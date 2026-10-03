@@ -86,8 +86,9 @@ def _literal_str(node: ast.AST) -> str | None:
 _PARAMETRIC_MATCHERS = {
     "_match_run_id": "/api/runs/{run_id}",
     "_match_profile_id": "/api/profiles/{profile_id}",
-    # 0110-034: ``api/story_bank._match_story_id`` (the entry's question_id).
-    "_match_story_id": "/api/story-bank/{story_id}",
+    # 0.1.10.7 C: ``api/story_bank._match_answer_id`` / ``_match_story_id``.
+    "_match_answer_id": "/api/answers/{question_id}",
+    "_match_story_id": "/api/stories/{story_id}",
 }
 
 
@@ -147,7 +148,7 @@ def discover_routes() -> frozenset[Route]:
 
     tree = ast.parse(_PRESENT_API_PATH.read_text(encoding="utf-8"), filename=str(_PRESENT_API_PATH))
     routes: set[Route] = set()
-    # 0110-034 added ``do_DELETE`` (one route: a story bank entry).
+    # 0110-034 added ``do_DELETE`` (an answer, a story, a profile).
     for method_name, http_method in (("do_GET", "GET"), ("do_POST", "POST"), ("do_PUT", "PUT"), ("do_DELETE", "DELETE")):
         method_node = _find_do_method(tree, method_name)
         if method_node is None:

@@ -11,6 +11,7 @@ import ApplicationsView from "./views/ApplicationsView.jsx";
 import RunsView from "./views/RunsView.jsx";
 import SettingsView from "./views/SettingsView.jsx";
 import PdfView from "./views/PdfView.jsx";
+import AnswersStoriesView from "./views/AnswersStoriesView.jsx";
 import { JOBS_HASH, SETTINGS_HASH, navViewFor, navigate, postingHash, routeFor, useHashRoute } from "./routing.js";
 
 function useConfig() {
@@ -325,6 +326,8 @@ export default function App() {
         )}
 
         {route.view === "pdf" && <PdfView target={route.params.pdfTarget} />}
+
+        {route.view === "answers" && <AnswersStoriesView />}
 
         {route.view === "assess" && (
           <AssessView

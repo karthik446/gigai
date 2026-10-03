@@ -35,19 +35,20 @@ the posting and lands the result in the store with the ``answer:<id>``
 trigger -- so the page's history reads "Re-assessed after you answered ...".
 ``reassess_not_found`` (404) stays for an identity no run or store knows.
 
-0110-034 (story bank): an answer belongs to a PROFILE. ``POST /api/answers``
-saves into the story bank of ``profile_id`` when given, else of the profile
-the ``reassess`` job was assessed for, else of the selected profile
-(``story_bank.save_answer``: the personal-info check, then the same
-``experience_qa`` write as before, in that profile's own record). Optional
-``question`` keeps the question's own words with the answer; optional
-``from_bank`` names the bank question a near-match suggestion came from, when
-the user confirmed it; optional ``actor`` (``operator``, the default, or
-``agent``; also the ``X-GigAI-Actor`` header) is recorded on the bank entry.
-``GET /api/answers`` lists what one profile may reuse
-(``?profile_id=``, default the selected profile): its own answers plus a
-shared profile's, never anyone else's. Only a gig with no profile at all
-keeps the old gig-wide behaviour.
+0.1.10.7 C: an answer belongs to the USER, not to a profile
+(``story_bank.py``, ``story-bank-contract.md``). ``POST /api/answers`` saves
+one answer for every profile to reuse (``story_bank.save_answer``: the
+contact-data check, then the same ``experience_qa`` write as before).
+Optional ``question`` keeps the question's own words with the answer;
+optional ``tag``; optional ``from_bank`` names the question a near-match
+suggestion came from, when the user confirmed it; optional ``actor``
+(``operator``, the default, or ``agent``; also the ``X-GigAI-Actor`` header)
+is recorded on the answer; optional ``revision`` is the revision the writer
+read (``409 revision_conflict`` with the current ``answer`` when it has
+changed since). The reply carries the saved ``answer`` in the one Answer
+shape. ``GET /api/answers`` lists every answer in that shape (``q`` and
+``tag`` narrow it). One answer, the edit, the delete and the near match are
+``/api/answers/{question_id}`` and ``/api/answers/match`` (``api/story_bank.py``).
 
 Origin (assess-origin-field): a re-assessment keeps the stored item's
 ``origin`` (the request names none, so ``quick_assess._origin_for`` leaves it
@@ -61,10 +62,8 @@ from http import HTTPStatus
 
 from urllib.parse import parse_qs, urlsplit
 
-from ....native_records import NativeRecordResult
 from ....private_records import PrivateRecordError
 from ... import story_bank
-from ...experience_answers import PriorAnswer, read_answers, record_answer
 from ...question_ids import normalize_question_id
 from ..contracts import AcquireOutput, FindJobsContractError, PostingRow, normalize_url
 from ...quick_assess import (
@@ -74,7 +73,7 @@ from ...quick_assess import (
     run_quick_assessment,
 )
 from ..assess_contracts import ORIGIN_JOB_PAGE, AssessJobInput, AssessRequest, AssessResumeInput
-from .story_bank import ACTOR_HEADER, resolve_profile_id
+from .story_bank import ACTOR_HEADER, ANSWERS_SCHEMA, ERROR_STATUS, answers_response, error_extra
 
 _ANSWER_ERROR_STATUS: dict[str, HTTPStatus] = {
     "answer_invalid": HTTPStatus.UNPROCESSABLE_ENTITY,
@@ -84,7 +83,7 @@ _ANSWER_ERROR_STATUS: dict[str, HTTPStatus] = {
     "reassess_not_found": HTTPStatus.NOT_FOUND,
     "target_unavailable": HTTPStatus.NOT_FOUND,
     "profile_not_found": HTTPStatus.NOT_FOUND,
-    "personal_info_refused": HTTPStatus.UNPROCESSABLE_ENTITY,
+    **ERROR_STATUS,
     "workpad_layout_migration_required": HTTPStatus.CONFLICT,
     "native_record_invalid": HTTPStatus.CONFLICT,
     "native_record_too_large": HTTPStatus.CONFLICT,
@@ -94,16 +93,6 @@ _ANSWER_ERROR_STATUS: dict[str, HTTPStatus] = {
 
 def _status_for(code: str) -> HTTPStatus:
     return _ANSWER_ERROR_STATUS.get(code, HTTPStatus.CONFLICT)
-
-
-def _answer_to_json(item: PriorAnswer) -> dict[str, object]:
-    return {
-        "question_id": item.question_id,
-        "prompt": item.prompt,
-        "answer": item.answer,
-        "record_id": item.record_id,
-        "revision_id": item.revision_id,
-    }
 
 
 def find_run_posting(home_root, target, job_identity: str) -> tuple[PostingRow, str | None] | None:
@@ -170,7 +159,7 @@ class AnswersRoutesMixin:
             self._error(HTTPStatus.UNPROCESSABLE_ENTITY, "wrong_type", "request body must be a JSON object")
             return
 
-        unknown = set(body) - {"question_id", "answer", "reassess", "question", "profile_id", "from_bank", "actor"}
+        unknown = set(body) - {"question_id", "answer", "reassess", "question", "tag", "from_bank", "actor", "revision"}
         if unknown:
             self._error(HTTPStatus.UNPROCESSABLE_ENTITY, "unknown_key", f"unknown field(s): {sorted(unknown)}")
             return
@@ -190,7 +179,7 @@ class AnswersRoutesMixin:
                 return
             job_identity = reassess["job_identity"]
 
-        for key in ("question", "profile_id", "from_bank", "actor"):
+        for key in ("question", "tag", "from_bank", "actor"):
             if body.get(key) is not None and not isinstance(body[key], str):
                 self._error(HTTPStatus.UNPROCESSABLE_ENTITY, "invalid_value", f"{key} must be a string")
                 return
@@ -200,30 +189,22 @@ class AnswersRoutesMixin:
             return
         home_root = self._backend.home_root
 
-        # 0110-034: who writes (operator, or an agent), whose bank, and which posting asked.
+        # Who writes (operator, or an agent), which revision it read, and which posting asked.
         try:
             actor = story_bank.actor_value(body.get("actor") or self.headers.get(ACTOR_HEADER))
-            profile_id, posting = self._answer_profile(target, body.get("profile_id"), job_identity)
-        except story_bank.StoryBankError as exc:
-            self._error(_status_for(exc.code), exc.code, str(exc))
-            return
-        try:
-            if profile_id is None:
-                # A gig with no profile yet: the gig-wide write, as before.
-                found = story_bank.personal_info_in_answer(answer)
-                if found:
-                    raise story_bank.StoryBankError("personal_info_refused", f"this answer looks like it holds personal information ({', '.join(found)})")
-                result = record_answer(home_root=home_root, requested_target=target, question_id=question_id, prompt=question_id, answer=answer)
-            else:
-                result = story_bank.save_answer(
-                    home_root=home_root, target=target, profile_id=profile_id,
-                    question_id=question_id, answer=answer, question=body.get("question"),
-                    posting=posting, confirmed_from=body.get("from_bank"), actor=actor,
-                )
+            entry = story_bank.save_answer(
+                home_root=home_root, target=target, question_id=question_id, answer=answer,
+                question=body.get("question"), tag=body.get("tag"),
+                job=self._answer_job(target, job_identity), confirmed_from=body.get("from_bank"), actor=actor,
+                expected_revision=story_bank.revision_value(body.get("revision")),
+            )
         except (PrivateRecordError, story_bank.StoryBankError) as exc:
+            extra = error_extra(exc)
+            if extra is not None:
+                self._error_with_extra(_status_for(exc.code), exc.code, str(exc), extra)
+                return
             self._error(_status_for(exc.code), exc.code, str(exc))
             return
-        assert isinstance(result, NativeRecordResult)
 
         normalized_question_id = normalize_question_id(question_id)
 
@@ -238,49 +219,29 @@ class AnswersRoutesMixin:
         self._write_json(
             HTTPStatus.CREATED,
             {
-                "record_id": result.record_id,
-                "revision_id": result.revision_id,
+                "schema_version": ANSWERS_SCHEMA,
+                "record_id": entry.record_id,
+                "revision_id": entry.revision_id,
                 "question_id": normalized_question_id,
-                "profile_id": profile_id,
+                "answer": entry.to_json(),
                 "reassessed": reassessed,
             },
         )
 
-    def _answer_profile(self, target, requested: str | None, job_identity: str | None) -> tuple[str | None, dict[str, object] | None]:
-        """``(profile id, posting)`` an answer is saved under (0110-034).
+    def _answer_job(self, target, job_identity: str | None) -> dict[str, object] | None:
+        """The posting an answer is tied to (its ``jobs``): the ``reassess`` job, ``None`` without one."""
 
-        The profile: ``requested`` when given (``profile_not_found`` if it is
-        not one), else the profile the ``reassess`` job was assessed for
-        (its stored assessment, else the run that found it), else the
-        selected profile; ``None`` only for a gig with no profile at all.
-        The posting: what the bank shows under "asked by", ``None`` without
-        a ``reassess`` job.
-        """
-
+        if job_identity is None:
+            return None
         home_root = self._backend.home_root
-        posting: dict[str, object] | None = None
-        from_job: str | None = None
-        if job_identity is not None:
-            previous = find_quick_assessment_by_job_identity(home_root, target, job_identity)
-            if previous is not None:
-                from_job = previous.resume.profile_id
-                posting = {"job_identity": job_identity, "title": previous.job.title, "company": previous.job.company, "url": previous.job.source_url}
-            else:
-                run_posting = find_run_posting(home_root, target, job_identity)
-                if run_posting is not None:
-                    row, from_job = run_posting
-                    posting = {"job_identity": job_identity, "title": row.title, "company": row.company, "url": row.url}
-                else:
-                    posting = {"job_identity": job_identity, "title": "", "company": "", "url": None}
-        if requested:
-            return resolve_profile_id(home_root, target, requested), posting
-        try:
-            return resolve_profile_id(home_root, target, from_job), posting
-        except story_bank.StoryBankError:
-            try:
-                return resolve_profile_id(home_root, target, None), posting
-            except story_bank.StoryBankError:
-                return None, posting
+        previous = find_quick_assessment_by_job_identity(home_root, target, job_identity)
+        if previous is not None:
+            return {"job_identity": job_identity, "title": previous.job.title, "company": previous.job.company, "url": previous.job.source_url}
+        run_posting = find_run_posting(home_root, target, job_identity)
+        if run_posting is not None:
+            row, _profile_id = run_posting
+            return {"job_identity": job_identity, "title": row.title, "company": row.company, "url": row.url}
+        return {"job_identity": job_identity, "title": "", "company": "", "url": None}
 
     def _reassess(self, target, job_identity: str, *, trigger: str) -> dict[str, object]:
         """Re-run the whole assessment for ``job_identity`` and return the
@@ -319,31 +280,17 @@ class AnswersRoutesMixin:
         if target is None:
             return
         home_root = self._backend.home_root
-        query = parse_qs(urlsplit(self.path).query, keep_blank_values=False)
-        unknown = sorted(set(query) - {"profile_id"})
+        query = parse_qs(urlsplit(self.path).query, keep_blank_values=True)
+        unknown = sorted(set(query) - {"q", "tag"})
         if unknown:
-            self._error(HTTPStatus.UNPROCESSABLE_ENTITY, "unknown_key", f"unknown query key: {unknown[0]}; allowed: profile_id")
+            self._error(HTTPStatus.UNPROCESSABLE_ENTITY, "unknown_key", f"unknown query key: {unknown[0]}; allowed: q, tag")
             return
-        requested = (query.get("profile_id") or [None])[0]
         try:
-            # A named profile is checked by the bank read itself (one read less on the job page's load).
-            profile_id: str | None = requested or None
-            if profile_id is None:
-                try:
-                    profile_id = resolve_profile_id(home_root, target, None)
-                except story_bank.StoryBankError:
-                    profile_id = None
-            # 0110-034: one profile's answers (own plus shared); gig-wide only when the gig has no profile.
-            answers = (
-                read_answers(home_root=home_root, requested_target=target)
-                if profile_id is None
-                else story_bank.answers_for_profile(home_root=home_root, target=target, profile_id=profile_id, strict=True)
-            )
+            body = answers_response(home_root, target, q=(query.get("q") or [None])[0], tag=(query.get("tag") or [None])[0])
         except (PrivateRecordError, story_bank.StoryBankError) as exc:
             self._error(_status_for(exc.code), exc.code, str(exc))
             return
-        items = sorted(answers.values(), key=lambda item: item.question_id)
-        self._write_json(HTTPStatus.OK, {"answers": [_answer_to_json(item) for item in items]})
+        self._write_json(HTTPStatus.OK, body)
 
 
 __all__ = ["AnswersRoutesMixin", "find_run_posting"]

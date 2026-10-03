@@ -11,18 +11,18 @@ requirement met, cites ``Story bank cloud:gcp: <answer>`` and asks nothing;
 when the prompt offers no such line it asks the question, under the id it
 would have picked for THIS posting's wording (``tooling:google_cloud_platform``).
 
-The first two tests are the fail-before / pass-after proof and use only what
-HEAD + 0110-034 has (``story_bank.save_answer``, ``set_sharing``,
-``assess_node``): there, the run's prompt has no STORY BANK paragraph, so the
-reworded question is asked again.
+0.1.10.7 C: answers and stories are the USER's (``story-bank-contract.md``), so
+the per-profile cases of 0110-034 (a second profile's run never got the first
+one's answers until they were shared) are gone: every profile's run reads the
+same answers, and the stories that match each posting.
 
 Covers: reuse of an answer given on posting A for a reworded requirement on
-posting B, in a run; two profiles of different people (a run for profile 2
-never gets profile 1's answers, and gets them once shared); a re-run after
-the bank changed assesses the unchanged posting again, and does not while
-the bank is unchanged; what the run seals (prompt version, whose bank, the
-entry marks); the staleness rule itself; ``bank_suggestions`` on a run's
-``/results`` and ``/posting`` bodies.
+posting B, in a run; a run for another profile reuses the same answer; a
+story that matches a run's posting is in that posting's prompt and one that
+does not is not; a re-run after the bank changed assesses the unchanged
+posting again, and does not while the bank is unchanged; what the run seals
+(prompt version, the profile, the marks); the staleness rule itself;
+``bank_suggestions`` on a run's ``/results`` and ``/posting`` bodies.
 """
 
 from __future__ import annotations
@@ -294,10 +294,10 @@ def test_a_run_settles_a_reworded_requirement_from_an_answer_given_on_another_po
     fx: ProfileFixtureGig, two: tuple[str, str], binding: _Binding
 ) -> None:
     default, _other = two
-    # Posting A asked "cloud:gcp"; the user answered it on the job page: a bank entry.
+    # Posting A asked "cloud:gcp"; the user answered it on the job page: one of the user's answers.
     story_bank.save_answer(
-        home_root=fx.home_root, target=fx.target, profile_id=default, question_id="cloud:gcp",
-        question="Do you have GCP experience?", answer=_ANSWER, posting=_POSTING_A,
+        home_root=fx.home_root, target=fx.target, question_id="cloud:gcp",
+        question="Do you have GCP experience?", answer=_ANSWER, job=_POSTING_A,
     )
 
     # A find-jobs run for that profile; its assess node sees posting B, which words the same fact differently.
@@ -310,32 +310,56 @@ def test_a_run_settles_a_reworded_requirement_from_an_answer_given_on_another_po
     assert len(binding.port.prompts) == 1, "reuse costs no extra model call"
 
 
-def test_a_run_for_another_person_never_gets_the_first_profiles_answers_until_they_are_shared(
-    fx: ProfileFixtureGig, two: tuple[str, str], binding: _Binding
-) -> None:
-    default, other = two
-    story_bank.save_answer(
-        home_root=fx.home_root, target=fx.target, profile_id=default, question_id="cloud:gcp",
-        question="Do you have GCP experience?", answer=_ANSWER, posting=_POSTING_A,
-    )
+def test_a_run_for_another_profile_reuses_the_same_answer(fx: ProfileFixtureGig, two: tuple[str, str], binding: _Binding) -> None:
+    """0.1.10.7 C: answers are the user's. A run of ANY profile gets them; an empty bank still renders no paragraph."""
 
-    # Profile 2's run: the sealed profile_ref says whose run it is. Nothing of profile 1 reaches the model.
-    unshared = _assess(fx, _run_id(11), profile_id=other)
+    _default, other = two
+    empty = _assess(fx, _run_id(11), profile_id=other)
     prompt = binding.port.prompts[-1]
-    assert _asked(unshared) == [_ASKED_ID], "profile 2 was never asked about, and never answered, GCP"
-    assert _ANSWER not in prompt and "two years running batch" not in prompt and "- cloud:gcp" not in prompt
+    assert _asked(empty) == [_ASKED_ID]
     assert "STORY BANK (answers" not in prompt and "PRIOR ANSWERS (from earlier" not in prompt, "an empty bank renders no paragraph at all"
 
-    # The same two profiles, now explicitly sharing (profile 2 reads profile 1's bank).
-    story_bank.set_sharing(home_root=fx.home_root, target=fx.target, profile_id=other, share_with=default)
-    shared = _assess(fx, _run_id(12), profile_id=other)
-    assert _asked(shared) == [], "after sharing, the run reuses the shared answer"
-    assert _evidence(shared) == (f"Story bank cloud:gcp: {_ANSWER}",)
+    story_bank.save_answer(
+        home_root=fx.home_root, target=fx.target, question_id="cloud:gcp",
+        question="Do you have GCP experience?", answer=_ANSWER, job=_POSTING_A, actor="agent",
+    )
 
-    # And off again: the next run does not get it.
-    story_bank.set_sharing(home_root=fx.home_root, target=fx.target, profile_id=other, share_with=None)
+    # The second profile's run: the sealed profile_ref says whose run it is; the answer is the user's.
+    reused = _assess(fx, _run_id(12), profile_id=other)
+    assert _asked(reused) == [], "the run reuses the answer, whichever profile it runs for"
+    assert _evidence(reused) == (f"Story bank cloud:gcp: {_ANSWER}",)
+    assert _ANSWER in binding.port.prompts[-1]
+
+    # Deleted: the next run does not get it.
+    story_bank.delete_answer(home_root=fx.home_root, target=fx.target, question_id="cloud:gcp")
     again = _assess(fx, _run_id(13), profile_id=other)
     assert _asked(again) == [_ASKED_ID] and _ANSWER not in binding.port.prompts[-1]
+
+
+def test_a_run_puts_the_story_that_matches_its_posting_into_the_prompt_and_no_other(fx: ProfileFixtureGig, two: tuple[str, str], binding: _Binding) -> None:
+    """Acceptance (b), in a find-jobs run: searched per posting, only the relevant story is sent."""
+
+    from gigai.scout import stories
+
+    default, _other = two
+    relevant = stories.save_story(
+        home_root=fx.home_root, target=fx.target, actor="agent",
+        fields={"title": "Moved the data platform to Google Cloud Platform", "raw": "I moved our batch jobs to GCP and BigQuery.", "tags": ["gcp"]},
+    )
+    unrelated = stories.save_story(
+        home_root=fx.home_root, target=fx.target, actor="agent",
+        fields={"title": "Settled a disagreement with a designer", "raw": "We tested both onboarding flows and kept hers."},
+    )
+
+    output = _assess(fx, _run_id(31), profile_id=default)
+
+    prompt = binding.port.prompts[-1]
+    assert f"- {relevant.story_id} | asked: Moved the data platform to Google Cloud Platform | answer: " in prompt
+    assert "I moved our batch jobs to GCP and BigQuery." in prompt
+    assert unrelated.story_id not in prompt and "kept hers" not in prompt
+    # Sealed with the run: both stories' marks (a later edit of either is then visible), no story text.
+    assert output.story_bank is not None and set(output.story_bank.entries) == {relevant.story_id, unrelated.story_id}
+    assert "batch jobs" not in json.dumps(output.story_bank.to_json())
 
 
 # --- what the run seals -----------------------------------------------------------------------------
@@ -351,7 +375,7 @@ def test_the_run_seals_the_prompt_version_and_the_bank_it_read(fx: ProfileFixtur
     assert empty.prompt_version == ASSESS_PROMPT_VERSION_NO_WORK_MODE == "assess-prompt-v4"
     assert empty.story_bank is not None and empty.story_bank.profile_id == default and empty.story_bank.entries == {}
 
-    story_bank.save_answer(home_root=fx.home_root, target=fx.target, profile_id=default, question_id="cloud:gcp", answer=_ANSWER, posting=_POSTING_A)
+    story_bank.save_answer(home_root=fx.home_root, target=fx.target, question_id="cloud:gcp", answer=_ANSWER, job=_POSTING_A)
     first = _assess(fx, _run_id(22), profile_id=default)
     assert first.story_bank is not None and list(first.story_bank.entries) == ["cloud:gcp"]
     assert first.story_bank.bank_digest != empty.story_bank.bank_digest
@@ -362,19 +386,20 @@ def test_the_run_seals_the_prompt_version_and_the_bank_it_read(fx: ProfileFixtur
 
     # The same bank read again seals the same digest; an edit changes it.
     assert _assess(fx, _run_id(23), profile_id=default).story_bank == first.story_bank
-    entry = story_bank.read_bank(home_root=fx.home_root, target=fx.target, profile_id=default)[0]
-    story_bank.edit_entry(
-        home_root=fx.home_root, target=fx.target, profile_id=default, question_id="cloud:gcp",
-        answer="Three years on GCP.", expected_updated_at=entry.updated_at,
+    entry = story_bank.read_bank(home_root=fx.home_root, target=fx.target)[0]
+    story_bank.edit_answer(
+        home_root=fx.home_root, target=fx.target, question_id="cloud:gcp",
+        answer="Three years on GCP.", expected_revision=entry.revision,
     )
     edited = _assess(fx, _run_id(24), profile_id=default)
     assert edited.story_bank.bank_digest != first.story_bank.bank_digest and list(edited.story_bank.entries) == ["cloud:gcp"]
 
-    # Whose bank: the run's own profile, not the default's.
-    assert _assess(fx, _run_id(25), profile_id=other).story_bank.profile_id == other
+    # The stamp names the run's own profile; the bank it read is the same (the user's).
+    theirs = _assess(fx, _run_id(25), profile_id=other).story_bank
+    assert theirs.profile_id == other and theirs.entries == edited.story_bank.entries
 
     # The reuse is noted on the bank entry, as a quick assessment notes it.
-    kinds = {(posting.job_identity, posting.kind) for posting in story_bank.read_bank(home_root=fx.home_root, target=fx.target, profile_id=default)[0].postings}
+    kinds = {(job.job_identity, job.kind) for job in story_bank.read_bank(home_root=fx.home_root, target=fx.target)[0].jobs}
     assert (_URL_B, "reused") in kinds
 
 
@@ -462,8 +487,8 @@ def test_a_rerun_assesses_an_unchanged_posting_again_once_the_bank_can_answer_it
 
     # The user answers the question on ANOTHER posting, under another wording.
     story_bank.save_answer(
-        home_root=fx.home_root, target=fx.target, profile_id=default, question_id="cloud:gcp",
-        question="Do you have GCP experience?", answer=_ANSWER, posting=_POSTING_A,
+        home_root=fx.home_root, target=fx.target, question_id="cloud:gcp",
+        question="Do you have GCP experience?", answer=_ANSWER, job=_POSTING_A,
     )
 
     # Run 3: posting B is still unchanged, but its open question may be answerable now: assessed again.
@@ -479,10 +504,10 @@ def test_a_rerun_assesses_an_unchanged_posting_again_once_the_bank_can_answer_it
     calls = len(binding.port.prompts)
 
     # The cited answer is edited: the verdict that cites it is made again.
-    entry = story_bank.read_bank(home_root=fx.home_root, target=fx.target, profile_id=default)[0]
-    story_bank.edit_entry(
-        home_root=fx.home_root, target=fx.target, profile_id=default, question_id="cloud:gcp",
-        answer="Three years on GCP, mostly BigQuery.", expected_updated_at=entry.updated_at,
+    entry = story_bank.read_bank(home_root=fx.home_root, target=fx.target)[0]
+    story_bank.edit_answer(
+        home_root=fx.home_root, target=fx.target, question_id="cloud:gcp",
+        answer="Three years on GCP, mostly BigQuery.", expected_revision=entry.revision,
     )
     fifth_acquire, fifth = _run(fx, 45, profile_id=default)
     assert fifth is not None and fifth_acquire.carried_forward_assessments == ()
@@ -496,8 +521,7 @@ def _bank_of(**marks: str) -> story_bank.AssessBank:
     entries = tuple(
         story_bank.BankEntry(
             question_id=key.replace("__", ":"), question=f"About {key.replace('__', ' ')}?", answer="An answer.", tag="technical",
-            owner_profile_id="profile_1", shared=False, legacy=False, edited=False, confirmed_from=None, first_answered_at=None,
-            updated_at=None, postings=(), record_id=f"record_{key}", revision_id=mark,
+            created_at=None, updated_at=None, jobs=(), record_id=f"record_{key}", revision_id=mark,
         )
         for key, mark in marks.items()
     )
@@ -530,7 +554,7 @@ def test_the_staleness_rule() -> None:
     # Not when the bank is what the run saw, or only lost an entry (a deletion answers nothing).
     assert not stale(questions=asked, evidence=[], sealed_marks={"cloud:gcp": "a"}, bank=gcp)
     assert not stale(questions=asked, evidence=[], sealed_marks={"cloud:gcp": "a", "years:go": "b"}, bank=gcp)
-    # A cited answer: stale when it was edited, deleted or is no longer visible; not when another entry changed.
+    # A cited answer: stale when it was edited or deleted; not when another entry changed.
     assert stale(questions=[], evidence=cites, sealed_marks={"cloud:gcp": "a"}, bank=gcp_edited)
     assert stale(questions=[], evidence=cites, sealed_marks={"cloud:gcp": "a"}, bank=empty)
     assert not stale(questions=[], evidence=cites, sealed_marks={"cloud:gcp": "a"}, bank=_bank_of(cloud__gcp="a", years__go="c"))
@@ -564,20 +588,21 @@ def test_a_runs_results_and_posting_bodies_carry_bank_suggestions_for_the_questi
     assert "bank_suggestions" not in results
 
     # The answer arrives later, under another id: the run's stored question now has a near match.
-    story_bank.save_answer(**paths, profile_id=default, question_id="cloud:gcp", question="Do you have GCP experience?", answer=_ANSWER, posting=_POSTING_A)
+    story_bank.save_answer(**paths, question_id="cloud:gcp", question="Do you have GCP experience?", answer=_ANSWER, job=_POSTING_A)
     for body in (results, posting):
         attach_bank_suggestions(body, **paths, profile_id=default)
         (suggestion,) = body["bank_suggestions"]
         assert suggestion["question_id"] == _ASKED_ID and suggestion["bank_question_id"] == "cloud:gcp" and suggestion["answer"] == _ANSWER
         assert suggestion == story_bank.near_match(
-            story_bank.read_bank(**paths, profile_id=default), question_id=_ASKED_ID, question="Do you have hands-on Google Cloud Platform experience?"
-        ).to_json(), "the same match as GET /api/story-bank/match and the job page"
+            story_bank.read_bank(**paths), question_id=_ASKED_ID, question="Do you have hands-on Google Cloud Platform experience?"
+        ).to_json(), "the same match as GET /api/answers/match and the job page"
 
-    # Another person's run reads its own bank: no suggestion from profile 1's answer.
-    theirs = {"payload": {"assessments": [assessment]}, "carried_forward_assessments": []}
-    attach_bank_suggestions(theirs, **paths, profile_id=other)
-    assert "bank_suggestions" not in theirs
-    # No profile, or no open question: nothing read, nothing added.
-    nobody = {"payload": {"assessments": [assessment]}}
-    attach_bank_suggestions(nobody, **paths, profile_id=None)
-    assert "bank_suggestions" not in nobody
+    # 0.1.10.7 C: the answers are the user's: another profile's run, and a run with no profile, get the same suggestion.
+    for profile_id in (other, None):
+        theirs = {"payload": {"assessments": [assessment]}, "carried_forward_assessments": []}
+        attach_bank_suggestions(theirs, **paths, profile_id=profile_id)
+        assert [item["bank_question_id"] for item in theirs["bank_suggestions"]] == ["cloud:gcp"]
+    # No open question: nothing read, nothing added.
+    done = {"payload": {"assessments": []}}
+    attach_bank_suggestions(done, **paths, profile_id=default)
+    assert "bank_suggestions" not in done

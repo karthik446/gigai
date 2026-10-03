@@ -2,7 +2,6 @@ import ResumeWarning from "../components/ResumeWarning.jsx";
 import ResumeDisplayPanel from "../components/ResumeDisplayPanel.jsx";
 import NewProfileResume from "../components/NewProfileResume.jsx";
 import ProfileSearchSettings from "../components/ProfileSearchSettings.jsx";
-import StoryBankPanel from "../components/StoryBankPanel.jsx";
 import { settingsSummary } from "../profileSettingsModel.js";
 import { storeResume } from "../wizard/wizardApi.js";
 import {
@@ -346,9 +345,6 @@ export default function ProfilesView({ profiles, selectedProfileId, onSelectProf
             defaults={defaultSearchSettings}
             onSaved={reloadProfiles}
           />
-
-          {/* 0110-034: this profile's story bank. */}
-          <StoryBankPanel key={`story-bank-${selected.profile_id}`} profile={selected} />
         </section>
       )}
 

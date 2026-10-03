@@ -213,31 +213,21 @@ class AgentRoutesMixin:
             return None
 
         assessments = [*run_assessments, *(_quick_entry(item, sources.basis) for item in quick_items)]
-        # 0110-034: an assessment's questions are answered by ITS profile's story bank
-        # (own answers plus a shared profile's), never by another profile's. A gig with
-        # no profile keeps the gig-wide answers; a pasted resume has none.
-        gig_wide: dict[str, object] | None = None
-        banks: dict[str, tuple[story_bank.BankEntry, ...]] = {}
+        # 0.1.10.7 C: every assessment's questions are answered by the USER's
+        # answers, whichever profile asked (one read, only when there is a question).
+        entries: tuple[story_bank.BankEntry, ...] | None = None
+        answers: dict[str, object] = {}
         open_questions: list[dict[str, object]] = []
         answered: dict[str, dict[str, object]] = {}
         bank_suggestions: list[dict[str, object]] = []
         seen: set[str] = set()
         for entry in assessments:
-            entry_profile = entry.get("profile_id")
-            entries: tuple[story_bank.BankEntry, ...] = ()
-            answers: dict[str, object] = {}
-            if isinstance(entry_profile, str) and entry_profile != "ephemeral":
-                if entry_profile not in banks:
-                    try:
-                        banks[entry_profile] = story_bank.read_bank(home_root=home_root, target=target, profile_id=entry_profile, with_postings=False)
-                    except Exception:  # noqa: BLE001 - an unreadable bank answers nothing
-                        banks[entry_profile] = ()
-                entries = banks[entry_profile]
+            if entries is None and entry.get("structured_questions"):
+                try:
+                    entries = story_bank.read_bank(home_root=home_root, target=target, with_jobs=False)
+                except Exception:  # noqa: BLE001 - an unreadable bank answers nothing
+                    entries = ()
                 answers = {item.question_id: item for item in entries}
-            elif entry_profile is None:
-                if gig_wide is None:
-                    gig_wide = dict(read_answers(home_root=home_root, requested_target=target)) if resolved is None or not _has_profiles(resolved) else {}
-                answers = gig_wide
             for question in entry.get("structured_questions") or []:  # type: ignore[union-attr]
                 normalized = normalize_question_id(str(question["question_id"]))  # type: ignore[index]
                 prior = answers.get(normalized)
@@ -247,7 +237,7 @@ class AgentRoutesMixin:
                 elif normalized not in seen:
                     seen.add(normalized)
                     open_questions.append(dict(question))  # type: ignore[arg-type]
-                    bank_suggestions.extend(story_bank.suggestions_for([question], entries))  # type: ignore[list-item]
+                    bank_suggestions.extend(story_bank.suggestions_for([question], entries or ()))  # type: ignore[list-item]
 
         profile_id = getattr(getattr(joins, "profile", None), "profile_id", None)
         if profile_id is None and quick_items and quick_items[0].resume.profile_id:

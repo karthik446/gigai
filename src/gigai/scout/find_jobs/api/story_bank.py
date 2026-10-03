@@ -1,152 +1,166 @@
-"""0110-034: the story bank routes -- a profile's answered questions and stories, kept and reused.
+"""0.1.10.7 C: the answers and stories routes -- user-level, written mainly by the user's agent.
 
-    GET    /api/story-bank             the bank a profile sees (own entries, then the shared
-                                       profile's), its tags and its sharing setting; ``q`` and
-                                       ``tag`` narrow the list
-    GET    /api/story-bank/match       the near match for one question ("We already know: ...")
-    GET    /api/story-bank/{id}        one entry
-    POST   /api/story-bank             add a new entry: a story, or an answer nobody asked yet
-    PUT    /api/story-bank/sharing     which other profile's bank this profile also reads
-    PUT    /api/story-bank/{id}        edit an own entry: answer, question words and/or tag
-    DELETE /api/story-bank/{id}        remove an own entry
+    GET    /api/answers                  every answer (``q`` and ``tag`` narrow the list)      [answers.py]
+    POST   /api/answers                  save an answer (optionally re-assess the job)        [answers.py]
+    GET    /api/answers/match            the near match for one question ("We already know: ...")
+    GET    /api/answers/{question_id}    one answer
+    PUT    /api/answers/{question_id}    edit: answer, question words and/or tag
+    DELETE /api/answers/{question_id}    remove it
 
-``{id}`` is the entry's ``question_id`` (``cloud:gcp``, ``story:led_migration``).
+    GET    /api/stories                  every story (``q`` and ``tag`` narrow the list)
+    POST   /api/stories                  add a story
+    GET    /api/stories/prep             ``answers_questions`` pooled across the stories
+    GET    /api/stories/{story_id}       one story
+    PUT    /api/stories/{story_id}       edit the given fields
+    DELETE /api/stories/{story_id}       remove it
 
-Every route is local and model-free (``gigai.scout.story_bank``). ``profile_id`` is optional
-everywhere: omitted, the gig's selected profile is used. The reads return answers, so
-``do_GET`` runs the Host check before them; the writes go through ``_check_csrf``. Nothing
-here logs an answer.
+Every route is local and model-free (``gigai.scout.story_bank``, ``gigai.scout.stories``).
+Answers and stories belong to the user, not to a profile: no route takes a ``profile_id``. The
+reads return the user's text, so ``do_GET`` runs the Host check before them; the writes go
+through ``_check_csrf``. Nothing here logs an answer or a story.
 
-Two writers (the user and an agent) share the bank. A write says who it is with ``actor``
-(``operator``, the default, or ``agent``; the body field, or the ``X-GigAI-Actor`` header),
-and ``PUT``/``DELETE`` name the ``updated_at`` of the entry they read: when the entry changed
-since, the answer is ``409 story_bank_changed`` with the current ``entry`` in the error (the
-``PUT /api/tailored-resumes/lines`` pattern). Every write runs the personal-info check.
-
-0110-046: GigAI stores no name, so the check knows no name to look for: a strictly name-shaped
-line is refused (``story_bank.personal_info_in_answer``), contact shapes always are.
+Two writers (the user's agent and the user) share them. A write says who it is with ``actor``
+(``operator``, the default, or ``agent``; the body field, or the ``X-GigAI-Actor`` header), and
+``PUT``/``DELETE`` name the ``revision`` they read: when the answer or story changed since, the
+reply is ``409 revision_conflict`` with the current ``answer`` / ``story`` in the error. Every
+write runs the contact-data check (shape-only: email, phone, links, a street address; GigAI
+stores no name to look for) and refuses with ``422 personal_info_refused``.
 """
 
 from __future__ import annotations
 
 from http import HTTPStatus
 from pathlib import Path
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import parse_qs, unquote, urlsplit
 
 from ....private_records import PrivateRecordError
-from ... import story_bank
-from ..assess_contracts import AssessResumeInput
-from ..contracts import FindJobsContractError
+from ... import stories, story_bank
 
-RESPONSE_SCHEMA = "scout-story-bank-response:1"
+ANSWERS_SCHEMA = "scout-answers-response:1"
+STORIES_SCHEMA = "scout-stories-response:1"
 
 ACTOR_HEADER = "X-GigAI-Actor"
 
-_GET_KEYS = frozenset({"profile_id", "q", "tag"})
-_ENTRY_KEYS = frozenset({"profile_id"})
-_MATCH_KEYS = frozenset({"profile_id", "question_id", "question"})
-_POST_KEYS = frozenset({"profile_id", "question_id", "question", "answer", "tag", "actor"})
-_PUT_KEYS = frozenset({"profile_id", "answer", "question", "tag", "updated_at", "actor"})
-_SHARING_KEYS = frozenset({"profile_id", "share_with", "actor"})
-_DELETE_KEYS = frozenset({"profile_id", "updated_at", "actor"})
+_LIST_KEYS = frozenset({"q", "tag"})
+_MATCH_KEYS = frozenset({"question_id", "question"})
+_ANSWER_PUT_KEYS = frozenset({"answer", "question", "tag", "revision", "actor"})
+_DELETE_KEYS = frozenset({"revision", "actor"})
+_STORY_POST_KEYS = frozenset({"story_id", "actor", *stories.STORY_FIELDS})
+_STORY_PUT_KEYS = frozenset({"revision", "actor", *stories.STORY_FIELDS})
 
-_ERROR_STATUS: dict[str, HTTPStatus] = {
+ERROR_STATUS: dict[str, HTTPStatus] = {
     "not_found": HTTPStatus.NOT_FOUND,
-    "profile_not_found": HTTPStatus.NOT_FOUND,
-    "profile_unavailable": HTTPStatus.NOT_FOUND,
     "target_unavailable": HTTPStatus.NOT_FOUND,
     "personal_info_refused": HTTPStatus.UNPROCESSABLE_ENTITY,
     "invalid_value": HTTPStatus.UNPROCESSABLE_ENTITY,
+    "wrong_type": HTTPStatus.UNPROCESSABLE_ENTITY,
+    "unknown_key": HTTPStatus.UNPROCESSABLE_ENTITY,
     "answer_invalid": HTTPStatus.UNPROCESSABLE_ENTITY,
-    "story_bank_changed": HTTPStatus.CONFLICT,
+    "revision_conflict": HTTPStatus.CONFLICT,
     "story_exists": HTTPStatus.CONFLICT,
 }
 
 
-def _match_story_id(path: str, *, suffix: str) -> str | None:
-    """Extract ``{story_id}`` from ``/api/story-bank/{story_id}<suffix>``.
+def _match_id(path: str, prefix: str) -> str | None:
+    if not path.startswith(prefix):
+        return None
+    remainder = path[len(prefix):]
+    if not remainder or "/" in remainder:
+        return None
+    return unquote(remainder)
+
+
+def _match_answer_id(path: str, *, suffix: str) -> str | None:
+    """Extract ``{question_id}`` from ``/api/answers/{question_id}``.
 
     The same shape as ``common._match_run_id`` / ``profiles._match_profile_id``
     (``server.py``'s dispatch and ``tests/api_e2e/route_inventory.py``'s scanner
     recognize the name). The id is percent-decoded; no embedded slash.
     """
 
-    from urllib.parse import unquote
-
-    prefix = "/api/story-bank/"
-    if not path.startswith(prefix):
-        return None
-    remainder = path[len(prefix):]
-    if suffix:
-        if not remainder.endswith(suffix):
-            return None
-        remainder = remainder[: -len(suffix)]
-    if not remainder or "/" in remainder:
-        return None
-    return unquote(remainder)
+    return None if suffix else _match_id(path, "/api/answers/")
 
 
-def resolve_profile_id(home_root: Path, target: Path, profile_id: str | None) -> str:
-    """``profile_id`` when it is a profile of this gig, else the selected profile's id.
+def _match_story_id(path: str, *, suffix: str) -> str | None:
+    """Extract ``{story_id}`` from ``/api/stories/{story_id}`` (as ``_match_answer_id``)."""
 
-    Raises ``StoryBankError``: ``profile_not_found`` / ``profile_unavailable`` / ``target_unavailable``.
-    """
-
-    from ....workpad import resolve_workpad
-    from ..resume_input import resolve_profile
-
-    try:
-        resolved = resolve_workpad(home_root=home_root, requested_target=target, gig_id=None, allow_semantic_state=True)
-    except Exception as exc:  # noqa: BLE001 - any failure to resolve the gig is one typed refusal
-        raise story_bank.StoryBankError("target_unavailable", "no Scout gig is available for this folder") from exc
-    try:
-        profile = resolve_profile(AssessResumeInput(profile_id=profile_id or None), resolved=resolved, home_root=home_root, target=target)
-    except FindJobsContractError as exc:
-        raise story_bank.StoryBankError(exc.code, str(exc)) from exc
-    assert profile is not None
-    return profile.profile_id
+    return None if suffix else _match_id(path, "/api/stories/")
 
 
-def bank_response(home_root: Path, target: Path, profile_id: str, *, q: str | None = None, tag: str | None = None, question_id: str | None = None) -> dict[str, object]:
-    """The ``GET /api/story-bank`` body (also what ``gigai scout story-bank list --json`` prints)."""
-
-    from ...question_ids import normalize_question_id
-
-    entries = story_bank.read_bank(home_root=home_root, target=target, profile_id=profile_id)
-    tags = sorted({entry.tag for entry in entries})
-    total = len(entries)
-    if question_id:
-        wanted = normalize_question_id(question_id)
-        entries = tuple(entry for entry in entries if entry.question_id == wanted)
-    if tag:
-        entries = tuple(entry for entry in entries if entry.tag == tag.strip().lower())
+def _narrowed(items: list[dict[str, object]], *, q: str | None, tag: str | None, tags_of, text_of) -> list[dict[str, object]]:
+    if tag and tag.strip():
+        wanted = tag.strip().lower()
+        items = [item for item in items if wanted in tags_of(item)]
     if q and q.strip():
         needle = q.strip().casefold()
-        entries = tuple(
-            entry
-            for entry in entries
-            if needle in entry.question_id.casefold() or needle in entry.question.casefold() or needle in entry.answer.casefold() or needle in entry.tag
-        )
-    return {
-        "schema_version": RESPONSE_SCHEMA,
-        "profile_id": profile_id,
-        "entries": [entry.to_json() for entry in entries],
-        "total": total,
-        "tags": tags,
-        "sharing": story_bank.sharing(home_root=home_root, target=target, profile_id=profile_id),
-    }
+        items = [item for item in items if needle in text_of(item).casefold()]
+    return items
+
+
+def answers_response(home_root: Path, target: Path, *, q: str | None = None, tag: str | None = None) -> dict[str, object]:
+    """The ``GET /api/answers`` body (also what ``gigai scout answers list --json`` prints)."""
+
+    entries = [entry.to_json() for entry in story_bank.read_bank(home_root=home_root, target=target)]
+    shown = _narrowed(
+        entries, q=q, tag=tag,
+        tags_of=lambda item: (item["tag"],),
+        text_of=lambda item: " ".join(str(item[key]) for key in ("question_id", "question", "answer", "tag")),
+    )
+    return {"schema_version": ANSWERS_SCHEMA, "answers": shown, "total": len(entries), "tags": sorted({str(entry["tag"]) for entry in entries})}
+
+
+def answer_response(entry: story_bank.BankEntry) -> dict[str, object]:
+    """One answer's body: ``GET``/``PUT /api/answers/{question_id}`` and ``answers show|save --json``."""
+
+    return {"schema_version": ANSWERS_SCHEMA, "answer": entry.to_json()}
+
+
+def stories_response(home_root: Path, target: Path, *, q: str | None = None, tag: str | None = None) -> dict[str, object]:
+    """The ``GET /api/stories`` body (also what ``gigai scout story list --json`` prints)."""
+
+    found = [story.to_json() for story in stories.list_stories(home_root=home_root, target=target)]
+    shown = _narrowed(
+        found, q=q, tag=tag,
+        tags_of=lambda item: item["tags"],
+        text_of=lambda item: " ".join(
+            [str(item[key]) for key in ("story_id", "title", "company", "role", "period", "raw")]
+            + [str(part) for part in item["narrative"].values()]  # type: ignore[union-attr]
+            + [str(part) for key in ("tags", "answers_questions") for part in item[key]]  # type: ignore[union-attr]
+        ),
+    )
+    return {"schema_version": STORIES_SCHEMA, "stories": shown, "total": len(found), "tags": sorted({str(tag) for item in found for tag in item["tags"]})}  # type: ignore[union-attr]
+
+
+def story_response(story: stories.Story) -> dict[str, object]:
+    """One story's body: ``GET``/``POST``/``PUT /api/stories[/{story_id}]`` and ``story show|save --json``."""
+
+    return {"schema_version": STORIES_SCHEMA, "story": story.to_json()}
+
+
+def prep_response(home_root: Path, target: Path) -> dict[str, object]:
+    """The ``GET /api/stories/prep`` body (also ``gigai scout story prep --json``)."""
+
+    return {"schema_version": STORIES_SCHEMA, "questions": stories.prep_questions(stories.list_stories(home_root=home_root, target=target))}
+
+
+def error_extra(exc: Exception) -> dict[str, object] | None:
+    """What a stale or duplicate write carries beside the error: the answer or story as it is now."""
+
+    entry = getattr(exc, "entry", None)
+    if entry is None:
+        return None
+    return {"story" if isinstance(entry, stories.Story) else "answer": entry.to_json()}
 
 
 class StoryBankRoutesMixin:
-    """``Handler`` mixin: the ``/api/story-bank`` routes."""
+    """``Handler`` mixin: ``/api/answers/...`` (one answer, the match) and ``/api/stories...``."""
 
     def _story_bank_fail(self, exc: Exception) -> None:
         code = getattr(exc, "code", "invalid_value")
-        status = _ERROR_STATUS.get(code, HTTPStatus.CONFLICT)
-        entry = getattr(exc, "entry", None)
-        if entry is not None:
-            # A stale or duplicate write: the caller gets the entry as it is now.
-            self._error_with_extra(status, code, str(exc), {"entry": entry.to_json()})
+        status = ERROR_STATUS.get(code, HTTPStatus.CONFLICT)
+        extra = error_extra(exc)
+        if extra is not None:
+            self._error_with_extra(status, code, str(exc), extra)
             return
         self._error(status, code, str(exc))
 
@@ -162,7 +176,10 @@ class StoryBankRoutesMixin:
         query = parse_qs(urlsplit(self.path).query, keep_blank_values=True)
         unknown = sorted(set(query) - allowed)
         if unknown:
-            self._error(HTTPStatus.UNPROCESSABLE_ENTITY, "unknown_key", f"unknown query key: {unknown[0]}; allowed: {', '.join(sorted(allowed))}")
+            self._error(
+                HTTPStatus.UNPROCESSABLE_ENTITY, "unknown_key",
+                f"unknown query key: {unknown[0]}; allowed: {', '.join(sorted(allowed)) or 'none'}",
+            )
             return None
         return {key: values[0] for key, values in query.items()}
 
@@ -177,50 +194,34 @@ class StoryBankRoutesMixin:
         if unknown:
             self._error(HTTPStatus.UNPROCESSABLE_ENTITY, "unknown_key", f"unknown key: {unknown[0]}; allowed: {', '.join(sorted(allowed))}")
             return None
-        for key, value in body.items():
-            if value is not None and not isinstance(value, str):
-                self._error(HTTPStatus.UNPROCESSABLE_ENTITY, "wrong_type", f"{key} must be a string")
-                return None
         return body
 
     def _story_bank_actor(self, given: object) -> str:
         """``actor`` from the body/query, else the ``X-GigAI-Actor`` header, else ``operator``."""
 
+        if given is not None and not isinstance(given, str):
+            raise story_bank.StoryBankError("wrong_type", "actor must be a string")
         return story_bank.actor_value(given if isinstance(given, str) and given.strip() else self.headers.get(ACTOR_HEADER))
 
-    def _handle_get_story_bank(self) -> None:
+    # --- answers ---------------------------------------------------------------------------
+
+    def _handle_get_answer(self, question_id: str) -> None:
         paths = self._story_bank_paths()
-        query = None if paths is None else self._story_bank_query(_GET_KEYS)
+        query = None if paths is None else self._story_bank_query(frozenset())
         if paths is None or query is None:
             return
         home_root, target = paths
         try:
-            profile_id = resolve_profile_id(home_root, target, query.get("profile_id"))
-            body = bank_response(home_root, target, profile_id, q=query.get("q"), tag=query.get("tag"))
+            entry = story_bank.get_answer(home_root=home_root, target=target, question_id=question_id)
         except (story_bank.StoryBankError, PrivateRecordError) as exc:
             self._story_bank_fail(exc)
             return
-        self._write_json(HTTPStatus.OK, body)
+        if entry is None:
+            self._error(HTTPStatus.NOT_FOUND, "not_found", f"there is no answer for {question_id!r}")
+            return
+        self._write_json(HTTPStatus.OK, answer_response(entry))
 
-    def _handle_get_story_bank_entry(self, story_id: str) -> None:
-        paths = self._story_bank_paths()
-        query = None if paths is None else self._story_bank_query(_ENTRY_KEYS)
-        if paths is None or query is None:
-            return
-        home_root, target = paths
-        try:
-            profile_id = resolve_profile_id(home_root, target, query.get("profile_id"))
-            body = bank_response(home_root, target, profile_id, question_id=story_id)
-        except (story_bank.StoryBankError, PrivateRecordError) as exc:
-            self._story_bank_fail(exc)
-            return
-        entries = body["entries"]
-        if not entries:
-            self._error(HTTPStatus.NOT_FOUND, "not_found", f"this profile's story bank has no entry {story_id!r}")
-            return
-        self._write_json(HTTPStatus.OK, {"schema_version": RESPONSE_SCHEMA, "profile_id": profile_id, "entry": entries[0]})  # type: ignore[index]
-
-    def _handle_get_story_bank_match(self) -> None:
+    def _handle_get_answers_match(self) -> None:
         paths = self._story_bank_paths()
         query = None if paths is None else self._story_bank_query(_MATCH_KEYS)
         if paths is None or query is None:
@@ -231,98 +232,163 @@ class StoryBankRoutesMixin:
             self._error(HTTPStatus.UNPROCESSABLE_ENTITY, "invalid_value", "question_id is required")
             return
         try:
-            profile_id = resolve_profile_id(home_root, target, query.get("profile_id"))
-            entries = story_bank.read_bank(home_root=home_root, target=target, profile_id=profile_id, with_postings=False)
+            entries = story_bank.read_bank(home_root=home_root, target=target, with_jobs=False)
         except (story_bank.StoryBankError, PrivateRecordError) as exc:
             self._story_bank_fail(exc)
             return
         match = story_bank.near_match(entries, question_id=question_id, question=query.get("question") or "")
-        self._write_json(
-            HTTPStatus.OK,
-            {"schema_version": RESPONSE_SCHEMA, "profile_id": profile_id, "question_id": question_id, "match": None if match is None else match.to_json()},
-        )
+        self._write_json(HTTPStatus.OK, {"schema_version": ANSWERS_SCHEMA, "question_id": question_id, "match": None if match is None else match.to_json()})
 
-    def _handle_post_story_bank(self) -> None:
+    def _handle_put_answer(self, question_id: str) -> None:
         paths = self._story_bank_paths()
-        body = None if paths is None else self._story_bank_body(_POST_KEYS)
+        body = None if paths is None else self._story_bank_body(_ANSWER_PUT_KEYS)
         if paths is None or body is None:
             return
         home_root, target = paths
-        question, answer = body.get("question"), body.get("answer")
-        if not isinstance(question, str) or not question.strip() or not isinstance(answer, str):
-            self._error(HTTPStatus.UNPROCESSABLE_ENTITY, "invalid_value", "question (what the story answers) and answer (the story) are required strings")
-            return
+        for key in ("answer", "question", "tag"):
+            if body.get(key) is not None and not isinstance(body[key], str):
+                self._error(HTTPStatus.UNPROCESSABLE_ENTITY, "wrong_type", f"{key} must be a string")
+                return
         try:
-            profile_id = resolve_profile_id(home_root, target, body.get("profile_id"))  # type: ignore[arg-type]
-            entry = story_bank.add_story(
-                home_root=home_root, target=target, profile_id=profile_id, question=question, answer=answer,
-                question_id=body.get("question_id"), tag=body.get("tag"),  # type: ignore[arg-type]
-                actor=self._story_bank_actor(body.get("actor")),
-            )
-        except (story_bank.StoryBankError, PrivateRecordError) as exc:
-            self._story_bank_fail(exc)
-            return
-        self._write_json(HTTPStatus.CREATED, {"schema_version": RESPONSE_SCHEMA, "profile_id": profile_id, "entry": entry.to_json()})
-
-    def _handle_put_story_bank_entry(self, story_id: str) -> None:
-        paths = self._story_bank_paths()
-        body = None if paths is None else self._story_bank_body(_PUT_KEYS)
-        if paths is None or body is None:
-            return
-        home_root, target = paths
-        updated_at = body.get("updated_at")
-        if not isinstance(updated_at, str) or not updated_at.strip():
-            self._error(HTTPStatus.UNPROCESSABLE_ENTITY, "invalid_value", "updated_at is required: the updated_at of the entry you read")
-            return
-        try:
-            profile_id = resolve_profile_id(home_root, target, body.get("profile_id"))  # type: ignore[arg-type]
-            entry = story_bank.edit_entry(
-                home_root=home_root, target=target, profile_id=profile_id, question_id=story_id,
+            entry = story_bank.edit_answer(
+                home_root=home_root, target=target, question_id=question_id,
                 answer=body.get("answer"), question=body.get("question"), tag=body.get("tag"),  # type: ignore[arg-type]
-                actor=self._story_bank_actor(body.get("actor")), expected_updated_at=updated_at,
+                actor=self._story_bank_actor(body.get("actor")),
+                expected_revision=story_bank.revision_value(body.get("revision"), required=True),
             )
         except (story_bank.StoryBankError, PrivateRecordError) as exc:
             self._story_bank_fail(exc)
             return
-        self._write_json(HTTPStatus.OK, {"schema_version": RESPONSE_SCHEMA, "profile_id": profile_id, "entry": entry.to_json()})
+        self._write_json(HTTPStatus.OK, answer_response(entry))
 
-    def _handle_put_story_bank_sharing(self) -> None:
-        paths = self._story_bank_paths()
-        body = None if paths is None else self._story_bank_body(_SHARING_KEYS)
-        if paths is None or body is None:
-            return
-        home_root, target = paths
-        if "share_with" not in body:
-            self._error(HTTPStatus.UNPROCESSABLE_ENTITY, "invalid_value", "share_with is required: a profile id, or null to read only this profile's own bank")
-            return
-        try:
-            profile_id = resolve_profile_id(home_root, target, body.get("profile_id"))  # type: ignore[arg-type]
-            result = story_bank.set_sharing(home_root=home_root, target=target, profile_id=profile_id, share_with=body["share_with"] or None)  # type: ignore[arg-type]
-        except (story_bank.StoryBankError, PrivateRecordError) as exc:
-            self._story_bank_fail(exc)
-            return
-        self._write_json(HTTPStatus.OK, {"schema_version": RESPONSE_SCHEMA, "profile_id": profile_id, "sharing": result})
-
-    def _handle_delete_story_bank_entry(self, story_id: str) -> None:
+    def _handle_delete_answer(self, question_id: str) -> None:
         paths = self._story_bank_paths()
         query = None if paths is None else self._story_bank_query(_DELETE_KEYS)
         if paths is None or query is None:
             return
         home_root, target = paths
-        updated_at = (query.get("updated_at") or "").strip()
-        if not updated_at:
-            self._error(HTTPStatus.UNPROCESSABLE_ENTITY, "invalid_value", "updated_at is required: the updated_at of the entry you read")
-            return
         try:
             self._story_bank_actor(query.get("actor"))
-            profile_id = resolve_profile_id(home_root, target, query.get("profile_id"))
-            deleted = story_bank.delete_entry(
-                home_root=home_root, target=target, profile_id=profile_id, question_id=story_id, expected_updated_at=updated_at
+            deleted = story_bank.delete_answer(
+                home_root=home_root, target=target, question_id=question_id,
+                expected_revision=story_bank.revision_value(query.get("revision"), required=True),
             )
         except (story_bank.StoryBankError, PrivateRecordError) as exc:
             self._story_bank_fail(exc)
             return
-        self._write_json(HTTPStatus.OK, {"schema_version": RESPONSE_SCHEMA, "profile_id": profile_id, "deleted": deleted})
+        self._write_json(HTTPStatus.OK, {"schema_version": ANSWERS_SCHEMA, "deleted": deleted})
+
+    # --- stories ---------------------------------------------------------------------------
+
+    def _handle_get_stories(self) -> None:
+        paths = self._story_bank_paths()
+        query = None if paths is None else self._story_bank_query(_LIST_KEYS)
+        if paths is None or query is None:
+            return
+        home_root, target = paths
+        try:
+            body = stories_response(home_root, target, q=query.get("q"), tag=query.get("tag"))
+        except (story_bank.StoryBankError, PrivateRecordError) as exc:
+            self._story_bank_fail(exc)
+            return
+        self._write_json(HTTPStatus.OK, body)
+
+    def _handle_get_stories_prep(self) -> None:
+        paths = self._story_bank_paths()
+        query = None if paths is None else self._story_bank_query(frozenset())
+        if paths is None or query is None:
+            return
+        home_root, target = paths
+        try:
+            body = prep_response(home_root, target)
+        except (story_bank.StoryBankError, PrivateRecordError) as exc:
+            self._story_bank_fail(exc)
+            return
+        self._write_json(HTTPStatus.OK, body)
+
+    def _handle_get_story(self, story_id: str) -> None:
+        paths = self._story_bank_paths()
+        query = None if paths is None else self._story_bank_query(frozenset())
+        if paths is None or query is None:
+            return
+        home_root, target = paths
+        try:
+            story = stories.get_story(home_root=home_root, target=target, story_id=story_id)
+        except (story_bank.StoryBankError, PrivateRecordError) as exc:
+            self._story_bank_fail(exc)
+            return
+        if story is None:
+            self._error(HTTPStatus.NOT_FOUND, "not_found", f"there is no story {story_id!r}")
+            return
+        self._write_json(HTTPStatus.OK, story_response(story))
+
+    def _handle_post_stories(self) -> None:
+        paths = self._story_bank_paths()
+        body = None if paths is None else self._story_bank_body(_STORY_POST_KEYS)
+        if paths is None or body is None:
+            return
+        home_root, target = paths
+        story_id = body.get("story_id")
+        if story_id is not None and not isinstance(story_id, str):
+            self._error(HTTPStatus.UNPROCESSABLE_ENTITY, "wrong_type", "story_id must be a string")
+            return
+        try:
+            story = stories.save_story(
+                home_root=home_root, target=target, story_id=story_id,
+                fields={key: body[key] for key in stories.STORY_FIELDS if key in body},
+                actor=self._story_bank_actor(body.get("actor")),
+            )
+        except (story_bank.StoryBankError, PrivateRecordError) as exc:
+            self._story_bank_fail(exc)
+            return
+        self._write_json(HTTPStatus.CREATED, story_response(story))
+
+    def _handle_put_story(self, story_id: str) -> None:
+        paths = self._story_bank_paths()
+        body = None if paths is None else self._story_bank_body(_STORY_PUT_KEYS)
+        if paths is None or body is None:
+            return
+        home_root, target = paths
+        try:
+            story = stories.edit_story(
+                home_root=home_root, target=target, story_id=story_id,
+                fields={key: body[key] for key in stories.STORY_FIELDS if key in body},
+                actor=self._story_bank_actor(body.get("actor")),
+                expected_revision=story_bank.revision_value(body.get("revision"), required=True),
+            )
+        except (story_bank.StoryBankError, PrivateRecordError) as exc:
+            self._story_bank_fail(exc)
+            return
+        self._write_json(HTTPStatus.OK, story_response(story))
+
+    def _handle_delete_story(self, story_id: str) -> None:
+        paths = self._story_bank_paths()
+        query = None if paths is None else self._story_bank_query(_DELETE_KEYS)
+        if paths is None or query is None:
+            return
+        home_root, target = paths
+        try:
+            self._story_bank_actor(query.get("actor"))
+            deleted = stories.delete_story(
+                home_root=home_root, target=target, story_id=story_id,
+                expected_revision=story_bank.revision_value(query.get("revision"), required=True),
+            )
+        except (story_bank.StoryBankError, PrivateRecordError) as exc:
+            self._story_bank_fail(exc)
+            return
+        self._write_json(HTTPStatus.OK, {"schema_version": STORIES_SCHEMA, "deleted": deleted})
 
 
-__all__ = ["ACTOR_HEADER", "RESPONSE_SCHEMA", "StoryBankRoutesMixin", "bank_response", "resolve_profile_id"]
+__all__ = [
+    "ACTOR_HEADER",
+    "ANSWERS_SCHEMA",
+    "ERROR_STATUS",
+    "STORIES_SCHEMA",
+    "StoryBankRoutesMixin",
+    "answer_response",
+    "answers_response",
+    "error_extra",
+    "prep_response",
+    "stories_response",
+    "story_response",
+]

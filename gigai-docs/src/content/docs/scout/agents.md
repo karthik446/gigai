@@ -103,75 +103,111 @@ What to know:
   rule, `resume_markdown_too_large` the limit (65536 bytes), `invalid_value` a `spacing_scale`
   outside 0.7 to 1.4.
 
-## The story bank: answers and stories, reused
+## Answers and stories: kept once, reused
 
-Each profile has a story bank: every question it answered on a posting, plus the stories you or an
-agent add. It is local (no model call, no network) and it is what the next assessment reuses: the
-assess prompt gets a one-line summary of each entry and is told to settle a requirement from an
-entry that covers it instead of asking again, in the same call. It is also the material for
-interviews.
+Scout keeps two things you tell your agent, for every profile at once (they are yours, not one
+profile's):
 
-You and an agent write the same bank, so every write says who it is (`actor`: `operator`, the
-default, or `agent`; a body field, or the `X-GigAI-Actor` header) and an edit or a delete sends
-the `updated_at` it read. If the entry changed since, the answer is `409 story_bank_changed` with
-the current `entry` in the error: read it, merge, send again. The UI does the same and shows an
-entry an agent changed.
+- An **answer** is a short fact a posting asked for: "Do you have GCP experience?" -> "Yes, 4 years,
+  GKE + BigQuery".
+- A **story** is an experience worth telling: a project, a problem, an outcome. It has a `title`,
+  where and when (`company`, `role`, `period`), your own words (`raw`), a loosely STAR `narrative`
+  (`situation`, `task`, `action`, `result`; every part optional), `tags`, the interview questions
+  it answers (`answers_questions`) and what triggered it (`sources`).
 
-A worked example, **an agent adds a STAR story from a conversation, and a later assessment
-reuses it**:
+Both are local (no model call, no network) and both are what the next assessment uses. An answer
+is reused for the same question, and for the same fact worded differently, instead of asking
+again. The stories are searched on your machine for each job, and only the few that match the
+posting go into that assessment's prompt as evidence. `answers_questions`, pooled across your
+stories, is your basic interview prep list (`GET /api/stories/prep`).
+
+The usual flow in a chat: the agent asks a job's open questions. A factual reply is saved as an
+answer. A reply with substance gets "Want me to make this a story?": the agent drafts the
+narrative from your words, shows it, and saves it when you say yes.
+
+You and an agent write the same answers and stories, so every write says who it is (`actor`:
+`operator`, the default, or `agent`; a body field, or the `X-GigAI-Actor` header) and an edit or
+a delete sends the `revision` it read. If it changed since, the reply is `409 revision_conflict`
+with the current `answer` or `story` in the error: read it, merge, send again. Scout's own page
+(Settings > Answers and stories) is read-only: it lists them, shows which jobs used each, and
+deletes one that is wrong. It has no form; writing is the agent's job.
+
+A worked example, **an agent saves an answer and a story from a conversation, and later
+assessments use them**:
 
 ```sh
 B=http://127.0.0.1:8765; H='Content-Type: application/json'
 
-# 1. Add the story to the selected profile's bank (add "profile_id" for another profile).
-curl -s -X POST "$B/api/story-bank" -H "$H" -d '{
-  "question": "Tell me about a database migration you led",
-  "answer": "Situation: a 4 TB Postgres primary was close to its disk limit. Task: move it to a new cluster with no downtime. Action: led three engineers through a dual-write cut-over with a replayable backfill. Result: zero lost writes and p95 latency down 30%.",
+# 1. A factual reply: save it as an answer.
+curl -s -X POST "$B/api/answers" -H "$H" -d '{
+  "question_id": "cloud:gcp", "question": "Do you have GCP experience?",
+  "answer": "Yes, 4 years, GKE + BigQuery", "actor": "agent"}'
+# -> 201 {"answer": {"question_id": "cloud:gcp", "written_by": "agent", "revision": 1, "jobs": [], ...}}
+
+# 2. A reply with substance, after "Want me to make this a story?" and a yes: save the story.
+curl -s -X POST "$B/api/stories" -H "$H" -d '{
+  "title": "Cut CI time 60% at Acme", "company": "Acme", "role": "Staff Engineer", "period": "2023",
+  "raw": "Our builds took forty minutes, so I moved the runners to Kubernetes and cached the layers.",
+  "narrative": {"situation": "Builds took forty minutes and blocked every merge.",
+                "action": "Moved the runners to Kubernetes and cached the image layers.",
+                "result": "Build time fell 60 percent."},
+  "tags": ["ci", "delivery"],
+  "answers_questions": ["Tell me about a time you improved a slow process"],
+  "sources": [{"question_id": "tooling:kubernetes"}],
   "actor": "agent"}'
-# -> 201 {"entry": {"question_id": "story:database_led_migration", "tag": "leadership",
-#                   "written_by": "agent", "revision": 1, "updated_at": "..."}}
+# -> 201 {"story": {"story_id": "story:60_acme_ci_cut_time", "written_by": "agent", "revision": 1, ...}}
 
-# 2. Later, assess a posting that requires leading a database migration (one model call).
+# 3. Later, assess another posting that wants GCP and Kubernetes (one model call).
 curl -s -X POST "$B/api/assess" -H "$H" -d '{"job": {"job_url": "https://boards.greenhouse.io/acme/jobs/101"}}'
-# -> the model is told to settle that requirement from the story: no question for it; its resume_evidence reads
-#    "Story bank story:database_led_migration: Situation: a 4 TB Postgres primary ..."
+# -> no question for GCP; that row's resume_evidence reads "Story bank cloud:gcp: Yes, 4 years, ...".
+#    The story matched the posting, so it was in the prompt too: a row may read
+#    "Story bank story:60_acme_ci_cut_time: Cut CI time 60% at Acme ...".
 
-# 3. The entry now lists that job (kind "reused").
-curl -s "$B/api/story-bank/story:database_led_migration"
+# 4. Each now lists that job: the answer with kind "reused", the story with kind "used".
+curl -s "$B/api/answers/cloud%3Agcp"
+curl -s "$B/api/stories/story%3A60_acme_ci_cut_time"
 
-# 4. Improve the story later: send the updated_at you just read.
-curl -s -X PUT "$B/api/story-bank/story:database_led_migration" -H "$H" -d '{
-  "updated_at": "<updated_at>", "tag": "migrations", "actor": "agent"}'
+# 5. Improve the story later: send the revision you just read.
+curl -s -X PUT "$B/api/stories/story%3A60_acme_ci_cut_time" -H "$H" -d '{
+  "revision": 1, "period": "2022-2023", "actor": "agent"}'
 ```
 
 The same with the CLI (no running server needed):
 
 ```sh
-gigai scout story-bank add --question "Tell me about a database migration you led" --answer-file story.md --actor agent --json
-gigai scout story-bank list --json                     # every entry, with tags and the jobs that used it
-gigai scout story-bank show story:database_led_migration --json
-gigai scout story-bank edit story:database_led_migration --tag migrations --actor agent --updated-at "<updated_at>" --json
-gigai scout story-bank delete story:database_led_migration --confirm --json
-gigai scout story-bank share --profile <reader> --with <owner> --json
+gigai scout answers save cloud:gcp --question "Do you have GCP experience?" --answer-text "Yes, 4 years, GKE + BigQuery" --actor agent --json
+gigai scout answers list --json                        # every answer, with tags and the jobs that used it
+gigai scout answers show cloud:gcp --json
+gigai scout answers delete cloud:gcp --confirm --revision 1 --json
+gigai scout story save --file story.json --actor agent --json   # the fields of POST /api/stories
+gigai scout story list --json
+gigai scout story show story:60_acme_ci_cut_time --json
+gigai scout story save story:60_acme_ci_cut_time --period 2022-2023 --revision 1 --actor agent --json
+gigai scout story delete story:60_acme_ci_cut_time --confirm --revision 2 --json
+gigai scout story prep --json                          # the interview questions your stories answer
 ```
+
+The routes: `GET` / `POST /api/answers`, `GET /api/answers/match`, `GET` / `PUT` / `DELETE
+/api/answers/{question_id}`, `GET` / `POST /api/stories`, `GET /api/stories/prep`, `GET` / `PUT` /
+`DELETE /api/stories/{story_id}`. The CLI prints the same bodies.
 
 What to know:
 
-- **Answers land there by themselves.** `POST /api/answers` (and `gigai scout answer`, and the
-  job page) saves into the bank of the profile the job was assessed for. Send `question` (the
-  question's own words) with it; they are kept with the answer.
+- **Answers from a job page land there too.** `POST /api/answers` with `reassess` (and `gigai
+  scout answer --reassess`, and the job page's question box) saves the answer and assesses that
+  job again. Send `question` (the question's own words) with it; they are kept with the answer.
 - **Reuse costs nothing extra.** The exact same `question_id` is reused as before. A question
-  worded differently is settled from the bank in the assessment's own model call; the row then
-  cites `Story bank <id>: ...` and the job is listed on the entry.
+  worded differently is settled from the answers in the assessment's own model call; the row then
+  cites `Story bank <id>: ...` and the job is listed on the answer or the story.
 - **A search run reuses it too.** The assessments a find-jobs run makes (`POST /api/run`, a
-  background check) get what `POST /api/assess` gets: the bank of the run's profile, and the
+  background check) get what `POST /api/assess` gets: your answers and matching stories, and the
   run's own search settings (whether you need sponsorship, the countries you can work from,
   your location, your target titles). The run's sealed output says what it used: the assess
   prompt (`prompt_version`), a digest of those settings (`constraints_digest`) and the bank
-  (`story_bank`: the profile and a mark per entry, never the answers). A posting that did not
+  (`story_bank`: a mark per answer and story, never their text). A posting that did not
   change is normally not assessed again. It is when the prompt version or those settings
-  changed, when its assessment left a question open and the bank has an answer the run had not
-  seen, or when it cites a bank answer that was edited, deleted or is no longer shared.
+  changed, when its assessment left a question open and there is an answer or a story about it
+  the run had not seen, or when it cites an answer or story that was edited or deleted.
   `GET /api/runs/{run_id}/results` and `.../posting` carry `bank_suggestions` for the questions
   that remain.
 - **A run says why it did not assess a posting.** Each row a run kept but did not assess has a
@@ -187,10 +223,10 @@ What to know:
   the settings or the answers). `GET /api/assessments` items and the `source: "quick"`
   assessments of `GET /api/jobs` carry `basis_stale` (true or false) and, when true,
   `basis_stale_reason`: `older_prompt`, `settings_changed` (the profile's work mode, countries,
-  location or sponsorship need changed) or `story_bank_changed` (a bank entry added or edited
-  since answers one of ITS OWN open questions, by the same id or the near match behind
-  `bank_suggestions`, or it cites an answer that was edited, deleted or unshared; answering one
-  question does not flag assessments that asked something else). A `story_bank_changed` item
+  location or sponsorship need changed) or `story_bank_changed` (an answer or story added or edited
+  since answers one of ITS OWN open questions, by the same id, the near match behind
+  `bank_suggestions` or a story about it, or it cites an answer or story that was edited or deleted;
+  answering one question does not flag assessments that asked something else). A `story_bank_changed` item
   also carries `basis_stale_bank`: the entries that made it stale, each `{match: "exact" |
   "near" | "cited", bank_question_id, bank_question, question_id, question}` (ids and question
   words, never an answer). `job_state.assessment_stale.reason` carries the same reason when that assessment
@@ -208,18 +244,16 @@ What to know:
   assessment is skipped.
 - **A near match is offered, not assumed.** When an assessment still asks something close to
   an entry, the response carries `bank_suggestions` (also on `GET /api/jobs?url=`, and for one
-  question on `GET /api/story-bank/match?question_id=&question=`): the bank's answer, the
-  entry it came from and a score. For a run's assessment the bank is the one of the run's own
-  profile, whichever profile is selected when you read it. It is word overlap, no model. To accept it, save it as the
+  question on `GET /api/answers/match?question_id=&question=`): the answer, the question it
+  came from and a score. It is word overlap, no model. To accept it, save it as the
   answer: `POST /api/answers {"question_id": "<the new question>", "answer": "<the suggested
   answer, or your edit>", "from_bank": "<bank_question_id>", "reassess": {"job_identity": "..."}}`.
   The UI shows it as "We already know: ..., use it?".
-- **One profile, one bank.** Profiles on one machine can be different people. A profile never
-  reads another profile's answers: not in the list, the suggestions, the assess prompt or the
-  tailoring. `PUT /api/story-bank/sharing {"profile_id": "<reader>", "share_with": "<owner>"}`
-  makes the reader also read the owner's own entries (one hop, one way); `"share_with": null`
-  stops it at once. An answer saved before the bank existed belongs to the profile named in
-  its answer history, else to the default profile.
+- **Yours, not a profile's.** Since 0.1.10.7 every profile reads the same answers and stories.
+  The per-profile story bank of 0.1.10.5 and its sharing setting are gone; what it held was moved
+  once (`gigai scout answers migrate --json` prints the counts; a second run changes nothing).
+  Two profiles that answered the same question: the newest write is the answer, and a different
+  older one is kept in that answer's `history`. The old file is kept as `story_bank/bank.v1.json`.
 - **Tags** are model-free: `technical`, `experience-level`, `eligibility`, `education`, `domain`,
   `leadership`, `conflict`, `failure`, `collaboration`, `system-design`, `delivery`, `skill`, `other`,
   from the id's category and the question's words. Set your own with `tag`.
@@ -227,9 +261,9 @@ What to know:
   street address or the name saved in Resume display is refused with `422 personal_info_refused`
   (the message names what was found, never the text). What a model sees of the bank is a one-line
   summary per entry, at most 40 entries, redacted again.
-- **Delete** (`DELETE /api/story-bank/<id>?updated_at=`, with `Content-Type: application/json`
-  like every write) takes the entry out of use for good. The project's journal keeps the older
-  revision of the record it was in.
+- **Delete** (`DELETE /api/answers/<id>?revision=` or `DELETE /api/stories/<id>?revision=`, with
+  `Content-Type: application/json` like every write) takes it out of use for good. For an answer,
+  the project's journal keeps the older revision of the record it was in.
 
 ## Install and run
 

@@ -636,25 +636,19 @@ def run_quick_assessment(
         raise QuickAssessError("target_unavailable", "this folder is not bound to a GigAI project") from exc
     previous = _read_stored(path)
 
-    # 4b. Prior answers (P3's Q&A loop), per profile since 0110-034: the
-    #     answered questions of THIS profile's story bank (its own, plus the
-    #     bank of the one profile it is set to share with), rendered into the
-    #     prompt so the model never re-asks something already answered
-    #     (assess.md rule 8). ``bank_answers`` is the same bank as short
-    #     lines (id, the question as asked, a one-line answer) for the STORY
-    #     BANK paragraph: a requirement worded differently reuses the answer
-    #     in this same call. A pasted resume has no profile: it reads the
-    #     SELECTED profile's bank (the person at the keyboard), as it read the
-    #     gig's answers before. No gig or no profile: none, not fatal.
+    # 4b. Prior answers (P3's Q&A loop), user-level since 0.1.10.7 C: every
+    #     answer the user gave, for any profile and any posting, rendered
+    #     into the prompt so the model never re-asks something already
+    #     answered (assess.md rule 8). ``bank_answers`` is the same answers
+    #     as short lines (id, the question as asked, a one-line answer) for
+    #     the STORY BANK paragraph: a requirement worded differently reuses
+    #     the answer in this same call. ``for_job`` adds the few stories that
+    #     match THIS posting (searched locally) to those lines, as evidence.
+    #     A pasted resume reads the same bank. No gig: none, not fatal.
     #     One builder for every path that renders the assess prompt
     #     (``story_bank.assess_bank``: this, assess-all and a find-jobs run).
-    bank = story_bank.assess_bank(
-        home_root=home_root,
-        target=target,
-        profile_id=story_bank.reader_profile_id(home_root=home_root, target=target, profile_id=resume.profile_id),
-        resume_text=resume.text,
-    )
-    bank_entries = bank.entries
+    bank = story_bank.assess_bank(home_root=home_root, target=target, profile_id=resume.profile_id, resume_text=resume.text)
+    job_bank = bank.for_job(title=job.title, text=job.text)
 
     # 5. Model target -> adapter (C1/C11), then the shared core (P1).
     model_target = request.model_target or _default_model_target(target)
@@ -674,7 +668,7 @@ def run_quick_assessment(
                 countries=tuple(preferences.countries),
                 titles=tuple(preferences.titles),
                 location=candidate_location,
-                bank=bank,
+                bank=job_bank,
                 work_mode=candidate_work_mode,
             ),
             parse=_parse_body,
@@ -742,10 +736,10 @@ def run_quick_assessment(
         model=_model_id(getattr(binding.port, "resolved_model", None)),
     )
     atomic_write(path, json.dumps(response.to_json(), indent=2, sort_keys=True).encode("utf-8"))
-    if bank_entries:
-        # 0110-034: which bank answers this assessment cited ("Story bank <id>: ...").
+    if bank.entries or bank.stories:
+        # Which answers and stories this assessment cited ("Story bank <id>: ...").
         story_bank.record_reuse(
-            home_root=home_root, target=target, entries=bank_entries,
+            home_root=home_root, target=target, entries=bank.entries, stories=bank.stories,
             evidence=[evidence for row in body.matrix for evidence in row.resume_evidence],
             posting={"job_identity": job.job_identity, "title": job.title, "company": job.company, "url": job.source_url},
         )

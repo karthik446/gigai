@@ -269,13 +269,13 @@ def test_the_story_bank_rule_is_the_runs_own(fx: ProfileFixtureGig, model: _Bind
 
     # 0110-041: an answer to a question it did NOT ask leaves it current (039 flagged it here).
     story_bank.save_answer(
-        home_root=fx.home_root, target=fx.target, profile_id=item.resume.profile_id,  # type: ignore[arg-type]
+        home_root=fx.home_root, target=fx.target,
         question_id="cloud:gcp", answer="Two years running services on GCP.", question="Do you have GCP experience?",
     )
     assert _reason(fx, item) is None and "assessment_stale" not in _state(fx, item)
 
     story_bank.save_answer(
-        home_root=fx.home_root, target=fx.target, profile_id=item.resume.profile_id,  # type: ignore[arg-type]
+        home_root=fx.home_root, target=fx.target,
         question_id="location:houston", answer="I live in Houston and can be in the office.", question="Can you work from the Houston office?",
     )
 
@@ -377,7 +377,7 @@ def test_a_request_on_an_unchanged_workpad_pays_one_cheap_lookup(fx: ProfileFixt
     # 0110-041: the answer to the question these four asked (an unrelated one would flag none of them).
     assert {question.question_id for item in items for question in item.result.structured_questions} == {"location:houston"}
     story_bank.save_answer(
-        home_root=fx.home_root, target=fx.target, profile_id=profile_id,
+        home_root=fx.home_root, target=fx.target,
         question_id="location:houston", answer="I live in Houston and can be in the office.", question="Can you work from the Houston office?",
     )
     spawned: list[str] = []

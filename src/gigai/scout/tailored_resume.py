@@ -2348,19 +2348,15 @@ def run_tailored_resume(
 
     # 3. Answered questions (citable sources), tolerantly: a pasted-text run
     #    with no bound gig simply has none.
-    #    0110-034: the answers of THIS profile's story bank (its own plus a
-    #    shared profile's), never another profile's; a pasted resume reads
-    #    the selected profile's.
+    #    0.1.10.7 C: the user's answers, the same for every profile and for
+    #    a pasted resume.
     from . import story_bank
 
-    answers: dict[str, AnswerSource] = {}
-    bank_profile_id = story_bank.reader_profile_id(home_root=home_root, target=target, profile_id=resume.profile_id)
-    if bank_profile_id is not None:
-        stored_answers = story_bank.answers_for_profile(home_root=home_root, target=target, profile_id=bank_profile_id)
-        answers = {
-            key: AnswerSource(question_id=item.question_id, answer=item.answer, revision_id=item.revision_id, prompt=item.prompt)
-            for key, item in stored_answers.items()
-        }
+    stored_answers = story_bank.answers_for_reuse(home_root=home_root, target=target)
+    answers: dict[str, AnswerSource] = {
+        key: AnswerSource(question_id=item.question_id, answer=item.answer, revision_id=item.revision_id, prompt=item.prompt)
+        for key, item in stored_answers.items()
+    }
 
     # 4. Storage path first (so the response can name it and ``created_at``
     #    survives a re-run), then the stored matrix (context only).

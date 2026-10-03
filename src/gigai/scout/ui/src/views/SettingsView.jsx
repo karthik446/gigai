@@ -5,6 +5,7 @@ import BackgroundUpdatesPanel from "../components/BackgroundUpdatesPanel.jsx";
 import ModelMetricsPanel from "../components/ModelMetricsPanel.jsx";
 import ExaSourceToggle from "../components/ExaSourceToggle.jsx";
 import ProfilesView from "./ProfilesView.jsx";
+import { ANSWERS_HASH } from "../routing.js";
 
 export default function SettingsView({
   config,
@@ -78,6 +79,18 @@ export default function SettingsView({
           defaultSearchSettings={defaultSearchSettings}
         />
       </div>
+
+      {/* 0.1.10.7 C: answers and stories are the user's, not a profile's: one
+          read-only page for all of them. */}
+      <section className="panel" id="settings-answers-stories">
+        <h2>Answers and stories</h2>
+        <p className="muted">
+          What you told your agent, kept once and used for every profile: the answers postings asked for and the stories behind them.
+        </p>
+        <a className="button secondary" data-action="open-answers-stories" href={ANSWERS_HASH}>
+          Open answers and stories
+        </a>
+      </section>
 
       <div id="settings-add-company">
         <AddCompanyForm />

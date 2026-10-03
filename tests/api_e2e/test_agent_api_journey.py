@@ -197,8 +197,8 @@ def test_agent_api_journey(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> N
         assert allowed(client.get("/api/watchlist?bogus=1")) == ["limit", "offset", "summary"]
         assert allowed(client.post("/api/watchlist", json={"url": "x", "bogus": 1})) == ["url"]
         assert allowed(client.post("/api/answers", json={"question_id": "a:b", "answer": "x", "bogus": 1})) == [
-                # 0110-034: an answer goes into a profile's story bank (actor, from_bank, profile_id, question).
-                "actor", "answer", "from_bank", "profile_id", "question", "question_id", "reassess",
+                # 0.1.10.7 C: an answer is the user's (no profile_id); it may carry a tag and the revision read.
+                "actor", "answer", "from_bank", "question", "question_id", "reassess", "revision", "tag",
             ]
         assert allowed(client.post("/api/sources/update", json={"bogus": 1})) == ["force", "full_refresh"]
         # 0110-025: the sources status carries the documented `background` block. A journey server

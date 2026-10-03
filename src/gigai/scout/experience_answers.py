@@ -33,15 +33,18 @@ the CLI's normal error shape) instead of reaching native-record schema
 validation and surfacing as a generic conflict. Terra review, P1: writes are
 retry-safe under the journal writer -- see ``record_answer``'s own docstring.
 
-0110-034 (story bank): a profile owns its answers. ``experience_qa`` has no
-profile field (the schema is closed), so ``story_bank.py`` keeps which record
-belongs to which profile and passes an ``AnswerScope`` to ``record_answer``:
-the one record that already holds this profile's answer to the question (if
-any) and the records this profile may append to. Without a scope every call
-behaves exactly as before (gig-wide). ``list_answer_rows`` is the unjoined
-read the bank is a view over; ``remove_answer`` is the bank's delete (a new
-revision with the question ``not_applicable``: the journal keeps the older
-revision, the answer is never read or reused again).
+0110-034 / 0.1.10.7 C (``story_bank.py``): the bank on top of these records.
+``experience_qa`` has no field for who wrote an answer, its dates or the jobs
+that used it (the schema is closed), so ``story_bank.py`` keeps those and
+passes an ``AnswerScope`` to ``record_answer``: the one record that already
+holds THE answer to the question (if any) and the records it may append to.
+In 0.1.10.5 a scope was one profile's records; since 0.1.10.7 answers are the
+user's and the scope is every ``experience_qa`` record of the gig
+(``experience_record_ids``). Without a scope every call behaves exactly as
+before. ``list_answer_rows`` is the unjoined read the bank is a view over;
+``remove_answer`` is the bank's delete (a new revision with the question
+``not_applicable``: the journal keeps the older revision, the answer is never
+read or reused again).
 """
 
 from __future__ import annotations
@@ -209,6 +212,16 @@ def list_answer_rows(*, home_root: Path, requested_target: Path | None, gig_id: 
     return rows
 
 
+def experience_record_ids(*, home_root: Path, requested_target: Path | None, gig_id: str | None = None) -> frozenset[str]:
+    """Every ``experience_qa`` record of the gig (0.1.10.7: the user-level answers append to any of them)."""
+
+    return frozenset(
+        str(row["record_id"])
+        for row in list_native_records(home_root=home_root, requested_target=requested_target, gig_id=gig_id)
+        if row["kind"] == "experience_qa"
+    )
+
+
 def read_answers(*, home_root: Path, requested_target: Path | None, gig_id: str | None = None) -> dict[str, PriorAnswer]:
     """Every ANSWERED question across this gig's ``experience_qa`` records,
     keyed by normalized ``question_id`` (a record's own questions never
@@ -220,8 +233,8 @@ def read_answers(*, home_root: Path, requested_target: Path | None, gig_id: str 
     ``record_answer``, so a same-fact collision across two records is not
     the expected steady state).
 
-    0110-034: gig-wide, every profile's answers together. What one profile
-    may see is ``story_bank.answers_for_profile``."""
+    Gig-wide and unjoined with the bank's own file. What an assessment or
+    the tailoring reads is ``story_bank.read_bank`` / ``answers_for_reuse``."""
 
     return {
         item.question_id: item
@@ -509,4 +522,4 @@ def remove_answer(
                 raise
 
 
-__all__ = ["AnswerScope", "PriorAnswer", "list_answer_rows", "read_answers", "record_answer", "remove_answer"]
+__all__ = ["AnswerScope", "PriorAnswer", "experience_record_ids", "list_answer_rows", "read_answers", "record_answer", "remove_answer"]

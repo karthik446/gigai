@@ -200,17 +200,21 @@ _KEPT_LOCK = threading.Lock()
 _kept: dict[str, _Kept] = {}
 # (home, target) -> the two home files a kept read depends on. Where they are
 # never changes for a bound folder, and finding out costs a subprocess each.
-_watched: dict[tuple[str, str], tuple[Path, Path]] = {}
+_watched: dict[tuple[str, str], tuple[Path, Path, Path]] = {}
 
 
-def _watched_files(home_root: Path, target: Path) -> tuple[Path, Path]:
+def _watched_files(home_root: Path, target: Path) -> tuple[Path, Path, Path]:
     key = (str(home_root), str(target))
     found = _watched.get(key)
     if found is None:
         from . import story_bank
         from .find_jobs.discovery.storage import discovery_dir
 
-        found = _watched[key] = (discovery_dir(home_root, target) / "prefs.json", story_bank.bank_path(home_root, target))
+        found = _watched[key] = (
+            discovery_dir(home_root, target) / "prefs.json",
+            story_bank.bank_path(home_root, target),
+            story_bank.stories_path(home_root, target),
+        )
     return found
 
 
@@ -256,7 +260,7 @@ class BasisCheck:
             workpad = Path(self._workpad().path)  # type: ignore[attr-defined]
             head = _cheap_workpad_head(workpad)
             if head is not None:
-                prefs, bank = _watched_files(self._home_root, self._target)
+                prefs, bank, stories = _watched_files(self._home_root, self._target)
                 key = (
                     head,
                     str(self._home_root),
@@ -264,6 +268,7 @@ class BasisCheck:
                     _stat_mark(self._target / "find-jobs.json"),
                     _stat_mark(prefs),
                     _stat_mark(bank),
+                    _stat_mark(stories),
                 )
                 with _KEPT_LOCK:
                     found = _kept.get(str(workpad))
@@ -320,8 +325,8 @@ class BasisCheck:
         from . import story_bank
 
         def read():
-            reader = story_bank.reader_profile_id(home_root=self._home_root, target=self._target, profile_id=profile_id)
-            bank = story_bank.assess_bank(home_root=self._home_root, target=self._target, profile_id=reader)
+            # 0.1.10.7 C: the bank is the user's; every resume identity reads the same one.
+            bank = story_bank.assess_bank(home_root=self._home_root, target=self._target, profile_id=profile_id)
             return None if bank.profile_id is None else bank
 
         if profile_id is None:

@@ -315,8 +315,8 @@ export default function JobPage({
   }, [onApplicationsChanged]);
 
   useEffect(() => {
-    // 0110-034: the answers of THIS profile's story bank (own plus shared).
-    getAnswers(profileId)
+    // 0.1.10.7 C: the user's answers, the same for every profile.
+    getAnswers()
       .then((response) => setAnswers(response.answers || []))
       .catch(() => setAnswers([]));
     setTailorError(null);
@@ -343,7 +343,6 @@ export default function JobPage({
     priorAnswers,
     onAnswered: onQuickUpdated,
     onReassessUnavailable: jobUrl ? assessByUrl : undefined,
-    profileId,
   });
   const tailored = useTailoredResume({ jobIdentity: job ? job.id : null, jobUrl, profileId });
 

@@ -640,7 +640,7 @@ export function triggerQuestionId(trigger) {
 // assessments' own structured_questions (`question`; pass every assessment
 // the job has -- a re-assessed job's latest result may carry no questions
 // while the run's result still names them) and the recorded answers (GET
-// /api/answers rows carry `prompt`). An answer recorded without a prompt
+// /api/answers rows carry `question`). An answer recorded without a prompt
 // is stored with the id AS its prompt (the CLI / a bare POST), which is no
 // prompt at all: skipped, so the caller falls back to the id honestly.
 export function questionPromptIndex({ answers, assessment, assessments }) {
@@ -654,8 +654,10 @@ export function questionPromptIndex({ answers, assessment, assessments }) {
     });
   });
   (answers || []).forEach((answer) => {
-    if (answer && usable(answer.question_id, answer.prompt) && !index.has(answer.question_id)) {
-      index.set(answer.question_id, answer.prompt.trim());
+    // 0.1.10.7 C: an answer row carries `question`; `prompt` was its name before.
+    const words = answer && (answer.question || answer.prompt);
+    if (answer && usable(answer.question_id, words) && !index.has(answer.question_id)) {
+      index.set(answer.question_id, words.trim());
     }
   });
   return index;

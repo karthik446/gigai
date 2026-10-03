@@ -420,38 +420,45 @@ def test_the_detector_finds_the_values_when_the_strip_is_disabled(
     assert payloads and set(leaks(payloads[0])) == set(FORBIDDEN)
 
 
-# --- the story bank lines of an assess payload (0110-034) ------------------------------------------
+# --- the answers and stories lines of an assess payload (0110-034, user-level since 0.1.10.7 C) -----
 
-BANK_MARKER = "Glimmerbank"  # a clean bank answer every assess payload of the profile must carry
-OTHER_PROFILE_MARKER = "Otherperson-Only"  # another profile's answer: never in this profile's payload
+BANK_MARKER = "Glimmerbank"  # a clean answer every assess payload must carry
+STORY_MARKER = "Glimmerstory"  # a clean story that matches the posting: in the payload too
 #: An answer saved before the personal-info check existed, with every contact value planted in it.
 _OLD_ANSWER = (
     f"Six years on the ledger; {NAME} ran the cut-over. Write to {EMAIL} or call {PHONE}; "
     f"see https://{GITHUB}/ledger, {LINKEDIN} and https://{SITE}/talk."
 )
+#: A story with the contact values in it. No write path stores one (every field is checked), so it is
+#: planted straight into the file: what reaches a model is still redacted, or the line is left out.
+_PLANTED_STORY = {
+    "title": "Ran Kubernetes for the ledger team",
+    "raw": f"{NAME} and I ran Kubernetes for the ledger. Write to {EMAIL} or call {PHONE}; see https://{GITHUB}/k8s, {LINKEDIN} and https://{SITE}/k8s.",
+    "tags": ["kubernetes"], "created_at": "2026-10-01T10:00:00.000000Z", "updated_at": "2026-10-01T10:00:00.000000Z", "revision": 1, "written_by": "operator",
+}
 
 
-def _seed_story_bank(fixture: Home) -> str:
-    """An old answer with contact values, a clean one, and another profile's; returns the other profile's id."""
+def _seed_story_bank(fixture: Home) -> None:
+    """An old answer with contact values, a clean answer, a clean story and a planted story with contact values."""
 
-    from gigai.scout import story_bank
+    from gigai.scout import stories, story_bank
     from gigai.scout.experience_answers import record_answer
-    from gigai.scout.profile_records import create_profile, list_profiles
 
     home, target = fixture.home, fixture.target
-    # The 0.1.10.4 write path: no profile, no personal-info check.
+    # The 0.1.10.4 write path: no personal-info check.
     record_answer(home_root=home, requested_target=target, gig_id=fixture.gig_id, question_id="years:ledger", prompt="years:ledger", answer=_OLD_ANSWER)
     story_bank.save_answer(
-        home_root=home, target=target, profile_id=fixture.profile_id, question_id="story:ledger_migration",
+        home_root=home, target=target, question_id="story:ledger_migration",
         question="Tell me about a migration you led", answer=f"Led the {BANK_MARKER} ledger migration with zero lost writes.",
     )
-    resolved = resolve_workpad(home_root=home, requested_target=target, gig_id=fixture.gig_id, allow_semantic_state=True)
-    mine = next(item for item in list_profiles(resolved) if item.profile_id == fixture.profile_id)
-    other = create_profile(resolved, label="another person", titles=("x",), titles_to_avoid=(), queries=("x",), resume_ref=mine.resume_ref)
-    story_bank.save_answer(
-        home_root=home, target=target, profile_id=other.profile_id, question_id="cloud:gcp", answer=f"{OTHER_PROFILE_MARKER}: four years on GCP.",
+    stories.save_story(
+        home_root=home, target=target, actor="agent",
+        fields={"title": f"Moved the {STORY_MARKER} services to Kubernetes", "raw": "I moved forty Python services to Kubernetes.", "tags": ["kubernetes"]},
     )
-    return other.profile_id
+    path = story_bank.stories_path(home, target)
+    stored = json.loads(path.read_text(encoding="utf-8"))
+    stored["stories"]["story:planted"] = _PLANTED_STORY
+    path.write_text(json.dumps(stored), encoding="utf-8")
 
 
 def _assess_with_the_bank(fixture: Home, capture: Capture) -> list[bytes]:
@@ -463,7 +470,7 @@ def _assess_with_the_bank(fixture: Home, capture: Capture) -> list[bytes]:
     return capture.model_payloads("quick_assess_bank")
 
 
-def test_the_story_bank_lines_of_an_assess_payload_carry_no_contact_value_and_no_other_profiles_answer(
+def test_the_answer_and_story_lines_of_an_assess_payload_carry_no_contact_value(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     fixture = _home(tmp_path, monkeypatch)
@@ -480,8 +487,8 @@ def test_the_story_bank_lines_of_an_assess_payload_carry_no_contact_value_and_no
     assert "- years:ledger | answer: Six years on the ledger;" in payload and "- years:ledger: Six years on the ledger;" in payload
     assert BODY_MARKER in payload, "and the resume, as before"
     # The assertions themselves.
-    assert leaks(payload) == [], "no name or contact value in the bank lines"
-    assert OTHER_PROFILE_MARKER not in payload and "cloud:gcp:" not in payload and "- cloud:gcp |" not in payload
+    assert STORY_MARKER in payload and "I moved forty Python services to Kubernetes." in payload, "the story that matches the posting"
+    assert leaks(payload) == [], "no name or contact value in the answer and story lines"
 
 
 def test_the_detector_finds_the_bank_values_when_the_bank_redaction_is_disabled(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -533,7 +540,7 @@ def _run_with_the_bank(fixture: Home, capture: Capture) -> list[bytes]:
     return capture.model_payloads("assess_node_bank")
 
 
-def test_the_story_bank_lines_of_a_runs_assess_payload_carry_no_contact_value_and_no_other_profiles_answer(
+def test_the_answer_and_story_lines_of_a_runs_assess_payload_carry_no_contact_value(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     fixture = _home(tmp_path, monkeypatch)
@@ -553,8 +560,8 @@ def test_the_story_bank_lines_of_a_runs_assess_payload_carry_no_contact_value_an
     assert "visa sponsorship required = no; " in payload and "): US; " in payload and "): Denver, CO; " in payload
     assert "target titles the candidate is looking for = staff software engineer." in payload
     # The assertions themselves.
-    assert leaks(payload) == [], "no name or contact value in the bank lines of a run"
-    assert OTHER_PROFILE_MARKER not in payload and "cloud:gcp:" not in payload and "- cloud:gcp |" not in payload
+    assert STORY_MARKER in payload, "the story that matches the run's posting"
+    assert leaks(payload) == [], "no name or contact value in the answer and story lines of a run"
 
 
 def test_the_detector_finds_the_bank_values_in_a_runs_payload_when_the_bank_redaction_is_disabled(

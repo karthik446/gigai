@@ -3,7 +3,7 @@ import RequirementActions from "./RequirementActions.jsx";
 import { useAnswerDrafts } from "../answerDrafts.js";
 import { placeQuestions } from "../answersModel.js";
 import { requirementStatusLabel, sortMatrixRows } from "../jobModel.js";
-import { suggestionNotice } from "../storyBankModel.js";
+import { suggestionNotice } from "../answersStoriesModel.js";
 
 // One open question, inside the requirement row it settles (uat-batch1 N5):
 // the question's own words and an answer box. The id is a normalized token
@@ -103,7 +103,7 @@ export default function AssessmentBody({
   questionsFirst = false,
   profileId,
 }) {
-  const own = useAnswerDrafts({ assessment, jobIdentity, priorAnswers, onAnswered, onReassessUnavailable, profileId });
+  const own = useAnswerDrafts({ assessment, jobIdentity, priorAnswers, onAnswered, onReassessUnavailable });
   const answers = controller || own;
   const { rows: questionsByRow, unplaced } = placeQuestions(assessment.matrix, answers.questions);
   const stateFor = new Map(answers.states.map((state) => [state.question_id, state]));
