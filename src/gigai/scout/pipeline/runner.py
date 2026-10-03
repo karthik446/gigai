@@ -39,6 +39,15 @@ local day with ``daily_cap_reached`` (``PipelineStore.defer``).
 **A dead runner.** ``claim`` gives a step back at once when the process that
 held it is gone; a drain also does it first thing (``reclaim``).
 
+**The rank lane and old runs** (0.1.10.7 M4a). After a drain the server's
+thread also gives the background rank lane a turn (``rank_lane.rank_tick``:
+a few calls, first :data:`RANK_START_DELAY_SECONDS` after the start, then
+every :data:`RANK_POLL_SECONDS`, or at once on :meth:`PipelineRunner.kick_rank`;
+it backs off when no model answers) and, once per start, imports what old
+find-jobs runs assessed into the read model (``run_history.migrate_runs``).
+An "assess these" batch is live work too (the same ``busy.py`` marker as the
+``scout new`` batch): nothing is claimed while it runs.
+
 **Off.** ``pipeline.enabled`` false, :data:`~gigai.scout.pipeline.settings.PIPELINE_ENV`
 off, or a settings file that cannot be read: nothing is claimed
 (``pipeline process`` still runs the one job it was asked for unless the
@@ -80,6 +89,14 @@ DRAIN_SCHEMA = "scout-pipeline-drain:1"
 
 #: How often the server's thread looks for work (and how long a stop can take while it waits).
 POLL_SECONDS = 30.0
+#: How often the server's thread gives the rank lane a turn when nothing kicked it, and how many calls a turn may make.
+RANK_POLL_SECONDS = 600.0
+#: The rank lane's first turn after the server starts: the start itself spends no model call.
+RANK_START_DELAY_SECONDS = 120.0
+RANK_CALLS_PER_TURN = 4
+#: The rank lane's backoff when no model answers or its answer cannot be read: doubling, like a model lane's.
+RANK_BACKOFF_SECONDS = 300.0
+RANK_BACKOFF_MAX_SECONDS = 6 * 3600.0
 #: Claiming threads of one drain: the model total (4) is the store's; the rest run local steps.
 DEFAULT_WORKERS = 6
 #: How long an idle worker waits for a running one to open more steps.
@@ -155,7 +172,7 @@ def live_work(home_root: Path, target: Path) -> str | None:
     if any(record.live_status() == "running" for record in assess_all.list_records(Path(home_root), Path(target))):
         return BUSY_ASSESS_BATCH
     if assess_batch_live(Path(home_root), Path(target)):
-        return BUSY_ASSESS_BATCH  # 0.1.10.7 PL5: the batch `scout new` assesses on a yes (busy.py)
+        return BUSY_ASSESS_BATCH  # 0.1.10.7 PL5: the batch `scout new` assesses on a yes, an "assess these" batch (busy.py)
     if _find_jobs_run_is_live(Path(home_root), Path(target)):
         return BUSY_FIND_JOBS_RUN
     return None
@@ -243,12 +260,18 @@ class PipelineRunner:
         self._last: DrainResult | None = None
         self._last_state: str | None = None
         self._resolved_path: Path | None = None
+        self._rank_next = 0.0  # monotonic: when the rank lane gets its next turn
+        self._rank_kicked = threading.Event()
+        self._rank_backoff = 0.0
+        self._last_rank: dict[str, object] | None = None
+        self._migrated = False
 
     # -- the server's thread ---------------------------------------------------------------
 
     def start(self) -> None:
         if self._thread is not None:
             return
+        self._rank_next = time.monotonic() + RANK_START_DELAY_SECONDS
         self._thread = threading.Thread(target=self._loop, name="scout-pipeline", daemon=True)
         self._thread.start()
 
@@ -268,6 +291,12 @@ class PipelineRunner:
 
         self._wake.set()
 
+    def kick_rank(self) -> None:
+        """Give the rank lane its turn now (the stored postings or a profile changed), not at its next poll."""
+
+        self._rank_kicked.set()
+        self._wake.set()
+
     @property
     def alive(self) -> bool:
         return self._thread is not None and self._thread.is_alive()
@@ -285,8 +314,49 @@ class PipelineRunner:
                 self._logger.warning("pipeline: the runner loop hit %s; it goes on", type(exc).__name__)
             if self._stop.is_set():
                 break
+            self._background()
+            if self._stop.is_set():
+                break
             if self._wake.wait(self._poll_seconds):
                 self._wake.clear()
+
+    def _background(self) -> None:
+        """Once per start: import what old runs assessed. Then the rank lane's turn, when it is due or was kicked."""
+
+        from . import rank_lane
+
+        try:
+            if not self._migrated:
+                self._migrated = True
+                from ..run_history import migrate_runs
+
+                counts = migrate_runs(self.home_root, self.target)
+                if counts["runs_imported"]:
+                    self._logger.info(
+                        "pipeline: imported %d assessment(s) of %d old run(s) into the read model",
+                        counts["assessments_imported"], counts["runs_imported"],
+                    )
+            kicked = self._rank_kicked.is_set()
+            self._rank_kicked.clear()
+            if time.monotonic() < self._rank_next and (self._rank_backoff or not kicked):
+                return  # not due yet; a kick does not cut a backoff short
+            result = rank_lane.rank_tick(
+                self.home_root, self.target, config=self._config, environ=self._environ, busy=self._busy, stop=self._stop,
+                max_calls=RANK_CALLS_PER_TURN,
+            )
+            self._last_rank = result
+            if result["state"] == rank_lane.STATE_UNAVAILABLE:
+                self._rank_backoff = min(RANK_BACKOFF_MAX_SECONDS, self._rank_backoff * 2 or RANK_BACKOFF_SECONDS)
+                self._rank_next = time.monotonic() + self._rank_backoff
+            else:
+                self._rank_backoff = 0.0
+                more = result["state"] == rank_lane.STATE_RAN and int(result["calls"]) >= RANK_CALLS_PER_TURN  # type: ignore[call-overload]
+                self._rank_next = time.monotonic() + (0.0 if more else RANK_POLL_SECONDS)
+            if result["calls"]:
+                self._logger.info("pipeline: ranked %d posting(s) in %d call(s)", result["ranked"], result["calls"])
+        except Exception as exc:  # noqa: BLE001 - nothing else observes this thread: log it and keep the loop
+            self._logger.warning("pipeline: the rank lane hit %s; it goes on", type(exc).__name__)
+            self._rank_next = time.monotonic() + RANK_POLL_SECONDS
 
     def _note(self, result: DrainResult) -> None:
         state = f"{result.state}:{result.reason or ''}"
@@ -533,6 +603,9 @@ class PipelineRunner:
         return {
             "active": self.alive and not self.stopping,
             "last": None if self._last is None else {"state": self._last.state, "reason": self._last.reason, "steps": len(self._last.steps)},
+            "rank": None if self._last_rank is None else {
+                key: self._last_rank[key] for key in ("state", "reason", "calls", "ranked", "warning")
+            },
         }
 
 

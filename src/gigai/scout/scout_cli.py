@@ -2380,6 +2380,146 @@ def new_command(
     _emit(response, as_json, "" if as_json else render(response))
 
 
+# --- 0.1.10.7 M4a: `gigai scout jobs list|assess|import-runs` ----------------
+
+
+@scout_group.group("jobs")
+def jobs_group() -> None:
+    """The stored postings your profiles match: search them, assess the ones you pick. No find-jobs run."""
+
+
+def _jobs_errors() -> tuple[type[BaseException], ...]:
+    from .data_labels import LabelError
+    from .pipeline.store import PipelineStoreError
+    from .posting_search import PostingModelError, PostingSearchError
+
+    return (ScoutTargetError, WorkpadError, PostingSearchError, PostingModelError, PipelineStoreError, LabelError, OSError, ValueError)
+
+
+@jobs_group.command("list")
+@click.option("--profile", "profile_ids", multiple=True, help="Only postings this active profile matches (repeatable). With one profile, its own row is shown.")
+@click.option("--query", "query", help="Words that must all be in the title, company or location.")
+@click.option("--state", "states", multiple=True, help="Keep this state (repeatable): not_assessed, needs_answers, matched, not_a_match, tailored, assessed, recommended.")
+@click.option("--window", "window", type=click.Choice(["new", "7d", "30d"]), help="new: first seen since your last check. 7d / 30d: published in the last 7 or 30 days.")
+@click.option("--removed", "removed", is_flag=True, help="The postings the board no longer lists, instead of the live ones.")
+@click.option("--history", "history", is_flag=True, help="Also what old find-jobs runs assessed, with each run's provenance.")
+@click.option("--include-hidden", "include_hidden", is_flag=True, help="With --history: also the hidden rows (a run with no profile, a profile that is not active).")
+@click.option("--limit", "limit", type=click.IntRange(min=1, max=200), default=50, show_default=True)
+@click.option("--offset", "offset", type=click.IntRange(min=0), default=0)
+@click.option("--home", "home_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--target", "target_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--json", "as_json", is_flag=True)
+def jobs_list_command(
+    profile_ids: tuple[str, ...], query: str | None, states: tuple[str, ...], window: str | None, removed: bool, history: bool,
+    include_hidden: bool, limit: int, offset: int, home_value: Path | None, target_value: Path | None, as_json: bool,
+) -> None:
+    """Search the stored postings across your active profiles. No board is asked, no run is made, no model is called.
+
+    Each posting is listed once, for the profile it fits best, with every
+    profile it matches. The "new since" anchor of `gigai scout new` does not
+    move.
+    """
+
+    from .outbound_check import redact_payload
+    from .posting_search import render, search_postings
+
+    home_root = home_value or default_home_root()
+    try:
+        target = _pipeline_target(target_value, home_root, as_json=as_json)
+        response = search_postings(
+            home_root, target, profile_ids=profile_ids or None, query=query, states=states or None, window=window, removed=removed,
+            history=history, include_hidden=include_hidden, limit=limit, offset=offset,
+        )
+    except _jobs_errors() as exc:
+        _fail(exc, as_json=as_json, fallback="scout_jobs_failed")
+        return
+    response = redact_payload(response)
+    _emit(response, as_json, "" if as_json else render(response))
+
+
+@jobs_group.command("assess")
+@click.argument("jobs", nargs=-1)
+@click.option("--profile", "profile_id", help="Assess for this active profile instead of each posting's best profile.")
+@click.option("--query", "query", help="Without JOBS: words that must all be in the title, company or location.")
+@click.option("--state", "states", multiple=True, help="Without JOBS: keep this state (repeatable), as `gigai scout jobs list`.")
+@click.option("--window", "window", type=click.Choice(["new", "7d", "30d"]), help="Without JOBS: new, 7d or 30d, as `gigai scout jobs list`.")
+@click.option("--yes", "yes", is_flag=True, help="Approve: assess without asking (one model call per posting).")
+@click.option("--again", "again", is_flag=True, help="Also the postings whose assessment is current.")
+@click.option("--actor", "actor", type=click.Choice(["operator", "agent"]), default="operator", show_default=True, help="Who approves the batch.")
+@click.option("--home", "home_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--target", "target_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--json", "as_json", is_flag=True)
+def jobs_assess_command(
+    jobs: tuple[str, ...], profile_id: str | None, query: str | None, states: tuple[str, ...], window: str | None, yes: bool,
+    again: bool, actor: str, home_value: Path | None, target_value: Path | None, as_json: bool,
+) -> None:
+    """Assess these postings: the ones named (posting URLs), or the ones the filter selects.
+
+    Nothing is assessed without approval: without --yes the command says how
+    many would be assessed and what it will cost, and asks (in a terminal) or
+    stops there (--json, or no terminal). Each posting is assessed for the
+    profile it fits best, from the posting text already stored.
+    """
+
+    import sys
+
+    from .outbound_check import redact_payload
+    from .posting_search import STATUS_ASK, assess_these, render
+
+    home_root = home_value or default_home_root()
+
+    def call(approve: bool) -> dict[str, object]:
+        return assess_these(
+            home_root, target, jobs=list(jobs) or None, profile_id=profile_id, query=query, states=states or None, window=window,
+            approve=approve, again=again, decided_by=actor,
+        )
+
+    try:
+        target = _pipeline_target(target_value, home_root, as_json=as_json)
+        response = call(yes)
+        if response["status"] == STATUS_ASK and not as_json and sys.stdin.isatty():
+            if click.confirm(str(response["question"]["text"]).rstrip("?"), default=False):  # type: ignore[index]
+                click.echo("Assessing (one model call per posting; this can take a few minutes)...")
+                response = call(True)
+    except _jobs_errors() as exc:
+        _fail(exc, as_json=as_json, fallback="scout_jobs_failed")
+        return
+    response = redact_payload(response)
+    _emit(response, as_json, "" if as_json else render(response))
+
+
+@jobs_group.command("import-runs")
+@click.option("--home", "home_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--target", "target_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--json", "as_json", is_flag=True)
+def jobs_import_runs_command(home_value: Path | None, target_value: Path | None, as_json: bool) -> None:
+    """Import what old find-jobs runs assessed, so `gigai scout jobs list` and `gigai scout new` show it.
+
+    Runs are read-only history: nothing of a run is changed or copied. Each
+    run is imported once; running this again imports nothing. A run made with
+    no profile is kept apart ("ephemeral") and hidden by default.
+    """
+
+    from .run_history import migrate_runs
+
+    home_root = home_value or default_home_root()
+    try:
+        target = _pipeline_target(target_value, home_root, as_json=as_json)
+        counts = migrate_runs(home_root, target)
+    except _jobs_errors() as exc:
+        _fail(exc, as_json=as_json, fallback="scout_jobs_failed")
+        return
+    line = (
+        f"Imported {counts['assessments_imported']} assessment(s) of {counts['runs_imported']} run(s); "
+        f"{counts['runs_already_imported']} run(s) were already imported."
+    )
+    if counts["ephemeral_assessments"]:
+        line += f" {counts['ephemeral_assessments']} came from runs with no profile: hidden by default (`gigai scout jobs list --history --include-hidden`)."
+    if counts["runs_not_finished"] or counts["runs_unreadable"]:
+        line += f" {int(counts['runs_not_finished']) + int(counts['runs_unreadable'])} run(s) were left for later (not finished, or not readable now)."  # type: ignore[call-overload]
+    _emit(counts, as_json, line)
+
+
 # --- 0110-026b/e: `gigai scout snapshot export|import|status` ------------
 
 
@@ -2619,6 +2759,46 @@ def pipeline_run_command(once: bool, max_steps: int | None, home_value: Path | N
         _fail(exc, as_json=as_json, fallback="scout_pipeline_failed")
         return
     _emit(drain, as_json, _pipeline_drain_line(drain))
+
+
+@pipeline_group.command("rank")
+@click.option("--max-calls", "max_calls", type=click.IntRange(min=1), help="Make at most this many rank calls now.")
+@click.option("--home", "home_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--target", "target_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--json", "as_json", is_flag=True)
+def pipeline_rank_command(max_calls: int | None, home_value: Path | None, target_value: Path | None, as_json: bool) -> None:
+    """Rank the stored postings your active profiles match that have no rank score yet, without the Scout server.
+
+    The Scout server does this in the background. One model call ranks up to
+    50 postings; a posting ranked once is not ranked again. All profiles share
+    one daily allowance (100 calls, with a warning past 60).
+    """
+
+    from .pipeline.rank_lane import rank_tick
+
+    home_root = home_value or default_home_root()
+    try:
+        target = _pipeline_target(target_value, home_root, as_json=as_json)
+        result = rank_tick(home_root, target, max_calls=max_calls, force_enabled=True)
+    except _pipeline_errors() as exc:
+        _fail(exc, as_json=as_json, fallback="scout_pipeline_failed")
+        return
+    today = result["calls_today"]
+    assert isinstance(today, dict)
+    if result["state"] == "ran":
+        line = f"Ranked {result['ranked']} posting(s) in {result['calls']} call(s)."
+    elif result["state"] == "idle":
+        line = "Nothing to rank."
+    elif result["state"] == "waiting":
+        line = f"Today's rank calls are used up ({today['used']}/{today['limit']}); ranking goes on tomorrow."
+    elif result["state"] == "yielded":
+        line = f"Ranking is waiting: {str(result['reason']).replace('_', ' ')} is running. Run it again when that is done."
+    else:
+        line = f"Nothing was ranked ({result['state']}: {result['reason']})."
+    line += f" Rank calls today: {today['used']}/{today['limit']}."
+    if today["warning"]:
+        line += f" That is past the warning level of {today['warn_at']}."
+    _emit(result, as_json, line)
 
 
 @pipeline_group.command("status")
