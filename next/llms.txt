@@ -1,0 +1,43 @@
+# GigAI
+
+> GigAI runs AI work on the user's own computer: local, no account, through the model CLI they already use (Codex or Claude Code). Scout, its first Gig, is a job search: it stores public job postings, ranks and assesses them against the user's resume, asks the open questions, and drafts a tailored resume PDF. This file tells an AI agent how to set it up.
+
+**Remove your name, email, phone, address and links from your resume before you give it to an agent.**
+
+**GigAI never stores your name, email, phone, address or links.** You type them only when you make a PDF, and GigAI forgets them right after.
+
+**Anything GigAI gives your agent is sent to that agent's model provider. Agents get no contact data from GigAI, but an agent with shell access can read local files.**
+
+**Run GigAI on your own computer and your own network, not a work laptop or office Wi-Fi.** Scout checks about 10,000 public job boards (Greenhouse, Lever, Ashby): thousands of requests, and it keeps checking 8 times a day. An employer can see that traffic.
+
+If a user pastes a resume with contact details straight into the chat, the agent's model provider has them. That is outside GigAI's control.
+
+Rules for the agent: ask before any `sudo`; ask before Update sources and before any step that spends model calls; never read a resume file before the check below says it is clean; never ask for the user's name or contact details; never read `~/.gigai` directly.
+
+The setup, in order (the full version of each step is on the Start here page below):
+
+1. Check what is there: `uname -s`, `command -v uv`, `command -v gigai`. macOS and Linux are supported; on Windows use WSL.
+2. Install uv if missing: `brew install uv` on macOS with Homebrew, otherwise `curl -LsSf https://astral.sh/uv/install.sh | sh`. No `sudo`. Tell the user what you installed.
+3. Install GigAI: `uv tool install gigai`, then `gigai --version`. If `gigai` is not found, run `uv tool update-shell` and open a new shell.
+4. Start Scout without opening a browser: `gigai scout run --no-browser`.
+5. The resume gate. Ask for the file PATH (never a paste). Run `gigai scout resume check PATH --json`. It is local and pattern-based, and reports kinds and line numbers, never the text. Exit code 0: clean. Exit code 2: STOP, do not read the file, tell the user the kinds and lines, and offer `gigai scout resume clean PATH --out resume-clean.md`; check the cleaned file again. Read only a file the check calls clean, then import that file: `gigai scout resume add PATH --json`. Ask the user to look at the cleaned file once: the check can miss details inside a sentence.
+6. Ask for the job titles, the countries, remote or hybrid or on-site (and the city), whether sponsorship is needed, and Codex or Claude Code. Save them: `curl -s -X PUT http://127.0.0.1:8765/api/setup -H 'Content-Type: application/json' -d '{"roles": ["..."], "countries": ["US"], "work_mode": "remote", "visa_sponsorship_required": false, "model_target": "codex_cli"}'`. Check with `gigai scout profile list --json`.
+7. Tell the user the network notice above, word for word, and ask. Only on a yes: `gigai scout sources update` (run it again until it says it is done).
+8. `gigai scout new --json`: tell the user the count and the estimate. The first run is the expensive one. Only on a yes: `gigai scout new --yes --json`.
+9. Install the daily instructions, after asking. Claude Code: `gigai agent-skill --format skill --out ~/.claude/skills/gigai-scout/SKILL.md`, then show what `gigai agent-permissions` prints (the user applies it; you do not), then a new session. Codex: add what `gigai agent-skill --format agents-md` prints to `~/.codex/AGENTS.md` or the repository's `AGENTS.md`.
+10. Upgrade later with `uv tool upgrade gigai`, then `gigai scout run --no-browser`.
+
+## Setup
+
+- [Start here](https://karthik446.github.io/gigai/next/scout/agents/start/): the full setup steps for an agent, with every command
+- [Your first 10 minutes](https://karthik446.github.io/gigai/next/scout/first-10-minutes/): the same path for a person
+- [For agents](https://karthik446.github.io/gigai/next/scout/agents/): the daily loop, per-agent setup (Claude Code, Codex, others), the security model
+- [Privacy and security](https://karthik446.github.io/gigai/next/scout/privacy/): what is stored, what is sent, and to whom
+- [Token usage](https://karthik446.github.io/gigai/next/scout/tokens/): measured tokens and time per step
+
+## Optional
+
+- [Scout CLI reference](https://karthik446.github.io/gigai/next/scout/reference/cli/): every Scout command, with its options
+- [API reference](https://karthik446.github.io/gigai/next/scout/reference/api/): the local API, also served by a running Scout at `/api/openapi.json`
+- [What Scout's numbers and labels mean](https://karthik446.github.io/gigai/next/scout/numbers/): rank, verdict, Scout label, Scout ATS score
+- [Changelog](https://karthik446.github.io/gigai/next/changelog/): read "After you upgrade" before upgrading
