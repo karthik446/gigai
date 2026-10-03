@@ -45,6 +45,7 @@ from gigai.scout.find_jobs.model_tag import (
 from gigai.scout.find_jobs.refresh_tick import STATE_NEEDS_FIRST_UPDATE, STATE_RUNNING, RefreshTicker, settings_path
 from gigai.scout.find_jobs.tag_store import SOURCE_MODEL
 from gigai.scout.find_jobs.title_query import TitleMatcher, open_tag_store
+from gigai.scout.untrusted_text import UNTRUSTED_POSTING_RULE, fence_untrusted_posting, unfence_untrusted_posting
 from gigai.setup import build_config
 
 from .test_sources_update import _installed, _write_running
@@ -196,15 +197,20 @@ def _queue(home: Path, *, backfill: bool = False, backfill_model: str = "configu
 
 
 def test_the_prompt_is_the_spikes_tag_v1_and_carries_only_the_lines() -> None:
-    # The digest of research/posting-index-spike/scripts/models.py PROMPT: an edit here needs a new version.
-    assert PROMPT_VERSION == "tag-v1"
-    assert hashlib.sha256(PROMPT.encode("utf-8")).hexdigest() == "a3dc7ff83bc1a373ef720d9561e1f562abdcdf571d065fa0d0aa3a2d0cf9867c"
+    # tag-v2 (0.1.10.7 P5) is the spike's tag-v1 text (research/posting-index-spike/scripts/models.py PROMPT) plus the
+    # untrusted-text rule's slot: taking that slot out gives tag-v1's digest. An edit here needs a new version.
+    assert PROMPT_VERSION == "tag-v2"
+    assert hashlib.sha256(PROMPT.encode("utf-8")).hexdigest() == "008aca2a3d3c7eb7f7d4034ba1d09ed2679cefa540d9100197d4fcd58060ef48"
+    assert hashlib.sha256(PROMPT.replace("{untrusted_rule}\n\n", "").encode("utf-8")).hexdigest() == "a3dc7ff83bc1a373ef720d9561e1f562abdcdf571d065fa0d0aa3a2d0cf9867c"
 
     line = model_tag.tag_line("s000", "Director | of\nWizardry", "Denver,  CO")
     assert line == "s000 | Director / of Wizardry | Denver, CO"  # one line, no stray column
     prompt = model_tag.render_tag_prompt([line, model_tag.tag_line("s001", "Barista", None)])
     assert _lines(prompt) == [("s000", "Director / of Wizardry", "Denver, CO"), ("s001", "Barista", "")]
     assert "POSTINGS (2):" in prompt and "{" not in prompt.split("Answer with ONLY", 1)[0]
+    # P5: the rule, then the lines inside the fence and nothing else in it.
+    assert UNTRUSTED_POSTING_RULE in prompt.split("POSTINGS (2):", 1)[0]
+    assert unfence_untrusted_posting(prompt) == f"{line}\ns001 | Barista | "
 
 
 def test_an_answer_is_validated_against_the_seventeen_families_and_other() -> None:
@@ -257,8 +263,8 @@ def test_demand_set_titles_drain_before_the_backfill_each_with_its_own_model(tmp
     assert {request.reasoning_effort for request in port.requests} == {"low"}
 
     rows = _rows(home)
-    assert rows["director of wizardry 000"] == ("operations", "model", "codex_cli:default", "tag-v1")
-    assert rows["senior alchemist 000"] == ("operations", "model", "claude_cli:haiku", "tag-v1")
+    assert rows["director of wizardry 000"] == ("operations", "model", "codex_cli:default", "tag-v2")
+    assert rows["senior alchemist 000"] == ("operations", "model", "claude_cli:haiku", "tag-v2")
     assert rows["director of engineering"][:2] == ("software", "rules")
     assert rows["senior alchemist 100"] == (None, None, None, None)
     status = queue.status()
@@ -299,7 +305,7 @@ def test_other_is_stored_as_asked_with_no_family_and_is_not_asked_again(tmp_path
     assert queue.drain().tagged == 2 and queue.drain().state == "idle"
 
     assert len(port.requests) == 1
-    assert _rows(home)["director of wizardry 000"] == (None, "model", "codex_cli:default", "tag-v1")
+    assert _rows(home)["director of wizardry 000"] == (None, "model", "codex_cli:default", "tag-v2")
     # Search still treats such a title as untagged: the plain rule judges it.
     matcher = TitleMatcher(ROLES, open_tag_store(home))
     assert matcher.matches("Director of Wizardry 000") is False and matcher.counts.untagged_fallback == 1
@@ -652,7 +658,7 @@ def test_a_payload_is_the_prompt_and_only_titles_and_locations(tmp_path: Path, m
     assert _lines(backfill) == [("s000", "Senior Alchemist", "Austin, TX")]
     for request, lines in zip(port.requests, ([model_tag.tag_line(*line) for line in _lines(demand)], [model_tag.tag_line(*line) for line in _lines(backfill)])):
         # The whole payload is the fixed prompt around exactly those lines.
-        assert request.prompt == f"{_HEAD.format(extra='')}{len(lines)}):\n" + "\n".join(lines) + _TAIL.replace("{{", "{").replace("}}", "}")
+        assert request.prompt == f"{_HEAD.format(extra='', untrusted_rule=UNTRUSTED_POSTING_RULE)}{len(lines)}):\n" + fence_untrusted_posting("\n".join(lines)) + _TAIL.replace("{{", "{").replace("}}", "}")
         assert request.role == "reviewer"
         for forbidden in ("Quillfeather", "Zephyrine", "zq7731", "Glimmerfall", "Acme", "acme", "Globex", "globex", "greenhouse", "Engineering", str(home), str(target)):
             assert forbidden not in request.prompt, forbidden

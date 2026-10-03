@@ -35,6 +35,7 @@ from .. import proposal_execution
 from ..call_metrics import KIND_INTERVIEW, CallMeter
 from ..proposal_execution import _resolve_configured_target_name_for_adapter, ScoutProposalExecutionError
 from ..resume_privacy import model_resume
+from ..untrusted_text import UNTRUSTED_POSTING_RULE, fence_untrusted_posting
 from .types import QUESTION_CATEGORIES, QuestionCategoryPrediction
 
 _MAX_PROMPT_TEXT = 12_000
@@ -61,8 +62,9 @@ def _prompt(*, title: str, company: str, posting_text: str, resume_text: str, co
     parts = [
         "You are predicting likely interview question CATEGORIES (not specific questions) for GigAI Scout.",
         schema,
-        f"ROLE: {title}\nCOMPANY: {company}",
-        "POSTING TEXT (may be truncated):\n" + posting_text[:_MAX_PROMPT_TEXT],
+        UNTRUSTED_POSTING_RULE,
+        # 0.1.10.7 P5: the title, the company and the posting text are a stranger's words.
+        fence_untrusted_posting(f"ROLE: {title}\nCOMPANY: {company}\nPOSTING TEXT (may be truncated):\n" + posting_text[:_MAX_PROMPT_TEXT]),
         "CANDIDATE RESUME (may be truncated):\n" + model_resume(resume_text).text[:_MAX_PROMPT_TEXT],
         company_block,
         "Ground every category's \"why\" and \"grounded_in\" in the posting, resume, or company research above -- "

@@ -180,7 +180,7 @@ def test_a_start_makes_a_committed_rank_record_and_the_reads_use_it(fx, monkeypa
     details = _committed(fx, f"runs/{record.record_id}/run-details.json")
     assert details["kind"] == "rank" and details["parent_run_id"] == RUN_ID and details["status"] == "complete"
     assert details["key"]["profile_id"] and details["key"]["resume_revision_id"] == fx.resume_revision_id
-    assert details["key"]["prompt_version"] == "rank-v1" and details["key_digest"].startswith("sha256:")
+    assert details["key"]["prompt_version"] == "rank-v2" and details["key_digest"].startswith("sha256:")
     assert details["input"]["postings"] == 3 and details["input"]["acquire_output_digest"].startswith("sha256:")
     assert details["input"]["model_target"] == "codex_cli"
     sealed = _committed(fx, f"runs/{record.record_id}/outputs/rank.json")

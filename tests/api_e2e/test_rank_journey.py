@@ -2,7 +2,7 @@
 
 Through the real supervisor, a real find-jobs run in its child process and
 the real server; the model is the suite's fake Ollama
-(``GIGAI_SCOUT_FIND_JOBS_TEST_MODEL=1``). Its rank branch answers a rank-v1
+(``GIGAI_SCOUT_FIND_JOBS_TEST_MODEL=1``). Its rank branch answers a rank-v2
 prompt with VALID strict id-keyed JSON and a deterministic score read from
 the posting's own digest (``fit <n>`` in the title; 60 when there is none;
 ``flags=`` become blockers), so every ranking pass here produces REAL scores.
@@ -83,7 +83,7 @@ def test_the_fixture_answers_the_real_rank_prompt() -> None:
     """The fake's rank marker is the first line of ``model_rank.PROMPT`` (the two must not drift)."""
 
     assert model_rank.PROMPT.splitlines()[0].startswith(bindings.TEST_MODEL_RANK_MARKER)
-    assert model_rank.PROMPT_VERSION == "rank-v1"
+    assert model_rank.PROMPT_VERSION == "rank-v2"
 
 
 def test_the_run_ranks_as_a_step_and_a_rank_click_makes_a_committed_record(
@@ -102,7 +102,7 @@ def test_the_run_ranks_as_a_step_and_a_rank_click_makes_a_committed_record(
         # -- the run's own ranking step: sealed, streamed, and REAL ------
         sealed = _sealed_rank(workpad, run_id)
         assert sealed["schema_version"] == "scout-rank:1" and sealed["kind"] == "run" and sealed["run_id"] == run_id
-        assert sealed["model_target"] == "ollama_local" and sealed["prompt_version"] == "rank-v1"
+        assert sealed["model_target"] == "ollama_local" and sealed["prompt_version"] == "rank-v2"
         _assert_the_fake_model_ranked(sealed, postings=1)
         assert [item["score"] for item in sealed["postings"]] == [bindings.TEST_MODEL_RANK_DEFAULT_SCORE]
         lines = (workpad / "runs" / run_id / "progress" / "rank.jsonl").read_text(encoding="utf-8").splitlines()

@@ -9,12 +9,13 @@ The journey:
 
 1. a run with a cap of 1, then "Assess all new": every other new posting gets
    a stored assessment, each with its basis;
-2. the stored files are rewritten as v4-era ones (no recorded basis). For the
-   plain profile (no work mode) nothing is stale and nothing is queued;
+2. the stored files are rewritten as v4-era ones (no recorded basis). Since
+   0.1.10.7 P5 (the posting fenced as untrusted in every assess prompt) such
+   a record is older wording whatever the profile: even for the plain
+   profile (no work mode) every one of them is planned "with older settings";
 3. the profile becomes remote only and needs sponsorship. "Assess all new"
-   now plans every one of them as "with older settings" (on HEAD it planned
-   none: they were skipped as already assessed), and the list, the run rows,
-   the run posting and ``GET /api/jobs`` all say so, with the reason;
+   still plans every one of them as "with older settings", and the list, the
+   run rows, the run posting and ``GET /api/jobs`` all say so, with the reason;
 4. one job is re-assessed with one call (the job page's Re-assess): it is
    current, the rest still stale. No read above called a model or wrote a
    file;
@@ -114,12 +115,14 @@ def test_a_stored_assessment_made_under_older_settings_is_stale_and_assess_all_a
             path.write_text(json.dumps(stored, indent=2, sort_keys=True), encoding="utf-8")
         plain = BasisCheck(home_root=home, target=target).current(profile_id)
         assert plain is not None and plain.work_mode == "", "this fixture's profile starts with no work mode"
-        assert _plan(client, run_id)["count"] == 0, "a plain profile's old assessments stay current: nothing to assess again"
+        plan = _plan(client, run_id)
+        assert (plan["count"], plan["new_count"], plan["stale_count"]) == (len(expected), 0, len(expected)), (
+            "P5: an assessment with no recorded basis was made before the posting was fenced: older wording, even for a plain profile"
+        )
 
         # 3. The profile is now remote only and needs sponsorship.
         _edit_config(target, work_mode="remote", remote=True, visa_sponsorship_required=True)
         plan = _plan(client, run_id)
-        # Fail-before: HEAD answered 0 here (every stored assessment was skipped as already assessed).
         assert plan["count"] == len(expected), "the stored assessments made under the old settings are queued again"
         assert (plan["new_count"], plan["stale_count"]) == (0, len(expected))
 
@@ -149,7 +152,7 @@ def test_a_stored_assessment_made_under_older_settings_is_stale_and_assess_all_a
         clicked = client.post("/api/assess", json={"job": {"job_url": url}, "origin": "job_page"})
         assert clicked.status_code == 200, clicked.text
         fresh = clicked.json()
-        assert fresh["basis_stale"] is False and fresh["prompt_version"] == "assess-prompt-v5"
+        assert fresh["basis_stale"] is False and fresh["prompt_version"] == "assess-prompt-v7"
         assert set(BASIS_KEYS) <= set(fresh)
         after_click = _store_bytes(home)
         changed = [path for path in after_click if after_click[path] != before_click[path]]
@@ -178,7 +181,7 @@ def test_a_stored_assessment_made_under_older_settings_is_stale_and_assess_all_a
         assert after_job[changed[0]] == after_click[changed[0]], "the current one was not assessed again"
         for path, raw in after_job.items():
             stored = json.loads(raw)
-            assert stored["prompt_version"] == "assess-prompt-v5" and "constraints_digest" in stored
+            assert stored["prompt_version"] == "assess-prompt-v7" and "constraints_digest" in stored
             assert [entry["trigger"] for entry in stored["history"]] == ["assess", "reassess"], "the earlier verdict stays in the history"
         items = _items(client)
         assert all(item["basis_stale"] is False and "assessment_stale" not in item["job_state"] for item in items.values())

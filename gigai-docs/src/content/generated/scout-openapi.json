@@ -5706,7 +5706,7 @@
                       },
                       "last_drain_at": "2026-10-01T12:01:00Z",
                       "parked": 0,
-                      "prompt_version": "tag-v1",
+                      "prompt_version": "tag-v2",
                       "setting": {
                         "backfill_enabled": false,
                         "model_enabled": true,

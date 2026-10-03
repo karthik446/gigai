@@ -104,7 +104,7 @@ def test_a_stored_assessment_records_the_basis_a_run_seals(fx: ProfileFixtureGig
 
     item = _assess(fx)
 
-    assert item.prompt_version == "assess-prompt-v5"
+    assert item.prompt_version == "assess-prompt-v7"
     assert item.constraints_digest == constraints_digest(
         visa_sponsorship_required=True, countries=("US",), location="Austin, TX", work_mode="remote"
     )
@@ -122,7 +122,7 @@ def test_a_profile_with_no_work_mode_records_the_v4_name(fx: ProfileFixtureGig, 
 
     item = _assess(fx)
 
-    assert item.prompt_version == "assess-prompt-v4"
+    assert item.prompt_version == "assess-prompt-v7"
     assert item.constraints_digest == constraints_digest(visa_sponsorship_required=False, countries=("US",), location="Austin, TX")
 
 
@@ -158,32 +158,38 @@ def test_an_old_assessment_of_a_remote_only_visa_profile_is_stale_and_says_why(f
     assert quick_assess._read_stored(Path(old.stored_path)).to_json() == old.to_json(), "and writes nothing"
 
 
-def test_a_plain_profiles_old_assessment_is_not_stale(fx: ProfileFixtureGig, model: _Binding) -> None:
-    """No work mode, and the sponsorship need and countries the record says: nothing the old prompt missed."""
+def test_a_plain_profiles_old_assessment_is_older_wording_too(fx: ProfileFixtureGig, model: _Binding) -> None:
+    """0.1.10.7 P5: no work mode, the same sponsorship need and countries, and still made before the posting was fenced.
+
+    Until P5 such a record stood ("nothing the old prompt missed"). Every assess prompt now fences the
+    posting as untrusted, so a record with no basis was made with wording no profile is assessed with now.
+    """
 
     _write_find_jobs(fx, _with_mode(None))
     old = _as_stored_before_039(_assess(fx))
+    made = _calls(model)
 
-    assert _reason(fx, old) is None
-    assert "assessment_stale" not in _state(fx, old)
-    assert BasisCheck(home_root=fx.home_root, target=fx.target, resolved=fx.resolved).served(old) == {"basis_stale": False}
+    assert _reason(fx, old) == "older_prompt"
+    assert _state(fx, old)["assessment_stale"] == {"reason": "older_prompt"}
+    assert BasisCheck(home_root=fx.home_root, target=fx.target, resolved=fx.resolved).served(old) == {"basis_stale": True, "basis_stale_reason": "older_prompt"}
     # "any" is no work mode either.
     _write_find_jobs(fx, _with_mode(WorkModePreference.ANY))
-    assert _reason(fx, old) is None
+    assert _reason(fx, old) == "older_prompt"
+    assert _calls(model) == made, "a read never calls a model"
 
 
 @pytest.mark.parametrize(
     ("change", "expected"),
     [
-        (lambda config: replace(config, visa_sponsorship_required=True), "settings_changed"),
-        (lambda config: replace(config, countries=("US", "CA")), "settings_changed"),
+        # 0.1.10.7 P5: the older wording is the first thing true of a record with no basis, whatever else changed.
+        (lambda config: replace(config, visa_sponsorship_required=True), "older_prompt"),
+        (lambda config: replace(config, countries=("US", "CA")), "older_prompt"),
         (lambda config: replace(config, work_mode=WorkModePreference.HYBRID), "older_prompt"),
-        # The location an old record used was not stored, so it is taken as unchanged.
-        (lambda config: replace(config, location="Denver, CO"), None),
-        (lambda config: replace(config, roles=("staff engineer",), merged_queries=("staff engineer",)), None),
+        (lambda config: replace(config, location="Denver, CO"), "older_prompt"),
+        (lambda config: replace(config, roles=("staff engineer",), merged_queries=("staff engineer",)), "older_prompt"),
     ],
 )
-def test_an_old_assessment_is_stale_only_for_what_its_prompt_missed_or_its_record_contradicts(
+def test_an_old_assessment_is_older_wording_whatever_else_changed(
     fx: ProfileFixtureGig, model: _Binding, change, expected: str | None
 ) -> None:
     plain = _with_mode(None)
@@ -294,8 +300,8 @@ def test_the_story_bank_rule_is_the_runs_own(fx: ProfileFixtureGig, model: _Bind
         run_says = proposal_execution._basis_stale(prior, bank=bank, constraints=current.constraints_digest)
         assert run_says == (_reason(fx, stored) is not None)
 
-    # An old record has no bank stamp: the bank rule is not applied to it.
-    assert _reason(fx, _as_stored_before_039(item)) is None
+    # An old record has no bank stamp: the bank rule is not applied to it. It is older wording (P5), not a bank change.
+    assert _reason(fx, _as_stored_before_039(item)) == "older_prompt"
 
 
 def test_a_request_that_overrides_the_settings_is_recorded_as_made(fx: ProfileFixtureGig, model: _Binding) -> None:
@@ -460,7 +466,7 @@ def test_the_job_skips_a_current_stored_assessment_and_not_a_stale_one(fx: Profi
     """What the job checks just before each call (a card may have been assessed meanwhile)."""
 
     _write_find_jobs(fx, _with_mode(None))
-    old = _as_stored_before_039(_assess(fx))
+    old = _assess(fx)
     profile_id = old.resume.profile_id
     assert profile_id is not None
     item = assess_all.QueueItem(normalized_url=old.job.job_identity, url="https://example.test/job")
@@ -468,7 +474,7 @@ def test_the_job_skips_a_current_stored_assessment_and_not_a_stale_one(fx: Profi
     current = assess_all.current_for_profile(fx.home_root, fx.target, profile_id)
     never = assess_all.QueueItem(normalized_url="text:sha256:" + "0" * 64, url="https://example.test/never")
 
-    assert stored(item) and current(item), "a plain profile's old assessment is current: skipped"
+    assert stored(item) and current(item), "an assessment made with the shipped prompt and these settings is current: skipped"
     assert not current(never)
 
     _write_find_jobs(fx, _remote_and_visa())
@@ -479,7 +485,7 @@ def test_the_job_skips_a_current_stored_assessment_and_not_a_stale_one(fx: Profi
     assert _calls(model) == made
 
     again = _assess(fx)  # the job's own single-posting call
-    assert again.prompt_version == "assess-prompt-v5" and again.result.verdict.value == "not_a_match"
+    assert again.prompt_version == "assess-prompt-v7" and again.result.verdict.value == "not_a_match"
     assert current(item) and _reason(fx, again) is None
     assert [entry.trigger for entry in again.history] == ["assess", "reassess"], "the earlier verdict stays in the history"
 

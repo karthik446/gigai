@@ -491,11 +491,13 @@ _TEST_MODEL_RESUME_LINE = re.compile(r"^R(\d+): (.*)$", re.MULTILINE)
 
 
 def _test_model_posting(prompt: str) -> str:
-    """The posting text a tailor prompt carries (between ``POSTING TEXT:`` and ``RESUME LINES:``)."""
+    """The posting text a tailor prompt carries (after ``POSTING TEXT:`` inside the untrusted fence, P5)."""
 
-    start = prompt.find("POSTING TEXT:\n")
-    end = prompt.find("\n\nRESUME LINES:", start)
-    return prompt[start + len("POSTING TEXT:\n") : end] if start != -1 and end != -1 else ""
+    from ..untrusted_text import unfence_untrusted_posting
+
+    fenced = unfence_untrusted_posting(prompt)
+    start = fenced.find("POSTING TEXT:\n")
+    return fenced[start + len("POSTING TEXT:\n") :] if start != -1 else ""
 
 
 def _test_model_reason(kind: str, posting: str, words: str = "") -> dict[str, object]:
@@ -584,7 +586,7 @@ def _test_model_tailor_reply(prompt: str) -> dict[str, object]:
     return {"sections": sections}
 
 
-#: SCOPE-ADD-3 C1 follow-up: the first line of every rank-v1 prompt
+#: SCOPE-ADD-3 C1 follow-up: the first line of every rank prompt
 #: (``model_rank.PROMPT`` -- the literal is repeated here so the fixture never
 #: imports the ranker; ``test_rank_journey.py`` asserts the two stay
 #: identical). Its presence means "this is a ranking batch, not an
@@ -611,6 +613,8 @@ def _test_model_rank_reply(prompt: str) -> list[dict[str, object]]:
             continue
         if not line.strip():
             break
+        if " | " not in line:
+            continue  # the untrusted fence's marker lines (P5)
         posting_id = line.split(" | ", 1)[0].strip()
         fit = _TEST_MODEL_RANK_FIT.search(line)
         score = min(int(fit.group(1)), 100) if fit else TEST_MODEL_RANK_DEFAULT_SCORE

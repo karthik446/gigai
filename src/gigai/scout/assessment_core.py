@@ -45,6 +45,7 @@ from .find_jobs.contracts import FindJobsContractError, NotAssessedReason
 from .find_jobs.work_mode import in_person_modes
 from .question_ids import normalize_question_id
 from .resume_privacy import model_resume
+from .untrusted_text import fence_untrusted_posting
 
 _INSTRUCTIONS_RESOURCE = "scout/data/instructions/assess.md"
 _ROLE = "reviewer"
@@ -71,19 +72,23 @@ _IN_PERSON_PLACEHOLDER = "{{in_person_mode}}"
 #: candidate with no work mode (or "any") gets no such paragraph, and that
 #: prompt renders byte for byte as v4 did, so it keeps the v4 name
 #: (``assess_prompt_version``).
+#: v6 (0110-048) changed the hybrid paragraph's words ("remote roles, and
+#: hybrid or on-site roles in their own area"; decision #207), so a hybrid
+#: prompt got a name of its own while the others kept theirs.
+#: v7 (0.1.10.7 P5) fences the posting (ROLE, COMPANY, LOCATION and POSTING
+#: TEXT) as untrusted and adds the UNTRUSTED TEXT rule (``untrusted_text``).
+#: That changes the bytes of EVERY prompt, whatever the work mode, so all
+#: three names below moved to v7 together: an assessment sealed as v4, v5 or
+#: v6 is older wording now (``assessment_basis``: ``older_prompt``). The three
+#: constants stay, one per paragraph a prompt can carry, so a later change to
+#: one work mode's words can rename that one alone, as v6 did.
 #: ``tests/behaviors/scout_find_jobs/test_assessment_core.py`` pins it with
 #: the file's digest.
-ASSESS_PROMPT_VERSION = "assess-prompt-v5"
-#: The name of a prompt rendered with no CANDIDATE WORK MODE paragraph: the
-#: same bytes v4 rendered, so an assessment sealed under it still stands.
-ASSESS_PROMPT_VERSION_NO_WORK_MODE = "assess-prompt-v4"
+ASSESS_PROMPT_VERSION = "assess-prompt-v7"
+#: The name of a prompt rendered with no CANDIDATE WORK MODE paragraph.
+ASSESS_PROMPT_VERSION_NO_WORK_MODE = "assess-prompt-v7"
 #: The name of a prompt rendered for a HYBRID candidate (decision #207).
-#: 0110-048 changed that paragraph's words ("remote roles, and hybrid or
-#: on-site roles in their own area"; before: "hybrid roles in their own
-#: area"), so a hybrid prompt is no longer the bytes v5 rendered. The remote
-#: only and on-site paragraphs, and a prompt with no work mode, render byte
-#: for byte as before and keep their names (v5, v4): their assessments stand.
-ASSESS_PROMPT_VERSION_HYBRID = "assess-prompt-v6"
+ASSESS_PROMPT_VERSION_HYBRID = "assess-prompt-v7"
 #: The versions the shipped ``assess.md`` renders today. An assessment sealed
 #: with none of them is older wording. One sealed with one of them is current
 #: when the constraints digest (which includes the work mode) is the same and
@@ -324,9 +329,10 @@ class AssessAttempt:
 def render_assess_prompt(job: AssessJob, ctx: AssessContext, validation_error: str | None = None) -> str:
     """Render the real find-jobs assessment prompt (U25) from the packaged template.
 
-    Includes the role/title/company/location, the bounded posting text, the
-    resume text, the candidate's constraints (sponsorship, eligible
-    countries, own location, target titles), and a precise JSON schema so the
+    Includes the role/title/company/location and the bounded posting text
+    (inside the untrusted fence, ``untrusted_text``), the resume text, the
+    candidate's constraints (sponsorship, eligible countries, own location,
+    target titles), and a precise JSON schema so the
     model returns a shape that parses on the first try.  On a retry (U22),
     the prior validation error is fed back: the template's last paragraph
     (the one carrying ``{{validation_error}}``) names the violated bound or
@@ -338,12 +344,14 @@ def render_assess_prompt(job: AssessJob, ctx: AssessContext, validation_error: s
     answer instead of "fixing" one it never saw.
     """
 
+    # 0.1.10.7 P5: everything a stranger wrote goes inside one fence the text cannot close.
+    posting = (
+        f"ROLE: {job.title}\nCOMPANY: {job.company}\nLOCATION: {job.location or 'unspecified'}\n"
+        f"POSTING TEXT:\n{job.posting_text[:_MAX_PROMPT_POSTING_TEXT]}"
+    )
     values = {
-        "title": job.title,
-        "company": job.company,
-        "location": job.location or "unspecified",
+        "posting": fence_untrusted_posting(posting),
         "visa_required": "yes" if ctx.visa_sponsorship_required else "no",
-        "posting_text": job.posting_text[:_MAX_PROMPT_POSTING_TEXT],
         "resume_text": model_resume(ctx.resume_text).text[:_MAX_PROMPT_RESUME_TEXT],
         "validation_error": (validation_error or "")[:_MAX_PROMPT_VALIDATION_ERROR],
         "countries": ", ".join(ctx.countries) if ctx.countries else "any",

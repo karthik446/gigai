@@ -432,13 +432,39 @@ def test_cache_key_covers_resume_prefs_model_and_versions(tmp_path: Path, monkey
     for field, value in (("content_sha256", "sha256:2"), ("resume_digest_sha256", "r2"), ("prefs_sha256", "p2"),
                          ("model", "claude_cli:sonnet")):
         assert model_rank.cache_key(**{**base, field: value}) != key
-    monkeypatch.setattr(model_rank, "PROMPT_VERSION", "rank-v2")
-    assert model_rank.cache_key(**base) != key
+    assert model_rank.PROMPT_VERSION == "rank-v2"
     monkeypatch.setattr(model_rank, "PROMPT_VERSION", "rank-v1")
+    assert model_rank.cache_key(**base) != key
+    monkeypatch.setattr(model_rank, "PROMPT_VERSION", "rank-v2")
     monkeypatch.setattr(model_rank, "DIGEST_VERSION", "digest-v9")
     assert model_rank.cache_key(**base) != key
     assert model_rank.prefs_digest(_PREFS) != model_rank.prefs_digest(CandidatePrefs(titles=("Staff Software Engineer",)))
     assert cache_dir(tmp_path) == tmp_path / "cache" / "scout" / "rank" / "scores"
+
+
+def test_a_score_cached_under_the_earlier_prompt_is_not_reused(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """0.1.10.7 P5: rank-v2 fences the posting lines; a rank-v1 score is never served as if rank-v2 had made it."""
+
+    port = _Port(lambda prompt, _n: _good_answer(prompt))
+    _install(monkeypatch, _Binding(port))
+    monkeypatch.setattr(model_rank, "PROMPT_VERSION", "rank-v1")
+    earlier = _rank(tmp_path, _rows(5))
+    cached_v1 = sorted(cache_dir(tmp_path / "home").glob("*.json"))
+    assert len(port.prompts) == 1 and len(cached_v1) == 5 and earlier.totals()["cached"] == 0
+    assert _rank(tmp_path, _rows(5)).totals()["cached"] == 5 and len(port.prompts) == 1, "the same prompt version reuses them"
+    monkeypatch.undo()
+    _install(monkeypatch, _Binding(port))
+    assert model_rank.PROMPT_VERSION == "rank-v2"
+
+    now = _rank(tmp_path, _rows(5))
+
+    assert len(port.prompts) == 2, "every posting is ranked again with the shipped prompt"
+    assert now.totals()["cached"] == 0 and [item.cached for item in now.postings] == [False] * 5
+    assert now.prompt_version == "rank-v2"
+    written = sorted(cache_dir(tmp_path / "home").glob("*.json"))
+    assert len(written) == 10 and set(cached_v1) < set(written), "the old files stay; the new scores have new keys"
+    assert {json.loads(path.read_text())["prompt_version"] for path in set(written) - set(cached_v1)} == {"rank-v2"}
+    assert _rank(tmp_path, _rows(5)).totals()["cached"] == 5 and len(port.prompts) == 2
 
 
 def test_changed_prefs_or_resume_miss_the_cache(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

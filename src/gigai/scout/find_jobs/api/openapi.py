@@ -871,7 +871,7 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
                 "models": {"demand": "ollama_local:llama3.1", "backfill": "ollama_local"},
                 "queue": {
                     "setting": {"model_enabled": True, "backfill_enabled": False, "tag_backfill_model": "configured", "source": "default"},
-                    "prompt_version": "tag-v1",
+                    "prompt_version": "tag-v2",
                     "batch_size": 50,
                     "batches_per_tick": 4,
                     "state": "drained",
