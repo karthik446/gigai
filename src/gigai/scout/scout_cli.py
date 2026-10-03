@@ -2226,6 +2226,10 @@ def sources_update_command(
             f"Checked {boards['checked']} of {boards['total']} boards "
             f"({boards['cached']} unchanged, {boards['failed']} did not answer) in {snapshot['elapsed_seconds']:.0f}s."
         )
+        asked = snapshot.get("requests_by_board")
+        if isinstance(asked, dict) and asked:
+            named = ", ".join(f"{board} {count}" for board, count in asked.items())
+            click.echo(f"{snapshot['requests']} requests; boards that also asked for descriptions (requests each): {named}.")
         if result.status == STATUS_PARTIAL:
             click.echo(f"{snapshot['remaining']} boards are left: run `gigai scout sources update` again to continue.")
     if result.status == STATUS_FAILED:
@@ -2460,7 +2464,8 @@ def jobs_assess_command(
     Nothing is assessed without approval: without --yes the command says how
     many would be assessed and what it will cost, and asks (in a terminal) or
     stops there (--json, or no terminal). Each posting is assessed for the
-    profile it fits best, from the posting text already stored.
+    profile it fits best, from the posting text already stored (a posting with
+    none has its description fetched first, one request for it alone).
     """
 
     import sys

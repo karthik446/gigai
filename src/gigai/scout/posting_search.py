@@ -29,7 +29,7 @@ batch is recorded as an approved batch (``approval``: who approved, when, how
 many, the estimate), registered as live work (the ``assess_batch`` lease:
 the pipeline and the rank lane start nothing while it runs) and assessed
 through the job page's own path (``run_quick_assessment``, from the posting
-text already stored: nothing is fetched). The results are in the quick-assess
+text already stored; one with none has its description fetched first, one request for it alone). The results are in the quick-assess
 store, so the read model shows them at once.
 
 LABELS (data_labels, P4): like ``scout new``, no response mixes. A response
@@ -528,9 +528,9 @@ def render(response: Mapping[str, object]) -> str:
             lines.append(str(question["text"]))
             lines.append("  Nothing was assessed. Yes: run the same command with --yes.")
         elif isinstance(assessed, Mapping):
-            lines.append(f"Assessed {assessed['assessed']} of {assessed['requested']}.")
+            lines.append(f"Assessed {assessed['assessed']} of {assessed['requested']}." + (f" Fetched {assessed['fetched_on_demand']} missing description(s) first." if assessed.get("fetched_on_demand") else ""))
             for item in assessed["failed"]:  # type: ignore[union-attr]
-                lines.append(f"  not assessed ({item['error_code']}): {item['job_identity']}")
+                lines.append(f"  not assessed ({item['error_code']}{': ' + str(item['reason']) if item.get('reason') else ''}): {item['job_identity']}")
         else:
             lines.append("Nothing to assess: every selected posting has a current assessment.")
         for job in response["not_found"]:  # type: ignore[union-attr]

@@ -57,13 +57,15 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 import re
 import textwrap
+import threading
+import time
 
 from ..canonical import digest_imported_bytes
 from . import postings
 from .data_labels import ENVELOPE_KEY, PUBLIC_UNTRUSTED, UNTRUSTED_TEXT_RULE, USER_PRIVATE, assert_not_mixed, labels_envelope
 from .pipeline.busy import LiveBatch, assess_batch
 from .pipeline.store import MODEL_STEPS, PipelineStore, PipelineStoreError, PostingRecord, pipeline_path
-from .postings import PostingModelError, PostingText, ProfileView
+from .postings import PostingModelError, PostingText, ProfileView, split_board
 
 SCHEMA_VERSION = "scout-new:1"
 SEEN_SCHEMA_VERSION = "scout-new-seen:1"
@@ -255,41 +257,79 @@ def _assess(
     pairs: Sequence[tuple[str, str]], texts: Mapping[str, PostingText], *, home_root: Path, target: Path, config: object | None,
     live: LiveBatch | None = None,
 ) -> dict[str, object]:
-    """Assess each ``(job, profile)`` through the job page's path, from the stored posting text. Nothing is fetched.
+    """Assess each ``(job, profile)`` through the job page's path, from the stored posting text.
+
+    0110-8-02: a posting with NO stored description is fetched on demand, ONE request for that posting alone
+    (``job_input.fetch_missing_description``: public board API, the existing body cap, paced like the board clients), before it is
+    given up on. ``fetched_on_demand`` counts the descriptions that way; a posting whose text cannot be had stays
+    ``job_text_unavailable`` (or ``job_fetch_failed``) with a named ``reason``.
 
     ``live``: the caller already marked the batch live (``pipeline.busy``,
     "assess these") and this keeps its marker fresh; without it the batch is
     marked here for as long as it runs.
     """
 
+    from .find_jobs import job_input
     from .find_jobs.assess_all import FATAL_CODES, assess_concurrency
     from .find_jobs.assess_contracts import ORIGIN_JOB_PAGE, AssessJobInput, AssessRequest, AssessResumeInput, ResolvedJob
+    from .find_jobs.market_acquisition import AcquireLimits
     from .quick_assess import QuickAssessError, run_quick_assessment
 
     marked = nullcontext(live) if live is not None else assess_batch(home_root, target)
 
     failed: list[dict[str, object]] = []
     stop: list[str] = []
+    fetched: list[str] = []
+    pace = threading.Lock()
+    clients: list[object] = []
+    next_request = [0.0]
+    gap = AcquireLimits.from_environment().min_request_interval_seconds
 
-    def one(pair: tuple[str, str]) -> str | None:
+    def fetch_missing(text: PostingText) -> ResolvedJob:
+        """The one request; the lock keeps the batch's requests a polite interval apart and shares one client."""
+
+        if text.board is None or text.posting_id is None:
+            raise job_input.PostingTextUnavailable("job_text_unavailable", job_input.REASON_NO_TEXT, "the posting is not in the stored index")
+        provider, token = split_board(text.board)
+        with pace:
+            if not clients:
+                clients.append(job_input.job_fetch_client())
+            wait = next_request[0] - time.monotonic()
+            if wait > 0:
+                time.sleep(wait)
+            next_request[0] = time.monotonic() + gap
+            client = clients[0]
+        return job_input.fetch_missing_description(  # type: ignore[arg-type]
+            client, provider=provider, token=token, posting_id=text.posting_id, url=text.url
+        )
+
+    def one(pair: tuple[str, str]) -> tuple[str, str | None] | None:
         try:
             return assess_one(pair)
         finally:
             live.beat()
 
-    def assess_one(pair: tuple[str, str]) -> str | None:
+    def assess_one(pair: tuple[str, str]) -> tuple[str, str | None] | None:
         job, profile_id = pair
         if stop:
-            return "not_started"
+            return ("not_started", None)
         text = texts.get(job)
-        if text is None or not (text.text or "").strip():
-            return "job_text_unavailable"
-        body = text.text or ""
-        resolved_job = ResolvedJob(
-            job_identity=job, source_url=text.url, normalized_url=job, fetch_kind="ats_board", title=text.title,
-            company=text.company, location=text.location, text=body,
-            text_sha256=digest_imported_bytes(body.encode("utf-8")),
-        )
+        if text is None:
+            return ("job_text_unavailable", job_input.REASON_NO_TEXT)
+        resolved_job = None
+        if (text.text or "").strip():
+            body = text.text or ""
+            resolved_job = ResolvedJob(
+                job_identity=job, source_url=text.url, normalized_url=job, fetch_kind="ats_board", title=text.title,
+                company=text.company, location=text.location, text=body,
+                text_sha256=digest_imported_bytes(body.encode("utf-8")),
+            )
+        else:
+            try:
+                resolved_job = fetch_missing(text)
+            except job_input.PostingTextUnavailable as exc:
+                return (exc.code, exc.reason)
+            fetched.append(job)
         request = AssessRequest(
             job=AssessJobInput(job_url=text.url), resume=AssessResumeInput(profile_id=profile_id), origin=ORIGIN_JOB_PAGE
         )
@@ -298,17 +338,28 @@ def _assess(
         except QuickAssessError as exc:
             if exc.code in FATAL_CODES:
                 stop.append(exc.code)  # no model, no profile, no resume: the next call would fail the same way
-            return exc.code
+            return (exc.code, None)
         return None
 
     # PL5: the batch is live work the pipeline's runner yields to (DESIGN 7), like an "assess all" batch.
-    with marked as live:
-        with ThreadPoolExecutor(max_workers=max(1, assess_concurrency()), thread_name_prefix="scout-new-assess") as pool:
-            codes = list(pool.map(one, pairs))
-    for (job, profile_id), code in zip(pairs, codes):
-        if code is not None:
-            failed.append({"job_identity": job, "profile_id": profile_id, "error_code": code})
-    return {"requested": len(pairs), "assessed": len(pairs) - len(failed), "failed": failed, "stopped": stop[0] if stop else None}
+    try:
+        with marked as live:
+            with ThreadPoolExecutor(max_workers=max(1, assess_concurrency()), thread_name_prefix="scout-new-assess") as pool:
+                outcomes = list(pool.map(one, pairs))
+    finally:
+        for client in clients:
+            client.close()  # type: ignore[attr-defined]
+    for (job, profile_id), outcome in zip(pairs, outcomes):
+        if outcome is not None:
+            code, reason = outcome
+            failure: dict[str, object] = {"job_identity": job, "profile_id": profile_id, "error_code": code}
+            if reason is not None:
+                failure["reason"] = reason
+            failed.append(failure)
+    return {
+        "requested": len(pairs), "assessed": len(pairs) - len(failed), "failed": failed, "stopped": stop[0] if stop else None,
+        "fetched_on_demand": len(fetched),
+    }
 
 
 # --- the pipeline offer (read only) ---------------------------------------------------------
@@ -697,9 +748,9 @@ def render(response: Mapping[str, object]) -> str:
     lines = [str(response["message"])]
     assessed = response.get("assessed")
     if isinstance(assessed, Mapping):
-        lines.append(f"Assessed {assessed['assessed']} of {assessed['requested']}.")
+        lines.append(f"Assessed {assessed['assessed']} of {assessed['requested']}." + (f" Fetched {assessed['fetched_on_demand']} missing description(s) first." if assessed.get("fetched_on_demand") else ""))
         for item in assessed["failed"]:  # type: ignore[union-attr]
-            lines.append(f"  not assessed ({item['error_code']}): {item['job_identity']}")
+            lines.append(f"  not assessed ({item['error_code']}{': ' + str(item['reason']) if item.get('reason') else ''}): {item['job_identity']}")
     question = response.get("question")
     if isinstance(question, Mapping):
         lines.append(str(question["text"]))

@@ -185,12 +185,20 @@ def default_http_client() -> Any:
 
 
 def load_effective_config(home_root: Path, target: Path) -> FindJobsConfig | None:
-    """``find-jobs.json`` with the selected profile's titles, as a run would read it; ``None`` if unusable.
+    """``find-jobs.json`` with the titles of EVERY active profile as its roles, as a run would read the rest; ``None`` if unusable.
 
     Only ``roles`` matters here (which Greenhouse descriptions to fetch
     now), so an unreadable config or profile never stops an update: it
     falls back to the shared file, then to listing only.
+
+    0110-8-03: the roles are the union over all ACTIVE profiles (the selected
+    one first; archived and deleted ones are left out), because a posting the
+    second profile matches needs its description as much as the selected
+    profile's. Which of those titles then asks for a description is the
+    update's gate (:func:`_description_gate`).
     """
+
+    from dataclasses import replace
 
     from ...canonical import parse_json_bytes
     from ...workpad import resolve_workpad
@@ -210,7 +218,41 @@ def load_effective_config(home_root: Path, target: Path) -> FindJobsConfig | Non
     except Exception as exc:  # noqa: BLE001 - the shared roles are a fine fallback
         print(f"scout sources update: selected profile unavailable, using find-jobs.json roles ({type(exc).__name__})", file=sys.stderr)
         return config
-    return overlay_selected_profile(config, profile)
+    config = overlay_selected_profile(config, profile)
+    try:
+        roles = list(config.roles)
+        for record in profile_records.list_profiles(resolved):
+            if record.state == "active":
+                roles.extend(title for title in record.titles if title not in roles)
+        return replace(config, roles=tuple(roles))
+    except Exception as exc:  # noqa: BLE001 - the selected profile's roles are a fine fallback
+        print(f"scout sources update: profiles unavailable, using the selected profile's roles ({type(exc).__name__})", file=sys.stderr)
+        return config
+
+
+def _description_gate(roles: Sequence[str], home_root: Path | None) -> Callable[[str], bool]:
+    """Which Greenhouse titles get a description request: the read model's own matcher over ``roles``, plus the function tag NOW.
+
+    ``title_query.TitleMatcher`` (the whole-word rule, or the tag store's (level, function) for a role's pair) is what the posting
+    read model matches by, so a title it will list gets a description. A NEW posting has no stored tag yet (the update tags it after
+    its board is fetched), so the rules tagger the update would use runs on the title here.
+    """
+
+    from .posting_tags import tag_title
+    from .title_query import TitleMatcher, open_tag_store, tag_query_for_roles
+
+    matcher = TitleMatcher(roles, open_tag_store(home_root))
+    pairs = tag_query_for_roles(roles).pairs
+
+    def gate(title: str) -> bool:
+        if matcher.matches(title):
+            return True
+        if not pairs or type(title) is not str:
+            return False
+        found = tag_title(title)
+        return found.function is not None and (found.level, found.function) in pairs
+
+    return gate
 
 
 def _parse(value: object) -> datetime | None:
@@ -608,6 +650,8 @@ class _Listener:
         self.totals = UpdateTotals()
         self.counts = {"fetched": 0, "cached": 0, "failed": 0, "skipped": 0}
         self.requests = 0
+        #: 0110-8-03: the requests each board made (a list is one; the rest are descriptions), for the boards that made more than one.
+        self.board_requests: dict[str, int] = {}
         self.total = len(companies)
         self.done = 0  # boards settled: checked, or skipped by the budget
         self.checked = 0  # boards that were asked (fetched, unchanged or did not answer)
@@ -672,6 +716,8 @@ class _Listener:
                 self.cancelled = True
             self.counts[status] = self.counts.get(status, 0) + 1
             self.requests += requests
+            if requests > 1:
+                self.board_requests[f"{provider}:{board_token}"] = requests
             first = False
             if status != "skipped":
                 first = self.checked == 0
@@ -746,6 +792,9 @@ class _Listener:
             },
             "postings": {"new": totals.new, "changed": totals.changed, "removed": totals.removed, "live": totals.live},
             "requests": self.requests,
+            # 0110-8-03: the boards that made more than their one list request (they asked for descriptions), most first, at most
+            # ``FAILED_BOARDS_LISTED``; the sum of every board's requests is ``requests``.
+            "requests_by_board": dict(sorted(self.board_requests.items(), key=lambda item: (-item[1], item[0]))[:FAILED_BOARDS_LISTED]),
             # What this update has not reached: while it runs, every board
             # not asked yet; at the end, the boards the budget left. They
             # lead the next update (`boards.never_checked` is the backlog
@@ -859,20 +908,21 @@ def update_sources(
 class _FillingClients:
     """The update's view of the real ``ATSBoardClients``: it also fills Greenhouse descriptions (0110-026d)."""
 
-    def __init__(self, inner: ATSBoardClients) -> None:
+    def __init__(self, inner: ATSBoardClients, title_filter: Callable[[str], bool] | None = None) -> None:
         self._inner = inner
+        self._title_filter = title_filter
 
     def list_board(self, *args: Any, **kwargs: Any) -> Any:
         return self._inner.list_board(*args, **kwargs)
 
     def fetch_board(self, client: Any, provider: str, board_token: str, config: FindJobsConfig, *, cache: BoardCache | None = None) -> Any:
-        return self._inner.fetch_board(client, provider, board_token, config, cache=cache, descriptions=True)
+        return self._inner.fetch_board(client, provider, board_token, config, cache=cache, descriptions=True, title_filter=self._title_filter)
 
 
-def _with_fill(ats: Any) -> Any:
+def _with_fill(ats: Any, title_filter: Callable[[str], bool] | None = None) -> Any:
     """Only the real clients fill; a test's fake is called exactly as before."""
 
-    return _FillingClients(ats) if isinstance(ats, ATSBoardClients) else ats
+    return _FillingClients(ats, title_filter) if isinstance(ats, ATSBoardClients) else ats
 
 
 class _BackoffClients:
@@ -1014,7 +1064,7 @@ def _run_update(
         if full_refresh:
             for board in boards:  # a Full refresh redoes the one-time Greenhouse description fill
                 cache.clear_content_filled(board.provider.value, board.board_token)
-        clients = _with_fill(ats if ats is not None else ATSBoardClients())
+        clients = _with_fill(ats if ats is not None else ATSBoardClients(), _description_gate(config.roles, home_root))
         if trigger == TRIGGER_AUTO and callable(getattr(clients, "fetch_board", None)):
             clients = listener.backoff = _BackoffClients(clients, stop)
         _rows, _failures, summary = _fetch_boards(
@@ -1386,6 +1436,7 @@ def _blank_snapshot(update_id: str, status: str, *, error: Mapping[str, object] 
         "companies": {"checked": 0, "indexed": 0, "updated": 0, "untouched": 0, "unreadable": 0, "with_new": 0, "with_changes": 0},
         "postings": {"new": 0, "changed": 0, "removed": 0, "live": 0},
         "requests": 0,
+        "requests_by_board": {},
         "remaining": 0,
         "rotation": None,
         "watchlist_seed": None,

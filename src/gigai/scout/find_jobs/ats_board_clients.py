@@ -279,6 +279,17 @@ def _text_bytes(*parts: str | None) -> bytes:
     return "\n".join(part for part in parts if part).encode("utf-8")
 
 
+def posting_content_digest(title: str, text: str | None) -> str:
+    """THE posting digest rule (0110-8-06): the title and the plain posting text joined by a newline, through ``gigai.canonical``.
+
+    A board row's ``content_sha256``, an assessment's ``posting_sha256`` and the digest the job-state check recomputes from a stored
+    assessment's text are all this function, so they can only disagree when the TEXT does. A posting with no text digests its title
+    alone: that is a digest of the listing, never of a description (see ``PostingRow.text``).
+    """
+
+    return content_hash(_text_bytes(title, text or None))
+
+
 def _published_at_from_iso(value: object) -> str | None:
     if type(value) is not str or not value:
         return None
@@ -546,7 +557,6 @@ def _greenhouse_row(
     # text (U25) and hash *that*, not the raw markup, so the digest tracks
     # the posting's actual wording.
     text = html_to_text(content)
-    content_bytes = _text_bytes(title, text or None)
     return PostingRow(
         url=absolute_url,
         normalized_url=normalize_url(absolute_url),
@@ -556,7 +566,7 @@ def _greenhouse_row(
         title=title,
         location=location_name,
         published_at=_published_at_from_iso(job.get("updated_at")),
-        content_sha256=content_hash(content_bytes),
+        content_sha256=posting_content_digest(title, text),
         source_kind=SourceKind.ATS,
         query_key=f"ats:greenhouse:{board_token}",
         text=text or None,
@@ -696,7 +706,6 @@ def _lever_rows(payload: list, board_token: str, config: FindJobsConfig, stats: 
             location_name = categories["location"]
         countries = _lever_countries(job)
         text = _lever_text(job)
-        content_bytes = _text_bytes(title, text or None)
         rows.append(
             PostingRow(
                 url=hosted_url,
@@ -707,7 +716,7 @@ def _lever_rows(payload: list, board_token: str, config: FindJobsConfig, stats: 
                 title=title,
                 location=location_name,
                 published_at=_published_at_from_epoch_ms(job.get("createdAt")),
-                content_sha256=content_hash(content_bytes),
+                content_sha256=posting_content_digest(title, text),
                 source_kind=SourceKind.ATS,
                 query_key=f"ats:lever:{board_token}",
                 text=text or None,
@@ -801,7 +810,6 @@ def _ashby_rows(jobs: list, board_token: str, config: FindJobsConfig, stats: "Bo
         countries = _ashby_countries(job)
         description = job.get("descriptionPlain")
         text = html_to_text(description if type(description) is str else None)
-        content_bytes = _text_bytes(title, text or None)
         rows.append(
             PostingRow(
                 url=job_url,
@@ -812,7 +820,7 @@ def _ashby_rows(jobs: list, board_token: str, config: FindJobsConfig, stats: "Bo
                 title=title,
                 location=location_name,
                 published_at=_published_at_from_iso(job.get("publishedAt")),
-                content_sha256=content_hash(content_bytes),
+                content_sha256=posting_content_digest(title, text),
                 source_kind=SourceKind.ATS,
                 query_key=f"ats:ashby:{board_token}",
                 countries=countries,
@@ -1303,8 +1311,12 @@ def fetch_greenhouse_board(
     cache: BoardCache | None = None,
     stats: BoardFetchStats | None = None,
     descriptions: bool = False,
+    title_filter: "Callable[[str], bool] | None" = None,
 ) -> BoardFetchResult:
     """Two-phase Greenhouse: content-free list -> title prefilter -> detail per match.
+
+    ``title_filter`` (0110-8-03, the sources update) decides which titles get a detail request in place of the bare
+    ``matches_roles(title, config.roles)``: the update passes the union over every active profile, by rule or by function tag.
 
     A detail request is made only for a job whose title matches the roles
     AND whose ``updated_at`` differs from the cached detail's marker. A
@@ -1343,7 +1355,7 @@ def fetch_greenhouse_board(
             continue
         stats.listed += 1
         title = job.get("title")
-        if type(title) is not str or not matches_roles(title, config.roles):
+        if type(title) is not str or not (title_filter(title) if title_filter is not None else matches_roles(title, config.roles)):
             stats.prefiltered_out += 1
             continue
         absolute_url = job.get("absolute_url")
@@ -1456,18 +1468,20 @@ class ATSBoardClients:
         *,
         cache: BoardCache | None = None,
         descriptions: bool = False,
+        title_filter: "Callable[[str], bool] | None" = None,
     ) -> BoardFetchResult:
         """Q2: the cached, prefiltered path acquire uses (see module docstring).
 
         ``descriptions`` (the sources update only) turns on Greenhouse's
         one-time description fill; Lever and Ashby already list descriptions.
+        ``title_filter`` (the sources update only, 0110-8-03): which Greenhouse titles get a description request.
         """
 
         fetcher = _FETCHERS.get(provider)
         if fetcher is None:
             raise ATSBoardClientError("unsupported_provider", f"unsupported ATS provider {provider!r}")
         if descriptions and provider == "greenhouse":
-            return fetch_greenhouse_board(client, board_token, config, cache=cache, descriptions=True)
+            return fetch_greenhouse_board(client, board_token, config, cache=cache, descriptions=True, title_filter=title_filter)
         return fetcher(client, board_token, config, cache=cache)
 
 
@@ -1494,6 +1508,7 @@ __all__ = [
     "list_lever_board",
     "MATCH_ANY_TITLE_ROLE",
     "matches_roles",
+    "posting_content_digest",
     "parse_board_url",
     "work_mode_from_label",
 ]

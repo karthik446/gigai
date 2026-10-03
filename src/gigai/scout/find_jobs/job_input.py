@@ -26,7 +26,7 @@ Reused, never re-derived: ``normalize_url``/``parse_board_url``
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import html as _html_entities
 import json
 from pathlib import Path
@@ -87,10 +87,11 @@ _PERMISSIVE_CONFIG = FindJobsConfig(
 class _FetchFailure(Exception):
     """A redacted single-request failure (host + status/network, no body)."""
 
-    def __init__(self, code: str, host: str, detail: str) -> None:
+    def __init__(self, code: str, host: str, detail: str, status: int | None = None) -> None:
         super().__init__(f"{host}: {detail}")
         self.code = code
         self.host = host
+        self.status = status
 
 
 @dataclass(frozen=True)
@@ -307,7 +308,7 @@ def _read_capped(client: "httpx.Client", url: str) -> tuple[bytes, str | None]:
     try:
         with client.stream("GET", url) as response:
             if response.status_code != 200:
-                raise _FetchFailure("http_error", host, f"HTTP {response.status_code}")
+                raise _FetchFailure("http_error", host, f"HTTP {response.status_code}", response.status_code)
             chunks: list[bytes] = []
             received = 0
             for chunk in response.iter_bytes():
@@ -420,4 +421,69 @@ def _from_board_row(row: PostingRow, *, source_url: str, normalized_url: str) ->
     )
 
 
-__all__ = ["MAX_BODY_BYTES", "MIN_POSTING_TEXT_CHARS", "job_fetch_client", "resolve_job"]
+#: 0110-8-02: why a posting's description could not be fetched on demand (``PostingTextUnavailable.reason``).
+REASON_POSTING_REMOVED = "posting_removed"  # the board answers 404/410, or its list no longer has the posting
+REASON_BOARD_REFUSED = "board_refused"  # any other HTTP refusal (403, 429, 5xx)
+REASON_NO_TEXT = "no_text"  # the board answered and the posting carries no description
+REASON_NETWORK_ERROR = "network_error"  # nothing answered (code ``job_fetch_failed``)
+DESCRIPTION_UNAVAILABLE_REASONS: tuple[str, ...] = (REASON_POSTING_REMOVED, REASON_BOARD_REFUSED, REASON_NO_TEXT, REASON_NETWORK_ERROR)
+
+
+class PostingTextUnavailable(FindJobsContractError):
+    """The one request for a posting's description did not bring one; ``reason`` is one of ``DESCRIPTION_UNAVAILABLE_REASONS``."""
+
+    def __init__(self, code: str, reason: str, message: str) -> None:
+        super().__init__(code, message)
+        self.reason = reason
+
+
+def fetch_missing_description(
+    client: "httpx.Client", *, provider: str, token: str, posting_id: str, url: str
+) -> ResolvedJob:
+    """A posting the index holds NO description for: ONE request for that posting's own detail, through GigAI's public board client.
+
+    Greenhouse: the single-job endpoint (``?content=true``), by the provider's id (so an embedded board's ``gh_jid`` posting works too).
+    Lever and Ashby: the board's list (their one public endpoint), the row matched by URL. No page is scraped, nothing else is asked, the
+    body cap is ``MAX_BODY_BYTES``. Raises :class:`PostingTextUnavailable` with a named reason; never retries.
+    """
+
+    normalized = normalize_url(url)
+    try:
+        if provider == "greenhouse":
+            found = _greenhouse_single_job(client, token, posting_id, source_url=url, normalized_url=normalized)
+        else:
+            row = _match_board_row(client, provider, token, job_id=None, normalized_url=normalized)
+            if row is None:
+                raise PostingTextUnavailable(
+                    "job_text_unavailable", REASON_POSTING_REMOVED, f"the {provider} board no longer lists this posting"
+                )
+            if not (row.text or "").strip():
+                raise PostingTextUnavailable("job_text_unavailable", REASON_NO_TEXT, f"the {provider} board row carries no posting text")
+            found = _from_board_row(row, source_url=url, normalized_url=normalized)
+    except _FetchFailure as exc:
+        if exc.status in (404, 410):
+            raise PostingTextUnavailable("job_text_unavailable", REASON_POSTING_REMOVED, f"the posting is no longer listed ({exc})") from None
+        if exc.status is not None:
+            raise PostingTextUnavailable("job_text_unavailable", REASON_BOARD_REFUSED, f"the board refused the request ({exc})") from None
+        if exc.code == "network_error":
+            raise PostingTextUnavailable("job_fetch_failed", REASON_NETWORK_ERROR, f"the board did not answer ({exc})") from None
+        reason = REASON_NO_TEXT if exc.code == "empty_content" else REASON_BOARD_REFUSED
+        raise PostingTextUnavailable("job_text_unavailable", reason, f"the board gave no posting text ({exc})") from None
+    except ATSBoardClientError as exc:
+        if exc.code == "network_error":
+            raise PostingTextUnavailable("job_fetch_failed", REASON_NETWORK_ERROR, f"the {provider} board did not answer") from None
+        raise PostingTextUnavailable("job_text_unavailable", REASON_BOARD_REFUSED, f"the {provider} board refused the request ({exc.code})") from None
+    # The text is the board's own (the same html_to_text a board row uses), so its digest is comparable with the row's:
+    # an assessment of it reads as ``ats_board`` text (``job_state.quick_assessment_fact``).
+    return replace(found, fetch_kind="ats_board")
+
+
+__all__ = [
+    "DESCRIPTION_UNAVAILABLE_REASONS",
+    "MAX_BODY_BYTES",
+    "MIN_POSTING_TEXT_CHARS",
+    "PostingTextUnavailable",
+    "fetch_missing_description",
+    "job_fetch_client",
+    "resolve_job",
+]

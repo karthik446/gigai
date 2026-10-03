@@ -58,6 +58,7 @@ from ...canonical import digest_imported_bytes, parse_json_bytes
 from ...application_event_index import ApplicationEventIndexUnavailable, committed_application_events
 from ...journal import JournalError, read_committed_snapshot
 from .assess_contracts import AssessResponse
+from .ats_board_clients import posting_content_digest
 from .contracts import Verdict, normalize_url
 
 NOT_ASSESSED = "not_assessed"
@@ -404,7 +405,7 @@ def quick_assessment_fact(item: AssessResponse, *, basis_stale: str | None = Non
         since = entry.at
     content = None
     if item.job.fetch_kind == "ats_board" and item.posting_text:
-        content = digest_imported_bytes("\n".join(part for part in (item.job.title, item.posting_text) if part).encode("utf-8"))
+        content = posting_content_digest(item.job.title, item.posting_text)
     return AssessmentFact(at=at, verdict=verdict, since=since, content_sha256=content, basis_stale=basis_stale)
 
 
