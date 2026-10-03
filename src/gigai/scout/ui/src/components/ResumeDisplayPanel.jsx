@@ -2,86 +2,32 @@ import { useEffect, useState } from "react";
 import { getResumeDisplay, putResumeDisplay } from "../api.js";
 import {
   AUTO_FIT_HELP,
-  KIND_LABELS,
-  KIND_PLACEHOLDERS,
-  MAX_CONTACT,
   PREVIEW_LINES,
   PRIVACY_NOTE,
   SPACING_MAX,
   SPACING_MIN,
   SPACING_STEP,
-  addEntry,
-  availableKinds,
   buildPutBody,
-  draftFromResponse,
-  moveEntry,
-  previewGap,
-  previewHeader,
-  removeEntry,
-  setEntryKind,
-  setEntryValue,
   clampSpacing,
+  draftFromResponse,
+  previewGap,
   spacingDisabled,
   spacingLabel,
 } from "../resumeDisplayModel.js";
 
-// The fields, reorder controls and live preview, shared by this panel and the
-// setup wizard's "Resume display" step (one implementation). `onChange(patch)`
-// merges a patch into the draft.
+// The fields and live preview, shared by this panel and the setup wizard's
+// "Resume display" step (one implementation). `onChange(patch)` merges a
+// patch into the draft. 0110-046: no name or contact fields: GigAI stores
+// none; they are typed in the Generate PDF form for one PDF.
 export function ResumeDisplayFields({ draft, onChange }) {
-  const preview = previewHeader(draft);
-  const addable = availableKinds(draft.contact);
   return (
     <>
-      <div className="form-group">
-        <label className="form-label" htmlFor="resume-display-name">
-          Name
-        </label>
-        <input id="resume-display-name" type="text" className="text-input" value={draft.name} onChange={(event) => onChange({ name: event.target.value })} />
-      </div>
       <div className="form-group">
         <label className="form-label" htmlFor="resume-display-title">
           Title (this profile)
         </label>
         <input id="resume-display-title" type="text" className="text-input" value={draft.title} onChange={(event) => onChange({ title: event.target.value })} placeholder="e.g. Staff AI Engineer" />
       </div>
-      {draft.contact.map((entry, index) => (
-        <div className="action-item" key={index} data-contact-index={index}>
-          <select className="text-input" aria-label="Kind" value={entry.kind} onChange={(event) => onChange({ contact: setEntryKind(draft.contact, index, event.target.value) })} style={{ maxWidth: 170 }}>
-            {[entry.kind, ...availableKinds(draft.contact).filter((kind) => kind !== entry.kind)].map((kind) => (
-              <option key={kind} value={kind}>
-                {KIND_LABELS[kind]}
-              </option>
-            ))}
-          </select>
-          <input
-            type="text"
-            className="text-input"
-            aria-label={KIND_LABELS[entry.kind]}
-            value={entry.value}
-            placeholder={KIND_PLACEHOLDERS[entry.kind]}
-            onChange={(event) => onChange({ contact: setEntryValue(draft.contact, index, event.target.value) })}
-          />
-          <button type="button" className="button small secondary" aria-label="Move up" disabled={index === 0} onClick={() => onChange({ contact: moveEntry(draft.contact, index, -1) })}>
-            ↑
-          </button>
-          <button type="button" className="button small secondary" aria-label="Move down" disabled={index === draft.contact.length - 1} onClick={() => onChange({ contact: moveEntry(draft.contact, index, 1) })}>
-            ↓
-          </button>
-          <button type="button" className="button small secondary" aria-label="Remove" onClick={() => onChange({ contact: removeEntry(draft.contact, index) })}>
-            Remove
-          </button>
-        </div>
-      ))}
-      {draft.contact.length < MAX_CONTACT && addable.length > 0 && (
-        <div className="card-actions" style={{ marginTop: 8 }}>
-          {addable.map((kind) => (
-            <button key={kind} type="button" className="button small secondary" onClick={() => onChange({ contact: addEntry(draft.contact, kind) })}>
-              + {KIND_LABELS[kind]}
-            </button>
-          ))}
-        </div>
-      )}
       <div className="form-group" data-role="spacing-control">
         <label className="form-label" htmlFor="resume-display-spacing">
           Spacing <span data-role="spacing-value">{spacingLabel(draft.spacing_scale)}</span>
@@ -104,9 +50,11 @@ export function ResumeDisplayFields({ draft, onChange }) {
       <h3>Preview</h3>
       <div className="resume-display-preview-row">
         <div className="md-preview" data-role="resume-display-preview" style={{ whiteSpace: "normal" }}>
-          <div style={{ fontWeight: 700, fontSize: "1.1rem" }}>{preview.name || <span className="muted">Your name</span>}</div>
-          {preview.title && <div>{preview.title}</div>}
-          {preview.contactLine && <div className="muted">{preview.contactLine}</div>}
+          <div className="muted" style={{ fontWeight: 700, fontSize: "1.1rem" }}>
+            Your name
+          </div>
+          {draft.title && <div>{draft.title}</div>}
+          <div className="muted">Your contact details, typed when you generate a PDF</div>
         </div>
         <div className="spacing-preview" data-role="spacing-preview" aria-hidden="true" style={{ gap: previewGap(draft.spacing_scale) }}>
           {Array.from({ length: PREVIEW_LINES }, (_unused, index) => (
@@ -118,10 +66,10 @@ export function ResumeDisplayFields({ draft, onChange }) {
   );
 }
 
-// 0.1.10-003 1b: "Resume display" on the profile page: the name, title and
-// contact line printed on a tailored-resume PDF (GET/PUT /api/resume-display).
-// The name and contact line are stored once per machine; the title is this
-// profile's. `suggested` prefills once and is only saved when the user does.
+// 0.1.10-003 1b / 0110-046: "Resume display" on the profile page: this
+// profile's title and the PDF layout (GET/PUT /api/resume-display). The
+// layout is stored once per machine; the title is this profile's.
+// `suggested` prefills the title once and is only saved when the user does.
 export default function ResumeDisplayPanel({ profileId }) {
   const [draft, setDraft] = useState(null);
   const [error, setError] = useState(null);
@@ -163,12 +111,12 @@ export default function ResumeDisplayPanel({ profileId }) {
   return (
     <section className="panel" id="resume-display">
       <h2>Resume display</h2>
-      <p className="muted">The header printed on your tailored-resume PDF. {PRIVACY_NOTE}</p>
+      <p className="muted">The title and layout of your resume PDF. {PRIVACY_NOTE}</p>
       {error && <div className="callout danger">{error}</div>}
       {!draft && !error && <p className="muted">Loading…</p>}
       {draft && (
         <>
-          {draft.prefilled && <div className="callout info">Filled in from your resume. Check it, then save.</div>}
+          {draft.prefilled && <div className="callout info">Title filled in from your resume. Check it, then save.</div>}
           <ResumeDisplayFields draft={draft} onChange={change} />
           <div className="actions">
             {savedNote && <span className="muted">Saved.</span>}

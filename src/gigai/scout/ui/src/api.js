@@ -499,11 +499,10 @@ export function putTailoredResumeLine({ profileId, jobIdentity, updatedAt, lineI
   });
 }
 
-// 0.1.10-003: the name, title and contact line printed on a tailored-resume
-// PDF (find_jobs/api/resume_display.py). GET carries `saved`, the values and,
-// while nothing is saved, a local `suggested` prefill; PUT saves (per-profile
-// `titles` merge). POST /api/tailored-resumes/pdf answers the PDF bytes: the
-// blob and the Content-Disposition file name come back for a download.
+// 0.1.10-003 / 0110-046: the per-profile title and the layout of a resume PDF
+// (find_jobs/api/resume_display.py). GET carries `saved`, the values and,
+// while this profile has no title, a local `suggested` title; PUT saves
+// (per-profile `titles` merge). GigAI stores no name or contact details.
 export function getResumeDisplay(profileId) {
   const qs = profileId ? `?profile_id=${encodeURIComponent(profileId)}` : "";
   return request("GET", `/api/resume-display${qs}`);
@@ -513,13 +512,17 @@ export function putResumeDisplay(body) {
   return request("PUT", "/api/resume-display", body);
 }
 
-export async function postTailoredResumePdf({ profileId, jobIdentity }) {
+// The PDF routes answer bytes: the blob and the Content-Disposition file name
+// come back for a download. `header` is the Generate PDF form's values
+// (generatePdfModel.headerBody): sent in this one request body, never stored
+// by the server, never kept here.
+async function postPdf(path, body) {
   let response;
   try {
-    response = await fetch("/api/tailored-resumes/pdf", {
+    response = await fetch(path, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ profile_id: profileId, job_identity: jobIdentity }),
+      body: JSON.stringify(body),
     });
   } catch (networkError) {
     throw new ApiError(0, "Could not reach the local API. Is the server running on 127.0.0.1:8765?");
@@ -539,7 +542,27 @@ export async function postTailoredResumePdf({ profileId, jobIdentity }) {
   return { blob: await response.blob(), fileName: pdfFileName(response.headers.get("Content-Disposition")) };
 }
 
-// The file name in `attachment; filename="<name>"`, or a plain fallback.
+export function postTailoredResumePdf({ profileId, jobIdentity, header }) {
+  const body = { profile_id: profileId, job_identity: jobIdentity };
+  if (header) {
+    body.header = header;
+  }
+  return postPdf("/api/tailored-resumes/pdf", body);
+}
+
+export function postResumePdf({ markdown, profileId, header }) {
+  const body = { markdown };
+  if (profileId) {
+    body.profile_id = profileId;
+  }
+  if (header) {
+    body.header = header;
+  }
+  return postPdf("/api/resume/pdf", body);
+}
+
+// The file name in `attachment; filename="<name>"`, or a plain fallback (the
+// server names it <company>-<role>-<YYYY-MM-DD>.pdf, never after the user).
 export function pdfFileName(disposition) {
   const match = /filename="([^"]+)"/.exec(disposition || "");
   return match ? match[1] : "resume.pdf";

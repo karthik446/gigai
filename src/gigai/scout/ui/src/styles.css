@@ -1619,6 +1619,9 @@ table.data-table th {
 /* 0110-017: Resume display spacing control and its schematic preview */
 .checkbox-label { display: flex; align-items: center; gap: 6px; margin-top: 6px; }
 .resume-display-preview-row { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-start; }
+/* 0110-046: the Generate PDF form (six fields, two columns where there is room). */
+.generate-pdf-form { margin: 8px 0 12px; }
+.generate-pdf-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 0 12px; }
 .resume-display-preview-row > .md-preview { flex: 1 1 260px; }
 .spacing-preview { display: flex; flex-direction: column; width: 120px; padding: 10px; border: 1px solid var(--border); border-radius: 6px; }
 .spacing-preview-line { display: block; height: 4px; border-radius: 2px; background: var(--muted); opacity: 0.45; }

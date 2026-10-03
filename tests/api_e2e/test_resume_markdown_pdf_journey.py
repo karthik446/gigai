@@ -8,11 +8,13 @@ Tailor once (the fixture model's lossy marker, so one bullet is a fallback with 
     ``POST /api/tailored-resumes/pdf`` prints them;
 (b) ``POST /api/resume/pdf`` with that resume's ``markdown`` answers a PDF whose extracted text and page
     count are IDENTICAL to the stored resume's PDF (the bytes differ only by the creation time and the
-    document title, which carries the company for a stored resume), with ``X-GigAI-Pages``;
+    document title, which carries the company for a stored resume), with ``X-GigAI-Pages``; both have no
+    header (0110-046: GigAI stores no name or contact details; the old ``PUT /api/resume-display`` name and
+    contact are accepted and ignored);
 (c) the CLI: ``resume pdf --tailored --job-url`` writes the SAME BYTES the API's stored-resume route serves,
     and ``resume pdf --in`` the same text and page count as the markdown route;
-(d) the personal-info check refuses a contact line and the saved name (422 ``personal_info_refused``), and
-    nothing changes;
+(d) the personal-info check refuses a contact line and a name-shaped line (422 ``personal_info_refused``),
+    and nothing changes;
 (e) ``use: original`` / ``use: rewritten`` switch an edited line back (a version the replaced line never
     had is refused: ``test_tailored_line_edit.py``);
 (f) invalid markdown, an oversize body, an out-of-range spacing, an unknown key and shape errors are 422s
@@ -25,6 +27,7 @@ from __future__ import annotations
 
 import io
 import json
+import re
 from pathlib import Path
 
 import httpx
@@ -113,7 +116,8 @@ def test_an_agent_changes_two_bullets_and_renders_a_new_pdf(tmp_path: Path, monk
         assert first["alternative"]["text"] == _WEAKER_STAFF and first["origin"] == "fallback"
         lines_url, md_url, stored_url = "/api/tailored-resumes/lines", "/api/resume/pdf", "/api/tailored-resumes/pdf"
         saved = client.put("/api/resume-display", json={"name": "Riley Example", "contact": [{"kind": "email", "value": "riley@example.test"}]})
-        assert saved.status_code == 200, saved.text
+        assert saved.status_code == 200 and saved.json()["ignored"] == ["contact", "name"], saved.text
+        assert "Riley" not in saved.text and "riley@" not in saved.text
 
         def shown() -> dict:
             items = client.get("/api/tailored-resumes", params=key).json()["items"]
@@ -150,17 +154,18 @@ def test_an_agent_changes_two_bullets_and_renders_a_new_pdf(tmp_path: Path, monk
         from_markdown = client.post(md_url, json={"markdown": markdown, "profile_id": key["profile_id"]})
         assert from_markdown.status_code == 200, from_markdown.text
         assert from_markdown.headers["content-type"] == "application/pdf" and from_markdown.content.startswith(b"%PDF")
-        assert from_markdown.headers["content-disposition"] == 'attachment; filename="riley-example-resume.pdf"'
+        assert re.fullmatch(r'attachment; filename="resume-\d{4}-\d{2}-\d{2}\.pdf"', from_markdown.headers["content-disposition"])
         assert int(from_markdown.headers["content-length"]) == len(from_markdown.content)
         assert _text(from_markdown.content) == _text(stored_pdf.content), "text-identical to the UI path's PDF"
         assert _pages(from_markdown.content) == _pages(stored_pdf.content) == int(from_markdown.headers["x-gigai-pages"]) == 1
-        assert _text(from_markdown.content).startswith("RILEY EXAMPLE\nriley@example.test\n")
+        header_area = _text(from_markdown.content).split("\n")[0]
+        assert header_area == "SUMMARY" and "RILEY" not in _text(from_markdown.content), "no header: GigAI stores no name or contact details"
 
-        # An agent's own markdown: the saved header prints, the markdown's own name/contact lines do not.
+        # An agent's own markdown: no header, and the markdown's own name/contact lines never print.
         own = client.post(md_url, json={"markdown": _OWN_MARKDOWN, "spacing_scale": 0.8})
         assert own.status_code == 200 and own.headers["x-gigai-spacing-scale"] == "0.8", own.text
         own_text = _text(own.content)
-        assert own_text.startswith("RILEY EXAMPLE\nriley@example.test\nSUMMARY") and own_text.count("riley@example.test") == 1
+        assert own_text.startswith("SUMMARY") and "riley@example.test" not in own_text and "RILEY" not in own_text
         assert "555-010-0100" not in own_text and _MARKER in own_text and "Python SQL HL7" in own_text
         looser = client.post(md_url, json={"markdown": _OWN_MARKDOWN, "spacing_scale": 1.4, "auto_fit": False})
         assert looser.status_code == 200 and looser.headers["x-gigai-spacing-scale"] == "1.4" and looser.content != own.content
@@ -181,12 +186,12 @@ def test_an_agent_changes_two_bullets_and_renders_a_new_pdf(tmp_path: Path, monk
         missing = CliRunner().invoke(cli, ["scout", "resume", "pdf", "--tailored", "--job-url", "https://example.test/none", "--out", str(tmp_path / "x.pdf"), "--home", str(home), "--target", str(target), "--json"])
         assert missing.exit_code == 1 and json.loads(missing.output)["error"]["code"] == "tailored_resume_not_found"
 
-        # (d) the personal-info check refuses contact details and the saved name; nothing changes.
+        # (d) the personal-info check refuses contact details and a name-shaped line; nothing changes.
         for text, found in (
             ("Reach me at riley@example.test for references.", "email"),
             ("Call 555-010-0100 after 5pm.", "phone"),
             ("Code samples at github.com/riley-example", "links"),
-            ("Mentored by Riley Example on the platform team.", "name"),
+            ("Riley Example", "name"),
         ):
             refused = edit(first["id"], text)
             assert refused.status_code == 422 and _error(refused)["code"] == "personal_info_refused", (text, refused.text)
@@ -235,7 +240,7 @@ def test_an_agent_changes_two_bullets_and_renders_a_new_pdf(tmp_path: Path, monk
             assert out_of_range.status_code == 422 and _error(out_of_range) == {"code": "invalid_value", "message": "spacing_scale must be between 0.7 and 1.4"}
         unknown = client.post(md_url, json={"markdown": _OWN_MARKDOWN, "company": "Acme"})
         assert unknown.status_code == 422 and _error(unknown)["code"] == "unknown_key"
-        assert _error(unknown)["allowed_keys"] == ["auto_fit", "markdown", "profile_id", "spacing_scale"]
+        assert _error(unknown)["allowed_keys"] == ["auto_fit", "header", "markdown", "profile_id", "spacing_scale"]
         for bad_body, code in (
             ({}, "wrong_type"),
             ({"markdown": 7}, "wrong_type"),

@@ -2005,7 +2005,7 @@
     },
     "/api/resume-display": {
       "get": {
-        "description": "The saved PDF header settings and the suggestion to prefill them. Returns personal values, so the Host header must match the bound server. spacing_scale and auto_fit read as 1.0 and true until saved.",
+        "description": "The saved PDF layout (per-profile title, spacing, auto fit) and a title suggestion. GigAI stores no name or contact details (they are typed in the Generate PDF form for one PDF), so this carries none. The Host header must match the bound server. spacing_scale and auto_fit read as 1.0 and true until saved.",
         "operationId": "get_api_resume_display",
         "parameters": [],
         "responses": {
@@ -2014,10 +2014,9 @@
               "application/json": {
                 "example": {
                   "auto_fit": true,
-                  "contact": [],
-                  "name": "",
                   "saved": false,
                   "spacing_scale": 1.0,
+                  "title": "",
                   "titles": {}
                 },
                 "schema": {
@@ -2045,7 +2044,7 @@
             "description": "forbidden_origin"
           }
         },
-        "summary": "Get the PDF header settings",
+        "summary": "Get the PDF layout settings",
         "tags": [
           "Tailored resumes"
         ],
@@ -2054,7 +2053,7 @@
         "x-gigai-host-checked": true
       },
       "put": {
-        "description": "Save the PDF display settings (name, contact line, per-profile titles, spacing). Keys left out keep their saved values. A spacing_scale outside 0.7..1.4 answers 422 invalid_value.",
+        "description": "Save the PDF layout settings (per-profile titles, spacing, auto fit). Keys left out keep their saved values. A spacing_scale outside 0.7..1.4 answers 422 invalid_value. name and contact are ignored, never stored: the response then carries ignored and a note.",
         "operationId": "put_api_resume_display",
         "parameters": [],
         "requestBody": {
@@ -2062,8 +2061,6 @@
             "application/json": {
               "example": {
                 "auto_fit": true,
-                "contact": [],
-                "name": "Kar Ohm",
                 "spacing_scale": 1.0,
                 "titles": {}
               },
@@ -2075,11 +2072,11 @@
                     "type": "boolean"
                   },
                   "contact": {
-                    "description": "Contact items {kind, value}.",
+                    "description": "Accepted for older clients and ignored: GigAI stores no contact details (the response lists it in ignored).",
                     "type": "array"
                   },
                   "name": {
-                    "description": "The name printed on the PDF.",
+                    "description": "Accepted for older clients and ignored: GigAI stores no name (the response lists it in ignored).",
                     "type": "string"
                   },
                   "spacing_scale": {
@@ -2150,7 +2147,7 @@
             "description": "unknown_key, wrong_type, invalid_value"
           }
         },
-        "summary": "Save the PDF header settings",
+        "summary": "Save the PDF layout settings",
         "tags": [
           "Tailored resumes"
         ],
@@ -2386,7 +2383,7 @@
     },
     "/api/resume/pdf": {
       "post": {
-        "description": "Render resume markdown you send as a PDF (binary), with the saved header and layout. Returns application/pdf with Content-Disposition: attachment, X-GigAI-Pages and X-GigAI-Spacing-Scale; changes nothing. Local only: the markdown is not sent to a model, not stored and not logged. The header (name, title, contact line) comes from the saved display settings (PUT /api/resume-display), exactly as for a tailored resume; lines above the first `## ` section are not printed. Trailing `<!-- ... -->` comments are dropped, so a tailored resume's `markdown` renders as it is. 422 resume_markdown_invalid names the line number and the rule.",
+        "description": "Render resume markdown you send as a PDF (binary), with the saved layout. Returns application/pdf with Content-Disposition: attachment; filename=`resume-<YYYY-MM-DD>.pdf`, X-GigAI-Pages and X-GigAI-Spacing-Scale; changes nothing. Local only: the markdown is not sent to a model, not stored and not logged. GigAI stores no name or contact details: without header the PDF has no header (a blank block keeps the page layout); the person finishes it in Scout's Generate PDF form, in their browser. Lines above the first `## ` section are not printed. Trailing `<!-- ... -->` comments are dropped, so a tailored resume's `markdown` renders as it is. 422 resume_markdown_invalid names the line number and the rule.",
         "operationId": "post_api_resume_pdf",
         "parameters": [],
         "requestBody": {
@@ -2403,12 +2400,16 @@
                     "description": "Pick the spacing scale that ends the content near a page boundary. Default: the saved setting.",
                     "type": "boolean"
                   },
+                  "header": {
+                    "description": "The Generate PDF form: {name, email, phone, location, linkedin, link}, each an optional string of at most 200 characters. Fills this one PDF's header; never stored, logged or returned. Left out: the PDF has no header.",
+                    "type": "object"
+                  },
                   "markdown": {
                     "description": "Resume markdown in GigAI's format, at most 65536 bytes: `## Summary|Experience|Skills|Education|Projects|Other` sections; in Experience, Projects and Education `### <heading>` entries with `- ` bullets.",
                     "type": "string"
                   },
                   "profile_id": {
-                    "description": "A profile id: its saved title prints under the name.",
+                    "description": "A profile id: with header, its saved title prints under the name.",
                     "type": "string"
                   },
                   "spacing_scale": {
@@ -5925,7 +5926,7 @@
     },
     "/api/tailored-resumes/lines": {
       "put": {
-        "description": "Show the original, the rewrite, or your own text on one line of a stored tailored resume. Idempotent: choosing what is already shown changes nothing. The PDF and the markdown follow the choice; updated_at is unchanged. use custom edits a body line (a summary, skills or other line, or an entry's bullet; never an entry heading): the line becomes kind custom, origin user, with no refs (no source is claimed for it and the no-loss check does not cover it) and edited_from holding the line it replaced, so use original or use rewritten brings that back. Local only: no model reads the text. A text that looks like your name or a contact detail (email, phone, link, address) is refused with 422 personal_info_refused: those come from PUT /api/resume-display. Example, change two bullets then render: PUT this route twice (line_id L3, then L4, each with use custom and text), then POST /api/tailored-resumes/pdf with the same profile_id and job_identity.",
+        "description": "Show the original, the rewrite, or your own text on one line of a stored tailored resume. Idempotent: choosing what is already shown changes nothing. The PDF and the markdown follow the choice; updated_at is unchanged. use custom edits a body line (a summary, skills or other line, or an entry's bullet; never an entry heading): the line becomes kind custom, origin user, with no refs (no source is claimed for it and the no-loss check does not cover it) and edited_from holding the line it replaced, so use original or use rewritten brings that back. Local only: no model reads the text. A text that looks like your name or a contact detail (email, phone, link, address) is refused with 422 personal_info_refused: GigAI stores no name or contact details; they are typed in Scout's Generate PDF form for one PDF. Example, change two bullets then render: PUT this route twice (line_id L3, then L4, each with use custom and text), then POST /api/tailored-resumes/pdf with the same profile_id and job_identity.",
         "operationId": "put_api_tailored_resumes_lines",
         "parameters": [],
         "requestBody": {
@@ -6091,7 +6092,7 @@
     },
     "/api/tailored-resumes/pdf": {
       "post": {
-        "description": "Render the stored tailored resume as a PDF (binary). Returns application/pdf with Content-Disposition: attachment; changes nothing.",
+        "description": "Render the stored tailored resume as a PDF (binary). Returns application/pdf with Content-Disposition: attachment; filename=`<company>-<role>-<YYYY-MM-DD>.pdf` (never your name); changes nothing. GigAI stores no name or contact details: without header the PDF has no header (a blank block keeps the page layout); the person finishes it in Scout's Generate PDF form, in their browser.",
         "operationId": "post_api_tailored_resumes_pdf",
         "parameters": [],
         "requestBody": {
@@ -6104,6 +6105,10 @@
               "schema": {
                 "additionalProperties": false,
                 "properties": {
+                  "header": {
+                    "description": "The Generate PDF form: {name, email, phone, location, linkedin, link}, each an optional string of at most 200 characters. Fills this one PDF's header; never stored, logged or returned. Left out: the PDF has no header.",
+                    "type": "object"
+                  },
                   "job_identity": {
                     "description": "The job identity.",
                     "type": "string"
@@ -6185,7 +6190,7 @@
                 }
               }
             },
-            "description": "invalid_value"
+            "description": "invalid_value, wrong_type, unknown_key"
           },
           "500": {
             "content": {

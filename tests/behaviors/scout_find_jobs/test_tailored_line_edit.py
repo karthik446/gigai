@@ -221,7 +221,7 @@ def test_a_name_or_contact_line_is_refused_and_nothing_changes(text: str, found:
     with pytest.raises(TailorError) as caught:
         apply_line_edit(stored, "L3", text)
     assert caught.value.code == "personal_info_refused"
-    assert f"({', '.join(found)})" in str(caught.value) and "Resume display settings" in str(caught.value)
+    assert f"({', '.join(found)})" in str(caught.value) and "Generate PDF form" in str(caught.value)
     assert text not in str(caught.value), "the refusal never echoes the text"
 
 

@@ -74,7 +74,7 @@ from ...quick_assess import (
     run_quick_assessment,
 )
 from ..assess_contracts import ORIGIN_JOB_PAGE, AssessJobInput, AssessRequest, AssessResumeInput
-from .story_bank import ACTOR_HEADER, known_names, resolve_profile_id
+from .story_bank import ACTOR_HEADER, resolve_profile_id
 
 _ANSWER_ERROR_STATUS: dict[str, HTTPStatus] = {
     "answer_invalid": HTTPStatus.UNPROCESSABLE_ENTITY,
@@ -210,7 +210,7 @@ class AnswersRoutesMixin:
         try:
             if profile_id is None:
                 # A gig with no profile yet: the gig-wide write, as before.
-                found = story_bank.personal_info_in_answer(answer, names=known_names(home_root))
+                found = story_bank.personal_info_in_answer(answer)
                 if found:
                     raise story_bank.StoryBankError("personal_info_refused", f"this answer looks like it holds personal information ({', '.join(found)})")
                 result = record_answer(home_root=home_root, requested_target=target, question_id=question_id, prompt=question_id, answer=answer)
@@ -218,7 +218,7 @@ class AnswersRoutesMixin:
                 result = story_bank.save_answer(
                     home_root=home_root, target=target, profile_id=profile_id,
                     question_id=question_id, answer=answer, question=body.get("question"),
-                    posting=posting, confirmed_from=body.get("from_bank"), names=known_names(home_root), actor=actor,
+                    posting=posting, confirmed_from=body.get("from_bank"), actor=actor,
                 )
         except (PrivateRecordError, story_bank.StoryBankError) as exc:
             self._error(_status_for(exc.code), exc.code, str(exc))

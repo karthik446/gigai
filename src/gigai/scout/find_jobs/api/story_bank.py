@@ -23,9 +23,8 @@ and ``PUT``/``DELETE`` name the ``updated_at`` of the entry they read: when the 
 since, the answer is ``409 story_bank_changed`` with the current ``entry`` in the error (the
 ``PUT /api/tailored-resumes/lines`` pattern). Every write runs the personal-info check.
 
-``known_names`` is the one place the saved PDF-header name is read for the personal-info
-check; ``api/answers.py`` and the CLI use it too, so ``story_bank.py`` itself never imports
-the display settings.
+0110-046: GigAI stores no name, so the check knows no name to look for: a strictly name-shaped
+line is refused (``story_bank.personal_info_in_answer``), contact shapes always are.
 """
 
 from __future__ import annotations
@@ -36,7 +35,6 @@ from urllib.parse import parse_qs, urlsplit
 
 from ....private_records import PrivateRecordError
 from ... import story_bank
-from ...resume_display import load_display
 from ..assess_contracts import AssessResumeInput
 from ..contracts import FindJobsContractError
 
@@ -86,18 +84,6 @@ def _match_story_id(path: str, *, suffix: str) -> str | None:
     if not remainder or "/" in remainder:
         return None
     return unquote(remainder)
-
-
-def known_names(home_root: Path | None) -> tuple[str, ...]:
-    """The name saved for the PDF header, for the local personal-info check; ``()`` when none."""
-
-    if home_root is None:
-        return ()
-    try:
-        settings = load_display(home_root)
-    except Exception:  # noqa: BLE001 - no readable settings means no known name
-        return ()
-    return (settings.name,) if settings is not None and settings.name.strip() else ()
 
 
 def resolve_profile_id(home_root: Path, target: Path, profile_id: str | None) -> str:
@@ -271,7 +257,7 @@ class StoryBankRoutesMixin:
             entry = story_bank.add_story(
                 home_root=home_root, target=target, profile_id=profile_id, question=question, answer=answer,
                 question_id=body.get("question_id"), tag=body.get("tag"),  # type: ignore[arg-type]
-                names=known_names(home_root), actor=self._story_bank_actor(body.get("actor")),
+                actor=self._story_bank_actor(body.get("actor")),
             )
         except (story_bank.StoryBankError, PrivateRecordError) as exc:
             self._story_bank_fail(exc)
@@ -293,7 +279,7 @@ class StoryBankRoutesMixin:
             entry = story_bank.edit_entry(
                 home_root=home_root, target=target, profile_id=profile_id, question_id=story_id,
                 answer=body.get("answer"), question=body.get("question"), tag=body.get("tag"),  # type: ignore[arg-type]
-                names=known_names(home_root), actor=self._story_bank_actor(body.get("actor")), expected_updated_at=updated_at,
+                actor=self._story_bank_actor(body.get("actor")), expected_updated_at=updated_at,
             )
         except (story_bank.StoryBankError, PrivateRecordError) as exc:
             self._story_bank_fail(exc)
@@ -339,4 +325,4 @@ class StoryBankRoutesMixin:
         self._write_json(HTTPStatus.OK, {"schema_version": RESPONSE_SCHEMA, "profile_id": profile_id, "deleted": deleted})
 
 
-__all__ = ["ACTOR_HEADER", "RESPONSE_SCHEMA", "StoryBankRoutesMixin", "bank_response", "known_names", "resolve_profile_id"]
+__all__ = ["ACTOR_HEADER", "RESPONSE_SCHEMA", "StoryBankRoutesMixin", "bank_response", "resolve_profile_id"]

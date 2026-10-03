@@ -1673,8 +1673,8 @@ def _make_handler(
         def _check_host(self) -> bool:
             """DNS-rebinding guard: ``Host`` must match the bound host:port.
 
-            Also applied to GET routes that return personal values (``GET
-            /api/resume-display``), which ``_check_csrf`` never covers.
+            Also applied to ``GET /api/resume-display`` (it returned personal values
+            before 0110-046 and keeps the check), which ``_check_csrf`` never covers.
             """
 
             port = self._bound_port()

@@ -538,7 +538,7 @@ def test_the_steps_and_the_review_have_no_discovery_cadence_or_budget(out: dict)
     assert steps["review"] == [
         "Profile",
         "Resume",
-        "PDF header",
+        "PDF layout",
         "Extracted by",
         "Tech stack",
         "Seniority",

@@ -174,7 +174,7 @@ def _refuse_personal_info(text: str, *, names: Iterable[str], what: str) -> None
         raise StoryBankError(
             "personal_info_refused",
             f"{what} looks like it holds personal information ({', '.join(found)}); the story bank holds experience, never "
-            "a name or contact details (those live in the Resume display settings). Remove it and save again",
+            "a name or contact details (GigAI stores none: you type them only when you generate a PDF). Remove it and save again",
         )
 
 

@@ -30,7 +30,7 @@ const TOTAL_STEPS = 5;
 // P9b (F2): the 5-screen setup wizard that replaces the one-page interview.
 //
 //   1. Resume + profile  -> POST /api/resume/extract (stack / seniority / titles)
-//   2. Resume display    -> the PDF header (0110-013; GET /api/resume-display,
+//   2. Resume display    -> the PDF title/layout (0110-013; GET /api/resume-display,
 //      skippable; saved by Finish with PUT /api/resume-display)
 //   3. Target            -> titles (seeded from 1), countries, work mode, visa
 //   4. Companies         -> exclude / always watch (catalog: S26, not in 0.1.9)

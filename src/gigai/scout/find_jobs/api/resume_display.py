@@ -1,13 +1,17 @@
-"""0110-003 P3: ``GET`` / ``PUT /api/resume-display`` -- the name, contact line and per-profile
-titles printed on a tailored-resume PDF, plus its layout (0110-017: ``spacing_scale`` 0.7..1.4
-and ``auto_fit``).
+"""0110-003 P3: ``GET`` / ``PUT /api/resume-display`` -- the per-profile titles printed under the
+name on a resume PDF, plus its layout (0110-017: ``spacing_scale`` 0.7..1.4 and ``auto_fit``).
+
+0110-046: GigAI stores no name or contact details.  The PDF header's name and contact items are
+typed in the Generate PDF form for one render (``POST /api/tailored-resumes/pdf`` /
+``POST /api/resume/pdf`` with ``header``) and never saved.  ``PUT`` still accepts the old
+``name`` / ``contact`` keys so an older client keeps working, but ignores them: nothing of them
+is stored, and the response says so (``ignored``).
 
 Stored once per home by ``gigai.scout.resume_display`` (``<home>/scout/resume-display.json``,
 0600); this module is only the HTTP wiring.  ``GET`` returns the saved values (or
-``saved: false``) plus a local ``suggested`` prefill while nothing is saved -- the prefill
-is never written, only a user ``PUT`` saves.  ``GET`` returns personal values, so ``do_GET``
-runs the Host check (``_check_host``) before it; ``PUT`` goes through ``_check_csrf``.
-Nothing here logs a value.
+``saved: false``) plus a local ``suggested`` title while the profile has none -- the prefill is
+never written, only a user ``PUT`` saves.  ``do_GET`` runs the Host check (``_check_host``)
+before it; ``PUT`` goes through ``_check_csrf``.  Nothing here logs a value.
 """
 
 from __future__ import annotations
@@ -16,32 +20,25 @@ from http import HTTPStatus
 from urllib.parse import parse_qs, urlsplit
 
 from ...resume_display import (
-    KINDS,
+    LEGACY_CONTACT_KEYS,
     SPACING_DEFAULT,
     SPACING_MAX,
     SPACING_MIN,
-    ContactEntry,
     DisplaySettings,
-    Suggestion,
     load_display,
+    profile_title,
     save_display,
-    suggest,
+    suggest_title,
     valid_spacing,
 )
 
-_PUT_KEYS = frozenset({"name", "contact", "titles", "spacing_scale", "auto_fit"})
+_PUT_KEYS = frozenset({"titles", "spacing_scale", "auto_fit", *LEGACY_CONTACT_KEYS})
+#: The quiet note a ``PUT`` with an old ``name`` / ``contact`` key gets back.
+IGNORED_NOTE = "GigAI no longer stores your name or contact details; you type them when you generate a PDF."
 
 
-def _suggestion_json(suggestion: Suggestion) -> dict[str, object]:
-    return {
-        "name": suggestion.name,
-        "title": suggestion.title,
-        "contact": [{"kind": entry.kind, "value": entry.value} for entry in suggestion.contact],
-    }
-
-
-def suggestion_for_profile(backend: object, profile_id: str | None) -> Suggestion | None:
-    """The local prefill from a profile's pinned resume header; ``None`` when unreadable.
+def suggested_title(backend: object, profile_id: str | None) -> str | None:
+    """The local title prefill from a profile's pinned resume header; ``None`` when unreadable.
 
     ``profile_id=None`` reads the selected profile.  Never raises, never logs a value.
     """
@@ -54,26 +51,26 @@ def suggestion_for_profile(backend: object, profile_id: str | None) -> Suggestio
         from ...interview_prep.resume import current_resume
 
         _identity, data = current_resume(home_root=home_root, requested_target=target, gig_id=None, profile_id=profile_id or None)
-        return suggest(data.decode("utf-8", errors="replace"))
+        return suggest_title(data.decode("utf-8", errors="replace"))
     except Exception:  # noqa: BLE001 - a prefill is a convenience; any failure means "no suggestion"
         return None
 
 
-def settings_json(settings: DisplaySettings | None, profile_id: str | None, suggestion: Suggestion | None) -> dict[str, object]:
+def settings_json(settings: DisplaySettings | None, profile_id: str | None, suggestion: str | None, ignored: list[str] | None = None) -> dict[str, object]:
     body: dict[str, object] = {
         "schema_version": "scout-resume-display-response:1",
         "saved": settings is not None,
-        "name": settings.name if settings else "",
-        "contact": [{"kind": e.kind, "value": e.value} for e in (settings.contact if settings else ())],
         "titles": dict(settings.titles) if settings else {},
-        "title": (settings.titles.get(profile_id or "", "") if settings else ""),
+        "title": profile_title(settings, profile_id),
         "spacing_scale": settings.spacing_scale if settings else SPACING_DEFAULT,
         "auto_fit": settings.auto_fit if settings else True,
         "updated_at": settings.updated_at if settings else "",
-        "kinds": list(KINDS),
     }
-    if suggestion is not None:
-        body["suggested"] = _suggestion_json(suggestion)
+    if suggestion:
+        body["suggested"] = {"title": suggestion}
+    if ignored:
+        body["ignored"] = ignored
+        body["note"] = IGNORED_NOTE
     return body
 
 
@@ -93,13 +90,9 @@ class ResumeDisplayRoutesMixin:
         query = parse_qs(urlsplit(self.path).query, keep_blank_values=False)
         profile_id = (query.get("profile_id") or [None])[0]
         settings = load_display(home_root)
-        suggestion: Suggestion | None = None
-        needs_title = settings is not None and bool(profile_id) and not settings.titles.get(profile_id or "")
-        if settings is None or needs_title:
-            found = suggestion_for_profile(self._backend, profile_id)
-            if found is not None and settings is not None:
-                found = Suggestion(title=found.title)  # saved name/contact are never overridden
-            suggestion = found
+        suggestion = None
+        if not profile_title(settings, profile_id) and (settings is None or profile_id):
+            suggestion = suggested_title(self._backend, profile_id)
         self._write_json(HTTPStatus.OK, settings_json(settings, profile_id, suggestion))
 
     def _handle_put_resume_display(self) -> None:
@@ -116,27 +109,9 @@ class ResumeDisplayRoutesMixin:
         if unknown:
             self._error(HTTPStatus.UNPROCESSABLE_ENTITY, "unknown_key", f"unknown key: {unknown[0]}")
             return
+        # 0110-046: an older client's name / contact are accepted and dropped unread.
+        ignored = sorted(key for key in LEGACY_CONTACT_KEYS if key in body)
         current = load_display(home_root) or DisplaySettings()
-        name = body.get("name", current.name)
-        if not isinstance(name, str):
-            self._error(HTTPStatus.UNPROCESSABLE_ENTITY, "wrong_type", "name must be a string")
-            return
-        contact = current.contact
-        if "contact" in body:
-            raw = body["contact"]
-            if type(raw) is not list:
-                self._error(HTTPStatus.UNPROCESSABLE_ENTITY, "wrong_type", "contact must be an array")
-                return
-            entries: list[ContactEntry] = []
-            for item in raw:
-                if type(item) is not dict or not isinstance(item.get("kind"), str) or not isinstance(item.get("value"), str):
-                    self._error(HTTPStatus.UNPROCESSABLE_ENTITY, "wrong_type", "each contact item needs a string kind and value")
-                    return
-                if item["kind"] not in KINDS:
-                    self._error(HTTPStatus.UNPROCESSABLE_ENTITY, "bad_enum", "contact kind is not supported")
-                    return
-                entries.append(ContactEntry(item["kind"], item["value"]))
-            contact = tuple(entries)
         titles = dict(current.titles)
         if "titles" in body:
             raw_titles = body["titles"]
@@ -156,11 +131,11 @@ class ResumeDisplayRoutesMixin:
             self._error(HTTPStatus.UNPROCESSABLE_ENTITY, "wrong_type", "auto_fit must be true or false")
             return
         try:
-            saved = save_display(home_root, DisplaySettings(name, contact, titles, spacing_scale=float(spacing), auto_fit=auto_fit))
+            saved = save_display(home_root, DisplaySettings(titles, spacing_scale=float(spacing), auto_fit=auto_fit))
         except OSError:
             self._error(HTTPStatus.INTERNAL_SERVER_ERROR, "display_write_failed", "could not save the resume display settings")
             return
-        self._write_json(HTTPStatus.OK, settings_json(saved, None, None))
+        self._write_json(HTTPStatus.OK, settings_json(saved, None, None, ignored))
 
 
-__all__ = ["ResumeDisplayRoutesMixin", "settings_json"]
+__all__ = ["IGNORED_NOTE", "ResumeDisplayRoutesMixin", "settings_json"]

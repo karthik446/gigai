@@ -1,16 +1,18 @@
-"""0110-003 P3: ``POST /api/tailored-resumes/pdf`` over HTTP against the real supervised server.
+"""0110-003 P3 / 0110-046: ``POST /api/tailored-resumes/pdf`` over HTTP against the real supervised server.
 
-Tailor once (offline fixtures), then: (a) empty settings -> a name-only PDF (no contact line printed); (b) after ``PUT /api/resume-display`` the PDF carries the
-saved contact line; ``application/pdf`` + ``Content-Disposition: attachment`` named
-``<name>-resume-<company>.pdf``; (c) unknown job -> 404 ``tailored_resume_not_found``; (d) 422 shape
-errors; (e) CSRF / Host rejections.  A second journey (0110-006): the
-fixture model's lossy marker returns the operator's weaker Staff and DSAR
-rewrites, and the PDF prints the ORIGINAL lines.
+Tailor once (offline fixtures), then: (a) no ``header`` -> a PDF with no header (GigAI stores no name or
+contact details), named ``<company>-<role>-<YYYY-MM-DD>.pdf``; (b) the Generate PDF form's ``header`` fills
+this one PDF (name, saved per-profile title, contact line) and the response carries none of it (the PDF
+bytes aside); an old ``PUT /api/resume-display`` name/contact is ignored and never prints; (c) unknown job
+-> 404 ``tailored_resume_not_found``; (d) 422 shape errors, also for a bad ``header``, never echoing a
+value; (e) CSRF / Host rejections.  A second journey (0110-006): the fixture model's lossy marker returns
+the operator's weaker Staff and DSAR rewrites, and the PDF prints the ORIGINAL lines.
 """
 
 from __future__ import annotations
 
 import io
+import re
 from pathlib import Path
 
 import httpx
@@ -21,7 +23,6 @@ from click.testing import CliRunner
 
 from gigai.cli import cli
 from gigai.scout.find_jobs.bindings import TEST_MODEL_LOSSY_MARKER, TEST_MODEL_LOSSY_REWRITES
-from gigai.scout.resume_pdf import pdf_file_name
 
 from tests.api_e2e.after_journey import assert_clean_and_healthy
 from tests.api_e2e.harness import (
@@ -34,10 +35,24 @@ from tests.api_e2e.harness import (
 )
 
 _JOB = {"job_url": "https://boards.greenhouse.io/acme/jobs/101"}
+#: Synthetic marker values (0110-046).
+_FORM = {
+    "name": "Zora Quillfeather", "email": "zora.q@example.invalid", "phone": "555-0142-ZQ",
+    "location": "Nowhere, ZZ", "linkedin": "linkedin.com/in/zq-invalid", "link": "https://zq.example.invalid/",
+}
+_MARKERS = ("Zora", "Quillfeather", "zora.q@example.invalid", "555-0142-ZQ", "zq-invalid", "zq.example.invalid", "Nowhere, ZZ")
 
 
 def _text(pdf: bytes) -> str:
     return "\n".join(page.extract_text() for page in PdfReader(io.BytesIO(pdf)).pages)
+
+
+def _no_marker(response: httpx.Response, *, body_too: bool = True) -> None:
+    headers = "\n".join(f"{key}: {value}" for key, value in response.headers.items())
+    for marker in _MARKERS:
+        assert marker not in headers, (marker, headers)
+        if body_too:
+            assert marker not in response.text, marker
 
 
 def test_tailored_resume_pdf_journey(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -52,31 +67,35 @@ def test_tailored_resume_pdf_journey(tmp_path: Path, monkeypatch: pytest.MonkeyP
         payload = tailored.json()
         key = {"profile_id": payload["resume"]["profile_id"], "job_identity": payload["job"]["job_identity"]}
         assert payload["job"]["company"] == "Acme"
+        expected_name = re.compile(r'attachment; filename="acme-[a-z0-9-]*\d{4}-\d{2}-\d{2}\.pdf"')
 
-        # (a) empty settings: still a PDF, name-only (legacy header line as the name fallback), no contact line.
-        header = payload["result"]["header"]
-        fallback = header[0]["text"] if header else ""
+        # (a) no form: no header at all; the file is named after the company, role and date.
         assert client.get("/api/resume-display").json()["saved"] is False
         first = client.post("/api/tailored-resumes/pdf", json=key)
         assert first.status_code == 200, first.text
         assert first.headers["content-type"] == "application/pdf"
-        assert first.headers["content-disposition"] == f'attachment; filename="{pdf_file_name(fallback, "Acme")}"'
+        assert expected_name.fullmatch(first.headers["content-disposition"]), first.headers["content-disposition"]
         assert int(first.headers["content-length"]) == len(first.content) and first.content.startswith(b"%PDF")
         text = _text(first.content)
         assert "|" not in text and "@" not in text
-        assert not (home / "scout" / "resume-display.json").exists(), "rendering must not save the prefill"
+        assert not (home / "scout" / "resume-display.json").exists(), "rendering saves nothing"
 
-        # (b) saved settings print.
-        saved = client.put(
-            "/api/resume-display",
-            json={"name": "Kar Ohm", "contact": [{"kind": "email", "value": "kar@example.test"}], "titles": {key["profile_id"]: "Staff Engineer"}},
-        )
-        assert saved.status_code == 200, saved.text
-        second = client.post("/api/tailored-resumes/pdf", json=key)
+        # (b) the Generate PDF form fills this PDF; an old client's saved name/contact are ignored.
+        legacy = client.put("/api/resume-display", json={"name": "Kar Ohm", "contact": [{"kind": "email", "value": "kar@example.test"}], "titles": {key["profile_id"]: "Staff Engineer"}})
+        assert legacy.status_code == 200 and legacy.json()["ignored"] == ["contact", "name"] and "note" in legacy.json()
+        stored = (home / "scout" / "resume-display.json").read_text()
+        assert "Kar Ohm" not in stored and "kar@example.test" not in stored and "Staff Engineer" in stored
+        headerless = client.post("/api/tailored-resumes/pdf", json=key)
+        assert "Kar Ohm".upper() not in _text(headerless.content) and "kar@example.test" not in _text(headerless.content)
+        second = client.post("/api/tailored-resumes/pdf", json={**key, "header": _FORM})
         assert second.status_code == 200 and second.headers["content-type"] == "application/pdf"
-        assert second.headers["content-disposition"] == 'attachment; filename="kar-ohm-resume-acme.pdf"'
+        assert expected_name.fullmatch(second.headers["content-disposition"])
+        _no_marker(second, body_too=False)
         text = _text(second.content)
-        assert "kar@example.test" in text and "Staff Engineer" in text
+        assert text.startswith("ZORA QUILLFEATHER\nStaff Engineer\nzora.q@example.invalid | 555-0142-ZQ | Nowhere, ZZ | linkedin.com/in/zq-invalid | zq.example.invalid")
+        assert len(PdfReader(io.BytesIO(second.content)).pages) == len(PdfReader(io.BytesIO(headerless.content)).pages)
+        name_only = client.post("/api/tailored-resumes/pdf", json={**key, "header": {"name": "Zora Quillfeather"}})
+        assert _text(name_only.content).startswith("ZORA QUILLFEATHER\nStaff Engineer\n") and "|" not in _text(name_only.content).split("\n")[2]
 
         # (b2) 0110-017: with auto fit off the PDF follows the saved spacing scale.
         pdfs = []
@@ -88,15 +107,28 @@ def test_tailored_resume_pdf_journey(tmp_path: Path, monkeypatch: pytest.MonkeyP
         assert pdfs[0] != pdfs[1]
 
         # (c) not found.
-        missing = client.post("/api/tailored-resumes/pdf", json={**key, "job_identity": "https://example.test/none"})
+        missing = client.post("/api/tailored-resumes/pdf", json={**key, "job_identity": "https://example.test/none", "header": _FORM})
         assert missing.status_code == 404 and missing.json()["error"]["code"] == "tailored_resume_not_found"
+        _no_marker(missing)
         ephemeral = client.post("/api/tailored-resumes/pdf", json={**key, "profile_id": "ephemeral"})
         assert ephemeral.status_code == 404 and ephemeral.json()["error"]["code"] == "tailored_resume_not_found"
 
-        # (d) shape errors.
-        for bad in ({}, {"profile_id": "x"}, {**key, "extra": 1}, {"profile_id": 1, "job_identity": "j"}, {**key, "profile_id": "../x"}):
+        # (d) shape errors, and a bad form: typed 422s that never echo a value.
+        for bad in ({}, {"profile_id": "x"}, {**key, "extra": 1}, {"profile_id": 1, "job_identity": "j"}, {**key, "profile_id": "../x"}, {"header": _FORM}):
             response = client.post("/api/tailored-resumes/pdf", json=bad)
             assert response.status_code == 422 and response.json()["error"]["code"] == "invalid_value", (bad, response.text)
+            _no_marker(response)
+        for header, code in (
+            ("Zora Quillfeather", "wrong_type"),
+            ({**_FORM, "phone": 5550142}, "wrong_type"),
+            ({**_FORM, "fax": "555-0142-ZQ"}, "unknown_key"),
+            ({**_FORM, "name": "Zora Quillfeather " * 20}, "invalid_value"),
+            ({**_FORM, "email": "zora.q@example.invalid\nX"}, "invalid_value"),
+        ):
+            response = client.post("/api/tailored-resumes/pdf", json={**key, "header": header})
+            assert response.status_code == 422 and response.json()["error"]["code"] == code, (header, response.text)
+            _no_marker(response)
+            assert "fax" not in response.json()["error"]["message"]
 
         # (e) CSRF / Host.
         url = f"{server.base_url}/api/tailored-resumes/pdf"
@@ -104,14 +136,25 @@ def test_tailored_resume_pdf_journey(tmp_path: Path, monkeypatch: pytest.MonkeyP
         assert wrong_origin.status_code == 403 and wrong_origin.json()["error"]["code"] == "forbidden_origin"
         wrong_type = httpx.post(url, content=b"{}", headers={"Content-Type": "text/plain"})
         assert wrong_type.status_code == 415
-        wrong_host = httpx.post(url, json=key, headers={"Host": "evil.example.test"})
+        wrong_host = httpx.post(url, json={**key, "header": _FORM}, headers={"Host": "evil.example.test"})
         assert wrong_host.status_code == 403 and wrong_host.json()["error"]["code"] == "forbidden_origin"
         assert not wrong_host.content.startswith(b"%PDF")
+        _no_marker(wrong_host)
 
         workpad = resolve_workpad_path(home, target)
     finally:
         stop_server(server)
 
+    # The form's values were rendered and dropped: in no file under the home (the server log lives there) or target.
+    holders = [
+        (path, marker)
+        for root in (home, target)
+        for path in root.rglob("*")
+        if path.is_file() and not path.is_symlink()
+        for marker in _MARKERS
+        if marker.encode() in path.read_bytes()
+    ]
+    assert holders == [], f"the Generate PDF form's values must not be written anywhere: {holders}"
     assert_clean_and_healthy(workpad, home)
 
 

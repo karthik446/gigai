@@ -143,6 +143,6 @@ export function checkResume(fields) {
   return request("POST", "/api/resume/check", fields);
 }
 
-// 0110-013: the Resume display step reads and saves the PDF header through the
+// 0110-013: the Resume display step reads and saves the PDF title/layout through the
 // same two helpers as the settings panel (never a model endpoint).
 export { ApiError, getResumeDisplay, putResumeDisplay } from "../api.js";

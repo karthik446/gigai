@@ -1,4 +1,4 @@
-"""0110-013: the setup wizard's "Resume display" step, UI side.
+"""0110-013 / 0110-046: the setup wizard's "Resume display" step (title and layout only), UI side.
 
 The step's rules (wizardState.js, wizardFinish.js) run under the system
 ``node`` (LOUD skip when it is not on PATH); the JSX is checked by reading it.
@@ -23,11 +23,10 @@ const input = JSON.parse(process.argv[1]);
 const state = await import(input.stateUrl);
 const { finishSetup } = await import(input.finishUrl);
 const model = await import(input.modelUrl);
-const c = (kind, value) => ({ kind, value });
 
 const base = state.initialFields({ prefs: {}, config: null, selectedProfile: null, resumes: [] });
 const filled = { ...base, profileName: "Staff", resumeText: "Jane", titles: ["Staff Engineer"] };
-const draft = model.draftFromResponse({ saved: false, name: "", title: "", contact: [], suggested: { name: "Jane Doe", title: "Engineer", contact: [c("email", "j@x.io")] } });
+const draft = model.draftFromResponse({ saved: false, title: "", suggested: { title: "Engineer" } });
 
 async function run(fields) {
   const calls = [];
@@ -53,10 +52,10 @@ console.log(JSON.stringify({
   shouldSave: [state.shouldSaveDisplay(filled), state.shouldSaveDisplay(opened), state.shouldSaveDisplay(skipped)],
   body: state.displayBody(opened, "profile_1"),
   bodySkipped: state.displayBody(skipped, "profile_1"),
-  rowOpened: state.reviewRows(opened, []).find(([key]) => key === "PDF header"),
-  rowSkipped: state.reviewRows(skipped, []).find(([key]) => key === "PDF header"),
-  rowNever: state.reviewRows(filled, []).find(([key]) => key === "PDF header"),
-  rowEmpty: state.reviewRows({ ...opened, display: { name: "", title: "", contact: [], prefilled: false } }, []).find(([key]) => key === "PDF header"),
+  rowOpened: state.reviewRows(opened, []).find(([key]) => key === "PDF layout"),
+  rowSkipped: state.reviewRows(skipped, []).find(([key]) => key === "PDF layout"),
+  rowNever: state.reviewRows(filled, []).find(([key]) => key === "PDF layout"),
+  rowManual: state.reviewRows({ ...opened, display: { title: "", spacing_scale: 0.9, auto_fit: false, prefilled: false } }, []).find(([key]) => key === "PDF layout"),
   finishOpened: await run(opened),
   finishSkipped: await run(skipped),
   finishNever: await run(filled),
@@ -92,8 +91,6 @@ def test_the_step_follows_resume_and_is_never_a_gate(out: dict) -> None:
 def test_finish_saves_the_step_for_the_saved_profile_only_when_opened_and_not_skipped(out: dict) -> None:
     assert out["shouldSave"] == [False, True, False]
     expected = {
-        "name": "Jane Doe",
-        "contact": [{"kind": "email", "value": "j@x.io"}],
         "spacing_scale": 1.0,
         "auto_fit": True,
         "titles": {"profile_1": "Staff Engineer"},
@@ -105,11 +102,11 @@ def test_finish_saves_the_step_for_the_saved_profile_only_when_opened_and_not_sk
     assert out["finishNever"] == [["putSetup"]]
 
 
-def test_the_review_shows_the_pdf_header(out: dict) -> None:
-    assert out["rowOpened"] == ["PDF header", "Jane Doe · Staff Engineer · j@x.io"]
+def test_the_review_shows_the_pdf_layout_and_never_a_name(out: dict) -> None:
+    assert out["rowOpened"] == ["PDF layout", "Staff Engineer · Auto fit"]
     assert out["rowSkipped"][1].startswith("(skipped")
     assert out["rowNever"][1].startswith("(skipped")
-    assert out["rowEmpty"] == ["PDF header", "(empty)"]
+    assert out["rowManual"] == ["PDF layout", "Spacing 0.90x"]
 
 
 def test_the_wizard_renders_the_step_with_a_skip_and_loads_the_saved_header() -> None:

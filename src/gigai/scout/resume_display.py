@@ -1,10 +1,15 @@
-"""Resume display settings: the name, contact line and per-profile title printed on a PDF.
+"""Resume display settings: the per-profile title and the PDF layout (0110-046: no personal data).
 
 Stored once per home at ``<home>/scout/resume-display.json`` (``scout-resume-display:1``),
-0600, display-only: nothing here ever feeds a model prompt or the network.  Reads are
-tolerant (missing, symlinked or malformed means "not saved"; a file written before 0110-017
-has no ``spacing_scale``/``auto_fit`` and reads as the defaults).  ``suggest`` is a local,
-pure prefill parser: it never writes and never overrides saved values.
+0600, display-only: nothing here ever feeds a model prompt or the network.  The file holds the
+per-profile ``titles``, ``spacing_scale`` and ``auto_fit``.  GigAI never stores the user's name or
+contact details (0110-046): a file written before 0.1.10.7 may still carry ``name`` / ``contact``;
+reads ignore them, any save drops them, and ``legacy_contact_fields`` counts them for the one-time
+cleanup.  The PDF header's name and contact items come from the Generate PDF form for ONE render
+(``parse_header_form`` + ``form_header``) and are never written anywhere.  Reads are tolerant
+(missing, symlinked or malformed means "not saved"; a file written before 0110-017 has no
+``spacing_scale``/``auto_fit`` and reads as the defaults).  ``suggest_title`` is a local, pure
+prefill parser: it never writes and never overrides a saved title.
 """
 
 from __future__ import annotations
@@ -12,6 +17,7 @@ from __future__ import annotations
 import json
 import os
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from pathlib import Path
@@ -19,24 +25,18 @@ from pathlib import Path
 from gigai.scout.find_jobs.discovery.storage import atomic_write
 
 SCHEMA_VERSION = "scout-resume-display:1"
-KINDS: tuple[str, ...] = ("location", "work_authorization", "linkedin", "github", "link", "email", "phone")
-MAX_CONTACT = 12
 MAX_VALUE = 200
 #: The PDF spacing unit's scale (0110-017): the Resume display slider's range and default.
 SPACING_MIN, SPACING_MAX, SPACING_DEFAULT = 0.7, 1.4, 1.0
+#: The keys a file written before 0.1.10.7 may still hold: never read, dropped by any save.
+LEGACY_CONTACT_KEYS: tuple[str, ...] = ("name", "contact")
+#: The Generate PDF form's fields (0110-046), in the order the contact line prints them after the name.
+HEADER_FIELDS: tuple[str, ...] = ("name", "email", "phone", "location", "linkedin", "link")
 _CONTROL = re.compile(r"[\x00-\x1f\x7f]")
 
 
 @dataclass(frozen=True)
-class ContactEntry:
-    kind: str
-    value: str
-
-
-@dataclass(frozen=True)
 class DisplaySettings:
-    name: str = ""
-    contact: tuple[ContactEntry, ...] = ()
     titles: dict[str, str] = field(default_factory=dict)
     updated_at: str = ""
     spacing_scale: float = SPACING_DEFAULT
@@ -56,11 +56,14 @@ class PdfHeader:
     contact: tuple[ContactItem, ...] = ()
 
 
-@dataclass(frozen=True)
-class Suggestion:
-    name: str = ""
-    title: str = ""
-    contact: tuple[ContactEntry, ...] = ()
+class HeaderFormError(ValueError):
+    """The Generate PDF form's values are not usable; ``code`` is the API error code.
+
+    Messages name a field and the rule, never a value."""
+
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(message)
+        self.code = code
 
 
 def display_path(home_root: Path) -> Path:
@@ -81,27 +84,14 @@ def _spacing(value: object) -> float:
 
 
 def normalize(settings: DisplaySettings) -> DisplaySettings:
-    """Drop empty values, unknown kinds and duplicates of single-use kinds; keep order.  An out-of-range
-    spacing scale reads as the default."""
+    """Drop empty titles; an out-of-range spacing scale reads as the default."""
 
-    seen: set[str] = set()
-    contact: list[ContactEntry] = []
-    for entry in settings.contact:
-        value = _clean(entry.value)
-        if not value or entry.kind not in KINDS or (entry.kind != "link" and entry.kind in seen):
-            continue
-        seen.add(entry.kind)
-        contact.append(ContactEntry(entry.kind, value))
-        if len(contact) >= MAX_CONTACT:
-            break
     titles = {key: title for key, value in settings.titles.items() if isinstance(key, str) and key and (title := _clean(value))}
     auto_fit = settings.auto_fit if type(settings.auto_fit) is bool else True
-    return DisplaySettings(_clean(settings.name), tuple(contact), titles, settings.updated_at, _spacing(settings.spacing_scale), auto_fit)
+    return DisplaySettings(titles, settings.updated_at, _spacing(settings.spacing_scale), auto_fit)
 
 
-def load_display(home_root: Path) -> DisplaySettings | None:
-    """The saved settings, or ``None`` when nothing usable is saved."""
-
+def _read_raw(home_root: Path) -> dict[str, object] | None:
     path = display_path(home_root)
     try:
         if path.is_symlink() or not path.is_file():
@@ -111,20 +101,44 @@ def load_display(home_root: Path) -> DisplaySettings | None:
         return None
     if type(raw) is not dict or raw.get("schema_version") != SCHEMA_VERSION:
         return None
-    contact: list[ContactEntry] = []
-    if type(raw.get("contact")) is list:
-        for item in raw["contact"]:
-            if type(item) is dict and isinstance(item.get("kind"), str) and isinstance(item.get("value"), str):
-                contact.append(ContactEntry(item["kind"], item["value"]))
+    return raw
+
+
+def load_display(home_root: Path) -> DisplaySettings | None:
+    """The saved settings, or ``None`` when nothing usable is saved.  A legacy name/contact is ignored."""
+
+    raw = _read_raw(home_root)
+    if raw is None:
+        return None
     titles = raw.get("titles") if type(raw.get("titles")) is dict else {}
     updated = raw.get("updated_at") if isinstance(raw.get("updated_at"), str) else ""
     spacing = raw.get("spacing_scale", SPACING_DEFAULT)
     auto_fit = raw.get("auto_fit", True)
-    return normalize(DisplaySettings(_clean(raw.get("name")), tuple(contact), dict(titles), updated, spacing, auto_fit))
+    return normalize(DisplaySettings(dict(titles), updated, spacing, auto_fit))
+
+
+def legacy_contact_fields(home_root: Path) -> dict[str, int]:
+    """How many personal values a pre-0.1.10.7 file still holds: ``{"name": 0|1, "contact": <items>}``.
+
+    Counts only (the one-time cleanup's report); ``{}`` when the file holds none or cannot be read."""
+
+    raw = _read_raw(home_root)
+    if raw is None:
+        return {}
+    found: dict[str, int] = {}
+    if isinstance(raw.get("name"), str) and raw["name"].strip():
+        found["name"] = 1
+    contact = raw.get("contact")
+    items = [item for item in contact if type(item) is dict and isinstance(item.get("value"), str) and item["value"].strip()] if type(contact) is list else []
+    if items:
+        found["contact"] = len(items)
+    if not found and any(key in raw for key in LEGACY_CONTACT_KEYS):
+        found["empty_fields"] = sum(1 for key in LEGACY_CONTACT_KEYS if key in raw)
+    return found
 
 
 def save_display(home_root: Path, settings: DisplaySettings, *, now: datetime | None = None) -> DisplaySettings:
-    """Normalize and write atomically, 0600 (directory 0700 when created)."""
+    """Normalize and write atomically, 0600 (directory 0700 when created).  Only layout and titles are written."""
 
     clean = normalize(settings)
     stamp = (now or datetime.now(timezone.utc)).isoformat().replace("+00:00", "Z")
@@ -135,8 +149,6 @@ def save_display(home_root: Path, settings: DisplaySettings, *, now: datetime | 
     path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     payload = {
         "schema_version": SCHEMA_VERSION,
-        "name": clean.name,
-        "contact": [{"kind": e.kind, "value": e.value} for e in clean.contact],
         "titles": clean.titles,
         "spacing_scale": clean.spacing_scale,
         "auto_fit": clean.auto_fit,
@@ -147,30 +159,59 @@ def save_display(home_root: Path, settings: DisplaySettings, *, now: datetime | 
     return clean
 
 
-# --- header for the PDF --------------------------------------------------------------------
+# --- the Generate PDF form (0110-046): one render's header, never stored ------------------
 
 _SCHEME = re.compile(r"\A[a-z][a-z0-9+.-]*://", re.IGNORECASE)
 
 
-def _contact_item(entry: ContactEntry) -> ContactItem:
-    value = entry.value
-    if entry.kind == "email":
-        return ContactItem(value, "mailto:" + value)
-    if entry.kind in {"linkedin", "github", "link"}:
-        if _SCHEME.match(value):
-            return ContactItem(_SCHEME.sub("", value).rstrip("/"), value)
-        return ContactItem(value.rstrip("/"), "https://" + value)
-    return ContactItem(value, None)
+def parse_header_form(raw: object) -> dict[str, str]:
+    """The form's values, trimmed, or ``HeaderFormError``.  Pure: no I/O, never logs.
+
+    ``raw`` is an object of strings keyed by ``HEADER_FIELDS`` (each optional, at most ``MAX_VALUE``
+    characters, one line).  Errors name the field and the rule, never the value."""
+
+    if type(raw) is not dict:
+        raise HeaderFormError("wrong_type", "header must be an object of strings: " + ", ".join(HEADER_FIELDS))
+    if any(key not in HEADER_FIELDS for key in raw):
+        raise HeaderFormError("unknown_key", "header has an unknown field (allowed: " + ", ".join(HEADER_FIELDS) + ")")
+    values: dict[str, str] = {}
+    for key in HEADER_FIELDS:
+        value = raw.get(key, "")
+        if not isinstance(value, str):
+            raise HeaderFormError("wrong_type", f"header.{key} must be a string")
+        if len(value) > MAX_VALUE:
+            raise HeaderFormError("invalid_value", f"header.{key} is longer than {MAX_VALUE} characters")
+        if _CONTROL.search(value):
+            raise HeaderFormError("invalid_value", f"header.{key} must be one line")
+        values[key] = value.strip()
+    return values
 
 
-def pdf_header(settings: DisplaySettings | None, profile_id: str | None, fallback_name: str = "") -> PdfHeader:
-    """Saved values only; unsaved contact is never printed.  Name falls back to ``fallback_name``."""
+def _link_item(value: str) -> ContactItem:
+    if _SCHEME.match(value):
+        return ContactItem(_SCHEME.sub("", value).rstrip("/"), value)
+    return ContactItem(value.rstrip("/"), "https://" + value)
 
-    if settings is None:
-        return PdfHeader(name=_clean(fallback_name))
-    name = settings.name or _clean(fallback_name)
-    title = settings.titles.get(profile_id or "", "")
-    return PdfHeader(name, title, tuple(_contact_item(entry) for entry in settings.contact))
+
+def form_header(values: Mapping[str, str], title: str = "") -> PdfHeader:
+    """The PDF header from the form's values (``parse_header_form``) and the saved per-profile title."""
+
+    contact: list[ContactItem] = []
+    for key in HEADER_FIELDS[1:]:
+        value = values.get(key, "")
+        if not value:
+            continue
+        if key == "email":
+            contact.append(ContactItem(value, "mailto:" + value))
+        elif key in ("linkedin", "link"):
+            contact.append(_link_item(value))
+        else:
+            contact.append(ContactItem(value, None))
+    return PdfHeader(values.get("name", ""), _clean(title), tuple(contact))
+
+
+def profile_title(settings: DisplaySettings | None, profile_id: str | None) -> str:
+    return settings.titles.get(profile_id or "", "") if settings is not None else ""
 
 
 # --- local prefill parser ------------------------------------------------------------------
@@ -220,73 +261,55 @@ def _looks_like_name(line: str) -> bool:
     return all(_NAME_WORD.match(word) and (word[0].isupper()) for word in words)
 
 
-def _classify(segment: str) -> ContactEntry | None:
+def _is_contact(segment: str) -> bool:
+    """A header segment that is a contact value (email, phone, link, work authorization, location)."""
+
     text = segment.strip().strip("*_").strip()
     if not text:
-        return None
-    if _EMAIL.match(text):
-        return ContactEntry("email", text)
-    if _PHONE.match(text):
-        return ContactEntry("phone", text)
-    lowered = text.lower()
-    if "linkedin.com/" in lowered and _URLISH.match(text):
-        return ContactEntry("linkedin", text)
-    if "github.com/" in lowered and _URLISH.match(text):
-        return ContactEntry("github", text)
-    if _URLISH.match(text):
-        return ContactEntry("link", text)
+        return False
+    if _EMAIL.match(text) or _PHONE.match(text) or _URLISH.match(text):
+        return True
     if _WORKAUTH.search(text) and len(text.split()) <= 8:
-        return ContactEntry("work_authorization", text)
-    if _LOCATION.match(text) and not _TITLE_WORD.search(text):
-        return ContactEntry("location", text)
-    return None
+        return True
+    return bool(_LOCATION.match(text) and not _TITLE_WORD.search(text))
 
 
-def suggest(resume_text: str) -> Suggestion:
-    """A local prefill from the resume's header block only.  Pure: no model, no network, no writes.
+def suggest_title(resume_text: str) -> str:
+    """A local title prefill from the resume's header block only.  Pure: no model, no network, no writes.
 
-    Segments that match nothing are dropped, never guessed."""
+    The first one-segment header line that reads like a job title (a resume stored since 0.1.10.7
+    has no name or contact lines; an older one's are skipped, never returned)."""
 
     block = _header_block(resume_text)
     if not block:
-        return Suggestion()
-    name = block[0] if _looks_like_name(block[0]) else ""
-    title = ""
-    contact: list[ContactEntry] = []
-    seen: set[str] = set()
-    for line in block[1 if name else 0 :]:
+        return ""
+    for line in block[1 if _looks_like_name(block[0]) else 0 :]:
         line = _MD_LINK.sub(lambda m: m.group(2), line)
         segments = [s for s in _SPLIT.split(line) if s.strip()]
-        if not title and len(segments) == 1 and len(line.split()) <= 8 and not line.rstrip().endswith(".") and _TITLE_WORD.search(line) and _classify(line) is None:
-            title = _strip_markers(line)
-            continue
-        for segment in segments:
-            entry = _classify(segment)
-            if entry is None or (entry.kind != "link" and entry.kind in seen) or (entry.kind, entry.value) in {(c.kind, c.value) for c in contact}:
-                continue
-            seen.add(entry.kind)
-            contact.append(entry)
-    order = {kind: index for index, kind in enumerate(KINDS)}
-    contact.sort(key=lambda entry: order[entry.kind])
-    return Suggestion(name, title, tuple(contact))
+        if len(segments) == 1 and len(line.split()) <= 8 and not line.rstrip().endswith(".") and _TITLE_WORD.search(line) and not _is_contact(line):
+            return _strip_markers(line)
+    return ""
 
 
 __all__ = [
-    "ContactEntry",
     "ContactItem",
     "DisplaySettings",
-    "KINDS",
+    "HEADER_FIELDS",
+    "HeaderFormError",
+    "LEGACY_CONTACT_KEYS",
     "PdfHeader",
     "SCHEMA_VERSION",
     "SPACING_DEFAULT",
     "SPACING_MAX",
     "SPACING_MIN",
-    "Suggestion",
     "display_path",
+    "form_header",
+    "legacy_contact_fields",
     "load_display",
     "normalize",
-    "pdf_header",
+    "parse_header_form",
+    "profile_title",
     "save_display",
-    "suggest",
+    "suggest_title",
     "valid_spacing",
 ]

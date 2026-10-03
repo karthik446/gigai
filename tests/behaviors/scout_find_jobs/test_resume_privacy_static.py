@@ -15,7 +15,8 @@ next change honest, without running any GigAI code:
    through ``proposal_execution.resolve_model_adapter`` (looked up as a
    module attribute), so the test transport and the payload test see every
    call (``interview_prep/categories.py`` used to bypass it).
-4. DISPLAY FIELDS: the local display settings (name, contact line) are
+4. DISPLAY FIELDS: the local display settings (title, layout; since
+   0110-046 no name or contact line, and the Generate PDF form's parser) are
    imported only by the PDF renderer and the settings/PDF API, never by a
    model-bound module.
 """
@@ -42,13 +43,12 @@ _READER_ALLOWLIST: dict[tuple[str, str, str], str] = {
     ("gigai.scout.find_jobs.api.extract", "ResumeExtractRoutesMixin._handle_post_resume_check", "read_stored_resume"): "local contact-details check, no model",
     ("gigai.scout.find_jobs.api.profiles", "ProfilesRoutesMixin._resolve_resume_ref", "read_record"): "hashed only",
     ("gigai.scout.find_jobs.api.rank", "_resolve", "read_record"): "model_rank.rank_postings -> rank_digest.resume_digest",
-    ("gigai.scout.find_jobs.api.resume_display", "suggestion_for_profile", "current_resume"): "local prefill parser, no model",
+    ("gigai.scout.find_jobs.api.resume_display", "suggested_title", "current_resume"): "local title prefill parser, no model",
     ("gigai.scout.find_jobs.api.run_reads", "_resume_text", "read_record"): "local run reads (RowJoins), never sent",
     ("gigai.scout.find_jobs.market_acquisition", "_read_resume_text_for_rank", "read_record"): "returned to the rank step below",
     ("gigai.scout.find_jobs.market_acquisition", "_rank_rows_with_status", "_read_resume_text_for_rank"): "model_rank.rank_postings -> rank_digest.resume_digest",
     ("gigai.scout.find_jobs.resume_input", "resolve_resume", "resume_for_profile"): "returned to its callers (allowlisted here)",
     ("gigai.scout.find_jobs.resume_input", "resume_for_profile", "read_pinned_resume"): "returned to its callers (allowlisted here)",
-    ("gigai.scout.resume_pdf", "saved_header", "current_resume"): "local PDF header prefill (0110-032), never sent to a model",
     ("gigai.scout.interview_prep.prep", "build_prep", "current_resume"): "categories._prompt (model_resume)",
     ("gigai.scout.profile_records", "_resolve_newest_resume_for_gig", "read_record"): "hashed only",
     ("gigai.scout.proposal_execution", "_assess_node_body", "_read_pinned_resume"): "assessment_core.render_assess_prompt (model_resume)",
@@ -73,10 +73,7 @@ _BUILDERS: dict[tuple[str, str], frozenset[str]] = {
 _DISPLAY_IMPORTERS: dict[str, frozenset[str]] = {
     "gigai.scout.resume_display": frozenset({
         "gigai.scout.resume_pdf", "gigai.scout.find_jobs.api.resume_display", "gigai.scout.find_jobs.api.tailored_resumes",
-        # 0110-034: ``known_names`` reads the saved name for the story bank's LOCAL personal-info check
-        # (an answer holding it is refused); the name is never put in a prompt. ``story_bank.py`` itself,
-        # which builds the model-bound bank lines, does not import the display settings.
-        "gigai.scout.find_jobs.api.story_bank",
+        # 0110-046: the story bank no longer reads a saved name (GigAI stores none).
     }),
     "gigai.scout.find_jobs.api.resume_display": frozenset({
         "gigai.scout.find_jobs.api.server", "gigai.scout.find_jobs.api.tailored_resumes",

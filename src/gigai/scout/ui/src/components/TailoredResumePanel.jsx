@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ApiError, getResumeDisplay, getTailoredResumes, postTailoredResume, postTailoredResumePdf, putTailoredResumeLine } from "../api.js";
+import { ApiError, getTailoredResumes, postTailoredResume, postTailoredResumePdf, putTailoredResumeLine } from "../api.js";
 import { dateTimeLabel } from "../jobModel.js";
-import { hasContactLine, savedHeaderLine } from "../resumeDisplayModel.js";
-import { SETTINGS_HASH } from "../routing.js";
+import GeneratePdfForm from "./GeneratePdfForm.jsx";
 import {
   changeSummary,
   inlineSegments,
@@ -29,9 +28,12 @@ import {
 //   preview  tailoredResumeModel.previewLines(result): every content line is
 //            the response's own text, with its refs (the cited resume line /
 //            answer text) on hover and on click. Nothing is fabricated here.
-//   download POST /api/tailored-resumes/pdf -> the PDF, saved under the
-//            server's Content-Disposition name (0.1.10-003; the .md link is
-//            gone from the UI, the API's `markdown` field stays)
+//   download "Generate PDF" opens the form (GeneratePdfForm.jsx, 0110-046):
+//            name and contact details typed for this PDF only, sent in the
+//            one POST /api/tailored-resumes/pdf body and never stored; the
+//            PDF is saved under the server's Content-Disposition name
+//            (<company>-<role>-<date>.pdf). The .md link is gone from the UI,
+//            the API's `markdown` field stays
 //
 // uat-batch1 (N6): the right-hand column is gone, and with it this panel's
 // own button and explainer. "Tailor resume" is one of the two actions at
@@ -43,17 +45,6 @@ import {
 // A posting without a URL (a pasted-text quick assessment: the store never
 // serializes the text) cannot be tailored from here (answersModel.tailorGate
 // says so on the action); a stored one for it still shows.
-function saveBlob(blob, fileName) {
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
-  anchor.href = url;
-  anchor.download = fileName;
-  document.body.appendChild(anchor);
-  anchor.click();
-  document.body.removeChild(anchor);
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
-}
-
 function errorView(error) {
   const detail = error.detail || error.message || String(error);
   if (error.code === "model_output_invalid") {
@@ -412,47 +403,16 @@ export default function TailoredResumePanel({ state, profileLabel, questionPromp
   const promptFor = (id) => (questionPrompts && questionPrompts.get(id)) || null;
   const { stored, tailoring, elapsed, error } = state;
   const panel = useRef(null);
-  const [downloading, setDownloading] = useState(false);
-  const [downloadError, setDownloadError] = useState(null);
-  const [hasContact, setHasContact] = useState(true);
-  // 0110-013: the saved header on one line ("" while nothing is saved).
-  const [headerText, setHeaderText] = useState("");
+  // 0110-046: the Generate PDF form, open on request. Closing it drops what
+  // was typed (the form's state goes with it).
+  const [pdfOpen, setPdfOpen] = useState(false);
   const [choosing, setChoosing] = useState(false);
   const [choiceError, setChoiceError] = useState(null);
 
-  // Empty settings still download (name only); the panel then points at the
-  // settings section. A failed read just hides the hint.
-  useEffect(() => {
-    let live = true;
-    if (!stored) {
-      return undefined;
-    }
-    getResumeDisplay(state.profileId)
-      .then((response) => {
-        if (live) {
-          setHasContact(hasContactLine(response));
-          setHeaderText(savedHeaderLine(response));
-        }
-      })
-      .catch(() => {
-        if (live) {
-          setHasContact(true);
-          setHeaderText("");
-        }
-      });
-    return () => {
-      live = false;
-    };
-  }, [stored, state.profileId]);
-
-  const downloadPdf = useCallback(() => {
-    setDownloading(true);
-    setDownloadError(null);
-    postTailoredResumePdf({ profileId: state.profileId, jobIdentity: state.jobIdentity })
-      .then(({ blob, fileName }) => saveBlob(blob, fileName))
-      .catch((err) => setDownloadError(err.detail || err.message || String(err)))
-      .finally(() => setDownloading(false));
-  }, [state.profileId, state.jobIdentity]);
+  const renderPdf = useCallback(
+    (header) => postTailoredResumePdf({ profileId: state.profileId, jobIdentity: state.jobIdentity, header }),
+    [state.profileId, state.jobIdentity],
+  );
 
   // 0110-006: PUT one line's choice; the response replaces `stored`, so the
   // clean copy and the PDF follow. A 409 means a newer tailoring replaced this
@@ -496,32 +456,12 @@ export default function TailoredResumePanel({ state, profileLabel, questionPromp
       <div className="resume-toolbar">
         <h3>Tailored resume</h3>
         {stored && !tailoring && (
-          <button type="button" className="button small secondary" onClick={downloadPdf} disabled={downloading}>
-            {downloading ? "Preparing…" : "Download PDF"}
+          <button type="button" className="button small secondary" aria-expanded={pdfOpen} data-role="open-generate-pdf" onClick={() => setPdfOpen((open) => !open)}>
+            {pdfOpen ? "Close" : "Generate PDF"}
           </button>
         )}
       </div>
-      {stored && !tailoring && headerText && (
-        <div className="muted" data-role="pdf-header" style={{ fontSize: "0.82rem" }}>
-          PDF header: <span data-role="pdf-header-line">{headerText}</span> ·{" "}
-          <a href={`${SETTINGS_HASH}`} data-role="pdf-header-edit" onClick={() => setTimeout(() => document.getElementById("resume-display")?.scrollIntoView(), 0)}>
-            Edit
-          </a>
-        </div>
-      )}
-      {stored && !tailoring && !hasContact && (
-        <div className="muted" data-role="contact-hint" style={{ fontSize: "0.82rem" }}>
-          <a href={`${SETTINGS_HASH}`} onClick={() => setTimeout(() => document.getElementById("resume-display")?.scrollIntoView(), 0)}>
-            Add your contact line
-          </a>{" "}
-          to your PDF.
-        </div>
-      )}
-      {downloadError && (
-        <div className="callout danger" role="alert">
-          Could not make the PDF. {downloadError}
-        </div>
-      )}
+      {stored && !tailoring && pdfOpen && <GeneratePdfForm render={renderPdf} />}
       {error && (
         <div className="callout danger tailor-error" role="alert">
           <strong>{errorView(error).heading}.</strong> {errorView(error).body}

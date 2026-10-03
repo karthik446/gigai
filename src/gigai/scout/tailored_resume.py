@@ -20,7 +20,7 @@ from the model:
   ``resume_privacy.model_resume`` keeps (no name/contact lines, inline
   contact redacted), under their ORIGINAL ``R<n>`` numbers (gaps are
   fine); a copy or citation of a withheld line is rejected.  The output is
-  HEADERLESS: the PDF header comes from the local display settings, never
+  HEADERLESS: the PDF header comes from the Generate PDF form (0110-046), never
   from the model.  A stray ``header`` key in the answer is accepted and
   discarded (no retry spent); ``TailoredResume.header`` stays in the
   contract (empty for new results) so older stored results still parse.
@@ -1719,7 +1719,7 @@ def personal_info_found(text: str, *, names: Iterable[str] = ()) -> list[str]:
     The paste path's local check (``resume_pii.detect_contact_details``: email, phone,
     linkedin/github links, a street address), plus anything ``resume_privacy.redact_inline``
     would remove before a model sees the line (other links), plus ``name``: the line holds
-    one of ``names`` (the name saved for the PDF header) or, when no name is known, is
+    one of ``names`` (a name the caller knows; GigAI stores none, 0110-046) or, when no name is known, is
     strictly name-shaped (``resume_privacy.is_name_line``).  Local and pure: no model, no I/O.
     """
 
@@ -1753,8 +1753,8 @@ def custom_line_text(text: object, *, names: Iterable[str] = ()) -> str:
     if found:
         raise TailorError(
             "personal_info_refused",
-            f"text looks like a name or contact line ({', '.join(found)}); your name and contact details are added to the PDF "
-            "from the Resume display settings (PUT /api/resume-display), never from a resume line",
+            f"text looks like a name or contact line ({', '.join(found)}); GigAI stores no name or contact details: "
+            "you type them in Scout's Generate PDF form when you make the PDF, never in a resume line",
         )
     return clean
 

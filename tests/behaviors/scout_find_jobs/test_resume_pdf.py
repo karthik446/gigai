@@ -1,11 +1,11 @@
-"""0110-003 P2: the Typst PDF renderer (pypdf golden checks)."""
+"""0110-003 P2 / 0110-046: the Typst PDF renderer (pypdf golden checks), headerless PDFs and file names."""
 
 from __future__ import annotations
 
 import io
 import json
 import socket
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -33,7 +33,7 @@ def _result() -> TailoredResume:
     return TailoredResume.from_json(json.loads(FIXTURE.read_text()))
 
 
-def _pdf(header: PdfHeader = HEADER, result: TailoredResume | None = None) -> bytes:
+def _pdf(header: PdfHeader | None = HEADER, result: TailoredResume | None = None) -> bytes:
     return render_pdf(result or _result(), header, company="Northwind", timestamp=STAMP)
 
 
@@ -60,7 +60,8 @@ def test_name_first_pages_links_and_metadata() -> None:
     assert len(PdfReader(io.BytesIO(data)).pages) <= 2
     assert set(_uris(data)) == {"https://github.com/riley-example", "mailto:riley@example.test"}
     meta = PdfReader(io.BytesIO(data)).metadata
-    assert meta.title == "Riley Example resume Northwind" and meta.author == "Riley Example"
+    # 0110-046: the document title never carries the name (the author field of the user's own PDF does).
+    assert meta.title == "Resume Northwind" and meta.author == "Riley Example"
 
 
 def test_fonts_embedded_and_bytes_deterministic() -> None:
@@ -103,10 +104,30 @@ def test_render_makes_no_network_connection(monkeypatch: pytest.MonkeyPatch) -> 
     assert _pdf().startswith(b"%PDF")
 
 
+def test_a_headerless_pdf_prints_no_header_and_keeps_the_finished_pages() -> None:
+    """0110-046: an agent's / the CLI's PDF: no name, title or contact line, and a blank block of the header's height,
+    so it breaks pages where the PDF finished in the Generate PDF form does."""
+    blank = _pdf(None)
+    text = _text(blank)
+    assert blank.startswith(b"%PDF")
+    assert "RILEY" not in text and "|" not in text.split("\n")[0] and "@" not in text
+    assert text.split("\n")[0] == _text(_pdf(PdfHeader())).split("\n")[0], "the body starts with the same first line"
+    finished = _pdf(PdfHeader("Riley Example", "", (ContactItem("riley@example.test", "mailto:riley@example.test"),)))
+    pages = lambda data: len(PdfReader(io.BytesIO(data)).pages)  # noqa: E731
+    assert pages(blank) == pages(finished)
+    assert PdfReader(io.BytesIO(blank)).metadata.author in (None, "")
+
+
 def test_pdf_file_name() -> None:
-    assert pdf_file_name("Riley Example", "Northwind") == "riley-example-resume-northwind.pdf"
-    assert pdf_file_name("José Álvarez", "Acme, Inc.") == "jose-alvarez-resume-acme-inc.pdf"
-    assert pdf_file_name("", "Northwind") == "resume-northwind.pdf"
-    assert pdf_file_name("Riley Example", "") == "riley-example-resume.pdf"
-    assert pdf_file_name("", "") == "resume.pdf"
-    assert len(pdf_file_name("x" * 100, "y" * 100)) <= 40 + 40 + len("-resume-.pdf")
+    """0110-046: <company>-<role>-<YYYY-MM-DD>.pdf, slugified and capped; never the user's name."""
+    day = date(2026, 10, 2)
+    assert pdf_file_name("Prefect", "Director of Engineering", day) == "prefect-director-of-engineering-2026-10-02.pdf"
+    assert pdf_file_name("Acme, Inc.", "Señor Ingeniero (Platform)", day) == "acme-inc-senor-ingeniero-platform-2026-10-02.pdf"
+    assert pdf_file_name("", "", day) == "resume-2026-10-02.pdf"
+    assert pdf_file_name("Northwind", "", day) == "northwind-2026-10-02.pdf"
+    assert pdf_file_name("", "Staff Engineer", day) == "staff-engineer-2026-10-02.pdf"
+    assert pdf_file_name("日本", "!!!", day) == "resume-2026-10-02.pdf"
+    long = pdf_file_name("c" * 100, "r" * 100, day)
+    assert long == "c" * 40 + "-" + "r" * 60 + "-2026-10-02.pdf" and len(long) <= 40 + 60 + len("--2026-10-02.pdf")
+    for name in (pdf_file_name("../../etc", "x/y\\z", day), pdf_file_name('a"b', "c;d", day)):
+        assert set(name) <= set("abcdefghijklmnopqrstuvwxyz0123456789-.") and name.count(".") == 1

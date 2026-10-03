@@ -43,6 +43,9 @@
 #let bullet(x, keep: false) = block(below: s, sticky: keep, pad(left: 17.8pt, {place(left, dx: -11.8pt, [•]); x}))
 #let para(x) = block(below: 2 * s, t(x, fill: soft))
 
+// 0110-046: an agent's or the CLI's PDF has no header (GigAI stores no name or contact details): a blank block
+// as tall as the name line and one contact line keeps the pages the finished PDF (Generate PDF form) will have.
+#if d.at("blank_header", default: false) { block(below: 6 * s, height: 16.6pt); block(below: 2 * s, height: 14.3pt) }
 #if d.name != "" { block(below: 6 * s, t(upper(d.name), size: 16.6pt, lh: 16.6pt, weight: 600, tracking: 0.77pt)) }
 #if d.title != "" { block(below: 2 * s, d.title) }
 #if d.contact.len() > 0 { block(below: 2 * s, t(d.contact.map(item).join([ | ]), fill: soft)) }

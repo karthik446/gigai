@@ -508,7 +508,7 @@ def resume_tailor_command(
 @click.option("--tailored", "tailored", is_flag=True, help="Render the STORED tailored resume for --job-url instead of a markdown file.")
 @click.option("--job-url", "job_url", help="With --tailored: the posting URL the resume was tailored to.")
 @click.option("--out", "out_file", required=True, type=click.Path(path_type=Path, dir_okay=False), help="Write the PDF to FILE.")
-@click.option("--profile", "profile_id", help="Scout profile ID: its saved title prints under the name; with --tailored, the resume identity (default: the newest).")
+@click.option("--profile", "profile_id", help="With --tailored: the Scout profile ID the resume was tailored from (default: the newest).")
 @click.option("--spacing", "spacing", type=float, help="Spacing scale 0.7-1.4 for this render (turns auto fit off unless --auto-fit is given). Default: the saved setting.")
 @click.option("--auto-fit/--no-auto-fit", "auto_fit", default=None, help="Pick the spacing that ends the content near a page boundary. Default: the saved setting.")
 @click.option("--target", "target_value", type=click.Path(path_type=Path, file_okay=False))
@@ -532,17 +532,16 @@ def resume_pdf_command(
     `## Experience` with `### <employer>` entries and `- ` bullets, `## Skills`,
     `## Education`, `## Projects`, `## Other`) or --tailored --job-url URL (the
     stored tailored resume for that posting). Either way the PDF uses the same
-    template as the Scout UI's "Download PDF", and its header (name, title,
-    contact line) comes from the saved Resume display settings, never from the
-    markdown. --spacing / --auto-fit change the layout for this render only.
+    template as the Scout UI's "Generate PDF". GigAI stores no name or contact
+    details, so this PDF has no header (a blank block keeps the page layout):
+    you add yours in Scout's Generate PDF form. --spacing / --auto-fit change
+    the layout for this render only.
     """
-
-    from datetime import datetime, timezone
 
     from .find_jobs.contracts import FindJobsContractError
     from .find_jobs.job_state import normalize_job_identity
     from .quick_assess import QuickAssessError
-    from .resume_pdf import ResumeMarkdownError, layout, parse_resume_markdown, render_markdown_pdf, saved_header, stored_resume_pdf
+    from .resume_pdf import ResumeMarkdownError, markdown_resume_pdf, stored_resume_pdf
     from .tailored_resume import list_tailored_resumes
     from .target_resolution import home_scout_target
 
@@ -557,7 +556,7 @@ def resume_pdf_command(
         if tailored:
             target: Path | None = _resolved_target(target_value, home_root, as_json=as_json).expanduser().resolve(strict=True)
         else:
-            # Rendering a file never creates a Scout folder: the target only supplies a name when none is saved.
+            # Rendering a file never creates a Scout folder.
             candidate = target_value or home_scout_target(home_root)
             target = candidate.expanduser().resolve() if candidate.is_dir() else None
     except (ScoutTargetError, WorkpadError, OSError, ValueError) as exc:
@@ -572,14 +571,11 @@ def resume_pdf_command(
             items = list_tailored_resumes(home_root, target, profile_id=profile_id or None, job_identity=normalize_job_identity(job_url))
             if not items:
                 raise QuickAssessError("tailored_resume_not_found", "no stored tailored resume for that job; run `gigai scout resume tailor --job-url ...` first")
-            rendered, _name = stored_resume_pdf(items[0], home_root=home_root, target=target, spacing_scale=spacing, auto_fit=auto_fit, count_pages=True)
+            rendered, _name = stored_resume_pdf(items[0], home_root=home_root, spacing_scale=spacing, auto_fit=auto_fit, count_pages=True)
         else:
             assert in_file is not None
             markdown = _read_text_option(in_file, flag="--in")
-            name_hint, _sections = parse_resume_markdown(markdown)
-            header, settings = saved_header(home_root, target, profile_id, name_hint)
-            scale, fit = layout(settings, spacing, auto_fit)
-            rendered = render_markdown_pdf(markdown, header, timestamp=datetime.now(timezone.utc), spacing_scale=scale, auto_fit=fit)
+            rendered, _name = markdown_resume_pdf(markdown, home_root=home_root, spacing_scale=spacing, auto_fit=auto_fit)
     except OSError as exc:
         failure = (exc, "input_file_unreadable")
     except (ResumeMarkdownError, QuickAssessError, FindJobsContractError, ValueError) as exc:  # ValueError: --spacing out of range, undecodable input
@@ -1149,7 +1145,7 @@ def answer_command(
     from ..private_records import PrivateRecordError
     from . import story_bank
     from .experience_answers import record_answer
-    from .find_jobs.api.story_bank import known_names, resolve_profile_id
+    from .find_jobs.api.story_bank import resolve_profile_id
     from .find_jobs.assess_contracts import AssessJobInput, AssessRequest, AssessResumeInput
     from .find_jobs.contracts import FindJobsContractError
     from .question_ids import normalize_question_id
@@ -1200,7 +1196,7 @@ def answer_command(
                 raise
         if bank_profile_id is None:
             # A gig with no profile yet: the gig-wide write, as before.
-            found = story_bank.personal_info_in_answer(answer, names=known_names(home_root))
+            found = story_bank.personal_info_in_answer(answer)
             if found:
                 raise story_bank.StoryBankError("personal_info_refused", f"this answer looks like it holds personal information ({', '.join(found)})")
             result = record_answer(home_root=home_root, requested_target=target, question_id=question_id, prompt=question_id, answer=answer)
@@ -1210,7 +1206,7 @@ def answer_command(
                 posting = {"job_identity": previous.job.job_identity, "title": previous.job.title, "company": previous.job.company, "url": previous.job.source_url}
             result = story_bank.save_answer(
                 home_root=home_root, target=target, profile_id=bank_profile_id, question_id=question_id, answer=answer,
-                question=question_text, posting=posting, names=known_names(home_root), actor=actor,
+                question=question_text, posting=posting, actor=actor,
             )
     except (PrivateRecordError, story_bank.StoryBankError) as exc:
         _fail(exc, as_json=as_json, fallback="answer_invalid")
@@ -1421,7 +1417,7 @@ def story_bank_add_command(
 
     from ..private_records import PrivateRecordError
     from . import story_bank
-    from .find_jobs.api.story_bank import RESPONSE_SCHEMA, known_names
+    from .find_jobs.api.story_bank import RESPONSE_SCHEMA
 
     try:
         answer = _story_text(answer_text, answer_file, flag="answer")
@@ -1437,7 +1433,7 @@ def story_bank_add_command(
     try:
         entry = story_bank.add_story(
             home_root=home_root, target=target, profile_id=resolved_profile, question=question, answer=answer,
-            question_id=question_id, tag=tag, names=known_names(home_root), actor=actor,
+            question_id=question_id, tag=tag, actor=actor,
         )
     except (story_bank.StoryBankError, PrivateRecordError) as exc:
         _story_fail(exc, as_json=as_json)
@@ -1465,7 +1461,7 @@ def story_bank_edit_command(
 
     from ..private_records import PrivateRecordError
     from . import story_bank
-    from .find_jobs.api.story_bank import RESPONSE_SCHEMA, known_names
+    from .find_jobs.api.story_bank import RESPONSE_SCHEMA
 
     try:
         answer = _story_text(answer_text, answer_file, flag="answer")
@@ -1479,7 +1475,7 @@ def story_bank_edit_command(
     try:
         entry = story_bank.edit_entry(
             home_root=home_root, target=target, profile_id=resolved_profile, question_id=question_id,
-            answer=answer, question=question, tag=tag, names=known_names(home_root), actor=actor, expected_updated_at=updated_at,
+            answer=answer, question=question, tag=tag, actor=actor, expected_updated_at=updated_at,
         )
     except (story_bank.StoryBankError, PrivateRecordError) as exc:
         _story_fail(exc, as_json=as_json)

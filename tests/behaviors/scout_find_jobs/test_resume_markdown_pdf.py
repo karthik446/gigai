@@ -6,8 +6,8 @@ What is pinned:
 * a stored result's own ``markdown`` (``render_markdown``) renders through ``render_markdown_pdf`` to
   the SAME BYTES as ``render_pdf`` of the result, for the same header, company and timestamp (the UI
   path) -- so the markdown route and the UI path cannot drift;
-* the header is the saved display settings', never the markdown's (lines above the first section are
-  not printed);
+* the header is the Generate PDF form's, never the markdown's (lines above the first section are
+  not printed); without the form (the CLI) the PDF has no header (0110-046);
 * invalid markdown, an oversize body and an out-of-range spacing are clear errors that name a line
   number and a rule, never the line's text;
 * the CLI renders ``--in`` to a valid PDF, reports pages, and creates nothing under the home.
@@ -25,7 +25,7 @@ from click.testing import CliRunner
 from pypdf import PdfReader
 
 from gigai.cli import cli
-from gigai.scout.resume_display import ContactEntry, DisplaySettings, PdfHeader, save_display
+from gigai.scout.resume_display import DisplaySettings, PdfHeader, save_display
 from gigai.scout.resume_pdf import (
     MAX_MARKDOWN_BYTES,
     ResumeMarkdownError,
@@ -90,7 +90,7 @@ def test_a_stored_results_markdown_renders_to_the_same_bytes_as_the_ui_path() ->
     )
 
 
-def test_the_parsed_shape_and_the_header_comes_from_the_settings_not_the_markdown() -> None:
+def test_the_parsed_shape_and_the_header_comes_from_the_form_not_the_markdown() -> None:
     name, sections = parse_resume_markdown(MARKDOWN)
     assert name == "Riley Example"
     assert [section["heading"] for section in sections] == ["SUMMARY", "EXPERIENCE", "SKILLS", "OTHER"]
@@ -169,22 +169,22 @@ def _cli(*args: str) -> tuple[int, dict]:
     return result.exit_code, json.loads(result.output.strip().splitlines()[-1])
 
 
-def test_cli_renders_markdown_with_the_saved_header_and_creates_nothing_else(tmp_path: Path) -> None:
+def test_cli_renders_markdown_headerless_with_the_saved_layout_and_creates_nothing_else(tmp_path: Path) -> None:
     source, out, home = tmp_path / "resume.md", tmp_path / "out" / "resume.pdf", tmp_path / "home"
     source.write_text(MARKDOWN, encoding="utf-8")
 
-    # Nothing saved: the markdown's "# Name" is only the name fallback; no Scout folder is created.
+    # 0110-046: no header at all (GigAI stores no name or contact details); the markdown's "# Name" never prints.
     code, payload = _cli("--in", str(source), "--out", str(out), "--home", str(home))
     assert code == 0 and payload["ok"] is True and payload["source"] == "markdown" and payload["pages"] == 1
     assert out.read_bytes().startswith(b"%PDF") and payload["bytes"] == out.stat().st_size
-    assert _text(out.read_bytes()).startswith("RILEY EXAMPLE\nSUMMARY")
+    assert _text(out.read_bytes()).startswith("SUMMARY")
     assert not home.exists(), "rendering a file creates no GigAI home or Scout folder"
 
-    # Saved display settings: name, title for --profile and the contact line print; the layout follows them.
-    save_display(home, DisplaySettings("Sam Saved", (ContactEntry("email", "sam@example.test"),), {"prof_1": "Staff Engineer"}, spacing_scale=0.8, auto_fit=False))
+    # The saved layout is followed; a saved title does not print on a headerless PDF.
+    save_display(home, DisplaySettings({"prof_1": "Staff Engineer"}, spacing_scale=0.8, auto_fit=False))
     code, payload = _cli("--in", str(source), "--out", str(out), "--home", str(home), "--profile", "prof_1")
     assert code == 0 and payload["spacing_scale"] == 0.8
-    assert _text(out.read_bytes()).startswith("SAM SAVED\nStaff Engineer\nsam@example.test\nSUMMARY")
+    assert _text(out.read_bytes()).startswith("SUMMARY")
     saved_bytes = out.read_bytes()
 
     # --spacing overrides for this render only; --auto-fit picks the scale.

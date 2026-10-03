@@ -1,13 +1,19 @@
 """Render a stored tailored resume to PDF with Typst, locally and deterministically.
 
-The header comes from display settings (``resume_display.pdf_header``), never from
-``result.header``.  Body lines go through the same ``shown_text`` mapping as the markdown
-renderer (a copy -- the model's or a no-loss fallback -- loses its own markers).  ``typst`` is imported lazily so CLI startup never loads its native library.
+0110-046: GigAI stores no name or contact details.  The header (name, contact items) comes from
+the Generate PDF form for ONE render (``resume_display.form_header``), with the saved per-profile
+title; without the form (an agent, the CLI) the PDF has no header: a blank block of the same height
+is reserved, so the pages are the ones the finished PDF will have.  Never from ``result.header``
+or the markdown.  Body lines go through the same ``shown_text`` mapping as the markdown renderer
+(a copy -- the model's or a no-loss fallback -- loses its own markers).  ``typst`` is imported
+lazily so CLI startup never loads its native library.
 
 0110-032: ``render_markdown_pdf`` renders resume markdown in GigAI's format (what ``render_markdown``
 writes: ``## Section``, ``### entry heading``, ``- `` bullets) through the SAME template, header and
 auto fit; ``stored_resume_pdf`` is the one stored-resume path the API and ``gigai scout resume pdf
---tailored`` share.  Nothing here calls a model, the network, or a logger.
+--tailored`` share.  Nothing here calls a model, the network, or a logger, and nothing here writes:
+the form's values live only in this call's arguments.  A PDF's file name is
+``<company>-<role>-<YYYY-MM-DD>.pdf`` (``pdf_file_name``), never the user's name.
 """
 
 from __future__ import annotations
@@ -16,14 +22,16 @@ import json
 import re
 import unicodedata
 from contextlib import ExitStack
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from importlib import resources
 from pathlib import Path
 from collections.abc import Callable
 
 from dataclasses import dataclass
 
-from gigai.scout.resume_display import SPACING_DEFAULT, SPACING_MAX, SPACING_MIN, ContactItem, DisplaySettings, PdfHeader, load_display, pdf_header, suggest, valid_spacing
+from gigai.scout.resume_display import (
+    SPACING_DEFAULT, SPACING_MAX, SPACING_MIN, ContactItem, DisplaySettings, PdfHeader, form_header, load_display, profile_title, valid_spacing,
+)
 from gigai.scout.tailored_resume import (
     ENTRY_SECTIONS,
     MAX_HEADING_LINES,
@@ -38,17 +46,20 @@ from gigai.scout.tailored_resume import (
 )
 
 _PART_MAX = 40
+_ROLE_MAX = 60
 
 
-def _slug(text: str) -> str:
+def _slug(text: str, limit: int = _PART_MAX) -> str:
     ascii_text = unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode("ascii").lower()
-    return re.sub(r"[^a-z0-9]+", "-", ascii_text).strip("-")[:_PART_MAX].strip("-")
+    return re.sub(r"[^a-z0-9]+", "-", ascii_text).strip("-")[:limit].strip("-")
 
 
-def pdf_file_name(name: str, company: str) -> str:
-    who, org = _slug(name), _slug(company)
-    parts = [who, "resume", org]
-    return "-".join(part for part in parts if part) + ".pdf"
+def pdf_file_name(company: str, role: str, day: date) -> str:
+    """``<company>-<role>-<YYYY-MM-DD>.pdf`` (lowercase ASCII, hyphens, each part length-capped);
+    ``resume-<YYYY-MM-DD>.pdf`` when neither is known.  Never carries the user's name (0110-046)."""
+
+    parts = [part for part in (_slug(company), _slug(role, _ROLE_MAX)) if part] or ["resume"]
+    return "-".join([*parts, day.isoformat()]) + ".pdf"
 
 
 _YEAR = re.compile(r"\b(?:19|20)\d\d\b|\bPresent\b", re.IGNORECASE)
@@ -209,15 +220,17 @@ class RenderedPdf:
 
 
 def _render(
-    sections: list[dict[str, object]], header: PdfHeader, *, company: str, timestamp: datetime, spacing_scale: float, auto_fit: bool,
+    sections: list[dict[str, object]], header: PdfHeader | None, *, company: str, timestamp: datetime, spacing_scale: float, auto_fit: bool,
     count_pages: bool = False,
 ) -> RenderedPdf:
-    doc_title = " ".join(part for part in (header.name, "resume", company.strip()) if part)
+    """``header`` ``None``: no header, a blank block of the header's height reserved (an agent's PDF)."""
+    shown = header or PdfHeader()
     data = {
-        "doc_title": doc_title,
-        "name": header.name,
-        "title": header.title,
-        "contact": [{"text": c.text, "url": c.url} for c in header.contact],
+        "doc_title": " ".join(part for part in ("Resume", company.strip()) if part),
+        "name": shown.name,
+        "title": shown.title,
+        "contact": [{"text": c.text, "url": c.url} for c in shown.contact],
+        "blank_header": header is None,
         "sections": sections,
     }
     root = resources.files("gigai.scout").joinpath("data", "resume")
@@ -238,7 +251,7 @@ def _render(
 
 
 def render_pdf(
-    result: TailoredResume, header: PdfHeader, *, company: str, timestamp: datetime,
+    result: TailoredResume, header: PdfHeader | None, *, company: str, timestamp: datetime,
     spacing_scale: float = SPACING_DEFAULT, auto_fit: bool = True,
 ) -> bytes:
     """``auto_fit`` picks the spacing scale (``fit_scale``); otherwise ``spacing_scale`` is used as given."""
@@ -286,7 +299,8 @@ def parse_resume_markdown(markdown: str) -> tuple[str, list[dict[str, object]]]:
     * a plain line right under a bullet continues that bullet (a hard wrap);
     * a trailing ``<!-- ... -->`` comment (the source refs) is dropped, text prints literally (inline
       markdown is not interpreted), and anything above the first ``## `` is NOT printed: the PDF header
-      comes from the saved display settings.  A leading ``# Name`` there is only the name hint.
+      comes from the Generate PDF form, never the markdown.  A leading ``# Name`` there is returned as
+      the name hint and printed nowhere.
 
     The sections come back in ``_body``'s shape, so the same template prints them.
     """
@@ -388,7 +402,7 @@ def parse_resume_markdown(markdown: str) -> tuple[str, list[dict[str, object]]]:
 
 
 def render_markdown_pdf(
-    markdown: str, header: PdfHeader, *, timestamp: datetime, spacing_scale: float = SPACING_DEFAULT, auto_fit: bool = True, company: str = "",
+    markdown: str, header: PdfHeader | None, *, timestamp: datetime, spacing_scale: float = SPACING_DEFAULT, auto_fit: bool = True, company: str = "",
 ) -> RenderedPdf:
     """Resume markdown (``parse_resume_markdown``) through the tailored-resume template, header and auto fit; pages counted."""
 
@@ -399,29 +413,13 @@ def render_markdown_pdf(
 # --- the header and layout both entry points use ---------------------------------------------
 
 
-def saved_header(home_root: Path, target: Path | None, profile_id: str | None, fallback_name: str = "") -> tuple[PdfHeader, DisplaySettings]:
-    """The PDF header from the saved display settings, and the settings (defaults when none are saved).
+def pdf_header(settings: DisplaySettings | None, profile_id: str | None, form: dict[str, str] | None) -> PdfHeader | None:
+    """The header for one render: the form's values (``resume_display.parse_header_form``) with the saved
+    per-profile title, or ``None`` (headerless) when no form was filled.  Reads nothing, writes nothing."""
 
-    Saved values only.  When no name is saved, the name falls back to the profile's pinned resume
-    header (the local ``suggest`` prefill; ``profile_id`` ``None`` or ``ephemeral`` reads the selected
-    profile), then to ``fallback_name``.  Reads only; never writes the prefill.
-    """
-
-    settings = load_display(home_root)
-    fallback = ""
-    if settings is None or not settings.name:
-        suggested = ""
-        if target is not None:
-            try:
-                from gigai.scout.interview_prep.resume import current_resume
-
-                wanted = None if profile_id in (None, "", "ephemeral") else profile_id
-                _identity, data = current_resume(home_root=home_root, requested_target=target, gig_id=None, profile_id=wanted)
-                suggested = suggest(data.decode("utf-8", errors="replace")).name
-            except Exception:  # noqa: BLE001 - a prefill is a convenience; any failure means "no suggestion"
-                suggested = ""
-        fallback = suggested or fallback_name
-    return pdf_header(settings, profile_id, fallback), settings or DisplaySettings()
+    if form is None:
+        return None
+    return form_header(form, profile_title(settings, profile_id))
 
 
 def layout(settings: DisplaySettings, spacing_scale: float | None = None, auto_fit: bool | None = None) -> tuple[float, bool]:
@@ -438,19 +436,39 @@ def layout(settings: DisplaySettings, spacing_scale: float | None = None, auto_f
 
 
 def stored_resume_pdf(
-    stored: TailorResponse, *, home_root: Path, target: Path | None, spacing_scale: float | None = None, auto_fit: bool | None = None,
-    count_pages: bool = False,
+    stored: TailorResponse, *, home_root: Path, form: dict[str, str] | None = None, spacing_scale: float | None = None,
+    auto_fit: bool | None = None, count_pages: bool = False, today: date | None = None,
 ) -> tuple[RenderedPdf, str]:
-    """``(the PDF, its file name)`` for one stored tailored resume: what ``POST /api/tailored-resumes/pdf`` serves."""
+    """``(the PDF, its file name)`` for one stored tailored resume: what ``POST /api/tailored-resumes/pdf`` serves.
+
+    ``form`` ``None``: headerless (an agent's or the CLI's render)."""
 
     profile_id = stored.resume.profile_id or "ephemeral"
-    header, settings = saved_header(home_root, target, profile_id, stored.result.header[0].text if stored.result.header else "")
+    settings = load_display(home_root) or DisplaySettings()
     stamp = datetime.fromisoformat(stored.updated_at.replace("Z", "+00:00"))
     if stamp.tzinfo is None:
         stamp = stamp.replace(tzinfo=timezone.utc)
     scale, fit = layout(settings, spacing_scale, auto_fit)
-    rendered = _render(_body(stored.result), header, company=stored.job.company, timestamp=stamp, spacing_scale=scale, auto_fit=fit, count_pages=count_pages)
-    return rendered, pdf_file_name(header.name, stored.job.company)
+    rendered = _render(
+        _body(stored.result), pdf_header(settings, profile_id, form), company=stored.job.company, timestamp=stamp,
+        spacing_scale=scale, auto_fit=fit, count_pages=count_pages,
+    )
+    return rendered, pdf_file_name(stored.job.company, stored.job.title, today or date.today())
+
+
+def markdown_resume_pdf(
+    markdown: str, *, home_root: Path, profile_id: str | None = None, form: dict[str, str] | None = None,
+    spacing_scale: float | None = None, auto_fit: bool | None = None, now: datetime | None = None,
+) -> tuple[RenderedPdf, str]:
+    """``(the PDF, its file name)`` for resume markdown: what ``POST /api/resume/pdf`` and ``scout resume pdf --in``
+    serve.  ``ResumeMarkdownError`` / ``ValueError`` (spacing) before any render."""
+
+    parse_resume_markdown(markdown)
+    settings = load_display(home_root) or DisplaySettings()
+    scale, fit = layout(settings, spacing_scale, auto_fit)
+    stamp = now or datetime.now(timezone.utc)
+    rendered = render_markdown_pdf(markdown, pdf_header(settings, profile_id, form), timestamp=stamp, spacing_scale=scale, auto_fit=fit)
+    return rendered, pdf_file_name("", "", stamp.astimezone().date())
 
 
 __all__ = [
@@ -463,10 +481,11 @@ __all__ = [
     "clamp_scale",
     "fit_scale",
     "layout",
+    "markdown_resume_pdf",
     "parse_resume_markdown",
     "pdf_file_name",
+    "pdf_header",
     "render_markdown_pdf",
     "render_pdf",
-    "saved_header",
     "stored_resume_pdf",
 ]

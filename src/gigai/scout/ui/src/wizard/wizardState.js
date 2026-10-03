@@ -8,7 +8,7 @@
 // (the run dialog offers the same list); re-exported for the wizard.
 export { MODEL_TARGETS, MODEL_TARGET_HINTS, MODEL_TARGET_LABELS, modelTargetLabel } from "../modelTargets.js";
 import { MODEL_TARGETS } from "../modelTargets.js";
-import { buildPutBody, headerLine } from "../resumeDisplayModel.js";
+import { buildPutBody, layoutLine } from "../resumeDisplayModel.js";
 
 // uat-bug-028: each mode is a filter (find-jobs.json `work_mode`, applied
 // by the index search before ranking); `hint` says what it keeps.
@@ -118,9 +118,9 @@ export function initialFields({ prefs, config, selectedProfile, resumes }) {
     city: typeof p.city === "string" && !isLocationPlaceholder(p.city) ? p.city : "",
     visaSponsorshipRequired: Boolean(p.visa_sponsorship_required),
     maxAgeDays: Number.isInteger(configuredWindow) && configuredWindow >= 1 ? clampMaxAgeDays(configuredWindow) : DEFAULT_MAX_AGE_DAYS,
-    // screen 2 (0110-013): the PDF header draft (resumeDisplayModel's draft),
-    // loaded from GET /api/resume-display when the step is first opened; null
-    // until then. `displaySkipped` leaves the saved header untouched.
+    // screen 2 (0110-013): the PDF title/layout draft (resumeDisplayModel's
+    // draft), loaded from GET /api/resume-display when the step is first
+    // opened; null until then. `displaySkipped` leaves the saved one untouched.
     display: null,
     displaySkipped: false,
     // screen 4
@@ -371,7 +371,7 @@ export function setupBody(fields, existingPrefs) {
 }
 
 // 0110-013: whether Finish saves the Resume display step: it was opened
-// (a draft exists) and not skipped. Skipping leaves the saved header alone.
+// (a draft exists) and not skipped. Skipping leaves the saved one alone.
 export function shouldSaveDisplay(fields) {
   return Boolean(fields.display) && !fields.displaySkipped;
 }
@@ -382,12 +382,12 @@ export function displayBody(fields, profileId) {
   return shouldSaveDisplay(fields) ? buildPutBody(fields.display, profileId) : null;
 }
 
-// The Review step's "PDF header" value.
+// The Review step's "PDF layout" value.
 export function displayReviewText(fields) {
   if (fields.displaySkipped || !fields.display) {
-    return "(skipped: the saved header stays as it is)";
+    return "(skipped: the saved title and layout stay as they are)";
   }
-  return headerLine(fields.display) || "(empty)";
+  return layoutLine(fields.display) || "(empty)";
 }
 
 export function reviewRows(fields, resumes) {
@@ -402,7 +402,7 @@ export function reviewRows(fields, resumes) {
   return [
     ["Profile", `${fields.profileName.trim() || "(unnamed)"}${fields.profileMode === "update" ? " (update)" : " (new)"}`],
     ["Resume", resumeSummary(fields, resumes)],
-    ["PDF header", displayReviewText(fields)],
+    ["PDF layout", displayReviewText(fields)],
     ["Extracted by", extractor],
     ["Tech stack", list(fields.stack)],
     ["Seniority", list(fields.seniority)],

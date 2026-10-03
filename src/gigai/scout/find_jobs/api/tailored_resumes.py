@@ -21,14 +21,19 @@ assess routes use (``api/assess.py``'s ``_ERROR_STATUS``) plus
 0110-032: ``PUT /api/tailored-resumes/lines`` also takes ``use: "custom"`` with ``text`` (the
 caller's own wording for one line; the personal-info check refuses a name or contact line with
 422 ``personal_info_refused``), and ``POST /api/resume/pdf`` renders resume markdown the caller
-sends to a PDF with the same template and saved header as ``POST /api/tailored-resumes/pdf``.
+sends to a PDF with the same template as ``POST /api/tailored-resumes/pdf``.
 That markdown is used for the render only: no model call, nothing stored, nothing logged
 (a refusal names a line number and a rule, never the text).
+
+0110-046: GigAI stores no name or contact details.  Both PDF routes take an optional ``header``
+(the Generate PDF form: ``name``, ``email``, ``phone``, ``location``, ``linkedin``, ``link``); its
+values fill this one PDF's header and are dropped: never written, logged, cached, or echoed in a
+response or an error (the PDF bytes aside; the file name is ``<company>-<role>-<date>.pdf``).
+Without ``header`` the PDF has no header.
 """
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
 from http import HTTPStatus
 import re
 from urllib.parse import parse_qs, urlsplit
@@ -45,15 +50,12 @@ from ...tailored_resume import (
     run_tailored_resume,
     save_tailor_response,
 )
-from ...resume_display import SPACING_MAX, SPACING_MIN, valid_spacing
+from ...resume_display import SPACING_MAX, SPACING_MIN, HeaderFormError, parse_header_form, valid_spacing
 from ...resume_pdf import (
     MAX_MARKDOWN_BYTES,
     ResumeMarkdownError,
-    layout,
+    markdown_resume_pdf,
     parse_resume_markdown,
-    pdf_file_name,
-    render_markdown_pdf,
-    saved_header,
     stored_resume_pdf,
 )
 from ..contracts import FindJobsContractError
@@ -65,7 +67,8 @@ _ERROR_STATUS: dict[str, HTTPStatus] = {
     "personal_info_refused": HTTPStatus.UNPROCESSABLE_ENTITY,
 }
 
-_RESUME_PDF_KEYS = frozenset({"markdown", "spacing_scale", "auto_fit", "profile_id"})
+_RESUME_PDF_KEYS = frozenset({"markdown", "spacing_scale", "auto_fit", "profile_id", "header"})
+_TAILORED_PDF_KEYS = frozenset({"profile_id", "job_identity"})
 _PROFILE_ID = re.compile(r"\A[A-Za-z0-9_-]+\Z")
 #: ``POST /api/resume/pdf``: a body above this is refused before it is parsed (JSON escaping can
 #: make ``MAX_MARKDOWN_BYTES`` of markdown several times larger on the wire); above the drain
@@ -108,16 +111,38 @@ class TailoredResumesRoutesMixin:
             return
         self._write_json(HTTPStatus.OK, response.to_json())
 
+    def _header_form(self, body: dict[str, object]) -> tuple[bool, dict[str, str] | None]:
+        """``(ok, the form's values or None)``; a 422 is written when ``header`` is unusable (never echoing a value)."""
+
+        if "header" not in body:
+            return True, None
+        try:
+            return True, parse_header_form(body["header"])
+        except HeaderFormError as exc:
+            self._error(HTTPStatus.UNPROCESSABLE_ENTITY, exc.code, str(exc))
+            return False, None
+
+    def _write_pdf(self, rendered, file_name: str, extra: dict[str, str] | None = None) -> None:
+        self._write_bytes(
+            HTTPStatus.OK,
+            "application/pdf",
+            rendered.pdf,
+            {"Content-Disposition": f'attachment; filename="{file_name}"', **(extra or {})},
+        )
+
     def _handle_post_tailored_resume_pdf(self) -> None:
         body = self._read_json_body()
         if body is None:
             return
-        if type(body) is not dict or set(body) != {"profile_id", "job_identity"}:
-            self._error(HTTPStatus.UNPROCESSABLE_ENTITY, "invalid_value", "body must be exactly profile_id and job_identity")
+        if type(body) is not dict or not _TAILORED_PDF_KEYS <= set(body) <= _TAILORED_PDF_KEYS | {"header"}:
+            self._error(HTTPStatus.UNPROCESSABLE_ENTITY, "invalid_value", "body must be exactly profile_id and job_identity (plus header from the Generate PDF form)")
             return
         profile_id, job_identity = body["profile_id"], body["job_identity"]
         if not isinstance(profile_id, str) or not profile_id or not isinstance(job_identity, str) or not job_identity:
             self._error(HTTPStatus.UNPROCESSABLE_ENTITY, "invalid_value", "profile_id and job_identity must be non-empty strings")
+            return
+        ok, form = self._header_form(body)
+        if not ok:
             return
         target = self._tailor_target()
         if target is None:
@@ -132,16 +157,11 @@ class TailoredResumesRoutesMixin:
             self._error(HTTPStatus.NOT_FOUND, "tailored_resume_not_found", "no stored tailored resume for that profile and job")
             return
         try:
-            rendered, file_name = stored_resume_pdf(items[0], home_root=home_root, target=target)
-        except Exception:  # noqa: BLE001 - a render failure is typed, and never echoes the resume
+            rendered, file_name = stored_resume_pdf(items[0], home_root=home_root, form=form)
+        except Exception:  # noqa: BLE001 - a render failure is typed, and never echoes the resume or the form
             self._error(HTTPStatus.INTERNAL_SERVER_ERROR, "pdf_render_failed", "the PDF could not be rendered")
             return
-        self._write_bytes(
-            HTTPStatus.OK,
-            "application/pdf",
-            rendered.pdf,
-            {"Content-Disposition": f'attachment; filename="{file_name}"'},
-        )
+        self._write_pdf(rendered, file_name)
 
     def _refuse_large_body(self) -> bool:
         """True (and a 422 written) when the request body is too large to be resume markdown."""
@@ -167,10 +187,10 @@ class TailoredResumesRoutesMixin:
     def _handle_post_resume_pdf(self) -> None:
         """``POST /api/resume/pdf``: resume markdown in, ``application/pdf`` out (0110-032).
 
-        Body ``{markdown, spacing_scale?, auto_fit?, profile_id?}``.  The header (name, title,
-        contact line) and the layout come from the saved display settings, exactly as for a
-        stored tailored resume; ``spacing_scale`` / ``auto_fit`` override the saved layout for
-        this render only.  Nothing is stored, sent to a model, or logged.
+        Body ``{markdown, spacing_scale?, auto_fit?, profile_id?, header?}``.  The layout comes from the
+        saved display settings, ``spacing_scale`` / ``auto_fit`` override it for this render only;
+        ``header`` (the Generate PDF form, 0110-046) fills this PDF's header with the profile's saved
+        title, and without it the PDF has no header.  Nothing is stored, sent to a model, or logged.
         """
 
         if self._refuse_large_body():
@@ -204,31 +224,27 @@ class TailoredResumesRoutesMixin:
         if profile_id is not None and (not isinstance(profile_id, str) or not _PROFILE_ID.fullmatch(profile_id)):
             self._error(HTTPStatus.UNPROCESSABLE_ENTITY, "invalid_value", "profile_id must be a profile id")
             return
+        ok, form = self._header_form(body)
+        if not ok:
+            return
         home_root = getattr(self._backend, "home_root", None)
         if home_root is None:
             self._error(HTTPStatus.NOT_FOUND, "target_unavailable", "a home path is required")
             return
         try:
-            name_hint, _sections = parse_resume_markdown(markdown)
+            parse_resume_markdown(markdown)
         except ResumeMarkdownError as exc:
             self._error(HTTPStatus.UNPROCESSABLE_ENTITY, exc.code, str(exc))
             return
         try:
-            header, settings = saved_header(home_root, getattr(self._backend, "target", None), profile_id, name_hint)
-            scale, fit = layout(settings, spacing, auto_fit)
-            rendered = render_markdown_pdf(markdown, header, timestamp=datetime.now(timezone.utc), spacing_scale=scale, auto_fit=fit)
-        except Exception:  # noqa: BLE001 - a render failure is typed, and never echoes the resume
+            rendered, file_name = markdown_resume_pdf(
+                markdown, home_root=home_root, profile_id=profile_id, form=form, spacing_scale=spacing, auto_fit=auto_fit
+            )
+        except Exception:  # noqa: BLE001 - a render failure is typed, and never echoes the resume or the form
             self._error(HTTPStatus.INTERNAL_SERVER_ERROR, "pdf_render_failed", "the PDF could not be rendered")
             return
-        self._write_bytes(
-            HTTPStatus.OK,
-            "application/pdf",
-            rendered.pdf,
-            {
-                "Content-Disposition": f'attachment; filename="{pdf_file_name(header.name, "")}"',
-                "X-GigAI-Pages": str(rendered.pages),
-                "X-GigAI-Spacing-Scale": f"{rendered.spacing_scale:g}",
-            },
+        self._write_pdf(
+            rendered, file_name, {"X-GigAI-Pages": str(rendered.pages), "X-GigAI-Spacing-Scale": f"{rendered.spacing_scale:g}"}
         )
 
     def _handle_put_tailored_resume_line(self) -> None:
@@ -270,11 +286,8 @@ class TailoredResumesRoutesMixin:
             return
         try:
             if custom:
-                # The name the PDF header prints (saved, else the resume's own): a line holding it is refused.
-                header, _settings = saved_header(
-                    self._backend.home_root, target, body["profile_id"], stored.result.header[0].text if stored.result.header else ""
-                )
-                updated = apply_line_edit(stored, body["line_id"], body["text"], names=(header.name,))
+                # GigAI keeps no name (0110-046): a strictly name-shaped line is refused (``personal_info_found``).
+                updated = apply_line_edit(stored, body["line_id"], body["text"])
             else:
                 updated = apply_line_choice(stored, body["line_id"], body["use"])
         except TailorError as exc:

@@ -116,6 +116,16 @@ _JOB_INPUT = (
 )
 _JOB_URL = "https://boards.greenhouse.io/acme/jobs/101"
 _IDENTITY_KEY: dict[str, object] = {"profile_id": "prof_1", "job_identity": _JOB_URL}
+#: 0110-046: the Generate PDF form's fields, for one render; GigAI stores no name or contact details.
+_HEADER_PARAM = _b(
+    "header", "object",
+    "The Generate PDF form: {name, email, phone, location, linkedin, link}, each an optional string of at most 200 characters. "
+    "Fills this one PDF's header; never stored, logged or returned. Left out: the PDF has no header.",
+)
+_HEADER_NOTE = (
+    "GigAI stores no name or contact details: without header the PDF has no header (a blank block keeps the page layout); "
+    "the person finishes it in Scout's Generate PDF form, in their browser."
+)
 _ROW_ERRORS = (_INVALID, _WRONG_TYPE, _UNKNOWN_KEY)
 
 _STORY_ID = _p("story_id", "string", "A story bank entry's id (its question_id, e.g. cloud:gcp or story:database_led_migration).")
@@ -628,48 +638,63 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
             "use custom edits a body line (a summary, skills or other line, or an entry's bullet; never an entry heading): the line becomes kind custom, origin user, "
             "with no refs (no source is claimed for it and the no-loss check does not cover it) and edited_from holding the line it replaced, so use original or "
             "use rewritten brings that back. Local only: no model reads the text. A text that looks like your name or a contact detail (email, phone, link, address) "
-            "is refused with 422 personal_info_refused: those come from PUT /api/resume-display. "
+            "is refused with 422 personal_info_refused: GigAI stores no name or contact details; they are typed in Scout's Generate PDF form for one PDF. "
             "Example, change two bullets then render: PUT this route twice (line_id L3, then L4, each with use custom and text), then POST /api/tailored-resumes/pdf with the same profile_id and job_identity."
         ),
     ),
     RouteSpec(
         "POST", "/api/tailored-resumes/pdf", "Render the stored tailored resume as a PDF (binary).", "read", "none", {"content_type": "application/pdf"},
-        params=(_b("profile_id", "string", "The resume identity.", required=True), _b("job_identity", "string", "The job identity.", required=True)),
-        request_example=_IDENTITY_KEY, content_type="application/pdf", errors=(_INVALID, (404, "tailored_resume_not_found"), (500, "pdf_render_failed"), _NO_TARGET),
-        description="Returns application/pdf with Content-Disposition: attachment; changes nothing.",
+        params=(
+            _b("profile_id", "string", "The resume identity.", required=True), _b("job_identity", "string", "The job identity.", required=True),
+            _HEADER_PARAM,
+        ),
+        request_example=_IDENTITY_KEY, content_type="application/pdf",
+        errors=(_INVALID, (422, "wrong_type"), (422, "unknown_key"), (404, "tailored_resume_not_found"), (500, "pdf_render_failed"), _NO_TARGET),
+        description=(
+            "Returns application/pdf with Content-Disposition: attachment; filename=`<company>-<role>-<YYYY-MM-DD>.pdf` (never your name); changes nothing. "
+            + _HEADER_NOTE
+        ),
     ),
     RouteSpec(
-        "POST", "/api/resume/pdf", "Render resume markdown you send as a PDF (binary), with the saved header and layout.", "read", "none", {"content_type": "application/pdf"},
+        "POST", "/api/resume/pdf", "Render resume markdown you send as a PDF (binary), with the saved layout.", "read", "none", {"content_type": "application/pdf"},
         params=(
             _b("markdown", "string", "Resume markdown in GigAI's format, at most 65536 bytes: `## Summary|Experience|Skills|Education|Projects|Other` sections; in Experience, Projects and Education `### <heading>` entries with `- ` bullets.", required=True),
             _b("spacing_scale", "number", "The spacing scale for this render, 0.7 to 1.4; turns auto fit off unless auto_fit is sent. Default: the saved setting."),
             _b("auto_fit", "boolean", "Pick the spacing scale that ends the content near a page boundary. Default: the saved setting."),
-            _b("profile_id", "string", "A profile id: its saved title prints under the name."),
+            _b("profile_id", "string", "A profile id: with header, its saved title prints under the name."),
+            _HEADER_PARAM,
         ),
         request_example={"markdown": "## Summary\n\n- Platform engineer with nine years building billing systems.\n\n## Experience\n\n### Northwind Health\nStaff Engineer | Jun 2020 - Present\n\n- Rebuilt the scheduling service on Python and Postgres.\n", "auto_fit": True},
         content_type="application/pdf",
         errors=(_UNKNOWN_KEY, _WRONG_TYPE, _INVALID, (422, "resume_markdown_invalid"), (422, "resume_markdown_too_large"), (500, "pdf_render_failed"), _NO_TARGET),
         description=(
-            "Returns application/pdf with Content-Disposition: attachment, X-GigAI-Pages and X-GigAI-Spacing-Scale; changes nothing. "
-            "Local only: the markdown is not sent to a model, not stored and not logged. The header (name, title, contact line) comes from the saved display "
-            "settings (PUT /api/resume-display), exactly as for a tailored resume; lines above the first `## ` section are not printed. Trailing `<!-- ... -->` "
+            "Returns application/pdf with Content-Disposition: attachment; filename=`resume-<YYYY-MM-DD>.pdf`, X-GigAI-Pages and X-GigAI-Spacing-Scale; changes nothing. "
+            "Local only: the markdown is not sent to a model, not stored and not logged. " + _HEADER_NOTE + " Lines above the first `## ` section are not printed. Trailing `<!-- ... -->` "
             "comments are dropped, so a tailored resume's `markdown` renders as it is. 422 resume_markdown_invalid names the line number and the rule."
         ),
     ),
     RouteSpec(
-        "GET", "/api/resume-display", "The saved PDF header settings and the suggestion to prefill them.", "read", "none",
-        {"saved": False, "name": "", "contact": [], "titles": {}, "spacing_scale": 1.0, "auto_fit": True}, host_checked=True, errors=((403, "forbidden_origin"),),
-        description="Returns personal values, so the Host header must match the bound server. spacing_scale and auto_fit read as 1.0 and true until saved.",
+        "GET", "/api/resume-display", "The saved PDF layout (per-profile title, spacing, auto fit) and a title suggestion.", "read", "none",
+        {"saved": False, "titles": {}, "title": "", "spacing_scale": 1.0, "auto_fit": True}, host_checked=True, errors=((403, "forbidden_origin"),),
+        description=(
+            "GigAI stores no name or contact details (they are typed in the Generate PDF form for one PDF), so this carries none. "
+            "The Host header must match the bound server. spacing_scale and auto_fit read as 1.0 and true until saved."
+        ),
     ),
     RouteSpec(
-        "PUT", "/api/resume-display", "Save the PDF display settings (name, contact line, per-profile titles, spacing).", "write", "none", {"saved": True},
+        "PUT", "/api/resume-display", "Save the PDF layout settings (per-profile titles, spacing, auto fit).", "write", "none", {"saved": True},
         params=(
-            _b("name", "string", "The name printed on the PDF."), _b("contact", "array", "Contact items {kind, value}."), _b("titles", "object", "Title per profile id."),
+            _b("titles", "object", "Title per profile id."),
+            _b("name", "string", "Accepted for older clients and ignored: GigAI stores no name (the response lists it in ignored)."),
+            _b("contact", "array", "Accepted for older clients and ignored: GigAI stores no contact details (the response lists it in ignored)."),
             _b("spacing_scale", "number", "The PDF spacing unit's scale, 0.7 to 1.4 (default 1.0); used when auto_fit is false."),
             _b("auto_fit", "boolean", "Pick the spacing scale that ends the content near a page boundary (default true)."),
         ),
-        request_example={"name": "Kar Ohm", "contact": [], "titles": {}, "spacing_scale": 1.0, "auto_fit": True}, errors=(_UNKNOWN_KEY, _WRONG_TYPE, _INVALID),
-        description="Keys left out keep their saved values. A spacing_scale outside 0.7..1.4 answers 422 invalid_value.",
+        request_example={"titles": {}, "spacing_scale": 1.0, "auto_fit": True}, errors=(_UNKNOWN_KEY, _WRONG_TYPE, _INVALID),
+        description=(
+            "Keys left out keep their saved values. A spacing_scale outside 0.7..1.4 answers 422 invalid_value. "
+            "name and contact are ignored, never stored: the response then carries ignored and a note."
+        ),
     ),
     # --- resume ----------------------------------------------------------------------
     RouteSpec(
@@ -922,8 +947,8 @@ _META: dict[tuple[str, str], tuple[str, str]] = {
     ("PUT", "/api/tailored-resumes/lines"): ("Keep the original or the rewrite of one line, or edit it", "Tailored resumes"),
     ("POST", "/api/tailored-resumes/pdf"): ("Render a tailored resume as a PDF", "Tailored resumes"),
     ("POST", "/api/resume/pdf"): ("Render resume markdown as a PDF", "Tailored resumes"),
-    ("GET", "/api/resume-display"): ("Get the PDF header settings", "Tailored resumes"),
-    ("PUT", "/api/resume-display"): ("Save the PDF header settings", "Tailored resumes"),
+    ("GET", "/api/resume-display"): ("Get the PDF layout settings", "Tailored resumes"),
+    ("PUT", "/api/resume-display"): ("Save the PDF layout settings", "Tailored resumes"),
     ("POST", "/api/resume/extract"): ("Extract search preferences from a resume", "Profiles and resume"),
     ("POST", "/api/resume/check"): ("Check resume text for personal data", "Profiles and resume"),
     ("POST", "/api/resumes"): ("Store a resume", "Profiles and resume"),
@@ -1152,7 +1177,8 @@ def llms_text() -> str:
         "- Edit a resume and render a new PDF (local, no model call): read the lines with GET /api/tailored-resumes?profile_id=&job_identity= (each body line has an id L<n>), "
         "PUT /api/tailored-resumes/lines {profile_id, job_identity, updated_at, line_id, use: \"custom\", text} once per line you change (use original or rewritten undoes it), "
         "then POST /api/tailored-resumes/pdf. To render your own markdown instead: POST /api/resume/pdf {markdown}. "
-        "The name and contact line always come from the saved display settings (PUT /api/resume-display); a line holding them is refused (422 personal_info_refused).\n"
+        "GigAI stores no name or contact details: these PDFs have no header, and a line holding a name or contact detail is refused (422 personal_info_refused). "
+        "The person adds their details in Scout's Generate PDF form, in their browser; an agent cannot finish that step unless it drives that browser.\n"
         "- Story bank (per profile; local, no model call): every answered question and story, reused by later assessments. Read GET /api/story-bank "
         "(?profile_id=&q=&tag=) or GET /api/story-bank/<id>; add POST /api/story-bank {question, answer, actor: \"agent\"}; edit PUT /api/story-bank/<id> "
         "{updated_at, answer|question|tag, actor}; remove DELETE /api/story-bank/<id>?updated_at=. Send the updated_at you read: a stale write answers "
