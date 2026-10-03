@@ -95,6 +95,7 @@ from typing import ClassVar
 from ..canonical import digest_imported_bytes, parse_json_bytes
 from ..config import GigAIConfig, load_config
 from .assessment_core import AssessAttempt, invoke_json_once
+from .call_metrics import KIND_TAILOR, CallMeter
 from .find_jobs.assess_contracts import AssessJobInput, AssessResumeInput, ResolvedJob, ResolvedResume
 from .find_jobs.contracts import (
     FindJobsContractError,
@@ -2373,7 +2374,10 @@ def run_tailored_resume(
     # 5. Model target -> adapter (C1/C11), then the shared loop.
     model_target = request.model_target or _default_model_target(target)
     active = config if config is not None else load_config(home_root)
-    binding = _resolve_binding(active, model_target, home_root=home_root)
+    meter = CallMeter(
+        KIND_TAILOR, model_target.value, home_root, target, profile_id=resume.profile_id, job=job.job_identity
+    )
+    binding = meter.bind(_resolve_binding(active, model_target, home_root=home_root))
     tailor_job = TailorJob(title=job.title, company=job.company, location=job.location, posting_text=job.text)
     ctx = tailor_context(resume.text, answers=answers, matrix=matrix)
     try:

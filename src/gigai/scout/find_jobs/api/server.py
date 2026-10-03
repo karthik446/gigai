@@ -1495,6 +1495,7 @@ def _make_handler(
     from .config import ConfigRoutesMixin
     from .discover import DiscoverRoutesMixin
     from .extract import ResumeExtractRoutesMixin
+    from .metrics import MetricsRoutesMixin
     from .posted_window import PostedWindowRoutesMixin
     from .privacy_cleanup import PrivacyCleanupRoutesMixin
     from .profiles import ProfilesRoutesMixin
@@ -1530,6 +1531,7 @@ def _make_handler(
         ResumeDisplayRoutesMixin,
         PrivacyCleanupRoutesMixin,
         SecretsStatusRoutesMixin,
+        MetricsRoutesMixin,
         StoryBankRoutesMixin,
         TailoredResumesRoutesMixin,
         WatchlistRoutesMixin,
@@ -1788,6 +1790,9 @@ def _make_handler(
                         return
                     if path == "/api/settings/background":
                         self._handle_get_settings_background()
+                        return
+                    if path == "/api/metrics":
+                        self._handle_get_metrics()
                         return
                     # run-reads-fast (uat-bug-022): with a query these two are
                     # the page-sized reads (``run_reads.py``); with none they

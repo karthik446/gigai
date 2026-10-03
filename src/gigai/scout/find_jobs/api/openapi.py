@@ -901,6 +901,40 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
             "settings_unreadable; `checks_today` how many times today's list holds. Reading this makes no request."
         ),
     ),
+    # --- metrics (0.1.10.7 E) ----------------------------------------------------------
+    RouteSpec(
+        "GET", "/api/metrics", "What this project's model calls cost, as averages per kind of call and model.", "read", "none",
+        {
+            "schema_version": "scout-metrics:1", "kind": "assess", "model": None,
+            "aggregates": [{
+                "kind": "assess", "model_target": "codex_cli", "model": "gpt-5.1-codex", "calls": 12, "errors": 1,
+                "error_rate": 0.0833, "items": 12, "avg_input_tokens": 18400, "avg_output_tokens": 1100,
+                "avg_cached_tokens": 9200, "avg_tokens": 19500, "avg_seconds": 11.2, "avg_cost_usd": None,
+                "last_at": "2026-10-02T14:02:00.000000Z",
+            }],
+            "comparison": [{
+                "kind": "assess", "model_target": "codex_cli", "models": ["gpt-5.1-codex"], "calls": 12, "errors": 1,
+                "error_rate": 0.0833, "items": 12, "avg_input_tokens": 18400, "avg_output_tokens": 1100,
+                "avg_cached_tokens": 9200, "avg_tokens": 19500, "avg_seconds": 11.2, "avg_cost_usd": None,
+                "last_at": "2026-10-02T14:02:00.000000Z",
+            }],
+        },
+        schema_version="scout-metrics:1",
+        params=(
+            _q("kind", "string", "Only this kind of call.", enum=("assess", "rank", "tag", "tailor", "extract", "interview")),
+            _q("model", "string", "Only this model target (codex_cli, claude_cli, ollama_local, openrouter_api) or model id."),
+        ),
+        errors=(_INVALID, _UNKNOWN_KEY, _NO_TARGET),
+        description=(
+            "Every model call Scout makes is recorded once, locally: the model, tokens in, out and cached, the cost when the "
+            "provider reports one, the wall time and the outcome. No prompt, answer, resume or posting text is stored or served. "
+            "`aggregates` has one entry per (kind, model_target, model); `comparison` adds the model ids of one model target "
+            "together. `avg_input_tokens` is everything the model read (cached input included) and `avg_cached_tokens` the part "
+            "served from cache; token and cost averages are over the calls that reported them, `avg_seconds` over the calls that "
+            "succeeded; `error_rate` counts a call that failed or answered something unusable; `items` is how many jobs or titles "
+            "the calls covered (a rank or tag call covers several). A value nothing reported is null. Reading makes no model call."
+        ),
+    ),
     # --- settings ----------------------------------------------------------------------
     RouteSpec(
         "GET", "/api/settings/background", "The background settings: hourly refresh, model tagging, snapshot download.", "read", "none",
@@ -997,6 +1031,7 @@ _META: dict[tuple[str, str], tuple[str, str]] = {
     ("POST", "/api/watchlist"): ("Watch a company board", "Sources"),
     ("POST", "/api/sources/update"): ("Refresh the board catalog", "Sources"),
     ("GET", "/api/sources/update"): ("Get the board refresh status", "Sources"),
+    ("GET", "/api/metrics"): ("Get the model call averages", "Settings"),
     ("GET", "/api/settings/background"): ("Get the background settings", "Settings"),
     ("PUT", "/api/settings/background"): ("Change the background settings", "Settings"),
 }

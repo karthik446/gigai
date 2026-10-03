@@ -344,6 +344,8 @@ def _work(source: RankInput, record: RankRecord, current: _Pass) -> None:
             home_root=source.home_root,
             streamer=streamer,
             cancel=current.cancel,
+            target=getattr(resolved, "target_root", None),
+            profile_id=source.profile_id,
             record_id=record.record_id,
             parent_run_id=source.parent_run_id,
         )

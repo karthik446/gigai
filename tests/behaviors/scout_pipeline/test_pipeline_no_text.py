@@ -39,6 +39,13 @@ _REVIEWED: dict[str, dict[str, str]] = {
         "cached_tokens": "integer", "cost_usd": "real", "cost_status": "code", "started_at": "timestamp",
         "seconds": "real", "outcome": "code", "error_code": "code", "input_digest": "digest",
     },
+    # 0.1.10.7 E: a model call outside a step; step_run's metrics columns, keyed by the call's kind.
+    "model_call": {
+        "id": "integer", "kind": "code", "profile_id": "id", "job": "job", "items": "integer",
+        "lane": "lane", "adapter": "id", "model": "model", "input_tokens": "integer", "output_tokens": "integer",
+        "cached_tokens": "integer", "cost_usd": "real", "cost_status": "code", "started_at": "timestamp",
+        "seconds": "real", "outcome": "code", "error_code": "code", "input_digest": "digest",
+    },
     "lane": {"lane": "lane", "not_before": "real", "backoff_seconds": "real", "error_code": "code", "updated_at": "timestamp"},
     "approval": {
         "id": "id", "profile_id": "id", "trigger": "code", "jobs": "integer", "est_calls": "integer", "est_tokens": "integer",
@@ -115,6 +122,10 @@ def _scenario(store: PipelineStore) -> None:
     store.advance_anchor("2026-10-02T14:02:00Z", set_by="scout_new")
     store.spend("pipeline_calls", "2026-10-02", 3, limit=40)
     store.spend("rank_calls", "2026-10-02", 50)
+    store.record_call(kind="assess", lane="codex_cli", seconds=11.2, metrics=metrics, profile_id=_P, job=_JOB, input_digest=_digest("p"))
+    store.record_call(kind="assess", lane="codex_cli", seconds=0.4, outcome="error", error_code="model_timeout", job=_PASTED)
+    answered = store.record_call(kind="rank", lane="api:openrouter-main", seconds=3.0, items=50, metrics=StepMetrics(adapter="openrouter_api"))
+    store.fail_call(answered, "model_output_invalid")
 
 
 def test_every_stored_value_is_an_id_a_digest_a_code_or_a_number_and_nothing_is_contact_shaped(tmp_path: Path) -> None:
@@ -138,6 +149,7 @@ def test_every_stored_value_is_an_id_a_digest_a_code_or_a_number_and_nothing_is_
                 if kind not in ("timestamp", "day"):  # dates are digit runs by design; so are long hex ids and digests
                     assert not _PHONE.search(re.sub(r"[0-9a-f]{16,}", "", value)), (table, column, value)
     assert seen["step_run"] >= 4 and seen["approval"] == 1 and seen["anchor"] == 1 and seen["cap_counter"] == 2
+    assert seen["model_call"] == 3
     # And the raw file as a whole: no email shape anywhere in its bytes.
     connection.close()
     store.close()
@@ -161,6 +173,14 @@ def test_every_stored_value_is_an_id_a_digest_a_code_or_a_number_and_nothing_is_
         ("metrics_adapter", "my adapter"),
         ("anchor", "last tuesday"),
         ("cap", "Pipeline Calls"),
+        ("call_kind", "Assess this job"),
+        ("call_job", "Senior engineer at Acme, remote"),
+        ("call_profile_id", "Jane Doe"),
+        ("call_error_code", "Traceback: model said jane.doe@example.com"),
+        ("call_input_digest", "You are assessing a resume"),
+        ("call_model", "jane.doe@example.com"),
+        ("call_lane", "my laptop"),
+        ("call_fail", "The answer was not JSON"),
     ],
 )
 def test_text_is_refused_before_it_reaches_the_file(tmp_path: Path, call: str, bad: str) -> None:
@@ -171,6 +191,15 @@ def test_text_is_refused_before_it_reaches_the_file(tmp_path: Path, call: str, b
             args = {**good, {"digest": "input_digest"}.get(call, call): bad}
             store.enqueue(args["profile_id"], args["job"], "tailor", input_digest=args["input_digest"], trigger="process_now",
                           lane="claude_cli", model_target=args["model_target"])
+        elif call == "call_fail":
+            store.fail_call(store.record_call(kind="assess", lane="codex_cli", seconds=1.0), bad)
+        elif call.startswith("call_"):
+            values: dict[str, object] = dict(kind="assess", lane="codex_cli", seconds=1.0, outcome="error")
+            if call == "call_model":
+                values["metrics"] = StepMetrics(model=bad)
+            else:
+                values[call.removeprefix("call_")] = bad
+            store.record_call(**values)  # type: ignore[arg-type]
         elif call == "anchor":
             store.advance_anchor(bad, set_by="scout_new")
         elif call == "cap":

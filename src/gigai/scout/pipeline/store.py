@@ -22,6 +22,10 @@ What it holds (DESIGN 5.1):
 - ``step_run``: one row per attempt, the metrics record (tokens, cost,
   seconds, outcome, error code). An attempt whose holder died is recorded
   as ``interrupted`` when it is reclaimed.
+- ``model_call``: one row per model call made OUTSIDE a pipeline step
+  (assess, rank, tag, tailor, ...): ``step_run``'s metrics columns, keyed by
+  the call's ``kind`` instead of a step (0.1.10.7 E; written by
+  ``scout/call_metrics.py``, the one recorder every call site uses).
 - ``lane``: a model lane that is backed off (``model_target_unavailable``:
   300 s, doubling to 6 h; cleared by the lane's next success).
 - ``approval``: an approval-gated batch (the per-trigger cap).
@@ -77,7 +81,7 @@ import time
 import uuid
 
 #: ``PRAGMA user_version`` of a file this module writes.
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 #: The fixed DAG, in topological order.
 STEPS: tuple[str, ...] = ("tailor", "reassess", "ats", "label")
@@ -176,6 +180,14 @@ CREATE TABLE IF NOT EXISTS step_run (
   cost_usd REAL, cost_status TEXT,
   started_at TEXT NOT NULL, seconds REAL NOT NULL, outcome TEXT NOT NULL, error_code TEXT, input_digest TEXT);
 CREATE INDEX IF NOT EXISTS step_run_step ON step_run(profile_id, job, name);
+CREATE TABLE IF NOT EXISTS model_call (
+  id INTEGER PRIMARY KEY,
+  kind TEXT NOT NULL, profile_id TEXT, job TEXT, items INTEGER NOT NULL,
+  lane TEXT NOT NULL, adapter TEXT, model TEXT,
+  input_tokens INTEGER, output_tokens INTEGER, cached_tokens INTEGER,
+  cost_usd REAL, cost_status TEXT,
+  started_at TEXT NOT NULL, seconds REAL NOT NULL, outcome TEXT NOT NULL, error_code TEXT, input_digest TEXT);
+CREATE INDEX IF NOT EXISTS model_call_kind ON model_call(kind, adapter, model);
 CREATE TABLE IF NOT EXISTS lane (
   lane TEXT PRIMARY KEY, not_before REAL NOT NULL, backoff_seconds REAL NOT NULL,
   error_code TEXT, updated_at TEXT NOT NULL);
@@ -202,6 +214,12 @@ COLUMN_KINDS: Mapping[str, Mapping[str, str]] = {
     },
     "step_run": {
         "id": "integer", "profile_id": "id", "job": "job", "name": "code", "attempt": "integer", "owner": "owner",
+        "lane": "lane", "adapter": "id", "model": "model", "input_tokens": "integer", "output_tokens": "integer",
+        "cached_tokens": "integer", "cost_usd": "real", "cost_status": "code", "started_at": "timestamp",
+        "seconds": "real", "outcome": "code", "error_code": "code", "input_digest": "digest",
+    },
+    "model_call": {
+        "id": "integer", "kind": "code", "profile_id": "id", "job": "job", "items": "integer",
         "lane": "lane", "adapter": "id", "model": "model", "input_tokens": "integer", "output_tokens": "integer",
         "cached_tokens": "integer", "cost_usd": "real", "cost_status": "code", "started_at": "timestamp",
         "seconds": "real", "outcome": "code", "error_code": "code", "input_digest": "digest",
@@ -262,6 +280,12 @@ def _check_count(value: object, what: str, *, optional: bool = False) -> int | N
     if type(value) is not int or value < 0:
         raise PipelineStoreError("invalid_value", f"{what} must be a non-negative integer")
     return value
+
+
+def fits(kind: str, value: object) -> bool:
+    """Whether ``value`` has the shape a ``kind`` column holds (``COLUMN_KINDS``)."""
+
+    return type(value) is str and _SHAPES[kind].fullmatch(value) is not None
 
 
 def _check_lane(lane: object) -> str:
@@ -397,6 +421,33 @@ class StepRun:
     outcome: str
     error_code: str | None
     input_digest: str | None
+
+
+@dataclass(frozen=True)
+class CallTotals:
+    """``model_call`` rows of one ``(kind, adapter, model)``, summed.
+
+    Each ``*_tokens`` / ``cost_usd`` sum comes with the number of calls that
+    reported it (``*_n``): an average is over those, never over calls that
+    reported nothing. ``seconds`` is summed over the ``ok`` calls only.
+    """
+
+    kind: str
+    adapter: str | None
+    model: str | None
+    calls: int
+    ok: int
+    items: int
+    input_tokens: int
+    input_n: int
+    output_tokens: int
+    output_n: int
+    cached_tokens: int
+    cached_n: int
+    cost_usd: float
+    cost_n: int
+    seconds: float
+    last_at: str
 
 
 @dataclass(frozen=True)
@@ -1064,6 +1115,74 @@ class PipelineStore:
         rows = self._conn().execute(f"SELECT {_RUN_COLUMNS} FROM step_run{where} ORDER BY id", params)
         return tuple(StepRun(*row) for row in rows.fetchall())
 
+    # model calls outside a step (0.1.10.7 E)
+
+    def record_call(
+        self,
+        *,
+        kind: str,
+        lane: str,
+        seconds: float,
+        outcome: str = OUTCOME_OK,
+        error_code: str | None = None,
+        metrics: StepMetrics | None = None,
+        profile_id: str | None = None,
+        job: str | None = None,
+        items: int = 1,
+        input_digest: str | None = None,
+        started_at: float | None = None,
+    ) -> int:
+        """One model call's metrics row; returns its id. Every value is checked like a ``step_run``'s."""
+
+        _check("code", kind, "kind")
+        _check_lane(lane)
+        _check_member(outcome, (OUTCOME_OK, OUTCOME_ERROR), "outcome")
+        _check_optional("code", error_code, "error_code")
+        _check_optional("id", profile_id, "profile_id")
+        _check_optional("job", job, "job")
+        _check_optional("digest", input_digest, "input_digest")
+        _check_count(items, "items")
+        if type(seconds) not in (int, float) or seconds < 0:
+            raise PipelineStoreError("invalid_value", "seconds must be a non-negative number")
+        self._check_metrics(metrics)
+        m = metrics or StepMetrics()
+        with self._write() as c:
+            cursor = c.execute(
+                "INSERT INTO model_call(kind, profile_id, job, items, lane, adapter, model, input_tokens, output_tokens, "
+                "cached_tokens, cost_usd, cost_status, started_at, seconds, outcome, error_code, input_digest) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (
+                    kind, profile_id, job, items, lane, m.adapter, m.model, m.input_tokens, m.output_tokens,
+                    m.cached_tokens, m.cost_usd, m.cost_status, self._now_iso(started_at), float(seconds),
+                    outcome, error_code, input_digest,
+                ),
+            )
+            return int(cursor.lastrowid)
+
+    def fail_call(self, call_id: int, error_code: str) -> bool:
+        """Settle a recorded call as an error (its answer was unusable); ``False`` when there is no such row."""
+
+        _check("code", error_code, "error_code")
+        with self._write() as c:
+            cursor = c.execute(
+                "UPDATE model_call SET outcome=?, error_code=? WHERE id=?", (OUTCOME_ERROR, error_code, call_id)
+            )
+            return cursor.rowcount == 1
+
+    def call_totals(self, *, kind: str | None = None) -> tuple[CallTotals, ...]:
+        """``model_call`` summed per ``(kind, adapter, model)``, ordered by them."""
+
+        where, params = ("", ()) if kind is None else (" WHERE kind=?", (kind,))
+        rows = self._conn().execute(
+            "SELECT kind, adapter, model, COUNT(*), SUM(outcome='ok'), SUM(items), "
+            "COALESCE(SUM(input_tokens),0), COUNT(input_tokens), COALESCE(SUM(output_tokens),0), COUNT(output_tokens), "
+            "COALESCE(SUM(cached_tokens),0), COUNT(cached_tokens), COALESCE(SUM(cost_usd),0.0), COUNT(cost_usd), "
+            "COALESCE(SUM(CASE WHEN outcome='ok' THEN seconds END),0.0), MAX(started_at) "
+            f"FROM model_call{where} GROUP BY kind, adapter, model ORDER BY kind, adapter, model",
+            params,
+        )
+        return tuple(CallTotals(*row) for row in rows.fetchall())
+
     def lane_backoffs(self) -> tuple[LaneBackoff, ...]:
         rows = self._conn().execute("SELECT lane, not_before, backoff_seconds, error_code FROM lane ORDER BY lane")
         return tuple(LaneBackoff(*row) for row in rows.fetchall())
@@ -1190,6 +1309,7 @@ __all__ = [
     "STEPS",
     "Anchor",
     "Approval",
+    "CallTotals",
     "Claim",
     "LaneBackoff",
     "PipelineStore",
@@ -1197,6 +1317,7 @@ __all__ = [
     "Step",
     "StepMetrics",
     "StepRun",
+    "fits",
     "pipeline_path",
     "process_token",
 ]

@@ -94,6 +94,8 @@ class InvocationResult:
     raw_usage: Mapping[str, object]
     normalized_usage: NormalizedUsage
     cost_status: str
+    #: What the provider itself said this call cost, in US dollars; ``None`` when it reported none.
+    cost_usd: float | None = None
 
     def __post_init__(self) -> None:
         if self.status != "success":
@@ -104,6 +106,10 @@ class InvocationResult:
             raise ValueError("successful model invocation result needs resolved_model")
         if self.cost_status not in {"provider_reported", "derived", "unavailable"}:
             raise ValueError("invalid model invocation cost status")
+        if self.cost_usd is not None and (
+            type(self.cost_usd) not in (int, float) or not 0 <= self.cost_usd < float("inf")
+        ):
+            raise ValueError("model invocation cost must be a non-negative number")
 
 
 class ModelInvocationPort(Protocol):

@@ -2,6 +2,7 @@ import ConfigPanel from "../components/ConfigPanel.jsx";
 import AddCompanyForm from "../components/AddCompanyForm.jsx";
 import SourcesUpdatePanel from "../components/SourcesUpdatePanel.jsx";
 import BackgroundUpdatesPanel from "../components/BackgroundUpdatesPanel.jsx";
+import ModelMetricsPanel from "../components/ModelMetricsPanel.jsx";
 import ExaSourceToggle from "../components/ExaSourceToggle.jsx";
 import ProfilesView from "./ProfilesView.jsx";
 
@@ -28,6 +29,9 @@ export default function SettingsView({
       {/* 0110-024/025/026: what runs by itself (automatic checks, model
           tagging, the starter snapshot), right under the action it follows. */}
       <BackgroundUpdatesPanel />
+
+      {/* 0.1.10.7 E: what the model calls have taken, per model (hidden until one is recorded). */}
+      <ModelMetricsPanel />
 
       <section className="panel" id="settings-preferences">
         <h2>Preferences</h2>

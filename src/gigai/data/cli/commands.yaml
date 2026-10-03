@@ -731,6 +731,17 @@
         "gigai scout install"
       ]
     },
+    "scout metrics": {
+      "summary": "Show what the model calls cost on average: tokens, seconds, cost and error rate per kind of call and model.",
+      "effect": "read",
+      "external": "none",
+      "output": "Human-readable text; --json emits one JSON object: {schema_version, kind, model, aggregates, comparison} (what GET /api/metrics answers).",
+      "examples": [
+        "gigai scout metrics",
+        "gigai scout metrics --kind assess --model codex_cli --json"
+      ],
+      "notes": "Every model call Scout makes (assess, rank, tag, tailor, extract, interview) is recorded once, locally: the model, tokens in, out and cached, the cost when the provider reports one, the wall time and the outcome. No prompt, answer, resume or posting text is stored. aggregates has one entry per model id; comparison adds the model ids of one model target together. --model takes a model target or a model id. Makes no model call."
+    },
     "scout prep": {
       "summary": "Prepare for an interview at a find-jobs-acquired posting.",
       "effect": "write",
