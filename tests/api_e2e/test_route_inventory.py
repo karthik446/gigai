@@ -57,6 +57,11 @@ JOURNEYS: dict[Route, str] = {
     Route("PUT", "/api/settings/background"): "test_background_settings_journey.py",
     # 0.1.10.7 E: the model call metrics.
     Route("GET", "/api/metrics"): "test_metrics_journey.py",
+    # 0.1.10.7 M3a: what is new since the last check.
+    Route("GET", "/api/new"): "test_scout_new_journey.py",
+    Route("GET", "/api/new/yours"): "test_scout_new_journey.py",
+    Route("POST", "/api/new"): "test_scout_new_journey.py",
+    Route("POST", "/api/new/seen"): "test_scout_new_journey.py",
     Route("GET", "/api/runs"): "test_runs_list_journey.py",
     Route("GET", "/api/applications"): "test_applications_journey.py",
     Route("POST", "/api/applications"): "test_applications_journey.py",

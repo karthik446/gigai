@@ -177,6 +177,7 @@ _TARGET_COMMANDS: dict[str, tuple[str, ...]] = {
     "profile delete": ("scout", "profile", "delete", "profile_00000000-0000-4000-8000-000000000001"),
     "profile update": ("scout", "profile", "update", "profile_00000000-0000-4000-8000-000000000001", "--work-mode", "remote"),
     "metrics": ("scout", "metrics"),
+    "new": ("scout", "new", "--peek"),
     "pipeline run": ("scout", "pipeline", "run", "--once"),
     "pipeline status": ("scout", "pipeline", "status"),
     "pipeline process": ("scout", "pipeline", "process", "https://boards.greenhouse.io/example/jobs/1"),

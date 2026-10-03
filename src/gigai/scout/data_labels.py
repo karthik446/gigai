@@ -21,8 +21,9 @@ Where they appear:
 
 THE ``scout new`` CONTRACT (the daily brief builds on this module): one ``scout new``
 response never holds ``public-untrusted`` text together with ``user-private`` text.
-Posting-derived rows go in one response, the user's own text behind a separate call.
-``assert_not_mixed`` is that rule as a check. The UI job page (``GET /api/jobs``) may mix
+Posting-derived rows go in one response, the user's own text behind a separate call
+(``gigai scout new --yours``, ``GET /api/new/yours``). ``assert_not_mixed`` is that rule
+as a check (``scout_new.check_response`` runs it on every response). The UI job page (``GET /api/jobs``) may mix
 them: its operation is labelled with both.
 
 Pure data and helpers: no I/O.

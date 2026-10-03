@@ -31,6 +31,11 @@ What it holds (DESIGN 5.1):
 - ``approval``: an approval-gated batch (the per-trigger cap).
 - ``anchor``: the ONE "new since" anchor per install (``scope = 'user'``).
 - ``cap_counter``: the daily counters (``pipeline_calls``, ``rank_calls``).
+- ``posting`` / ``posting_build``: the per-(posting, profile) read model
+  (0.1.10.7 PL6, DESIGN 10.1): a CACHE ``scout/postings.py`` rebuilds from the
+  company index and the stores, never authority. Ids, digests, numbers and
+  codes only: a posting's title, company and text are read from the index
+  when a row is served, never kept here.
 
 Idempotency (DESIGN 5.2): ``enqueue`` with the digest the step was last done
 with is ``noop_unchanged``; the digest it is already queued with is
@@ -81,7 +86,7 @@ import time
 import uuid
 
 #: ``PRAGMA user_version`` of a file this module writes.
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 #: The fixed DAG, in topological order.
 STEPS: tuple[str, ...] = ("tailor", "reassess", "ats", "label")
@@ -198,6 +203,21 @@ CREATE TABLE IF NOT EXISTS anchor (
   scope TEXT PRIMARY KEY CHECK (scope = 'user'), last_checked_at TEXT NOT NULL, set_by TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS cap_counter (
   cap TEXT NOT NULL, day TEXT NOT NULL, used INTEGER NOT NULL, PRIMARY KEY (cap, day));
+CREATE TABLE IF NOT EXISTS posting (
+  job TEXT NOT NULL, profile_id TEXT NOT NULL, board TEXT NOT NULL,
+  first_seen TEXT NOT NULL, published_at TEXT, removed_at TEXT,
+  listing_digest TEXT NOT NULL, listing_known INTEGER NOT NULL DEFAULT 0,
+  rank_score INTEGER, match_rank INTEGER NOT NULL DEFAULT 1,
+  state TEXT NOT NULL, stale_code TEXT, assessed_at TEXT,
+  reqs_met INTEGER, reqs_total INTEGER, open_questions INTEGER NOT NULL DEFAULT 0,
+  tailored INTEGER NOT NULL DEFAULT 0, label TEXT, ats_score INTEGER,
+  pinned_digest TEXT NOT NULL, settings_digest TEXT NOT NULL, updated_at TEXT NOT NULL,
+  PRIMARY KEY (job, profile_id));
+CREATE INDEX IF NOT EXISTS posting_first_seen ON posting(first_seen);
+CREATE INDEX IF NOT EXISTS posting_profile ON posting(profile_id);
+CREATE TABLE IF NOT EXISTS posting_build (
+  profile_id TEXT PRIMARY KEY, match_digest TEXT NOT NULL, facts_digest TEXT NOT NULL,
+  pinned_digest TEXT NOT NULL, settings_digest TEXT NOT NULL, row_count INTEGER NOT NULL, built_at TEXT NOT NULL);
 """
 
 #: What every column holds. No column is a text payload: ``id`` / ``job`` /
@@ -232,6 +252,17 @@ COLUMN_KINDS: Mapping[str, Mapping[str, str]] = {
     },
     "anchor": {"scope": "code", "last_checked_at": "timestamp", "set_by": "code"},
     "cap_counter": {"cap": "code", "day": "day", "used": "integer"},
+    "posting": {
+        "job": "job", "profile_id": "id", "board": "board", "first_seen": "timestamp", "published_at": "timestamp",
+        "removed_at": "timestamp", "listing_digest": "digest", "listing_known": "integer", "rank_score": "integer",
+        "match_rank": "integer", "state": "code", "stale_code": "code", "assessed_at": "timestamp", "reqs_met": "integer",
+        "reqs_total": "integer", "open_questions": "integer", "tailored": "integer", "label": "code",
+        "ats_score": "integer", "pinned_digest": "digest", "settings_digest": "digest", "updated_at": "timestamp",
+    },
+    "posting_build": {
+        "profile_id": "id", "match_digest": "digest", "facts_digest": "digest", "pinned_digest": "digest",
+        "settings_digest": "digest", "row_count": "integer", "built_at": "timestamp",
+    },
 }
 
 _SHAPES: Mapping[str, re.Pattern[str]] = {
@@ -246,6 +277,8 @@ _SHAPES: Mapping[str, re.Pattern[str]] = {
     "owner": re.compile(r"[0-9a-f]{32}:[A-Za-z0-9_-]{1,32}"),
     "timestamp": re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?Z"),
     "day": re.compile(r"\d{4}-\d{2}-\d{2}"),
+    # ``<ats>:<percent-encoded slug>``: the company index file's own key (no whitespace, no "@").
+    "board": re.compile(r"(?:greenhouse|lever|ashby):[A-Za-z0-9][A-Za-z0-9_.%~-]{0,119}"),
 }
 _WORKER = re.compile(r"[A-Za-z0-9_-]{1,32}")
 
@@ -476,6 +509,103 @@ class Approval:
 class Anchor:
     last_checked_at: str
     set_by: str
+
+
+@dataclass(frozen=True)
+class PostingRecord:
+    """One ``posting`` row: what the read model keeps for one (posting, profile). No text.
+
+    ``listing_digest`` is the rank cache's content identity of the posting
+    (``model_rank.content_digest``); ``listing_known`` says the index itself
+    holds it (a Greenhouse posting without its detail has none), so only then
+    can a stored assessment be compared with it. ``match_rank`` is this
+    profile's place among the active profiles the posting matches (1: best).
+    ``pinned_digest`` is the digest of the profile's pinned resume, ``stale_code``
+    why a stored assessment is stale. ``reqs_met`` / ``reqs_total`` are the latest
+    assessment's requirement counts.
+    """
+
+    job: str
+    profile_id: str
+    board: str
+    first_seen: str
+    published_at: str | None
+    removed_at: str | None
+    listing_digest: str
+    listing_known: bool
+    rank_score: int | None
+    match_rank: int
+    state: str
+    stale_code: str | None
+    assessed_at: str | None
+    reqs_met: int | None
+    reqs_total: int | None
+    open_questions: int
+    tailored: bool
+    label: str | None
+    ats_score: int | None
+    pinned_digest: str
+    settings_digest: str
+    updated_at: str
+
+
+@dataclass(frozen=True)
+class PostingBuild:
+    """What one profile's ``posting`` rows were built from: the digests a later read compares."""
+
+    profile_id: str
+    match_digest: str
+    facts_digest: str
+    pinned_digest: str
+    settings_digest: str
+    row_count: int
+    built_at: str
+
+
+_POSTING_COLUMNS = (
+    "job, profile_id, board, first_seen, published_at, removed_at, listing_digest, listing_known, rank_score, "
+    "match_rank, state, stale_code, assessed_at, reqs_met, reqs_total, open_questions, tailored, label, ats_score, "
+    "pinned_digest, settings_digest, updated_at"
+)
+_POSTING_BUILD_COLUMNS = "profile_id, match_digest, facts_digest, pinned_digest, settings_digest, row_count, built_at"
+#: The assessment's share of requirements met, else the rank score: what a posting is ordered by.
+_POSTING_SCORE = "COALESCE(CASE WHEN reqs_total > 0 THEN reqs_met * 100 / reqs_total END, rank_score, -1)"
+
+
+def _posting(row: tuple) -> PostingRecord:
+    values = list(row)
+    values[7] = bool(values[7])
+    values[16] = bool(values[16])
+    return PostingRecord(*values)
+
+
+def _posting_values(row: PostingRecord) -> tuple:
+    _check("job", row.job, "posting job")
+    _check("id", row.profile_id, "posting profile_id")
+    _check("board", row.board, "posting board")
+    _check("timestamp", row.first_seen, "posting first_seen")
+    _check_optional("timestamp", row.published_at, "posting published_at")
+    _check_optional("timestamp", row.removed_at, "posting removed_at")
+    _check("digest", row.listing_digest, "posting listing_digest")
+    _check_optional("timestamp", row.assessed_at, "posting assessed_at")
+    _check("code", row.state, "posting state")
+    _check_optional("code", row.stale_code, "posting stale_code")
+    _check_optional("code", row.label, "posting label")
+    _check("digest", row.pinned_digest, "posting pinned_digest")
+    _check("digest", row.settings_digest, "posting settings_digest")
+    _check("timestamp", row.updated_at, "posting updated_at")
+    for name in ("rank_score", "reqs_met", "reqs_total", "ats_score"):
+        _check_count(getattr(row, name), f"posting {name}", optional=True)
+    _check_count(row.match_rank, "posting match_rank")
+    _check_count(row.open_questions, "posting open_questions")
+    if type(row.listing_known) is not bool or type(row.tailored) is not bool:
+        raise PipelineStoreError("invalid_value", "posting listing_known and tailored are true or false")
+    return (
+        row.job, row.profile_id, row.board, row.first_seen, row.published_at, row.removed_at, row.listing_digest,
+        int(row.listing_known), row.rank_score, row.match_rank, row.state, row.stale_code, row.assessed_at, row.reqs_met,
+        row.reqs_total, row.open_questions, int(row.tailored), row.label, row.ats_score, row.pinned_digest,
+        row.settings_digest, row.updated_at,
+    )
 
 
 _STEP_COLUMNS = (
@@ -1306,6 +1436,145 @@ class PipelineStore:
             )
         return Anchor(at, set_by)
 
+    # the posting read model (0.1.10.7 PL6): a cache, written whole per profile by scout/postings.py
+
+    def posting_builds(self) -> dict[str, PostingBuild]:
+        rows = self._conn().execute(f"SELECT {_POSTING_BUILD_COLUMNS} FROM posting_build").fetchall()
+        return {row[0]: PostingBuild(*row) for row in rows}
+
+    def replace_postings(self, build: PostingBuild, rows: Iterable[PostingRecord]) -> int:
+        """Replace one profile's rows and its build record in one transaction; returns how many rows it has now.
+
+        Every value is checked against its column's shape first: nothing is written when one does not fit.
+        """
+
+        _check("id", build.profile_id, "build profile_id")
+        for name in ("match_digest", "facts_digest", "pinned_digest", "settings_digest"):
+            _check("digest", getattr(build, name), f"build {name}")
+        _check("timestamp", build.built_at, "build built_at")
+        values = []
+        for row in rows:
+            if row.profile_id != build.profile_id:
+                raise PipelineStoreError("invalid_value", "a posting row belongs to another profile than its build")
+            values.append(_posting_values(row))
+        marks = ",".join("?" * 22)
+        with self._write() as c:
+            c.execute("DELETE FROM posting WHERE profile_id=?", (build.profile_id,))
+            c.executemany(f"INSERT INTO posting({_POSTING_COLUMNS}) VALUES ({marks})", values)
+            c.execute(
+                f"INSERT INTO posting_build({_POSTING_BUILD_COLUMNS}) VALUES (?,?,?,?,?,?,?) "
+                "ON CONFLICT(profile_id) DO UPDATE SET match_digest=excluded.match_digest, facts_digest=excluded.facts_digest, "
+                "pinned_digest=excluded.pinned_digest, settings_digest=excluded.settings_digest, "
+                "row_count=excluded.row_count, built_at=excluded.built_at",
+                (
+                    build.profile_id, build.match_digest, build.facts_digest, build.pinned_digest, build.settings_digest,
+                    len(values), build.built_at,
+                ),
+            )
+        return len(values)
+
+    def keep_posting_profiles(self, profile_ids: Iterable[str]) -> int:
+        """Drop the rows and build records of every profile not in ``profile_ids`` (deleted or archived ones)."""
+
+        keep = sorted({_check("id", profile_id, "profile_id") for profile_id in profile_ids})
+        marks = ",".join("?" * len(keep))
+        where = f" WHERE profile_id NOT IN ({marks})" if keep else ""
+        with self._write() as c:
+            dropped = c.execute(f"DELETE FROM posting{where}", keep).rowcount
+            c.execute(f"DELETE FROM posting_build{where}", keep)
+        return dropped
+
+    def posting_rank_inputs(self) -> list[tuple[str, str, int | None, str, int]]:
+        """``(job, profile_id, rank_score, state, match_rank)`` of every row: what the best-tag order is made from."""
+
+        return self._conn().execute("SELECT job, profile_id, rank_score, state, match_rank FROM posting").fetchall()
+
+    def set_match_ranks(self, ranks: Iterable[tuple[int, str, str]]) -> None:
+        """``(match_rank, job, profile_id)`` for the rows whose rank changed."""
+
+        values = [(_check_count(rank, "match_rank"), job, profile_id) for rank, job, profile_id in ranks]
+        if not values:
+            return
+        with self._write() as c:
+            c.executemany("UPDATE posting SET match_rank=? WHERE job=? AND profile_id=?", values)
+
+    def posting_count(self, *, profile_id: str | None = None) -> int:
+        where, params = ("", ()) if profile_id is None else (" WHERE profile_id=?", (profile_id,))
+        return self._conn().execute(f"SELECT COUNT(*) FROM posting{where}", params).fetchone()[0]
+
+    def postings(
+        self,
+        *,
+        since: str | None = None,
+        profile_id: str | None = None,
+        jobs: Iterable[str] | None = None,
+        live: bool = True,
+    ) -> tuple[PostingRecord, ...]:
+        """Rows by posting, each posting's best profile first.
+
+        ``since``: only postings first seen after it; ``profile_id``: only
+        this profile's rows; ``jobs``: only these postings; ``live``: leave
+        out postings the board no longer lists.
+        """
+
+        clauses: list[str] = []
+        params: list[object] = []
+        if since is not None:
+            clauses.append("first_seen > ?")
+            params.append(_check("timestamp", since, "since"))
+        if profile_id is not None:
+            clauses.append("profile_id = ?")
+            params.append(_check("id", profile_id, "profile_id"))
+        if live:
+            clauses.append("removed_at IS NULL")
+        found: list[tuple] = []
+        chunks: list[list[str]] = [[]]
+        if jobs is not None:
+            wanted = sorted(set(jobs))
+            chunks = [wanted[start:start + 500] for start in range(0, len(wanted), 500)]
+        for chunk in chunks:
+            where, values = list(clauses), list(params)
+            if jobs is not None:
+                where.append(f"job IN ({','.join('?' * len(chunk))})")
+                values.extend(chunk)
+            text = f" WHERE {' AND '.join(where)}" if where else ""
+            found.extend(
+                self._conn().execute(
+                    f"SELECT {_POSTING_COLUMNS} FROM posting{text} ORDER BY job, match_rank, profile_id", values
+                ).fetchall()
+            )
+        return tuple(_posting(row) for row in found)
+
+    def postings_by_score(
+        self, *, states: Iterable[str], profile_id: str | None = None, limit: int = 10
+    ) -> tuple[PostingRecord, ...]:
+        """Live rows in ``states`` that Scout has not labelled recommended, best score first.
+
+        One row per posting: its best profile's, or ``profile_id``'s. Ordered
+        by score (the assessment's share of requirements met, else the rank
+        score), then open questions, then an assessed posting with unmet
+        requirements and no tailored resume, then the newest.
+        """
+
+        wanted = sorted({_check("code", state, "state") for state in states})
+        if not wanted:
+            return ()
+        _check_count(limit, "limit")
+        clauses = ["removed_at IS NULL", f"state IN ({','.join('?' * len(wanted))})", "(label IS NULL OR label != 'recommended')"]
+        params: list[object] = list(wanted)
+        if profile_id is None:
+            clauses.append("match_rank = 1")
+        else:
+            clauses.append("profile_id = ?")
+            params.append(_check("id", profile_id, "profile_id"))
+        rows = self._conn().execute(
+            f"SELECT {_POSTING_COLUMNS} FROM posting WHERE {' AND '.join(clauses)} "
+            f"ORDER BY {_POSTING_SCORE} DESC, open_questions DESC, "
+            "(tailored = 0 AND reqs_total IS NOT NULL AND reqs_met < reqs_total) DESC, first_seen DESC, job LIMIT ?",
+            (*params, limit),
+        )
+        return tuple(_posting(row) for row in rows.fetchall())
+
     # daily caps
 
     def spend(self, cap: str, day: str, calls: int = 1, *, limit: int | None = None) -> bool:
@@ -1357,6 +1626,8 @@ __all__ = [
     "LaneBackoff",
     "PipelineStore",
     "PipelineStoreError",
+    "PostingBuild",
+    "PostingRecord",
     "Step",
     "StepMetrics",
     "StepRun",

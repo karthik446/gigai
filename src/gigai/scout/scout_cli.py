@@ -2262,6 +2262,68 @@ def metrics_command(
         )
 
 
+# --- 0.1.10.7 M3a: `gigai scout new` ---------------------------------------
+
+
+@scout_group.command("new")
+@click.option("--profile", "profile_id", help="Only this active profile's postings. A filtered call does not move the \"new since\" anchor.")
+@click.option("--yes", "yes", is_flag=True, help="Assess the new postings without asking (one model call each).")
+@click.option("--no-assess", "no_assess", is_flag=True, help="Do not ask and do not assess: show the new postings ranked only.")
+@click.option("--yours", "yours", is_flag=True, help="The separate call: what matches, from your own resume and answers. Never shown next to posting text; never moves the anchor.")
+@click.option("--peek", "peek", is_flag=True, help="Look without moving the \"new since\" anchor.")
+@click.option("--since", "since", help="Measure \"new\" from this time: the since of the response that asked.")
+@click.option("--home", "home_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--target", "target_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--json", "as_json", is_flag=True)
+def new_command(
+    profile_id: str | None, yes: bool, no_assess: bool, yours: bool, peek: bool, since: str | None,
+    home_value: Path | None, target_value: Path | None, as_json: bool,
+) -> None:
+    """Show what is new since your last check, across all active profiles.
+
+    Read from the stored postings: no board is asked. New postings are
+    assessed only on a yes: without --yes the command asks first (with the
+    count and what it will cost) and shows them ranked. With nothing new it
+    shows the 10 postings that still need your attention.
+
+    The table shows each posting, its score, what it still asks for and its
+    open questions. "What matches" comes from your own resume and answers, so
+    it is a separate call, never printed next to posting text: --yours.
+    """
+
+    import sys
+
+    from .data_labels import LabelError
+    from .outbound_check import redact_payload
+    from .pipeline.store import PipelineStoreError
+    from .scout_new import STATUS_ASK, PostingModelError, ScoutNewError, render, scout_new, scout_new_yours
+
+    home_root = home_value or default_home_root()
+    errors = (ScoutTargetError, WorkpadError, ScoutNewError, PostingModelError, PipelineStoreError, LabelError, OSError, ValueError)
+    if sum((yes, no_assess, yours)) > 1:
+        _fail(ValueError("pass at most one of --yes, --no-assess and --yours"), as_json=as_json, fallback="invalid_value")
+        return
+    try:
+        target = _pipeline_target(target_value, home_root, as_json=as_json)
+        if yours:
+            response = scout_new_yours(home_root, target, profile_id=profile_id, since=since)
+        else:
+            assess = True if yes else False if no_assess else None
+            response = scout_new(home_root, target, profile_id=profile_id, peek=peek, assess=assess, since=since)
+        if response["status"] == STATUS_ASK and not as_json and not yours and sys.stdin.isatty():
+            sentence = response["question"]["text"]  # type: ignore[index]
+            if click.confirm(str(sentence).rstrip("?"), default=False):
+                click.echo("Assessing (one model call per posting; this can take a few minutes)...")
+                # The first call already moved the anchor: the yes measures from the same since.
+                response = scout_new(home_root, target, profile_id=profile_id, peek=peek, assess=True, since=str(response["since"]))
+    except errors as exc:
+        _fail(exc, as_json=as_json, fallback="scout_new_failed")
+        return
+    # What an agent reads: the same outbound check every API response passes (no contact data).
+    response = redact_payload(response)
+    _emit(response, as_json, "" if as_json else render(response))
+
+
 # --- 0110-026b/e: `gigai scout snapshot export|import|status` ------------
 
 
