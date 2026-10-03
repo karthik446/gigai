@@ -229,7 +229,7 @@ def test_the_hybrid_and_onsite_paragraph_states_the_rule_and_an_unknown_area() -
 
     assert _work_mode(paragraph) == {"mode": "hybrid", "area": "unknown"}
     for needle in (
-        "hybrid (remote roles, and hybrid roles in their own area)",
+        "hybrid (remote roles, and hybrid or on-site roles in their own area)",
         "(that city or its metro area) has that requirement MET, and you never ask a location question about it",
         'is decided by rule 4 as before (the "location:<city>" question)',
         "A remote posting always has its work mode met.",

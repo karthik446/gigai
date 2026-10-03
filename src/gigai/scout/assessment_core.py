@@ -41,6 +41,7 @@ import re
 from ..adapters.port import ModelInvocationError, NormalizedUsage
 from ..canonical import digest_imported_bytes
 from .find_jobs.contracts import FindJobsContractError, NotAssessedReason
+from .find_jobs.work_mode import in_person_modes
 from .question_ids import normalize_question_id
 from .resume_privacy import model_resume
 
@@ -82,10 +83,16 @@ ASSESS_PROMPT_VERSION_NO_WORK_MODE = "assess-prompt-v4"
 CURRENT_ASSESS_PROMPT_VERSIONS = frozenset({ASSESS_PROMPT_VERSION, ASSESS_PROMPT_VERSION_NO_WORK_MODE})
 
 _WORK_MODES = ("remote", "hybrid", "onsite")
-_IN_PERSON_MODE_TEXT = {
-    "hybrid": "hybrid (remote roles, and hybrid roles in their own area)",
-    "onsite": "on-site (remote roles, and hybrid or on-site roles in their own area)",
-}
+_IN_PERSON_LABELS = {"hybrid": "hybrid", "onsite": "on-site"}
+
+
+def _in_person_mode_text(preference: str) -> str:
+    # 0110-048: the roles named come from the filter's rule (work_mode.in_person_modes).
+    roles = " or ".join(_IN_PERSON_LABELS[mode] for mode in in_person_modes(preference))
+    return f"{_IN_PERSON_LABELS[preference]} (remote roles, and {roles} roles in their own area)"
+
+
+_IN_PERSON_MODE_TEXT = {mode: _in_person_mode_text(mode) for mode in ("hybrid", "onsite")}
 
 
 def normalize_work_mode(value: object) -> str:
