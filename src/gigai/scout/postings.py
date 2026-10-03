@@ -69,7 +69,7 @@ from ..canonical import digest_imported_bytes
 from .pipeline.store import PipelineStore, PostingBuild, PostingRecord, RunAssessment, pipeline_path
 
 #: Bump when what a row is matched by, or what its facts are read from, changes.
-MATCH_VERSION = "posting-match:1"
+MATCH_VERSION = "posting-match:2"  # 0110-8-06: a row with no description is no longer a "known" digest (rows rebuild once)
 FACTS_VERSION = "posting-facts:1"
 
 STATE_ACTIVE = "active"
@@ -472,7 +472,7 @@ def _matched_rows(
         found[row.normalized_url] = PostingRecord(
             job=row.normalized_url, profile_id=view.profile_id, board=board, first_seen=first_seen,
             published_at=stamp(row.published_at), removed_at=None, listing_digest=content_digest(row),
-            listing_known=bool(row.content_sha256), rank_score=None, match_rank=1, state="not_assessed", stale_code=None,
+            listing_known=bool(row.content_sha256 and row.text), rank_score=None, match_rank=1, state="not_assessed", stale_code=None,
             assessed_at=None, reqs_met=None, reqs_total=None, open_questions=0, tailored=False, label=None, ats_score=None,
             pinned_digest=view.resume_digest, settings_digest=view.settings_digest, updated_at=built_at,
         )
@@ -632,6 +632,9 @@ class PostingText:
     text: str | None
     work_mode: str
     salary: str | None
+    #: 0110-8-02: where the posting lives (``greenhouse:acme`` and the provider's id), so a missing description can be fetched for it alone.
+    board: str | None = None
+    posting_id: str | None = None
 
 
 def _salary(pay: object | None) -> str | None:
@@ -690,10 +693,10 @@ def posting_texts(home_root: Path, rows: Iterable[PostingRecord]) -> dict[str, P
             row = cached.get(posting_id)
             if row is None:
                 mode = derive_work_mode(posting.location, None)  # type: ignore[attr-defined]
-                found[job] = PostingText(posting.title, entry.company, posting.location, posting.url, None, mode.mode, None)  # type: ignore[attr-defined]
+                found[job] = PostingText(posting.title, entry.company, posting.location, posting.url, None, mode.mode, None, board, posting_id)  # type: ignore[attr-defined]
                 continue
             mode = derive_work_mode(row.location, row.work_mode)
-            found[job] = PostingText(row.title, row.company, row.location, row.url, row.text, mode.mode, _salary(row.pay))
+            found[job] = PostingText(row.title, row.company, row.location, row.url, row.text, mode.mode, _salary(row.pay), board, posting_id)
     return found
 
 

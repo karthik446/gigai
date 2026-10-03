@@ -256,7 +256,7 @@ def test_c_new_postings_are_asked_about_and_assessed_only_on_a_yes(tmp_path: Pat
     yes = _cli(fx, "--yes", "--since", str(asked["since"]))
 
     assert yes["status"] == "new" and yes["question"] is None
-    assert yes["assessed"] == {"requested": 2, "assessed": 2, "failed": [], "stopped": None}
+    assert yes["assessed"] == {"requested": 2, "assessed": 2, "failed": [], "stopped": None, "fetched_on_demand": 0}
     assert len(fx.base.model.assess_prompts) == 2
     for row in _rows(yes):
         assert (row["score"], row["score_kind"], row["state"]) == (100, "assessment", "matched")
@@ -326,7 +326,7 @@ def test_d_a_recruiter_email_in_a_posting_passes_and_an_email_in_the_users_own_t
 
     response = _new(fx, assess=True)
 
-    assert response["assessed"] == {"requested": 2, "assessed": 2, "failed": [], "stopped": None}
+    assert response["assessed"] == {"requested": 2, "assessed": 2, "failed": [], "stopped": None, "fetched_on_demand": 0}
     _assert_labels(response)
     row = next(item for item in _rows(response) if item["job_identity"] == job_url("acme", 1))
     assert RECRUITER_EMAIL in row["description"]  # type: ignore[operator]

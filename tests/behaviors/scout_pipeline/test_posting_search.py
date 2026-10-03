@@ -228,7 +228,7 @@ def test_assess_these_asks_first_and_assesses_only_on_approval(tmp_path: Path, m
     monkeypatch.setattr(posting_search, "_assess", watched)
     done = these(jobs=wanted, approve=True, decided_by="agent")
     assert done["status"] == "assessed" and done["question"] is None
-    assert done["assessed"] == {"requested": 2, "assessed": 2, "failed": [], "stopped": None}
+    assert done["assessed"] == {"requested": 2, "assessed": 2, "failed": [], "stopped": None, "fetched_on_demand": 0}
     assert fx.base.model.calls == calls + 2
     assert seen_live == [runner.BUSY_ASSESS_BATCH] and runner.live_work(fx.home_root, fx.target) is None
     _assert_public_only(done)

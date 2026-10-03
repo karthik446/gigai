@@ -83,16 +83,16 @@ BASIS_STALE_REASONS: tuple[str, ...] = (REASON_OLDER_PROMPT, REASON_SETTINGS_CHA
 def posting_sha256(title: str, text: str) -> str:
     """A posting's content digest: what the company index stores as its posting digest.
 
-    The ATS parsers hash the title and the plain posting text, joined by a
-    newline (``ats_board_clients._text_bytes``), so an assessment of an
-    indexed posting carries the digest the index has for it, and a changed
-    posting can be told from the one that was assessed.
+    0110-8-06: this IS ``ats_board_clients.posting_content_digest`` (title and
+    plain text joined by a newline, through ``gigai.canonical``), the same
+    function a board row hashes itself with and ``job_state`` recomputes a
+    stored assessment's digest with, so an assessment of an indexed posting
+    carries the digest the index has for the same text.
     """
 
-    from .find_jobs.ats_board_clients import _text_bytes
-    from .find_jobs.contracts import content_hash
+    from .find_jobs.ats_board_clients import posting_content_digest
 
-    return content_hash(_text_bytes(title, text or None))
+    return posting_content_digest(title, text or None)
 
 
 @dataclass(frozen=True)

@@ -1159,9 +1159,11 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
         request_example={"assess": True},
         description=(
             "The yes or no to `status: \"ask\"`. With `assess: true` each new posting with no assessment is assessed for its best "
-            "profile through the job page's own path, from the posting text already stored (nothing is fetched); the calls are "
-            "recorded like every model call (GET /api/metrics). `assessed.failed` lists what could not be assessed, by error code; "
-            "a posting with no stored text is `job_text_unavailable`. The call waits for the model: allow a minute per four "
+            "profile through the job page's own path, from the posting text already stored; a posting with no stored text has its "
+            "description fetched first, ONE request for that posting alone (`assessed.fetched_on_demand` counts them); the calls are "
+            "recorded like every model call (GET /api/metrics). `assessed.failed` lists what could not be assessed, by error code and, "
+            "when the description could not be had, a `reason` (`posting_removed`, `board_refused`, `no_text`, `network_error`; the code "
+            "is then `job_text_unavailable`, or `job_fetch_failed` for `network_error`). The call waits for the model: allow a minute per four "
             "postings. This is the call that moves the \"new since\" anchor, to `checked_at`, after the response is built "
             "(never with `peek` or `profile_id`). " + _NEW_NOTE
         ),
@@ -1402,9 +1404,10 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
             "calls; `question.yes.api` is the call that approves) and no model call is made. With `approve: true` the batch is "
             "recorded as approved (`approval`: its id, who approved, how many), runs as live work (the pipeline and the rank lane "
             "start nothing meanwhile; a second batch answers 409 assess_batch_running) and each posting is assessed for its best "
-            "profile through the job page's own path, from the posting text already stored (nothing is fetched). The results are "
+            "profile through the job page's own path, from the posting text already stored (a posting with none has its description "
+            "fetched first: one request for it alone, counted in `assessed.fetched_on_demand`). The results are "
             "stored like any assessment, so GET /api/postings, GET /api/new and GET /api/jobs show them. `status` is then "
-            "`assessed`; `assessed.failed` lists what could not be assessed, by error code. A posting whose assessment is current "
+            "`assessed`; `assessed.failed` lists what could not be assessed, by error code and, for a missing description, a `reason`. A posting whose assessment is current "
             "is left out (`counts.already_current`) unless `again`; `not_found` lists named postings that are not in the stored "
             "postings. `nothing_to_assess` when nothing is left. The call waits for the model: allow a minute per four postings. "
             "No response mixes: posting text only, nothing the user wrote."
