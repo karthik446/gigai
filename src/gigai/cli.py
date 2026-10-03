@@ -114,6 +114,7 @@ from .run import ProposalRunRequest, TailorRunRequest, RunError, launch_run, rea
 from .run_plan import RunPlanError, create_run_plan, list_run_plans, read_run_plan
 from .provider_review import ProviderReviewError, close_provider_review_no_fix_required
 from .agent_context import agent_context_command
+from .agent_skill import agent_permissions_command, agent_skill_command
 from .private_records import (
     PrivateRecordError,
     create_record,
@@ -4265,6 +4266,8 @@ cli.add_command(scout_group)
 cli.add_command(transfer_group)
 cli.add_command(secrets_group)
 cli.add_command(agent_context_command)
+cli.add_command(agent_skill_command)
+cli.add_command(agent_permissions_command)
 # Keep existing G45 wrapper create/read behavior while exposing native CRUD.
 # Registering this independently named group as "record" would silently replace
 # the existing Click group and break its accepted command surface.

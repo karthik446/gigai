@@ -1450,6 +1450,29 @@
         "gigai agent-context --json"
       ],
       "notes": "Offline; reads only the packaged manifest and the command tree."
+    },
+    "agent-skill": {
+      "summary": "Print the instructions that teach your AI agent the daily Scout loop (a Claude Code SKILL.md, or an AGENTS.md section).",
+      "effect": "read",
+      "external": "none",
+      "output": "The instructions text on stdout; with --out, one line naming the file written.",
+      "examples": [
+        "gigai agent-skill",
+        "gigai agent-skill --format agents-md",
+        "gigai agent-skill --format skill --out SKILL.md"
+      ],
+      "notes": "Offline. Prints by default; --out writes only the file you name and refuses to replace an existing one without --force. Never writes into an agent's own folders by itself."
+    },
+    "agent-permissions": {
+      "summary": "Print a recommended Claude Code permissions snippet (deny reading ~/.gigai, allow the GigAI CLI) for you to apply.",
+      "effect": "read",
+      "external": "none",
+      "output": "A JSON snippet and a short plain explanation on stdout.",
+      "examples": [
+        "gigai agent-permissions",
+        "gigai agent-permissions --agent claude-code"
+      ],
+      "notes": "Offline. Prints only; GigAI never edits your agent's settings."
     }
   }
 }
