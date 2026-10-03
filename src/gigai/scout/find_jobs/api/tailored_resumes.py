@@ -29,7 +29,8 @@ That markdown is used for the render only: no model call, nothing stored, nothin
 (the Generate PDF form: ``name``, ``email``, ``phone``, ``location``, ``linkedin``, ``link``); its
 values fill this one PDF's header and are dropped: never written, logged, cached, or echoed in a
 response or an error (the PDF bytes aside; the file name is ``<company>-<role>-<date>.pdf``).
-Without ``header`` the PDF has no header.
+Without ``header`` the PDF has no header and the response carries ``X-GigAI-Finish-Url``: the local
+Scout page (``#/pdf/...``) where the person adds their details in the Generate PDF form and downloads.
 """
 
 from __future__ import annotations
@@ -54,6 +55,7 @@ from ...resume_display import SPACING_MAX, SPACING_MIN, HeaderFormError, parse_h
 from ...resume_pdf import (
     MAX_MARKDOWN_BYTES,
     ResumeMarkdownError,
+    finish_url,
     markdown_resume_pdf,
     parse_resume_markdown,
     stored_resume_pdf,
@@ -122,13 +124,16 @@ class TailoredResumesRoutesMixin:
             self._error(HTTPStatus.UNPROCESSABLE_ENTITY, exc.code, str(exc))
             return False, None
 
-    def _write_pdf(self, rendered, file_name: str, extra: dict[str, str] | None = None) -> None:
-        self._write_bytes(
-            HTTPStatus.OK,
-            "application/pdf",
-            rendered.pdf,
-            {"Content-Disposition": f'attachment; filename="{file_name}"', **(extra or {})},
-        )
+    def _write_pdf(self, rendered, file_name: str, extra: dict[str, str] | None = None, finish: str | None = None) -> None:
+        """The PDF; a headerless one (``finish`` set) names the Scout page that finishes it."""
+
+        headers = {"Content-Disposition": f'attachment; filename="{file_name}"', **(extra or {})}
+        if finish is not None:
+            headers["X-GigAI-Finish-Url"] = finish
+        self._write_bytes(HTTPStatus.OK, "application/pdf", rendered.pdf, headers)
+
+    def _finish_url(self, profile_id: str | None = None, job_identity: str | None = None) -> str:
+        return finish_url(f"http://127.0.0.1:{self._bound_port()}", profile_id, job_identity)
 
     def _handle_post_tailored_resume_pdf(self) -> None:
         body = self._read_json_body()
@@ -161,7 +166,7 @@ class TailoredResumesRoutesMixin:
         except Exception:  # noqa: BLE001 - a render failure is typed, and never echoes the resume or the form
             self._error(HTTPStatus.INTERNAL_SERVER_ERROR, "pdf_render_failed", "the PDF could not be rendered")
             return
-        self._write_pdf(rendered, file_name)
+        self._write_pdf(rendered, file_name, finish=None if form is not None else self._finish_url(profile_id, job_identity))
 
     def _refuse_large_body(self) -> bool:
         """True (and a 422 written) when the request body is too large to be resume markdown."""
@@ -244,7 +249,8 @@ class TailoredResumesRoutesMixin:
             self._error(HTTPStatus.INTERNAL_SERVER_ERROR, "pdf_render_failed", "the PDF could not be rendered")
             return
         self._write_pdf(
-            rendered, file_name, {"X-GigAI-Pages": str(rendered.pages), "X-GigAI-Spacing-Scale": f"{rendered.spacing_scale:g}"}
+            rendered, file_name, {"X-GigAI-Pages": str(rendered.pages), "X-GigAI-Spacing-Scale": f"{rendered.spacing_scale:g}"},
+            finish=None if form is not None else self._finish_url(),
         )
 
     def _handle_put_tailored_resume_line(self) -> None:

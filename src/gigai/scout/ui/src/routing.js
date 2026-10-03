@@ -18,6 +18,10 @@
 //   #/settings           preferences, resume, setup wizard, discover, add company
 //   #/assess             "+ Assess a job", reached from Assessments (its
 //                        result opens #/assessments/<id>)
+//   #/pdf                0110-046: Generate PDF, where an agent's or the
+//   #/pdf/<profile>/<job>  CLI's headerless PDF is finished (the link they
+//                        print); markdown picked here, or the stored
+//                        tailored resume for that profile and job
 //
 // Hash routes so the browser back/forward buttons work (every link is a
 // plain <a href="#/…">), the server never sees a client route (the packaged
@@ -41,6 +45,7 @@ export const ROUTES = [
   { view: "run", path: "#/runs/", label: "Run", pattern: /^#\/runs\/(.+)$/, param: "runId" },
   { view: "settings", path: "#/settings", label: "Settings", pattern: /^#\/settings\/?$/ },
   { view: "assess", path: "#/assess", label: "Assess a job", pattern: /^#\/assess\/?$/ },
+  { view: "pdf", path: "#/pdf", label: "Generate PDF", pattern: /^#\/pdf(?:\/(.*))?$/, param: "pdfTarget" },
 ];
 
 // The top bar's primary links, in order (the profile switcher and the
@@ -77,11 +82,28 @@ export function parseHash(hash) {
   for (const route of ROUTES) {
     const match = route.pattern.exec(value);
     if (match) {
-      const params = route.param ? { [route.param]: decodeParam(match[1]) } : {};
+      const params = route.param && match[1] !== undefined ? { [route.param]: decodeParam(match[1]) } : {};
       return { view: route.view, params, known: true };
     }
   }
   return { view: "jobs", params: {}, known: false };
+}
+
+// 0110-046: "<profile_id>/<encoded job identity>" (the server's finish link) ->
+// {profileId, jobIdentity}; "" or anything else -> nulls (the markdown form).
+// The router has already decoded the hash once, so the job identity (a URL)
+// arrives decoded; a profile id never holds a "/".
+export function parsePdfTarget(target) {
+  const value = typeof target === "string" ? target : "";
+  const slash = value.indexOf("/");
+  if (slash <= 0 || slash === value.length - 1) {
+    return { profileId: null, jobIdentity: null };
+  }
+  return { profileId: value.slice(0, slash), jobIdentity: value.slice(slash + 1) };
+}
+
+export function pdfHash(profileId, jobIdentity) {
+  return profileId && jobIdentity ? `#/pdf/${encodeURIComponent(profileId)}/${encodeURIComponent(jobIdentity)}` : "#/pdf";
 }
 
 export function jobHash(jobId) {

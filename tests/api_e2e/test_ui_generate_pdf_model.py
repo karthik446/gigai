@@ -86,3 +86,45 @@ def test_the_form_keeps_nothing_and_sends_the_values_only_in_the_render_request(
     assert re.findall(r"body\.header = header", api) == ["body.header = header", "body.header = header"]
     assert 'postPdf("/api/tailored-resumes/pdf", body)' in api and 'postPdf("/api/resume/pdf", body)' in api
 
+
+
+ROUTING_SCRIPT = """
+const r = await import(process.argv[1]);
+console.log(JSON.stringify({
+  bare: r.parseHash("#/pdf"),
+  slash: r.parseHash("#/pdf/"),
+  job: r.parseHash("#/pdf/prof_1/https%3A%2F%2Fboards.greenhouse.io%2Facme%2Fjobs%2F101"),
+  target: r.parsePdfTarget("prof_1/https://boards.greenhouse.io/acme/jobs/101"),
+  empty: [r.parsePdfTarget(undefined), r.parsePdfTarget(""), r.parsePdfTarget("prof_1"), r.parsePdfTarget("prof_1/")],
+  hash: r.pdfHash("prof_1", "https://boards.greenhouse.io/acme/jobs/101"),
+  hashBare: r.pdfHash(null, null),
+}));
+"""
+
+
+def test_the_finish_link_opens_the_generate_pdf_page_for_that_resume(tmp_path: Path) -> None:
+    """The server's X-GigAI-Finish-Url / the CLI's link (``resume_pdf.finish_url``) parse back to the profile and job."""
+    from urllib.parse import urlsplit
+
+    from gigai.scout.resume_pdf import finish_url
+    from tests.api_e2e.test_ui_uat_batch2_model import _routing_without_react
+
+    if shutil.which("node") is None:
+        pytest.skip("LOUD: node is not on PATH; the Generate PDF route was NOT checked")
+    out = json.loads(subprocess.run(
+        ["node", "--input-type=module", "-e", ROUTING_SCRIPT, _routing_without_react(tmp_path).as_uri()],
+        capture_output=True, text=True, timeout=60, check=True,
+    ).stdout)
+    job = "https://boards.greenhouse.io/acme/jobs/101"
+    assert out["bare"] == {"view": "pdf", "params": {}, "known": True}
+    assert out["slash"]["view"] == "pdf"
+    assert out["job"] == {"view": "pdf", "params": {"pdfTarget": f"prof_1/{job}"}, "known": True}
+    assert out["target"] == {"profileId": "prof_1", "jobIdentity": job}
+    assert out["empty"] == [{"profileId": None, "jobIdentity": None}] * 4
+    link = finish_url("http://127.0.0.1:8765", "prof_1", job)
+    assert link == "http://127.0.0.1:8765" + "/" + out["hash"]
+    assert "#" + urlsplit(link).fragment == out["hash"] and finish_url("http://127.0.0.1:8765/") == "http://127.0.0.1:8765/" + out["hashBare"]
+    view = (UI_SRC / "views" / "PdfView.jsx").read_text(encoding="utf-8")
+    assert "<GeneratePdfForm" in view and "postTailoredResumePdf" in view and "postResumePdf" in view
+    app = (UI_SRC / "App.jsx").read_text(encoding="utf-8")
+    assert 'route.view === "pdf" && <PdfView target={route.params.pdfTarget} />' in app

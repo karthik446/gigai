@@ -158,6 +158,8 @@ def test_an_agent_changes_two_bullets_and_renders_a_new_pdf(tmp_path: Path, monk
         assert int(from_markdown.headers["content-length"]) == len(from_markdown.content)
         assert _text(from_markdown.content) == _text(stored_pdf.content), "text-identical to the UI path's PDF"
         assert _pages(from_markdown.content) == _pages(stored_pdf.content) == int(from_markdown.headers["x-gigai-pages"]) == 1
+        assert from_markdown.headers["x-gigai-finish-url"] == f"http://127.0.0.1:{server.port}/#/pdf"
+        assert stored_pdf.headers["x-gigai-finish-url"].startswith(f"http://127.0.0.1:{server.port}/#/pdf/")
         header_area = _text(from_markdown.content).split("\n")[0]
         assert header_area == "SUMMARY" and "RILEY" not in _text(from_markdown.content), "no header: GigAI stores no name or contact details"
 
@@ -177,12 +179,21 @@ def test_an_agent_changes_two_bullets_and_renders_a_new_pdf(tmp_path: Path, monk
         ran = CliRunner().invoke(cli, ["scout", "resume", "pdf", "--tailored", "--job-url", key["job_identity"], "--out", str(cli_stored), "--home", str(home), "--target", str(target), "--json"])
         assert ran.exit_code == 0, ran.output
         assert json.loads(ran.output)["source"] == "tailored" and json.loads(ran.output)["pages"] == 1
+        # 0110-046: headerless, with the running Scout's page that finishes it.
+        assert json.loads(ran.output)["finish_url"] == stored_pdf.headers["x-gigai-finish-url"] and json.loads(ran.output)["scout_running"] is True
         assert cli_stored.read_bytes() == stored_pdf.content, "the CLI writes the bytes the UI's Download PDF gets"
         md_file.write_text(markdown, encoding="utf-8")
         ran = CliRunner().invoke(cli, ["scout", "resume", "pdf", "--in", str(md_file), "--profile", key["profile_id"], "--out", str(cli_md), "--home", str(home), "--target", str(target), "--json"])
         assert ran.exit_code == 0, ran.output
         assert cli_md.read_bytes().startswith(b"%PDF") and json.loads(ran.output)["pages"] == 1
         assert _text(cli_md.read_bytes()) == _text(from_markdown.content) == _text(stored_pdf.content)
+        # No --out: the file is named after the company, role and date, in the current folder; never after the person.
+        monkeypatch.chdir(tmp_path)
+        named = CliRunner().invoke(cli, ["scout", "resume", "pdf", "--tailored", "--job-url", key["job_identity"], "--home", str(home), "--target", str(target)])
+        assert named.exit_code == 0, named.output
+        written = re.search(r"Wrote (\S+\.pdf)", named.output).group(1)
+        assert re.fullmatch(r"acme-staff-engineer-\d{4}-\d{2}-\d{2}\.pdf", Path(written).name) and Path(written).parent == tmp_path.resolve()
+        assert f"Open in Scout to add your name and contact details and download: {stored_pdf.headers['x-gigai-finish-url']}" in named.output
         missing = CliRunner().invoke(cli, ["scout", "resume", "pdf", "--tailored", "--job-url", "https://example.test/none", "--out", str(tmp_path / "x.pdf"), "--home", str(home), "--target", str(target), "--json"])
         assert missing.exit_code == 1 and json.loads(missing.output)["error"]["code"] == "tailored_resume_not_found"
 

@@ -125,8 +125,9 @@ _HEADER_PARAM = _b(
     "and the person finishing it in Scout.",
 )
 _HEADER_NOTE = (
-    "GigAI stores no name or contact details: without header the PDF has no header (a blank block keeps the page layout); "
-    "the person finishes it in Scout's Generate PDF form, in their browser."
+    "GigAI stores no name or contact details: without header the PDF has no header (a blank block keeps the page layout) "
+    "and the response carries X-GigAI-Finish-Url, the local Scout page where the person adds their details in the Generate PDF form "
+    "and downloads; an agent cannot finish that step unless it drives that person's browser."
 )
 _ROW_ERRORS = (_INVALID, _WRONG_TYPE, _UNKNOWN_KEY)
 

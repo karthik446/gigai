@@ -2383,7 +2383,7 @@
     },
     "/api/resume/pdf": {
       "post": {
-        "description": "Render resume markdown you send as a PDF (binary), with the saved layout. Returns application/pdf with Content-Disposition: attachment; filename=`resume-<YYYY-MM-DD>.pdf`, X-GigAI-Pages and X-GigAI-Spacing-Scale; changes nothing. Local only: the markdown is not sent to a model, not stored and not logged. GigAI stores no name or contact details: without header the PDF has no header (a blank block keeps the page layout); the person finishes it in Scout's Generate PDF form, in their browser. Lines above the first `## ` section are not printed. Trailing `<!-- ... -->` comments are dropped, so a tailored resume's `markdown` renders as it is. 422 resume_markdown_invalid names the line number and the rule.",
+        "description": "Render resume markdown you send as a PDF (binary), with the saved layout. Returns application/pdf with Content-Disposition: attachment; filename=`resume-<YYYY-MM-DD>.pdf`, X-GigAI-Pages and X-GigAI-Spacing-Scale; changes nothing. Local only: the markdown is not sent to a model, not stored and not logged. GigAI stores no name or contact details: without header the PDF has no header (a blank block keeps the page layout) and the response carries X-GigAI-Finish-Url, the local Scout page where the person adds their details in the Generate PDF form and downloads; an agent cannot finish that step unless it drives that person's browser. Lines above the first `## ` section are not printed. Trailing `<!-- ... -->` comments are dropped, so a tailored resume's `markdown` renders as it is. 422 resume_markdown_invalid names the line number and the rule.",
         "operationId": "post_api_resume_pdf",
         "parameters": [],
         "requestBody": {
@@ -6092,7 +6092,7 @@
     },
     "/api/tailored-resumes/pdf": {
       "post": {
-        "description": "Render the stored tailored resume as a PDF (binary). Returns application/pdf with Content-Disposition: attachment; filename=`<company>-<role>-<YYYY-MM-DD>.pdf` (never your name); changes nothing. GigAI stores no name or contact details: without header the PDF has no header (a blank block keeps the page layout); the person finishes it in Scout's Generate PDF form, in their browser.",
+        "description": "Render the stored tailored resume as a PDF (binary). Returns application/pdf with Content-Disposition: attachment; filename=`<company>-<role>-<YYYY-MM-DD>.pdf` (never your name); changes nothing. GigAI stores no name or contact details: without header the PDF has no header (a blank block keeps the page layout) and the response carries X-GigAI-Finish-Url, the local Scout page where the person adds their details in the Generate PDF form and downloads; an agent cannot finish that step unless it drives that person's browser.",
         "operationId": "post_api_tailored_resumes_pdf",
         "parameters": [],
         "requestBody": {

@@ -9,6 +9,7 @@ import AssessView from "./views/AssessView.jsx";
 import ApplicationsView from "./views/ApplicationsView.jsx";
 import RunsView from "./views/RunsView.jsx";
 import SettingsView from "./views/SettingsView.jsx";
+import PdfView from "./views/PdfView.jsx";
 import { JOBS_HASH, SETTINGS_HASH, navViewFor, navigate, postingHash, routeFor, useHashRoute } from "./routing.js";
 
 function useConfig() {
@@ -289,6 +290,8 @@ export default function App() {
             defaultSearchSettings={profilesState.defaultSearchSettings}
           />
         )}
+
+        {route.view === "pdf" && <PdfView target={route.params.pdfTarget} />}
 
         {route.view === "assess" && (
           <AssessView

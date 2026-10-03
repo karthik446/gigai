@@ -26,6 +26,7 @@ from datetime import date, datetime, timezone
 from importlib import resources
 from pathlib import Path
 from collections.abc import Callable
+from urllib.parse import quote
 
 from dataclasses import dataclass
 
@@ -456,6 +457,20 @@ def stored_resume_pdf(
     return rendered, pdf_file_name(stored.job.company, stored.job.title, today or date.today())
 
 
+#: Shown with every headerless PDF (0110-046): the page that finishes it.
+FINISH_LINE = "Open in Scout to add your name and contact details and download"
+
+
+def finish_url(base_url: str, profile_id: str | None = None, job_identity: str | None = None) -> str:
+    """The Scout page that finishes a headerless PDF: ``<base>/#/pdf/<profile_id>/<job identity>`` for a stored
+    tailored resume, ``<base>/#/pdf`` for markdown (the user picks the file there).  ASCII only (a header value)."""
+
+    base = base_url.rstrip("/")
+    if profile_id and job_identity:
+        return f"{base}/#/pdf/{quote(profile_id, safe='')}/{quote(job_identity, safe='')}"
+    return f"{base}/#/pdf"
+
+
 def markdown_resume_pdf(
     markdown: str, *, home_root: Path, profile_id: str | None = None, form: dict[str, str] | None = None,
     spacing_scale: float | None = None, auto_fit: bool | None = None, now: datetime | None = None,
@@ -479,6 +494,8 @@ __all__ = [
     "RenderedPdf",
     "ResumeMarkdownError",
     "clamp_scale",
+    "FINISH_LINE",
+    "finish_url",
     "fit_scale",
     "layout",
     "markdown_resume_pdf",

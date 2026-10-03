@@ -193,9 +193,29 @@ def test_cli_renders_markdown_headerless_with_the_saved_layout_and_creates_nothi
     code, payload = _cli("--in", str(source), "--out", str(out), "--home", str(home), "--auto-fit")
     assert code == 0 and 0.7 <= payload["spacing_scale"] <= 1.4
 
+    # 0110-046: the payload names the page that finishes the PDF; no Scout runs here, so the default address.
+    assert payload["header"] is False and payload["finish_url"] == "http://127.0.0.1:8765/#/pdf" and payload["scout_running"] is False
+    plain = CliRunner().invoke(cli, ["scout", "resume", "pdf", "--in", str(source), "--out", str(out), "--home", str(home)])
+    assert plain.exit_code == 0, plain.output
+    assert "without your name and contact details" in plain.output
+    assert "Open in Scout to add your name and contact details and download: http://127.0.0.1:8765/#/pdf (start Scout first: `gigai scout run`)" in plain.output
+
     # stdin works too.
     piped = CliRunner().invoke(cli, ["scout", "resume", "pdf", "--in", "-", "--out", str(out), "--home", str(home), "--json"], input=MARKDOWN)
     assert piped.exit_code == 0 and json.loads(piped.output)["pages"] == 1
+
+
+def test_cli_default_out_is_dated_and_never_the_persons_name(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """0110-046 addendum: no --out writes resume-<YYYY-MM-DD>.pdf in the current folder (the markdown's '# Name' is not used)."""
+    source, home = tmp_path / "resume.md", tmp_path / "home"
+    source.write_text(MARKDOWN, encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    code, payload = _cli("--in", str(source), "--home", str(home))
+    assert code == 0, payload
+    written = Path(payload["out_path"])
+    assert written.parent == tmp_path.resolve() or written.parent == tmp_path
+    assert written.name.startswith("resume-") and written.name.endswith(".pdf") and len(written.name) == len("resume-2026-10-02.pdf")
+    assert "riley" not in written.name.lower() and written.read_bytes().startswith(b"%PDF")
 
 
 def test_cli_errors_are_clear(tmp_path: Path) -> None:

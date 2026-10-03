@@ -507,7 +507,7 @@ def resume_tailor_command(
 @click.option("--in", "in_file", help="Resume markdown FILE in GigAI's resume format (or - for stdin).")
 @click.option("--tailored", "tailored", is_flag=True, help="Render the STORED tailored resume for --job-url instead of a markdown file.")
 @click.option("--job-url", "job_url", help="With --tailored: the posting URL the resume was tailored to.")
-@click.option("--out", "out_file", required=True, type=click.Path(path_type=Path, dir_okay=False), help="Write the PDF to FILE.")
+@click.option("--out", "out_file", type=click.Path(path_type=Path, dir_okay=False), help="Write the PDF to FILE (default: <company>-<role>-<YYYY-MM-DD>.pdf, or resume-<YYYY-MM-DD>.pdf, in this folder).")
 @click.option("--profile", "profile_id", help="With --tailored: the Scout profile ID the resume was tailored from (default: the newest).")
 @click.option("--spacing", "spacing", type=float, help="Spacing scale 0.7-1.4 for this render (turns auto fit off unless --auto-fit is given). Default: the saved setting.")
 @click.option("--auto-fit/--no-auto-fit", "auto_fit", default=None, help="Pick the spacing that ends the content near a page boundary. Default: the saved setting.")
@@ -518,7 +518,7 @@ def resume_pdf_command(
     in_file: str | None,
     tailored: bool,
     job_url: str | None,
-    out_file: Path,
+    out_file: Path | None,
     profile_id: str | None,
     spacing: float | None,
     auto_fit: bool | None,
@@ -534,14 +534,18 @@ def resume_pdf_command(
     stored tailored resume for that posting). Either way the PDF uses the same
     template as the Scout UI's "Generate PDF". GigAI stores no name or contact
     details, so this PDF has no header (a blank block keeps the page layout):
-    you add yours in Scout's Generate PDF form. --spacing / --auto-fit change
-    the layout for this render only.
+    the command prints the local Scout page where you add yours in the
+    Generate PDF form and download (an agent cannot finish that step unless it
+    drives your browser). --spacing / --auto-fit change the layout for this
+    render only. The file is named <company>-<role>-<YYYY-MM-DD>.pdf, never
+    after you.
     """
 
     from .find_jobs.contracts import FindJobsContractError
     from .find_jobs.job_state import normalize_job_identity
     from .quick_assess import QuickAssessError
-    from .resume_pdf import ResumeMarkdownError, markdown_resume_pdf, stored_resume_pdf
+    from . import run_supervisor
+    from .resume_pdf import FINISH_LINE, ResumeMarkdownError, finish_url, markdown_resume_pdf, stored_resume_pdf
     from .tailored_resume import list_tailored_resumes
     from .target_resolution import home_scout_target
 
@@ -565,17 +569,19 @@ def resume_pdf_command(
 
     failure: tuple[Exception, str] | None = None
     rendered = None
+    finish_ids: tuple[str | None, str | None] = (None, None)
     try:
         if tailored:
             assert job_url is not None and target is not None
             items = list_tailored_resumes(home_root, target, profile_id=profile_id or None, job_identity=normalize_job_identity(job_url))
             if not items:
                 raise QuickAssessError("tailored_resume_not_found", "no stored tailored resume for that job; run `gigai scout resume tailor --job-url ...` first")
-            rendered, _name = stored_resume_pdf(items[0], home_root=home_root, spacing_scale=spacing, auto_fit=auto_fit, count_pages=True)
+            rendered, file_name = stored_resume_pdf(items[0], home_root=home_root, spacing_scale=spacing, auto_fit=auto_fit, count_pages=True)
+            finish_ids = (items[0].resume.profile_id or "ephemeral", items[0].job.job_identity)
         else:
             assert in_file is not None
             markdown = _read_text_option(in_file, flag="--in")
-            rendered, _name = markdown_resume_pdf(markdown, home_root=home_root, spacing_scale=spacing, auto_fit=auto_fit)
+            rendered, file_name = markdown_resume_pdf(markdown, home_root=home_root, spacing_scale=spacing, auto_fit=auto_fit)
     except OSError as exc:
         failure = (exc, "input_file_unreadable")
     except (ResumeMarkdownError, QuickAssessError, FindJobsContractError, ValueError) as exc:  # ValueError: --spacing out of range, undecodable input
@@ -587,13 +593,23 @@ def resume_pdf_command(
         _fail(exc, as_json=as_json, fallback=fallback)
         return
 
-    out_path = out_file.expanduser()
+    out_path = out_file.expanduser() if out_file is not None else Path.cwd() / file_name
     try:
         out_path.parent.mkdir(parents=True, exist_ok=True)
         out_path.write_bytes(rendered.pdf)
     except OSError as exc:
         _fail(exc, as_json=as_json, fallback="output_file_unwritable")
         return
+    # 0110-046: the PDF has no header; the running Scout's page finishes it (the default port when none runs).
+    base, running = f"http://127.0.0.1:{run_supervisor.DEFAULT_PORT}", False
+    if target is not None:
+        try:
+            current = run_supervisor.status(home_root=home_root, requested_target=target)
+            if current.state == "running" and current.url:
+                base, running = current.url, True
+        except Exception:  # noqa: BLE001 - no bound project or no state: the default local address
+            pass
+    link = finish_url(base, *finish_ids)
     payload: dict[str, object] = {
         "ok": True,
         "out_path": str(out_path),
@@ -601,8 +617,17 @@ def resume_pdf_command(
         "pages": rendered.pages,
         "bytes": len(rendered.pdf),
         "spacing_scale": rendered.spacing_scale,
+        "header": False,
+        "finish_url": link,
+        "scout_running": running,
     }
-    _emit(payload, as_json, f"Wrote {out_path} ({rendered.pages} page{'' if rendered.pages == 1 else 's'}, spacing {rendered.spacing_scale:g}).")
+    lines = [
+        f"Wrote {out_path} ({rendered.pages} page{'' if rendered.pages == 1 else 's'}, spacing {rendered.spacing_scale:g}), without your name and contact details.",
+        f"{FINISH_LINE}: {link}" + ("" if running else " (start Scout first: `gigai scout run`)"),
+    ]
+    if not tailored:
+        lines.append(f"There, choose {in_file if in_file != '-' else 'the same markdown'} as the resume.")
+    _emit(payload, as_json, "\n".join(lines))
 
 
 def _other_server_label(other: OtherScoutServer) -> str:

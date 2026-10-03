@@ -14,6 +14,7 @@ from __future__ import annotations
 import io
 import re
 from pathlib import Path
+from urllib.parse import quote
 
 import httpx
 import pytest
@@ -79,6 +80,10 @@ def test_tailored_resume_pdf_journey(tmp_path: Path, monkeypatch: pytest.MonkeyP
         text = _text(first.content)
         assert "|" not in text and "@" not in text
         assert not (home / "scout" / "resume-display.json").exists(), "rendering saves nothing"
+        # ... and names the Scout page that finishes it (the Generate PDF form for this profile and job).
+        finish = first.headers["x-gigai-finish-url"]
+        assert finish == f"http://127.0.0.1:{server.port}/#/pdf/{quote(key['profile_id'], safe='')}/{quote(key['job_identity'], safe='')}"
+        assert finish.isascii()
 
         # (b) the Generate PDF form fills this PDF; an old client's saved name/contact are ignored.
         legacy = client.put("/api/resume-display", json={"name": "Kar Ohm", "contact": [{"kind": "email", "value": "kar@example.test"}], "titles": {key["profile_id"]: "Staff Engineer"}})
@@ -91,6 +96,7 @@ def test_tailored_resume_pdf_journey(tmp_path: Path, monkeypatch: pytest.MonkeyP
         assert second.status_code == 200 and second.headers["content-type"] == "application/pdf"
         assert expected_name.fullmatch(second.headers["content-disposition"])
         _no_marker(second, body_too=False)
+        assert "x-gigai-finish-url" not in second.headers, "a PDF with its header needs no finishing"
         text = _text(second.content)
         assert text.startswith("ZORA QUILLFEATHER\nStaff Engineer\nzora.q@example.invalid | 555-0142-ZQ | Nowhere, ZZ | linkedin.com/in/zq-invalid | zq.example.invalid")
         assert len(PdfReader(io.BytesIO(second.content)).pages) == len(PdfReader(io.BytesIO(headerless.content)).pages)
