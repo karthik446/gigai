@@ -95,17 +95,17 @@ def test_the_start_page_asks_before_the_network_and_before_model_calls() -> None
         assert banned not in text, banned
 
 
-def test_the_readme_starter_prompt_points_at_this_release_and_carries_the_fallbacks() -> None:
+def test_the_readme_starter_prompt_points_at_the_start_page_source_and_carries_the_fallbacks() -> None:
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     prompt = next(block for block in re.findall(r"```text\n(.*?)\n```", readme, flags=re.S) if block.startswith("Set up GigAI for me."))
     assert "\n" not in prompt, "one paragraph, so it pastes as one message"
-    # /latest/ pages are redirect stubs, so the prompt names the release's own pages. The release is the newest
-    # CHANGELOG entry: a release that forgets to move the prompt fails here.
-    newest = re.search(r"^### (\d+(?:\.\d+)+)$", (ROOT / "CHANGELOG.md").read_text(encoding="utf-8"), flags=re.M)
-    assert newest is not None
-    version = newest.group(1)
-    assert f"https://karthik446.github.io/gigai/{version}/scout/agents/start/" in prompt
-    assert f"`curl -fsSL https://karthik446.github.io/gigai/{version}/llms.txt`" in prompt, "the fallback when the agent cannot open the page"
+    # The docs site is versioned and /latest/ pages are redirect stubs, and the README may carry no version literal
+    # (test_readme_no_versions): so the prompt names the start page's SOURCE on main, a stable plain-text URL that is
+    # always the newest released text. The file must exist at that path in the repo.
+    raw = "https://raw.githubusercontent.com/karthik446/gigai/main/gigai-docs/src/content/docs/scout/agents/start.md"
+    assert f"Read {raw} first" in prompt
+    assert f"`curl -fsSL {raw}`" in prompt, "the fallback when the agent cannot open the page"
+    assert (ROOT / "gigai-docs" / "src" / "content" / "docs" / "scout" / "agents" / "start.md").is_file()
     assert "/latest/" not in prompt
     for must in (
         "`brew install uv`",
