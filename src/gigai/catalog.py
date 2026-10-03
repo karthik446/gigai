@@ -17,7 +17,7 @@ from .package import (
 )
 
 
-CATALOG_REVISION = "v0.1.10.6"
+CATALOG_REVISION = "v0.1.10.7"
 CATALOG_NAMESPACE = uuid.UUID("6d4f3a9e-3f76-4a2b-9d17-5c8e2f1a4b63")
 CATALOG_SCHEMA_VERSION = "1.0"
 
