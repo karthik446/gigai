@@ -70,6 +70,7 @@ from ...adapters.claude_cli import ClaudeCLIAdapter
 from ...adapters.codex_cli import CodexCLIAdapter
 from ...adapters.port import ModelInvocationError
 from ...canonical import canonical_json_digest, digest_imported_bytes
+from ..call_metrics import KIND_RANK, CallMeter
 from .discovery.storage import atomic_write
 from .rank_digest import DIGEST_VERSION, CandidatePrefs, posting_digest, resume_digest
 
@@ -626,9 +627,12 @@ def _usage_of(result: object) -> BatchUsage:
 
 
 class _Ranker:
-    def __init__(self, *, binding: object, port: object, effort: str | None, candidate: str, budget: _Budget) -> None:
+    def __init__(
+        self, *, binding: object, port: object, effort: str | None, candidate: str, budget: _Budget, meter: CallMeter
+    ) -> None:
         self._binding = binding
         self._port = port
+        self._meter = meter
         self._effort = effort
         self._candidate = candidate
         self._budget = budget
@@ -650,7 +654,7 @@ class _Ranker:
             if self._effort is not None:
                 request = replace(request, reasoning_effort=self._effort)
             try:
-                result = self._port.invoke(request)  # type: ignore[attr-defined]
+                result = self._meter.invoke(self._port, request, items=len(entries))
             except (ModelInvocationError, OSError, TimeoutError) as exc:
                 code = getattr(exc, "code", "")
                 error = f"model call failed ({code or type(exc).__name__}): {str(exc)[:200]}"
@@ -666,6 +670,7 @@ class _Ranker:
                 items = validate_rank_answer(result.output_text, ids)  # type: ignore[attr-defined]
             except RankAnswerError as exc:
                 error = str(exc)
+                self._meter.invalid_output()
                 continue
             return _Attempt(items, None, usage, resolved, calls)
         return _Attempt(None, error, usage, resolved, calls)
@@ -816,6 +821,8 @@ def rank_postings(
     concurrency: int = DEFAULT_CONCURRENCY,
     max_calls: int = DEFAULT_MAX_CALLS,
     max_tokens: int | None = None,
+    target: Path | None = None,
+    profile_id: str | None = None,
 ) -> RankResult:
     """Rank ``rows`` for one candidate; one :class:`RankedPosting` per row, in input order.
 
@@ -945,7 +952,11 @@ def rank_postings(
         ))
 
     budget = _Budget(max_calls=max_calls, max_tokens=max_tokens, cancel=cancel)
-    ranker = _Ranker(binding=resolved.binding, port=resolved.port, effort=resolved.effort_applied, candidate=candidate, budget=budget)
+    ranker = _Ranker(
+        binding=resolved.binding, port=resolved.port, effort=resolved.effort_applied, candidate=candidate, budget=budget,
+        # 0.1.10.7 E: recorded in the project's metrics when the caller names the project (``target``).
+        meter=CallMeter(KIND_RANK, adapter_kind, home_root, target, target_name=resolved.configured_target, profile_id=profile_id),
+    )
     batches = [
         (f"b{number:03d}", pending[start:start + batch_size])
         for number, start in enumerate(range(0, len(pending), batch_size))

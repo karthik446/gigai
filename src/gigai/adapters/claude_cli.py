@@ -123,6 +123,7 @@ class ClaudeCLIAdapter:
             raw_usage=usage,
             normalized_usage=_normalize_usage(usage),
             cost_status="provider_reported" if usage else "unavailable",
+            cost_usd=_reported_cost(output.stdout),
         )
 
 
@@ -148,6 +149,19 @@ def _parse_claude_json(
         model = ",".join(str(name) for name in model_usage)
     usage = payload.get("usage") if isinstance(payload.get("usage"), dict) else {}
     return text, model, usage
+
+
+def _reported_cost(stdout: str) -> float | None:
+    """``total_cost_usd`` of ``claude -p --output-format json``, when it is there (0.1.10.7 E)."""
+
+    try:
+        payload: Any = json.loads(stdout)
+    except json.JSONDecodeError:
+        return None
+    cost = payload.get("total_cost_usd") if type(payload) is dict else None
+    if type(cost) not in (int, float) or not 0 <= cost < float("inf"):
+        return None
+    return float(cost)
 
 
 def _normalize_usage(usage: Mapping[str, object]) -> NormalizedUsage:

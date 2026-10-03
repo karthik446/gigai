@@ -333,6 +333,8 @@ def run_pass(
     config: object | None = None,
     max_calls: int | None = None,
     concurrency: int | None = None,
+    target: Path | None = None,
+    profile_id: str | None = None,
     **extra_started: object,
 ) -> RankResult:
     """One pass over ``rows`` at batch 50, K=``run_concurrency()``, capped at ``run_call_cap``; streamed."""
@@ -353,6 +355,8 @@ def run_pass(
         batch_size=DEFAULT_BATCH_SIZE,
         concurrency=workers,
         max_calls=calls,
+        target=target,
+        profile_id=profile_id,
     )
     streamer.finished(result)
     return result

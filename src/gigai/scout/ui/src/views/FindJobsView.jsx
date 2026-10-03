@@ -20,6 +20,7 @@ import NodeStatusList from "../components/NodeStatusList.jsx";
 import JobsGrid from "../components/JobsGrid.jsx";
 import JobsSummaryStrip from "../components/JobsSummaryStrip.jsx";
 import Breadcrumb from "../components/Breadcrumb.jsx";
+import ModelAverage from "../components/ModelAverage.jsx";
 import JobPage from "./JobPage.jsx";
 import AssessmentsView from "./AssessmentsView.jsx";
 import { useSourcesStatus } from "../components/SourcesUpdatePanel.jsx";
@@ -907,6 +908,9 @@ export default function FindJobsView({
           >
             {assessAllButtonLabel(assessAllPlan)}
           </button>
+        )}
+        {!assessAllBusy && assessAllPlan && assessAllPlan.count > 0 && !assessAllConfirm && (
+          <ModelAverage kind="assess" target={assessAllPlan.model_target} />
         )}
         {!assessAllBusy && assessAllConfirm && assessAllPlan && (
           <span data-role="assess-all-confirm">

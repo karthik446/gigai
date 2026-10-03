@@ -620,4 +620,20 @@ export function putBackgroundSettings(patch) {
   return request("PUT", "/api/settings/background", patch);
 }
 
+// 0.1.10.7 E: GET /api/metrics -> {schema_version, kind, model, aggregates,
+// comparison}: the averages of the recorded model calls (tokens, seconds,
+// cost, error rate), per (kind, model_target, model) and per (kind,
+// model_target). {kind, model} narrow it. Numbers only; no model is called.
+export function getMetrics({ kind, model } = {}) {
+  const query = new URLSearchParams();
+  if (kind) {
+    query.set("kind", kind);
+  }
+  if (model) {
+    query.set("model", model);
+  }
+  const text = query.toString();
+  return request("GET", text ? `/api/metrics?${text}` : "/api/metrics");
+}
+
 export { ApiError };

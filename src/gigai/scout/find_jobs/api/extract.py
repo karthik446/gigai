@@ -55,6 +55,7 @@ from ....config import GigAIConfig, load_config
 from ....model_targets import ModelTargetResolutionError
 from ....private_records import PrivateRecordError, read_record
 from ....workpad import resolve_workpad
+from ...call_metrics import KIND_EXTRACT, CallMeter
 from ...resume_pii import detect_contact_details
 from ...resume_privacy import model_resume
 from ...quick_assess import _default_model_target, _ObservedBinding, _ObservedPort, _seam_deadline_seconds
@@ -324,7 +325,7 @@ def _resolve_binding(config: GigAIConfig, model_target: ModelTarget, *, home_roo
 
 
 def extract_with_model(
-    resume_text: str, *, config: GigAIConfig, model_target: ModelTarget, home_root: Path
+    resume_text: str, *, config: GigAIConfig, model_target: ModelTarget, home_root: Path, target: Path | None = None
 ) -> tuple[list[str], str | None, list[str], str]:
     """Run the extraction prompt; returns ``(stack, seniority, titles, resolved target name)``.
 
@@ -334,7 +335,9 @@ def extract_with_model(
     the call (``model_denied``).
     """
 
-    binding = _resolve_binding(config, model_target, home_root=home_root)
+    # 0.1.10.7 E: recorded in the project's metrics when the caller names the project (``target``).
+    meter = CallMeter(KIND_EXTRACT, model_target.value, home_root, target)
+    binding = meter.bind(_resolve_binding(config, model_target, home_root=home_root))
     prompt = render_prompt(resume_text)
     last_error: ResumeExtractError | None = None
     try:
@@ -353,6 +356,7 @@ def extract_with_model(
                 stack, seniority, titles = parse_extraction(_extract_json_object(result.output_text))
             except ResumeExtractError as exc:
                 last_error = exc
+                meter.invalid_output()
                 continue
             return stack, seniority, titles, binding.port.name or model_target.value
     finally:
@@ -421,7 +425,7 @@ class ResumeExtractRoutesMixin:
             return
         try:
             stack, seniority, titles, resolved_target = extract_with_model(
-                resume.text, config=config, model_target=model_target, home_root=home_root
+                resume.text, config=config, model_target=model_target, home_root=home_root, target=target
             )
         except ResumeExtractError as exc:
             _logger.info(

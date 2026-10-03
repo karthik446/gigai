@@ -40,6 +40,7 @@ import re
 
 from ..adapters.port import ModelInvocationError, NormalizedUsage
 from ..canonical import digest_imported_bytes
+from .call_metrics import note_invalid_output
 from .find_jobs.contracts import FindJobsContractError, NotAssessedReason
 from .find_jobs.work_mode import in_person_modes
 from .question_ids import normalize_question_id
@@ -425,6 +426,7 @@ def invoke_json_once(
             parsed = parse(decoded)
         except (FindJobsContractError, ValueError, TypeError) as exc:
             validation_error = str(exc)
+            note_invalid_output(binding.port)  # 0.1.10.7 E: metrics only
             if attempt == 0:
                 # U22: one retry, with the validation error fed back so the
                 # model can correct its own shape, before giving up on this

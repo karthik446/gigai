@@ -172,6 +172,7 @@ _TARGET_COMMANDS: dict[str, tuple[str, ...]] = {
     "profile list": ("scout", "profile", "list"),
     "profile update": ("scout", "profile", "update", "profile_00000000-0000-4000-8000-000000000001", "--work-mode", "remote"),
     "profile delete": ("scout", "profile", "delete", "profile_00000000-0000-4000-8000-000000000001"),
+    "metrics": ("scout", "metrics"),
 }
 
 

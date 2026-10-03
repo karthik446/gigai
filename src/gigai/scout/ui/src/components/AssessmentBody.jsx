@@ -187,6 +187,7 @@ export default function AssessmentBody({
       reassess={{
         ...answers.gate,
         label: jobIdentity ? "Re-assess" : "Save answers",
+        average: Boolean(jobIdentity),
         busy: answers.busy === "reassess",
         onClick: answers.reassess,
       }}

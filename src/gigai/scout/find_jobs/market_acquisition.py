@@ -1421,6 +1421,7 @@ def _rank_rows_with_status(
             home_root=home_root,
             streamer=streamer,
             cancel=cancel,
+            target=getattr(resolved, "target_root", None),
             run_id=run_id,
         )
     except Exception as exc:  # noqa: BLE001 - ranking never fails acquire; the type is recorded and logged

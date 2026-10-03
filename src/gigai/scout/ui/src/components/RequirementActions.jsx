@@ -3,10 +3,15 @@
 //   Re-assess       saves every filled answer box, then re-assesses once
 //   Tailor resume   (job page only) opens the tailored-resume panel below
 //
+// 0.1.10.7 E: `reassess.average` shows what an assessment has taken on
+// average with the configured model, beside the button (ModelAverage).
+//
 // Each action is {enabled, reason, label, busy, onClick}; the gates are
 // answersModel.js's reassessGate / tailorGate. A disabled action says why
 // twice: in the tooltip (on a wrapper, since a disabled button shows none
 // in every browser) and in the helper line under the buttons.
+import ModelAverage from "./ModelAverage.jsx";
+
 function Action({ action, name, primary, busy }) {
   const disabled = !action.enabled || busy;
   return (
@@ -58,6 +63,7 @@ export default function RequirementActions({ reassess, tailor, busy, error }) {
     <div className="req-actions">
       <div className="req-actions-buttons">
         <Action action={reassess} name="reassess" primary busy={busy} />
+        {reassess.average && <ModelAverage kind="assess" />}
         {tailor && <Action action={tailor} name="tailor" busy={busy} />}
         {tailor && tailor.status && <TailorStatus status={tailor.status} />}
         {reassess.busy && (

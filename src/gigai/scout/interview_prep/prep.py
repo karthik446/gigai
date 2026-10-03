@@ -181,7 +181,7 @@ def build_prep(
             title=posting.title, company=posting.company,
             posting_text=posting.text or "", resume_text=resume_text,
             company_claims=tuple(claim.claim for claim in company.claims),
-            home_root=home_root,
+            home_root=home_root, target=target,
         )
     except CategoryPredictionError as exc:
         raise InterviewPrepError(exc.code, str(exc)) from exc

@@ -1371,6 +1371,153 @@
         "x-gigai-host-checked": true
       }
     },
+    "/api/metrics": {
+      "get": {
+        "description": "What this project's model calls cost, as averages per kind of call and model. Every model call Scout makes is recorded once, locally: the model, tokens in, out and cached, the cost when the provider reports one, the wall time and the outcome. No prompt, answer, resume or posting text is stored or served. `aggregates` has one entry per (kind, model_target, model); `comparison` adds the model ids of one model target together. `avg_input_tokens` is everything the model read (cached input included) and `avg_cached_tokens` the part served from cache; token and cost averages are over the calls that reported them, `avg_seconds` over the calls that succeeded; `error_rate` counts a call that failed or answered something unusable; `items` is how many jobs or titles the calls covered (a rank or tag call covers several). A value nothing reported is null. Reading makes no model call.",
+        "operationId": "get_api_metrics",
+        "parameters": [
+          {
+            "description": "Only this kind of call.",
+            "in": "query",
+            "name": "kind",
+            "required": false,
+            "schema": {
+              "enum": [
+                "assess",
+                "rank",
+                "tag",
+                "tailor",
+                "extract",
+                "interview"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Only this model target (codex_cli, claude_cli, ollama_local, openrouter_api) or model id.",
+            "in": "query",
+            "name": "model",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "aggregates": [
+                    {
+                      "avg_cached_tokens": 9200,
+                      "avg_cost_usd": null,
+                      "avg_input_tokens": 18400,
+                      "avg_output_tokens": 1100,
+                      "avg_seconds": 11.2,
+                      "avg_tokens": 19500,
+                      "calls": 12,
+                      "error_rate": 0.0833,
+                      "errors": 1,
+                      "items": 12,
+                      "kind": "assess",
+                      "last_at": "2026-10-02T14:02:00.000000Z",
+                      "model": "gpt-5.1-codex",
+                      "model_target": "codex_cli"
+                    }
+                  ],
+                  "comparison": [
+                    {
+                      "avg_cached_tokens": 9200,
+                      "avg_cost_usd": null,
+                      "avg_input_tokens": 18400,
+                      "avg_output_tokens": 1100,
+                      "avg_seconds": 11.2,
+                      "avg_tokens": 19500,
+                      "calls": 12,
+                      "error_rate": 0.0833,
+                      "errors": 1,
+                      "items": 12,
+                      "kind": "assess",
+                      "last_at": "2026-10-02T14:02:00.000000Z",
+                      "model_target": "codex_cli",
+                      "models": [
+                        "gpt-5.1-codex"
+                      ]
+                    }
+                  ],
+                  "kind": "assess",
+                  "model": null,
+                  "schema_version": "scout-metrics:1"
+                },
+                "schema": {
+                  "additionalProperties": true,
+                  "properties": {
+                    "schema_version": {
+                      "const": "scout-metrics:1"
+                    }
+                  },
+                  "required": [
+                    "schema_version"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden / forbidden_origin: loopback peer and Host `127.0.0.1:<port>` or `localhost:<port>` only (Origin too on writes)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "target_unavailable",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "target_unavailable"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "invalid_value",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "invalid_value, unknown_key"
+          }
+        },
+        "summary": "Get the model call averages",
+        "tags": [
+          "Settings"
+        ],
+        "x-gigai-effect": "read",
+        "x-gigai-external": "none",
+        "x-gigai-host-checked": true
+      }
+    },
     "/api/openapi.json": {
       "get": {
         "description": "This API as an OpenAPI 3.1 document (generated from the server's route table). Every route with params, response schema_version, example, error codes, x-gigai-effect and x-gigai-external.",

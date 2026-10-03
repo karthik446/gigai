@@ -32,6 +32,7 @@ from ...adapters.port import ModelInvocationError
 from ...config import GigAIConfig
 from ...model_targets import ModelTargetResolutionError
 from .. import proposal_execution
+from ..call_metrics import KIND_INTERVIEW, CallMeter
 from ..proposal_execution import _resolve_configured_target_name_for_adapter, ScoutProposalExecutionError
 from ..resume_privacy import model_resume
 from .types import QUESTION_CATEGORIES, QuestionCategoryPrediction
@@ -117,6 +118,7 @@ def predict_categories(
     resume_text: str,
     company_claims: tuple[str, ...],
     home_root: Path | None = None,
+    target: Path | None = None,
 ) -> tuple[tuple[QuestionCategoryPrediction, ...], str]:
     """Predict question categories; returns (predictions, resolved_target_name).
 
@@ -141,7 +143,8 @@ def predict_categories(
     try:
         prompt = _prompt(title=title, company=company, posting_text=posting_text, resume_text=resume_text, company_claims=company_claims)
         request = binding.request(role="reviewer", prompt=prompt)
-        result = binding.port.invoke(request)
+        # 0.1.10.7 E: recorded in the project's metrics when the caller names the project (``target``).
+        result = CallMeter(KIND_INTERVIEW, model_target, home_root, target).invoke(binding.port, request)
     except ModelInvocationError as exc:
         raise CategoryPredictionError(getattr(exc, "code", "category_model_invocation_failed"), str(exc)) from exc
     finally:

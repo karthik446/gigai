@@ -76,6 +76,7 @@ import threading
 from typing import Any
 
 from ...adapters.port import ModelInvocationError
+from ..call_metrics import KIND_TAG, CallMeter
 from . import model_rank
 from .posting_tags import FUNCTIONS, normalize_title
 from .tag_store import TagStore
@@ -489,18 +490,20 @@ class _Caller:
     resolved: Any
     adapter_kind: str
     model_override: str | None
+    #: 0.1.10.7 E: every call of the drain is recorded in the project's metrics.
+    meter: CallMeter
 
     @property
     def model_id(self) -> str:
         return f"{self.adapter_kind}:{self.model_override or self.resolved.model}"
 
-    def invoke(self, prompt: str) -> Any:
+    def invoke(self, prompt: str, *, items: int = 1) -> Any:
         request = self.resolved.binding.request(role=_ROLE, prompt=prompt)
         if self.model_override is not None:
             request = replace(request, model=self.model_override)
         if self.resolved.effort_applied is not None:
             request = replace(request, reasoning_effort=self.resolved.effort_applied)
-        return self.resolved.port.invoke(request)
+        return self.meter.invoke(self.resolved.port, request, items=items)
 
     def close(self) -> None:
         close = getattr(self.resolved.binding, "close", None)
@@ -732,7 +735,10 @@ class TagQueue:
         # The same errors the ranker skips a pass for (model_rank.rank_postings).
         except (ValueError, KeyError, OSError, ModelInvocationError) as exc:
             raise _ModelUnavailable(f"model_target_unavailable: {str(exc)[:_MAX_ERROR] or type(exc).__name__}") from None
-        return _Caller(resolved, adapter_kind, model_override)
+        meter = CallMeter(
+            KIND_TAG, adapter_kind, self.home_root, self.target, target_name=getattr(resolved, "configured_target", None)
+        )
+        return _Caller(resolved, adapter_kind, model_override, meter)
 
     def _failed_lane(self, lane: LaneStatus, error: str) -> None:
         now = self._clock()
@@ -824,7 +830,7 @@ class TagQueue:
             for _ in range(tries):
                 asked.calls += 1
                 try:
-                    result = caller.invoke(render_tag_prompt(lines, error))
+                    result = caller.invoke(render_tag_prompt(lines, error), items=len(part))
                 except (ModelInvocationError, OSError, TimeoutError) as exc:
                     code = getattr(exc, "code", "")
                     error = f"model call failed ({code or type(exc).__name__}): {str(exc)[:_MAX_ERROR]}"
@@ -836,6 +842,7 @@ class TagQueue:
                     answer = validate_tag_answer(result.output_text, ids)
                 except TagAnswerError as exc:
                     error = str(exc)
+                    caller.meter.invalid_output()
                     continue
                 by_id = dict(zip(ids, part))
                 asked.functions.update({by_id[pid]: function for pid, function in answer.functions.items()})

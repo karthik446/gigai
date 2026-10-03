@@ -2061,6 +2061,54 @@ def sources_status_command(home_value: Path | None, as_json: bool) -> None:
         click.echo(str(index["message"]))
 
 
+# --- 0.1.10.7 E: `gigai scout metrics` ------------------------------------
+
+
+def _metrics_tokens(value: object) -> str:
+    if not isinstance(value, (int, float)):
+        return "no token count"
+    return f"{value / 1000:.1f}k tokens" if value >= 1000 else f"{int(value)} tokens"
+
+
+@scout_group.command("metrics")
+@click.option("--kind", "kind", help="Only this kind of call: assess, rank, tag, tailor, extract or interview.")
+@click.option("--model", "model", help="Only this model target (codex_cli, claude_cli, ...) or model id.")
+@click.option("--home", "home_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--target", "target_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--json", "as_json", is_flag=True)
+def metrics_command(
+    kind: str | None, model: str | None, home_value: Path | None, target_value: Path | None, as_json: bool
+) -> None:
+    """Show what the model calls cost on average: tokens, seconds, cost and error rate per kind of call and model."""
+
+    from .call_metrics import CallMetricsError, metrics_report
+    from .pipeline.store import PipelineStoreError
+
+    home_root = home_value or default_home_root()
+    try:
+        # Resolved like every Scout command; with no GigAI home yet there is nothing to read and nothing is created.
+        target = _snapshot_target(target_value, home_root, as_json=as_json)
+        report = metrics_report(home_root, target, kind=kind, model=model)
+    except (ScoutTargetError, CallMetricsError, PipelineStoreError, OSError, ValueError) as exc:
+        _fail(exc, as_json=as_json, fallback="scout_metrics_failed")
+        return
+    if as_json:
+        _emit(report, True, "")
+        return
+    rows = report["comparison"]
+    assert isinstance(rows, list)
+    if not rows:
+        click.echo("No model call has been recorded yet.")
+        return
+    for row in rows:
+        seconds = f"{row['avg_seconds']:.1f} s" if row["avg_seconds"] is not None else "no time"
+        cost = f", ${row['avg_cost_usd']:.4f}" if row["avg_cost_usd"] is not None else ""
+        click.echo(
+            f"{row['kind']} on {row['model_target'] or 'unknown'}: avg {_metrics_tokens(row['avg_tokens'])}, {seconds}{cost} "
+            f"per call; {row['calls']} calls, {row['errors']} failed ({row['error_rate'] * 100:.0f}%)."
+        )
+
+
 # --- 0110-026b/e: `gigai scout snapshot export|import|status` ------------
 
 

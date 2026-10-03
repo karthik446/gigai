@@ -46,6 +46,7 @@ from .assessment_core import (  # noqa: F401 - moved in P1; re-exported by the o
     normalize_work_mode,
     render_assess_prompt,
 )
+from .call_metrics import KIND_ASSESS, CallMeter
 from .find_jobs.progress import ProgressWriter
 from ..journal import (
     JournalArtifact,
@@ -481,6 +482,10 @@ def _assess_node_body(
     # prompt carries what the job page's does: the sealed config's
     # constraints, PRIOR ANSWERS (exact question id) and the STORY BANK
     # paragraph. A profile with no answers renders neither paragraph.
+    # 0.1.10.7 E: every call of this step is recorded (``call_metrics``); a run with no target folder records none.
+    meter = CallMeter(
+        KIND_ASSESS, model_target, home_root, target if isinstance(target, Path) else None, profile_id=current_profile_id
+    )
     assess_context = build_assess_context(
         resume_text=resume_text,
         visa_sponsorship_required=visa_sponsorship_required,
@@ -504,7 +509,8 @@ def _assess_node_body(
                 {**normalized, "posting": _posting_json, "proposal_revision_ref": None}
             )
 
-        return assess_once(binding, _assess_job(posting, posting_text), assess_context, parse=parse_selected)
+        metered = meter.bind(binding, job=posting.normalized_url)
+        return assess_once(metered, _assess_job(posting, posting_text), assess_context, parse=parse_selected)
 
     def record_outcome(posting: object, outcome: object) -> None:
         nonlocal model_attempts

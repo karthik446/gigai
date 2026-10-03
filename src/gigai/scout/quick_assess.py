@@ -71,6 +71,7 @@ from ..canonical import digest_imported_bytes, parse_json_bytes
 from ..config import GigAIConfig, load_config
 from ..model_targets import ModelTargetResolutionError
 from .assessment_basis import posting_sha256
+from .call_metrics import KIND_ASSESS, CallMeter
 from .assessment_core import INSTRUCTIONS_DIGEST, AssessJob, build_assess_context
 from .assessment_core import POSTING_INCOMPLETE_MESSAGE, assess_once, assess_prompt_version, constraints_digest
 from . import story_bank
@@ -658,7 +659,11 @@ def run_quick_assessment(
     # 5. Model target -> adapter (C1/C11), then the shared core (P1).
     model_target = request.model_target or _default_model_target(target)
     active = config if config is not None else load_config(home_root)
-    binding = _resolve_binding(active, model_target, home_root=home_root)
+    # 0.1.10.7 E: every call of this binding is recorded (``call_metrics``), a timeout of the test seam included.
+    meter = CallMeter(
+        KIND_ASSESS, model_target.value, home_root, target, profile_id=resume.profile_id, job=job.job_identity
+    )
+    binding = meter.bind(_resolve_binding(active, model_target, home_root=home_root))
     try:
         attempt = assess_once(
             binding,
