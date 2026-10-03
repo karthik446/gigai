@@ -21,7 +21,11 @@ CLEAN = "Staff engineer 2019 - 2023: nine years of Go and Kafka. Led a team of 1
 
 def test_detector_flags_email_and_phone_and_says_nothing_on_a_clean_resume() -> None:
     assert detect_contact_details("Reach me: jordan@example.com or 415-555-0134.") == ["email", "phone"]
-    assert heads_up(["email", "phone"]) == "This resume seems to contain: email, phone. Remove them before continuing?"
+    # 0.1.10.7 K: the import removes contact lines (0110-046); was "... Remove them before continuing?"
+    assert heads_up(["email", "phone"]) == (
+        "This resume seems to contain: email, phone. Scout removes contact lines when it stores the resume. "
+        "Check that nothing else personal is in the text."
+    )
     assert detect_contact_details(WITH_CONTACT) == ["email", "phone", "links", "address"]
     assert detect_contact_details(CLEAN) == []
     assert heads_up([]) is None

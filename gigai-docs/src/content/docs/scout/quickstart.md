@@ -18,10 +18,11 @@ One path from zero to a running Scout: find jobs, assess them, tailor a resume.
 ## 2. Prepare your resume
 
 Use a Markdown (`.md`) or plain-text (`.txt`) file. Scout removes your name and
-contact lines (email, phone, address, links) before it sends your resume to the
-model provider you picked, but it can't catch personal details elsewhere in the
-text, so **keep those out** (anything else you would not paste into Codex or
-Claude). A PDF or DOCX resume must be converted first:
+contact lines (email, phone, address, links) when it stores your resume, so they
+are never kept and never sent to the model provider you picked, but it can't
+catch personal details elsewhere in the text, so **keep those out** (anything
+else you would not paste into Codex or Claude). A PDF or DOCX resume must be
+converted first:
 
 ```bash
 uvx --from 'markitdown[pdf,docx]' markitdown resume.pdf > resume.md
@@ -73,16 +74,20 @@ your roles, location and work mode. Then:
    later updates are a single short pass.
    While Scout stays open it then re-checks the boards about once an hour by
    itself ([Background updates](../sources/#background-updates)).
-2. **Run find jobs** (Jobs page): ranks the stored postings that pass your
-   filters and assesses the top ones. Optional **Keywords** in the run dialog
-   narrow the search to postings whose description mentions one of them.
-3. **Assess all new**: on the finished run, assesses the rest in the background.
+2. **Jobs**: the page lists the stored postings that match your profiles,
+   with no run to start. The background ranks them. Use the chips (profile,
+   New since last check, 7 days, 30 days, state) and the search box to narrow
+   the list.
+3. **Assess these**: pick postings (or use the filter) and Scout asks first,
+   with the count and an estimate; it assesses only when you approve.
 4. **Tailor resume**: on a posting's page, drafts a resume for that posting.
-   Review every line; each shows its sources. **Download PDF** saves it as a
-   PDF. Under Settings > Profiles, **Resume display** holds the name, title
-   and contact line (location, work authorization, LinkedIn, GitHub, other
-   links, email, phone) printed at the top of the PDF; they are stored only
-   on your computer, never sent to a model, and added to the PDF locally.
+   Review every line; each shows its sources. **Generate PDF** opens a small
+   form for your name and contact details and saves the PDF; GigAI does not
+   keep what you type there. Under Settings > Profiles, **Resume display**
+   holds the title under your name and the PDF layout.
+
+Prefer to work from your own AI agent? `gigai scout new` is the daily entry
+point: see [For agents](../agents/).
 
 `gigai scout stop` stops Scout; `gigai scout run --port 9000` picks another
 port if 8765 is taken. More detail for scripts and agents is under

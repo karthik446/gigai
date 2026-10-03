@@ -1746,3 +1746,23 @@ table.data-table th {
 .pipeline-fields.models { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .summary-strip.jobs-summary { grid-template-columns: repeat(5, minmax(0, 1fr)); }
 #settings-pipeline h3 { margin: 18px 0 8px; font-size: 1rem; }
+
+/* 0.1.10.7 I3: the "?" beside a number or a label; opens the docs page that explains it. */
+.help-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.15rem;
+  height: 1.15rem;
+  margin-left: 4px;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+  font-size: 0.72rem;
+  font-weight: 600;
+  line-height: 1;
+  text-decoration: none;
+  opacity: 0.65;
+  vertical-align: middle;
+}
+.help-link:hover,
+.help-link:focus-visible { opacity: 1; }

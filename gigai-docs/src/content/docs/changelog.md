@@ -22,6 +22,137 @@ operator-visible capability and must link to the relevant release or evidence.
 
 ## Released versions
 
+### 0.1.10.7
+
+Scout can now be used day to day from your own AI agent: ask "what's new?", answer the open
+questions in chat, and let Scout tailor and score in the background. GigAI no longer stores your
+name or contact details. Read "After you upgrade" first.
+
+#### After you upgrade
+
+- **Every stored assessment reads "Assessed with older settings".** The assessment prompt changed
+  (see Security), so every assessment made by an earlier version is flagged. The verdicts still
+  show. Nothing is assessed again by itself: "Assess these" on the Jobs page (and "Assess all" on
+  a past run) plans them again, one model call each, and only when you click.
+- **The next ranking pass ranks every posting again, once,** and a search run started by a script
+  assesses its unchanged postings again, once. After that, costs are as before.
+- **A one-time cleanup removes stored contact details** from your resumes and from Resume display,
+  and tells you what it removed (counts only). Older copies can remain in GigAI's local history on
+  your computer; see Security.
+- **Your story bank is moved once** to answers that every profile shares. Nothing is lost: when two
+  profiles answered the same question differently, the newest is the answer and the other is kept
+  in its history. `gigai scout answers migrate` prints the counts.
+
+#### Added
+
+- **`gigai scout new`: what is new since your last check.** One command, for you or your agent,
+  across all your active profiles, read from the stored postings (no job board is asked). It asks
+  before it assesses, with the count and an estimate from your own past calls; `--yes` assesses,
+  `--no-assess` shows ranks only. With nothing new it lists the 10 postings that still need your
+  attention. The grid shows each posting, its score, what it still needs and its open questions.
+  "What matches" comes from your own resume and answers, so it is a separate call (`--yours`) and
+  is never shown next to posting text. The first use looks back 7 days.
+- **An agent skill and a permissions snippet.** `gigai agent-skill` prints the instructions that
+  teach your agent the daily loop (as a Claude Code skill, or as a section for an `AGENTS.md`).
+  `gigai agent-permissions` prints a recommended Claude Code permissions snippet. GigAI prints it
+  and never applies it: it does not touch your agent's settings.
+- **Answers and stories, shared by every profile.** An answer is a short fact a posting asked for.
+  A story is an experience worth telling: a title, where and when, your own words, a short
+  narrative and the questions it answers. Your agent asks "Want me to make this a story?" when a
+  reply has substance. An assessment reuses your answers and gets the few stories that fit the job.
+  Both are written through `gigai scout answers`, `gigai scout story` and the matching API, with a
+  stale-write check. Scout's own page (Settings > Answers and stories) is read-only: it lists them,
+  shows which jobs used each, and deletes one that is wrong.
+- **A background pipeline for the jobs you engage with.** After you answer a job's question (or
+  press "Process now"), Scout tailors a resume for that job, assesses the tailored resume, computes
+  a Scout ATS score and sets a Scout label, in the background. It is on by default and works only
+  on jobs you engaged with. One trigger starts at most 10 jobs and the rest wait for your approval;
+  the pipeline makes at most 40 model calls a day; background ranking makes at most 100 a day, with
+  a warning past 60. All of these are settings (Settings > Background pipeline). The job page shows
+  each step with its model, tokens and time, and "73 → 91 after tailoring".
+- **A tailored resume you edited is never replaced by the background.** If you tailored a job's
+  resume yourself or changed a line, the pipeline keeps it and scores your text. To refresh it,
+  tailor that job again yourself.
+- **Scout label.** "Recommended" or "needs attention", with the reasons. It is Scout's own
+  suggestion from your settings, resume and answers, not a prediction of what an employer will
+  decide.
+- **Scout ATS score.** A score from 0 to 100 for a tailored resume PDF against its posting: how
+  cleanly the PDF reads back, how many of the posting's skills it names, and basic format rules,
+  with the missing skills listed. It is GigAI's own local check, with no model call, and not any
+  real ATS's score. It is shown, never used to block anything. Skills in the PDF are now separated
+  by a dot so they read back as separate words.
+- **What your model calls cost.** Every Scout model call is recorded on your computer: kind, model,
+  tokens, time, and cost when the provider reports one (no text). Averages show beside Re-assess
+  and Assess all, Settings has a Model usage table, `gigai scout metrics` prints them, and they
+  feed the estimates `gigai scout new` shows.
+- **A page that explains the numbers.** "What Scout's numbers and labels mean" covers rank,
+  verdict, Scout label and Scout ATS score, and a "?" beside each of them on the job page opens it.
+- **Delete a profile.** On the Profiles page, and with `gigai scout profile delete`. Its past runs
+  are hidden. The default profile can never be deleted, and neither can your only active one.
+- **A Generate PDF form.** See Security.
+
+#### Changed
+
+- **The Jobs page lists postings, not a run.** It shows the stored postings that match your
+  profiles, live, with a tag for each profile a posting matches. The profile switcher became a
+  filter. Chips narrow the list: New since last check, 7 days, 30 days, and state (needs your
+  answers, assessed, Scout label, removed). "Mark all seen" resets "new".
+- **"Run find jobs" is gone.** Ranking runs in the background. **First assessments happen only
+  when you approve them**: "Assess these" on the Jobs page, `gigai scout new` and
+  `gigai scout jobs assess` all ask first, with the count and an estimate. Past runs stay readable
+  as history (read-only), and what they assessed shows beside newer assessments.
+- **`POST /api/run` is deprecated.** It still works in this release, for scripts, and will be
+  removed later. Use `GET /api/postings` (`gigai scout jobs list`) to search and
+  `POST /api/postings/assess` (`gigai scout jobs assess`) to assess.
+- **The per-profile story bank is replaced, with no alias.** `gigai scout story-bank` and the
+  `/api/story-bank` routes are removed. Use `gigai scout answers` and `gigai scout story`, and
+  `/api/answers` and `/api/stories`. The sharing setting is gone: every profile reads the same
+  answers and stories. The Story bank page with its forms is replaced by the read-only page above.
+- **A hybrid profile now keeps on-site roles in its own area.** A hybrid profile in Houston keeps
+  an on-site Houston role and still drops an on-site New York one. The filter and the assessment
+  use the same rule.
+- **PDF files are named after the job, not you**: `<company>-<role>-<date>.pdf`.
+- **Resume display holds only the title and the layout.** The name and contact fields are gone
+  (see Security).
+
+#### Security
+
+- **GigAI never stores your name, email, phone, address or links.** You type them in the new
+  Generate PDF form, they go into that one PDF, and GigAI forgets them. A resume you add is stored
+  with its name and contact lines removed, and you are told what was removed. The limits: the
+  removal works on patterns and can miss a detail inside a sentence; and versions before this one
+  did store those lines, so a one-time cleanup removes them from the current files, but older
+  copies can remain in GigAI's local history on your computer. `gigai scout privacy` shows what
+  the cleanup removed.
+- **A PDF made by an agent or the command line has no name or contact details.** GigAI has none to
+  give it. The command prints an "Open in Scout" link; you open it, fill the form in your own
+  browser and download the finished PDF.
+- **Anything GigAI gives your agent is sent to that agent's model provider.** Agents get no contact
+  data from GigAI, but an agent with shell access can read local files. The docs say this in bold,
+  with what it means.
+- **Every reply to an agent is checked for contact details.** Text shaped like an email address, a
+  phone number, a profile link or a street address in your own fields is replaced by a marker
+  before a reply leaves the local API. Posting text is left as published. It is a backstop that
+  works on shapes, and it can miss things.
+- **Replies say what kind of data they hold.** Each API reply is labelled: your private text,
+  public text written by strangers, or neither. `gigai scout new` never mixes the two in one
+  reply.
+- **Posting text is fenced in Scout's own prompts.** Every prompt that carries a posting marks it
+  as text written by strangers: data to read, never instructions to follow. In a test on synthetic
+  postings written to steer the model, one of five steered the old prompt and none steered the new
+  one; ordinary verdicts did not change. It lowers the risk and does not remove it.
+- **The local API checks the Host of every request**, not only writes, so a web page you visit
+  cannot read your data through your browser.
+
+#### Fixed
+
+- **Reading the configuration no longer launches about a hundred helper processes.** A first read
+  from Update sources, setup and a few other paths launched 109 processes; it now launches 30, and
+  a repeat read launches none.
+- **A resume with one very long line no longer takes minutes to process.** A single line of
+  100,000 characters took almost two minutes; it now takes a fraction of a second. What is removed
+  is unchanged.
+
 ### 0.1.10.6
 
 #### Fixed

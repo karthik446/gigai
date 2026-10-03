@@ -25,6 +25,7 @@ from dataclasses import dataclass, replace
 import re
 from typing import Literal
 
+from ...wording import ATS_WORDING, LABEL_WORDING
 from ...data_labels import LABELS, NO_LABELS, OPENAPI_KEY, PUBLIC_UNTRUSTED, UNTRUSTED_TEXT_RULE, USER_PRIVATE, labels_header
 from ..contracts import NotAssessedReason
 
@@ -1280,12 +1281,12 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
             "ats": {
                 "score": 84, "line": "Scout ATS 84: parses cleanly · 9/11 key skills · missing: Terraform, SOC 2",
                 "parts": {"fidelity": 38.5, "coverage": 31.0, "format": 20.0}, "key_skills": "9/11", "missing": ["Terraform", "SOC 2"],
-                "failed_rules": [], "wording": "GigAI’s own local check of how well this resume reads and matches the posting. Not any real ATS’s score.",
+                "failed_rules": [], "wording": ATS_WORDING,
                 "updated_at": "2026-10-03T09:31:05.000000Z",
             },
             "label": {
                 "name": "Scout label", "label": "recommended", "reasons": [], "ats_score": 84, "min_ats": 0,
-                "wording": "Scout's own suggestion from your settings, resume and answers. Not a prediction of what an employer will decide.",
+                "wording": LABEL_WORDING,
                 "updated_at": "2026-10-03T09:31:10.000000Z",
             },
         },

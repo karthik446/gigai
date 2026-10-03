@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { ApiError, getTailoredResumes, postTailoredResume, postTailoredResumePdf, putTailoredResumeLine } from "../api.js";
 import { dateTimeLabel } from "../jobModel.js";
 import GeneratePdfForm from "./GeneratePdfForm.jsx";
+import { TAILORED_WORDING } from "../wording.js";
 import {
   changeSummary,
   inlineSegments,
@@ -461,6 +462,11 @@ export default function TailoredResumePanel({ state, profileLabel, questionPromp
           </button>
         )}
       </div>
+      {stored && !tailoring && (
+        <p className="muted small" data-role="tailored-wording">
+          {TAILORED_WORDING}
+        </p>
+      )}
       {stored && !tailoring && pdfOpen && <GeneratePdfForm render={renderPdf} />}
       {error && (
         <div className="callout danger tailor-error" role="alert">

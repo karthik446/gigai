@@ -27,8 +27,8 @@ from pypdf.generic import ContentStream
 from gigai.scout.posting_keywords import PostingKeywords, mentions
 from gigai.scout.tailored_resume import TailoredResume, render_markdown
 
-#: The wording that always accompanies the score (one source string; not yet shown in the UI).
-ATS_WORDING = "GigAI’s own local check of how well this resume reads and matches the posting. Not any real ATS’s score."
+#: The wording that always accompanies the score: ``ATS_WORDING``, one source string (``gigai.scout.wording``).
+from gigai.scout.wording import ATS_WORDING
 
 STANDARD_HEADINGS = frozenset({"SUMMARY", "EXPERIENCE", "SKILLS", "EDUCATION", "PROJECTS"})
 #: A failed rule caps the total.

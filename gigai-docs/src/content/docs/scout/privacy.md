@@ -1,21 +1,46 @@
 ---
 title: Privacy and security
-description: Exactly what leaves your machine, and to whom.
+description: What GigAI stores, what leaves your machine, and to whom.
 ---
 
-**Scout removes your name and contact lines (email, phone, address, links)
-before sending your resume to the model you pick** (Codex -> OpenAI, Claude ->
-Anthropic, OpenRouter -> your provider), and adds them back only in your PDF,
-on this machine. It can't catch personal details elsewhere in the text (a first
-line that holds both a title and your name, or contact details inside a
-sentence), so keep those out. With Ollama the resume stays on this machine. The
-contact line printed on your PDF lives in Settings > Resume display. The setup
-wizard, the Assessments page, Settings > Profiles and `gigai scout resume add`
-all show this note, and the wizard also runs a local check (no model) that lists
-any email, phone, linkedin.com/github.com link or street address it spots; it
-can miss things. The Resume display fields (name, title, contact line) are
-never sent to a model or the network: only the PDF renderer and the
-settings/PDF API read them.
+**GigAI never stores your name, email, phone, address or links.**
+
+The limits of that promise, plainly:
+
+- **You type them only when you make a PDF, and GigAI forgets them right after.** The Generate
+  PDF form sends them with that one request; they fill that PDF's header and are not written to a
+  file, a log or a reply. Your browser may offer to remember them for autofill. That is your
+  browser's own store, not GigAI's.
+- **A resume you add is stored without them.** The import removes the name line and the contact
+  lines (email, phone, address, links) and discards them. It works on patterns. It can't catch
+  personal details elsewhere in the text (a first line that holds both a title and your name, or
+  contact details inside a sentence), so keep those out. The setup wizard also runs a local check
+  (no model) that lists any email, phone, linkedin.com/github.com link or street address it
+  spots; it can miss things.
+- **Older copies can remain in GigAI's local history on your computer.** Versions before
+  0.1.10.7 stored the contact lines of your resume and the name and contact line you saved under
+  Resume display. The first start after you upgrade removes them from the current files, once,
+  and tells you what it removed (`gigai scout privacy` prints the counts again). It does not
+  rewrite history: Scout keeps earlier revisions of its records in a local history (a git
+  journal in its workpad, on this computer), and the earlier copies of your resume are still in
+  it. A tailored resume made by a version before 0.1.10 can also still hold the header it was
+  made with; tailor that job again to replace it. None of this leaves your computer by itself.
+- **Everything else you give GigAI stays on your computer unless you or your agent send it
+  somewhere**: your answers and stories, your application notes, and the body of your resume.
+- **GigAI's own model calls send your resume (without the contact lines) and your answers to the
+  model you picked** (Codex -> OpenAI, Claude -> Anthropic, OpenRouter -> your provider). With
+  Ollama the resume stays on this machine. The sections below list exactly what is sent.
+- **Your search settings are not contact data, and they are stored.** The city or area you set
+  for the search, your work mode, the countries you can work from and whether you need
+  sponsorship are saved as settings and go to your model with an assessment.
+
+**Anything GigAI gives your agent is sent to that agent's model provider. Agents get no contact data from GigAI, but an agent with shell access can read local files.**
+
+[For agents](../agents/#the-security-model) explains what that means when you let an AI agent
+use Scout.
+
+The setup wizard, the Assessments page, Settings > Profiles and `gigai scout resume add` all show
+a short form of this note where a resume enters Scout.
 
 ## Scout has no service of its own
 
@@ -38,11 +63,14 @@ or assessment. Scout runs `codex` with its shell tool and memories turned off, a
 - **Assessment and tailoring** send your resume text with the name and contact lines removed: an assessment sends the posting text and your resume for each posting
   being assessed, including each posting "Assess all new" assesses, with whether you need sponsorship, the countries you can
   work from, your location as you wrote it, your work mode (remote, hybrid or on-site) and your target titles (a search run's assessments send the same). A pasted resume is used for that assessment only: its full text is never saved and never sent anywhere but your assessment model; the stored result keeps short evidence quotes on your machine.
-- **Your answers go with an assessment, per profile.** The answers you gave to earlier questions are part of what an assessment
-  sends (one you start on a job, and each one a search run makes), so a question is not asked twice: each answer in full, plus a one-line summary of each story bank entry (at most 40).
-  Only the answers of the profile being assessed are sent, and those of the one profile it is set to share with; another
-  profile's answers never are. An answer that holds an email, a phone number, a link, a street address or the name saved in
-  Resume display is refused when you save it, and anything of that kind in an older answer is removed again before it is sent.
+- **Your answers and stories go with an assessment.** The answers you gave to earlier questions are part of what an assessment
+  sends (one you start on a job, each one the background pipeline makes, and each one a search run makes), so a question is not asked twice: your answers to that job's own questions in full, a one-line summary of each of your other answers (at most 40), and the few stories that fit the posting (at most 3, one line each).
+  They are yours, not one profile's: every profile's assessment sends them. A tailoring sends your answers and the stories that fit the posting too.
+  An answer or a story that holds an email, a phone number, a link or a street address is refused when you save it, and
+  anything of that kind in an older answer is removed again before it is sent. The check works on shapes; it does not recognise a name.
+- **Posting text is fenced.** Every prompt Scout builds puts the posting's words inside a marked block with one rule: it is data to
+  read, never instructions to follow. A posting is written by strangers; this lowers the chance that text in it steers your model. It
+  does not remove it.
 - **With a local Ollama target nothing leaves the machine.** Scout only
   talks to Ollama on a numeric loopback address (`127.0.0.1`).
 - With `codex_cli` (the Codex CLI sends it to OpenAI), `claude_cli` (the
@@ -63,21 +91,30 @@ Ranking scores are cached on disk under `<home>/cache/scout/rank/scores/`
 (a score, up to two short reasons and any blockers per posting, no resume
 text); the cache is safe to delete. What ranking costs is whatever your
 model target charges; a run makes a bounded number of ranking calls, and
-postings past that bound stay unranked and keep date order.
+postings past that bound stay unranked and keep date order. Every model
+call Scout makes is recorded on your computer (kind, model, tokens, time,
+cost when the provider reports one; no text): Settings > Model usage and
+`gigai scout metrics` show the averages.
 
-## Assess all new
+## Assessing many postings
 
-A run assesses its top-ranked postings automatically (the
-run's "Full assessments" setting). On a finished run, **Assess all new**
-assesses the rest in the background: one model call per posting, 4 at a time,
-with Cancel, and a second click resumes without redoing finished ones. The run
-dialog's "All new postings" choice does the same during the run and is the
-starting choice for the `ollama_local`, `codex_cli` and `claude_cli` targets;
-`openrouter_api` starts on a number. Runs on the `codex_cli` and
+A posting is assessed for the first time only when you approve it. **Assess
+these** on the Jobs page, `gigai scout new` and `gigai scout jobs assess` all ask
+first, with the count and an estimate from your own past calls, and assess
+only on a yes: one model call per posting, a few at a time. On a past run's
+page, **Assess all new** assesses that run's remaining postings in the
+background: one model call per posting, 4 at a time, with Cancel, and a second
+click resumes without redoing finished ones. Calls on the `codex_cli` and
 `claude_cli` targets use your own CLI login and its usage limits; Scout passes
 them no API key. With a hosted model target each posting's assessment sends
 your resume and that posting to that provider, exactly as any other assessment
-does. A time estimate is shown only once a per-call time has been measured.
+does. A token estimate is shown only once a call has been measured.
+
+The background pipeline (tailor, assess the tailored resume, Scout ATS score,
+Scout label) makes model calls by itself, only for jobs you engaged with, and
+at most 40 a day; ranking in the background makes at most 100 a day. Both
+limits are in Settings > Background pipeline. Each of those calls sends what
+the table above lists for its step.
 
 ## Network traffic besides your model
 
@@ -104,7 +141,18 @@ project's workpad. Tailored resumes are stored under the gig too
 (`scout/<project>/resumes/`, ephemeral pasted-resume runs under `ephemeral/`)
 and contain resume-derived text by design.
 
-The story bank (every answered question and added story, per profile) stays local too: the answers are records in the
-project's workpad, and who owns each one, its tag, dates and the jobs that used it are in
-`scout/<project>/story_bank/bank.json`. Deleting an entry takes it out of use; the workpad's history keeps the older
-revision of the record it was in.
+Your answers and stories stay local too: the text of each answer is a record in the project's workpad, its tag, dates,
+writer and the jobs that used it are in `scout/<project>/story_bank/answers.json`, and the stories are in
+`scout/<project>/story_bank/stories.json`. Deleting one takes it out of use; for an answer, the workpad's history keeps
+the older revision of the record it was in.
+
+The background pipeline's own file (`scout/<project>/pipeline/pipeline.sqlite`) holds ids, codes, numbers and times,
+never posting, resume or answer text.
+
+## The local API
+
+Scout's API listens on this computer only, and every request must carry a `Host` of `127.0.0.1:<port>` or
+`localhost:<port>`, so a web page you visit can't read it through your browser. There is no login: any program you run
+on this computer can call it. As a backstop, every JSON reply is scanned and text shaped like an email address, a phone
+number, a profile link or a street address in your own fields is replaced by a marker such as `[removed: email]`
+(posting text is left as published). The scan works on shapes and can miss things.

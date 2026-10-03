@@ -28,8 +28,8 @@ starting Scout:
 
 `work_mode` is `remote`, `hybrid`, `onsite` or `any`, and it is a real
 filter: **Remote** keeps remote postings (and any whose mode can't be told); **Hybrid** with an area (your
-`location`, e.g. "Denver, CO") keeps remote and hybrid postings in that
-area; **Onsite** with an area also keeps on-site ones there; **Any** keeps
+`location`, e.g. "Denver, CO") keeps remote postings, plus hybrid and on-site postings in that
+area (an on-site role elsewhere, or with no area set, stays out); **Onsite** with an area keeps the same set; **Any** keeps
 everything the other filters allow. A posting's mode comes from the job
 board's own field when it has one, else it is read from the location text
 and labelled as derived. A posting whose location says nothing usable (for

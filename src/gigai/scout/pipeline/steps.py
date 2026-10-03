@@ -85,6 +85,7 @@ from pathlib import Path
 import re
 
 from ..call_metrics import lane_for
+from ..wording import LABEL_WORDING
 from .settings import PipelineSetting
 from .store import Claim, PipelineStore, fits, pipeline_path
 
@@ -106,10 +107,7 @@ TAILOR_KEPT_USER_EDITS = "tailor_kept_user_edits"
 TAILOR_OUTCOMES: tuple[str, ...] = (TAILOR_TAILORED, TAILOR_KEPT_USER_EDITS)
 
 #: The label's name, everywhere it is shown.
-LABEL_NAME = "Scout label"
-LABEL_WORDING = (
-    "Scout's own suggestion from your settings, resume and answers. Not a prediction of what an employer will decide."
-)
+LABEL_NAME = "Scout label"  # its one-line notice is LABEL_WORDING (gigai.scout.wording)
 LABEL_RECOMMENDED = "recommended"
 LABEL_NEEDS_ATTENTION = "needs_attention"
 LABELS: tuple[str, ...] = (LABEL_RECOMMENDED, LABEL_NEEDS_ATTENTION)

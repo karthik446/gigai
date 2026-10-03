@@ -3,6 +3,7 @@ import { getTailoredResumes, postResumePdf, postTailoredResumePdf } from "../api
 import GeneratePdfForm from "../components/GeneratePdfForm.jsx";
 import { latestStored } from "../tailoredResumeModel.js";
 import { parsePdfTarget } from "../routing.js";
+import { TAILORED_WORDING } from "../wording.js";
 
 // 0110-046: the Generate PDF page, where an agent's or the CLI's PDF is
 // finished. `gigai scout resume pdf` and the two PDF routes render without a
@@ -68,6 +69,9 @@ export default function PdfView({ target }) {
               <p data-role="pdf-source">
                 Tailored resume for <strong>{(job && job.title) || "this job"}</strong>
                 {job && job.company ? ` at ${job.company}` : ""}.
+              </p>
+              <p className="muted small" data-role="tailored-wording">
+                {TAILORED_WORDING}
               </p>
               <GeneratePdfForm render={(header) => postTailoredResumePdf({ profileId: profileId || stored.resume.profile_id, jobIdentity, header })} />
             </>
