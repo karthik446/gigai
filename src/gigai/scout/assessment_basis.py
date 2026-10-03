@@ -43,6 +43,13 @@ prompt can have missed, never re-assessed wholesale:
 A profile with no work mode whose sponsorship need and countries are what
 the record says has nothing the old prompt missed: its old verdicts stay.
 
+0.1.10.7 PL2: a new record also carries the rest of what a run seals, so the
+provenance survives without runs: ``profile_ref`` (the profile's id,
+revision and content digest), ``posting_sha256`` (:func:`posting_sha256`, the
+company index's ``content_sha256`` for the same posting) and ``model`` (the
+model id that answered). They are recorded, not yet compared: a record
+without them (written before 0.1.10.7) reads exactly as before.
+
 Nothing here calls a model, and nothing is written: staleness is derived on
 read. ``BasisCheck`` is one request's view: the settings of each resume
 identity are read at most once, and the story bank at most once per resume
@@ -75,6 +82,21 @@ REASON_OLDER_PROMPT = "older_prompt"
 REASON_SETTINGS_CHANGED = "settings_changed"
 REASON_STORY_BANK_CHANGED = "story_bank_changed"
 BASIS_STALE_REASONS: tuple[str, ...] = (REASON_OLDER_PROMPT, REASON_SETTINGS_CHANGED, REASON_STORY_BANK_CHANGED)
+
+
+def posting_sha256(title: str, text: str) -> str:
+    """A posting's content digest: what the company index stores as ``content_sha256``.
+
+    The ATS parsers hash the title and the plain posting text, joined by a
+    newline (``ats_board_clients._text_bytes``), so an assessment of an
+    indexed posting carries the digest the index has for it, and a changed
+    posting can be told from the one that was assessed.
+    """
+
+    from .find_jobs.ats_board_clients import _text_bytes
+    from .find_jobs.contracts import content_hash
+
+    return content_hash(_text_bytes(title, text or None))
 
 
 def _countries(values: object) -> frozenset[str]:
@@ -354,6 +376,7 @@ __all__ = [
     "BasisCheck",
     "CurrentBasis",
     "Staleness",
+    "posting_sha256",
     "stale_reason",
     "staleness",
 ]

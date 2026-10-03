@@ -20,6 +20,7 @@ from .contracts import (
     ModelTarget,
     PinnedResume,
     Producer,
+    ProfileRef,
     RequirementMatrixRow,
     SponsorshipStatus,
     StoryBankStamp,
@@ -545,6 +546,19 @@ class AssessResponse(_Contract):
     prompt_version: str | None = None
     constraints_digest: str | None = None
     story_bank: StoryBankStamp | None = None
+    # 0.1.10.7 PL2 (additive): the rest of what a run seals, so an assessment
+    # made with no run keeps its provenance (DESIGN 10.2). ``profile_ref`` is
+    # the profile's ``{profile_id, revision, content_digest}`` (the run seal's
+    # shape; ``None`` for a pasted resume, whose identity is ``resume.
+    # content_sha256``); ``posting_sha256`` the posting's content digest, the
+    # company index's ``content_sha256`` for the same title and text
+    # (``assessment_basis.posting_sha256``); ``model`` the model id the
+    # adapter answered with (``InvocationResult.resolved_model``). Ids and
+    # digests only. All ``None`` for a file written before these fields;
+    # each is omitted from JSON when ``None``.
+    profile_ref: ProfileRef | None = None
+    posting_sha256: str | None = None
+    model: str | None = None
 
     def __post_init__(self) -> None:
         if (
@@ -595,6 +609,12 @@ class AssessResponse(_Contract):
             value["constraints_digest"] = self.constraints_digest
         if self.story_bank is not None:
             value["story_bank"] = self.story_bank.to_json()
+        if self.profile_ref is not None:
+            value["profile_ref"] = self.profile_ref.to_json()
+        if self.posting_sha256 is not None:
+            value["posting_sha256"] = self.posting_sha256
+        if self.model is not None:
+            value["model"] = self.model
         return value
 
     @classmethod
@@ -607,7 +627,7 @@ class AssessResponse(_Contract):
             ),
             (
                 "updated_at", "history", "posting_text", "rank_score", "rank_skip_reason", "origin",
-                "prompt_version", "constraints_digest", "story_bank",
+                "prompt_version", "constraints_digest", "story_bank", "profile_ref", "posting_sha256", "model",
             ),
             "assess_response",
         )
@@ -661,6 +681,11 @@ class AssessResponse(_Contract):
                 else None
             ),
             story_bank=StoryBankStamp.from_json(value["story_bank"]) if "story_bank" in value else None,
+            profile_ref=ProfileRef.from_json(value["profile_ref"]) if "profile_ref" in value else None,
+            posting_sha256=(
+                _digest_value(value["posting_sha256"], "assess_response.posting_sha256") if "posting_sha256" in value else None
+            ),
+            model=_string(value["model"], "assess_response.model") if "model" in value else None,
         )
 
 
