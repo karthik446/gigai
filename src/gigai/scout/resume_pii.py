@@ -109,26 +109,87 @@ def strip_contact_lines(text: str) -> ContactStrip:
     stripped = model_resume(text)
     if stripped.text == text:
         return ContactStrip(text)
-    numbered = [line.strip() for line in text.splitlines() if line.strip()]
-    kept = dict(stripped.lines)
     removed: dict[str, int] = {}
-
-    def count(kinds: list[str]) -> None:
-        for kind in kinds:
-            removed[kind] = removed.get(kind, 0) + 1
-
-    for number, line in enumerate(numbered, 1):
-        if number in stripped.withheld:
-            # The name line, a contact line, or a line left empty once its contact details went.
-            count(["name"] if number == 1 and is_name_line(line) else _kinds(line) or ["other"])
-        elif kept.get(number, line) != line:
-            # Inline contact details taken out, or the name's words (a "Name - Headline" first line).
-            count(_kinds(line) or ["name"])
+    for _number, kind in _removed_lines(text, stripped):
+        removed[kind] = removed.get(kind, 0) + 1
     ordered = {kind: removed[kind] for kind in REMOVED_KINDS if kind in removed}
+    numbered = [line.strip() for line in text.splitlines() if line.strip()]
     first = numbered[0] if numbered else ""
     split = _name_then_headline(first) if first else None
     words = _name_tokens_of(first) if first and is_name_line(first) else (_name_tokens_of(split[0]) if split else set())
     return ContactStrip(stripped.text, ordered or {"other": 1}, frozenset(words))
+
+
+def _removed_lines(text: str, stripped) -> list[tuple[int, str]]:  # noqa: ANN001 - a ModelResume, imported lazily
+    """``(number, kind)`` for every line ``stripped`` (``model_resume(text)``) took something from.
+
+    ``number`` counts the non-empty lines, 1-based, as ``model_resume`` does; a line that lost
+    several kinds appears once per kind."""
+
+    from .resume_privacy import is_name_line
+
+    numbered = [line.strip() for line in text.splitlines() if line.strip()]
+    kept = dict(stripped.lines)
+    found: list[tuple[int, str]] = []
+    for number, line in enumerate(numbered, 1):
+        if number in stripped.withheld:
+            # The name line, a contact line, or a line left empty once its contact details went.
+            kinds = ["name"] if number == 1 and is_name_line(line) else _kinds(line) or ["other"]
+        elif kept.get(number, line) != line:
+            # Inline contact details taken out, or the name's words (a "Name - Headline" first line).
+            kinds = _kinds(line) or ["name"]
+        else:
+            continue
+        found.extend((number, kind) for kind in kinds)
+    return found
+
+
+#: The kind names ``contact_findings`` reports, in this order within a line.
+CHECK_KINDS: tuple[str, ...] = ("name", "email", "phone", "address", "link", "work_authorization", "other")
+
+
+@dataclass(frozen=True)
+class ContactFinding:
+    """One kind of contact detail on one line of a file (never the value)."""
+
+    kind: str
+    line: int
+
+
+def contact_findings(text: str) -> list[ContactFinding]:
+    """The contact details in ``text`` by kind and 1-based FILE line number; ``[]`` when none are noticed.
+
+    The import strip's own detector (what ``strip_contact_lines`` removes) plus the heads-up's
+    ``detect_contact_details`` shapes, line by line. Pattern-based: ``[]`` is not proof of a clean file."""
+
+    from .resume_privacy import model_resume
+
+    file_lines = text.splitlines()
+    file_line_of = [index for index, line in enumerate(file_lines, 1) if line.strip()]
+    found: set[tuple[int, str]] = set()
+    for number, kind in _removed_lines(text, model_resume(text)):
+        found.add((file_line_of[number - 1], "link" if kind == "links" else kind))
+    for index in file_line_of:
+        for label in detect_contact_details(file_lines[index - 1]):
+            found.add((index, "link" if label == "links" else label))
+    order = {kind: n for n, kind in enumerate(CHECK_KINDS)}
+    return [ContactFinding(kind, line) for line, kind in sorted(found, key=lambda f: (f[0], order[f[1]]))]
+
+
+def clean_contact_text(text: str) -> str:
+    """``text`` that ``contact_findings`` finds nothing in: the import strip, then any line it still flags.
+
+    Pure; the strip is ``strip_contact_lines`` (the same one the import runs)."""
+
+    cleaned = strip_contact_lines(text).text
+    for _ in range(3):
+        flagged = {finding.line for finding in contact_findings(cleaned)}
+        if not flagged:
+            break
+        cleaned = "\n".join(line for index, line in enumerate(cleaned.splitlines(), 1) if index not in flagged)
+    if cleaned and not cleaned.endswith("\n"):
+        cleaned += "\n"
+    return cleaned
 
 
 def removed_summary(removed: dict[str, int]) -> str:

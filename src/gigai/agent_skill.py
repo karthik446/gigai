@@ -16,8 +16,9 @@ import click
 
 SKILL_NAME = "gigai-scout"
 SKILL_DESCRIPTION = (
-    "Run the daily GigAI Scout loop for the user: what is new, open questions, answers and "
-    "stories, tailored resume. Use when the user asks about job postings, Scout or GigAI."
+    "Run the daily GigAI Scout job-search loop with the `gigai` CLI: what is new on Scout, "
+    "assess postings, open questions, answers and stories, tailored resume PDF. Use when the user "
+    "asks \"what's new on Scout\", about job postings or GigAI."
 )
 FORMATS = ("skill", "agents-md")
 
@@ -25,9 +26,9 @@ FORMATS = ("skill", "agents-md")
 PERMISSIONS_SNIPPET: dict[str, dict[str, list[str]]] = {
     "permissions": {
         "allow": [
-            "Bash(gigai:*)",
-            "Bash(curl http://127.0.0.1:*)",
-            "Bash(curl http://localhost:*)",
+            "Bash(gigai *)",
+            "Bash(curl http://127.0.0.1:8765/*)",
+            "Bash(curl http://localhost:8765/*)",
         ],
         "deny": [
             "Read(~/.gigai/**)",
@@ -39,7 +40,8 @@ PERMISSIONS_EXPLANATION = (
     "This stops your agent from reading GigAI's files by accident and lets it use the GigAI "
     "command line and Scout's local API on this computer. It is a guard against accidents, "
     "not a security boundary: an agent that can run commands on your computer can read "
-    "GigAI's files directly. Keep your agent's permission prompts on."
+    "GigAI's files directly. The curl rules cover only `curl http://127.0.0.1:8765/…` written "
+    "exactly that way; the agent should prefer the `gigai` CLI. Keep your agent's permission prompts on."
 )
 
 
@@ -71,6 +73,7 @@ def agent_skill_command(fmt: str, out: Path | None, force: bool) -> None:
         return
     if out.exists() and not force:
         raise click.ClickException(f"{out} already exists; pass --force to replace it.")
+    out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(text, encoding="utf-8")
     click.echo(f"Wrote {out}")
 

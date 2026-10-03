@@ -986,6 +986,26 @@
       ],
       "notes": "The profile leaves the profile list, the switcher, new runs and background tagging; its runs and assessments stay readable (hidden from the default Jobs list) and the answers and stories (the user's, not the profile's) are untouched. The default profile and the only active profile are refused. Deleting the selected profile selects the default profile."
     },
+    "scout resume check": {
+      "summary": "Check a resume FILE (.md/.txt) for contact details: kinds and line numbers, never values.",
+      "effect": "read",
+      "external": "none",
+      "output": "Human-readable text; --json emits one JSON object: {ok, clean, findings: [{kind, line}], counts, note}. Exit 0 when nothing is found, 2 when something is, 1 for a named error (missing, unreadable, binary or unsupported file).",
+      "examples": [
+        "gigai scout resume check resume.md --json"
+      ],
+      "notes": "Local: reads only the path given. No model, no network, no GigAI home or Scout folder needed or created. Kinds: name, email, phone, address, link, work_authorization. It uses the detector the resume import uses and is pattern-based: it can miss things. Run it before any agent reads a resume file."
+    },
+    "scout resume clean": {
+      "summary": "Write a copy of a resume FILE with its contact lines removed (the import's own strip).",
+      "effect": "write",
+      "external": "none",
+      "output": "Human-readable text; --json emits one JSON object: {ok, out, removed: [{kind, line}], counts, note}. Kinds and line numbers only, never values.",
+      "examples": [
+        "gigai scout resume clean resume.md --out resume-clean.md"
+      ],
+      "notes": "Local: reads the path given and writes only --out (parent folders are created). The input is never modified. Refuses an existing --out without --force, and --out equal to the input. The written file passes 'gigai scout resume check'. Glance at the cleaned file before you use it."
+    },
     "scout resume add": {
       "summary": "Import a file as the resume reference and create the record find-jobs reads.",
       "effect": "write",
