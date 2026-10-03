@@ -1,0 +1,51 @@
+import { estimateLine } from "../postingsModel.js";
+import { modelTargetLabel } from "../modelTargets.js";
+
+// 0.1.10.7 M4b: the approval "Assess these" asks for. `dialog` is
+// postingsModel.approvalDialog(the ASK's answer): the count and the estimate
+// are the server's. Nothing has been assessed when this shows; Approve sends
+// the body the server named for the yes.
+export default function AssessApprovalDialog({ dialog, submitting, error, onApprove, onCancel }) {
+  return (
+    <div className="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="assess-approval-title" data-testid="approval-dialog">
+      <div className="modal">
+        <h2 id="assess-approval-title">
+          Assess {dialog.count} posting{dialog.count === 1 ? "" : "s"}?
+        </h2>
+        <ul className="approval-facts">
+          {dialog.byProfile.map((item) => (
+            <li key={item.label}>
+              <strong>{item.label}:</strong> {item.count}
+            </li>
+          ))}
+          <li data-role="approval-estimate">
+            <strong>Estimate:</strong> {estimateLine(dialog)}
+            {dialog.basisCalls === 0 ? " (no recorded calls yet to estimate tokens or time from)" : ""}
+          </li>
+          {dialog.modelTarget && (
+            <li>
+              <strong>Model:</strong> {modelTargetLabel(dialog.modelTarget)}
+            </li>
+          )}
+          {dialog.alreadyCurrent > 0 && (
+            <li>
+              <strong>Left out:</strong> {dialog.alreadyCurrent} already assessed with the current settings
+            </li>
+          )}
+        </ul>
+        <p className="muted" data-role="approval-nothing-yet">
+          Nothing has been assessed yet. Assessing starts only when you approve.
+        </p>
+        {error && <div className="callout danger">{error}</div>}
+        <div className="actions">
+          <button type="button" className="button secondary" onClick={onCancel} disabled={submitting} data-action="approval-cancel">
+            Cancel
+          </button>
+          <button type="button" className="button" onClick={onApprove} disabled={submitting || !dialog.approveBody} data-action="approval-approve">
+            {submitting ? "Assessing…" : "Approve and assess"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}

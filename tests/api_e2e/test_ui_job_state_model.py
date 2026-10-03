@@ -439,10 +439,13 @@ def test_the_questions_count_moved_to_jobs_and_assessments() -> None:
     app = _source("App.jsx")
     assert "needAnswers={needAnswers}" in app and "onNeedAnswers={setNeedAnswers}" in app
     view = _source("views", "FindJobsView.jsx")
-    assert "onNeedAnswers({ jobs: jobsWaiting, assessments: assessmentsWaiting })" in view
-    assert "needAnswersCount(runJobs)" in view and "needAnswersCount(assessed)" in view
-    strip = _source("components", "JobsSummaryStrip.jsx")
-    assert 'label="Need your answers"' in strip and "Open questions" not in strip and "QUESTIONS_HASH" not in strip
+    # 0.1.10.7 M4b: the Jobs count is the by-posting list's (GET /api/postings counts.by_state.needs_answers,
+    # read with no filter on), handed up by JobsView; the Assessments count is unchanged.
+    assert "onNeedAnswers({ jobs: postingsWaiting, assessments: assessmentsWaiting })" in view
+    assert "onCounts={setPostingsWaiting}" in view and "needAnswersCount(assessed)" in view
+    jobs = _source("views", "JobsView.jsx")
+    assert "onCounts(needsAnswers(loaded.counts));" in jobs and "if (!hasFilter(shownFilter)) {" in jobs
+    assert '<Tile label="Need your answers"' in jobs and "Open questions" not in jobs and "QUESTIONS_HASH" not in jobs
 
 
 def test_settings_reads_one_page_of_the_watchlist() -> None:

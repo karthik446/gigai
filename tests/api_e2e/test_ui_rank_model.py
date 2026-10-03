@@ -442,8 +442,9 @@ def test_the_status_panel_and_both_pages_show_the_counts() -> None:
     assert "rankCountsLine(rank, assessCounts)" in panel and 'data-role="rank-counts"' in panel
     assert "rankedByLine(rankStatus, rank)" in panel and "rankShortfallLine(rank, rankStatus)" in panel
     view = _source("views/FindJobsView.jsx")
-    assert view.count("<NodeStatusList") == 2
-    assert view.count("rank={progress?.rank}") == 2 and view.count("assessCounts={progress?.assess_counts}") == 2
+    # 0.1.10.7 M4b: one status panel is left, on the past run's page (Jobs starts and shows no run).
+    assert view.count("<NodeStatusList") == 1
+    assert view.count("rank={progress?.rank}") == 1 and view.count("assessCounts={progress?.assess_counts}") == 1
     # the run's last counts are read once more when it ends
     terminal = view[view.index("if (TERMINAL_STATUSES.has(status.status)) {") :][:400]
     assert "getRunProgress(id)" in terminal

@@ -26,14 +26,16 @@ from __future__ import annotations
 import json
 from pathlib import Path
 import time
+from urllib.parse import quote
 
 import pytest
 from click.testing import CliRunner
 
 from gigai.cli import cli
-from gigai.scout import data_labels
+from gigai.scout import ats_score, data_labels
 from gigai.scout.find_jobs.api import openapi
 from gigai.scout.find_jobs.refresh_tick import settings_path
+from gigai.scout.pipeline import steps
 
 from tests.api_e2e.after_journey import assert_clean_and_healthy
 from tests.api_e2e.harness import (
@@ -198,6 +200,42 @@ def test_pipeline_journey(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> No
         _system_only(client.get("/api/pipeline"), job=job)
         (tailored,) = client.get("/api/metrics?kind=tailor").json()["aggregates"]
         assert tailored["calls"] == 1  # the calls are recorded like every model call
+
+        # -- 5b. the job page's read: the steps with their numbers, the two counts, the ATS breakdown, the label --
+        detail_url = f"/api/pipeline/job?job_identity={quote(job, safe='')}&profile_id={profile_id}"
+        read = client.get(detail_url)
+        assert read.status_code == 200, read.text
+        assert read.headers[data_labels.LABELS_HEADER] == data_labels.PUBLIC_UNTRUSTED  # the ATS line names the posting's skills
+        detail = read.json()
+        assert "_redactions" not in detail and "stored_path" not in read.text and str(home) not in read.text
+        assert (detail["schema_version"], detail["job_identity"], detail["profile_id"]) == ("scout-pipeline-job:1", job, profile_id)
+        assert (detail["enabled"], detail["state"], detail["tailor_outcome"]) == (True, "done", "tailored")
+        assert [step["name"] for step in detail["steps"]] == list(_STEPS) and {step["state"] for step in detail["steps"]} == {"done"}
+        by_step = {step["name"]: step for step in detail["steps"]}
+        assert by_step["tailor"]["model_target"] and by_step["tailor"]["last_run"]["outcome"] == "ok"
+        assert by_step["tailor"]["last_run"]["seconds"] >= 0 and by_step["ats"]["model_target"] is None
+        for side in ("base", "tailored"):
+            met = detail["requirements_met"][side]
+            assert set(met) == {"met", "total", "percent"} and 0 <= met["met"] <= met["total"]
+        assert detail["ats"]["score"] == done["label"]["ats_score"] and detail["ats"]["line"].startswith(f"Scout ATS {detail['ats']['score']}")
+        assert detail["ats"]["wording"] == ats_score.ATS_WORDING and set(detail["ats"]["parts"]) == {"fidelity", "coverage", "format"}
+        assert detail["label"]["label"] == done["label"]["label"] and detail["label"]["reasons"] == done["label"]["reasons"]
+        assert (detail["label"]["name"], detail["label"]["wording"], detail["label"]["min_ats"]) == (steps.LABEL_NAME, steps.LABEL_WORDING, 10)
+        documented_job = _example("GET", "/api/pipeline/job")
+        assert set(documented_job) == set(detail) and set(documented_job["steps"][0]) == set(by_step["tailor"])  # type: ignore[index]
+        assert set(documented_job["steps"][0]["last_run"]) == set(by_step["tailor"]["last_run"])  # type: ignore[index]
+        assert set(documented_job["ats"]) == set(detail["ats"]) and set(documented_job["label"]) == set(detail["label"])  # type: ignore[arg-type]
+        # A job that never entered the pipeline: no steps, nothing made up.
+        never = client.get(f"/api/pipeline/job?job_identity={quote('https://careers.example.test/jobs/never', safe='')}&profile_id={profile_id}").json()
+        assert (never["state"], never["steps"], never["ats"], never["label"]) == (None, [], None, None)
+        assert never["requirements_met"] == {"base": None, "tailored": None}
+        for url, code in (
+            ("/api/pipeline/job", "invalid_value"), (detail_url + "&x=1", "unknown_key"),
+            (f"/api/pipeline/job?job_identity=not%20a%20link&profile_id={profile_id}", "invalid_value"),
+        ):
+            refused = client.get(url)
+            assert refused.status_code == 422 and refused.json()["error"]["code"] == code, (url, refused.text)
+        assert client.get(detail_url, headers={"Host": "evil.example"}).status_code == 403
 
         # -- 6. process now -----------------------------------------------------------------------
         same = client.post("/api/pipeline/process", json={"job_identity": _JOB_URL})

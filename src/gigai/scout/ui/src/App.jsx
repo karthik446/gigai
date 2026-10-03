@@ -73,14 +73,15 @@ function useSetup() {
 // top bar (components/TopBar.jsx) and routing.js's ROUTES table drive
 // everything:
 //
-//   jobs / job / run   FindJobsView (mounted on EVERY route so a live run
-//                      keeps polling and the grid's state survives; it
-//                      draws nothing on the other routes)
+//   jobs / job / run   FindJobsView (mounted on EVERY route so the job
+//                      model survives; it draws nothing on the other
+//                      routes). 0.1.10.7 M4b: Jobs is by posting (JobsView,
+//                      no run); a run page is a past run, history only
 //   assessments /      FindJobsView too (uat-bug-016): the on-demand
 //   assessment         assessments, newest first, and their job page
 //   applications       ApplicationsView: the jobs that are applied or
 //                      beyond (GET /api/applications, uat-bug-018)
-//   runs               RunsView (GET /api/runs?profile_id=…)
+//   runs               RunsView: past runs, read-only history (GET /api/runs?profile_id=…)
 //   settings           SettingsView (preferences + wizard launch, profiles,
 //                      discover, add company)
 //   assess             AssessView; its AssessResponse is handed to
@@ -286,13 +287,13 @@ export default function App() {
             profile={selectedProfile}
             profilesLoading={profilesState.loading}
             config={configResponse}
-            reloadConfig={reloadConfig}
             runsState={runsState}
             applicationsState={applicationsState}
             externalQuickItem={assessedItem}
             runPostingIds={runPostingIds}
             onRunPostingIds={setRunPostingIds}
             onNeedAnswers={setNeedAnswers}
+            onSelectProfile={handleSelectProfile}
           />
         )}
 

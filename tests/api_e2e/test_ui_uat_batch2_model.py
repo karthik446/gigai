@@ -851,9 +851,10 @@ def test_assess_a_job_lives_on_assessments_not_on_jobs() -> None:
     assessments = (UI_SRC / "views" / "AssessmentsView.jsx").read_text(encoding="utf-8")
     assert "+ Assess a job" in assessments and "href={ASSESS_HASH}" in assessments
     assert 'data-action="assess"' not in find_jobs and "ASSESS_HASH" not in find_jobs
-    # Jobs' grid is the run's postings; the Assessments grid sorts newest first.
-    jobs_page = find_jobs[find_jobs.index("  const grid = (") :]
-    assert "jobs={runJobs}" in jobs_page and "jobs={jobs}" not in jobs_page
+    # 0.1.10.7 M4b: Jobs is the by-posting list (JobsView); a past run's grid is the run's postings only.
+    assert "<JobsView" in find_jobs and "const grid = (" not in find_jobs
+    run_page = find_jobs[find_jobs.index('if (route.view === "run") {') :]
+    assert "jobs={runJobs}" in run_page and "jobs={jobs}" not in run_page
     assert 'from="assessments"' in assessments
     grid = (UI_SRC / "components" / "JobsGrid.jsx").read_text(encoding="utf-8")
     assert "assessments ? sortByAssessedAt(matching) : sortJobs(matching)" in grid
@@ -1033,9 +1034,10 @@ def test_the_settings_action_and_the_jobs_message_are_wired() -> None:
     assert "setTimeout(read, SOURCES_POLL_MS)" in panel and "isRunning(response)" in panel
     settings = (UI_SRC / "views" / "SettingsView.jsx").read_text(encoding="utf-8")
     assert "<SourcesUpdatePanel />" in settings
-    find_jobs = (UI_SRC / "views" / "FindJobsView.jsx").read_text(encoding="utf-8")
-    assert 'data-role="index-notice"' in find_jobs and "<a href={SETTINGS_HASH}>" in find_jobs
-    assert 'useSourcesStatus({ enabled: route.view === "jobs" })' in find_jobs
+    # 0.1.10.7 M4b: the Jobs list reads the same status for its sources strip (uat-bug-048 made the strip say
+    # what the Settings-link notice said; the notice went with the run-centric landing).
+    jobs = (UI_SRC / "views" / "JobsView.jsx").read_text(encoding="utf-8")
+    assert "useSourcesStatus({ enabled: true })" in jobs and "<SourcesStrip strip={strip} read={sources.read} />" in jobs
 
 
 # --- uat-bug-011 ------------------------------------------------------------------
@@ -1054,7 +1056,7 @@ def test_the_run_page_reads_the_field_the_progress_route_carries() -> None:
     assert "not_imported_count" in ProgressSnapshot.__dataclass_fields__
     find_jobs = (UI_SRC / "views" / "FindJobsView.jsx").read_text(encoding="utf-8")
     run_page = find_jobs[find_jobs.index('if (route.view === "run") {') :]
-    run_page = run_page[: run_page.index("\n  return (\n    <div>\n      <JobsSummaryStrip")]
+    assert run_page.rstrip().endswith("return null;\n}"), "the run page is the view's last branch (0.1.10.7 M4b: no landing after it)"
     assert "notImported={progress?.not_imported_count}" in run_page
     # A finished run opened later has its progress read once, for the run shown.
     start = find_jobs.index("getRunProgress(pastRunId)")

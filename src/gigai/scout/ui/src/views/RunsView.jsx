@@ -2,22 +2,24 @@ import { relativeTimeLabel } from "../display.js";
 import { dateTimeLabel } from "../jobModel.js";
 import { JOBS_HASH, runHash } from "../routing.js";
 
-// Q4a-nav: Runs (#/runs) -- every find-jobs run for the selected profile,
+// Q4a-nav: Past runs (#/runs) -- every find-jobs run for the selected profile,
 // newest first, from GET /api/runs?profile_id=<selected> (P9c: date /
 // found / new / assessed / matched / status are the run's own fields;
 // cost/duration have no source field and stay out). Each row opens
 // #/runs/<run_id>, the run page (status, node receipts, its postings).
-// Starting a run happens on Jobs ("Run find jobs"), where the config and
-// the consent dialog live.
+// 0.1.10.7 M4b: this is HISTORY, read-only. The UI starts no run any more:
+// Jobs lists the stored postings directly, and what these runs assessed
+// shows there too.
 export default function RunsView({ profile, runs, loading, error, reload }) {
   return (
     <div>
       <section className="panel">
         <h2>
-          Runs {profile && <span className="muted">{profile.label}</span>}
+          Past runs <span className="tag" data-role="history-tag">History</span> {profile && <span className="muted">{profile.label}</span>}
         </h2>
-        <p className="muted">
-          Every find-jobs run for this profile, newest first. Start a new one from <a href={JOBS_HASH}>Jobs</a>.
+        <p className="muted" data-role="runs-history-note">
+          Find-jobs runs made before Scout stopped using runs, newest first. Read-only: no new run is started here. <a href={JOBS_HASH}>Jobs</a> lists your
+          postings without a run, with what these runs assessed.
         </p>
         {!profile && <p className="muted">Select a profile first.</p>}
         {profile && loading && <p className="muted">Loading runs…</p>}
@@ -29,7 +31,7 @@ export default function RunsView({ profile, runs, loading, error, reload }) {
             </button>
           </div>
         )}
-        {profile && !loading && !error && runs.length === 0 && <p className="muted">No runs yet for this profile.</p>}
+        {profile && !loading && !error && runs.length === 0 && <p className="muted">No past runs for this profile.</p>}
         {profile && !loading && !error && runs.length > 0 && (
           <table className="data-table runs-table">
             <thead>

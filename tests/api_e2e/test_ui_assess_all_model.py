@@ -207,12 +207,14 @@ def test_the_dialog_offers_all_new_postings() -> None:
 
 
 def test_the_jobs_page_has_the_button_the_confirm_line_and_live_counts() -> None:
+    # 0.1.10.7 M4b: "Assess all new" is a past run's own action now (its run page); Jobs has "Assess these"
+    # (test_ui_postings_model.py), and the run-centric summary strip with its live counts is gone.
     view = (UI_SRC / "views" / "FindJobsView.jsx").read_text(encoding="utf-8")
     assert 'data-action="assess-all"' in view and "assessAllButtonLabel(assessAllPlan)" in view
     assert 'data-role="assess-all-plan"' in view and "planLine(assessAllPlan)" in view
     assert "estimateSourceLine(assessAllPlan)" in view and "privacyLine(assessAllPlan.model_target)" in view
     assert 'data-action="assess-all-start"' in view and 'data-action="cancel-assess-all"' in view
-    assert "withLiveCounts(newestRun, runId, assessAllCounts)" in view
+    assert "withLiveCounts" not in view and "JobsSummaryStrip" not in view
     assert 'followAssessAll(id, "read")' in view and "loadQuickItems();" in view
     api = (UI_SRC / "api.js").read_text(encoding="utf-8")
     assert "/assess-all`" in api and "export function postAssessAll(runId, fields)" in api

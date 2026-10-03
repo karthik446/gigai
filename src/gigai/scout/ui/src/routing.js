@@ -5,16 +5,18 @@
 // checks that every entry has a view in App.jsx and that the served bundle
 // carries every path. Add a route here first; nothing else invents a hash.
 //
-//   #/jobs               the card grid (home; also the empty hash): the
-//                        postings of a find-jobs run, nothing else
+//   #/jobs               Jobs by posting (home; also the empty hash): the
+//                        stored postings every active profile matches, no
+//                        run (0.1.10.7 M4b)
 //   #/jobs/<encoded id>  one posting's job page, keyed by its normalized_url
 //                        (or a quick assessment's job_identity)
 //   #/assessments        every on-demand assessment, newest first (uat-bug-016)
 //   #/assessments/<id>   the same job page, opened from Assessments (keyed by
 //                        the assessment's job_identity)
 //   #/applications       every job that is applied or beyond (uat-bug-018)
-//   #/runs               every find-jobs run for the selected profile
-//   #/runs/<run id>      one run: status, node receipts, its postings
+//   #/runs               past find-jobs runs of the selected profile: history,
+//                        read-only (no run is started from the UI any more)
+//   #/runs/<run id>      one past run: status, node receipts, its postings
 //   #/settings           preferences, resume, setup wizard, discover, add company
 //   #/assess             "+ Assess a job", reached from Assessments (its
 //                        result opens #/assessments/<id>)
@@ -43,8 +45,8 @@ export const ROUTES = [
   { view: "assessments", path: "#/assessments", label: "Assessments", pattern: /^#\/assessments\/?$/ },
   { view: "assessment", path: "#/assessments/", label: "Assessment", pattern: /^#\/assessments\/(.+)$/, param: "jobId" },
   { view: "applications", path: "#/applications", label: "Applications", pattern: /^#\/applications\/?$/ },
-  { view: "runs", path: "#/runs", label: "Runs", pattern: /^#\/runs\/?$/ },
-  { view: "run", path: "#/runs/", label: "Run", pattern: /^#\/runs\/(.+)$/, param: "runId" },
+  { view: "runs", path: "#/runs", label: "Past runs", pattern: /^#\/runs\/?$/ },
+  { view: "run", path: "#/runs/", label: "Past run", pattern: /^#\/runs\/(.+)$/, param: "runId" },
   { view: "settings", path: "#/settings", label: "Settings", pattern: /^#\/settings\/?$/ },
   { view: "assess", path: "#/assess", label: "Assess a job", pattern: /^#\/assess\/?$/ },
   { view: "pdf", path: "#/pdf", label: "Generate PDF", pattern: /^#\/pdf(?:\/(.*))?$/, param: "pdfTarget" },

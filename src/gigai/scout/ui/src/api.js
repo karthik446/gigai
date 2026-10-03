@@ -629,4 +629,54 @@ export function getMetrics({ kind, model } = {}) {
   return request("GET", text ? `/api/metrics?${text}` : "/api/metrics");
 }
 
+// 0.1.10.7 M4b: the Jobs page by posting, with no run.
+//
+// GET /api/postings (posting_search.search_postings) is the live search over
+// the stored postings, across the active profiles: `query` is the string
+// postingsModel.postingsQuery builds. It never moves the "new since" anchor.
+// GET /api/new is the PEEK the "New since last check (N)" chip counts from
+// (a GET never moves the anchor); POST /api/new/seen is "Mark all seen" (it
+// moves the anchor to now). POST /api/postings/assess is "Assess these":
+// without `approve: true` it answers `status: "ask"` (count and estimate)
+// and assesses nothing.
+export function getPostings(query) {
+  return request("GET", `/api/postings${query ? `?${query}` : ""}`);
+}
+
+export function getNewPeek() {
+  return request("GET", "/api/new?peek=1");
+}
+
+export function postMarkAllSeen() {
+  return request("POST", "/api/new/seen", {});
+}
+
+export function postAssessThese(body) {
+  return request("POST", "/api/postings/assess", body);
+}
+
+// 0.1.10.7 M4b: the background pipeline (find_jobs/api/pipeline.py).
+// GET /api/pipeline is its status (lanes, today's counters against their
+// caps, approvals, last errors); GET /api/pipeline/job one job's steps with
+// their numbers, the requirements met before and after tailoring, the Scout
+// ATS breakdown and the Scout label. An approval is decided with
+// {approve: true|false}; "process now" queues one assessed job and never
+// waits for a model (202).
+export function getPipeline() {
+  return request("GET", "/api/pipeline");
+}
+
+export function getPipelineJob({ jobIdentity, profileId }) {
+  const query = new URLSearchParams({ job_identity: jobIdentity, profile_id: profileId });
+  return request("GET", `/api/pipeline/job?${query}`);
+}
+
+export function postPipelineApproval(approvalId, body) {
+  return request("POST", `/api/pipeline/approvals/${encodeURIComponent(approvalId)}`, body);
+}
+
+export function postPipelineProcess(body) {
+  return request("POST", "/api/pipeline/process", body);
+}
+
 export { ApiError };

@@ -3,6 +3,7 @@ import AddCompanyForm from "../components/AddCompanyForm.jsx";
 import SourcesUpdatePanel from "../components/SourcesUpdatePanel.jsx";
 import BackgroundUpdatesPanel from "../components/BackgroundUpdatesPanel.jsx";
 import ModelMetricsPanel from "../components/ModelMetricsPanel.jsx";
+import PipelinePanel from "../components/PipelinePanel.jsx";
 import ExaSourceToggle from "../components/ExaSourceToggle.jsx";
 import ProfilesView from "./ProfilesView.jsx";
 import { ANSWERS_HASH } from "../routing.js";
@@ -31,13 +32,16 @@ export default function SettingsView({
           tagging, the starter snapshot), right under the action it follows. */}
       <BackgroundUpdatesPanel />
 
+      {/* 0.1.10.7 M4b: the background pipeline: lanes, today's calls against their caps, approvals, settings, last errors. */}
+      <PipelinePanel />
+
       {/* 0.1.10.7 E: what the model calls have taken, per model (hidden until one is recorded). */}
       <ModelMetricsPanel />
 
       <section className="panel" id="settings-preferences">
         <h2>Preferences</h2>
         <p className="muted">
-          Job titles, location, visa, publication window and the resume every run and assessment use. Editing them
+          Job titles, location, visa, publication window and the resume every search and assessment use. Editing them
           re-opens the setup wizard. Location, work mode, countries and the publication window here are the default
           profile's; every other profile has its own, under Profiles below.
         </p>

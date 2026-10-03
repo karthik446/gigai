@@ -215,7 +215,8 @@ def test_the_grid_and_the_view_use_the_paging_state() -> None:
     assert re.search(r"useEffect\(\(\) => \{\s*setShown\(initialShown\(\)\);\s*\}, \[filterState\]\)", grid), "a filter change resets the page"
     assert "onWantRows" in grid and "showMoreShown" in grid
     assert "createResultsPager" in view and "getRunResults" not in view, "the view reads pages on demand, not the whole run"
-    assert view.count("onWantRows={runActive ? null : wantResultRows}") == 2, "a live run's streaming grid is not paged from the server"
+    # 0.1.10.7 M4b: one grid of a run is left, on the past run's page.
+    assert view.count("onWantRows={runActive ? null : wantResultRows}") == 1, "a live run's streaming grid is not paged from the server"
     assert "RANK_ORDER_NOTE" in grid, "the honest order note stays"
 
 

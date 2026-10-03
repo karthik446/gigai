@@ -424,7 +424,8 @@ export function assessOriginFor(job) {
   if (stored) {
     return stored;
   }
-  return job && job.row ? ORIGIN_JOB_PAGE : ORIGIN_QUICK_ASSESS;
+  // 0.1.10.7 M4b: a posting opened from the Jobs list (postingsModel.postingJob) is a job page's too.
+  return job && (job.row || job.fromPostings) ? ORIGIN_JOB_PAGE : ORIGIN_QUICK_ASSESS;
 }
 
 export function addRunPostings(known, rows) {

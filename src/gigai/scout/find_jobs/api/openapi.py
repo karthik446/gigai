@@ -1258,6 +1258,57 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
         ),
     ),
     RouteSpec(
+        "GET", "/api/pipeline/job", "One job's pipeline: its steps with their numbers, requirements met before and after tailoring, the Scout ATS breakdown, the Scout label.", "read", "none",
+        {
+            "schema_version": "scout-pipeline-job:1",
+            "profile_id": "prof_1",
+            "job_identity": _JOB_URL,
+            "enabled": True,
+            "state": "done",
+            "steps": [
+                {
+                    "name": "tailor", "state": "done", "model_target": "codex_cli", "attempts": 1, "error_code": None, "waiting": None,
+                    "retry_at": None, "updated_at": "2026-10-03T09:30:40.000000Z",
+                    "last_run": {
+                        "outcome": "ok", "model": "gpt-5.1-codex", "input_tokens": 30000, "output_tokens": 4000, "cached_tokens": 0,
+                        "seconds": 24.2, "started_at": "2026-10-03T09:30:15.000000Z",
+                    },
+                },
+            ],
+            "requirements_met": {"base": {"met": 8, "total": 11, "percent": 73}, "tailored": {"met": 10, "total": 11, "percent": 91}},
+            "tailor_outcome": "tailored",
+            "ats": {
+                "score": 84, "line": "Scout ATS 84: parses cleanly · 9/11 key skills · missing: Terraform, SOC 2",
+                "parts": {"fidelity": 38.5, "coverage": 31.0, "format": 20.0}, "key_skills": "9/11", "missing": ["Terraform", "SOC 2"],
+                "failed_rules": [], "wording": "GigAI’s own local check of how well this resume reads and matches the posting. Not any real ATS’s score.",
+                "updated_at": "2026-10-03T09:31:05.000000Z",
+            },
+            "label": {
+                "name": "Scout label", "label": "recommended", "reasons": [], "ats_score": 84, "min_ats": 0,
+                "wording": "Scout's own suggestion from your settings, resume and answers. Not a prediction of what an employer will decide.",
+                "updated_at": "2026-10-03T09:31:10.000000Z",
+            },
+        },
+        schema_version="scout-pipeline-job:1",
+        params=(
+            _q("job_identity", "string", "The job's identity: the posting's link (or `text:sha256:...`).", required=True),
+            _q("profile_id", "string", "The profile the job was processed for.", required=True),
+        ),
+        errors=(_UNKNOWN_KEY, (422, "invalid_value"), _NO_TARGET),
+        description=(
+            "For a job page. `steps`: the job's steps in order (tailor, reassess, ats, label), each with its state, the model "
+            "target it runs with, why it waits and `last_run`, the numbers of its last attempt (model, tokens, seconds; null "
+            "before the first). An empty list: the job never entered the pipeline (`state` null). `requirements_met`: what the "
+            "job's own assessment (`base`) and the assessment of the tailored resume (`tailored`) found met; each null until it "
+            "exists. `tailor_outcome`: `tailored`, or `tailor_kept_user_edits` when the stored resume is the user's and was kept. "
+            "`ats`: the Scout ATS score of the tailored resume with its line, its three parts (parse fidelity of 40, keyword "
+            "coverage of 40, format rules of 20), the key skills found, the ones missing and the format rules that failed, and "
+            "the wording that always goes with the score. `label`: the Scout label as codes with the wording that always goes "
+            "with it; null until the label step is done. `ats.line` and `ats.missing` are words of the posting "
+            "(public-untrusted); nothing here is the user's own text. Reading makes no model call and creates nothing."
+        ),
+    ),
+    RouteSpec(
         "POST", "/api/pipeline/approvals/{approval_id}", "Approve or deny one approval.", "write", "none",
         {
             "schema_version": "scout-pipeline-approval:1",
@@ -1525,6 +1576,7 @@ _META: dict[tuple[str, str], tuple[str, str]] = {
     ("POST", "/api/new/seen"): ("Mark all postings seen", "Jobs"),
     ("GET", "/api/pipeline"): ("Get what the background pipeline is doing", "Jobs"),
     ("GET", "/api/pipeline/approvals"): ("List the pipeline approvals", "Jobs"),
+    ("GET", "/api/pipeline/job"): ("Get one job's pipeline steps, ATS breakdown and Scout label", "Jobs"),
     ("POST", "/api/pipeline/approvals/{approval_id}"): ("Approve or deny a pipeline approval", "Jobs"),
     ("POST", "/api/pipeline/process"): ("Process one job now", "Jobs"),
     ("GET", "/api/postings"): ("Search the stored postings", "Jobs"),
@@ -1612,6 +1664,7 @@ _LABELS: dict[tuple[str, str], tuple[str, ...]] = {
     # 0.1.10.7 PL5: system data only (ids, codes, counts): no posting, resume, answer or story text.
     ("GET", "/api/pipeline"): _NONE,
     ("GET", "/api/pipeline/approvals"): _NONE,
+    ("GET", "/api/pipeline/job"): _UNTRUSTED,  # the ATS line and the missing skills are words of the posting
     ("POST", "/api/pipeline/approvals/{approval_id}"): _NONE,
     ("POST", "/api/pipeline/process"): _NONE,
     ("GET", "/api/postings"): _UNTRUSTED,

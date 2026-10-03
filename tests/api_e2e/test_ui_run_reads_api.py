@@ -302,12 +302,16 @@ def test_the_jobs_view_draws_each_page_and_opens_on_one_small_read() -> None:
 
     # The run to open on is asked for on its own; the runs list is not waited for.
     opens = view[view.index("// Q4a: nothing loaded yet") :]
-    opens = opens[: opens.index("async function handleConfirm")]
+    opens = opens[: opens.index("const rows = useMemo(")]  # 0.1.10.7 M4b: no handleConfirm, the UI starts no run
     assert 'getRuns({ profileId, status: "succeeded", limit: 1 })' in opens
     assert "shownRunId.current === null" in opens
     assert "runsState" not in opens
     assert "runsState.loading && !runId" not in view
-    assert "loading={fromAssessments ? quickLoading : resultsLoading || pagesLoading || quickLoading || (newestLoading && !runId)}" in view
+    # 0.1.10.7 M4b: a posting no run and no assessment carries is looked up in the Jobs list once; "not found" waits for that.
+    assert (
+        "loading={fromAssessments ? quickLoading : resultsLoading || pagesLoading || quickLoading || (newestLoading && !runId)"
+        " || !(postingLookup.id === jobId && postingLookup.done)}"
+    ) in view
     assert "const runCreatedAt = currentRun ? currentRun.created_at : runMeta ? runMeta.created_at : null;" in view
     assert "runId={runId}" in view[view.index("<JobPage") :][:400]
 

@@ -22,7 +22,7 @@ from pathlib import Path
 import time
 
 from . import steps as steps_module
-from .runner import WAIT_DAILY_CAP, WAIT_LANE, WAIT_RETRY, live_work
+from .runner import WAIT_DAILY_CAP, WAIT_LANE, WAIT_RETRY, live_work, pipeline_status
 from .settings import SOURCE_UNREADABLE, pipeline_setting
 from .store import (
     API_LANE_CAP,
@@ -44,6 +44,7 @@ from .store import (
 from .triggers import approvals_of, caps
 
 OVERVIEW_SCHEMA = "scout-pipeline:1"
+JOB_SCHEMA = "scout-pipeline-job:1"
 #: Jobs listed in one response, most recently changed first; ``counts.jobs`` counts all of them.
 JOBS_LIMIT = 200
 ERRORS_LIMIT = 20
@@ -216,4 +217,98 @@ def overview(
     return answer
 
 
-__all__ = ["ERRORS_LIMIT", "JOBS_LIMIT", "JOB_STATES", "OVERVIEW_SCHEMA", "job_state", "overview"]
+def _ats(record: Mapping[str, object] | None) -> dict[str, object] | None:
+    """The stored Scout ATS record as the job page shows it: the score, its line, the three parts and what is missing."""
+
+    from .. import ats_score  # here, not at import: it loads the PDF reader
+
+    result = record.get("result") if record else None
+    if not isinstance(result, dict) or type(result.get("score")) is not int:
+        return None
+    breakdown = result.get("breakdown") if isinstance(result.get("breakdown"), dict) else {}
+    coverage = breakdown.get("coverage") if isinstance(breakdown.get("coverage"), dict) else {}
+    fmt = breakdown.get("format") if isinstance(breakdown.get("format"), dict) else {}
+
+    def words(block: Mapping[str, object], *keys: str) -> list[str]:
+        return [item for key in keys for item in (block.get(key) if isinstance(block.get(key), list) else []) if isinstance(item, str)]
+
+    return {
+        "score": result["score"],
+        "line": result.get("line") if isinstance(result.get("line"), str) else None,
+        "parts": {name: result.get(name) if isinstance(result.get(name), (int, float)) else None for name in ("fidelity", "coverage", "format")},
+        "key_skills": coverage.get("key_skills") if isinstance(coverage.get("key_skills"), str) else None,
+        "missing": words(coverage, "missing_must", "missing_nice"),
+        "failed_rules": words(fmt, "failed"),
+        "wording": ats_score.ATS_WORDING,
+        "updated_at": record.get("updated_at") if record else None,
+    }
+
+
+def job_detail(
+    home_root: Path,
+    target: Path,
+    profile_id: str,
+    job: str,
+    *,
+    environ: Mapping[str, str] | None = None,
+    clock: Callable[[], float] = time.time,
+) -> dict[str, object]:
+    """``scout-pipeline-job:1``: one job's pipeline, for its job page (``GET /api/pipeline/job``).
+
+    Each step with its state and the numbers of its last attempt (model,
+    tokens, seconds), the share of requirements met before and after
+    tailoring, the Scout ATS score with its breakdown and the Scout label.
+    The ATS line and the missing skills are words of the posting
+    (public-untrusted); everything else is ids, codes and numbers. Nothing
+    the user wrote and no file path. Reads only.
+    """
+
+    status = pipeline_status(Path(home_root), Path(target), profile_id=profile_id, job=job, environ=environ, clock=clock)
+    last: dict[str, Mapping[str, object]] = {}
+    for run in status.get("runs", ()):  # type: ignore[union-attr]
+        last[str(run["name"])] = run  # oldest first: the last attempt of each step stays
+    by_name = {str(step["name"]): step for step in status["steps"]}  # type: ignore[union-attr]
+    steps = []
+    for name in STEPS:
+        step = by_name.get(name)
+        if step is None:
+            continue
+        run = last.get(name)
+        steps.append(
+            {
+                "name": name, "state": step["state"], "model_target": step["model_target"], "attempts": step["attempts"],
+                "error_code": step["error_code"], "waiting": step["waiting"], "retry_at": step["retry_at"], "updated_at": step["updated_at"],
+                "last_run": None if run is None else {
+                    key: run[key] for key in ("outcome", "model", "input_tokens", "output_tokens", "cached_tokens", "seconds", "started_at")
+                },
+            }
+        )
+    outputs = status["outputs"]
+    assert isinstance(outputs, dict)
+    base, tailored, resume = outputs["base_assessment"], outputs["tailored_assessment"], outputs["tailored_resume"]
+    record = steps_module.read_label(Path(home_root), Path(target), profile_id, job)
+    label = _label(Path(home_root), Path(target), profile_id, job)
+    if label is not None and record is not None:
+        label = {
+            "name": steps_module.LABEL_NAME, **label, "min_ats": record.get("min_ats") if type(record.get("min_ats")) is int else None,
+            "wording": steps_module.LABEL_WORDING, "updated_at": record.get("updated_at"),
+        }
+    return {
+        "schema_version": JOB_SCHEMA,
+        "profile_id": profile_id,
+        "job_identity": job,
+        "enabled": bool(status["setting"]["enabled"]),  # type: ignore[index]
+        "state": job_state({str(step["name"]): str(step["state"]) for step in steps}) if steps else None,
+        "steps": steps,
+        # "72 -> 86 after tailoring": the requirements each assessment found met ({met, total, percent}), null until it exists.
+        "requirements_met": {
+            "base": None if base is None else base["requirements_met"],
+            "tailored": None if tailored is None else tailored["requirements_met"],
+        },
+        "tailor_outcome": None if resume is None else resume["outcome"],
+        "ats": _ats(steps_module.read_ats(Path(home_root), Path(target), profile_id, job)),
+        "label": label,
+    }
+
+
+__all__ = ["ERRORS_LIMIT", "JOBS_LIMIT", "JOB_SCHEMA", "JOB_STATES", "OVERVIEW_SCHEMA", "job_detail", "job_state", "overview"]

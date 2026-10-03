@@ -3,7 +3,7 @@ import { startSourcesUpdate } from "../api.js";
 import { startErrorText } from "../sourcesModel.js";
 import SourcesStatusLines from "./SourcesStatusLines.jsx";
 
-// uat-bug-048: the strip above "Run find jobs". `strip` is
+// uat-bug-048: the strip at the top of Jobs. `strip` is
 // sourcesStripModel.sourcesStrip(status); `read` re-reads the status.
 export default function SourcesStrip({ strip, read }) {
   const [starting, setStarting] = useState(false);
