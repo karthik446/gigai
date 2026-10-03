@@ -42,6 +42,14 @@ test = [
   "pytest-xdist>=3.6",
 ]
 
+# Release screenshots (tools/media, `make media`). A dependency group, not an extra: it is
+# never part of the published package's metadata and nothing installs it by default.
+[dependency-groups]
+media = [
+  "playwright>=1.49",
+  "pillow>=11",
+]
+
 [tool.setuptools.packages.find]
 where = ["src"]
 

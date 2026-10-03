@@ -10,6 +10,48 @@ are on [For agents](../../agents/).
 `gigai agent-skill` prints the instructions that teach your agent the daily Scout loop,
 and `gigai agent-permissions` prints a recommended Claude Code permissions snippet.
 
+## Screenshots
+
+<!-- 0110-049: the images are rebuilt every release by `make media` from a synthetic demo home
+(made-up companies and persona, fixture model) and live at fixed paths under public/media/.
+Raw <img> tags with a path relative to this page, so the versioned docs base (/gigai/<version>/)
+needs no handling and the build's link check covers them. Each image links to itself at full size. -->
+
+Your agent runs `gigai scout new`: what is new, and what assessing it would cost, before any model call.
+
+<a href="../../media/terminal-new.png"><img src="../../media/terminal-new.png" alt="An agent runs `gigai scout new`: what is new, and the cost, before anything is assessed." loading="lazy" /></a>
+
+It asks your open questions, saves your answer, and offers to turn an experience into a story.
+
+<a href="../../media/terminal-answer.png"><img src="../../media/terminal-answer.png" alt="The agent asks a question, saves your answer, and offers to make it a story." loading="lazy" /></a>
+
+The same jobs in the Scout UI, with the Scout label and Scout ATS score once the background pipeline has run.
+
+<a href="../../media/jobs-dark.png"><img class="light:sl-hidden" src="../../media/jobs-dark.png" alt="The Jobs page: every stored posting your profiles match, with filter chips, profile tags and Scout's chips." loading="lazy" /></a>
+<a href="../../media/jobs-light.png"><img class="dark:sl-hidden" src="../../media/jobs-light.png" alt="The Jobs page: every stored posting your profiles match, with filter chips, profile tags and Scout's chips." loading="lazy" /></a>
+
+<a href="../../media/job-pipeline-dark.png"><img class="light:sl-hidden" src="../../media/job-pipeline-dark.png" alt="The same job page further down: the background pipeline's steps, the Scout label and the Scout ATS score, then the tailored resume." loading="lazy" /></a>
+<a href="../../media/job-pipeline-light.png"><img class="dark:sl-hidden" src="../../media/job-pipeline-light.png" alt="The same job page further down: the background pipeline's steps, the Scout label and the Scout ATS score, then the tailored resume." loading="lazy" /></a>
+
+Jobs over the per-trigger limit wait for your approval.
+
+<a href="../../media/background-dark.png"><img class="light:sl-hidden" src="../../media/background-dark.png" alt="The Background pipeline panel, with jobs waiting for your approval." loading="lazy" /></a>
+<a href="../../media/background-light.png"><img class="dark:sl-hidden" src="../../media/background-light.png" alt="The Background pipeline panel, with jobs waiting for your approval." loading="lazy" /></a>
+
+What you told your agent is kept once, on this machine, and reused.
+
+<a href="../../media/answers-dark.png"><img class="light:sl-hidden" src="../../media/answers-dark.png" alt="Answers: what you told Scout or your agent, kept once and reused." loading="lazy" /></a>
+<a href="../../media/answers-light.png"><img class="dark:sl-hidden" src="../../media/answers-light.png" alt="Answers: what you told Scout or your agent, kept once and reused." loading="lazy" /></a>
+
+The agent's PDF has no name or contact details. It hands you a link, and you add yours in the browser.
+
+<a href="../../media/terminal-pdf.png"><img src="../../media/terminal-pdf.png" alt="The agent renders the tailored resume as a headerless PDF and hands you the link to finish it in Scout." loading="lazy" /></a>
+
+<a href="../../media/pdf-dark.png"><img class="light:sl-hidden" src="../../media/pdf-dark.png" alt="Generate PDF: you add your own name and contact details in the browser; GigAI stores none." loading="lazy" /></a>
+<a href="../../media/pdf-light.png"><img class="dark:sl-hidden" src="../../media/pdf-light.png" alt="Generate PDF: you add your own name and contact details in the browser; GigAI stores none." loading="lazy" /></a>
+
+The companies, postings and person in these images are made up.
+
 ## Discover the API
 
 While Scout runs (default `http://127.0.0.1:8765`):

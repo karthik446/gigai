@@ -37,13 +37,14 @@ def test_release_job_graph_is_the_fast_path_then_the_post_release_checks() -> No
         "tag": ["preflight"],
         "publish-pypi": ["preflight", "tag"],
         "github-release": ["preflight", "publish-pypi"],
+        "media": ["preflight", "github-release"],
         "docs": ["preflight", "github-release"],
         "advance-main": ["preflight", "github-release"],
         "verify-pypi": ["preflight", "github-release"],
         "post-release-compatibility": ["preflight", "github-release"],
     }
     # The post-release checks are leaves: nothing waits on them.
-    for check in ("verify-pypi", "post-release-compatibility", "advance-main", "docs"):
+    for check in ("verify-pypi", "post-release-compatibility", "advance-main", "docs", "media"):
         assert all(check not in needs for needs in graph.values()), check
 
 
@@ -228,7 +229,7 @@ def test_no_release_job_can_be_skipped() -> None:
 
 def test_every_post_tag_job_uses_the_tag_and_commit_from_preflight() -> None:
     workflow = _read_release_workflow()
-    assert workflow.count("ref: ${{ needs.preflight.outputs.ref }}") == 2  # github-release, docs
+    assert workflow.count("ref: ${{ needs.preflight.outputs.ref }}") == 3  # github-release, media, docs
     assert workflow.count("COMMIT: ${{ needs.preflight.outputs.commit }}") == 2  # manifest, advance-main
     assert 'echo "ref=refs/tags/v${version}" >> "${GITHUB_OUTPUT}"' in workflow
     assert 'echo "commit=${GITHUB_SHA}" >> "${GITHUB_OUTPUT}"' in workflow
