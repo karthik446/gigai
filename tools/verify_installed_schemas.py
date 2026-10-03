@@ -90,7 +90,7 @@ EXPECTED_SHA256 = {
     "scout-interview-preparation.schema.json": "a2e7548187730e41a6de490244b1f36955f2e7c97227d85090ddc40742b0217f",
     "scout-private-transfer-manifest.schema.json": "a06f2be2b90fe695fd57213168e7da648055d7ccb4f0830732ad4c7f92a7d040",
     "scout-definition-export-manifest.schema.json": "8ff08ba0e111e0d79d188407d0a75c83b670cf94f7637abf3b06caad8c6a5a05",
-    "scout-profile.schema.json": "7b8c0e5a23fe76f2faf20588d19aa1ee9dbd8193db4d02a05069daed06abaf77",
+    "scout-profile.schema.json": "dbdeff5ea628c5cd10bbbfab193b790d5a9b32cd185643c84632019ab10d5776",
     "scout-profile-selection.schema.json": "8c0bb60b4f6da2fbcd3b3c5faf1a6e0cac6058ec653c9163f04b1b2a1f1d4ffd",
 }
 
