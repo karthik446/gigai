@@ -11,8 +11,8 @@ name: Release
 # `preflight` finds the green pre-check run on exactly this commit, or fails at
 # once naming the pre-check to dispatch. Then: tag v<version> on the commit,
 # publish that run's files to PyPI (nothing is rebuilt), GitHub Release, docs,
-# fast-forward main. The PyPI install check and the compatibility sweep come
-# after the release and never fail this run.
+# fast-forward main. The PyPI install check, the compatibility sweep and the
+# screenshot rebuild (`media`) come after the release and never fail this run.
 #
 # There is no tag-push trigger: a pushed tag would skip the pre-check rule.
 run-name: Release ${{ github.ref_name }}
@@ -238,6 +238,51 @@ jobs:
               --title "GigAI ${VERSION}" \
               --generate-notes
           fi
+
+  media:
+    name: Rebuild the release screenshots (never blocks the release)
+    needs: [preflight, github-release]
+    # 0110-049. A leaf, after the Release exists, continue-on-error: nothing waits on it, so a
+    # failure here (a UI selector moved, the privacy gate found something) withholds only
+    # the Release's image assets. `make media` builds a synthetic demo home in a temporary
+    # HOME, takes the screenshots and runs the privacy gate (DOM text + OCR); nothing is
+    # uploaded unless that gate passes. No secrets; the only network is the tool installs.
+    # The docs do NOT take their images from this job: they embed the set committed under
+    # gigai-docs/public/media/ (made with `make media-publish` and looked at before the
+    # release), which the docs job publishes with the rest of the tag's tree.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    continue-on-error: true
+    permissions:
+      contents: write   # gh release upload
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.preflight.outputs.ref }}
+      - uses: astral-sh/setup-uv@v8.0.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - name: OCR for the privacy gate, and Chromium's system libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends tesseract-ocr
+          uv run --locked --group media playwright install-deps chromium
+      - name: Build the screenshots and run the privacy gate
+        run: make media
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-media-${{ needs.preflight.outputs.version }}
+          path: |
+            build/media/*.png
+            build/media/manifest.json
+          if-no-files-found: error
+          retention-days: 30
+      - name: Attach the images to the GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.preflight.outputs.tag }}
+        run: gh release upload "${TAG}" build/media/*.png build/media/manifest.json --repo "${GITHUB_REPOSITORY}" --clobber
 
   docs:
     name: Publish this version's docs (GitHub Pages)

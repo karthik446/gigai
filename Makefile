@@ -143,3 +143,24 @@ docs-dev: docs-gen
 
 docs-build: docs-check
 	cd gigai-docs && npm ci && npm run build
+
+# Release screenshots (tools/media; 0110-049). Builds a synthetic demo home in a temporary HOME
+# (never ~/.gigai), runs the real Scout server on fixture transports (no network, no model),
+# takes the UI screenshots (Playwright, 1280x800, light + dark) and the terminal frames, then
+# runs the privacy gate (DOM text + OCR; a hit exits non-zero). About 80 s; timings are printed.
+# One-time tools, no sudo, no pip:  brew install tesseract   (Linux: apt-get install tesseract-ocr)
+# `playwright install chromium` below downloads the browser once (about 95 MB, cached per user).
+#   make media            build into $(MEDIA_OUT) (git-ignored)
+#   make media-publish    build, then copy the set to gigai-docs/public/media/ (commit that)
+#   make media-check      the committed set matches its manifest (no browser needed)
+.PHONY: media media-publish media-check
+MEDIA_OUT ?= build/media
+media:
+	$(UV) run --locked --group media playwright install chromium
+	$(UV) run --locked --group media python -m tools.media.build --out "$(MEDIA_OUT)"
+
+media-publish: media
+	$(UV) run --locked python -m tools.media.manifest publish "$(MEDIA_OUT)"
+
+media-check:
+	$(UV) run --locked python -m tools.media.manifest check gigai-docs/public/media
