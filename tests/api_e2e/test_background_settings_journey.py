@@ -54,6 +54,9 @@ DEFAULTS = {
     "sources": {"auto_refresh": True, "check_times": DEFAULT_TIMES},
     "tagging": {"model_enabled": True, "backfill_enabled": False, "tag_backfill_model": "configured"},
     "snapshot": {"enabled": True, "manifest_url": DEFAULT_URL},
+    # 0.1.10.7 PL5: the background pipeline's block and the rank caps (their own journey: test_pipeline_journey.py).
+    "pipeline": {"enabled": True, "auto_jobs_per_trigger": 10, "max_model_calls_per_day": 40, "label_min_ats": 0, "models": {}},
+    "rank": {"max_calls_per_day": 100, "warn_calls_per_day": 60},
 }
 
 
@@ -87,6 +90,7 @@ def test_background_settings_round_trip_validate_and_keep_what_they_do_not_know(
                 },
                 "tagging": {"model_enabled": False, "backfill_enabled": False, "tag_backfill_model": "configured", "source": "environment"},
                 "snapshot": {"enabled": True, "manifest_url": DEFAULT_URL, "source": "default"},
+                "pipeline": {**DEFAULTS["pipeline"], "source": "default", "rank": DEFAULTS["rank"]},
             },
         }
         assert not path.exists()
@@ -104,6 +108,8 @@ def test_background_settings_round_trip_validate_and_keep_what_they_do_not_know(
             "sources": {"auto_refresh": False, "check_times": DEFAULT_TIMES},
             "tagging": {"model_enabled": True, "backfill_enabled": True, "tag_backfill_model": "haiku"},
             "snapshot": {"enabled": False, "manifest_url": "https://example.test/scout/manifest.json"},
+            "pipeline": DEFAULTS["pipeline"],
+            "rank": DEFAULTS["rank"],
         }
         assert saved.json()["settings"] == expected
         read_back = client.get("/api/settings/background").json()

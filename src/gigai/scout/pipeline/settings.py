@@ -22,10 +22,11 @@ project's configured model target (``find-jobs.json``
 pipeline OFF (DESIGN 7, 12: a background job that spends model calls does not
 guess). :data:`PIPELINE_ENV` overrides ``enabled`` either way.
 
-``auto_jobs_per_trigger`` and the ``rank`` caps are read here and not yet
-acted on: the triggers and the background rank lane come in later
-milestones. ``max_model_calls_per_day`` is enforced by the runner
-(``cap_counter``, one count for the whole install).
+``auto_jobs_per_trigger`` is the per-trigger cap of ``triggers.py`` (PL5: the
+jobs over it wait for an approval). ``max_model_calls_per_day`` is enforced
+by the runner (``cap_counter``, one count for the whole install). The
+``rank`` caps are counted by ``triggers.spend_rank_calls``, for the
+background rank lane of a later milestone.
 """
 
 from __future__ import annotations

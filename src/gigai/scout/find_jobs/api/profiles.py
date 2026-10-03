@@ -474,6 +474,8 @@ class ProfilesRoutesMixin:
         except ProfileRecordError as exc:
             self._error_from_profile_error(exc)
             return
+        # 0.1.10.7 PL5: a new resume or other settings re-open this profile's pipeline steps whose inputs changed.
+        self._pipeline_profile_changed(self._backend.target, profile_id)
         self._profile_response(HTTPStatus.OK, resolved, record)
 
     # -- POST /api/profiles/{profile_id}/archive -----------------------------

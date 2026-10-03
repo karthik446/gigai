@@ -89,6 +89,8 @@ _PARAMETRIC_MATCHERS = {
     # 0.1.10.7 C: ``api/story_bank._match_answer_id`` / ``_match_story_id``.
     "_match_answer_id": "/api/answers/{question_id}",
     "_match_story_id": "/api/stories/{story_id}",
+    # 0.1.10.7 PL5: ``api/pipeline._match_approval_id``.
+    "_match_approval_id": "/api/pipeline/approvals/{approval_id}",
 }
 
 

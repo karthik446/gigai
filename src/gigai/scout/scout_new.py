@@ -18,7 +18,15 @@ THE FLOW
   ``assess=False`` is the grid with rank only.
 - Nothing new: ``status: "nothing_new"`` and the 10 postings that still need
   attention, ordered by score, open questions, tailoring needed.
-- Waiting pipeline work is offered with its command. Nothing is started here.
+- Waiting pipeline work is offered with its command (``pipeline``: the jobs
+  that wait, how many of them need an approval first, the model calls they
+  would make). Nothing is started by a plain call. ``process=True``
+  (``gigai scout new --process``) is the yes to that offer: the pending
+  approvals are approved and the waiting steps run once on this thread
+  (``pipeline.runner.run_once``: the pipeline's own switch, daily cap and
+  yield rules apply), before the response is built. It never moves the anchor.
+- While it assesses on a yes, the batch is marked live (``pipeline.busy``), so
+  the pipeline's runner claims nothing until it is done.
 
 THE ANCHOR (DESIGN 11): one per install, the time of the last plain call.
 "New" is ``first_seen > anchor``; before the first call it is the last 7
@@ -73,12 +81,13 @@ NEW_ROWS_LIMIT = 50
 UNMET_SHOWN = 4
 EVIDENCE_SHOWN = 3
 DESCRIPTION_CHARS = 400
-PIPELINE_COMMAND = "gigai scout pipeline run --once"
+PIPELINE_COMMAND = "gigai scout new --process"
 
 #: States that still want something from the user (a posting Scout labelled recommended is left out by the query).
 _ATTENTION_STATES = ("needs_answers", "matched", "assessed", "tailored", "not_assessed")
 _NOT_ASSESSED = "not_assessed"
 _WAITING_STATES = frozenset({"blocked", "ready", "awaiting_approval"})
+_AWAITING_APPROVAL = "awaiting_approval"
 
 POSTINGS_LABELS = {
     "/rows/*/title": PUBLIC_UNTRUSTED,
@@ -230,12 +239,19 @@ def _assess(
 
     from .find_jobs.assess_all import FATAL_CODES, assess_concurrency
     from .find_jobs.assess_contracts import ORIGIN_JOB_PAGE, AssessJobInput, AssessRequest, AssessResumeInput, ResolvedJob
+    from .pipeline.busy import assess_batch
     from .quick_assess import QuickAssessError, run_quick_assessment
 
     failed: list[dict[str, object]] = []
     stop: list[str] = []
 
     def one(pair: tuple[str, str]) -> str | None:
+        try:
+            return assess_one(pair)
+        finally:
+            live.beat()
+
+    def assess_one(pair: tuple[str, str]) -> str | None:
         job, profile_id = pair
         if stop:
             return "not_started"
@@ -259,8 +275,10 @@ def _assess(
             return exc.code
         return None
 
-    with ThreadPoolExecutor(max_workers=max(1, assess_concurrency()), thread_name_prefix="scout-new-assess") as pool:
-        codes = list(pool.map(one, pairs))
+    # PL5: the batch is live work the pipeline's runner yields to (DESIGN 7), like an "assess all" batch.
+    with assess_batch(home_root, target) as live:
+        with ThreadPoolExecutor(max_workers=max(1, assess_concurrency()), thread_name_prefix="scout-new-assess") as pool:
+            codes = list(pool.map(one, pairs))
     for (job, profile_id), code in zip(pairs, codes):
         if code is not None:
             failed.append({"job_identity": job, "profile_id": profile_id, "error_code": code})
@@ -271,16 +289,43 @@ def _assess(
 
 
 def _pipeline_offer(store: PipelineStore) -> dict[str, object] | None:
+    """The jobs that wait in the pipeline, the ones among them that need an approval first, and the calls they would make."""
+
     waiting = [step for step in store.steps() if step.state in _WAITING_STATES]
     if not waiting:
         return None
     jobs = len({(step.profile_id, step.job) for step in waiting})
+    gated = {(step.profile_id, step.job) for step in waiting if step.state == _AWAITING_APPROVAL}
+    approvals = sorted({step.approval_id for step in waiting if step.state == _AWAITING_APPROVAL and step.approval_id})
     calls = sum(1 for step in waiting if step.name in MODEL_STEPS)
+    need = f" ({len(gated)} need your approval)" if gated else ""
     return {
         "waiting": jobs,
+        "awaiting_approval": len(gated),
+        "approvals": approvals,
         "est_calls": calls,
         "command": PIPELINE_COMMAND,
-        "text": f"{jobs} waiting, process now? ~{calls} calls",
+        "text": f"{jobs} waiting{need}, process now? ~{calls} calls",
+    }
+
+
+def process_waiting(home_root: Path, target: Path, *, config: object | None = None, decided_by: str = "operator") -> dict[str, object]:
+    """The yes to the pipeline offer: approve what waits for an approval, then run the waiting steps once.
+
+    ``{approved: [{id, jobs}], drain: scout-pipeline-drain:1}``: ids, codes
+    and counts. The drain is the pipeline's own (``run_once``): switched off,
+    or yielding to live work, it runs nothing and says so; the daily cap of
+    model calls holds, so a job over it waits for the next day.
+    """
+
+    from .pipeline.runner import run_once
+    from .pipeline.triggers import approve_all
+
+    approved = approve_all(home_root, target, decided_by=decided_by)
+    drain = run_once(home_root, target, config=config)
+    return {
+        "approved": [{"id": item["id"], "jobs": item["decided_jobs"]} for item in approved],
+        "drain": drain.to_json(),
     }
 
 
@@ -377,8 +422,15 @@ def scout_new(
     now: datetime | None = None,
     config: object | None = None,
     yours: bool = False,
+    process: bool = False,
+    decided_by: str = "operator",
 ) -> dict[str, object]:
     """What is new since the last check, as the ``scout-new:1`` response. See the module docstring.
+
+    ``process``: first approve the pending pipeline approvals (as
+    ``decided_by``) and run the waiting pipeline steps once
+    (:func:`process_waiting`, reported as ``processed``); such a call never
+    moves the anchor.
 
     ``yours`` answers the separate ``scout-new-yours:1`` response instead
     (:func:`scout_new_yours`): it never assesses and never moves the anchor.
@@ -394,7 +446,7 @@ def scout_new(
     with committed_read_cache():
         return _scout_new(
             Path(home_root), Path(target), profile_id=profile_id, peek=peek, assess=assess, since=since, now=now, config=config,
-            yours=yours,
+            yours=yours, process=process and not yours, decided_by=decided_by,
         )
 
 
@@ -412,8 +464,10 @@ def scout_new_yours(
 
 def _scout_new(
     home_root: Path, target: Path, *, profile_id: str | None, peek: bool, assess: bool | None, since: str | None,
-    now: datetime | None, config: object | None, yours: bool,
+    now: datetime | None, config: object | None, yours: bool, process: bool = False, decided_by: str = "operator",
 ) -> dict[str, object]:
+    # Before anything is read: what the steps store (a Scout label, a tailored resume) is in the rows below.
+    processed = process_waiting(home_root, target, config=config, decided_by=decided_by) if process else None
     moment = (now or datetime.now(UTC)).astimezone(UTC)
     checked_at = postings.stamp(moment)
     assert checked_at is not None
@@ -514,7 +568,7 @@ def _scout_new(
         for group in groups.values():
             for row in group:
                 per_profile[row.profile_id] = per_profile.get(row.profile_id, 0) + 1
-        advances = not peek and profile_id is None
+        advances = not peek and profile_id is None and not process
         response: dict[str, object] = {
             "schema_version": SCHEMA_VERSION,
             "status": status,
@@ -534,6 +588,7 @@ def _scout_new(
             "question": question,
             "assessed": assessed,
             "pipeline": _pipeline_offer(store),
+            "processed": processed,
             "postings": {
                 ENVELOPE_KEY: labels_envelope(POSTINGS_LABELS),
                 "rule": UNTRUSTED_TEXT_RULE,
@@ -655,10 +710,38 @@ def render(response: Mapping[str, object]) -> str:
     hint = response.get("yours_hint")
     if isinstance(hint, Mapping) and hint.get("available"):
         lines.append(f"What matches, from your own resume and answers (a separate call): {hint['cli']}")
+    processed = response.get("processed")
+    if isinstance(processed, Mapping):
+        lines.append(_processed_line(processed))
     pipeline = response.get("pipeline")
     if isinstance(pipeline, Mapping):
         lines.append(f"Pipeline: {pipeline['text']} Run: {pipeline['command']}")
     return "\n".join(lines)
+
+
+def _processed_line(processed: Mapping[str, object]) -> str:
+    """What ``--process`` did, in one line."""
+
+    drain = processed["drain"]
+    approved = processed["approved"]
+    assert isinstance(drain, Mapping) and isinstance(approved, list)
+    steps = drain["steps"]
+    assert isinstance(steps, list)
+    start = f"Approved {sum(item['jobs'] for item in approved)} waiting job(s). " if approved else ""
+    if drain["state"] == "disabled":
+        return f"{start}The pipeline is off ({drain['reason']}). Nothing was run."
+    if drain["state"] == "yielded":
+        return f"{start}The pipeline is waiting: {str(drain['reason']).replace('_', ' ')} is running. Run it again when that is done."
+    if not steps:
+        return f"{start}Pipeline: nothing to run."
+    waiting = sum(1 for step in steps if step.get("outcome") == "waiting")
+    failed = sum(1 for step in steps if step.get("error_code"))
+    line = f"{start}Pipeline: ran {len(steps) - waiting} step(s), {drain['model_calls']} model call(s)."
+    if failed:
+        line += f" {failed} did not finish; see `gigai scout pipeline status`."
+    if waiting:
+        line += f" {waiting} wait for tomorrow: today's model calls for the pipeline are used up."
+    return line
 
 
 def _render_yours(response: Mapping[str, object]) -> str:
@@ -689,6 +772,7 @@ __all__ = [
     "ScoutNewError",
     "check_response",
     "mark_all_seen",
+    "process_waiting",
     "render",
     "response_labels",
     "scout_new",

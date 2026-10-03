@@ -1502,6 +1502,7 @@ def _make_handler(
     from .extract import ResumeExtractRoutesMixin
     from .metrics import MetricsRoutesMixin
     from .new import NewRoutesMixin
+    from .pipeline import PipelineRoutesMixin, _match_approval_id
     from .posted_window import PostedWindowRoutesMixin
     from .privacy_cleanup import PrivacyCleanupRoutesMixin
     from .profiles import ProfilesRoutesMixin
@@ -1539,6 +1540,7 @@ def _make_handler(
         SecretsStatusRoutesMixin,
         MetricsRoutesMixin,
         NewRoutesMixin,
+        PipelineRoutesMixin,
         StoryBankRoutesMixin,
         TailoredResumesRoutesMixin,
         WatchlistRoutesMixin,
@@ -1818,6 +1820,12 @@ def _make_handler(
                     if path == "/api/new/yours":
                         self._handle_get_new_yours()
                         return
+                    if path == "/api/pipeline":
+                        self._handle_get_pipeline()
+                        return
+                    if path == "/api/pipeline/approvals":
+                        self._handle_get_pipeline_approvals()
+                        return
                     # run-reads-fast (uat-bug-022): with a query these two are
                     # the page-sized reads (``run_reads.py``); with none they
                     # answer what they always did.
@@ -1877,6 +1885,13 @@ def _make_handler(
                     return
                 if path == "/api/new/seen":
                     self._handle_post_new_seen()
+                    return
+                if path == "/api/pipeline/process":
+                    self._handle_post_pipeline_process()
+                    return
+                approval_id = _match_approval_id(path, suffix="")
+                if approval_id is not None:
+                    self._handle_post_pipeline_approval(approval_id)
                     return
                 if path == "/api/tailored-resumes":
                     self._handle_post_tailored_resumes()

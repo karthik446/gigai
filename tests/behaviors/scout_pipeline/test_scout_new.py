@@ -242,8 +242,10 @@ def test_c_new_postings_are_asked_about_and_assessed_only_on_a_yes(tmp_path: Pat
     assert sentence == f"2 new postings across 2 profiles (default 1, {SECOND_LABEL} 1). Assess them? ~2 calls, ~60 tokens"
     assert all(row["score"] is None and row["assessment"] is None and row["needs_tailoring"] is None for row in _rows(asked))
     assert asked["pipeline"] == {
-        "waiting": 1, "est_calls": 2, "command": "gigai scout pipeline run --once", "text": "1 waiting, process now? ~2 calls",
+        "waiting": 1, "awaiting_approval": 0, "approvals": [], "est_calls": 2, "command": "gigai scout new --process",
+        "text": "1 waiting, process now? ~2 calls",
     }
+    assert asked["processed"] is None
     store = PipelineStore(pipeline_path(fx.home_root, fx.target))
     assert {step.state for step in store.steps()} == {"ready", "blocked"}  # offered, not started
     store.close()
@@ -290,7 +292,7 @@ def test_c_new_postings_are_asked_about_and_assessed_only_on_a_yes(tmp_path: Pat
     assert own.exit_code == 0 and "+ six years" in own.output and "Staff AI Engineer" not in own.output, own.output
     both = CliRunner().invoke(cli, [*fx.cli("--yours", "--yes"), "--json"])
     assert both.exit_code == 1 and json.loads(both.output)["error"]["code"] == "invalid_value"
-    assert "Pipeline: 1 waiting, process now? ~2 calls Run: gigai scout pipeline run --once" in text.output
+    assert "Pipeline: 1 waiting, process now? ~2 calls Run: gigai scout new --process" in text.output
 
 
 def test_c_the_no_is_the_grid_with_rank_only_and_the_top_ten_is_ten(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

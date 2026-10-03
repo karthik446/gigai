@@ -120,7 +120,7 @@ STATES = frozenset(
 #: A step in one of these can still run without a new enqueue.
 _QUEUED = frozenset({STATE_BLOCKED, STATE_READY, STATE_RUNNING, STATE_AWAITING_APPROVAL})
 
-TRIGGERS = frozenset({"answer_saved", "story_saved", "process_now", "approval", "startup_reconcile"})
+TRIGGERS = frozenset({"answer_saved", "story_saved", "process_now", "profile_changed", "approval", "startup_reconcile"})
 
 #: ``enqueue`` results.
 ENQUEUED = "enqueued"

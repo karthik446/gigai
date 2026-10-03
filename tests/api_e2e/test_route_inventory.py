@@ -62,6 +62,11 @@ JOURNEYS: dict[Route, str] = {
     Route("GET", "/api/new/yours"): "test_scout_new_journey.py",
     Route("POST", "/api/new"): "test_scout_new_journey.py",
     Route("POST", "/api/new/seen"): "test_scout_new_journey.py",
+    # 0.1.10.7 PL5: the pipeline's status, approvals and "process now".
+    Route("GET", "/api/pipeline"): "test_pipeline_journey.py",
+    Route("GET", "/api/pipeline/approvals"): "test_pipeline_journey.py",
+    Route("POST", "/api/pipeline/approvals/{approval_id}"): "test_pipeline_journey.py",
+    Route("POST", "/api/pipeline/process"): "test_pipeline_journey.py",
     Route("GET", "/api/runs"): "test_runs_list_journey.py",
     Route("GET", "/api/applications"): "test_applications_journey.py",
     Route("POST", "/api/applications"): "test_applications_journey.py",

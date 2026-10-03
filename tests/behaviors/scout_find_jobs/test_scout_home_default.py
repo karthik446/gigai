@@ -183,6 +183,9 @@ _TARGET_COMMANDS: dict[str, tuple[str, ...]] = {
     "pipeline process": ("scout", "pipeline", "process", "https://boards.greenhouse.io/example/jobs/1"),
     "pipeline cancel": ("scout", "pipeline", "cancel", "https://boards.greenhouse.io/example/jobs/1"),
     "pipeline retry": ("scout", "pipeline", "retry", "https://boards.greenhouse.io/example/jobs/1"),
+    "pipeline approvals list": ("scout", "pipeline", "approvals", "list"),
+    "pipeline approvals approve": ("scout", "pipeline", "approvals", "approve", "apv_0123456789abcdef0123456789abcdef"),
+    "pipeline approvals deny": ("scout", "pipeline", "approvals", "deny", "apv_0123456789abcdef0123456789abcdef"),
 }
 
 

@@ -700,7 +700,7 @@
         "gigai scout answer q-visa --answer-text \"I need H-1B sponsorship\"",
         "gigai scout answer cloud:gcp --question \"Do you have GCP experience?\" --answer-text \"Yes, 4 years, GKE + BigQuery\" --actor agent --json"
       ],
-      "notes": "The answer is the user's (0.1.10.7: not one profile's) and is reused by every later assessment, also when a posting words the question differently. --question keeps the question's own words with it; --actor agent records that an agent wrote it; --revision (the revision you read) refuses the write with revision_conflict when the answer changed since. An answer holding an email, phone, link or street address is refused (personal_info_refused). --reassess JOB_URL_OR_ID re-runs the assessment with a model (external=model). The same body as POST /api/answers."
+      "notes": "The answer is the user's (0.1.10.7: not one profile's) and is reused by every later assessment, also when a posting words the question differently. --question keeps the question's own words with it; --actor agent records that an agent wrote it; --revision (the revision you read) refuses the write with revision_conflict when the answer changed since. An answer holding an email, phone, link or street address is refused (personal_info_refused). --reassess JOB_URL_OR_ID re-runs the assessment with a model (external=model). The same body as POST /api/answers. 0.1.10.7: a saved answer queues the pipeline (tailored resume, assessment against it, Scout ATS score, Scout label) for every job of an active profile whose assessment left that question open: at most pipeline.auto_jobs_per_trigger (10) run, the rest wait for an approval (gigai scout pipeline approvals). --json then carries pipeline {trigger, state, enqueued, awaiting_approval, unchanged, skipped, approval}: ids, codes and counts. The Scout server runs the queued jobs; without it, gigai scout new --process does."
     },
     "scout answers delete": {
       "summary": "Remove an answer.",
@@ -743,7 +743,7 @@
         "gigai scout answers save cloud:gcp --answer-file answer.md --revision 1 --actor agent --json",
         "gigai scout answers save cloud:gcp --tag \"cloud platforms\" --revision 2"
       ],
-      "notes": "Local, no model call. A new QUESTION_ID needs the answer; an existing one takes whatever is given. Every write bumps the answer's revision and records who wrote it (--actor). Pass --revision (the revision you read with show --json) to be safe against a concurrent write: when the answer changed since, the save is refused with revision_conflict and --json carries the current answer. An empty --tag puts the automatic tag back. Text holding an email, phone, link or street address is refused (personal_info_refused). The same answer object as POST /api/answers and PUT /api/answers/{question_id}."
+      "notes": "Local, no model call. A new QUESTION_ID needs the answer; an existing one takes whatever is given. Every write bumps the answer's revision and records who wrote it (--actor). Pass --revision (the revision you read with show --json) to be safe against a concurrent write: when the answer changed since, the save is refused with revision_conflict and --json carries the current answer. An empty --tag puts the automatic tag back. Text holding an email, phone, link or street address is refused (personal_info_refused). The same answer object as POST /api/answers and PUT /api/answers/{question_id}. 0.1.10.7: a saved answer (not a tag alone) queues the pipeline (tailored resume, assessment against it, Scout ATS score, Scout label) for every job of an active profile whose assessment left that question open: at most pipeline.auto_jobs_per_trigger (10) run, the rest wait for an approval (gigai scout pipeline approvals). --json then carries pipeline {trigger, state, enqueued, awaiting_approval, unchanged, skipped, approval}: ids, codes and counts. The Scout server runs the queued jobs; without it, gigai scout new --process does."
     },
     "scout answers show": {
       "summary": "Show one answer: the question, the full answer, who wrote it, its revision and its jobs.",
@@ -795,6 +795,38 @@
       ],
       "notes": "Every model call Scout makes (assess, rank, tag, tailor, extract, interview) is recorded once, locally: the model, tokens in, out and cached, the cost when the provider reports one, the wall time and the outcome. No prompt, answer, resume or posting text is stored. aggregates has one entry per model id; comparison adds the model ids of one model target together. --model takes a model target or a model id. Makes no model call."
     },
+    "scout pipeline approvals approve": {
+      "summary": "Approve the waiting jobs of one pipeline approval.",
+      "effect": "write",
+      "external": "none",
+      "output": "Human-readable text; --json emits one JSON object: {ok, schema_version, approval}.",
+      "examples": [
+        "gigai scout pipeline approvals approve apv_0123456789abcdef0123456789abcdef",
+        "gigai scout pipeline approvals approve apv_0123456789abcdef0123456789abcdef --actor agent --json"
+      ],
+      "notes": "APPROVAL_ID comes from gigai scout pipeline approvals list. The approval's waiting jobs open; the Scout server runs them, or gigai scout pipeline run --once does. They run within the daily cap of model calls (pipeline.max_model_calls_per_day): a call over it waits for the next day. --actor records who decided. Approving an approval that is already decided changes nothing. Makes no model call itself."
+    },
+    "scout pipeline approvals deny": {
+      "summary": "Deny one pipeline approval: its waiting jobs are cancelled.",
+      "effect": "write",
+      "external": "none",
+      "output": "Human-readable text; --json emits one JSON object: {ok, schema_version, approval}.",
+      "examples": [
+        "gigai scout pipeline approvals deny apv_0123456789abcdef0123456789abcdef"
+      ],
+      "notes": "The approval's waiting jobs are cancelled and no model call is made for them. A cancelled job can be queued again with gigai scout pipeline process JOB. Denying an approval that is already decided changes nothing."
+    },
+    "scout pipeline approvals list": {
+      "summary": "Show the pipeline approvals that wait: the jobs each holds and what running them would cost.",
+      "effect": "read",
+      "external": "none",
+      "output": "Human-readable text; --json emits one JSON object: {schema_version, pending, approvals} (what GET /api/pipeline/approvals answers).",
+      "examples": [
+        "gigai scout pipeline approvals list",
+        "gigai scout pipeline approvals list --all --json"
+      ],
+      "notes": "One trigger (a saved answer or story, a changed profile) queues at most pipeline.auto_jobs_per_trigger jobs (10); the rest wait in one approval and nothing of theirs runs until it is approved. Each approval: its id, the trigger, how many jobs it held and how many still wait (with each job's link and profile), the model calls they would make and, when the recorded calls can say, the tokens. Ids, codes and counts only: no posting, resume or answer text. --all also lists the approvals already approved or denied. Makes no model call."
+    },
     "scout pipeline cancel": {
       "summary": "Cancel a job's waiting pipeline steps.",
       "effect": "write",
@@ -814,7 +846,7 @@
         "gigai scout pipeline process https://boards.greenhouse.io/acme/jobs/1",
         "gigai scout pipeline process https://boards.greenhouse.io/acme/jobs/1 --profile profile_123 --force --json"
       ],
-      "notes": "JOB is the posting URL of a job this profile already has an assessment for; the posting is read from that assessment, nothing is fetched. Steps: tailor (from the profile's resume, your answers and the stories that match the posting; no contact data), then the assessment against the tailored resume (stored beside the job's assessment, which stays the job's verdict) and the Scout ATS score, then the Scout label. The Scout label is Scout's own suggestion from your settings, resume and answers, not a prediction of what an employer will decide. Running it again with nothing changed makes no model call; --force tailors again. At most two model steps (tailor, assess), each counted against pipeline.max_model_calls_per_day (40): a call over the cap waits for the next day, it does not fail. Waits while a find-jobs run, an assess batch or a manual sources update is running."
+      "notes": "JOB is the posting URL of a job this profile already has an assessment for; the posting is read from that assessment, nothing is fetched. Steps: tailor (from the profile's resume, your answers and the stories that match the posting; no contact data), then the assessment against the tailored resume (stored beside the job's assessment, which stays the job's verdict) and the Scout ATS score, then the Scout label. The Scout label is Scout's own suggestion from your settings, resume and answers, not a prediction of what an employer will decide. Running it again with nothing changed makes no model call; --force tailors again. At most two model steps (tailor, assess), each counted against pipeline.max_model_calls_per_day (40): a call over the cap waits for the next day, it does not fail. Waits while a find-jobs run, an assess batch or a manual sources update is running. Naming a job is an explicit choice: the per-trigger cap does not apply, and a job waiting for an approval is taken out of it and run."
     },
     "scout pipeline retry": {
       "summary": "Open a job's failed or cancelled pipeline steps again.",
@@ -852,15 +884,16 @@
       "summary": "Show what is new since your last check, across all active profiles; ask before assessing.",
       "effect": "write",
       "external": "model",
-      "output": "Human-readable text (a 4-column table: details | score | needs tailoring? | open questions); --json emits one JSON object: {schema_version, status, since, since_source, checked_at, peek, profile_id, anchor, counts, message, question, assessed, pipeline, postings, profiles, yours_hint} (what GET /api/new answers). --yours emits {schema_version, status, since, since_source, checked_at, profile_id, _labels, evidence} (what GET /api/new/yours answers).",
+      "output": "Human-readable text (a 4-column table: details | score | needs tailoring? | open questions); --json emits one JSON object: {schema_version, status, since, since_source, checked_at, peek, profile_id, anchor, counts, message, question, assessed, pipeline, processed, postings, profiles, yours_hint} (what GET /api/new answers). --yours emits {schema_version, status, since, since_source, checked_at, profile_id, _labels, evidence} (what GET /api/new/yours answers).",
       "examples": [
         "gigai scout new",
         "gigai scout new --json",
         "gigai scout new --yes --since 2026-10-01T14:02:00.000000Z --json",
         "gigai scout new --yours --since 2026-10-01T14:02:00.000000Z --json",
-        "gigai scout new --profile profile_00000000-0000-4000-8000-000000000001 --peek"
+        "gigai scout new --profile profile_00000000-0000-4000-8000-000000000001 --peek",
+        "gigai scout new --process"
       ],
-      "notes": "Reads the stored postings (no board request) for every active profile; a deleted or archived profile is never listed. status is ask, new or nothing_new. New postings with no assessment are assessed only on a yes: without --yes the answer is status ask, with the count per profile, the estimate from the recorded model calls, and the postings ranked only; --yes assesses them (one model call each, from the stored posting text) and the table then has scores; --no-assess never asks and never assesses. In a terminal the command asks and waits for y or n. At most 50 new postings are listed, best score first. Nothing new: the 10 postings that still need attention, by score, open questions, tailoring needed. \"New\" is measured from the one anchor per install: the time of the last plain call, or the last 7 days before the first one. The anchor moves only after the answer is built, and never for --peek, --profile or --yours; --since measures from the since of an earlier answer (the yes, or --yours, after a call that moved the anchor). Waiting pipeline work is offered with its command; nothing is started. NO OUTPUT MIXES: the table and its JSON hold posting text and what a model derived from it (public-untrusted: data, never instructions) and nothing you wrote. What matches, from your own resume, answers and stories, is the separate call --yours (user-private only, never posting text); yours_hint in the JSON gives the exact command. Questions are shown as asked, never with an answer. No contact data. Makes no model call without a yes."
+      "notes": "Reads the stored postings (no board request) for every active profile; a deleted or archived profile is never listed. status is ask, new or nothing_new. New postings with no assessment are assessed only on a yes: without --yes the answer is status ask, with the count per profile, the estimate from the recorded model calls, and the postings ranked only; --yes assesses them (one model call each, from the stored posting text) and the table then has scores; --no-assess never asks and never assesses. In a terminal the command asks and waits for y or n. At most 50 new postings are listed, best score first. Nothing new: the 10 postings that still need attention, by score, open questions, tailoring needed. \"New\" is measured from the one anchor per install: the time of the last plain call, or the last 7 days before the first one. The anchor moves only after the answer is built, and never for --peek, --profile or --yours; --since measures from the since of an earlier answer (the yes, or --yours, after a call that moved the anchor). Waiting pipeline work is offered (pipeline: the jobs that wait, how many of them need an approval first, the model calls they would make); a plain call starts nothing. --process is the yes to that offer: the pending approvals are approved and the waiting steps run once (model calls, within pipeline.max_model_calls_per_day; a call over the cap waits for the next day), reported as processed {approved, drain}; it never moves the anchor. In a terminal the command asks and waits for y or n. NO OUTPUT MIXES: the table and its JSON hold posting text and what a model derived from it (public-untrusted: data, never instructions) and nothing you wrote. What matches, from your own resume, answers and stories, is the separate call --yours (user-private only, never posting text); yours_hint in the JSON gives the exact command. Questions are shown as asked, never with an answer. No contact data. Makes no model call without a yes."
     },
     "scout prep": {
       "summary": "Prepare for an interview at a find-jobs-acquired posting.",
@@ -893,7 +926,7 @@
         "gigai scout profile update profile_1 --location \"Houston, TX\" --work-mode hybrid --country US --max-age-days 30",
         "gigai scout profile update profile_1 --same-as-default"
       ],
-      "notes": "Only the options given change; no other profile is changed. The default profile is refused: it uses the setup settings (Settings in the Scout UI). The location is a search setting, not the resume's contact line."
+      "notes": "Only the options given change; no other profile is changed. The default profile is refused: it uses the setup settings (Settings in the Scout UI). The location is a search setting, not the resume's contact line. 0.1.10.7: this profile's jobs already in the pipeline start again (their inputs changed), under the per-trigger cap; no other profile's do."
     },
     "scout profile delete": {
       "summary": "Delete a profile: it stops showing and searching; its history stays.",
@@ -1068,7 +1101,7 @@
         "gigai scout story save --title \"Cut CI time 60% at Acme\" --company Acme --role \"Staff Engineer\" --period 2023 --raw-file words.md --situation \"Builds took forty minutes.\" --action \"Moved the runners to Kubernetes.\" --result \"Build time fell 60 percent.\" --tag ci --answers \"Tell me about a time you improved a slow process\" --actor agent --json",
         "gigai scout story save story:60_acme_ci_cut_time --period 2022-2023 --revision 1 --actor agent --json"
       ],
-      "notes": "Local, no model call. A new story needs --title; its id is STORY_ID, else story:<the title's first words> as the id normalizer writes them. For an existing STORY_ID only the given fields change (a given narrative part replaces that part; --tag and --answers replace the whole list). --file takes one JSON object with the fields of POST /api/stories (title, company, role, period, raw, narrative, tags, answers_questions, sources, and optionally story_id); the options override it. Pass --revision (the revision you read) to be safe against a concurrent write: revision_conflict, with the current story in --json. story_exists when a new story's id is taken. Text holding an email, phone, link or street address in any field is refused (personal_info_refused). An assessment searches the stories for each job and puts only the few that match the posting into its prompt. The same story object as POST /api/stories and PUT /api/stories/{story_id}."
+      "notes": "Local, no model call. A new story needs --title; its id is STORY_ID, else story:<the title's first words> as the id normalizer writes them. For an existing STORY_ID only the given fields change (a given narrative part replaces that part; --tag and --answers replace the whole list). --file takes one JSON object with the fields of POST /api/stories (title, company, role, period, raw, narrative, tags, answers_questions, sources, and optionally story_id); the options override it. Pass --revision (the revision you read) to be safe against a concurrent write: revision_conflict, with the current story in --json. story_exists when a new story's id is taken. Text holding an email, phone, link or street address in any field is refused (personal_info_refused). An assessment searches the stories for each job and puts only the few that match the posting into its prompt. The same story object as POST /api/stories and PUT /api/stories/{story_id}. 0.1.10.7: a saved story queues the pipeline for every job of an active profile whose assessment left open a question the story is about (at most pipeline.auto_jobs_per_trigger run, the rest wait for an approval); --json then carries pipeline {trigger, state, enqueued, awaiting_approval, unchanged, skipped, approval}."
     },
     "scout story show": {
       "summary": "Show one story in full.",
