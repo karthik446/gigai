@@ -45,6 +45,12 @@ test = [
 # Release screenshots (tools/media, `make media`). A dependency group, not an extra: it is
 # never part of the published package's metadata and nothing installs it by default.
 [dependency-groups]
+# Browser tests (tests/ui, `make ui-test`): Playwright drives Chromium, psutil samples the
+# server's CPU and memory. Also a group, never an extra: nothing installs it by default.
+ui = [
+  "playwright>=1.49",
+  "psutil>=6",
+]
 media = [
   "playwright>=1.49",
   "pillow>=11",
@@ -60,7 +66,9 @@ where = ["src"]
 "gigai" = ["static/*.css", "data/cli/*.yaml", "data/agent/*.md"]
 
 [tool.pytest.ini_options]
-addopts = "-ra --strict-config --strict-markers -p no:cacheprovider"
+# `-m "not ui"`: browser tests (tests/ui) never run by default, so no source shard collects
+# them. `make ui-test` passes `-m ui`, which replaces this expression (the last -m wins).
+addopts = "-ra --strict-config --strict-markers -p no:cacheprovider -m 'not ui'"
 markers = [
   "g30_live: opt-in local provider UAT; skipped unless GIGAI_G30_UAT=1",
   "fast_unit: isolated deterministic unit/contract test with no filesystem, process, network, or mutable-workpad fixture",
@@ -68,6 +76,7 @@ markers = [
   "release: test exercising installed/package/resource or release-boundary behavior",
   "cli: test that exercises a public GigAI command or CLI wrapper; selected separately from library integration",
   "installed: test or verifier that requires a normally installed GigAI package or console script",
+  "ui: real-browser flow against a real Scout server (tests/ui); deselected by default, run by `make ui-test`",
   "scout_acquisition: behavior grouping for public Scout acquisition, discovery, and progress semantics",
 ]
 testpaths = [
