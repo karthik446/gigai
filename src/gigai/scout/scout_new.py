@@ -9,15 +9,34 @@ THE FLOW
 - New postings (first seen after the anchor, still listed): each posting once,
   tagged with every active profile it matches (best first) and shown for its
   best profile (``profile_id`` filters to one profile and shows its own row).
-  At most 50 are listed, best score first; the counts are of all of them.
-  Those not assessed yet are assessed only on a yes: without one the response
-  is ``status: "ask"`` with the question (the count per profile and the
-  estimate from the recorded model calls) and the grid with rank only.
+  At most 50 are listed, in the grid's order; the counts are of all of them.
+  Those NO profile has assessed are assessed only on a yes: without one the
+  response is ``status: "ask"`` with the question (the count per profile and
+  the estimate from the recorded model calls) and the grid with rank only.
   ``assess=True`` assesses them through ``run_quick_assessment`` (the
-  posting's stored text, nothing fetched) and the grid then has scores;
+  posting's stored text, nothing fetched) and the grid then has verdicts;
   ``assess=False`` is the grid with rank only.
 - Nothing new: ``status: "nothing_new"`` and the 10 postings that still need
-  attention, ordered by score, open questions, tailoring needed.
+  attention, in the grid's order.
+- THE GRID'S ORDER (0110-8-04, :func:`order_key`): a current assessment, then
+  a stale one, then none; inside a group the verdict (matched, needs answers,
+  other, not a match), the rank score, the share of requirements met, the
+  newest. A percentage is never compared with a rank score.
+- OLD ASSESSMENTS (0110-8-08): the live postings that have only a stale
+  assessment (made by an old run, an older prompt, other settings) are their
+  OWN question, ``stale_question``, with the count and the estimate, next to
+  the assess-new one. ``assess=True`` never answers it: ``reassess_stale=True``
+  (``--reassess-stale``) does. It is not bound to the "new" window: an old
+  assessment is old whenever the posting was first seen.
+- ``counts.to_assess`` (0110-8-01) is the new postings no matching profile has
+  assessed; ``counts.only_stale`` the live postings with only an old
+  assessment. Neither depends on which profile a posting is shown under, so
+  neither moves while the background rank fills in scores; ``ranking`` says
+  how far that rank is, per profile.
+- PROGRESS (0110-8-14): ``progress`` (the CLI: stderr) gets one line when a
+  batch starts and lines as it goes ("assessed 120 of 333 · ~25 min left"),
+  the time left from the recorded average per call until the batch has a
+  pace of its own.
 - Waiting pipeline work is offered with its command (``pipeline``: the jobs
   that wait, how many of them need an approval first, the model calls they
   would make). Nothing is started by a plain call. ``process=True``
@@ -50,13 +69,15 @@ way out.
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import nullcontext
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 import re
 import textwrap
+import threading
+import time
 
 from ..canonical import digest_imported_bytes
 from . import postings
@@ -79,7 +100,7 @@ SINCE_GIVEN = "since"
 
 FIRST_USE_DAYS = 7
 ATTENTION_LIMIT = 10
-#: New postings listed in one response, best score first; ``counts.new`` is all of them and the question counts all of them.
+#: New postings listed in one response, in the grid's order; ``counts.new`` is all of them and the question counts all of them.
 NEW_ROWS_LIMIT = 50
 UNMET_SHOWN = 4
 EVIDENCE_SHOWN = 3
@@ -139,6 +160,82 @@ def _score(row: PostingRecord) -> tuple[int | None, str | None]:
     if row.rank_score is not None:
         return row.rank_score, "rank"
     return None, None
+
+
+GROUP_CURRENT = "current"
+GROUP_STALE = "stale"
+GROUP_NOT_ASSESSED = "not_assessed"
+_GROUP_ORDER = {GROUP_CURRENT: 0, GROUP_STALE: 1, GROUP_NOT_ASSESSED: 2}
+#: Inside the assessed groups: matched, needs answers, anything else, not a match.
+_VERDICT_ORDER = {"matched": 0, "needs_answers": 1, "not_a_match": 3}
+_VERDICT_WORDS = {"matched": "Matched", "needs_answers": "Needs your answers", "not_a_match": "Not a match"}
+_STALE_WORDS = {
+    "posting_changed": "posting changed",
+    "older_prompt": "older prompt",
+    "settings_changed": "settings changed",
+    "story_bank_changed": "answers changed",
+}
+_RECOMMENDED = "recommended"
+
+
+def sort_group(row: PostingRecord) -> str:
+    """``current`` (an assessment made on what the profile has now), ``stale`` (an old one) or ``not_assessed``."""
+
+    if row.state == _NOT_ASSESSED:
+        return GROUP_NOT_ASSESSED
+    return GROUP_STALE if row.stale_code is not None else GROUP_CURRENT
+
+
+def order_key(row: PostingRecord) -> tuple[int, int, int, int, int]:
+    """What the grid is ordered by before recency (0110-8-04); ``pipeline.store._POSTING_ORDER`` is the same key in SQL.
+
+    The freshness group, the Scout label ``recommended`` first inside it, the
+    verdict, the rank score (the one number comparable across rows), then the
+    share of requirements met as the tie-break inside a rank score.
+    """
+
+    group = sort_group(row)
+    verdict = 0 if group == GROUP_NOT_ASSESSED else _VERDICT_ORDER.get(row.state, 2)
+    percent = _score(row)[0] if row.reqs_total else None
+    return (
+        _GROUP_ORDER[group], 0 if row.label == _RECOMMENDED else 1, verdict,
+        -(row.rank_score if row.rank_score is not None else -1), -(percent if percent is not None else -1),
+    )
+
+
+def in_order(shown: Iterable[tuple[Sequence[PostingRecord], PostingRecord]]) -> list[tuple[Sequence[PostingRecord], PostingRecord]]:
+    """``(tags, row)`` pairs in the grid's order: :func:`order_key`, then the newest first, then the URL."""
+
+    ordered = sorted(shown, key=lambda pair: pair[1].job)
+    ordered.sort(key=lambda pair: pair[1].first_seen, reverse=True)  # stable: equal stamps keep the URL order
+    ordered.sort(key=lambda pair: order_key(pair[1]))
+    return ordered
+
+
+def stale_label(row: PostingRecord) -> str | None:
+    """"old assessment: older prompt" for a stale row; ``None`` for a current or a not-assessed one."""
+
+    if row.state == _NOT_ASSESSED or row.stale_code is None:
+        return None
+    return f"old assessment: {_STALE_WORDS.get(row.stale_code, row.stale_code.replace('_', ' '))}"
+
+
+def score_text(row: PostingRecord) -> str:
+    """The score column: the verdict word first, "N of M requirements", the rank. Never a bare percent (0110-8-04)."""
+
+    rank = f"rank {row.rank_score}" if row.rank_score is not None else "not ranked yet"
+    if row.state == _NOT_ASSESSED:
+        parts = [rank, "not assessed"]
+    else:
+        verdict = _VERDICT_WORDS.get(row.state, "Assessed")
+        old = stale_label(row)
+        parts = [f"{verdict} ({old})" if old else verdict]
+        if row.reqs_total:
+            parts.append(f"{row.reqs_met or 0} of {row.reqs_total} requirements")
+        parts.append(rank)
+    if row.tailored:
+        parts.append("resume tailored")
+    return " · ".join(parts)
 
 
 def _grouped(rows: Iterable[PostingRecord]) -> dict[str, list[PostingRecord]]:
@@ -202,6 +299,12 @@ def _row_json(
             "assessed_at": row.assessed_at,
         }
     assessed = row.state != _NOT_ASSESSED
+    if assessed and item is None:
+        # An old run's assessment (0110-8-08): its counts are in the row, its detail is in the run, not in the quick store.
+        assessment = {
+            "verdict": None, "met": row.reqs_met, "requirements": row.reqs_total,
+            "percent": score if kind == "assessment" else None, "assessed_at": row.assessed_at,
+        }
     return {
         "job_identity": row.job,
         "normalized_url": row.job,
@@ -221,11 +324,16 @@ def _row_json(
             for item_ in group
         ],
         "state": row.state,
+        "tailored": row.tailored,
         "stale_reason": row.stale_code,
+        "stale_label": stale_label(row),
+        "sort_group": sort_group(row),
         "score": score,
         "score_kind": kind,
+        "score_text": score_text(row),
         "rank_score": row.rank_score,
         "assessment": assessment,
+        "assessment_detail": (item is not None) if assessed else None,
         "needs_tailoring": (bool(unmet) and not row.tailored) if assessed and item is not None else None,
         "unmet": unmet[:UNMET_SHOWN],
         "open_questions": questions,
@@ -253,7 +361,7 @@ def _evidence(row: PostingRecord, item: object | None) -> dict[str, object] | No
 
 def _assess(
     pairs: Sequence[tuple[str, str]], texts: Mapping[str, PostingText], *, home_root: Path, target: Path, config: object | None,
-    live: LiveBatch | None = None,
+    live: LiveBatch | None = None, progress: "BatchProgress | None" = None,
 ) -> dict[str, object]:
     """Assess each ``(job, profile)`` through the job page's path, from the stored posting text. Nothing is fetched.
 
@@ -276,6 +384,8 @@ def _assess(
             return assess_one(pair)
         finally:
             live.beat()
+            if progress is not None:
+                progress.done()
 
     def assess_one(pair: tuple[str, str]) -> str | None:
         job, profile_id = pair
@@ -303,12 +413,108 @@ def _assess(
 
     # PL5: the batch is live work the pipeline's runner yields to (DESIGN 7), like an "assess all" batch.
     with marked as live:
+        if progress is not None:
+            progress.start()
         with ThreadPoolExecutor(max_workers=max(1, assess_concurrency()), thread_name_prefix="scout-new-assess") as pool:
             codes = list(pool.map(one, pairs))
     for (job, profile_id), code in zip(pairs, codes):
         if code is not None:
             failed.append({"job_identity": job, "profile_id": profile_id, "error_code": code})
     return {"requested": len(pairs), "assessed": len(pairs) - len(failed), "failed": failed, "stopped": stop[0] if stop else None}
+
+
+# --- progress (0110-8-14) -------------------------------------------------------------------
+
+#: A batch of this many or fewer says every result; a longer one a line at most this often (and always the last).
+PROGRESS_EVERY_ITEMS = 20
+PROGRESS_EVERY_SECONDS = 10.0
+
+
+def _about(seconds: float) -> str:
+    minutes = max(1, round(seconds / 60))
+    return f"~{minutes} min" if minutes < 120 else f"~{minutes / 60:.1f} h"
+
+
+class BatchProgress:
+    """The progress lines of one assess batch: "assessed 120 of 333 · ~25 min left".
+
+    ``emit`` gets each line (the CLI writes them to stderr; stdout stays the
+    response). The time left comes from ``average_seconds`` (the recorded
+    average of one call, ``call_metrics.estimate``) over ``concurrency``
+    calls at a time, until the batch has a pace of its own; then from that
+    pace. Safe to call from the batch's worker threads: the count only
+    rises, and lines leave in that order.
+    """
+
+    def __init__(
+        self, total: int, emit: Callable[[str], None], *, average_seconds: float | None = None, concurrency: int = 1,
+        done_word: str = "assessed", doing_word: str = "assessing", clock: Callable[[], float] = time.monotonic,
+        every_seconds: float = PROGRESS_EVERY_SECONDS,
+    ) -> None:
+        self.total, self._emit = total, emit
+        self._average = average_seconds if isinstance(average_seconds, (int, float)) and average_seconds > 0 else None
+        self._concurrency = max(1, concurrency)
+        self._done_word, self._doing_word = done_word, doing_word
+        self._clock, self._every = clock, every_seconds
+        self._lock = threading.Lock()
+        self._count = 0
+        self._started = self._last = clock()
+
+    def _left(self, count: int, now: float) -> float | None:
+        remaining = self.total - count
+        elapsed = now - self._started
+        if count >= max(3, 2 * self._concurrency) and elapsed > 0:
+            return elapsed / count * remaining
+        if self._average is not None:
+            return remaining * self._average / self._concurrency
+        return None
+
+    def start(self) -> None:
+        with self._lock:
+            self._started = self._last = self._clock()
+            line = f"{self._doing_word} {self.total} posting{'s' if self.total != 1 else ''}, {self._concurrency} at a time"
+            left = self._left(0, self._started)
+            self._emit(line if left is None else f"{line} · {_about(left)}")
+
+    def done(self) -> None:
+        with self._lock:
+            self._count += 1
+            now = self._clock()
+            last = self._count >= self.total
+            if not last and self.total > PROGRESS_EVERY_ITEMS and now - self._last < self._every:
+                return
+            self._last = now
+            line = f"{self._done_word} {self._count} of {self.total}"
+            left = None if last else self._left(self._count, now)
+            self._emit(line if left is None else f"{line} · {_about(left)} left")
+
+
+def _ranking(store: PipelineStore, views: Sequence[ProfileView], home_root: Path, target: Path) -> dict[str, object]:
+    """How far the background rank is, per active profile: ``ranked`` of ``total`` live matches."""
+
+    from .pipeline.rank_lane import rank_status
+
+    found = store.posting_rank_progress()
+    by_profile = [
+        {"profile_id": view.profile_id, "ranked": found.get(view.profile_id, (0, 0))[0], "total": found.get(view.profile_id, (0, 0))[1]}
+        for view in views
+    ]
+    try:
+        enabled = bool(rank_status(home_root, target)["enabled"])
+    except (PipelineStoreError, OSError, ValueError):  # a display read: a setting that cannot be read is "not ranking"
+        enabled = False
+    return {
+        "enabled": enabled,
+        "in_progress": enabled and any(item["ranked"] < item["total"] for item in by_profile),  # type: ignore[operator]
+        "by_profile": by_profile,
+    }
+
+
+def _ranking_line(ranking: Mapping[str, object], labels: Mapping[str, object]) -> str:
+    return ", ".join(
+        f"{labels.get(item['profile_id'], item['profile_id'])} {item['ranked']} of {item['total']} ranked"
+        for item in ranking["by_profile"]  # type: ignore[union-attr]
+    )
 
 
 # --- the pipeline offer (read only) ---------------------------------------------------------
@@ -370,45 +576,112 @@ def _tokens(value: object) -> str:
     return f", ~{value / 1000:.0f}k tokens" if value >= 1000 else f", ~{int(value)} tokens"
 
 
-def _question(
-    pairs: Sequence[tuple[str, str]], new_count: int, views: Sequence[ProfileView], since: str, *, home_root: Path, target: Path
-) -> tuple[dict[str, object], str]:
-    """The approval question: ids and numbers, and the sentence (it names the profile tags)."""
+def _estimate(count: int, *, home_root: Path, target: Path) -> tuple[str, dict[str, object]]:
+    """``(model target, estimate)`` for ``count`` assess calls, from the recorded model calls (``call_metrics.estimate``)."""
 
     from .call_metrics import KIND_ASSESS, CallMetricsError, estimate
     from .quick_assess import _default_model_target
 
+    model = _default_model_target(target).value
+    try:
+        found = estimate(KIND_ASSESS, model, count, home_root=home_root, target=target)
+    except (CallMetricsError, PipelineStoreError):
+        found = {"calls": None, "tokens": None, "seconds": None, "cost": None, "basis_calls": 0}
+    calls = found["calls"] if isinstance(found["calls"], int) else count
+    return model, {
+        "calls": calls, "tokens": found["tokens"], "seconds": found["seconds"], "cost": found["cost"],
+        "basis_calls": found["basis_calls"],
+    }
+
+
+def _by_profile(pairs: Sequence[tuple[str, str]], views: Sequence[ProfileView]) -> list[dict[str, object]]:
     per_profile: dict[str, int] = {}
     for _job, profile_id in pairs:
         per_profile[profile_id] = per_profile.get(profile_id, 0) + 1
-    model = _default_model_target(target).value
-    try:
-        found = estimate(KIND_ASSESS, model, len(pairs), home_root=home_root, target=target)
-    except (CallMetricsError, PipelineStoreError):
-        found = {"calls": None, "tokens": None, "seconds": None, "cost": None, "basis_calls": 0}
-    calls = found["calls"] if isinstance(found["calls"], int) else len(pairs)
-    by_profile = [{"profile_id": view.profile_id, "count": per_profile[view.profile_id]} for view in views if view.profile_id in per_profile]
+    return [{"profile_id": view.profile_id, "count": per_profile[view.profile_id]} for view in views if view.profile_id in per_profile]
+
+
+def _answers(since: str, profile_id: str | None, *, flag: str, body: Mapping[str, object]) -> dict[str, object]:
+    """How a question is answered: the CLI command and the API call, for the same window (and profile)."""
+
+    profile = f" --profile {profile_id}" if profile_id is not None else ""
+    api_body = {**body, "since": since, **({"profile_id": profile_id} if profile_id is not None else {})}
+    return {"cli": f"gigai scout new {flag} --since {since}{profile}", "api": {"method": "POST", "path": "/api/new", "body": api_body}}
+
+
+def _question(
+    pairs: Sequence[tuple[str, str]], new_count: int, views: Sequence[ProfileView], since: str, *, home_root: Path, target: Path,
+    profile_id: str | None = None,
+) -> tuple[dict[str, object], str]:
+    """The approval question: ids and numbers, and the sentence (it names the profile tags)."""
+
+    model, found = _estimate(len(pairs), home_root=home_root, target=target)
+    by_profile = _by_profile(pairs, views)
     labels = {view.profile_id: view.label for view in views}
     named = ", ".join(f"{labels[item['profile_id']]} {item['count']}" for item in by_profile)  # type: ignore[index]
     plural = "s" if new_count != 1 else ""
     across = f" across {len(by_profile)} profiles ({named})" if len(by_profile) > 1 else (f" ({named})" if named else "")
     ask = "Assess them?" if len(pairs) == new_count else f"Assess the {len(pairs)} not assessed yet?"
-    sentence = f"{new_count} new posting{plural}{across}. {ask} ~{calls} calls{_tokens(found['tokens'])}"
+    sentence = f"{new_count} new posting{plural}{across}. {ask} ~{found['calls']} calls{_tokens(found['tokens'])}"
     question = {
         "kind": "assess_new",
         "new": new_count,
         "to_assess": len(pairs),
         "by_profile": by_profile,
         "model_target": model,
-        "estimate": {
-            "calls": calls, "tokens": found["tokens"], "seconds": found["seconds"], "cost": found["cost"],
-            "basis_calls": found["basis_calls"],
-        },
-        "yes": {"cli": f"gigai scout new --yes --since {since}", "api": {"method": "POST", "path": "/api/new", "body": {"assess": True, "since": since}}},
-        "no": {"cli": f"gigai scout new --no-assess --since {since}", "api": {"method": "POST", "path": "/api/new", "body": {"assess": False, "since": since}}},
+        "estimate": found,
+        "yes": _answers(since, profile_id, flag="--yes", body={"assess": True}),
+        "no": _answers(since, profile_id, flag="--no-assess", body={"assess": False}),
         "text": sentence,
     }
     return question, sentence
+
+
+def _stale_question(
+    pairs: Sequence[tuple[str, str]], views: Sequence[ProfileView], since: str, *, home_root: Path, target: Path,
+    profile_id: str | None = None,
+) -> dict[str, object]:
+    """0110-8-08: the postings that have only an old assessment, as their own question. Never answered by the assess-new yes."""
+
+    model, found = _estimate(len(pairs), home_root=home_root, target=target)
+    have = "has" if len(pairs) == 1 else "have"
+    return {
+        "kind": "reassess_stale",
+        "to_reassess": len(pairs),
+        "by_profile": _by_profile(pairs, views),
+        "model_target": model,
+        "estimate": found,
+        "yes": _answers(since, profile_id, flag="--reassess-stale", body={"assess": False, "reassess_stale": True}),
+        "text": f"{len(pairs)} {have} only an old assessment; re-assess? ~{found['calls']} calls{_tokens(found['tokens'])}",
+    }
+
+
+def _current(row: PostingRecord) -> bool:
+    return row.state != _NOT_ASSESSED and row.stale_code is None
+
+
+def _new_pairs(groups: Mapping[str, Sequence[PostingRecord]], profile_id: str | None) -> list[tuple[str, str]]:
+    """0110-8-01: the new postings NO matching profile has assessed (with ``profile_id``: that this profile has not), each for the profile it is shown under."""
+
+    pairs = []
+    for group in groups.values():
+        row = _shown(group, profile_id)
+        if all(item.state == _NOT_ASSESSED for item in ([row] if profile_id is not None else group)):
+            pairs.append((row.job, row.profile_id))
+    return sorted(pairs)
+
+
+def _stale_pairs(store: PipelineStore, profile_id: str | None) -> list[tuple[str, str]]:
+    """0110-8-08: the live postings with an assessment and no CURRENT one under any matching profile, each for the profile whose old assessment is shown."""
+
+    pairs = []
+    for group in _grouped(store.postings(profile_id=profile_id)).values():
+        if any(_current(item) for item in group):
+            continue
+        old = next((item for item in group if item.state != _NOT_ASSESSED), None)
+        if old is not None:
+            pairs.append((old.job, old.profile_id))
+    return sorted(pairs)
 
 
 def response_labels(response: Mapping[str, object]) -> tuple[str, ...]:
@@ -450,6 +723,8 @@ def scout_new(
     yours: bool = False,
     process: bool = False,
     decided_by: str = "operator",
+    reassess_stale: bool = False,
+    progress: Callable[[str], None] | None = None,
 ) -> dict[str, object]:
     """What is new since the last check, as the ``scout-new:1`` response. See the module docstring.
 
@@ -463,8 +738,12 @@ def scout_new(
 
     ``assess``: ``True`` assesses the new postings that have no assessment
     (model calls), ``False`` never does, ``None`` asks (``status: "ask"``)
-    when there are any. Raises :class:`ScoutNewError` / ``PostingModelError``
-    / ``PipelineStoreError``.
+    when there are any. ``reassess_stale``: the yes to the OTHER question
+    (``stale_question``): assess again the live postings that have only an
+    old assessment. ``assess=True`` alone never does that. ``progress`` gets
+    the progress lines of a batch (and how far the background rank is).
+    Raises :class:`ScoutNewError` / ``PostingModelError`` /
+    ``PipelineStoreError``.
     """
 
     from ..workpad import committed_read_cache
@@ -472,7 +751,8 @@ def scout_new(
     with committed_read_cache():
         return _scout_new(
             Path(home_root), Path(target), profile_id=profile_id, peek=peek, assess=assess, since=since, now=now, config=config,
-            yours=yours, process=process and not yours, decided_by=decided_by,
+            yours=yours, process=process and not yours, decided_by=decided_by, reassess_stale=reassess_stale and not yours,
+            progress=progress,
         )
 
 
@@ -491,6 +771,7 @@ def scout_new_yours(
 def _scout_new(
     home_root: Path, target: Path, *, profile_id: str | None, peek: bool, assess: bool | None, since: str | None,
     now: datetime | None, config: object | None, yours: bool, process: bool = False, decided_by: str = "operator",
+    reassess_stale: bool = False, progress: Callable[[str], None] | None = None,
 ) -> dict[str, object]:
     # Before anything is read: what the steps store (a Scout label, a tailored resume) is in the rows below.
     processed = process_waiting(home_root, target, config=config, decided_by=decided_by) if process else None
@@ -523,29 +804,62 @@ def _scout_new(
             return _grouped(store.postings(jobs={row.job for row in selected}))
 
         groups = read_new()
-        pairs = [(row.job, row.profile_id) for row in (_shown(group, profile_id) for group in groups.values()) if row.state == _NOT_ASSESSED]
-        pairs.sort()
+        pairs = _new_pairs(groups, profile_id)
+        stale_pairs = _stale_pairs(store, profile_id)
         new_count = len(groups)
         status = STATUS_NEW if groups else STATUS_NOTHING_NEW
         question: dict[str, object] | None = None
         sentence: str | None = None
         assessed: dict[str, object] | None = None
-        if pairs and assess is True:
-            texts = postings.posting_texts(home_root, [group[0] for group in groups.values()])
-            assessed = _assess(pairs, texts, home_root=home_root, target=target, config=config)
-            postings.refresh(home_root, target, store=store, now=moment)
-            groups = read_new()
+        reassessed: dict[str, object] | None = None
+        labels = {view.profile_id: view.label for view in views}
+
+        def batch(todo: Sequence[tuple[str, str]], rows: Iterable[PostingRecord], *, done_word: str, doing_word: str) -> dict[str, object]:
+            from .find_jobs.assess_all import assess_concurrency
+
+            lines: BatchProgress | None = None
+            if progress is not None:
+                found = _estimate(len(todo), home_root=home_root, target=target)[1]
+                seconds, calls = found["seconds"], found["calls"]
+                average = seconds / calls if isinstance(seconds, (int, float)) and isinstance(calls, int) and calls else None
+                lines = BatchProgress(
+                    len(todo), progress, average_seconds=average, concurrency=assess_concurrency(), done_word=done_word,
+                    doing_word=doing_word,
+                )
+            return _assess(todo, postings.posting_texts(home_root, rows), home_root=home_root, target=target, config=config, progress=lines)
+
+        approved_new = bool(pairs) and assess is True
+        approved_stale = bool(stale_pairs) and reassess_stale
+        if progress is not None and (approved_new or approved_stale):
+            # A long batch is never silent, and a moving count is explained: how far the background rank is.
+            progress(f"ranking: {_ranking_line(_ranking(store, views, home_root, target), labels)}")
+        if approved_new:
+            assessed = batch(pairs, [group[0] for group in groups.values()], done_word="assessed", doing_word="assessing")
         elif pairs and assess is None:
             status = STATUS_ASK
-            question, sentence = _question(pairs, new_count, views, since_at, home_root=home_root, target=target)
+        if approved_stale:
+            # 0110-8-08: only on its own yes. Each posting for the profile whose old assessment it has.
+            reassessed = batch(
+                stale_pairs, store.postings(jobs={job for job, _owner in stale_pairs}), done_word="re-assessed", doing_word="re-assessing"
+            )
+        if assessed is not None or reassessed is not None:
+            postings.refresh(home_root, target, store=store, now=moment)
+            groups = read_new()
+            pairs = _new_pairs(groups, profile_id)  # what is still not assessed: the failures
+            stale_pairs = _stale_pairs(store, profile_id)
+        if status == STATUS_ASK:
+            question, sentence = _question(pairs, new_count, views, since_at, home_root=home_root, target=target, profile_id=profile_id)
+        stale_question = (
+            _stale_question(stale_pairs, views, since_at, home_root=home_root, target=target, profile_id=profile_id)
+            if stale_pairs else None
+        )
 
         if groups:
-            shown = [(group, _shown(group, profile_id)) for group in groups.values()]
-            shown.sort(key=lambda pair: (-(_score(pair[1])[0] if _score(pair[1])[0] is not None else -1), pair[1].job))
+            shown = in_order((group, _shown(group, profile_id)) for group in groups.values())
             message = f"{new_count} new posting{'s' if new_count != 1 else ''} since {_when(since_at)}."
             if len(shown) > NEW_ROWS_LIMIT:
                 shown = shown[:NEW_ROWS_LIMIT]
-                message += f" Showing the {NEW_ROWS_LIMIT} with the best score."
+                message += f" Showing the first {NEW_ROWS_LIMIT}: assessed ones first, then by rank."
         else:
             applied = _applied(refreshed.resolved)
             best = [
@@ -606,13 +920,17 @@ def _scout_new(
             "anchor": {"last_checked_at": None if anchor is None else anchor.last_checked_at, "advances": advances},
             "counts": {
                 "new": new_count,
-                "to_assess": len(pairs) if assessed is None else len(assessed["failed"]),  # type: ignore[arg-type]
+                "to_assess": len(pairs),
+                "only_stale": len(stale_pairs),
                 "shown": len(rows_json),
                 "by_profile": [{"profile_id": view.profile_id, "new": per_profile.get(view.profile_id, 0)} for view in views],
             },
             "message": message,
             "question": question,
+            "stale_question": stale_question,
             "assessed": assessed,
+            "reassessed": reassessed,
+            "ranking": _ranking(store, views, home_root, target),
             "pipeline": _pipeline_offer(store),
             "processed": processed,
             "postings": {
@@ -700,11 +1018,23 @@ def render(response: Mapping[str, object]) -> str:
         lines.append(f"Assessed {assessed['assessed']} of {assessed['requested']}.")
         for item in assessed["failed"]:  # type: ignore[union-attr]
             lines.append(f"  not assessed ({item['error_code']}): {item['job_identity']}")
+    reassessed = response.get("reassessed")
+    if isinstance(reassessed, Mapping):
+        lines.append(f"Re-assessed {reassessed['assessed']} of {reassessed['requested']}.")
+        for item in reassessed["failed"]:  # type: ignore[union-attr]
+            lines.append(f"  not re-assessed ({item['error_code']}): {item['job_identity']}")
     question = response.get("question")
     if isinstance(question, Mapping):
         lines.append(str(question["text"]))
         lines.append(f"  Yes: {question['yes']['cli']}")  # type: ignore[index]
         lines.append("  Below: ranked, not assessed.")
+    stale = response.get("stale_question")
+    if isinstance(stale, Mapping):
+        lines.append(str(stale["text"]))
+        lines.append(f"  Yes: {stale['yes']['cli']}")  # type: ignore[index]
+    ranking = response.get("ranking")
+    if isinstance(ranking, Mapping) and ranking.get("in_progress"):
+        lines.append(f"Ranking in progress: {_ranking_line(ranking, labels)}. Scores below can still change; the counts above do not.")
     rows = listing["rows"]
     assert isinstance(rows, list)
     if rows:
@@ -717,12 +1047,10 @@ def render(response: Mapping[str, object]) -> str:
             if row["salary"]:
                 details.append(str(row["salary"]))
             details.append(f"[{tags}]")
-            if row["score"] is None:
-                score = ["not ranked yet"]
-            elif row["score_kind"] == "assessment":
-                score = [f"{row['score']}% of requirements met ({row['state'].replace('_', ' ')})"]
-            else:
-                score = [f"rank {row['score']} (not assessed)"]
+            # One part per line (the column is narrow): the verdict, "old assessment: ...", "N of M requirements", the rank.
+            score = str(row["score_text"]).split(" · ")
+            if row.get("stale_label"):
+                score[0:1] = [score[0].split(" (")[0], str(row["stale_label"])]
             if row["needs_tailoring"] is None:
                 tailoring = ["-"]
             elif row["needs_tailoring"]:
@@ -784,6 +1112,10 @@ def _render_yours(response: Mapping[str, object]) -> str:
 
 __all__ = [
     "ATTENTION_LIMIT",
+    "BatchProgress",
+    "GROUP_CURRENT",
+    "GROUP_NOT_ASSESSED",
+    "GROUP_STALE",
     "NEW_ROWS_LIMIT",
     "FIRST_USE_DAYS",
     "POSTINGS_LABELS",
@@ -797,10 +1129,15 @@ __all__ = [
     "PostingModelError",
     "ScoutNewError",
     "check_response",
+    "in_order",
     "mark_all_seen",
+    "order_key",
     "process_waiting",
     "render",
     "response_labels",
+    "score_text",
     "scout_new",
     "scout_new_yours",
+    "sort_group",
+    "stale_label",
 ]

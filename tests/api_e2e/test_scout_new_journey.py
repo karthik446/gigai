@@ -177,6 +177,13 @@ def test_scout_new_journey(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> N
         for payload, code in (({}, "wrong_type"), ({"assess": "yes"}, "wrong_type"), ({"assess": True, "bogus": 1}, "unknown_key"), ({"assess": False, "since": "last tuesday"}, "invalid_value")):
             refused = client.post("/api/new", json=payload)
             assert refused.status_code == 422 and refused.json()["error"]["code"] == code, refused.text
+        # 0110-8-08: the second yes is its own key, true or false; with nothing stale it assesses nothing and says so.
+        refused = client.post("/api/new", json={"assess": False, "reassess_stale": "yes", "peek": True})
+        assert refused.status_code == 422 and refused.json()["error"]["code"] == "wrong_type", refused.text
+        again = client.post("/api/new", json={"assess": False, "reassess_stale": True, "peek": True})
+        assert again.status_code == 200, again.text
+        assert (again.json()["reassessed"], again.json()["stale_question"], again.json()["counts"]["only_stale"]) == (None, None, 0)
+        _assert_unmixed(again, data_labels.PUBLIC_UNTRUSTED)
         assert client.post("/api/new/seen", json={"at": "2030-01-01T00:00:00Z"}).status_code == 422
         for url in ("/api/new", "/api/new/yours"):
             assert client.get(url, headers={"Host": "evil.example"}).status_code == 403
@@ -185,7 +192,7 @@ def test_scout_new_journey(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> N
         def cli_json(*args: str) -> dict[str, object]:
             result = CliRunner().invoke(cli, ["scout", "new", *args, "--home", str(home), "--target", str(target), "--json"])
             assert result.exit_code == 0, result.output
-            return json.loads(result.output)
+            return json.loads(result.stdout)
 
         for args, url in ((("--peek",), "/api/new"), (("--yours",), "/api/new/yours")):
             printed, served = cli_json(*args), client.get(url).json()
