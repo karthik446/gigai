@@ -17,11 +17,13 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import time
 
 import httpx
 import pytest
 
 from gigai.scout.find_jobs.api import openapi
+from gigai.scout.pipeline import busy
 from tests.api_e2e.after_journey import assert_clean_and_healthy
 from tests.api_e2e.harness import (
     add_resume,
@@ -33,6 +35,7 @@ from tests.api_e2e.harness import (
     stop_server,
     write_offline_find_jobs_config,
 )
+from tests.support.latency import latency_bound
 
 _URL = "https://boards.greenhouse.io/acme/jobs/101"
 
@@ -45,14 +48,32 @@ def _workpad_files(workpad: Path) -> set[str]:
     return {str(path.relative_to(workpad)) for path in workpad.rglob("*") if path.is_file() and ".git" not in path.parts}
 
 
+def _pipeline_job(client: httpx.Client) -> dict[str, object] | None:
+    return next((item for item in client.get("/api/pipeline").json()["jobs"] if item["job_identity"] == _URL), None)
+
+
+def _wait_for_pipeline(client: httpx.Client, *, deadline_seconds: float = 90.0) -> dict[str, object]:
+    """Poll ``GET /api/pipeline`` until the job's background pipeline is over (the server's runner does the work)."""
+
+    deadline = time.monotonic() + latency_bound(deadline_seconds)
+    seen: dict[str, object] | None = None
+    while time.monotonic() < deadline:
+        seen = _pipeline_job(client)
+        if seen is not None and seen["state"] in ("done", "failed"):
+            return seen
+        time.sleep(0.2)
+    raise AssertionError(f"the job's pipeline never finished: {seen}")
+
+
 def test_agent_api_journey(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     home, target = setup_and_init(tmp_path)
     add_resume(home, target, tmp_path)
     write_offline_find_jobs_config(target, sources_live=True)
-    # 0.1.10.7 PL5: answering a job's question queues its background pipeline, whose tailoring would replace the
-    # resume this journey tailors and edits by hand (409 tailored_resume_changed). This journey is the agent API's;
-    # the pipeline's own is test_pipeline_journey.py.
-    monkeypatch.setenv("GIGAI_SCOUT_PIPELINE", "0")
+    # 0.1.10.7 PL5 + fix1: the pipeline is ON. Answering the job's question queues its background pipeline, and the
+    # agent then tailors and edits that job's resume by hand: the background tailoring must keep it (no 409).
+    # The order is made certain, not left to timing: the server's runner yields while an assess batch is live
+    # (``busy.assess_batch``, the marker `scout new` leaves), so the background tailoring runs AFTER the agent's.
+    monkeypatch.delenv("GIGAI_SCOUT_PIPELINE", raising=False)
     server = start_server(home, target, monkeypatch=monkeypatch)
     try:
         client = server.client
@@ -136,17 +157,25 @@ def test_agent_api_journey(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> N
         print("GET /api/jobs?url= keys ->", sorted(job), "| assessments:", [(a["source"], a.get("verdict")) for a in job["assessments"]], "| state:", job["job_state"])
 
         # answering closes the question; the answer is listed with it
-        answered = client.post("/api/answers", json={"question_id": "cloud:gcp", "answer": "Yes, two years on GCP.", "reassess": {"job_identity": _URL}})
-        assert answered.status_code == 201, answered.text
-        job = _job(client).json()
-        assert job["open_questions"] == []
-        assert [a["answer"] for a in job["answers"]] == ["Yes, two years on GCP."]
-        assert next(a for a in job["assessments"] if a["source"] == "quick")["verdict"] == "matched_above_threshold"
-        assert job["job_state"]["state"] == "matched"
+        with busy.assess_batch(home, target):  # the runner yields: the job's background pipeline waits, queued
+            answered = client.post("/api/answers", json={"question_id": "cloud:gcp", "answer": "Yes, two years on GCP.", "reassess": {"job_identity": _URL}})
+            assert answered.status_code == 201, answered.text
+            job = _job(client).json()
+            assert job["open_questions"] == []
+            assert [a["answer"] for a in job["answers"]] == ["Yes, two years on GCP."]
+            assert next(a for a in job["assessments"] if a["source"] == "quick")["verdict"] == "matched_above_threshold"
+            assert job["job_state"]["state"] == "matched"
 
-        # tailoring adds the resume with its links; the PDF link works as given
-        tailored = client.post("/api/tailored-resumes", json={"job": {"job_url": _URL}})
-        assert tailored.status_code == 200, tailored.text
+            # tailoring adds the resume with its links; the PDF link works as given
+            tailored = client.post("/api/tailored-resumes", json={"job": {"job_url": _URL}})
+            assert tailored.status_code == 200, tailored.text
+            queued = _pipeline_job(client)
+            assert queued is not None and queued["trigger"] == "answer_saved" and queued["steps"]["tailor"] == "ready", queued
+        # 0.1.10.7 fix1: now the background pipeline the answer queued runs, after the agent tailored. Its tailor step
+        # keeps the agent's resume: same revision, so the edit below (made with the revision the agent holds) gets no 409.
+        assert client.post("/api/pipeline/process", json={"job_identity": _URL}).status_code == 202
+        finished = _wait_for_pipeline(client)
+        assert (finished["state"], finished["error_code"]) == ("done", None), finished
         job = _job(client).json()
         assert len(job["tailored_resumes"]) == 1 and job["job_state"]["state"] == "tailored"
         link = job["links"]["pdf"]
@@ -162,10 +191,19 @@ def test_agent_api_journey(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> N
         # the resume's own markdown renders through POST /api/resume/pdf. No model call in any of it.
         body_lines = [line for section in tailored.json()["result"]["sections"] for line in (section.get("lines") or [bullet for entry in section.get("entries", []) for bullet in entry["bullets"]])]
         wording = "Agent journey wording for one resume line."
-        edited = client.put(line_link["path"], json={**line_link["body"], "line_id": body_lines[0]["id"], "use": "custom", "text": wording})
+        held = {**line_link["body"], "updated_at": tailored.json()["updated_at"]}  # the revision the agent got when it tailored
+        edited = client.put(line_link["path"], json={**held, "line_id": body_lines[0]["id"], "use": "custom", "text": wording})
         assert edited.status_code == 200, edited.text
         assert f"- {wording} <!-- edited -->" in edited.json()["markdown"]
         assert client.post(link["path"], json=link["body"]).status_code == 200
+        # 0.1.10.7 fix1: the job's pipeline runs again from its tailoring (forced) and the resume is still the
+        # agent's: the edited line survives, under the revision the agent holds (its next choice below is not refused).
+        forced = client.post("/api/pipeline/process", json={"job_identity": _URL, "force": True})
+        assert forced.status_code == 202 and forced.json()["result"] == "enqueued", forced.text
+        finished = _wait_for_pipeline(client)
+        assert (finished["state"], finished["error_code"]) == ("done", None), finished
+        (kept,) = client.get("/api/tailored-resumes", params={"job_identity": _URL}).json()["items"]
+        assert f"- {wording} <!-- edited -->" in kept["markdown"] and kept["updated_at"] == tailored.json()["updated_at"]
         from_markdown = client.post("/api/resume/pdf", json={"markdown": edited.json()["markdown"]})
         assert from_markdown.status_code == 200 and from_markdown.headers["content-type"] == "application/pdf" and from_markdown.content.startswith(b"%PDF")
         undone = client.put(line_link["path"], json={**line_link["body"], "line_id": body_lines[0]["id"], "use": "original" if body_lines[0]["kind"] == "copy" else "rewritten"})

@@ -523,7 +523,9 @@ class PipelineRunner:
         state = store.finish(
             claim, input_digest=digest, output_ref=result.output_ref, output_digest=result.output_digest, metrics=metrics  # type: ignore[union-attr]
         )
-        note(state, model_calls=made)
+        # ``code``: how a done step ended when not as usual (``tailor_kept_user_edits``: the stored resume is the user's).
+        code = getattr(result, "code", None)
+        note(state, model_calls=made, **({"code": code} if code else {}))
 
     # -- status ------------------------------------------------------------------------------
 

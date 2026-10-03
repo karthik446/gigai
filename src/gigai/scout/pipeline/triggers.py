@@ -15,11 +15,11 @@ story_saved      every (posting, active profile) whose stored assessment left op
 process_now      the one job the user named (CLI, API). Not capped per trigger: it is an
                  explicit choice. It also takes that job out of a pending approval.
 profile_changed  the steps of THAT profile already in the pipeline whose input digest is no
-                 longer the one they were done with. A changed profile record (a new resume,
-                 its own settings: its revision is part of the tailoring's digest) starts the
-                 job again from the tailoring; changed candidate settings that are not the
-                 profile's own (the setup's) re-open the re-assessment only. Never a job
-                 that was not in the pipeline.
+                 longer the one they were done with. A new resume starts the job again from
+                 the tailoring (its digest is part of the tailoring's); changed candidate
+                 settings (the profile's own, or the setup's) re-open the re-assessment only;
+                 a renamed profile or changed titles re-open nothing. Never a job that was
+                 not in the pipeline.
 ===============  ==============================================================================
 
 New postings in the index trigger nothing: 500 new postings are 0 queued jobs
@@ -483,9 +483,9 @@ def profile_changed(home_root: Path, target: Path, profile_id: str | None = None
     """Re-open the steps of ``profile_id`` (``None``: every profile) whose inputs changed. Never raises.
 
     Only jobs already in the pipeline, each from its first step whose digest
-    is no longer the one it was done with: a changed profile record (a new
-    resume, its own settings) re-opens the tailoring, candidate settings
-    that changed elsewhere the re-assessment. Under the per-trigger cap like
+    is no longer the one it was done with: a new resume re-opens the
+    tailoring, changed candidate settings the re-assessment, a renamed
+    profile or changed titles nothing. Under the per-trigger cap like
     every trigger. With no pipeline file there is nothing to look at and
     nothing is created.
     """

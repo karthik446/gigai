@@ -222,7 +222,9 @@ _TRIGGER_NOTE = (
     "0.1.10.7: the write also queues the background pipeline (tailored resume, assessment against it, Scout ATS score, Scout "
     "label) for every job of an active profile whose stored assessment left open a question this answers; at most "
     "`pipeline.auto_jobs_per_trigger` (10) jobs run, the rest wait for an approval (GET /api/pipeline/approvals). The pipeline's "
-    "tailoring replaces the job's stored tailored resume. Read what was queued with GET /api/pipeline."
+    "tailoring replaces only a tailored resume the pipeline itself made: one tailored on demand (POST /api/tailored-resumes) or "
+    "with a line chosen or edited (PUT /api/tailored-resumes/lines) is kept as it is, its `updated_at` unchanged, and the "
+    "assessment, the Scout ATS score and the Scout label are made against it. Read what was queued with GET /api/pipeline."
 )
 _BACKGROUND_SETTINGS_EXAMPLE: dict[str, object] = {
     "schema_version": "scout-background-settings:1",

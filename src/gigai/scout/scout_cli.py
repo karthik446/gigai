@@ -2586,6 +2586,9 @@ def _pipeline_status_lines(status: dict[str, object]) -> list[str]:
                 f"Requirements met: {base['requirements_met']['percent']} -> {tailored['requirements_met']['percent']} after tailoring "
                 f"(verdict {base['verdict']} -> {tailored['verdict']})."
             )
+        resume = outputs.get("tailored_resume")
+        if isinstance(resume, dict) and resume.get("outcome") == "tailor_kept_user_edits":
+            lines.append("Tailored resume: yours, kept as you left it (tailor_kept_user_edits).")
         if isinstance(ats, dict):
             lines.append(str(ats["line"]))
         if isinstance(label, dict):
