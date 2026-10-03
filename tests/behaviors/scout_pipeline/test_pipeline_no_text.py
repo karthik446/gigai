@@ -21,7 +21,7 @@ import sqlite3
 
 import pytest
 
-from gigai.scout.pipeline.store import COLUMN_KINDS, PipelineStore, PipelineStoreError, StepMetrics
+from gigai.scout.pipeline.store import COLUMN_KINDS, PipelineStore, PipelineStoreError, PostingBuild, PostingRecord, StepMetrics
 
 #: The reviewed schema: (column, kind). A new column fails this test until it is added here with a non-text kind.
 _REVIEWED: dict[str, dict[str, str]] = {
@@ -53,6 +53,18 @@ _REVIEWED: dict[str, dict[str, str]] = {
     },
     "anchor": {"scope": "code", "last_checked_at": "timestamp", "set_by": "code"},
     "cap_counter": {"cap": "code", "day": "day", "used": "integer"},
+    # 0.1.10.7 PL6: the per-(posting, profile) read model. A posting's title, company and text are never kept here.
+    "posting": {
+        "job": "job", "profile_id": "id", "board": "board", "first_seen": "timestamp", "published_at": "timestamp",
+        "removed_at": "timestamp", "listing_digest": "digest", "listing_known": "integer", "rank_score": "integer",
+        "match_rank": "integer", "state": "code", "stale_code": "code", "assessed_at": "timestamp", "reqs_met": "integer",
+        "reqs_total": "integer", "open_questions": "integer", "tailored": "integer", "label": "code",
+        "ats_score": "integer", "pinned_digest": "digest", "settings_digest": "digest", "updated_at": "timestamp",
+    },
+    "posting_build": {
+        "profile_id": "id", "match_digest": "digest", "facts_digest": "digest", "pinned_digest": "digest",
+        "settings_digest": "digest", "row_count": "integer", "built_at": "timestamp",
+    },
 }
 _NUMERIC = {"integer": ("INTEGER",), "real": ("REAL",)}
 #: Kept separate from the store's own shapes on purpose: this is the test's reading of "no text".
@@ -67,6 +79,7 @@ _SHAPE = {
     "owner": r"[0-9a-f]{32}:[A-Za-z0-9_-]+",
     "timestamp": r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z",
     "day": r"\d{4}-\d{2}-\d{2}",
+    "board": r"(greenhouse|lever|ashby):[a-z0-9-]+",
 }
 _EMAIL = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
 _PHONE = re.compile(r"\+?\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4}")
@@ -126,6 +139,24 @@ def _scenario(store: PipelineStore) -> None:
     store.record_call(kind="assess", lane="codex_cli", seconds=0.4, outcome="error", error_code="model_timeout", job=_PASTED)
     answered = store.record_call(kind="rank", lane="api:openrouter-main", seconds=3.0, items=50, metrics=StepMetrics(adapter="openrouter_api"))
     store.fail_call(answered, "model_output_invalid")
+    store.replace_postings(_build(), [_posting_row(), _posting_row(job=_JOB + "/2", removed_at="2026-10-02T09:00:00.000000Z", state="needs_answers")])
+    store.set_match_ranks([(2, _JOB, _P)])
+
+
+def _build() -> PostingBuild:
+    return PostingBuild(_P, _digest("m"), _digest("f"), _digest("r"), _digest("s"), 0, "2026-10-02T14:02:00.000000Z")
+
+
+def _posting_row(**changes: object) -> PostingRecord:
+    values: dict[str, object] = dict(
+        job=_JOB, profile_id=_P, board="lever:acme", first_seen="2026-10-01T08:00:00.000000Z",
+        published_at="2026-09-30T00:00:00.000000Z", removed_at=None, listing_digest=_digest("c"), listing_known=True,
+        rank_score=82, match_rank=1, state="matched", stale_code="posting_changed", assessed_at="2026-10-01T09:00:00.000000Z",
+        reqs_met=3, reqs_total=4, open_questions=1, tailored=True, label="needs_attention", ats_score=71,
+        pinned_digest=_digest("r"), settings_digest=_digest("s"), updated_at="2026-10-02T14:02:00.000000Z",
+    )
+    values.update(changes)
+    return PostingRecord(**values)  # type: ignore[arg-type]
 
 
 def test_every_stored_value_is_an_id_a_digest_a_code_or_a_number_and_nothing_is_contact_shaped(tmp_path: Path) -> None:
@@ -150,6 +181,7 @@ def test_every_stored_value_is_an_id_a_digest_a_code_or_a_number_and_nothing_is_
                     assert not _PHONE.search(re.sub(r"[0-9a-f]{16,}", "", value)), (table, column, value)
     assert seen["step_run"] >= 4 and seen["approval"] == 1 and seen["anchor"] == 1 and seen["cap_counter"] == 2
     assert seen["model_call"] == 3
+    assert seen["posting"] == 2 and seen["posting_build"] == 1
     # And the raw file as a whole: no email shape anywhere in its bytes.
     connection.close()
     store.close()
@@ -181,6 +213,17 @@ def test_every_stored_value_is_an_id_a_digest_a_code_or_a_number_and_nothing_is_
         ("call_model", "jane.doe@example.com"),
         ("call_lane", "my laptop"),
         ("call_fail", "The answer was not JSON"),
+        ("posting_job", "Staff Engineer at Acme, remote"),
+        ("posting_job", "https://jobs.example.test/apply?ref=jane.doe@example.com"),
+        ("posting_board", "Acme Corp"),
+        ("posting_board", "lever:jane.doe@example.com"),
+        ("posting_state", "Needs your answers"),
+        ("posting_stale_code", "The posting changed: now asks for Terraform"),
+        ("posting_label", "Recommended, apply today"),
+        ("posting_first_seen", "last tuesday"),
+        ("posting_listing_digest", "Own the Python inference services"),
+        ("posting_pinned_digest", "Jane Doe resume v3"),
+        ("posting_since", "yesterday"),
     ],
 )
 def test_text_is_refused_before_it_reaches_the_file(tmp_path: Path, call: str, bad: str) -> None:
@@ -191,6 +234,10 @@ def test_text_is_refused_before_it_reaches_the_file(tmp_path: Path, call: str, b
             args = {**good, {"digest": "input_digest"}.get(call, call): bad}
             store.enqueue(args["profile_id"], args["job"], "tailor", input_digest=args["input_digest"], trigger="process_now",
                           lane="claude_cli", model_target=args["model_target"])
+        elif call == "posting_since":
+            store.postings(since=bad)
+        elif call.startswith("posting_"):
+            store.replace_postings(_build(), [_posting_row(), _posting_row(**{"job": _JOB + "/2", call.removeprefix("posting_"): bad})])
         elif call == "call_fail":
             store.fail_call(store.record_call(kind="assess", lane="codex_cli", seconds=1.0), bad)
         elif call.startswith("call_"):

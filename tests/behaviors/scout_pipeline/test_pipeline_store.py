@@ -87,7 +87,7 @@ def test_the_file_is_wal_sqlite_with_the_schema_version(tmp_path: Path) -> None:
     assert connection.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
     assert connection.execute("PRAGMA user_version").fetchone()[0] == pipeline_store.SCHEMA_VERSION
     tables = {row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-    assert tables == {"step", "step_run", "model_call", "lane", "approval", "anchor", "cap_counter"}
+    assert tables == {"step", "step_run", "model_call", "lane", "approval", "anchor", "cap_counter", "posting", "posting_build"}
     PipelineStore(path)  # opening again is a no-op
 
 
@@ -109,7 +109,7 @@ def test_a_version_1_file_gains_the_model_call_table_and_keeps_its_rows(tmp_path
     assert upgraded.recovered_from is None and upgraded.step(_P, _JOB, "tailor") is not None
     assert upgraded.record_call(kind="assess", lane="codex_cli", seconds=1.5) == 1
     connection = sqlite3.connect(path)
-    assert connection.execute("PRAGMA user_version").fetchone()[0] == pipeline_store.SCHEMA_VERSION == 2
+    assert connection.execute("PRAGMA user_version").fetchone()[0] == pipeline_store.SCHEMA_VERSION == 3
 
 
 def test_pipeline_path_is_per_project_under_the_home(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

@@ -1501,6 +1501,7 @@ def _make_handler(
     from .discover import DiscoverRoutesMixin
     from .extract import ResumeExtractRoutesMixin
     from .metrics import MetricsRoutesMixin
+    from .new import NewRoutesMixin
     from .posted_window import PostedWindowRoutesMixin
     from .privacy_cleanup import PrivacyCleanupRoutesMixin
     from .profiles import ProfilesRoutesMixin
@@ -1537,6 +1538,7 @@ def _make_handler(
         PrivacyCleanupRoutesMixin,
         SecretsStatusRoutesMixin,
         MetricsRoutesMixin,
+        NewRoutesMixin,
         StoryBankRoutesMixin,
         TailoredResumesRoutesMixin,
         WatchlistRoutesMixin,
@@ -1810,6 +1812,12 @@ def _make_handler(
                     if path == "/api/metrics":
                         self._handle_get_metrics()
                         return
+                    if path == "/api/new":
+                        self._handle_get_new()
+                        return
+                    if path == "/api/new/yours":
+                        self._handle_get_new_yours()
+                        return
                     # run-reads-fast (uat-bug-022): with a query these two are
                     # the page-sized reads (``run_reads.py``); with none they
                     # answer what they always did.
@@ -1863,6 +1871,12 @@ def _make_handler(
                     return
                 if path == "/api/assess":
                     self._handle_post_assess()
+                    return
+                if path == "/api/new":
+                    self._handle_post_new()
+                    return
+                if path == "/api/new/seen":
+                    self._handle_post_new_seen()
                     return
                 if path == "/api/tailored-resumes":
                     self._handle_post_tailored_resumes()
