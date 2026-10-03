@@ -370,43 +370,36 @@ export function postAnswer(fields) {
   return request("POST", "/api/answers", fields);
 }
 
-// 0110-034: the answers ONE profile may reuse (its own, plus a shared
-// profile's); no profileId = the selected profile.
-export function getAnswers(profileId) {
-  return request("GET", `/api/answers${profileId ? `?profile_id=${encodeURIComponent(profileId)}` : ""}`);
-}
-
-// 0110-034: the story bank (find_jobs/api/story_bank.py). Local, no model
-// call. `updated_at` on an edit or a delete is the value this page read: a
-// stale one answers 409 story_bank_changed with the current `entry`
-// (ApiError.entry), written since by an agent or another window.
-const storyQuery = (fields) => {
+// 0.1.10.7 C: the user's answers and stories (find_jobs/api/answers.py,
+// api/story_bank.py). They belong to the user, not to a profile. Local, no
+// model call. The UI only reads and deletes them (the Answers and stories
+// page) and saves an answer from a job page's question box. `revision` on a
+// delete is the value this page read: a stale one answers 409
+// revision_conflict with the current `answer` / `story` (ApiError.answer /
+// ApiError.story), written since by the agent or another window.
+const bankQuery = (fields) => {
   const pairs = Object.entries(fields).filter(([, value]) => value !== undefined && value !== null && value !== "");
   return pairs.length ? `?${pairs.map(([key, value]) => `${key}=${encodeURIComponent(value)}`).join("&")}` : "";
 };
 
-export function getStoryBank(profileId) {
-  return request("GET", `/api/story-bank${storyQuery({ profile_id: profileId })}`);
+export function getAnswers() {
+  return request("GET", "/api/answers");
 }
 
-export function getStoryBankMatch({ profileId, questionId, question }) {
-  return request("GET", `/api/story-bank/match${storyQuery({ profile_id: profileId, question_id: questionId, question })}`);
+export function getAnswerMatch({ questionId, question }) {
+  return request("GET", `/api/answers/match${bankQuery({ question_id: questionId, question })}`);
 }
 
-export function addStory(body) {
-  return request("POST", "/api/story-bank", body);
+export function deleteAnswer(questionId, revision) {
+  return request("DELETE", `/api/answers/${encodeURIComponent(questionId)}${bankQuery({ revision })}`);
 }
 
-export function putStory(questionId, body) {
-  return request("PUT", `/api/story-bank/${encodeURIComponent(questionId)}`, body);
+export function getStories() {
+  return request("GET", "/api/stories");
 }
 
-export function deleteStory(questionId, { profileId, updatedAt }) {
-  return request("DELETE", `/api/story-bank/${encodeURIComponent(questionId)}${storyQuery({ profile_id: profileId, updated_at: updatedAt })}`);
-}
-
-export function putStoryBankSharing(profileId, shareWith) {
-  return request("PUT", "/api/story-bank/sharing", { profile_id: profileId, share_with: shareWith || null });
+export function deleteStory(storyId, revision) {
+  return request("DELETE", `/api/stories/${encodeURIComponent(storyId)}${bankQuery({ revision })}`);
 }
 
 // SCOPE-ADD-3: the ranking pass for one run's postings, by the run's own

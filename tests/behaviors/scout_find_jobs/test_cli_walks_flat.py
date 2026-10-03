@@ -905,7 +905,8 @@ COMMANDS = {
     "history": (("history",), 13),
     "proposals": (("proposals",), 13),
     "scout profile list": (("scout", "profile", "list"), 21),
-    "scout story-bank list": (("scout", "story-bank", "list"), 29),
+    # 0.1.10.7 C: the user-level answers list (the 0.1.10.5 ``story-bank list`` it replaces cost 29).
+    "scout answers list": (("scout", "answers", "list"), 29),
 }
 
 
@@ -940,7 +941,7 @@ def test_a_read_only_command_opens_one_read(gig: SimpleNamespace, monkeypatch: p
 
     monkeypatch.setattr(workpad_module, "resolve_workpad", resolving)
     monkeypatch.setattr("gigai.cli.resolve_workpad", resolving)
-    for words in (("status",), ("show",), ("history",), ("proposals",), ("scout", "profile", "list"), ("scout", "story-bank", "list")):
+    for words in (("status",), ("show",), ("history",), ("proposals",), ("scout", "profile", "list"), ("scout", "answers", "list")):
         opened.clear()
         _run(gig, *words)
         assert opened and all(depth >= 1 for depth in opened), words

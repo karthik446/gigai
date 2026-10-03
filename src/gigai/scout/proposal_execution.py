@@ -319,10 +319,10 @@ def _assess_node_body(
         location=prompt_location,
         work_mode=prompt_work_mode,
     )
-    # 0110-034b: the run's profile reads ITS story bank (own answers plus the
-    # one profile it shares with), through the same builder as the job page's
-    # quick assessment (``story_bank.assess_bank``). No profile, or a bank
-    # that cannot be read: an empty bank, and the prompt renders as before.
+    # 0.1.10.7 C: the run reads the USER's answers and stories (every
+    # profile reads the same ones), through the same builder as the job
+    # page's quick assessment (``story_bank.assess_bank``). A bank that
+    # cannot be read: none, and the prompt renders as before.
     from . import story_bank
 
     resume_text = resume.decode("utf-8", errors="replace")
@@ -504,7 +504,12 @@ def _assess_node_body(
                 {**normalized, "posting": _posting_json, "proposal_revision_ref": None}
             )
 
-        return assess_once(binding, _assess_job(posting, posting_text), assess_context, parse=parse_selected)
+        job = _assess_job(posting, posting_text)
+        # The few stories that match THIS posting join the STORY BANK lines
+        # (``AssessBank.for_job``); no story matches: the run's one context.
+        job_bank = bank.for_job(title=job.title, text=job.posting_text)
+        context_for_job = assess_context if job_bank is bank else replace(assess_context, bank_answers=tuple(job_bank.bank_answers))
+        return assess_once(binding, job, context_for_job, parse=parse_selected)
 
     def record_outcome(posting: object, outcome: object) -> None:
         nonlocal model_attempts
@@ -535,12 +540,12 @@ def _assess_node_body(
         usage_values.append(outcome.usage)
         if progress is not None:
             progress.assessment_finished(posting.normalized_url, ok=True, assessment_json=parsed.to_json())
-        if bank.entries:
-            # Which bank answers this assessment cited ("Story bank <id>: ..."),
-            # noted on the entry as quick assess notes it. Never raises.
+        if bank.entries or bank.stories:
+            # Which answers and stories this assessment cited ("Story bank <id>: ..."),
+            # noted on each as quick assess notes it. Never raises.
             posting_json = posting.to_json()
             story_bank.record_reuse(
-                home_root=home_root, target=root, entries=bank.entries,
+                home_root=home_root, target=root, entries=bank.entries, stories=bank.stories,
                 evidence=[evidence for row in parsed.matrix for evidence in row.resume_evidence],
                 posting={
                     "job_identity": posting.normalized_url,
@@ -684,12 +689,12 @@ def _basis_stale(prior: object, *, bank: object, constraints: str | None) -> boo
       config to compare, which skips this check);
     - the story bank changed in a way that concerns THIS assessment
       (``story_bank.bank_makes_stale``, targeted since 0110-041): a bank
-      entry added or edited since answers one of its own open questions (the
-      same id, or the model-free near match), or a cited bank answer was
-      edited, deleted or unshared. A bank change that answers none of its
-      questions leaves it carried forward. The same rule, the same function,
-      as a stored assessment's (``assessment_basis``). A run with no profile
-      has no bank.
+      answer or story added or edited since answers one of its own open
+      questions (the same id, the model-free near match, or a story about
+      it), or a cited answer or story was edited or deleted. A bank change
+      that answers none of its questions leaves it carried forward. The same
+      rule, the same function, as a stored assessment's
+      (``assessment_basis``).
     """
 
     from . import story_bank

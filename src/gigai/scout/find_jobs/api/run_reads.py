@@ -496,15 +496,14 @@ def attach_bank_suggestions(body: dict[str, object], *, home_root: Path, target:
     no bank at all. Never raises: display-only.
     """
 
-    if profile_id is None:
-        return
     questions = open_run_questions(body)
     if not questions:
         return
     try:
         from ... import story_bank
 
-        bank = story_bank.read_bank(home_root=home_root, target=target, profile_id=profile_id, with_postings=False)
+        # 0.1.10.7 C: the user's answers; ``profile_id`` no longer narrows them.
+        bank = story_bank.read_bank(home_root=home_root, target=target, with_jobs=False)
         found = story_bank.suggestions_for(questions, bank)
     except Exception:  # noqa: BLE001 - display-only enrichment must never break the read
         _logger.exception("story bank suggestions skipped")

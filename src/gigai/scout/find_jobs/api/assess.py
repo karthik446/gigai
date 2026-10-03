@@ -136,7 +136,7 @@ class AssessRoutesMixin:
         body = AssessmentsListResponse(items).to_json()
         served = body.get("items")
         if isinstance(served, list):
-            # 0110-034: computed on read (one bank read per profile), never stored.
+            # Computed on read (one read of the user's answers), never stored.
             from ... import story_bank
 
             banks: dict[str, tuple[story_bank.BankEntry, ...]] = {}

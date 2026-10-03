@@ -71,7 +71,7 @@ def test_answers_journey(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Non
         # GET /api/answers is empty before any answer.
         empty = client.get("/api/answers")
         assert empty.status_code == 200, empty.text
-        assert empty.json() == {"answers": []}
+        assert empty.json() == {"schema_version": "scout-answers-response:1", "answers": [], "total": 0, "tags": []}
 
         # POST /api/answers with reassess: the answer is recorded AND the
         # posting is re-assessed in the same call.
@@ -86,6 +86,9 @@ def test_answers_journey(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Non
         body = answered.json()
         assert body["question_id"] == "cloud:gcp"
         assert body["record_id"].startswith("record_")
+        # 0.1.10.7 C: the saved answer, in the one Answer shape; it names the job that asked.
+        assert body["answer"]["answer"] == "Yes, two years on GCP." and body["answer"]["revision"] == 1
+        assert [(job["job_identity"], job["kind"]) for job in body["answer"]["jobs"]] == [(job_identity, "answered")]
         assert body["reassessed"] is not None
         assert body["reassessed"]["result"]["verdict"] == "matched_above_threshold"
         assert body["reassessed"]["stored_path"] == p["stored_path"]  # same (resume, job) file, overwritten

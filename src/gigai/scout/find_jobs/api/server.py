@@ -65,7 +65,7 @@ from .common import (
 )
 from .openapi import with_allowed_keys
 from .profiles import _match_profile_id
-from .story_bank import _match_story_id
+from .story_bank import _match_answer_id, _match_story_id
 
 # _TEST_HTTP_ENV/_TEST_MODEL_ENV live in present_api.py now -- they're only
 # read by main(), which moved there too (see the MONKEYPATCH TRAP note near
@@ -1761,15 +1761,22 @@ def _make_handler(
                     if path == "/api/answers":
                         self._handle_get_answers()
                         return
-                    if path == "/api/story-bank":
-                        self._handle_get_story_bank()
+                    if path == "/api/answers/match":
+                        self._handle_get_answers_match()
                         return
-                    if path == "/api/story-bank/match":
-                        self._handle_get_story_bank_match()
+                    question_id = _match_answer_id(path, suffix="")
+                    if question_id is not None:
+                        self._handle_get_answer(question_id)
+                        return
+                    if path == "/api/stories":
+                        self._handle_get_stories()
+                        return
+                    if path == "/api/stories/prep":
+                        self._handle_get_stories_prep()
                         return
                     story_id = _match_story_id(path, suffix="")
                     if story_id is not None:
-                        self._handle_get_story_bank_entry(story_id)
+                        self._handle_get_story(story_id)
                         return
                     if path == "/api/runs":
                         self._handle_get_runs_list()
@@ -1867,8 +1874,8 @@ def _make_handler(
                 if path == "/api/applications":
                     self._handle_post_applications()
                     return
-                if path == "/api/story-bank":
-                    self._handle_post_story_bank()
+                if path == "/api/stories":
+                    self._handle_post_stories()
                     return
                 if path == "/api/watchlist":
                     self._handle_post_watchlist()
@@ -1922,12 +1929,13 @@ def _make_handler(
                 if path == "/api/privacy/cleanup":
                     self._handle_put_privacy_cleanup()
                     return
-                if path == "/api/story-bank/sharing":
-                    self._handle_put_story_bank_sharing()
+                question_id = _match_answer_id(path, suffix="")
+                if question_id is not None:
+                    self._handle_put_answer(question_id)
                     return
                 story_id = _match_story_id(path, suffix="")
                 if story_id is not None:
-                    self._handle_put_story_bank_entry(story_id)
+                    self._handle_put_story(story_id)
                     return
                 profile_id = _match_profile_id(path, suffix="")
                 if profile_id is not None:
@@ -1945,9 +1953,13 @@ def _make_handler(
                 return
             path = urlsplit(self.path).path
             try:
+                question_id = _match_answer_id(path, suffix="")
+                if question_id is not None:
+                    self._handle_delete_answer(question_id)
+                    return
                 story_id = _match_story_id(path, suffix="")
                 if story_id is not None:
-                    self._handle_delete_story_bank_entry(story_id)
+                    self._handle_delete_story(story_id)
                     return
                 profile_id = _match_profile_id(path, suffix="")
                 if profile_id is not None:

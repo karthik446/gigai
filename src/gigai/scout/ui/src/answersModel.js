@@ -51,7 +51,7 @@ export function placeQuestions(matrix, questions) {
 // given on another posting counts here without being typed again.
 //
 // 0110-034: `bank` (optional) is {suggestions, used}: `suggestions` maps a
-// question_id to its story bank near match (GET /api/story-bank/match) and
+// question_id to its near match among the user's answers (GET /api/answers/match) and
 // `used` to the bank question the operator took with "Use it". A state
 // then also carries the question's words, `suggestion` (only while the box
 // is empty and nothing is on record: nothing is filled in for the user) and
@@ -78,11 +78,11 @@ export function answerStates(questions, drafts, priorAnswers, bank) {
   });
 }
 
-// 0110-034: what a POST /api/answers body carries beyond the answer: the
-// question's own words (kept with it in the story bank), the bank question
-// a confirmed suggestion came from, and whose bank it is. Each only when
-// known, so a caller without them sends what it always did.
-function bankFields(state, profileId) {
+// What a POST /api/answers body carries beyond the answer: the question's
+// own words (kept with it) and the question a confirmed suggestion came
+// from. Each only when known, so a caller without them sends what it always
+// did. 0.1.10.7 C: no profile; an answer is the user's.
+function bankFields(state) {
   const fields = {};
   if (state.question) {
     fields.question = state.question;
@@ -90,30 +90,27 @@ function bankFields(state, profileId) {
   if (state.fromBank) {
     fields.from_bank = state.fromBank;
   }
-  if (profileId) {
-    fields.profile_id = profileId;
-  }
   return fields;
 }
 
 // The POST /api/answers bodies for one "Re-assess": every filled box, in
 // question order, re-assessing on the last one only.
-export function answerRequests(states, jobIdentity, profileId) {
+export function answerRequests(states, jobIdentity) {
   const filled = (states || []).filter((state) => state.filled);
   return filled.map((state, index) => ({
     question_id: state.question_id,
     answer: state.value,
     reassess: jobIdentity && index === filled.length - 1 ? { job_identity: jobIdentity } : null,
-    ...bankFields(state, profileId),
+    ...bankFields(state),
   }));
 }
 
 // The bodies "Tailor resume" sends first: only the answers the record does
 // not hold yet, never re-assessing (tailoring reads the recorded answers).
-export function unsavedAnswerRequests(states, profileId) {
+export function unsavedAnswerRequests(states) {
   return (states || [])
     .filter((state) => state.isNew)
-    .map((state) => ({ question_id: state.question_id, answer: state.value, reassess: null, ...bankFields(state, profileId) }));
+    .map((state) => ({ question_id: state.question_id, answer: state.value, reassess: null, ...bankFields(state) }));
 }
 
 const plural = (count, word) => `${count} ${word}${count === 1 ? "" : "s"}`;

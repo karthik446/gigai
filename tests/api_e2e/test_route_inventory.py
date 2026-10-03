@@ -74,14 +74,17 @@ JOURNEYS: dict[Route, str] = {
     Route("GET", "/api/openapi.json"): "test_agent_api_journey.py, test_openapi_drift.py",
     Route("GET", "/api/jobs"): "test_agent_api_journey.py",
     Route("GET", "/llms.txt"): "test_agent_api_journey.py",
-    # 0110-034: the story bank.
-    Route("GET", "/api/story-bank"): "test_story_bank_journey.py",
-    Route("GET", "/api/story-bank/match"): "test_story_bank_journey.py",
-    Route("GET", "/api/story-bank/{story_id}"): "test_story_bank_journey.py",
-    Route("POST", "/api/story-bank"): "test_story_bank_journey.py",
-    Route("PUT", "/api/story-bank/sharing"): "test_story_bank_journey.py",
-    Route("PUT", "/api/story-bank/{story_id}"): "test_story_bank_journey.py",
-    Route("DELETE", "/api/story-bank/{story_id}"): "test_story_bank_journey.py",
+    # 0.1.10.7 C: user-level answers and stories.
+    Route("GET", "/api/answers/match"): "test_answers_stories_journey.py",
+    Route("GET", "/api/answers/{question_id}"): "test_answers_stories_journey.py",
+    Route("PUT", "/api/answers/{question_id}"): "test_answers_stories_journey.py",
+    Route("DELETE", "/api/answers/{question_id}"): "test_answers_stories_journey.py",
+    Route("GET", "/api/stories"): "test_answers_stories_journey.py",
+    Route("GET", "/api/stories/prep"): "test_answers_stories_journey.py",
+    Route("GET", "/api/stories/{story_id}"): "test_answers_stories_journey.py",
+    Route("POST", "/api/stories"): "test_answers_stories_journey.py",
+    Route("PUT", "/api/stories/{story_id}"): "test_answers_stories_journey.py",
+    Route("DELETE", "/api/stories/{story_id}"): "test_answers_stories_journey.py",
 }
 
 

@@ -18,6 +18,8 @@
 //   #/settings           preferences, resume, setup wizard, discover, add company
 //   #/assess             "+ Assess a job", reached from Assessments (its
 //                        result opens #/assessments/<id>)
+//   #/answers            0.1.10.7 C: Answers and stories, read-only (browse, the
+//                        jobs that used each, delete); reached from Settings
 //   #/pdf                0110-046: Generate PDF, where an agent's or the
 //   #/pdf/<profile>/<job>  CLI's headerless PDF is finished (the link they
 //                        print); markdown picked here, or the stored
@@ -46,6 +48,7 @@ export const ROUTES = [
   { view: "settings", path: "#/settings", label: "Settings", pattern: /^#\/settings\/?$/ },
   { view: "assess", path: "#/assess", label: "Assess a job", pattern: /^#\/assess\/?$/ },
   { view: "pdf", path: "#/pdf", label: "Generate PDF", pattern: /^#\/pdf(?:\/(.*))?$/, param: "pdfTarget" },
+  { view: "answers", path: "#/answers", label: "Answers and stories", pattern: /^#\/answers\/?$/ },
 ];
 
 // The top bar's primary links, in order (the profile switcher and the
@@ -58,6 +61,7 @@ export const APPLICATIONS_HASH = "#/applications";
 export const RUNS_HASH = "#/runs";
 export const SETTINGS_HASH = "#/settings";
 export const ASSESS_HASH = "#/assess";
+export const ANSWERS_HASH = "#/answers";
 // Kept for the phase-1 callers (JobPage/JobCard): the grid's hash.
 export const GRID_HASH = JOBS_HASH;
 

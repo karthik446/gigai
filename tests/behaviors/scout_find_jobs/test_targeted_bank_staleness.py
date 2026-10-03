@@ -9,7 +9,7 @@ Now an assessment is stale for the bank only when a bank entry added or
 edited since its basis answers one of ITS OWN open questions (the same id,
 or ``story_bank.near_match``, the model-free match behind
 ``bank_suggestions``), or when it cites a bank answer that was edited,
-deleted or unshared (as before). The entries that matched are served
+deleted (as before). The entries that matched are served
 (``basis_stale_bank``) so the reason line can name the question. A run's
 unchanged skip (``proposal_execution._basis_stale``) applies the same rule
 through the same function: the twin assertions here run both over the same
@@ -37,7 +37,7 @@ from gigai.scout.find_jobs.api.assess_all import _quick_verdicts, stale_stored
 from gigai.scout.find_jobs.assess_contracts import AssessResponse
 from gigai.scout.find_jobs.contracts import StoryBankStamp
 from gigai.scout.find_jobs.job_state import JobStateSources
-from gigai.scout.profile_records import create_profile, selected_profile
+from gigai.scout.profile_records import selected_profile
 from gigai.scout.question_ids import normalize_question_id
 
 from tests.support.scout_profile_fixtures import ProfileFixtureGig, build_gig_with_resume
@@ -77,14 +77,15 @@ def _question(number: int) -> tuple[str, str]:
 
 
 def _save(fx: ProfileFixtureGig, profile_id: str, question_id: str, answer: str, question: str) -> None:
-    story_bank.save_answer(home_root=fx.home_root, target=fx.target, profile_id=profile_id, question_id=question_id, answer=answer, question=question)
+    # 0.1.10.7 C: answers are the user's; ``profile_id`` only says whose assessments the test is about.
+    story_bank.save_answer(home_root=fx.home_root, target=fx.target, question_id=question_id, answer=answer, question=question)
 
 
 def _edit(fx: ProfileFixtureGig, profile_id: str, question_id: str, answer: str) -> None:
-    entry = next(item for item in story_bank.read_bank(home_root=fx.home_root, target=fx.target, profile_id=profile_id) if item.question_id == question_id)
-    story_bank.edit_entry(
-        home_root=fx.home_root, target=fx.target, profile_id=entry.owner_profile_id, question_id=question_id,
-        answer=answer, expected_updated_at=entry.updated_at,
+    entry = next(item for item in story_bank.read_bank(home_root=fx.home_root, target=fx.target) if item.question_id == question_id)
+    story_bank.edit_answer(
+        home_root=fx.home_root, target=fx.target, question_id=question_id,
+        answer=answer, expected_revision=entry.revision,
     )
 
 
@@ -152,7 +153,7 @@ def page(fx: ProfileFixtureGig, model: _Binding) -> SimpleNamespace:
     template = json.loads(Path(first.stored_path).read_text(encoding="utf-8"))
     assert [entry["question_id"] for entry in template["story_bank"]["entries"]] == ["cloud:aws", "industry:fintech"]
     seen = story_bank.near_match(
-        story_bank.read_bank(home_root=fx.home_root, target=fx.target, profile_id=profile.profile_id), question_id=_SEEN_ID, question=_SEEN_QUESTION
+        story_bank.read_bank(home_root=fx.home_root, target=fx.target), question_id=_SEEN_ID, question=_SEEN_QUESTION
     )
     assert seen is not None and seen.bank_question_id == "cloud:aws"
     Path(first.stored_path).unlink()
@@ -227,7 +228,7 @@ def test_one_answer_flags_only_the_assessments_that_asked_it(fx: ProfileFixtureG
         ],
     }
     # The near match is the one behind bank_suggestions, not a second rule.
-    bank = story_bank.read_bank(home_root=fx.home_root, target=fx.target, profile_id=page.profile_id)
+    bank = story_bank.read_bank(home_root=fx.home_root, target=fx.target)
     suggestion = story_bank.near_match(bank, question_id=_NEAR_ID, question=_NEAR_QUESTION)
     assert suggestion is not None and suggestion.bank_question_id == "cloud:gcp"
     # No answer text is served with the reason.
@@ -311,24 +312,14 @@ def test_a_page_of_jobs_reads_the_bank_once(fx: ProfileFixtureGig, model: _Bindi
     assert len(model.port.prompts) == page.calls
 
 
-def test_an_assessment_that_cited_an_entry_is_stale_when_it_is_edited_deleted_or_unshared(fx: ProfileFixtureGig, model: _Binding, page: SimpleNamespace) -> None:
+def test_an_assessment_that_cited_an_entry_is_stale_when_it_is_edited_or_deleted(fx: ProfileFixtureGig, model: _Binding, page: SimpleNamespace) -> None:
     default = page.profile_id
-    profile = selected_profile(fx.resolved, home_root=fx.home_root, target=fx.target)
-    assert profile is not None
-    other = create_profile(
-        fx.resolved, label="other person", titles=("staff backend engineer",), titles_to_avoid=(), queries=("staff backend engineer",),
-        resume_ref=profile.resume_ref,
-    ).profile_id
     _save(fx, default, "industry:logistics", "Three years of routing software.", "Do you have logistics experience?")
-    _save(fx, other, "industry:health", "Two years on clinical systems.", "Do you have healthcare experience?")
-    story_bank.set_sharing(home_root=fx.home_root, target=fx.target, profile_id=default, share_with=other)
     stamp = _stamp_now(fx, default)
-    assert {entry["question_id"] for entry in stamp["entries"]} == {"cloud:aws", "industry:fintech", "industry:logistics", "industry:health"}  # type: ignore[index, union-attr]
-    cited = {
-        name: _write_copy(fx, page.template, f"Cites {name}", _cites(f"industry:{name}", stamp)) for name in ("fintech", "logistics", "health")
-    }
+    assert {entry["question_id"] for entry in stamp["entries"]} == {"cloud:aws", "industry:fintech", "industry:logistics"}  # type: ignore[index, union-attr]
+    cited = {name: _write_copy(fx, page.template, f"Cites {name}", _cites(f"industry:{name}", stamp)) for name in ("fintech", "logistics")}
     asks = _write_copy(fx, page.template, "Asks something else", lambda stored: (_asks(11)(stored), stored.__setitem__("story_bank", stamp)))
-    items = [cited["fintech"], cited["logistics"], cited["health"], asks]
+    items = [cited["fintech"], cited["logistics"], asks]
 
     def both() -> dict[int, list[dict[str, object]]]:
         stale = _stale(fx, items)
@@ -340,14 +331,11 @@ def test_an_assessment_that_cited_an_entry_is_stale_when_it_is_edited_deleted_or
     _edit(fx, default, "industry:fintech", "Five years building payment systems.")
     assert both() == {0: [{"match": "cited", "bank_question_id": "industry:fintech", "bank_question": "Do you have fintech experience?"}]}
 
-    entry = next(item for item in story_bank.read_bank(home_root=fx.home_root, target=fx.target, profile_id=default) if item.question_id == "industry:logistics")
-    story_bank.delete_entry(home_root=fx.home_root, target=fx.target, profile_id=default, question_id="industry:logistics", expected_updated_at=entry.updated_at)
-    assert both()[1] == [{"match": "cited", "bank_question_id": "industry:logistics"}], "a deleted entry has no question to name"
-
-    story_bank.set_sharing(home_root=fx.home_root, target=fx.target, profile_id=default, share_with=None)
+    entry = next(item for item in story_bank.read_bank(home_root=fx.home_root, target=fx.target) if item.question_id == "industry:logistics")
+    story_bank.delete_answer(home_root=fx.home_root, target=fx.target, question_id="industry:logistics", expected_revision=entry.revision)
     found = both()
-    assert sorted(found) == [0, 1, 2], "the one that only asked an unrelated question stays current through all three"
-    assert found[2] == [{"match": "cited", "bank_question_id": "industry:health"}]
+    assert sorted(found) == [0, 1], "the one that only asked an unrelated question stays current through both"
+    assert found[1] == [{"match": "cited", "bank_question_id": "industry:logistics"}], "a deleted entry has no question to name"
     assert len(model.port.prompts) == page.calls
 
 
@@ -383,7 +371,7 @@ def test_a_stamp_as_it_was_recorded_before_reads_as_it_was_and_gets_the_targeted
 
 
 def test_writing_one_entry_leaves_the_other_entries_marks_as_they_were(fx: ProfileFixtureGig, model: _Binding, page: SimpleNamespace) -> None:
-    """A profile's answers share one record, whose revision id changes on every write: the mark is per entry."""
+    """Answers share one record, whose revision id changes on every write: the mark is per entry."""
 
     def bank() -> story_bank.AssessBank:
         return story_bank.assess_bank(home_root=fx.home_root, target=fx.target, profile_id=page.profile_id)
@@ -395,37 +383,6 @@ def test_writing_one_entry_leaves_the_other_entries_marks_as_they_were(fx: Profi
 
     assert after.marks["cloud:aws"] == before.marks["cloud:aws"], "not written: the same mark"
     assert after.marks["industry:fintech"] != before.marks["industry:fintech"]
-    assert after.record_marks["cloud:aws"] != before.record_marks["cloud:aws"], "the record's revision moved for every entry of it"
     assert [entry.question_id for entry in story_bank.changed_entries(before.marks, after)] == ["cloud:gcp", "industry:fintech"]
     # Marks are ids and counters: no answer text and nothing derived from it.
     assert all(len(mark) == 16 and "GCP" not in mark for mark in after.marks.values())
-
-
-def test_a_basis_recorded_with_the_records_revision_still_compares(fx: ProfileFixtureGig, model: _Binding, page: SimpleNamespace) -> None:
-    """A stamp written before 0110-041 holds the record's revision per entry. It reads, it is current while
-    the record is unchanged, and after the next write of that record every entry of it is new to it (it
-    cannot say which one was written): still only the assessments those entries concern."""
-
-    bank = story_bank.assess_bank(home_root=fx.home_root, target=fx.target, profile_id=page.profile_id)
-    old_stamp = StoryBankStamp(page.profile_id, bank.digest, dict(bank.record_marks)).to_json()
-    assert old_stamp != page.template["story_bank"] and StoryBankStamp.from_json(old_stamp).to_json() == old_stamp
-
-    def with_old_stamp(change):
-        return lambda stored: (change(stored), stored.__setitem__("story_bank", old_stamp))
-
-    seen = _write_copy(fx, page.template, "Old stamp, nearly matches an entry", with_old_stamp(_asks(SEEN)))
-    other = _write_copy(fx, page.template, "Old stamp, asks something else", with_old_stamp(_asks(12)))
-    cites = _write_copy(fx, page.template, "Old stamp, cites an entry", _cites("industry:fintech", old_stamp))
-    items = [seen, other, cites, page.items[SEEN]]
-    assert _stale(fx, items) == {} and _run_skip_says_stale(fx, items, page.profile_id) == set()
-
-    _save(fx, page.profile_id, "industry:retail", "One year on a retail platform.", "Do you have retail experience?")
-
-    stale = _stale(fx, items)
-    assert sorted(stale) == [0, 2], "the unrelated question, and the one with a per-entry stamp, stay current"
-    assert stale[0]["basis_stale_bank"] == [
-        {"match": "near", "bank_question_id": "cloud:aws", "bank_question": "Do you have AWS experience?", "question_id": _SEEN_ID, "question": _SEEN_QUESTION}
-    ]
-    assert stale[2]["basis_stale_bank"] == [{"match": "cited", "bank_question_id": "industry:fintech", "bank_question": "Do you have fintech experience?"}]
-    assert _run_skip_says_stale(fx, items, page.profile_id) == {0, 2}
-    assert len(model.port.prompts) == page.calls

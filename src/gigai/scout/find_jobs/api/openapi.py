@@ -75,15 +75,15 @@ _STALE_NOTE = (
     "state was made on posting text that has since changed: the verdict still reads, and the job should be re-assessed. "
     "The same marker carries reason `older_prompt`, `settings_changed` or `story_bank_changed` when the state comes from a stored "
     "quick assessment made with an older assess prompt, other candidate settings (work mode, countries, location, sponsorship "
-    "need) or a story bank that has since changed; nothing is re-assessed until you ask (POST /api/assess, or assess-all)."
+    "need) or answers and stories that have since changed; nothing is re-assessed until you ask (POST /api/assess, or assess-all)."
 )
 _BASIS_NOTE = (
     "A stored assessment records its basis (`prompt_version`, `constraints_digest`, `story_bank`: digests and ids, no settings "
     "or answer text). Served with `basis_stale` (true | false) and, when true, `basis_stale_reason` (`older_prompt` | "
     "`settings_changed` | `story_bank_changed`): whether it is what its profile would be assessed with now. Derived on read; "
-    "no model is called. `story_bank_changed` is targeted: a bank entry added or edited since answers one of the assessment's own "
-    "open questions (the same id, or the near match behind `bank_suggestions`), or it cites a bank answer that was edited, deleted "
-    "or unshared. Such an item also carries `basis_stale_bank`: the entries that made it stale, each `{match: \"exact\" | \"near\" | "
+    "no model is called. `story_bank_changed` is targeted: an answer or story added or edited since answers one of the assessment's own "
+    "open questions (the same id, the near match behind `bank_suggestions`, or a story about it), or it cites an answer or story "
+    "that was edited or deleted. Such an item also carries `basis_stale_bank`: the entries that made it stale, each `{match: \"exact\" | \"near\" | "
     "\"cited\", bank_question_id, bank_question?, question_id?, question?}` (ids and question words, never an answer)."
 )
 
@@ -131,46 +131,68 @@ _HEADER_NOTE = (
 )
 _ROW_ERRORS = (_INVALID, _WRONG_TYPE, _UNKNOWN_KEY)
 
-_STORY_ID = _p("story_id", "string", "A story bank entry's id (its question_id, e.g. cloud:gcp or story:database_led_migration).")
-_STORY_BANK_ENTRY: dict[str, object] = {
-    "question_id": "cloud:gcp", "question": "Have you run workloads on GCP?", "answer": "Yes: two years of batch workloads on GCP.",
-    "tag": "technical", "owner_profile_id": "prof_1", "shared": False, "legacy": False, "edited": False, "confirmed_from": None,
-    "first_answered_at": "2026-10-01T15:00:00.000000Z", "updated_at": "2026-10-01T15:00:00.000000Z", "revision": 1, "written_by": "operator",
-    "history": [{"at": "2026-10-01T15:00:00.000000Z", "by": "operator", "action": "answered"}],
-    "postings": [{"job_identity": _JOB_URL, "title": "Software Engineer", "company": "Acme", "url": _JOB_URL, "kind": "answered", "at": "2026-10-01T15:00:00.000000Z"}],
-    "record_id": "rec_1", "revision_id": "rev_1",
+_QUESTION_ID = _p("question_id", "string", "An answer's id (e.g. cloud:gcp). Percent-encode it in the path.")
+_STORY_ID = _p("story_id", "string", "A story's id (e.g. story:60_acme_ci_cut_time). Percent-encode it in the path.")
+_ANSWER: dict[str, object] = {
+    "question_id": "cloud:gcp", "question": "Do you have GCP experience?", "answer": "Yes, 4 years, GKE + BigQuery",
+    "tag": "technical",
+    "jobs": [{"job_identity": _JOB_URL, "title": "Software Engineer", "company": "Acme", "url": _JOB_URL, "kind": "answered", "at": "2026-10-02T15:00:00.000000Z"}],
+    "written_by": "agent", "created_at": "2026-10-02T15:00:00.000000Z", "updated_at": "2026-10-02T15:00:00.000000Z", "revision": 1,
+    "history": [{"at": "2026-10-02T15:00:00.000000Z", "by": "agent", "action": "answered"}],
 }
-_STORY_BANK_STORY_REQUEST: dict[str, object] = {
-    "question": "Tell me about a database migration you led",
-    "answer": (
-        "Situation: a 4 TB Postgres primary was close to its disk limit. Task: move it to a new cluster with no downtime. "
-        "Action: led three engineers through a dual-write cut-over with a replayable backfill. Result: zero lost writes and p95 latency down 30%."
-    ),
+_ANSWER_SUGGESTION: dict[str, object] = {
+    "question_id": "tooling:cloud_google_platform", "bank_question_id": "cloud:gcp", "bank_question": "Do you have GCP experience?",
+    "answer": "Yes, 4 years, GKE + BigQuery", "score": 1.0,
+}
+_ANSWERS_EXAMPLE: dict[str, object] = {"schema_version": "scout-answers-response:1", "answers": [_ANSWER], "total": 1, "tags": ["technical"]}
+_ANSWER_NOTE = (
+    "Answers belong to the user, not to a profile: every profile's assessment and tailoring reads the same ones. Each answer: the "
+    "`question_id` (its id in the other routes), the `question` as asked (the id itself when only the id is known), the `answer`, a "
+    "model-free `tag` (technical, experience-level, eligibility, education, domain, leadership, conflict, failure, collaboration, "
+    "system-design, delivery, skill, other; or your own), `jobs` (the postings that asked it, confirmed a suggestion with it, or whose "
+    "assessment reused it: kind answered | confirmed | reused), `written_by` (operator | agent), `created_at`, `updated_at`, `revision` "
+    "(send it back on PUT and DELETE) and the last writes in `history` ({at, by, action}; an entry with `answer` is an earlier text kept "
+    "when two profiles' answers were merged)."
+)
+_STORY_REQUEST: dict[str, object] = {
+    "title": "Cut CI time 60% at Acme",
+    "company": "Acme", "role": "Staff Engineer", "period": "2023",
+    "raw": "Our builds took forty minutes, so I moved the runners to Kubernetes and cached the layers. It came down to sixteen.",
+    "narrative": {
+        "situation": "Builds took forty minutes and blocked every merge.",
+        "task": "Make the pipeline fast enough to merge several times a day.",
+        "action": "Moved the runners to Kubernetes and cached the image layers.",
+        "result": "Build time fell 60 percent.",
+    },
+    "tags": ["ci", "delivery"],
+    "answers_questions": ["Tell me about a time you improved a slow process"],
+    "sources": [{"question_id": "tooling:kubernetes", "job_identity": _JOB_URL}],
     "actor": "agent",
 }
-_STORY_BANK_STORY: dict[str, object] = {
-    **_STORY_BANK_ENTRY, "question_id": "story:database_led_migration", "question": _STORY_BANK_STORY_REQUEST["question"],
-    "answer": _STORY_BANK_STORY_REQUEST["answer"], "tag": "leadership", "written_by": "agent", "postings": [],
-    "history": [{"at": "2026-10-01T15:00:00.000000Z", "by": "agent", "action": "added"}],
+_STORY: dict[str, object] = {
+    "story_id": "story:60_acme_ci_cut_time",
+    **{key: value for key, value in _STORY_REQUEST.items() if key != "actor"},
+    "jobs": [], "written_by": "agent", "created_at": "2026-10-02T15:00:00.000000Z", "updated_at": "2026-10-02T15:00:00.000000Z", "revision": 1,
+    "history": [{"at": "2026-10-02T15:00:00.000000Z", "by": "agent", "action": "added"}],
 }
-_STORY_BANK_SUGGESTION: dict[str, object] = {
-    "question_id": "tooling:cloud_google_platform", "bank_question_id": "cloud:gcp", "bank_question": "Have you run workloads on GCP?",
-    "answer": "Yes: two years of batch workloads on GCP.", "score": 1.0, "owner_profile_id": "prof_1", "shared": False,
-}
-_STORY_BANK_EXAMPLE: dict[str, object] = {
-    "schema_version": "scout-story-bank-response:1", "profile_id": "prof_1", "entries": [_STORY_BANK_ENTRY], "total": 1, "tags": ["technical"],
-    "sharing": {"share_with": None, "read_by": [], "profiles": [{"profile_id": "prof_2", "label": "second"}]},
-}
-_STORY_BANK_NOTE = (
-    "`entries` are the profile's own, then (with `shared: true`) those of the one profile named by `sharing.share_with`. Each entry: the "
-    "`question_id` (its id in the other routes), the `question` as asked (the id itself for an answer saved before the bank), the `answer`, "
-    "a model-free `tag` (technical, experience-level, eligibility, education, domain, leadership, conflict, failure, collaboration, "
-    "system-design, delivery, skill, other; or your own), `postings` (the jobs that asked it, confirmed a suggestion with it, or whose "
-    "assessment reused it: kind answered | confirmed | reused), `first_answered_at`, `updated_at` (send it back on PUT and DELETE), `revision`, "
-    "`written_by` (operator | agent) and the last writes in `history`. `legacy: true` marks an answer saved before the bank: it belongs to the "
-    "profile named in its answer history, else to the default profile. `total` counts the entries before `q` and `tag` narrow them. "
-    "An assessment of this profile gets the entries as one-line summaries and reuses one that covers a requirement instead of asking again."
+_STORY_NOTE = (
+    "Stories belong to the user, not to a profile. Each story: `story_id`, `title`, `company`, `role`, `period` (rough is fine), `raw` "
+    "(the user's own words, kept as said), `narrative` ({situation, task, action, result}, loosely STAR, every part optional), `tags`, "
+    "`answers_questions` (the interview questions it answers), `sources` ([{question_id, job_identity}]: the job question that triggered "
+    "it), `jobs` (the postings whose assessment cited it: kind used), `written_by` (operator | agent), `created_at`, `updated_at`, "
+    "`revision` (send it back on PUT and DELETE) and the last writes in `history`. An assessment searches the stories locally for each "
+    "job and puts only the few that match the posting into its prompt as evidence."
 )
+_STORY_FIELD_PARAMS = (
+    _b("company", "string", "Where it happened."), _b("role", "string", "The role held."), _b("period", "string", "When; rough is fine."),
+    _b("raw", "string", "The user's own words, kept as said (at most 16000 characters)."),
+    _b("narrative", "object", "`{situation, task, action, result}`: loosely STAR, every part an optional string."),
+    _b("tags", "array", "Tags (lowercase, at most 12)."),
+    _b("answers_questions", "array", "The interview questions this story answers (at most 12)."),
+    _b("sources", "array", "`[{question_id, job_identity}]`: the job question that triggered the story."),
+)
+_ACTOR_PARAM = _b("actor", "string", "Who writes: recorded as written_by. Also the X-GigAI-Actor header.", enum=("operator", "agent"))
+_REVISION_CONFLICT = (409, "revision_conflict")
 
 _CHECK_TIMES_EXAMPLE: dict[str, object] = {
     "weekdays": ["03:00", "07:00", "09:00", "11:00", "13:00", "15:00", "17:00", "19:00"],
@@ -356,7 +378,7 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
         schema_version="scout-find-jobs-run-results-response:1",
         params=(_RUN_ID, _q("limit", "integer", "Page size 1..500; without it the whole run with posting text."), _q("offset", "integer", "Page start (needs limit).")),
         errors=(_INVALID, _UNKNOWN_KEY, _NOT_FOUND),
-        description="Each row carries job_state. `bank_suggestions` (when a question the run's assessments left open has a near match in the run profile's story bank) is the same list as on assess responses. " + _STALE_NOTE,
+        description="Each row carries job_state. `bank_suggestions` (when a question the run's assessments left open has a near match in the user's answers) is the same list as on assess responses. " + _STALE_NOTE,
     ),
     RouteSpec(
         "GET", "/api/runs/{run_id}/posting", "One posting of a run, complete with its text and assessment.", "read", "none",
@@ -365,7 +387,7 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
         params=(_RUN_ID, _q("url", "string", "The posting's normalized_url.", required=True)), errors=(_INVALID, _UNKNOWN_KEY, _NOT_FOUND),
         description=(
             "For a job across runs and quick assessments use GET /api/jobs?url= instead. "
-            "`bank_suggestions` is added when a question this assessment left open has a near match in the run profile's story bank. "
+            "`bank_suggestions` is added when a question this assessment left open has a near match in the user's answers. "
             f"not_assessed_reason is one of: {_NOT_ASSESSED_REASONS} (posting_incomplete: the requirement list looked cut off, so no verdict was given). "
             + _STALE_NOTE
         ),
@@ -449,7 +471,7 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
         description=(
             "Send Content-Type: application/json like every write (no body is read). The profile leaves GET /api/profiles, the switcher, new runs and background tagging; "
             "its runs and assessments stay readable (GET /api/runs?profile_id=... or include_deleted=1). The default profile and the only active profile are a 409. "
-            "Deleting the selected profile selects the default; `selected_profile_id` is the selection after the delete. The story bank and answers are untouched."
+            "Deleting the selected profile selects the default; `selected_profile_id` is the selection after the delete. The answers and stories are the user's and are untouched."
         ),
     ),
     RouteSpec(
@@ -473,142 +495,164 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
         description=_BASIS_NOTE + " " + _STALE_NOTE,
     ),
     RouteSpec(
-        "POST", "/api/answers", "Answer an assessment question; with reassess the job is assessed again.", "write", "model",
-        {"record_id": "rec_1", "revision_id": "rev_1", "question_id": "cloud:gcp", "profile_id": "prof_1", "reassessed": None}, params=(
-            _b("question_id", "string", "The question's id (`<category>:<value>`).", required=True), _b("answer", "string", "Your answer.", required=True),
+        "POST", "/api/answers", "Save an answer; with reassess the job is assessed again.", "write", "model",
+        {"schema_version": "scout-answers-response:1", "record_id": "rec_1", "revision_id": "rev_1", "question_id": "cloud:gcp", "answer": _ANSWER, "reassessed": None},
+        schema_version="scout-answers-response:1",
+        params=(
+            _b("question_id", "string", "The question's id (`<category>:<value>`).", required=True), _b("answer", "string", "The answer.", required=True),
             _b("reassess", "object", '`{"job_identity": "<id>"}`: a job to assess again with the answer.'),
-            _b("question", "string", "The question's own words, kept with the answer in the story bank."),
-            _b("profile_id", "string", "Whose story bank gets the answer; omitted = the profile the reassess job was assessed for, else the selected profile."),
+            _b("question", "string", "The question's own words, kept with the answer."),
+            _b("tag", "string", "Your own tag (lowercase, at most 40 characters); omitted = a tag from the question."),
             _b("from_bank", "string", "When the answer confirms a `bank_suggestions` near match: that suggestion's `bank_question_id`."),
-            _b("actor", "string", "Who writes: recorded on the story bank entry. Also the X-GigAI-Actor header.", enum=("operator", "agent")),
+            _b("revision", "integer", "The revision you read, when the answer exists; a stale one answers 409."),
+            _ACTOR_PARAM,
         ),
-        request_example={"question_id": "cloud:gcp", "question": "Have you run workloads on GCP?", "answer": "Yes: two years of batch workloads on GCP."},
-        errors=(_UNKNOWN_KEY, _WRONG_TYPE, (422, "answer_invalid"), (422, "personal_info_refused"), (422, "reassess_unavailable"), (404, "reassess_not_found"), (404, "profile_not_found"), _NO_TARGET),
+        request_example={"question_id": "cloud:gcp", "question": "Do you have GCP experience?", "answer": "Yes, 4 years, GKE + BigQuery", "actor": "agent"},
+        errors=(_UNKNOWN_KEY, _WRONG_TYPE, _INVALID, (422, "answer_invalid"), (422, "personal_info_refused"), _REVISION_CONFLICT, (422, "reassess_unavailable"), (404, "reassess_not_found"), _NOT_FOUND, _NO_TARGET),
         description=(
-            "Storing the answer is local; the model runs only when `reassess` is given. The answer lands in one profile's story bank "
-            "(GET /api/story-bank) and is reused by that profile's later assessments. An answer holding an email, phone, link, street "
-            "address or the saved name is refused with 422 personal_info_refused."
+            "Answers 201 with the saved `answer`. Storing it is local; the model runs only when `reassess` is given. The answer is the user's: "
+            "every profile's later assessment reuses it, for the same question id and for the same fact worded differently. A new id creates "
+            "the answer; an existing id replaces its text (send `revision` to be safe against another writer: 409 revision_conflict carries "
+            "the current `answer`). Text holding an email, phone, link or street address is refused with 422 personal_info_refused. "
+            "Example, an agent saves a factual reply from a chat and the next posting that asks it is not asked again: POST this route with "
+            "the request example; then POST /api/assess for another posting that requires GCP: the answer has no question for it and its "
+            "resume_evidence reads `Story bank cloud:gcp: ...`."
         ),
     ),
     RouteSpec(
-        "GET", "/api/answers", "The answers one profile may reuse (its own, plus a shared profile's).", "read", "none",
-        {"answers": [{"question_id": "auth:work_authorization", "prompt": "Are you authorized?", "answer": "Yes", "record_id": "rec_1", "revision_id": "rev_1"}]},
-        params=(_q("profile_id", "string", "Whose answers; omitted = the selected profile."),),
-        errors=(_UNKNOWN_KEY, (404, "profile_not_found"), _NO_TARGET),
-        description="Never another profile's answers unless that profile's bank is shared (PUT /api/story-bank/sharing). For tags, dates and the jobs that used each answer read GET /api/story-bank.",
-    ),
-    # --- the story bank (0110-034) ----------------------------------------------------
-    RouteSpec(
-        "GET", "/api/story-bank", "A profile's story bank: every answered question and story, with tags, dates, writer and the jobs that used it.", "read", "none",
-        _STORY_BANK_EXAMPLE, schema_version="scout-story-bank-response:1", host_checked=True,
-        params=(
-            _q("profile_id", "string", "Whose bank; omitted = the selected profile."),
-            _q("q", "string", "Only entries whose id, question, answer or tag holds this text."),
-            _q("tag", "string", "Only entries with this tag."),
-        ),
-        errors=(_UNKNOWN_KEY, (404, "profile_not_found"), _NO_TARGET),
-        description=_STORY_BANK_NOTE,
+        "GET", "/api/answers", "Every answer of the user, with tags, dates, writer and the jobs that asked or reused it.", "read", "none",
+        _ANSWERS_EXAMPLE, schema_version="scout-answers-response:1",
+        params=(_q("q", "string", "Only answers whose id, question, answer or tag holds this text."), _q("tag", "string", "Only answers with this tag.")),
+        errors=(_UNKNOWN_KEY, _NO_TARGET),
+        description=_ANSWER_NOTE + " `total` counts the answers before `q` and `tag` narrow them.",
     ),
     RouteSpec(
-        "GET", "/api/story-bank/match", "The story bank entry closest to one question, when it is close enough to suggest.", "read", "none",
-        {"schema_version": "scout-story-bank-response:1", "profile_id": "prof_1", "question_id": "tooling:google_cloud_platform", "match": _STORY_BANK_SUGGESTION},
-        schema_version="scout-story-bank-response:1", host_checked=True,
-        params=(
-            _q("question_id", "string", "The new question's id.", required=True),
-            _q("question", "string", "The new question's words."),
-            _q("profile_id", "string", "Whose bank; omitted = the selected profile."),
-        ),
-        errors=(_UNKNOWN_KEY, _INVALID, (404, "profile_not_found"), _NO_TARGET),
+        "GET", "/api/answers/match", "The answer closest to one question, when it is close enough to suggest.", "read", "none",
+        {"schema_version": "scout-answers-response:1", "question_id": "tooling:google_cloud_platform", "match": _ANSWER_SUGGESTION},
+        schema_version="scout-answers-response:1", host_checked=True,
+        params=(_q("question_id", "string", "The new question's id.", required=True), _q("question", "string", "The new question's words.")),
+        errors=(_UNKNOWN_KEY, _INVALID, _NO_TARGET),
         description=(
-            "Model-free: word overlap between the question and each entry (ids and question words). `match` is null when nothing scores 0.5 "
-            "or when the bank already answers this exact id (that is plain reuse). To use the suggestion, save it as the answer: "
+            "Model-free: word overlap between the question and each answer (ids and question words). `match` is null when nothing scores 0.5 "
+            "or when this exact id is already answered (that is plain reuse). To use the suggestion, save it as the answer: "
             "POST /api/answers {question_id, answer, from_bank: match.bank_question_id}. Assess responses, GET /api/jobs and a run's "
             "/results and /posting carry the same suggestions as `bank_suggestions`."
         ),
     ),
     RouteSpec(
-        "GET", "/api/story-bank/{story_id}", "One story bank entry.", "read", "none",
-        {"schema_version": "scout-story-bank-response:1", "profile_id": "prof_1", "entry": _STORY_BANK_ENTRY},
-        schema_version="scout-story-bank-response:1", host_checked=True,
-        params=(_STORY_ID, _q("profile_id", "string", "Whose bank; omitted = the selected profile.")),
-        errors=(_UNKNOWN_KEY, _NOT_FOUND, (404, "profile_not_found"), _NO_TARGET),
+        "GET", "/api/answers/{question_id}", "One answer.", "read", "none",
+        {"schema_version": "scout-answers-response:1", "answer": _ANSWER},
+        schema_version="scout-answers-response:1", host_checked=True,
+        params=(_QUESTION_ID,), errors=(_UNKNOWN_KEY, _NOT_FOUND, _NO_TARGET), description=_ANSWER_NOTE,
     ),
     RouteSpec(
-        "POST", "/api/story-bank", "Add a new entry: a story, or an answer nobody asked for yet.", "write", "none",
-        {"schema_version": "scout-story-bank-response:1", "profile_id": "prof_1", "entry": _STORY_BANK_STORY},
-        schema_version="scout-story-bank-response:1",
+        "PUT", "/api/answers/{question_id}", "Edit an answer: its text, the question words and/or the tag.", "write", "none",
+        {"schema_version": "scout-answers-response:1", "answer": _ANSWER},
+        schema_version="scout-answers-response:1",
         params=(
-            _b("question", "string", "What the story answers, e.g. \"Tell me about a migration you led\".", required=True),
-            _b("answer", "string", "The story or answer, at most 16000 characters.", required=True),
-            _b("question_id", "string", "The entry's id (`<category>:<value>`); omitted = `story:<the question's first words>`."),
-            _b("tag", "string", "Your own tag (lowercase, at most 40 characters); omitted = a tag from the question."),
-            _b("profile_id", "string", "Whose bank; omitted = the selected profile."),
-            _b("actor", "string", "Who writes: recorded on the entry. Also the X-GigAI-Actor header.", enum=("operator", "agent")),
-        ),
-        request_example=_STORY_BANK_STORY_REQUEST,
-        errors=(_UNKNOWN_KEY, _WRONG_TYPE, _INVALID, (422, "answer_invalid"), (422, "personal_info_refused"), (409, "story_exists"), (404, "profile_not_found"), _NO_TARGET),
-        description=(
-            "Answers 201 with the entry. Local only: no model reads it now; a later assessment of this profile is offered a one-line summary of it "
-            "and reuses it for a requirement it covers. 409 story_exists (with the current `entry` in the error) when the profile already has that id: "
-            "change it with PUT. 422 personal_info_refused for an email, phone, link, street address or the saved name. "
-            "Example, an agent adds a STAR story from a conversation and a later assessment reuses it: POST this route with the request example "
-            "(actor agent); then POST /api/assess for a posting that requires leading a database migration: the answer has no question for that "
-            "requirement and its resume_evidence reads `Story bank story:database_led_migration: ...`; GET /api/story-bank/story:database_led_migration "
-            "then lists that job under `postings` with kind reused."
-        ),
-    ),
-    RouteSpec(
-        "PUT", "/api/story-bank/sharing", "Set which other profile's story bank this profile also reads.", "write", "none",
-        {"schema_version": "scout-story-bank-response:1", "profile_id": "prof_2", "sharing": {"share_with": "prof_1", "read_by": [], "profiles": [{"profile_id": "prof_1", "label": "default"}]}},
-        schema_version="scout-story-bank-response:1",
-        params=(
-            _b("share_with", "string", "The profile id whose bank is also read, or null to read only this profile's own.", required=True),
-            _b("profile_id", "string", "The profile that reads; omitted = the selected profile."),
-            _b("actor", "string", "Who writes.", enum=("operator", "agent")),
-        ),
-        request_example={"profile_id": "prof_2", "share_with": "prof_1"},
-        errors=(_UNKNOWN_KEY, _WRONG_TYPE, _INVALID, (404, "profile_not_found"), _NO_TARGET),
-        description=(
-            "Explicit and one hop: prof_2 then reads prof_1's own entries (not what prof_1 reads from someone else), and prof_1 reads nothing new. "
-            "Profiles on one machine can be different people: without this setting a profile never sees another profile's answers, in the list, "
-            "the suggestions, the assess prompt or the tailoring."
-        ),
-    ),
-    RouteSpec(
-        "PUT", "/api/story-bank/{story_id}", "Edit one of the profile's own entries: the answer, the question words and/or the tag.", "write", "none",
-        {"schema_version": "scout-story-bank-response:1", "profile_id": "prof_1", "entry": _STORY_BANK_ENTRY},
-        schema_version="scout-story-bank-response:1",
-        params=(
-            _STORY_ID,
-            _b("updated_at", "string", "The updated_at of the entry you read; when the entry changed since, the answer is 409.", required=True),
+            _QUESTION_ID,
+            _b("revision", "integer", "The revision of the answer you read; when it changed since, the reply is 409.", required=True),
             _b("answer", "string", "The new answer."), _b("question", "string", "The question's own words."),
             _b("tag", "string", "Your own tag; an empty string puts the automatic tag back."),
-            _b("profile_id", "string", "Whose bank; omitted = the selected profile."),
-            _b("actor", "string", "Who writes: recorded on the entry. Also the X-GigAI-Actor header.", enum=("operator", "agent")),
+            _ACTOR_PARAM,
         ),
-        request_example={"updated_at": "2026-10-01T15:00:00.000000Z", "answer": "Yes: three years of batch and streaming workloads on GCP.", "actor": "agent"},
-        errors=(_UNKNOWN_KEY, _WRONG_TYPE, _INVALID, (422, "answer_invalid"), (422, "personal_info_refused"), (409, "story_bank_changed"), _NOT_FOUND, (404, "profile_not_found"), _NO_TARGET),
+        request_example={"revision": 1, "answer": "Yes, 5 years, GKE, BigQuery and Dataflow", "actor": "agent"},
+        errors=(_UNKNOWN_KEY, _WRONG_TYPE, _INVALID, (422, "answer_invalid"), (422, "personal_info_refused"), _REVISION_CONFLICT, _NOT_FOUND, _NO_TARGET),
         description=(
-            "At least one of answer, question, tag. Every write bumps the entry's `revision` and `updated_at` and records `written_by`. "
-            "409 story_bank_changed carries the current `entry` in the error: someone (the user in the UI, or another agent) wrote it after you read it; "
-            "read the entry, merge, and send again with its updated_at. A shared entry is edited in the profile that owns it (404 here)."
+            "At least one of answer, question, tag. Every write bumps `revision` and `updated_at` and records `written_by`. "
+            "409 revision_conflict carries the current `answer` in the error: someone (the user, or another agent) wrote it after you read it; "
+            "read it, merge, and send again with its revision."
         ),
     ),
     RouteSpec(
-        "DELETE", "/api/story-bank/{story_id}", "Remove one of the profile's own entries.", "write", "none",
-        {"schema_version": "scout-story-bank-response:1", "profile_id": "prof_1", "deleted": "cloud:gcp"},
-        schema_version="scout-story-bank-response:1",
+        "DELETE", "/api/answers/{question_id}", "Remove an answer.", "write", "none",
+        {"schema_version": "scout-answers-response:1", "deleted": "cloud:gcp"},
+        schema_version="scout-answers-response:1",
         params=(
-            _STORY_ID,
-            _q("updated_at", "string", "The updated_at of the entry you read; when the entry changed since, the answer is 409.", required=True),
-            _q("profile_id", "string", "Whose bank; omitted = the selected profile."),
+            _QUESTION_ID,
+            _q("revision", "integer", "The revision of the answer you read; when it changed since, the reply is 409.", required=True),
             _q("actor", "string", "Who writes.", enum=("operator", "agent")),
         ),
-        errors=(_UNKNOWN_KEY, _INVALID, (409, "story_bank_changed"), _NOT_FOUND, (404, "profile_not_found"), _NO_TARGET),
+        errors=(_UNKNOWN_KEY, _INVALID, _REVISION_CONFLICT, _NOT_FOUND, _NO_TARGET),
         description=(
-            "Send Content-Type: application/json like every write (no body is read). The entry is never listed, offered or sent to a model again; "
+            "Send Content-Type: application/json like every write (no body is read). The answer is never listed, offered or sent to a model again; "
             "the project's journal keeps the older revision of the record it was in."
         ),
+    ),
+    # --- stories (0.1.10.7 C) ---------------------------------------------------------
+    RouteSpec(
+        "GET", "/api/stories", "Every story of the user, with tags, dates, writer and the jobs that used it.", "read", "none",
+        {"schema_version": "scout-stories-response:1", "stories": [_STORY], "total": 1, "tags": ["ci", "delivery"]},
+        schema_version="scout-stories-response:1", host_checked=True,
+        params=(_q("q", "string", "Only stories whose text holds this."), _q("tag", "string", "Only stories with this tag.")),
+        errors=(_UNKNOWN_KEY, _NO_TARGET),
+        description=_STORY_NOTE + " `total` counts the stories before `q` and `tag` narrow them.",
+    ),
+    RouteSpec(
+        "GET", "/api/stories/prep", "The basic interview prep list: the questions the stories answer, pooled.", "read", "none",
+        {"schema_version": "scout-stories-response:1", "questions": [
+            {"question": "Tell me about a time you improved a slow process", "stories": [{"story_id": "story:60_acme_ci_cut_time", "title": "Cut CI time 60% at Acme"}]},
+        ]},
+        schema_version="scout-stories-response:1", host_checked=True,
+        errors=(_UNKNOWN_KEY, _NO_TARGET),
+        description="`answers_questions` pooled across every story: one row per question, in first-seen order, with the stories that answer it. Local, no model call.",
+    ),
+    RouteSpec(
+        "GET", "/api/stories/{story_id}", "One story.", "read", "none",
+        {"schema_version": "scout-stories-response:1", "story": _STORY},
+        schema_version="scout-stories-response:1", host_checked=True,
+        params=(_STORY_ID,), errors=(_UNKNOWN_KEY, _NOT_FOUND, _NO_TARGET), description=_STORY_NOTE,
+    ),
+    RouteSpec(
+        "POST", "/api/stories", "Add a story.", "write", "none",
+        {"schema_version": "scout-stories-response:1", "story": _STORY},
+        schema_version="scout-stories-response:1",
+        params=(
+            _b("title", "string", "\"Cut CI time 60% at Acme\" (at most 200 characters).", required=True),
+            *_STORY_FIELD_PARAMS,
+            _b("story_id", "string", "The story's id (`story:<words>`); omitted = `story:<the title's first words>`."),
+            _ACTOR_PARAM,
+        ),
+        request_example=_STORY_REQUEST,
+        errors=(_UNKNOWN_KEY, _WRONG_TYPE, _INVALID, (422, "personal_info_refused"), (409, "story_exists"), _NO_TARGET),
+        description=(
+            "Answers 201 with the story. Local only: no model reads it now. 409 story_exists (with the current `story` in the error) when that id "
+            "is taken: change it with PUT. 422 personal_info_refused when any text holds an email, phone, link or street address. "
+            "Example, an agent turns a substantial reply into a story and a later assessment uses it: after the user says yes to \"Want me to "
+            "make this a story?\", POST this route with the request example; then POST /api/assess for a posting that asks for Kubernetes: "
+            "the story is in that assessment's prompt, the row's resume_evidence reads `Story bank story:60_acme_ci_cut_time: ...`, and "
+            "GET /api/stories/story:60_acme_ci_cut_time lists that job under `jobs` with kind used. " + _STORY_NOTE
+        ),
+    ),
+    RouteSpec(
+        "PUT", "/api/stories/{story_id}", "Edit a story: only the given fields change.", "write", "none",
+        {"schema_version": "scout-stories-response:1", "story": _STORY},
+        schema_version="scout-stories-response:1",
+        params=(
+            _STORY_ID,
+            _b("revision", "integer", "The revision of the story you read; when it changed since, the reply is 409.", required=True),
+            _b("title", "string", "The title."),
+            *_STORY_FIELD_PARAMS,
+            _ACTOR_PARAM,
+        ),
+        request_example={"revision": 1, "period": "2022-2023", "tags": ["ci", "delivery", "kubernetes"], "actor": "agent"},
+        errors=(_UNKNOWN_KEY, _WRONG_TYPE, _INVALID, (422, "personal_info_refused"), _REVISION_CONFLICT, _NOT_FOUND, _NO_TARGET),
+        description=(
+            "At least one field. A given field replaces the stored one whole (`narrative`, `tags`, `answers_questions` and `sources` are not merged). "
+            "Every write bumps `revision` and `updated_at` and records `written_by`. 409 revision_conflict carries the current `story` in the error."
+        ),
+    ),
+    RouteSpec(
+        "DELETE", "/api/stories/{story_id}", "Remove a story.", "write", "none",
+        {"schema_version": "scout-stories-response:1", "deleted": "story:60_acme_ci_cut_time"},
+        schema_version="scout-stories-response:1",
+        params=(
+            _STORY_ID,
+            _q("revision", "integer", "The revision of the story you read; when it changed since, the reply is 409.", required=True),
+            _q("actor", "string", "Who writes.", enum=("operator", "agent")),
+        ),
+        errors=(_UNKNOWN_KEY, _INVALID, _REVISION_CONFLICT, _NOT_FOUND, _NO_TARGET),
+        description="Send Content-Type: application/json like every write (no body is read). The story is never listed, searched or sent to a model again.",
     ),
     RouteSpec(
         "POST", "/api/applications", "Record an application event (applied, interview_scheduled, ...) for a job.", "write", "none",
@@ -936,7 +980,7 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
     ),
 )
 
-TAGS: tuple[str, ...] = ("Agents and meta", "Runs", "Jobs", "Assessment", "Tailored resumes", "Profiles and resume", "Sources", "Settings")
+TAGS: tuple[str, ...] = ("Agents and meta", "Runs", "Jobs", "Assessment", "Answers and stories", "Tailored resumes", "Profiles and resume", "Sources", "Settings")
 
 # (summary <= 80 chars, imperative; tag). The long sentence written on each entry above becomes the
 # start of its description, so the docs page shows a short title and the full explanation.
@@ -970,15 +1014,18 @@ _META: dict[tuple[str, str], tuple[str, str]] = {
     ("POST", "/api/profiles/selection"): ("Select the active profile", "Profiles and resume"),
     ("POST", "/api/assess"): ("Assess one job against a resume", "Assessment"),
     ("GET", "/api/assessments"): ("List stored assessments", "Assessment"),
-    ("POST", "/api/answers"): ("Answer an assessment question", "Assessment"),
-    ("GET", "/api/answers"): ("List stored answers", "Assessment"),
-    ("GET", "/api/story-bank"): ("List a profile's story bank", "Profiles and resume"),
-    ("GET", "/api/story-bank/match"): ("Find a story bank answer for a question", "Profiles and resume"),
-    ("GET", "/api/story-bank/{story_id}"): ("Get one story bank entry", "Profiles and resume"),
-    ("POST", "/api/story-bank"): ("Add a story or an answer to the story bank", "Profiles and resume"),
-    ("PUT", "/api/story-bank/sharing"): ("Share a story bank between two profiles", "Profiles and resume"),
-    ("PUT", "/api/story-bank/{story_id}"): ("Edit a story bank entry", "Profiles and resume"),
-    ("DELETE", "/api/story-bank/{story_id}"): ("Delete a story bank entry", "Profiles and resume"),
+    ("POST", "/api/answers"): ("Save an answer", "Answers and stories"),
+    ("GET", "/api/answers"): ("List answers", "Answers and stories"),
+    ("GET", "/api/answers/match"): ("Find an answer for a question", "Answers and stories"),
+    ("GET", "/api/answers/{question_id}"): ("Get one answer", "Answers and stories"),
+    ("PUT", "/api/answers/{question_id}"): ("Edit an answer", "Answers and stories"),
+    ("DELETE", "/api/answers/{question_id}"): ("Delete an answer", "Answers and stories"),
+    ("GET", "/api/stories"): ("List stories", "Answers and stories"),
+    ("GET", "/api/stories/prep"): ("List the interview questions the stories answer", "Answers and stories"),
+    ("GET", "/api/stories/{story_id}"): ("Get one story", "Answers and stories"),
+    ("POST", "/api/stories"): ("Add a story", "Answers and stories"),
+    ("PUT", "/api/stories/{story_id}"): ("Edit a story", "Answers and stories"),
+    ("DELETE", "/api/stories/{story_id}"): ("Delete a story", "Answers and stories"),
     ("POST", "/api/applications"): ("Record an application event", "Jobs"),
     ("GET", "/api/applications"): ("List application events", "Jobs"),
     ("POST", "/api/tailored-resumes"): ("Tailor the resume to one posting", "Tailored resumes"),
@@ -1220,12 +1267,17 @@ def llms_text() -> str:
         "then POST /api/tailored-resumes/pdf. To render your own markdown instead: POST /api/resume/pdf {markdown}. "
         "GigAI stores no name or contact details: these PDFs have no header, and a line holding a name or contact detail is refused (422 personal_info_refused). "
         "The person adds their details in Scout's Generate PDF form, in their browser; an agent cannot finish that step unless it drives that browser.\n"
-        "- Story bank (per profile; local, no model call): every answered question and story, reused by later assessments. Read GET /api/story-bank "
-        "(?profile_id=&q=&tag=) or GET /api/story-bank/<id>; add POST /api/story-bank {question, answer, actor: \"agent\"}; edit PUT /api/story-bank/<id> "
-        "{updated_at, answer|question|tag, actor}; remove DELETE /api/story-bank/<id>?updated_at=. Send the updated_at you read: a stale write answers "
-        "409 story_bank_changed with the current entry. An open question may come with a near match in `bank_suggestions` (assess responses, GET /api/jobs, "
-        "GET /api/story-bank/match): confirm it with POST /api/answers {question_id, answer, from_bank}. A profile never reads another profile's bank "
-        "unless PUT /api/story-bank/sharing says so. Answers never hold a name or contact details (422 personal_info_refused).\n"
+        "- Answers and stories (the user's, shared by every profile; local, no model call). An ANSWER is a short fact (\"Do you have GCP experience?\" -> "
+        "\"Yes, 4 years, GKE + BigQuery\"): save a factual reply with POST /api/answers {question_id, question, answer, actor: \"agent\"}; read GET /api/answers "
+        "(?q=&tag=) or GET /api/answers/<id>; edit PUT /api/answers/<id> {revision, answer|question|tag, actor}; remove DELETE /api/answers/<id>?revision=. "
+        "A STORY is an experience worth telling (a project, a problem, an outcome): when a reply has that substance, ask \"Want me to make this a story?\", "
+        "draft the narrative from the person's own words, show it, and on OK save it with POST /api/stories {title, company, role, period, raw, "
+        "narrative: {situation, task, action, result}, tags, answers_questions, sources, actor: \"agent\"}; read GET /api/stories or GET /api/stories/<id>; "
+        "edit PUT /api/stories/<id> {revision, ...fields, actor}; remove DELETE /api/stories/<id>?revision=; GET /api/stories/prep pools the interview "
+        "questions the stories answer. Send the revision you read: a stale write answers 409 revision_conflict with the current answer or story. "
+        "Later assessments reuse an answer for the same question (or the same fact worded differently) and get the few stories that match the posting. "
+        "An open question may come with a near match in `bank_suggestions` (assess responses, GET /api/jobs, GET /api/answers/match): confirm it with "
+        "POST /api/answers {question_id, answer, from_bank}. Answers and stories never hold contact details (422 personal_info_refused).\n"
     )
 
 

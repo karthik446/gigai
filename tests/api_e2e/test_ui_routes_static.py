@@ -64,6 +64,8 @@ EXPECTED_ROUTES = {
     "assess": "#/assess",
     # 0110-046: where an agent's or the CLI's headerless PDF is finished.
     "pdf": "#/pdf",
+    # 0.1.10.7 C: the read-only Answers and stories page.
+    "answers": "#/answers",
 }
 
 
