@@ -56,6 +56,7 @@ from contextlib import nullcontext
 from datetime import UTC, datetime, timedelta
 import hashlib
 from pathlib import Path
+import re
 import textwrap
 
 from . import postings
@@ -94,6 +95,7 @@ _AWAITING_APPROVAL = "awaiting_approval"
 POSTINGS_LABELS = {
     "/rows/*/title": PUBLIC_UNTRUSTED,
     "/rows/*/company": PUBLIC_UNTRUSTED,
+    "/rows/*/company_name": PUBLIC_UNTRUSTED,
     "/rows/*/location": PUBLIC_UNTRUSTED,
     "/rows/*/salary": PUBLIC_UNTRUSTED,
     "/rows/*/description": PUBLIC_UNTRUSTED,
@@ -102,6 +104,20 @@ POSTINGS_LABELS = {
 }
 YOURS_LABELS = {"/evidence/*/lines/*": USER_PRIVATE}
 YOURS_NOTE = "What matches, in your own words (resume lines, answers, stories), is a separate call: it is never sent next to posting text."
+
+
+_SLUG_LIKE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
+
+
+def display_company_name(company: str | None) -> str | None:
+    """A board slug ("tallgrass-health") as a name ("Tallgrass Health"); a real name passes through.
+
+    The same rule as the UI's ``displayCompanyName`` (``ui/src/display.js``): a slug has no spaces and no capitals.
+    """
+
+    if not company or not _SLUG_LIKE.match(company):
+        return company
+    return " ".join(part[:1].upper() + part[1:] for part in company.split("-") if part)
 
 
 class ScoutNewError(ValueError):
@@ -192,6 +208,7 @@ def _row_json(
         "job_url": text.url if text is not None else row.job,
         "title": text.title if text is not None else None,
         "company": text.company if text is not None else None,
+        "company_name": display_company_name(text.company) if text is not None else None,
         "location": text.location if text is not None else None,
         "work_mode": text.work_mode if text is not None else "unknown",
         "salary": text.salary if text is not None else None,
@@ -657,7 +674,7 @@ _HEADINGS = ("Details", "Score", "Needs tailoring?", "Open questions")
 def _cell(lines: Iterable[str], width: int) -> list[str]:
     wrapped: list[str] = []
     for line in lines:
-        wrapped.extend(textwrap.wrap(line, width=width, subsequent_indent="  ") or [""])
+        wrapped.extend(textwrap.wrap(line, width=width, subsequent_indent="  ", break_long_words=False) or [""])
     return wrapped
 
 
@@ -696,7 +713,7 @@ def render(response: Mapping[str, object]) -> str:
         lines.append(rule)
         for row in rows:
             tags = ", ".join(str(labels.get(item["profile_id"], item["profile_id"])) for item in row["profiles"])
-            details = [f"{row['company'] or '?'}: {row['title'] or row['job_identity']}", str(row["work_mode"])]
+            details = [f"{row['company_name'] or '?'}: {row['title'] or row['job_identity']}", str(row["work_mode"])]
             if row["salary"]:
                 details.append(str(row["salary"]))
             details.append(f"[{tags}]")

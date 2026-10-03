@@ -233,7 +233,7 @@ def test_the_variant_reads_n_to_m_after_tailoring_from_the_backends_numbers(out:
     assert out["variants"] == [
         {"text": "73 → 91 after tailoring", "detail": "Requirements met: 8 of 11 → 10 of 11", "improved": True},
         None,
-        {"text": "82 → 82 after tailoring", "detail": "Requirements met: 9 of 11 → 9 of 11", "improved": False},
+        {"text": "82 · no change after tailoring", "detail": "Requirements met: 9 of 11 → 9 of 11", "improved": False},
     ]
 
 

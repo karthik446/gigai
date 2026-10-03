@@ -301,13 +301,13 @@ _NEW_EXAMPLE: dict[str, object] = {
     "processed": None,
     "postings": {
         "_labels": {
-            "/rows/*/title": "public-untrusted", "/rows/*/company": "public-untrusted", "/rows/*/location": "public-untrusted",
+            "/rows/*/title": "public-untrusted", "/rows/*/company": "public-untrusted", "/rows/*/company_name": "public-untrusted", "/rows/*/location": "public-untrusted",
             "/rows/*/salary": "public-untrusted", "/rows/*/description": "public-untrusted",
             "/rows/*/unmet/*": "public-untrusted", "/rows/*/open_questions/*/question": "public-untrusted",
         },
         "rule": UNTRUSTED_TEXT_RULE,
         "rows": [{
-            "job_identity": _JOB_URL, "normalized_url": _JOB_URL, "job_url": _JOB_URL, "title": "Staff Engineer", "company": "Acme",
+            "job_identity": _JOB_URL, "normalized_url": _JOB_URL, "job_url": _JOB_URL, "title": "Staff Engineer", "company": "acme", "company_name": "Acme",
             "location": "Remote - US", "work_mode": "remote", "salary": "USD 180,000-220,000 per year",
             "description": "Acme is hiring a Staff Engineer to own its Python services…", "first_seen": "2026-10-02T08:00:00.000000Z",
             "removed_at": None, "profile_id": "prof_1",

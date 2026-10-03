@@ -23,6 +23,11 @@ export function displayCompanyName(company) {
     .join(" ");
 }
 
+// " at <Company>" for a sentence, or "" when the job has no company.
+export function atCompany(company) {
+  return company ? ` at ${displayCompanyName(company)}` : "";
+}
+
 // PinnedResume (contracts.py) itself still carries only record_id/
 // revision_id/content_sha256 — no human label or source filename (U17).
 // uat-bug-004: GET /api/config now also returns the resume reference's

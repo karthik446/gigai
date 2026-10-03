@@ -102,8 +102,9 @@ export function variantLine(detail) {
   if (!base || !tailored || typeof base.percent !== "number" || typeof tailored.percent !== "number") {
     return null;
   }
+  const unchanged = base.percent === tailored.percent && base.met === tailored.met && base.total === tailored.total;
   return {
-    text: `${base.percent} → ${tailored.percent} after tailoring`,
+    text: unchanged ? `${base.percent} · no change after tailoring` : `${base.percent} → ${tailored.percent} after tailoring`,
     detail: `Requirements met: ${base.met} of ${base.total} → ${tailored.met} of ${tailored.total}`,
     improved: tailored.percent > base.percent,
   };
