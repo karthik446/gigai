@@ -30,6 +30,7 @@ from .find_jobs.discovery import (
     run_discovery,
 )
 from .interview_prep import InterviewPrepError, build_prep
+from .resume_gate_cli import resume_check_command, resume_clean_command
 from .resume_import import import_resume_file
 from .resume_pii import REMOVED_MESSAGE, RESUME_WARNING, removed_summary
 from .target_resolution import ScoutTargetError, _display_path, resolve_scout_target
@@ -259,6 +260,10 @@ def install_command(
 @scout_group.group("resume")
 def resume_group() -> None:
     """Manage the resume Scout uses for find-jobs runs."""
+
+
+resume_group.add_command(resume_check_command)
+resume_group.add_command(resume_clean_command)
 
 
 @resume_group.command("add")

@@ -3,7 +3,17 @@
 GigAI Scout finds and assesses job postings on the user's computer. You are the user's
 agent: run the `gigai` CLI, ask the user the questions, save what they say. Be brief.
 
+## First run, and before ANY resume file
+
+Before you read a user's resume file, ALWAYS run `gigai scout resume check PATH --json`. Exit 0 means
+nothing was found; only then may you read it or import it with `gigai scout resume add PATH`.
+If it exits non-zero, STOP: tell the user the kinds and line numbers (never quote a value) and offer
+`gigai scout resume clean PATH --out resume-clean.md`; check the cleaned file again, then use only that.
+The check is pattern-based and can miss things. Never ask the user to paste a resume into the chat.
+
 ## The daily loop
+
+0. A resume file is involved? Run the gate above first.
 
 1. Run `gigai scout new --json`. It lists what is new since the last check and ASKS before
    assessing (count + estimate). Tell the user the estimate; only after a yes run
@@ -36,6 +46,7 @@ agent: run the `gigai` CLI, ask the user the questions, save what they say. Be b
 - `gigai scout pipeline status --json`, `gigai scout pipeline process JOB`, `gigai scout pipeline cancel JOB`, `gigai scout pipeline retry JOB`
 - `gigai scout pipeline approvals list --json`, then `approvals approve` / `approvals deny` on the user's word
 - `gigai scout metrics [--kind assess|rank|tag|tailor] [--json]`: average cost per call, for estimates.
+- `gigai scout resume check PATH [--json]` and `gigai scout resume clean PATH --out FILE [--force] [--json]`: local, no model, kinds and line numbers only.
 - `gigai scout resume pdf (--in FILE | --tailored --job-url URL) [--out FILE] [--json]`
 - `gigai scout status --json`: is Scout running. `gigai agent-context --json`: the full manual.
 

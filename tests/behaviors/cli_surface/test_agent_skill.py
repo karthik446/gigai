@@ -73,7 +73,7 @@ def _path(command: click.Command) -> list[str]:
 
 def test_the_spans_without_pseudo_syntax_parse_in_full() -> None:
     for span in _spans():
-        if re.search(r"[|\[\]()]|\.\.\.|\bTEXT\b|\bN\b|\bS\b", span) or " / " in span:
+        if re.search(r"[|\[\]()]|\.\.\.|\bTEXT\b|\bPATH\b|\bN\b|\bS\b", span) or " / " in span:
             continue
         words = span.split()[1:]
         (command, rest), = _resolve(words)
@@ -123,6 +123,22 @@ def test_out_writes_only_the_named_file_and_never_replaces_silently(tmp_path: Pa
     assert CliRunner().invoke(cli, ["agent-skill", "--out", str(target), "--format", "agents-md", "--force"]).exit_code == 0
 
 
+def test_out_creates_missing_parent_folders(tmp_path: Path) -> None:
+    target = tmp_path / "fresh" / ".claude" / "skills" / "gigai-scout" / "SKILL.md"
+    result = CliRunner().invoke(cli, ["agent-skill", "--format", "skill", "--out", str(target)])
+    assert result.exit_code == 0, result.output
+    assert target.read_text() == render("skill")
+
+
+def test_the_skill_gates_every_resume_file_on_the_check() -> None:
+    text = source_text()
+    assert "gigai scout resume check PATH" in text and "gigai scout resume clean PATH --out resume-clean.md" in text
+    assert "Never ask the user to paste a resume" in text
+    assert len(text.splitlines()) <= 100
+    description = render("skill").split("---\n")[1]
+    assert "what's new on Scout" in description
+
+
 def test_agent_permissions_prints_valid_json_and_writes_nothing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     home = tmp_path / "home"
     work = tmp_path / "work"
@@ -136,10 +152,12 @@ def test_agent_permissions_prints_valid_json_and_writes_nothing(tmp_path: Path, 
     end = result.output.rindex("}") + 1
     assert json.loads(result.output[start:end]) == PERMISSIONS_SNIPPET
     permissions = PERMISSIONS_SNIPPET["permissions"]
-    assert "Bash(gigai:*)" in permissions["allow"] and "Read(~/.gigai/**)" in permissions["deny"]
+    assert permissions["allow"] == ["Bash(gigai *)", "Bash(curl http://127.0.0.1:8765/*)", "Bash(curl http://localhost:8765/*)"]
+    assert permissions["deny"] == ["Read(~/.gigai/**)", "Bash(cat ~/.gigai/**)"]
+    assert "curl http://127.0.0.1:8765/" in result.output and "prefer the `gigai` CLI" in result.output
     assert "not a security boundary" in result.output
     assert list(home.rglob("*")) == [] and list(work.rglob("*")) == []
 
 
-GOLDEN_SKILL = "f675e9a77fe7ac14f9197bd7e13e7ffcca0945d09ab34442988894793224ecea"
-GOLDEN_AGENTS = "c885291c24ba493cae0cd30c5f8acdab0496d0d496a1cac4589d15412ce2a13a"
+GOLDEN_SKILL = "4158a1af1d6b52d1c79f7471f88997b7dcd23d86d340d90522a3c87487ffc2d1"
+GOLDEN_AGENTS = "a9ceb96d9e8e28ef589a398e41a4084b6aef340306fc88eefdcb8a00f6ae1d54"
