@@ -718,6 +718,10 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
         "POST", "/api/resumes", "Store a resume (pasted text or a base64 file).", "write", "none", {"record_id": "rec_1", "revision_id": "rev_1"},
         params=(_b("text", "string", "Resume text (exclusive with file_name)."), _b("file_name", "string", "Uploaded file name."), _b("content_base64", "string", "Uploaded file, base64.")),
         request_example={"text": "..."}, errors=(_UNKNOWN_KEY, _WRONG_TYPE, (422, "resume_input_invalid"), (422, "resume_too_large")),
+        description=(
+            "The resume is stored with its name and contact lines (email, phone, address, links) removed and discarded; "
+            "contact_removed is {removed: {kind: count}, message} when any were, else null."
+        ),
     ),
     # --- watchlist / sources ---------------------------------------------------------
     RouteSpec(

@@ -49,9 +49,15 @@ function fakeApi() {
 const out = { initial: m.initialNewResume() };
 
 const paste = fakeApi();
-await m.createProfileWithResume(
+out.pasteResult = await m.createProfileWithResume(
   { label: " FDE ", titles: ["fde"], resume: { ...m.initialNewResume(), text: "pasted resume" } }, paste);
 out.paste = paste.calls;
+
+// 0110-046: the import's "we removed your contact lines" message comes back with the profile.
+const stripped = fakeApi();
+stripped.storeResume = async () => ({ resume_ref: { record_id: "r", revision_id: "v" }, contact_removed: { removed: { email: 1 }, message: "We removed your contact lines; you'll add them when you make a PDF." } });
+out.strippedResult = await m.createProfileWithResume({ label: "S", titles: ["s"], resume: { ...m.initialNewResume(), text: "x" } }, stripped);
+out.removedMessages = [m.contactRemovedMessage(null), m.contactRemovedMessage({ contact_removed: null }), m.contactRemovedMessage({ contact_removed: { message: "m" } })];
 
 const upload = fakeApi();
 await m.createProfileWithResume(
@@ -168,3 +174,13 @@ def test_the_form_uses_the_warning_the_contact_check_and_truthful_copy() -> None
     assert "<NewProfileResume" in view and "data-role=\"shared-resume-warning\"" in view
     assert "<ResumeWarning" in field and "useResumeCheck" in field and "contactHeadsUp" in field
     assert "Continue anyway" in field
+
+
+def test_the_import_message_comes_back_with_the_new_profile(out: dict) -> None:
+    from gigai.scout.resume_pii import REMOVED_MESSAGE
+
+    assert out["pasteResult"] == {"profile": {"profile_id": "p_new", "label": "FDE"}, "contactRemoved": None}
+    assert out["strippedResult"]["contactRemoved"] == REMOVED_MESSAGE
+    assert out["removedMessages"] == [None, None, "m"]
+    view = (UI_SRC / "views" / "ProfilesView.jsx").read_text(encoding="utf-8")
+    assert 'data-role="contact-removed"' in view and "setCreateNote(created.contactRemoved)" in view

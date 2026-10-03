@@ -163,7 +163,12 @@ export default function App() {
     [runPostingIds],
   );
 
-  const wizardDone = () => {
+  // 0110-046: a one-time notice under the top bar ("We removed your contact
+  // lines; ..." after the wizard stored a resume). Dismissed, it is gone.
+  const [notice, setNotice] = useState(null);
+
+  const wizardDone = (done) => {
+    setNotice((done && done.contactRemoved) || null);
     setEditingSetup(false);
     setupState.reload();
     // P0-2: PUT /api/setup also rewrites find-jobs.json, so the config --
@@ -197,8 +202,8 @@ export default function App() {
   if (showFirstRunInterview) {
     return (
       <SetupWizard
-        onDone={() => {
-          wizardDone();
+        onDone={(done) => {
+          wizardDone(done);
           navigate(JOBS_HASH);
         }}
       />
@@ -208,8 +213,8 @@ export default function App() {
   if (editingSetup && setupState.prefs) {
     return (
       <SetupWizard
-        onDone={() => {
-          wizardDone();
+        onDone={(done) => {
+          wizardDone(done);
           // uat-bug-048: an empty store lands on Jobs (step 1 highlighted there).
           getSourcesUpdate()
             .then((status) => navigate(finishLanding(status, { fromSettings: true }).toJobs ? JOBS_HASH : SETTINGS_HASH))
@@ -233,6 +238,14 @@ export default function App() {
       />
 
       <main className="app-main" data-view={route.view}>
+        {notice && (
+          <div className="callout info" role="status" data-role="app-notice">
+            {notice}{" "}
+            <button type="button" className="button small secondary" onClick={() => setNotice(null)}>
+              Dismiss
+            </button>
+          </div>
+        )}
         {profilesState.error && <div className="callout danger">Could not load profiles: {profilesState.error}</div>}
 
         {configError && route.view !== "settings" && (

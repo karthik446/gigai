@@ -25,14 +25,17 @@
 // Pressing Finish again after a failure at any step repeats the steps
 // without making a second resume (the server stores a resume once per
 // content) or a second profile (step 3 finds the one already saved).
+import { contactRemovedMessage } from "../profileResumeModel.js";
 import { displayBody, profileBody, profileToUpdate, resumeBody, setupBody } from "./wizardState.js";
 
 export async function finishSetup({ fields, selectedProfile, existingPrefs }, api) {
   let resumeRef = null;
+  let contactRemoved = null;
   const resume = resumeBody(fields);
   if (resume) {
     const stored = await api.storeResume(resume);
     resumeRef = stored.resume_ref;
+    contactRemoved = contactRemovedMessage(stored); // 0110-046: the import removed contact lines
   } else if (fields.existingRef) {
     resumeRef = { record_id: fields.existingRef.record_id, revision_id: fields.existingRef.revision_id };
   }
@@ -62,5 +65,5 @@ export async function finishSetup({ fields, selectedProfile, existingPrefs }, ap
   if (display) {
     await api.putResumeDisplay(display);
   }
-  return { profile, selectedProfileId, resumeRef, prefs: prefsResponse.prefs };
+  return { profile, selectedProfileId, resumeRef, prefs: prefsResponse.prefs, contactRemoved };
 }

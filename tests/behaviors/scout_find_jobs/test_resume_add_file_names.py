@@ -34,7 +34,8 @@ from tests.behaviors.scout_find_jobs.test_scout_cli import _setup_and_init
 from tests.support.scout_profile_fixtures import ProfileFixtureGig, build_gig_with_resume
 
 READABLE_NAME = "Jordan Rivera résumé (2026).md"
-RESUME = "Jordan Rivera\nStaff engineer: nine years of Go and Kafka.\n".encode("utf-8")
+# 0110-046: no name line (an import strips it, and a file name holding the removed name is not kept).
+RESUME = "Staff engineer: nine years of Go and Kafka.\nBuilt the billing pipeline.\n".encode("utf-8")
 KEY_CHARS = set("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._:-")
 
 

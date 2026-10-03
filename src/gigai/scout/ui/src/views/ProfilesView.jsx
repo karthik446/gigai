@@ -107,6 +107,9 @@ export default function ProfilesView({ profiles, selectedProfileId, onSelectProf
   const [archiveError, setArchiveError] = useState(null);
   const [archiveNote, setArchiveNote] = useState(null);
 
+  // 0110-046: "We removed your contact lines; ..." after a resume was stored.
+  const [createNote, setCreateNote] = useState(null);
+
   async function handleCreate(event) {
     event.preventDefault();
     if (!canCreateProfile({ label: newLabel, titles: newTitles, resume: newResume }) || resumeBlocked) {
@@ -115,7 +118,8 @@ export default function ProfilesView({ profiles, selectedProfileId, onSelectProf
     setCreateSaving(true);
     setCreateError(null);
     try {
-      await createProfileWithResume({ label: newLabel, titles: newTitles, resume: newResume }, { storeResume, createProfile });
+      const created = await createProfileWithResume({ label: newLabel, titles: newTitles, resume: newResume }, { storeResume, createProfile });
+      setCreateNote(created.contactRemoved);
       setNewLabel("");
       setNewTitles([]);
       setNewResume(initialNewResume());
@@ -247,7 +251,12 @@ export default function ProfilesView({ profiles, selectedProfileId, onSelectProf
           </form>
         ) : (
           <div className="card-actions" style={{ marginTop: 10 }}>
-            <button className="button small secondary" onClick={() => setCreating(true)}>
+            {createNote && (
+              <div className="callout info" data-role="contact-removed">
+                {createNote}
+              </div>
+            )}
+            <button className="button small secondary" onClick={() => { setCreateNote(null); setCreating(true); }}>
               + Add profile
             </button>
           </div>

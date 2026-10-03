@@ -11,7 +11,9 @@ The resume is imported through ``resume_import``, the same function
 ``gigai scout resume add`` calls, so it becomes the same kind of reference
 and record. Response: ``201`` when something was stored, ``200`` when this
 exact resume already was (idempotent by content), with ``{"resume_ref":
-{"record_id", "revision_id", "content_sha256"}, "label", "created"}``. The
+{"record_id", "revision_id", "content_sha256"}, "label", "created", "contact_removed"}``
+(0110-046: the import stores the resume with its name and contact lines removed;
+``contact_removed`` is ``{"removed": {kind: count}, "message"}`` or null). The
 ids are what ``POST /api/profiles`` / ``PUT /api/profiles/{id}`` take as
 ``resume_record_id`` / ``resume_revision_id``; this route never touches a
 profile.
@@ -39,6 +41,7 @@ from ...resume_import import (
     import_resume_bytes,
     safe_resume_file_name,
 )
+from ...resume_pii import REMOVED_MESSAGE
 from .server import _logger
 
 SCHEMA_VERSION = "scout-resume-import-response:1"
@@ -131,6 +134,8 @@ def resume_response(resume: ImportedResume) -> dict[str, object]:
         },
         "label": resume.label,
         "created": resume.created,
+        # 0110-046: the contact lines the import removed and discarded (counts only), or null.
+        "contact_removed": {"removed": resume.contact_removed, "message": REMOVED_MESSAGE} if resume.contact_removed else None,
     }
 
 

@@ -22,11 +22,20 @@ import_reference`` reads its source from one regular file, so the bytes are
 written to a private temporary directory (mode 0700, removed before this
 returns, also on failure) and imported from there. Nothing here logs,
 prints or returns a byte of the resume.
+
+0110-046: GigAI stores no name or contact details. Every import runs
+``resume_pii.strip_contact_lines`` first (the name line, the header's
+contact lines, contact-only lines, emails / phone numbers / links inside
+other lines, the name's words elsewhere) and stores only what is left; the
+removed lines are discarded. ``ImportedResume.contact_removed`` counts what
+went, by kind (never a value), for the message the CLI, the API and the UI
+show (``resume_pii.REMOVED_MESSAGE``). A file name that holds the removed
+name's words is stored as ``resume<suffix>``.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 import re
 import shutil
@@ -34,6 +43,7 @@ import tempfile
 
 from ..canonical import digest_imported_bytes
 from ..private_records import create_record, import_reference
+from .resume_pii import ContactStrip, strip_contact_lines
 
 #: ``private_records.import_reference``'s own size limit for a reference.
 RESUME_MAX_BYTES = 1_048_576
@@ -72,10 +82,33 @@ class ImportedResume:
     record_created: bool
     content_sha256: str
     label: str
+    #: 0110-046: what the import removed, by kind (``{}`` when nothing): counts only.
+    contact_removed: dict[str, int] = field(default_factory=dict)
 
     @property
     def created(self) -> bool:
         return self.reference_created or self.record_created
+
+
+def _strip(data: bytes) -> ContactStrip | None:
+    """The import's strip of ``data``; ``None`` when it is too large or not UTF-8 (``import_reference`` refuses both)."""
+
+    if len(data) > RESUME_MAX_BYTES:
+        return None
+    try:
+        text = data.decode("utf-8", errors="strict")
+    except UnicodeDecodeError:
+        return None
+    return strip_contact_lines(text)
+
+
+def _stored_name(file_name: str, name_words: frozenset[str]) -> str:
+    """``file_name``, or ``resume<suffix>`` when it holds a word of the removed name (``Jane_Doe_CV.md``)."""
+
+    if not name_words:
+        return file_name
+    stem_words = {word.lower() for word in re.split(r"[^0-9A-Za-z\u00C0-\uFFFF]+", Path(file_name).stem) if word}
+    return f"resume{Path(file_name).suffix.lower()}" if stem_words & name_words else file_name
 
 
 def import_resume_file(
@@ -85,10 +118,26 @@ def import_resume_file(
     source: Path,
     gig_id: str | None = None,
 ) -> ImportedResume:
-    """Import ``source`` as the resume reference and create the record find-jobs reads."""
+    """Import ``source``, contact lines removed, as the resume reference and the record find-jobs reads."""
 
     if source.suffix.lower() not in RESUME_SUFFIXES:
         raise ResumeImportError("resume_media_type_unsupported", RESUME_MEDIA_TYPE_MESSAGE)
+    stripped = _strip(source.read_bytes())
+    if stripped is None or (not stripped.changed and _stored_name(source.name, stripped.name_words) == source.name):
+        return _import_file(home_root=home_root, requested_target=requested_target, source=source, gig_id=gig_id)
+    # 0110-046: the stripped text is what is stored; the original bytes never reach the workpad.
+    directory = Path(tempfile.mkdtemp(prefix="gigai-resume-")).resolve()
+    try:
+        clean = directory / _stored_name(source.name, stripped.name_words)
+        clean.write_text(stripped.text if stripped.text.endswith("\n") or not stripped.text else stripped.text + "\n", encoding="utf-8")
+        imported = _import_file(home_root=home_root, requested_target=requested_target, source=clean, gig_id=gig_id)
+    finally:
+        shutil.rmtree(directory, ignore_errors=True)
+    return ImportedResume(**{**imported.__dict__, "contact_removed": dict(stripped.removed)})
+
+
+def _import_file(*, home_root: Path, requested_target: Path | None, source: Path, gig_id: str | None) -> ImportedResume:
+    """The reference import plus its ``g45_reference`` record (the pre-0110-046 body of ``import_resume_file``)."""
 
     # Key by name + content digest (not name alone) so re-adding the
     # SAME bytes under the same file name stays idempotent (identical

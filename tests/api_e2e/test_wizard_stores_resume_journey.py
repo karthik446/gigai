@@ -47,10 +47,12 @@ from tests.api_e2e.harness import add_resume, resolve_workpad_path, setup_and_in
 
 WIZARD_SRC = Path(static_module.__file__).resolve().parents[2] / "ui" / "src" / "wizard"
 
-PASTED = "Jordan Rivera\nStaff engineer: nine years of Go, Kafka and Kubernetes on AWS.\n"
+# 0110-046: no name or contact line (an import strips those: test_resume_import_strips_contact.py), so the
+# pinned bytes are the bytes sent.
+PASTED = "Staff engineer: nine years of Go, Kafka and Kubernetes on AWS.\nBuilt the billing pipeline.\n"
 UPLOADED_NAME = "Jordan Rivera résumé (2026).md"
 UPLOADED_STORED_NAME = "Jordan-Rivera-r-sum-2026.md"
-UPLOADED = "# Jordan Rivera\n\nStaff engineer — Go, Kafka, Kubernetes.\n".encode("utf-8")
+UPLOADED = "# Staff engineer — Go, Kafka, Kubernetes.\n\nBuilt the billing pipeline.\n".encode("utf-8")
 LABEL = "Staff platform engineer"
 TITLES = ["Staff Software Engineer", "Staff Backend Engineer"]
 # What ``harness.add_resume`` stores through `gigai scout resume add`.

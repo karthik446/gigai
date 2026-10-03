@@ -237,7 +237,7 @@ export default function SetupWizard({ onDone, onCancel }) {
         { storeResume, getProfiles, createProfile, updateProfile, selectProfile, putSetup, putResumeDisplay },
       );
       setExistingPrefs(result.prefs);
-      const done = { profile: result.profile };
+      const done = { profile: result.profile, contactRemoved: result.contactRemoved };
       setSaved(done);
       if (onDone) {
         onDone(done);

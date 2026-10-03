@@ -42,17 +42,27 @@ export function canCreateProfile({ label, titles, resume }) {
   return label.trim().length > 0 && titles.length > 0 && hasNewResume(resume);
 }
 
+// 0110-046: the import removes and discards contact lines; POST /api/resumes
+// says so (`contact_removed`). The message to show, or null.
+export function contactRemovedMessage(stored) {
+  const removed = stored && stored.contact_removed;
+  return removed && typeof removed.message === "string" ? removed.message : null;
+}
+
 // The resume the user picked, stored first (paste / upload), then the profile
-// with that resume pinned. Returns the created profile.
+// with that resume pinned. Returns {profile, contactRemoved} (the import's
+// message, or null).
 export async function createProfileWithResume({ label, titles, resume }, api) {
   if (!canCreateProfile({ label, titles, resume })) {
     throw new Error("A profile needs a name, job titles and a resume.");
   }
   let ref;
+  let contactRemoved = null;
   const body = resumeBody(asFields(resume));
   if (body) {
     const stored = await api.storeResume(body);
     ref = stored.resume_ref;
+    contactRemoved = contactRemovedMessage(stored);
   } else {
     ref = resume.existingRef;
   }
@@ -62,7 +72,7 @@ export async function createProfileWithResume({ label, titles, resume }, api) {
     resume_record_id: ref.record_id,
     resume_revision_id: ref.revision_id,
   });
-  return saved.profile;
+  return { profile: saved.profile, contactRemoved };
 }
 
 function sameResume(a, b) {

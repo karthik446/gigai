@@ -31,7 +31,7 @@ from .find_jobs.discovery import (
 )
 from .interview_prep import InterviewPrepError, build_prep
 from .resume_import import import_resume_file
-from .resume_pii import RESUME_WARNING
+from .resume_pii import REMOVED_MESSAGE, RESUME_WARNING, removed_summary
 from .target_resolution import ScoutTargetError, _display_path, resolve_scout_target
 from .template import ScoutInstallError, install_scout
 
@@ -332,6 +332,8 @@ def resume_add_command(
         "record_created": resume.record_created,
         "profile_id": attached_profile.profile_id if attached_profile is not None else None,
         "warning": RESUME_WARNING,
+        # 0110-046: what the import removed and discarded (counts only), or null.
+        "contact_removed": {"removed": resume.contact_removed, "message": REMOVED_MESSAGE} if resume.contact_removed else None,
     }
     if as_json:
         _emit(payload, True, "")
@@ -344,6 +346,8 @@ def resume_add_command(
     )
     if attached_profile is not None:
         click.echo(f"Attached to profile {attached_profile.label} ({attached_profile.profile_id})")
+    if resume.contact_removed:
+        click.echo(f"{REMOVED_MESSAGE} (removed: {removed_summary(resume.contact_removed)})")
     click.echo(f"Warning: {RESUME_WARNING}")
 
 

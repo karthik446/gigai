@@ -48,7 +48,9 @@ from gigai.secrets_catalog import KNOWN_SERVICES
 from tests.support.scout_profile_fixtures import ProfileFixtureGig, build_gig_with_resume
 
 FIXTURE_RESUME = b"# Fixture Resume\n\nStaff AI Engineer. (fixture only.)\n"
-PASTED = "Jordan Rivera\nStaff engineer: nine years of Go and Kafka.\n"
+# 0110-046: no name or contact line (an import strips those: test_resume_import_strips_contact.py), so this
+# resume is stored byte for byte.
+PASTED = "Staff engineer: nine years of Go and Kafka.\nBuilt the billing pipeline.\n"
 
 
 @pytest.fixture
@@ -266,7 +268,8 @@ def test_the_route_answers_with_ids_and_logs_no_resume(running_server, caplog: p
 
     assert stored.status_code == 201, stored.text
     body = stored.json()
-    assert set(body) == {"schema_version", "resume_ref", "label", "created"}
+    assert set(body) == {"schema_version", "resume_ref", "label", "created", "contact_removed"}
+    assert body["contact_removed"] is None, "nothing to remove from this resume"
     assert set(body["resume_ref"]) == {"record_id", "revision_id", "content_sha256"}
     assert body["created"] is True and body["label"] == "Jordan-Rivera.md"
     assert again.status_code == 200 and again.json() == {**body, "created": False}

@@ -147,6 +147,7 @@ for (const [name, load] of Object.entries(input.loads)) {
     resumeRow: state.reviewRows(filled, resumes).find(([key]) => key === "Resume")[1],
     calls: api.calls,
     resumeRef: result.resumeRef,
+    contactRemoved: result.contactRemoved,
   };
 }
 
@@ -511,6 +512,7 @@ def test_a_resume_stored_from_the_cli_is_offered_and_used(out: dict) -> None:
     assert load["calls"][1][1]["resume_record_id"] == "record_cli"
     assert load["calls"][1][1]["resume_revision_id"] == "revision_cli"
     assert load["resumeRef"] == {"record_id": "record_cli", "revision_id": "revision_cli"}
+    assert load["contactRemoved"] is None, "0110-046: no resume stored, no import message"
 
 
 def test_the_selected_profiles_resume_is_the_one_the_wizard_starts_with(out: dict) -> None:

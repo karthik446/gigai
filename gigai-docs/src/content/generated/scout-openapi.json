@@ -2517,7 +2517,7 @@
     },
     "/api/resumes": {
       "post": {
-        "description": "Store a resume (pasted text or a base64 file).",
+        "description": "Store a resume (pasted text or a base64 file). The resume is stored with its name and contact lines (email, phone, address, links) removed and discarded; contact_removed is {removed: {kind: count}, message} when any were, else null.",
         "operationId": "post_api_resumes",
         "parameters": [],
         "requestBody": {
