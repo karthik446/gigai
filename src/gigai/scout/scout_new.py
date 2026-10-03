@@ -184,6 +184,7 @@ def _row_json(
     row: PostingRecord,
     text: PostingText | None,
     item: object | None,
+    tag_pending: bool = False,
 ) -> dict[str, object]:
     """One posting of the grid. Posting text and what a model derived from it only: nothing of the user's."""
 
@@ -210,7 +211,8 @@ def _row_json(
         "job_url": text.url if text is not None else row.job,
         "title": text.title if text is not None else None,
         "company": text.company if text is not None else None,
-        "company_name": display_company_name(text.company) if text is not None else None,
+        # 0110-8-11: the index's name for the board when it has one ("Garner Health"), else the slug rule.
+        "company_name": display_company_name(text.company_name or text.company) if text is not None else None,
         "location": text.location if text is not None else None,
         "work_mode": text.work_mode if text is not None else "unknown",
         "salary": text.salary if text is not None else None,
@@ -233,6 +235,8 @@ def _row_json(
         "open_questions": questions,
         "label": row.label,
         "ats_score": row.ats_score,
+        # 0110-8-05: matched by a generic title's words alone; the posting's function tag is not known yet.
+        "tag_pending": tag_pending,
     }
 
 
@@ -273,7 +277,7 @@ def _assess(
     from .find_jobs.assess_all import FATAL_CODES, assess_concurrency
     from .find_jobs.assess_contracts import ORIGIN_JOB_PAGE, AssessJobInput, AssessRequest, AssessResumeInput, ResolvedJob
     from .find_jobs.market_acquisition import AcquireLimits
-    from .quick_assess import QuickAssessError, run_quick_assessment
+    from .quick_assess import ERROR_NOT_STORED, QuickAssessError, run_quick_assessment
 
     marked = nullcontext(live) if live is not None else assess_batch(home_root, target)
 
@@ -334,11 +338,14 @@ def _assess(
             job=AssessJobInput(job_url=text.url), resume=AssessResumeInput(profile_id=profile_id), origin=ORIGIN_JOB_PAGE
         )
         try:
-            run_quick_assessment(request, home_root=home_root, target=target, config=config, resolved_job=resolved_job)  # type: ignore[arg-type]
+            stored = run_quick_assessment(request, home_root=home_root, target=target, config=config, resolved_job=resolved_job)  # type: ignore[arg-type]
         except QuickAssessError as exc:
             if exc.code in FATAL_CODES:
                 stop.append(exc.code)  # no model, no profile, no resume: the next call would fail the same way
             return (exc.code, None)
+        # 0110-8-09: "assessed" means a record the grid will read, under THIS job and profile; anything else is a named failure.
+        if stored.job.job_identity != job or stored.resume.profile_id != profile_id or not Path(stored.stored_path or "").is_file():
+            return (ERROR_NOT_STORED, None)
         return None
 
     # PL5: the batch is live work the pipeline's runner yields to (DESIGN 7), like an "assess all" batch.
@@ -617,9 +624,11 @@ def _scout_new(
         evidence: list[dict[str, object]] = []
         from .quick_assess import read_quick_assessment
 
+        pending = postings.TagPending(home_root, views)
         for group, row in shown:
             item = None if row.state == _NOT_ASSESSED else read_quick_assessment(home_root, target, row.profile_id, row.job)
-            rows_json.append(_row_json(group, row, texts.get(row.job), item))
+            text = texts.get(row.job)
+            rows_json.append(_row_json(group, row, text, item, pending(row.profile_id, None if text is None else text.title)))
             found = _evidence(row, item)
             if found is not None:
                 evidence.append(found)
@@ -768,6 +777,8 @@ def render(response: Mapping[str, object]) -> str:
             if row["salary"]:
                 details.append(str(row["salary"]))
             details.append(f"[{tags}]")
+            if row.get("tag_pending"):
+                details.append("tag pending")  # 0110-8-05: matched by a generic title's words; its function tag is not known yet
             if row["score"] is None:
                 score = ["not ranked yet"]
             elif row["score_kind"] == "assessment":

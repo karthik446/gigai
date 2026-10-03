@@ -69,7 +69,7 @@ from ..canonical import digest_imported_bytes
 from .pipeline.store import PipelineStore, PostingBuild, PostingRecord, RunAssessment, pipeline_path
 
 #: Bump when what a row is matched by, or what its facts are read from, changes.
-MATCH_VERSION = "posting-match:2"  # 0110-8-06: a row with no description is no longer a "known" digest (rows rebuild once)
+MATCH_VERSION = "posting-match:3"  # 0110-8-05: a known function tag vetoes a generic title (rows rebuild once); :2 was 0110-8-06
 FACTS_VERSION = "posting-facts:1"
 
 STATE_ACTIVE = "active"
@@ -510,6 +510,25 @@ def _removed_rows(previous: Iterable[PostingRecord], matched: set[str], index: _
     return kept
 
 
+class TagPending:
+    """0110-8-05: is a served row matched by a GENERIC title alone while its posting's function tag is not known yet?
+
+    The matcher is the search's own (``title_query.TitleMatcher``), one per
+    profile, asked for the rows a response serves only. Never raises: with no
+    tag store nothing is pending (the plain rule decided, as it always did).
+    """
+
+    def __init__(self, home_root: Path, views: Iterable[ProfileView]) -> None:
+        from .find_jobs.title_query import TitleMatcher, open_tag_store
+
+        store = open_tag_store(Path(home_root))
+        self._matchers = {view.profile_id: TitleMatcher(view.config.roles, store) for view in views}  # type: ignore[attr-defined]
+
+    def __call__(self, profile_id: str, title: str | None) -> bool:
+        matcher = self._matchers.get(profile_id)
+        return bool(matcher is not None and matcher.generic_roles and title and matcher.decide(title).tag_pending)
+
+
 # --- refresh --------------------------------------------------------------------------------
 
 
@@ -635,6 +654,8 @@ class PostingText:
     #: 0110-8-02: where the posting lives (``greenhouse:acme`` and the provider's id), so a missing description can be fetched for it alone.
     board: str | None = None
     posting_id: str | None = None
+    #: 0110-8-11: the company index's own name for the board ("Garner Health"); ``company`` is the cached row's (the board token).
+    company_name: str | None = None
 
 
 def _salary(pay: object | None) -> str | None:
@@ -693,10 +714,10 @@ def posting_texts(home_root: Path, rows: Iterable[PostingRecord]) -> dict[str, P
             row = cached.get(posting_id)
             if row is None:
                 mode = derive_work_mode(posting.location, None)  # type: ignore[attr-defined]
-                found[job] = PostingText(posting.title, entry.company, posting.location, posting.url, None, mode.mode, None, board, posting_id)  # type: ignore[attr-defined]
+                found[job] = PostingText(posting.title, entry.company, posting.location, posting.url, None, mode.mode, None, board, posting_id, entry.company)  # type: ignore[attr-defined]
                 continue
             mode = derive_work_mode(row.location, row.work_mode)
-            found[job] = PostingText(row.title, row.company, row.location, row.url, row.text, mode.mode, _salary(row.pay), board, posting_id)
+            found[job] = PostingText(row.title, row.company, row.location, row.url, row.text, mode.mode, _salary(row.pay), board, posting_id, entry.company)
     return found
 
 
@@ -708,6 +729,7 @@ __all__ = [
     "PostingText",
     "ProfileView",
     "RefreshResult",
+    "TagPending",
     "active_profiles",
     "board_key",
     "open_store",

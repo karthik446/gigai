@@ -70,6 +70,8 @@ _ERROR_STATUS: dict[str, HTTPStatus] = {
     "model_denied": HTTPStatus.FORBIDDEN,
     "assess_timeout": HTTPStatus.GATEWAY_TIMEOUT,
     "model_output_invalid": HTTPStatus.BAD_GATEWAY,
+    # 0110-8-09: the model answered, the answer could not be written
+    "assessment_not_stored": HTTPStatus.INTERNAL_SERVER_ERROR,
 }
 
 

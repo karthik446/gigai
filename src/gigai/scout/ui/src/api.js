@@ -3,6 +3,8 @@
 // UIConsentEnvelope, RunStatusResponse, RunResultsResponse). This module
 // does not invent fields; it mirrors that contract exactly.
 
+import { rememberCompanyNames } from "./display.js";
+
 const STATUS_MESSAGES = {
   400: "The run request was malformed. Reload and try again.",
   403: "This action was refused: consent was missing, stale, or the target isn't allowed from this UI.",
@@ -108,7 +110,8 @@ async function request(method, path, body) {
     throw new ApiError(response.status, messageForStatus(path, response.status, code, detail), code, { ...extra, detail });
   }
 
-  return payload;
+  // 0110-8-11: the company names this response carries (display.js).
+  return rememberCompanyNames(payload);
 }
 
 export function getConfig() {

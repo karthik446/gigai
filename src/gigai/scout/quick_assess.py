@@ -399,6 +399,11 @@ def _has_requirement_cue(text: str) -> bool:
     return _REQUIREMENT_CUES.search(text) is not None
 
 
+#: 0110-8-09: why a model call that answered left no stored assessment (the ``QuickAssessError`` code and the call's ``error_code``).
+ERROR_POSTING_UNREADABLE = "posting_requirements_unreadable"
+ERROR_NOT_STORED = "assessment_not_stored"
+
+
 def _has_real_requirement(body: AssessmentBody) -> bool:
     return any(row.requirement.strip().lower().rstrip(".") != _NO_STATED_REQUIREMENTS for row in body.matrix)
 
@@ -618,7 +623,13 @@ def run_quick_assessment(
     ``job_fetch_failed``, ``profile_not_found``, ``profile_unavailable``,
     ``resume_unavailable``, ``resume_digest_mismatch``, ``model_target_unavailable``,
     ``model_unavailable``, ``model_denied``, ``assess_timeout``, ``model_output_invalid``,
-    ``posting_requirements_unreadable``, ``target_unavailable``.
+    ``posting_requirements_unreadable``, ``target_unavailable``, ``assessment_not_stored``.
+
+    0110-8-09, the invariant: a model call of this assessment is ``ok`` in the
+    call metrics ONLY when its answer was stored. An answer that is withheld
+    (``posting_requirements_unreadable``) or cannot be written
+    (``assessment_not_stored``) settles its call as an error with that code, and
+    the caller gets the same code: a success never leaves nothing behind.
     """
 
     home_root = Path(home_root)
@@ -723,7 +734,8 @@ def run_quick_assessment(
     if not attempt.ok:
         if attempt.incomplete_posting:
             # uat-bug-046: nothing is stored; the job stays "not assessed".
-            raise QuickAssessError("posting_requirements_unreadable", POSTING_INCOMPLETE_MESSAGE)
+            meter.unused(ERROR_POSTING_UNREADABLE)  # 0110-8-09: the call answered, its answer is not kept
+            raise QuickAssessError(ERROR_POSTING_UNREADABLE, POSTING_INCOMPLETE_MESSAGE)
         reason = attempt.not_assessed_reason
         if reason is NotAssessedReason.MODEL_OUTPUT_INVALID:
             detail = attempt.validation_error or "the model's answer did not match the assessment schema"
@@ -738,7 +750,8 @@ def run_quick_assessment(
     assert isinstance(body, AssessmentBody)
     if posting_requirements_unreadable(job.text, body):
         # Nothing is stored: the job stays "not assessed", never Matched.
-        raise QuickAssessError("posting_requirements_unreadable", POSTING_UNREADABLE_MESSAGE)
+        meter.unused(ERROR_POSTING_UNREADABLE)  # 0110-8-09
+        raise QuickAssessError(ERROR_POSTING_UNREADABLE, POSTING_UNREADABLE_MESSAGE)
     from .proposal_execution import _usage_block
 
     usage = _usage_block([attempt.usage] if attempt.usage is not None else [], UsageBlock)
@@ -779,7 +792,12 @@ def run_quick_assessment(
         posting_sha256=posting_digest,
         model=_model_id(getattr(binding.port, "resolved_model", None)),
     )
-    atomic_write(path, json.dumps(response.to_json(), indent=2, sort_keys=True).encode("utf-8"))
+    try:
+        atomic_write(path, json.dumps(response.to_json(), indent=2, sort_keys=True).encode("utf-8"))
+    except OSError as exc:
+        # 0110-8-09: the model answered and the answer could not be written: a named failure, never a silent success.
+        meter.unused(ERROR_NOT_STORED)
+        raise QuickAssessError(ERROR_NOT_STORED, f"the assessment could not be stored ({type(exc).__name__}); nothing was saved") from exc
     if (bank.entries or bank.stories) and variant is None:
         # Which answers and stories this assessment cited ("Story bank <id>: ...").
         story_bank.record_reuse(
@@ -792,6 +810,8 @@ def run_quick_assessment(
 
 __all__ = [
     "EPHEMERAL_RESUME_KEY",
+    "ERROR_NOT_STORED",
+    "ERROR_POSTING_UNREADABLE",
     "TAILORED_VARIANT_DIR",
     "TRIGGER_ANSWER_PREFIX",
     "TRIGGER_ASSESS",

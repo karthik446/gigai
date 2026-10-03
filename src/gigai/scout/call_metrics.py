@@ -343,6 +343,16 @@ class CallMeter:
     def invalid_output(self) -> None:
         """This thread's last call answered, but with something the caller could not use: count it as an error."""
 
+        self.unused(ERROR_INVALID_OUTPUT)
+
+    def unused(self, error_code: str) -> None:
+        """This thread's last call answered, and its answer was NOT kept: settle it as an error named ``error_code``.
+
+        0110-8-09: an ``ok`` call is one whose answer was stored. A caller that
+        withholds a valid answer (an unreadable posting) or cannot write it
+        says so here, so the metrics never show a success that left nothing.
+        """
+
         call_id = getattr(self._last, "call_id", None)
         if call_id is None or self.home_root is None or self.target is None:
             return
@@ -350,7 +360,7 @@ class CallMeter:
         try:
             store = _open(self.home_root, self.target)
             try:
-                store.fail_call(call_id, ERROR_INVALID_OUTPUT)
+                store.fail_call(call_id, error_code)
             finally:
                 store.close()
         except Exception as exc:  # noqa: BLE001 - as record_call
@@ -375,6 +385,9 @@ class MeteredPort:
 
     def invalid_output(self) -> None:
         self._meter.invalid_output()
+
+    def unused(self, error_code: str) -> None:
+        self._meter.unused(error_code)
 
     def __getattr__(self, name: str) -> object:
         return getattr(self._inner, name)

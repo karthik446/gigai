@@ -450,11 +450,15 @@ def stored_resume_pdf(
     if stamp.tzinfo is None:
         stamp = stamp.replace(tzinfo=timezone.utc)
     scale, fit = layout(settings, spacing_scale, auto_fit)
+    # 0110-8-11: the file and the document are named for the company (the index's name), not its board token.
+    from .find_jobs.company_names import company_display_name
+
+    company = company_display_name(home_root, stored.job.company) or stored.job.company
     rendered = _render(
-        _body(stored.result), pdf_header(settings, profile_id, form), company=stored.job.company, timestamp=stamp,
+        _body(stored.result), pdf_header(settings, profile_id, form), company=company, timestamp=stamp,
         spacing_scale=scale, auto_fit=fit, count_pages=count_pages,
     )
-    return rendered, pdf_file_name(stored.job.company, stored.job.title, today or date.today())
+    return rendered, pdf_file_name(company, stored.job.title, today or date.today())
 
 
 #: Shown with every headerless PDF (0110-046): the page that finishes it.

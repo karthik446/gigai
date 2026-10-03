@@ -514,7 +514,7 @@ def resume_tailor_command(
     job = response.job
     heading = job.title or "(untitled posting)"
     if job.company:
-        heading += f" at {job.company}"
+        heading += f" at {_company_shown(home_root, job.company)}"
     result = response.result
     rewritten = len(result.rewritten_lines())
     click.echo(f"Tailored resume for {heading}:")
@@ -1169,7 +1169,7 @@ def assess_command(
     job = response.job
     heading = job.title or "(untitled posting)"
     if job.company:
-        heading += f" at {job.company}"
+        heading += f" at {_company_shown(home_root, job.company)}"
     click.echo(f"Assessment for {heading}:")
     click.echo(f"  Verdict: {result.verdict.value if result.verdict is not None else 'none returned'}")
     if result.not_a_match_reason:
@@ -1402,9 +1402,17 @@ def _jobs_label(count: int) -> str:
     return f"{count} job{'' if count == 1 else 's'}"
 
 
-def _job_lines(jobs: object) -> None:
+def _company_shown(home_root: Path | None, company: str) -> str:
+    """0110-8-11: the company index's name for a board token ("Garner Health"), else the slug rule, else the text."""
+
+    from .find_jobs.company_names import company_display_name
+
+    return company_display_name(home_root, company) or company
+
+
+def _job_lines(jobs: object, home_root: Path | None = None) -> None:
     for job in jobs:  # type: ignore[union-attr]
-        label = " at ".join(part for part in (job["title"], job["company"]) if part) or job["job_identity"]
+        label = " at ".join(part for part in (job["title"], _company_shown(home_root, job["company"]) if job["company"] else "") if part) or job["job_identity"]
         click.echo(f"  {job['kind']}: {label} ({job['at']})")
 
 
@@ -1478,7 +1486,7 @@ def answers_show_command(question_id: str, target_value: Path | None, home_value
         click.echo(f"  Question: {entry.question}")
     click.echo(f"  Answer: {entry.answer}")
     click.echo(f"  Written by {entry.written_by}, updated {entry.updated_at or 'unknown'} (revision {entry.revision}).")
-    _job_lines([job.to_json() for job in entry.jobs])
+    _job_lines([job.to_json() for job in entry.jobs], home_root)
 
 
 @answers_group.command("save")
@@ -1931,6 +1939,20 @@ def _profile_payload(record, *, default_id: str | None, selected_id: str | None)
     }
 
 
+def _title_warnings(home_root: Path, resolved) -> dict[str, list[dict[str, object]]]:
+    """0110-8-05: each active profile's generic titles with their live match count; nothing when it cannot be read."""
+
+    from . import postings
+    from .find_jobs.generic_titles import generic_title_warnings
+
+    try:
+        target = Path(resolved.target_root)
+        _resolved, views = postings.active_profiles(home_root, target, resolved)
+        return generic_title_warnings(home_root, target, views)
+    except (postings.PostingModelError, OSError, ValueError):
+        return {}
+
+
 def _settings_line(settings: dict[str, object] | None) -> str:
     if settings is None:
         return "no setup settings saved yet"
@@ -1959,15 +1981,18 @@ def profile_list_command(target_value: Path | None, home_value: Path | None, as_
 
     home_root = home_value or default_home_root()
     try:
-        _resolved, profiles, selected, shared = _profiles_context(target_value, home_root, as_json=as_json)
+        resolved, profiles, selected, shared = _profiles_context(target_value, home_root, as_json=as_json)
     except (ScoutTargetError, WorkpadError, profile_records.ProfileRecordError, OSError, ValueError) as exc:
         _fail(exc, as_json=as_json, fallback="scout_profile_list_failed")
         return
+    warnings = _title_warnings(home_root, resolved)
     default = profile_records.default_profile(profiles)
     default_id = None if default is None else default.profile_id
     selected_id = None if selected is None else selected.profile_id
     shared_json = None if shared is None else shared.to_json()
     items = [_profile_payload(item, default_id=default_id, selected_id=selected_id) for item in profiles if item.state != "deleted"]
+    for item in items:
+        item["title_warnings"] = warnings.get(str(item["profile_id"]), [])
     if as_json:
         _emit({"ok": True, "profiles": items, "default_profile_id": default_id, "default_search_settings": shared_json}, True, "")
         return
@@ -1984,6 +2009,8 @@ def profile_list_command(target_value: Path | None, home_value: Path | None, as_
             click.echo(f"  same as default: {_settings_line(shared_json)}")
         else:
             click.echo(f"  own settings: {_settings_line(own)}")  # type: ignore[arg-type]
+        for warning in item["title_warnings"]:  # type: ignore[union-attr]
+            click.echo(f"  warning: {warning['text']}")
 
 
 @profile_group.command("update")
@@ -2072,6 +2099,7 @@ def profile_update_command(
         default_id=None if default is None else default.profile_id,
         selected_id=None if selected is None else selected.profile_id,
     )
+    payload["title_warnings"] = _title_warnings(home_root, resolved).get(record.profile_id, [])
     if as_json:
         _emit({"ok": True, "profile": payload}, True, "")
         return
@@ -2079,6 +2107,8 @@ def profile_update_command(
         click.echo(f"{record.label} ({record.profile_id}) now uses the default profile's settings.")
     else:
         click.echo(f"{record.label} ({record.profile_id}): {_settings_line(record.search_settings.to_json())}")
+    for warning in payload["title_warnings"]:  # type: ignore[union-attr]
+        click.echo(f"  warning: {warning['text']}")
 
 
 @profile_group.command("delete")
