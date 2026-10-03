@@ -58,7 +58,7 @@ class RouteSpec:
     errors: tuple[tuple[int, str], ...] = ()
     request_example: dict[str, object] | None = None
     content_type: str = "application/json"
-    host_checked: bool = False  # GET routes that return personal values also check Host
+    host_checked: bool = False  # set for every GET in _finish: the server checks Host on all of them
     description: str = ""
     tag: str = ""  # the docs grouping; set from _META below, one of TAGS
     # Body keys the handler accepts as a top-level object (drives unknown_key's allowed keys).
@@ -1063,7 +1063,7 @@ def _operation(route: RouteSpec) -> dict[str, object]:
             if p.where in ("path", "query")
         ],
     }
-    if route.host_checked:
+    if route.host_checked or route.method == "GET":
         operation["x-gigai-host-checked"] = True
     body_params = [p for p in route.params if p.where == "body"]
     if route.method in ("POST", "PUT") and (body_params or route.open_body or route.request_example is not None):
@@ -1087,7 +1087,7 @@ def _operation(route: RouteSpec) -> dict[str, object]:
         entry["description"] = f"{description}, {code}" if description else code  # type: ignore[index]
     if route.method in ("POST", "PUT", "DELETE"):
         responses.setdefault("415", {"description": "unsupported_media_type: writes need Content-Type: application/json.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}})
-    responses.setdefault("403", {"description": "forbidden / forbidden_origin: loopback peer and matching Host/Origin only.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}})
+    responses.setdefault("403", {"description": "forbidden / forbidden_origin: loopback peer and Host `127.0.0.1:<port>` or `localhost:<port>` only (Origin too on writes).", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}})
     operation["responses"] = responses
     return operation
 
@@ -1145,7 +1145,7 @@ def llms_text() -> str:
         "- Start at GET /api (every route, its effect, and its cost class).\n"
         "- Full spec: GET /api/openapi.json (OpenAPI 3.1: params, examples, error codes; x-gigai-effect read|write, x-gigai-external none|model|network).\n"
         "- One job, everything known about it: GET /api/jobs?url=<posting url> (read only, no model calls). The UI's #/jobs/<url> is this route.\n"
-        "- Writes (POST/PUT) need Content-Type: application/json. Host must be 127.0.0.1:<port> or localhost:<port>; this server only answers loopback peers.\n"
+        "- Writes (POST/PUT) need Content-Type: application/json. Every request (reads too) must carry Host 127.0.0.1:<port> or localhost:<port> (else 403 forbidden_origin); this server only answers loopback peers.\n"
         "- Errors are {\"error\": {\"code\", \"message\"}}; an unknown_key 422 lists allowed_keys.\n"
         "- Routes marked x-gigai-external model spend a model call (assess, tailor, rank, run); network reads the public internet. Prefer read routes first.\n"
         "- Tailored resumes: POST /api/tailored-resumes, then POST /api/tailored-resumes/pdf {profile_id, job_identity} for the PDF; PUT /api/tailored-resumes/lines picks the original or the rewrite of one line.\n"
