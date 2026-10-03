@@ -656,7 +656,7 @@ def _migrate(gig: _Gig) -> dict[str, object]:
     labels = {item.profile_id: item.label for item in profiles}
     try:
         default = profile_records.default_profile(profiles)
-    except Exception:  # noqa: BLE001
+    except Exception:  # noqa: BLE001 - no default profile readable: the answers still migrate, unowned
         default = None
     default_id = "" if default is None else default.profile_id
 

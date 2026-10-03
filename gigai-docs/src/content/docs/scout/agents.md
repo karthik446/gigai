@@ -119,7 +119,7 @@ Both are local (no model call, no network) and both are what the next assessment
 is reused for the same question, and for the same fact worded differently, instead of asking
 again. The stories are searched on your machine for each job, and only the few that match the
 posting go into that assessment's prompt as evidence. `answers_questions`, pooled across your
-stories, is your basic interview prep list (`GET /api/stories/prep`).
+stories, is the list of questions your stories answer (`GET /api/stories/prep`).
 
 The usual flow in a chat: the agent asks a job's open questions. A factual reply is saved as an
 answer. A reply with substance gets "Want me to make this a story?": the agent drafts the
