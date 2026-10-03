@@ -158,7 +158,7 @@ def test_the_markdown_and_the_pdf_print_the_edit() -> None:
     summary = apply_line_edit(stored, "L1", "Platform engineer with nine years in healthcare billing.")
     skills = apply_line_edit(stored, "L5", "Python, PostgreSQL, Terraform")
     assert "• Platform engineer" not in _pdf_text(summary.result) and "Platform engineer with nine years in healthcare billing." in _pdf_text(summary.result)
-    assert "Python PostgreSQL Terraform" in _pdf_text(skills.result)
+    assert "Python · PostgreSQL · Terraform" in _pdf_text(skills.result)
 
 
 def test_switching_back_to_the_original_or_the_rewrite() -> None:
