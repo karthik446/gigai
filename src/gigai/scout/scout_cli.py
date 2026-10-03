@@ -815,11 +815,13 @@ def privacy_command(target_value: Path | None, home_value: Path | None, as_json:
     the workpad's local history: the cleanup does not rewrite it.
     """
 
-    from .target_resolution import home_scout_target
-
     home_root = home_value or default_home_root()
-    candidate = target_value or home_scout_target(home_root)  # never created here
-    report = _contact_cleanup(home_root, candidate if candidate.is_dir() else None)
+    try:
+        resolved_target = _resolved_target(target_value, home_root, as_json=as_json)  # the folder `scout status` reads
+    except (ScoutTargetError, WorkpadError, OSError, ValueError) as exc:
+        _fail(exc, as_json=as_json, fallback="scout_privacy_failed")
+        return
+    report = _contact_cleanup(home_root, resolved_target)
     if report.get("status") == "failed":
         _fail(RuntimeError(f"the contact cleanup could not run ({report.get('code')}); it is tried again on the next start"), as_json=as_json, fallback="contact_cleanup_failed")
         return

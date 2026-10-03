@@ -153,6 +153,7 @@ _TARGET_COMMANDS: dict[str, tuple[str, ...]] = {
     "run": ("scout", "run", "--no-browser"),
     "stop": ("scout", "stop"),
     "status": ("scout", "status"),
+    "privacy": ("scout", "privacy"),
     "discover": ("scout", "discover", "--status"),
     "prep": ("scout", "prep", "https://boards.greenhouse.io/example/jobs/1"),
     "assess": ("scout", "assess", "--job-text", "{posting}", "--resume-text", "Python engineer."),

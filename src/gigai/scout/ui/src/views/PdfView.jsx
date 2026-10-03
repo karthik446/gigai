@@ -69,7 +69,7 @@ export default function PdfView({ target }) {
                 Tailored resume for <strong>{(job && job.title) || "this job"}</strong>
                 {job && job.company ? ` at ${job.company}` : ""}.
               </p>
-              <GeneratePdfForm render={(header) => postTailoredResumePdf({ profileId: stored.resume.profile_id, jobIdentity, header })} />
+              <GeneratePdfForm render={(header) => postTailoredResumePdf({ profileId: profileId || stored.resume.profile_id, jobIdentity, header })} />
             </>
           )}
         </>
