@@ -31,8 +31,8 @@ country/region; see the uat-bug-028 worker notes.
 The filter (operator semantics, N37):
 
 * Remote-only: remote postings (and ``unknown``, labelled);
-* Hybrid + area: remote postings, plus hybrid (or plain-city) postings in
-  the area;
+* Hybrid + area: remote postings, plus hybrid, on-site or plain-city
+  postings in the area (0110-048; ``in_person_modes``);
 * Onsite + area: remote postings, plus hybrid, on-site or plain-city
   postings in the area;
 * Any: everything (the country filter still applies, in ``filters``).
@@ -125,6 +125,18 @@ _METROS: tuple[tuple[str, tuple[str, ...], tuple[str, ...]], ...] = (
     ("London", (), ("london",)),
     ("Toronto", (), ("toronto", "mississauga", "markham")),
 )
+
+
+def in_person_modes(preference: WorkModePreference | str) -> tuple[str, ...]:
+    """The posting modes (besides remote) a preference keeps when the posting is in the area.
+
+    The ONE rule behind ``work_mode_fit`` and the assess prompt's CANDIDATE
+    WORK MODE wording (0110-048): Hybrid and Onsite both keep hybrid and
+    on-site roles in their own area (a plain city reads as either).
+    """
+
+    value = getattr(preference, "value", preference)
+    return (HYBRID, ONSITE) if value in (WorkModePreference.HYBRID.value, WorkModePreference.ONSITE.value) else ()
 
 
 @dataclass(frozen=True)
@@ -298,7 +310,8 @@ def work_mode_fit(posting: PostingRow, config: FindJobsConfig) -> WorkModeFit:
     elif preference is WorkModePreference.REMOTE:
         passes = False
     elif preference is WorkModePreference.HYBRID and derived.mode == ONSITE:
-        passes = False
+        # On-site stays out unless it is stated to be in the area (no area, or elsewhere: out).
+        passes = ONSITE in in_person_modes(preference) and matched is True
     else:
         passes = matched is not False
     return WorkModeFit(
@@ -317,6 +330,7 @@ __all__ = [
     "WorkModeFit",
     "derive_work_mode",
     "in_area",
+    "in_person_modes",
     "parse_area",
     "work_mode_fit",
 ]

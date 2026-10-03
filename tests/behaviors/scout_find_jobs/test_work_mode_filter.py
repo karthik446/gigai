@@ -175,18 +175,19 @@ def test_the_reddit_remote_us_posting_is_a_derived_remote_and_passes_remote_only
     assert work_mode_fit(G2I_ASHBY_REMOTE, _config("remote")).source == "board"
 
 
-def test_hybrid_with_an_area_keeps_remote_plus_hybrid_in_that_area() -> None:
+def test_hybrid_with_an_area_keeps_remote_plus_hybrid_and_onsite_in_that_area() -> None:
     config = _config("hybrid", "Denver, CO")
     assert _passing(config, ALL_ROWS) == [
         REDDIT_REMOTE_US,
         G2I_ASHBY_REMOTE,
         LEVER_DENVER_HYBRID,
+        LEVER_BOULDER_ONSITE,
         GH_BOULDER_PLAIN,
         GH_UNITED_STATES,
         GH_EMPTY,
     ]
-    # An on-site posting in the area is out under Hybrid (in under Onsite).
-    assert work_mode_fit(LEVER_BOULDER_ONSITE, config).passes is False
+    # 0110-048: an on-site posting in the area is in under Hybrid too.
+    assert work_mode_fit(LEVER_BOULDER_ONSITE, config).passes is True
     assert work_mode_fit(LEVER_DENVER_HYBRID, config).to_json() == {
         "mode": "hybrid", "source": "board", "preference": "hybrid", "area": "Denver", "in_area": True, "passes": True,
     }
@@ -339,7 +340,7 @@ def test_the_index_search_filters_remote_only_before_ranking(tmp_path: Path) -> 
 def test_the_index_search_filters_hybrid_and_onsite_in_the_area(tmp_path: Path) -> None:
     urls, summary = _search_urls(tmp_path, "hybrid", "Denver, CO")
     assert "https://jobs.lever.co/initech/lev-h" in urls  # hybrid, Boulder is Denver's metro
-    assert "https://jobs.lever.co/initech/lev-o" not in urls  # on-site is out under Hybrid
+    assert "https://jobs.lever.co/initech/lev-o" in urls  # 0110-048: Boulder on-site is in Denver's metro
     assert "https://boards.greenhouse.io/acme/jobs/21" not in urls  # San Jose is not Denver
     onsite, _ = _search_urls(tmp_path / "onsite", "onsite", "Denver, CO")
     assert "https://jobs.lever.co/initech/lev-o" in onsite and "https://boards.greenhouse.io/acme/jobs/21" not in onsite
