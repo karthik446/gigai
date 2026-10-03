@@ -418,6 +418,11 @@ class SetupRoutesMixin:
         _logger.info(
             "setup saved: fields=%s profile=%s", sorted(prefs_fields), "selected" if profile_id is None else "named"
         )
+        # 0.1.10.7 PL5: other settings re-open the pipeline steps whose inputs changed. The setup's settings are the
+        # default profile's and what the other profiles fall back to, so with no profile named every profile is looked at.
+        target = getattr(self._backend, "target", None)
+        if target is not None and getattr(self._backend, "home_root", None) is not None:
+            self._pipeline_profile_changed(target, None if profile_id is None else str(profile_id))
         self._write_json(
             HTTPStatus.OK,
             {"schema_version": "scout-find-jobs-setup-response:1", "prefs": prefs_json},

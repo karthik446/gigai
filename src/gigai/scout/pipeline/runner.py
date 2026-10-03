@@ -26,7 +26,8 @@ retries, backoff and the lane backoff on ``model_target_unavailable`` are the
 store's).
 
 **Yield** (DESIGN 7). No step is claimed while a manual sources update, an
-"assess all" batch or a find-jobs run is live (:func:`live_work`): they
+"assess all" batch, the batch ``scout new`` assesses on a yes (``busy.py``)
+or a find-jobs run is live (:func:`live_work`): they
 already use the machine's model slots, and the operator asked for them. A
 step already running finishes. A background sources check is not waited for.
 
@@ -59,6 +60,7 @@ import time
 
 from ..call_metrics import capture_calls, total_metrics
 from . import steps as steps_module
+from .busy import assess_batch_live
 from .settings import SOURCE_UNREADABLE, PipelineSetting, pipeline_setting
 from .store import (
     CAP_PIPELINE_CALLS,
@@ -152,6 +154,8 @@ def live_work(home_root: Path, target: Path) -> str | None:
         return BUSY_SOURCES_UPDATE
     if any(record.live_status() == "running" for record in assess_all.list_records(Path(home_root), Path(target))):
         return BUSY_ASSESS_BATCH
+    if assess_batch_live(Path(home_root), Path(target)):
+        return BUSY_ASSESS_BATCH  # 0.1.10.7 PL5: the batch `scout new` assesses on a yes (busy.py)
     if _find_jobs_run_is_live(Path(home_root), Path(target)):
         return BUSY_FIND_JOBS_RUN
     return None

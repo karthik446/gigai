@@ -122,6 +122,22 @@ def _emit(payload: dict[str, object], as_json: bool, plain: str) -> None:
     )
 
 
+def _pipeline_fired(pending: object, payload: dict[str, object] | None = None, *, as_json: bool = True) -> None:
+    """0.1.10.7 PL5: queue the jobs a saved answer or story concerns (never fails the save) and say so.
+
+    With ``payload`` (JSON output) the trigger's result is added as ``pipeline`` when it queued anything;
+    otherwise one line is printed.
+    """
+
+    fired = pending.fire()  # type: ignore[attr-defined]
+    if fired.state != "fired":
+        return
+    if payload is not None:
+        payload["pipeline"] = fired.to_json()
+    elif not as_json and fired.line():
+        click.echo(fired.line())
+
+
 def _fail(exc: Exception, *, as_json: bool, fallback: str) -> None:
     code = getattr(exc, "code", fallback)
     if as_json:
@@ -320,6 +336,11 @@ def resume_add_command(
     except (ScoutTargetError, ScoutInstallError, PrivateRecordError, WorkpadError, OSError, ValueError) as exc:
         _fail(exc, as_json=as_json, fallback="scout_resume_add_failed")
         return
+    if attached_profile is not None:
+        # 0.1.10.7 PL5: a new resume re-opens this profile's pipeline steps whose inputs changed (never fails the add).
+        from .pipeline import triggers as pipeline_triggers
+
+        pipeline_triggers.profile_changed(home_root, target_root, attached_profile.profile_id)
 
     payload = {
         "ok": True,
@@ -1271,6 +1292,12 @@ def answer_command(
         _story_fail(exc, as_json=as_json, fallback="answer_invalid")
         return
 
+    # 0.1.10.7 PL5: who asked this question is read now, before the re-assessment answers it; queued after it.
+    from .pipeline import triggers as pipeline_triggers
+
+    asked = pipeline_triggers.pending_answer(
+        home_root, target, entry, job_identity=None if previous is None else previous.job.job_identity
+    )
     reassessed_payload: dict[str, object] | None = None
     if reassess:
         try:
@@ -1284,6 +1311,7 @@ def answer_command(
             )
             response = run_quick_assessment(request, home_root=home_root, target=target)
         except (QuickAssessError, FindJobsContractError) as exc:
+            asked.fire()  # the answer is saved: the jobs that asked are queued whether or not the re-assessment worked
             _fail(exc, as_json=as_json, fallback="scout_answer_failed")
             return
         reassessed_payload = response.to_json()
@@ -1297,6 +1325,7 @@ def answer_command(
         "answer": entry.to_json(),
         "reassessed": reassessed_payload,
     }
+    _pipeline_fired(asked, payload if as_json else None, as_json=as_json)
     if as_json:
         _emit(payload, True, "")
         return
@@ -1500,8 +1529,13 @@ def answers_save_command(
     except (story_bank.StoryBankError, PrivateRecordError) as exc:
         _story_fail(exc, as_json=as_json)
         return
+    from .pipeline import triggers as pipeline_triggers
+
+    payload: dict[str, object] = {"ok": True, **answer_response(entry)}
+    if existing is None or answer is not None or question is not None:  # a tag alone answers nothing new
+        _pipeline_fired(pipeline_triggers.pending_answer(home_root, target, entry), payload if as_json else None, as_json=as_json)
     if as_json:
-        _emit({"ok": True, **answer_response(entry)}, True, "")
+        _emit(payload, True, "")
         return
     click.echo(f"Saved {entry.question_id} (revision {entry.revision}, written by {entry.written_by}).")
 
@@ -1730,8 +1764,12 @@ def story_save_command(
     except story_bank.StoryBankError as exc:
         _story_fail(exc, as_json=as_json)
         return
+    from .pipeline import triggers as pipeline_triggers
+
+    payload: dict[str, object] = {"ok": True, **story_response(story)}
+    _pipeline_fired(pipeline_triggers.pending_story(home_root, target, story), payload if as_json else None, as_json=as_json)
     if as_json:
-        _emit({"ok": True, **story_response(story)}, True, "")
+        _emit(payload, True, "")
         return
     click.echo(f"Saved {story.story_id} (revision {story.revision}, written by {story.written_by}).")
 
@@ -2022,6 +2060,10 @@ def profile_update_command(
     except (ScoutTargetError, WorkpadError, profile_records.ProfileRecordError, OSError, ValueError) as exc:
         _fail(exc, as_json=as_json, fallback="scout_profile_update_failed")
         return
+    # 0.1.10.7 PL5: other settings re-open this profile's pipeline steps whose inputs changed (never fails the update).
+    from .pipeline import triggers as pipeline_triggers
+
+    pipeline_triggers.profile_changed(home_root, Path(resolved.target_root), profile_id)
     default = profile_records.default_profile(profiles)
     payload = _profile_payload(
         record,
@@ -2271,12 +2313,13 @@ def metrics_command(
 @click.option("--no-assess", "no_assess", is_flag=True, help="Do not ask and do not assess: show the new postings ranked only.")
 @click.option("--yours", "yours", is_flag=True, help="The separate call: what matches, from your own resume and answers. Never shown next to posting text; never moves the anchor.")
 @click.option("--peek", "peek", is_flag=True, help="Look without moving the \"new since\" anchor.")
+@click.option("--process", "process", is_flag=True, help="The yes to the pipeline offer: approve what waits for an approval and run the waiting pipeline steps now (model calls, within the daily cap). Does not move the anchor.")
 @click.option("--since", "since", help="Measure \"new\" from this time: the since of the response that asked.")
 @click.option("--home", "home_value", type=click.Path(path_type=Path, file_okay=False))
 @click.option("--target", "target_value", type=click.Path(path_type=Path, file_okay=False))
 @click.option("--json", "as_json", is_flag=True)
 def new_command(
-    profile_id: str | None, yes: bool, no_assess: bool, yours: bool, peek: bool, since: str | None,
+    profile_id: str | None, yes: bool, no_assess: bool, yours: bool, peek: bool, process: bool, since: str | None,
     home_value: Path | None, target_value: Path | None, as_json: bool,
 ) -> None:
     """Show what is new since your last check, across all active profiles.
@@ -2289,6 +2332,9 @@ def new_command(
     The table shows each posting, its score, what it still asks for and its
     open questions. "What matches" comes from your own resume and answers, so
     it is a separate call, never printed next to posting text: --yours.
+
+    Jobs that wait in the pipeline (you answered one of their questions) are
+    offered with what they would cost; --process runs them now.
     """
 
     import sys
@@ -2303,19 +2349,29 @@ def new_command(
     if sum((yes, no_assess, yours)) > 1:
         _fail(ValueError("pass at most one of --yes, --no-assess and --yours"), as_json=as_json, fallback="invalid_value")
         return
+    if yours and process:
+        _fail(ValueError("--process cannot be combined with --yours"), as_json=as_json, fallback="invalid_value")
+        return
     try:
         target = _pipeline_target(target_value, home_root, as_json=as_json)
         if yours:
             response = scout_new_yours(home_root, target, profile_id=profile_id, since=since)
         else:
             assess = True if yes else False if no_assess else None
-            response = scout_new(home_root, target, profile_id=profile_id, peek=peek, assess=assess, since=since)
+            response = scout_new(home_root, target, profile_id=profile_id, peek=peek, assess=assess, since=since, process=process)
         if response["status"] == STATUS_ASK and not as_json and not yours and sys.stdin.isatty():
             sentence = response["question"]["text"]  # type: ignore[index]
             if click.confirm(str(sentence).rstrip("?"), default=False):
                 click.echo("Assessing (one model call per posting; this can take a few minutes)...")
                 # The first call already moved the anchor: the yes measures from the same since.
                 response = scout_new(home_root, target, profile_id=profile_id, peek=peek, assess=True, since=str(response["since"]))
+        offer = response.get("pipeline")
+        if isinstance(offer, dict) and not process and not as_json and not yours and sys.stdin.isatty():
+            if click.confirm("Pipeline: " + str(offer["text"]).rstrip("?"), default=False):
+                click.echo("Processing (the waiting pipeline steps; this can take a few minutes)...")
+                response = scout_new(
+                    home_root, target, profile_id=profile_id, peek=True, assess=False, since=str(response["since"]), process=True
+                )
     except errors as exc:
         _fail(exc, as_json=as_json, fallback="scout_new_failed")
         return
@@ -2603,14 +2659,14 @@ def pipeline_process_command(
     """Put one assessed job through the pipeline now: tailor, assess again, Scout ATS score, Scout label."""
 
     from .pipeline.runner import pipeline_status, run_once
-    from .pipeline.steps import enqueue_job
+    from .pipeline.triggers import process_now
 
     home_root = home_value or default_home_root()
     try:
         target = _pipeline_target(target_value, home_root, as_json=as_json)
         identity = _pipeline_job(job)
         profile = _pipeline_profile(profile_id, home_root, target)
-        queued = enqueue_job(profile, identity, force=force, home_root=home_root, target=target)
+        queued = process_now(home_root, target, profile, identity, force=force)
         drain = run_once(home_root, target, only=(profile, identity), force_enabled=True).to_json()
         status = pipeline_status(home_root, target, profile_id=profile, job=identity)
     except _pipeline_errors() as exc:
@@ -2680,6 +2736,114 @@ def _pipeline_change(
         return
     done = "cancelled" if action == "cancel" else "opened again"
     _emit({"ok": True, "action": action, "profile_id": profile, "job": identity, "steps": changed}, as_json, f"{changed} step(s) {done}.")
+
+
+# --- 0.1.10.7 PL5: `gigai scout pipeline approvals list|approve|deny` ------------------
+
+
+@pipeline_group.group("approvals")
+def pipeline_approvals_group() -> None:
+    """Jobs over the per-trigger cap wait here until you approve them; nothing of theirs runs before."""
+
+
+def _approval_line(item: dict[str, object]) -> str:
+    tokens = f", ~{item['est_tokens']} tokens" if item["est_tokens"] is not None else ""
+    decided = f", {item['decided_by']} at {item['decided_at']}" if item["decided_at"] else ""
+    return (
+        f"{item['id']}: {item['state']}{decided}; {item['waiting_jobs']} of {item['jobs']} job(s) waiting "
+        f"({item['trigger']}), ~{item['est_calls']} model calls{tokens}"
+    )
+
+
+@pipeline_approvals_group.command("list")
+@click.option("--all", "show_all", is_flag=True, help="Also the approvals already approved or denied.")
+@click.option("--home", "home_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--target", "target_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--json", "as_json", is_flag=True)
+def pipeline_approvals_list_command(show_all: bool, home_value: Path | None, target_value: Path | None, as_json: bool) -> None:
+    """Show the approvals that wait: how many jobs each holds and what running them would cost."""
+
+    from .pipeline import triggers
+
+    home_root = home_value or default_home_root()
+    try:
+        target = _pipeline_target(target_value, home_root, as_json=as_json)
+        listing = triggers.approvals(home_root, target, state=None if show_all else "pending")
+    except _pipeline_errors() as exc:
+        _fail(exc, as_json=as_json, fallback="scout_pipeline_failed")
+        return
+    if as_json:
+        _emit(listing, True, "")
+        return
+    items = listing["approvals"]
+    assert isinstance(items, list)
+    if not items:
+        click.echo("No approval is waiting." if not show_all else "No approval yet.")
+        return
+    for item in items:
+        click.echo(_approval_line(item))
+        for waiting in item["waiting"]:
+            click.echo(f"  {waiting['job_identity']} [{waiting['profile_id']}]")
+    if listing["pending"]:
+        click.echo("Approve: `gigai scout pipeline approvals approve ID`. Deny: `gigai scout pipeline approvals deny ID`.")
+
+
+def _pipeline_decide(approval_id: str, approve: bool, actor: str, home_value: Path | None, target_value: Path | None, as_json: bool) -> None:
+    from .pipeline import triggers
+
+    home_root = home_value or default_home_root()
+    try:
+        target = _pipeline_target(target_value, home_root, as_json=as_json)
+        approval = triggers.decide(home_root, target, approval_id, approve=approve, decided_by=actor)
+    except _pipeline_errors() as exc:
+        _fail(exc, as_json=as_json, fallback="scout_pipeline_failed")
+        return
+    if as_json:
+        _emit({"ok": True, "schema_version": "scout-pipeline-approval:1", "approval": approval}, True, "")
+        return
+    if approval["state"] == "approved":
+        click.echo(
+            f"Approved {approval['id']}: {approval['decided_jobs']} job(s) opened. "
+            "The Scout server runs them, or run `gigai scout pipeline run --once`."
+        )
+    elif approval["state"] == "declined":
+        click.echo(f"Denied {approval['id']}: {approval['decided_jobs']} job(s) cancelled. No model call was made.")
+    else:
+        click.echo(_approval_line(approval))
+
+
+_APPROVAL_ACTOR = click.option(
+    "--actor", "actor", type=click.Choice(["operator", "agent"]), default="operator", show_default=True,
+    help="Who decides: recorded on the approval.",
+)
+
+
+@pipeline_approvals_group.command("approve")
+@click.argument("approval_id")
+@_APPROVAL_ACTOR
+@click.option("--home", "home_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--target", "target_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--json", "as_json", is_flag=True)
+def pipeline_approvals_approve_command(
+    approval_id: str, actor: str, home_value: Path | None, target_value: Path | None, as_json: bool
+) -> None:
+    """Approve the waiting jobs of one approval: they open, and run within the daily cap of model calls."""
+
+    _pipeline_decide(approval_id, True, actor, home_value, target_value, as_json)
+
+
+@pipeline_approvals_group.command("deny")
+@click.argument("approval_id")
+@_APPROVAL_ACTOR
+@click.option("--home", "home_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--target", "target_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--json", "as_json", is_flag=True)
+def pipeline_approvals_deny_command(
+    approval_id: str, actor: str, home_value: Path | None, target_value: Path | None, as_json: bool
+) -> None:
+    """Deny one approval: its waiting jobs are cancelled and no model call is made for them."""
+
+    _pipeline_decide(approval_id, False, actor, home_value, target_value, as_json)
 
 
 __all__ = ["scout_group", "write_starter_find_jobs_config", "STARTER_FIND_JOBS_CONFIG"]

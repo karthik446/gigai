@@ -64,6 +64,7 @@ from urllib.parse import parse_qs, urlsplit
 
 from ....private_records import PrivateRecordError
 from ... import story_bank
+from ...pipeline import triggers as pipeline_triggers
 from ...question_ids import normalize_question_id
 from ..contracts import AcquireOutput, FindJobsContractError, PostingRow, normalize_url
 from ...quick_assess import (
@@ -208,13 +209,19 @@ class AnswersRoutesMixin:
 
         normalized_question_id = normalize_question_id(question_id)
 
+        # 0.1.10.7 PL5: the jobs that asked this question enter the pipeline. Who asked is read now, before the
+        # re-assessment answers it; they are queued after it, whether or not it worked (the answer is saved).
+        asked = pipeline_triggers.pending_answer(home_root, target, entry, job_identity=job_identity)
         reassessed: dict[str, object] | None = None
-        if job_identity is not None:
-            try:
-                reassessed = self._reassess(target, job_identity, trigger=TRIGGER_ANSWER_PREFIX + normalized_question_id)
-            except QuickAssessError as exc:
-                self._error(_status_for(exc.code), exc.code, str(exc))
-                return
+        try:
+            if job_identity is not None:
+                try:
+                    reassessed = self._reassess(target, job_identity, trigger=TRIGGER_ANSWER_PREFIX + normalized_question_id)
+                except QuickAssessError as exc:
+                    self._error(_status_for(exc.code), exc.code, str(exc))
+                    return
+        finally:
+            self._pipeline_fire(asked)
 
         self._write_json(
             HTTPStatus.CREATED,

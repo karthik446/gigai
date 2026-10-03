@@ -49,6 +49,10 @@ def test_agent_api_journey(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> N
     home, target = setup_and_init(tmp_path)
     add_resume(home, target, tmp_path)
     write_offline_find_jobs_config(target, sources_live=True)
+    # 0.1.10.7 PL5: answering a job's question queues its background pipeline, whose tailoring would replace the
+    # resume this journey tailors and edits by hand (409 tailored_resume_changed). This journey is the agent API's;
+    # the pipeline's own is test_pipeline_journey.py.
+    monkeypatch.setenv("GIGAI_SCOUT_PIPELINE", "0")
     server = start_server(home, target, monkeypatch=monkeypatch)
     try:
         client = server.client
@@ -229,7 +233,7 @@ def test_agent_api_journey(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> N
         assert set(settings_body) == set(settings_documented)
         for view in ("settings", "effective"):
             assert {name: set(settings_body[view][name]) for name in settings_body[view]} == {name: set(settings_documented[view][name]) for name in settings_documented[view]}, view
-        assert allowed(client.put("/api/settings/background", json={"bogus": 1})) == ["snapshot", "sources", "tagging"]
+        assert allowed(client.put("/api/settings/background", json={"bogus": 1})) == ["pipeline", "rank", "snapshot", "sources", "tagging"]
         nested_setting = client.put("/api/settings/background", json={"tagging": {"bogus": 1}})
         assert nested_setting.status_code == 422 and nested_setting.json()["error"]["allowed_keys"] == ["backfill_enabled", "model_enabled", "tag_backfill_model"]
         assert allowed(client.post("/api/applications", json={"bogus": 1})) == ["event_kind", "job_identity", "normalized_url", "notes", "occurred_at"]

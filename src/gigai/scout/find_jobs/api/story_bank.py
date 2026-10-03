@@ -35,6 +35,7 @@ from urllib.parse import parse_qs, unquote, urlsplit
 
 from ....private_records import PrivateRecordError
 from ... import stories, story_bank
+from ...pipeline import triggers as pipeline_triggers
 
 ANSWERS_SCHEMA = "scout-answers-response:1"
 STORIES_SCHEMA = "scout-stories-response:1"
@@ -259,6 +260,8 @@ class StoryBankRoutesMixin:
         except (story_bank.StoryBankError, PrivateRecordError) as exc:
             self._story_bank_fail(exc)
             return
+        if body.get("answer") is not None or body.get("question") is not None:  # a tag alone answers nothing new
+            self._pipeline_fire(pipeline_triggers.pending_answer(home_root, target, entry))
         self._write_json(HTTPStatus.OK, answer_response(entry))
 
     def _handle_delete_answer(self, question_id: str) -> None:
@@ -341,6 +344,7 @@ class StoryBankRoutesMixin:
         except (story_bank.StoryBankError, PrivateRecordError) as exc:
             self._story_bank_fail(exc)
             return
+        self._pipeline_fire(pipeline_triggers.pending_story(home_root, target, story))
         self._write_json(HTTPStatus.CREATED, story_response(story))
 
     def _handle_put_story(self, story_id: str) -> None:
@@ -359,6 +363,7 @@ class StoryBankRoutesMixin:
         except (story_bank.StoryBankError, PrivateRecordError) as exc:
             self._story_bank_fail(exc)
             return
+        self._pipeline_fire(pipeline_triggers.pending_story(home_root, target, story))
         self._write_json(HTTPStatus.OK, story_response(story))
 
     def _handle_delete_story(self, story_id: str) -> None:
