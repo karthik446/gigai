@@ -33,7 +33,7 @@ import threading
 from click.testing import CliRunner
 import pytest
 
-from gigai.scout import scout_new
+from gigai.scout import posting_search, scout_new
 from gigai.scout.find_jobs import background_settings
 from gigai.scout.find_jobs.assess_contracts import AssessJobInput, AssessRequest, AssessResumeInput
 from gigai.scout.find_jobs.refresh_tick import settings_path
@@ -57,7 +57,7 @@ from gigai.scout.scout_cli import scout_group
 
 from tests.support.answers_stories_fixtures import config, pending, two_profiles
 from tests.support.pipeline_fixtures import MARKERS, PipelineFixture, assessment, build_pipeline_fixture, resolved_job
-from tests.support.posting_fixtures import NOW, build_postings_fixture, days_ago, lever_job
+from tests.support.posting_fixtures import NOW, build_postings_fixture, days_ago, job_url, lever_job
 
 _TERRAFORM = ("tooling:terraform", "Have you used Terraform in production?")
 _PAYMENTS = ("domain:payments", "Have you built payment systems?")
@@ -347,13 +347,15 @@ def test_d_the_41st_model_call_of_the_day_waits_and_two_profiles_share_the_count
     assert _steps(fx, job, default) == _DONE and _steps(fx, job, second) == _DONE
 
 
-def test_d_the_rank_counter_is_one_for_the_install_warns_at_60_and_stops_at_100(fx: PipelineFixture) -> None:
+def test_d_the_rank_counter_is_one_for_the_install_warns_past_60_and_stops_at_100(fx: PipelineFixture) -> None:
     today = datetime(2026, 10, 3, 11, 0).astimezone()
 
     first = triggers.spend_rank_calls(fx.home_root, fx.target, 59, now=today)
     assert first == {"allowed": True, "used": 59, "limit": 100, "warn_at": 60, "warning": False, "day": today.date().isoformat()}
-    assert triggers.spend_rank_calls(fx.home_root, fx.target, 1, now=today)["warning"] is True  # 60
-    assert triggers.spend_rank_calls(fx.home_root, fx.target, 40, now=today)["used"] == 100
+    assert triggers.spend_rank_calls(fx.home_root, fx.target, 1, now=today)["warning"] is False  # the 60th: not flagged
+    sixty_first = triggers.spend_rank_calls(fx.home_root, fx.target, 1, now=today)
+    assert (sixty_first["allowed"], sixty_first["used"], sixty_first["warning"]) == (True, 61, True)  # the 61st: made, flagged
+    assert triggers.spend_rank_calls(fx.home_root, fx.target, 39, now=today)["used"] == 100
     over = triggers.spend_rank_calls(fx.home_root, fx.target, 1, now=today)
     assert (over["allowed"], over["used"]) == (False, 100)  # the 101st is refused and not counted
     triggers.refund_rank_calls(fx.home_root, fx.target, 5, now=today)
@@ -666,6 +668,59 @@ def test_h_the_runner_yields_while_scout_new_assesses_on_a_yes_and_resumes_when_
         release.set()
         batch.join(60)
     assert not batch.is_alive() and result["assessed"]["assessed"] >= 1  # type: ignore[index]
+
+    assert not busy.assess_batch_live(fx.home_root, fx.target) and live_work(fx.home_root, fx.target) is None
+    assert list(busy.live_dir(fx.home_root, fx.target).glob("batch_*.json")) == []  # the marker is gone
+    resumed = PipelineRunner(home_root=fx.home_root, target=fx.target, config=config(fx.home_root)).drain()
+    assert resumed.state == DRAIN_RAN and _steps(fx, _job(1)) == _DONE
+
+
+def test_h_the_runner_yields_while_assess_these_assesses_on_approval_and_resumes_when_it_is_done(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """0.1.10.7 int2: an approved "assess these" batch leaves the same marker as ``scout new`` on a yes."""
+
+    monkeypatch.delenv(PIPELINE_ENV, raising=False)
+    pf = build_postings_fixture(tmp_path, monkeypatch, deleted=False)
+    fx = pf.base
+    pf.seed("acme", [lever_job("acme", 1)], seen_at=days_ago(1))
+    _ask(fx, _job(1))
+    triggers.process_now(fx.home_root, fx.target, fx.profile_id, _job(1))  # a pipeline job that is ready to run
+
+    def these(**kwargs: object) -> dict[str, object]:
+        return posting_search.assess_these(  # type: ignore[arg-type]
+            fx.home_root, fx.target, jobs=[job_url("acme", 1)], now=NOW, config=config(fx.home_root), **kwargs
+        )
+
+    # Asking marks nothing live: only an approved batch does.
+    assert these()["status"] == "ask" and live_work(fx.home_root, fx.target) is None
+    assert list(busy.live_dir(fx.home_root, fx.target).glob("batch_*.json")) == []
+
+    entered, release = threading.Event(), threading.Event()
+    answer = fx.model.answer
+
+    def slow(prompt: str):
+        entered.set()
+        assert release.wait(60)
+        return answer(prompt)
+
+    monkeypatch.setattr(fx.model, "answer", slow)
+    result: dict[str, object] = {}
+    batch = threading.Thread(target=lambda: result.update(these(approve=True)), daemon=True)
+    batch.start()
+    try:
+        assert entered.wait(60), "the assess batch never reached the model"
+        # The real signal: ONE marker for the batch, read by the runner's own live_work (no injected busy).
+        assert len(list(busy.live_dir(fx.home_root, fx.target).glob("batch_*.json"))) == 1
+        assert busy.assess_batch_live(fx.home_root, fx.target) and live_work(fx.home_root, fx.target) == BUSY_ASSESS_BATCH
+        runner = PipelineRunner(home_root=fx.home_root, target=fx.target, config=config(fx.home_root))
+        yielded = runner.drain()
+        assert (yielded.state, yielded.reason, yielded.steps) == (DRAIN_YIELDED, BUSY_ASSESS_BATCH, [])
+        assert _steps(fx, _job(1))["tailor"] == "ready" and not fx.model.tailor_prompts
+    finally:
+        release.set()
+        batch.join(60)
+    assert not batch.is_alive() and result["status"] == "assessed" and result["assessed"]["assessed"] >= 1  # type: ignore[index]
 
     assert not busy.assess_batch_live(fx.home_root, fx.target) and live_work(fx.home_root, fx.target) is None
     assert list(busy.live_dir(fx.home_root, fx.target).glob("batch_*.json")) == []  # the marker is gone

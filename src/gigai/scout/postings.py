@@ -23,7 +23,9 @@ index; the profile's rank score from the home's rank score cache (never a
 model call here: a posting nothing ranked yet has none); the job state
 (``job_state``: not assessed / needs answers / matched / not a match /
 tailored), why a stored assessment is stale, its requirement counts and open
-questions; the Scout label and Scout ATS score the pipeline stored; and
+questions (from the quick-assess store, or from what an old find-jobs run
+assessed when that is the newer of the two: ``run_history.py`` imports it, the
+run's records are not copied); the Scout label and Scout ATS score the pipeline stored; and
 ``match_rank``, this profile's place among the profiles the posting matches
 (1 is the best tag: the highest rank score, then the profile that has an
 assessment, then the default profile). Application events are not cached:
@@ -64,7 +66,7 @@ import os
 from pathlib import Path
 from urllib.parse import quote, unquote
 
-from .pipeline.store import PipelineStore, PostingBuild, PostingRecord, pipeline_path
+from .pipeline.store import PipelineStore, PostingBuild, PostingRecord, RunAssessment, pipeline_path
 
 #: Bump when what a row is matched by, or what its facts are read from, changes.
 MATCH_VERSION = "posting-match:1"
@@ -281,11 +283,16 @@ def rank_model_key(home_root: Path, target: Path) -> str | None:
 class _Facts:
     """One profile's stores, listed once: a posting with nothing stored costs two hashes and three set lookups."""
 
-    def __init__(self, home_root: Path, target: Path, resolved: object, view: ProfileView, rank_model: str | None) -> None:
+    def __init__(
+        self, home_root: Path, target: Path, resolved: object, view: ProfileView, rank_model: str | None,
+        run_latest: Mapping[str, RunAssessment] | None = None,
+    ) -> None:
         from .find_jobs.job_state import JobStateSources, _stored_names
         from .find_jobs.model_rank import cache_dir
 
         self.home_root, self.target, self.view = home_root, target, view
+        #: The newest imported run assessment per job for this profile (0.1.10.7 M4a): used when nothing newer is stored.
+        self._run_latest = run_latest or {}
         root = _scout_root(home_root, target)
         self._assessed = _stored_names(root / "quick_assess" / view.profile_id)
         self._tailored = _stored_names(root / "resumes" / view.profile_id)
@@ -346,6 +353,11 @@ class _Facts:
             requirements = len(item.result.matrix)
             met = sum(1 for entry in item.result.matrix if entry.status.value == "met")
             questions = len(item.result.structured_questions) or len(item.result.questions)
+        ran = self._run_latest.get(row.job)
+        if ran is not None and (assessed_at is None or (ran.assessed_at or "") > assessed_at):
+            # An old run's assessment, newer than anything in the quick store (DESIGN 10.4: latest wins).
+            state, stale = ran.state, self._run_stale(ran, row)
+            assessed_at, met, requirements, questions = ran.assessed_at, ran.reqs_met, ran.reqs_total, ran.open_questions
         if tailored:
             state = TAILORED
         label, ats_score = None, None
@@ -360,6 +372,31 @@ class _Facts:
             reqs_met=met, reqs_total=requirements, open_questions=questions, tailored=bool(tailored), label=label,
             ats_score=ats_score, pinned_digest=self.view.resume_digest, settings_digest=self.view.settings_digest,
         )
+
+
+    def _run_stale(self, ran: RunAssessment, row: PostingRecord) -> str | None:
+        """Why an imported run assessment is not what the profile would get now: the quick store's own order of reasons.
+
+        The posting's text first, then the prompt version, then the candidate
+        settings. The story-bank rule is not applied: it needs the questions'
+        ids, which are in the run's record and not in the imported row.
+        """
+
+        from .assessment_basis import REASON_OLDER_PROMPT, REASON_SETTINGS_CHANGED
+        from .assessment_core import CURRENT_ASSESS_PROMPT_VERSIONS
+        from .find_jobs.job_state import STALE_POSTING_CHANGED
+
+        if row.listing_known and ran.listing_digest and ran.listing_digest != row.listing_digest:
+            return STALE_POSTING_CHANGED
+        if ran.prompt_version not in CURRENT_ASSESS_PROMPT_VERSIONS:
+            return REASON_OLDER_PROMPT
+        try:
+            current = self._sources.basis.current(self.view.profile_id)
+        except Exception:  # noqa: BLE001 - settings that cannot be read say nothing about staleness
+            current = None
+        if current is not None and ran.constraints_digest != current.constraints_digest:
+            return REASON_SETTINGS_CHANGED
+        return None
 
 
 # --- the index, read once for every profile ------------------------------------------------
@@ -442,6 +479,22 @@ def _matched_rows(
     return list(found.values())
 
 
+def profile_posting_rows(view: ProfileView, home_root: Path, target: Path, now: datetime) -> list[object]:
+    """The profile's live matches as the index's own ``PostingRow``s (what the rank lane ranks): no board request."""
+
+    from .find_jobs.ats_board_clients import BoardCache
+    from .find_jobs.company_index import CompanyIndex
+    from .find_jobs.index_search import read_indexed_boards
+    from .find_jobs.title_query import open_tag_store
+
+    cache = BoardCache(home_root / "cache" / "scout" / "ats-boards", validator_source=lambda _provider, _url: None)
+    rows, _failures, _summary = read_indexed_boards(
+        _watched(home_root, target), index=CompanyIndex.for_home(home_root), cache=cache, config=view.config, now=now,  # type: ignore[arg-type]
+        remember_search=False, tags=open_tag_store(home_root), home_root=home_root,
+    )
+    return list(rows)
+
+
 def _removed_rows(previous: Iterable[PostingRecord], matched: set[str], index: _IndexOnce, built_at: str) -> list[PostingRecord]:
     """Rows the profile had whose posting the board no longer lists: kept, with ``removed_at``."""
 
@@ -520,9 +573,13 @@ def _refresh(
         day = moment.date().isoformat()
         index: _IndexOnce | None = None
         done: dict[str, str] = {}
+        # What old runs assessed (0.1.10.7 M4a): a build made before an import gets its facts again.
+        history = opened.run_history_stamp()
         for view in views:
             previous = builds.get(view.profile_id)
             facts_digest = _facts_stamp(home_root, target, view, rank_model)
+            if history[0]:
+                facts_digest = _digest(facts_digest, "run-history", list(history))
             match_digest = _digest(MATCH_VERSION, view.settings_digest, index_stamp, boards_digest, day)
             if force or previous is None or previous.match_digest != match_digest:
                 if index is None:
@@ -538,7 +595,10 @@ def _refresh(
             else:
                 done[view.profile_id] = BUILD_UNCHANGED
                 continue
-            facts = _Facts(home_root, target, resolved, view, rank_model)
+            run_latest = (
+                {item.job: item for item in opened.run_assessments(profile_id=view.profile_id, latest=True)} if history[0] else {}
+            )
+            facts = _Facts(home_root, target, resolved, view, rank_model, run_latest)
             rows = [facts.of(row) for row in rows]
             opened.replace_postings(
                 PostingBuild(view.profile_id, match_digest, facts_digest, view.resume_digest, view.settings_digest, len(rows), built_at),
@@ -649,6 +709,7 @@ __all__ = [
     "board_key",
     "open_store",
     "posting_texts",
+    "profile_posting_rows",
     "rank_model_key",
     "refresh",
     "split_board",

@@ -24,9 +24,10 @@ guess). :data:`PIPELINE_ENV` overrides ``enabled`` either way.
 
 ``auto_jobs_per_trigger`` is the per-trigger cap of ``triggers.py`` (PL5: the
 jobs over it wait for an approval). ``max_model_calls_per_day`` is enforced
-by the runner (``cap_counter``, one count for the whole install). The
-``rank`` caps are counted by ``triggers.spend_rank_calls``, for the
-background rank lane of a later milestone.
+by the runner and the ``rank`` caps by the background rank lane
+(``rank_lane.py``), which takes every call from the one counter,
+``triggers.spend_rank_calls``: ``cap_counter``, one count each for the whole
+install. ``rank.max_calls_per_day`` 0 switches the rank lane off.
 """
 
 from __future__ import annotations

@@ -53,6 +53,8 @@ _READER_ALLOWLIST: dict[tuple[str, str, str], str] = {
     ("gigai.scout.profile_records", "_resolve_newest_resume_for_gig", "read_record"): "hashed only",
     # 0.1.10.7 M3a: the posting read model looks up cached rank scores; the text only makes the cache key, no model is called.
     ("gigai.scout.postings", "_Facts._rank_key_inputs", "resume_for_profile"): "hashed only (rank_digest.resume_digest -> the rank cache key); never sent, never stored",
+    # 0.1.10.7 M4a: the background rank lane ranks a profile's demand set with that profile's resume, as a run's rank step did.
+    ("gigai.scout.pipeline.rank_lane", "_candidate", "resume_for_profile"): "model_rank.rank_postings -> rank_digest.resume_digest",
     ("gigai.scout.proposal_execution", "_assess_node_body", "_read_pinned_resume"): "assessment_core.render_assess_prompt (model_resume)",
     ("gigai.scout.proposal_execution", "read_pinned_resume", "read_record"): "returned to its callers (allowlisted here)",
     ("gigai.scout.quick_assess", "run_quick_assessment", "resolve_resume"): "assessment_core.render_assess_prompt (model_resume)",

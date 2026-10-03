@@ -66,6 +66,8 @@ class RouteSpec:
     open_body: bool = False  # True: the handler accepts keys this table does not enumerate
     # P4: the labels of the data a response can hold (data_labels.LABELS); set from _LABELS below. None: not labelled yet.
     labels: tuple[str, ...] | None = None
+    # 0.1.10.7 M4a: still served, no longer the way in (OpenAPI `deprecated: true`); the description says what replaces it.
+    deprecated: bool = False
 
     @property
     def key(self) -> tuple[str, str]:
@@ -322,6 +324,51 @@ _NEW_EXAMPLE: dict[str, object] = {
         "api": {"method": "GET", "path": f"/api/new/yours?since={_NEW_SINCE}"},
     },
 }
+_POSTINGS_EXAMPLE: dict[str, object] = {
+    "schema_version": "scout-postings:1", "checked_at": "2026-10-03T09:30:00.000000Z",
+    "filters": {"profile_ids": [], "query": None, "states": [], "window": None, "removed": False, "limit": 50, "offset": 0},
+    "anchor": {"last_checked_at": _NEW_SINCE, "since": _NEW_SINCE},
+    "counts": {"matched": 1, "shown": 1, "new": 1, "by_state": {"not_assessed": 1}},
+    "postings": {
+        "_labels": _NEW_EXAMPLE["postings"]["_labels"],  # type: ignore[index]
+        "rule": UNTRUSTED_TEXT_RULE,
+        "rows": [{**_NEW_EXAMPLE["postings"]["rows"][0], "assessment_basis": None}],  # type: ignore[index]
+    },
+    "profiles": [{"profile_id": "prof_1", "label": "Staff Engineer", "is_default": True, "matched": 1, "resume": {"record_id": "rec_1", "revision_id": "rev_1"}}],
+    "rank": {"enabled": True, "calls_today": {"day": "2026-10-03", "used": 4, "limit": 100, "warn_at": 60, "warning": False, "reached": False}},
+    "history": None,
+}
+_POSTINGS_ASSESS_EXAMPLE: dict[str, object] = {
+    "schema_version": "scout-postings-assess:1", "status": "ask", "checked_at": "2026-10-03T09:30:00.000000Z",
+    "question": {
+        "kind": "assess_these", "selected": 1, "to_assess": 1, "already_current": 0, "by_profile": [{"profile_id": "prof_1", "count": 1}],
+        "model_target": "codex_cli", "estimate": {"calls": 1, "tokens": 19500, "seconds": 11.2, "cost": None, "basis_calls": 12},
+        "text": "Assess 1 posting (Staff Engineer 1)? ~1 calls, ~20k tokens",
+        "yes": {"api": {"method": "POST", "path": "/api/postings/assess", "body": {"approve": True, "jobs": [_JOB_URL]}}},
+    },
+    "counts": {"selected": 1, "to_assess": 1, "already_current": 0, "not_found": 0},
+    "not_found": [], "approval": None, "assessed": None,
+    "postings": _POSTINGS_EXAMPLE["postings"],
+    "profiles": _POSTINGS_EXAMPLE["profiles"],
+}
+_POSTINGS_NOTE = (
+    "What \"Run find jobs\" searched, without a run: read from the stored index through the per-(posting, profile) read model, "
+    "across every active profile (a deleted or archived profile is never listed). A changed setting (titles, countries, "
+    "work mode) is seen by the next call. Each posting is listed once, for its best profile (`profile_id`), with every "
+    "active profile it matches in `profiles`, best first; with one `profile_id` the row is that profile's own. Ordered: the "
+    "Scout label recommended, then needs_answers, then matched, then the rest by score (the assessment's share of "
+    "requirements met, else the background rank score, else unranked). `counts.matched` is every posting the filters keep, "
+    "`counts.new` those first seen since the last check (`anchor.since`; the last 7 days before the first check). This call "
+    "never moves that anchor. `assessment_basis` says where a row's assessment came from: `{origin: \"quick_assess\"}`, or for "
+    "an old run's `{origin: \"run:<run_id>\", run_id, prompt_version, constraints_digest, story_bank_digest, profile_ref, resume, "
+    "posting_sha256, model_target, model}` (ids and digests). `rank` is the background rank lane: whether it is on and today's "
+    "calls against `rank.max_calls_per_day` (100) and the warning level `rank.warn_calls_per_day` (60), counted once for all "
+    "profiles. With history=1, `history.rows` lists what old runs assessed (`{job_identity, profile_id, state, met, "
+    "requirements, open_questions, assessed_at, hidden, basis}`); rows of a run with no profile (`ephemeral`) or of a profile "
+    "that is not active are hidden: listed only with include_hidden=1 or when `profile_id` names them, and counted in "
+    "`history.hidden` otherwise. No response mixes: posting text and what a model derived from it only (`postings._labels`: "
+    "public-untrusted), nothing the user wrote."
+)
 _NEW_NOTE = (
     "Read from the stored index (no board request) across every active profile; a deleted or archived profile is never "
     "listed. `status` is `ask` (new postings with no assessment: `question` has the count per profile and the estimate from "
@@ -440,7 +487,7 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
     ),
     # --- runs ------------------------------------------------------------------------
     RouteSpec(
-        "POST", "/api/run", "Start a find-jobs run (acquire, rank, assess up to the cap).", "write", "model",
+        "POST", "/api/run", "Deprecated: start a find-jobs run (acquire, rank, assess up to the cap).", "write", "model",
         {"schema_version": "scout-find-jobs-run-response:1", "run_id": "run_20260929T100000Z", "status": "running", "node_receipts": []},
         schema_version="scout-find-jobs-run-response:1",
         params=(
@@ -454,7 +501,12 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
         ),
         request_example={"schema_version": "scout-find-jobs-run-request:1", "config_digest": "sha256:...", "selection_cap": 10, "keywords": ["kubernetes"]},
         errors=(_INVALID, _WRONG_TYPE, _UNKNOWN_KEY, (404, "config_missing"), (409, "config_digest_mismatch")),
+        deprecated=True,
         description=(
+            "Deprecated since 0.1.10.7 and kept for one release for scripts: a run is no longer the way in. Search with "
+            "GET /api/postings (the stored index, live, no run), see what is new with GET /api/new, and assess on approval with "
+            "POST /api/postings/assess or POST /api/new; ranking runs in the background. Existing runs stay readable "
+            "(GET /api/runs and the routes under it) and what they assessed is in the read model (POST /api/runs/import). "
             "Reads the boards over the network and spends model calls on assessment; returns as soon as the run is allocated. "
             "Poll GET /api/runs/{run_id}. `keywords` filter the postings the profile's titles matched, through the full-text index "
             "(title and description): a posting whose stored text matches none of them is dropped; one keyword is enough, each is "
@@ -1133,7 +1185,10 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
             "schema_version": "scout-pipeline:1",
             "setting": _PIPELINE_SETTING_EXAMPLE,
             "readable": True,
-            "runner": {"active": True, "last": {"state": "ran", "reason": None, "steps": 4}},
+            "runner": {
+                "active": True, "last": {"state": "ran", "reason": None, "steps": 4},
+                "rank": {"state": "ran", "reason": None, "calls": 2, "ranked": 73, "warning": False},
+            },
             "yielding_to": None,
             "lanes": [
                 {"lane": "claude_cli", "running": 0, "cap": 2, "error_code": None, "retry_at": None},
@@ -1172,11 +1227,12 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
         description=(
             _PIPELINE_NOTE + "`setting` is the pipeline's settings in effect with the `source` that decided them (default, "
             "setting, environment, settings_unreadable); `readable` false: the settings file cannot be read and the pipeline "
-            "is off. `runner` is this server's runner thread (null when it runs none). `yielding_to` names live work the "
+            "is off. `runner` is this server's runner thread (null when it runs none); its `rank` is the background rank lane's "
+            "last turn (null before the first: state, reason, model calls made, postings ranked, `warning`). `yielding_to` names live work the "
             "pipeline waits for (sources_update, assess_batch, find_jobs_run), else null. `lanes`: steps running per model "
             "lane against its cap, and `error_code` / `retry_at` while a lane is backed off. `caps`: today's model calls of "
             "the pipeline and of the background rank against their daily caps (one count for the install, every profile "
-            "together; `warning` from `warn_at` on) and `jobs_per_trigger`. `counts`: steps per state and jobs per state "
+            "together; `warning` once the count is past `warn_at`) and `jobs_per_trigger`. `counts`: steps per state and jobs per state "
             "(running, awaiting_approval, failed, waiting, done, cancelled). `approvals`: the pending approvals with their "
             "estimate. `jobs`: at most 200, most recently changed first, each with its steps' states, the trigger that queued "
             "it, why it waits (daily_cap_reached, lane_backoff, retry_backoff), its failed step's code and, once the label "
@@ -1251,6 +1307,76 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
             "explicit choice: the per-trigger cap does not apply and a job waiting for an approval is taken out of it; the "
             "daily cap of model calls still does. Read the outcome with GET /api/pipeline. `runner` false: this server runs "
             "no pipeline thread (run `gigai scout pipeline run --once`). 404 assessment_missing: assess the job first."
+        ),
+    ),
+    # --- the live search, assess these, old runs (0.1.10.7 M4a) --------------------------
+    RouteSpec(
+        "GET", "/api/postings", "The live search: the stored postings every active profile matches. No run, no board request, no model call.", "read", "none",
+        _POSTINGS_EXAMPLE,
+        schema_version="scout-postings:1",
+        params=(
+            _q("profile_id", "string", "Only postings this active profile matches; repeat it, or separate ids with commas. One id shows that profile's own row."),
+            _q("q", "string", "Words that must all be in the title, company or location."),
+            _q("state", "string", "Keep these states (repeat or separate with commas): not_assessed, needs_answers, matched, not_a_match, tailored, assessed (any assessment), recommended (the Scout label)."),
+            _q("window", "string", "new: first seen since the last check. 7d / 30d: published (else first seen) in the last 7 or 30 days.", enum=("new", "7d", "30d")),
+            _q("removed", "string", "1: the postings the board no longer lists, instead of the live ones.", enum=("0", "1", "true", "false")),
+            _q("history", "string", "1: add `history`, what old find-jobs runs assessed, with each run's provenance.", enum=("0", "1", "true", "false")),
+            _q("include_hidden", "string", "1 with history=1: also the hidden rows (a run with no profile, a profile that is not active).", enum=("0", "1", "true", "false")),
+            _q("limit", "integer", "Rows per page (1..200, default 50)."),
+            _q("offset", "integer", "Rows to skip."),
+        ),
+        errors=(_INVALID, _UNKNOWN_KEY, _NO_TARGET, (404, "profile_not_found"), (409, "config_unavailable")),
+        description=_POSTINGS_NOTE,
+    ),
+    RouteSpec(
+        "POST", "/api/postings/assess", "Assess these: ask first (count and estimate), assess the postings on approval.", "write", "model",
+        _POSTINGS_ASSESS_EXAMPLE,
+        schema_version="scout-postings-assess:1",
+        params=(
+            _b("jobs", "array", "The postings to assess, by job identity (posting URL). Without it the filter below selects them."),
+            _b("profile_id", "string", "Assess for this active profile instead of each posting's best profile."),
+            _b("query", "string", "Filter: words that must all be in the title, company or location."),
+            _b("states", "array", "Filter: states to keep (as GET /api/postings `state`)."),
+            _b("window", "string", "Filter: new, 7d or 30d (as GET /api/postings).", enum=("new", "7d", "30d")),
+            _b("approve", "boolean", "true: assess (one model call per posting). Left out or false: only ask."),
+            _b("again", "boolean", "true: also the postings whose assessment is current."),
+            _b("actor", "string", "Who approves: operator (default) or agent.", enum=("operator", "agent")),
+        ),
+        errors=(_INVALID, _WRONG_TYPE, _UNKNOWN_KEY, _NO_TARGET, (404, "profile_not_found"), (409, "assess_batch_running"), (409, "config_unavailable")),
+        request_example={"jobs": [_JOB_URL], "approve": True},
+        description=(
+            "What a run's assess step did, without a run. Nothing is assessed without approval: with no `approve: true` the answer "
+            "is `status: \"ask\"` with `question` (how many would be assessed, per profile, and the estimate from the recorded model "
+            "calls; `question.yes.api` is the call that approves) and no model call is made. With `approve: true` the batch is "
+            "recorded as approved (`approval`: its id, who approved, how many), runs as live work (the pipeline and the rank lane "
+            "start nothing meanwhile; a second batch answers 409 assess_batch_running) and each posting is assessed for its best "
+            "profile through the job page's own path, from the posting text already stored (nothing is fetched). The results are "
+            "stored like any assessment, so GET /api/postings, GET /api/new and GET /api/jobs show them. `status` is then "
+            "`assessed`; `assessed.failed` lists what could not be assessed, by error code. A posting whose assessment is current "
+            "is left out (`counts.already_current`) unless `again`; `not_found` lists named postings that are not in the stored "
+            "postings. `nothing_to_assess` when nothing is left. The call waits for the model: allow a minute per four postings. "
+            "No response mixes: posting text only, nothing the user wrote."
+        ),
+    ),
+    RouteSpec(
+        "POST", "/api/runs/import", "Import what old find-jobs runs assessed into the read model, once per run.", "write", "none",
+        {
+            "schema_version": "scout-run-history:1", "runs": 2, "runs_imported": 2, "runs_already_imported": 0, "runs_not_finished": 0,
+            "runs_unreadable": 0, "assessments_imported": 13, "ephemeral_assessments": 3, "rows_skipped": 0, "values_dropped": 0,
+            "by_profile": [{"profile_id": "ephemeral", "assessments": 3}, {"profile_id": "prof_1", "assessments": 10}],
+            "imported": [{"run_id": "run_20260929T100000Z", "profile_id": "prof_1", "assessments": 10}, {"run_id": "run_20260801T090000Z", "profile_id": "ephemeral", "assessments": 3}],
+        },
+        schema_version="scout-run-history:1",
+        errors=(_UNKNOWN_KEY, _NO_TARGET),
+        description=(
+            "Runs are read-only history since 0.1.10.7. Nothing of a run is rewritten, moved or copied: each posting a finished run "
+            "assessed gets one row (state, requirement counts, and the provenance the run sealed: prompt version, constraints "
+            "digest, story bank digest, the profile's and the resume's sealed identity, the posting digest, the model target), "
+            "keyed by the run's profile. A run sealed with no profile goes to the pseudo-profile `ephemeral`: hidden by default, "
+            "never ranked, never in the pipeline. The read model uses a run's assessment where nothing newer is stored for the "
+            "same posting and profile. Idempotent: a run already imported is skipped, so a second call answers "
+            "`runs_imported: 0`. The Scout server also does this once when it starts. `rows_skipped` and `values_dropped` count "
+            "what a run sealed in a shape the read model does not hold (it holds no text); it is still in the run's own record."
         ),
     ),
     # --- metrics (0.1.10.7 E) ----------------------------------------------------------
@@ -1344,7 +1470,7 @@ _META: dict[tuple[str, str], tuple[str, str]] = {
     ("PUT", "/api/setup"): ("Save preferences and derive the config", "Settings"),
     ("PUT", "/api/config/sources"): ("Turn the Exa source on or off", "Sources"),
     ("GET", "/api/secrets/status"): ("Show which provider keys are set", "Settings"),
-    ("POST", "/api/run"): ("Start a find-jobs run", "Runs"),
+    ("POST", "/api/run"): ("Start a find-jobs run (deprecated)", "Runs"),
     ("GET", "/api/runs"): ("List runs", "Runs"),
     ("GET", "/api/runs/{run_id}"): ("Get one run's status", "Runs"),
     ("GET", "/api/runs/{run_id}/progress"): ("Get a run's live progress", "Runs"),
@@ -1401,6 +1527,9 @@ _META: dict[tuple[str, str], tuple[str, str]] = {
     ("GET", "/api/pipeline/approvals"): ("List the pipeline approvals", "Jobs"),
     ("POST", "/api/pipeline/approvals/{approval_id}"): ("Approve or deny a pipeline approval", "Jobs"),
     ("POST", "/api/pipeline/process"): ("Process one job now", "Jobs"),
+    ("GET", "/api/postings"): ("Search the stored postings", "Jobs"),
+    ("POST", "/api/postings/assess"): ("Assess these postings, on approval", "Jobs"),
+    ("POST", "/api/runs/import"): ("Import what old runs assessed", "Runs"),
     ("GET", "/api/metrics"): ("Get the model call averages", "Settings"),
     ("GET", "/api/settings/background"): ("Get the background settings", "Settings"),
     ("PUT", "/api/settings/background"): ("Change the background settings", "Settings"),
@@ -1485,6 +1614,9 @@ _LABELS: dict[tuple[str, str], tuple[str, ...]] = {
     ("GET", "/api/pipeline/approvals"): _NONE,
     ("POST", "/api/pipeline/approvals/{approval_id}"): _NONE,
     ("POST", "/api/pipeline/process"): _NONE,
+    ("GET", "/api/postings"): _UNTRUSTED,
+    ("POST", "/api/postings/assess"): _UNTRUSTED,
+    ("POST", "/api/runs/import"): _NONE,
     ("GET", "/api/metrics"): _NONE,
     ("GET", "/api/settings/background"): _NONE,
     ("PUT", "/api/settings/background"): _NONE,
@@ -1595,7 +1727,10 @@ def index_document() -> dict[str, object]:
         "openapi": SPEC_PATH,
         "llms": LLMS_PATH,
         "routes": [
-            {"method": route.method, "path": route.path, "summary": route.summary, "effect": route.effect, "external": route.external}
+            {
+                "method": route.method, "path": route.path, "summary": route.summary, "effect": route.effect, "external": route.external,
+                **({"deprecated": True} if route.deprecated else {}),
+            }
             for route in ROUTES
         ],
     }
@@ -1635,6 +1770,8 @@ def _operation(route: RouteSpec) -> dict[str, object]:
     }
     if route.host_checked or route.method == "GET":
         operation["x-gigai-host-checked"] = True
+    if route.deprecated:
+        operation["deprecated"] = True
     body_params = [p for p in route.params if p.where == "body"]
     if route.method in ("POST", "PUT") and (body_params or route.open_body or route.request_example is not None):
         body_schema: dict[str, object] = {
@@ -1727,6 +1864,9 @@ def llms_text() -> str:
         "- Contact-shaped text outside posting text (email, phone, street address, linkedin/github/gitlab link) is replaced by `[removed: <kind>]`; "
         "the response then carries `_redactions` {kind: count}.\n"
         "- Routes marked x-gigai-external model spend a model call (assess, tailor, rank, run); network reads the public internet. Prefer read routes first.\n"
+        "- Jobs without runs: GET /api/postings searches the stored postings (live, no run, no model call; filters profile_id, q, state, window); "
+        "POST /api/postings/assess {jobs} asks first (count and estimate) and assesses only with approve: true. POST /api/run is deprecated; "
+        "old runs stay readable and POST /api/runs/import puts what they assessed into the read model.\n"
         "- Tailored resumes: POST /api/tailored-resumes, then POST /api/tailored-resumes/pdf {profile_id, job_identity} for the PDF; PUT /api/tailored-resumes/lines picks the original or the rewrite of one line.\n"
         "- Edit a resume and render a new PDF (local, no model call): read the lines with GET /api/tailored-resumes?profile_id=&job_identity= (each body line has an id L<n>), "
         "PUT /api/tailored-resumes/lines {profile_id, job_identity, updated_at, line_id, use: \"custom\", text} once per line you change (use original or rewritten undoes it), "

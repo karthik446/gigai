@@ -95,6 +95,9 @@ class PipelineRoutesMixin:
 
         if triggers.profile_changed(self._backend.home_root, target, profile_id).enqueued:
             self._pipeline_kick()
+        runner = self._pipeline_runner()
+        if runner is not None:
+            runner.kick_rank()  # DESIGN 10.6: the profile's demand set or candidate changed, so the rank lane looks now
 
     def _pipeline_fail(self, exc: BaseException) -> None:
         code = getattr(exc, "code", None)

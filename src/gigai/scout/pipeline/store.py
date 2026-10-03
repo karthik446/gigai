@@ -36,6 +36,14 @@ What it holds (DESIGN 5.1):
   company index and the stores, never authority. Ids, digests, numbers and
   codes only: a posting's title, company and text are read from the index
   when a row is served, never kept here.
+- ``run_assessment`` / ``run_import``: what a find-jobs run assessed, imported
+  once per run (0.1.10.7 M4a, DESIGN 10.4): the state, the requirement counts
+  and the provenance a run sealed (prompt version, constraints digest, the
+  profile and resume identity, the posting digest, the model target). The
+  run's own records are not copied and stay where they are; these rows point
+  at them by ``run_id``.
+- ``job_lease``: one holder at a time for a named background job (the rank
+  lane, an "assess these" batch), by the same owner rule as a step's lease.
 
 Idempotency (DESIGN 5.2): ``enqueue`` with the digest the step was last done
 with is ``noop_unchanged``; the digest it is already queued with is
@@ -86,7 +94,7 @@ import time
 import uuid
 
 #: ``PRAGMA user_version`` of a file this module writes.
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 #: The fixed DAG, in topological order.
 STEPS: tuple[str, ...] = ("tailor", "reassess", "ats", "label")
@@ -120,7 +128,9 @@ STATES = frozenset(
 #: A step in one of these can still run without a new enqueue.
 _QUEUED = frozenset({STATE_BLOCKED, STATE_READY, STATE_RUNNING, STATE_AWAITING_APPROVAL})
 
-TRIGGERS = frozenset({"answer_saved", "story_saved", "process_now", "profile_changed", "approval", "startup_reconcile"})
+TRIGGERS = frozenset(
+    {"answer_saved", "story_saved", "process_now", "profile_changed", "approval", "startup_reconcile", "assess_these"}
+)
 
 #: ``enqueue`` results.
 ENQUEUED = "enqueued"
@@ -158,6 +168,13 @@ COST_STATUSES = frozenset({"provider_reported", "derived", "unavailable"})
 #: Daily counters (``spend``): pipeline model calls, rank calls.
 CAP_PIPELINE_CALLS = "pipeline_calls"
 CAP_RANK_CALLS = "rank_calls"
+
+#: ``job_lease`` names: the background rank lane, an approved "assess these" batch.
+LEASE_RANK = "rank"
+LEASE_ASSESS_BATCH = "assess_batch"
+LEASES = frozenset({LEASE_RANK, LEASE_ASSESS_BATCH})
+#: The pseudo-profile of a run sealed with no profile (DESIGN 10.7): hidden by default, never in the pipeline.
+EPHEMERAL_PROFILE = "ephemeral"
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS step (
@@ -218,6 +235,21 @@ CREATE INDEX IF NOT EXISTS posting_profile ON posting(profile_id);
 CREATE TABLE IF NOT EXISTS posting_build (
   profile_id TEXT PRIMARY KEY, match_digest TEXT NOT NULL, facts_digest TEXT NOT NULL,
   pinned_digest TEXT NOT NULL, settings_digest TEXT NOT NULL, row_count INTEGER NOT NULL, built_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS run_import (
+  run_id TEXT PRIMARY KEY, profile_id TEXT NOT NULL, row_count INTEGER NOT NULL, imported_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS run_assessment (
+  run_id TEXT NOT NULL, job TEXT NOT NULL, profile_id TEXT NOT NULL,
+  state TEXT NOT NULL, assessed_at TEXT,
+  reqs_met INTEGER NOT NULL, reqs_total INTEGER NOT NULL, open_questions INTEGER NOT NULL,
+  listing_digest TEXT, prompt_version TEXT, constraints_digest TEXT, bank_digest TEXT,
+  profile_revision INTEGER, profile_digest TEXT,
+  pinned_record TEXT, pinned_revision TEXT, pinned_digest TEXT,
+  model_target TEXT, adapter TEXT,
+  PRIMARY KEY (run_id, job));
+CREATE INDEX IF NOT EXISTS run_assessment_profile ON run_assessment(profile_id, job);
+CREATE TABLE IF NOT EXISTS job_lease (
+  name TEXT PRIMARY KEY, lease_owner TEXT NOT NULL, lease_pid INTEGER NOT NULL, lease_until REAL NOT NULL,
+  claimed_at REAL NOT NULL);
 """
 
 #: What every column holds. No column is a text payload: ``id`` / ``job`` /
@@ -263,6 +295,15 @@ COLUMN_KINDS: Mapping[str, Mapping[str, str]] = {
         "profile_id": "id", "match_digest": "digest", "facts_digest": "digest", "pinned_digest": "digest",
         "settings_digest": "digest", "row_count": "integer", "built_at": "timestamp",
     },
+    "run_import": {"run_id": "id", "profile_id": "id", "row_count": "integer", "imported_at": "timestamp"},
+    "run_assessment": {
+        "run_id": "id", "job": "job", "profile_id": "id", "state": "code", "assessed_at": "timestamp",
+        "reqs_met": "integer", "reqs_total": "integer", "open_questions": "integer", "listing_digest": "digest",
+        "prompt_version": "id", "constraints_digest": "digest", "bank_digest": "digest", "profile_revision": "integer",
+        "profile_digest": "digest", "pinned_record": "id", "pinned_revision": "id", "pinned_digest": "digest",
+        "model_target": "id", "adapter": "id",
+    },
+    "job_lease": {"name": "code", "lease_owner": "owner", "lease_pid": "integer", "lease_until": "real", "claimed_at": "real"},
 }
 
 _SHAPES: Mapping[str, re.Pattern[str]] = {
@@ -560,6 +601,66 @@ class PostingBuild:
     settings_digest: str
     row_count: int
     built_at: str
+
+
+@dataclass(frozen=True)
+class RunAssessment:
+    """One posting a find-jobs run assessed, as imported: its state, counts and the provenance the run sealed. No text.
+
+    ``listing_digest`` is the posting's content digest the verdict was made
+    on; ``profile_revision`` / ``profile_digest`` the run's sealed profile
+    identity (``None`` for a run sealed with no profile: its ``profile_id``
+    is ``ephemeral``); ``pinned_*`` the resume it pinned; ``model_target`` /
+    ``adapter`` what answered. A value a run sealed in a shape this file does
+    not hold is ``None`` here and still in the run's own record.
+    """
+
+    run_id: str
+    job: str
+    profile_id: str
+    state: str
+    assessed_at: str | None
+    reqs_met: int
+    reqs_total: int
+    open_questions: int
+    listing_digest: str | None
+    prompt_version: str | None
+    constraints_digest: str | None
+    bank_digest: str | None
+    profile_revision: int | None
+    profile_digest: str | None
+    pinned_record: str | None
+    pinned_revision: str | None
+    pinned_digest: str | None
+    model_target: str | None
+    adapter: str | None
+
+
+_RUN_ASSESSMENT_COLUMNS = (
+    "run_id, job, profile_id, state, assessed_at, reqs_met, reqs_total, open_questions, listing_digest, prompt_version, "
+    "constraints_digest, bank_digest, profile_revision, profile_digest, pinned_record, pinned_revision, pinned_digest, "
+    "model_target, adapter"
+)
+
+
+def _run_assessment_values(row: RunAssessment) -> tuple:
+    _check("id", row.run_id, "run_id")
+    _check("job", row.job, "run assessment job")
+    _check("id", row.profile_id, "run assessment profile_id")
+    _check("code", row.state, "run assessment state")
+    _check_optional("timestamp", row.assessed_at, "run assessment assessed_at")
+    for name in ("reqs_met", "reqs_total", "open_questions"):
+        _check_count(getattr(row, name), f"run assessment {name}")
+    _check_count(row.profile_revision, "run assessment profile_revision", optional=True)
+    for name in ("listing_digest", "constraints_digest", "bank_digest", "profile_digest", "pinned_digest"):
+        _check_optional("digest", getattr(row, name), f"run assessment {name}")
+    for name in ("prompt_version", "pinned_record", "pinned_revision", "model_target", "adapter"):
+        _check_optional("id", getattr(row, name), f"run assessment {name}")
+    return (
+        row.run_id, row.job, row.profile_id, row.state, row.assessed_at, row.reqs_met, row.reqs_total, row.open_questions,
+        row.listing_digest, row.prompt_version, row.constraints_digest, row.bank_digest, row.profile_revision,
+        row.profile_digest, row.pinned_record, row.pinned_revision, row.pinned_digest, row.model_target, row.adapter,
+    )
 
 
 _POSTING_COLUMNS = (
@@ -1575,6 +1676,113 @@ class PipelineStore:
         )
         return tuple(_posting(row) for row in rows.fetchall())
 
+    # what find-jobs runs assessed (0.1.10.7 M4a): imported once per run by scout/run_history.py
+
+    def imported_runs(self) -> dict[str, int]:
+        """``run_id -> rows imported`` for every run already imported."""
+
+        return dict(self._conn().execute("SELECT run_id, row_count FROM run_import").fetchall())
+
+    def import_run(self, run_id: str, profile_id: str, rows: Iterable[RunAssessment]) -> int | None:
+        """Import one run's assessed postings in one transaction; ``None`` (nothing written) when the run is already imported.
+
+        Every value is checked against its column's shape first: nothing is written when one does not fit.
+        """
+
+        _check("id", run_id, "run_id")
+        _check("id", profile_id, "profile_id")
+        values = []
+        for row in rows:
+            if row.run_id != run_id or row.profile_id != profile_id:
+                raise PipelineStoreError("invalid_value", "a run assessment belongs to another run or profile than its import")
+            values.append(_run_assessment_values(row))
+        marks = ",".join("?" * 19)
+        with self._write() as c:
+            if c.execute("SELECT 1 FROM run_import WHERE run_id=?", (run_id,)).fetchone() is not None:
+                return None
+            c.executemany(f"INSERT OR REPLACE INTO run_assessment({_RUN_ASSESSMENT_COLUMNS}) VALUES ({marks})", values)
+            c.execute(
+                "INSERT INTO run_import(run_id, profile_id, row_count, imported_at) VALUES (?,?,?,?)",
+                (run_id, profile_id, len(values), self._now_iso()),
+            )
+        return len(values)
+
+    def run_assessments(
+        self, *, profile_id: str | None = None, job: str | None = None, latest: bool = False
+    ) -> tuple[RunAssessment, ...]:
+        """Imported run assessments, newest first per ``(profile, job)``; ``latest``: only the newest of each pair."""
+
+        clauses, params = [], []
+        if profile_id is not None:
+            clauses.append("profile_id=?")
+            params.append(_check("id", profile_id, "profile_id"))
+        if job is not None:
+            clauses.append("job=?")
+            params.append(_check("job", job, "job"))
+        where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
+        rows = self._conn().execute(
+            f"SELECT {_RUN_ASSESSMENT_COLUMNS} FROM run_assessment{where} "
+            "ORDER BY profile_id, job, COALESCE(assessed_at, '') DESC, run_id DESC",
+            params,
+        ).fetchall()
+        found: list[RunAssessment] = []
+        for row in rows:
+            item = RunAssessment(*row)
+            if latest and found and (found[-1].profile_id, found[-1].job) == (item.profile_id, item.job):
+                continue
+            found.append(item)
+        return tuple(found)
+
+    def run_history_stamp(self) -> tuple[int, str | None]:
+        """``(runs imported, when the last one was)``: what a read model build compares."""
+
+        return tuple(self._conn().execute("SELECT COUNT(*), MAX(imported_at) FROM run_import").fetchone())  # type: ignore[return-value]
+
+    # named leases (0.1.10.7 M4a): one holder for a background job that is not a step
+
+    def take_lease(self, name: str, *, worker: str = "0") -> bool:
+        """Hold ``name`` for this process; ``False`` while another live holder has it (a step's owner rule)."""
+
+        _check_member(name, LEASES, "lease name")
+        if type(worker) is not str or not _WORKER.fullmatch(worker):
+            raise PipelineStoreError("invalid_value", "worker is not a worker name")
+        owner = f"{process_token()}:{worker}"
+        now = self._clock()
+        with self._write() as c:
+            row = c.execute("SELECT lease_owner, lease_pid, lease_until FROM job_lease WHERE name=?", (name,)).fetchone()
+            if row is not None and row[0] != owner and not _holder_gone(row[0], row[1], row[2], now):
+                return False
+            c.execute(
+                "INSERT INTO job_lease(name, lease_owner, lease_pid, lease_until, claimed_at) VALUES (?,?,?,?,?) "
+                "ON CONFLICT(name) DO UPDATE SET lease_owner=excluded.lease_owner, lease_pid=excluded.lease_pid, "
+                "lease_until=excluded.lease_until, claimed_at=excluded.claimed_at",
+                (name, owner, os.getpid(), now + self._lease_seconds, now),
+            )
+        return True
+
+    def renew_lease(self, name: str, *, worker: str = "0") -> bool:
+        """Extend a lease this process holds; ``False`` when it no longer holds it."""
+
+        _check_member(name, LEASES, "lease name")
+        owner = f"{process_token()}:{worker}"
+        with self._write() as c:
+            return c.execute(
+                "UPDATE job_lease SET lease_until=? WHERE name=? AND lease_owner=?",
+                (self._clock() + self._lease_seconds, name, owner),
+            ).rowcount == 1
+
+    def release_lease(self, name: str, *, worker: str = "0") -> None:
+        _check_member(name, LEASES, "lease name")
+        with self._write() as c:
+            c.execute("DELETE FROM job_lease WHERE name=? AND lease_owner=?", (name, f"{process_token()}:{worker}"))
+
+    def lease_held(self, name: str) -> bool:
+        """Whether a live holder has ``name`` now (a read: a dead holder's row is left for the next ``take_lease``)."""
+
+        _check_member(name, LEASES, "lease name")
+        row = self._conn().execute("SELECT lease_owner, lease_pid, lease_until FROM job_lease WHERE name=?", (name,)).fetchone()
+        return row is not None and not _holder_gone(row[0], row[1], row[2], self._clock())
+
     # daily caps
 
     def spend(self, cap: str, day: str, calls: int = 1, *, limit: int | None = None) -> bool:
@@ -1628,6 +1836,7 @@ __all__ = [
     "PipelineStoreError",
     "PostingBuild",
     "PostingRecord",
+    "RunAssessment",
     "Step",
     "StepMetrics",
     "StepRun",

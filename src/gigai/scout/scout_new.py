@@ -52,6 +52,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import nullcontext
 from datetime import UTC, datetime, timedelta
 import hashlib
 from pathlib import Path
@@ -59,6 +60,7 @@ import textwrap
 
 from . import postings
 from .data_labels import ENVELOPE_KEY, PUBLIC_UNTRUSTED, UNTRUSTED_TEXT_RULE, USER_PRIVATE, assert_not_mixed, labels_envelope
+from .pipeline.busy import LiveBatch, assess_batch
 from .pipeline.store import MODEL_STEPS, PipelineStore, PipelineStoreError, PostingRecord, pipeline_path
 from .postings import PostingModelError, PostingText, ProfileView
 
@@ -233,14 +235,21 @@ def _evidence(row: PostingRecord, item: object | None) -> dict[str, object] | No
 
 
 def _assess(
-    pairs: Sequence[tuple[str, str]], texts: Mapping[str, PostingText], *, home_root: Path, target: Path, config: object | None
+    pairs: Sequence[tuple[str, str]], texts: Mapping[str, PostingText], *, home_root: Path, target: Path, config: object | None,
+    live: LiveBatch | None = None,
 ) -> dict[str, object]:
-    """Assess each ``(job, profile)`` through the job page's path, from the stored posting text. Nothing is fetched."""
+    """Assess each ``(job, profile)`` through the job page's path, from the stored posting text. Nothing is fetched.
+
+    ``live``: the caller already marked the batch live (``pipeline.busy``,
+    "assess these") and this keeps its marker fresh; without it the batch is
+    marked here for as long as it runs.
+    """
 
     from .find_jobs.assess_all import FATAL_CODES, assess_concurrency
     from .find_jobs.assess_contracts import ORIGIN_JOB_PAGE, AssessJobInput, AssessRequest, AssessResumeInput, ResolvedJob
-    from .pipeline.busy import assess_batch
     from .quick_assess import QuickAssessError, run_quick_assessment
+
+    marked = nullcontext(live) if live is not None else assess_batch(home_root, target)
 
     failed: list[dict[str, object]] = []
     stop: list[str] = []
@@ -276,7 +285,7 @@ def _assess(
         return None
 
     # PL5: the batch is live work the pipeline's runner yields to (DESIGN 7), like an "assess all" batch.
-    with assess_batch(home_root, target) as live:
+    with marked as live:
         with ThreadPoolExecutor(max_workers=max(1, assess_concurrency()), thread_name_prefix="scout-new-assess") as pool:
             codes = list(pool.map(one, pairs))
     for (job, profile_id), code in zip(pairs, codes):

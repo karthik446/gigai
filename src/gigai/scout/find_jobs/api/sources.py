@@ -124,6 +124,7 @@ class SourcesRoutesMixin:
             config = None
 
         ticker = getattr(self.server, "refresh_ticker", None)
+        runner = getattr(self.server, "pipeline_runner", None)
 
         def _finished(snapshot: dict[str, object]) -> None:
             log = _logger.warning if snapshot.get("status") == "failed" else _logger.info
@@ -137,6 +138,8 @@ class SourcesRoutesMixin:
             if ticker is not None:
                 # The update tagged new titles: let the model queue look now, not at the next poll.
                 ticker.kick_tags()
+            if runner is not None:
+                runner.kick_rank()  # DESIGN 10.6: the check stored new postings, so the rank lane looks now
 
         try:
             update_id = start_background_update(

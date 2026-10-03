@@ -41,7 +41,8 @@ the whole install, never per profile):
 - ``pipeline.max_model_calls_per_day`` (40): the runner's
   (``runner.PipelineRunner``); the call over it waits for the next day.
 - ``rank.max_calls_per_day`` (100), warning at ``rank.warn_calls_per_day`` (60):
-  the counter is here (:func:`spend_rank_calls`) for the background rank lane.
+  the one counter is here (:func:`spend_rank_calls`); the background rank lane
+  (``rank_lane.py``) takes every call from it.
 
 The pipeline switched off, or settings that cannot be read: an answer or story
 trigger queues nothing (``disabled``, with what said so).
@@ -647,18 +648,30 @@ def caps(
         finally:
             if store is None:
                 opened.close()
-    rank = used[CAP_RANK_CALLS]
     return {
         "day": day,
         "jobs_per_trigger": setting.auto_jobs_per_trigger,
         "pipeline_calls": {"used": used[CAP_PIPELINE_CALLS], "limit": setting.max_model_calls_per_day},
-        "rank_calls": {
-            "used": rank,
-            "limit": setting.rank_max_calls_per_day,
-            "warn_at": setting.rank_warn_calls_per_day,
-            "warning": rank >= setting.rank_warn_calls_per_day,
-        },
+        "rank_calls": _rank_count(used[CAP_RANK_CALLS], setting),
     }
+
+
+def _rank_count(used: int, setting: PipelineSetting) -> dict[str, object]:
+    """The day's rank count against its caps. ``warning``: the count has passed the warning level (the 61st call of a day with the default 60)."""
+
+    return {
+        "used": used,
+        "limit": setting.rank_max_calls_per_day,
+        "warn_at": setting.rank_warn_calls_per_day,
+        "warning": used > setting.rank_warn_calls_per_day,
+    }
+
+
+def rank_calls_today(store: PipelineStore | None, setting: PipelineSetting, day: str) -> dict[str, object]:
+    """The day's rank counter as a status block: numbers only. ``store`` None: no pipeline file yet, nothing counted."""
+
+    used = 0 if store is None else store.used(CAP_RANK_CALLS, day)
+    return {"day": day, **_rank_count(used, setting), "reached": used >= setting.rank_max_calls_per_day}
 
 
 def spend_rank_calls(
@@ -670,13 +683,18 @@ def spend_rank_calls(
     store: PipelineStore | None = None,
     now: datetime | None = None,
 ) -> dict[str, object]:
-    """Count ``calls`` rank model calls for today against ``rank.max_calls_per_day``: the background rank lane's gate.
+    """Count ``calls`` rank model calls for today against ``rank.max_calls_per_day``, BEFORE they are made.
+
+    THE one rank counter: the background rank lane (``rank_lane.rank_tick``)
+    and every other caller take their calls here, so the install has one
+    count whatever the profile and whoever ranks.
 
     ``{allowed, used, limit, warn_at, warning, day}``. ``allowed`` false:
     nothing was counted and the calls must not be made (the cap, or settings
     that cannot be read: a background job that spends model calls does not
-    guess). ``warning`` is true from ``rank.warn_calls_per_day`` on. One
-    count for the whole install, whatever the profile.
+    guess). ``warning`` is true once the day's count has passed
+    ``rank.warn_calls_per_day``: with the defaults the 60th call is not
+    flagged, the 61st is, and the 101st is not allowed.
     """
 
     home_root, target = Path(home_root), Path(target)
@@ -689,14 +707,7 @@ def spend_rank_calls(
     finally:
         if store is None:
             opened.close()
-    return {
-        "allowed": allowed,
-        "used": used,
-        "limit": setting.rank_max_calls_per_day,
-        "warn_at": setting.rank_warn_calls_per_day,
-        "warning": used >= setting.rank_warn_calls_per_day,
-        "day": day,
-    }
+    return {"allowed": allowed, **_rank_count(used, setting), "day": day}
 
 
 def refund_rank_calls(home_root: Path, target: Path, calls: int = 1, *, store: PipelineStore | None = None, now: datetime | None = None) -> None:
@@ -733,6 +744,7 @@ __all__ = [
     "pending_story",
     "process_now",
     "profile_changed",
+    "rank_calls_today",
     "refund_rank_calls",
     "spend_rank_calls",
     "today",
