@@ -38,15 +38,140 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import re
-from typing import Sequence
+from typing import Callable, Iterator, Sequence
+
+# --- patterns found in linear time ---------------------------------------------------
+#
+# A pattern such as ``[\w.+-]+@...`` tried from every character of a long run
+# reads the rest of the run each time: one 20,000-character line cost 4.5 s and
+# 100,000 characters 111 s. ``_Linear`` finds the same matches without that.
+#
+# Each branch is one alternative of the pattern, in the pattern's own order,
+# with the places it can start: ``starts`` finds them in one pass over the text
+# (a run is read once, from its first character), and ``resume``, when a branch
+# has one, gives the first place at or after the end of the match before. The
+# alternative itself is then matched only at those places, by the unchanged
+# expression. For every branch: where the alternative matches at some place, it
+# matches at one of its listed places no later than that, so the leftmost match
+# and which alternative makes it are what ``re`` would find.
+# ``tests/behaviors/scout_find_jobs/test_resume_privacy_linear.py`` keeps the
+# earlier patterns and compares.
+
+_Resume = Callable[[str, int], "int | None"]
+
+
+def _place(found: "re.Match[str] | None") -> int | None:
+    """Where a ``starts`` match says its alternative can begin: its last group when it has one."""
+
+    if found is None:
+        return None
+    return found.start(found.lastindex) if found.lastindex else found.start()
+
+
+def _resume_at(expression: str, flags: int = 0) -> Callable[[], _Resume]:
+    pattern = re.compile(expression, flags)
+    return lambda: lambda text, position: _place(pattern.match(text, position))
+
+
+class _Linear:
+    """A pattern's ``finditer`` / ``search`` / ``sub`` in time linear in the text (see above)."""
+
+    def __init__(self, *branches: tuple[str, str, "Callable[[], _Resume] | None"], flags: int = 0) -> None:
+        self._branches = tuple((re.compile(match, flags), re.compile(starts, flags), resume) for match, starts, resume in branches)
+
+    def finditer(self, text: str) -> Iterator["re.Match[str]"]:
+        streams = [starts.finditer(text) for _match, starts, _resume in self._branches]
+        heads = [_place(next(stream, None)) for stream in streams]
+        resumes = [resume() if resume is not None else None for _match, _starts, resume in self._branches]
+        position = 0
+        while True:
+            extra: list[int | None] = [None] * len(streams)
+            for index, stream in enumerate(streams):
+                head = heads[index]
+                while head is not None and head < position:
+                    head = _place(next(stream, None))
+                heads[index] = head
+                resume = resumes[index]
+                if position and resume is not None:
+                    extra[index] = resume(text, position)
+            found = None
+            while found is None:
+                place = min((at for at in (*heads, *extra) if at is not None), default=None)
+                if place is None:
+                    return
+                for index, (match, _starts, _resume) in enumerate(self._branches):
+                    if heads[index] == place:
+                        heads[index] = _place(next(streams[index], None))
+                    elif extra[index] != place:
+                        continue
+                    if extra[index] == place:
+                        extra[index] = None
+                    if found is None:
+                        found = match.match(text, place)
+            yield found
+            position = max(found.end(), found.start() + 1)
+
+    def search(self, text: str) -> "re.Match[str] | None":
+        return next(self.finditer(text), None)
+
+    def sub(self, replacement: str, text: str) -> str:
+        """``text`` with every match replaced by ``replacement``, taken literally."""
+
+        out: list[str] = []
+        position = 0
+        for found in self.finditer(text):
+            out.append(text[position:found.start()])
+            out.append(replacement)
+            position = found.end()
+        if not out:
+            return text
+        out.append(text[position:])
+        return "".join(out)
+
+
+def _scheme_resume() -> _Resume:
+    """Where a ``scheme://`` link can begin at or after a place inside a run of scheme characters.
+
+    The run is read once however many matches end inside it: whether
+    ``://`` and a character follow it is kept for the run.
+    """
+
+    held = [0, -1, False]  # the run was read from here, to here; whether a link's "://x" follows it
+
+    def resume(text: str, position: int) -> int | None:
+        if not held[0] <= position <= held[1]:
+            end = _SCHEME_RUN.match(text, position).end()
+            held[:] = [position, end, _SCHEME_FOLLOWS.match(text, end) is not None]
+        if not held[2]:
+            return None
+        return _place(_SCHEME_LETTER.match(text, position, held[1]))
+
+    return resume
+
+
+_SCHEME_RUN = re.compile(r"[a-z0-9+.-]*", re.I)
+_SCHEME_FOLLOWS = re.compile(r"://\S")
+_SCHEME_LETTER = re.compile(r"[0-9+.-]*([a-z])", re.I)
+
+#: The first word character of a chain of dotted labels (``[\w-]+`` joined by
+#: single dots): of a run of ``[\w.-]``, and after each ``..`` inside one.
+_CHAIN_STARTS = r"(?<![\w.-])(?=[.-]*(\w))|(?<=\.\.)(?=(?:-+\.)*-*(\w))"
+#: A run of address characters that a ``@`` follows, from its first character
+#: (``_ADDRESS_RESUME``: or from where the match before ended).
+_ADDRESS_STARTS = r"(?<![\w.+-])(?=[\w.+-]+@)"
+_ADDRESS_RESUME = _resume_at(r"(?=[\w.+-]+@)")
 
 # --- contact patterns (shared with the rank digest) ---------------------------------
 
-_EMAIL = re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+|(?<!\w)@[\w.]{2,}")
-_URL = re.compile(
-    r"(?:https?://|www\.)\S+"
-    r"|\b(?:[\w-]+\.)+(?:com|net|org|io|dev|me|ai|app|co|us|ca|uk|in|xyz|tech)\b(?:/\S*)?",
-    re.I,
+_ADDRESS = r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+"
+_EMAIL = _Linear(
+    (_ADDRESS, _ADDRESS_STARTS, _ADDRESS_RESUME),
+    (r"(?<!\w)@[\w.]{2,}", r"@", None),
+)
+_URL = _Linear(
+    (r"(?:https?://|www\.)\S+", r"https?://|www\.", None),
+    (r"\b(?:[\w-]+\.)+(?:com|net|org|io|dev|me|ai|app|co|us|ca|uk|in|xyz|tech)\b(?:/\S*)?", _CHAIN_STARTS, None),
+    flags=re.I,
 )
 _PHONE = re.compile(
     r"(?<![\w.])(?:\+?\d{1,3}[\s.-]?)?(?:\(\d{3}\)|\d{3})[\s.-]?\d{3}[\s.-]?\d{4}(?!\d)"
@@ -58,16 +183,26 @@ _STREET = re.compile(
     re.I,
 )
 _PO_BOX = re.compile(r"\bp\.?\s?o\.?\s?box\s+\d+", re.I)
-_ZIP_LINE = re.compile(r"\b[A-Z][A-Za-z.\s]+,\s*[A-Z]{2}\b(?:\s+\d{5}(?:-\d{4})?)?|\b\d{5}(?:-\d{4})?\b")
+#: ``City, ST`` begins at the first capital on a word boundary in a run of ``[A-Za-z.\s]`` that a comma ends.
+_CITY_START = r"(?=[A-Za-z.\s]+,)(?=[A-Za-z.\s]*?\b([A-Z]))"
+_ZIP_LINE = _Linear(
+    (r"\b[A-Z][A-Za-z.\s]+,\s*[A-Z]{2}\b(?:\s+\d{5}(?:-\d{4})?)?", r"(?<![A-Za-z.\s])" + _CITY_START, _resume_at(_CITY_START)),
+    (r"\b\d{5}(?:-\d{4})?\b", r"\b(?=\d{5})", None),
+)
 
 #: Body redaction only: a real email address (never a bare ``@handle``, so
 #: ``Engineer @Stripe`` survives) and a narrow link pattern (see the module
 #: docstring).
-_BODY_EMAIL = re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+")
-_BODY_URL = re.compile(
-    r"(?:[a-z][a-z0-9+.-]*://|www\.)\S+"
-    r"|\b(?:[\w-]+\.)*(?:linkedin\.com|github\.com|gitlab\.com|bit\.ly|lnkd\.in|t\.co|tinyurl\.com|goo\.gl)\b(?:/\S*)?",
-    re.I,
+_BODY_EMAIL = _Linear((_ADDRESS, _ADDRESS_STARTS, _ADDRESS_RESUME))
+_LINK_HOSTS = r"(?:linkedin\.com|github\.com|gitlab\.com|bit\.ly|lnkd\.in|t\.co|tinyurl\.com|goo\.gl)\b"
+# ``(?:scheme://|www\.)\S+`` and ``\b(?:[\w-]+\.)*host\b(?:/\S*)?``, each as two branches: the
+# host with labels before it begins at its chain's first word character, the host alone where it stands.
+_BODY_URL = _Linear(
+    (r"[a-z][a-z0-9+.-]*://\S+", r"(?<![a-z0-9+.-])(?=[0-9+.-]*([a-z])[a-z0-9+.-]*://)", _scheme_resume),
+    (r"www\.\S+", r"www\.", None),
+    (r"\b(?:[\w-]+\.)*" + _LINK_HOSTS + r"(?:/\S*)?", _CHAIN_STARTS, None),
+    (r"\b" + _LINK_HOSTS + r"(?:/\S*)?", r"\b" + _LINK_HOSTS, None),
+    flags=re.I,
 )
 #: A header line that states work authorization (``VISA: H1B``, ``US citizen``).
 _WORK_AUTH = re.compile(
@@ -177,11 +312,19 @@ def guard_name(text: str, tokens: set[str]) -> str:
 
 #: At most this many lines form the header candidate block.
 HEADER_MAX_LINES = 8
-_MARKDOWN_MARKERS = re.compile(r"\A[#>*_\s]+|[*_\s]+\Z")
+_LEADING_MARKERS = re.compile(r"[#>*_\s]*")
+_TRAILING_MARKERS = re.compile(r"[*_\s]*")
+
+
+def _without_markers(text: str) -> str:
+    """``text`` less its leading ``[#>*_\\s]`` and then its trailing ``[*_\\s]``, each run read once."""
+
+    text = text[_LEADING_MARKERS.match(text).end():]
+    return text[: len(text) - _TRAILING_MARKERS.match(text[::-1]).end()]
 
 
 def _unmarked(line: str) -> str:
-    return _MARKDOWN_MARKERS.sub("", line.strip())
+    return _without_markers(line.strip())
 
 
 def is_name_line(line: str) -> bool:
@@ -208,19 +351,30 @@ def _is_name_word(word: str) -> bool:
     return len(caps) <= 2 and all(b - a > 1 for a, b in zip(caps, caps[1:]))
 
 
-#: Line 1 as ``<name> <separator> <headline>`` (``# Priya Natarajan — Staff ML Engineer``, ``Jane Doe | Engineer``).
-_NAME_THEN_REST = re.compile(r"\A(?P<prefix>[#>*_\s]*)(?P<name>[^|—–·•,]+?)\s*(?:\s[—–-]\s|[|·•,])\s*(?P<rest>\S.*)\Z")
+#: Line 1 as ``<name> <separator> <headline>`` (``# Priya Natarajan — Staff ML Engineer``, ``Jane Doe | Engineer``):
+#: markers, then the shortest name that a separator follows, then the rest. The first separator in the
+#: line is the only one a name can end at (no name holds ``|—–·•,``).
+_NAME_SEPARATOR = re.compile(r"\s[—–-]\s|[|·•,]")
 
 
 def _name_then_headline(line: str) -> tuple[str, str] | None:
     """``(name, headline)`` when line 1 opens with a strictly name-shaped segment followed by more text."""
 
-    match = _NAME_THEN_REST.match(line.strip())
-    if match is None or not is_name_line(match.group("name")):
+    line = line.strip()
+    if "\n" in line:
         return None
-    hashes = re.match(r"#+", match.group("prefix").strip())
-    headline = _MARKDOWN_MARKERS.sub("", match.group("rest")) or match.group("rest")
-    return _unmarked(match.group("name")), (hashes.group(0) + " " if hashes else "") + headline
+    prefix = line[: _LEADING_MARKERS.match(line).end()]
+    after = line[len(prefix):]
+    separator = _NAME_SEPARATOR.search(after)
+    if separator is None:
+        return None
+    name = after[: separator.start()]
+    rest = after[separator.end():].lstrip()
+    if not rest or "—" in name or "–" in name or not is_name_line(name):
+        return None
+    hashes = re.match(r"#+", prefix.strip())
+    headline = _without_markers(rest) or rest
+    return _unmarked(name), (hashes.group(0) + " " if hashes else "") + headline
 
 
 def _name_tokens_of(name: str) -> set[str]:

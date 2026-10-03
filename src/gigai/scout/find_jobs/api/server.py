@@ -62,6 +62,7 @@ from .common import (
     _is_transient_run_error,
     _match_run_id,
     _receipt_span_ms,
+    reads_committed,
 )
 from .openapi import with_allowed_keys
 from .profiles import _match_profile_id
@@ -517,6 +518,7 @@ class ScoutFindJobsBackend:
                 _selected_profile_cache[(str(resolved.path), post_head)] = profile
         return profile
 
+    @reads_committed  # 0110-045: every caller, not only GET /api/config, keeps its workpad checks
     def read_config(self) -> tuple[FindJobsConfig, bytes]:
         """The EFFECTIVE config: the shared ``find-jobs.json`` with the
 
@@ -553,6 +555,7 @@ class ScoutFindJobsBackend:
         details = self.resume_details()
         return None if details is None else (details.label, details.created_at)
 
+    @reads_committed  # 0110-045
     def resume_details(self) -> ResumeDetails | None:
         """The SELECTED profile's resume (S25 F1-b2), not "newest".
 

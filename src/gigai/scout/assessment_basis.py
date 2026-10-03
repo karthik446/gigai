@@ -14,7 +14,10 @@ the same three things a find-jobs run seals on its ``AssessOutput``:
 assessed with now, and names why the two differ:
 
 - ``older_prompt``: the prompt version is not one the shipped ``assess.md``
-  renders (``CURRENT_ASSESS_PROMPT_VERSIONS``);
+  renders (``CURRENT_ASSESS_PROMPT_VERSIONS``), or, with the same
+  constraints, it is not the one this work mode renders now (decision #207:
+  a hybrid profile's assessment sealed as v5, before the hybrid paragraph's
+  words changed);
 - ``settings_changed``: the constraints digest differs (a changed work
   mode, countries, location or sponsorship need);
 - ``story_bank_changed``: ``story_bank.bank_matches`` (0110-041, targeted): a
@@ -156,6 +159,9 @@ def staleness(item: AssessResponse, current: CurrentBasis, bank_now) -> Stalenes
         return Staleness(REASON_OLDER_PROMPT)
     if item.constraints_digest != current.constraints_digest:
         return Staleness(REASON_SETTINGS_CHANGED)
+    if item.prompt_version != current.prompt_version:
+        # The same constraints under another name: the words for this work mode changed (#207, hybrid).
+        return Staleness(REASON_OLDER_PROMPT)
     questions = item.result.structured_questions
     evidence = [evidence for row in item.result.matrix for evidence in row.resume_evidence]
     if not questions and not story_bank.cited_ids(evidence):

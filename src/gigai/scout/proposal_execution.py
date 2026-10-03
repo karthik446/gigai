@@ -365,7 +365,7 @@ def _assess_node_body(
                 # acquire's): the assess prompt version, the candidate's
                 # constraints, the story bank. An open question the bank can
                 # now answer is never hidden behind "unchanged".
-                and not _basis_stale(prior, bank=bank, constraints=current_constraints)
+                and not _basis_stale(prior, bank=bank, constraints=current_constraints, prompt_version=assess_prompt_version(prompt_work_mode))
             ):
                 # A genuinely skippable UNCHANGED row: not a candidate at
                 # all, same as before this fix. Its carried-forward result
@@ -679,7 +679,7 @@ def _run_root(root: Path, context: object) -> Path:
     return workpad
 
 
-def _basis_stale(prior: object, *, bank: object, constraints: str | None) -> bool:
+def _basis_stale(prior: object, *, bank: object, constraints: str | None, prompt_version: str | None = None) -> bool:
     """Whether an earlier run's assessment was made with something that has since changed.
 
     ``prior`` is a ``market_acquisition._PriorAssessment``: the assessment
@@ -688,7 +688,10 @@ def _basis_stale(prior: object, *, bank: object, constraints: str | None) -> boo
     revision and profile:
 
     - the assess prompt version differs (a run sealed before 0.1.10.5 has
-      none: its prompt had no candidate constraints, 0110-035);
+      none: its prompt had no candidate constraints, 0110-035), or is not
+      the one this run's work mode renders (``prompt_version``, decision
+      #207: a hybrid run's assessment sealed as v5, before the hybrid
+      paragraph's words changed; ``None`` skips this check);
     - the candidate constraints differ (``constraints``: this run's
       ``assessment_core.constraints_digest``, work mode included since
       0110-038; ``None`` when the caller has no
@@ -709,6 +712,8 @@ def _basis_stale(prior: object, *, bank: object, constraints: str | None) -> boo
     # one: the same bytes as before) are both what the shipped prompt renders;
     # which of the two an assessment needed is in the constraints digest.
     if getattr(prior, "prompt_version", None) not in CURRENT_ASSESS_PROMPT_VERSIONS:
+        return True
+    if prompt_version is not None and getattr(prior, "prompt_version", None) != prompt_version:
         return True
     if constraints is not None and getattr(prior, "constraints_digest", None) != constraints:
         return True

@@ -77,11 +77,18 @@ ASSESS_PROMPT_VERSION = "assess-prompt-v5"
 #: The name of a prompt rendered with no CANDIDATE WORK MODE paragraph: the
 #: same bytes v4 rendered, so an assessment sealed under it still stands.
 ASSESS_PROMPT_VERSION_NO_WORK_MODE = "assess-prompt-v4"
-#: The versions the shipped ``assess.md`` renders today. An earlier
-#: assessment sealed with either is current as far as the wording goes; the
-#: constraints digest (which includes the work mode) says whether it was made
-#: for the same candidate constraints.
-CURRENT_ASSESS_PROMPT_VERSIONS = frozenset({ASSESS_PROMPT_VERSION, ASSESS_PROMPT_VERSION_NO_WORK_MODE})
+#: The name of a prompt rendered for a HYBRID candidate (decision #207).
+#: 0110-048 changed that paragraph's words ("remote roles, and hybrid or
+#: on-site roles in their own area"; before: "hybrid roles in their own
+#: area"), so a hybrid prompt is no longer the bytes v5 rendered. The remote
+#: only and on-site paragraphs, and a prompt with no work mode, render byte
+#: for byte as before and keep their names (v5, v4): their assessments stand.
+ASSESS_PROMPT_VERSION_HYBRID = "assess-prompt-v6"
+#: The versions the shipped ``assess.md`` renders today. An assessment sealed
+#: with none of them is older wording. One sealed with one of them is current
+#: when the constraints digest (which includes the work mode) is the same and
+#: the version is the one that work mode renders now (``assess_prompt_version``).
+CURRENT_ASSESS_PROMPT_VERSIONS = frozenset({ASSESS_PROMPT_VERSION, ASSESS_PROMPT_VERSION_NO_WORK_MODE, ASSESS_PROMPT_VERSION_HYBRID})
 
 _WORK_MODES = ("remote", "hybrid", "onsite")
 _IN_PERSON_LABELS = {"hybrid": "hybrid", "onsite": "on-site"}
@@ -112,7 +119,10 @@ def normalize_work_mode(value: object) -> str:
 def assess_prompt_version(work_mode: object = "") -> str:
     """The version of the prompt a candidate with ``work_mode`` is assessed with."""
 
-    return ASSESS_PROMPT_VERSION if normalize_work_mode(work_mode) else ASSESS_PROMPT_VERSION_NO_WORK_MODE
+    mode = normalize_work_mode(work_mode)
+    if mode == "hybrid":
+        return ASSESS_PROMPT_VERSION_HYBRID
+    return ASSESS_PROMPT_VERSION if mode else ASSESS_PROMPT_VERSION_NO_WORK_MODE
 
 # Exception mapping at the model boundary, exactly as the pre-P1 loop had it:
 # a transport/adapter failure whose code is one of these is the operator's own
@@ -844,6 +854,7 @@ def _normalize_and_strip(decoded: Mapping[str, object]) -> tuple[dict[str, objec
 
 __all__ = [
     "ASSESS_PROMPT_VERSION",
+    "ASSESS_PROMPT_VERSION_HYBRID",
     "ASSESS_PROMPT_VERSION_NO_WORK_MODE",
     "CURRENT_ASSESS_PROMPT_VERSIONS",
     "AssessAttempt",
