@@ -30,6 +30,17 @@ mechanics here. Those belong in the internal changelog.
 
 ## Released versions
 
+### 0.1.10.6
+
+#### Fixed
+
+- **`gigai status` and other commands no longer slow down as your history grows.** `gigai status`
+  took 14 seconds with a long history (37 seconds with a longer one) because it re-read every saved
+  change each time; it now takes a fraction of a second whatever the history length. `gigai scout
+  profile list` and `gigai scout story-bank list` are also flat, and a read-only command checks your
+  data folder once instead of several times. The first command after upgrading does the one-time
+  work.
+
 ### 0.1.10.5
 
 #### Added
