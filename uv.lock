@@ -90,6 +90,7 @@ dependencies = [
     { name = "jsonschema" },
     { name = "openpyxl" },
     { name = "pycountry" },
+    { name = "pypdf" },
     { name = "python-dotenv" },
     { name = "questionary" },
     { name = "referencing" },
@@ -99,7 +100,6 @@ dependencies = [
 [package.optional-dependencies]
 test = [
     { name = "pydantic" },
-    { name = "pypdf" },
     { name = "pytest" },
     { name = "pytest-xdist" },
 ]
@@ -112,7 +112,7 @@ requires-dist = [
     { name = "openpyxl", specifier = ">=3.1" },
     { name = "pycountry", specifier = ">=24" },
     { name = "pydantic", marker = "extra == 'test'", specifier = ">=2.10" },
-    { name = "pypdf", marker = "extra == 'test'", specifier = ">=5" },
+    { name = "pypdf", specifier = ">=5" },
     { name = "pytest", marker = "extra == 'test'", specifier = ">=8.3" },
     { name = "pytest-xdist", marker = "extra == 'test'", specifier = ">=3.6" },
     { name = "python-dotenv", specifier = ">=1.0" },

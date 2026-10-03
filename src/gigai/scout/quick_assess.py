@@ -70,6 +70,7 @@ from ..adapters.port import ModelInvocationError
 from ..canonical import digest_imported_bytes, parse_json_bytes
 from ..config import GigAIConfig, load_config
 from ..model_targets import ModelTargetResolutionError
+from .assessment_basis import posting_sha256
 from .assessment_core import INSTRUCTIONS_DIGEST, AssessJob, build_assess_context
 from .assessment_core import POSTING_INCOMPLETE_MESSAGE, assess_once, assess_prompt_version, constraints_digest
 from . import story_bank
@@ -87,6 +88,7 @@ from .find_jobs.contracts import (
     ModelTarget,
     NotAssessedReason,
     Producer,
+    ProfileRef,
     StoryBankStamp,
     UsageBlock,
 )
@@ -226,6 +228,8 @@ class _ObservedPort:
     inner: object
     deadline_seconds: float | None = None
     timed_out: bool = False
+    #: The model id the last successful call answered with (``InvocationResult.resolved_model``).
+    resolved_model: str | None = None
 
     @property
     def name(self) -> str:
@@ -234,12 +238,15 @@ class _ObservedPort:
     def invoke(self, request):
         try:
             if self.deadline_seconds is None:
-                return self.inner.invoke(request)
-            return self._invoke_with_deadline(request)
+                result = self.inner.invoke(request)
+            else:
+                result = self._invoke_with_deadline(request)
         except BaseException as exc:
             if _is_timeout(exc):
                 self.timed_out = True
             raise
+        self.resolved_model = getattr(result, "resolved_model", None) or self.resolved_model
+        return result
 
     def _invoke_with_deadline(self, request):
         outcome: dict[str, object] = {}
@@ -479,6 +486,16 @@ def candidate_location_and_work_mode(preferences, profile, *, home_root: Path, t
     return location, work_mode
 
 
+#: A model id as an adapter names it (``claude-opus-5-5``, ``gpt-5.1-codex``, ``llama3.1:8b``): never free text.
+_MODEL_ID = re.compile(r"\A[A-Za-z0-9][A-Za-z0-9_.:/+-]{0,127}\Z")
+
+
+def _model_id(value: str | None) -> str | None:
+    """``value`` when it is shaped like a model id, else ``None`` (nothing else is stored as one)."""
+
+    return value if value is not None and _MODEL_ID.fullmatch(value) else None
+
+
 def _default_model_target(target: Path) -> ModelTarget:
     """``find-jobs.json``'s ``default_model_target``, tolerantly (missing/
     unreadable/starter -> the contract default, ``ollama_local``)."""
@@ -575,6 +592,8 @@ def run_quick_assessment(
             job = resolve_job(request.job, client=client, home_root=home_root)
     except FindJobsContractError as exc:
         raise QuickAssessError(exc.code, str(exc)) from exc
+    # PL2: the posting's digest as fetched (the index's ``content_sha256``), before any title override.
+    posting_digest = posting_sha256(job.title, job.text)
     job = _apply_job_overrides(job, request)
 
     # 2. Resume identity + text (the pinned profile resume, or ephemeral).
@@ -712,6 +731,10 @@ def run_quick_assessment(
             work_mode=candidate_work_mode,
         ),
         story_bank=None if bank.profile_id is None else StoryBankStamp(bank.profile_id, bank.digest, dict(bank.marks)),
+        # 0.1.10.7 PL2: the rest of a run's seal (``assessment_basis``).
+        profile_ref=None if profile is None else ProfileRef(profile.profile_id, profile.revision, profile.content_digest),
+        posting_sha256=posting_digest,
+        model=_model_id(getattr(binding.port, "resolved_model", None)),
     )
     atomic_write(path, json.dumps(response.to_json(), indent=2, sort_keys=True).encode("utf-8"))
     if bank_entries:

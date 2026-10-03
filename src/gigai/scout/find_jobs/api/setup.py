@@ -292,6 +292,8 @@ def _named_profile_refusal(backend: object, profile_id: str) -> tuple[HTTPStatus
     profile = next((item for item in profiles if item.profile_id == profile_id), None)
     if profile is None:
         return missing
+    if profile.state == "deleted":
+        return missing
     if profile.state == "archived":
         return (HTTPStatus.CONFLICT, "scout_profile_archived", "an archived profile cannot take the setup's titles")
     return None

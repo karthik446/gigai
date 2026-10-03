@@ -1,6 +1,11 @@
 """F1-c: the profiles API (``GET``/``POST /api/profiles``,
 ``PUT /api/profiles/{profile_id}``, ``POST /api/profiles/{profile_id}/archive``,
-``POST /api/profiles/selection``).
+``POST /api/profiles/selection``, ``DELETE /api/profiles/{profile_id}``).
+
+0110-047: ``DELETE`` archives a profile as state ``deleted`` (the journal keeps
+it): it leaves ``GET /api/profiles``, the switcher, demand tagging and runs;
+the default profile and the only active one are a ``409``; deleting the selected
+profile selects the default.
 
 Design source: ``orchestrator/docs/v0.1.9/spikes/S25-scout-interested-
 profiles.md`` (Q6, Amendment A1, the Packet plan's F1-c row). Calls
@@ -98,6 +103,9 @@ _PROFILE_ERROR_STATUS: dict[str, int] = {
     "scout_profile_invalid": HTTPStatus.BAD_REQUEST,
     "scout_profile_unavailable": HTTPStatus.NOT_FOUND,
     "scout_profile_archived": HTTPStatus.CONFLICT,
+    "scout_profile_deleted": HTTPStatus.CONFLICT,
+    "scout_profile_default_delete": HTTPStatus.CONFLICT,
+    "scout_profile_last_active": HTTPStatus.CONFLICT,
     "scout_profile_default_search_settings": HTTPStatus.CONFLICT,
     "profile_archive_requires_replacement": HTTPStatus.CONFLICT,
     "scout_profile_selection_dangling": HTTPStatus.CONFLICT,
@@ -311,6 +319,8 @@ class ProfilesRoutesMixin:
             self._error_from_profile_error(exc)
             return
         default = default_profile(profiles)
+        # 0110-047: a deleted profile is gone from every list; its history stays in the journal.
+        profiles = tuple(item for item in profiles if item.state != "deleted")
         default_profile_id = None if default is None else default.profile_id
         shared = self._default_search_settings()
         self._write_json(
@@ -509,6 +519,28 @@ class ProfilesRoutesMixin:
             self._error(HTTPStatus.NOT_FOUND, "not_found", "no target is configured")
             return
         self._profile_response(HTTPStatus.OK, resolved, record)
+
+    # -- DELETE /api/profiles/{profile_id} -----------------------------------
+
+    def _handle_delete_profile(self, profile_id: str) -> None:
+        try:
+            resolved = self._resolve_profiles_gig()
+            record = write_profile(resolved, profile_id=profile_id, state="deleted")
+            selection = selected_profile(resolved, home_root=self._backend.home_root, target=self._backend.target)
+        except ProfileRecordError as exc:
+            self._error_from_profile_error(exc)
+            return
+        except LookupError:
+            self._error(HTTPStatus.NOT_FOUND, "not_found", "no target is configured")
+            return
+        self._write_json(
+            HTTPStatus.OK,
+            {
+                "schema_version": "scout-profile-delete-response:1",
+                "deleted": record.profile_id,
+                "selected_profile_id": selection.profile_id if selection is not None else None,
+            },
+        )
 
     # -- POST /api/profiles/selection ----------------------------------------
 

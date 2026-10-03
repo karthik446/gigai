@@ -205,6 +205,7 @@ class RunsListRoutesMixin(RunReadsRoutesMixin):
         # A blank filter is no filter, as before; a blank limit is refused.
         filter_profile_id = (query.get("profile_id") or [None])[0] or None
         filter_status = (query.get("status") or [None])[0] or None
+        include_deleted = (query.get("include_deleted") or [""])[0] in ("1", "true")
         try:
             limit = _query_int(query, "limit", minimum=1, maximum=RUNS_LIST_LIMIT_MAX)
         except ValueError:
@@ -223,6 +224,9 @@ class RunsListRoutesMixin(RunReadsRoutesMixin):
             self._error(HTTPStatus.NOT_FOUND, "not_found", "no target is configured")
             return
 
+        # 0110-047: runs of a deleted profile stay readable, but not in the default list
+        # (they show when `profile_id` names that profile, or with include_deleted=true).
+        deleted_ids = frozenset() if include_deleted else self._deleted_profile_ids(resolved)
         run_ids = _run_ids_newest_first(resolved)
         read_size = len(run_ids) if limit is None else max(limit, _LIMITED_READ_SIZE)
         default_profile_id: str | None = None
@@ -238,6 +242,8 @@ class RunsListRoutesMixin(RunReadsRoutesMixin):
                     profile_id = default_profile_id
                 if filter_profile_id is not None and profile_id != filter_profile_id:
                     continue
+                if profile_id in deleted_ids and profile_id != filter_profile_id:
+                    continue
                 if filter_status is not None and row["status"] != filter_status:
                     continue
                 runs.append({**row, "profile_id": profile_id})
@@ -246,6 +252,14 @@ class RunsListRoutesMixin(RunReadsRoutesMixin):
                 break
 
         self._write_json(HTTPStatus.OK, {"schema_version": "scout-runs-list-response:1", "runs": runs})
+
+    def _deleted_profile_ids(self, resolved) -> frozenset[str]:
+        from ...profile_records import ProfileRecordError, list_profiles
+
+        try:
+            return frozenset(item.profile_id for item in list_profiles(resolved) if item.state == "deleted")
+        except ProfileRecordError:
+            return frozenset()
 
     def _default_profile_id(self, resolved) -> str | None:
         """The migrated default profile: what a run sealed before F1-b ran against."""

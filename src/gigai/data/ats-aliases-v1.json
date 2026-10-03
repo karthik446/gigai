@@ -1,0 +1,359 @@
+{
+ "schema_version": "scout-ats-aliases:1",
+ "terms": [
+  {
+   "term": "Kubernetes",
+   "aliases": [
+    "k8s",
+    "eks",
+    "gke",
+    "aks"
+   ]
+  },
+  {
+   "term": "Docker",
+   "aliases": [
+    "containerization"
+   ]
+  },
+  {
+   "term": "Terraform",
+   "aliases": [
+    "opentofu"
+   ]
+  },
+  {
+   "term": "AWS",
+   "aliases": [
+    "amazon web services"
+   ]
+  },
+  {
+   "term": "GCP",
+   "aliases": [
+    "google cloud",
+    "google cloud platform"
+   ]
+  },
+  {
+   "term": "Azure",
+   "aliases": [
+    "microsoft azure"
+   ]
+  },
+  {
+   "term": "CI/CD",
+   "aliases": [
+    "continuous integration",
+    "continuous delivery",
+    "continuous deployment",
+    "github actions",
+    "jenkins",
+    "gitlab ci",
+    "circleci"
+   ]
+  },
+  {
+   "term": "Go",
+   "aliases": [
+    "golang"
+   ]
+  },
+  {
+   "term": "Python",
+   "aliases": [
+    "python3"
+   ]
+  },
+  {
+   "term": "JavaScript",
+   "aliases": [
+    "js",
+    "ecmascript"
+   ]
+  },
+  {
+   "term": "TypeScript",
+   "aliases": []
+  },
+  {
+   "term": "Node.js",
+   "aliases": [
+    "nodejs",
+    "node js"
+   ]
+  },
+  {
+   "term": "React",
+   "aliases": [
+    "reactjs",
+    "react.js"
+   ]
+  },
+  {
+   "term": "Java",
+   "aliases": []
+  },
+  {
+   "term": "Kotlin",
+   "aliases": []
+  },
+  {
+   "term": "Rust",
+   "aliases": []
+  },
+  {
+   "term": "C++",
+   "aliases": [
+    "cpp"
+   ]
+  },
+  {
+   "term": "C#",
+   "aliases": [
+    "csharp",
+    "c sharp"
+   ]
+  },
+  {
+   "term": ".NET",
+   "aliases": [
+    "dotnet",
+    "asp.net"
+   ]
+  },
+  {
+   "term": "Ruby",
+   "aliases": [
+    "ruby on rails"
+   ]
+  },
+  {
+   "term": "PHP",
+   "aliases": []
+  },
+  {
+   "term": "Scala",
+   "aliases": []
+  },
+  {
+   "term": "Swift",
+   "aliases": []
+  },
+  {
+   "term": "SQL",
+   "aliases": []
+  },
+  {
+   "term": "PostgreSQL",
+   "aliases": [
+    "postgres",
+    "psql"
+   ]
+  },
+  {
+   "term": "MySQL",
+   "aliases": []
+  },
+  {
+   "term": "MongoDB",
+   "aliases": [
+    "mongo"
+   ]
+  },
+  {
+   "term": "Redis",
+   "aliases": []
+  },
+  {
+   "term": "Kafka",
+   "aliases": [
+    "apache kafka"
+   ]
+  },
+  {
+   "term": "Elasticsearch",
+   "aliases": [
+    "elastic search",
+    "opensearch"
+   ]
+  },
+  {
+   "term": "Spark",
+   "aliases": [
+    "apache spark",
+    "pyspark"
+   ]
+  },
+  {
+   "term": "Airflow",
+   "aliases": [
+    "apache airflow"
+   ]
+  },
+  {
+   "term": "Snowflake",
+   "aliases": []
+  },
+  {
+   "term": "dbt",
+   "aliases": []
+  },
+  {
+   "term": "Prometheus",
+   "aliases": []
+  },
+  {
+   "term": "Grafana",
+   "aliases": []
+  },
+  {
+   "term": "Datadog",
+   "aliases": []
+  },
+  {
+   "term": "ArgoCD",
+   "aliases": [
+    "argo cd",
+    "argo"
+   ]
+  },
+  {
+   "term": "Helm",
+   "aliases": []
+  },
+  {
+   "term": "Ansible",
+   "aliases": []
+  },
+  {
+   "term": "Linux",
+   "aliases": [
+    "unix"
+   ]
+  },
+  {
+   "term": "Bash",
+   "aliases": [
+    "shell scripting"
+   ]
+  },
+  {
+   "term": "GraphQL",
+   "aliases": []
+  },
+  {
+   "term": "REST",
+   "aliases": [
+    "restful",
+    "rest api",
+    "rest apis"
+   ]
+  },
+  {
+   "term": "gRPC",
+   "aliases": []
+  },
+  {
+   "term": "Microservices",
+   "aliases": [
+    "micro-services",
+    "microservice"
+   ]
+  },
+  {
+   "term": "Machine Learning",
+   "aliases": []
+  },
+  {
+   "term": "PyTorch",
+   "aliases": []
+  },
+  {
+   "term": "TensorFlow",
+   "aliases": []
+  },
+  {
+   "term": "LLM",
+   "aliases": [
+    "llms",
+    "large language models"
+   ]
+  },
+  {
+   "term": "SOC 2",
+   "aliases": [
+    "soc2",
+    "soc ii"
+   ]
+  },
+  {
+   "term": "ISO 27001",
+   "aliases": [
+    "iso27001"
+   ]
+  },
+  {
+   "term": "HIPAA",
+   "aliases": []
+  },
+  {
+   "term": "GDPR",
+   "aliases": []
+  },
+  {
+   "term": "Agile",
+   "aliases": [
+    "scrum"
+   ]
+  },
+  {
+   "term": "Observability",
+   "aliases": []
+  },
+  {
+   "term": "SRE",
+   "aliases": [
+    "site reliability"
+   ]
+  },
+  {
+   "term": "Salesforce",
+   "aliases": []
+  },
+  {
+   "term": "Tableau",
+   "aliases": []
+  },
+  {
+   "term": "Power BI",
+   "aliases": [
+    "powerbi"
+   ]
+  },
+  {
+   "term": "Excel",
+   "aliases": [
+    "microsoft excel"
+   ]
+  },
+  {
+   "term": "Figma",
+   "aliases": []
+  },
+  {
+   "term": "Git",
+   "aliases": []
+  },
+  {
+   "term": "Bazel",
+   "aliases": []
+  },
+  {
+   "term": "OpenTelemetry",
+   "aliases": [
+    "otel"
+   ]
+  }
+ ]
+}

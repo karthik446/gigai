@@ -58,7 +58,7 @@ class RouteSpec:
     errors: tuple[tuple[int, str], ...] = ()
     request_example: dict[str, object] | None = None
     content_type: str = "application/json"
-    host_checked: bool = False  # GET routes that return personal values also check Host
+    host_checked: bool = False  # set for every GET in _finish: the server checks Host on all of them
     description: str = ""
     tag: str = ""  # the docs grouping; set from _META below, one of TAGS
     # Body keys the handler accepts as a top-level object (drives unknown_key's allowed keys).
@@ -337,8 +337,9 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
         "GET", "/api/runs", "Every run, newest first, with counts.", "read", "none",
         {"schema_version": "scout-runs-list-response:1", "runs": [{"run_id": "run_20260929T100000Z", "created_at": "2026-09-29T10:00:00Z", "profile_id": "prof_1", "status": "succeeded", "counts": {"found": 40, "new": 12, "assessed": 10, "matched": 3}}]},
         schema_version="scout-runs-list-response:1",
-        params=(_q("profile_id", "string", "Keep the runs of this profile."), _q("status", "string", "Keep the runs with this status."), _q("limit", "integer", "The newest N runs (1..500).")),
+        params=(_q("profile_id", "string", "Keep the runs of this profile."), _q("status", "string", "Keep the runs with this status."), _q("limit", "integer", "The newest N runs (1..500)."), _q("include_deleted", "string", "1 to include the runs of deleted profiles (hidden by default).", enum=("0", "1"))),
         errors=(_INVALID, _NOT_FOUND, _NO_TARGET),
+        description="Runs of a deleted profile are left out unless include_deleted=1 or profile_id names that profile.",
     ),
     RouteSpec(
         "GET", "/api/runs/{run_id}", "One run's status, node receipts and progress.", "read", "none",
@@ -438,6 +439,18 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
     RouteSpec(
         "POST", "/api/profiles/{profile_id}/archive", "Archive a profile, optionally moving its selection to another.", "write", "none", {"archived": "prof_1"},
         params=(_PROFILE_ID, _b("replacement_profile_id", "string", "Profile to select instead.")), request_example={}, errors=((400, "invalid_value"), _NOT_FOUND),
+    ),
+    RouteSpec(
+        "DELETE", "/api/profiles/{profile_id}", "Delete a profile: it is archived as `deleted` and the journal keeps its history.", "write", "none",
+        {"schema_version": "scout-profile-delete-response:1", "deleted": "prof_2", "selected_profile_id": "prof_1"},
+        schema_version="scout-profile-delete-response:1",
+        params=(_PROFILE_ID,),
+        errors=(_NOT_FOUND, (409, "scout_profile_default_delete"), (409, "scout_profile_last_active"), (409, "scout_profile_deleted")),
+        description=(
+            "Send Content-Type: application/json like every write (no body is read). The profile leaves GET /api/profiles, the switcher, new runs and background tagging; "
+            "its runs and assessments stay readable (GET /api/runs?profile_id=... or include_deleted=1). The default profile and the only active profile are a 409. "
+            "Deleting the selected profile selects the default; `selected_profile_id` is the selection after the delete. The story bank and answers are untouched."
+        ),
     ),
     RouteSpec(
         "POST", "/api/profiles/selection", "Select the profile that runs and assessments use.", "write", "none", {"selected": "prof_1"},
@@ -953,6 +966,7 @@ _META: dict[tuple[str, str], tuple[str, str]] = {
     ("POST", "/api/profiles"): ("Create a profile", "Profiles and resume"),
     ("PUT", "/api/profiles/{profile_id}"): ("Update a profile", "Profiles and resume"),
     ("POST", "/api/profiles/{profile_id}/archive"): ("Archive a profile", "Profiles and resume"),
+    ("DELETE", "/api/profiles/{profile_id}"): ("Delete a profile", "Profiles and resume"),
     ("POST", "/api/profiles/selection"): ("Select the active profile", "Profiles and resume"),
     ("POST", "/api/assess"): ("Assess one job against a resume", "Assessment"),
     ("GET", "/api/assessments"): ("List stored assessments", "Assessment"),
@@ -1115,7 +1129,7 @@ def _operation(route: RouteSpec) -> dict[str, object]:
             if p.where in ("path", "query")
         ],
     }
-    if route.host_checked:
+    if route.host_checked or route.method == "GET":
         operation["x-gigai-host-checked"] = True
     body_params = [p for p in route.params if p.where == "body"]
     if route.method in ("POST", "PUT") and (body_params or route.open_body or route.request_example is not None):
@@ -1139,7 +1153,7 @@ def _operation(route: RouteSpec) -> dict[str, object]:
         entry["description"] = f"{description}, {code}" if description else code  # type: ignore[index]
     if route.method in ("POST", "PUT", "DELETE"):
         responses.setdefault("415", {"description": "unsupported_media_type: writes need Content-Type: application/json.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}})
-    responses.setdefault("403", {"description": "forbidden / forbidden_origin: loopback peer and matching Host/Origin only.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}})
+    responses.setdefault("403", {"description": "forbidden / forbidden_origin: loopback peer and Host `127.0.0.1:<port>` or `localhost:<port>` only (Origin too on writes).", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}})
     operation["responses"] = responses
     return operation
 
@@ -1197,7 +1211,7 @@ def llms_text() -> str:
         "- Start at GET /api (every route, its effect, and its cost class).\n"
         "- Full spec: GET /api/openapi.json (OpenAPI 3.1: params, examples, error codes; x-gigai-effect read|write, x-gigai-external none|model|network).\n"
         "- One job, everything known about it: GET /api/jobs?url=<posting url> (read only, no model calls). The UI's #/jobs/<url> is this route.\n"
-        "- Writes (POST/PUT) need Content-Type: application/json. Host must be 127.0.0.1:<port> or localhost:<port>; this server only answers loopback peers.\n"
+        "- Writes (POST/PUT) need Content-Type: application/json. Every request (reads too) must carry Host 127.0.0.1:<port> or localhost:<port> (else 403 forbidden_origin); this server only answers loopback peers.\n"
         "- Errors are {\"error\": {\"code\", \"message\"}}; an unknown_key 422 lists allowed_keys.\n"
         "- Routes marked x-gigai-external model spend a model call (assess, tailor, rank, run); network reads the public internet. Prefer read routes first.\n"
         "- Tailored resumes: POST /api/tailored-resumes, then POST /api/tailored-resumes/pdf {profile_id, job_identity} for the PDF; PUT /api/tailored-resumes/lines picks the original or the rewrite of one line.\n"

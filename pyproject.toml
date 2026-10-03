@@ -25,6 +25,7 @@ dependencies = [
   "jsonschema>=4.23",
   "openpyxl>=3.1",
   "pycountry>=24",
+  "pypdf>=5",
   "python-dotenv>=1.0",
   "questionary>=2.1.1",
   "referencing>=0.36",
@@ -37,7 +38,6 @@ gigai = "gigai.cli:cli"
 [project.optional-dependencies]
 test = [
   "pydantic>=2.10",
-  "pypdf>=5",
   "pytest>=8.3",
   "pytest-xdist>=3.6",
 ]

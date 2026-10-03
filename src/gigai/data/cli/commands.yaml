@@ -764,6 +764,16 @@
       ],
       "notes": "Only the options given change; no other profile is changed. The default profile is refused: it uses the setup settings (Settings in the Scout UI). The location is a search setting, not the resume's contact line."
     },
+    "scout profile delete": {
+      "summary": "Delete a profile: it stops showing and searching; its history stays.",
+      "effect": "write",
+      "external": "none",
+      "output": "Human-readable text; --json emits one JSON object.",
+      "examples": [
+        "gigai scout profile delete profile_2 --json"
+      ],
+      "notes": "The profile leaves the profile list, the switcher, new runs and background tagging; its runs and assessments stay readable (hidden from the default Jobs list) and the story bank and answers are untouched. The default profile and the only active profile are refused. Deleting the selected profile selects the default profile."
+    },
     "scout resume add": {
       "summary": "Import a file as the resume reference and create the record find-jobs reads.",
       "effect": "write",

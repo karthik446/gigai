@@ -132,7 +132,8 @@ def test_route_for_matches_parametric_paths_and_allowed_keys_come_from_the_table
     assert openapi.route_for("GET", "/api/runs/run_1/results").path == "/api/runs/{run_id}/results"
     assert openapi.route_for("PUT", "/api/profiles/p1").path == "/api/profiles/{profile_id}"
     assert openapi.route_for("GET", "/api/runs/run_1/results/extra") is None
-    assert openapi.route_for("DELETE", "/api/profiles/p1") is None
+    assert openapi.route_for("DELETE", "/api/profiles/p1").path == "/api/profiles/{profile_id}"
+    assert openapi.route_for("DELETE", "/api/profiles") is None
     assert openapi.allowed_keys(openapi.route_for("GET", "/api/jobs")) == ["url"]
     assert openapi.allowed_keys(openapi.route_for("POST", "/api/watchlist")) == ["url"]
     assert openapi.allowed_keys(openapi.route_for("GET", "/api/runs/r/results")) == ["limit", "offset"]

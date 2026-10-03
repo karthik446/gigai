@@ -1146,7 +1146,7 @@ class ScoutFindJobsBackend:
         seen_titles: set[str] = set()
         seen_avoid: set[str] = set()
         for profile in profiles:
-            if profile.state == "archived":
+            if profile.state != "active":
                 continue
             for title in profile.titles:
                 if title not in seen_titles:
@@ -1675,8 +1675,8 @@ def _make_handler(
         def _check_host(self) -> bool:
             """DNS-rebinding guard: ``Host`` must match the bound host:port.
 
-            Also applied to ``GET /api/resume-display`` (it returned personal values
-            before 0110-046 and keeps the check), which ``_check_csrf`` never covers.
+            Applied once at the top of ``do_GET`` (every GET path) and, for the
+            writes, by ``_check_csrf``.
             """
 
             port = self._bound_port()
@@ -1709,25 +1709,26 @@ def _make_handler(
         def do_GET(self) -> None:  # noqa: N802
             if not self._check_loopback():
                 return
+            # DNS-rebinding guard for EVERY GET (pages, static assets, /api/*): a rebound
+            # hostile page sends its own Host, and any route can return personal values.
+            if not self._check_host():
+                return
             path = urlsplit(self.path).path
             try:
                 # 0110-007: the agent-facing routes. ``/api`` (and ``/api/``) sit outside the
-                # ``/api/`` prefix below; ``/llms.txt`` and ``/api/jobs`` return personal
-                # values or a guide meant for the local agent, so the Host is checked.
+                # ``/api/`` prefix below.
                 if path in ("/api", "/api/"):
                     self._handle_get_api_index()
                     return
                 if path == "/llms.txt":
-                    if self._check_host():
-                        self._handle_get_llms()
+                    self._handle_get_llms()
                     return
                 if path.startswith("/api/"):
                     if path == "/api/openapi.json":
                         self._handle_get_openapi()
                         return
                     if path == "/api/jobs":
-                        if self._check_host():
-                            self._handle_get_job()
+                        self._handle_get_job()
                         return
                     if path == "/api/health":
                         self._write_json(HTTPStatus.OK, {"status": "ok"})
@@ -1751,8 +1752,7 @@ def _make_handler(
                         self._handle_get_tailored_resumes()
                         return
                     if path == "/api/resume-display":
-                        if self._check_host():
-                            self._handle_get_resume_display()
+                        self._handle_get_resume_display()
                         return
                     if path == "/api/privacy/cleanup":
                         if self._check_host():
@@ -1762,17 +1762,14 @@ def _make_handler(
                         self._handle_get_answers()
                         return
                     if path == "/api/story-bank":
-                        if self._check_host():
-                            self._handle_get_story_bank()
+                        self._handle_get_story_bank()
                         return
                     if path == "/api/story-bank/match":
-                        if self._check_host():
-                            self._handle_get_story_bank_match()
+                        self._handle_get_story_bank_match()
                         return
                     story_id = _match_story_id(path, suffix="")
                     if story_id is not None:
-                        if self._check_host():
-                            self._handle_get_story_bank_entry(story_id)
+                        self._handle_get_story_bank_entry(story_id)
                         return
                     if path == "/api/runs":
                         self._handle_get_runs_list()
@@ -1951,6 +1948,10 @@ def _make_handler(
                 story_id = _match_story_id(path, suffix="")
                 if story_id is not None:
                     self._handle_delete_story_bank_entry(story_id)
+                    return
+                profile_id = _match_profile_id(path, suffix="")
+                if profile_id is not None:
+                    self._handle_delete_profile(profile_id)
                     return
                 self._error(HTTPStatus.NOT_FOUND, "not_found", "no such route")
             except Exception:  # noqa: BLE001 - same last-resort boundary as do_GET

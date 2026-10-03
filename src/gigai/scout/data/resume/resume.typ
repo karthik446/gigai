@@ -53,7 +53,7 @@
   sec(x.heading)
   for l in x.lines { if l.bullet { bullet(l.text) } else { para(l.text) } }
   if x.tags.len() > 0 {
-    block(below: 2 * s, par(leading: 3 * s, text(size: 8.3pt, ..edges(8.3pt, 12.5pt), x.tags.map(chip).join(h(1.8pt)))))
+    block(below: 2 * s, par(leading: 3 * s, text(size: 8.3pt, ..edges(8.3pt, 12.5pt), x.tags.map(chip).join([#h(1.8pt)·#h(1.8pt)]))))
   }
   for e in x.entries {
     // Sticky heading + role line keep the first bullet with them (a heading is never stranded at a page end).

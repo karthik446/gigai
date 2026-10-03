@@ -121,7 +121,7 @@ def _skill_runs(data: bytes) -> list[str]:
         found: list[str] = []
         page.extract_text(visitor_text=lambda text, cm, tm, font, size: found.append(text) if text.strip() else None)
         runs += found
-    return [r.strip() for r in runs[[r.strip() for r in runs].index("SKILLS") + 1 :]]
+    return [r.strip() for r in runs[[r.strip() for r in runs].index("SKILLS") + 1 :] if r.strip() != "·"]  # "·": the separator printed between chips
 
 
 def _skill_tags(data: bytes) -> list[str]:

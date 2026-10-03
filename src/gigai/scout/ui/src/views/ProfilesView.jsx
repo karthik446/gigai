@@ -15,7 +15,8 @@ import {
 } from "../profileResumeModel.js";
 import { useState } from "react";
 import TagListInput from "../components/TagListInput.jsx";
-import { archiveProfile, createProfile, updateProfile } from "../api.js";
+import { archiveProfile, createProfile, deleteProfile, updateProfile } from "../api.js";
+import { deleteBlockedReason, deleteConfirmText } from "../profileDeleteModel.js";
 import { useRuns } from "../hooks.js";
 import { relativeTimeLabel } from "../display.js";
 import { modelTargetLabel } from "../modelTargets.js";
@@ -106,6 +107,9 @@ export default function ProfilesView({ profiles, selectedProfileId, onSelectProf
   const [archiving, setArchiving] = useState(false);
   const [archiveError, setArchiveError] = useState(null);
   const [archiveNote, setArchiveNote] = useState(null);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState(null);
 
   // 0110-046: "We removed your contact lines; ..." after a resume was stored.
   const [createNote, setCreateNote] = useState(null);
@@ -146,6 +150,30 @@ export default function ProfilesView({ profiles, selectedProfileId, onSelectProf
       setTitlesError(error.message || String(error));
     } finally {
       setTitlesSaving(false);
+    }
+  }
+
+  async function handleDelete() {
+    if (!selected) {
+      return;
+    }
+    const blocked = deleteBlockedReason(profiles, selected);
+    if (blocked) {
+      setDeleteError(blocked);
+      setConfirmingDelete(false);
+      return;
+    }
+    setDeleting(true);
+    setDeleteError(null);
+    try {
+      await deleteProfile(selected.profile_id);
+      setConfirmingDelete(false);
+      // The server already selected the default; the reload shows it.
+      reloadProfiles();
+    } catch (error) {
+      setDeleteError(error.message || String(error));
+    } finally {
+      setDeleting(false);
     }
   }
 
@@ -336,6 +364,30 @@ export default function ProfilesView({ profiles, selectedProfileId, onSelectProf
               {archiving ? "Archiving…" : "Archive"}
             </button>
           </div>
+          <div className="card-actions" style={{ marginTop: 8 }}>
+            {confirmingDelete ? (
+              <>
+                <div className="callout danger">{deleteConfirmText(profiles, selected)}</div>
+                <button className="button small danger-outline" onClick={handleDelete} disabled={deleting}>
+                  {deleting ? "Deleting…" : "Delete profile"}
+                </button>
+                <button className="button small" onClick={() => setConfirmingDelete(false)} disabled={deleting}>
+                  Cancel
+                </button>
+              </>
+            ) : (
+              <button
+                className="button small danger-outline"
+                onClick={() => {
+                  setDeleteError(deleteBlockedReason(profiles, selected));
+                  setConfirmingDelete(deleteBlockedReason(profiles, selected) === null);
+                }}
+              >
+                Delete
+              </button>
+            )}
+          </div>
+          {deleteError && <div className="callout info">{deleteError}</div>}
           {archiveError && <div className="callout danger">{archiveError}</div>}
           {archiveNote && <div className="callout info">{archiveNote}</div>}
         </section>
