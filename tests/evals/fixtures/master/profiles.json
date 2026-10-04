@@ -1,0 +1,11 @@
+{
+  "note": "SYNTHETIC. A profile is its titles (+ search settings, not used here) and, optionally, focus tags. No resume of its own.",
+  "profiles": [
+    {"profile_id": "profile-ai", "label": "Staff AI Engineer",
+     "titles": ["Staff AI Engineer", "Principal AI Engineer", "Staff Machine Learning Engineer"],
+     "focus_tags": ["ai", "llm", "agents", "evals", "rag", "retrieval", "ml", "ml-platform", "fine-tuning", "serving"]},
+    {"profile_id": "profile-swe", "label": "Staff Software Engineer",
+     "titles": ["Staff Software Engineer", "Principal Software Engineer", "Staff Infrastructure Engineer"],
+     "focus_tags": ["backend", "distributed", "infrastructure", "sre", "observability", "reliability", "performance", "delivery", "platform"]}
+  ]
+}

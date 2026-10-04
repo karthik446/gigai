@@ -1020,6 +1020,39 @@
       ],
       "notes": "Works as the very first command on a fresh machine: writes the default GigAI settings (like 'gigai scout run'), installs Scout if needed, then imports the file. Never rewrites an existing config. The name and contact lines (email, phone, address, links) are removed and discarded before the resume is stored; --json carries contact_removed {removed: {kind: count}, message} (null when there were none)."
     },
+    "scout resume master show": {
+      "summary": "Show your master resume: every entry and line with its id, tags and evidence strength.",
+      "effect": "read",
+      "external": "none",
+      "output": "Human-readable text; --json emits one JSON object: {ok, master: {revision, revision_id, parent_revision, written_by, updated_at, content_sha256, record_id, format, sections, counts, entries: [{id, section, heading, sublines, start, end, ongoing, bullets, order}], items: [{id, section, kind, text, tags, backed, entry_id, order, strength, mark}]}}.",
+      "examples": [
+        "gigai scout resume master show --json",
+        "gigai scout resume master show --section experience",
+        "gigai scout resume master show --entry r-hex --json"
+      ],
+      "notes": "Local, no model call. The master resume is the one document that holds every role, bullet, project and skill, one per Scout home, with an id on every line and no contact data. kind is summary, bullet, skills or other (a certification is an Other line); a skills line also carries label and skills. strength is derived, never typed: backed (a story or an answer is linked), quantified (the line states a number) or stated. mark is 16 hex characters over the id and the text: it changes when the text does. --section and --entry narrow entries and items; counts always describe the whole master. No master yet: master_not_found. Output is the user's own text (user-private)."
+    },
+    "scout resume master init": {
+      "summary": "Store a resume markdown FILE as your master resume: contact lines removed, an id on every line.",
+      "effect": "write",
+      "external": "none",
+      "output": "Human-readable text; --json emits one JSON object: {ok, status: created | revised | unchanged, master: {revision, revision_id, parent_revision, written_by, updated_at, content_sha256, record_id, counts}, ids_assigned, ids_restored, changes: {added, removed, changed}, contact_removed, scout_installed}.",
+      "examples": [
+        "gigai scout resume master init --from master.md",
+        "gigai scout resume master init --from master.md --revision 1 --as agent --json"
+      ],
+      "notes": "Local, no model call. --from takes resume markdown in GigAI's format (## Summary, ## Experience with ### entries and - bullets, ## Skills, ## Education, ## Projects, ## Other), at most 1 MiB; a first line <!-- gigai-master:1 --> names the format. Every line may end in <!-- id:ID tags:a,b backed:story:ID -->; a line without an id gets one, and an id never changes when its text is edited. A line whose id comment was deleted gets its id back when its text still matches. Whatever stands above the first ## section is never stored. A line that looks like contact data (name, email, phone, link, address: the resume import's own detector) is not imported; contact_removed names it by kind and line number, never by value (null when there was none). The master is one record with a revision per change: with a master already stored, pass --revision N (the revision you read with show --json) and the file becomes revision N+1; without it the write is refused with master_exists, and with a revision that is no longer the current one with revision_conflict (both carry current, the revision the master is at). The same content again writes nothing (status unchanged). A file that does not read as a master is refused with master_markdown_invalid, naming the line number and the rule, never the line's text; the stored master stays as it was. --as agent (also --actor agent) records that an agent wrote the revision. Works as the very first command on a fresh machine, as 'gigai scout resume add' does. No profile, assessment or tailored resume reads the master yet."
+    },
+    "scout resume master history": {
+      "summary": "List your master resume's revisions, newest first: who wrote each, when, and what it changed.",
+      "effect": "read",
+      "external": "none",
+      "output": "Human-readable text; --json emits one JSON object: {ok, revision, revisions: [{revision, revision_id, parent_revision, written_by, updated_at, content_sha256, items, entries, added, removed, changed}]}.",
+      "examples": [
+        "gigai scout resume master history --json"
+      ],
+      "notes": "Local, no model call. Each change to the master is a new revision of one record; an earlier revision is never rewritten. added, removed and changed count ids against the revision before. Ids, counts and digests only: no line of the master. No master yet: master_not_found."
+    },
     "scout resume pdf": {
       "summary": "Render a resume to PDF locally: your own markdown, or a stored tailored resume.",
       "effect": "write",

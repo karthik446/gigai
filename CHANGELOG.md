@@ -145,6 +145,16 @@ the server used several gigabytes of memory, and reloading made it worse. Read "
   edited resume (one model call, for the assessment against it). Background tailoring never
   replaces an edited resume; asking for a new tailoring does.
 
+#### Added
+
+- **A master resume, first step: the store.** One document that holds every role, bullet, project
+  and skill you have, with an id on every line and no contact data. `gigai scout resume master init
+  --from FILE` stores a resume markdown file as the master (a line that looks like contact data is
+  left out and named by its line number, a line without an id gets one), `gigai scout resume master
+  show` lists every line with its id, and `gigai scout resume master history` lists its revisions:
+  each change is a new revision and nothing is rewritten. Nothing reads the master yet: profiles,
+  assessments and tailored resumes work as before.
+
 ### 0.1.10.8
 
 Fixes from the first days of real use of 0.1.10.7, a security fix for everyone who uses Scout
