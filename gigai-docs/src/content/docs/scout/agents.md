@@ -737,6 +737,24 @@ What to know:
   words, never an answer). `job_state.assessment_stale.reason` carries the same reason when that assessment
   gives the job's state. The verdict still reads. Each profile is compared with its own
   settings.
+- **With a master resume, an assessment reads the master.** For a profile, the model is shown the
+  lines of the whole master most relevant to that posting (picked by code, within the same size
+  limit, in the same one call), not only the profile's 2-page resume. Such an assessment carries
+  `resume_basis`: `{input: "evidence", master_revision_id, master_revision, selector_version}`;
+  its `resume` still names the profile's resume. A pasted resume, a profile whose resume was
+  replaced by hand, the assessment of a tailored resume and a find-jobs run read what they read
+  before.
+- **With a master resume, a stored assessment also says when the resume changed for it.**
+  `basis_stale_reason` is then `resume_changed`, and it is targeted like the answers' reason: a
+  resume line the assessment quoted as evidence is no longer in what its profile would be assessed
+  with (edited, retired, or no longer in the profile's resume), or a line that was not there
+  names the subject of one of ITS OWN open questions (`tooling:helm`: a new line that names Helm).
+  The item carries `basis_stale_resume`: each `{change: "line_changed", requirement}` or
+  `{change: "new_line", question_id, question}` (the assessment's own words, never a resume
+  line). `gigai scout resume master init` makes nothing stale: a profile that keeps its resume
+  keeps its assessments. Nothing is assessed again on its own: re-assess the job
+  (`POST /api/assess`), or answer the "old assessments" question of `gigai scout new`. Without a
+  master resume this reason never appears.
 - **Every assessment stored before 0.1.10.7 reads `older_prompt`.** The assess prompt changed in
   0.1.10.7 (posting text is fenced as untrusted), so an assessment made by an earlier version,
   with or without a recorded basis, is flagged as made with older settings. The verdict still

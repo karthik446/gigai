@@ -200,6 +200,7 @@ const STALE_WORDS = {
   older_prompt: "older settings",
   settings_changed: "older settings",
   story_bank_changed: "answers changed",
+  resume_changed: "resume changed",
 };
 
 const ROW_STATE_WORDS = {

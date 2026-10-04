@@ -359,6 +359,26 @@ def _facts_stamp(home_root: Path, target: Path, view: ProfileView, rank_model: s
     )
 
 
+def _master_stamp(home_root: Path, target: Path, resolved: object) -> str | None:
+    """The stored master resume's revision id (kept per journal head, ``tailor_master.stored_master``).
+
+    ``None`` without a master, and while an assessment reads the profile's own
+    resume (``assess_master.ASSESS_INPUT``): what ``resume_changed`` compares
+    is then the profile's resume, whose digest the facts stamp already holds.
+    """
+
+    from . import assess_master
+    from .tailor_master import stored_master
+
+    if assess_master.ASSESS_INPUT != assess_master.INPUT_EVIDENCE:
+        return None
+    try:
+        stored = stored_master(home_root, target, resolved=resolved)
+    except Exception:  # noqa: BLE001 - a master that cannot be read marks nothing stale; never a failed read of the postings
+        return None
+    return None if stored is None else stored.revision.revision_id
+
+
 def rank_model_key(home_root: Path, target: Path) -> str | None:
     """``<adapter kind>:<model>`` as the rank score cache keys it, from the configuration alone; ``None`` when it names none."""
 
@@ -873,6 +893,9 @@ def _plan(
     day = moment.date().isoformat()
     # What old runs assessed (0.1.10.7 M4a): a build made before an import gets its facts again.
     history = store.run_history_stamp()
+    # 0.1.10.9 master P7: the master's revision, which the ``resume_changed`` stale check reads when assessments read
+    # the master. Nothing without a master, and nothing while they read the profile's own resume.
+    master = _master_stamp(home_root, target, resolved)
     digests: dict[str, tuple[str, str]] = {}
     kinds: dict[str, str] = {}
     urgent = force
@@ -881,6 +904,8 @@ def _plan(
         facts_digest = _facts_stamp(home_root, target, view, rank_model)
         if history[0]:
             facts_digest = _digest(facts_digest, "run-history", list(history))
+        if master is not None:
+            facts_digest = _digest(facts_digest, "master", master)
         match_digest = _digest(MATCH_VERSION, view.settings_digest, index_stamp, boards.digest, day)
         if boards.unread and previous is not None and not force:
             # The watchlist could not be read just now (a journal write in flight): the stored rows are not thrown

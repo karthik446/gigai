@@ -238,6 +238,27 @@ the server used several gigabytes of memory, and reloading made it worse. Read "
   resume master add --restore ID` puts it back under the same id. The agent instructions (`gigai
   agent-skill`) have a step for this: after saving a story or an answer with substance, the agent
   asks "Want this on your resume?".
+- **A master resume: an assessment reads it.** Once a master is stored, assessing a job for a
+  profile (the job page's Assess, `gigai scout assess`, "Assess all new", `gigai scout new --yes`)
+  no longer reads only the profile's 2-page resume. The model is shown the lines of your whole
+  master that are most relevant to that posting, picked by code, within the same limit on the
+  resume's size and in the same single call. A verdict then says what you can truthfully claim: a
+  requirement your master covers is no longer a question because one profile's 2 pages left the
+  line out. In our test on invented postings (11 cases, each assessed twice both ways) the open
+  questions went from 63 to 6, no case got a worse verdict and no evidence was invented; the prompt
+  is about 14% larger. The assessment of a tailored resume still reads the 2 pages that will be
+  sent, and a find-jobs run still reads the profile's resume. A pasted resume, a profile whose
+  resume you replaced by hand and a home without a master are assessed exactly as before.
+- **A stored assessment says when your resume changed for it.** With a master stored, an assessment
+  can read "old assessment: resume changed" (`resume_changed`; "Resume changed" on a job's card).
+  It is said only for the assessments the change concerns: a resume line the assessment quoted as
+  evidence was edited, retired or is no longer in the profile's resume, or a new line names
+  something the assessment left as an open question ("A new line of your resume may answer: Have
+  you used Helm?"). Editing another line flags nothing. Nothing is assessed again on its own:
+  re-assess the job with one click, or say yes to the "old assessments" question of `gigai scout
+  new`. `gigai scout resume master init` makes no assessment stale. For agents: `basis_stale_reason:
+  "resume_changed"` with `basis_stale_resume` (what changed for that assessment), and
+  `resume_basis` on an assessment that read the master (its revision and the selector's version).
 
 ### 0.1.10.8
 

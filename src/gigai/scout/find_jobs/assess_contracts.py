@@ -32,6 +32,7 @@ from .contracts import (
     _digest_value,
     _enum,
     _fail,
+    _integer,
     _json_enum,
     _json_strings,
     _object,
@@ -446,6 +447,52 @@ class AssessRequest(_Contract):
         )
 
 
+#: ``ResumeBasis.input``: what the prompt's RESUME was when a master resume is stored (``assess_master``).
+RESUME_INPUT_EVIDENCE = "evidence"
+RESUME_INPUTS: tuple[str, ...] = (RESUME_INPUT_EVIDENCE,)
+
+
+@dataclass(frozen=True)
+class ResumeBasis(_Contract):
+    """0.1.10.9 master P7: what the assessment read INSTEAD of the profile's own resume.
+
+    Present only when the prompt's RESUME was the evidence view of the master
+    resume (``assess_master``): ``master_revision_id`` / ``master_revision``
+    name the master revision the lines were picked from and
+    ``selector_version`` the rule that picked them
+    (``master_selection.SELECTOR_VERSION``).  Ids and a version only: no line
+    of the master.  ``resume`` on the response still names the profile's
+    pinned resume (the resume identity the assessment is stored under).
+    """
+
+    input: str
+    master_revision_id: str
+    master_revision: int
+    selector_version: str
+
+    def __post_init__(self) -> None:
+        if self.input not in RESUME_INPUTS:
+            _fail("bad_enum", "resume_basis.input has an unsupported value")
+
+    def to_json(self) -> dict[str, object]:
+        return {
+            "input": self.input,
+            "master_revision_id": self.master_revision_id,
+            "master_revision": self.master_revision,
+            "selector_version": self.selector_version,
+        }
+
+    @classmethod
+    def from_json(cls, obj: object) -> "ResumeBasis":
+        value = _object(obj, ("input", "master_revision_id", "master_revision", "selector_version"), "resume_basis")
+        return cls(
+            input=_string(value["input"], "resume_basis.input"),
+            master_revision_id=_string(value["master_revision_id"], "resume_basis.master_revision_id"),
+            master_revision=_integer(value["master_revision"], "resume_basis.master_revision", minimum=1),
+            selector_version=_string(value["selector_version"], "resume_basis.selector_version"),
+        )
+
+
 @dataclass(frozen=True)
 class VerdictHistoryEntry(_Contract):
     """Q4a (v0.1.9): one line of a quick assessment's verdict history.
@@ -565,6 +612,13 @@ class AssessResponse(_Contract):
     profile_ref: ProfileRef | None = None
     posting_sha256: str | None = None
     model: str | None = None
+    # 0.1.10.9 master P7 (additive): set only when the prompt's RESUME was the
+    # evidence view of the master resume, not the profile's own resume
+    # (:class:`ResumeBasis`). ``None`` for every other assessment and for a
+    # file written before this field; omitted from JSON when ``None``, so
+    # such a record's bytes are what they were.
+    # ``assessment_basis`` reads it for the ``resume_changed`` stale reason.
+    resume_basis: ResumeBasis | None = None
 
     def __post_init__(self) -> None:
         if (
@@ -621,6 +675,8 @@ class AssessResponse(_Contract):
             value["posting_sha256"] = self.posting_sha256
         if self.model is not None:
             value["model"] = self.model
+        if self.resume_basis is not None:
+            value["resume_basis"] = self.resume_basis.to_json()
         return value
 
     @classmethod
@@ -633,7 +689,7 @@ class AssessResponse(_Contract):
             ),
             (
                 "updated_at", "history", "posting_text", "rank_score", "rank_skip_reason", "origin",
-                "prompt_version", "constraints_digest", "story_bank", "profile_ref", "posting_sha256", "model",
+                "prompt_version", "constraints_digest", "story_bank", "profile_ref", "posting_sha256", "model", "resume_basis",
             ),
             "assess_response",
         )
@@ -692,6 +748,7 @@ class AssessResponse(_Contract):
                 _digest_value(value["posting_sha256"], "assess_response.posting_sha256") if "posting_sha256" in value else None
             ),
             model=_string(value["model"], "assess_response.model") if "model" in value else None,
+            resume_basis=ResumeBasis.from_json(value["resume_basis"]) if "resume_basis" in value else None,
         )
 
 
@@ -721,6 +778,8 @@ __all__ = [
     "ORIGIN_JOB_PAGE",
     "ORIGIN_QUICK_ASSESS",
     "RANK_SKIP_REASONS",
+    "RESUME_INPUTS",
+    "RESUME_INPUT_EVIDENCE",
     "AssessJobInput",
     "AssessPreferences",
     "AssessRequest",
@@ -730,6 +789,7 @@ __all__ = [
     "AssessmentsListResponse",
     "ResolvedJob",
     "ResolvedResume",
+    "ResumeBasis",
     "VerdictHistoryEntry",
     "text_identity",
 ]

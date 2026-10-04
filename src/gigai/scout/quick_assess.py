@@ -710,6 +710,19 @@ def run_quick_assessment(
     bank = story_bank.assess_bank(home_root=home_root, target=target, profile_id=resume.profile_id, resume_text=resume.text)
     job_bank = bank.for_job(title=job.title, text=job.text)
 
+    # 4c. 0.1.10.9 master P7: with a master resume stored, the prompt's RESUME for a profile is the evidence view of
+    #     the master for THIS posting (``assess_master``), not the profile's 2 pages. ``None`` (no master, a pasted
+    #     resume, a resume replaced by hand, the tailored variant, or the switch on the profile's view): the
+    #     profile's resume, exactly as before. ``resume`` stays the identity the assessment is stored under.
+    master_input = None
+    if variant is None and profile is not None:
+        from .assess_master import assess_input
+
+        master_input = assess_input(
+            home_root=home_root, target=target, profile=profile, title=job.title, posting_text=job.text, company=job.company,
+            location=job.location, resolved=resolved,
+        )
+
     # 5. Model target -> adapter (C1/C11), then the shared core (P1).
     model_target = request.model_target or _default_model_target(target)
     active = config if config is not None else load_config(home_root)
@@ -723,7 +736,7 @@ def run_quick_assessment(
             binding,
             AssessJob(title=job.title, company=job.company, location=job.location, posting_text=job.text),
             build_assess_context(
-                resume_text=resume.text,
+                resume_text=resume.text if master_input is None else master_input.resume_text,
                 visa_sponsorship_required=preferences.visa_sponsorship_required,
                 countries=tuple(preferences.countries),
                 titles=tuple(preferences.titles),
@@ -796,6 +809,7 @@ def run_quick_assessment(
         profile_ref=None if profile is None else ProfileRef(profile.profile_id, profile.revision, profile.content_digest),
         posting_sha256=posting_digest,
         model=_model_id(getattr(binding.port, "resolved_model", None)),
+        resume_basis=None if master_input is None else master_input.basis,
     )
     try:
         atomic_write(path, json.dumps(response.to_json(), indent=2, sort_keys=True).encode("utf-8"))

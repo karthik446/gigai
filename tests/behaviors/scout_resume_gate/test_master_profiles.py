@@ -426,7 +426,9 @@ def test_the_migration_leaves_nothing_stale(tmp_path: Path, monkeypatch: pytest.
         done = json.loads(runner.invoke(cli, ["scout", "resume", "master", "init", *answers, *base]).output.strip().splitlines()[-1])
     assert done["status"] == "created" and len(done["profiles"]) == 2
 
-    # 1. The read model: no profile is matched or re-read again, and every row is what it was.
+    # 1. The read model: no profile is matched again, and every row is what it was. P7: an assessment now reads the
+    #    master, whose revision is part of what a stale check reads, so each profile's facts are read again ONCE.
+    assert set(postings.refresh(home, target).builds.values()) == {"facts"}
     assert set(postings.refresh(home, target).builds.values()) == {"unchanged"}
     migrated_state = state()
     assert but_tailoring(migrated_state) == but_tailoring(before)

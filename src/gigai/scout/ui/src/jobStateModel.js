@@ -160,7 +160,7 @@ export const STALE_ASSESSMENT_TEXT = "Posting text changed since this assessment
 // sponsorship need) or a story bank that has since changed
 // (assessment_basis.py). A quiet note, never an error: the verdict still
 // reads, and one click re-assesses. Nothing re-assesses on its own.
-export const BASIS_STALE_REASONS = ["older_prompt", "settings_changed", "story_bank_changed"];
+export const BASIS_STALE_REASONS = ["older_prompt", "settings_changed", "story_bank_changed", "resume_changed"];
 export const OLDER_SETTINGS_TEXT = "Assessed with older settings: re-assess";
 export const STORY_BANK_CHANGED_TEXT = "Your story bank changed since this assessment: re-assess";
 export const OLDER_SETTINGS_CHIP = "Older settings";
@@ -189,6 +189,26 @@ export function storyBankNote(matches) {
     return question ? `Answered in your story bank: ${question}${more}: re-assess` : STORY_BANK_CHANGED_TEXT;
   }
   return list.some((item) => item.match === "cited") ? BANK_CITED_TEXT : STORY_BANK_CHANGED_TEXT;
+}
+
+// 0.1.10.9 master P7: resume_changed is targeted too. The stored item says
+// what changed for it (`basis_stale_resume`: {change: "line_changed",
+// requirement} | {change: "new_line", question_id, question?}): a line it
+// quoted is gone, or a new line names one of its open questions.
+export const RESUME_CHANGED_TEXT = "Your resume changed since this assessment: re-assess";
+export const RESUME_LINE_CHANGED_TEXT = "A resume line this assessment used has changed: re-assess";
+export const RESUME_CHANGED_CHIP = "Resume changed";
+
+export function resumeChangedNote(changes) {
+  const list = Array.isArray(changes) ? changes.filter((item) => item && typeof item === "object") : [];
+  const added = list.filter((item) => item.change === "new_line");
+  if (added.length > 0) {
+    const question = shortQuestion(added[0].question || added[0].question_id);
+    const others = new Set(added.map((item) => item.question_id)).size - 1;
+    const more = others > 0 ? ` (and ${others} more)` : "";
+    return question ? `A new line of your resume may answer: ${question}${more}: re-assess` : RESUME_CHANGED_TEXT;
+  }
+  return list.some((item) => item.change === "line_changed") ? RESUME_LINE_CHANGED_TEXT : RESUME_CHANGED_TEXT;
 }
 
 export function isBasisStaleReason(reason) {
@@ -222,6 +242,9 @@ export function assessmentStaleFor(job) {
     return null;
   }
   const bank = reason === "story_bank_changed" && job.quick && Array.isArray(job.quick.basis_stale_bank) ? job.quick.basis_stale_bank : [];
+  if (reason === "resume_changed") {
+    return { reason, resume: job.quick && Array.isArray(job.quick.basis_stale_resume) ? job.quick.basis_stale_resume : [] };
+  }
   return bank.length > 0 ? { reason, bank } : { reason };
 }
 
@@ -233,6 +256,9 @@ export function staleAssessmentNote(job) {
   if (stale.reason === "story_bank_changed") {
     return storyBankNote(stale.bank);
   }
+  if (stale.reason === "resume_changed") {
+    return resumeChangedNote(stale.resume);
+  }
   return isBasisStaleReason(stale.reason) ? OLDER_SETTINGS_TEXT : STALE_ASSESSMENT_TEXT;
 }
 
@@ -240,7 +266,8 @@ export function staleAssessmentNote(job) {
 // (a changed posting text keeps its own line on the job page).
 export function olderSettingsChip(job) {
   const stale = assessmentStaleFor(job);
-  return stale && isBasisStaleReason(stale.reason) ? { label: OLDER_SETTINGS_CHIP, title: staleAssessmentNote(job) } : null;
+  const label = stale && stale.reason === "resume_changed" ? RESUME_CHANGED_CHIP : OLDER_SETTINGS_CHIP;
+  return stale && isBasisStaleReason(stale.reason) ? { label, title: staleAssessmentNote(job) } : null;
 }
 
 export function olderSettingsCount(jobs) {

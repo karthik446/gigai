@@ -196,6 +196,7 @@ _STALE_WORDS = {
     "older_prompt": "older prompt",
     "settings_changed": "settings changed",
     "story_bank_changed": "answers changed",
+    "resume_changed": "resume changed",
 }
 _RECOMMENDED = "recommended"
 

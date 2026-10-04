@@ -31,6 +31,21 @@ assessed with now, and names why the two differ:
 The same three checks, in the same order, as a run's unchanged skip
 (``proposal_execution._basis_stale``).
 
+0.1.10.9 master P7, a fourth reason, checked last and ONLY when a master
+resume is stored (without one nothing below is read, and a stored assessment
+is never stale for its resume, as before):
+
+- ``resume_changed`` (``assess_master.resume_changes``, targeted like the
+  bank's): a line the assessment quoted as evidence is not in what its
+  profile would be assessed with now, or a line that was not there names the
+  subject of one of ITS OWN open questions. What it read then is the master
+  at the revision its ``resume_basis`` names (an assessment made on the
+  evidence view), else the profile's resume at the revision it pins; the same
+  master revision, or the same resume, is never stale (so ``master init``
+  makes nothing stale). The changes that matched are served as
+  ``basis_stale_resume``. A find-jobs run is not part of this: it seals one
+  pinned resume and re-assesses when that changes (the existing rule).
+
 A record with NO basis (written before 0110-039) is ``older_prompt``,
 whatever the profile. Until 0.1.10.7 P5 it was judged by what its prompt can
 have missed (a work mode, a changed sponsorship need or country list), and a
@@ -61,7 +76,12 @@ head (profiles, answers), ``find-jobs.json``, the setup's saved preferences
 and the story bank's overlay file (the three by size and modification time).
 A request on an unchanged workpad then pays one ``git rev-parse`` and three
 ``stat`` calls, whatever the number of rows; any change is seen by the very
-next request.
+next request. The ``resume_changed`` check is kept the same way: the stored
+master per journal head (``tailor_master.stored_master``: two small file
+reads on an unchanged journal), each assessment's result per journal head,
+and an earlier revision of the master or of a resume once per process (a
+revision never changes). An assessment made on the master as it is now, or
+on the resume its profile still has, is answered without reading anything.
 """
 
 from __future__ import annotations
@@ -77,7 +97,8 @@ from .find_jobs.assess_contracts import AssessResponse
 REASON_OLDER_PROMPT = "older_prompt"
 REASON_SETTINGS_CHANGED = "settings_changed"
 REASON_STORY_BANK_CHANGED = "story_bank_changed"
-BASIS_STALE_REASONS: tuple[str, ...] = (REASON_OLDER_PROMPT, REASON_SETTINGS_CHANGED, REASON_STORY_BANK_CHANGED)
+REASON_RESUME_CHANGED = "resume_changed"
+BASIS_STALE_REASONS: tuple[str, ...] = (REASON_OLDER_PROMPT, REASON_SETTINGS_CHANGED, REASON_STORY_BANK_CHANGED, REASON_RESUME_CHANGED)
 
 
 def posting_sha256(title: str, text: str) -> str:
@@ -120,19 +141,26 @@ class CurrentBasis:
 
 @dataclass(frozen=True)
 class Staleness:
-    """Why a stored assessment should be made again; ``bank`` (``story_bank.BankMatch``) only for ``story_bank_changed``."""
+    """Why a stored assessment should be made again.
+
+    ``bank`` (``story_bank.BankMatch``) only for ``story_bank_changed``;
+    ``resume`` (``assess_master.ResumeChange``) only for ``resume_changed``.
+    """
 
     reason: str
     bank: tuple[object, ...] = ()
+    resume: tuple[object, ...] = ()
 
 
-def staleness(item: AssessResponse, current: CurrentBasis, bank_now) -> Staleness | None:
+def staleness(item: AssessResponse, current: CurrentBasis, bank_now, resume_now=None) -> Staleness | None:
     """Why ``item`` is not what ``current`` would produce, or ``None``. Pure.
 
     ``bank_now`` is called (at most once, and only for a record that has an
     open question or cites a bank answer) for the bank now
     (``story_bank.AssessBank``); it answers ``None`` when there is no bank to
-    read.
+    read. ``resume_now`` (0.1.10.9 master P7; ``None``: not checked) is called
+    last, when nothing else made the record stale, for the resume changes
+    that concern it (``assess_master.ResumeChange``; empty: none).
     """
 
     from . import story_bank
@@ -149,14 +177,18 @@ def staleness(item: AssessResponse, current: CurrentBasis, bank_now) -> Stalenes
         return Staleness(REASON_OLDER_PROMPT)
     questions = item.result.structured_questions
     evidence = [evidence for row in item.result.matrix for evidence in row.resume_evidence]
-    if not questions and not story_bank.cited_ids(evidence):
-        return None
-    bank = bank_now()
-    if bank is None:
-        return None
-    sealed = None if item.story_bank is None else item.story_bank.entries
-    matches = story_bank.bank_matches(questions=questions, evidence=evidence, sealed_marks=sealed, bank=bank)
-    return Staleness(REASON_STORY_BANK_CHANGED, matches) if matches else None
+    if questions or story_bank.cited_ids(evidence):
+        bank = bank_now()
+        if bank is not None:
+            sealed = None if item.story_bank is None else item.story_bank.entries
+            matches = story_bank.bank_matches(questions=questions, evidence=evidence, sealed_marks=sealed, bank=bank)
+            if matches:
+                return Staleness(REASON_STORY_BANK_CHANGED, matches)
+    if resume_now is not None:
+        changes = tuple(resume_now())
+        if changes:
+            return Staleness(REASON_RESUME_CHANGED, resume=changes)
+    return None
 
 
 def stale_reason(item: AssessResponse, current: CurrentBasis, bank_now) -> str | None:
@@ -185,6 +217,10 @@ class _Kept:
     current: dict[str | None, CurrentBasis | None] = field(default_factory=dict)
     #: ``story_bank.AssessBank`` per resume identity (``None``: no bank to read).
     banks: dict[str | None, object | None] = field(default_factory=dict)
+    #: The profile records by id (``None``: not read yet), for the settings and the ``resume_changed`` check.
+    profiles: dict[str, object] | None = None
+    #: (stored path, assessed at) -> the resume changes that concern that assessment (``assess_master``).
+    resume: dict[tuple[str, str, str], tuple[object, ...]] = field(default_factory=dict)
 
 
 _KEPT_LOCK = threading.Lock()
@@ -222,13 +258,13 @@ class BasisCheck:
         self._home_root = Path(home_root)
         self._target = Path(target)
         self._resolved = resolved
-        self._profiles: object = _UNREAD
         self._kept_here: _Kept | None = None
         # Never kept past this request: a read that failed (it may work next
         # time), and a pasted resume's bank (the SELECTED profile's, and the
         # selection is not one of the things a kept read is keyed on).
         self._failed: set[str | None] = set()
         self._pasted_bank: object = _UNREAD
+        self._resume_check: object = _UNREAD
 
     def _workpad(self):
         if self._resolved is None:
@@ -272,11 +308,12 @@ class BasisCheck:
         return kept
 
     def _profile(self, profile_id: str):
-        if self._profiles is _UNREAD:
+        kept = self._kept()
+        if kept.profiles is None:
             from . import profile_records
 
-            self._profiles = {record.profile_id: record for record in profile_records.list_profiles(self._workpad())}
-        return self._profiles.get(profile_id)  # type: ignore[union-attr]
+            kept.profiles = {record.profile_id: record for record in profile_records.list_profiles(self._workpad())}
+        return kept.profiles.get(profile_id)
 
     def current(self, profile_id: str | None) -> CurrentBasis | None:
         """The basis ``profile_id`` (``None``: a pasted resume) would be assessed with now."""
@@ -329,6 +366,23 @@ class BasisCheck:
             banks[profile_id] = read()
         return banks[profile_id]
 
+    def _resume_changes(self, item: AssessResponse) -> tuple[object, ...]:
+        """0.1.10.9 master P7: the resume changes that concern ``item`` (``assess_master.ResumeCheck``); ``()`` without a master."""
+
+        from . import assess_master
+
+        if self._resume_check is _UNREAD:
+            self._resume_check = assess_master.ResumeCheck(
+                home_root=self._home_root, target=self._target, resolved=self._workpad(), profile=self._profile
+            )
+        # Kept like the settings: the master and every profile's resume are in the journal, whose head the kept reads
+        # are keyed on, and a re-assessment has another ``updated_at``.
+        kept = self._kept().resume
+        key = (item.stored_path, item.updated_at, assess_master.ASSESS_INPUT)
+        if key not in kept:
+            kept[key] = self._resume_check.changes(item)  # type: ignore[attr-defined]
+        return kept[key]
+
     def staleness(self, item: AssessResponse) -> Staleness | None:
         """Why ``item`` should be assessed again, with the bank entries that say so; ``None``: current, or it cannot be said."""
 
@@ -337,7 +391,7 @@ class BasisCheck:
         if current is None:
             return None
         try:
-            return staleness(item, current, lambda: self._bank(profile_id))
+            return staleness(item, current, lambda: self._bank(profile_id), lambda: self._resume_changes(item))
         except Exception:  # noqa: BLE001 - display-only: a check that fails marks nothing
             return None
 
@@ -352,7 +406,10 @@ class BasisCheck:
 
         0110-041: a ``story_bank_changed`` one also carries ``basis_stale_bank``,
         the bank entries that made it stale (``story_bank.BankMatch.to_json``:
-        ids and question words, never an answer).
+        ids and question words, never an answer). 0.1.10.9 master P7: a
+        ``resume_changed`` one carries ``basis_stale_resume``
+        (``assess_master.ResumeChange.to_json``: the assessment's own
+        requirement or question words, never a line of the resume).
         """
 
         found = self.staleness(item)
@@ -361,12 +418,15 @@ class BasisCheck:
         served: dict[str, object] = {"basis_stale": True, "basis_stale_reason": found.reason}
         if found.bank:
             served["basis_stale_bank"] = [match.to_json() for match in found.bank]  # type: ignore[attr-defined]
+        if found.resume:
+            served["basis_stale_resume"] = [change.to_json() for change in found.resume]  # type: ignore[attr-defined]
         return served
 
 
 __all__ = [
     "BASIS_STALE_REASONS",
     "REASON_OLDER_PROMPT",
+    "REASON_RESUME_CHANGED",
     "REASON_SETTINGS_CHANGED",
     "REASON_STORY_BANK_CHANGED",
     "BasisCheck",
