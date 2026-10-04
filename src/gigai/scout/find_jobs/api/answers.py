@@ -42,8 +42,10 @@ contact-data check, then the same ``experience_qa`` write as before).
 Optional ``question`` keeps the question's own words with the answer;
 optional ``tag``; optional ``from_bank`` names the question a near-match
 suggestion came from, when the user confirmed it; optional ``actor``
-(``operator``, the default, or ``agent``; also the ``X-GigAI-Actor`` header)
-is recorded on the answer; optional ``revision`` is the revision the writer
+(``operator`` or ``agent``; also the ``X-GigAI-Actor`` header; 0110-10-04:
+without either, ``operator`` for the Scout UI and ``agent`` for any other
+loopback caller, ``_story_bank_actor``) is recorded on the answer; optional
+``source`` is free text, where the answer came from; optional ``revision`` is the revision the writer
 read (``409 revision_conflict`` with the current ``answer`` when it has
 changed since). The reply carries the saved ``answer`` in the one Answer
 shape. ``GET /api/answers`` lists every answer in that shape (``q`` and
@@ -74,7 +76,7 @@ from ...quick_assess import (
     run_quick_assessment,
 )
 from ..assess_contracts import ORIGIN_JOB_PAGE, AssessJobInput, AssessRequest, AssessResumeInput
-from .story_bank import ACTOR_HEADER, ANSWERS_SCHEMA, ERROR_STATUS, answers_response, error_extra
+from .story_bank import ANSWERS_SCHEMA, ERROR_STATUS, answers_response, error_extra
 
 _ANSWER_ERROR_STATUS: dict[str, HTTPStatus] = {
     "answer_invalid": HTTPStatus.UNPROCESSABLE_ENTITY,
@@ -160,7 +162,7 @@ class AnswersRoutesMixin:
             self._error(HTTPStatus.UNPROCESSABLE_ENTITY, "wrong_type", "request body must be a JSON object")
             return
 
-        unknown = set(body) - {"question_id", "answer", "reassess", "question", "tag", "from_bank", "actor", "revision"}
+        unknown = set(body) - {"question_id", "answer", "reassess", "question", "tag", "from_bank", "actor", "revision", "source"}
         if unknown:
             self._error(HTTPStatus.UNPROCESSABLE_ENTITY, "unknown_key", f"unknown field(s): {sorted(unknown)}")
             return
@@ -180,7 +182,7 @@ class AnswersRoutesMixin:
                 return
             job_identity = reassess["job_identity"]
 
-        for key in ("question", "tag", "from_bank", "actor"):
+        for key in ("question", "tag", "from_bank", "actor", "source"):
             if body.get(key) is not None and not isinstance(body[key], str):
                 self._error(HTTPStatus.UNPROCESSABLE_ENTITY, "invalid_value", f"{key} must be a string")
                 return
@@ -192,11 +194,12 @@ class AnswersRoutesMixin:
 
         # Who writes (operator, or an agent), which revision it read, and which posting asked.
         try:
-            actor = story_bank.actor_value(body.get("actor") or self.headers.get(ACTOR_HEADER))
+            actor = self._story_bank_actor(body.get("actor"))
             entry = story_bank.save_answer(
                 home_root=home_root, target=target, question_id=question_id, answer=answer,
                 question=body.get("question"), tag=body.get("tag"),
                 job=self._answer_job(target, job_identity), confirmed_from=body.get("from_bank"), actor=actor,
+                source=body.get("source"),
                 expected_revision=story_bank.revision_value(body.get("revision")),
             )
         except (PrivateRecordError, story_bank.StoryBankError) as exc:

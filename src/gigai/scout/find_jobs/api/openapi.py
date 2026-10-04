@@ -143,7 +143,8 @@ _ANSWER: dict[str, object] = {
     "question_id": "cloud:gcp", "question": "Do you have GCP experience?", "answer": "Yes, 4 years, GKE + BigQuery",
     "tag": "technical",
     "jobs": [{"job_identity": _JOB_URL, "title": "Software Engineer", "company": "Acme", "url": _JOB_URL, "kind": "answered", "at": "2026-10-02T15:00:00.000000Z"}],
-    "written_by": "agent", "created_at": "2026-10-02T15:00:00.000000Z", "updated_at": "2026-10-02T15:00:00.000000Z", "revision": 1,
+    "written_by": "agent", "source": "from the user's repo infra-charts, at the user's request",
+    "created_at": "2026-10-02T15:00:00.000000Z", "updated_at": "2026-10-02T15:00:00.000000Z", "revision": 1,
     "history": [{"at": "2026-10-02T15:00:00.000000Z", "by": "agent", "action": "answered"}],
 }
 _ANSWER_SUGGESTION: dict[str, object] = {
@@ -156,7 +157,8 @@ _ANSWER_NOTE = (
     "`question_id` (its id in the other routes), the `question` as asked (the id itself when only the id is known), the `answer`, a "
     "model-free `tag` (technical, experience-level, eligibility, education, domain, leadership, conflict, failure, collaboration, "
     "system-design, delivery, skill, other; or your own), `jobs` (the postings that asked it, confirmed a suggestion with it, or whose "
-    "assessment reused it: kind answered | confirmed | reused), `written_by` (operator | agent), `created_at`, `updated_at`, `revision` "
+    "assessment reused it: kind answered | confirmed | reused), `written_by` (operator | agent), `source` (free text the writer gave: where "
+    "the answer came from; null when it gave none), `created_at`, `updated_at`, `revision` "
     "(send it back on PUT and DELETE) and the last writes in `history` ({at, by, action}; an entry with `answer` is an earlier text kept "
     "when two profiles' answers were merged)."
 )
@@ -197,7 +199,17 @@ _STORY_FIELD_PARAMS = (
     _b("answers_questions", "array", "The interview questions this story answers (at most 12)."),
     _b("sources", "array", "`[{question_id, job_identity}]`: the job question that triggered the story."),
 )
-_ACTOR_PARAM = _b("actor", "string", "Who writes: recorded as written_by. Also the X-GigAI-Actor header.", enum=("operator", "agent"))
+_ACTOR_PARAM = _b(
+    "actor", "string",
+    "Who writes: recorded as written_by. Also the X-GigAI-Actor header. Without either, a write from the Scout UI (a browser page of this "
+    "server) is the operator's and any other loopback write is the agent's.",
+    enum=("operator", "agent"),
+)
+_SOURCE_PARAM = _b(
+    "source", "string",
+    "Free text, at most 300 characters: where the answer came from (e.g. \"from the user's repo, at the user's request\"). Returned with "
+    "the answer; never sent to a model. A new answer text without it drops the stored one.",
+)
 _REVISION_CONFLICT = (409, "revision_conflict")
 
 _CHECK_TIMES_EXAMPLE: dict[str, object] = {
@@ -701,9 +713,12 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
             _b("tag", "string", "Your own tag (lowercase, at most 40 characters); omitted = a tag from the question."),
             _b("from_bank", "string", "When the answer confirms a `bank_suggestions` near match: that suggestion's `bank_question_id`."),
             _b("revision", "integer", "The revision you read, when the answer exists; a stale one answers 409."),
-            _ACTOR_PARAM,
+            _ACTOR_PARAM, _SOURCE_PARAM,
         ),
-        request_example={"question_id": "cloud:gcp", "question": "Do you have GCP experience?", "answer": "Yes, 4 years, GKE + BigQuery", "actor": "agent"},
+        request_example={
+            "question_id": "cloud:gcp", "question": "Do you have GCP experience?", "answer": "Yes, 4 years, GKE + BigQuery", "actor": "agent",
+            "source": "from the user's repo infra-charts, at the user's request",
+        },
         errors=(_UNKNOWN_KEY, _WRONG_TYPE, _INVALID, (422, "answer_invalid"), (422, "personal_info_refused"), _REVISION_CONFLICT, (422, "reassess_unavailable"), (404, "reassess_not_found"), _NOT_FOUND, _NO_TARGET),
         description=(
             "Answers 201 with the saved `answer`. Storing it is local; the model runs only when `reassess` is given. The answer is the user's: "
@@ -750,12 +765,12 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
             _b("revision", "integer", "The revision of the answer you read; when it changed since, the reply is 409.", required=True),
             _b("answer", "string", "The new answer."), _b("question", "string", "The question's own words."),
             _b("tag", "string", "Your own tag; an empty string puts the automatic tag back."),
-            _ACTOR_PARAM,
+            _ACTOR_PARAM, _SOURCE_PARAM,
         ),
         request_example={"revision": 1, "answer": "Yes, 5 years, GKE, BigQuery and Dataflow", "actor": "agent"},
         errors=(_UNKNOWN_KEY, _WRONG_TYPE, _INVALID, (422, "answer_invalid"), (422, "personal_info_refused"), _REVISION_CONFLICT, _NOT_FOUND, _NO_TARGET),
         description=(
-            "At least one of answer, question, tag. Every write bumps `revision` and `updated_at` and records `written_by`. "
+            "At least one of answer, question, tag, source (an empty source removes it). Every write bumps `revision` and `updated_at` and records `written_by`. "
             "409 revision_conflict carries the current `answer` in the error: someone (the user, or another agent) wrote it after you read it; "
             "read it, merge, and send again with its revision. A changed answer or question (not a tag alone): " + _TRIGGER_NOTE
         ),
@@ -1983,7 +1998,7 @@ def llms_text() -> str:
         "GigAI stores no name or contact details: these PDFs have no header, and a line holding a name or contact detail is refused (422 personal_info_refused). "
         "The person adds their details in Scout's Generate PDF form, in their browser; an agent cannot finish that step unless it drives that browser.\n"
         "- Answers and stories (the user's, shared by every profile; local, no model call). An ANSWER is a short fact (\"Do you have GCP experience?\" -> "
-        "\"Yes, 4 years, GKE + BigQuery\"): save a factual reply with POST /api/answers {question_id, question, answer, actor: \"agent\"}; read GET /api/answers "
+        "\"Yes, 4 years, GKE + BigQuery\"): save a factual reply with POST /api/answers {question_id, question, answer, actor: \"agent\", source: \"<where it came from>\"}; read GET /api/answers "
         "(?q=&tag=) or GET /api/answers/<id>; edit PUT /api/answers/<id> {revision, answer|question|tag, actor}; remove DELETE /api/answers/<id>?revision=. "
         "A STORY is an experience worth telling (a project, a problem, an outcome): when a reply has that substance, ask \"Want me to make this a story?\", "
         "draft the narrative from the person's own words, show it, and on OK save it with POST /api/stories {title, company, role, period, raw, "

@@ -95,6 +95,7 @@ from .find_jobs.contracts import (
 )
 from .find_jobs.discovery.storage import atomic_write, project_id
 from .find_jobs.job_input import job_fetch_client, resolve_job
+from .find_jobs.job_source import resolve_job_for_assessment
 from .find_jobs.resume_input import resolve_preferences, resolve_profile, resolve_resume, resume_for_profile
 
 #: Directory segment for assessments against pasted (ephemeral) resume text.
@@ -640,8 +641,12 @@ def run_quick_assessment(
         if resolved_job is not None:
             job = resolved_job
         else:
-            with job_fetch_client() as client:
-                job = resolve_job(request.job, client=client, home_root=home_root)
+            # 0110-10-04: the posting Scout already holds (the index's, or the one the stored assessment was
+            # made on) before the URL; a re-assessment never becomes a scrape of the company's page.
+            job = resolve_job_for_assessment(
+                request.job, home_root=home_root, target=target, open_client=lambda: job_fetch_client(),
+                resolve=lambda job_input_, client: resolve_job(job_input_, client=client, home_root=home_root),
+            )
     except FindJobsContractError as exc:
         raise QuickAssessError(exc.code, str(exc)) from exc
     # PL2: the posting's digest as fetched (the index's ``content_sha256``), before any title override.

@@ -102,7 +102,7 @@
     },
     "/api/answers": {
       "get": {
-        "description": "Every answer of the user, with tags, dates, writer and the jobs that asked or reused it. Answers belong to the user, not to a profile: every profile's assessment and tailoring reads the same ones. Each answer: the `question_id` (its id in the other routes), the `question` as asked (the id itself when only the id is known), the `answer`, a model-free `tag` (technical, experience-level, eligibility, education, domain, leadership, conflict, failure, collaboration, system-design, delivery, skill, other; or your own), `jobs` (the postings that asked it, confirmed a suggestion with it, or whose assessment reused it: kind answered | confirmed | reused), `written_by` (operator | agent), `created_at`, `updated_at`, `revision` (send it back on PUT and DELETE) and the last writes in `history` ({at, by, action}; an entry with `answer` is an earlier text kept when two profiles' answers were merged). `total` counts the answers before `q` and `tag` narrow them.",
+        "description": "Every answer of the user, with tags, dates, writer and the jobs that asked or reused it. Answers belong to the user, not to a profile: every profile's assessment and tailoring reads the same ones. Each answer: the `question_id` (its id in the other routes), the `question` as asked (the id itself when only the id is known), the `answer`, a model-free `tag` (technical, experience-level, eligibility, education, domain, leadership, conflict, failure, collaboration, system-design, delivery, skill, other; or your own), `jobs` (the postings that asked it, confirmed a suggestion with it, or whose assessment reused it: kind answered | confirmed | reused), `written_by` (operator | agent), `source` (free text the writer gave: where the answer came from; null when it gave none), `created_at`, `updated_at`, `revision` (send it back on PUT and DELETE) and the last writes in `history` ({at, by, action}; an entry with `answer` is an earlier text kept when two profiles' answers were merged). `total` counts the answers before `q` and `tag` narrow them.",
         "operationId": "get_api_answers",
         "parameters": [
           {
@@ -153,6 +153,7 @@
                       "question": "Do you have GCP experience?",
                       "question_id": "cloud:gcp",
                       "revision": 1,
+                      "source": "from the user's repo infra-charts, at the user's request",
                       "tag": "technical",
                       "updated_at": "2026-10-02T15:00:00.000000Z",
                       "written_by": "agent"
@@ -246,13 +247,14 @@
                 "actor": "agent",
                 "answer": "Yes, 4 years, GKE + BigQuery",
                 "question": "Do you have GCP experience?",
-                "question_id": "cloud:gcp"
+                "question_id": "cloud:gcp",
+                "source": "from the user's repo infra-charts, at the user's request"
               },
               "schema": {
                 "additionalProperties": false,
                 "properties": {
                   "actor": {
-                    "description": "Who writes: recorded as written_by. Also the X-GigAI-Actor header.",
+                    "description": "Who writes: recorded as written_by. Also the X-GigAI-Actor header. Without either, a write from the Scout UI (a browser page of this server) is the operator's and any other loopback write is the agent's.",
                     "enum": [
                       "operator",
                       "agent"
@@ -282,6 +284,10 @@
                   "revision": {
                     "description": "The revision you read, when the answer exists; a stale one answers 409.",
                     "type": "integer"
+                  },
+                  "source": {
+                    "description": "Free text, at most 300 characters: where the answer came from (e.g. \"from the user's repo, at the user's request\"). Returned with the answer; never sent to a model. A new answer text without it drops the stored one.",
+                    "type": "string"
                   },
                   "tag": {
                     "description": "Your own tag (lowercase, at most 40 characters); omitted = a tag from the question.",
@@ -326,6 +332,7 @@
                     "question": "Do you have GCP experience?",
                     "question_id": "cloud:gcp",
                     "revision": 1,
+                    "source": "from the user's repo infra-charts, at the user's request",
                     "tag": "technical",
                     "updated_at": "2026-10-02T15:00:00.000000Z",
                     "written_by": "agent"
@@ -686,7 +693,7 @@
         ]
       },
       "get": {
-        "description": "One answer. Answers belong to the user, not to a profile: every profile's assessment and tailoring reads the same ones. Each answer: the `question_id` (its id in the other routes), the `question` as asked (the id itself when only the id is known), the `answer`, a model-free `tag` (technical, experience-level, eligibility, education, domain, leadership, conflict, failure, collaboration, system-design, delivery, skill, other; or your own), `jobs` (the postings that asked it, confirmed a suggestion with it, or whose assessment reused it: kind answered | confirmed | reused), `written_by` (operator | agent), `created_at`, `updated_at`, `revision` (send it back on PUT and DELETE) and the last writes in `history` ({at, by, action}; an entry with `answer` is an earlier text kept when two profiles' answers were merged).",
+        "description": "One answer. Answers belong to the user, not to a profile: every profile's assessment and tailoring reads the same ones. Each answer: the `question_id` (its id in the other routes), the `question` as asked (the id itself when only the id is known), the `answer`, a model-free `tag` (technical, experience-level, eligibility, education, domain, leadership, conflict, failure, collaboration, system-design, delivery, skill, other; or your own), `jobs` (the postings that asked it, confirmed a suggestion with it, or whose assessment reused it: kind answered | confirmed | reused), `written_by` (operator | agent), `source` (free text the writer gave: where the answer came from; null when it gave none), `created_at`, `updated_at`, `revision` (send it back on PUT and DELETE) and the last writes in `history` ({at, by, action}; an entry with `answer` is an earlier text kept when two profiles' answers were merged).",
         "operationId": "get_api_answers_question_id",
         "parameters": [
           {
@@ -727,6 +734,7 @@
                     "question": "Do you have GCP experience?",
                     "question_id": "cloud:gcp",
                     "revision": 1,
+                    "source": "from the user's repo infra-charts, at the user's request",
                     "tag": "technical",
                     "updated_at": "2026-10-02T15:00:00.000000Z",
                     "written_by": "agent"
@@ -805,7 +813,7 @@
         ]
       },
       "put": {
-        "description": "Edit an answer: its text, the question words and/or the tag. At least one of answer, question, tag. Every write bumps `revision` and `updated_at` and records `written_by`. 409 revision_conflict carries the current `answer` in the error: someone (the user, or another agent) wrote it after you read it; read it, merge, and send again with its revision. A changed answer or question (not a tag alone): 0.1.10.7: the write also queues the background pipeline (tailored resume, assessment against it, Scout ATS score, Scout label) for every job of an active profile whose stored assessment left open a question this answers; at most `pipeline.auto_jobs_per_trigger` (10) jobs run, the rest wait for an approval (GET /api/pipeline/approvals). The pipeline's tailoring replaces only a tailored resume the pipeline itself made: one tailored on demand (POST /api/tailored-resumes) or with a line chosen or edited (PUT /api/tailored-resumes/lines) is kept as it is, its `updated_at` unchanged, and the assessment, the Scout ATS score and the Scout label are made against it. Read what was queued with GET /api/pipeline.",
+        "description": "Edit an answer: its text, the question words and/or the tag. At least one of answer, question, tag, source (an empty source removes it). Every write bumps `revision` and `updated_at` and records `written_by`. 409 revision_conflict carries the current `answer` in the error: someone (the user, or another agent) wrote it after you read it; read it, merge, and send again with its revision. A changed answer or question (not a tag alone): 0.1.10.7: the write also queues the background pipeline (tailored resume, assessment against it, Scout ATS score, Scout label) for every job of an active profile whose stored assessment left open a question this answers; at most `pipeline.auto_jobs_per_trigger` (10) jobs run, the rest wait for an approval (GET /api/pipeline/approvals). The pipeline's tailoring replaces only a tailored resume the pipeline itself made: one tailored on demand (POST /api/tailored-resumes) or with a line chosen or edited (PUT /api/tailored-resumes/lines) is kept as it is, its `updated_at` unchanged, and the assessment, the Scout ATS score and the Scout label are made against it. Read what was queued with GET /api/pipeline.",
         "operationId": "put_api_answers_question_id",
         "parameters": [
           {
@@ -830,7 +838,7 @@
                 "additionalProperties": false,
                 "properties": {
                   "actor": {
-                    "description": "Who writes: recorded as written_by. Also the X-GigAI-Actor header.",
+                    "description": "Who writes: recorded as written_by. Also the X-GigAI-Actor header. Without either, a write from the Scout UI (a browser page of this server) is the operator's and any other loopback write is the agent's.",
                     "enum": [
                       "operator",
                       "agent"
@@ -848,6 +856,10 @@
                   "revision": {
                     "description": "The revision of the answer you read; when it changed since, the reply is 409.",
                     "type": "integer"
+                  },
+                  "source": {
+                    "description": "Free text, at most 300 characters: where the answer came from (e.g. \"from the user's repo, at the user's request\"). Returned with the answer; never sent to a model. A new answer text without it drops the stored one.",
+                    "type": "string"
                   },
                   "tag": {
                     "description": "Your own tag; an empty string puts the automatic tag back.",
@@ -891,6 +903,7 @@
                     "question": "Do you have GCP experience?",
                     "question_id": "cloud:gcp",
                     "revision": 1,
+                    "source": "from the user's repo infra-charts, at the user's request",
                     "tag": "technical",
                     "updated_at": "2026-10-02T15:00:00.000000Z",
                     "written_by": "agent"
@@ -8552,7 +8565,7 @@
                 "additionalProperties": false,
                 "properties": {
                   "actor": {
-                    "description": "Who writes: recorded as written_by. Also the X-GigAI-Actor header.",
+                    "description": "Who writes: recorded as written_by. Also the X-GigAI-Actor header. Without either, a write from the Scout UI (a browser page of this server) is the operator's and any other loopback write is the agent's.",
                     "enum": [
                       "operator",
                       "agent"
@@ -9149,7 +9162,7 @@
                 "additionalProperties": false,
                 "properties": {
                   "actor": {
-                    "description": "Who writes: recorded as written_by. Also the X-GigAI-Actor header.",
+                    "description": "Who writes: recorded as written_by. Also the X-GigAI-Actor header. Without either, a write from the Scout UI (a browser page of this server) is the operator's and any other loopback write is the agent's.",
                     "enum": [
                       "operator",
                       "agent"

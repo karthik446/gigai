@@ -116,6 +116,7 @@ from .find_jobs.contracts import (
 )
 from .find_jobs.discovery.storage import atomic_write, project_id
 from .find_jobs.job_input import job_fetch_client, resolve_job
+from .find_jobs.job_source import resolve_job_for_assessment
 from .find_jobs.resume_input import resolve_profile, resolve_resume, resume_for_profile
 from .question_ids import normalize_question_id
 from .resume_pii import detect_contact_details
@@ -2371,8 +2372,11 @@ def run_tailored_resume(
         if resolved_job is not None:
             job = resolved_job
         else:
-            with job_fetch_client() as client:
-                job = resolve_job(request.job, client=client, home_root=home_root)
+            # 0110-10-04: the same posting the assessment read (``job_source``), never a scrape of the company's page.
+            job = resolve_job_for_assessment(
+                request.job, home_root=home_root, target=target, open_client=lambda: job_fetch_client(),
+                resolve=lambda job_input_, client: resolve_job(job_input_, client=client, home_root=home_root),
+            )
     except FindJobsContractError as exc:
         raise TailorError(exc.code, str(exc)) from exc
     from .find_jobs.assess_contracts import AssessRequest

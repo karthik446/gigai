@@ -22,9 +22,13 @@ export function answerTitle(answer) {
   return answer.question && answer.question !== answer.question_id ? answer.question : answer.question_id;
 }
 
-// One line under an answer or a story: who wrote it and when.
+// One line under an answer or a story: who wrote it, where it came from (the
+// writer's own free text, when it said) and when.
 export function writtenLine(item) {
   const parts = [`Written by ${item.written_by === "agent" ? "your agent" : "you"}`];
+  if (text(item.source)) {
+    parts.push(`source: ${text(item.source)}`);
+  }
   if (item.updated_at) {
     parts.push(`updated ${day(item.updated_at)}`);
   }

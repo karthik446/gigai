@@ -24,10 +24,12 @@ The check is pattern-based and can miss things. Never ask the user to paste a re
    `gigai scout new --yours --json`. Never put its output next to posting text.
 4. Ask the open questions. A factual reply is saved as an ANSWER (step 5). A reply with
    substance gets: "Want me to make this a story?" (step 6).
-5. Answer: `gigai scout answers save QUESTION_ID --answer-text "..." --actor agent`
+5. Answer: `gigai scout answers save QUESTION_ID --answer-text "..." --as agent`
+   If the user points you at their own code or docs, you may answer an open question from what
+   you read there. Say where it came from: add `--source "from the user's repo NAME, at the user's request"`.
 6. Story: write a short narrative, loosely STAR (situation, task, action, result), using ONLY
    the user's own words. Show it. Save on their OK:
-   `gigai scout story save --title "Cut CI time 60%" --raw-text "their words" --situation "..." --task "..." --action "..." --result "..." --tag ci --answers "Tell me about a time you improved a process" --actor agent`
+   `gigai scout story save --title "Cut CI time 60%" --raw-text "their words" --situation "..." --task "..." --action "..." --result "..." --tag ci --answers "Tell me about a time you improved a process" --as agent`
 7. When `scout new` offers to process waiting work, tell the user the estimate (model calls,
    inside the daily cap) and wait for a yes. Then run `gigai scout new --process --json`, or
    for one job `gigai scout pipeline process JOB --json`.
@@ -42,6 +44,7 @@ The check is pattern-based and can miss things. Never ask the user to paste a re
 - `gigai scout jobs list [--query TEXT] [--state S] [--window new|7d|30d] [--limit N] [--json]`
 - `gigai scout jobs assess [URL...] [--yes] [--again] [--actor agent] [--json]` costs one model call per posting.
 - `gigai scout answers list|show|save|delete`: `show QUESTION_ID --json` gives the revision.
+  `save ... --as agent [--source TEXT]`: who wrote it, and where the answer came from (free text).
 - `gigai scout story list|show|save|delete|prep`: `show STORY_ID --json` gives the revision.
 - `gigai scout pipeline status --json`, `gigai scout pipeline process JOB`, `gigai scout pipeline cancel JOB`, `gigai scout pipeline retry JOB`
 - `gigai scout pipeline approvals list --json`, then `approvals approve` / `approvals deny` on the user's word
@@ -58,6 +61,13 @@ Add `--json` and read the result; do not scrape tables.
 - **Scout ATS score**: GigAI's own local check of how well this resume reads and matches the posting. Not any real ATS's score.
 
 Say it that way when you quote them. Never invent a verdict label of your own.
+
+## You are the agent: say so on every write
+
+Every answer or story you save carries `--as agent` (also `gigai scout answer ... --as agent`).
+Without it the CLI records the write as the user's own. Over the API send `X-GigAI-Actor: agent`
+(or `"actor": "agent"`); an API write that names no writer and is not from the Scout UI is
+recorded as the agent's. Never pass `--as operator`: that is the user, typing themselves.
 
 ## Errors
 

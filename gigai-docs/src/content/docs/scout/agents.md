@@ -110,15 +110,20 @@ assessment, for every profile.
 - A short fact is saved as an **answer**:
 
   ```sh
-  gigai scout answers save cloud:gcp --question "Do you have GCP experience?" --answer-text "Yes, 4 years, GKE and BigQuery" --actor agent --json
+  gigai scout answers save cloud:gcp --question "Do you have GCP experience?" --answer-text "Yes, 4 years, GKE and BigQuery" --as agent --json
   ```
+
+  `--as agent` records that the agent wrote it (the Answers and stories page says "Written by your
+  agent"); without it the command line records the write as yours. If you point the agent at your
+  own code or notes and it answers a question from them, it adds where the answer came from:
+  `--source "from the user's repo infra-charts, at the user's request"`.
 
 - A reply with substance (a project, a problem, an outcome) gets the question "Want me to make
   this a story?". On a yes the agent drafts a short narrative from your own words, shows it to
   you, and saves it when you agree:
 
   ```sh
-  gigai scout story save --title "Cut CI time 60% at Acme" --raw-text "Our builds took forty minutes, so I moved the runners to Kubernetes and cached the layers." --situation "Builds took forty minutes and blocked every merge." --action "Moved the runners to Kubernetes and cached the image layers." --result "Build time fell 60 percent." --tag ci --answers "Tell me about a time you improved a slow process" --actor agent --json
+  gigai scout story save --title "Cut CI time 60% at Acme" --raw-text "Our builds took forty minutes, so I moved the runners to Kubernetes and cached the layers." --situation "Builds took forty minutes and blocked every merge." --action "Moved the runners to Kubernetes and cached the image layers." --result "Build time fell 60 percent." --tag ci --answers "Tell me about a time you improved a slow process" --as agent --json
   ```
 
 Every write is checked on your computer: text that looks like an email address, a phone number, a
@@ -361,9 +366,9 @@ gigai scout new --yours --json
 > **Robin:** Yes, save it. And GCP: four years, GKE and BigQuery.
 
 ```sh
-gigai scout answers save streaming:kafka --question "Have you run Kafka in production?" --answer-text "Yes, three years" --actor agent --json
-gigai scout story save --title "Order pipeline moved from nightly batch to Kafka" --raw-text "We moved the order pipeline off a nightly batch onto Kafka and cut the delay from a day to under a minute." --situation "Orders were processed once a day." --action "Moved the pipeline onto Kafka." --result "Delay fell from a day to under a minute." --tag streaming --answers "Tell me about a time you improved a slow process" --actor agent --json
-gigai scout answers save cloud:gcp --question "Do you have GCP experience?" --answer-text "Yes, 4 years, GKE and BigQuery" --actor agent --json
+gigai scout answers save streaming:kafka --question "Have you run Kafka in production?" --answer-text "Yes, three years" --as agent --json
+gigai scout story save --title "Order pipeline moved from nightly batch to Kafka" --raw-text "We moved the order pipeline off a nightly batch onto Kafka and cut the delay from a day to under a minute." --situation "Orders were processed once a day." --action "Moved the pipeline onto Kafka." --result "Delay fell from a day to under a minute." --tag streaming --answers "Tell me about a time you improved a slow process" --as agent --json
+gigai scout answers save cloud:gcp --question "Do you have GCP experience?" --answer-text "Yes, 4 years, GKE and BigQuery" --as agent --json
 gigai scout new --peek --json
 ```
 
@@ -614,14 +619,14 @@ curl -s -X PUT "$B/api/stories/story%3A60_acme_ci_cut_time" -H "$H" -d '{
 The same with the CLI (no running server needed):
 
 ```sh
-gigai scout answers save cloud:gcp --question "Do you have GCP experience?" --answer-text "Yes, 4 years, GKE + BigQuery" --actor agent --json
+gigai scout answers save cloud:gcp --question "Do you have GCP experience?" --answer-text "Yes, 4 years, GKE + BigQuery" --as agent --json
 gigai scout answers list --json                        # every answer, with tags and the jobs that used it
 gigai scout answers show cloud:gcp --json
 gigai scout answers delete cloud:gcp --confirm --revision 1 --json
-gigai scout story save --file story.json --actor agent --json   # the fields of POST /api/stories
+gigai scout story save --file story.json --as agent --json   # the fields of POST /api/stories
 gigai scout story list --json
 gigai scout story show story:60_acme_ci_cut_time --json
-gigai scout story save story:60_acme_ci_cut_time --period 2022-2023 --revision 1 --actor agent --json
+gigai scout story save story:60_acme_ci_cut_time --period 2022-2023 --revision 1 --as agent --json
 gigai scout story delete story:60_acme_ci_cut_time --confirm --revision 2 --json
 gigai scout story prep --json                          # the interview questions your stories answer
 ```

@@ -45,7 +45,7 @@ from tests.api_e2e.harness import (
 )
 
 _GCP = "Yes, 4 years, GKE + BigQuery"
-_ANSWER_KEYS = {"question_id", "question", "answer", "tag", "jobs", "written_by", "created_at", "updated_at", "revision", "history"}
+_ANSWER_KEYS = {"question_id", "question", "answer", "tag", "jobs", "written_by", "source", "created_at", "updated_at", "revision", "history"}
 _STORY_KEYS = {
     "story_id", "title", "company", "role", "period", "raw", "narrative", "tags", "answers_questions", "sources", "jobs",
     "written_by", "created_at", "updated_at", "revision", "history",
@@ -165,6 +165,8 @@ def test_answers_and_stories_journey(tmp_path: Path, monkeypatch: pytest.MonkeyP
         confirmed = client.post(
             "/api/answers",
             json={"question_id": "tooling:cloud_google_platform", "question": "Hands-on Google Cloud Platform experience?", "answer": suggestion["answer"], "from_bank": "cloud:gcp"},
+            # 0110-10-04: the user's own click in the Scout UI (a browser sends its Origin); without it the write is an agent's.
+            headers={"Origin": server.base_url.rstrip("/")},
         )
         assert confirmed.status_code == 201 and confirmed.json()["answer"]["written_by"] == "operator"
         assert client.get("/api/answers/match", params={"question_id": "tooling:google_cloud_platform"}).json()["match"] is None

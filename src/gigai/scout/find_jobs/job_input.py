@@ -8,7 +8,10 @@ v0.1.9 plan (§P4, operator answer 6):
    ``boards-api.greenhouse.io/v1/boards/{token}/jobs/{id}?content=true``
    (proven live by S29 r1's fetch, 15/15).
 3. Otherwise GET the page itself (redirects followed, 2 MiB body cap) and
-   run ``html_to_text`` on it.
+   run ``html_to_text`` on it. 0110-10-04: the site's own navigation is not
+   the posting (``_posting_markup``: ``<nav>``, the page header and footer,
+   ``<aside>``, a "Skip to main content" link are left out, and a ``<main>``
+   that carries the posting is read alone).
 4. If the URL is on an ATS host and the page had (almost) no text -- a
    JavaScript shell -- list the board through the existing
    ``ATSBoardClients`` and match the row by normalized URL (or, for
@@ -28,6 +31,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 import html as _html_entities
+from html.parser import HTMLParser
 import json
 from pathlib import Path
 import re
@@ -343,10 +347,115 @@ def _page_title(html: str) -> str:
     return re.sub(r"\s+", " ", _html_entities.unescape(match.group(1))).strip()
 
 
+# 0110-10-04: what a generic page carries around its posting.
+_NEVER_TEXT_TAGS = frozenset({"script", "style", "noscript", "template", "svg"})
+_NAVIGATION_TAGS = frozenset({"nav", "aside"})
+#: The PAGE's header and footer; inside ``<main>``/``<article>`` they are the posting's own (its title, its apply line).
+_PAGE_CHROME_TAGS = frozenset({"header", "footer"})
+_CONTENT_TAGS = frozenset({"main", "article"})
+_NAVIGATION_ROLES = frozenset({"navigation", "banner", "contentinfo", "search"})
+_VOID_TAGS = frozenset({"area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "source", "track", "wbr"})
+_SKIP_LINK = re.compile(r"\Askip to (?:main )?content\Z", re.IGNORECASE)
+
+
+class _PostingMarkup(HTMLParser):
+    """A fetched page's markup without the site's navigation; ``<main>``'s part of it is kept apart."""
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=False)
+        self.kept: list[str] = []
+        self.main: list[str] = []
+        self._skipping: str | None = None  # the tag whose subtree is being left out
+        self._skip_depth = 0
+        self._content_depth = 0
+        self._main_depth = 0
+
+    def _emit(self, markup: str) -> None:
+        if self._skipping is not None:
+            return
+        self.kept.append(markup)
+        if self._main_depth:
+            self.main.append(markup)
+
+    def _is_navigation(self, tag: str, attrs: list[tuple[str, str | None]]) -> bool:
+        if tag in _NEVER_TEXT_TAGS or tag in _NAVIGATION_TAGS:
+            return True
+        if tag in _PAGE_CHROME_TAGS and not self._content_depth:
+            return True
+        return (dict(attrs).get("role") or "").strip().lower() in _NAVIGATION_ROLES
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if self._skipping is not None:
+            if tag == self._skipping:
+                self._skip_depth += 1
+            return
+        if tag in _VOID_TAGS:
+            self._emit(self.get_starttag_text() or "")
+            return
+        if self._is_navigation(tag, attrs):
+            self._skipping, self._skip_depth = tag, 1
+            return
+        if tag in _CONTENT_TAGS:
+            self._content_depth += 1
+        if tag == "main" or (dict(attrs).get("role") or "").strip().lower() == "main":
+            self._main_depth += 1
+        self._emit(self.get_starttag_text() or "")
+
+    def handle_startendtag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        del tag, attrs
+        self._emit(self.get_starttag_text() or "")
+
+    def handle_endtag(self, tag: str) -> None:
+        if self._skipping is not None:
+            if tag == self._skipping:
+                self._skip_depth -= 1
+                if self._skip_depth == 0:
+                    self._skipping = None
+            return
+        self._emit(f"</{tag}>")
+        if tag in _CONTENT_TAGS:
+            self._content_depth = max(0, self._content_depth - 1)
+        if tag == "main":
+            self._main_depth = max(0, self._main_depth - 1)
+
+    def handle_data(self, data: str) -> None:
+        self._emit(data)
+
+    def handle_entityref(self, name: str) -> None:
+        self._emit(f"&{name};")
+
+    def handle_charref(self, name: str) -> None:
+        self._emit(f"&#{name};")
+
+
+def _without_skip_link(text: str) -> str:
+    return "\n".join(line for line in text.splitlines() if not _SKIP_LINK.fullmatch(line.strip()))
+
+
+def _posting_text(html: str) -> str:
+    """The page's text without the site's navigation boilerplate (0110-10-04).
+
+    ``<main>`` (or ``role="main"``) alone when it carries a posting's worth of
+    text; else the page without its navigation, header, footer and asides. A
+    page whose markup hides everything that way (an unclosed ``<nav>``) keeps
+    the text it always had: boilerplate is removed, a posting never is.
+    """
+
+    whole = html_to_text(html)
+    parser = _PostingMarkup()
+    parser.feed(html)
+    parser.close()
+    for markup in ("".join(parser.main), "".join(parser.kept)):
+        text = _without_skip_link(html_to_text(markup))
+        if len(text) >= MIN_POSTING_TEXT_CHARS:
+            return text
+    return whole
+
+
 def _fetch_page(client: "httpx.Client", url: str) -> _Page:
     body, charset = _read_capped(client, url)
     html = _decode(body, charset)
-    return _Page(title=_page_title(html), text=html_to_text(html))
+    return _Page(title=_page_title(html), text=_posting_text(html))
 
 
 def _greenhouse_single_job(

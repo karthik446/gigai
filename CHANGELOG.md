@@ -65,6 +65,17 @@ the server used several gigabytes of memory, and reloading made it worse. Read "
   refreshes it in place and asks for one thing at a time. A slow answer says what it is waiting for.
 - **A browser that goes away is no longer an error in the log.** It is logged as "client closed the
   connection".
+- **Re-assessing a job after an answer keeps the posting.** A posting from a Greenhouse board that a
+  company shows on its own site (a `...?gh_jid=...` address) was read from the stored posting the
+  first time, and from the company's web page after you answered a question: the page's menus were
+  stored as the posting and the location was lost. Every assessment and tailoring of a job address
+  now reads the stored posting first and never falls back to a web page when the board's own text
+  is known. A page that is the only source is read without its menus, header and footer.
+- **An answer says who wrote it and where it came from.** An answer your agent saved was recorded as
+  yours. `gigai scout answer` and `gigai scout answers save` take `--as agent` (`--actor` still
+  works) and a free-text `--source` ("from the user's repo, at the user's request"). An API write
+  that names no writer is yours from the Scout page and the agent's from anywhere else. The Answers
+  and stories page shows both. The agent instructions tell agents to pass them.
 
 ### 0.1.10.8
 
