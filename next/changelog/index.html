@@ -267,6 +267,17 @@ resume you replaced by hand, a pasted resume, and a home without a master are ta
 before. After you make or change the master, the background pipeline tailors a job’s resume again
 the next time it processes that job, within the daily limit on model calls; a resume you tailored
 or edited yourself is kept.</li>
+<li><strong>A master resume: your agent keeps it up to date from a chat.</strong> <code dir="auto">gigai scout resume master add</code>,
+<code dir="auto">edit</code> and <code dir="auto">remove</code> change one line, role or skill by its id. A story or an answer becomes a line
+of the master with <code dir="auto">--from-story ID</code> or <code dir="auto">--from-answer ID</code>: the line is linked to it, and from
+then on every profile and every job can select it. An agent passes <code dir="auto">--as agent</code> and says where
+the evidence came from with <code dir="auto">--source</code>; <code dir="auto">gigai scout resume master show</code> shows both for each
+line. An edit or a removal names the revision it read (<code dir="auto">--revision N</code>) and is refused when the
+master changed since. Text that looks like contact data is refused and stored nowhere. A line the
+master already has in other words is not added: Scout lists the line it looks like, and you
+change that one or pass <code dir="auto">--force</code>. A removed line is retired, not deleted: no resume shows it any
+more, <code dir="auto">gigai scout resume master show --retired</code> still lists it with its text, and <code dir="auto">gigai scout resume master add --restore ID</code> puts it back under the same id. The agent instructions (<code dir="auto">gigai agent-skill</code>) have a step for this: after saving a story or an answer with substance, the agent
+asks “Want this on your resume?”.</li>
 </ul>
 <div class="sl-heading-wrapper level-h3"><h3 id="01108">0.1.10.8</h3><a class="sl-anchor-link" href="#01108"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “0.1.10.8”</span></a></div>
 <p>Fixes from the first days of real use of 0.1.10.7, a security fix for everyone who uses Scout
