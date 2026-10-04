@@ -225,6 +225,19 @@ the server used several gigabytes of memory, and reloading made it worse. Read "
   before. After you make or change the master, the background pipeline tailors a job's resume again
   the next time it processes that job, within the daily limit on model calls; a resume you tailored
   or edited yourself is kept.
+- **A master resume: your agent keeps it up to date from a chat.** `gigai scout resume master add`,
+  `edit` and `remove` change one line, role or skill by its id. A story or an answer becomes a line
+  of the master with `--from-story ID` or `--from-answer ID`: the line is linked to it, and from
+  then on every profile and every job can select it. An agent passes `--as agent` and says where
+  the evidence came from with `--source`; `gigai scout resume master show` shows both for each
+  line. An edit or a removal names the revision it read (`--revision N`) and is refused when the
+  master changed since. Text that looks like contact data is refused and stored nowhere. A line the
+  master already has in other words is not added: Scout lists the line it looks like, and you
+  change that one or pass `--force`. A removed line is retired, not deleted: no resume shows it any
+  more, `gigai scout resume master show --retired` still lists it with its text, and `gigai scout
+  resume master add --restore ID` puts it back under the same id. The agent instructions (`gigai
+  agent-skill`) have a step for this: after saving a story or an answer with substance, the agent
+  asks "Want this on your resume?".
 
 ### 0.1.10.8
 
