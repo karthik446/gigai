@@ -1176,7 +1176,10 @@ def assess_command(
     if job.company:
         heading += f" at {_company_shown(home_root, job.company)}"
     click.echo(f"Assessment for {heading}:")
-    click.echo(f"  Verdict: {result.verdict.value if result.verdict is not None else 'none returned'}")
+    from .requirement_weights import minor_gap_text, minor_gaps
+
+    gap_text = minor_gap_text(minor_gaps(result.matrix))  # 0110-10-03: "matched_above_threshold, 1 minor gap: Helm"
+    click.echo(f"  Verdict: {result.verdict.value if result.verdict is not None else 'none returned'}" + (f", {gap_text}" if gap_text else ""))
     if result.not_a_match_reason:
         click.echo(f"  Reason: {result.not_a_match_reason}")
     if result.sponsorship is not None:
@@ -1193,6 +1196,8 @@ def assess_command(
         klass = f" [{row.requirement_class.value}]" if row.requirement_class is not None else ""
         evidence = f" -- {'; '.join(row.resume_evidence)}" if row.resume_evidence else ""
         click.echo(f"    {row.status.value:8} {row.requirement}{klass}{evidence}")
+    if result.rows_not_shown:
+        click.echo(f"    +{result.rows_not_shown} not shown")
     if result.structured_questions:
         click.echo("  Questions:")
         for question in result.structured_questions:

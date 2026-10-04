@@ -38,11 +38,18 @@ Every lookup here is best effort: an unbound folder, a project with no
 posting store or an unreadable index is "not known here", and step 3 decides.
 The index lookup is one keyed read of the posting store and one board's
 files; the stored assessments are only searched in step 4.
+
+0110-10-03 (d): ``index_job`` is the same lookup for a READ. ``GET /api/jobs``
+joined a job's rank, pay, work mode and H-1B from a find-jobs run's row only,
+so a job the index holds and no run acquired (every posting ``scout new``
+assesses, a company-site ``gh_jid`` URL among them) read ``rank: null`` and no
+pay. ``index_job`` gives that route the posting's read-model row and its
+index text, by the job identity alone, whatever host the URL is on.
 """
 
 from __future__ import annotations
 
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from pathlib import Path
 import sqlite3
 from typing import TYPE_CHECKING, Callable
@@ -147,4 +154,56 @@ def index_posting(
     return replace(found, job_identity=job_identity, normalized_url=job_identity)
 
 
-__all__ = ["ATS_FETCH_KINDS", "index_posting", "resolve_job_for_assessment", "stored_ats_posting"]
+@dataclass(frozen=True)
+class IndexJob:
+    """One job as the index and the posting read model hold it (no request, nothing written).
+
+    ``row`` is the read model's row for the profile asked for (else the
+    posting's best profile); ``rows`` every profile's; ``text`` the index's
+    title, company, location, work mode, stated pay and description, ``None``
+    when the board's files no longer give them; ``grid`` the Jobs grid's own
+    row for the posting (``GET /api/postings``).
+    """
+
+    row: object
+    rows: tuple[object, ...]
+    text: object | None
+    grid: dict[str, object]
+
+    @property
+    def provider(self) -> str:
+        return self.row.board.partition(":")[0]  # type: ignore[attr-defined]
+
+    @property
+    def board_token(self) -> str:
+        return self.row.board.partition(":")[2]  # type: ignore[attr-defined]
+
+
+def index_job(home_root: Path, target: Path, job_identity: str, *, profile_id: str | None = None) -> IndexJob | None:
+    """The index's posting for ``job_identity`` as a read serves it, or ``None`` when the index does not hold it.
+
+    Read only: the stored read-model rows (no rebuild, a posting the board no
+    longer lists included) and one board's files. Never raises.
+    """
+
+    from ...workpad import WorkpadError
+    from .. import posting_search, postings
+    from ..pipeline.store import PipelineStoreError, pipeline_path
+
+    home_root, target = Path(home_root), Path(target)
+    try:
+        if not pipeline_path(home_root, target).is_file():
+            return None  # no posting store yet: nothing is created for a read
+        store = postings.open_store(home_root, target)
+        rows = store.postings(jobs={job_identity}, live=False)
+        if not rows:
+            return None
+        row = next((item for item in rows if item.profile_id == profile_id), rows[0])
+        grid = posting_search._rows_json(home_root, target, store, [(rows, row)])[0]
+        text = postings.posting_texts(home_root, [row]).get(job_identity)
+    except (PipelineStoreError, FindJobsContractError, WorkpadError, sqlite3.Error, OSError, ValueError, LookupError):
+        return None
+    return IndexJob(row=row, rows=tuple(rows), text=text, grid=grid)
+
+
+__all__ = ["ATS_FETCH_KINDS", "IndexJob", "index_job", "index_posting", "resolve_job_for_assessment", "stored_ats_posting"]

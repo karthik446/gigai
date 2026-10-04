@@ -180,7 +180,7 @@ def test_no_work_mode_renders_the_prompt_with_no_work_mode_paragraph(none: objec
     assert render_assess_prompt(_JOB, _ctx(none)) == plain
     assert "CANDIDATE WORK MODE" not in plain and "{{" not in plain
     assert normalize_work_mode(none) == ""
-    assert assess_prompt_version(none) == ASSESS_PROMPT_VERSION_NO_WORK_MODE == "assess-prompt-v7"
+    assert assess_prompt_version(none) == ASSESS_PROMPT_VERSION_NO_WORK_MODE == "assess-prompt-v8"
 
 
 @pytest.mark.parametrize(
@@ -199,7 +199,7 @@ def test_a_work_mode_adds_exactly_one_paragraph_after_the_constraints_line(mode:
     assert _work_mode(prompt) == expected
     # 0.1.10.7 P5: every work mode's prompt is v7 (the posting fenced as untrusted); the mode is in the constraints digest.
     assert assess_prompt_version(mode) == ASSESS_PROMPT_VERSION
-    assert ASSESS_PROMPT_VERSION == "assess-prompt-v7"
+    assert ASSESS_PROMPT_VERSION == "assess-prompt-v8"
     blocks = prompt.split("\n\n")
     paragraph = next(block for block in blocks if block.startswith("CANDIDATE WORK MODE"))
     assert blocks[blocks.index(paragraph) - 1].lstrip("\n").startswith("CANDIDATE CONSTRAINTS:")  # the resume ends with a newline
@@ -263,7 +263,7 @@ def test_a_runs_assess_prompt_carries_the_runs_sealed_work_mode(fx: ProfileFixtu
 
     assert len(binding.port.prompts) == 1
     assert _work_mode(binding.port.prompts[0]) == {"mode": "remote only", "area": "Austin, TX"}
-    assert output.prompt_version == "assess-prompt-v7"
+    assert output.prompt_version == "assess-prompt-v8"
     assert output.constraints_digest == constraints_digest(visa_sponsorship_required=False, countries=("US",), location="Austin, TX", work_mode="remote")
     assert "remote" not in json.dumps({key: value for key, value in output.to_json().items() if key in ("prompt_version", "constraints_digest", "story_bank")})
     assert not [value for value in _CONTACT_VALUES if value in binding.port.prompts[0].split("CANDIDATE WORK MODE", 1)[1].split("\n\n", 1)[0]]
@@ -277,7 +277,7 @@ def test_a_runs_assess_prompt_has_no_work_mode_paragraph_when_the_run_has_none(f
     output = _assess(fx, _run_id(111), profile_id=None, postings=[posting], config=config)
 
     assert _work_mode(binding.port.prompts[0]) is None
-    assert output.prompt_version == "assess-prompt-v7"
+    assert output.prompt_version == "assess-prompt-v8"
     assert output.constraints_digest == constraints_digest(visa_sponsorship_required=False, countries=("US",), location="Austin, TX")
     # The same bytes the builder gives with no work mode at all.
     from gigai.scout.proposal_execution import _assess_job
@@ -494,7 +494,7 @@ def test_an_unchanged_posting_is_assessed_again_when_the_work_mode_is_set_or_cha
 
     # Run 1: no work mode. Assessed under the shipped name (v7 since 0.1.10.7 P5, for every work mode).
     first_acquire, first = _run(fx, 901, posting, none)
-    assert first is not None and first.prompt_version == "assess-prompt-v7"
+    assert first is not None and first.prompt_version == "assess-prompt-v8"
     # Run 2: nothing changed: carried forward, no model call. The assessment of a candidate with no work mode stands.
     second_acquire, second = _run(fx, 902, posting, none)
     assert {row.outcome for row in second_acquire.rows} == {RowOutcome.UNCHANGED}
@@ -505,7 +505,7 @@ def test_an_unchanged_posting_is_assessed_again_when_the_work_mode_is_set_or_cha
     third_acquire, third = _run(fx, 903, posting, remote)
     assert {row.outcome for row in third_acquire.rows} == {RowOutcome.UNCHANGED}
     assert third_acquire.carried_forward_assessments == (), "a verdict made without the work mode is not served"
-    assert third is not None and third.prompt_version == "assess-prompt-v7"
+    assert third is not None and third.prompt_version == "assess-prompt-v8"
     assert _work_mode(binding.port.prompts[-1]) == {"mode": "remote only", "area": "Austin, TX"}
     assert len(binding.port.prompts) == 2
 
@@ -522,4 +522,4 @@ def test_an_unchanged_posting_is_assessed_again_when_the_work_mode_is_set_or_cha
 
 
 def test_the_shipped_version_names() -> None:
-    assert assessment_core.CURRENT_ASSESS_PROMPT_VERSIONS == {"assess-prompt-v7", "assess-prompt-v7", "assess-prompt-v7"}
+    assert assessment_core.CURRENT_ASSESS_PROMPT_VERSIONS == {"assess-prompt-v8", "assess-prompt-v8", "assess-prompt-v8"}

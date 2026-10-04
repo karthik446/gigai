@@ -5,17 +5,33 @@ A posting row's ``company`` is its board token ("garnerhealth",
 company index knows the real one ("Garner Health", "Medallion": the watchlist
 and catalog name ``sources update`` wrote into ``<ats>:<slug>.json``). The
 token stays what it is everywhere it is an id (rows, stored records, digests,
-filters); a response that SHOWS a company gets ``company_name`` beside it:
+filters); a response that SHOWS a company says its name.
+
+0110-10-03: in a response, ``company`` IS the name. An agent reading
+``posting.company`` took the board token ("ospreylabs") for the company's
+name while the real one sat beside it in ``company_name``. Every
+posting-shaped object of a response now carries:
+
+* ``company``: the display name ("Osprey Lane");
+* ``company_slug``: the board token ("ospreylabs"), or ``null`` when the
+  stored company is not a token (a posting read from a page or pasted text
+  has only the name its page gave);
+* ``company_name``: the same name as ``company`` (kept for readers written
+  before the change).
+
+Stored records keep the token in ``company``, as before: only what a response
+says changed.
 
 * :func:`index_company_name`: the index's name for a token, when it has one
   that is not the token itself;
 * :func:`company_display_name`: that, else the slug rule every surface already
   used (``osprey-lane`` -> ``Osprey Lane``), else the text as it is;
-* :func:`with_company_names`: adds ``company_name`` to every posting-shaped
-  object of a JSON response (one that has a ``company`` and names a job by
-  its link), so the Jobs rows, the job page, the assessments list, applications
-  and tailored resumes all say the same name. A story's ``company`` (the
-  user's own words) is not posting-shaped and is left alone.
+* :func:`company_slug`: the board token a stored ``company`` is, when it is one;
+* :func:`with_company_names`: names every posting-shaped object of a JSON
+  response (one that has a ``company`` and names a job by its link), so the
+  Jobs rows, the job page, the assessments list, applications and tailored
+  resumes all say the same name. A story's ``company`` (the user's own words)
+  is not posting-shaped and is left alone.
 
 Reading a name opens only the head of one small index file and is cached by
 the file's stamp; nothing is requested, nothing is written, and it never
@@ -40,6 +56,9 @@ _COMPANY_FIELD = re.compile(r'"company":("(?:[^"\\]|\\.)*")')
 #: A posting-shaped object names a job by its link next to its company (a watchlist entry carries its own name already).
 _POSTING_KEYS = frozenset({"job_identity", "normalized_url", "url", "job_url", "source_url"})
 _NAME_KEY = "company_name"
+_SLUG_KEY = "company_slug"
+#: Where a posting-shaped object says its board token itself (a run's posting row).
+_TOKEN_KEY = "board_token"
 
 _LOCK = threading.Lock()
 _CACHE: dict[str, tuple[tuple[int, int], str | None]] = {}
@@ -101,8 +120,33 @@ def company_display_name(home_root: Path | str | None, company: str | None) -> s
     return index_company_name(home_root, company) or slug_display_name(company)
 
 
+def company_slug(home_root: Path | str | None, company: str | None, board_token: object = None) -> str | None:
+    """The board token of a posting whose stored company is ``company``; ``None`` when it has none.
+
+    ``board_token`` is the posting's own, when its object carries one. Without
+    it, ``company`` is the token when the index holds a board by that name or
+    it is written as a slug ("osprey-lane"); a name a page gave ("Osprey Lane",
+    "Garner Health") is not a token.
+    """
+
+    if type(board_token) is str and board_token:
+        return board_token
+    if type(company) is not str or not company:
+        return None
+    if _SLUG_LIKE.match(company) or index_company_name(home_root, company) is not None:
+        return company
+    return None
+
+
+def named_company(home_root: Path | str | None, company: str | None, board_token: object = None) -> dict[str, object]:
+    """``company`` / ``company_slug`` / ``company_name`` as a response says them (0110-10-03), from the stored ``company``."""
+
+    name = company_display_name(home_root, company)
+    return {"company": name, _SLUG_KEY: company_slug(home_root, company, board_token), _NAME_KEY: name}
+
+
 def with_company_names(payload: object, home_root: Path | str | None) -> object:
-    """``payload`` with ``company_name`` beside the ``company`` of every posting-shaped object.
+    """``payload`` with every posting-shaped object's company named: ``company`` the name, ``company_slug`` the token.
 
     Nothing given is changed: an object that gets a name (and each container
     above it) is copied, everything else is returned as it was, so a row a
@@ -136,11 +180,16 @@ def _named(node: object, home_root: Path | str) -> object:
                     out = dict(node)
                 out[key] = named
     company = node.get("company")
-    if type(company) is str and company and _NAME_KEY not in node and not _POSTING_KEYS.isdisjoint(node):
+    # An object that already says its slug was named where it was built (the Jobs rows): left as it is.
+    if type(company) is str and company and _SLUG_KEY not in node and not _POSTING_KEYS.isdisjoint(node):
         if out is None:
             out = dict(node)
-        out[_NAME_KEY] = company_display_name(home_root, company)
+        named = named_company(home_root, company, node.get(_TOKEN_KEY))
+        given = node.get(_NAME_KEY)
+        if type(given) is str and given:
+            named["company"] = named[_NAME_KEY] = given
+        out.update(named)
     return node if out is None else out
 
 
-__all__ = ["company_display_name", "index_company_name", "slug_display_name", "with_company_names"]
+__all__ = ["company_display_name", "company_slug", "index_company_name", "named_company", "slug_display_name", "with_company_names"]

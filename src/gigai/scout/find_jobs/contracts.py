@@ -169,6 +169,8 @@ class RequirementClass(StrEnum):
 
     HARD = "hard"
     ASKABLE = "askable"
+    #: 0110-10-03: one tool of a list a single sentence names ("Docker, Helm, and Kubernetes"); see ``requirement_weights``.
+    LIST_ITEM = "list_item"
     NICE_TO_HAVE = "nice_to_have"
 
 
@@ -1583,6 +1585,8 @@ class AssessmentResult(_Contract):
     verdict: Verdict | None = None
     structured_questions: tuple[AssessmentQuestion, ...] = ()
     not_a_match_reason: str | None = None
+    # 0110-10-03: rows the model returned past ``requirement_weights.MAX_MATRIX_ROWS`` ("+N not shown"); omitted at 0.
+    rows_not_shown: int = 0
 
     def to_json(self) -> dict[str, object]:
         value: dict[str, object] = {"posting": self.posting.to_json(), "matrix": [row.to_json() for row in self.matrix], "suggestions": _json_strings(self.suggestions), "questions": _json_strings(self.questions), "proposal_revision_ref": self.proposal_revision_ref}
@@ -1597,6 +1601,8 @@ class AssessmentResult(_Contract):
             value["structured_questions"] = [item.to_json() for item in self.structured_questions]
         if self.not_a_match_reason is not None:
             value["not_a_match_reason"] = self.not_a_match_reason
+        if self.rows_not_shown:
+            value["rows_not_shown"] = self.rows_not_shown
         return value
 
     @classmethod
@@ -1604,7 +1610,7 @@ class AssessmentResult(_Contract):
         value = _object_with_optional(
             obj,
             ("posting", "matrix", "suggestions", "questions", "proposal_revision_ref"),
-            ("sponsorship", "verdict", "structured_questions", "not_a_match_reason"),
+            ("sponsorship", "verdict", "structured_questions", "not_a_match_reason", "rows_not_shown"),
             "assessment_result",
         )
         if type(value["matrix"]) is not list:
@@ -1627,7 +1633,19 @@ class AssessmentResult(_Contract):
             verdict,
             structured_questions,
             not_a_match_reason,
+            rows_not_shown_count(value, "assessment_result"),
         )
+
+
+def rows_not_shown_count(value: Mapping[str, object], name: str) -> int:
+    """``rows_not_shown`` of an assessment object: absent is 0; present, a whole number of 1 or more."""
+
+    if "rows_not_shown" not in value:
+        return 0
+    count = value["rows_not_shown"]
+    if type(count) is not int or count < 1:
+        _fail("invalid_value", f"{name}.rows_not_shown must be a whole number of 1 or more")
+    return count  # type: ignore[return-value]
 
 
 @dataclass(frozen=True)

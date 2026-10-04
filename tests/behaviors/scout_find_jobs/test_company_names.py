@@ -76,8 +76,10 @@ def test_the_index_name_then_the_slug_rule_then_the_text(fx: PostingsFixture) ->
 
 def test_scout_new_rows_and_table_use_the_index_name(fx: PostingsFixture) -> None:
     response = scout_new.scout_new(fx.home_root, fx.target, now=NOW, peek=True)
-    names = {row["company"]: row["company_name"] for row in response["postings"]["rows"]}  # type: ignore[index]
-    assert names == {SLUG: NAME, LONG_SLUG: LONG_NAME, PLAIN: "Osprey Lane"}
+    rows = response["postings"]["rows"]  # type: ignore[index]
+    # 0110-10-03: ``company`` is the name; the board token is ``company_slug``.
+    assert {row["company_slug"]: row["company"] for row in rows} == {SLUG: NAME, LONG_SLUG: LONG_NAME, PLAIN: "Osprey Lane"}
+    assert all(row["company_name"] == row["company"] for row in rows)
 
     table = CliRunner().invoke(cli, fx.cli("--peek"))
     assert table.exit_code == 0, table.output
@@ -89,9 +91,9 @@ def test_scout_new_rows_and_table_use_the_index_name(fx: PostingsFixture) -> Non
 
 def test_the_jobs_api_rows_and_the_search_lines_use_the_index_name(fx: PostingsFixture) -> None:
     found = posting_search.search_postings(fx.home_root, fx.target, now=NOW)
-    assert {row["company"]: row["company_name"] for row in found["postings"]["rows"]} == {  # type: ignore[index]
-        SLUG: NAME, LONG_SLUG: LONG_NAME, PLAIN: "Osprey Lane",
-    }
+    rows = found["postings"]["rows"]  # type: ignore[index]
+    assert {row["company_slug"]: row["company"] for row in rows} == {SLUG: NAME, LONG_SLUG: LONG_NAME, PLAIN: "Osprey Lane"}
+    assert all(row["company_name"] == row["company"] for row in rows)
     lines = posting_search.render(found)
     assert f"{NAME}: " in lines and f"{LONG_NAME}: " in lines and f"{SLUG}: " not in lines
 
@@ -131,11 +133,17 @@ def test_every_api_shape_that_names_a_postings_company_gets_the_name(fx: Posting
     assert json.dumps(payload, sort_keys=True) == before  # what a route keeps between requests is never written to
     assert [item["posting"]["company_name"] for item in served["run_rows"]["postings"]] == [NAME, "Osprey Lane"]  # type: ignore[index]
     assert served["assessments"]["assessments"][0]["job"]["company_name"] == NAME  # type: ignore[index]
-    assert served["assessments"]["assessments"][0]["job"]["company"] == SLUG  # type: ignore[index]  # the token stays
+    # 0110-10-03: ``company`` says the name; the token stays, as ``company_slug`` (a run's row says its own ``board_token``).
+    job = served["assessments"]["assessments"][0]["job"]  # type: ignore[index]
+    assert (job["company"], job["company_slug"]) == (NAME, SLUG)
+    assert [(item["posting"]["company"], item["posting"]["company_slug"]) for item in served["run_rows"]["postings"]] == [(NAME, SLUG), ("Osprey Lane", PLAIN)]  # type: ignore[index]
+    assert (served["already"]["company"], served["already"]["company_slug"]) == ("As Given", SLUG)  # type: ignore[index]
+    assert assessment["job"]["company"] == SLUG  # the stored record is not rewritten
     assert served["applications"]["applications"][0]["linked_posting"]["company_name"] == NAME  # type: ignore[index]
     assert served["tailored"]["tailored_resumes"][0]["company_name"] == LONG_NAME  # type: ignore[index]
     assert served["answer"]["jobs"][0]["company_name"] == NAME  # type: ignore[index]
     assert "company_name" not in served["story"] and "company_name" not in served["watch"]  # type: ignore[operator]
+    assert "company_slug" not in served["story"] and served["watch"] == payload["watch"]  # type: ignore[operator]
     assert served["already"]["company_name"] == "As Given"  # type: ignore[index]
     assert served["story"] is payload["story"]  # untouched parts are the same objects
 

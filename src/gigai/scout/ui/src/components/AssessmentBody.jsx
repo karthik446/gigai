@@ -2,7 +2,7 @@ import MatrixBadge from "./MatrixBadge.jsx";
 import RequirementActions from "./RequirementActions.jsx";
 import { useAnswerDrafts } from "../answerDrafts.js";
 import { placeQuestions } from "../answersModel.js";
-import { requirementStatusLabel, sortMatrixRows } from "../jobModel.js";
+import { minorGapText, requirementStatusLabel, requirementsHeading, sortMatrixRows } from "../jobModel.js";
 import { suggestionNotice } from "../answersStoriesModel.js";
 
 // One open question, inside the requirement row it settles (uat-batch1 N5):
@@ -111,6 +111,13 @@ export default function AssessmentBody({
   const ordered = sorted.filter((row) => questionsByRow.has(row.requirement)).concat(sorted.filter((row) => !questionsByRow.has(row.requirement)));
   const hasQuestions = answers.questions.length > 0;
   const busy = Boolean(answers.busy);
+  // 0110-10-03: a bonus or one-of-a-list row that is not met never blocks a match; it is said beside the verdict.
+  const gapText = minorGapText(assessment);
+  const gaps = gapText && (
+    <p className="muted small" data-role="minor-gaps">
+      {gapText}
+    </p>
+  );
 
   const boxes = (questions) =>
     questions.map((question) => (
@@ -222,7 +229,8 @@ export default function AssessmentBody({
           actions && <section className="panel">{actions}</section>
         )}
         <section className="panel" data-role="requirements-section">
-          <h3>Requirements ({assessment.matrix ? assessment.matrix.length : 0})</h3>
+          <h3>{requirementsHeading(assessment)}</h3>
+          {gaps}
           {table(false)}
           {suggestions}
           {!hasQuestions && assessment.questions && assessment.questions.length > 0 && (
@@ -247,6 +255,7 @@ export default function AssessmentBody({
           <MatrixBadge status={assessment.verdict} kind="verdict" />
         </div>
       )}
+      {gaps}
 
       {actions}
 

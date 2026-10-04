@@ -287,7 +287,10 @@ def test_absent_verdict_is_not_checked() -> None:
 # ephemeral session, so the message has to carry everything the model needs:
 # the violated bound or rule, the number it found, and the limit. These pin
 # the EXACT text for three violations (the wording the prompt's retry tail
-# translates: "at most 12 allowed", "rule 7", "question_id ... is invalid").
+# translates: "at most 40 allowed", "rule 7", "question_id ... is invalid").
+# 0110-10-03: the bound is ``requirement_weights.MAX_MATRIX_ROWS`` (40), not 12. The
+# model boundary keeps 40 rows and counts the rest (``rows_not_shown``) before this
+# validator sees them, so this message is for a caller that skipped that step.
 
 
 def test_retry_message_for_too_many_matrix_rows_names_the_count_and_the_bound() -> None:
@@ -295,14 +298,17 @@ def test_retry_message_for_too_many_matrix_rows_names_the_count_and_the_bound() 
         verdict="matched_above_threshold",
         matrix=[
             {"requirement": f"Requirement {i}", "class": "nice_to_have", "resume_evidence": [], "status": "met"}
-            for i in range(14)
+            for i in range(41)
         ],
         questions=[],
         structured_questions=[],
     )
     with pytest.raises(FindJobsContractError) as excinfo:
         parse_assessment_proposal(new)
-    assert str(excinfo.value) == "matrix has 14 rows; at most 12 allowed"
+    assert str(excinfo.value) == "matrix has 41 rows; at most 40 allowed"
+    # 0110-10-03: 14 rows (the old cap was 12) are every row the posting states, and are kept.
+    new["matrix"] = new["matrix"][:14]
+    assert len(parse_assessment_proposal(new).matrix) == 14
 
 
 def test_retry_message_for_matched_with_a_hard_unmet_row_names_the_rule_and_the_count() -> None:
@@ -354,12 +360,13 @@ def test_retry_messages_never_refer_to_an_answer_the_model_cannot_see() -> None:
                 verdict="matched_above_threshold",
                 matrix=[{"requirement": "Python", "class": "hard", "resume_evidence": ["Built Python services"], "status": "met"}],
             ),
-            "verdict matched_above_threshold but 1 question is open (rule 7: any question -> pending_user_answers)",
+            "verdict matched_above_threshold but 1 question is open "
+            "(rule 7: any question on a hard or askable row, or two or more list_item questions -> pending_user_answers)",
         ),
         (
             _new_shape_assessment(questions=[], structured_questions=[]),
-            "verdict pending_user_answers but questions is empty "
-            "(rule 7: no hard unmet row and no question -> matched_above_threshold)",
+            "verdict pending_user_answers but no question holds it "
+            "(rule 7: no hard unmet row, and no question but at most one on a list_item row -> matched_above_threshold)",
         ),
         (
             _new_shape_assessment(
@@ -373,9 +380,9 @@ def test_retry_messages_never_refer_to_an_answer_the_model_cannot_see() -> None:
         ),
         (
             _new_shape_assessment(
-                structured_questions=[{"question_id": f"cat:{i}", "question": "x?", "requirement": None} for i in range(13)]
+                structured_questions=[{"question_id": f"cat:{i}", "question": "x?", "requirement": None} for i in range(41)]
             ),
-            "questions has 13 items; at most 12 allowed",
+            "questions has 41 items; at most 40 allowed",
         ),
         (
             _new_shape_assessment(verdict="matched_above_threshold", matrix=[], questions=[], structured_questions=[]),
@@ -403,11 +410,11 @@ def test_structured_questions_rejects_bad_question_id() -> None:
 def test_structured_questions_rejects_too_many() -> None:
     new = _new_shape_assessment(
         structured_questions=[
-            {"question_id": f"cat:{i}", "question": "x?", "requirement": None} for i in range(13)
+            {"question_id": f"cat:{i}", "question": "x?", "requirement": None} for i in range(41)
         ]
     )
     with pytest.raises(FindJobsContractError):
-        parse_assessment_proposal(new)
+        parse_assessment_proposal(new)  # 0110-10-03: a row asks one question, so the questions' bound is the rows' (40)
 
 
 def test_structured_questions_rejects_oversized_question_text() -> None:

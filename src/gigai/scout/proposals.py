@@ -16,6 +16,7 @@ from types import MappingProxyType
 from typing import Literal
 
 from .find_jobs.contracts import AssessmentResult, FindJobsContractError
+from .requirement_weights import MAX_MATRIX_ROWS, blocking_question_count
 from .untrusted_text import UNTRUSTED_POSTING_RULE, fence_untrusted_posting
 
 from ..adapters.port import InvocationRequest
@@ -546,9 +547,9 @@ def _validate_structured_questions(items: object) -> None:
         return
     if not isinstance(items, list):
         raise FindJobsContractError("invalid_value", "questions must be a list of objects")
-    if len(items) > _MAX_ITEMS:
+    if len(items) > MAX_MATRIX_ROWS:
         raise FindJobsContractError(
-            "invalid_value", f"questions has {len(items)} items; at most {_MAX_ITEMS} allowed"
+            "invalid_value", f"questions has {len(items)} items; at most {MAX_MATRIX_ROWS} allowed"
         )
     for item in items:
         if not isinstance(item, Mapping):
@@ -626,8 +627,8 @@ def _validate_verdict_consistency(raw: Mapping[str, object]) -> None:
     matrix = raw.get("matrix")
     rows = matrix if isinstance(matrix, list) else []
     hard_unmet_rows = sum(1 for row in rows if _is_hard_unmet_row(row))
-    structured = raw.get("structured_questions")
-    question_count = len(structured) if isinstance(structured, list) else 0
+    # 0110-10-03: one open question on a one-of-a-list row is asked and holds nothing up (``requirement_weights``).
+    question_count = blocking_question_count(rows, raw.get("structured_questions"))
 
     hard_unmet = _count_phrase(hard_unmet_rows, "hard requirement is unmet", "hard requirements are unmet")
     open_questions = _count_phrase(question_count, "question is open", "questions are open")
@@ -642,7 +643,7 @@ def _validate_verdict_consistency(raw: Mapping[str, object]) -> None:
             raise FindJobsContractError(
                 "invalid_value",
                 f"verdict matched_above_threshold but {open_questions} "
-                "(rule 7: any question -> pending_user_answers)",
+                "(rule 7: any question on a hard or askable row, or two or more list_item questions -> pending_user_answers)",
             )
     elif verdict == "pending_user_answers":
         if hard_unmet_rows > 0:
@@ -654,8 +655,8 @@ def _validate_verdict_consistency(raw: Mapping[str, object]) -> None:
         if question_count < 1:
             raise FindJobsContractError(
                 "invalid_value",
-                "verdict pending_user_answers but questions is empty "
-                "(rule 7: no hard unmet row and no question -> matched_above_threshold)",
+                "verdict pending_user_answers but no question holds it "
+                "(rule 7: no hard unmet row, and no question but at most one on a list_item row -> matched_above_threshold)",
             )
     elif verdict == "not_a_match":
         if hard_unmet_rows < 1:
@@ -692,16 +693,18 @@ def validate_assessment_bounds(raw: Mapping[str, object]) -> None:
     # text straight back to the model on its one retry -- "matrix is out of
     # bounds" gave a model that emitted 14 careful rows nothing to act on.
     if not isinstance(matrix, list):
-        raise FindJobsContractError("invalid_value", f"matrix must be a list of 1 to {_MAX_ITEMS} rows")
+        raise FindJobsContractError("invalid_value", f"matrix must be a list of 1 to {MAX_MATRIX_ROWS} rows")
     if not matrix:
         raise FindJobsContractError("invalid_value", "matrix has 0 rows; at least 1 row is required")
-    if len(matrix) > _MAX_ITEMS:
-        raise FindJobsContractError("invalid_value", f"matrix has {len(matrix)} rows; at most {_MAX_ITEMS} allowed")
+    # 0110-10-03: no 12-row cap. The model boundary keeps ``MAX_MATRIX_ROWS`` and counts the rest (``rows_not_shown``).
+    if len(matrix) > MAX_MATRIX_ROWS:
+        raise FindJobsContractError("invalid_value", f"matrix has {len(matrix)} rows; at most {MAX_MATRIX_ROWS} allowed")
     for field, items in (("suggestions", suggestions), ("questions", questions)):
         if not isinstance(items, list):
             raise FindJobsContractError("invalid_value", f"{field} must be a list")
-        if len(items) > _MAX_ITEMS:
-            raise FindJobsContractError("invalid_value", f"{field} has {len(items)} items; at most {_MAX_ITEMS} allowed")
+        limit = MAX_MATRIX_ROWS if field == "questions" else _MAX_ITEMS  # a row asks at most one question
+        if len(items) > limit:
+            raise FindJobsContractError("invalid_value", f"{field} has {len(items)} items; at most {limit} allowed")
         for index, item in enumerate(items):
             if type(item) is not str or not item.strip() or len(item) > _MAX_QUESTION or "\x00" in item:
                 raise FindJobsContractError(

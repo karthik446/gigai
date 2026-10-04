@@ -1213,7 +1213,7 @@
     },
     "/api/assess": {
       "post": {
-        "description": "Assess one job (URL or pasted text) against a resume: verdict, requirement matrix, questions. Synchronous: blocks for the model call (and a public fetch for job_url). Stores the assessment; read it back with GET /api/jobs?url=. A stored assessment records its basis (`prompt_version`, `constraints_digest`, `story_bank`: digests and ids, no settings or answer text). Served with `basis_stale` (true | false) and, when true, `basis_stale_reason` (`older_prompt` | `settings_changed` | `story_bank_changed`): whether it is what its profile would be assessed with now. Derived on read; no model is called. `story_bank_changed` is targeted: an answer or story added or edited since answers one of the assessment's own open questions (the same id, the near match behind `bank_suggestions`, or a story about it), or it cites an answer or story that was edited or deleted. Such an item also carries `basis_stale_bank`: the entries that made it stale, each `{match: \"exact\" | \"near\" | \"cited\", bank_question_id, bank_question?, question_id?, question?}` (ids and question words, never an answer).",
+        "description": "Assess one job (URL or pasted text) against a resume: verdict, requirement matrix, questions. Synchronous: blocks for the model call (and a public fetch for job_url). Stores the assessment; read it back with GET /api/jobs?url=. A matrix row's `class` says what it weighs: `hard` and `askable` are must-haves (an open question on one holds the job at `pending_user_answers`), `list_item` is one tool of a list a single sentence names (\"Docker, Helm, and Kubernetes\": its question is still asked, and one of them open does not hold a match), `nice_to_have` is a bonus. So a `matched_above_threshold` assessment can carry one question. `minor_gaps` names the `list_item` and `nice_to_have` rows that are not met and `minor_gap_text` says them in one line (\"1 minor gap: Helm\"). The matrix has a row for every requirement the posting states, must-haves first; past 40 rows `rows_not_shown` counts the rest. A stored assessment records its basis (`prompt_version`, `constraints_digest`, `story_bank`: digests and ids, no settings or answer text). Served with `basis_stale` (true | false) and, when true, `basis_stale_reason` (`older_prompt` | `settings_changed` | `story_bank_changed`): whether it is what its profile would be assessed with now. Derived on read; no model is called. `story_bank_changed` is targeted: an answer or story added or edited since answers one of the assessment's own open questions (the same id, the near match behind `bank_suggestions`, or a story about it), or it cites an answer or story that was edited or deleted. Such an item also carries `basis_stale_bank`: the entries that made it stale, each `{match: \"exact\" | \"near\" | \"cited\", bank_question_id, bank_question?, question_id?, question?}` (ids and question words, never an answer).",
         "operationId": "post_api_assess",
         "parameters": [],
         "requestBody": {
@@ -1869,7 +1869,7 @@
     },
     "/api/jobs": {
       "get": {
-        "description": "One job, complete: posting, rank, assessment + requirement matrix, open questions, tailored resumes, job state, action links. Read only; never calls a model or the network. Aggregates the newest run posting, its rank, every run or quick assessment of the job (with the requirement matrix), the questions still unanswered, stored tailored resumes, the job's state with the events it accepts next, and the action links. The UI route `#/jobs/<posting url>` maps to this route. Each `source: \"quick\"` assessment carries `basis_stale` (and `basis_stale_reason` when true). job_state may carry `assessment_stale: {reason: \"posting_changed\"}` (absent otherwise) when the assessment that gives the state was made on posting text that has since changed: the verdict still reads, and the job should be re-assessed. The same marker carries reason `older_prompt`, `settings_changed` or `story_bank_changed` when the state comes from a stored quick assessment made with an older assess prompt, other candidate settings (work mode, countries, location, sponsorship need) or answers and stories that have since changed; nothing is re-assessed until you ask (POST /api/assess, or assess-all).",
+        "description": "One job, complete: posting, rank, assessment + requirement matrix, open questions, tailored resumes, job state, action links. Read only; never calls a model or the network. Aggregates the newest run posting, its rank, every run or quick assessment of the job (with the requirement matrix), the questions still unanswered, stored tailored resumes, the job's state with the events it accepts next, and the action links. The UI route `#/jobs/<posting url>` maps to this route. A job no run acquired is joined to its index posting by the URL alone, whatever host it is on (a Greenhouse board embedded in a company's own site: `https://www.<company>/jobs?gh_jid=<id>`): `posting` then has the index's `location`, `work_mode`, `salary`, `provider` and `board_token`, `rank` is `{normalized_url, score, profile_id, source: \"posting_index\"}` (the stored score; a run's rank line has reasons and blockers instead), `work_mode_fit` and `h1b` are a run row's, and `index_posting` is the GET /api/postings row for the job (null when the index does not hold it). In every response `company` is the company's NAME (the company index's, e.g. \"Osprey Lane\"); `company_slug` is the board token (\"ospreylabs\": an id, never a name; null for a posting read from a page or pasted text) and `company_name` repeats the name. A matrix row's `class` says what it weighs: `hard` and `askable` are must-haves (an open question on one holds the job at `pending_user_answers`), `list_item` is one tool of a list a single sentence names (\"Docker, Helm, and Kubernetes\": its question is still asked, and one of them open does not hold a match), `nice_to_have` is a bonus. So a `matched_above_threshold` assessment can carry one question. `minor_gaps` names the `list_item` and `nice_to_have` rows that are not met and `minor_gap_text` says them in one line (\"1 minor gap: Helm\"). The matrix has a row for every requirement the posting states, must-haves first; past 40 rows `rows_not_shown` counts the rest. Each `source: \"quick\"` assessment carries `basis_stale` (and `basis_stale_reason` when true). job_state may carry `assessment_stale: {reason: \"posting_changed\"}` (absent otherwise) when the assessment that gives the state was made on posting text that has since changed: the verdict still reads, and the job should be re-assessed. The same marker carries reason `older_prompt`, `settings_changed` or `story_bank_changed` when the state comes from a stored quick assessment made with an older assess prompt, other candidate settings (work mode, countries, location, sponsorship need) or answers and stories that have since changed; nothing is re-assessed until you ask (POST /api/assess, or assess-all).",
         "operationId": "get_api_jobs",
         "parameters": [
           {
@@ -1891,9 +1891,21 @@
                   "application_events": [],
                   "assessments": [
                     {
-                      "matrix": [],
+                      "matrix": [
+                        {
+                          "class": "list_item",
+                          "requirement": "Helm",
+                          "resume_evidence": [],
+                          "status": "unclear"
+                        }
+                      ],
+                      "minor_gap_text": "1 minor gap: Helm",
+                      "minor_gaps": [
+                        "Helm"
+                      ],
                       "profile_id": null,
                       "questions": [],
+                      "rows_not_shown": 0,
                       "run_id": "run_20260929T100000Z",
                       "source": "run",
                       "suggestions": [],
@@ -1901,6 +1913,7 @@
                     }
                   ],
                   "h1b": null,
+                  "index_posting": null,
                   "job_identity": "https://boards.greenhouse.io/acme/jobs/101",
                   "job_state": {
                     "next_events": [
@@ -1962,6 +1975,9 @@
                   ],
                   "posting": {
                     "company": "Acme",
+                    "company_name": "Acme",
+                    "company_slug": "acme",
+                    "location": "Remote - US",
                     "normalized_url": "https://boards.greenhouse.io/acme/jobs/101",
                     "text": "...",
                     "title": "Software Engineer"
@@ -2321,8 +2337,11 @@
                     "_labels": {
                       "/rows/*/company": "public-untrusted",
                       "/rows/*/company_name": "public-untrusted",
+                      "/rows/*/company_slug": "public-untrusted",
                       "/rows/*/description": "public-untrusted",
                       "/rows/*/location": "public-untrusted",
+                      "/rows/*/minor_gap_text": "public-untrusted",
+                      "/rows/*/minor_gaps/*": "public-untrusted",
                       "/rows/*/open_questions/*/question": "public-untrusted",
                       "/rows/*/salary": "public-untrusted",
                       "/rows/*/title": "public-untrusted",
@@ -2333,14 +2352,17 @@
                         "assessment": null,
                         "assessment_detail": null,
                         "ats_score": null,
-                        "company": "acme",
+                        "company": "Acme",
                         "company_name": "Acme",
+                        "company_slug": "acme",
                         "description": "Acme is hiring a Staff Engineer to own its Python services\u2026",
                         "first_seen": "2026-10-02T08:00:00.000000Z",
                         "job_identity": "https://boards.greenhouse.io/acme/jobs/101",
                         "job_url": "https://boards.greenhouse.io/acme/jobs/101",
                         "label": null,
                         "location": "Remote - US",
+                        "minor_gap_text": null,
+                        "minor_gaps": [],
                         "needs_tailoring": null,
                         "normalized_url": "https://boards.greenhouse.io/acme/jobs/101",
                         "open_questions": [],
@@ -2355,6 +2377,7 @@
                         ],
                         "rank_score": 82,
                         "removed_at": null,
+                        "rows_not_shown": 0,
                         "salary": "USD 180,000-220,000 per year",
                         "score": 82,
                         "score_kind": "rank",
@@ -2658,8 +2681,11 @@
                     "_labels": {
                       "/rows/*/company": "public-untrusted",
                       "/rows/*/company_name": "public-untrusted",
+                      "/rows/*/company_slug": "public-untrusted",
                       "/rows/*/description": "public-untrusted",
                       "/rows/*/location": "public-untrusted",
+                      "/rows/*/minor_gap_text": "public-untrusted",
+                      "/rows/*/minor_gaps/*": "public-untrusted",
                       "/rows/*/open_questions/*/question": "public-untrusted",
                       "/rows/*/salary": "public-untrusted",
                       "/rows/*/title": "public-untrusted",
@@ -2670,14 +2696,17 @@
                         "assessment": null,
                         "assessment_detail": null,
                         "ats_score": null,
-                        "company": "acme",
+                        "company": "Acme",
                         "company_name": "Acme",
+                        "company_slug": "acme",
                         "description": "Acme is hiring a Staff Engineer to own its Python services\u2026",
                         "first_seen": "2026-10-02T08:00:00.000000Z",
                         "job_identity": "https://boards.greenhouse.io/acme/jobs/101",
                         "job_url": "https://boards.greenhouse.io/acme/jobs/101",
                         "label": null,
                         "location": "Remote - US",
+                        "minor_gap_text": null,
+                        "minor_gaps": [],
                         "needs_tailoring": null,
                         "normalized_url": "https://boards.greenhouse.io/acme/jobs/101",
                         "open_questions": [],
@@ -2692,6 +2721,7 @@
                         ],
                         "rank_score": 82,
                         "removed_at": null,
+                        "rows_not_shown": 0,
                         "salary": "USD 180,000-220,000 per year",
                         "score": 82,
                         "score_kind": "rank",
@@ -3928,7 +3958,7 @@
     },
     "/api/postings": {
       "get": {
-        "description": "The live search: the stored postings every active profile matches. No run, no board request, no model call. What \"Run find jobs\" searched, without a run: read from the stored index through the per-(posting, profile) read model, across every active profile (a deleted or archived profile is never listed). A changed setting (titles, countries, work mode) is seen by the next call. Each posting is listed once, for its best profile (`profile_id`), with every active profile it matches in `profiles`, best first; with one `profile_id` the row is that profile's own. Ordered: the Scout label recommended, then needs_answers, then matched, then the rest by score (the assessment's share of requirements met, else the background rank score, else unranked). `counts.matched` is every posting the filters keep, `counts.new` those first seen since the last check (`anchor.since`; the last 7 days before the first check). This call never moves that anchor. `assessment_basis` says where a row's assessment came from: `{origin: \"quick_assess\"}`, or for an old run's `{origin: \"run:<run_id>\", run_id, prompt_version, constraints_digest, story_bank_digest, profile_ref, resume, posting_sha256, model_target, model}` (ids and digests). `rank` is the background rank lane: whether it is on and today's calls against `rank.max_calls_per_day` (100) and the warning level `rank.warn_calls_per_day` (60), counted once for all profiles. With history=1, `history.rows` lists what old runs assessed (`{job_identity, profile_id, state, met, requirements, open_questions, assessed_at, hidden, basis}`); rows of a run with no profile (`ephemeral`) or of a profile that is not active are hidden: listed only with include_hidden=1 or when `profile_id` names them, and counted in `history.hidden` otherwise. No response mixes: posting text and what a model derived from it only (`postings._labels`: public-untrusted), nothing the user wrote. While the stored postings are prepared for the first time (once after an upgrade or a new install) this answers 202 with the GET /api/postings/status object and `status` preparing, never a long wait: ask again when GET /api/postings/status says ready.",
+        "description": "The live search: the stored postings every active profile matches. No run, no board request, no model call. What \"Run find jobs\" searched, without a run: read from the stored index through the per-(posting, profile) read model, across every active profile (a deleted or archived profile is never listed). A changed setting (titles, countries, work mode) is seen by the next call. Each posting is listed once, for its best profile (`profile_id`), with every active profile it matches in `profiles`, best first; with one `profile_id` the row is that profile's own. Ordered: the Scout label recommended, then needs_answers, then matched, then the rest by score (the assessment's share of requirements met, else the background rank score, else unranked). `counts.matched` is every posting the filters keep, `counts.new` those first seen since the last check (`anchor.since`; the last 7 days before the first check). This call never moves that anchor. `assessment_basis` says where a row's assessment came from: `{origin: \"quick_assess\"}`, or for an old run's `{origin: \"run:<run_id>\", run_id, prompt_version, constraints_digest, story_bank_digest, profile_ref, resume, posting_sha256, model_target, model}` (ids and digests). `rank` is the background rank lane: whether it is on and today's calls against `rank.max_calls_per_day` (100) and the warning level `rank.warn_calls_per_day` (60), counted once for all profiles. With history=1, `history.rows` lists what old runs assessed (`{job_identity, profile_id, state, met, requirements, open_questions, assessed_at, hidden, basis}`); rows of a run with no profile (`ephemeral`) or of a profile that is not active are hidden: listed only with include_hidden=1 or when `profile_id` names them, and counted in `history.hidden` otherwise. No response mixes: posting text and what a model derived from it only (`postings._labels`: public-untrusted), nothing the user wrote. In every response `company` is the company's NAME (the company index's, e.g. \"Osprey Lane\"); `company_slug` is the board token (\"ospreylabs\": an id, never a name; null for a posting read from a page or pasted text) and `company_name` repeats the name. A row's `minor_gaps` / `minor_gap_text` name the bonus and one-of-a-list requirements its assessment did not meet (they never block a match: \"Matched\" with \"1 minor gap: Helm\", and the question about it stays in `open_questions`); `rows_not_shown` counts requirement rows past the 40 an assessment keeps. While the stored postings are prepared for the first time (once after an upgrade or a new install) this answers 202 with the GET /api/postings/status object and `status` preparing, never a long wait: ask again when GET /api/postings/status says ready.",
         "operationId": "get_api_postings",
         "parameters": [
           {
@@ -4068,8 +4098,11 @@
                     "_labels": {
                       "/rows/*/company": "public-untrusted",
                       "/rows/*/company_name": "public-untrusted",
+                      "/rows/*/company_slug": "public-untrusted",
                       "/rows/*/description": "public-untrusted",
                       "/rows/*/location": "public-untrusted",
+                      "/rows/*/minor_gap_text": "public-untrusted",
+                      "/rows/*/minor_gaps/*": "public-untrusted",
                       "/rows/*/open_questions/*/question": "public-untrusted",
                       "/rows/*/salary": "public-untrusted",
                       "/rows/*/title": "public-untrusted",
@@ -4081,14 +4114,17 @@
                         "assessment_basis": null,
                         "assessment_detail": null,
                         "ats_score": null,
-                        "company": "acme",
+                        "company": "Acme",
                         "company_name": "Acme",
+                        "company_slug": "acme",
                         "description": "Acme is hiring a Staff Engineer to own its Python services\u2026",
                         "first_seen": "2026-10-02T08:00:00.000000Z",
                         "job_identity": "https://boards.greenhouse.io/acme/jobs/101",
                         "job_url": "https://boards.greenhouse.io/acme/jobs/101",
                         "label": null,
                         "location": "Remote - US",
+                        "minor_gap_text": null,
+                        "minor_gaps": [],
                         "needs_tailoring": null,
                         "normalized_url": "https://boards.greenhouse.io/acme/jobs/101",
                         "open_questions": [],
@@ -4103,6 +4139,7 @@
                         ],
                         "rank_score": 82,
                         "removed_at": null,
+                        "rows_not_shown": 0,
                         "salary": "USD 180,000-220,000 per year",
                         "score": 82,
                         "score_kind": "rank",
@@ -4317,8 +4354,11 @@
                     "_labels": {
                       "/rows/*/company": "public-untrusted",
                       "/rows/*/company_name": "public-untrusted",
+                      "/rows/*/company_slug": "public-untrusted",
                       "/rows/*/description": "public-untrusted",
                       "/rows/*/location": "public-untrusted",
+                      "/rows/*/minor_gap_text": "public-untrusted",
+                      "/rows/*/minor_gaps/*": "public-untrusted",
                       "/rows/*/open_questions/*/question": "public-untrusted",
                       "/rows/*/salary": "public-untrusted",
                       "/rows/*/title": "public-untrusted",
@@ -4330,14 +4370,17 @@
                         "assessment_basis": null,
                         "assessment_detail": null,
                         "ats_score": null,
-                        "company": "acme",
+                        "company": "Acme",
                         "company_name": "Acme",
+                        "company_slug": "acme",
                         "description": "Acme is hiring a Staff Engineer to own its Python services\u2026",
                         "first_seen": "2026-10-02T08:00:00.000000Z",
                         "job_identity": "https://boards.greenhouse.io/acme/jobs/101",
                         "job_url": "https://boards.greenhouse.io/acme/jobs/101",
                         "label": null,
                         "location": "Remote - US",
+                        "minor_gap_text": null,
+                        "minor_gaps": [],
                         "needs_tailoring": null,
                         "normalized_url": "https://boards.greenhouse.io/acme/jobs/101",
                         "open_questions": [],
@@ -4352,6 +4395,7 @@
                         ],
                         "rank_score": 82,
                         "removed_at": null,
+                        "rows_not_shown": 0,
                         "salary": "USD 180,000-220,000 per year",
                         "score": 82,
                         "score_kind": "rank",

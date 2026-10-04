@@ -372,7 +372,7 @@ def test_the_run_seals_the_prompt_version_and_the_bank_it_read(fx: ProfileFixtur
     default, other = two
     empty = _assess(fx, _run_id(21), profile_id=default)
     # 0110-038: this run's config has no work mode, so its prompt is the one v4 rendered and keeps that name.
-    assert empty.prompt_version == ASSESS_PROMPT_VERSION_NO_WORK_MODE == "assess-prompt-v7"
+    assert empty.prompt_version == ASSESS_PROMPT_VERSION_NO_WORK_MODE == "assess-prompt-v8"
     assert empty.story_bank is not None and empty.story_bank.profile_id == default and empty.story_bank.entries == {}
 
     story_bank.save_answer(home_root=fx.home_root, target=fx.target, question_id="cloud:gcp", answer=_ANSWER, job=_POSTING_A)

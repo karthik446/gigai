@@ -19,8 +19,15 @@ true, ``basis_stale_reason``: whether it was made with what its profile would be
 now (``assessment_basis``); ``job_state.assessment_stale`` carries the same reason when that
 assessment gives the state. Derived on read; a run's own assessments carry neither.
 
-``404 not_found`` when no run, quick assessment, tailored resume or application event names the
-job; ``422`` for a missing/blank/unparseable ``url`` or an unknown query key (naming the allowed one).
+0110-10-03 (d): a job no run acquired is joined to its INDEX posting by its identity alone (the
+posting's URL, whatever host it is on: a Greenhouse board embedded in a company's own site has
+``https://www.<company>/jobs?gh_jid=<id>``). ``posting`` then has the index's location, work mode
+and stated pay, ``rank`` the stored rank score, ``work_mode_fit`` and ``h1b`` what a run's row
+has, and ``index_posting`` is the Jobs grid's own row for it (``GET /api/postings``). Each
+assessment also says its ``minor_gaps`` and ``rows_not_shown`` (``requirement_weights``).
+
+``404 not_found`` when no run, quick assessment, tailored resume, application event or index
+posting names the job; ``422`` for a missing/blank/unparseable ``url`` or an unknown query key (naming the allowed one).
 """
 
 from __future__ import annotations
@@ -35,6 +42,7 @@ from ... import story_bank
 from ...experience_answers import read_answers
 from ...question_ids import normalize_question_id
 from ...quick_assess import QuickAssessError, list_quick_assessments
+from ...requirement_weights import minor_gap_text, minor_gaps
 from ...tailored_resume import list_tailored_resumes
 from ..contracts import AcquireOutput, FindJobsContractError
 from ..job_state import JobStateSources, is_text_identity, normalize_job_identity
@@ -60,9 +68,77 @@ def _link(method: str, path: str, body: dict[str, object] | None = None) -> dict
     return link
 
 
+def _weights(result: dict[str, object]) -> dict[str, object]:
+    """0110-10-03: what an assessment's rows weigh, derived on read: the minor gaps (named, and as one line) and the rows not shown."""
+
+    matrix = result.get("matrix")
+    gaps = minor_gaps(matrix) if isinstance(matrix, list) else []
+    return {"minor_gaps": gaps, "minor_gap_text": minor_gap_text(gaps), "rows_not_shown": result.get("rows_not_shown", 0)}
+
+
 def _run_assessment_entry(run_id: str, source: str, profile_id: str | None, assessment: dict[str, object]) -> dict[str, object]:
     body = {key: value for key, value in assessment.items() if key != "posting"}
-    return {"source": source, "run_id": run_id, "profile_id": profile_id, **body}
+    return {"source": source, "run_id": run_id, "profile_id": profile_id, **body, **_weights(body)}
+
+
+def _index_join(home_root: Path, target: Path, identity: str, *, profile_id: str | None, basis) -> dict[str, object] | None:
+    """What the index holds for a job no run acquired (0110-10-03 d): its posting, rank score, work-mode fit and H-1B.
+
+    The same facts a run's row carries, read from the posting read model and
+    the index by the job identity. Display only: any part that cannot be read
+    is left out, and ``None`` means the index does not hold the job.
+    ``basis`` is the request's ``assessment_basis.BasisCheck``: the profile's
+    work mode and area come from its kept settings read (the one an
+    assessment's ``basis_stale`` uses), not from another read of the profiles.
+    """
+
+    from ..contracts import ATSProvider, WorkMode, WorkModePreference
+    from ..job_source import index_job
+    from ..work_mode import derive_work_mode, work_mode_fit
+
+    found = index_job(home_root, target, identity, profile_id=profile_id)
+    if found is None:
+        return None
+    row, text = found.row, found.text
+    posting: dict[str, object] = {
+        "job_identity": identity, "normalized_url": identity, "source_url": identity, "fetch_kind": "ats_board",
+        "provider": found.provider, "board_token": found.board_token,
+        "first_seen": row.first_seen, "removed_at": row.removed_at,  # type: ignore[attr-defined]
+    }
+    fit: dict[str, object] | None = None
+    if text is not None:
+        posting.update({
+            "source_url": text.url, "title": text.title, "company": text.company, "location": text.location,  # type: ignore[attr-defined]
+            "work_mode": text.work_mode, "salary": text.salary, "text": text.text,  # type: ignore[attr-defined]
+        })
+        try:
+            current = basis.current(row.profile_id)  # type: ignore[attr-defined]
+            if current is not None:
+                # The board's own field when the mode is not what the location text alone says.
+                stated = text.work_mode  # type: ignore[attr-defined]
+                board = WorkMode(stated) if derive_work_mode(text.location, None).mode != stated and stated in {mode.value for mode in WorkMode} else None  # type: ignore[attr-defined]
+                shaped = type("_Posting", (), {"location": text.location, "work_mode": board})()  # type: ignore[attr-defined]
+                wanted = type("_Wanted", (), {"effective_work_mode": WorkModePreference(current.work_mode or "any"), "location": current.location})()
+                fit = work_mode_fit(shaped, wanted).to_json()  # type: ignore[arg-type]
+        except Exception:  # noqa: BLE001 - display-only: no fit beats a failed read
+            _logger.exception("job %s: work-mode fit could not be derived from the index", identity)
+    h1b: dict[str, object] | None = None
+    try:
+        from .runs import _catalog_h1b_index
+
+        aggregate = _catalog_h1b_index().get((ATSProvider(found.provider), found.board_token.lower()))
+        h1b = None if aggregate is None else aggregate.to_json()
+    except Exception:  # noqa: BLE001 - display-only: the catalog join never breaks the read
+        h1b = None
+    score = row.rank_score  # type: ignore[attr-defined]
+    return {
+        "posting": posting,
+        # The read model keeps the score alone (its reasons are the rank cache's): said as such, never as a run's rank line.
+        "rank": None if score is None else {"normalized_url": identity, "score": score, "profile_id": row.profile_id, "source": "posting_index"},  # type: ignore[attr-defined]
+        "work_mode_fit": fit,
+        "h1b": h1b,
+        "index_posting": found.grid,
+    }
 
 
 def _quick_entry(item, basis) -> dict[str, object]:
@@ -74,6 +150,7 @@ def _quick_entry(item, basis) -> dict[str, object]:
         "updated_at": item.updated_at or item.created_at,
         **basis.served(item),
         **item.result.to_json(),
+        **_weights(item.result.to_json()),
     }
 
 
@@ -208,6 +285,22 @@ class AgentRoutesMixin:
         sources = JobStateSources(
             home_root=home_root, target=target, resolved=resolved, events=getattr(joins, "events", None)
         )
+        # 0110-10-03 (d): no run row -> the index posting, by the job identity (a company-site URL too).
+        index: dict[str, object] | None = None
+        if not row and not is_text_identity(identity):
+            index = _index_join(
+                home_root, target, identity, basis=sources.basis,
+                profile_id=next((item.resume.profile_id for item in quick_items if item.resume.profile_id), None),
+            )
+        if index is not None:
+            held: dict[str, object] = index["posting"]  # type: ignore[assignment]
+            if posting is None:
+                posting = held
+            else:
+                # The assessment's own posting stays; the index fills what it lacks (a page scrape has no location or pay).
+                posting = {**posting, **{key: value for key, value in held.items() if posting.get(key) in (None, "") and value not in (None, "")}}
+            row = {key: index[key] for key in ("rank", "work_mode_fit", "h1b") if index[key] is not None}
+
         events = [dict(item) for item in sources.events_for(identity)] if resolved is not None else []
         if posting is None and not run_hits and not quick_items and not tailored_items and not events:
             return None
@@ -290,6 +383,7 @@ class AgentRoutesMixin:
             "rank_score": row.get("rank_score"),
             "work_mode_fit": row.get("work_mode_fit"),
             "h1b": row.get("h1b"),
+            "index_posting": None if index is None else index["index_posting"],
             "assessments": assessments,
             "open_questions": open_questions,
             "bank_suggestions": bank_suggestions,

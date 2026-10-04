@@ -101,7 +101,7 @@ def test_scout_new_journey(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> N
             assert ask["anchor"] == {"last_checked_at": None, "advances": False}
         (row,) = ask["postings"]["rows"]
         (profile,) = ask["profiles"]
-        assert (row["job_identity"], row["title"], row["company"], row["work_mode"]) == (_JOB, "Software Engineer", "acmenew", "remote")
+        assert (row["job_identity"], row["title"], row["company_slug"], row["work_mode"]) == (_JOB, "Software Engineer", "acmenew", "remote")
         assert row["profile_id"] == profile["profile_id"] and [item["profile_id"] for item in row["profiles"]] == [profile["profile_id"]]
         assert (row["state"], row["score"], row["assessment"]) == ("not_assessed", None, None)
         question = ask["question"]

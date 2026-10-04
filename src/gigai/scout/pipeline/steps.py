@@ -85,6 +85,7 @@ import re
 
 from ...canonical import digest_imported_bytes
 from ..call_metrics import lane_for
+from ..requirement_weights import blocking_question_count
 from ..wording import LABEL_WORDING
 from .settings import PipelineSetting
 from .store import Claim, PipelineStore, fits, pipeline_path
@@ -571,8 +572,11 @@ def _label(ctx: StepContext, claim: Claim, found: _Inputs) -> StepResult:
     verdict = None if variant.result.verdict is None else variant.result.verdict.value
     open_questions = len(variant.result.structured_questions) or len(variant.result.questions)
     stale = _base_stale_reason(ctx, found.base)
+    # 0110-10-03: a lone question on a one-of-a-list row is a minor gap (``requirement_weights``): asked, and no reason
+    # to hold the label. The record below still counts every open question.
+    holding = blocking_question_count(variant.result.matrix, variant.result.structured_questions) if variant.result.structured_questions else open_questions
     label, reasons = label_for(
-        verdict=verdict, open_questions=open_questions, ats=score, min_ats=ctx.setting.label_min_ats, stale_reason=stale
+        verdict=verdict, open_questions=holding, ats=score, min_ats=ctx.setting.label_min_ats, stale_reason=stale
     )
     base = found.base
     path = _record_path(ctx, LABEL_DIR, claim.profile_id, claim.job)

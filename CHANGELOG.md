@@ -45,6 +45,13 @@ the server used several gigabytes of memory, and reloading made it worse. Read "
 - **You cannot go back to 0.1.10.8 without one step.** Scout's local posting store (`pipeline.sqlite`,
   a cache plus the history of its background work) has a new layout. If you install 0.1.10.8 again,
   delete that file first; it is rebuilt.
+- **Stored assessments read "made with older settings" once.** The assessment rules changed (see
+  "One missing tool from a list" and "Every stated requirement" under Fixed), so an assessment made
+  before this release is offered for re-assessment like any other old one. Nothing is assessed again
+  until you say yes.
+- **In the API and in `--json` output, `company` is now the company's name.** The board's id (what
+  `company` held before) is in `company_slug`. `company_name` is still there and says the same name.
+  A script that used `company` as an id should read `company_slug`.
 
 #### Fixed
 
@@ -76,6 +83,26 @@ the server used several gigabytes of memory, and reloading made it worse. Read "
   works) and a free-text `--source` ("from the user's repo, at the user's request"). An API write
   that names no writer is yours from the Scout page and the agent's from anywhere else. The Answers
   and stories page shows both. The agent instructions tell agents to pass them.
+- **One missing tool from a list no longer holds a job back.** A posting that asked for "Docker,
+  Helm, and Kubernetes" in one sentence waited at "Needs your answers" when your resume showed
+  everything but Helm: one tool inside a list counted as much as "8+ years of experience". A tool
+  named inside a list of three or more is now its own kind of requirement ("One of a list"). One of
+  them unknown leaves the job Matched, says "1 minor gap: Helm", and still asks the question, which
+  you can answer or leave. Two or more unknown tools of a list, or one unknown requirement that
+  stands on its own line, wait for your answer as before. Requirements under "bonus" or "highly
+  desirable" that you do not meet are named as minor gaps too.
+- **Every stated requirement gets a row.** An assessment listed at most 12 requirements and dropped
+  the rest without saying so, so many jobs read "N of 12". It now lists every requirement the
+  posting states, must-haves first, including "highly desirable" lines and experience such as
+  mentoring engineers or having worked in a named kind of company. Past 40 rows it keeps the first
+  40 and says "+N not shown".
+- **A job opened by its address on the company's own site has its rank, pay and location.**
+  `GET /api/jobs?url=` for a posting that no find-jobs run had picked up (every posting `gigai scout
+  new` assesses, including a Greenhouse posting shown on the company's site as `...?gh_jid=...`)
+  answered with no rank, no pay, no work-mode fit and no H-1B figures. It now reads them from the
+  stored posting, and answers for a stored posting that has not been assessed yet.
+- **The API says a company's name in `company`.** `posting.company` was the board's id (for example
+  `ospreylabs`) while the name sat beside it in `company_name`, and agents read the id as the name.
 
 ### 0.1.10.8
 

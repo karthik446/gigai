@@ -159,7 +159,9 @@ export function profileTags(row, profiles) {
 // A response without `score_text` (an older server) falls back to the number.
 export function scoreText(row) {
   if (typeof row.score_text === "string" && row.score_text.trim()) {
-    return row.score_text;
+    // 0110-10-03: "Matched · 11 of 12 requirements · rank 80 · 1 minor gap: Helm".
+    const gap = typeof row.minor_gap_text === "string" && row.minor_gap_text.trim() ? ` · ${row.minor_gap_text}` : "";
+    return `${row.score_text}${gap}`;
   }
   if (typeof row.score !== "number") {
     return "not ranked yet";

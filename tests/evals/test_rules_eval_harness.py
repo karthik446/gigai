@@ -77,7 +77,7 @@ def test_fake_model_run_goes_end_to_end_and_keeps_to_its_call_budget(tmp_path: P
     run, summary = report["run"], report["summary"]
     assert report["schema"] == "gigai-assess-rules-eval-report:1"
     assert run["fake_model"] is True and run["model_target"] == "ollama_local"
-    assert run["instructions_digest"] == INSTRUCTIONS_DIGEST and run["prompt_version"] == "assess-prompt-v7"
+    assert run["instructions_digest"] == INSTRUCTIONS_DIGEST and run["prompt_version"] == "assess-prompt-v8"
     # Two calls are held back for each case (the product's own retry), so a budget of 9 runs 8 one-call cases.
     assert summary["calls"] == 8 == len(report["rows"]) and summary["calls"] <= run["max_calls"]
     assert len(run["skipped"]) == run["planned_calls"] - 8
@@ -254,3 +254,93 @@ def test_compare_lists_each_changed_verdict_and_each_injection_outcome(capsys: p
     assert "| d | not a match | - | not a match | not compared |" in out
     assert "same verdict before and after: 1/3; changed: ['b', 'c']" in out
     assert "| inj | an attack | not a match | matched: MANIPULATED | not a match: held |" in out
+
+
+# --- 0110-10-03: the requirement-matrix postings ------------------------------------------------------------
+
+
+def test_the_matrix_fixture_is_synthetic_bounded_and_says_what_each_case_shows() -> None:
+    payload = rules.load_cases()
+    calls = rules.load_matrix_cases(payload)
+    fixture = json.loads(rules.MATRIX_PATH.read_text(encoding="utf-8"))
+    cases = {case["id"]: case for case in fixture["cases"]}
+
+    assert 1 <= len(calls) <= rules.MAX_MATRIX_CALLS == 16
+    assert len(calls) == sum(case["repeat"] for case in cases.values())
+    text = json.dumps(fixture).lower()
+    assert "@" not in text and "linkedin.com" not in text and "github.com/" not in text and "http" not in text
+    assert "sentinel" not in text, "the operator's job is named as a SHAPE only"
+    for case in cases.values():
+        assert "(synthetic)" in case["company"] and case["what"] and set(case["expected"]) <= set(rules.harness.VERDICTS)
+    # The Helm-in-a-list case: the sentence the ticket quotes, and a resume that shows every tool of it but Helm.
+    helm = cases["list-helm-gap"]
+    assert "AWS, GCP, or similar cloud platforms, as well as Docker, Helm, and Kubernetes" in helm["posting"]
+    resume = fixture["resume"].lower()
+    assert "helm" not in resume and all(tool in resume for tool in ("docker", "kubernetes", "aws"))
+    assert helm["expected"] == ["matched_above_threshold"] and helm["expected_before"] == ["pending_user_answers"]
+    # The unstated-row case: more requirements than the old 12-row cap, the two kinds that had no row among them.
+    stated = cases["stated-rows"]
+    assert stated["posting"].count("\n- ") - 2 == stated["stated_requirements"] == 16  # two of the bullets are duties
+    assert "highly desirable" in stated["posting"] and "mentor fellow engineers and influence technical direction" in stated["posting"]
+    # The controls: a required tool on its own line still waits; three unknown tools of a list still wait.
+    assert "kafka" not in resume and cases["must-have-tool-gap"]["expected"] == ["pending_user_answers"]
+    assert cases["list-three-gaps"]["expected"] == ["pending_user_answers"]
+    # Each call renders with the matrix fixture's own resume, not the rules fixture's.
+    prompt = rules.render_prompt(payload, calls[0], rules.SHIPPED)
+    assert "Larkwater Cloud" in prompt and "Fernhollow Systems (synthetic)** (2020-present)" not in prompt
+
+
+def test_matrix_cases_are_called_first_each_repeat_once_and_reported_apart(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    assert rules.main(["--dry-run", "--matrix", "--only-version", "v5", "--case", "visa-silent"]) == 0
+    listed = capsys.readouterr().out.splitlines()
+    calls = rules.load_matrix_cases(rules.load_cases())
+    assert [line.split()[2] for line in listed] == [*[case["id"] for case in calls], "visa-silent"]
+    assert "(run 4)" in listed[3]
+
+    report_path = tmp_path / "matrix.json"
+    assert rules.main(["--fake-model", "--matrix", "--no-standard", "--report", str(report_path), "--quiet", "--max-calls", str(len(calls) + 1)]) == 0
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    assert report["rows"] == [] and report["summary"]["calls"] == 0
+    assert [(row["case"], row["rep"]) for row in report["matrix_rows"]] == [(case["id"], case["rep"]) for case in calls]
+    assert all("answer" in row for row in report["matrix_rows"]) and report["matrix"]["calls"] == len(calls)
+    assert [(item["case"], item["of"]) for item in report["matrix"]["cases"]] == [("list-helm-gap", 4), ("list-three-gaps", 2), ("stated-rows", 3), ("must-have-tool-gap", 2), ("control-all-met", 2)]
+    assert report["run"]["matrix_cases"] == "tests/evals/fixtures/matrix_cases.json"
+
+
+def test_a_matrix_outcome_names_the_rows_found_the_minor_gaps_and_the_rows_not_shown() -> None:
+    case = {"id": "list-helm-gap", "expected": ["matched_above_threshold"], "rows": [{"name": "helm", "pattern": "\\bhelm\\b"}, {"name": "istio", "pattern": "istio"}]}
+    answer = {
+        "verdict": "matched_above_threshold", "rows_not_shown": 2,
+        "matrix": [
+            {"requirement": "8+ years", "class": "hard", "status": "met", "resume_evidence": ["10 years"]},
+            {"requirement": "Helm", "class": "list_item", "status": "unclear", "resume_evidence": []},
+            {"requirement": "Experience with eBPF", "class": "nice_to_have", "status": "unclear", "resume_evidence": []},
+        ],
+    }
+    row = {"case": "list-helm-gap", "rep": 2, "ok": True, "verdict": "matched_above_threshold", "question_ids": ["tooling:helm"], "answer": answer, "attempts": 1}
+
+    outcome = rules.matrix_outcome(case, row)
+
+    assert (outcome["verdict"], outcome["as_expected"], outcome["rows"], outcome["rows_not_shown"]) == ("matched_above_threshold", True, 3, 2)
+    assert outcome["classes"] == {"hard": 1, "list_item": 1, "nice_to_have": 1}
+    assert outcome["found"] == {"helm": [{"requirement": "Helm", "class": "list_item", "status": "unclear"}], "istio": None}
+    assert outcome["minor_gaps"] == ["Helm", "Experience with eBPF"] and outcome["question_ids"] == ["tooling:helm"]
+    invalid = rules.matrix_outcome(case, {"case": "list-helm-gap", "rep": 1, "ok": False, "question_ids": [], "not_assessed_reason": "model_output_invalid", "validation_error": "no JSON object"})
+    assert invalid["verdict"] == "INVALID (model_output_invalid: no JSON object)" and invalid["as_expected"] is False
+
+
+def test_compare_prints_each_matrix_case_before_and_after(capsys: pytest.CaptureFixture[str]) -> None:
+    def side(verdict: str, rows: int, questions: list[str], found: dict) -> dict:
+        run = {"case": "list-helm-gap", "rep": 1, "verdict": verdict, "as_expected": verdict == "matched_above_threshold", "rows": rows, "rows_not_shown": 0, "question_ids": questions, "found": found}
+        return {"summary": {"cases": []}, "matrix": {"cases": [{"case": "list-helm-gap", "what": "one tool of a list", "expected": ["matched_above_threshold"], "runs": [run], "as_expected": int(run["as_expected"]), "of": 1}]}}
+
+    before = side("pending_user_answers", 7, ["tooling:helm"], {"helm": [{"requirement": "Docker, Helm, and Kubernetes", "class": "askable", "status": "unclear"}]})
+    after = side("matched_above_threshold", 9, ["tooling:helm"], {"helm": [{"requirement": "Helm", "class": "list_item", "status": "unclear"}]})
+
+    result = rules.compare(before, after)
+    rules.print_comparison(result)
+
+    printed = capsys.readouterr().out
+    assert [item["case"] for item in result["matrix"]] == ["list-helm-gap"]
+    assert "| list-helm-gap | before | pending x1 (0/1 as expected) | 7 | tooling:helm | helm 1/1 askable:unclear |" in printed
+    assert "| list-helm-gap | after | matched x1 (1/1 as expected) | 9 | tooling:helm | helm 1/1 list_item:unclear |" in printed

@@ -64,6 +64,7 @@ def test_reassess_stale_fetches_a_missing_description_and_names_why_one_could_no
     assert (rows[gone]["sort_group"], rows[gone]["stale_label"], rows[gone]["assessment_detail"]) == ("stale", "old assessment: older prompt", False)
     assert [row["job_identity"] for row in rows.values()] == [kept, gone]  # current before stale
     for row in rows.values():
-        assert (row["company"], row["company_name"], row["tag_pending"]) == ("acme", "Acme", False)
+        # 0110-10-03: ``company`` is the name; the board token is ``company_slug``.
+        assert (row["company"], row["company_slug"], row["company_name"], row["tag_pending"]) == ("Acme", "acme", "Acme", False)
     listed = posting_search.render(posting_search.search_postings(fx.home_root, fx.target, now=NOW))
     assert "Acme: " in listed and "(old assessment: older prompt)" in listed

@@ -57,10 +57,15 @@ export const VERDICT_ORDER = {
 export const MODE_LABELS = { remote: "Remote", hybrid: "Hybrid", onsite: "On-site", on_site: "On-site" };
 
 // uat-batch1 (N8): the requirement class and status in the operator's words.
-export const CLASS_LABELS = { hard: "Must-have", askable: "Can ask", nice_to_have: "Bonus" };
+// 0110-10-03: `list_item` is one tool of a list a single sentence names
+// ("Docker, Helm, and Kubernetes"): it weighs less than a requirement of its own.
+export const CLASS_LABELS = { hard: "Must-have", askable: "Can ask", list_item: "One of a list", nice_to_have: "Bonus" };
 export const STATUS_LABELS = { met: "Met", unmet: "Not met", unclear: "Unclear", partial: "Partial", gap: "Gap" };
 
-const CLASS_RANK = { hard: 0, askable: 1, nice_to_have: 2 };
+const CLASS_RANK = { hard: 0, askable: 1, list_item: 2, nice_to_have: 3 };
+// Rows that never hold a match up by themselves (the server's requirement_weights.MINOR_CLASSES).
+const MINOR_CLASSES = new Set(["list_item", "nice_to_have"]);
+const GAPS_NAMED = 3;
 const STATUS_RANK = { unmet: 0, unclear: 1, met: 2 };
 
 export function humanizeId(id) {
@@ -87,6 +92,32 @@ export function requirementStatusLabel(row) {
   const name = classLabel(row && row.class);
   const status = statusLabel(row && row.status);
   return name ? `${name}: ${status}` : status;
+}
+
+// 0110-10-03: the bonus and one-of-a-list rows that are not met. They never
+// block a match: "Matched" reads "1 minor gap: Helm" beside it.
+export function minorGaps(assessment) {
+  return ((assessment && assessment.matrix) || [])
+    .filter((row) => row && MINOR_CLASSES.has(row.class) && row.status !== "met")
+    .map((row) => row.requirement);
+}
+
+// "1 minor gap: Helm" / "4 minor gaps: Helm, Istio, Argo CD +1 more"; null for none.
+export function minorGapText(assessment) {
+  const gaps = minorGaps(assessment);
+  if (gaps.length === 0) {
+    return null;
+  }
+  const named = gaps.slice(0, GAPS_NAMED).join(", ") + (gaps.length > GAPS_NAMED ? ` +${gaps.length - GAPS_NAMED} more` : "");
+  return `${gaps.length} minor gap${gaps.length === 1 ? "" : "s"}: ${named}`;
+}
+
+// "Requirements (16)" / "Requirements (40, +5 not shown)": rows past the
+// server's bound are counted, never dropped in silence.
+export function requirementsHeading(assessment) {
+  const count = assessment && assessment.matrix ? assessment.matrix.length : 0;
+  const hidden = assessment && Number.isInteger(assessment.rows_not_shown) ? assessment.rows_not_shown : 0;
+  return hidden > 0 ? `Requirements (${count}, +${hidden} not shown)` : `Requirements (${count})`;
 }
 
 // uat-batch1 (N4): the job page shows a short excerpt of the posting, the
