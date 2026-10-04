@@ -84,7 +84,7 @@ from . import postings
 from .data_labels import ENVELOPE_KEY, PUBLIC_UNTRUSTED, UNTRUSTED_TEXT_RULE, USER_PRIVATE, assert_not_mixed, labels_envelope
 from .pipeline.busy import LiveBatch, assess_batch
 from .pipeline.store import MODEL_STEPS, PipelineStore, PipelineStoreError, PostingRecord, pipeline_path
-from .postings import PostingModelError, PostingText, ProfileView, split_board
+from .postings import PostingModelError, PostingModelPreparing, PostingText, ProfileView, split_board
 
 SCHEMA_VERSION = "scout-new:1"
 SEEN_SCHEMA_VERSION = "scout-new-seen:1"
@@ -781,8 +781,16 @@ def scout_new(
     decided_by: str = "operator",
     reassess_stale: bool = False,
     progress: Callable[[str], None] | None = None,
+    model_wait: float | None = None,
+    build_progress: Callable[[str, int, int], None] | None = None,
 ) -> dict[str, object]:
     """What is new since the last check, as the ``scout-new:1`` response. See the module docstring.
+
+    ``model_wait`` (0110-9-01, the server's GET): how long to wait for a build
+    of the posting read model (``postings.refresh(wait=...)``); past it the
+    rows are read as stored, or ``PostingModelPreparing`` is raised when there
+    are none yet. ``None`` waits for the build; ``build_progress`` then gets
+    how far it is.
 
     ``process``: first approve the pending pipeline approvals (as
     ``decided_by``) and run the waiting pipeline steps once
@@ -808,12 +816,13 @@ def scout_new(
         return _scout_new(
             Path(home_root), Path(target), profile_id=profile_id, peek=peek, assess=assess, since=since, now=now, config=config,
             yours=yours, process=process and not yours, decided_by=decided_by, reassess_stale=reassess_stale and not yours,
-            progress=progress,
+            progress=progress, model_wait=model_wait, build_progress=build_progress,
         )
 
 
 def scout_new_yours(
-    home_root: Path, target: Path, *, profile_id: str | None = None, since: str | None = None, now: datetime | None = None
+    home_root: Path, target: Path, *, profile_id: str | None = None, since: str | None = None, now: datetime | None = None,
+    model_wait: float | None = None,
 ) -> dict[str, object]:
     """The user's own evidence of what matches, for the postings ``scout_new`` lists with the same filters.
 
@@ -821,13 +830,16 @@ def scout_new_yours(
     named by its job identity). Never assesses, never moves the anchor.
     """
 
-    return scout_new(home_root, target, profile_id=profile_id, peek=True, assess=False, since=since, now=now, yours=True)
+    return scout_new(
+        home_root, target, profile_id=profile_id, peek=True, assess=False, since=since, now=now, yours=True, model_wait=model_wait
+    )
 
 
 def _scout_new(
     home_root: Path, target: Path, *, profile_id: str | None, peek: bool, assess: bool | None, since: str | None,
     now: datetime | None, config: object | None, yours: bool, process: bool = False, decided_by: str = "operator",
-    reassess_stale: bool = False, progress: Callable[[str], None] | None = None,
+    reassess_stale: bool = False, progress: Callable[[str], None] | None = None, model_wait: float | None = None,
+    build_progress: Callable[[str, int, int], None] | None = None,
 ) -> dict[str, object]:
     # Before anything is read: what the steps store (a Scout label, a tailored resume) is in the rows below.
     processed = process_waiting(home_root, target, config=config, decided_by=decided_by) if process else None
@@ -841,7 +853,7 @@ def _scout_new(
             raise ScoutNewError("invalid_value", "since must be an ISO-8601 time, like the since of an earlier response")
     store = postings.open_store(home_root, target)
     try:
-        refreshed = postings.refresh(home_root, target, store=store, now=moment)
+        refreshed = postings.refresh(home_root, target, store=store, now=moment, wait=model_wait, progress=build_progress)
         views = refreshed.profiles
         if profile_id is not None and profile_id not in {view.profile_id for view in views}:
             raise ScoutNewError("profile_not_found", "no active Scout profile has this id")
@@ -1197,6 +1209,7 @@ __all__ = [
     "YOURS_LABELS",
     "YOURS_SCHEMA_VERSION",
     "PostingModelError",
+    "PostingModelPreparing",
     "ScoutNewError",
     "check_response",
     "in_order",

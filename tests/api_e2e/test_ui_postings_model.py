@@ -294,8 +294,9 @@ def test_a_postings_markup_stays_text_and_nothing_in_the_ui_renders_raw_html(out
 
 def test_the_jobs_page_wiring_and_test_ids() -> None:
     api = (UI_SRC / "api.js").read_text(encoding="utf-8")
-    assert 'request("GET", `/api/postings${query ? `?${query}` : ""}`)' in api
-    assert 'request("GET", "/api/new?peek=1")' in api, "the New chip reads the peek"
+    # 0110-9-01: both take the store's abort signal (``options``) as the request's last argument.
+    assert 'request("GET", `/api/postings${query ? `?${query}` : ""}`, undefined, options)' in api
+    assert 'request("GET", "/api/new?peek=1", undefined, options)' in api, "the New chip reads the peek"
     assert 'request("POST", "/api/new/seen", {})' in api and 'request("POST", "/api/postings/assess", body)' in api
     view = (UI_SRC / "views" / "JobsView.jsx").read_text(encoding="utf-8")
     for test_id in ('data-testid="jobs-list"', 'data-testid="job-row"', 'data-testid="profile-chip"', 'data-testid="mark-all-seen"', 'data-testid="assess-these"'):
@@ -305,7 +306,10 @@ def test_the_jobs_page_wiring_and_test_ids() -> None:
     assert not re.search(r'data-testid=\{`', view), "test ids are stable: none is built from a value"
     # Mark all seen: the POST, then the peek and the list are read again.
     mark = view[view.index("const markAllSeen = () => {") :][:260]
-    assert "postMarkAllSeen()" in mark and "readPeek();" in mark and "load(filter);" in mark
+    # 0110-9-01: through the client-side store (one request each, the rows staying shown while they are read).
+    assert "postMarkAllSeen()" in mark and "postingsStore.refresh(filter)" in mark
+    store = (UI_SRC / "postingsStore.js").read_text(encoding="utf-8")
+    assert "store.show(filter, { force: true });\n      store.peekNew({ force: true });" in store
     # The ask opens the dialog; only the dialog's Approve sends the approving body.
     assert view.count("postAssessThese(") == 2 and "postAssessThese(approval.dialog.approveBody)" in view
     assert "approve: true" not in view and "onApprove={approve}" in view

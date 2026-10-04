@@ -2407,6 +2407,14 @@ def new_command(
     def progress(line: str) -> None:
         click.echo(line, err=True)  # stderr: stdout stays the response (valid JSON with --json)
 
+    said = [0.0]
+
+    def build_progress(phase: str, done: int, total: int) -> None:
+        # 0110-9-01: the first build over a large index takes a while (once): never silent. A line every 2 s at most.
+        if phase == "matching" and total >= 500 and (time.monotonic() - said[0] >= 2.0 or done == total):
+            said[0] = time.monotonic()
+            click.echo(f"preparing your postings: {int(100 * done / total)}% ({done} of {total} companies)", err=True)
+
     try:
         target = _pipeline_target(target_value, home_root, as_json=as_json)
         if yours:
@@ -2415,7 +2423,7 @@ def new_command(
             assess = True if yes else False if no_assess else None
             response = scout_new(
                 home_root, target, profile_id=profile_id, peek=peek, assess=assess, since=since, process=process,
-                reassess_stale=reassess_stale, progress=progress,
+                reassess_stale=reassess_stale, progress=progress, build_progress=build_progress,
             )
         if response["status"] == STATUS_ASK and not as_json and not yours and sys.stdin.isatty():
             sentence = response["question"]["text"]  # type: ignore[index]

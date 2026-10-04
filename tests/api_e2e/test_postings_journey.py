@@ -91,6 +91,15 @@ def test_postings_journey(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> No
         _seed_index(home, target)
         assess_calls = sum(item["calls"] for item in client.get("/api/metrics?kind=assess").json()["aggregates"])
         listed = client.get("/api/postings")
+        # 0110-9-01: how the stored postings are prepared, from memory. A small home is built inside the request above.
+        prepared = client.get("/api/postings/status")
+        assert prepared.status_code == 200 and prepared.headers["X-GigAI-Labels"] == client.get("/api/health").headers["X-GigAI-Labels"]
+        assert prepared.json() == {
+            "schema_version": "scout-postings-status:1", "state": "ready", "percent": 100, "phase": "idle", "boards_done": 0,
+            "boards_total": 0, "builds": prepared.json()["builds"], "last_boards": prepared.json()["last_boards"],
+        }
+        assert prepared.json()["builds"] <= 1
+        assert client.get("/api/postings/status", headers={"Host": "evil.example"}).status_code == 403
         assert listed.status_code == 200, listed.text
         found = _assert_public_only(listed)
         assert found["schema_version"] == "scout-postings:1" and found["history"] is None

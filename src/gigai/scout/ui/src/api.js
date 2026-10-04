@@ -75,7 +75,10 @@ function messageForStatus(path, status, code, detail) {
   return STATUS_MESSAGES[status] || detail || `Request failed with status ${status}.`;
 }
 
-async function request(method, path, body) {
+// 0110-9-01: `options.signal` (an AbortController's) cancels the request; a
+// cancelled one rejects with code "aborted", which its caller ignores.
+async function request(method, path, body, options) {
+  const signal = options && options.signal ? options.signal : undefined;
   let response;
   try {
     response = await fetch(path, {
@@ -84,13 +87,25 @@ async function request(method, path, body) {
       // wants the JSON content type on every write.
       headers: body || method === "DELETE" ? { "Content-Type": "application/json" } : undefined,
       body: body ? JSON.stringify(body) : undefined,
+      signal,
     });
   } catch (networkError) {
+    if (signal && signal.aborted) {
+      throw new ApiError(0, "The request was cancelled.", "aborted");
+    }
     throw new ApiError(0, "Could not reach the local API. Is the server running on 127.0.0.1:8765?");
   }
 
   let payload = null;
-  const text = await response.text();
+  let text;
+  try {
+    text = await response.text();
+  } catch (readError) {
+    if (signal && signal.aborted) {
+      throw new ApiError(0, "The request was cancelled.", "aborted");
+    }
+    throw readError;
+  }
   if (text) {
     try {
       payload = JSON.parse(text);
@@ -642,12 +657,22 @@ export function getMetrics({ kind, model } = {}) {
 // moves the anchor to now). POST /api/postings/assess is "Assess these":
 // without `approve: true` it answers `status: "ask"` (count and estimate)
 // and assesses nothing.
-export function getPostings(query) {
-  return request("GET", `/api/postings${query ? `?${query}` : ""}`);
+//
+// 0110-9-01: while the server prepares the stored postings for the first time
+// (once after an upgrade), GET /api/postings and GET /api/new answer 202 with
+// `status: "preparing"` and the percent instead of rows; GET
+// /api/postings/status says how far it is, at once. postingsStore.js is the
+// one caller that waits on it.
+export function getPostings(query, options) {
+  return request("GET", `/api/postings${query ? `?${query}` : ""}`, undefined, options);
 }
 
-export function getNewPeek() {
-  return request("GET", "/api/new?peek=1");
+export function getNewPeek(options) {
+  return request("GET", "/api/new?peek=1", undefined, options);
+}
+
+export function getPostingsStatus(options) {
+  return request("GET", "/api/postings/status", undefined, options);
 }
 
 export function postMarkAllSeen() {

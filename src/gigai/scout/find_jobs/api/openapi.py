@@ -366,6 +366,15 @@ _POSTINGS_ASSESS_EXAMPLE: dict[str, object] = {
     "postings": _POSTINGS_EXAMPLE["postings"],
     "profiles": _POSTINGS_EXAMPLE["profiles"],
 }
+_POSTINGS_STATUS_EXAMPLE: dict[str, object] = {
+    "schema_version": "scout-postings-status:1", "state": "preparing", "percent": 42, "phase": "matching",
+    "boards_done": 4347, "boards_total": 10350, "builds": 1, "last_boards": 0,
+}
+_PREPARING_NOTE = (
+    " While the stored postings are prepared for the first time (once after an upgrade or a new install) this answers "
+    "202 with the GET /api/postings/status object and `status` preparing, never a long wait: ask again when "
+    "GET /api/postings/status says ready."
+)
 _POSTINGS_NOTE = (
     "What \"Run find jobs\" searched, without a run: read from the stored index through the per-(posting, profile) read model, "
     "across every active profile (a deleted or archived profile is never listed). A changed setting (titles, countries, "
@@ -1143,7 +1152,7 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
             _q("peek", "string", "Accepted for symmetry with the CLI: a GET never moves the anchor.", enum=("0", "1", "true", "false")),
         ),
         errors=(_INVALID, _UNKNOWN_KEY, _NO_TARGET, (404, "profile_not_found"), (409, "config_unavailable")),
-        description=_NEW_NOTE + " A GET never moves the \"new since\" anchor: POST /api/new and POST /api/new/seen do.",
+        description=_NEW_NOTE + " A GET never moves the \"new since\" anchor: POST /api/new and POST /api/new/seen do." + _PREPARING_NOTE,
     ),
     RouteSpec(
         "GET", "/api/new/yours", "What matches, from the user's own resume and answers, for the postings GET /api/new lists.", "read", "none",
@@ -1405,7 +1414,23 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
             _q("offset", "integer", "Rows to skip."),
         ),
         errors=(_INVALID, _UNKNOWN_KEY, _NO_TARGET, (404, "profile_not_found"), (409, "config_unavailable")),
-        description=_POSTINGS_NOTE,
+        description=_POSTINGS_NOTE + _PREPARING_NOTE,
+    ),
+    RouteSpec(
+        "GET", "/api/postings/status", "How the stored postings are being prepared in this server: ready, or a build and how far it is.", "read", "none",
+        _POSTINGS_STATUS_EXAMPLE,
+        schema_version="scout-postings-status:1",
+        errors=(_UNKNOWN_KEY, _NO_TARGET),
+        description=(
+            "Answered from memory, at once, whatever a build is doing. `state`: preparing (the first build runs, once after "
+            "an upgrade or a new install: GET /api/postings and GET /api/new answer 202 until it is done), refreshing (a "
+            "build runs and the stored rows are served meanwhile), ready, or unknown (nothing has asked for the postings "
+            "since this server started). `percent` is the share of companies (`boards_done` of `boards_total`) the running "
+            "build has matched; `phase` matching, facts or idle; `builds` how many builds this server has started and `last_boards` how many "
+            "companies the last finished one matched. The "
+            "postings are matched once for every request and kept in the project's pipeline file, so a restart does not "
+            "match them again; after an index update only the companies that changed are matched again."
+        ),
     ),
     RouteSpec(
         "POST", "/api/postings/assess", "Assess these: ask first (count and estimate), assess the postings on approval.", "write", "model",
@@ -1609,6 +1634,7 @@ _META: dict[tuple[str, str], tuple[str, str]] = {
     ("POST", "/api/pipeline/approvals/{approval_id}"): ("Approve or deny a pipeline approval", "Jobs"),
     ("POST", "/api/pipeline/process"): ("Process one job now", "Jobs"),
     ("GET", "/api/postings"): ("Search the stored postings", "Jobs"),
+    ("GET", "/api/postings/status"): ("Get how the stored postings are being prepared", "Jobs"),
     ("POST", "/api/postings/assess"): ("Assess these postings, on approval", "Jobs"),
     ("POST", "/api/runs/import"): ("Import what old runs assessed", "Runs"),
     ("GET", "/api/metrics"): ("Get the model call averages", "Settings"),
@@ -1697,6 +1723,7 @@ _LABELS: dict[tuple[str, str], tuple[str, ...]] = {
     ("POST", "/api/pipeline/approvals/{approval_id}"): _NONE,
     ("POST", "/api/pipeline/process"): _NONE,
     ("GET", "/api/postings"): _UNTRUSTED,
+    ("GET", "/api/postings/status"): _NONE,  # a state, a phase and counts
     ("POST", "/api/postings/assess"): _UNTRUSTED,
     ("POST", "/api/runs/import"): _NONE,
     ("GET", "/api/metrics"): _NONE,

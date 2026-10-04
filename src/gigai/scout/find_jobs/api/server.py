@@ -1589,6 +1589,16 @@ def _make_handler(
                 duration_ms,
             )
 
+        def _client_closed(self) -> None:
+            """0110-9-01: the client went away before its answer was written (a closed tab, a reload, a timeout).
+
+            Nothing is wrong with the server and there is nobody to answer: one line at info, no traceback, no 500.
+            """
+
+            path = urlsplit(self.path).path if self.path else "-"
+            _logger.info("client closed the connection: %s %s", self.command or "-", path)
+            self.close_connection = True
+
         def _write_json(self, status: int, payload: dict[str, object]) -> None:
             # 0110-007: an unknown_key 422 names the keys the route allows (openapi.py's table).
             path = urlsplit(self.path).path
@@ -1839,6 +1849,9 @@ def _make_handler(
                     if path == "/api/postings":
                         self._handle_get_postings()
                         return
+                    if path == "/api/postings/status":
+                        self._handle_get_postings_status()
+                        return
                     # run-reads-fast (uat-bug-022): with a query these two are
                     # the page-sized reads (``run_reads.py``); with none they
                     # answer what they always did.
@@ -1867,6 +1880,8 @@ def _make_handler(
                     self._error(HTTPStatus.NOT_FOUND, "not_found", "no such route")
                     return
                 self._handle_get_static(path)
+            except CLIENT_GONE:
+                self._client_closed()
             except Exception:  # noqa: BLE001 - last-resort boundary so the connection never just drops
                 _logger.exception("unhandled exception in GET %s", path)
                 self._error(HTTPStatus.INTERNAL_SERVER_ERROR, "internal_error", "an internal error occurred")
@@ -1962,6 +1977,8 @@ def _make_handler(
                     self._handle_post_posted_window(run_id)
                     return
                 self._error(HTTPStatus.NOT_FOUND, "not_found", "no such route")
+            except CLIENT_GONE:
+                self._client_closed()
             except Exception:  # noqa: BLE001 - same last-resort boundary as do_GET
                 _logger.exception("unhandled exception in POST %s", path)
                 self._error(HTTPStatus.INTERNAL_SERVER_ERROR, "internal_error", "an internal error occurred")
@@ -2004,6 +2021,8 @@ def _make_handler(
                     self._handle_put_profile(profile_id)
                     return
                 self._error(HTTPStatus.NOT_FOUND, "not_found", "no such route")
+            except CLIENT_GONE:
+                self._client_closed()
             except Exception:  # noqa: BLE001 - same last-resort boundary as do_GET
                 _logger.exception("unhandled exception in PUT %s", path)
                 self._error(HTTPStatus.INTERNAL_SERVER_ERROR, "internal_error", "an internal error occurred")
@@ -2028,11 +2047,17 @@ def _make_handler(
                     self._handle_delete_profile(profile_id)
                     return
                 self._error(HTTPStatus.NOT_FOUND, "not_found", "no such route")
+            except CLIENT_GONE:
+                self._client_closed()
             except Exception:  # noqa: BLE001 - same last-resort boundary as do_GET
                 _logger.exception("unhandled exception in DELETE %s", path)
                 self._error(HTTPStatus.INTERNAL_SERVER_ERROR, "internal_error", "an internal error occurred")
 
     return Handler
+
+
+#: What a write to a client that went away raises (0110-9-01).
+CLIENT_GONE = (BrokenPipeError, ConnectionResetError, ConnectionAbortedError)
 
 
 class _ScoutHTTPServer(NoLookupThreadingHTTPServer):
@@ -2051,6 +2076,14 @@ class _ScoutHTTPServer(NoLookupThreadingHTTPServer):
     refresh_ticker = None
     #: 0.1.10.7 PL4: the pipeline's runner thread (``pipeline.runner``), started and stopped with the ticker.
     pipeline_runner = None
+
+    def handle_error(self, request, client_address) -> None:  # noqa: ANN001 - socketserver's signature
+        """A client that went away while its request was read or its answer flushed is one info line, not a traceback."""
+
+        if isinstance(sys.exc_info()[1], CLIENT_GONE):
+            _logger.info("client closed the connection")
+            return
+        super().handle_error(request, client_address)
 
     def stop_refresh_ticker(self) -> None:
         runner = self.pipeline_runner

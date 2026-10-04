@@ -444,7 +444,7 @@ def test_the_questions_count_moved_to_jobs_and_assessments() -> None:
     assert "onNeedAnswers({ jobs: postingsWaiting, assessments: assessmentsWaiting })" in view
     assert "onCounts={setPostingsWaiting}" in view and "needAnswersCount(assessed)" in view
     jobs = _source("views", "JobsView.jsx")
-    assert "onCounts(needsAnswers(loaded.counts));" in jobs and "if (!hasFilter(shownFilter)) {" in jobs
+    assert "onCounts(needsAnswers(response.counts));" in jobs and "if (!hasFilter(filter)) {" in jobs
     assert '<Tile label="Need your answers"' in jobs and "Open questions" not in jobs and "QUESTIONS_HASH" not in jobs
 
 

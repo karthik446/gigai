@@ -536,4 +536,4 @@ def test_the_cli_prints_the_report_as_json_and_as_one_line_per_model(project: tu
     ]
     refused = runner.invoke(cli, [*base, "--kind", "summarize", "--json"])
     assert refused.exit_code == 1 and json.loads(refused.output)["error"]["code"] == "invalid_value"
-    assert pipeline_store.SCHEMA_VERSION == 4
+    assert pipeline_store.SCHEMA_VERSION == 5  # 0110-9-01: posting_board, posting_source

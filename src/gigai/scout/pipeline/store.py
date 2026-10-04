@@ -94,7 +94,7 @@ import time
 import uuid
 
 #: ``PRAGMA user_version`` of a file this module writes.
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 #: The fixed DAG, in topological order.
 STEPS: tuple[str, ...] = ("tailor", "reassess", "ats", "label")
@@ -235,6 +235,10 @@ CREATE INDEX IF NOT EXISTS posting_profile ON posting(profile_id);
 CREATE TABLE IF NOT EXISTS posting_build (
   profile_id TEXT PRIMARY KEY, match_digest TEXT NOT NULL, facts_digest TEXT NOT NULL,
   pinned_digest TEXT NOT NULL, settings_digest TEXT NOT NULL, row_count INTEGER NOT NULL, built_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS posting_board (
+  profile_id TEXT NOT NULL, board TEXT NOT NULL, stamp TEXT NOT NULL, PRIMARY KEY (profile_id, board));
+CREATE TABLE IF NOT EXISTS posting_source (
+  name TEXT PRIMARY KEY, source_digest TEXT NOT NULL, value_digest TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS run_import (
   run_id TEXT PRIMARY KEY, profile_id TEXT NOT NULL, row_count INTEGER NOT NULL, imported_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS run_assessment (
@@ -295,6 +299,8 @@ COLUMN_KINDS: Mapping[str, Mapping[str, str]] = {
         "profile_id": "id", "match_digest": "digest", "facts_digest": "digest", "pinned_digest": "digest",
         "settings_digest": "digest", "row_count": "integer", "built_at": "timestamp",
     },
+    "posting_board": {"profile_id": "id", "board": "board", "stamp": "digest"},
+    "posting_source": {"name": "code", "source_digest": "digest", "value_digest": "digest"},
     "run_import": {"run_id": "id", "profile_id": "id", "row_count": "integer", "imported_at": "timestamp"},
     "run_assessment": {
         "run_id": "id", "job": "job", "profile_id": "id", "state": "code", "assessed_at": "timestamp",
@@ -1582,6 +1588,85 @@ class PipelineStore:
             )
         return len(values)
 
+    def posting_board_stamps(self, profile_id: str) -> dict[str, str]:
+        """``board -> stamp``: what each board's rows of this profile were matched from (0110-9-01: only a board whose
+        stamp differs is matched again)."""
+
+        rows = self._conn().execute(
+            "SELECT board, stamp FROM posting_board WHERE profile_id=?", (_check("id", profile_id, "profile_id"),)
+        ).fetchall()
+        return dict(rows)
+
+    def replace_board_postings(self, profile_id: str, stamps: Mapping[str, str | None], rows: Iterable[PostingRecord]) -> int:
+        """Replace this profile's rows of the boards in ``stamps`` and record each board's stamp, in one transaction.
+
+        A board whose stamp is ``None`` is dropped (its rows and its stamp). Every row must be of this profile and of
+        one of these boards; every value is checked first, nothing is written when one does not fit.
+        """
+
+        _check("id", profile_id, "profile_id")
+        for board, stamp in stamps.items():
+            _check("board", board, "posting board")
+            _check_optional("digest", stamp, "posting board stamp")
+        values = []
+        for row in rows:
+            if row.profile_id != profile_id or row.board not in stamps:
+                raise PipelineStoreError("invalid_value", "a posting row belongs to another profile or board than its build")
+            values.append(_posting_values(row))
+        marks = ",".join("?" * 22)
+        boards = sorted(stamps)
+        with self._write() as c:
+            for start in range(0, len(boards), 500):
+                chunk = boards[start:start + 500]
+                where = f"profile_id=? AND board IN ({','.join('?' * len(chunk))})"
+                c.execute(f"DELETE FROM posting WHERE {where}", (profile_id, *chunk))
+                c.execute(f"DELETE FROM posting_board WHERE {where}", (profile_id, *chunk))
+            c.executemany(f"INSERT OR REPLACE INTO posting({_POSTING_COLUMNS}) VALUES ({marks})", values)
+            c.executemany(
+                "INSERT INTO posting_board(profile_id, board, stamp) VALUES (?,?,?)",
+                [(profile_id, board, stamp) for board, stamp in stamps.items() if stamp is not None],
+            )
+        return len(values)
+
+    def finish_posting_build(self, build: PostingBuild) -> int:
+        """Record what this profile's rows are now built from (its rows stay as they are); returns how many it has."""
+
+        _check("id", build.profile_id, "build profile_id")
+        for name in ("match_digest", "facts_digest", "pinned_digest", "settings_digest"):
+            _check("digest", getattr(build, name), f"build {name}")
+        _check("timestamp", build.built_at, "build built_at")
+        with self._write() as c:
+            count = c.execute("SELECT COUNT(*) FROM posting WHERE profile_id=?", (build.profile_id,)).fetchone()[0]
+            c.execute(
+                f"INSERT INTO posting_build({_POSTING_BUILD_COLUMNS}) VALUES (?,?,?,?,?,?,?) "
+                "ON CONFLICT(profile_id) DO UPDATE SET match_digest=excluded.match_digest, facts_digest=excluded.facts_digest, "
+                "pinned_digest=excluded.pinned_digest, settings_digest=excluded.settings_digest, "
+                "row_count=excluded.row_count, built_at=excluded.built_at",
+                (
+                    build.profile_id, build.match_digest, build.facts_digest, build.pinned_digest, build.settings_digest,
+                    count, build.built_at,
+                ),
+            )
+        return count
+
+    def posting_source(self, name: str) -> tuple[str, str] | None:
+        """``(source digest, value digest)`` kept for ``name``: a digest the read model made from a source it need not read again."""
+
+        return self._conn().execute(
+            "SELECT source_digest, value_digest FROM posting_source WHERE name=?", (_check("code", name, "source name"),)
+        ).fetchone()
+
+    def set_posting_source(self, name: str, source_digest: str, value_digest: str) -> None:
+        _check("code", name, "source name")
+        _check("digest", source_digest, "source digest")
+        _check("digest", value_digest, "value digest")
+        with self._write() as c:
+            c.execute(
+                "INSERT INTO posting_source(name, source_digest, value_digest) VALUES (?,?,?) "
+                "ON CONFLICT(name) DO UPDATE SET source_digest=excluded.source_digest, value_digest=excluded.value_digest",
+                (name, source_digest, value_digest),
+            )
+
     def keep_posting_profiles(self, profile_ids: Iterable[str]) -> int:
         """Drop the rows and build records of every profile not in ``profile_ids`` (deleted or archived ones)."""
 
@@ -1591,6 +1676,7 @@ class PipelineStore:
         with self._write() as c:
             dropped = c.execute(f"DELETE FROM posting{where}", keep).rowcount
             c.execute(f"DELETE FROM posting_build{where}", keep)
+            c.execute(f"DELETE FROM posting_board{where}", keep)
         return dropped
 
     def posting_rank_inputs(self) -> list[tuple[str, str, int | None, str, int, str | None, int]]:

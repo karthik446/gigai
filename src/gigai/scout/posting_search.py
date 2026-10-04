@@ -57,7 +57,7 @@ from .pipeline.store import (
     PostingRecord,
     RunAssessment,
 )
-from .postings import PostingModelError, ProfileView
+from .postings import PostingModelError, PostingModelPreparing, ProfileView
 from .scout_new import FIRST_USE_DAYS, POSTINGS_LABELS, _assess, _grouped, _row_json, _score, _shown, check_response, in_order
 
 SCHEMA_VERSION = "scout-postings:1"
@@ -162,8 +162,9 @@ class _Selection:
     def __init__(
         self, home_root: Path, target: Path, store: PipelineStore, *, profile_ids: Sequence[str], query: str | None,
         states: Sequence[str], window: str | None, removed: bool, jobs: Sequence[str] | None, moment: datetime,
+        model_wait: float | None = None,
     ) -> None:
-        refreshed = postings.refresh(home_root, target, store=store, now=moment)
+        refreshed = postings.refresh(home_root, target, store=store, now=moment, wait=model_wait)
         self.views: tuple[ProfileView, ...] = refreshed.profiles
         self.resolved = refreshed.resolved
         active = {view.profile_id for view in self.views}
@@ -280,8 +281,13 @@ def search_postings(
     limit: int = DEFAULT_LIMIT,
     offset: int = 0,
     now: datetime | None = None,
+    model_wait: float | None = None,
 ) -> dict[str, object]:
     """The live search, as the ``scout-postings:1`` response. See the module docstring.
+
+    ``model_wait`` (0110-9-01, the server's GET): how long to wait for a build
+    of the posting read model; past it the rows are read as stored, or
+    ``PostingModelPreparing`` is raised when there are none yet.
 
     Raises :class:`PostingSearchError` / ``PostingModelError`` / ``PipelineStoreError``.
     """
@@ -302,7 +308,7 @@ def search_postings(
         try:
             selection = _Selection(
                 home_root, target, store, profile_ids=wanted_profiles, query=query, states=wanted_states, window=window,
-                removed=removed, jobs=None, moment=moment,
+                removed=removed, jobs=None, moment=moment, model_wait=model_wait,
             )
             unknown = [item for item in selection.hidden_profiles if item != EPHEMERAL_PROFILE and not history]
             if unknown:
@@ -560,6 +566,7 @@ __all__ = [
     "STATUS_NOTHING",
     "WINDOWS",
     "PostingModelError",
+    "PostingModelPreparing",
     "PostingSearchError",
     "assess_these",
     "render",
