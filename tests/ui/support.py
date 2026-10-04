@@ -31,6 +31,20 @@ from urllib.parse import urlsplit
 LIST_READY_JS = """() => document.querySelectorAll('[data-testid="job-row"]').length > 0
   && !((document.querySelector('[data-role="postings-count"]') || {}).textContent || 'Loading').startsWith('Loading')"""
 
+#: Installed before the page's own scripts: `window.__gigaiCountLines` holds every text the Jobs count line
+#: shows, in order (null while the page shown has no count line). A MutationObserver sees every committed
+#: change, so a "Loading postings…" that flashes for one frame is in the list.
+COUNT_LINE_WATCH_JS = """(() => {
+  const seen = [];
+  window.__gigaiCountLines = seen;
+  const read = () => {
+    const node = document.querySelector('[data-role="postings-count"]');
+    const text = node ? (node.textContent || '').trim() : null;
+    if (!seen.length || seen[seen.length - 1] !== text) seen.push(text);
+  };
+  new MutationObserver(read).observe(document, {subtree: true, childList: true, characterData: true, attributes: true});
+})()"""
+
 #: Chromium's own word for a request that a navigation, a reload or a closed page cut short.
 ABORTED = "ERR_ABORTED"
 

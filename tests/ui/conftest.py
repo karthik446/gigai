@@ -13,6 +13,10 @@ swap lasts only while the home is built and stopped; the server keeps the enviro
 with. One home and one server per pytest session: a flow that changes the home runs last, or
 builds its own.
 
+The operator-sized home (`operator_server`, `operator_ui`; tests/ui/operator_home_ui.py) is a second
+home and a second server, built once per session only when a test asks for it. Such a test is
+marked `operator_sized` as well: `make ui-test` deselects it, `make ui-test-full` runs it.
+
 On a failed test, `ui` writes screenshot, Playwright trace, requests, console, server log tail
 and the CPU/RSS samples to `$GIGAI_UI_ARTIFACTS/<test>/` (default `build/ui-artifacts/`).
 """
@@ -44,7 +48,8 @@ SCRUBBED = ("GIGAI_HOME", "GIGAI_SCOUT_PIPELINE")
 EXTRA_SEAMS = {"GIGAI_SCOUT_SNAPSHOT": "0", "GIGAI_SCOUT_MODEL_TAGS": "0"}
 FIXTURE_LATENCY_SCALE = "8"  # only widens the server's 15 s health wait on a slow machine
 
-_UI_FIXTURES = frozenset({"ui", "ui_browser", "scout_server"})
+_OPERATOR_FIXTURES = frozenset({"operator_ui", "operator_server"})
+_UI_FIXTURES = frozenset({"ui", "ui_browser", "scout_server"}) | _OPERATOR_FIXTURES
 
 
 # ---------------------------------------------------------------------------- marking and failure state
@@ -55,8 +60,11 @@ def pytest_collection_modifyitems(items) -> None:
     """A test that uses a browser fixture is a `ui` test, whether or not its author remembered the mark."""
 
     for item in items:
-        if _UI_FIXTURES & set(getattr(item, "fixturenames", ())):
+        used = set(getattr(item, "fixturenames", ()))
+        if _UI_FIXTURES & used:
             item.add_marker(pytest.mark.ui)
+        if _OPERATOR_FIXTURES & used:
+            item.add_marker(pytest.mark.operator_sized)
 
 
 @pytest.hookimpl(hookwrapper=True)
@@ -139,6 +147,41 @@ def scout_server() -> Iterator[ScoutServer]:
 
 
 @pytest.fixture(scope="session")
+def operator_server(request: pytest.FixtureRequest) -> Iterator[object]:
+    """The real server process, cold, on the operator-sized synthetic home (built here, once, in a temporary HOME)."""
+
+    try:
+        import psutil  # noqa: F401
+    except ImportError:
+        _unavailable("psutil is not installed")
+    from tests.ui import operator_home_ui
+
+    reporter = request.config.pluginmanager.get_plugin("terminalreporter")
+
+    def say(line: str) -> None:  # the build and start times are part of the result: shown whatever the capture mode
+        if reporter is not None:
+            reporter.write_line(f"[ui] {line}")
+
+    home = Path(tempfile.mkdtemp(prefix="gigai-ui-operator-")).resolve()
+    server = None
+    try:
+        server = operator_home_ui.start(home)
+        built = server.built
+        say(
+            f"operator-sized home: {built.postings} postings x {built.companies} companies, {len(built.profiles)} profiles, "
+            f"built in {server.build_seconds:.1f} s; server up in {server.start_seconds:.1f} s"
+            + (f"; product code of {server.server_root}" if server.server_root else "")
+        )
+        yield server
+    finally:
+        try:
+            if server is not None:
+                operator_home_ui.stop(server.process)
+        finally:
+            shutil.rmtree(home, ignore_errors=True)
+
+
+@pytest.fixture(scope="session")
 def ui_artifacts() -> Path:
     folder = Path(os.environ.get(ARTIFACTS_ENV) or REPO / "build" / "ui-artifacts").resolve()
     if folder.exists():
@@ -171,9 +214,9 @@ def ui_browser() -> Iterator[object]:
 class Ui(support.Recorder):
     """One page with its books: `ui.page`, `ui.step(...)`, the assertions of `support.Recorder`."""
 
-    def __init__(self, page, server: ScoutServer, network: support.Network, probe: support.ProcessTreeProbe) -> None:
+    def __init__(self, page, server, network: support.Network, probe: support.ProcessTreeProbe, sampler: support.Sampler | None = None) -> None:
         super().__init__(network, probe.cpu_seconds)
-        self.page, self.server = page, server
+        self.page, self.server, self.sampler = page, server, sampler
 
     def goto(self, route: str = "/#/jobs") -> None:
         self.page.goto(self.server.url + route)
@@ -200,9 +243,24 @@ class Ui(support.Recorder):
     def job_rows(self) -> int:
         return self.page.locator(support.tid("job-row")).count()
 
+    def watch_count_line(self) -> None:
+        """From the next page load on, keep every text the Jobs count line shows (call before `goto`)."""
 
-@pytest.fixture
-def ui(request: pytest.FixtureRequest, ui_browser, scout_server: ScoutServer, ui_artifacts: Path) -> Iterator[Ui]:
+        self.page.add_init_script(support.COUNT_LINE_WATCH_JS)
+
+    def count_lines(self) -> list[str | None]:
+        """Every text the count line has shown so far, in order; None stands for "not on the Jobs page"."""
+
+        return list(self.page.evaluate("() => window.__gigaiCountLines || []"))
+
+    def peak_server_rss_mb(self) -> float:
+        return (self.sampler.peak_rss_bytes if self.sampler is not None else 0) / 1048576
+
+
+@contextmanager
+def _ui_session(request: pytest.FixtureRequest, ui_browser, scout_server, ui_artifacts: Path) -> Iterator[Ui]:
+    """One page with its books on `scout_server` (anything with `url`, `pid`, `log_path`); artifacts when the test fails."""
+
     context = ui_browser.new_context(viewport=VIEWPORT, reduced_motion="reduce")
     context.set_default_timeout(PATIENCE_MS)
     context.tracing.start(screenshots=True, snapshots=True)
@@ -212,7 +270,7 @@ def ui(request: pytest.FixtureRequest, ui_browser, scout_server: ScoutServer, ui
     probe = support.ProcessTreeProbe(scout_server.pid)
     sampler = support.Sampler(probe.read, network)
     sampler.start()
-    session = Ui(page, scout_server, network, probe)
+    session = Ui(page, scout_server, network, probe, sampler)
     folder = ui_artifacts / support.safe_name(request.node.nodeid)
     try:
         yield session
@@ -242,3 +300,17 @@ def ui(request: pytest.FixtureRequest, ui_browser, scout_server: ScoutServer, ui
             print(f"\n[ui] artifacts for {request.node.nodeid}: {folder} ({', '.join(folder_files)})")
     if problems and not failed:
         raise AssertionError(f"{len(problems)} problem(s) in the browser (artifacts: {folder}):\n  " + "\n  ".join(problems))
+
+
+@pytest.fixture
+def ui(request: pytest.FixtureRequest, ui_browser, scout_server: ScoutServer, ui_artifacts: Path) -> Iterator[Ui]:
+    with _ui_session(request, ui_browser, scout_server, ui_artifacts) as session:
+        yield session
+
+
+@pytest.fixture
+def operator_ui(request: pytest.FixtureRequest, ui_browser, operator_server, ui_artifacts: Path) -> Iterator[Ui]:
+    """`ui` on the operator-sized home (`operator_server`)."""
+
+    with _ui_session(request, ui_browser, operator_server, ui_artifacts) as session:
+        yield session

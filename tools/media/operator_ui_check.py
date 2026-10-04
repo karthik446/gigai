@@ -112,7 +112,13 @@ class _Requests:
             self.problems.append(f"{response.status} {response.request.method} {response.url.replace(self.base, '')}")
 
 
-def _start_server(home: str, target: str, log_path: Path) -> tuple[subprocess.Popen, str]:
+def start_server(home: str, target: str, log_path: Path, *, env: dict[str, str] | None = None) -> tuple[subprocess.Popen, str]:
+    """The real Scout server process on `home` (a free port, the fixture transports, its background threads running).
+
+    Also what the browser tests' operator-sized fixture starts (tests/ui/operator_home_ui.py); `env` replaces the
+    inherited environment (the fixture seams are added to either).
+    """
+
     from tests.support import operator_home
 
     with socket.socket() as probe:
@@ -121,7 +127,7 @@ def _start_server(home: str, target: str, log_path: Path) -> tuple[subprocess.Po
     log = open(log_path, "w", encoding="utf-8")
     process = subprocess.Popen(
         [sys.executable, "-m", "gigai.scout.find_jobs.present_api", "--home", home, "--target", target, "--port", str(port), "--allow-test-seams"],
-        env=dict(os.environ, **operator_home.SEAM_ENV), stdout=log, stderr=subprocess.STDOUT,
+        env=dict(os.environ if env is None else env, **operator_home.SEAM_ENV), stdout=log, stderr=subprocess.STDOUT,
     )
     return process, f"http://127.0.0.1:{port}"
 
@@ -135,7 +141,7 @@ def run(out: Path, *, postings: int, companies: int, log=print) -> dict[str, obj
     root = Path(tempfile.mkdtemp(prefix="gigai-operator-ui-")).resolve() / "op"
     built = operator_home.build(root, postings=postings, companies=companies, log=lambda line: log(f"  {line}"))
     log(f"[operator-ui] home: {built.postings} postings x {built.companies} companies in {built.build_seconds} s")
-    process, base = _start_server(built.home, built.target, out / "server.log")
+    process, base = start_server(built.home, built.target, out / "server.log")
     numbers: dict[str, object] = {"postings": built.postings, "companies": built.companies, "home_build_seconds": built.build_seconds}
     failures: list[str] = []
     requests = _Requests(base)

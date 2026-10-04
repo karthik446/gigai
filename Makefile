@@ -183,9 +183,19 @@ media-check:
 # screenshot, trace, requests, console, server log tail and CPU/RSS samples are written to
 # $(UI_ARTIFACTS)/<test>/. One-time: `playwright install chromium` below (no sudo, no pip).
 # No retry anywhere: see tests/ui/README.md.
-.PHONY: ui-test
+#   make ui-test        every `ui` test on the small home (not the `operator_sized` ones)
+#   make ui-test-full   the release profile: the same, plus the `operator_sized` tests on the operator-sized
+#                       synthetic home (290,000 postings, 10,350 companies, 2 profiles; tests/support/operator_home.py,
+#                       built once per run in a temporary HOME; the real server process, cold, its background threads
+#                       running). About 2 minutes on a laptop; the build time and the flow's numbers are printed and
+#                       written to $(UI_ARTIFACTS)/operator-sized-jobs.json.
+.PHONY: ui-test ui-test-full
 UI_ARTIFACTS ?= build/ui-artifacts
 ui-test:
+	$(UV) run --locked --group ui playwright install chromium
+	GIGAI_UI_REQUIRED=1 GIGAI_UI_ARTIFACTS="$(UI_ARTIFACTS)" $(UV) run --locked --group ui --extra test pytest tests/ui -m "ui and not operator_sized" -n 0 -q --tb=short --durations=5
+
+ui-test-full:
 	$(UV) run --locked --group ui playwright install chromium
 	GIGAI_UI_REQUIRED=1 GIGAI_UI_ARTIFACTS="$(UI_ARTIFACTS)" $(UV) run --locked --group ui --extra test pytest tests/ui -m ui -n 0 -q --tb=short --durations=5
 
