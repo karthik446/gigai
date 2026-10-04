@@ -81,7 +81,8 @@ _STALE_NOTE = (
     "state was made on posting text that has since changed: the verdict still reads, and the job should be re-assessed. "
     "The same marker carries reason `older_prompt`, `settings_changed` or `story_bank_changed` when the state comes from a stored "
     "quick assessment made with an older assess prompt, other candidate settings (work mode, countries, location, sponsorship "
-    "need) or answers and stories that have since changed; nothing is re-assessed until you ask (POST /api/assess, or assess-all). "
+    "need) or answers and stories that have since changed, and `resume_changed` when a master resume is stored and a resume line "
+    "the assessment quoted is gone or a new line names one of its open questions; nothing is re-assessed until you ask (POST /api/assess, or assess-all). "
     "job_state.state `weak_fit` is `needs_answers` for a job whose stored assessment has few requirements met AND whose rank "
     "score is low (the `fit` block of the project's settings: below 40% and below rank 50): it is not counted with the jobs "
     "that need your answers."
@@ -107,7 +108,13 @@ _BASIS_NOTE = (
     "no model is called. `story_bank_changed` is targeted: an answer or story added or edited since answers one of the assessment's own "
     "open questions (the same id, the near match behind `bank_suggestions`, or a story about it), or it cites an answer or story "
     "that was edited or deleted. Such an item also carries `basis_stale_bank`: the entries that made it stale, each `{match: \"exact\" | \"near\" | "
-    "\"cited\", bank_question_id, bank_question?, question_id?, question?}` (ids and question words, never an answer)."
+    "\"cited\", bank_question_id, bank_question?, question_id?, question?}` (ids and question words, never an answer). "
+    "With a master resume stored a fourth reason exists, `resume_changed`, targeted the same way: a resume line the assessment "
+    "quoted as evidence is no longer in what its profile would be assessed with, or a line that was not there names the subject "
+    "of one of its open questions. Such an item carries `basis_stale_resume`: each `{change: \"line_changed\", requirement}` or "
+    "`{change: \"new_line\", question_id, question?}` (the assessment's own words, never a resume line). An assessment that read "
+    "the evidence view of the master carries `resume_basis`: `{input: \"evidence\", master_revision_id, master_revision, "
+    "selector_version}`."
 )
 
 

@@ -426,7 +426,9 @@ def test_the_migration_leaves_nothing_stale(tmp_path: Path, monkeypatch: pytest.
         done = json.loads(runner.invoke(cli, ["scout", "resume", "master", "init", *answers, *base]).output.strip().splitlines()[-1])
     assert done["status"] == "created" and len(done["profiles"]) == 2
 
-    # 1. The read model: no profile is matched or re-read again, and every row is what it was.
+    # 1. The read model: no profile is matched again, and every row is what it was. P7: an assessment now reads the
+    #    master, whose revision is part of what a stale check reads, so each profile's facts are read again ONCE.
+    assert set(postings.refresh(home, target).builds.values()) == {"facts"}
     assert set(postings.refresh(home, target).builds.values()) == {"unchanged"}
     migrated_state = state()
     assert but_tailoring(migrated_state) == but_tailoring(before)
@@ -842,12 +844,13 @@ def test_a_resume_in_another_shape_is_read_where_the_shape_is_plain() -> None:
     assert [section.name for section in draft.sections] == ["summary", "experience", "skills", "education", "other"]
     by_name = {section.name: section for section in draft.sections}
     assert [item.text for item in by_name["summary"].items] == ["Platform engineer with 9 years of experience in distributed systems."]
-    assert [(entry.heading, [bullet.text for bullet in entry.bullets]) for entry in by_name["experience"].entries] == [
-        ("Staff Engineer, Acme Cloud (2021 - Present)", ["Runs the control plane for 4,000 clusters.", "Cut deploy time from 40 minutes to 6 minutes."]),
-        ("Engineer, Borealis (2016 - 2021)", ["Built the billing service in Go.", "Wrote the ledger."]),
+    # MIGFIX: the dates a heading ends with are the entry's role line, so the entry has its dates (they were part of the heading).
+    assert [(entry.heading, entry.sublines, [bullet.text for bullet in entry.bullets]) for entry in by_name["experience"].entries] == [
+        ("Staff Engineer, Acme Cloud", ["2021 - Present"], ["Runs the control plane for 4,000 clusters.", "Cut deploy time from 40 minutes to 6 minutes."]),
+        ("Engineer, Borealis", ["2016 - 2021"], ["Built the billing service in Go.", "Wrote the ledger."]),
     ]
     assert [item.text for item in by_name["skills"].items] == ["Languages: Go, Python", "Cloud: Kubernetes, AWS"]
-    assert [entry.heading for entry in by_name["education"].entries] == ["BS Computer Science, Example State (2016)"]
+    assert [(entry.heading, entry.sublines) for entry in by_name["education"].entries] == [("BS Computer Science, Example State", ["2016"])]
     # Certifications and awards are Other lines (decision 8), both sections in one.
     assert [item.text for item in by_name["other"].items] == ["Certified Kubernetes Administrator (2022)", "Hackathon winner (2019)"]
     # A master made of it is a master, and the resume's own GigAI-format twin gives the same lines.
