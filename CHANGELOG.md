@@ -32,30 +32,55 @@ mechanics here. Those belong in the internal changelog.
 
 ### 0.1.10.9
 
-A fix for the Jobs page, which never finished loading on a large store of postings (about 290,000
-postings from about 10,000 companies): the first page load took minutes, every request took seconds,
-the server used several gigabytes of memory, and reloading made it worse. Read "After you upgrade".
+The Jobs page now loads on a large store of postings (about 290,000 postings from about 10,000
+companies, where it never finished loading) and has real pages. Fixes from the first days of real
+use: re-assessing a job keeps its posting, an answer says who wrote it, an assessment lists every
+stated requirement, one missing tool from a list no longer holds a job back, weak fits have their
+own group, postings are ordered by how well they fit, and a yes assesses only postings ranked 50 or
+more. Tailoring puts a skill you confirmed in an answer on the resume, cuts for length only by
+leaving out your oldest roles (with Restore), stores a resume you edited back for one job, and saves
+your resumes in a folder you can see. New: a master resume, one document that holds everything you
+have done, from which each profile and each job takes its lines. Read "After you upgrade".
 
 #### After you upgrade
 
 - **One more preparation, with progress.** The stored postings are prepared again once, in the
   background. The Jobs page shows "Preparing your postings (one time after an upgrade)... N%" and
-  the rest of Scout stays usable meanwhile; `gigai scout new` prints the same progress. After that
+  the rest of Scout stays usable meanwhile; `gigai scout new` prints the progress too. After that
   the Jobs page answers in a fraction of a second.
-- **You cannot go back to 0.1.10.8 without one step.** Scout's local posting store (`pipeline.sqlite`,
-  a cache plus the history of its background work) has a new layout. If you install 0.1.10.8 again,
-  delete that file first; it is rebuilt.
-- **Stored assessments read "made with older settings" once.** The assessment rules changed (see
+- **You cannot go back to 0.1.10.8 without one step.** Scout's local posting store
+  (`pipeline.sqlite`, a cache plus the history of its background work) has a new layout. If you
+  install 0.1.10.8 again, delete that file first; it is rebuilt.
+- **Stored assessments read "Assessed with older settings" once.** The assessment rules changed (see
   "One missing tool from a list" and "Every stated requirement" under Fixed), so an assessment made
   before this release is offered for re-assessment like any other old one. Nothing is assessed again
   until you say yes.
-- **The pipeline may tailor a job's resume again.** The tailoring instructions changed (see "A
-  skill you confirmed" and "over 2 pages" under Fixed), so the next time the background pipeline
-  processes a job it tailors that job's resume again, within the daily limit on model calls. A
-  resume you tailored or edited yourself is kept, as before.
+- **The pipeline may tailor a job's resume again.** The tailoring instructions changed (see "A skill
+  you confirmed" and "over 2 pages" under Fixed), so the next time the background pipeline processes
+  a job it tailors that job's resume again, within the daily limit on model calls. A resume you
+  tailored or edited yourself is kept, as before.
 - **In the API and in `--json` output, `company` is now the company's name.** The board's id (what
   `company` held before) is in `company_slug`. `company_name` is still there and says the same name.
   A script that used `company` as an id should read `company_slug`.
+- **Your tailored resumes are copied into a folder you can see.** The next time Scout starts (or
+  when you run `gigai scout resume folder`) it copies the tailored resumes you already have, as
+  markdown, into `~/Documents/GigAI/resumes`, which it makes when it first writes there. Nothing is
+  moved or deleted, and the folder never gets your name or contact details. See "Your resumes have
+  one visible folder" under Changed.
+- **The master resume changes nothing until you make one.** The upgrade makes no master: profiles,
+  assessments and tailored resumes work as before until you run `gigai scout resume master init` or
+  make the master on the Master resume page in Settings (opening the page writes nothing). Look
+  first: `gigai scout resume master init --dry-run` writes nothing and lists every line of your
+  resumes that would be left out.
+- **Once you have a master.** An assessment for a profile reads the lines of your whole master that
+  fit the posting best, not only the profile's 2-page resume; making the master marks no stored
+  assessment as old. The background pipeline tailors a job's resume again the next time it processes
+  that job, within the daily limit on model calls (a resume you tailored or edited yourself is
+  kept). You can no longer go back to an older version: it cannot read a profile that selects from
+  the master, nor an assessment made since (`resume_basis`). And creating a profile answers at once,
+  with the profile's first selection made a few seconds later (up to about 15 seconds on a very
+  large home). Saving a change to the master takes several seconds on a very large home: about 4.5 s
+  with 290,000 postings and 10,350 companies, about 12 s when two profiles show the changed line.
 
 #### Fixed
 
@@ -134,10 +159,10 @@ the server used several gigabytes of memory, and reloading made it worse. Read "
 - **Past runs lists the selected profile's runs.** Past runs could show every profile's runs under
   the selected profile when the first read answered last.
 - **Saving is faster on a home that watches many companies.** Every write of a resume, of the master
-  resume or of a profile's view read and checked every file of the watched-companies list first (one
-  file per board: over 10,000 on a large home). A write now reads only what it uses. On a synthetic
-  home of 290,000 postings and 10,350 boards, adding a line to the master went from about 7 s to
-  about 4.5 s, an edit of a line that two profiles show from about 18.5 s to about 12 s, and `gigai
+  resume or of a profile's selection read and checked every file of the watched-companies list first
+  (one file per board: over 10,000 on a large home). A write now reads only what it uses. On a synthetic
+  home of 290,000 postings and 10,350 boards, adding a line to the master went from about 6.9 s to
+  about 4.5 s, an edit of a line that two profiles show from about 18.6 s to about 12.1 s, and `gigai
   scout resume add` from about 7.7 s to about 5.3 s. Saving an answer is not changed by this.
 
 #### Changed
@@ -183,143 +208,106 @@ the server used several gigabytes of memory, and reloading made it worse. Read "
 
 #### Added
 
-- **A master resume, first step: the store.** One document that holds every role, bullet, project
-  and skill you have, with an id on every line and no contact data. `gigai scout resume master init
-  --from FILE` stores a resume markdown file as the master (a line that looks like contact data is
-  left out and named by its line number, a line without an id gets one), `gigai scout resume master
-  show` lists every line with its id, and `gigai scout resume master history` lists its revisions:
-  each change is a new revision and nothing is rewritten. Nothing reads the master yet: profiles,
-  assessments and tailored resumes work as before.
-- **A master resume, second step: which lines a resume shows.** `gigai scout resume master selection
-  show` picks the lines of the master for a profile or for one job (`--job-url` for a posting Scout
-  already holds, or `--job-text FILE`) and lists them as Picked / Left out, each line with its
-  reason. The pick is made by code alone, with no model call, and fitted to 2 pages by measuring it
-  with the PDF template: recent roles always appear, and for length the oldest roles are shortened,
-  then dropped, first. A line that is the only one naming something the posting requires is kept,
-  after first trying a recent role's line that names the same thing. Nothing is reworded. `--evidence`
-  shows the lines most relevant to the job that an assessment could read. Nothing uses the selection
-  yet: profiles, assessments and tailored resumes work as before.
-- **A master resume, third step: your profiles select from it.** `gigai scout resume master init`
-  (without `--from`) builds the master from the resumes your profiles hold today: the lines of all
-  of them, the same line kept once, and a line worded twice folded into the newer wording. When two
-  resumes state one line with different numbers, Scout asks which is right and writes nothing until
-  you answer (`--answer ID=a`, `=b`, or `=both` to keep the two lines); `--dry-run` shows the merge
-  first. Each profile's first selection is its own resume, which is not rewritten, so nothing you
-  assessed, ranked or tailored goes stale. A profile's selection is sticky: when you edit or retire
-  a line it shows, its resume follows; lines you add to the master are only offered (`gigai scout
-  resume master selection status`: "3 new master lines: refresh?"). `gigai scout resume master
-  selection refresh` selects again from the whole master, by code and with no model call, against
-  the postings the profile's titles match in your local index, and makes the result the profile's
-  resume. A new profile made with a master stored gets its own first selection the same way instead
-  of a copy of another profile's resume. Tailoring a resume for one job still reads the profile's
-  resume, as before.
-- **A master resume, fourth step: a job's tailored resume is picked from the whole master.** Once a
-  master is stored, tailoring a resume for one job no longer reads only the profile's own resume.
-  Code first picks that job's candidate lines from the whole master (about twice what fits on 2
-  pages), starting from the lines the profile shows. The one tailoring call then orders and words
-  the lines inside that set, as it did before, and code cuts the result to 2 pages: the oldest roles
-  first, every recent role still present, and a line that is the only one naming something the
-  posting requires kept. What was cut is listed and one Restore puts it back (`gigai scout resume
-  length`). The Skills line is put together by code (the required skills of the posting that your
-  master lists, then its nice-to-haves, then what the offered lines name), so the master's whole
-  Skills list is never put on one resume. Every line of the tailored resume names the master line it
-  is, and the stored resume says what was picked and what was left out, each line with its reason
-  (`selection` in `gigai scout resume tailor --json` and in `GET /api/tailored-resumes`; a page for
-  it comes later). When the model call fails or no model is available, tailoring on demand still
-  gives you a resume: the code's own 2-page selection, marked as picked by code. A profile whose
-  resume you replaced by hand, a pasted resume, and a home without a master are tailored exactly as
-  before. After you make or change the master, the background pipeline tailors a job's resume again
-  the next time it processes that job, within the daily limit on model calls; a resume you tailored
-  or edited yourself is kept.
-- **A master resume, fifth step: the Master page, and Picked / Left out on a job.** Settings has a
-  new page, **Master resume** (`#/master`). With no master yet it offers to make one from the resumes
-  your profiles hold: it shows what the merge would do, asks about each line your resumes word with
-  different numbers (keep A, keep B, or both), and writes nothing until you answer. After that the
-  page lists the master by role. You can add a line, edit one, retire one (History lists what is
-  retired and puts it back), and add a role; each line shows how strong its evidence is (backed by a
-  story or an answer, states a number, or stated) and which profiles show it. The page sends the
-  revision it read with every change, so a change that crosses one your agent made is refused and
-  the page shows the master as it is now. Under Profiles in Settings, and on the Master page, each
-  profile says where its selection stands ("3 new master lines: refresh?") with a **Refresh**
-  button. On a job page, a resume tailored from the master has **Picked (n)** and **Left out (m)**:
-  every line with the reason it is shown or not, **Remove** to take a line off this job's resume and
-  **Add** to put one on. When an added line would make the resume 3 pages, Scout names the line that
-  would be cut to keep 2 and asks: cut it, or keep both. A line your agent edited on a tailored
-  resume offers **Save this wording to your master**. The API has `GET /api/master`,
-  `GET /api/master/history`, `POST` and `PUT /api/master/lines` and `/api/master/entries` (edit,
-  retire, restore by id, each with the revision you read), `GET` and `POST /api/master/migration`,
-  `GET` and `POST /api/master/selection`, and `PUT /api/tailored-resumes/selection`; a write names
-  who made it (`actor`), as for answers. Two smaller changes come with it. Creating a profile while
-  a master is stored now answers at once: the profile's own first selection is made in the
-  background a few seconds later (it held the request for 7 to 8 seconds on a large store of
-  postings). And the "Cut for length" line says "older bullets" only when every bullet it names
-  belongs to a role that ended more than 8 years ago; bullets cut from a recent role are "bullets".
-- **A master resume: your agent keeps it up to date from a chat.** `gigai scout resume master add`,
-  `edit` and `remove` change one line, role or skill by its id. A story or an answer becomes a line
-  of the master with `--from-story ID` or `--from-answer ID`: the line is linked to it, and from
-  then on every profile and every job can select it. An agent passes `--as agent` and says where
-  the evidence came from with `--source`; `gigai scout resume master show` shows both for each
-  line. An edit or a removal names the revision it read (`--revision N`) and is refused when the
-  master changed since. Text that looks like contact data is refused and stored nowhere. A line the
-  master already has in other words is not added: Scout lists the line it looks like, and you
-  change that one or pass `--force`. A removed line is retired, not deleted: no resume shows it any
-  more, `gigai scout resume master show --retired` still lists it with its text, and `gigai scout
-  resume master add --restore ID` puts it back under the same id. The agent instructions (`gigai
-  agent-skill`) have a step for this: after saving a story or an answer with substance, the agent
-  asks "Want this on your resume?".
-- **A master resume: an assessment reads it.** Once a master is stored, assessing a job for a
-  profile (the job page's Assess, `gigai scout assess`, "Assess all new", `gigai scout new --yes`)
-  no longer reads only the profile's 2-page resume. The model is shown the lines of your whole
-  master that are most relevant to that posting, picked by code, within the same limit on the
-  resume's size and in the same single call. A verdict then says what you can truthfully claim: a
-  requirement your master covers is no longer a question because one profile's 2 pages left the
-  line out. In our test on invented postings (11 cases, each assessed twice both ways) the open
-  questions went from 63 to 6, no case got a worse verdict and no evidence was invented; the prompt
-  is about 14% larger. The assessment of a tailored resume still reads the 2 pages that will be
-  sent, and a find-jobs run still reads the profile's resume. A pasted resume, a profile whose
-  resume you replaced by hand and a home without a master are assessed exactly as before.
-- **A stored assessment says when your resume changed for it.** With a master stored, an assessment
-  can read "old assessment: resume changed" (`resume_changed`; "Resume changed" on a job's card).
-  It is said only for the assessments the change concerns: a resume line the assessment quoted as
-  evidence was edited, retired or is no longer in the profile's resume, or a new line names
-  something the assessment left as an open question ("A new line of your resume may answer: Have
-  you used Helm?"). Editing another line flags nothing. Nothing is assessed again on its own:
-  re-assess the job with one click, or say yes to the "old assessments" question of `gigai scout
-  new`. `gigai scout resume master init` makes no assessment stale. For agents: `basis_stale_reason:
-  "resume_changed"` with `basis_stale_resume` (what changed for that assessment), and
-  `resume_basis` on an assessment that read the master (its revision and the selector's version).
-- **A master resume: the merge reads the resume you have, and says what it left out.** `gigai scout
-  resume master init` keeps a summary paragraph that has no heading above it as your Summary (your
-  name, a title, a headline and contact lines above it are still never kept). A title line under an
-  employer (`**Senior Software Engineer** | 2021 - present`) is that employer's role line, a second
-  one is the next role there, and dates written in an entry's heading become its role line, so every
-  role has its dates and the oldest-first rule can order them. A Skills block of `Category: a, b, c`
-  lines and a plain list of certifications are read a line each. Nothing is left out silently:
-  `init` and `init --dry-run` count every line of your resumes as kept, folded into a line the
-  master holds, or left out, and name each left-out line by its line number in the stored resume and
-  the reason, never by its text ("Of 20 lines of resume text ...: 18 kept, 0 folded into a line the
-  master holds, 2 left out"; `migration.source_lines` in `--json`). Look at `--dry-run` first.
-- **A master resume: a file you can edit.** Your master is now also a file, `master.md` in your
-  resumes folder (`~/Documents/GigAI/resumes` unless you chose another), written again after every
-  change of the master, whoever made it. Edit it in your own editor, then import it: **Import the
-  file** on the Master page, or `gigai scout resume master sync`. The import is the master's next
-  revision: a line you typed gets an id, every other line keeps its id (also when you deleted the id
-  comment and left the text), and a line you removed is retired and can be restored; the command and
-  the page say what was added, changed and retired. GigAI never reads the file by itself. Until you
-  import it, Scout says "master.md has changes not imported yet" (`gigai scout status`, `gigai scout
-  resume master show`, the Master page), and it never replaces a file you changed: a change made in
-  Scout or by your agent meanwhile is written beside it as `master-2.md`, and says so. Refused, with
-  nothing imported and your file left as it is: a file that does not read as a master (the line is
-  named), a name, email, phone number, link or address in it (by line number; GigAI stores no
-  contact details), and a master that changed since the file was written, unless you say to import
-  it anyway (`--revision N`, or **Import it anyway**): what was added since is then retired, and
-  can be restored. For agents: `file` on `GET /api/master` and on every write of the master, and
-  `POST /api/master/sync`; an agent reads the master with `master show --json`, never from the file.
-- **The Master page's preview says what the merge left out.** Before you make the master, the page
-  now shows the count of every line of your resumes (kept, folded into a line the master already
-  holds, left out) and lists each left-out line by resume, line number and reason, never by its
-  text, as `gigai scout resume master init --dry-run` does. `migration.source_lines` is in the API's
-  description of `GET` and `POST /api/master/migration`.
+- **A master resume.** One document that holds every role, bullet, project and skill you have, with
+  an id on every line and no contact details. Each profile shows a selection of its lines, each
+  job's tailored resume is picked from the whole of it, and an assessment reads the lines that fit
+  the posting best. Lines are picked by code, with no model call; the one tailoring call and the one
+  assessment call are the ones Scout made before. It is opt-in: nothing changes until you make one
+  (see "After you upgrade").
+  - **The store, and a file you can edit.** `gigai scout resume master show` lists every line with
+    its id and `gigai scout resume master history` lists the revisions: each change is a new
+    revision and nothing is rewritten. The master is also a file, `master.md` in your resumes folder
+    (`~/Documents/GigAI/resumes` unless you chose another), written again after every change,
+    whoever made it. Edit it in your own editor, then import it with **Import the file** on the
+    Master page or `gigai scout resume master sync`: a line you typed gets an id, every other line
+    keeps its id, and a line you removed is retired and can be restored. GigAI never reads the file
+    by itself; until you import it, Scout says "master.md has changes not imported yet" and never
+    replaces it (a change made in Scout meanwhile is written beside it as `master-2.md`). An import
+    is refused, with your file left as it is, when the file does not read as a master, when it holds
+    a name, email, phone number, link or address (named by line number), or when the master changed
+    since the file was written, unless you import it anyway (`--revision N`, or **Import it
+    anyway**): what was added since is then retired.
+  - **What a profile shows.** When the master is made, each profile's first selection is its own
+    resume, which is not rewritten, so nothing you assessed or ranked goes stale. A selection is
+    sticky: when you edit or retire a line a profile shows, its resume follows; lines you add to the
+    master are only offered (`gigai scout resume master selection status`: "3 new master lines:
+    refresh?"). `gigai scout resume master selection refresh` selects again from the whole master,
+    against the postings the profile's titles match in your local index, and makes the result the
+    profile's resume. A selection is fitted to 2 pages by measuring it with the PDF template: recent
+    roles always appear, and for length the oldest roles are shortened, then dropped, first. `gigai
+    scout resume master selection show` lists it as Picked / Left out, each line with its reason,
+    for a profile or for one job (`--job-url`, or `--job-text FILE`). A new profile gets its own
+    first selection the same way. A profile whose resume you replace by hand keeps that resume: the
+    master leaves it alone until you refresh its selection.
+  - **Making it from your resumes.** `gigai scout resume master init` merges the resumes your
+    profiles hold: the lines of all of them, the same line kept once, and a line worded twice folded
+    into the newer wording. When two resumes state one line with different numbers, Scout asks which
+    is right and writes nothing until you answer (`--answer ID=a`, `=b`, or `=both` to keep the two
+    lines). Nothing is left out silently: `init` and `init --dry-run` count every line of your
+    resumes as kept, folded into a line the master holds, or left out, and name each left-out line
+    by its line number in the stored resume and the reason, never by its text ("Of 20 lines of
+    resume text ...: 18 kept, 0 folded into a line the master holds, 2 left out";
+    `migration.source_lines` in `--json`). Your name, a headline and contact lines are never kept.
+    `gigai scout resume master init --from FILE` stores a resume markdown file as the master
+    instead.
+  - **A job's tailored resume is picked from the whole master.** Code first picks that job's
+    candidate lines from the whole master (about twice what fits on 2 pages), starting from the
+    lines the profile shows. The one tailoring call then orders and words the lines inside that set,
+    as before, and code cuts the result to 2 pages: the oldest roles first, every recent role still
+    present, and a line that is the only one naming something the posting requires kept. What was
+    cut is listed and one Restore puts it back; the "Cut for length" line says "older bullets" only
+    when every bullet it names belongs to a role that ended more than 8 years ago. The Skills line
+    is put together by code (the posting's required skills that your master lists, then its
+    nice-to-haves, then what the offered lines name; 28 skills at most), so the master's whole
+    Skills list is never put on one resume. When the model call fails or no model is available,
+    tailoring on demand still gives you a resume: the code's own 2-page selection, marked as picked
+    by code. A pasted resume, a profile whose resume you replaced by hand and a home without a
+    master are tailored exactly as before.
+  - **An assessment reads it, and says when your resume changed for it.** Assessing a job for a
+    profile (the job page's Assess, `gigai scout assess`, "Assess all new", `gigai scout new --yes`)
+    shows the model the lines of your whole master that fit that posting best, picked by code,
+    within the same limit on the resume's size and in the same single call. A requirement your
+    master covers is no longer a question because one profile's 2 pages left the line out: in our
+    test on invented postings (11 cases, each assessed twice both ways) the open questions went from
+    63 to 6, no case got a worse verdict and no evidence was invented; the prompt is about 14%
+    larger. The assessment of a tailored resume still reads the 2 pages that will be sent, a
+    find-jobs run still reads the profile's resume, and a pasted resume or a profile whose resume
+    you replaced by hand is assessed as before. A stored assessment can now read "old assessment:
+    resume changed" ("Resume changed" on a job's card), only when the change concerns it: a line it
+    quoted as evidence was edited or retired, or a new line names something it left as an open
+    question ("A new line of your resume may answer: Have you used Helm?"). Nothing is assessed
+    again on its own. For agents: `basis_stale_reason: "resume_changed"` with `basis_stale_resume`,
+    and `resume_basis` on an assessment that read the master.
+  - **Your agent keeps it up to date from a chat.** `gigai scout resume master add`, `edit` and
+    `remove` change one line, role or skill by its id. A story or an answer becomes a line of the
+    master with `--from-story ID` or `--from-answer ID`: the line is linked to it, and from then on
+    every profile and every job can select it. An agent passes `--as agent` and says where the
+    evidence came from with `--source`. An edit or a removal names the revision it read (`--revision
+    N`) and is refused when the master changed since. Text that looks like contact data is refused
+    and stored nowhere, and a line the master already has in other words is not added unless you
+    pass `--force`. A removed line is retired, not deleted: `gigai scout resume master show
+    --retired` still lists it, and `gigai scout resume master add --restore ID` puts it back under
+    the same id. The agent instructions (`gigai agent-skill`) have a step for this: after saving a
+    story or an answer with substance, the agent asks "Want this on your resume?". An agent reads
+    the master with `gigai scout resume master show --json`, never from the file.
+  - **The Master page, and Picked / Left out on a job.** Settings has a new page, **Master resume**
+    (`#/master`). With no master yet it offers to make one: it shows what the merge would do, counts
+    every line of your resumes and lists each left-out line by resume, line number and reason, asks
+    about each line your resumes word with different numbers (keep A, keep B, or both), and writes
+    nothing until you answer. After that it lists the master by role: add a line or a role, edit
+    one, retire one (History puts it back); each line shows how strong its evidence is (backed by a
+    story or an answer, states a number, or stated) and which profiles show it. A change that
+    crosses one your agent made is refused, and the page shows the master as it is now. Each profile
+    says where its selection stands ("3 new master lines: refresh?") with a **Refresh** button. On a
+    job page, a resume tailored from the master has **Picked (n)** and **Left out (m)**: every line
+    with the reason it is shown or not, **Remove** to take a line off this job's resume and **Add**
+    to put one on; when an added line would make the resume 3 pages, Scout names the line that would
+    be cut to keep 2 and asks. A line your agent edited on a tailored resume offers **Save this
+    wording to your master**. The API has `GET /api/master`, `GET /api/master/history`, `POST` and
+    `PUT /api/master/lines` and `/api/master/entries`, `GET` and `POST /api/master/migration`, `GET`
+    and `POST /api/master/selection`, `POST /api/master/sync` and `PUT
+    /api/tailored-resumes/selection`; a tailored resume carries what was picked and left out as
+    `selection` (`gigai scout resume tailor --json`, `GET /api/tailored-resumes`).
 
 ### 0.1.10.8
 
