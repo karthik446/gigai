@@ -17,6 +17,10 @@ master a resume shows for a profile or for one job, and why each line is
 picked or left out (``master_selection``: code only, fitted to the page
 budget by measuring). It reads the master, a profile's titles and a posting
 Scout already holds; it makes no request and the selection is not stored.
+
+P6 (``master_edit_cli``): ``add | edit | remove`` change one line, entry or
+skill by id; ``show --retired`` lists what was removed (retired, never lost)
+and ``show --revision N`` reads an earlier revision.
 """
 
 from __future__ import annotations
@@ -100,10 +104,16 @@ def master_group() -> None:
 @master_group.command("show")
 @click.option("--section", "section", help="Only this section: summary, experience, skills, education, projects or other.")
 @click.option("--entry", "entry_id", help="Only this role, project or school (its id) and its lines.")
+@click.option("--revision", "revision", type=click.IntRange(min=1), help="An earlier revision instead of the current one (history lists them).")
+@click.option("--retired", "retired", is_flag=True, help="Instead: the lines and entries the master no longer holds, each with its text and the revision that still holds it.")
 @_options
-def master_show_command(section: str | None, entry_id: str | None, target_value: Path | None, home_value: Path | None, as_json: bool) -> None:
-    """Show the master: every entry and line with its id, tags and evidence strength."""
+def master_show_command(
+    section: str | None, entry_id: str | None, revision: int | None, retired: bool, target_value: Path | None, home_value: Path | None, as_json: bool,
+) -> None:
+    """Show the master: every entry and line with its id, tags, evidence strength and who wrote it."""
 
+    from .master_edit import entry_json, item_json, provenance
+    from .master_edit_cli import show_retired
     from .master_resume import MASTER_FORMAT, SECTION_HEADINGS
     from .master_store import MasterStoreError, load_master
 
@@ -113,13 +123,20 @@ def master_show_command(section: str | None, entry_id: str | None, target_value:
         wanted = section.strip().lower() if section is not None else None
         if wanted is not None and wanted not in SECTION_HEADINGS:
             raise MasterStoreError("master_section_unknown", "--section is one of " + ", ".join(SECTION_HEADINGS))
+        if retired:
+            if wanted is not None or entry_id is not None or revision is not None:
+                raise MasterStoreError("master_option_invalid", "--retired lists every retired line: it takes no --section, --entry or --revision")
+            show_retired(home_root, target, as_json=as_json)
+            return
         with committed_read_cache():
-            stored = load_master(home_root=home_root, target=target)
+            stored = load_master(home_root=home_root, target=target, revision=revision)
         if stored is None:
             raise MasterStoreError("master_not_found", _NO_MASTER)
         master = stored.master
         if entry_id is not None and entry_id not in master.entries:
             raise MasterStoreError("master_entry_not_found", f"the master has no entry {entry_id!r}")
+        # P6: who wrote a line's text and where its evidence came from (null where that is not known).
+        known = provenance(home_root=home_root, target=target, master=master)
     except _errors() as exc:
         _fail(exc, as_json=as_json)
         return
@@ -135,19 +152,26 @@ def master_show_command(section: str | None, entry_id: str | None, target_value:
             "master": {
                 **stored.revision.to_json(), "record_id": stored.record_id, "format": MASTER_FORMAT,
                 "sections": list(master.sections), "counts": master.counts(),
-                "entries": [entry.to_json() for entry in entries], "items": [item.to_json() for item in items],
+                "revisions": stored.revisions,
+                "entries": [entry_json(entry, known) for entry in entries], "items": [item_json(item, known) for item in items],
             },
         })
         return
     counts = master.counts()
+    earlier = f" of {stored.revisions}, not the current one" if stored.revision.revision != stored.revisions else ""
     click.echo(
-        f"Master resume, revision {stored.revision.revision} (written by {stored.revision.written_by}, {stored.revision.updated_at}): "
+        f"Master resume, revision {stored.revision.revision}{earlier} (written by {stored.revision.written_by}, {stored.revision.updated_at}): "
         f"{_size(counts)}."
     )
 
     def line(item) -> str:  # noqa: ANN001 - a MasterItem
         tags = "".join(f" #{tag}" for tag in item.tags)
-        return f"{item.id}  [{item.strength}]  {item.text}{tags}"
+        kept = known.get(item.id, {})
+        said = [str(kept[key]) for key in ("written_by", "source") if kept.get(key)]
+        who = f"  ({': '.join(said) if kept.get('written_by') else 'source: ' + said[0]})" if said else ""
+        for skill in kept.get("skills", ()):  # a Skills line: the skills a write added, by who added them
+            who += f"  ({skill['written_by']}: {skill['name']})"
+        return f"{item.id}  [{item.strength}]  {item.text}{tags}{who}"
 
     for name in master.sections:
         if not any(entry.section == name for entry in entries) and not any(item.section == name for item in items):
@@ -527,6 +551,8 @@ def selection_show_command(
 
 # P3: `selection status` and `selection refresh` register themselves on the group above.
 from . import master_profiles_cli as _master_profiles_cli  # noqa: E402,F401
+# P6: `add`, `edit` and `remove` do the same.
+from . import master_edit_cli as _master_edit_cli  # noqa: E402,F401
 
 __all__ = [
     "master_group", "master_history_command", "master_init_command", "master_show_command", "selection_group", "selection_show_command",
