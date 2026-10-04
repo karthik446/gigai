@@ -40,6 +40,22 @@
         "countries": {"type": "array", "items": {"type": "string", "pattern": "^[A-Z]{2}$"}},
         "max_age_days": {"type": ["integer", "null"], "minimum": 1, "maximum": 365}
       }
+    },
+    "master_selection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["item_ids", "skills", "pins", "excludes", "master_revision_id", "synced_revision_id", "resume_revision_id", "selector_version", "source"],
+      "properties": {
+        "item_ids": {"type": "array", "maxItems": 5000, "uniqueItems": true, "items": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$"}},
+        "skills": {"type": "array", "maxItems": 500, "items": {"type": "string", "minLength": 1, "maxLength": 200}},
+        "pins": {"type": "array", "maxItems": 5000, "uniqueItems": true, "items": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$"}},
+        "excludes": {"type": "array", "maxItems": 5000, "uniqueItems": true, "items": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$"}},
+        "master_revision_id": {"type": "string", "pattern": "^revision_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"},
+        "synced_revision_id": {"type": "string", "pattern": "^revision_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"},
+        "resume_revision_id": {"type": "string", "pattern": "^revision_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"},
+        "selector_version": {"type": "string", "pattern": "^[a-z0-9][a-z0-9.-]{0,31}$"},
+        "source": {"enum": ["migration", "index", "titles", "refresh"]}
+      }
     }
   }
 }

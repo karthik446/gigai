@@ -6,6 +6,12 @@ project and skill, with an id on every line and no contact data
 its revisions). These commands are local: no model, no network. Errors
 name a line number and the rule, never a line's text.
 
+P3 (``master_profiles_cli``): ``init`` without ``--from`` builds the master
+from the resumes the profiles hold (the migration), ``selection status`` and
+``selection refresh`` keep a profile's selection, and every write of the
+master ends with ``after_master_write`` (stale views printed again, new
+lines offered).
+
 P2 adds ``gigai scout resume master selection show``: which lines of the
 master a resume shows for a profile or for one job, and why each line is
 picked or left out (``master_selection``: code only, fitted to the page
@@ -26,7 +32,10 @@ from ..workpad import WorkpadError, committed_read_cache
 from .target_resolution import ScoutTargetError
 from .template import ScoutInstallError
 
-_NO_MASTER = "there is no master resume yet; make one with: gigai scout resume master init --from FILE"
+_NO_MASTER = (
+    "there is no master resume yet; make one from your profiles' resumes with `gigai scout resume master init`, "
+    "or from a file with `gigai scout resume master init --from FILE`"
+)
 
 
 def _options(function):
@@ -162,28 +171,49 @@ def master_show_command(section: str | None, entry_id: str | None, target_value:
     "--as", "--actor", "actor", type=click.Choice(["operator", "agent"]), default="operator", show_default=True,
     help="Who is writing: recorded on the revision. An agent passes --as agent.",
 )
+@click.option(
+    "--answer", "answers", multiple=True,
+    help="Without --from: the answer to one question of the merge, QUESTION_ID=a, =b or =both (repeatable).",
+)
+@click.option("--dry-run", "dry_run", is_flag=True, help="Without --from: show what the merge would store; write nothing.")
 @_options
 def master_init_command(
-    source: Path | None, revision: int | None, actor: str, target_value: Path | None, home_value: Path | None, as_json: bool,
+    source: Path | None, revision: int | None, actor: str, answers: tuple[str, ...], dry_run: bool,
+    target_value: Path | None, home_value: Path | None, as_json: bool,
 ) -> None:
-    """Store FILE as the master resume: contact lines removed, an id on every line.
+    """Make the master resume: from the resumes your profiles hold, or from FILE.
 
-    FILE is resume markdown in GigAI's format (## Summary, ## Experience with
-    ### entries and - bullets, ## Skills, ## Education, ## Projects, ## Other).
-    A line without an id gets one. With a master already stored, pass
-    --revision N (the revision you read): the file becomes revision N+1.
+    Without --from: the resumes of your profiles are merged into one master
+    (the union of their lines; the same line and near-duplicates are folded,
+    the newer wording kept). Two versions of a line that state different
+    numbers are ASKED about: nothing is written until each has an --answer.
+    Every profile's first selection is its own resume, which is not
+    rewritten, so nothing already assessed or tailored goes stale.
+
+    With --from FILE: FILE is stored as the master. It is resume markdown in
+    GigAI's format (## Summary, ## Experience with ### entries and - bullets,
+    ## Skills, ## Education, ## Projects, ## Other); contact lines are
+    removed and a line without an id gets one. With a master already
+    stored, pass --revision N (the revision you read): the result becomes
+    revision N+1.
     """
 
     from . import scout_cli
+    from .master_profiles_cli import after_master_write, echo_after_master_write, run_migration
     from .master_store import MasterStoreError, import_master
 
+    if source is None:
+        run_migration(
+            answers=answers, dry_run=dry_run, revision=revision, actor=actor, target_value=target_value, home_value=home_value, as_json=as_json,
+        )
+        return
     home_root = home_value or default_home_root()
     # As `resume add`: works as the very first command on a fresh home.
     scout_cli._ensure_gigai_settings(home_root, as_json=as_json)
     try:
         target = _target(target_value, home_root, as_json=as_json)
-        if source is None:
-            raise MasterStoreError("master_source_missing", "pass --from FILE: the resume markdown to store as the master")
+        if answers or dry_run:
+            raise MasterStoreError("master_option_invalid", "--answer and --dry-run belong to `master init` without --from (the merge of your profiles' resumes)")
         installed = scout_cli.install_scout(home_root=home_root, requested_target=target)
         scout_cli.write_starter_find_jobs_config(target)
         result = import_master(home_root=home_root, target=target, source=source, actor=actor, revision=revision)
@@ -193,6 +223,8 @@ def master_init_command(
     master = result.stored.master
     counts = master.counts()
     removed = result.contact_removed.to_json()
+    # P3: a profile that shows an edited or retired line gets its resume printed again; new lines are only offered.
+    profiles = after_master_write(home_root, target) if result.status != "unchanged" else {"synced": [], "offers": []}
     payload = {
         "ok": True,
         "status": result.status,
@@ -203,6 +235,7 @@ def master_init_command(
         "changes": result.change.to_json(),
         # What the privacy strip took out (kinds and line numbers, never a value), or null.
         "contact_removed": removed,
+        "profiles": profiles,
     }
     if as_json:
         _emit(payload)
@@ -218,6 +251,7 @@ def master_init_command(
     if removed is not None:
         where = ", ".join(f"line {line}: {kind.replace('_', ' ')}" for kind, line in result.contact_removed.lines)
         click.echo(f"{removed['message']} Not imported: {where}.")
+    echo_after_master_write(profiles)
     click.echo("Next: `gigai scout resume master show`.")
 
 
@@ -490,6 +524,9 @@ def selection_show_command(
     else:
         _echo_selection(master, selected, heading, stored.revision.revision)
 
+
+# P3: `selection status` and `selection refresh` register themselves on the group above.
+from . import master_profiles_cli as _master_profiles_cli  # noqa: E402,F401
 
 __all__ = [
     "master_group", "master_history_command", "master_init_command", "master_show_command", "selection_group", "selection_show_command",

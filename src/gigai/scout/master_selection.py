@@ -890,6 +890,35 @@ def select(
     )
 
 
+def render_selection(master: Master, item_ids: Iterable[str], skills: Iterable[str]) -> str:
+    """The resume markdown of a STORED selection: the entries and lines ``item_ids`` names, and ``skills``.
+
+    What the master no longer has is left out (a retired line, a skill it no longer lists), and an edited
+    line prints as the master words it now. An entry prints when ``item_ids`` names it or one of its lines.
+    For the ids and skills of a ``Selected`` this is its ``markdown``.
+    """
+
+    wanted = list(dict.fromkeys(item_ids))
+    pick = _Pick()
+    for item_id in wanted:
+        entry = master.entries.get(item_id)
+        if entry is not None:
+            pick.entries.setdefault(entry.id, [])
+            continue
+        item = master.items.get(item_id)
+        if item is None:
+            continue
+        if item.kind == KIND_SUMMARY:
+            pick.summary.append(item.id)
+        elif item.kind == KIND_OTHER:
+            pick.other.append(item.id)
+        elif item.kind == KIND_BULLET:
+            pick.entries.setdefault(item.entry_id or "", []).append(item.id)
+    listed = {name.casefold(): name for name in master.skills()}
+    pick.skills = list(dict.fromkeys(listed[name.casefold()] for name in skills if name.casefold() in listed))
+    return _render(master, pick, ids=False)
+
+
 # --- the evidence view ------------------------------------------------------------------------
 
 
@@ -996,5 +1025,6 @@ __all__ = [
     "UNMEASURED_PAGES",
     "evidence_view",
     "is_old_role",
+    "render_selection",
     "select",
 ]
