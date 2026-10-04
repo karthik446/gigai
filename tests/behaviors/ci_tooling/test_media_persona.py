@@ -65,6 +65,22 @@ def test_the_resume_is_headerless() -> None:
     assert privacy_scan.scan_text(persona.RESUME_MARKDOWN, allow=()) == []
 
 
+def test_the_master_data_is_the_resume_and_the_stories() -> None:
+    # 0110-10-07: the Master page, Picked / Left out and the master terminal frames use only what the persona already holds.
+    bullets = [line.removeprefix("- ") for line in persona.RESUME_MARKDOWN.splitlines() if line.startswith("- ")]
+    lines = [persona.RESUME_MARKDOWN.splitlines()[0], *bullets]
+    titles = {story["title"] for story in persona.STORIES}
+    assert set(persona.MASTER_BACKED) <= titles, "a backed line names a story the demo saves"
+    assert set(persona.MASTER_BACKED.values()) <= set(bullets)
+    assert set(persona.MASTER_ADDED) <= set(lines)
+    assert len(set(persona.MASTER_ADDED)) == len(persona.MASTER_ADDED) >= 3
+    assert set(bullets) - set(persona.MASTER_ADDED), "some master lines stay under Left out"
+    assert f"### {persona.TERMINAL_MASTER['entry']}" in persona.RESUME_MARKDOWN, "the terminal's new line goes under a role the resume has"
+    assert persona.TERMINAL_MASTER["text"] not in persona.RESUME_MARKDOWN, "the line the agent adds is new to the master"
+    assert len(persona.TERMINAL_MASTER["text"]) <= 400, "one master line"
+    assert persona.TERMINAL_MASTER["text"] in persona.all_text()
+
+
 def test_the_build_refuses_a_home_that_is_not_temporary(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("HOME", str(REPO))
     with pytest.raises(demo_home.DemoHomeError, match="temporary directory"):

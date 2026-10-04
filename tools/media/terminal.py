@@ -74,6 +74,7 @@ class _Session:
 
 
 _SINCE = re.compile(r"--since (\S+)")
+_STORY = re.compile(r"\bstory:[a-z0-9_]+")
 
 
 def record(demo: DemoHome) -> list[Frame]:
@@ -114,11 +115,13 @@ def record(demo: DemoHome) -> list[Frame]:
         ("agent", "Save it?"),
         ("you", "Save it."),
     ]
-    session.run(
+    saved = _STORY.search(session.run(
         told, "scout", "story", "save", "--title", story["title"], "--raw-text", story["raw_text"],
         "--situation", story["situation"], "--task", story["task"], "--action", story["action"], "--result", story["result"],
         "--tag", story["tag"], "--answers", story["answers"], "--actor", "agent",
-    )
+    ))
+    if saved is None:
+        raise TerminalError("`gigai scout story save` did not print the story's id")
 
     pdf = Frame("terminal-pdf", "The agent renders the tailored resume as a headerless PDF and hands you the link to finish it in Scout.")
     pdf.lines.append(("you", f"Make the PDF for the {persona.COMPANIES[0].name} job."))
@@ -126,7 +129,28 @@ def record(demo: DemoHome) -> list[Frame]:
     session.run(pdf, "scout", "resume", "pdf", "--tailored", "--job-url", demo.hero_job, "--out", "resume.pdf")
     pdf.lines.append(("agent", "Done. The PDF has no name or contact details: open that link to add yours in the browser and download it."))
 
-    return [new, assessed, yours, answered, told, pdf]
+    # The master frames come last: adding a line makes a new master revision, which the frames above do not expect.
+    line = persona.TERMINAL_MASTER
+    master = Frame("terminal-master", "`gigai scout resume master show`: your master resume, every role and line once, each with its id and how well it is backed.")
+    master.lines.append(("you", "What does my master resume hold?"))
+    shown = session.run(master, "scout", "resume", "master", "show")
+    master.lines.append(("agent", "Every role and line you have, once. Each profile shows a selection of it, and a resume tailored for a job picks from all of it."))
+    entry = re.search(rf"^\s*(r-[0-9a-f]+)\s+{re.escape(line['entry'])}\b", shown, re.MULTILINE)
+    if entry is None:
+        raise TerminalError(f"`gigai scout resume master show` did not list the role {line['entry']}")
+
+    added = Frame("terminal-master-add", "The agent adds your story to the master resume as one line, on your OK; each profile is offered the new line, never changed by itself.")
+    added.lines += [
+        ("agent", f"Your Kafka story is not in your master resume yet. Add it under {line['entry']} as: \"{line['text']}\"?"),
+        ("you", "Yes, add it."),
+    ]
+    session.run(
+        added, "scout", "resume", "master", "add", "--entry", entry.group(1), "--text", line["text"],
+        "--from-story", saved.group(0), "--as", "agent",
+    )
+    added.lines.append(("agent", "Added, backed by your story. Your profiles keep the selection they have until you refresh them."))
+
+    return [new, assessed, yours, answered, told, pdf, master, added]
 
 
 _CSS = """

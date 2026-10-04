@@ -35,6 +35,10 @@ mechanics here. Those belong in the internal changelog.
 Speed: nothing you wait for in the local app should take more than a second, also on a very large
 store of postings. Work in progress; the notes are written as the changes land.
 
+- **Screenshots.** The screenshots in the docs are from this version again (0.1.10.9 kept the older
+  ones) and now show the Master resume page, Picked and Left out on a job's resume, where a job's
+  resume file is in your resumes folder, and an agent adding a story to your master resume.
+
 ### 0.1.10.9
 
 The Jobs page now loads on a large store of postings (about 290,000 postings from about 10,000

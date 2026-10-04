@@ -70,6 +70,18 @@ def assert_synthetic_home(root: Path) -> None:
         raise DemoHomeError("the temporary HOME already has a .gigai folder; use a fresh one")
 
 
+def media_resumes_folder() -> Path:
+    """Where the screenshots' demo home keeps its resume files: `Documents/GigAI/resumes` under the temporary HOME.
+
+    A home that is not `~/.gigai` defaults to `<home>/resumes`, which the UI would show as
+    `~/demo/home/resumes`: a made-up path nobody has, and one the privacy gate rightly reads as
+    a home path (`/home/<name>`; 0110-10-07). The demo sets the folder a default install has
+    instead, so the screenshots show `~/Documents/GigAI/resumes`, as a reader's own Scout does.
+    """
+
+    return Path.home() / "Documents" / "GigAI" / "resumes"
+
+
 def _lever_body(company: persona.Company, seen: datetime) -> list[dict[str, object]]:
     body: list[dict[str, object]] = []
     for number, posting in enumerate(company.postings, start=1):
@@ -90,8 +102,15 @@ def _lever_body(company: persona.Company, seen: datetime) -> list[dict[str, obje
     return body
 
 
-def build(root: Path, *, log=print) -> DemoHome:
-    """Create the home under `root`, start Scout, fill it. The caller stops it with `stop(root)`."""
+def build(root: Path, *, log=print, resumes_folder: Path | None = None, master: bool = False) -> DemoHome:
+    """Create the home under `root`, start Scout, fill it. The caller stops it with `stop(root)`.
+
+    `resumes_folder` saves that folder as the home's resumes folder (the real `gigai scout resume
+    folder --set`) before anything is written to it; `master` makes the master resume from the
+    profiles' resumes (the Master page's own route) before the first job is tailored, so the hero
+    job's resume is picked from the master. Both are off for the browser tests (tests/ui), which
+    pin the default folder and make the master themselves; `make media` turns both on.
+    """
 
     assert_synthetic_home(root)
     os.environ.update(SEAM_ENV)
@@ -126,6 +145,8 @@ def build(root: Path, *, log=print) -> DemoHome:
         "--create-model-target", "ollama_local", "--json",
     )
     gigai("init", "--home", str(home), "--target", str(target), "--username", "demo-user", "--json")
+    if resumes_folder is not None:
+        gigai("scout", "resume", "folder", "--set", str(resumes_folder), "--home", str(home), "--json")
     resume = root / "resume.md"
     resume.write_text(persona.RESUME_MARKDOWN, encoding="utf-8")
     gigai("scout", "resume", "add", str(resume), "--home", str(home), "--target", str(target), "--json")
@@ -191,6 +212,16 @@ def build(root: Path, *, log=print) -> DemoHome:
     profiles = {item["label"]: item["profile_id"] for item in ok(client.get("/api/profiles"))["profiles"]}
     log(f"profiles: {sorted(profiles)}")
 
+    if master:
+        # The Master page's "make it" button: the profiles hold one resume, so the merge asks nothing.
+        plan = ok(client.get("/api/master/migration"))
+        if plan.get("questions"):
+            raise DemoHomeError(f"the demo master should need no answer, not {len(plan['questions'])} questions")
+        made = ok(client.post("/api/master/migration", json={"answers": {}, "actor": "operator"}), 201)
+        if not made.get("written"):
+            raise DemoHomeError(f"the demo master was not made: {made.get('status')}")
+        log(f"master: revision {ok(client.get('/api/master'))['master']['revision']}")
+
     # One job of a trigger runs by itself; the rest wait for an approval (the Background panel shows it).
     ok(client.put("/api/settings/background", json={"pipeline": {"auto_jobs_per_trigger": 1}}))
 
@@ -232,6 +263,25 @@ def build(root: Path, *, log=print) -> DemoHome:
     for story in persona.STORIES:
         ok(client.post("/api/stories", json=dict(story, actor="agent")), 201)
 
+    def master_line(text: str) -> tuple[dict, dict]:
+        """(the master now, its line with exactly this text)."""
+
+        current = ok(client.get("/api/master"))["master"]
+        line = next((item for item in current["items"] if item["text"] == text), None)
+        if line is None:
+            raise DemoHomeError(f"the demo master has no line: {text[:60]}")
+        return current, line
+
+    if master:
+        # Each story backs the master line that tells the same thing (the line's evidence, as
+        # `gigai scout resume master edit --from-story` sets it): the Master page marks it "backed".
+        told = {item["title"]: item["story_id"] for item in ok(client.get("/api/stories"))["stories"]}
+        for title, text in persona.MASTER_BACKED.items():
+            current, line = master_line(text)
+            ok(client.put("/api/master/lines", json={
+                "revision": current["revision"], "actor": "agent", "id": line["id"], "use": "edit", "backed": [told[title]],
+            }))
+
     def pipeline_done(previous: str | None = None) -> dict:
         """Wait until the hero job's pipeline is done (again, when `previous` is its last `updated_at`)."""
 
@@ -257,6 +307,23 @@ def build(root: Path, *, log=print) -> DemoHome:
     pipeline = pipeline_done(done_job["updated_at"])
     done_job = pipeline["hero"]
     log(f"hero job: {done_job['label']}")
+
+    if master:
+        # The fixture model's "tailored" resume shows none of the master's lines. "You" add four with
+        # the job page's own Add (the same route), so Picked and Left out both have lines to show.
+        resume_of = {"profile_id": done_job["profile_id"], "job_identity": hero}
+        stored = max(ok(client.get("/api/tailored-resumes", params=resume_of))["items"], key=lambda item: item["updated_at"])
+        if not stored.get("selection"):
+            raise DemoHomeError("the hero job's resume was not tailored from the master")
+        for text in persona.MASTER_ADDED:
+            stored = ok(client.put("/api/tailored-resumes/selection", json={
+                **resume_of, "updated_at": stored["updated_at"], "use": "add", "item_id": master_line(text)[1]["id"],
+            }))
+            if not stored["selection_change"]["changed"]:
+                raise DemoHomeError(f"the line was not added to the hero job's resume: {stored['selection_change']}")
+        pipeline = pipeline_done()
+        done_job = pipeline["hero"]
+        log(f"hero resume: picked {stored['selection']['counts']['picked']}, left out {stored['selection']['counts']['left_out']}")
 
     final = ok(client.get("/api/postings"))
     counts = {key: int(value) for key, value in final["counts"].items() if isinstance(value, int)}

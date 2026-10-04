@@ -38,6 +38,16 @@ drafts: review each line; every line shows its sources.
 
 > Every line comes from your resume, answers or stories. Read it before you send it.
 
+The panel also says where the file is. Each job's tailored resume (markdown) is saved in your
+resumes folder (`~/Documents/GigAI/resumes` unless you chose another in Settings), named
+`<company>-<role>-<date>.md`. A file you change there stays yours; Scout replaces only what
+it wrote itself.
+
+<!-- The images on this page are the release screenshots (`make media`, a synthetic demo home on the
+fixture model; see the note under "The master resume"). Paths are relative to this page, as on For agents. -->
+<a href="../../media/job-resume-dark.png"><img class="light:sl-hidden" src="../../media/job-resume-dark.png" alt="The tailored resume on the job page, with where its file is in your resumes folder." loading="lazy" /></a>
+<a href="../../media/job-resume-light.png"><img class="dark:sl-hidden" src="../../media/job-resume-light.png" alt="The tailored resume on the job page, with where its file is in your resumes folder." loading="lazy" /></a>
+
 **Generate PDF** opens a small form: name, email, phone, location, LinkedIn and
 one more link. Fill what you want printed and press Generate PDF. The values go
 into that one PDF and are dropped: GigAI does not save them, so you type them
@@ -97,6 +107,9 @@ states a number, or stated. Only your own facts belong here; an agent writes wit
 through the API (`POST` and `PUT /api/master/lines`), under the same rules, and sends the
 revision it read, so a change that crosses yours is refused instead of overwriting it.
 
+<a href="../../media/master-lines-dark.png"><img class="light:sl-hidden" src="../../media/master-lines-dark.png" alt="The same page further down: every role and line of the master, each marked backed, stating a number, or stated." loading="lazy" /></a>
+<a href="../../media/master-lines-light.png"><img class="dark:sl-hidden" src="../../media/master-lines-light.png" alt="The same page further down: every role and line of the master, each marked backed, stating a number, or stated." loading="lazy" /></a>
+
 **The file.** Your master is also a file you can open: `master.md` in your resumes folder
 (`~/Documents/GigAI/resumes` unless you chose another in Settings). Scout writes it again
 after every change of the master. Edit it in your own editor, then import it: **Import the
@@ -113,6 +126,9 @@ link or an address (Scout stores no contact details), and when the master change
 the file was written; **Import it anyway** (`--revision N`) then imports your file as it
 is, and what was added since is retired.
 
+<a href="../../media/master-dark.png"><img class="light:sl-hidden" src="../../media/master-dark.png" alt="The Master resume page: its revision, the file you can edit in your resumes folder, and each profile's selection of it." loading="lazy" /></a>
+<a href="../../media/master-light.png"><img class="dark:sl-hidden" src="../../media/master-light.png" alt="The Master resume page: its revision, the file you can edit in your resumes folder, and each profile's selection of it." loading="lazy" /></a>
+
 **Profiles.** A profile's selection stays as it is until you refresh it. When the master
 gains lines, the profile says so ("3 new master lines: refresh?") under Settings >
 Profiles and on the Master page; **Refresh** selects again from the whole master, by
@@ -124,6 +140,18 @@ on the job page, every line with the reason it is shown or not. **Remove** takes
 off this job's resume; **Add** puts one on. If an added line would make the resume 3
 pages, Scout names the line that would be cut to keep 2 and asks: cut it, or keep both.
 A line that was edited on a tailored resume offers **Save this wording to your master**.
+
+<a href="../../media/job-picked-dark.png"><img class="light:sl-hidden" src="../../media/job-picked-dark.png" alt="Picked: the lines of your master resume this job's resume shows, each with why." loading="lazy" /></a>
+<a href="../../media/job-picked-light.png"><img class="dark:sl-hidden" src="../../media/job-picked-light.png" alt="Picked: the lines of your master resume this job's resume shows, each with why." loading="lazy" /></a>
+
+<a href="../../media/job-left-out-dark.png"><img class="light:sl-hidden" src="../../media/job-left-out-dark.png" alt="Left out: the other lines of your master resume, each with why, and Add to show one on this resume." loading="lazy" /></a>
+<a href="../../media/job-left-out-light.png"><img class="dark:sl-hidden" src="../../media/job-left-out-light.png" alt="Left out: the other lines of your master resume, each with why, and Add to show one on this resume." loading="lazy" /></a>
+
+The companies, postings and person in these images are made up, and no model wrote the resume
+in them: the build uses a fixture in place of a model, whose "tailored" resume is a few lines
+and shows none of the master's lines. The four lines under Picked were added with **Add**, which
+is why each says "you added it to this resume"; a resume a model tailored gives the reason each
+line was picked.
 
 ## Resume display
 

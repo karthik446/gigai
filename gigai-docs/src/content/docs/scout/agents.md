@@ -493,6 +493,16 @@ The agent's PDF has no name or contact details. It hands you a link, and you add
 <a href="../../media/pdf-dark.png"><img class="light:sl-hidden" src="../../media/pdf-dark.png" alt="Generate PDF: you add your own name and contact details in the browser; GigAI stores none." loading="lazy" /></a>
 <a href="../../media/pdf-light.png"><img class="dark:sl-hidden" src="../../media/pdf-light.png" alt="Generate PDF: you add your own name and contact details in the browser; GigAI stores none." loading="lazy" /></a>
 
+Your master resume, from the terminal: every role and line once, each with its id. On your OK
+the agent adds a story to it as one line; each profile is offered the new line, never changed by itself.
+
+<a href="../../media/terminal-master.png"><img src="../../media/terminal-master.png" alt="`gigai scout resume master show`: your master resume, every role and line once, each with its id and how well it is backed." loading="lazy" /></a>
+
+<a href="../../media/terminal-master-add.png"><img src="../../media/terminal-master-add.png" alt="The agent adds your story to the master resume as one line, on your OK; each profile is offered the new line, never changed by itself." loading="lazy" /></a>
+
+<a href="../../media/master-lines-dark.png"><img class="light:sl-hidden" src="../../media/master-lines-dark.png" alt="The same page further down: every role and line of the master, each marked backed, stating a number, or stated." loading="lazy" /></a>
+<a href="../../media/master-lines-light.png"><img class="dark:sl-hidden" src="../../media/master-lines-light.png" alt="The same page further down: every role and line of the master, each marked backed, stating a number, or stated." loading="lazy" /></a>
+
 The companies, postings and person in these images are made up.
 
 ## Discover the API
