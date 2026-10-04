@@ -56,6 +56,11 @@ the server used several gigabytes of memory, and reloading made it worse. Read "
   seconds), and `gigai scout new` takes under a second.
 - **The background ranking no longer slows everything down.** It used to match the whole store of
   postings against your profiles again on every turn.
+- **The Jobs page has real pages.** Pages of 50 postings (25 or 100 if you prefer) with Prev, Next
+  and page numbers, and "Showing 51-100 of 591 postings", instead of a list that grows by "Show 50
+  more". The page, its size and your filters are in the address (`#/jobs?page=3&state=needs_answers`),
+  so Back from a job returns to the same page and a page can be bookmarked. Changing a filter or the
+  search starts again at page 1, and the counts at the top stay the totals.
 - **Going back from a job to the list keeps the list.** The Jobs page keeps what it loaded,
   refreshes it in place and asks for one thing at a time. A slow answer says what it is waiting for.
 - **A browser that goes away is no longer an error in the log.** It is logged as "client closed the

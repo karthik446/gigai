@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { getNewPeek, getPostings, getPostingsStatus, postAssessThese, postMarkAllSeen } from "../api.js";
 import AssessApprovalDialog from "../components/AssessApprovalDialog.jsx";
 import SourcesStrip from "../components/SourcesStrip.jsx";
@@ -6,7 +6,7 @@ import { useSourcesStatus } from "../components/SourcesUpdatePanel.jsx";
 import { inProgressCount } from "../jobStateModel.js";
 import {
   EMPTY_FILTER,
-  PAGE_ROWS,
+  PAGE_SIZES,
   PROFILE_FILTER_KEY,
   REMOVED_FILTER,
   STATE_FILTERS,
@@ -17,8 +17,12 @@ import {
   detailLine,
   hasFilter,
   isNew,
+  jobsHash,
   keepActiveProfiles,
   needsAnswers,
+  pageCount,
+  pageNumbers,
+  parseJobsHash,
   profileChips,
   profileTags,
   rowChips,
@@ -156,12 +160,80 @@ function PostingRow({ row, profiles, anchor, selected, onSelect, onOpen, onAsses
 // back shows the rows that were read, at once, and refreshes them in place.
 const postingsStore = createPostingsStore({ fetchPostings: getPostings, fetchPeek: getNewPeek, fetchStatus: getPostingsStatus });
 
+// 0110-10-01: the page, the page size and the filters live in the address (#/jobs?page=3&state=needs_answers), so
+// Back from a job lands on the same page and a page can be bookmarked. The hash is the one source: a click writes
+// it, and the list is whatever it says.
+function currentView({ mounting = false } = {}) {
+  const parsed = parseJobsHash(window.location.hash);
+  if (parsed.bare) {
+    // A plain #/jobs coming in (the job page's arrow): the page the list was left on, else the remembered profiles.
+    // The Jobs tab clicked while the list is shown is a fresh start: page 1.
+    const left = mounting ? postingsStore.lastView() : null;
+    if (left) {
+      return { filter: left.filter, page: left.page, size: left.size };
+    }
+    return { filter: { ...EMPTY_FILTER, profileIds: storedProfileFilter() }, page: 1, size: parsed.size };
+  }
+  return { filter: parsed.filter, page: parsed.page, size: parsed.size };
+}
+
+// The scroll position each page was left at (this tab only), put back when the page is shown again.
+const scrollAt = new Map();
+const JOBS_LIST_HASH = /^#\/jobs\/?(\?.*)?$/;
+
+function Pager({ page, pages, size, onPage, onSize }) {
+  return (
+    <nav className="pager" aria-label="Pages" data-testid="pager" data-page={page} data-pages={pages}>
+      <button type="button" className="button small secondary" data-testid="pager-prev" disabled={page <= 1} onClick={() => onPage(page - 1)}>
+        Prev
+      </button>
+      <span className="pager-numbers">
+        {pageNumbers(page, pages).map((number, index) =>
+          number === "…" ? (
+            <span key={`gap-${index}`} className="pager-gap" aria-hidden="true">
+              …
+            </span>
+          ) : (
+            <button
+              key={number}
+              type="button"
+              className={`pager-number${number === page ? " active" : ""}`}
+              data-testid="pager-page"
+              data-page={number}
+              aria-current={number === page ? "page" : undefined}
+              onClick={() => onPage(number)}
+            >
+              {number}
+            </button>
+          ),
+        )}
+      </span>
+      <button type="button" className="button small secondary" data-testid="pager-next" disabled={page >= pages} onClick={() => onPage(page + 1)}>
+        Next
+      </button>
+      <label className="pager-size">
+        Per page{" "}
+        <select value={size} data-testid="pager-size" onChange={(event) => onSize(Number(event.target.value))}>
+          {PAGE_SIZES.map((option) => (
+            <option key={option} value={option}>
+              {option}
+            </option>
+          ))}
+        </select>
+      </label>
+    </nav>
+  );
+}
+
 export default function JobsView({ selectedProfileId, onSelectProfile, applicationsState, onRows, onCounts }) {
-  // The filter the page was left with, so coming back is the same list.
-  const [filter, setFilter] = useState(() => postingsStore.lastFilter() || { ...EMPTY_FILTER, profileIds: storedProfileFilter() });
+  // The page, its size and the filters, from the address.
+  const [place, setPlace] = useState(() => currentView({ mounting: true }));
+  const { filter, page, size } = place;
+  const placeRef = useRef(place);
+  placeRef.current = place;
   const [search, setSearch] = useState(() => filter.query || "");
   const listed = useSyncExternalStore(postingsStore.subscribe, postingsStore.getState);
-  const { response, rows, loading, loadingMore, error, newCount } = listed;
+  const { response, rows, loading, error, newCount } = listed;
   const [selectedIds, setSelectedIds] = useState([]);
   // The approval: {dialog} while the question is open; nothing is assessed before its Approve.
   const [approval, setApproval] = useState(null);
@@ -172,11 +244,64 @@ export default function JobsView({ selectedProfileId, onSelectProfile, applicati
   const [marking, setMarking] = useState(false);
   const sources = useSourcesStatus({ enabled: true });
 
+  // The scroll position to put back once the rows of the page shown are there (0: the top of a page not seen before).
+  const restore = useRef(scrollAt.get(jobsHash(filter, page, size)) ?? null);
+  const adopt = useCallback((next) => {
+    restore.current = scrollAt.get(jobsHash(next.filter, next.page, next.size)) ?? 0;
+    setPlace(next);
+  }, []);
+
+  // Every move writes the address; Back and a bookmark read it. `replace`: a filter or a size is not a history step.
+  const go = useCallback(
+    (next, { replace = false } = {}) => {
+      const hash = jobsHash(next.filter, next.page, next.size);
+      if (replace || window.location.hash === hash) {
+        window.history.replaceState(window.history.state, "", hash);
+        adopt(next);
+      } else {
+        window.location.hash = hash; // the hashchange below reads it back
+      }
+    },
+    [adopt],
+  );
+
+  useEffect(() => {
+    const onChange = () => {
+      if (JOBS_LIST_HASH.test(window.location.hash)) {
+        adopt(currentView());
+      }
+    };
+    window.addEventListener("hashchange", onChange);
+    return () => window.removeEventListener("hashchange", onChange);
+  }, [adopt]);
+
+  // A plain #/jobs that was filled in from the remembered view: the address says what the page shows.
+  useEffect(() => {
+    const hash = jobsHash(filter, page, size);
+    if (/^#\/jobs\/?$/.test(window.location.hash) && hash !== "#/jobs") {
+      window.history.replaceState(window.history.state, "", hash);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // The kept rows are shown at once; one read goes out unless one is in flight or the kept one is fresh.
   useEffect(() => {
-    postingsStore.show(filter);
+    postingsStore.show(filter, { page, size });
     setSelectedIds([]);
-  }, [filter]);
+  }, [filter, page, size]);
+
+  // The scroll position of a page is remembered while it is shown.
+  useEffect(() => {
+    const onScroll = () => scrollAt.set(jobsHash(filter, page, size), window.scrollY);
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, [filter, page, size]);
+  useLayoutEffect(() => {
+    if (restore.current !== null && rows.length > 0) {
+      window.scrollTo(0, restore.current);
+      restore.current = null;
+    }
+  }, [rows]);
 
   useEffect(() => {
     postingsStore.peekNew();
@@ -204,11 +329,28 @@ export default function JobsView({ selectedProfileId, onSelectProfile, applicati
     }
   }, [listed.errorCode, filter.profileIds.length]);
 
+  // A chip or the search changes the list: back to page 1 (the filter is part of the address, not a history step).
+  const setFilter = useCallback(
+    (update) => {
+      const current = placeRef.current;
+      const next = typeof update === "function" ? update(current.filter) : update;
+      if (next !== current.filter) {
+        go({ filter: next, page: 1, size: current.size }, { replace: true });
+      }
+    },
+    [go],
+  );
+
   // The search box filters after a pause, not on every key.
   useEffect(() => {
     const timer = setTimeout(() => setFilter((current) => (current.query === search ? current : { ...current, query: search })), 350);
     return () => clearTimeout(timer);
-  }, [search]);
+  }, [search, setFilter]);
+
+  // Back or a bookmark brought another search: the box says it.
+  useEffect(() => {
+    setSearch(filter.query || "");
+  }, [filter.query]);
 
   const profiles = response ? response.profiles : [];
   const counts = response ? response.counts : null;
@@ -221,13 +363,12 @@ export default function JobsView({ selectedProfileId, onSelectProfile, applicati
       return { ...current, profileIds: next };
     });
 
-  const showMore = () => postingsStore.more(filter);
 
   const markAllSeen = () => {
     setMarking(true);
     setNotice(null);
     postMarkAllSeen()
-      .then(() => postingsStore.refresh(filter))
+      .then(() => postingsStore.refresh(filter, { page, size }))
       .catch((err) => setNotice(err.message || String(err)))
       .finally(() => setMarking(false));
   };
@@ -258,7 +399,7 @@ export default function JobsView({ selectedProfileId, onSelectProfile, applicati
         setApproval(null);
         setNotice(assessOutcomeLine(answer));
         setSelectedIds([]);
-        postingsStore.refresh(filter);
+        postingsStore.refresh(filter, { page, size });
       })
       .catch((err) => setApprovalError(err.detail || err.message || String(err)))
       .finally(() => setApproving(false));
@@ -275,14 +416,27 @@ export default function JobsView({ selectedProfileId, onSelectProfile, applicati
   const strip = sourcesStrip(sources.status, { hasRun: true });
   const inProgress = useMemo(() => inProgressCount(applicationsState.applications || []), [applicationsState.applications]);
   const matched = counts ? counts.matched : 0;
+  const pages = pageCount(matched, size);
+  // The list got shorter than the address says (a bookmark, a refresh): the last page there is.
+  useEffect(() => {
+    if (response && !loading && !listed.refreshing && matched > 0 && rows.length === 0 && page > pages) {
+      go({ filter, page: pages, size }, { replace: true });
+    }
+  }, [response, loading, listed.refreshing, matched, rows.length, page, pages, filter, size, go]);
+  // The header counts are totals: with a filter on, the unfiltered total last read stays.
+  const totalRef = useRef(null);
+  if (counts && !hasFilter(filter)) {
+    totalRef.current = { matched: counts.matched, needsAnswers: needsAnswers(counts) };
+  }
+  const totals = counts ? (hasFilter(filter) && totalRef.current ? totalRef.current : { matched, needsAnswers: needsAnswers(counts) }) : null;
   const busy = asking || approving;
 
   return (
     <div>
       <div className="summary-strip jobs-summary" aria-label="Summary">
-        <Tile label="Postings" value={counts ? matched : "…"} />
+        <Tile label="Postings" value={totals ? totals.matched : "…"} />
         <Tile label="New since last check" value={newCount === null ? "–" : newCount} />
-        <Tile label="Need your answers" value={counts ? needsAnswers(counts) : "…"} />
+        <Tile label="Need your answers" value={totals ? totals.needsAnswers : "…"} />
         <Tile label="In progress" value={applicationsState.loading ? "…" : inProgress} href={APPLICATIONS_HASH} />
         <Tile label="History" value="Past runs" href={RUNS_HASH} />
       </div>
@@ -387,7 +541,7 @@ export default function JobsView({ selectedProfileId, onSelectProfile, applicati
             <span data-role="postings-count" data-refreshing={listed.refreshing ? "true" : undefined}>
               {/* 0110-9-01: a message with the percent while the server prepares, never an endless spinner; rows that
                   are there stay while they are refreshed in place. */}
-              {waitingLine(listed) || countLine(counts, rows.length)}
+              {waitingLine(listed) || countLine(counts, rows.length, page, size)}
               {hasFilter(filter) && (
                 <>
                   {" · "}
@@ -441,12 +595,14 @@ export default function JobsView({ selectedProfileId, onSelectProfile, applicati
           </li>
         )}
       </ul>
-      {!loading && rows.length < matched && (
-        <div className="show-more" data-role="show-more">
-          <button type="button" className="button secondary" disabled={loadingMore} onClick={showMore}>
-            {loadingMore ? "Loading…" : `Show ${Math.min(PAGE_ROWS, matched - rows.length)} more`}
-          </button>
-        </div>
+      {matched > PAGE_SIZES[0] && (
+        <Pager
+          page={page}
+          pages={pages}
+          size={size}
+          onPage={(next) => go({ filter, page: next, size })}
+          onSize={(next) => go({ filter, page: 1, size: next }, { replace: true })}
+        />
       )}
 
       {approval && (

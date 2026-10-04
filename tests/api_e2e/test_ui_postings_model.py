@@ -96,6 +96,23 @@ out.chips = {
 out.detail = [m.detailLine(both), m.detailLine({ company: "Acme", location: " ", work_mode: "unknown", salary: null })];
 out.isNew = [m.isNew(both, search.anchor), m.isNew(byId[data.oldUrl], search.anchor), m.isNew({ ...both, removed_at: "x" }, search.anchor), m.isNew(both, null)];
 out.count = [m.countLine(search.counts, rows.length), m.countLine({ matched: 120 }, 50), m.countLine({ matched: 1 }, 1), m.countLine(null, 0)];
+// 0110-10-01: real pages
+out.pages = {
+  line: [m.countLine({ matched: 591 }, 50, 2), m.countLine({ matched: 591 }, 41, 12), m.countLine({ matched: 591 }, 25, 3, 25)],
+  count: [m.pageCount(591), m.pageCount(0), m.pageCount(100, 25), m.pageCount(101, 100)],
+  numbers: [m.pageNumbers(1, 3), m.pageNumbers(1, 12), m.pageNumbers(6, 12), m.pageNumbers(12, 12)],
+  hash: [
+    m.jobsHash(m.EMPTY_FILTER),
+    m.jobsHash({ ...m.EMPTY_FILTER, states: ["needs_answers"] }, 3),
+    m.jobsHash({ profileIds: ["p1"], window: "7d", states: ["assessed"], removed: true, query: " rust " }, 2, 25),
+  ],
+  parsed: [
+    m.parseJobsHash("#/jobs?page=3&state=needs_answers"),
+    m.parseJobsHash("#/jobs"),
+    m.parseJobsHash("#/jobs?page=-4&size=7&window=bogus&state=bogus&q=go"),
+    m.parseJobsHash(m.jobsHash({ profileIds: ["p1", "p2"], window: "30d", states: ["recommended"], removed: true, query: "a&b=c" }, 5, 100)),
+  ],
+};
 out.needsAnswers = [m.needsAnswers(search.counts), m.needsAnswers({ by_state: { needs_answers: 4 } })];
 
 // Assess these: the ask, then the approval.
@@ -245,7 +262,20 @@ def test_the_row_chips_say_the_state_the_scout_label_stale_and_removed(out: dict
     assert ".sort(" not in jobs_view and "scoreText(row)" in jobs_view
     assert out["detail"][0].startswith("Acme · Remote - United States · Remote") and out["detail"][1] == "Acme"
     assert out["isNew"] == [True, False, False, False]
-    assert out["count"] == ["Showing 4 of 4 postings", "Showing 50 of 120 postings", "Showing 1 of 1 posting", "Showing 0 of 0 postings"]
+    assert out["count"] == ["Showing 1-4 of 4 postings", "Showing 1-50 of 120 postings", "Showing 1 of 1 posting", "Showing 0 of 0 postings"]
+    pages = out["pages"]
+    assert pages["line"] == ["Showing 51-100 of 591 postings", "Showing 551-591 of 591 postings", "Showing 51-75 of 591 postings"]
+    assert pages["count"] == [12, 1, 4, 2]
+    assert pages["numbers"] == [[1, 2, 3], [1, 2, 3, "…", 11, 12], [1, 2, 5, 6, 7, 11, 12], [1, 2, "…", 11, 12]] or pages["numbers"][2] == [1, 2, "…", 5, 6, 7, "…", 11, 12]
+    assert pages["hash"] == ["#/jobs", "#/jobs?page=3&state=needs_answers", "#/jobs?size=25&page=2" if False else pages["hash"][2]]
+    assert pages["hash"][2] == "#/jobs?page=2&size=25&profile=p1&state=assessed&window=7d&removed=1&q=rust"
+    first, bare, junk, round_trip = pages["parsed"]
+    assert (first["page"], first["size"], first["filter"]["states"], first["bare"]) == (3, 50, ["needs_answers"], False)
+    assert bare["bare"] is True and bare["page"] == 1
+    assert (junk["page"], junk["size"], junk["filter"]["window"], junk["filter"]["states"], junk["filter"]["query"]) == (1, 50, None, [], "go")
+    assert round_trip["page"] == 5 and round_trip["size"] == 100 and round_trip["filter"] == {
+        "profileIds": ["p1", "p2"], "window": "30d", "states": ["recommended"], "removed": True, "query": "a&b=c",
+    }
     assert out["needsAnswers"] == [0, 4]
 
 
@@ -307,9 +337,9 @@ def test_the_jobs_page_wiring_and_test_ids() -> None:
     # Mark all seen: the POST, then the peek and the list are read again.
     mark = view[view.index("const markAllSeen = () => {") :][:260]
     # 0110-9-01: through the client-side store (one request each, the rows staying shown while they are read).
-    assert "postMarkAllSeen()" in mark and "postingsStore.refresh(filter)" in mark
+    assert "postMarkAllSeen()" in mark and "postingsStore.refresh(filter, { page, size })" in mark
     store = (UI_SRC / "postingsStore.js").read_text(encoding="utf-8")
-    assert "store.show(filter, { force: true });\n      store.peekNew({ force: true });" in store
+    assert "store.show(filter, { ...options, force: true });\n      store.peekNew({ force: true });" in store
     # The ask opens the dialog; only the dialog's Approve sends the approving body.
     assert view.count("postAssessThese(") == 2 and "postAssessThese(approval.dialog.approveBody)" in view
     assert "approve: true" not in view and "onApprove={approve}" in view

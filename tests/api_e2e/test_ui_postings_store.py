@@ -188,15 +188,24 @@ const out = {};
 
   h.store.show(EMPTY_FILTER);
   await h.answer("list", page(50));
-  h.store.more(EMPTY_FILTER);
-  h.store.more(EMPTY_FILTER);           // one "show more" at a time
-  out.slow.moreQuery = h.calls.list[h.calls.list.length - 1];
+  out.slow.firstSent = h.store.sent();
+  h.store.show(EMPTY_FILTER, { page: 2 });
+  h.store.show(EMPTY_FILTER, { page: 2 });   // one request per page change, however often the page asks
+  out.slow.pageQuery = h.calls.list[h.calls.list.length - 1];
+  out.slow.pageSent = h.store.sent();
   await h.answer("list", page(50));
-  out.slow.more = view(h.store);
+  out.slow.page2 = view(h.store);
+  h.store.show(EMPTY_FILTER, { page: 1 });   // page 1 was read a moment ago: shown from the store, nothing sent
+  out.slow.page1Again = { ...view(h.store), sent: h.store.sent() };
+  h.store.show(EMPTY_FILTER, { page: 2, size: 25 });   // another size is another list
+  out.slow.size25 = { query: h.calls.list[h.calls.list.length - 1], ...view(h.store) };
+  await h.answer("list", page(25));
+  h.store.show(EMPTY_FILTER, { page: 2 });
+  out.slow.lastView = h.store.lastView();
   const sent = h.store.sent();
   h.store.refresh(EMPTY_FILTER);        // an assessment was stored: the list and the peek again, the rows staying shown
   out.slow.refresh = { ...view(h.store), sent: h.store.sent(), sentBefore: sent, query: h.calls.list[h.calls.list.length - 1] };
-  await h.answer("list", page(100));
+  await h.answer("list", page(50));
   await h.answer("peek", { counts: { new: 0 } });
   out.slow.refreshed = view(h.store);
 
@@ -205,7 +214,7 @@ const out = {};
   h.store.show(filtered);
   out.slow.other = view(h.store);
   const dropped = h.pending.list[0].signal;
-  h.store.show(EMPTY_FILTER);
+  h.store.show(EMPTY_FILTER, { page: 2 });
   await h.settle();
   out.slow.backToFirst = { ...view(h.store), otherAborted: dropped.aborted };
 }
@@ -263,7 +272,7 @@ def test_preparing_is_a_message_with_the_percent_and_the_status_is_polled_one_at
     assert prep["sent0"] == prep["sentAsked"] == {"list": 1, "peek": 1, "status": 0}
     assert prep["sent1"] == {"list": 1, "peek": 1, "status": 1}
     # The poll has not answered: no second one goes out, however long it takes (no setInterval, no stacking).
-    assert prep["sentWaiting"] == prep["sent1"] and prep["inFlight"] == {"list": False, "more": False, "peek": False, "status": True}
+    assert prep["sentWaiting"] == prep["sent1"] and prep["inFlight"] == {"list": False, "peek": False, "status": True}
     assert prep["second"]["preparing"] == 57 and prep["second"]["line"].endswith("57%")
     assert prep["sentAfterAnswer"] == prep["sent1"]  # only scheduled: sent after the pause
     assert prep["sent2"]["status"] == 2 and prep["sent3"]["status"] == 3
@@ -285,15 +294,19 @@ def test_a_slow_answer_says_so_leaving_aborts_and_a_change_is_read_in_place(out:
     assert slow["before"] == "Loading postings…" and slow["after"] == "Still loading your postings…"
     released = slow["released"]
     assert released["aborted"] is True and released["loading"] is False and released["error"] is None
-    assert released["inFlight"] == {"list": False, "more": False, "peek": False, "status": False} and released["timers"] == 0
-    assert slow["moreQuery"] == "limit=50&offset=50" and slow["more"]["rows"] == 100
+    assert released["inFlight"] == {"list": False, "peek": False, "status": False} and released["timers"] == 0
+    # 0110-10-01: a page change is ONE request for that page; a page read a moment ago needs none.
+    assert slow["pageQuery"] == "limit=50&offset=50" and slow["pageSent"]["list"] == slow["firstSent"]["list"] + 1
+    assert slow["page2"]["rows"] == 50 and slow["page1Again"]["rows"] == 50 and slow["page1Again"]["sent"] == slow["pageSent"]
+    assert slow["size25"]["query"] == "limit=25&offset=25" and slow["size25"]["rows"] == 0
+    assert slow["lastView"]["page"] == 2 and slow["lastView"]["size"] == 50
     refresh = slow["refresh"]
-    assert refresh["rows"] == 100 and refresh["loading"] is False and refresh["refreshing"] is True  # the rows stay shown
+    assert refresh["rows"] == 50 and refresh["loading"] is False and refresh["refreshing"] is True  # the rows stay shown
     assert refresh["sent"] == {"list": refresh["sentBefore"]["list"] + 1, "peek": refresh["sentBefore"]["peek"] + 1, "status": 0}
-    assert refresh["query"] == "limit=100"  # the rows shown are the rows read again
-    assert slow["refreshed"]["rows"] == 100 and slow["refreshed"]["refreshing"] is False and slow["refreshed"]["newCount"] == 0
+    assert refresh["query"] == "limit=50"  # the page asked for (page 1 here) is read again
+    assert slow["refreshed"]["rows"] == 50 and slow["refreshed"]["refreshing"] is False and slow["refreshed"]["newCount"] == 0
     assert slow["other"]["rows"] == 0 and slow["other"]["loading"] is True  # another filter: its own list
-    assert slow["backToFirst"]["rows"] == 100 and slow["backToFirst"]["loading"] is False and slow["backToFirst"]["otherAborted"] is True
+    assert slow["backToFirst"]["rows"] == 50 and slow["backToFirst"]["loading"] is False and slow["backToFirst"]["otherAborted"] is True
 
 
 def test_the_jobs_page_reads_the_store_and_nothing_polls_on_an_interval() -> None:
@@ -304,10 +317,10 @@ def test_the_jobs_page_reads_the_store_and_nothing_polls_on_an_interval() -> Non
     assert "\nconst postingsStore = createPostingsStore(" in view
     assert view.index("const postingsStore = createPostingsStore(") < view.index("export default function JobsView(")
     assert "useSyncExternalStore(postingsStore.subscribe, postingsStore.getState)" in view
-    assert "return () => postingsStore.release();" in view and "postingsStore.lastFilter()" in view
+    assert "return () => postingsStore.release();" in view and "postingsStore.lastView()" in view
     # The page itself fetches no list and no peek any more: only the store does.
     assert "getPostings(" not in view.split("createPostingsStore(")[1].split(");")[1]
     assert "setInterval(" not in view and "setInterval(" not in store
-    assert "waitingLine(listed) || countLine(counts, rows.length)" in view
+    assert "waitingLine(listed) || countLine(counts, rows.length, page, size)" in view
     # Requests can be cancelled, and the status route is the one polled.
     assert "signal," in api and '"aborted"' in api and 'request("GET", "/api/postings/status", undefined, options)' in api

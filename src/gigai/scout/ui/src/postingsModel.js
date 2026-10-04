@@ -26,6 +26,9 @@ import { rankEntry } from "./rankModel.js";
 import { tokensText, secondsText } from "./metricsModel.js";
 
 export const PAGE_ROWS = 50;
+// 0110-10-01: real pages. The sizes the page offers; the server's own cap is MAX_LOOKUP_ROWS.
+export const PAGE_SIZES = [25, 50, 100];
+export const JOBS_HASH_BASE = "#/jobs";
 // The most rows one read may ask for (posting_search.MAX_LIMIT): a job page opened by its link looks its posting up in them.
 export const MAX_LOOKUP_ROWS = 200;
 export const PROFILE_FILTER_KEY = "scout.jobs.profileFilter";
@@ -328,9 +331,105 @@ export function assessOutcomeLine(response) {
 
 // --- the summary and the count line -----------------------------------------------------------
 
-export function countLine(counts, loaded) {
-  const matched = counts && typeof counts.matched === "number" ? counts.matched : 0;
-  return `Showing ${Math.min(loaded, matched)} of ${matched} posting${matched === 1 ? "" : "s"}`;
+// --- real pages (0110-10-01) ------------------------------------------------------------------
+
+// A page number from the hash or a click: a whole number of at least 1, else 1.
+export function cleanPage(value) {
+  const number = Number.parseInt(value, 10);
+  return Number.isFinite(number) && number >= 1 ? number : 1;
+}
+
+export function cleanSize(value) {
+  const number = Number.parseInt(value, 10);
+  return PAGE_SIZES.includes(number) ? number : PAGE_ROWS;
+}
+
+// How many pages `total` rows make at `size` per page (at least 1, so an empty list is "page 1 of 1").
+export function pageCount(total, size = PAGE_ROWS) {
+  const rows = Number.isFinite(total) && total > 0 ? total : 0;
+  return Math.max(1, Math.ceil(rows / cleanSize(size)));
+}
+
+// The query offset of a page.
+export function pageOffset(page, size = PAGE_ROWS) {
+  return (cleanPage(page) - 1) * cleanSize(size);
+}
+
+// "Showing 51-100 of 591 postings"; "Showing 0 of 0 postings" when there is nothing.
+export function countLine(counts, loaded, page = 1, size = PAGE_ROWS) {
+  const total = counts && typeof counts.matched === "number" ? counts.matched : 0;
+  const noun = `posting${total === 1 ? "" : "s"}`;
+  if (!total || !loaded) {
+    return `Showing 0 of ${total} ${noun}`;
+  }
+  const first = pageOffset(page, size) + 1;
+  const last = Math.min(total, first + loaded - 1);
+  return first === last ? `Showing ${first} of ${total} ${noun}` : `Showing ${first}-${last} of ${total} ${noun}`;
+}
+
+// The page buttons: every page up to 7, else 1 2 3 … 12 around the current page. "…" is a gap, not a link.
+export function pageNumbers(page, pages) {
+  const current = Math.min(Math.max(1, page), pages);
+  if (pages <= 7) {
+    return Array.from({ length: pages }, (_, index) => index + 1);
+  }
+  const wanted = new Set([1, 2, pages - 1, pages, current - 1, current, current + 1]);
+  const numbers = [...wanted].filter((number) => number >= 1 && number <= pages).sort((a, b) => a - b);
+  const out = [];
+  numbers.forEach((number, index) => {
+    if (index > 0 && number - numbers[index - 1] > 1) {
+      out.push("…");
+    }
+    out.push(number);
+  });
+  return out;
+}
+
+// --- the page and the filters in the address (#/jobs?page=3&state=needs_answers) ---------------
+
+// The hash of a view: only what differs from the default is written, so a plain list is `#/jobs`.
+export function jobsHash(filter, page = 1, size = PAGE_ROWS) {
+  const query = new URLSearchParams();
+  if (cleanPage(page) > 1) {
+    query.set("page", String(cleanPage(page)));
+  }
+  if (cleanSize(size) !== PAGE_ROWS) {
+    query.set("size", String(cleanSize(size)));
+  }
+  (filter.profileIds || []).forEach((id) => query.append("profile", id));
+  (filter.states || []).forEach((state) => query.append("state", state));
+  if (filter.window) {
+    query.set("window", filter.window);
+  }
+  if (filter.removed) {
+    query.set("removed", "1");
+  }
+  if (filter.query && filter.query.trim()) {
+    query.set("q", filter.query.trim());
+  }
+  const text = query.toString();
+  return text ? `${JOBS_HASH_BASE}?${text}` : JOBS_HASH_BASE;
+}
+
+// The view a hash names: {filter, page, size, bare} (`bare`: no parameter at all). Anything unknown is dropped.
+export function parseJobsHash(hash) {
+  const text = typeof hash === "string" ? hash : "";
+  const mark = text.indexOf("?");
+  const query = new URLSearchParams(mark < 0 ? "" : text.slice(mark + 1));
+  const states = query.getAll("state").filter((value) => STATE_FILTERS.some((option) => option.value === value));
+  const window = query.get("window");
+  return {
+    filter: {
+      profileIds: query.getAll("profile").filter(Boolean),
+      window: WINDOWS.includes(window) ? window : null,
+      states: [...new Set(states)],
+      removed: query.get("removed") === "1",
+      query: query.get("q") || "",
+    },
+    page: cleanPage(query.get("page")),
+    size: cleanSize(query.get("size")),
+    bare: mark < 0 || text.slice(mark + 1) === "",
+  };
 }
 
 export function needsAnswers(counts) {

@@ -8,6 +8,8 @@
 //   #/jobs               Jobs by posting (home; also the empty hash): the
 //                        stored postings every active profile matches, no
 //                        run (0.1.10.7 M4b)
+//   #/jobs?page=3&state=needs_answers   the same list on page 3 with a filter (0110-10-01: page, size, profile, state,
+//                        window, removed and q live in the address; see postingsModel.jobsHash)
 //   #/jobs/<encoded id>  one posting's job page, keyed by its normalized_url
 //                        (or a quick assessment's job_identity)
 //   #/assessments        every on-demand assessment, newest first (uat-bug-016)
@@ -40,7 +42,7 @@ import { useEffect, useState } from "react";
 import { postingHome } from "./jobModel.js";
 
 export const ROUTES = [
-  { view: "jobs", path: "#/jobs", label: "Jobs", pattern: /^#\/jobs\/?$/ },
+  { view: "jobs", path: "#/jobs", label: "Jobs", pattern: /^#\/jobs\/?(?:\?.*)?$/ },
   { view: "job", path: "#/jobs/", label: "Job", pattern: /^#\/jobs\/(.+)$/, param: "jobId" },
   { view: "assessments", path: "#/assessments", label: "Assessments", pattern: /^#\/assessments\/?$/ },
   { view: "assessment", path: "#/assessments/", label: "Assessment", pattern: /^#\/assessments\/(.+)$/, param: "jobId" },
