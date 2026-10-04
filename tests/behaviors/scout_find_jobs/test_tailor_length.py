@@ -267,3 +267,44 @@ def test_the_length_record_round_trips_and_an_older_result_parses_as_before() ->
     ):
         with pytest.raises(FindJobsContractError):
             TailoredResume.from_json({**as_json, "length": bad})
+
+
+# --- 0.1.10.9 master P5: "older" is said only of old roles' bullets --------------------------------
+
+
+def test_bullets_cut_from_a_recent_role_are_not_called_older() -> None:
+    """The master resume's fit also takes the lowest-value lines of RECENT roles (``fit_by_cuts``): those are "bullets"."""
+
+    from datetime import date
+
+    from gigai.scout.tailor_length import TrimmedRole, fit_by_cuts, trimmed_bullets_note
+
+    settled = _settled(_resume(_RECENT))
+    experience = next(section for section in settled.sections if section.heading == "experience")
+    newest, second = experience.entries[0], experience.entries[1]
+    cuts = [("bullet", line.id) for line in (newest.bullets[-1], second.bullets[-1], second.bullets[-2])]
+    total = sum(len(entry.bullets) for entry in experience.entries)
+
+    def measure(result: TailoredResume) -> int:  # 3 pages until all three lines are cut
+        shown = sum(len(entry.bullets) for section in result.sections for entry in section.entries)
+        return 2 if shown <= total - 3 else 3
+
+    fitted = fit_by_cuts(settled, cuts, measure=measure)
+    length = fitted.length
+    assert length is not None and length.status == "cut" and length.trimmed_count() == 3 and not length.cut
+    note = length_note(length)
+    assert "older bullet" not in note, note
+    assert note == f"Cut for length (3 pages -> 2): 3 bullets (1 of {role_label(newest)}, 2 of {role_label(second)})."
+    assert length_note(restore_cut(fitted).length).startswith("Put back (was cut for length): 3 bullets (")
+
+    # One recent role among old ones: still not "older". Every role old: "older", as before.
+    old = TrimmedRole("L90", "Engineer — Cedar (2014–2016)", (newest.bullets[0],))
+    recent = TrimmedRole("L91", "Staff Engineer — Alder (2024–Present)", (newest.bullets[1],))
+    today = date(2026, 10, 4)
+    assert trimmed_bullets_note([old], today=today) == "1 older bullet (1 of Engineer — Cedar (2014–2016))"
+    assert trimmed_bullets_note([old, recent], today=today) == "2 bullets (1 of Engineer — Cedar (2014–2016), 1 of Staff Engineer — Alder (2024–Present))"
+    # "Old" is the length rule's own: ended more than 8 years ago; a role with no year, or an ongoing one, never is.
+    edge = TrimmedRole("L92", "Engineer — Birch (2016–2018)", (newest.bullets[0],))
+    assert trimmed_bullets_note([edge], today=date(2026, 10, 4)).startswith("1 bullet (")
+    assert trimmed_bullets_note([edge], today=date(2027, 1, 1)).startswith("1 older bullet (")
+    assert trimmed_bullets_note([TrimmedRole("L93", "Consultant — Elm", (newest.bullets[0],))], today=today).startswith("1 bullet (")

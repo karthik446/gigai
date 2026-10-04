@@ -1501,6 +1501,7 @@ def _make_handler(
     from .config import ConfigRoutesMixin
     from .discover import DiscoverRoutesMixin
     from .extract import ResumeExtractRoutesMixin
+    from .master import MasterRoutesMixin
     from .metrics import MetricsRoutesMixin
     from .new import NewRoutesMixin
     from .pipeline import PipelineRoutesMixin, _match_approval_id
@@ -1540,6 +1541,7 @@ def _make_handler(
         ResumesRoutesMixin,
         ResumeDisplayRoutesMixin,
         ResumesFolderRoutesMixin,
+        MasterRoutesMixin,
         PrivacyCleanupRoutesMixin,
         SecretsStatusRoutesMixin,
         MetricsRoutesMixin,
@@ -1791,6 +1793,18 @@ def _make_handler(
                     if path == "/api/resumes-folder":
                         self._handle_get_resumes_folder()
                         return
+                    if path == "/api/master":
+                        self._handle_get_master()
+                        return
+                    if path == "/api/master/history":
+                        self._handle_get_master_history()
+                        return
+                    if path == "/api/master/migration":
+                        self._handle_get_master_migration()
+                        return
+                    if path == "/api/master/selection":
+                        self._handle_get_master_selection()
+                        return
                     if path == "/api/privacy/cleanup":
                         if self._check_host():
                             self._handle_get_privacy_cleanup()
@@ -1941,6 +1955,18 @@ def _make_handler(
                 if path == "/api/answers":
                     self._handle_post_answers()
                     return
+                if path == "/api/master/lines":
+                    self._handle_post_master_lines()
+                    return
+                if path == "/api/master/entries":
+                    self._handle_post_master_entries()
+                    return
+                if path == "/api/master/migration":
+                    self._handle_post_master_migration()
+                    return
+                if path == "/api/master/selection":
+                    self._handle_post_master_selection()
+                    return
                 if path == "/api/resume/extract":
                     self._handle_post_resume_extract()
                     return
@@ -2018,6 +2044,15 @@ def _make_handler(
                     return
                 if path == "/api/tailored-resumes/length":
                     self._handle_put_tailored_resume_length()
+                    return
+                if path == "/api/tailored-resumes/selection":
+                    self._handle_put_tailored_resume_selection()
+                    return
+                if path == "/api/master/lines":
+                    self._handle_put_master_lines()
+                    return
+                if path == "/api/master/entries":
+                    self._handle_put_master_entries()
                     return
                 if path == "/api/privacy/cleanup":
                     self._handle_put_privacy_cleanup()
@@ -2100,6 +2135,11 @@ class _ScoutHTTPServer(NoLookupThreadingHTTPServer):
         super().handle_error(request, client_address)
 
     def stop_refresh_ticker(self) -> None:
+        from .master import wait_first_selections
+
+        # 0.1.10.9 master P5: a new profile's first selection is written after its answer; a stopping server lets it finish.
+        if not wait_first_selections(10.0):
+            _logger.warning("master: a profile's first selection is still being written")
         runner = self.pipeline_runner
         if runner is not None and not runner.stop():
             _logger.warning("pipeline: a step is still running; it is given back when this process ends")

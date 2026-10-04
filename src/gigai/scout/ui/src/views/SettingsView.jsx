@@ -7,7 +7,8 @@ import PipelinePanel from "../components/PipelinePanel.jsx";
 import ExaSourceToggle from "../components/ExaSourceToggle.jsx";
 import ResumesFolderPanel from "../components/ResumesFolderPanel.jsx";
 import ProfilesView from "./ProfilesView.jsx";
-import { ANSWERS_HASH } from "../routing.js";
+import { ANSWERS_HASH, MASTER_HASH } from "../routing.js";
+import MasterSelections from "../components/MasterSelections.jsx";
 
 export default function SettingsView({
   config,
@@ -86,6 +87,8 @@ export default function SettingsView({
           reloadProfiles={reloadProfiles}
           defaultSearchSettings={defaultSearchSettings}
         />
+        {/* 0.1.10.9 master P5: each profile's selection of the master ("3 new master lines: refresh?"); nothing without a master. */}
+        <MasterSelections version={profiles.length} onChanged={reloadProfiles} />
       </div>
 
       {/* 0.1.10.7 C: answers and stories are the user's, not a profile's: one
@@ -97,6 +100,18 @@ export default function SettingsView({
         </p>
         <a className="button secondary" data-action="open-answers-stories" href={ANSWERS_HASH}>
           Open answers and stories
+        </a>
+      </section>
+
+      {/* 0.1.10.9 master P5: the master resume is the user's, not a profile's. */}
+      <section className="panel" id="settings-master-resume">
+        <h2>Master resume</h2>
+        <p className="muted">
+          One resume with every role, bullet, project and skill you have. Each profile shows a selection of it, and a resume tailored for a job
+          picks from all of it.
+        </p>
+        <a className="button secondary" data-action="open-master-resume" href={MASTER_HASH}>
+          Open master resume
         </a>
       </section>
 

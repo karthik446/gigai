@@ -37,6 +37,7 @@ returns a line of the master in an error.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 import shutil
@@ -212,6 +213,24 @@ def master_revisions(*, home_root: Path, target: Path | None, gig_id: str | None
 
     resolved = _resolve_for_read(home_root, target, gig_id)
     return _chain(resolved) if resolved is not None else []
+
+
+def read_revisions(
+    *, home_root: Path, target: Path | None, gig_id: str | None = None, known: Mapping[str, Master] | None = None,
+) -> list[tuple[MasterRevision, Master]]:
+    """Every revision with its parsed master, oldest first.
+
+    ``known`` (revision id -> master) is used instead of a read: a revision's content never changes, so a
+    caller that keeps what it read (the API's history) reads each revision once per process."""
+
+    resolved = _resolve_for_read(home_root, target, gig_id)
+    if resolved is None:
+        return []
+    known = known or {}
+    return [
+        (revision, known[revision.revision_id] if revision.revision_id in known else _read_master(home_root, target, resolved, revision))
+        for revision in _chain(resolved)
+    ]
 
 
 @dataclass(frozen=True)
@@ -407,5 +426,6 @@ __all__ = [
     "master_history",
     "master_record_id",
     "master_revisions",
+    "read_revisions",
     "strip_contact",
 ]

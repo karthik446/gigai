@@ -83,6 +83,36 @@ def _answers(values: tuple[str, ...]) -> dict[str, str]:
     return answers
 
 
+def migration_payload(result) -> dict[str, object]:  # noqa: ANN001 - a master_profiles.Migration
+    """What a migration found and did, as ``master init --json`` prints it and ``/api/master/migration`` returns it."""
+
+    plan = result.plan
+    questions = [question.to_json() for question in plan.unanswered] if plan is not None else []
+    profiles = [
+        {
+            "profile_id": profile.profile_id, "label": profile.label,
+            "shown": len(selection.item_ids) if selection is not None else None,
+            "skills": len(selection.skills) if selection is not None else None,
+            # The migration never writes a profile's resume: the pin is the one it had.
+            "resume_ref": profile.resume_ref.to_json(),
+        }
+        for profile, selection in result.profiles
+    ]
+    written = result.status in ("created", "revised", "unchanged") and plan is not None
+    return {
+        "ok": True,
+        "mode": "migration",
+        "status": result.status,
+        "written": written,
+        "master": _master_json(result.stored),
+        "migration": plan.to_json() if plan is not None else None,
+        "questions": questions,
+        "profiles": profiles,
+        # What the privacy strip left out of a resume (the profile, the kind, the line number; never a value), or null.
+        "contact_removed": [{"profile": label, "kind": kind, "line": line} for label, kind, line in result.contact_removed] or None,
+    }
+
+
 def run_migration(
     *, answers: tuple[str, ...], dry_run: bool, revision: int | None, actor: str, target_value: Path | None, home_value: Path | None, as_json: bool,
 ) -> None:
@@ -102,30 +132,8 @@ def run_migration(
         _fail(exc, as_json=as_json)
         return
     plan = result.plan
-    questions = [question.to_json() for question in plan.unanswered] if plan is not None else []
-    profiles = [
-        {
-            "profile_id": profile.profile_id, "label": profile.label,
-            "shown": len(selection.item_ids) if selection is not None else None,
-            "skills": len(selection.skills) if selection is not None else None,
-            # The migration never writes a profile's resume: the pin is the one it had.
-            "resume_ref": profile.resume_ref.to_json(),
-        }
-        for profile, selection in result.profiles
-    ]
-    written = result.status in ("created", "revised", "unchanged") and plan is not None
-    payload = {
-        "ok": True,
-        "mode": "migration",
-        "status": result.status,
-        "written": written,
-        "master": _master_json(result.stored),
-        "migration": plan.to_json() if plan is not None else None,
-        "questions": questions,
-        "profiles": profiles,
-        # What the privacy strip left out of a resume (the profile, the kind, the line number; never a value), or null.
-        "contact_removed": [{"profile": label, "kind": kind, "line": line} for label, kind, line in result.contact_removed] or None,
-    }
+    payload = migration_payload(result)
+    questions = payload["questions"]
     if as_json:
         _emit(payload)
         return
@@ -289,4 +297,4 @@ def selection_refresh_command(
             click.echo("    The profile's resume is now this selection.")
 
 
-__all__ = ["after_master_write", "echo_after_master_write", "run_migration", "selection_refresh_command", "selection_status_command"]
+__all__ = ["after_master_write", "echo_after_master_write", "migration_payload", "run_migration", "selection_refresh_command", "selection_status_command"]

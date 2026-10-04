@@ -2111,6 +2111,2080 @@
         ]
       }
     },
+    "/api/master": {
+      "get": {
+        "description": "The master resume: every entry and line with its id, tags and evidence strength. The master resume is the user's one document of every role, bullet, project and skill, with a stable id on every line and no contact data; a profile shows a selection of it and a tailoring for one job picks from all of it. `master` is null when there is none yet (build it with POST /api/master/migration, or `gigai scout resume master init`). Each entry: `{id, section, heading, sublines, start, end, ongoing, bullets, order}`. Each line: `{id, section, kind: summary | bullet | skills | other, text, tags, backed, entry_id, order, strength: backed | quantified | stated, mark}` (a Skills line also `label` and `skills`). `strength` is derived: backed when a story or an answer is linked, quantified when the line states a number. `revision` is the number a write sends back. `shown_by` maps a line or entry id to the profiles whose selection shows it (`profiles` names them); `current_revision` is the newest revision's number.",
+        "operationId": "get_api_master",
+        "parameters": [
+          {
+            "description": "An earlier revision's number (a tailored resume's `sources.master.revision`); omitted = the current one.",
+            "in": "query",
+            "name": "revision",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "current_revision": 3,
+                  "master": {
+                    "content_sha256": "sha256:...",
+                    "counts": {
+                      "by_kind": {
+                        "bullet": 1,
+                        "other": 0,
+                        "skills": 1,
+                        "summary": 1
+                      },
+                      "by_strength": {
+                        "backed": 0,
+                        "quantified": 1,
+                        "stated": 2
+                      },
+                      "entries": 1,
+                      "ids": 4,
+                      "items": 3,
+                      "skills": 3
+                    },
+                    "entries": [
+                      {
+                        "bullets": [
+                          "b-hex-03"
+                        ],
+                        "end": 2023,
+                        "heading": "Hexa Cloud",
+                        "id": "r-hex",
+                        "ongoing": false,
+                        "order": 3,
+                        "section": "experience",
+                        "start": 2019,
+                        "sublines": [
+                          "Staff Software Engineer | Jun 2019 - Jan 2023"
+                        ]
+                      }
+                    ],
+                    "format": 1,
+                    "items": [
+                      {
+                        "backed": [],
+                        "entry_id": "r-hex",
+                        "id": "b-hex-03",
+                        "kind": "bullet",
+                        "mark": "5d0c2a4b9e1f7a36",
+                        "order": 4,
+                        "section": "experience",
+                        "strength": "quantified",
+                        "tags": [
+                          "delivery"
+                        ],
+                        "text": "Led the migration of 40 services to Helm charts released through ArgoCD."
+                      }
+                    ],
+                    "parent_revision": "revision_7c1d7b9a-0d58-4f0b-8f27-91f4f6f6a2c3",
+                    "record_id": "record_...",
+                    "revision": 3,
+                    "revision_id": "revision_0b6f2f0e-5a0e-4c58-9a57-2d1b6a0c1e11",
+                    "revisions": 3,
+                    "sections": [
+                      "summary",
+                      "experience",
+                      "skills"
+                    ],
+                    "updated_at": "2026-10-04T10:05:00.000000Z",
+                    "written_by": "operator"
+                  },
+                  "profiles": [
+                    {
+                      "label": "Staff Engineer",
+                      "profile_id": "prof_1",
+                      "state": "active"
+                    }
+                  ],
+                  "schema_version": "scout-master:1",
+                  "shown_by": {
+                    "b-hex-03": [
+                      "prof_1"
+                    ]
+                  }
+                },
+                "schema": {
+                  "additionalProperties": true,
+                  "properties": {
+                    "schema_version": {
+                      "const": "scout-master:1"
+                    }
+                  },
+                  "required": [
+                    "schema_version"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden / forbidden_origin: loopback peer and Host `127.0.0.1:<port>` or `localhost:<port>` only (Origin too on writes)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "master_revision_not_found",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "master_revision_not_found, target_unavailable"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "unknown_key",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "unknown_key, invalid_value"
+          }
+        },
+        "summary": "Get the master resume",
+        "tags": [
+          "Profiles and resume"
+        ],
+        "x-gigai-effect": "read",
+        "x-gigai-external": "none",
+        "x-gigai-host-checked": true,
+        "x-gigai-labels": [
+          "user-private"
+        ]
+      }
+    },
+    "/api/master/entries": {
+      "post": {
+        "description": "Add a role, a project or a school to the master. Answers 201 with the entry's `id`; it goes first in its section (a resume lists the newest first) and has no lines yet: add them with POST /api/master/lines {entry_id}. One new revision of the master. Send the `revision` you read: when the master changed since, the reply is 409 revision_conflict with `error.current` (the revision it is at now): read it again, then send the change on top of that. A text that looks like contact data (email, phone, link, address, a name line) answers 422 personal_info_refused and nothing is written. The reply carries the whole `master` after the write, `status` (revised, or unchanged when it already said this), the `id` the change was about, and `profiles`: what the write did to the profiles' selections (`synced`: a profile that shows an edited or retired line had its resume printed again; `offers`: new lines are offered, never added by themselves). Every tailoring made from the master is out of date after a write and is made again when the pipeline next looks at its profile. Local only: no model call.",
+        "operationId": "post_api_master_entries",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "example": {
+                "heading": "Orbital Works",
+                "revision": 3,
+                "section": "experience",
+                "sublines": [
+                  "Staff Engineer | Jun 2023 - Present"
+                ]
+              },
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "actor": {
+                    "description": "Who writes: recorded as written_by. Also the X-GigAI-Actor header. Without either, a write from the Scout UI (a browser page of this server) is the operator's and any other loopback write is the agent's.",
+                    "enum": [
+                      "operator",
+                      "agent"
+                    ],
+                    "type": "string"
+                  },
+                  "heading": {
+                    "description": "The employer, project or school (one line, at most 200 characters).",
+                    "type": "string"
+                  },
+                  "revision": {
+                    "description": "The revision of the master you read; when it changed since, the reply is 409.",
+                    "type": "integer"
+                  },
+                  "section": {
+                    "description": "Where it goes.",
+                    "enum": [
+                      "experience",
+                      "projects",
+                      "education"
+                    ],
+                    "type": "string"
+                  },
+                  "sublines": {
+                    "description": "The lines under the heading, at most 3: `Staff Engineer | Jun 2022 - Present`. The years decide which roles are the oldest.",
+                    "type": "array"
+                  }
+                },
+                "required": [
+                  "revision",
+                  "section",
+                  "heading"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "changes": {
+                    "added": 1,
+                    "changed": 0,
+                    "removed": 0
+                  },
+                  "id": "r-7a01c2",
+                  "master": {
+                    "content_sha256": "sha256:...",
+                    "counts": {
+                      "by_kind": {
+                        "bullet": 1,
+                        "other": 0,
+                        "skills": 1,
+                        "summary": 1
+                      },
+                      "by_strength": {
+                        "backed": 0,
+                        "quantified": 1,
+                        "stated": 2
+                      },
+                      "entries": 1,
+                      "ids": 4,
+                      "items": 3,
+                      "skills": 3
+                    },
+                    "entries": [
+                      {
+                        "bullets": [
+                          "b-hex-03"
+                        ],
+                        "end": 2023,
+                        "heading": "Hexa Cloud",
+                        "id": "r-hex",
+                        "ongoing": false,
+                        "order": 3,
+                        "section": "experience",
+                        "start": 2019,
+                        "sublines": [
+                          "Staff Software Engineer | Jun 2019 - Jan 2023"
+                        ]
+                      }
+                    ],
+                    "format": 1,
+                    "items": [
+                      {
+                        "backed": [],
+                        "entry_id": "r-hex",
+                        "id": "b-hex-03",
+                        "kind": "bullet",
+                        "mark": "5d0c2a4b9e1f7a36",
+                        "order": 4,
+                        "section": "experience",
+                        "strength": "quantified",
+                        "tags": [
+                          "delivery"
+                        ],
+                        "text": "Led the migration of 40 services to Helm charts released through ArgoCD."
+                      }
+                    ],
+                    "parent_revision": "revision_7c1d7b9a-0d58-4f0b-8f27-91f4f6f6a2c3",
+                    "record_id": "record_...",
+                    "revision": 3,
+                    "revision_id": "revision_0b6f2f0e-5a0e-4c58-9a57-2d1b6a0c1e11",
+                    "revisions": 3,
+                    "sections": [
+                      "summary",
+                      "experience",
+                      "skills"
+                    ],
+                    "updated_at": "2026-10-04T10:05:00.000000Z",
+                    "written_by": "operator"
+                  },
+                  "near_duplicate": null,
+                  "profiles": {
+                    "offers": [
+                      {
+                        "label": "Staff Engineer",
+                        "new_lines": [
+                          "b-4f0c1a"
+                        ],
+                        "offer": "1 new master line: refresh?",
+                        "profile_id": "prof_1"
+                      }
+                    ],
+                    "synced": []
+                  },
+                  "schema_version": "scout-master:1",
+                  "status": "revised"
+                },
+                "schema": {
+                  "additionalProperties": true,
+                  "properties": {
+                    "schema_version": {
+                      "const": "scout-master:1"
+                    }
+                  },
+                  "required": [
+                    "schema_version"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden / forbidden_origin: loopback peer and Host `127.0.0.1:<port>` or `localhost:<port>` only (Origin too on writes)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "master_not_found",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "master_not_found, target_unavailable"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "revision_conflict",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "revision_conflict, master_entry_exists"
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "unsupported_media_type: writes need Content-Type: application/json."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "unknown_key",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "unknown_key, wrong_type, invalid_value, personal_info_refused, master_markdown_invalid"
+          }
+        },
+        "summary": "Add a role, project or school to the master",
+        "tags": [
+          "Profiles and resume"
+        ],
+        "x-gigai-effect": "write",
+        "x-gigai-external": "none",
+        "x-gigai-labels": [
+          "user-private"
+        ]
+      },
+      "put": {
+        "description": "Edit, retire or restore a role, a project or a school of the master, by id. The entry's id and its lines stay on an edit. One new revision of the master. Send the `revision` you read: when the master changed since, the reply is 409 revision_conflict with `error.current` (the revision it is at now): read it again, then send the change on top of that. A text that looks like contact data (email, phone, link, address, a name line) answers 422 personal_info_refused and nothing is written. The reply carries the whole `master` after the write, `status` (revised, or unchanged when it already said this), the `id` the change was about, and `profiles`: what the write did to the profiles' selections (`synced`: a profile that shows an edited or retired line had its resume printed again; `offers`: new lines are offered, never added by themselves). Every tailoring made from the master is out of date after a write and is made again when the pipeline next looks at its profile. Local only: no model call.",
+        "operationId": "put_api_master_entries",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "example": {
+                "id": "r-hex",
+                "revision": 3,
+                "sublines": [
+                  "Staff Software Engineer | Jun 2019 - Feb 2023"
+                ]
+              },
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "actor": {
+                    "description": "Who writes: recorded as written_by. Also the X-GigAI-Actor header. Without either, a write from the Scout UI (a browser page of this server) is the operator's and any other loopback write is the agent's.",
+                    "enum": [
+                      "operator",
+                      "agent"
+                    ],
+                    "type": "string"
+                  },
+                  "heading": {
+                    "description": "With use edit: the heading.",
+                    "type": "string"
+                  },
+                  "id": {
+                    "description": "The entry's id.",
+                    "type": "string"
+                  },
+                  "revision": {
+                    "description": "The revision of the master you read; when it changed since, the reply is 409.",
+                    "type": "integer"
+                  },
+                  "sublines": {
+                    "description": "With use edit: the lines under the heading, whole.",
+                    "type": "array"
+                  },
+                  "use": {
+                    "description": "edit (the default) changes the heading and/or the lines under it; retire takes the entry and its lines out; restore puts a retired one back with its lines.",
+                    "enum": [
+                      "edit",
+                      "retire",
+                      "restore"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "revision",
+                  "id"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "changes": {
+                    "added": 0,
+                    "changed": 1,
+                    "removed": 0
+                  },
+                  "id": "r-hex",
+                  "master": {
+                    "content_sha256": "sha256:...",
+                    "counts": {
+                      "by_kind": {
+                        "bullet": 1,
+                        "other": 0,
+                        "skills": 1,
+                        "summary": 1
+                      },
+                      "by_strength": {
+                        "backed": 0,
+                        "quantified": 1,
+                        "stated": 2
+                      },
+                      "entries": 1,
+                      "ids": 4,
+                      "items": 3,
+                      "skills": 3
+                    },
+                    "entries": [
+                      {
+                        "bullets": [
+                          "b-hex-03"
+                        ],
+                        "end": 2023,
+                        "heading": "Hexa Cloud",
+                        "id": "r-hex",
+                        "ongoing": false,
+                        "order": 3,
+                        "section": "experience",
+                        "start": 2019,
+                        "sublines": [
+                          "Staff Software Engineer | Jun 2019 - Jan 2023"
+                        ]
+                      }
+                    ],
+                    "format": 1,
+                    "items": [
+                      {
+                        "backed": [],
+                        "entry_id": "r-hex",
+                        "id": "b-hex-03",
+                        "kind": "bullet",
+                        "mark": "5d0c2a4b9e1f7a36",
+                        "order": 4,
+                        "section": "experience",
+                        "strength": "quantified",
+                        "tags": [
+                          "delivery"
+                        ],
+                        "text": "Led the migration of 40 services to Helm charts released through ArgoCD."
+                      }
+                    ],
+                    "parent_revision": "revision_7c1d7b9a-0d58-4f0b-8f27-91f4f6f6a2c3",
+                    "record_id": "record_...",
+                    "revision": 3,
+                    "revision_id": "revision_0b6f2f0e-5a0e-4c58-9a57-2d1b6a0c1e11",
+                    "revisions": 3,
+                    "sections": [
+                      "summary",
+                      "experience",
+                      "skills"
+                    ],
+                    "updated_at": "2026-10-04T10:05:00.000000Z",
+                    "written_by": "operator"
+                  },
+                  "near_duplicate": null,
+                  "profiles": {
+                    "offers": [
+                      {
+                        "label": "Staff Engineer",
+                        "new_lines": [
+                          "b-4f0c1a"
+                        ],
+                        "offer": "1 new master line: refresh?",
+                        "profile_id": "prof_1"
+                      }
+                    ],
+                    "synced": []
+                  },
+                  "schema_version": "scout-master:1",
+                  "status": "revised"
+                },
+                "schema": {
+                  "additionalProperties": true,
+                  "properties": {
+                    "schema_version": {
+                      "const": "scout-master:1"
+                    }
+                  },
+                  "required": [
+                    "schema_version"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden / forbidden_origin: loopback peer and Host `127.0.0.1:<port>` or `localhost:<port>` only (Origin too on writes)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "master_not_found",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "master_not_found, target_unavailable, master_entry_not_found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "revision_conflict",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "revision_conflict, master_line_not_retired, master_would_be_empty"
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "unsupported_media_type: writes need Content-Type: application/json."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "unknown_key",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "unknown_key, wrong_type, invalid_value, personal_info_refused, master_markdown_invalid"
+          }
+        },
+        "summary": "Edit, retire or restore an entry of the master",
+        "tags": [
+          "Profiles and resume"
+        ],
+        "x-gigai-effect": "write",
+        "x-gigai-external": "none",
+        "x-gigai-labels": [
+          "user-private"
+        ]
+      }
+    },
+    "/api/master/history": {
+      "get": {
+        "description": "The master's revisions, newest first, and what is retired. Each revision: who wrote it (`written_by` operator | agent), when, how many lines and entries it holds and what it changed against the one before (`added`, `removed`, `changed`, by id). `retired`: every line or entry (`what`) an earlier revision held and the current one does not, as the last revision that held it had it (`last_revision`; `retired_in` is the revision that dropped it), the most recently retired first; a line retired with its entry is listed under the entry. Put one back with PUT /api/master/lines or /entries {id, use: \"restore\"}. Nothing is ever deleted: every revision stays in the journal. `revision` is null and both lists are empty when there is no master.",
+        "operationId": "get_api_master_history",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "retired": [
+                    {
+                      "backed": [],
+                      "entry_heading": "Hexa Cloud",
+                      "entry_id": "r-hex",
+                      "id": "b-hex-09",
+                      "kind": "bullet",
+                      "last_revision": 2,
+                      "mark": "5d0c2a4b9e1f7a36",
+                      "order": 4,
+                      "retired_in": 3,
+                      "section": "experience",
+                      "strength": "quantified",
+                      "tags": [
+                        "delivery"
+                      ],
+                      "text": "Led the migration of 40 services to Helm charts released through ArgoCD.",
+                      "what": "line"
+                    }
+                  ],
+                  "revision": 3,
+                  "revisions": [
+                    {
+                      "added": 0,
+                      "changed": 0,
+                      "content_sha256": "sha256:...",
+                      "entries": 1,
+                      "items": 3,
+                      "parent_revision": "revision_7c1d7b9a-0d58-4f0b-8f27-91f4f6f6a2c3",
+                      "removed": 1,
+                      "revision": 3,
+                      "revision_id": "revision_0b6f2f0e-5a0e-4c58-9a57-2d1b6a0c1e11",
+                      "updated_at": "2026-10-04T10:05:00.000000Z",
+                      "written_by": "operator"
+                    }
+                  ],
+                  "schema_version": "scout-master-history:1"
+                },
+                "schema": {
+                  "additionalProperties": true,
+                  "properties": {
+                    "schema_version": {
+                      "const": "scout-master-history:1"
+                    }
+                  },
+                  "required": [
+                    "schema_version"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden / forbidden_origin: loopback peer and Host `127.0.0.1:<port>` or `localhost:<port>` only (Origin too on writes)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "target_unavailable",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "target_unavailable"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "unknown_key",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "unknown_key"
+          }
+        },
+        "summary": "List the master's revisions and retired lines",
+        "tags": [
+          "Profiles and resume"
+        ],
+        "x-gigai-effect": "read",
+        "x-gigai-external": "none",
+        "x-gigai-host-checked": true,
+        "x-gigai-labels": [
+          "user-private"
+        ]
+      }
+    },
+    "/api/master/lines": {
+      "post": {
+        "description": "Add a line to the master: under a role, or to Summary, Skills or Other. Answers 201. The line gets its id (`id`) and goes last under its entry or in its section. `near_duplicate` names the line of the same section it reads like (`{id, similarity}`; a warning: edit that one instead if it is the same fact). Only the user's facts: every number comes from the user. One new revision of the master. Send the `revision` you read: when the master changed since, the reply is 409 revision_conflict with `error.current` (the revision it is at now): read it again, then send the change on top of that. A text that looks like contact data (email, phone, link, address, a name line) answers 422 personal_info_refused and nothing is written. The reply carries the whole `master` after the write, `status` (revised, or unchanged when it already said this), the `id` the change was about, and `profiles`: what the write did to the profiles' selections (`synced`: a profile that shows an edited or retired line had its resume printed again; `offers`: new lines are offered, never added by themselves). Every tailoring made from the master is out of date after a write and is made again when the pipeline next looks at its profile. Local only: no model call.",
+        "operationId": "post_api_master_lines",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "example": {
+                "actor": "agent",
+                "entry_id": "r-hex",
+                "revision": 3,
+                "text": "Cut the deploy time of 40 services from 50 to 12 minutes."
+              },
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "actor": {
+                    "description": "Who writes: recorded as written_by. Also the X-GigAI-Actor header. Without either, a write from the Scout UI (a browser page of this server) is the operator's and any other loopback write is the agent's.",
+                    "enum": [
+                      "operator",
+                      "agent"
+                    ],
+                    "type": "string"
+                  },
+                  "backed": {
+                    "description": "Optional evidence: `story:<id>` or `answer:<question_id>` (at most 12). A backed line's strength is backed.",
+                    "type": "array"
+                  },
+                  "entry_id": {
+                    "description": "The role, project or school the line goes under (an entry's id). Either this or section.",
+                    "type": "string"
+                  },
+                  "revision": {
+                    "description": "The revision of the master you read; when it changed since, the reply is 409.",
+                    "type": "integer"
+                  },
+                  "section": {
+                    "description": "For a line outside an entry.",
+                    "enum": [
+                      "summary",
+                      "skills",
+                      "other"
+                    ],
+                    "type": "string"
+                  },
+                  "tags": {
+                    "description": "Optional tags: words of letters, digits and + # . - _ (at most 12).",
+                    "type": "array"
+                  },
+                  "text": {
+                    "description": "The line: one line, at most 400 characters (a summary or a Skills line: 1000), without a bullet marker. A Skills line reads `Label: skill, skill`.",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "revision",
+                  "text"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "changes": {
+                    "added": 1,
+                    "changed": 0,
+                    "removed": 0
+                  },
+                  "id": "b-4f0c1a",
+                  "master": {
+                    "content_sha256": "sha256:...",
+                    "counts": {
+                      "by_kind": {
+                        "bullet": 1,
+                        "other": 0,
+                        "skills": 1,
+                        "summary": 1
+                      },
+                      "by_strength": {
+                        "backed": 0,
+                        "quantified": 1,
+                        "stated": 2
+                      },
+                      "entries": 1,
+                      "ids": 4,
+                      "items": 3,
+                      "skills": 3
+                    },
+                    "entries": [
+                      {
+                        "bullets": [
+                          "b-hex-03"
+                        ],
+                        "end": 2023,
+                        "heading": "Hexa Cloud",
+                        "id": "r-hex",
+                        "ongoing": false,
+                        "order": 3,
+                        "section": "experience",
+                        "start": 2019,
+                        "sublines": [
+                          "Staff Software Engineer | Jun 2019 - Jan 2023"
+                        ]
+                      }
+                    ],
+                    "format": 1,
+                    "items": [
+                      {
+                        "backed": [],
+                        "entry_id": "r-hex",
+                        "id": "b-hex-03",
+                        "kind": "bullet",
+                        "mark": "5d0c2a4b9e1f7a36",
+                        "order": 4,
+                        "section": "experience",
+                        "strength": "quantified",
+                        "tags": [
+                          "delivery"
+                        ],
+                        "text": "Led the migration of 40 services to Helm charts released through ArgoCD."
+                      }
+                    ],
+                    "parent_revision": "revision_7c1d7b9a-0d58-4f0b-8f27-91f4f6f6a2c3",
+                    "record_id": "record_...",
+                    "revision": 3,
+                    "revision_id": "revision_0b6f2f0e-5a0e-4c58-9a57-2d1b6a0c1e11",
+                    "revisions": 3,
+                    "sections": [
+                      "summary",
+                      "experience",
+                      "skills"
+                    ],
+                    "updated_at": "2026-10-04T10:05:00.000000Z",
+                    "written_by": "operator"
+                  },
+                  "near_duplicate": {
+                    "id": "b-hex-03",
+                    "similarity": 0.71
+                  },
+                  "profiles": {
+                    "offers": [
+                      {
+                        "label": "Staff Engineer",
+                        "new_lines": [
+                          "b-4f0c1a"
+                        ],
+                        "offer": "1 new master line: refresh?",
+                        "profile_id": "prof_1"
+                      }
+                    ],
+                    "synced": []
+                  },
+                  "schema_version": "scout-master:1",
+                  "status": "revised"
+                },
+                "schema": {
+                  "additionalProperties": true,
+                  "properties": {
+                    "schema_version": {
+                      "const": "scout-master:1"
+                    }
+                  },
+                  "required": [
+                    "schema_version"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden / forbidden_origin: loopback peer and Host `127.0.0.1:<port>` or `localhost:<port>` only (Origin too on writes)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "master_not_found",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "master_not_found, target_unavailable, master_entry_not_found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "revision_conflict",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "revision_conflict, master_line_exists"
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "unsupported_media_type: writes need Content-Type: application/json."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "unknown_key",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "unknown_key, wrong_type, invalid_value, personal_info_refused, master_markdown_invalid"
+          }
+        },
+        "summary": "Add a line to the master",
+        "tags": [
+          "Profiles and resume"
+        ],
+        "x-gigai-effect": "write",
+        "x-gigai-external": "none",
+        "x-gigai-labels": [
+          "user-private"
+        ]
+      },
+      "put": {
+        "description": "Edit, retire or restore one line of the master, by id. use edit needs at least one of text, tags, backed. use retire: the line is never selected again; it stays in the earlier revisions and is listed by GET /api/master/history. use restore: the line comes back under its own id, as the last revision that held it had it, next to the lines it stood beside (its role comes back with it when that was retired too). This is also \"save this wording to your master\" for a line edited on a tailored resume: send the line's `item_id` as `id` with the edited text. One new revision of the master. Send the `revision` you read: when the master changed since, the reply is 409 revision_conflict with `error.current` (the revision it is at now): read it again, then send the change on top of that. A text that looks like contact data (email, phone, link, address, a name line) answers 422 personal_info_refused and nothing is written. The reply carries the whole `master` after the write, `status` (revised, or unchanged when it already said this), the `id` the change was about, and `profiles`: what the write did to the profiles' selections (`synced`: a profile that shows an edited or retired line had its resume printed again; `offers`: new lines are offered, never added by themselves). Every tailoring made from the master is out of date after a write and is made again when the pipeline next looks at its profile. Local only: no model call.",
+        "operationId": "put_api_master_lines",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "example": {
+                "actor": "agent",
+                "id": "b-hex-03",
+                "revision": 3,
+                "text": "Led the migration of 40 services to Helm charts released through ArgoCD, in 5 months."
+              },
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "actor": {
+                    "description": "Who writes: recorded as written_by. Also the X-GigAI-Actor header. Without either, a write from the Scout UI (a browser page of this server) is the operator's and any other loopback write is the agent's.",
+                    "enum": [
+                      "operator",
+                      "agent"
+                    ],
+                    "type": "string"
+                  },
+                  "backed": {
+                    "description": "With use edit: the evidence, whole.",
+                    "type": "array"
+                  },
+                  "id": {
+                    "description": "The line's id.",
+                    "type": "string"
+                  },
+                  "revision": {
+                    "description": "The revision of the master you read; when it changed since, the reply is 409.",
+                    "type": "integer"
+                  },
+                  "tags": {
+                    "description": "With use edit: the tags, whole (an empty array removes them).",
+                    "type": "array"
+                  },
+                  "text": {
+                    "description": "With use edit: the new wording (one line; the id stays).",
+                    "type": "string"
+                  },
+                  "use": {
+                    "description": "edit (the default) changes text, tags and/or backed; retire takes the line out of the master; restore puts a retired one back.",
+                    "enum": [
+                      "edit",
+                      "retire",
+                      "restore"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "revision",
+                  "id"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "changes": {
+                    "added": 0,
+                    "changed": 1,
+                    "removed": 0
+                  },
+                  "id": "b-hex-03",
+                  "master": {
+                    "content_sha256": "sha256:...",
+                    "counts": {
+                      "by_kind": {
+                        "bullet": 1,
+                        "other": 0,
+                        "skills": 1,
+                        "summary": 1
+                      },
+                      "by_strength": {
+                        "backed": 0,
+                        "quantified": 1,
+                        "stated": 2
+                      },
+                      "entries": 1,
+                      "ids": 4,
+                      "items": 3,
+                      "skills": 3
+                    },
+                    "entries": [
+                      {
+                        "bullets": [
+                          "b-hex-03"
+                        ],
+                        "end": 2023,
+                        "heading": "Hexa Cloud",
+                        "id": "r-hex",
+                        "ongoing": false,
+                        "order": 3,
+                        "section": "experience",
+                        "start": 2019,
+                        "sublines": [
+                          "Staff Software Engineer | Jun 2019 - Jan 2023"
+                        ]
+                      }
+                    ],
+                    "format": 1,
+                    "items": [
+                      {
+                        "backed": [],
+                        "entry_id": "r-hex",
+                        "id": "b-hex-03",
+                        "kind": "bullet",
+                        "mark": "5d0c2a4b9e1f7a36",
+                        "order": 4,
+                        "section": "experience",
+                        "strength": "quantified",
+                        "tags": [
+                          "delivery"
+                        ],
+                        "text": "Led the migration of 40 services to Helm charts released through ArgoCD."
+                      }
+                    ],
+                    "parent_revision": "revision_7c1d7b9a-0d58-4f0b-8f27-91f4f6f6a2c3",
+                    "record_id": "record_...",
+                    "revision": 3,
+                    "revision_id": "revision_0b6f2f0e-5a0e-4c58-9a57-2d1b6a0c1e11",
+                    "revisions": 3,
+                    "sections": [
+                      "summary",
+                      "experience",
+                      "skills"
+                    ],
+                    "updated_at": "2026-10-04T10:05:00.000000Z",
+                    "written_by": "operator"
+                  },
+                  "near_duplicate": null,
+                  "profiles": {
+                    "offers": [
+                      {
+                        "label": "Staff Engineer",
+                        "new_lines": [
+                          "b-4f0c1a"
+                        ],
+                        "offer": "1 new master line: refresh?",
+                        "profile_id": "prof_1"
+                      }
+                    ],
+                    "synced": []
+                  },
+                  "schema_version": "scout-master:1",
+                  "status": "revised"
+                },
+                "schema": {
+                  "additionalProperties": true,
+                  "properties": {
+                    "schema_version": {
+                      "const": "scout-master:1"
+                    }
+                  },
+                  "required": [
+                    "schema_version"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden / forbidden_origin: loopback peer and Host `127.0.0.1:<port>` or `localhost:<port>` only (Origin too on writes)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "master_not_found",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "master_not_found, target_unavailable, master_line_not_found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "revision_conflict",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "revision_conflict, master_line_not_retired, master_would_be_empty"
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "unsupported_media_type: writes need Content-Type: application/json."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "unknown_key",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "unknown_key, wrong_type, invalid_value, personal_info_refused, master_markdown_invalid"
+          }
+        },
+        "summary": "Edit, retire or restore a line of the master",
+        "tags": [
+          "Profiles and resume"
+        ],
+        "x-gigai-effect": "write",
+        "x-gigai-external": "none",
+        "x-gigai-labels": [
+          "user-private"
+        ]
+      }
+    },
+    "/api/master/migration": {
+      "get": {
+        "description": "What building the master from the profiles' resumes would do, and the questions it asks. Writes nothing. The master is built from the resumes the profiles hold: the union of their lines, the same line and near-duplicates folded (the newer wording kept). Two versions of a line that state DIFFERENT NUMBERS are asked about (`questions`: both wordings, and the profile that holds each); nothing is written until every question has an answer (a, b, or both). Each profile's first selection is its own resume, which is not rewritten, so nothing assessed stays as it was. `status`: needs_answers (questions are open), ready (GET only: a POST would write it), created | revised | unchanged (written), blocked (GET only: `blocked` says why, e.g. migration_no_profiles or migration_resume_unreadable). `contact_removed` lists what the privacy strip left out of a resume by profile, kind and line number, never a value. Local only: no model call.",
+        "operationId": "get_api_master_migration",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "blocked": null,
+                  "contact_removed": null,
+                  "master": null,
+                  "migration": {
+                    "entries": 13,
+                    "exact_duplicates": 4,
+                    "ids_assigned": 78,
+                    "lines_in": 71,
+                    "lines_out": 65,
+                    "near_duplicates": [],
+                    "questions": [
+                      {
+                        "answer": null,
+                        "choices": [
+                          "a",
+                          "b",
+                          "both"
+                        ],
+                        "entry": "Lumenfold",
+                        "kind": "number_conflict",
+                        "options": [
+                          {
+                            "key": "a",
+                            "profiles": [
+                              "Staff AI Engineer"
+                            ],
+                            "text": "Scaled the event pipeline to 2.1 million events a day for 140 internal teams."
+                          },
+                          {
+                            "key": "b",
+                            "profiles": [
+                              "Staff Software Engineer"
+                            ],
+                            "text": "Scaled the event pipeline to 1.4 million events a day for 90 internal teams."
+                          }
+                        ],
+                        "question": "One line of Experience / Lumenfold is worded twice, with different numbers. Which is right: a, b, or both (keep the two lines)?",
+                        "question_id": "mq-59c304ca47a1",
+                        "section": "experience"
+                      }
+                    ],
+                    "resumes": 2,
+                    "unanswered": [
+                      "mq-59c304ca47a1"
+                    ]
+                  },
+                  "mode": "migration",
+                  "ok": true,
+                  "profiles": [
+                    {
+                      "label": "Staff AI Engineer",
+                      "profile_id": "prof_1",
+                      "resume_ref": {
+                        "content_sha256": "sha256:...",
+                        "record_id": "record_...",
+                        "revision_id": "revision_..."
+                      },
+                      "shown": null,
+                      "skills": null
+                    }
+                  ],
+                  "questions": [
+                    {
+                      "answer": null,
+                      "choices": [
+                        "a",
+                        "b",
+                        "both"
+                      ],
+                      "entry": "Lumenfold",
+                      "kind": "number_conflict",
+                      "options": [
+                        {
+                          "key": "a",
+                          "profiles": [
+                            "Staff AI Engineer"
+                          ],
+                          "text": "Scaled the event pipeline to 2.1 million events a day for 140 internal teams."
+                        },
+                        {
+                          "key": "b",
+                          "profiles": [
+                            "Staff Software Engineer"
+                          ],
+                          "text": "Scaled the event pipeline to 1.4 million events a day for 90 internal teams."
+                        }
+                      ],
+                      "question": "One line of Experience / Lumenfold is worded twice, with different numbers. Which is right: a, b, or both (keep the two lines)?",
+                      "question_id": "mq-59c304ca47a1",
+                      "section": "experience"
+                    }
+                  ],
+                  "schema_version": "scout-master-migration:1",
+                  "status": "needs_answers",
+                  "written": false
+                },
+                "schema": {
+                  "additionalProperties": true,
+                  "properties": {
+                    "schema_version": {
+                      "const": "scout-master-migration:1"
+                    }
+                  },
+                  "required": [
+                    "schema_version"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden / forbidden_origin: loopback peer and Host `127.0.0.1:<port>` or `localhost:<port>` only (Origin too on writes)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "target_unavailable",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "target_unavailable"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "unknown_key",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "unknown_key"
+          }
+        },
+        "summary": "Preview building the master from the profiles' resumes",
+        "tags": [
+          "Profiles and resume"
+        ],
+        "x-gigai-effect": "read",
+        "x-gigai-external": "none",
+        "x-gigai-host-checked": true,
+        "x-gigai-labels": [
+          "user-private"
+        ]
+      },
+      "post": {
+        "description": "Build the master resume from the profiles' resumes, with the answers to its questions. Answers 201 when the master was written (`status` created or revised, `written` true, `master` the new revision). With a question still open it answers 200, `status` needs_answers, and writes nothing. Only profiles without a selection take part; with a master already stored their resumes are merged into it. The master is built from the resumes the profiles hold: the union of their lines, the same line and near-duplicates folded (the newer wording kept). Two versions of a line that state DIFFERENT NUMBERS are asked about (`questions`: both wordings, and the profile that holds each); nothing is written until every question has an answer (a, b, or both). Each profile's first selection is its own resume, which is not rewritten, so nothing assessed stays as it was. `status`: needs_answers (questions are open), ready (GET only: a POST would write it), created | revised | unchanged (written), blocked (GET only: `blocked` says why, e.g. migration_no_profiles or migration_resume_unreadable). `contact_removed` lists what the privacy strip left out of a resume by profile, kind and line number, never a value. Local only: no model call.",
+        "operationId": "post_api_master_migration",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "example": {
+                "answers": {
+                  "mq-59c304ca47a1": "a"
+                }
+              },
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "actor": {
+                    "description": "Who writes: recorded as written_by. Also the X-GigAI-Actor header. Without either, a write from the Scout UI (a browser page of this server) is the operator's and any other loopback write is the agent's.",
+                    "enum": [
+                      "operator",
+                      "agent"
+                    ],
+                    "type": "string"
+                  },
+                  "answers": {
+                    "description": "`{question_id: \"a\" | \"b\" | \"both\"}`: one answer per question of GET /api/master/migration.",
+                    "type": "object"
+                  },
+                  "revision": {
+                    "description": "Needed only when a master already exists and this changes it: the revision you read.",
+                    "type": "integer"
+                  }
+                },
+                "required": [],
+                "type": "object"
+              }
+            }
+          },
+          "required": false
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "after": {
+                    "offers": [],
+                    "synced": []
+                  },
+                  "blocked": null,
+                  "contact_removed": null,
+                  "master": {
+                    "content_sha256": "sha256:...",
+                    "counts": {
+                      "by_kind": {
+                        "bullet": 1,
+                        "other": 0,
+                        "skills": 1,
+                        "summary": 1
+                      },
+                      "by_strength": {
+                        "backed": 0,
+                        "quantified": 1,
+                        "stated": 2
+                      },
+                      "entries": 1,
+                      "ids": 4,
+                      "items": 3,
+                      "skills": 3
+                    },
+                    "parent_revision": "revision_7c1d7b9a-0d58-4f0b-8f27-91f4f6f6a2c3",
+                    "record_id": "record_...",
+                    "revision": 3,
+                    "revision_id": "revision_0b6f2f0e-5a0e-4c58-9a57-2d1b6a0c1e11",
+                    "revisions": 3,
+                    "updated_at": "2026-10-04T10:05:00.000000Z",
+                    "written_by": "operator"
+                  },
+                  "migration": {
+                    "entries": 13,
+                    "exact_duplicates": 4,
+                    "ids_assigned": 78,
+                    "lines_in": 71,
+                    "lines_out": 65,
+                    "near_duplicates": [],
+                    "questions": [
+                      {
+                        "answer": null,
+                        "choices": [
+                          "a",
+                          "b",
+                          "both"
+                        ],
+                        "entry": "Lumenfold",
+                        "kind": "number_conflict",
+                        "options": [
+                          {
+                            "key": "a",
+                            "profiles": [
+                              "Staff AI Engineer"
+                            ],
+                            "text": "Scaled the event pipeline to 2.1 million events a day for 140 internal teams."
+                          },
+                          {
+                            "key": "b",
+                            "profiles": [
+                              "Staff Software Engineer"
+                            ],
+                            "text": "Scaled the event pipeline to 1.4 million events a day for 90 internal teams."
+                          }
+                        ],
+                        "question": "One line of Experience / Lumenfold is worded twice, with different numbers. Which is right: a, b, or both (keep the two lines)?",
+                        "question_id": "mq-59c304ca47a1",
+                        "section": "experience"
+                      }
+                    ],
+                    "resumes": 2,
+                    "unanswered": [
+                      "mq-59c304ca47a1"
+                    ]
+                  },
+                  "mode": "migration",
+                  "ok": true,
+                  "profiles": [
+                    {
+                      "label": "Staff AI Engineer",
+                      "profile_id": "prof_1",
+                      "resume_ref": {
+                        "content_sha256": "sha256:...",
+                        "record_id": "record_...",
+                        "revision_id": "revision_..."
+                      },
+                      "shown": null,
+                      "skills": null
+                    }
+                  ],
+                  "questions": [],
+                  "schema_version": "scout-master-migration:1",
+                  "status": "created",
+                  "written": true
+                },
+                "schema": {
+                  "additionalProperties": true,
+                  "properties": {
+                    "schema_version": {
+                      "const": "scout-master-migration:1"
+                    }
+                  },
+                  "required": [
+                    "schema_version"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden / forbidden_origin: loopback peer and Host `127.0.0.1:<port>` or `localhost:<port>` only (Origin too on writes)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "target_unavailable",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "target_unavailable"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "migration_no_profiles",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "migration_no_profiles, migration_resume_unreadable, master_exists, revision_conflict"
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "unsupported_media_type: writes need Content-Type: application/json."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "unknown_key",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "unknown_key, wrong_type, invalid_value, migration_answer_invalid, migration_answer_unknown"
+          }
+        },
+        "summary": "Build the master from the profiles' resumes",
+        "tags": [
+          "Profiles and resume"
+        ],
+        "x-gigai-effect": "write",
+        "x-gigai-external": "none",
+        "x-gigai-labels": [
+          "user-private"
+        ]
+      }
+    },
+    "/api/master/selection": {
+      "get": {
+        "description": "Each profile's selection of the master, against the master as it is now. A profile's selection of the master is sticky: it changes only when a line it shows is edited or retired, or on a refresh. Lines the master gained since the selection was made are offered (`new_lines`, and `offer`: \"3 new master lines: refresh?\"), never added by themselves. `attached` false: the profile's resume was replaced by hand after the selection was made, so it no longer shows it (a refresh selects again). `stale`: the master edited or retired a line the selection shows and the profile's resume has not been printed again (use sync). `has_selection` false: the profile still shows its own resume. `pending` lists profiles whose first selection is being made right now (a profile created a moment ago). Ids, counts and states only: no line's text. `master` is null and `profiles` empty when there is no master.",
+        "operationId": "get_api_master_selection",
+        "parameters": [
+          {
+            "description": "Only this profile.",
+            "in": "query",
+            "name": "profile_id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "master": {
+                    "content_sha256": "sha256:...",
+                    "counts": {
+                      "by_kind": {
+                        "bullet": 1,
+                        "other": 0,
+                        "skills": 1,
+                        "summary": 1
+                      },
+                      "by_strength": {
+                        "backed": 0,
+                        "quantified": 1,
+                        "stated": 2
+                      },
+                      "entries": 1,
+                      "ids": 4,
+                      "items": 3,
+                      "skills": 3
+                    },
+                    "parent_revision": "revision_7c1d7b9a-0d58-4f0b-8f27-91f4f6f6a2c3",
+                    "record_id": "record_...",
+                    "revision": 3,
+                    "revision_id": "revision_0b6f2f0e-5a0e-4c58-9a57-2d1b6a0c1e11",
+                    "revisions": 3,
+                    "updated_at": "2026-10-04T10:05:00.000000Z",
+                    "written_by": "operator"
+                  },
+                  "pending": [],
+                  "profiles": [
+                    {
+                      "attached": true,
+                      "changed": [],
+                      "excludes": [],
+                      "has_selection": true,
+                      "label": "Staff Engineer",
+                      "made_from_revision": 1,
+                      "master_revision": 3,
+                      "new_lines": [
+                        "b-4f0c1a",
+                        "b-91be02",
+                        "o-77aa10"
+                      ],
+                      "offer": "3 new master lines: refresh?",
+                      "pending": false,
+                      "pins": [],
+                      "profile_id": "prof_1",
+                      "retired": [],
+                      "selector_version": "sel-1",
+                      "shown": 36,
+                      "skills": 20,
+                      "skills_retired": [],
+                      "source": "migration",
+                      "stale": false,
+                      "state": "active"
+                    }
+                  ],
+                  "schema_version": "scout-master-selection:1"
+                },
+                "schema": {
+                  "additionalProperties": true,
+                  "properties": {
+                    "schema_version": {
+                      "const": "scout-master-selection:1"
+                    }
+                  },
+                  "required": [
+                    "schema_version"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden / forbidden_origin: loopback peer and Host `127.0.0.1:<port>` or `localhost:<port>` only (Origin too on writes)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "profile_not_found",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "profile_not_found, target_unavailable"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "unknown_key",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "unknown_key"
+          }
+        },
+        "summary": "Get each profile's selection of the master",
+        "tags": [
+          "Profiles and resume"
+        ],
+        "x-gigai-effect": "read",
+        "x-gigai-external": "none",
+        "x-gigai-host-checked": true,
+        "x-gigai-labels": [
+          "user-private"
+        ]
+      },
+      "post": {
+        "description": "Refresh one profile's selection of the master, or print its resume again. use refresh: the pick is made by code (no model) against the postings the profile's titles match in the local index, with the lines it shows now as the prior, and fitted to 2 pages; a profile with no selection gets its first one. The profile's resume then IS this selection, so what was assessed or tailored on the earlier resume is re-opened as for any new resume. `changes[0]`: `action` first | refreshed, `added` and `removed` (ids, against what it showed), `pages`, `fits`, `postings` (how many matching postings the pick was made against). use sync brings in the master's edited wording and drops retired lines, and selects nothing new (`changes` is empty when the resume already says what the master says). The reply also carries the profile's status after the change, as GET /api/master/selection gives it. A profile's selection of the master is sticky: it changes only when a line it shows is edited or retired, or on a refresh. Lines the master gained since the selection was made are offered (`new_lines`, and `offer`: \"3 new master lines: refresh?\"), never added by themselves. `attached` false: the profile's resume was replaced by hand after the selection was made, so it no longer shows it (a refresh selects again). `stale`: the master edited or retired a line the selection shows and the profile's resume has not been printed again (use sync). `has_selection` false: the profile still shows its own resume. `pending` lists profiles whose first selection is being made right now (a profile created a moment ago). Ids, counts and states only: no line's text.",
+        "operationId": "post_api_master_selection",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "example": {
+                "profile_id": "prof_1",
+                "use": "refresh"
+              },
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "dry_run": {
+                    "description": "With use refresh: say what it would pick; write nothing.",
+                    "type": "boolean"
+                  },
+                  "profile_id": {
+                    "description": "The profile.",
+                    "type": "string"
+                  },
+                  "use": {
+                    "description": "refresh (the default) selects again from the whole master; sync only prints the resume again from the lines it already shows.",
+                    "enum": [
+                      "refresh",
+                      "sync"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "profile_id"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "changes": [
+                    {
+                      "action": "refreshed",
+                      "added": [
+                        "b-4f0c1a"
+                      ],
+                      "changed": [],
+                      "fits": true,
+                      "label": "Staff Engineer",
+                      "pages": 2,
+                      "postings": 40,
+                      "profile_id": "prof_1",
+                      "removed": [
+                        "b-fin-07"
+                      ],
+                      "resume_ref": {
+                        "content_sha256": "sha256:...",
+                        "record_id": "record_...",
+                        "revision_id": "revision_..."
+                      },
+                      "retired": [],
+                      "shown": 38,
+                      "skills": 22,
+                      "source": "refresh",
+                      "written": true
+                    }
+                  ],
+                  "dry_run": false,
+                  "master": {
+                    "content_sha256": "sha256:...",
+                    "counts": {
+                      "by_kind": {
+                        "bullet": 1,
+                        "other": 0,
+                        "skills": 1,
+                        "summary": 1
+                      },
+                      "by_strength": {
+                        "backed": 0,
+                        "quantified": 1,
+                        "stated": 2
+                      },
+                      "entries": 1,
+                      "ids": 4,
+                      "items": 3,
+                      "skills": 3
+                    },
+                    "parent_revision": "revision_7c1d7b9a-0d58-4f0b-8f27-91f4f6f6a2c3",
+                    "record_id": "record_...",
+                    "revision": 3,
+                    "revision_id": "revision_0b6f2f0e-5a0e-4c58-9a57-2d1b6a0c1e11",
+                    "revisions": 3,
+                    "updated_at": "2026-10-04T10:05:00.000000Z",
+                    "written_by": "operator"
+                  },
+                  "pending": [],
+                  "profiles": [
+                    {
+                      "attached": true,
+                      "changed": [],
+                      "excludes": [],
+                      "has_selection": true,
+                      "label": "Staff Engineer",
+                      "made_from_revision": 1,
+                      "master_revision": 3,
+                      "new_lines": [
+                        "b-4f0c1a",
+                        "b-91be02",
+                        "o-77aa10"
+                      ],
+                      "offer": "3 new master lines: refresh?",
+                      "pending": false,
+                      "pins": [],
+                      "profile_id": "prof_1",
+                      "retired": [],
+                      "selector_version": "sel-1",
+                      "shown": 36,
+                      "skills": 20,
+                      "skills_retired": [],
+                      "source": "migration",
+                      "stale": false,
+                      "state": "active"
+                    }
+                  ],
+                  "schema_version": "scout-master-selection:1",
+                  "use": "refresh"
+                },
+                "schema": {
+                  "additionalProperties": true,
+                  "properties": {
+                    "schema_version": {
+                      "const": "scout-master-selection:1"
+                    }
+                  },
+                  "required": [
+                    "schema_version"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden / forbidden_origin: loopback peer and Host `127.0.0.1:<port>` or `localhost:<port>` only (Origin too on writes)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "profile_not_found",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "profile_not_found, master_not_found, target_unavailable"
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "unsupported_media_type: writes need Content-Type: application/json."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "unknown_key",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "unknown_key, invalid_value"
+          }
+        },
+        "summary": "Refresh a profile's selection of the master",
+        "tags": [
+          "Profiles and resume"
+        ],
+        "x-gigai-effect": "write",
+        "x-gigai-external": "none",
+        "x-gigai-labels": [
+          "user-private"
+        ]
+      }
+    },
     "/api/metrics": {
       "get": {
         "description": "What this project's model calls cost, as averages per kind of call and model. Every model call Scout makes is recorded once, locally: the model, tokens in, out and cached, the cost when the provider reports one, the wall time and the outcome. No prompt, answer, resume or posting text is stored or served. `aggregates` has one entry per (kind, model_target, model); `comparison` adds the model ids of one model target together. `avg_input_tokens` is everything the model read (cached input included) and `avg_cached_tokens` the part served from cache; token and cost averages are over the calls that reported them, `avg_seconds` over the calls that succeeded; `error_rate` counts a call that failed or answered something unusable; `items` is how many jobs or titles the calls covered (a rank or tag call covers several). A value nothing reported is null. Reading makes no model call.",
@@ -4964,7 +7038,7 @@
         ]
       },
       "post": {
-        "description": "Create a profile. Every profile but the default one has its own location, work mode, countries and posted window. The first profile is the default and uses the setup settings. The resume: the one named by resume_record_id and resume_revision_id; else, with a master resume stored, the profile's own first selection of the master (made by code, with no model call, from the postings its titles match in the local index); else the selected profile's resume.",
+        "description": "Create a profile. Every profile but the default one has its own location, work mode, countries and posted window. The first profile is the default and uses the setup settings. The resume: the one named by resume_record_id and resume_revision_id; else the selected profile's resume. With a master resume stored, a profile that named no resume then gets its own first selection of the master (made by code, with no model call, from the postings its titles match in the local index): it is made after this answer, so the response still shows the selected profile's resume, GET /api/master/selection lists the profile under `pending` meanwhile, and GET /api/profiles shows its own resume once it has landed.",
         "operationId": "post_api_profiles",
         "parameters": [],
         "requestBody": {
@@ -10563,6 +12637,197 @@
           "Tailored resumes"
         ],
         "x-gigai-effect": "read",
+        "x-gigai-external": "none",
+        "x-gigai-labels": [
+          "user-private",
+          "public-untrusted"
+        ]
+      }
+    },
+    "/api/tailored-resumes/selection": {
+      "put": {
+        "description": "Add or Remove one master line on a job's tailored resume. For a resume tailored from the master resume (its `selection` lists what was picked and what was left out). remove takes the line off this one job's resume and lists it under `selection.left_out` with code removed_by_you. add shows the line: one the fit had cut for length comes back as it was; any other is a copy of the master line as the master words it now, under its role. The reply is the tailored resume with `selection_change`: `{use, item_id, applied, changed, needs_choice, pages, max_pages, would_cut, cut}`. When an add pushes a resume that fitted over 2 pages and `fit` is ask, nothing is stored (`applied` false, `needs_choice` true) and `would_cut` names the lines that would go to keep 2 pages (the fit's own order: the oldest roles first, then the lowest-value last line of a recent role; never the added line): send the same request with `fit: \"cut\"` to make room (what was cut goes onto `result.length`, so PUT /api/tailored-resumes/length puts it back) or `fit: \"keep\"` to keep both. `updated_at` is unchanged. The resume is then yours: background tailoring never replaces it. Other jobs, the profile's selection and the master are untouched. Local only: no model call.",
+        "operationId": "put_api_tailored_resumes_selection",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "example": {
+                "item_id": "b-hex-03",
+                "job_identity": "https://boards.greenhouse.io/acme/jobs/101",
+                "profile_id": "prof_1",
+                "updated_at": "2026-09-29T10:05:00Z",
+                "use": "add"
+              },
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "fit": {
+                    "description": "For add, when the line pushes a resume that fitted over 2 pages: ask (default) stores nothing and names what would be cut; cut makes room; keep keeps both.",
+                    "enum": [
+                      "ask",
+                      "cut",
+                      "keep"
+                    ],
+                    "type": "string"
+                  },
+                  "item_id": {
+                    "description": "The master line's id (from `selection.picked` / `selection.left_out`, or GET /api/master).",
+                    "type": "string"
+                  },
+                  "job_identity": {
+                    "description": "The job identity.",
+                    "type": "string"
+                  },
+                  "profile_id": {
+                    "description": "The resume identity.",
+                    "type": "string"
+                  },
+                  "updated_at": {
+                    "description": "The updated_at of the tailored resume you read; a newer tailoring answers 409.",
+                    "type": "string"
+                  },
+                  "use": {
+                    "description": "add shows a left-out master line; remove takes a picked one off this resume.",
+                    "enum": [
+                      "add",
+                      "remove"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "profile_id",
+                  "job_identity",
+                  "updated_at",
+                  "use",
+                  "item_id"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "job": {
+                    "job_identity": "https://boards.greenhouse.io/acme/jobs/101"
+                  },
+                  "markdown": "# ...",
+                  "schema_version": "scout-tailor-response:1",
+                  "selection_change": {
+                    "applied": false,
+                    "changed": false,
+                    "cut": [],
+                    "item_id": "b-hex-03",
+                    "max_pages": 2,
+                    "needs_choice": true,
+                    "pages": 3,
+                    "use": "add",
+                    "would_cut": [
+                      {
+                        "id": "b-fin-07",
+                        "kind": "bullet",
+                        "role": "Fintra Labs \u00b7 Senior Engineer | 2016 - 2019",
+                        "text": "Maintained the nightly reconciliation jobs."
+                      }
+                    ]
+                  }
+                },
+                "schema": {
+                  "additionalProperties": true,
+                  "properties": {
+                    "schema_version": {
+                      "const": "scout-tailor-response:1"
+                    }
+                  },
+                  "required": [
+                    "schema_version"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden / forbidden_origin: loopback peer and Host `127.0.0.1:<port>` or `localhost:<port>` only (Origin too on writes)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "tailored_resume_not_found",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "tailored_resume_not_found, master_line_not_found, master_not_found, target_unavailable"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "selection_line_not_shown",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "selection_line_not_shown, tailored_resume_changed"
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "unsupported_media_type: writes need Content-Type: application/json."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "unknown_key",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "unknown_key, invalid_value, selection_unavailable, selection_line_unsupported"
+          }
+        },
+        "summary": "Add or remove a master line on a job's tailored resume",
+        "tags": [
+          "Tailored resumes"
+        ],
+        "x-gigai-effect": "write",
         "x-gigai-external": "none",
         "x-gigai-labels": [
           "user-private",

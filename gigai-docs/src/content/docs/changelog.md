@@ -217,6 +217,29 @@ the server used several gigabytes of memory, and reloading made it worse. Read "
   before. After you make or change the master, the background pipeline tailors a job's resume again
   the next time it processes that job, within the daily limit on model calls; a resume you tailored
   or edited yourself is kept.
+- **A master resume, fifth step: the Master page, and Picked / Left out on a job.** Settings has a
+  new page, **Master resume** (`#/master`). With no master yet it offers to make one from the resumes
+  your profiles hold: it shows what the merge would do, asks about each line your resumes word with
+  different numbers (keep A, keep B, or both), and writes nothing until you answer. After that the
+  page lists the master by role. You can add a line, edit one, retire one (History lists what is
+  retired and puts it back), and add a role; each line shows how strong its evidence is (backed by a
+  story or an answer, states a number, or stated) and which profiles show it. The page sends the
+  revision it read with every change, so a change that crosses one your agent made is refused and
+  the page shows the master as it is now. Under Profiles in Settings, and on the Master page, each
+  profile says where its selection stands ("3 new master lines: refresh?") with a **Refresh**
+  button. On a job page, a resume tailored from the master has **Picked (n)** and **Left out (m)**:
+  every line with the reason it is shown or not, **Remove** to take a line off this job's resume and
+  **Add** to put one on. When an added line would make the resume 3 pages, Scout names the line that
+  would be cut to keep 2 and asks: cut it, or keep both. A line your agent edited on a tailored
+  resume offers **Save this wording to your master**. The API has `GET /api/master`,
+  `GET /api/master/history`, `POST` and `PUT /api/master/lines` and `/api/master/entries` (edit,
+  retire, restore by id, each with the revision you read), `GET` and `POST /api/master/migration`,
+  `GET` and `POST /api/master/selection`, and `PUT /api/tailored-resumes/selection`; a write names
+  who made it (`actor`), as for answers. Two smaller changes come with it. Creating a profile while
+  a master is stored now answers at once: the profile's own first selection is made in the
+  background a few seconds later (it held the request for 7 to 8 seconds on a large store of
+  postings). And the "Cut for length" line says "older bullets" only when every bullet it names
+  belongs to a role that ended more than 8 years ago; bullets cut from a recent role are "bullets".
 
 ### 0.1.10.8
 

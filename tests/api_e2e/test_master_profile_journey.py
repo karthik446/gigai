@@ -5,7 +5,9 @@ master and one of its resumes), no model call. Before a master is stored, a
 profile made with ``POST /api/profiles`` takes the selected profile's resume,
 as always. With a master stored it gets its first selection (code only, from
 the local index, else its titles): its ``resume_ref`` is its own view record,
-and the selected profile's resume is not touched. A profile that names a
+and the selected profile's resume is not touched. P5: that selection is made
+after the route has answered (it held the route for 7 to 8 s on a home with
+290,000 postings), so the test waits for it to land. A profile that names a
 resume of its own keeps that resume.
 """
 
@@ -13,6 +15,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import time
 
 from click.testing import CliRunner
 import pytest
@@ -21,6 +24,7 @@ from gigai.cli import cli
 
 from tests.api_e2e.after_journey import assert_clean_and_healthy
 from tests.api_e2e.harness import add_resume, resolve_workpad_path, setup_and_init, start_server, stop_server, write_offline_find_jobs_config
+from tests.support.latency import latency_bound
 
 _MASTER = Path(__file__).resolve().parents[1] / "evals" / "fixtures" / "master" / "master.md"
 
@@ -45,10 +49,16 @@ def test_a_new_profile_gets_its_own_selection_once_a_master_is_stored(tmp_path: 
 
         created = client.post("/api/profiles", json={"label": "After", "titles": ["staff ai engineer"]})
         assert created.status_code == 201, created.text
-        made = created.json()["profile"]
-        assert made["resume_ref"] != default["resume_ref"] and made["revision"] == 2
+        # P5: the answer comes at once, with the selected profile's resume; the profile's own selection is made after it
+        # (`pending` in GET /api/master/selection meanwhile) and then IS its resume.
+        assert created.json()["profile"]["resume_ref"] == default["resume_ref"] and created.json()["profile"]["revision"] == 1
+        deadline = time.monotonic() + latency_bound(60.0)
+        while created.json()["profile"]["profile_id"] in client.get("/api/master/selection").json()["pending"]:
+            assert time.monotonic() < deadline, "the new profile's first selection never landed"
+            time.sleep(0.1)
         listed = {item["profile_id"]: item for item in client.get("/api/profiles").json()["profiles"]}
-        assert listed[made["profile_id"]]["resume_ref"] == made["resume_ref"]
+        made = listed[created.json()["profile"]["profile_id"]]
+        assert made["resume_ref"] != default["resume_ref"] and made["revision"] == 2
         assert listed[default["profile_id"]]["resume_ref"] == default["resume_ref"]  # nobody else's resume moved
 
         # The view is a resume the readers read: the profile's status says where it came from.

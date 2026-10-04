@@ -74,6 +74,38 @@ call. A PDF made this way has no name and no contact details. The command prints
 the finished PDF. [For agents](../agents/#change-a-resume-and-render-a-new-pdf) has a
 worked example and the markdown format.
 
+## The master resume
+
+A master resume is one document that holds everything: every role, bullet, project and
+skill you have, with an id on every line and no name or contact details. A profile shows
+a selection of it, and a resume tailored for one job is picked from all of it, so a line
+you add once is there for every profile and every job.
+
+**Make it.** Settings > **Master resume** (`#/master`), or `gigai scout resume master
+init`. Scout merges the resumes your profiles hold: every line once, the newer wording
+kept where two say the same thing. Where two resumes word one line with different
+numbers it asks which is right (A, B, or both) and writes nothing until you answer. Each
+profile keeps showing the resume it shows now, so nothing already assessed changes.
+
+**Change it.** The Master page lists the master by role. Add a line under a role, edit
+one, retire one, add a role. A retired line is never selected again; **History** lists
+what is retired and puts it back. Each line shows how strong its evidence is: backed by a
+story or an answer, states a number, or stated. Only your own facts belong here; an agent
+writes through the API (`POST` and `PUT /api/master/lines`) and sends the revision it
+read, so a change that crosses yours is refused instead of overwriting it.
+
+**Profiles.** A profile's selection stays as it is until you refresh it. When the master
+gains lines, the profile says so ("3 new master lines: refresh?") under Settings >
+Profiles and on the Master page; **Refresh** selects again from the whole master, by
+code and with no model call, and makes the result the profile's resume. When you edit
+or retire a line a profile shows, its resume follows by itself.
+
+**One job.** A resume tailored from the master shows **Picked (n)** and **Left out (m)**
+on the job page, every line with the reason it is shown or not. **Remove** takes a line
+off this job's resume; **Add** puts one on. If an added line would make the resume 3
+pages, Scout names the line that would be cut to keep 2 and asks: cut it, or keep both.
+A line that was edited on a tailored resume offers **Save this wording to your master**.
+
 ## Resume display
 
 Under Settings > Profiles, **Resume display** holds the title printed under your

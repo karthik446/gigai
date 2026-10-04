@@ -683,13 +683,21 @@ def test_the_create_route_gives_a_new_profile_its_own_selection_when_a_master_is
             two.resolved, label=label, titles=("staff platform engineer",), titles_to_avoid=(), queries=("staff platform engineer",), resume_ref=default.resume_ref,
         )
 
-    # No master yet: the profile stays as created, with the selected profile's resume.
+    from gigai.scout.find_jobs.api import master as master_routes
+
+    # No master yet: the profile stays as created, with the selected profile's resume, and nothing is started.
     first = create("Before")
-    assert handler._first_master_selection(first) == first
+    assert handler._first_master_selection(two.resolved, first) is None
+    assert two.profile(first.profile_id).resume_ref == default.resume_ref
     two.migrate("a")
     second = create("After")
-    made = handler._first_master_selection(second)
-    assert made.profile_id == second.profile_id and made.resume_ref != default.resume_ref
+    # 0.1.10.9 master P5: the selection is made after the route's answer, on a thread; the profile is listed as pending meanwhile.
+    thread = handler._first_master_selection(two.resolved, second)
+    assert thread is not None
+    thread.join(120)
+    assert not thread.is_alive() and master_routes.pending_first_selections(two.home, two.scout) == []
+    made = two.profile(second.profile_id)
+    assert made.resume_ref != default.resume_ref
     assert made.master_selection is not None and made.master_selection.source == "titles"
     assert made.resume_ref.record_id == mp.view_record_id(two.resolved, second.profile_id)
 

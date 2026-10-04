@@ -474,6 +474,91 @@ _NEW_NOTE = (
     "GET /api/new/yours (`yours_hint`). No contact data."
 )
 
+# --- 0.1.10.9 master P5: the master resume -------------------------------------------------------
+_MASTER_REVISION: dict[str, object] = {
+    "revision": 3, "revision_id": "revision_0b6f2f0e-5a0e-4c58-9a57-2d1b6a0c1e11", "parent_revision": "revision_7c1d7b9a-0d58-4f0b-8f27-91f4f6f6a2c3",
+    "written_by": "operator", "updated_at": "2026-10-04T10:05:00.000000Z", "content_sha256": "sha256:...", "record_id": "record_...", "revisions": 3,
+}
+_MASTER_LINE: dict[str, object] = {
+    "id": "b-hex-03", "section": "experience", "kind": "bullet", "text": "Led the migration of 40 services to Helm charts released through ArgoCD.",
+    "tags": ["delivery"], "backed": [], "entry_id": "r-hex", "order": 4, "strength": "quantified", "mark": "5d0c2a4b9e1f7a36",
+}
+_MASTER_EXAMPLE: dict[str, object] = {
+    **_MASTER_REVISION, "format": 1, "sections": ["summary", "experience", "skills"],
+    "counts": {"ids": 4, "items": 3, "entries": 1, "by_kind": {"summary": 1, "bullet": 1, "skills": 1, "other": 0}, "by_strength": {"backed": 0, "quantified": 1, "stated": 2}, "skills": 3},
+    "entries": [{"id": "r-hex", "section": "experience", "heading": "Hexa Cloud", "sublines": ["Staff Software Engineer | Jun 2019 - Jan 2023"], "start": 2019, "end": 2023, "ongoing": False, "bullets": ["b-hex-03"], "order": 3}],
+    "items": [_MASTER_LINE],
+}
+_MASTER_WRITE_EXAMPLE: dict[str, object] = {
+    "schema_version": "scout-master:1", "status": "revised", "id": "b-hex-03", "changes": {"added": 0, "removed": 0, "changed": 1}, "near_duplicate": None,
+    "profiles": {"synced": [], "offers": [{"profile_id": "prof_1", "label": "Staff Engineer", "new_lines": ["b-4f0c1a"], "offer": "1 new master line: refresh?"}]},
+    "master": _MASTER_EXAMPLE,
+}
+_MASTER_NOTE = (
+    "The master resume is the user's one document of every role, bullet, project and skill, with a stable id on every line and no contact data; a "
+    "profile shows a selection of it and a tailoring for one job picks from all of it. `master` is null when there is none yet (build it with "
+    "POST /api/master/migration, or `gigai scout resume master init`). Each entry: `{id, section, heading, sublines, start, end, ongoing, bullets, "
+    "order}`. Each line: `{id, section, kind: summary | bullet | skills | other, text, tags, backed, entry_id, order, strength: backed | quantified | "
+    "stated, mark}` (a Skills line also `label` and `skills`). `strength` is derived: backed when a story or an answer is linked, quantified when the "
+    "line states a number. `revision` is the number a write sends back."
+)
+_MASTER_WRITE_NOTE = (
+    "One new revision of the master. Send the `revision` you read: when the master changed since, the reply is 409 revision_conflict with "
+    "`error.current` (the revision it is at now): read it again, then send the change on top of that. A text that looks like contact data (email, "
+    "phone, link, address, a name line) answers 422 personal_info_refused and nothing is written. The reply carries the whole `master` after the "
+    "write, `status` (revised, or unchanged when it already said this), the `id` the change was about, and `profiles`: what the write did to the "
+    "profiles' selections (`synced`: a profile that shows an edited or retired line had its resume printed again; `offers`: new lines are offered, "
+    "never added by themselves). Every tailoring made from the master is out of date after a write and is made again when the pipeline next looks "
+    "at its profile. Local only: no model call."
+)
+_MASTER_REVISION_PARAM = _b("revision", "integer", "The revision of the master you read; when it changed since, the reply is 409.", required=True)
+_MASTER_WRITE_ERRORS = (
+    _UNKNOWN_KEY, _WRONG_TYPE, _INVALID, (422, "personal_info_refused"), (422, "master_markdown_invalid"), _REVISION_CONFLICT,
+    (404, "master_not_found"), _NO_TARGET,
+)
+_MIGRATION_QUESTION: dict[str, object] = {
+    "question_id": "mq-59c304ca47a1", "kind": "number_conflict", "section": "experience", "entry": "Lumenfold",
+    "question": "One line of Experience / Lumenfold is worded twice, with different numbers. Which is right: a, b, or both (keep the two lines)?",
+    "options": [
+        {"key": "a", "text": "Scaled the event pipeline to 2.1 million events a day for 140 internal teams.", "profiles": ["Staff AI Engineer"]},
+        {"key": "b", "text": "Scaled the event pipeline to 1.4 million events a day for 90 internal teams.", "profiles": ["Staff Software Engineer"]},
+    ],
+    "choices": ["a", "b", "both"], "answer": None,
+}
+_MIGRATION_EXAMPLE: dict[str, object] = {
+    "schema_version": "scout-master-migration:1", "ok": True, "mode": "migration", "status": "needs_answers", "written": False, "master": None,
+    "migration": {"resumes": 2, "lines_in": 71, "lines_out": 65, "entries": 13, "exact_duplicates": 4, "ids_assigned": 78, "near_duplicates": [], "questions": [_MIGRATION_QUESTION], "unanswered": ["mq-59c304ca47a1"]},
+    "questions": [_MIGRATION_QUESTION],
+    "profiles": [{"profile_id": "prof_1", "label": "Staff AI Engineer", "shown": None, "skills": None, "resume_ref": {"record_id": "record_...", "revision_id": "revision_...", "content_sha256": "sha256:..."}}],
+    "contact_removed": None, "blocked": None,
+}
+_MIGRATION_NOTE = (
+    "The master is built from the resumes the profiles hold: the union of their lines, the same line and near-duplicates folded (the newer wording "
+    "kept). Two versions of a line that state DIFFERENT NUMBERS are asked about (`questions`: both wordings, and the profile that holds each); nothing "
+    "is written until every question has an answer (a, b, or both). Each profile's first selection is its own resume, which is not rewritten, so "
+    "nothing assessed stays as it was. `status`: needs_answers (questions are open), ready (GET only: a POST would write it), created | revised | "
+    "unchanged (written), blocked (GET only: `blocked` says why, e.g. migration_no_profiles or migration_resume_unreadable). `contact_removed` "
+    "lists what the privacy strip left out of a resume by profile, kind and line number, never a value. Local only: no model call."
+)
+_SELECTION_STATUS: dict[str, object] = {
+    "profile_id": "prof_1", "label": "Staff Engineer", "state": "active", "has_selection": True, "attached": True, "source": "migration",
+    "selector_version": "sel-1", "shown": 36, "skills": 20, "pins": [], "excludes": [], "master_revision": 3, "made_from_revision": 1,
+    "new_lines": ["b-4f0c1a", "b-91be02", "o-77aa10"], "changed": [], "retired": [], "skills_retired": [], "stale": False,
+    "offer": "3 new master lines: refresh?", "pending": False,
+}
+_SELECTION_EXAMPLE: dict[str, object] = {
+    "schema_version": "scout-master-selection:1", "master": {**_MASTER_REVISION, "counts": _MASTER_EXAMPLE["counts"]},
+    "profiles": [_SELECTION_STATUS], "pending": [],
+}
+_SELECTION_NOTE = (
+    "A profile's selection of the master is sticky: it changes only when a line it shows is edited or retired, or on a refresh. Lines the master gained "
+    "since the selection was made are offered (`new_lines`, and `offer`: \"3 new master lines: refresh?\"), never added by themselves. `attached` false: "
+    "the profile's resume was replaced by hand after the selection was made, so it no longer shows it (a refresh selects again). `stale`: the master "
+    "edited or retired a line the selection shows and the profile's resume has not been printed again (use sync). `has_selection` false: the profile "
+    "still shows its own resume. `pending` lists profiles whose first selection is being made right now (a profile created a moment ago). Ids, "
+    "counts and states only: no line's text."
+)
+
 _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
     # --- discovery of the API itself -------------------------------------------------
     RouteSpec(
@@ -703,7 +788,7 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
             _b("search_settings", "object", "This profile's own {location, work_mode, countries, max_age_days}; omitted = a copy of the default's, null = same as default."),
         ),
         request_example={"label": "Backend", "titles": ["Software Engineer"]}, errors=(_WRONG_TYPE, (400, "invalid_value"), _NOT_FOUND),
-        description="Every profile but the default one has its own location, work mode, countries and posted window. The first profile is the default and uses the setup settings. The resume: the one named by resume_record_id and resume_revision_id; else, with a master resume stored, the profile's own first selection of the master (made by code, with no model call, from the postings its titles match in the local index); else the selected profile's resume.",
+        description="Every profile but the default one has its own location, work mode, countries and posted window. The first profile is the default and uses the setup settings. The resume: the one named by resume_record_id and resume_revision_id; else the selected profile's resume. With a master resume stored, a profile that named no resume then gets its own first selection of the master (made by code, with no model call, from the postings its titles match in the local index): it is made after this answer, so the response still shows the selected profile's resume, GET /api/master/selection lists the profile under `pending` meanwhile, and GET /api/profiles shows its own resume once it has landed.",
     ),
     RouteSpec(
         "PUT", "/api/profiles/{profile_id}", "Update a profile.", "write", "none", {"profile": {"profile_id": "prof_1"}},
@@ -1020,6 +1105,197 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
             "leaving out older roles would not fix it: no role was cut) or unmeasured (the pages could not be measured: no role was cut). use restore puts "
             "every cut role and bullet back where it was, in one step; use cut, after a restore, leaves the same things out again. Idempotent; updated_at "
             "is unchanged; the markdown and the PDF follow. Local only: no model call."
+        ),
+    ),
+    RouteSpec(
+        "PUT", "/api/tailored-resumes/selection", "Add or Remove one master line on a job's tailored resume.", "write", "none",
+        {
+            "schema_version": "scout-tailor-response:1", "job": {"job_identity": _JOB_URL}, "markdown": "# ...",
+            "selection_change": {
+                "use": "add", "item_id": "b-hex-03", "applied": False, "changed": False, "needs_choice": True, "pages": 3, "max_pages": 2,
+                "would_cut": [{"id": "b-fin-07", "kind": "bullet", "text": "Maintained the nightly reconciliation jobs.", "role": "Fintra Labs · Senior Engineer | 2016 - 2019"}],
+                "cut": [],
+            },
+        },
+        schema_version="scout-tailor-response:1",
+        params=(
+            _b("profile_id", "string", "The resume identity.", required=True), _b("job_identity", "string", "The job identity.", required=True),
+            _b("updated_at", "string", "The updated_at of the tailored resume you read; a newer tailoring answers 409.", required=True),
+            _b("use", "string", "add shows a left-out master line; remove takes a picked one off this resume.", required=True, enum=("add", "remove")),
+            _b("item_id", "string", "The master line's id (from `selection.picked` / `selection.left_out`, or GET /api/master).", required=True),
+            _b("fit", "string", "For add, when the line pushes a resume that fitted over 2 pages: ask (default) stores nothing and names what would be cut; cut makes room; keep keeps both.", enum=("ask", "cut", "keep")),
+        ),
+        request_example={"profile_id": "prof_1", "job_identity": _JOB_URL, "updated_at": "2026-09-29T10:05:00Z", "use": "add", "item_id": "b-hex-03"},
+        errors=(
+            _UNKNOWN_KEY, _INVALID, (422, "selection_unavailable"), (422, "selection_line_unsupported"), (404, "tailored_resume_not_found"),
+            (404, "master_line_not_found"), (404, "master_not_found"), (409, "selection_line_not_shown"), (409, "tailored_resume_changed"), _NO_TARGET,
+        ),
+        description=(
+            "For a resume tailored from the master resume (its `selection` lists what was picked and what was left out). remove takes the line off this "
+            "one job's resume and lists it under `selection.left_out` with code removed_by_you. add shows the line: one the fit had cut for length comes "
+            "back as it was; any other is a copy of the master line as the master words it now, under its role. The reply is the tailored resume with "
+            "`selection_change`: `{use, item_id, applied, changed, needs_choice, pages, max_pages, would_cut, cut}`. When an add pushes a resume that "
+            "fitted over 2 pages and `fit` is ask, nothing is stored (`applied` false, `needs_choice` true) and `would_cut` names the lines that would go "
+            "to keep 2 pages (the fit's own order: the oldest roles first, then the lowest-value last line of a recent role; never the added line): send "
+            "the same request with `fit: \"cut\"` to make room (what was cut goes onto `result.length`, so PUT /api/tailored-resumes/length puts it back) "
+            "or `fit: \"keep\"` to keep both. `updated_at` is unchanged. The resume is then yours: background tailoring never replaces it. Other jobs, the "
+            "profile's selection and the master are untouched. Local only: no model call."
+        ),
+    ),
+    # --- the master resume (0.1.10.9 master P5) -----------------------------------------------
+    RouteSpec(
+        "GET", "/api/master", "The master resume: every entry and line with its id, tags and evidence strength.", "read", "none",
+        {"schema_version": "scout-master:1", "master": _MASTER_EXAMPLE, "current_revision": 3, "profiles": [{"profile_id": "prof_1", "label": "Staff Engineer", "state": "active"}], "shown_by": {"b-hex-03": ["prof_1"]}},
+        schema_version="scout-master:1", host_checked=True,
+        params=(_q("revision", "integer", "An earlier revision's number (a tailored resume's `sources.master.revision`); omitted = the current one."),),
+        errors=(_UNKNOWN_KEY, _INVALID, (404, "master_revision_not_found"), _NO_TARGET),
+        description=_MASTER_NOTE + " `shown_by` maps a line or entry id to the profiles whose selection shows it (`profiles` names them); `current_revision` is the newest revision's number.",
+    ),
+    RouteSpec(
+        "GET", "/api/master/history", "The master's revisions, newest first, and what is retired.", "read", "none",
+        {
+            "schema_version": "scout-master-history:1", "revision": 3,
+            "revisions": [{**{key: value for key, value in _MASTER_REVISION.items() if key not in ("record_id", "revisions")}, "items": 3, "entries": 1, "added": 0, "removed": 1, "changed": 0}],
+            "retired": [{**_MASTER_LINE, "id": "b-hex-09", "what": "line", "last_revision": 2, "retired_in": 3, "entry_heading": "Hexa Cloud"}],
+        },
+        schema_version="scout-master-history:1", host_checked=True, errors=(_UNKNOWN_KEY, _NO_TARGET),
+        description=(
+            "Each revision: who wrote it (`written_by` operator | agent), when, how many lines and entries it holds and what it changed against the one "
+            "before (`added`, `removed`, `changed`, by id). `retired`: every line or entry (`what`) an earlier revision held and the current one does not, "
+            "as the last revision that held it had it (`last_revision`; `retired_in` is the revision that dropped it), the most recently retired first; a "
+            "line retired with its entry is listed under the entry. Put one back with PUT /api/master/lines or /entries {id, use: \"restore\"}. Nothing is "
+            "ever deleted: every revision stays in the journal. `revision` is null and both lists are empty when there is no master."
+        ),
+    ),
+    RouteSpec(
+        "POST", "/api/master/lines", "Add a line to the master: under a role, or to Summary, Skills or Other.", "write", "none",
+        {**_MASTER_WRITE_EXAMPLE, "id": "b-4f0c1a", "changes": {"added": 1, "removed": 0, "changed": 0}, "near_duplicate": {"id": "b-hex-03", "similarity": 0.71}},
+        schema_version="scout-master:1",
+        params=(
+            _MASTER_REVISION_PARAM,
+            _b("text", "string", "The line: one line, at most 400 characters (a summary or a Skills line: 1000), without a bullet marker. A Skills line reads `Label: skill, skill`.", required=True),
+            _b("entry_id", "string", "The role, project or school the line goes under (an entry's id). Either this or section."),
+            _b("section", "string", "For a line outside an entry.", enum=("summary", "skills", "other")),
+            _b("tags", "array", "Optional tags: words of letters, digits and + # . - _ (at most 12)."),
+            _b("backed", "array", "Optional evidence: `story:<id>` or `answer:<question_id>` (at most 12). A backed line's strength is backed."),
+            _ACTOR_PARAM,
+        ),
+        request_example={"revision": 3, "entry_id": "r-hex", "text": "Cut the deploy time of 40 services from 50 to 12 minutes.", "actor": "agent"},
+        errors=(*_MASTER_WRITE_ERRORS, (404, "master_entry_not_found"), (409, "master_line_exists")),
+        description=(
+            "Answers 201. The line gets its id (`id`) and goes last under its entry or in its section. `near_duplicate` names the line of the same section it "
+            "reads like (`{id, similarity}`; a warning: edit that one instead if it is the same fact). Only the user's facts: every number comes from the user. "
+            + _MASTER_WRITE_NOTE
+        ),
+    ),
+    RouteSpec(
+        "PUT", "/api/master/lines", "Edit, retire or restore one line of the master, by id.", "write", "none", _MASTER_WRITE_EXAMPLE,
+        schema_version="scout-master:1",
+        params=(
+            _MASTER_REVISION_PARAM,
+            _b("id", "string", "The line's id.", required=True),
+            _b("use", "string", "edit (the default) changes text, tags and/or backed; retire takes the line out of the master; restore puts a retired one back.", enum=("edit", "retire", "restore")),
+            _b("text", "string", "With use edit: the new wording (one line; the id stays)."),
+            _b("tags", "array", "With use edit: the tags, whole (an empty array removes them)."),
+            _b("backed", "array", "With use edit: the evidence, whole."),
+            _ACTOR_PARAM,
+        ),
+        request_example={"revision": 3, "id": "b-hex-03", "text": "Led the migration of 40 services to Helm charts released through ArgoCD, in 5 months.", "actor": "agent"},
+        errors=(*_MASTER_WRITE_ERRORS, (404, "master_line_not_found"), (409, "master_line_not_retired"), (409, "master_would_be_empty")),
+        description=(
+            "use edit needs at least one of text, tags, backed. use retire: the line is never selected again; it stays in the earlier revisions and is "
+            "listed by GET /api/master/history. use restore: the line comes back under its own id, as the last revision that held it had it, next to the "
+            "lines it stood beside (its role comes back with it when that was retired too). This is also \"save this wording to your master\" for a line "
+            "edited on a tailored resume: send the line's `item_id` as `id` with the edited text. " + _MASTER_WRITE_NOTE
+        ),
+    ),
+    RouteSpec(
+        "POST", "/api/master/entries", "Add a role, a project or a school to the master.", "write", "none",
+        {**_MASTER_WRITE_EXAMPLE, "id": "r-7a01c2", "changes": {"added": 1, "removed": 0, "changed": 0}},
+        schema_version="scout-master:1",
+        params=(
+            _MASTER_REVISION_PARAM,
+            _b("section", "string", "Where it goes.", required=True, enum=("experience", "projects", "education")),
+            _b("heading", "string", "The employer, project or school (one line, at most 200 characters).", required=True),
+            _b("sublines", "array", "The lines under the heading, at most 3: `Staff Engineer | Jun 2022 - Present`. The years decide which roles are the oldest."),
+            _ACTOR_PARAM,
+        ),
+        request_example={"revision": 3, "section": "experience", "heading": "Orbital Works", "sublines": ["Staff Engineer | Jun 2023 - Present"]},
+        errors=(*_MASTER_WRITE_ERRORS, (409, "master_entry_exists")),
+        description="Answers 201 with the entry's `id`; it goes first in its section (a resume lists the newest first) and has no lines yet: add them with POST /api/master/lines {entry_id}. " + _MASTER_WRITE_NOTE,
+    ),
+    RouteSpec(
+        "PUT", "/api/master/entries", "Edit, retire or restore a role, a project or a school of the master, by id.", "write", "none",
+        {**_MASTER_WRITE_EXAMPLE, "id": "r-hex"},
+        schema_version="scout-master:1",
+        params=(
+            _MASTER_REVISION_PARAM,
+            _b("id", "string", "The entry's id.", required=True),
+            _b("use", "string", "edit (the default) changes the heading and/or the lines under it; retire takes the entry and its lines out; restore puts a retired one back with its lines.", enum=("edit", "retire", "restore")),
+            _b("heading", "string", "With use edit: the heading."),
+            _b("sublines", "array", "With use edit: the lines under the heading, whole."),
+            _ACTOR_PARAM,
+        ),
+        request_example={"revision": 3, "id": "r-hex", "sublines": ["Staff Software Engineer | Jun 2019 - Feb 2023"]},
+        errors=(*_MASTER_WRITE_ERRORS, (404, "master_entry_not_found"), (409, "master_line_not_retired"), (409, "master_would_be_empty")),
+        description="The entry's id and its lines stay on an edit. " + _MASTER_WRITE_NOTE,
+    ),
+    RouteSpec(
+        "GET", "/api/master/migration", "What building the master from the profiles' resumes would do, and the questions it asks.", "read", "none",
+        _MIGRATION_EXAMPLE, schema_version="scout-master-migration:1", host_checked=True, errors=(_UNKNOWN_KEY, _NO_TARGET),
+        description="Writes nothing. " + _MIGRATION_NOTE,
+    ),
+    RouteSpec(
+        "POST", "/api/master/migration", "Build the master resume from the profiles' resumes, with the answers to its questions.", "write", "none",
+        {**_MIGRATION_EXAMPLE, "status": "created", "written": True, "master": {**_MASTER_REVISION, "counts": _MASTER_EXAMPLE["counts"]}, "questions": [], "after": {"synced": [], "offers": []}},
+        schema_version="scout-master-migration:1",
+        params=(
+            _b("answers", "object", "`{question_id: \"a\" | \"b\" | \"both\"}`: one answer per question of GET /api/master/migration."),
+            _b("revision", "integer", "Needed only when a master already exists and this changes it: the revision you read."),
+            _ACTOR_PARAM,
+        ),
+        request_example={"answers": {"mq-59c304ca47a1": "a"}},
+        errors=(
+            _UNKNOWN_KEY, _WRONG_TYPE, _INVALID, (422, "migration_answer_invalid"), (422, "migration_answer_unknown"), (409, "migration_no_profiles"),
+            (409, "migration_resume_unreadable"), (409, "master_exists"), _REVISION_CONFLICT, _NO_TARGET,
+        ),
+        description=(
+            "Answers 201 when the master was written (`status` created or revised, `written` true, `master` the new revision). With a question still open it "
+            "answers 200, `status` needs_answers, and writes nothing. Only profiles without a selection take part; with a master already stored their "
+            "resumes are merged into it. " + _MIGRATION_NOTE
+        ),
+    ),
+    RouteSpec(
+        "GET", "/api/master/selection", "Each profile's selection of the master, against the master as it is now.", "read", "none",
+        _SELECTION_EXAMPLE, schema_version="scout-master-selection:1", host_checked=True,
+        params=(_q("profile_id", "string", "Only this profile."),), errors=(_UNKNOWN_KEY, (404, "profile_not_found"), _NO_TARGET),
+        description=_SELECTION_NOTE + " `master` is null and `profiles` empty when there is no master.",
+    ),
+    RouteSpec(
+        "POST", "/api/master/selection", "Refresh one profile's selection of the master, or print its resume again.", "write", "none",
+        {
+            **_SELECTION_EXAMPLE, "use": "refresh", "dry_run": False,
+            "changes": [{
+                "profile_id": "prof_1", "label": "Staff Engineer", "action": "refreshed", "source": "refresh", "written": True,
+                "resume_ref": {"record_id": "record_...", "revision_id": "revision_...", "content_sha256": "sha256:..."},
+                "shown": 38, "skills": 22, "pages": 2, "fits": True, "added": ["b-4f0c1a"], "removed": ["b-fin-07"], "changed": [], "retired": [], "postings": 40,
+            }],
+        },
+        schema_version="scout-master-selection:1",
+        params=(
+            _b("profile_id", "string", "The profile.", required=True),
+            _b("use", "string", "refresh (the default) selects again from the whole master; sync only prints the resume again from the lines it already shows.", enum=("refresh", "sync")),
+            _b("dry_run", "boolean", "With use refresh: say what it would pick; write nothing."),
+        ),
+        request_example={"profile_id": "prof_1", "use": "refresh"},
+        errors=(_UNKNOWN_KEY, _INVALID, (404, "profile_not_found"), (404, "master_not_found"), _NO_TARGET),
+        description=(
+            "use refresh: the pick is made by code (no model) against the postings the profile's titles match in the local index, with the lines it shows "
+            "now as the prior, and fitted to 2 pages; a profile with no selection gets its first one. The profile's resume then IS this selection, so what "
+            "was assessed or tailored on the earlier resume is re-opened as for any new resume. `changes[0]`: `action` first | refreshed, `added` and "
+            "`removed` (ids, against what it showed), `pages`, `fits`, `postings` (how many matching postings the pick was made against). use sync brings in "
+            "the master's edited wording and drops retired lines, and selects nothing new (`changes` is empty when the resume already says what the master "
+            "says). The reply also carries the profile's status after the change, as GET /api/master/selection gives it. " + _SELECTION_NOTE
         ),
     ),
     RouteSpec(
@@ -1770,6 +2046,17 @@ _META: dict[tuple[str, str], tuple[str, str]] = {
     ("PUT", "/api/tailored-resumes"): ("Store an edited resume as a job's tailored resume", "Tailored resumes"),
     ("PUT", "/api/tailored-resumes/lines"): ("Keep the original or the rewrite of one line, or edit it", "Tailored resumes"),
     ("PUT", "/api/tailored-resumes/length"): ("Put back what was cut for length, or cut again", "Tailored resumes"),
+    ("PUT", "/api/tailored-resumes/selection"): ("Add or remove a master line on a job's tailored resume", "Tailored resumes"),
+    ("GET", "/api/master"): ("Get the master resume", "Profiles and resume"),
+    ("GET", "/api/master/history"): ("List the master's revisions and retired lines", "Profiles and resume"),
+    ("POST", "/api/master/lines"): ("Add a line to the master", "Profiles and resume"),
+    ("PUT", "/api/master/lines"): ("Edit, retire or restore a line of the master", "Profiles and resume"),
+    ("POST", "/api/master/entries"): ("Add a role, project or school to the master", "Profiles and resume"),
+    ("PUT", "/api/master/entries"): ("Edit, retire or restore an entry of the master", "Profiles and resume"),
+    ("GET", "/api/master/migration"): ("Preview building the master from the profiles' resumes", "Profiles and resume"),
+    ("POST", "/api/master/migration"): ("Build the master from the profiles' resumes", "Profiles and resume"),
+    ("GET", "/api/master/selection"): ("Get each profile's selection of the master", "Profiles and resume"),
+    ("POST", "/api/master/selection"): ("Refresh a profile's selection of the master", "Profiles and resume"),
     ("POST", "/api/tailored-resumes/pdf"): ("Render a tailored resume as a PDF", "Tailored resumes"),
     ("POST", "/api/resume/pdf"): ("Render resume markdown as a PDF", "Tailored resumes"),
     ("GET", "/api/resumes-folder"): ("Get the resumes folder", "Tailored resumes"),
@@ -1861,6 +2148,18 @@ _LABELS: dict[tuple[str, str], tuple[str, ...]] = {
     ("PUT", "/api/tailored-resumes"): _BOTH,
     ("PUT", "/api/tailored-resumes/lines"): _BOTH,
     ("PUT", "/api/tailored-resumes/length"): _BOTH,
+    ("PUT", "/api/tailored-resumes/selection"): _BOTH,
+    # 0.1.10.9 master P5: the master is the user's own text; no posting text is in any of these.
+    ("GET", "/api/master"): _PRIVATE,
+    ("GET", "/api/master/history"): _PRIVATE,
+    ("POST", "/api/master/lines"): _PRIVATE,
+    ("PUT", "/api/master/lines"): _PRIVATE,
+    ("POST", "/api/master/entries"): _PRIVATE,
+    ("PUT", "/api/master/entries"): _PRIVATE,
+    ("GET", "/api/master/migration"): _PRIVATE,
+    ("POST", "/api/master/migration"): _PRIVATE,
+    ("GET", "/api/master/selection"): _PRIVATE,  # ids, counts and a profile's label
+    ("POST", "/api/master/selection"): _PRIVATE,
     ("POST", "/api/tailored-resumes/pdf"): _BOTH,
     ("POST", "/api/resume/pdf"): _PRIVATE,
     ("GET", "/api/resume-display"): _PRIVATE,
@@ -2149,6 +2448,11 @@ def llms_text() -> str:
         "- Tailored resumes: POST /api/tailored-resumes, then POST /api/tailored-resumes/pdf {profile_id, job_identity} for the PDF; PUT /api/tailored-resumes/lines picks the original or the rewrite of one line. "
         "A tailored resume over 2 pages leaves out whole roles, the oldest first, and an old role's later bullets (`result.length`: `cut` and `trimmed`, absent when nothing was left out); "
         "PUT /api/tailored-resumes/length {profile_id, job_identity, updated_at, use: \"restore\"} puts all of it back.\n"
+        "- The master resume (the user's one document of every role, bullet and skill, an id on every line; local, no model call): read GET /api/master; "
+        "add POST /api/master/lines {revision, entry_id | section, text, actor: \"agent\"}; edit, retire or restore PUT /api/master/lines {revision, id, use, text}; "
+        "roles the same with /api/master/entries. Only the user's facts, every number from the user. Send the revision you read (409 revision_conflict carries the current one). "
+        "GET /api/master/selection says which profiles are offered new lines; a tailored resume made from the master lists what it picked and left out in `selection`, "
+        "and PUT /api/tailored-resumes/selection {profile_id, job_identity, updated_at, use: \"add\" | \"remove\", item_id} changes that for one job.\n"
         "- Edit a resume and render a new PDF (local, no model call): read the lines with GET /api/tailored-resumes?profile_id=&job_identity= (each body line has an id L<n>), "
         "PUT /api/tailored-resumes/lines {profile_id, job_identity, updated_at, line_id, use: \"custom\", text} once per line you change (use original or rewritten undoes it), "
         "then POST /api/tailored-resumes/pdf. To render your own markdown instead: POST /api/resume/pdf {markdown}. "

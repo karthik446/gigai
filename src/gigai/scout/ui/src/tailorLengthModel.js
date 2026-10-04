@@ -16,17 +16,38 @@ function plural(count, word) {
   return `${count} ${word}${count === 1 ? "" : "s"}`;
 }
 
-function leftOut(length) {
+// A role is an OLD role when its heading names a year, is not ongoing, and
+// its latest year is more than OLD_ROLE_YEARS back (tailored_resume's
+// LENGTH_RULE; tailor_length._old_role_label is the same rule).
+export const OLD_ROLE_YEARS = 8;
+const ONGOING = /\b(?:present|current|now|today|ongoing)\b/i;
+const YEAR = /(?<!\d)(19[5-9]\d|20\d\d)(?!\d)/g;
+
+export function isOldRole(role, year) {
+  const label = String(role || "");
+  if (ONGOING.test(label)) {
+    return false;
+  }
+  const years = (label.match(YEAR) || []).map(Number);
+  return years.length > 0 && year - Math.max(...years) > OLD_ROLE_YEARS;
+}
+
+// "3 older bullets (3 of <role>)" only when every role named is an old one:
+// the master resume's fit also takes the lowest-value lines of RECENT roles
+// (0.1.10.9 master P4), and those are "5 bullets (...)", never "older".
+function leftOut(length, year) {
   const parts = (length.cut || []).map((role) => role.role).filter(Boolean);
-  const trimmed = (length.trimmed || []).reduce((sum, role) => sum + (role.bullets || []).length, 0);
+  const trims = (length.trimmed || []).filter((role) => (role.bullets || []).length > 0);
+  const trimmed = trims.reduce((sum, role) => sum + role.bullets.length, 0);
   if (trimmed > 0) {
-    const roles = (length.trimmed || []).map((role) => `${(role.bullets || []).length} of ${role.role}`).join(", ");
-    parts.push(`${plural(trimmed, "older bullet")} (${roles})`);
+    const roles = trims.map((role) => `${role.bullets.length} of ${role.role}`).join(", ");
+    const word = trims.every((role) => isOldRole(role.role, year)) ? "older bullet" : "bullet";
+    parts.push(`${plural(trimmed, word)} (${roles})`);
   }
   return parts.join("; ");
 }
 
-export function lengthNote(response) {
+export function lengthNote(response, year = new Date().getFullYear()) {
   const length = response && response.result ? response.result.length : null;
   if (!length || typeof length !== "object") {
     return null;
@@ -38,7 +59,7 @@ export function lengthNote(response) {
   if (length.status === "over") {
     return { status: "over", text: `${plural(length.pages, "page")}, over the ${limit}. Leaving out older roles would not fix it, so nothing was cut.`, action: null };
   }
-  const what = leftOut(length);
+  const what = leftOut(length, year);
   if (length.status === "restored") {
     const pages = length.full_pages;
     const size = pages && pages > length.max_pages ? ` The resume is now ${plural(pages, "page")}, over the ${limit}.` : "";

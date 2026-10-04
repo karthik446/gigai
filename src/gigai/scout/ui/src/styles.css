@@ -1776,3 +1776,18 @@ table.data-table th {
 }
 .help-link:hover,
 .help-link:focus-visible { opacity: 1; }
+
+/* 0.1.10.9 master P5: the Master resume page, and Picked / Left out on the job page. */
+.master-entry { border: 1px solid var(--border); border-radius: 6px; padding: 10px 12px; margin-bottom: 10px; list-style: none; }
+.master-lines { list-style: none; padding: 0; margin: 6px 0 8px; }
+.master-line { display: flex; gap: 8px; align-items: flex-start; padding: 5px 0; border-top: 1px solid var(--border); }
+.master-line:first-child { border-top: 0; }
+.master-line-body { flex: 1; min-width: 0; }
+.master-line-actions { display: flex; gap: 10px; white-space: nowrap; }
+.master-strength { display: inline-block; min-width: 1.3em; text-align: center; font-weight: 700; border-radius: 4px; border: 1px solid var(--border); font-size: 0.78rem; line-height: 1.4; }
+.master-strength.backed { color: var(--ok); }
+.master-strength.quantified { color: var(--accent); }
+.master-strength.stated { color: var(--muted); }
+.master-form { display: flex; flex-direction: column; gap: 6px; margin: 6px 0; }
+.master-form textarea, .master-form input { width: 100%; box-sizing: border-box; font: inherit; padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--panel); color: inherit; }
+.picked-left-out { margin: 8px 0 12px; }

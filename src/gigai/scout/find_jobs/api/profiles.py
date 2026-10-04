@@ -405,26 +405,30 @@ class ProfilesRoutesMixin:
             self._error_from_profile_error(exc)
             return
         if "resume_record_id" not in body and "resume_revision_id" not in body:
-            record = self._first_master_selection(record)
+            self._first_master_selection(resolved, record)
         self._profile_response(HTTPStatus.CREATED, resolved, record)
 
-    def _first_master_selection(self, record: ProfileRecord) -> ProfileRecord:
+    def _first_master_selection(self, resolved, record: ProfileRecord):  # noqa: ANN001, ANN202 - the gig's ResolvedWorkpad; the thread, or None
         """0.1.10.9 master P3: with a master resume stored, a new profile that names no resume gets its OWN resume.
 
         Its first selection of the master, made by code from the postings its
         titles match in the local index (no model, no request), instead of
-        the selected profile's resume it was created with. Best effort: with
-        no master, or when the selection cannot be made, the profile stays as
-        created.
+        the selected profile's resume it was created with. P5: it is made
+        AFTER the answer, on a background thread (``master.first_selection_later``):
+        on a home with 290,000 postings the index read and the record write
+        held this route for 7 to 8 s. The profile is usable at once; its
+        resume becomes its own view when the selection lands. Best effort:
+        with no master, or when the selection cannot be made, the profile
+        stays as created. Returns the thread that makes it (``None``: no master).
         """
 
-        from ...master_profiles import first_selection
+        from ...tailor_master import stored_master
+        from .master import first_selection_later
 
-        try:
-            made = first_selection(home_root=self._backend.home_root, target=self._backend.target, profile_id=record.profile_id)
-        except (ValueError, RuntimeError, OSError):  # every store, record and layout refusal is one of these
-            return record
-        return made or record
+        home_root, target = self._backend.home_root, self._backend.target
+        if stored_master(home_root, target, resolved=resolved) is None:
+            return None
+        return first_selection_later(home_root, target, record.profile_id)
 
     # -- PUT /api/profiles/{profile_id} --------------------------------------
 

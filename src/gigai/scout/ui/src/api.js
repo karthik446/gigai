@@ -528,6 +528,67 @@ export function putTailoredResumeLength({ profileId, jobIdentity, updatedAt, use
   });
 }
 
+// 0.1.10.9 master P5: Add or Remove one master line on a job's tailored
+// resume (PUT /api/tailored-resumes/selection). `fit` answers an Add that
+// pushes the resume over 2 pages: "ask" (the default) stores nothing and
+// names what would be cut, "cut" makes room, "keep" keeps both. Answers the
+// TailorResponse plus `selection_change`.
+export function putTailoredResumeSelection({ profileId, jobIdentity, updatedAt, use, itemId, fit }) {
+  return request("PUT", "/api/tailored-resumes/selection", {
+    profile_id: profileId,
+    job_identity: jobIdentity,
+    updated_at: updatedAt,
+    use,
+    item_id: itemId,
+    ...(fit ? { fit } : {}),
+  });
+}
+
+// 0.1.10.9 master P5: the master resume (find_jobs/api/master.py). The reads
+// answer 200 with `master: null` when there is none yet. Every write sends
+// the `revision` the page read; a 409 revision_conflict carries `current`
+// (the revision the master is at now) on the error.
+export function getMaster(revision) {
+  return request("GET", `/api/master${revision ? `?revision=${encodeURIComponent(revision)}` : ""}`);
+}
+
+export function getMasterHistory() {
+  return request("GET", "/api/master/history");
+}
+
+export function postMasterLine({ revision, entryId, section, text }) {
+  return request("POST", "/api/master/lines", { revision, text, ...(entryId ? { entry_id: entryId } : { section }) });
+}
+
+// use: "edit" (with text), "retire" or "restore".
+export function putMasterLine({ revision, id, use = "edit", text }) {
+  return request("PUT", "/api/master/lines", { revision, id, use, ...(use === "edit" ? { text } : {}) });
+}
+
+export function postMasterEntry({ revision, section, heading, sublines }) {
+  return request("POST", "/api/master/entries", { revision, section, heading, sublines });
+}
+
+export function putMasterEntry({ revision, id, use = "edit", heading, sublines }) {
+  return request("PUT", "/api/master/entries", { revision, id, use, ...(use === "edit" ? { heading, sublines } : {}) });
+}
+
+export function getMasterMigration() {
+  return request("GET", "/api/master/migration");
+}
+
+export function postMasterMigration(answers) {
+  return request("POST", "/api/master/migration", { answers: answers || {} });
+}
+
+export function getMasterSelection() {
+  return request("GET", "/api/master/selection");
+}
+
+export function postMasterSelection({ profileId, use }) {
+  return request("POST", "/api/master/selection", { profile_id: profileId, use });
+}
+
 // 0.1.10-003 / 0110-046: the per-profile title and the layout of a resume PDF
 // (find_jobs/api/resume_display.py). GET carries `saved`, the values and,
 // while this profile has no title, a local `suggested` title; PUT saves

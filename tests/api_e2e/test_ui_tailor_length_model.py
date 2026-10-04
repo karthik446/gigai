@@ -140,3 +140,43 @@ def test_the_panel_sends_the_action_to_the_length_route() -> None:
     api, panel = API_JS.read_text(encoding="utf-8"), PANEL_JSX.read_text(encoding="utf-8")
     assert 'request("PUT", "/api/tailored-resumes/length"' in api
     assert "putTailoredResumeLength" in panel and "onLength={changeLength}" in panel and "lengthNote(response)" in panel
+
+
+# --- 0.1.10.9 master P5: "older" is said only of old roles' bullets --------------------------------
+
+WORDING_SCRIPT = f"""
+import {{ isOldRole, lengthNote }} from {json.dumps(LENGTH_JS.resolve().as_uri())};
+const input = JSON.parse(process.argv[1]);
+const out = {{ notes: {{}}, old: input.roles.map(([role, year]) => isOldRole(role, year)) }};
+for (const [name, response] of Object.entries(input.responses)) out.notes[name] = lengthNote(response, input.year).text;
+process.stdout.write(JSON.stringify(out));
+"""
+
+
+def test_bullets_cut_from_a_recent_role_are_not_called_older() -> None:
+    """The master resume's fit also cuts the lowest-value lines of RECENT roles: the line says "bullets", as the CLI's does."""
+
+    from gigai.scout.tailor_length import LengthFit, TrimmedRole, length_note
+
+    line = next(line for section in CUT.sections for entry in section.entries for line in entry.bullets)
+    recent = TrimmedRole("L1", "Staff Engineer — Alder (2024–Present)", (line, line))
+    old = TrimmedRole("L2", "Engineer — Cedar (2014–2016)", (line,))
+
+    def response(*trimmed: TrimmedRole) -> dict:
+        return {"result": {"length": LengthFit(2, 2, 3, "cut", (), tuple(trimmed)).to_json()}}
+
+    out = _run(WORDING_SCRIPT, {
+        "year": 2026,
+        "responses": {"recent": response(recent), "mixed": response(old, recent), "old": response(old)},
+        "roles": [["Engineer — Birch (2016–2018)", 2026], ["Engineer — Birch (2016–2018)", 2027], ["Consultant — Elm", 2026], ["Staff Engineer — Alder (2015–present)", 2026]],
+    })
+    assert out["notes"] == {
+        "recent": "Cut for length (3 pages to 2): 2 bullets (2 of Staff Engineer — Alder (2024–Present)).",
+        "mixed": "Cut for length (3 pages to 2): 3 bullets (1 of Engineer — Cedar (2014–2016), 2 of Staff Engineer — Alder (2024–Present)).",
+        "old": "Cut for length (3 pages to 2): 1 older bullet (1 of Engineer — Cedar (2014–2016)).",
+    }
+    assert out["old"] == [False, True, False, False]
+    # The CLI's line says the same of the same records.
+    today = date(2026, 10, 4)
+    assert "2 bullets (2 of Staff Engineer" in length_note(LengthFit(2, 2, 3, "cut", (), (recent,)), today=today)
+    assert "1 older bullet (1 of Engineer — Cedar" in length_note(LengthFit(2, 2, 3, "cut", (), (old,)), today=today)

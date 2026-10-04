@@ -18,8 +18,10 @@ import {
   sourceLabel,
   statsLine,
 } from "../tailoredResumeModel.js";
-import { putTailoredResumeLength } from "../api.js";
+import { getMaster, putMasterLine, putTailoredResumeLength } from "../api.js";
 import { lengthNote } from "../tailorLengthModel.js";
+import { conflictOf, saveWordingTarget } from "../masterModel.js";
+import PickedLeftOut from "./PickedLeftOut.jsx";
 
 // Q4b-ui (v0.1.9): the tailored-resume panel on the job page
 // (mockups/cards-and-job-page.html, "Tailored resume"), over Q3's routes:
@@ -137,8 +139,12 @@ function CleanCopy({ lines }) {
 // React text children, like everywhere else in the panel.
 // 0110-032: an edited line (its text was typed by the operator or their agent,
 // PUT use: "custom") says so and offers the way back: Use original / Use rewrite.
-function LineControls({ line, onChoose, busy }) {
+// 0.1.10.9 master P5: an edited line that replaced a line of the master offers
+// "Save this wording to your master" (`onSaveWording`; `saved` names the line
+// it was saved for and what the page says about it).
+function LineControls({ line, onChoose, busy, onSaveWording = null, saved = null }) {
   const actions = onChoose ? lineActions(line) : [];
+  const wording = onSaveWording ? saveWordingTarget(line) : null;
   const reason = line.kind === "rewritten" ? reasonLabel(line.reason) : "";
   const fallback = line.origin === "fallback" && line.kind === "copy" && line.alternative && line.alternative.kind === "rewritten";
   const lost = fallback ? lostLabels(line.alternative) : [];
@@ -165,12 +171,22 @@ function LineControls({ line, onChoose, busy }) {
             {action.label}
           </button>
         ))}
+        {wording && (
+          <button type="button" className="button small secondary" data-action="save-wording" disabled={busy} onClick={() => onSaveWording(line.id, wording)}>
+            Save this wording to your master
+          </button>
+        )}
+        {saved && saved.lineId === line.id && (
+          <span className="src-item muted" data-role="wording-saved">
+            {saved.text}
+          </span>
+        )}
       </span>
     </div>
   );
 }
 
-function PreviewLine({ line, index, open, onToggle, promptFor, showChanges, onChoose, busy }) {
+function PreviewLine({ line, index, open, onToggle, promptFor, showChanges, onChoose, busy, onSaveWording, saved }) {
   if (line.kind === "blank") {
     return (
       <div className="md-line blank">
@@ -249,12 +265,12 @@ function PreviewLine({ line, index, open, onToggle, promptFor, showChanges, onCh
         )}
       </span>
     </div>
-    {showChanges && <LineControls line={line} onChoose={onChoose} busy={busy} />}
+    {showChanges && <LineControls line={line} onChoose={onChoose} busy={busy} onSaveWording={onSaveWording} saved={saved} />}
     </>
   );
 }
 
-export function Preview({ response, profileLabel, promptFor, initialView = "changes", onChooseLine = null, choiceBusy = false, choiceError = null, onLength = null }) {
+export function Preview({ response, profileLabel, promptFor, initialView = "changes", onChooseLine = null, choiceBusy = false, choiceError = null, onLength = null, onSaveWording = null, wordingSaved = null }) {
   const [open, setOpen] = useState(() => new Set());
   const [view, setView] = useState(initialView); // "changes" (default) | "clean"
   const lines = previewLines(response.result);
@@ -326,7 +342,7 @@ export function Preview({ response, profileLabel, promptFor, initialView = "chan
       {view === "changes" ? (
         <div className="md-preview" data-tailored-lines={stats.total} data-view="changes">
           {lines.map((line, index) => (
-            <PreviewLine key={index} line={line} index={index} open={open.has(index)} onToggle={toggle} promptFor={promptFor} showChanges onChoose={onChooseLine} busy={choiceBusy} />
+            <PreviewLine key={index} line={line} index={index} open={open.has(index)} onToggle={toggle} promptFor={promptFor} showChanges onChoose={onChooseLine} busy={choiceBusy} onSaveWording={onSaveWording} saved={wordingSaved} />
           ))}
         </div>
       ) : (
@@ -511,6 +527,34 @@ export default function TailoredResumePanel({ state, profileLabel, questionPromp
     [stored, state],
   );
 
+  // 0.1.10.9 master P5: "Save this wording to your master". The master is
+  // read for its revision, then the line is written on top of it; when the
+  // agent wrote the master in between, the write is refused and says so.
+  const [wordingSaved, setWordingSaved] = useState(null);
+  const saveWording = useCallback((lineId, wording) => {
+    setChoosing(true);
+    setChoiceError(null);
+    setWordingSaved(null);
+    getMaster()
+      .then((body) => {
+        if (!body.master) {
+          throw new Error("There is no master resume to save it to.");
+        }
+        return putMasterLine({ revision: body.master.revision, id: wording.id, use: "edit", text: wording.text });
+      })
+      .then((response) =>
+        setWordingSaved({
+          lineId,
+          text: response.status === "unchanged" ? "Your master already says this." : `Saved to your master (revision ${response.master.revision}). Other jobs and profiles use it from now on.`,
+        }),
+      )
+      .catch((err) => {
+        const conflict = conflictOf(err);
+        setChoiceError(conflict ? "Not saved: your master changed a moment ago. Try again." : err.detail || err.message || String(err));
+      })
+      .finally(() => setChoosing(false));
+  }, []);
+
   // uat-bug-043: the action sits above the requirement table and its status
   // sits by the button; when a run finishes (result or error) bring the panel
   // into view.
@@ -553,7 +597,21 @@ export default function TailoredResumePanel({ state, profileLabel, questionPromp
           {errorView(error).hint && <div className="muted" style={{ marginTop: 4, fontSize: "0.82rem" }}>{errorView(error).hint}</div>}
         </div>
       )}
-      {stored && <Preview key={stored.updated_at || stored.stored_path} response={stored} profileLabel={profileLabel} promptFor={promptFor} onChooseLine={chooseLine} choiceBusy={choosing} choiceError={choiceError} onLength={changeLength} />}
+      {stored && !tailoring && <PickedLeftOut stored={stored} state={state} />}
+      {stored && (
+        <Preview
+          key={stored.updated_at || stored.stored_path}
+          response={stored}
+          profileLabel={profileLabel}
+          promptFor={promptFor}
+          onChooseLine={chooseLine}
+          choiceBusy={choosing}
+          choiceError={choiceError}
+          onLength={changeLength}
+          onSaveWording={stored.selection ? saveWording : null}
+          wordingSaved={wordingSaved}
+        />
+      )}
     </section>
   );
 }

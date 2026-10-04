@@ -35,6 +35,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, replace
+from datetime import UTC, date, datetime
 
 from .find_jobs.contracts import _fail, _object_with_optional, _string
 from .tailored_resume import (
@@ -569,7 +570,30 @@ def apply_length_use(result: TailoredResume, use: str) -> TailoredResume:
     raise ValueError("use must be restore or cut")
 
 
-def length_note(length: LengthFit | None) -> str:
+def _old_role_label(role: str, today: date) -> bool:
+    """A role, by its label (``role_label``: the heading's lines), is an OLD role: ``tailored_resume._is_old_role``'s rule."""
+
+    if _ONGOING.search(role):
+        return False
+    years = [int(year) for year in _YEAR.findall(role)]
+    return bool(years) and today.year - max(years) > LENGTH_RULE.old_role_years
+
+
+def trimmed_bullets_note(trimmed: Sequence[TrimmedRole], *, today: date | None = None) -> str:
+    """The left-out bullets in words: ``3 older bullets (3 of <role>)``, or ``5 bullets (...)`` when a recent role gave some.
+
+    "older" is said only when every role named is an old one (it ended more than
+    ``LENGTH_RULE.old_role_years`` years ago): the master resume's fit also takes the lowest-value
+    lines of RECENT roles (0.1.10.9 master P4), and those are not older bullets."""
+
+    today = today or datetime.now(UTC).date()
+    count = sum(len(role.bullets) for role in trimmed)
+    older = "older " if all(_old_role_label(role.role, today) for role in trimmed) else ""
+    bullets = ", ".join(f"{len(role.bullets)} of {role.role}" for role in trimmed)
+    return f"{count} {older}bullet{'' if count == 1 else 's'} ({bullets})"
+
+
+def length_note(length: LengthFit | None, *, today: date | None = None) -> str:
     """What the length rule did, in one line (the CLI's; the UI words its own from the same fields); ``""`` when nothing."""
 
     if length is None:
@@ -582,9 +606,7 @@ def length_note(length: LengthFit | None) -> str:
         return f"Length: {pages} pages, over the {limit}; leaving out older roles would not fix it, so no role was cut."
     parts = list(length.roles())
     if length.trimmed:
-        count = length.trimmed_count()
-        bullets = ", ".join(f"{len(role.bullets)} of {role.role}" for role in length.trimmed)
-        parts.append(f"{count} older bullet{'' if count == 1 else 's'} ({bullets})")
+        parts.append(trimmed_bullets_note(length.trimmed, today=today))
     what = "; ".join(parts)
     if length.status == STATUS_RESTORED:
         size = f" The resume is {pages} pages, over the {limit}." if length.over() else ""
@@ -620,5 +642,6 @@ __all__ = [
     "restore_cut",
     "role_label",
     "shown_whole",
+    "trimmed_bullets_note",
     "with_trims",
 ]

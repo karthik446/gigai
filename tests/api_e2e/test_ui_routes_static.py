@@ -66,6 +66,8 @@ EXPECTED_ROUTES = {
     "pdf": "#/pdf",
     # 0.1.10.7 C: the read-only Answers and stories page.
     "answers": "#/answers",
+    # 0.1.10.9 master P5: the Master resume page.
+    "master": "#/master",
 }
 
 
