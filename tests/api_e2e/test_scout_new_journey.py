@@ -134,7 +134,7 @@ def test_scout_new_journey(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> N
         # company_name and tag_pending), U3 (the row's group / score text / tailored flag, counts.only_stale, the stale question, ranking).
         assert (scored["company_name"], scored["tag_pending"]) == ("Acmenew", False)  # no index name: the slug rule; a specific title
         assert (scored["sort_group"], scored["tailored"], scored["stale_label"], scored["assessment_detail"]) == ("current", False, None, True)
-        assert scored["score_text"] == f"Needs your answers · {scored['assessment']['met']} of {scored['assessment']['requirements']} requirements · not ranked yet"
+        assert scored["score_text"] == f"Needs your answers · fit {scored['fit']}% · {scored['assessment']['met']} of {scored['assessment']['requirements']} requirements · not ranked yet"
         assert (answered["counts"]["to_assess"], answered["counts"]["only_stale"]) == (0, 0)
         assert (answered["stale_question"], answered["reassessed"]) == (None, None)
         assert answered["ranking"]["by_profile"] == [{"profile_id": profile["profile_id"], "ranked": 0, "total": 1}]

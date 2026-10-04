@@ -92,12 +92,34 @@ export function keepActiveProfiles(selectedIds, profiles) {
 // --- the state chips (multi) ------------------------------------------------------------------
 
 // `removed` is not a state of the search: it lists the postings the board no longer shows.
+// 0110-10-02: a weak fit (it waits on answers, few requirements are met and its rank is low) is listed ONLY while its
+// chip is on: the server leaves it out of every other list, and `counts.weak_fit` is the chip's number.
+export const WEAK_FIT = "weak_fit";
 export const STATE_FILTERS = [
   { value: "needs_answers", label: "Needs your answers" },
   { value: "assessed", label: "Assessed" },
   { value: "recommended", label: `${SCOUT_LABEL_NAME}: ${LABEL_WORDS.recommended}` },
+  { value: WEAK_FIT, label: "Weak fit", title: "Waits on your answers, but few requirements are met and the rank is low. Hidden unless this is on." },
 ];
 export const REMOVED_FILTER = { value: "removed", label: "Removed" };
+
+// How many weak fits the other filters select (listed or not); null when the server does not say.
+export function weakFitCount(counts) {
+  const value = counts && counts.weak_fit;
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null;
+}
+
+// The state chips: [{value, label, title, active, count}]. Only the weak-fit chip carries a count (what it would list).
+export function stateChips(states, counts) {
+  const on = states || [];
+  return STATE_FILTERS.map((option) => ({
+    value: option.value,
+    label: option.label,
+    title: option.title,
+    active: on.includes(option.value),
+    count: option.value === WEAK_FIT ? weakFitCount(counts) : null,
+  }));
+}
 
 export function toggleState(states, value) {
   const current = states || [];
@@ -150,12 +172,14 @@ export function profileTags(row, profiles) {
     }));
 }
 
-// The score column, in the server's own words (0110-8-04, `score_text`):
-// "Matched · 9 of 9 requirements · rank 76", "Matched (old assessment: older
-// prompt) · 3 of 3 requirements · rank 83", "rank 97 · not assessed". The
-// verdict first and "N of M", never a bare percent: a 1-of-1 reads "1 of 1".
+// The score column, in the server's own words (0110-8-04, 0110-10-02, `score_text`):
+// "Matched · fit 100% · 9 of 9 requirements · rank 76", "Matched (old assessment: older
+// prompt) · fit 100% · 3 of 3 requirements · rank 83", "rank 97 · not assessed". The
+// verdict first, the row's ONE fit number (`fit`: the share of requirements met with the
+// must-haves counted twice) and "N of M", never a bare percent: a 1-of-1 reads "1 of 1".
 // The rows are drawn in the order the server sends them (current, then
-// stale, then not assessed): this page never sorts them itself.
+// stale, then not assessed; inside a group by fit, then rank, then the newest): this
+// page never sorts them itself.
 // A response without `score_text` (an older server) falls back to the number.
 export function scoreText(row) {
   if (typeof row.score_text === "string" && row.score_text.trim()) {
@@ -180,6 +204,7 @@ const ROW_STATE_WORDS = {
   matched: "Matched",
   not_a_match: "Not a match",
   tailored: "Resume tailored",
+  weak_fit: "Weak fit",
 };
 
 function humanCode(code) {
@@ -187,7 +212,7 @@ function humanCode(code) {
 }
 
 // The state chips of a row, in order: [{kind, label, tone, testId?, title?}].
-//   state     the row's own state (needs answers with the number of open questions)
+//   state     the row's own state (needs answers with the number of open questions; a weak fit asks none)
 //   assessed  beside any assessed state, so "assessed" always reads the same
 //   label     the Scout label (recommended | needs_attention)
 //   ats       the Scout ATS score
@@ -200,6 +225,8 @@ export function rowChips(row) {
   if (state === "needs_answers") {
     const open = Array.isArray(row.open_questions) ? row.open_questions.length : 0;
     chips.push({ kind: "state", label: open ? `${ROW_STATE_WORDS.needs_answers} (${open})` : ROW_STATE_WORDS.needs_answers, tone: "warn" });
+  } else if (state === WEAK_FIT) {
+    chips.push({ kind: "state", label: ROW_STATE_WORDS.weak_fit, tone: "plain", testId: "weak-fit-chip", title: "Few requirements met and a low rank: no questions are asked for it." });
   } else if (assessed) {
     chips.push({ kind: "state", label: ROW_STATE_WORDS[state] || humanCode(state), tone: state === "not_a_match" ? "danger" : "ok" });
   }
@@ -282,6 +309,8 @@ export function assessAskBody({ selectedIds = [], filter = EMPTY_FILTER, rows = 
 //   calls / tokens / seconds   the estimate from the recorded model calls
 //                   (tokens and seconds null when the history cannot say)
 //   approveBody     the body the server names for the yes, sent as it is
+//   lowRank         0110-10-02: the postings ranked below the assess threshold, left out of `count`:
+//                   {count, minRank, calls, tokens, seconds, approveBody} (the body that assesses them too), or null
 export function approvalDialog(response, profiles) {
   const question = response && response.status === "ask" ? response.question : null;
   if (!question) {
@@ -290,7 +319,21 @@ export function approvalDialog(response, profiles) {
   const labels = new Map((profiles || (response && response.profiles) || []).map((profile) => [profile.profile_id, profile.label]));
   const estimate = question.estimate || {};
   const yes = question.yes && question.yes.api && question.yes.api.body;
+  const low = response.low_rank && typeof response.low_rank === "object" ? response.low_rank : null;
+  const lowYes = low && low.yes && low.yes.api && low.yes.api.body;
+  const lowEstimate = (low && low.estimate) || {};
   return {
+    lowRank:
+      low && low.skipped > 0
+        ? {
+            count: low.skipped,
+            minRank: typeof low.min_rank === "number" ? low.min_rank : null,
+            calls: typeof lowEstimate.calls === "number" ? lowEstimate.calls : low.skipped,
+            tokens: tokensText(lowEstimate.tokens),
+            seconds: secondsText(lowEstimate.seconds),
+            approveBody: lowYes && typeof lowYes === "object" ? { ...lowYes, approve: true, include_low_rank: true } : null,
+          }
+        : null,
     count: question.to_assess,
     alreadyCurrent: question.already_current || 0,
     byProfile: (question.by_profile || []).map((item) => ({ label: labels.get(item.profile_id) || item.profile_id, count: item.count })),
@@ -301,6 +344,28 @@ export function approvalDialog(response, profiles) {
     basisCalls: typeof estimate.basis_calls === "number" ? estimate.basis_calls : 0,
     approveBody: yes && typeof yes === "object" ? { ...yes, approve: true } : null,
   };
+}
+
+// The body Approve sends: the server's yes, or (the low-rank box ticked) the one that assesses the low-ranked too.
+// Null when there is nothing to send: nothing above the threshold and the box not ticked.
+export function approvalBody(dialog, includeLowRank) {
+  if (!dialog) {
+    return null;
+  }
+  if (includeLowRank && dialog.lowRank) {
+    return dialog.lowRank.approveBody;
+  }
+  return dialog.count > 0 ? dialog.approveBody : null;
+}
+
+// "112 low-ranked ones are skipped (rank below 50). Assess those too? ~112 model calls, ~2.6M tokens"
+export function lowRankLine(lowRank) {
+  if (!lowRank) {
+    return null;
+  }
+  const one = lowRank.count === 1;
+  const below = lowRank.minRank === null ? "" : ` (rank below ${lowRank.minRank})`;
+  return `${lowRank.count} low-ranked ${one ? "one is" : "ones are"} skipped${below}. Assess ${one ? "that" : "those"} too? ${estimateLine(lowRank)}`;
 }
 
 // "~12 model calls, ~230k tokens, ~4.5 min" (the parts the history can say).
@@ -320,13 +385,15 @@ export function assessOutcomeLine(response) {
   if (!response || response.status === "ask") {
     return null;
   }
+  const low = response.low_rank && response.low_rank.skipped > 0 ? response.low_rank : null;
+  const skipped = low ? ` ${low.skipped} low-ranked ${low.skipped === 1 ? "one was" : "ones were"} skipped (rank below ${low.min_rank}).` : "";
   if (response.status === "nothing_to_assess") {
-    return "Nothing to assess: every selected posting has a current assessment.";
+    return low ? `Nothing was assessed.${skipped}` : "Nothing to assess: every selected posting has a current assessment.";
   }
   const assessed = response.assessed || {};
   const failed = Array.isArray(assessed.failed) ? assessed.failed : [];
   const codes = [...new Set(failed.map((item) => item.error_code).filter(Boolean))];
-  return `Assessed ${assessed.assessed ?? 0} of ${assessed.requested ?? 0}.${codes.length ? ` Not assessed: ${codes.join(", ")}.` : ""}`;
+  return `Assessed ${assessed.assessed ?? 0} of ${assessed.requested ?? 0}.${codes.length ? ` Not assessed: ${codes.join(", ")}.` : ""}${skipped}`;
 }
 
 // --- the summary and the count line -----------------------------------------------------------

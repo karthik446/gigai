@@ -22,6 +22,13 @@ profile_changed  the steps of THAT profile already in the pipeline whose input d
                  not in the pipeline.
 ===============  ==============================================================================
 
+A WEAK FIT IS NEVER QUEUED by a saved answer or story (0110-10-02,
+``scout/fit.py``): a pair whose stored assessment waits on answers while few
+requirements are met and the rank score is low is ``skipped`` with the code
+``weak_fit``. It is judged when the trigger fires, so a job the answer just
+turned into a match is queued. ``process_now`` is the user naming one job and
+is not held back.
+
 New postings in the index trigger nothing: 500 new postings are 0 queued jobs
 and 0 model calls. A first assessment is asked for by ``gigai scout new``
 (approval-gated there, no daily cap) and is not a pipeline step.
@@ -56,7 +63,7 @@ resume, answer or story text. The trigger entries for the write paths
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 import logging
 from pathlib import Path
@@ -96,6 +103,8 @@ TRIGGER_PROFILE = "profile_changed"
 FIRED = "fired"
 NOTHING = "nothing"
 DISABLED = "disabled"
+#: ``skipped[].error_code`` of a pair an answer or story trigger left out because it is a weak fit (0110-10-02).
+SKIPPED_WEAK_FIT = "weak_fit"
 
 _QUEUED_STATES = frozenset({STATE_BLOCKED, STATE_READY, STATE_RUNNING, STATE_AWAITING_APPROVAL})
 _logger = logging.getLogger("gigai.scout.pipeline")
@@ -374,13 +383,48 @@ class Pending:
         if self.fired is None:
             try:
                 if self.pairs:
-                    self.fired = enqueue_pairs(self.home_root, self.target, self.pairs, trigger=self.trigger)
+                    # 0110-10-02: judged now, after any re-assessment the save started, not when the pairs were found.
+                    weak = _weak_fits(self.home_root, self.target, self.pairs)
+                    kept = tuple(pair for pair in self.pairs if pair not in weak)
+                    fired = (
+                        enqueue_pairs(self.home_root, self.target, kept, trigger=self.trigger) if kept else TriggerResult(self.trigger)
+                    )
+                    left_out = tuple(
+                        {"profile_id": pair[0], "job_identity": pair[1], "error_code": SKIPPED_WEAK_FIT}
+                        for pair in self.pairs if pair in weak
+                    )
+                    self.fired = replace(fired, skipped=fired.skipped + left_out) if left_out else fired
                 else:
                     self.fired = TriggerResult(self.trigger)
             except Exception as exc:  # noqa: BLE001 - a save never fails because of the pipeline: logged by type, nothing queued
                 _logger.warning("pipeline: the %s trigger failed (%s); nothing was queued", self.trigger, type(exc).__name__)
                 self.fired = TriggerResult(self.trigger, reason="trigger_failed")
         return self.fired
+
+
+def _weak_fits(home_root: Path, target: Path, pairs: Sequence[Pair]) -> frozenset[Pair]:
+    """0110-10-02: the ``pairs`` that are a weak fit now (``fit.is_weak_fit``).
+
+    The verdict and the fit number are the stored assessment's as it is at
+    this moment; the rank score is the posting read model's row (a pair with
+    no row, or no rank score yet, is never a weak fit). No model, nothing written.
+    """
+
+    from .. import fit
+    from ..quick_assess import read_quick_assessment
+
+    ranks = fit.stored_rank_scores(home_root, target) if pairs else {}
+    if not ranks:
+        return frozenset()
+    setting = fit.fit_setting(home_root, target)
+    weak: set[Pair] = set()
+    for pair in pairs:
+        rank_score = ranks.get(pair)
+        if rank_score is None:
+            continue
+        if fit.assessment_is_weak_fit(read_quick_assessment(home_root, target, pair[0], pair[1]), rank_score, setting):
+            weak.add(pair)
+    return frozenset(weak)
 
 
 def _active_profile_ids(home_root: Path, target: Path) -> frozenset[str]:
@@ -726,6 +770,7 @@ __all__ = [
     "DISABLED",
     "FIRED",
     "NOTHING",
+    "SKIPPED_WEAK_FIT",
     "TRIGGER_ANSWER",
     "TRIGGER_PROCESS",
     "TRIGGER_PROFILE",

@@ -2360,6 +2360,7 @@ def metrics_command(
 @click.option("--profile", "profile_id", help="Only this active profile's postings. A filtered call does not move the \"new since\" anchor.")
 @click.option("--yes", "yes", is_flag=True, help="Assess the new postings no profile has assessed, without asking (one model call each). Never the old assessments: that is --reassess-stale.")
 @click.option("--reassess-stale", "reassess_stale", is_flag=True, help="The yes to the other question: assess again the postings that have only an old assessment (one model call each). Can be combined with --yes.")
+@click.option("--include-low-rank", "include_low_rank", is_flag=True, help="With --yes or --reassess-stale: also the low-ranked postings (rank below fit.assess_min_rank, 50), which a yes leaves out by default.")
 @click.option("--no-assess", "no_assess", is_flag=True, help="Do not ask and do not assess: show the new postings ranked only.")
 @click.option("--yours", "yours", is_flag=True, help="The separate call: what matches, from your own resume and answers. Never shown next to posting text; never moves the anchor.")
 @click.option("--peek", "peek", is_flag=True, help="Look without moving the \"new since\" anchor.")
@@ -2369,8 +2370,8 @@ def metrics_command(
 @click.option("--target", "target_value", type=click.Path(path_type=Path, file_okay=False))
 @click.option("--json", "as_json", is_flag=True)
 def new_command(
-    profile_id: str | None, yes: bool, reassess_stale: bool, no_assess: bool, yours: bool, peek: bool, process: bool,
-    since: str | None, home_value: Path | None, target_value: Path | None, as_json: bool,
+    profile_id: str | None, yes: bool, reassess_stale: bool, include_low_rank: bool, no_assess: bool, yours: bool, peek: bool,
+    process: bool, since: str | None, home_value: Path | None, target_value: Path | None, as_json: bool,
 ) -> None:
     """Show what is new since your last check, across all active profiles.
 
@@ -2383,13 +2384,20 @@ def new_command(
     prompt or other settings) are a separate question with its own count and
     cost. --yes never answers it; --reassess-stale does.
 
+    A yes assesses only postings ranked 50 or more (the fit.assess_min_rank
+    setting). The low-ranked ones are counted and asked about separately;
+    --include-low-rank beside --yes assesses them too. A posting that waits
+    on your answers with few requirements met and a low rank is a "weak fit":
+    it is not listed here (`gigai scout jobs list --state weak_fit` lists them).
+
     While it assesses, progress lines go to stderr ("assessed 120 of 333 ·
     ~25 min left"); with --json, stdout is still the response alone.
 
-    The table shows each posting, its verdict, "N of M" requirements and
-    rank, what it still asks for and its open questions. Postings with a
-    current assessment come first, then old assessments, then the ones not
-    assessed. "What matches" comes from your own resume and answers, so
+    The table shows each posting, its verdict, its fit number (the share of
+    requirements met, must-haves weighted), "N of M" requirements and rank,
+    what it still asks for and its open questions. Postings with a current
+    assessment come first, then old assessments, then the ones not assessed;
+    inside a group the best fit first. "What matches" comes from your own resume and answers, so
     it is a separate call, never printed next to posting text: --yours.
 
     Jobs that wait in the pipeline (you answered one of their questions) are
@@ -2410,6 +2418,9 @@ def new_command(
         return
     if yours and (process or reassess_stale):
         _fail(ValueError("--process and --reassess-stale cannot be combined with --yours"), as_json=as_json, fallback="invalid_value")
+        return
+    if include_low_rank and not (yes or reassess_stale):
+        _fail(ValueError("--include-low-rank goes with --yes or --reassess-stale"), as_json=as_json, fallback="invalid_value")
         return
 
     def progress(line: str) -> None:
@@ -2432,6 +2443,7 @@ def new_command(
             response = scout_new(
                 home_root, target, profile_id=profile_id, peek=peek, assess=assess, since=since, process=process,
                 reassess_stale=reassess_stale, progress=progress, build_progress=build_progress,
+                include_low_rank=include_low_rank,
             )
         if response["status"] == STATUS_ASK and not as_json and not yours and sys.stdin.isatty():
             sentence = response["question"]["text"]  # type: ignore[index]
@@ -2440,6 +2452,14 @@ def new_command(
                 # The first call already moved the anchor: the yes measures from the same since.
                 response = scout_new(
                     home_root, target, profile_id=profile_id, peek=peek, assess=True, since=str(response["since"]), progress=progress
+                )
+        low = response.get("low_rank_question")
+        if isinstance(low, dict) and not as_json and not yours and sys.stdin.isatty():
+            # 0110-10-02: its own question, default no: a plain yes never assesses the low-ranked ones.
+            if click.confirm(str(low["text"]).rstrip("?"), default=False):
+                response = scout_new(
+                    home_root, target, profile_id=profile_id, peek=peek, assess=True, since=str(response["since"]),
+                    include_low_rank=True, progress=progress,
                 )
         old = response.get("stale_question")
         if isinstance(old, dict) and not as_json and not yours and sys.stdin.isatty():
@@ -2483,7 +2503,7 @@ def _jobs_errors() -> tuple[type[BaseException], ...]:
 @jobs_group.command("list")
 @click.option("--profile", "profile_ids", multiple=True, help="Only postings this active profile matches (repeatable). With one profile, its own row is shown.")
 @click.option("--query", "query", help="Words that must all be in the title, company or location.")
-@click.option("--state", "states", multiple=True, help="Keep this state (repeatable): not_assessed, needs_answers, matched, not_a_match, tailored, assessed, recommended.")
+@click.option("--state", "states", multiple=True, help="Keep this state (repeatable): not_assessed, needs_answers, matched, not_a_match, tailored, assessed, recommended, weak_fit. A weak fit (waits on answers, few requirements met, low rank) is listed only with --state weak_fit.")
 @click.option("--window", "window", type=click.Choice(["new", "7d", "30d"]), help="new: first seen since your last check. 7d / 30d: published in the last 7 or 30 days.")
 @click.option("--removed", "removed", is_flag=True, help="The postings the board no longer lists, instead of the live ones.")
 @click.option("--history", "history", is_flag=True, help="Also what old find-jobs runs assessed, with each run's provenance.")
@@ -2529,13 +2549,14 @@ def jobs_list_command(
 @click.option("--window", "window", type=click.Choice(["new", "7d", "30d"]), help="Without JOBS: new, 7d or 30d, as `gigai scout jobs list`.")
 @click.option("--yes", "yes", is_flag=True, help="Approve: assess without asking (one model call per posting).")
 @click.option("--again", "again", is_flag=True, help="Also the postings whose assessment is current.")
+@click.option("--include-low-rank", "include_low_rank", is_flag=True, help="Also the low-ranked postings (rank below fit.assess_min_rank, 50), which are left out by default.")
 @click.option("--actor", "actor", type=click.Choice(["operator", "agent"]), default="operator", show_default=True, help="Who approves the batch.")
 @click.option("--home", "home_value", type=click.Path(path_type=Path, file_okay=False))
 @click.option("--target", "target_value", type=click.Path(path_type=Path, file_okay=False))
 @click.option("--json", "as_json", is_flag=True)
 def jobs_assess_command(
     jobs: tuple[str, ...], profile_id: str | None, query: str | None, states: tuple[str, ...], window: str | None, yes: bool,
-    again: bool, actor: str, home_value: Path | None, target_value: Path | None, as_json: bool,
+    again: bool, include_low_rank: bool, actor: str, home_value: Path | None, target_value: Path | None, as_json: bool,
 ) -> None:
     """Assess these postings: the ones named (posting URLs), or the ones the filter selects.
 
@@ -2544,6 +2565,10 @@ def jobs_assess_command(
     stops there (--json, or no terminal). Each posting is assessed for the
     profile it fits best, from the posting text already stored (a posting with
     none has its description fetched first, one request for it alone).
+
+    Postings ranked below 50 (the fit.assess_min_rank setting) are left out
+    and counted; they are asked about separately, and --include-low-rank
+    assesses them with the rest.
     """
 
     import sys
@@ -2553,19 +2578,26 @@ def jobs_assess_command(
 
     home_root = home_value or default_home_root()
 
-    def call(approve: bool) -> dict[str, object]:
+    def call(approve: bool, low_rank: bool = include_low_rank) -> dict[str, object]:
         return assess_these(
             home_root, target, jobs=list(jobs) or None, profile_id=profile_id, query=query, states=states or None, window=window,
-            approve=approve, again=again, decided_by=actor,
+            approve=approve, again=again, decided_by=actor, include_low_rank=low_rank,
         )
 
     try:
         target = _pipeline_target(target_value, home_root, as_json=as_json)
         response = call(yes)
-        if response["status"] == STATUS_ASK and not as_json and sys.stdin.isatty():
+        asking = not as_json and sys.stdin.isatty()
+        if response["status"] == STATUS_ASK and asking and response["counts"]["to_assess"]:  # type: ignore[index]
             if click.confirm(str(response["question"]["text"]).rstrip("?"), default=False):  # type: ignore[index]
                 click.echo("Assessing (one model call per posting; this can take a few minutes)...")
                 response = call(True)
+        low = response.get("low_rank")
+        if isinstance(low, dict) and asking:
+            # 0110-10-02: its own question, default no.
+            if click.confirm(str(low["text"]).rstrip("?"), default=False):
+                click.echo("Assessing (one model call per posting; this can take a few minutes)...")
+                response = call(True, True)
     except _jobs_errors() as exc:
         _fail(exc, as_json=as_json, fallback="scout_jobs_failed")
         return

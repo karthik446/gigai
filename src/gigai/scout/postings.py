@@ -33,6 +33,9 @@ assessment, then the highest rank score, then the default profile. A rank
 score that arrives later never moves a posting away from the profile that
 assessed it). ``state`` is the verdict state; a tailored resume is the
 ``tailored`` flag beside it, never a state that replaces the verdict.
+0110-10-02: ``fit`` is the assessment's fit number, and a needs-answers
+posting with a low fit number AND a low rank score has the state ``weak_fit``
+(``fit.py``: the rule, its numbers and the setting that tunes them).
 Application events are not cached: they are journal records, read when a
 response is built.
 
@@ -108,7 +111,8 @@ from .pipeline.store import PipelineStore, PostingBuild, PostingRecord, RunAsses
 # :2 was 0110-8-06 (one digest rule), :3 was 0110-8-05 (a known function tag vetoes a generic title).
 # :5 is 0110-9-01: rows are matched and stamped per board (``posting_board``).
 MATCH_VERSION = "posting-match:5"
-FACTS_VERSION = "posting-facts:2"
+# :3 is 0110-10-02: a row carries its fit number, and a weak fit has its own state.
+FACTS_VERSION = "posting-facts:3"
 
 STATE_ACTIVE = "active"
 BUILD_FULL = "matched"
@@ -338,6 +342,8 @@ def _facts_stamp(home_root: Path, target: Path, view: ProfileView, rank_model: s
     from .assessment_basis import _watched_files
     from .find_jobs.model_rank import PROMPT_VERSION, cache_dir
     from .find_jobs.rank_digest import DIGEST_VERSION
+    from .find_jobs.refresh_tick import SETTINGS_FILENAME
+    from .fit import fit_setting
 
     root = _scout_root(home_root, target)
     stores = [
@@ -349,7 +355,7 @@ def _facts_stamp(home_root: Path, target: Path, view: ProfileView, rank_model: s
         watched = []
     return _digest(
         FACTS_VERSION, view.resume_digest, view.settings_digest, rank_model, PROMPT_VERSION, DIGEST_VERSION, stores, watched,
-        _stat(cache_dir(home_root)),
+        _stat(cache_dir(home_root)), fit_setting(home_root, target, path=root / SETTINGS_FILENAME).stamp(),
     )
 
 
@@ -382,11 +388,14 @@ class _Facts:
     ) -> None:
         from .find_jobs.job_state import JobStateSources, _stored_names
         from .find_jobs.model_rank import cache_dir
+        from .find_jobs.refresh_tick import SETTINGS_FILENAME
+        from .fit import fit_setting
 
         self.home_root, self.target, self.view = home_root, target, view
         #: The newest imported run assessment per job for this profile (0.1.10.7 M4a): used when nothing newer is stored.
         self._run_latest = run_latest or {}
         root = _scout_root(home_root, target)
+        self._fit = fit_setting(home_root, target, path=root / SETTINGS_FILENAME)
         self._assessed = _stored_names(root / "quick_assess" / view.profile_id)
         self._tailored = _stored_names(root / "resumes" / view.profile_id)
         self._labelled = _stored_names(root / "label" / view.profile_id)
@@ -429,6 +438,7 @@ class _Facts:
         """``row`` with its facts as the stores hold them now."""
 
         from .find_jobs.job_state import NOT_ASSESSED, _identity_digest, derive_job_state, quick_assessment_fact
+        from .fit import fit_percent, plain_percent, shown_state
         from .pipeline.steps import read_label
 
         profile_id = self.view.profile_id
@@ -436,6 +446,7 @@ class _Facts:
         item = self._sources.quick_assessment(row.job, profile_id) if key in self._assessed else None
         tailored = key in self._tailored and self._sources.tailored_at(row.job, profile_id)[0]
         state, stale, assessed_at, met, requirements, questions = NOT_ASSESSED, None, None, None, None, 0
+        fit: int | None = None
         if item is not None:
             fact = quick_assessment_fact(item, basis_stale=self._sources.basis.reason(item))
             derived = derive_job_state(
@@ -446,11 +457,13 @@ class _Facts:
             requirements = len(item.result.matrix)
             met = sum(1 for entry in item.result.matrix if entry.status.value == "met")
             questions = len(item.result.structured_questions) or len(item.result.questions)
+            fit = fit_percent(item.result.matrix)
         ran = self._run_latest.get(row.job)
         if ran is not None and (assessed_at is None or (ran.assessed_at or "") > assessed_at):
             # An old run's assessment, newer than anything in the quick store (DESIGN 10.4: latest wins).
             state, stale = ran.state, self._run_stale(ran, row)
             assessed_at, met, requirements, questions = ran.assessed_at, ran.reqs_met, ran.reqs_total, ran.open_questions
+            fit = plain_percent(met, requirements)  # a run's row has counts only: no classes to weight by
         # 0110-8-12: a tailored resume is the ``tailored`` flag below; the verdict state stays.
         label, ats_score = None, None
         if key in self._labelled:
@@ -459,10 +472,13 @@ class _Facts:
                 value, score = record.get("label"), record.get("ats_score")
                 label = value if isinstance(value, str) else None
                 ats_score = score if type(score) is int and score >= 0 else None
+        rank_score = self.rank_score(row.listing_digest)
+        # 0110-10-02: a needs-answers posting with few requirements met AND a low rank is a weak fit (``fit.py``).
+        state = shown_state(state, fit, rank_score, self._fit)
         return replace(
-            row, rank_score=self.rank_score(row.listing_digest), state=state, stale_code=stale, assessed_at=assessed_at,
+            row, rank_score=rank_score, state=state, stale_code=stale, assessed_at=assessed_at,
             reqs_met=met, reqs_total=requirements, open_questions=questions, tailored=bool(tailored), label=label,
-            ats_score=ats_score, pinned_digest=self.view.resume_digest, settings_digest=self.view.settings_digest,
+            ats_score=ats_score, pinned_digest=self.view.resume_digest, settings_digest=self.view.settings_digest, fit=fit,
         )
 
 

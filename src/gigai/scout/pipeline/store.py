@@ -228,7 +228,7 @@ CREATE TABLE IF NOT EXISTS posting (
   state TEXT NOT NULL, stale_code TEXT, assessed_at TEXT,
   reqs_met INTEGER, reqs_total INTEGER, open_questions INTEGER NOT NULL DEFAULT 0,
   tailored INTEGER NOT NULL DEFAULT 0, label TEXT, ats_score INTEGER,
-  pinned_digest TEXT NOT NULL, settings_digest TEXT NOT NULL, updated_at TEXT NOT NULL,
+  pinned_digest TEXT NOT NULL, settings_digest TEXT NOT NULL, updated_at TEXT NOT NULL, fit INTEGER,
   PRIMARY KEY (job, profile_id));
 CREATE INDEX IF NOT EXISTS posting_first_seen ON posting(first_seen);
 CREATE INDEX IF NOT EXISTS posting_profile ON posting(profile_id);
@@ -294,6 +294,7 @@ COLUMN_KINDS: Mapping[str, Mapping[str, str]] = {
         "match_rank": "integer", "state": "code", "stale_code": "code", "assessed_at": "timestamp", "reqs_met": "integer",
         "reqs_total": "integer", "open_questions": "integer", "tailored": "integer", "label": "code",
         "ats_score": "integer", "pinned_digest": "digest", "settings_digest": "digest", "updated_at": "timestamp",
+        "fit": "integer",
     },
     "posting_build": {
         "profile_id": "id", "match_digest": "digest", "facts_digest": "digest", "pinned_digest": "digest",
@@ -569,7 +570,8 @@ class PostingRecord:
     profile's place among the active profiles the posting matches (1: best).
     ``pinned_digest`` is the digest of the profile's pinned resume, ``stale_code``
     why a stored assessment is stale. ``reqs_met`` / ``reqs_total`` are the latest
-    assessment's requirement counts.
+    assessment's requirement counts; ``fit`` is its fit number (``scout/fit.py``, 0110-10-02: the share of
+    requirements met with the must-haves weighted, 0 to 100; ``None`` when not assessed).
     """
 
     job: str
@@ -594,6 +596,7 @@ class PostingRecord:
     pinned_digest: str
     settings_digest: str
     updated_at: str
+    fit: int | None = None
 
 
 @dataclass(frozen=True)
@@ -672,17 +675,18 @@ def _run_assessment_values(row: RunAssessment) -> tuple:
 _POSTING_COLUMNS = (
     "job, profile_id, board, first_seen, published_at, removed_at, listing_digest, listing_known, rank_score, "
     "match_rank, state, stale_code, assessed_at, reqs_met, reqs_total, open_questions, tailored, label, ats_score, "
-    "pinned_digest, settings_digest, updated_at"
+    "pinned_digest, settings_digest, updated_at, fit"
 )
 _POSTING_BUILD_COLUMNS = "profile_id, match_digest, facts_digest, pinned_digest, settings_digest, row_count, built_at"
-#: What a posting is ordered by (0110-8-04; the same key as ``scout_new.order_key``): a current assessment, then a
-#: stale one, then none; the verdict; the rank score; the share of requirements met; the newest.
+#: What a posting is ordered by (0110-8-04, 0110-10-02; the same key as ``scout_new.order_key``): a current assessment,
+#: then a stale one, then none; the verdict; the fit number; the rank score; the newest.
 _POSTING_ORDER = (
     "CASE WHEN state = 'not_assessed' THEN 2 WHEN stale_code IS NOT NULL THEN 1 ELSE 0 END, "
     "CASE WHEN label = 'recommended' THEN 0 ELSE 1 END, "
-    "CASE state WHEN 'not_assessed' THEN 0 WHEN 'matched' THEN 0 WHEN 'needs_answers' THEN 1 WHEN 'not_a_match' THEN 3 ELSE 2 END, "
+    "CASE state WHEN 'not_assessed' THEN 0 WHEN 'matched' THEN 0 WHEN 'needs_answers' THEN 1 WHEN 'weak_fit' THEN 3 "
+    "WHEN 'not_a_match' THEN 4 ELSE 2 END, "
+    "COALESCE(fit, CASE WHEN reqs_total > 0 THEN (reqs_met * 100 + reqs_total / 2) / reqs_total END, -1) DESC, "
     "COALESCE(rank_score, -1) DESC, "
-    "COALESCE(CASE WHEN reqs_total > 0 THEN (reqs_met * 100 + reqs_total / 2) / reqs_total END, -1) DESC, "
     "first_seen DESC, job"
 )
 
@@ -709,7 +713,7 @@ def _posting_values(row: PostingRecord) -> tuple:
     _check("digest", row.pinned_digest, "posting pinned_digest")
     _check("digest", row.settings_digest, "posting settings_digest")
     _check("timestamp", row.updated_at, "posting updated_at")
-    for name in ("rank_score", "reqs_met", "reqs_total", "ats_score"):
+    for name in ("rank_score", "reqs_met", "reqs_total", "ats_score", "fit"):
         _check_count(getattr(row, name), f"posting {name}", optional=True)
     _check_count(row.match_rank, "posting match_rank")
     _check_count(row.open_questions, "posting open_questions")
@@ -719,7 +723,7 @@ def _posting_values(row: PostingRecord) -> tuple:
         row.job, row.profile_id, row.board, row.first_seen, row.published_at, row.removed_at, row.listing_digest,
         int(row.listing_known), row.rank_score, row.match_rank, row.state, row.stale_code, row.assessed_at, row.reqs_met,
         row.reqs_total, row.open_questions, int(row.tailored), row.label, row.ats_score, row.pinned_digest,
-        row.settings_digest, row.updated_at,
+        row.settings_digest, row.updated_at, row.fit,
     )
 
 
@@ -850,6 +854,12 @@ class PipelineStore:
                     if statement.strip():
                         c.execute(statement)
                 c.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
+        # 0110-10-02: ``posting.fit`` is additive and nullable, added in place WITHOUT a version bump: a build that
+        # does not know it names its own columns and still opens this file.
+        if "fit" not in {row[1] for row in connection.execute("PRAGMA table_info(posting)")}:
+            with self._write() as c:
+                if "fit" not in {row[1] for row in c.execute("PRAGMA table_info(posting)")}:
+                    c.execute("ALTER TABLE posting ADD COLUMN fit INTEGER")
 
     @contextmanager
     def _write(self) -> Iterator[sqlite3.Connection]:
@@ -1572,7 +1582,7 @@ class PipelineStore:
             if row.profile_id != build.profile_id:
                 raise PipelineStoreError("invalid_value", "a posting row belongs to another profile than its build")
             values.append(_posting_values(row))
-        marks = ",".join("?" * 22)
+        marks = ",".join("?" * 23)
         with self._write() as c:
             c.execute("DELETE FROM posting WHERE profile_id=?", (build.profile_id,))
             c.executemany(f"INSERT INTO posting({_POSTING_COLUMNS}) VALUES ({marks})", values)
@@ -1613,7 +1623,7 @@ class PipelineStore:
             if row.profile_id != profile_id or row.board not in stamps:
                 raise PipelineStoreError("invalid_value", "a posting row belongs to another profile or board than its build")
             values.append(_posting_values(row))
-        marks = ",".join("?" * 22)
+        marks = ",".join("?" * 23)
         boards = sorted(stamps)
         with self._write() as c:
             for start in range(0, len(boards), 500):

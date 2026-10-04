@@ -10,6 +10,8 @@ objects).
 - ``POST /api/postings/assess`` is "Assess these". Without ``approve: true``
   it answers ``status: "ask"`` (the count and the estimate) and assesses
   nothing; with it the batch is assessed through the job page's own path.
+  0110-10-02: postings below the assess threshold are left out and counted
+  unless ``include_low_rank: true``.
 - ``POST /api/runs/import`` imports what old runs assessed into the read
   model, once per run; a second call imports nothing.
 
@@ -69,7 +71,7 @@ def preparing_body(progress: dict[str, object]) -> dict[str, object]:
 
 _FLAGS = {"1": True, "true": True, "0": False, "false": False}
 _QUERY_KEYS = frozenset({"profile_id", "q", "state", "window", "removed", "history", "include_hidden", "limit", "offset"})
-_ASSESS_KEYS = frozenset({"jobs", "profile_id", "query", "states", "window", "approve", "again", "actor"})
+_ASSESS_KEYS = frozenset({"jobs", "profile_id", "query", "states", "window", "approve", "again", "actor", "include_low_rank"})
 
 
 class PostingsRoutesMixin:
@@ -151,9 +153,9 @@ class PostingsRoutesMixin:
             if value is not None and (type(value) is not list or any(type(item) is not str for item in value)):
                 self._error(HTTPStatus.UNPROCESSABLE_ENTITY, "wrong_type", f"{name} must be a list of strings")
                 return
-        approve, again = body.get("approve", False), body.get("again", False)
-        if type(approve) is not bool or type(again) is not bool:
-            self._error(HTTPStatus.UNPROCESSABLE_ENTITY, "wrong_type", "approve and again must be true or false")
+        approve, again, include_low_rank = body.get("approve", False), body.get("again", False), body.get("include_low_rank", False)
+        if type(approve) is not bool or type(again) is not bool or type(include_low_rank) is not bool:
+            self._error(HTTPStatus.UNPROCESSABLE_ENTITY, "wrong_type", "approve, again and include_low_rank must be true or false")
             return
         texts = {key: body.get(key) for key in ("profile_id", "query", "window", "actor")}
         if any(value is not None and type(value) is not str for value in texts.values()):
@@ -167,6 +169,7 @@ class PostingsRoutesMixin:
             lambda: assess_these(
                 home_root, target, jobs=jobs, profile_id=texts["profile_id"], query=texts["query"], states=states,
                 window=texts["window"], approve=approve, again=again, decided_by=texts["actor"] or "operator",
+                include_low_rank=include_low_rank,
             )
         )
 

@@ -12,7 +12,9 @@ profiles, from the stored index: no board request.
   what matches (user-private only, never posting text), for the same postings.
 - ``POST /api/new`` answers the question: ``{"assess": true}`` assesses those
   postings (model calls, the job page's own path) and answers the grid with
-  scores; ``{"assess": false}`` the grid with rank only. Either moves the
+  scores; ``{"assess": false}`` the grid with rank only. 0110-10-02: a yes
+  leaves out the postings below the assess threshold (``low_rank_question``
+  counts them); ``"include_low_rank": true`` beside it assesses them too. Either moves the
   anchor after the response is built (not with ``peek`` or ``profile_id``).
 - ``POST /api/new/seen`` is "Mark all seen": it moves the same anchor to now.
 
@@ -52,7 +54,7 @@ class NewRoutesMixin:
 
     def _answer_new(
         self, target, *, profile_id, peek: bool, assess: bool | None, since, yours: bool = False, reassess_stale: bool = False,
-        model_wait: float | None = None,
+        model_wait: float | None = None, include_low_rank: bool = False,
     ) -> None:
         try:
             if yours:
@@ -60,7 +62,7 @@ class NewRoutesMixin:
             else:
                 response = scout_new(
                     self._backend.home_root, target, profile_id=profile_id, peek=peek, assess=assess, since=since,
-                    reassess_stale=reassess_stale, model_wait=model_wait,
+                    reassess_stale=reassess_stale, model_wait=model_wait, include_low_rank=include_low_rank,
                 )
         except PostingModelPreparing as exc:
             # 0110-9-01: the first build of the posting read model is running (a GET only): how far it is, never a hang.
@@ -104,16 +106,17 @@ class NewRoutesMixin:
         if not isinstance(body, dict):
             self._error(HTTPStatus.UNPROCESSABLE_ENTITY, "wrong_type", "the body must be a JSON object")
             return
-        unknown = sorted(set(body) - {"assess", "peek", "profile_id", "reassess_stale", "since"})
+        unknown = sorted(set(body) - {"assess", "include_low_rank", "peek", "profile_id", "reassess_stale", "since"})
         if unknown:
             self._error(HTTPStatus.UNPROCESSABLE_ENTITY, "unknown_key", f"unknown key: {unknown[0]}")
             return
         assess, peek = body.get("assess"), body.get("peek", False)
         profile_id, since = body.get("profile_id"), body.get("since")
-        reassess_stale = body.get("reassess_stale", False)
-        if type(assess) is not bool or type(peek) is not bool or type(reassess_stale) is not bool:
+        reassess_stale, include_low_rank = body.get("reassess_stale", False), body.get("include_low_rank", False)
+        if any(type(value) is not bool for value in (assess, peek, reassess_stale, include_low_rank)):
             self._error(
-                HTTPStatus.UNPROCESSABLE_ENTITY, "wrong_type", "assess (required), peek and reassess_stale must be true or false"
+                HTTPStatus.UNPROCESSABLE_ENTITY, "wrong_type",
+                "assess (required), peek, reassess_stale and include_low_rank must be true or false",
             )
             return
         if any(value is not None and type(value) is not str for value in (profile_id, since)):
@@ -122,7 +125,10 @@ class NewRoutesMixin:
         target = self._new_target()
         if target is None:
             return
-        self._answer_new(target, profile_id=profile_id, peek=peek, assess=assess, since=since, reassess_stale=reassess_stale)
+        self._answer_new(
+            target, profile_id=profile_id, peek=peek, assess=assess, since=since, reassess_stale=reassess_stale,
+            include_low_rank=include_low_rank,
+        )
 
     def _handle_post_new_seen(self) -> None:
         body = self._read_json_body()

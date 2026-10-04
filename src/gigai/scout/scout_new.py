@@ -18,10 +18,24 @@ THE FLOW
   ``assess=False`` is the grid with rank only.
 - Nothing new: ``status: "nothing_new"`` and the 10 postings that still need
   attention, in the grid's order.
-- THE GRID'S ORDER (0110-8-04, :func:`order_key`): a current assessment, then
-  a stale one, then none; inside a group the verdict (matched, needs answers,
-  other, not a match), the rank score, the share of requirements met, the
-  newest. A percentage is never compared with a rank score.
+- THE GRID'S ORDER (0110-8-04, 0110-10-02, :func:`order_key`): a current
+  assessment, then a stale one, then none; inside a group the verdict
+  (matched, needs answers, other, weak fit, not a match), then the FIT number
+  (``fit.py``: the share of requirements met, the must-haves weighted), the
+  rank score, the newest. A not-assessed posting has no fit number and is
+  ordered by its rank: a percentage is never compared with a rank score.
+- WEAK FIT (0110-10-02, ``fit.py``): a needs-answers posting with few
+  requirements met AND a low rank has the state ``weak_fit``. It is left out
+  of the rows listed here (``counts.weak_fit`` says how many, the message how
+  to list them), it is never one of the postings that "still need attention",
+  and its row asks no question (``open_questions`` is empty).
+- THE ASSESS THRESHOLD (0110-10-02): a yes assesses only the postings whose
+  rank score is at least ``fit.assess_min_rank`` (50; a posting not ranked
+  yet is assessed). The ones below are counted (``counts.low_rank_skipped``)
+  and offered as their OWN question, ``low_rank_question`` ("112 low-ranked
+  ones are skipped; assess those too? ~112 calls"), never answered by a plain
+  yes: ``include_low_rank=True`` (``--include-low-rank``) beside a yes
+  assesses them too. The same holds for ``reassess_stale``.
 - OLD ASSESSMENTS (0110-8-08): the live postings that have only a stale
   assessment (made by an old run, an older prompt, other settings) are their
   OWN question, ``stale_question``, with the count and the estimate, next to
@@ -80,6 +94,7 @@ import threading
 import time
 
 from ..canonical import digest_imported_bytes
+from . import fit as fit_rules
 from . import postings
 from .data_labels import ENVELOPE_KEY, PUBLIC_UNTRUSTED, UNTRUSTED_TEXT_RULE, USER_PRIVATE, assert_not_mixed, labels_envelope
 from .pipeline.busy import LiveBatch, assess_batch
@@ -106,6 +121,7 @@ UNMET_SHOWN = 4
 EVIDENCE_SHOWN = 3
 DESCRIPTION_CHARS = 400
 PIPELINE_COMMAND = "gigai scout new --process"
+WEAK_FIT_COMMAND = "gigai scout jobs list --state weak_fit"
 
 #: States that still want something from the user (a posting Scout labelled recommended is left out by the query).
 _ATTENTION_STATES = ("needs_answers", "matched", "assessed", "tailored", "not_assessed")
@@ -166,9 +182,11 @@ GROUP_CURRENT = "current"
 GROUP_STALE = "stale"
 GROUP_NOT_ASSESSED = "not_assessed"
 _GROUP_ORDER = {GROUP_CURRENT: 0, GROUP_STALE: 1, GROUP_NOT_ASSESSED: 2}
-#: Inside the assessed groups: matched, needs answers, anything else, not a match.
-_VERDICT_ORDER = {"matched": 0, "needs_answers": 1, "not_a_match": 3}
-_VERDICT_WORDS = {"matched": "Matched", "needs_answers": "Needs your answers", "not_a_match": "Not a match"}
+#: Inside the assessed groups: matched, needs answers, anything else, weak fit, not a match.
+_VERDICT_ORDER = {"matched": 0, "needs_answers": 1, fit_rules.WEAK_FIT: 3, "not_a_match": 4}
+_VERDICT_WORDS = {
+    "matched": "Matched", "needs_answers": "Needs your answers", fit_rules.WEAK_FIT: "Weak fit", "not_a_match": "Not a match",
+}
 _STALE_WORDS = {
     "posting_changed": "posting changed",
     "older_prompt": "older prompt",
@@ -186,20 +204,30 @@ def sort_group(row: PostingRecord) -> str:
     return GROUP_STALE if row.stale_code is not None else GROUP_CURRENT
 
 
+def fit_of(row: PostingRecord) -> int | None:
+    """The row's ONE fit number (``fit.py``), 0 to 100; ``None`` for a posting that is not assessed."""
+
+    if row.state == _NOT_ASSESSED:
+        return None
+    # A row stored before the fit number existed has none until its facts are read again: the plain share meanwhile.
+    return row.fit if row.fit is not None else fit_rules.plain_percent(row.reqs_met, row.reqs_total)
+
+
 def order_key(row: PostingRecord) -> tuple[int, int, int, int, int]:
-    """What the grid is ordered by before recency (0110-8-04); ``pipeline.store._POSTING_ORDER`` is the same key in SQL.
+    """What the grid is ordered by before recency (0110-8-04, 0110-10-02); ``pipeline.store._POSTING_ORDER`` is the same key in SQL.
 
     The freshness group, the Scout label ``recommended`` first inside it, the
-    verdict, the rank score (the one number comparable across rows), then the
-    share of requirements met as the tie-break inside a rank score.
+    verdict, then the real fit: the fit number (the share of requirements
+    met, must-haves weighted), then the rank score. A not-assessed row has
+    no fit number, so its group is ordered by rank.
     """
 
     group = sort_group(row)
     verdict = 0 if group == GROUP_NOT_ASSESSED else _VERDICT_ORDER.get(row.state, 2)
-    percent = _score(row)[0] if row.reqs_total else None
+    found = fit_of(row)
     return (
         _GROUP_ORDER[group], 0 if row.label == _RECOMMENDED else 1, verdict,
-        -(row.rank_score if row.rank_score is not None else -1), -(percent if percent is not None else -1),
+        -(found if found is not None else -1), -(row.rank_score if row.rank_score is not None else -1),
     )
 
 
@@ -221,7 +249,10 @@ def stale_label(row: PostingRecord) -> str | None:
 
 
 def score_text(row: PostingRecord) -> str:
-    """The score column: the verdict word first, "N of M requirements", the rank. Never a bare percent (0110-8-04)."""
+    """The score column: the verdict word first, the fit number, "N of M requirements", the rank.
+
+    Never a bare percent (0110-8-04): the one fit number (0110-10-02) is named ("fit 85%") and sits beside its "N of M".
+    """
 
     rank = f"rank {row.rank_score}" if row.rank_score is not None else "not ranked yet"
     if row.state == _NOT_ASSESSED:
@@ -230,6 +261,9 @@ def score_text(row: PostingRecord) -> str:
         verdict = _VERDICT_WORDS.get(row.state, "Assessed")
         old = stale_label(row)
         parts = [f"{verdict} ({old})" if old else verdict]
+        found = fit_of(row)
+        if found is not None:
+            parts.append(f"fit {found}%")
         if row.reqs_total:
             parts.append(f"{row.reqs_met or 0} of {row.reqs_total} requirements")
         parts.append(rank)
@@ -299,6 +333,8 @@ def _row_json(
             "met": row.reqs_met, "requirements": row.reqs_total, "percent": score if kind == "assessment" else None,
             "assessed_at": row.assessed_at,
         }
+    if row.state == fit_rules.WEAK_FIT:
+        questions = []  # 0110-10-02: a weak fit asks no question
     assessed = row.state != _NOT_ASSESSED
     if assessed and item is None:
         # An old run's assessment (0110-8-08): its counts are in the row, its detail is in the run, not in the quick store.
@@ -333,6 +369,8 @@ def _row_json(
         "score": score,
         "score_kind": kind,
         "score_text": score_text(row),
+        # 0110-10-02: the one fit number of the row (must-haves weighted); null when not assessed.
+        "fit": fit_of(row),
         "rank_score": row.rank_score,
         "assessment": assessment,
         "assessment_detail": (item is not None) if assessed else None,
@@ -667,9 +705,12 @@ def _answers(since: str, profile_id: str | None, *, flag: str, body: Mapping[str
 
 def _question(
     pairs: Sequence[tuple[str, str]], new_count: int, views: Sequence[ProfileView], since: str, *, home_root: Path, target: Path,
-    profile_id: str | None = None,
+    profile_id: str | None = None, low_rank: int = 0,
 ) -> tuple[dict[str, object], str]:
-    """The approval question: ids and numbers, and the sentence (it names the profile tags)."""
+    """The approval question: ids and numbers, and the sentence (it names the profile tags).
+
+    ``low_rank`` (0110-10-02): how many new postings the assess threshold holds back; they are their own question.
+    """
 
     model, found = _estimate(len(pairs), home_root=home_root, target=target)
     by_profile = _by_profile(pairs, views)
@@ -677,12 +718,16 @@ def _question(
     named = ", ".join(f"{labels[item['profile_id']]} {item['count']}" for item in by_profile)  # type: ignore[index]
     plural = "s" if new_count != 1 else ""
     across = f" across {len(by_profile)} profiles ({named})" if len(by_profile) > 1 else (f" ({named})" if named else "")
-    ask = "Assess them?" if len(pairs) == new_count else f"Assess the {len(pairs)} not assessed yet?"
+    if low_rank:
+        ask = f"Assess {len(pairs)} of them ({low_rank} low-ranked {'one is' if low_rank == 1 else 'ones are'} a separate question)?"
+    else:
+        ask = "Assess them?" if len(pairs) == new_count else f"Assess the {len(pairs)} not assessed yet?"
     sentence = f"{new_count} new posting{plural}{across}. {ask} ~{found['calls']} calls{_tokens(found['tokens'])}"
     question = {
         "kind": "assess_new",
         "new": new_count,
         "to_assess": len(pairs),
+        "low_rank_skipped": low_rank,
         "by_profile": by_profile,
         "model_target": model,
         "estimate": found,
@@ -695,21 +740,76 @@ def _question(
 
 def _stale_question(
     pairs: Sequence[tuple[str, str]], views: Sequence[ProfileView], since: str, *, home_root: Path, target: Path,
-    profile_id: str | None = None,
+    profile_id: str | None = None, low: Sequence[tuple[str, str]] = (), min_rank: int = 0,
 ) -> dict[str, object]:
-    """0110-8-08: the postings that have only an old assessment, as their own question. Never answered by the assess-new yes."""
+    """0110-8-08: the postings that have only an old assessment, as their own question. Never answered by the assess-new yes.
 
-    model, found = _estimate(len(pairs), home_root=home_root, target=target)
-    have = "has" if len(pairs) == 1 else "have"
+    0110-10-02: ``low`` are the ones below the assess threshold. They are left out of the yes and counted
+    (``low_rank_skipped``); when ONLY they are left, the question is about them and its yes names ``--include-low-rank``.
+    """
+
+    asked = pairs or low
+    model, found = _estimate(len(asked), home_root=home_root, target=target)
+    have = "has" if len(asked) == 1 else "have"
+    those = "that one" if len(asked) == 1 else "those"
+    if pairs:
+        flag, body = "--reassess-stale", {"assess": False, "reassess_stale": True}
+        text = f"{len(pairs)} {have} only an old assessment; re-assess? ~{found['calls']} calls{_tokens(found['tokens'])}"
+        if low:
+            more = "is" if len(low) == 1 else "are"
+            text += f" ({len(low)} more {more} low-ranked, rank below {min_rank}, and left out; add --include-low-rank to include them)"
+    else:
+        flag, body = "--reassess-stale --include-low-rank", {"assess": False, "reassess_stale": True, "include_low_rank": True}
+        text = (
+            f"{len(low)} low-ranked (rank below {min_rank}) {have} only an old assessment and {'is' if len(low) == 1 else 'are'} left out; "
+            f"re-assess {those} too? ~{found['calls']} calls{_tokens(found['tokens'])}"
+        )
     return {
         "kind": "reassess_stale",
         "to_reassess": len(pairs),
-        "by_profile": _by_profile(pairs, views),
+        "low_rank_skipped": len(low),
+        "by_profile": _by_profile(asked, views),
         "model_target": model,
         "estimate": found,
-        "yes": _answers(since, profile_id, flag="--reassess-stale", body={"assess": False, "reassess_stale": True}),
-        "text": f"{len(pairs)} {have} only an old assessment; re-assess? ~{found['calls']} calls{_tokens(found['tokens'])}",
+        "yes": _answers(since, profile_id, flag=flag, body=body),
+        "text": text,
     }
+
+
+def _low_rank_question(
+    low: Sequence[tuple[str, str]], views: Sequence[ProfileView], since: str, setting: fit_rules.FitSetting, *, home_root: Path,
+    target: Path, profile_id: str | None = None,
+) -> dict[str, object]:
+    """0110-10-02: the new postings below the assess threshold, as their own question. Never answered by a plain yes."""
+
+    model, found = _estimate(len(low), home_root=home_root, target=target)
+    one = len(low) == 1
+    return {
+        "kind": "assess_low_rank",
+        "skipped": len(low),
+        "min_rank": setting.assess_min_rank,
+        "by_profile": _by_profile(low, views),
+        "model_target": model,
+        "estimate": found,
+        "yes": _answers(since, profile_id, flag="--yes --include-low-rank", body={"assess": True, "include_low_rank": True}),
+        "text": (
+            f"{len(low)} low-ranked {'one is' if one else 'ones are'} skipped (rank below {setting.assess_min_rank}); "
+            f"assess {'that' if one else 'those'} too? ~{found['calls']} calls{_tokens(found['tokens'])}"
+        ),
+    }
+
+
+def split_low_rank(
+    pairs: Sequence[tuple[str, str]], ranks: Mapping[tuple[str, str], int | None], setting: fit_rules.FitSetting, *,
+    include: bool = False,
+) -> tuple[list[tuple[str, str]], list[tuple[str, str]]]:
+    """``(to assess, low-ranked and skipped)`` of ``(job, profile)`` pairs by the assess threshold; ``include`` skips none."""
+
+    if include:
+        return list(pairs), []
+    keep = [pair for pair in pairs if not fit_rules.is_low_rank(ranks.get(pair), setting)]
+    low = [pair for pair in pairs if fit_rules.is_low_rank(ranks.get(pair), setting)]
+    return keep, low
 
 
 def _current(row: PostingRecord) -> bool:
@@ -727,17 +827,17 @@ def _new_pairs(groups: Mapping[str, Sequence[PostingRecord]], profile_id: str | 
     return sorted(pairs)
 
 
-def _stale_pairs(store: PipelineStore, profile_id: str | None) -> list[tuple[str, str]]:
-    """0110-8-08: the live postings with an assessment and no CURRENT one under any matching profile, each for the profile whose old assessment is shown."""
+def _stale_rows(store: PipelineStore, profile_id: str | None) -> list[PostingRecord]:
+    """0110-8-08: the live postings with an assessment and no CURRENT one under any matching profile, each as the row of the profile whose old assessment is shown."""
 
-    pairs = []
+    rows = []
     for group in _grouped(store.postings(profile_id=profile_id)).values():
         if any(_current(item) for item in group):
             continue
         old = next((item for item in group if item.state != _NOT_ASSESSED), None)
         if old is not None:
-            pairs.append((old.job, old.profile_id))
-    return sorted(pairs)
+            rows.append(old)
+    return sorted(rows, key=lambda row: (row.job, row.profile_id))
 
 
 def response_labels(response: Mapping[str, object]) -> tuple[str, ...]:
@@ -783,6 +883,7 @@ def scout_new(
     progress: Callable[[str], None] | None = None,
     model_wait: float | None = None,
     build_progress: Callable[[str, int, int], None] | None = None,
+    include_low_rank: bool = False,
 ) -> dict[str, object]:
     """What is new since the last check, as the ``scout-new:1`` response. See the module docstring.
 
@@ -804,7 +905,9 @@ def scout_new(
     (model calls), ``False`` never does, ``None`` asks (``status: "ask"``)
     when there are any. ``reassess_stale``: the yes to the OTHER question
     (``stale_question``): assess again the live postings that have only an
-    old assessment. ``assess=True`` alone never does that. ``progress`` gets
+    old assessment. ``assess=True`` alone never does that. Either yes leaves
+    out the postings below the assess threshold (``fit.assess_min_rank``)
+    unless ``include_low_rank``. ``progress`` gets
     the progress lines of a batch (and how far the background rank is).
     Raises :class:`ScoutNewError` / ``PostingModelError`` /
     ``PipelineStoreError``.
@@ -817,6 +920,7 @@ def scout_new(
             Path(home_root), Path(target), profile_id=profile_id, peek=peek, assess=assess, since=since, now=now, config=config,
             yours=yours, process=process and not yours, decided_by=decided_by, reassess_stale=reassess_stale and not yours,
             progress=progress, model_wait=model_wait, build_progress=build_progress,
+            include_low_rank=include_low_rank and not yours,
         )
 
 
@@ -839,7 +943,7 @@ def _scout_new(
     home_root: Path, target: Path, *, profile_id: str | None, peek: bool, assess: bool | None, since: str | None,
     now: datetime | None, config: object | None, yours: bool, process: bool = False, decided_by: str = "operator",
     reassess_stale: bool = False, progress: Callable[[str], None] | None = None, model_wait: float | None = None,
-    build_progress: Callable[[str, int, int], None] | None = None,
+    build_progress: Callable[[str, int, int], None] | None = None, include_low_rank: bool = False,
 ) -> dict[str, object]:
     # Before anything is read: what the steps store (a Scout label, a tailored resume) is in the rows below.
     processed = process_waiting(home_root, target, config=config, decided_by=decided_by) if process else None
@@ -871,9 +975,20 @@ def _scout_new(
                 return _grouped(selected)
             return _grouped(store.postings(jobs={row.job for row in selected}))
 
+        setting = fit_rules.fit_setting(home_root, target)
+
+        def to_assess() -> tuple[list[tuple[str, str]], list[tuple[str, str]], list[tuple[str, str]], list[tuple[str, str]]]:
+            """``(new to assess, new low-ranked, stale to re-assess, stale low-ranked)`` as the stores are now (0110-10-02)."""
+
+            ranks = {(row.job, row.profile_id): row.rank_score for group in groups.values() for row in group}
+            new_keep, new_low = split_low_rank(_new_pairs(groups, profile_id), ranks, setting, include=include_low_rank)
+            old = _stale_rows(store, profile_id)
+            old_ranks = {(row.job, row.profile_id): row.rank_score for row in old}
+            old_keep, old_low = split_low_rank(list(old_ranks), old_ranks, setting, include=include_low_rank)
+            return new_keep, new_low, old_keep, old_low
+
         groups = read_new()
-        pairs = _new_pairs(groups, profile_id)
-        stale_pairs = _stale_pairs(store, profile_id)
+        pairs, low_pairs, stale_pairs, low_stale = to_assess()
         new_count = len(groups)
         status = STATUS_NEW if groups else STATUS_NOTHING_NEW
         question: dict[str, object] | None = None
@@ -913,21 +1028,38 @@ def _scout_new(
         if assessed is not None or reassessed is not None:
             postings.refresh(home_root, target, store=store, now=moment)
             groups = read_new()
-            pairs = _new_pairs(groups, profile_id)  # what is still not assessed: the failures
-            stale_pairs = _stale_pairs(store, profile_id)
+            pairs, low_pairs, stale_pairs, low_stale = to_assess()  # what is still not assessed: the failures
         if status == STATUS_ASK:
-            question, sentence = _question(pairs, new_count, views, since_at, home_root=home_root, target=target, profile_id=profile_id)
+            question, sentence = _question(
+                pairs, new_count, views, since_at, home_root=home_root, target=target, profile_id=profile_id, low_rank=len(low_pairs),
+            )
         stale_question = (
-            _stale_question(stale_pairs, views, since_at, home_root=home_root, target=target, profile_id=profile_id)
-            if stale_pairs else None
+            _stale_question(
+                stale_pairs, views, since_at, home_root=home_root, target=target, profile_id=profile_id, low=low_stale,
+                min_rank=setting.assess_min_rank,
+            )
+            if stale_pairs or low_stale else None
+        )
+        low_rank_question = (
+            _low_rank_question(low_pairs, views, since_at, setting, home_root=home_root, target=target, profile_id=profile_id)
+            if low_pairs else None
         )
 
+        weak_fit = 0
         if groups:
             shown = in_order((group, _shown(group, profile_id)) for group in groups.values())
             message = f"{new_count} new posting{'s' if new_count != 1 else ''} since {_when(since_at)}."
+            # 0110-10-02: a weak fit is not listed; the count and how to list them are said instead.
+            weak_fit = sum(1 for _group, row in shown if row.state == fit_rules.WEAK_FIT)
+            shown = [(group, row) for group, row in shown if row.state != fit_rules.WEAK_FIT]
             if len(shown) > NEW_ROWS_LIMIT:
                 shown = shown[:NEW_ROWS_LIMIT]
-                message += f" Showing the first {NEW_ROWS_LIMIT}: assessed ones first, then by rank."
+                message += f" Showing the first {NEW_ROWS_LIMIT}: assessed ones first, by fit, then by rank."
+            if weak_fit:
+                message += (
+                    f" {weak_fit} weak fit{'s are' if weak_fit != 1 else ' is'} not listed (few requirements met and a low rank):"
+                    f" {WEAK_FIT_COMMAND}"
+                )
         else:
             applied = _applied(refreshed.resolved)
             best = [
@@ -991,13 +1123,17 @@ def _scout_new(
             "counts": {
                 "new": new_count,
                 "to_assess": len(pairs),
-                "only_stale": len(stale_pairs),
+                "low_rank_skipped": len(low_pairs),
+                "only_stale": len(stale_pairs) + len(low_stale),
+                "weak_fit": weak_fit,
                 "shown": len(rows_json),
                 "by_profile": [{"profile_id": view.profile_id, "new": per_profile.get(view.profile_id, 0)} for view in views],
             },
             "message": message,
             "question": question,
             "stale_question": stale_question,
+            "low_rank_question": low_rank_question,
+            "fit": setting.to_json(),
             "assessed": assessed,
             "reassessed": reassessed,
             "ranking": _ranking(store, views, home_root, target),
@@ -1108,6 +1244,10 @@ def render(response: Mapping[str, object]) -> str:
         lines.append(str(question["text"]))
         lines.append(f"  Yes: {question['yes']['cli']}")  # type: ignore[index]
         lines.append("  Below: ranked, not assessed.")
+    low = response.get("low_rank_question")
+    if isinstance(low, Mapping):
+        lines.append(str(low["text"]))
+        lines.append(f"  Yes: {low['yes']['cli']}")  # type: ignore[index]
     stale = response.get("stale_question")
     if isinstance(stale, Mapping):
         lines.append(str(stale["text"]))
@@ -1212,6 +1352,7 @@ __all__ = [
     "PostingModelPreparing",
     "ScoutNewError",
     "check_response",
+    "fit_of",
     "in_order",
     "mark_all_seen",
     "order_key",
@@ -1222,5 +1363,6 @@ __all__ = [
     "scout_new",
     "scout_new_yours",
     "sort_group",
+    "split_low_rank",
     "stale_label",
 ]

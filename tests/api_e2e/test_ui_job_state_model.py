@@ -216,6 +216,7 @@ def test_every_state_the_backend_serves_has_words(out: dict) -> None:
         "not_assessed": "Not assessed",
         "assessed": "Assessed",
         "needs_answers": "Needs your answers",
+        "weak_fit": "Weak fit",
         "matched": "Matched",
         "not_a_match": "Not a match",
         "tailored": "Resume tailored",

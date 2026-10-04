@@ -1430,7 +1430,7 @@
     },
     "/api/assessments": {
       "get": {
-        "description": "Stored quick assessments, newest first, each with its job_state. A stored assessment records its basis (`prompt_version`, `constraints_digest`, `story_bank`: digests and ids, no settings or answer text). Served with `basis_stale` (true | false) and, when true, `basis_stale_reason` (`older_prompt` | `settings_changed` | `story_bank_changed`): whether it is what its profile would be assessed with now. Derived on read; no model is called. `story_bank_changed` is targeted: an answer or story added or edited since answers one of the assessment's own open questions (the same id, the near match behind `bank_suggestions`, or a story about it), or it cites an answer or story that was edited or deleted. Such an item also carries `basis_stale_bank`: the entries that made it stale, each `{match: \"exact\" | \"near\" | \"cited\", bank_question_id, bank_question?, question_id?, question?}` (ids and question words, never an answer). job_state may carry `assessment_stale: {reason: \"posting_changed\"}` (absent otherwise) when the assessment that gives the state was made on posting text that has since changed: the verdict still reads, and the job should be re-assessed. The same marker carries reason `older_prompt`, `settings_changed` or `story_bank_changed` when the state comes from a stored quick assessment made with an older assess prompt, other candidate settings (work mode, countries, location, sponsorship need) or answers and stories that have since changed; nothing is re-assessed until you ask (POST /api/assess, or assess-all).",
+        "description": "Stored quick assessments, newest first, each with its job_state. A stored assessment records its basis (`prompt_version`, `constraints_digest`, `story_bank`: digests and ids, no settings or answer text). Served with `basis_stale` (true | false) and, when true, `basis_stale_reason` (`older_prompt` | `settings_changed` | `story_bank_changed`): whether it is what its profile would be assessed with now. Derived on read; no model is called. `story_bank_changed` is targeted: an answer or story added or edited since answers one of the assessment's own open questions (the same id, the near match behind `bank_suggestions`, or a story about it), or it cites an answer or story that was edited or deleted. Such an item also carries `basis_stale_bank`: the entries that made it stale, each `{match: \"exact\" | \"near\" | \"cited\", bank_question_id, bank_question?, question_id?, question?}` (ids and question words, never an answer). job_state may carry `assessment_stale: {reason: \"posting_changed\"}` (absent otherwise) when the assessment that gives the state was made on posting text that has since changed: the verdict still reads, and the job should be re-assessed. The same marker carries reason `older_prompt`, `settings_changed` or `story_bank_changed` when the state comes from a stored quick assessment made with an older assess prompt, other candidate settings (work mode, countries, location, sponsorship need) or answers and stories that have since changed; nothing is re-assessed until you ask (POST /api/assess, or assess-all). job_state.state `weak_fit` is `needs_answers` for a job whose stored assessment has few requirements met AND whose rank score is low (the `fit` block of the project's settings: below 40% and below rank 50): it is not counted with the jobs that need your answers.",
         "operationId": "get_api_assessments",
         "parameters": [
           {
@@ -1869,7 +1869,7 @@
     },
     "/api/jobs": {
       "get": {
-        "description": "One job, complete: posting, rank, assessment + requirement matrix, open questions, tailored resumes, job state, action links. Read only; never calls a model or the network. Aggregates the newest run posting, its rank, every run or quick assessment of the job (with the requirement matrix), the questions still unanswered, stored tailored resumes, the job's state with the events it accepts next, and the action links. The UI route `#/jobs/<posting url>` maps to this route. Each `source: \"quick\"` assessment carries `basis_stale` (and `basis_stale_reason` when true). job_state may carry `assessment_stale: {reason: \"posting_changed\"}` (absent otherwise) when the assessment that gives the state was made on posting text that has since changed: the verdict still reads, and the job should be re-assessed. The same marker carries reason `older_prompt`, `settings_changed` or `story_bank_changed` when the state comes from a stored quick assessment made with an older assess prompt, other candidate settings (work mode, countries, location, sponsorship need) or answers and stories that have since changed; nothing is re-assessed until you ask (POST /api/assess, or assess-all).",
+        "description": "One job, complete: posting, rank, assessment + requirement matrix, open questions, tailored resumes, job state, action links. Read only; never calls a model or the network. Aggregates the newest run posting, its rank, every run or quick assessment of the job (with the requirement matrix), the questions still unanswered, stored tailored resumes, the job's state with the events it accepts next, and the action links. The UI route `#/jobs/<posting url>` maps to this route. Each `source: \"quick\"` assessment carries `basis_stale` (and `basis_stale_reason` when true). job_state may carry `assessment_stale: {reason: \"posting_changed\"}` (absent otherwise) when the assessment that gives the state was made on posting text that has since changed: the verdict still reads, and the job should be re-assessed. The same marker carries reason `older_prompt`, `settings_changed` or `story_bank_changed` when the state comes from a stored quick assessment made with an older assess prompt, other candidate settings (work mode, countries, location, sponsorship need) or answers and stories that have since changed; nothing is re-assessed until you ask (POST /api/assess, or assess-all). job_state.state `weak_fit` is `needs_answers` for a job whose stored assessment has few requirements met AND whose rank score is low (the `fit` block of the project's settings: below 40% and below rank 50): it is not counted with the jobs that need your answers.",
         "operationId": "get_api_jobs",
         "parameters": [
           {
@@ -2245,7 +2245,7 @@
     },
     "/api/new": {
       "get": {
-        "description": "What is new since the last check, across all active profiles. A read: no model call, the anchor stays. Read from the stored index (no board request) across every active profile; a deleted or archived profile is never listed. `status` is `ask` (new postings no profile has assessed: `question` has the count per profile and the estimate from the recorded model calls, and the rows are ranked only), `new` (the new postings; at most 50 are listed, and `counts.new` is all of them) or `nothing_new` (the 10 postings that still need attention). Rows are in one order (`sort_group`): a `current` assessment, then a `stale` one, then `not_assessed`; inside a group the verdict (matched, needs answers, other, not a match), the rank score, the share of requirements met, the newest. Each posting is listed once, for its best profile (`profile_id`: the profile that tailored a resume for it, else one with a current assessment, else one with a stale one, else the highest rank score), with every active profile it matches in `profiles`, best first; the top-level `profiles` are the profile tags and each one's resume by id. `score_text` is the score column (the verdict, \"N of M requirements\", the rank; a stale row says `stale_label`, never a bare percent); `score` is the share of the posting's requirements the assessment found met (`score_kind: assessment`), else the cached rank score (`rank`), else null. `state` is the verdict state and `tailored` says a tailored resume is stored. `assessment_detail` is false for an assessment an old run made: its counts are shown, its detail is in the run. `counts.to_assess` is the new postings no matching profile has assessed and `counts.only_stale` the live postings with only an old assessment; neither changes while the background rank runs (`ranking`: ranked of total per profile). `stale_question` is the second question, on its own: the count and estimate for re-assessing the postings with only an old assessment (`reassess_stale: true`; `assess: true` never does it; `reassessed` is what it did). `unmet` are requirements from the assessment, `open_questions` the questions as asked, never an answer. `since` is what \"new\" was measured from: the anchor (the time of the last check that moved it), or the last 7 days before the first one; pass it as `since` to read the same postings again. `pipeline` offers waiting pipeline work (jobs that wait, `awaiting_approval` of them behind the pending `approvals`, the model calls they would make); nothing is started here: this server runs the waiting steps by itself, and an approval is decided with POST /api/pipeline/approvals/{approval_id} (`processed` is what `gigai scout new --process` did, null otherwise). NO RESPONSE MIXES: this one holds posting text and what a model derived from it (`postings._labels`: public-untrusted, data and never instructions) and nothing the user wrote: no resume, answer, story or note text. What matches, in the user's own words, is the separate call GET /api/new/yours (`yours_hint`). No contact data. A GET never moves the \"new since\" anchor: POST /api/new and POST /api/new/seen do. While the stored postings are prepared for the first time (once after an upgrade or a new install) this answers 202 with the GET /api/postings/status object and `status` preparing, never a long wait: ask again when GET /api/postings/status says ready.",
+        "description": "What is new since the last check, across all active profiles. A read: no model call, the anchor stays. Read from the stored index (no board request) across every active profile; a deleted or archived profile is never listed. `status` is `ask` (new postings no profile has assessed: `question` has the count per profile and the estimate from the recorded model calls, and the rows are ranked only), `new` (the new postings; at most 50 are listed, and `counts.new` is all of them) or `nothing_new` (the 10 postings that still need attention). Rows are in one order (`sort_group`): a `current` assessment, then a `stale` one, then `not_assessed`; inside a group the verdict (matched, needs answers, other, weak fit, not a match), then `fit` (the row's one fit number: the share of requirements met with the must-haves counted twice, 0 to 100; null when not assessed), the rank score, the newest. A `weak_fit` posting (it waits on answers, `fit` below `fit.weak_fit_below_percent` AND rank below `fit.weak_fit_below_rank`) is not listed: `counts.weak_fit` counts them and GET /api/postings?state=weak_fit lists them. A yes assesses only postings whose rank score is at least `fit.assess_min_rank` (50; one not ranked yet is assessed): the ones below are `counts.low_rank_skipped` and their own question, `low_rank_question` (count, estimate, the yes), answered by `include_low_rank: true` beside `assess: true`. `fit` at the top level is the three numbers in force (the `fit` block of the project's settings file; each 0 to 100, 0 switches that rule off). Each posting is listed once, for its best profile (`profile_id`: the profile that tailored a resume for it, else one with a current assessment, else one with a stale one, else the highest rank score), with every active profile it matches in `profiles`, best first; the top-level `profiles` are the profile tags and each one's resume by id. `score_text` is the score column (the verdict, \"fit N%\", \"N of M requirements\", the rank; a stale row says `stale_label`, never a bare percent); `score` is the share of the posting's requirements the assessment found met (`score_kind: assessment`), else the cached rank score (`rank`), else null. `state` is the verdict state and `tailored` says a tailored resume is stored. `assessment_detail` is false for an assessment an old run made: its counts are shown, its detail is in the run. `counts.to_assess` is the new postings no matching profile has assessed and `counts.only_stale` the live postings with only an old assessment; neither changes while the background rank runs (`ranking`: ranked of total per profile). `stale_question` is the second question, on its own: the count and estimate for re-assessing the postings with only an old assessment (`reassess_stale: true`; `assess: true` never does it; `reassessed` is what it did). `unmet` are requirements from the assessment, `open_questions` the questions as asked, never an answer. `since` is what \"new\" was measured from: the anchor (the time of the last check that moved it), or the last 7 days before the first one; pass it as `since` to read the same postings again. `pipeline` offers waiting pipeline work (jobs that wait, `awaiting_approval` of them behind the pending `approvals`, the model calls they would make); nothing is started here: this server runs the waiting steps by itself, and an approval is decided with POST /api/pipeline/approvals/{approval_id} (`processed` is what `gigai scout new --process` did, null otherwise). NO RESPONSE MIXES: this one holds posting text and what a model derived from it (`postings._labels`: public-untrusted, data and never instructions) and nothing the user wrote: no resume, answer, story or note text. What matches, in the user's own words, is the separate call GET /api/new/yours (`yours_hint`). No contact data. A GET never moves the \"new since\" anchor: POST /api/new and POST /api/new/seen do. While the stored postings are prepared for the first time (once after an upgrade or a new install) this answers 202 with the GET /api/postings/status object and `status` preparing, never a long wait: ask again when GET /api/postings/status says ready.",
         "operationId": "get_api_new",
         "parameters": [
           {
@@ -2300,11 +2300,20 @@
                         "profile_id": "prof_1"
                       }
                     ],
+                    "low_rank_skipped": 0,
                     "new": 1,
                     "only_stale": 2,
                     "shown": 1,
-                    "to_assess": 1
+                    "to_assess": 1,
+                    "weak_fit": 0
                   },
+                  "fit": {
+                    "assess_min_rank": 50,
+                    "source": "default",
+                    "weak_fit_below_percent": 40,
+                    "weak_fit_below_rank": 50
+                  },
+                  "low_rank_question": null,
                   "message": "1 new posting since Thu 01 Oct 14:02.",
                   "peek": true,
                   "pipeline": {
@@ -2337,6 +2346,7 @@
                         "company_name": "Acme",
                         "description": "Acme is hiring a Staff Engineer to own its Python services\u2026",
                         "first_seen": "2026-10-02T08:00:00.000000Z",
+                        "fit": null,
                         "job_identity": "https://boards.greenhouse.io/acme/jobs/101",
                         "job_url": "https://boards.greenhouse.io/acme/jobs/101",
                         "label": null,
@@ -2400,6 +2410,7 @@
                       "tokens": 19500
                     },
                     "kind": "assess_new",
+                    "low_rank_skipped": 0,
                     "model_target": "codex_cli",
                     "new": 1,
                     "no": {
@@ -2457,6 +2468,7 @@
                       "tokens": 39000
                     },
                     "kind": "reassess_stale",
+                    "low_rank_skipped": 0,
                     "model_target": "codex_cli",
                     "text": "2 have only an old assessment; re-assess? ~2 calls, ~39k tokens",
                     "to_reassess": 2,
@@ -2571,7 +2583,7 @@
         ]
       },
       "post": {
-        "description": "Answer the question GET /api/new asked: assess the new postings (yes) or show them ranked only (no). The yes or no to `status: \"ask\"`. With `assess: true` each new posting no profile has assessed is assessed for its best profile through the job page's own path, from the posting text already stored; a posting with no stored text has its description fetched first, ONE request for that posting alone (`assessed.fetched_on_demand` counts them); the calls are recorded like every model call (GET /api/metrics). `assessed.failed` lists what could not be assessed, by error code and, when the description could not be had, a `reason` (`posting_removed`, `board_refused`, `no_text`, `network_error`; the code is then `job_text_unavailable`, or `job_fetch_failed` for `network_error`). The call waits for the model: allow a minute per four postings. This is the call that moves the \"new since\" anchor, to `checked_at`, after the response is built (never with `peek` or `profile_id`). Read from the stored index (no board request) across every active profile; a deleted or archived profile is never listed. `status` is `ask` (new postings no profile has assessed: `question` has the count per profile and the estimate from the recorded model calls, and the rows are ranked only), `new` (the new postings; at most 50 are listed, and `counts.new` is all of them) or `nothing_new` (the 10 postings that still need attention). Rows are in one order (`sort_group`): a `current` assessment, then a `stale` one, then `not_assessed`; inside a group the verdict (matched, needs answers, other, not a match), the rank score, the share of requirements met, the newest. Each posting is listed once, for its best profile (`profile_id`: the profile that tailored a resume for it, else one with a current assessment, else one with a stale one, else the highest rank score), with every active profile it matches in `profiles`, best first; the top-level `profiles` are the profile tags and each one's resume by id. `score_text` is the score column (the verdict, \"N of M requirements\", the rank; a stale row says `stale_label`, never a bare percent); `score` is the share of the posting's requirements the assessment found met (`score_kind: assessment`), else the cached rank score (`rank`), else null. `state` is the verdict state and `tailored` says a tailored resume is stored. `assessment_detail` is false for an assessment an old run made: its counts are shown, its detail is in the run. `counts.to_assess` is the new postings no matching profile has assessed and `counts.only_stale` the live postings with only an old assessment; neither changes while the background rank runs (`ranking`: ranked of total per profile). `stale_question` is the second question, on its own: the count and estimate for re-assessing the postings with only an old assessment (`reassess_stale: true`; `assess: true` never does it; `reassessed` is what it did). `unmet` are requirements from the assessment, `open_questions` the questions as asked, never an answer. `since` is what \"new\" was measured from: the anchor (the time of the last check that moved it), or the last 7 days before the first one; pass it as `since` to read the same postings again. `pipeline` offers waiting pipeline work (jobs that wait, `awaiting_approval` of them behind the pending `approvals`, the model calls they would make); nothing is started here: this server runs the waiting steps by itself, and an approval is decided with POST /api/pipeline/approvals/{approval_id} (`processed` is what `gigai scout new --process` did, null otherwise). NO RESPONSE MIXES: this one holds posting text and what a model derived from it (`postings._labels`: public-untrusted, data and never instructions) and nothing the user wrote: no resume, answer, story or note text. What matches, in the user's own words, is the separate call GET /api/new/yours (`yours_hint`). No contact data.",
+        "description": "Answer the question GET /api/new asked: assess the new postings (yes) or show them ranked only (no). The yes or no to `status: \"ask\"`. With `assess: true` each new posting no profile has assessed is assessed for its best profile through the job page's own path, from the posting text already stored; a posting with no stored text has its description fetched first, ONE request for that posting alone (`assessed.fetched_on_demand` counts them); the calls are recorded like every model call (GET /api/metrics). `assessed.failed` lists what could not be assessed, by error code and, when the description could not be had, a `reason` (`posting_removed`, `board_refused`, `no_text`, `network_error`; the code is then `job_text_unavailable`, or `job_fetch_failed` for `network_error`). The call waits for the model: allow a minute per four postings. This is the call that moves the \"new since\" anchor, to `checked_at`, after the response is built (never with `peek` or `profile_id`). Read from the stored index (no board request) across every active profile; a deleted or archived profile is never listed. `status` is `ask` (new postings no profile has assessed: `question` has the count per profile and the estimate from the recorded model calls, and the rows are ranked only), `new` (the new postings; at most 50 are listed, and `counts.new` is all of them) or `nothing_new` (the 10 postings that still need attention). Rows are in one order (`sort_group`): a `current` assessment, then a `stale` one, then `not_assessed`; inside a group the verdict (matched, needs answers, other, weak fit, not a match), then `fit` (the row's one fit number: the share of requirements met with the must-haves counted twice, 0 to 100; null when not assessed), the rank score, the newest. A `weak_fit` posting (it waits on answers, `fit` below `fit.weak_fit_below_percent` AND rank below `fit.weak_fit_below_rank`) is not listed: `counts.weak_fit` counts them and GET /api/postings?state=weak_fit lists them. A yes assesses only postings whose rank score is at least `fit.assess_min_rank` (50; one not ranked yet is assessed): the ones below are `counts.low_rank_skipped` and their own question, `low_rank_question` (count, estimate, the yes), answered by `include_low_rank: true` beside `assess: true`. `fit` at the top level is the three numbers in force (the `fit` block of the project's settings file; each 0 to 100, 0 switches that rule off). Each posting is listed once, for its best profile (`profile_id`: the profile that tailored a resume for it, else one with a current assessment, else one with a stale one, else the highest rank score), with every active profile it matches in `profiles`, best first; the top-level `profiles` are the profile tags and each one's resume by id. `score_text` is the score column (the verdict, \"fit N%\", \"N of M requirements\", the rank; a stale row says `stale_label`, never a bare percent); `score` is the share of the posting's requirements the assessment found met (`score_kind: assessment`), else the cached rank score (`rank`), else null. `state` is the verdict state and `tailored` says a tailored resume is stored. `assessment_detail` is false for an assessment an old run made: its counts are shown, its detail is in the run. `counts.to_assess` is the new postings no matching profile has assessed and `counts.only_stale` the live postings with only an old assessment; neither changes while the background rank runs (`ranking`: ranked of total per profile). `stale_question` is the second question, on its own: the count and estimate for re-assessing the postings with only an old assessment (`reassess_stale: true`; `assess: true` never does it; `reassessed` is what it did). `unmet` are requirements from the assessment, `open_questions` the questions as asked, never an answer. `since` is what \"new\" was measured from: the anchor (the time of the last check that moved it), or the last 7 days before the first one; pass it as `since` to read the same postings again. `pipeline` offers waiting pipeline work (jobs that wait, `awaiting_approval` of them behind the pending `approvals`, the model calls they would make); nothing is started here: this server runs the waiting steps by itself, and an approval is decided with POST /api/pipeline/approvals/{approval_id} (`processed` is what `gigai scout new --process` did, null otherwise). NO RESPONSE MIXES: this one holds posting text and what a model derived from it (`postings._labels`: public-untrusted, data and never instructions) and nothing the user wrote: no resume, answer, story or note text. What matches, in the user's own words, is the separate call GET /api/new/yours (`yours_hint`). No contact data.",
         "operationId": "post_api_new",
         "parameters": [],
         "requestBody": {
@@ -2585,6 +2597,10 @@
                 "properties": {
                   "assess": {
                     "description": "true: assess the new postings no profile has assessed (one model call each). false: rank only.",
+                    "type": "boolean"
+                  },
+                  "include_low_rank": {
+                    "description": "true beside `assess` or `reassess_stale`: also the postings whose rank score is below `fit.assess_min_rank` (the yes to `low_rank_question`). Left out: they are skipped and counted.",
                     "type": "boolean"
                   },
                   "peek": {
@@ -2637,11 +2653,20 @@
                         "profile_id": "prof_1"
                       }
                     ],
+                    "low_rank_skipped": 0,
                     "new": 1,
                     "only_stale": 2,
                     "shown": 1,
-                    "to_assess": 1
+                    "to_assess": 1,
+                    "weak_fit": 0
                   },
+                  "fit": {
+                    "assess_min_rank": 50,
+                    "source": "default",
+                    "weak_fit_below_percent": 40,
+                    "weak_fit_below_rank": 50
+                  },
+                  "low_rank_question": null,
                   "message": "1 new posting since Thu 01 Oct 14:02.",
                   "peek": false,
                   "pipeline": {
@@ -2674,6 +2699,7 @@
                         "company_name": "Acme",
                         "description": "Acme is hiring a Staff Engineer to own its Python services\u2026",
                         "first_seen": "2026-10-02T08:00:00.000000Z",
+                        "fit": null,
                         "job_identity": "https://boards.greenhouse.io/acme/jobs/101",
                         "job_url": "https://boards.greenhouse.io/acme/jobs/101",
                         "label": null,
@@ -2753,6 +2779,7 @@
                       "tokens": 39000
                     },
                     "kind": "reassess_stale",
+                    "low_rank_skipped": 0,
                     "model_target": "codex_cli",
                     "text": "2 have only an old assessment; re-assess? ~2 calls, ~39k tokens",
                     "to_reassess": 2,
@@ -3928,7 +3955,7 @@
     },
     "/api/postings": {
       "get": {
-        "description": "The live search: the stored postings every active profile matches. No run, no board request, no model call. What \"Run find jobs\" searched, without a run: read from the stored index through the per-(posting, profile) read model, across every active profile (a deleted or archived profile is never listed). A changed setting (titles, countries, work mode) is seen by the next call. Each posting is listed once, for its best profile (`profile_id`), with every active profile it matches in `profiles`, best first; with one `profile_id` the row is that profile's own. Ordered: the Scout label recommended, then needs_answers, then matched, then the rest by score (the assessment's share of requirements met, else the background rank score, else unranked). `counts.matched` is every posting the filters keep, `counts.new` those first seen since the last check (`anchor.since`; the last 7 days before the first check). This call never moves that anchor. `assessment_basis` says where a row's assessment came from: `{origin: \"quick_assess\"}`, or for an old run's `{origin: \"run:<run_id>\", run_id, prompt_version, constraints_digest, story_bank_digest, profile_ref, resume, posting_sha256, model_target, model}` (ids and digests). `rank` is the background rank lane: whether it is on and today's calls against `rank.max_calls_per_day` (100) and the warning level `rank.warn_calls_per_day` (60), counted once for all profiles. With history=1, `history.rows` lists what old runs assessed (`{job_identity, profile_id, state, met, requirements, open_questions, assessed_at, hidden, basis}`); rows of a run with no profile (`ephemeral`) or of a profile that is not active are hidden: listed only with include_hidden=1 or when `profile_id` names them, and counted in `history.hidden` otherwise. No response mixes: posting text and what a model derived from it only (`postings._labels`: public-untrusted), nothing the user wrote. While the stored postings are prepared for the first time (once after an upgrade or a new install) this answers 202 with the GET /api/postings/status object and `status` preparing, never a long wait: ask again when GET /api/postings/status says ready.",
+        "description": "The live search: the stored postings every active profile matches. No run, no board request, no model call. What \"Run find jobs\" searched, without a run: read from the stored index through the per-(posting, profile) read model, across every active profile (a deleted or archived profile is never listed). A changed setting (titles, countries, work mode) is seen by the next call. Each posting is listed once, for its best profile (`profile_id`), with every active profile it matches in `profiles`, best first; with one `profile_id` the row is that profile's own. Ordered like GET /api/new: a current assessment, then a stale one, then not assessed; inside a group the verdict, then `fit` (the row's one fit number: the share of requirements met with the must-haves counted twice, 0 to 100, null when not assessed), then the rank score, then the newest. A posting whose state is `weak_fit` (it waits on answers, its `fit` is below `fit.weak_fit_below_percent`, 40, AND its rank score is below `fit.weak_fit_below_rank`, 50) is left out unless `state=weak_fit` asks for it; it asks no question (`open_questions` is empty) and `counts.weak_fit` is how many the other filters select, listed or not. `counts.matched` is every posting the filters keep, `counts.new` those first seen since the last check (`anchor.since`; the last 7 days before the first check). This call never moves that anchor. `assessment_basis` says where a row's assessment came from: `{origin: \"quick_assess\"}`, or for an old run's `{origin: \"run:<run_id>\", run_id, prompt_version, constraints_digest, story_bank_digest, profile_ref, resume, posting_sha256, model_target, model}` (ids and digests). `rank` is the background rank lane: whether it is on and today's calls against `rank.max_calls_per_day` (100) and the warning level `rank.warn_calls_per_day` (60), counted once for all profiles. With history=1, `history.rows` lists what old runs assessed (`{job_identity, profile_id, state, met, requirements, open_questions, assessed_at, hidden, basis}`); rows of a run with no profile (`ephemeral`) or of a profile that is not active are hidden: listed only with include_hidden=1 or when `profile_id` names them, and counted in `history.hidden` otherwise. No response mixes: posting text and what a model derived from it only (`postings._labels`: public-untrusted), nothing the user wrote. While the stored postings are prepared for the first time (once after an upgrade or a new install) this answers 202 with the GET /api/postings/status object and `status` preparing, never a long wait: ask again when GET /api/postings/status says ready.",
         "operationId": "get_api_postings",
         "parameters": [
           {
@@ -3950,7 +3977,7 @@
             }
           },
           {
-            "description": "Keep these states (repeat or separate with commas): not_assessed, needs_answers, matched, not_a_match, tailored, assessed (any assessment), recommended (the Scout label).",
+            "description": "Keep these states (repeat or separate with commas): not_assessed, needs_answers, matched, not_a_match, tailored, assessed (any assessment), recommended (the Scout label), weak_fit (listed only when asked for).",
             "in": "query",
             "name": "state",
             "required": false,
@@ -4052,7 +4079,8 @@
                     },
                     "matched": 1,
                     "new": 1,
-                    "shown": 1
+                    "shown": 1,
+                    "weak_fit": 0
                   },
                   "filters": {
                     "limit": 50,
@@ -4085,6 +4113,7 @@
                         "company_name": "Acme",
                         "description": "Acme is hiring a Staff Engineer to own its Python services\u2026",
                         "first_seen": "2026-10-02T08:00:00.000000Z",
+                        "fit": null,
                         "job_identity": "https://boards.greenhouse.io/acme/jobs/101",
                         "job_url": "https://boards.greenhouse.io/acme/jobs/101",
                         "label": null,
@@ -4234,7 +4263,7 @@
     },
     "/api/postings/assess": {
       "post": {
-        "description": "Assess these: ask first (count and estimate), assess the postings on approval. What a run's assess step did, without a run. Nothing is assessed without approval: with no `approve: true` the answer is `status: \"ask\"` with `question` (how many would be assessed, per profile, and the estimate from the recorded model calls; `question.yes.api` is the call that approves) and no model call is made. With `approve: true` the batch is recorded as approved (`approval`: its id, who approved, how many), runs as live work (the pipeline and the rank lane start nothing meanwhile; a second batch answers 409 assess_batch_running) and each posting is assessed for its best profile through the job page's own path, from the posting text already stored (a posting with none has its description fetched first: one request for it alone, counted in `assessed.fetched_on_demand`). The results are stored like any assessment, so GET /api/postings, GET /api/new and GET /api/jobs show them. `status` is then `assessed`; `assessed.failed` lists what could not be assessed, by error code and, for a missing description, a `reason`. A posting whose assessment is current is left out (`counts.already_current`) unless `again`; `not_found` lists named postings that are not in the stored postings. `nothing_to_assess` when nothing is left. The call waits for the model: allow a minute per four postings. No response mixes: posting text only, nothing the user wrote.",
+        "description": "Assess these: ask first (count and estimate), assess the postings on approval. What a run's assess step did, without a run. Nothing is assessed without approval: with no `approve: true` the answer is `status: \"ask\"` with `question` (how many would be assessed, per profile, and the estimate from the recorded model calls; `question.yes.api` is the call that approves) and no model call is made. With `approve: true` the batch is recorded as approved (`approval`: its id, who approved, how many), runs as live work (the pipeline and the rank lane start nothing meanwhile; a second batch answers 409 assess_batch_running) and each posting is assessed for its best profile through the job page's own path, from the posting text already stored (a posting with none has its description fetched first: one request for it alone, counted in `assessed.fetched_on_demand`). The results are stored like any assessment, so GET /api/postings, GET /api/new and GET /api/jobs show them. `status` is then `assessed`; `assessed.failed` lists what could not be assessed, by error code and, for a missing description, a `reason`. A posting whose assessment is current is left out (`counts.already_current`) unless `again`; `not_found` lists named postings that are not in the stored postings. `nothing_to_assess` when nothing is left. A posting whose rank score is below `fit.assess_min_rank` (50; one not ranked yet is not) is left out of the batch and counted (`counts.low_rank_skipped`); `low_rank` is then the separate question for those (`{kind, skipped, min_rank, estimate, text, yes}`; its `yes.api` body carries `include_low_rank: true`), and when only low-ranked postings are selected the status is `ask` with `question.to_assess` 0. The call waits for the model: allow a minute per four postings. No response mixes: posting text only, nothing the user wrote.",
         "operationId": "post_api_postings_assess",
         "parameters": [],
         "requestBody": {
@@ -4263,6 +4292,10 @@
                   },
                   "approve": {
                     "description": "true: assess (one model call per posting). Left out or false: only ask.",
+                    "type": "boolean"
+                  },
+                  "include_low_rank": {
+                    "description": "true: also the postings whose rank score is below `fit.assess_min_rank` (50). Left out: they are skipped and counted (`low_rank`).",
                     "type": "boolean"
                   },
                   "jobs": {
@@ -4308,10 +4341,12 @@
                   "checked_at": "2026-10-03T09:30:00.000000Z",
                   "counts": {
                     "already_current": 0,
+                    "low_rank_skipped": 0,
                     "not_found": 0,
                     "selected": 1,
                     "to_assess": 1
                   },
+                  "low_rank": null,
                   "not_found": [],
                   "postings": {
                     "_labels": {
@@ -4334,6 +4369,7 @@
                         "company_name": "Acme",
                         "description": "Acme is hiring a Staff Engineer to own its Python services\u2026",
                         "first_seen": "2026-10-02T08:00:00.000000Z",
+                        "fit": null,
                         "job_identity": "https://boards.greenhouse.io/acme/jobs/101",
                         "job_url": "https://boards.greenhouse.io/acme/jobs/101",
                         "label": null,
@@ -4397,6 +4433,7 @@
                       "tokens": 19500
                     },
                     "kind": "assess_these",
+                    "low_rank_skipped": 0,
                     "model_target": "codex_cli",
                     "selected": 1,
                     "text": "Assess 1 posting (Staff Engineer 1)? ~1 calls, ~20k tokens",
@@ -6905,7 +6942,7 @@
     },
     "/api/runs/{run_id}/posting": {
       "get": {
-        "description": "One posting of a run, complete with its text and assessment. For a job across runs and quick assessments use GET /api/jobs?url= instead. `bank_suggestions` is added when a question this assessment left open has a near match in the user's answers. not_assessed_reason is one of: unchanged, duplicate, failed, over_cap, role_mismatch, no_resume, model_unavailable, model_denied, location_mismatch, sponsorship_excluded, model_output_invalid, posting_incomplete, region_only, published_too_old, work_mode_mismatch (posting_incomplete: the requirement list looked cut off, so no verdict was given). job_state may carry `assessment_stale: {reason: \"posting_changed\"}` (absent otherwise) when the assessment that gives the state was made on posting text that has since changed: the verdict still reads, and the job should be re-assessed. The same marker carries reason `older_prompt`, `settings_changed` or `story_bank_changed` when the state comes from a stored quick assessment made with an older assess prompt, other candidate settings (work mode, countries, location, sponsorship need) or answers and stories that have since changed; nothing is re-assessed until you ask (POST /api/assess, or assess-all).",
+        "description": "One posting of a run, complete with its text and assessment. For a job across runs and quick assessments use GET /api/jobs?url= instead. `bank_suggestions` is added when a question this assessment left open has a near match in the user's answers. not_assessed_reason is one of: unchanged, duplicate, failed, over_cap, role_mismatch, no_resume, model_unavailable, model_denied, location_mismatch, sponsorship_excluded, model_output_invalid, posting_incomplete, region_only, published_too_old, work_mode_mismatch (posting_incomplete: the requirement list looked cut off, so no verdict was given). job_state may carry `assessment_stale: {reason: \"posting_changed\"}` (absent otherwise) when the assessment that gives the state was made on posting text that has since changed: the verdict still reads, and the job should be re-assessed. The same marker carries reason `older_prompt`, `settings_changed` or `story_bank_changed` when the state comes from a stored quick assessment made with an older assess prompt, other candidate settings (work mode, countries, location, sponsorship need) or answers and stories that have since changed; nothing is re-assessed until you ask (POST /api/assess, or assess-all). job_state.state `weak_fit` is `needs_answers` for a job whose stored assessment has few requirements met AND whose rank score is low (the `fit` block of the project's settings: below 40% and below rank 50): it is not counted with the jobs that need your answers.",
         "operationId": "get_api_runs_run_id_posting",
         "parameters": [
           {
@@ -7250,7 +7287,7 @@
     },
     "/api/runs/{run_id}/results": {
       "get": {
-        "description": "A run's rows with assessments; with ?limit=N a page of them, without text. Each row carries job_state. `bank_suggestions` (when a question the run's assessments left open has a near match in the user's answers) is the same list as on assess responses. job_state may carry `assessment_stale: {reason: \"posting_changed\"}` (absent otherwise) when the assessment that gives the state was made on posting text that has since changed: the verdict still reads, and the job should be re-assessed. The same marker carries reason `older_prompt`, `settings_changed` or `story_bank_changed` when the state comes from a stored quick assessment made with an older assess prompt, other candidate settings (work mode, countries, location, sponsorship need) or answers and stories that have since changed; nothing is re-assessed until you ask (POST /api/assess, or assess-all).",
+        "description": "A run's rows with assessments; with ?limit=N a page of them, without text. Each row carries job_state. `bank_suggestions` (when a question the run's assessments left open has a near match in the user's answers) is the same list as on assess responses. job_state may carry `assessment_stale: {reason: \"posting_changed\"}` (absent otherwise) when the assessment that gives the state was made on posting text that has since changed: the verdict still reads, and the job should be re-assessed. The same marker carries reason `older_prompt`, `settings_changed` or `story_bank_changed` when the state comes from a stored quick assessment made with an older assess prompt, other candidate settings (work mode, countries, location, sponsorship need) or answers and stories that have since changed; nothing is re-assessed until you ask (POST /api/assess, or assess-all). job_state.state `weak_fit` is `needs_answers` for a job whose stored assessment has few requirements met AND whose rank score is low (the `fit` block of the project's settings: below 40% and below rank 50): it is not counted with the jobs that need your answers.",
         "operationId": "get_api_runs_run_id_results",
         "parameters": [
           {

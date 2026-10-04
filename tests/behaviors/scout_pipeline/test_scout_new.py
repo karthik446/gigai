@@ -141,7 +141,7 @@ def test_a_each_new_posting_once_with_its_profile_tags_and_never_the_deleted_pro
     assert all(set(item["resume"]) == {"record_id", "revision_id"} for item in tags)  # type: ignore[union-attr]
     assert (both["company"], both["title"], both["work_mode"], both["salary"]) == ("acme", "Staff AI Engineer", "remote", "USD 180,000-220,000 per year")
     assert response["counts"] == {
-        "new": 2, "to_assess": 2, "only_stale": 0, "shown": 2,
+        "new": 2, "to_assess": 2, "low_rank_skipped": 0, "only_stale": 0, "weak_fit": 0, "shown": 2,
         "by_profile": [{"profile_id": fx.default_profile_id, "new": 1}, {"profile_id": fx.second_profile_id, "new": 2}],
     }
     _assert_labels(response)
@@ -303,7 +303,7 @@ def test_c_the_no_is_the_grid_with_rank_only_and_the_top_ten_is_ten(tmp_path: Pa
     assert no["status"] == "new" and no["question"] is None and no["assessed"] is None and fx.base.model.calls == 0
     # 54 new: all are counted (and would be asked about), the 50 with the best score are listed.
     assert no["counts"] == {**no["counts"], "new": 54, "to_assess": 54, "shown": 50} and len(_rows(no)) == scout_new.NEW_ROWS_LIMIT == 50  # type: ignore[dict-item]
-    assert str(no["message"]).endswith("Showing the first 50: assessed ones first, then by rank.")
+    assert str(no["message"]).endswith("Showing the first 50: assessed ones first, by fit, then by rank.")
 
     nothing = _new(fx, now=NOW.replace(hour=16))
     assert nothing["status"] == "nothing_new" and len(_rows(nothing)) == scout_new.ATTENTION_LIMIT == 10

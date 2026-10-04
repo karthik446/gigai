@@ -1686,6 +1686,8 @@ table.data-table th {
 
 .approval-facts { margin: 0 0 12px; padding-left: 18px; }
 .approval-facts li { margin: 4px 0; }
+/* 0110-10-02: the dialog's second question, the low-ranked postings (off until ticked). */
+.approval-low-rank { display: block; margin: 0 0 12px; font-size: 0.9rem; }
 
 /* The job page's pipeline step timeline (PipelineTimeline.jsx). */
 .timeline-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
