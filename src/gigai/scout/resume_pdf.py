@@ -236,6 +236,18 @@ def fewest_pages(result: TailoredResume) -> int:
         return _end(template, directory, _data(_body(result), None, ""), SPACING_MIN)[0]
 
 
+def pages_at(result: TailoredResume, spacing_scale: float) -> int:
+    """The pages ``result`` prints on at ``spacing_scale``: ``fewest_pages``'s measurement at a spacing the caller names.
+
+    What the master resume's fit reads (0.1.10.9 master P4, ``tailor_master``): the selector's own page budget
+    is 2 pages at ``master_selection.FIT_SCALE``, and a tailoring of its candidates is held to the same one."""
+    root = resources.files("gigai.scout").joinpath("data", "resume")
+    with ExitStack() as stack:
+        directory = str(stack.enter_context(resources.as_file(root)))
+        template = (Path(directory) / "resume.typ").read_bytes()
+        return _end(template, directory, _data(_body(result), None, ""), clamp_scale(spacing_scale))[0]
+
+
 def _render(
     sections: list[dict[str, object]], header: PdfHeader | None, *, company: str, timestamp: datetime, spacing_scale: float, auto_fit: bool,
     count_pages: bool = False,

@@ -359,9 +359,13 @@ def _no_requests(monkeypatch: pytest.MonkeyPatch) -> list[str]:
 def test_the_migration_leaves_nothing_stale(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """A home with an assessed posting and a built read model: after the migration nothing is rebuilt, assessed again or re-opened.
 
-    The control at the end shows the same checks do move when a profile's resume really changes (a refresh)."""
+    The control at the end shows the same checks do move when a profile's resume really changes (a refresh).
 
-    from gigai.scout import postings
+    One thing does change with a master, by design (P4): a TAILORING of a job now reads the master, so the
+    basis the pipeline keys a tailoring by names the master's revision and the selector's version. Without a
+    master it is exactly the basis it was."""
+
+    from gigai.scout import postings, tailor_master
     from gigai.scout.assessment_basis import BasisCheck
     from gigai.scout.pipeline import steps, triggers
     from gigai.scout.pipeline.settings import pipeline_setting
@@ -405,9 +409,14 @@ def test_the_migration_leaves_nothing_stale(tmp_path: Path, monkeypatch: pytest.
             "tailor_basis": {profile_id: steps.tailor_digest(ctx, profile_id, job, "fixture") for profile_id in assessed},
         }
 
+    def but_tailoring(value: dict[str, object]) -> dict[str, object]:
+        return {key: item for key, item in value.items() if key != "tailor_basis"}
+
     assert set(postings.refresh(home, target).builds.values()) <= {"unchanged", "facts", "matched"}
     before = state()
     assert before["rows"] and set(before["stale"].values()) == {None}  # type: ignore[union-attr]
+    # No master yet: a tailoring's basis holds nothing of one.
+    assert [tailor_master.digest_parts(home, target, profile) for profile in profile_records.list_profiles(resolved)] == [(), ()]
 
     migrated = runner.invoke(cli, ["scout", "resume", "master", "init", *base])
     assert migrated.exit_code == 0, migrated.output
@@ -419,13 +428,22 @@ def test_the_migration_leaves_nothing_stale(tmp_path: Path, monkeypatch: pytest.
 
     # 1. The read model: no profile is matched or re-read again, and every row is what it was.
     assert set(postings.refresh(home, target).builds.values()) == {"unchanged"}
-    assert state() == before
+    migrated_state = state()
+    assert but_tailoring(migrated_state) == but_tailoring(before)
+    # P4: a tailoring now reads the master, so its basis names the master's revision, the selector and the candidate rule.
+    stored = load_master(home_root=home, target=target)
+    assert stored is not None
+    for profile in profile_records.list_profiles(resolved):
+        assert tailor_master.digest_parts(home, target, profile) == (
+            "master", stored.revision.revision_id, tailor_master.SELECTOR_VERSION, tailor_master.CANDIDATES_VERSION, tailor_master.CANDIDATES,
+        )
+    assert all(migrated_state["tailor_basis"][profile_id] != basis for profile_id, basis in before["tailor_basis"].items())  # type: ignore[index, union-attr]
     # 2. The batch finds nothing to assess: the stored assessment is still current.
     again = runner.invoke(cli, ["scout", "new", "--yes", *base])
     assert again.exit_code == 0, again.output
     found = json.loads(again.output.strip().splitlines()[-1])
     assert (found["counts"]["to_assess"], found["counts"]["only_stale"], found["assessed"], found["reassessed"]) == (0, 0, None, None), again.output
-    assert state() == before
+    assert state() == migrated_state
     # 3. The pipeline re-opens no step of either profile.
     result = triggers.profile_changed(home, target)
     assert (result.enqueued, result.awaiting) == ((), ())
@@ -439,10 +457,20 @@ def test_the_migration_leaves_nothing_stale(tmp_path: Path, monkeypatch: pytest.
     assert builds[default.profile_id] != "unchanged" and builds[second.profile_id] == "unchanged"
     after = state()
     assert after["profiles"] != before["profiles"]
-    assert after["tailor_basis"][default.profile_id] != before["tailor_basis"][default.profile_id]  # type: ignore[index]
+    assert after["tailor_basis"][default.profile_id] != migrated_state["tailor_basis"][default.profile_id]  # type: ignore[index]
     assert {key: value for key, value in after["tailor_basis"].items() if key != default.profile_id} == {  # type: ignore[union-attr]
-        key: value for key, value in before["tailor_basis"].items() if key != default.profile_id  # type: ignore[union-attr]
+        key: value for key, value in migrated_state["tailor_basis"].items() if key != default.profile_id  # type: ignore[union-attr]
     }
+
+    # P4: a write of the master, and a new selector version, each give every tailoring another basis.
+    edited = tmp_path / "master-2.md"
+    edited.write_text(stored.master.markdown().replace("## Other", "## Other\n\n- Speaker at a regional infrastructure meetup in 2024.", 1), encoding="utf-8")
+    written = runner.invoke(cli, ["scout", "resume", "master", "init", "--from", str(edited), "--revision", str(stored.revision.revision), *base])
+    assert written.exit_code == 0 and json.loads(written.output.strip().splitlines()[-1])["status"] == "revised", written.output
+    rewritten = state()
+    assert all(rewritten["tailor_basis"][profile_id] != basis for profile_id, basis in after["tailor_basis"].items())  # type: ignore[index, union-attr]
+    monkeypatch.setattr(tailor_master, "SELECTOR_VERSION", "sel-next")
+    assert all(state()["tailor_basis"][profile_id] != basis for profile_id, basis in rewritten["tailor_basis"].items())  # type: ignore[index, union-attr]
 
 
 # --- sticky: edits follow, new lines are offered ------------------------------------------------

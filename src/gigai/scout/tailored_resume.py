@@ -72,6 +72,13 @@ cited lines (``origin: "fallback"``, the rejected rewrite kept as
 bullet a role does not show is recorded on the entry (``dropped``).
 Fabrication stays a whole-answer retry; weakening is a per-line fallback.
 
+THE MASTER RESUME (0.1.10.9 master P4, ``tailor_master``): when one is stored,
+a profile's tailoring numbers and reads the job's CANDIDATE SET of the whole
+master instead of the profile's own resume; every rule above is unchanged
+and applies to those lines.  A ref then carries ``item_id`` (the master line
+it is), the result is cut to the page limit by the master's fit, and the
+response records what was picked and left out (``selection``).
+
 Storage: ``<home>/scout/<project_id>/resumes/
 <profile_id|ephemeral>/<sha256(job_identity)>.json`` + a sibling ``.md``.
 The stored JSON carries resume-derived text by design (README privacy
@@ -388,6 +395,10 @@ class TailorContext:
     #: ``resume_lines``, so a context is never built without the strip;
     #: ``tailor_context`` passes the one made from the raw resume text.
     model: ModelResume | None = None
+    #: 0.1.10.9 master P4: numbered line -> the master resume line it stands for, when the numbered text is a
+    #: candidate set of the master (``tailor_master``).  Empty (the default, every resume that is not one): no
+    #: ref carries an ``item_id``.
+    line_ids: Mapping[int, str] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if self.model is None:
@@ -427,6 +438,11 @@ class SourceRef:
     space between lines.  ``label()`` stays the cited line (``R4``); the
     stored JSON carries ``continued_lines`` only when it is non-empty, so an
     unexpanded ref serializes exactly as before.
+
+    ``item_id`` (0.1.10.9 master P4; optional, serialized only when set):
+    the master resume line the cited line is, when the tailoring read a
+    candidate set of the master (``TailorContext.line_ids``).  The line then
+    traces to the master by id, whatever number it had in that one prompt.
     """
 
     kind: str  # "resume" | "answer"
@@ -434,6 +450,7 @@ class SourceRef:
     question_id: str | None
     text: str
     continued_lines: tuple[int, ...] = ()
+    item_id: str | None = None
 
     def label(self) -> str:
         return f"R{self.line}" if self.kind == "resume" else f"A {self.question_id}"
@@ -443,6 +460,8 @@ class SourceRef:
             out: dict[str, object] = {"kind": "resume", "line": self.line, "text": self.text}
             if self.continued_lines:
                 out["continued_lines"] = list(self.continued_lines)
+            if self.item_id is not None:
+                out["item_id"] = self.item_id
             return out
         return {"kind": "answer", "question_id": self.question_id, "text": self.text}
 
@@ -452,14 +471,17 @@ class SourceRef:
             _fail("wrong_type", "ref must be an object")
         kind = obj.get("kind")
         if kind == "resume":
-            value = _object_with_optional(obj, ("kind", "line", "text"), ("continued_lines",), "ref")
+            value = _object_with_optional(obj, ("kind", "line", "text"), ("continued_lines", "item_id"), "ref")
             line = value["line"]
             if type(line) is not int or line < 1:
                 _fail("invalid_value", "ref.line must be a positive integer")
             raw_continued = value.get("continued_lines", [])
             if type(raw_continued) is not list or any(type(item) is not int or item <= line for item in raw_continued):
                 _fail("invalid_value", "ref.continued_lines must be a list of line numbers after ref.line")
-            return cls("resume", line, None, _string(value["text"], "ref.text", nonempty=False), tuple(raw_continued))
+            return cls(
+                "resume", line, None, _string(value["text"], "ref.text", nonempty=False), tuple(raw_continued),
+                _optional_string(value.get("item_id"), "ref.item_id"),
+            )
         if kind == "answer":
             value = _object_with_optional(obj, ("kind", "question_id", "text"), (), "ref")
             return cls("answer", None, _string(value["question_id"], "ref.question_id"), _string(value["text"], "ref.text", nonempty=False))
@@ -1204,7 +1226,7 @@ def _copy_line(raw: object, where: str, ctx: TailorContext, *, expand: bool = Fa
     if expand:
         return _span_copy(_resume_ref(number, ctx))
     text = ctx.resume_lines[number - 1]
-    return TailoredLine("copy", text, (SourceRef("resume", number, None, text),))
+    return TailoredLine("copy", text, (SourceRef("resume", number, None, text, (), ctx.line_ids.get(number)),))
 
 
 def _span_copy(ref: SourceRef, **fields: object) -> TailoredLine:
@@ -1227,7 +1249,7 @@ def _resume_ref(number: int, ctx: TailorContext) -> SourceRef:
         if number < item <= len(ctx.resume_lines) and item not in ctx.withheld
     )
     text = " ".join(ctx.resume_lines[item - 1] for item in (number, *continued))
-    return SourceRef("resume", number, None, text, continued)
+    return SourceRef("resume", number, None, text, continued, ctx.line_ids.get(number))
 
 
 def _drop_covered_copies(lines: Sequence[TailoredLine]) -> tuple[TailoredLine, ...]:
@@ -2133,6 +2155,11 @@ class TailorSources(_Contract):
     #: a member name like ``cloud:gcp``.
     answers: Mapping[str, str]
     assessment_stored_path: str | None
+    #: 0.1.10.9 master P4 (optional; serialized only when set, so a tailoring of the profile's own resume
+    #: stores what it did): the master resume revision the tailoring's candidate set was picked from
+    #: (``tailor_master.MasterSource``).  ``resume_content_sha256`` is then still the profile's resume (the
+    #: prior), and ``resume_line_count`` the lines of the candidate set, which the refs' numbers count.
+    master: "MasterSource | None" = None
 
     def to_json(self) -> dict[str, object]:
         return {
@@ -2143,12 +2170,13 @@ class TailorSources(_Contract):
                 for question_id, revision_id in sorted(self.answers.items())
             ],
             "assessment_stored_path": self.assessment_stored_path,
+            **({"master": self.master.to_json()} if self.master is not None else {}),
         }
 
     @classmethod
     def from_json(cls, obj: object) -> "TailorSources":
         value = _object_with_optional(
-            obj, ("resume_content_sha256", "resume_line_count", "answers", "assessment_stored_path"), (), "tailor_sources"
+            obj, ("resume_content_sha256", "resume_line_count", "answers", "assessment_stored_path"), ("master",), "tailor_sources"
         )
         raw_answers = value["answers"]
         if type(raw_answers) is not list:
@@ -2160,11 +2188,17 @@ class TailorSources(_Contract):
         count = value["resume_line_count"]
         if type(count) is not int or count < 0:
             _fail("wrong_type", "tailor_sources.resume_line_count must be a non-negative integer")
+        master = None
+        if value.get("master") is not None:
+            from .tailor_master import MasterSource
+
+            master = MasterSource.from_json(value["master"])
         return cls(
             _digest_value(value["resume_content_sha256"], "resume_content_sha256"),
             count,
             answers,
             _optional_string(value["assessment_stored_path"], "assessment_stored_path"),
+            master,
         )
 
 
@@ -2213,6 +2247,12 @@ class TailorResponse(_Contract):
     stored resume without it parses as before) marks a resume whose markdown
     the user or their agent attached (``tailored_resume_edit``): who wrote
     it and when.  A tailoring by a model carries none.
+
+    ``selection`` (optional, 0.1.10.9 master P4; same rule) is Picked / Left
+    out for a tailoring made from the master resume
+    (``tailor_master.TailorSelection``): which master lines the resume shows
+    and which it leaves out, each with its reason, and who picked.  A
+    tailoring of the profile's own resume carries none.
     """
 
     schema_version: ClassVar[str] = "scout-tailor-response:1"
@@ -2229,12 +2269,14 @@ class TailorResponse(_Contract):
     stored_path: str
     markdown_path: str
     edited: TailorEdit | None = None
+    selection: "TailorSelection | None" = None
 
     def to_json(self) -> dict[str, object]:
         job = self.job.to_json()
         del job["text"]
         return {
             **({"edited": self.edited.to_json()} if self.edited is not None else {}),
+            **({"selection": self.selection.to_json()} if self.selection is not None else {}),
             "schema_version": self.schema_version,
             "job": job,
             "resume": self.resume.to_json(),
@@ -2258,7 +2300,7 @@ class TailorResponse(_Contract):
                 "schema_version", "job", "resume", "sources", "result", "markdown", "producer", "usage",
                 "instructions_digest", "created_at", "updated_at", "stored_path", "markdown_path",
             ),
-            ("edited",),
+            ("edited", "selection"),
             "tailor_response",
         )
         if value["schema_version"] != cls.schema_version:
@@ -2269,6 +2311,11 @@ class TailorResponse(_Contract):
         if "text" in job:
             _fail("unknown_key", "tailor_response.job never carries the job text")
         usage = value["usage"]
+        selection = None
+        if value.get("selection") is not None:
+            from .tailor_master import TailorSelection
+
+            selection = TailorSelection.from_json(value["selection"])
         return cls(
             job=ResolvedJob.from_json({**job, "text": ""}),
             resume=ResolvedResume.from_json(value["resume"]),
@@ -2283,6 +2330,7 @@ class TailorResponse(_Contract):
             stored_path=_string(value["stored_path"], "stored_path"),
             markdown_path=_string(value["markdown_path"], "markdown_path"),
             edited=None if value.get("edited") is None else TailorEdit.from_json(value["edited"]),
+            selection=selection,
         )
 
 
@@ -2458,6 +2506,20 @@ def resolve_tailor_resume(request: TailorRequest, *, home_root: Path, target: Pa
     return resume
 
 
+def _tailor_failure(attempt: AssessAttempt, *, timed_out: bool) -> TailorError:
+    """The error of a tailor call that produced no valid answer: the quick-assess codes, or ``tailor_timeout``."""
+
+    reason = attempt.not_assessed_reason
+    if reason is NotAssessedReason.MODEL_OUTPUT_INVALID:
+        detail = attempt.validation_error or "the model's answer did not match the tailored-resume schema"
+        return TailorError("model_output_invalid", f"the model's answer was invalid after one retry: {detail}")
+    if reason is NotAssessedReason.MODEL_DENIED:
+        return TailorError("model_denied", "the configured policy refused this model call")
+    if timed_out:
+        return TailorError("tailor_timeout", "the model call timed out; try again or pick a faster model target")
+    return TailorError("model_unavailable", "the configured model is unavailable right now")
+
+
 def run_tailored_resume(
     request: TailorRequest,
     *,
@@ -2466,8 +2528,20 @@ def run_tailored_resume(
     config: GigAIConfig | None = None,
     resolved_job: ResolvedJob | None = None,
     store: Callable[[TailorResponse], TailorResponse] | None = None,
+    fallback_codes: frozenset[str] | None = None,
 ) -> TailorResponse:
     """Tailor ``request.resume`` to ``request.job`` and store the JSON + markdown.
+
+    WITH A MASTER RESUME stored (0.1.10.9 master P4, ``tailor_master``) a
+    profile's tailoring reads the job's candidate set of the whole master
+    instead of the profile's own resume, code fits the result, and the
+    response carries ``selection`` (Picked / Left out).  When the tailor call
+    then fails or no model is available, the code's own selection is stored
+    as the resume (``selection.picked_by == "code"``) instead of the error:
+    for every failure code, or only those in ``fallback_codes`` (the
+    pipeline's tailor step keeps its own retries for an unavailable model).
+    Without a master, with a pasted resume, or for a profile whose resume was
+    replaced by hand, everything is as it was.
 
     ``resolved_job`` (0.1.10.7 M2, the pipeline) is the job already resolved:
     nothing is fetched. ``store`` (the pipeline's tailor step) stores the new
@@ -2519,38 +2593,58 @@ def run_tailored_resume(
     meter = CallMeter(
         KIND_TAILOR, model_target.value, home_root, target, profile_id=resume.profile_id, job=job.job_identity
     )
-    binding = meter.bind(_resolve_binding(active, model_target, home_root=home_root))
     tailor_job = TailorJob(title=job.title, company=job.company, location=job.location, posting_text=job.text)
-    ctx = tailor_context(resume.text, answers=answers, matrix=matrix)
+    # 0.1.10.9 master P4: with a master resume stored, the tailoring reads the job's candidate set of the WHOLE
+    # master; ``plan`` is ``None`` without one, and everything below is then what it was.
+    from .tailor_master import tailoring_for_resume
+
+    plan = tailoring_for_resume(resume, tailor_job, home_root=home_root, target=target)
+    ctx = tailor_context(resume.text, answers=answers, matrix=matrix) if plan is None else plan.context(answers=answers, matrix=matrix)
+    attempt: AssessAttempt | None = None
+    failure: TailorError | None = None
+    adapter = model_target.value
     try:
-        attempt = tailor_once(binding, tailor_job, ctx)
-    finally:
-        binding.close()
+        binding = meter.bind(_resolve_binding(active, model_target, home_root=home_root))
+    except QuickAssessError as exc:
+        if plan is None:
+            raise
+        failure = TailorError(exc.code, str(exc))
+    else:
+        try:
+            attempt = tailor_once(binding, tailor_job, ctx)
+        finally:
+            binding.close()
+        adapter = binding.port.name or model_target.value
+        if not attempt.ok:
+            failure = _tailor_failure(attempt, timed_out=binding.port.timed_out)
 
-    if not attempt.ok:
-        reason = attempt.not_assessed_reason
-        if reason is NotAssessedReason.MODEL_OUTPUT_INVALID:
-            detail = attempt.validation_error or "the model's answer did not match the tailored-resume schema"
-            raise TailorError("model_output_invalid", f"the model's answer was invalid after one retry: {detail}")
-        if reason is NotAssessedReason.MODEL_DENIED:
-            raise TailorError("model_denied", "the configured policy refused this model call")
-        if binding.port.timed_out:
-            raise TailorError("tailor_timeout", "the model call timed out; try again or pick a faster model target")
-        raise TailorError("model_unavailable", "the configured model is unavailable right now")
+    selection = None
+    if failure is not None:
+        # The code's own selection stands in for a tailor call that failed or could not be made: only when
+        # there is a master to select from, and only for the failures the caller lets it stand in for.
+        if plan is None or (fallback_codes is not None and failure.code not in fallback_codes):
+            raise failure
+        try:
+            result, selection, ctx = plan.fall_back(tailor_job, ctx, failure.code)
+        except Exception:  # noqa: BLE001 - the selection itself could not be made (no renderer to fit it with): the call's own error stands
+            raise failure from None
+    else:
+        assert attempt is not None
+        result = attempt.parsed
+        assert isinstance(result, TailoredResume)
+        if plan is None:
+            # 0110-10-05: over the page limit, the oldest roles are left out whole, recorded on the result (restorable).
+            from .tailor_length import fit_to_pages
+            from .tailor_length_store import measure_pages
 
-    result = attempt.parsed
-    assert isinstance(result, TailoredResume)
-    # 0110-10-05: over the page limit, the oldest roles are left out whole, recorded on the result (restorable).
-    from .tailor_length import fit_to_pages
-    from .tailor_length_store import measure_pages
-
-    result = fit_to_pages(result, measure=measure_pages)
+            result = fit_to_pages(result, measure=measure_pages)
+        else:
+            # The Skills line code assembled is shown, and the result is cut to the page limit oldest roles first.
+            result, selection = plan.finish(result, ctx)
     from .proposal_execution import _usage_block
 
-    usage = _usage_block([attempt.usage] if attempt.usage is not None else [], UsageBlock)
-    producer = Producer(
-        _PRODUCER_CALLABLE, _PRODUCER_VERSION, _PRODUCER_ACTOR, model_target, binding.port.name or model_target.value
-    )
+    usage = _usage_block([attempt.usage] if attempt is not None and attempt.usage is not None else [], UsageBlock)
+    producer = Producer(_PRODUCER_CALLABLE, _PRODUCER_VERSION, _PRODUCER_ACTOR, model_target, adapter)
     now = _now()
     markdown_path = path.with_suffix(".md")
     response = TailorResponse(
@@ -2558,9 +2652,10 @@ def run_tailored_resume(
         resume=resume,
         sources=TailorSources(
             resume_content_sha256=resume.content_sha256,
-            resume_line_count=len(lines),
+            resume_line_count=len(lines) if plan is None else len(ctx.resume_lines),
             answers={key: item.revision_id for key, item in answers.items()},
             assessment_stored_path=assessment_path,
+            master=None if plan is None else plan.source,
         ),
         result=result,
         markdown=render_markdown(result),
@@ -2571,6 +2666,7 @@ def run_tailored_resume(
         updated_at=now,
         stored_path=os.fspath(path),
         markdown_path=os.fspath(markdown_path),
+        selection=selection,
     )
     if store is not None:
         return store(response)

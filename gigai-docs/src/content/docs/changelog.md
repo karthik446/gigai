@@ -193,6 +193,24 @@ the server used several gigabytes of memory, and reloading made it worse. Read "
   resume. A new profile made with a master stored gets its own first selection the same way instead
   of a copy of another profile's resume. Tailoring a resume for one job still reads the profile's
   resume, as before.
+- **A master resume, fourth step: a job's tailored resume is picked from the whole master.** Once a
+  master is stored, tailoring a resume for one job no longer reads only the profile's own resume.
+  Code first picks that job's candidate lines from the whole master (about twice what fits on 2
+  pages), starting from the lines the profile shows. The one tailoring call then orders and words
+  the lines inside that set, as it did before, and code cuts the result to 2 pages: the oldest roles
+  first, every recent role still present, and a line that is the only one naming something the
+  posting requires kept. What was cut is listed and one Restore puts it back (`gigai scout resume
+  length`). The Skills line is put together by code (the required skills of the posting that your
+  master lists, then its nice-to-haves, then what the offered lines name), so the master's whole
+  Skills list is never put on one resume. Every line of the tailored resume names the master line it
+  is, and the stored resume says what was picked and what was left out, each line with its reason
+  (`selection` in `gigai scout resume tailor --json` and in `GET /api/tailored-resumes`; a page for
+  it comes later). When the model call fails or no model is available, tailoring on demand still
+  gives you a resume: the code's own 2-page selection, marked as picked by code. A profile whose
+  resume you replaced by hand, a pasted resume, and a home without a master are tailored exactly as
+  before. After you make or change the master, the background pipeline tailors a job's resume again
+  the next time it processes that job, within the daily limit on model calls; a resume you tailored
+  or edited yourself is kept.
 
 ### 0.1.10.8
 

@@ -933,7 +933,14 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
         {"schema_version": "scout-tailor-response:1", "job": {"job_identity": _JOB_URL}, "markdown": "# ..."}, schema_version="scout-tailor-response:1",
         params=_JOB_INPUT[:4], request_example={"job": {"job_url": _JOB_URL}},
         errors=(*_ROW_ERRORS, (502, "job_fetch_failed"), (504, "tailor_timeout"), *_MODEL_ERRORS, _NO_TARGET),
-        description="Synchronous: blocks for the model call (one retry on a rejected answer).",
+        description=(
+            "Synchronous: blocks for the model call (one retry on a rejected answer). With a master resume stored, a profile's tailoring reads "
+            "that job's candidate lines of the whole master instead of the profile's own resume: each resume ref then carries `item_id` (the "
+            "master line it is), `sources.master` names the master revision, and `selection` lists what was picked and what was left out, each "
+            "line with its reason. The result is cut to 2 pages, the oldest roles first (`result.length`; PUT /api/tailored-resumes/length puts it "
+            "back). When the model call then fails or no model is available, the response is the code's own selection (`selection.picked_by` is "
+            "`code`, `selection.fallback` the error code) instead of an error."
+        ),
     ),
     RouteSpec(
         "GET", "/api/tailored-resumes", "Stored tailored resumes, newest first.", "read", "none",
