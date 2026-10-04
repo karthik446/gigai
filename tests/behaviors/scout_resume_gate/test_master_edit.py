@@ -41,6 +41,7 @@ from gigai.workpad import resolve_workpad
 
 from tests.behaviors.scout_resume_gate.test_master_tailor_outcomes import _cli, _Home
 from tests.support.scout_profile_fixtures import default_find_jobs_config
+from tests.support.setup_home import setup_home
 
 EMAIL = "jordan.testwell@example.test"
 PHONE = "(555) 010-0142"
@@ -76,12 +77,7 @@ HELM = "Moved 12 services to Helm charts released through ArgoCD."
 
 
 def _setup(tmp_path: Path) -> Path:
-    home = tmp_path / "home"
-    result = CliRunner().invoke(
-        cli, ["setup", "--non-interactive", "--home", str(home), "--workpad-root", str(tmp_path / "workpads"), "--editor", "/usr/bin/true", "--json"],
-    )
-    assert result.exit_code == 0, result.output
-    return home
+    return setup_home(tmp_path / "home", workpad_root=tmp_path / "workpads")
 
 
 def _master(home: Path, *args: str, ok: bool = True) -> dict:

@@ -28,6 +28,8 @@ from gigai.scout.master_resume import Master, parse_master
 from gigai.scout.posting_keywords import mentions
 from gigai.scout.resume_pdf import ResumeMarkdownError, measure_markdown, parse_resume_markdown, render_markdown_pdf
 
+from tests.support.setup_home import setup_home
+
 FIXTURES = Path(__file__).resolve().parents[2] / "evals" / "fixtures" / "master"
 TODAY = date(2026, 10, 3)
 STAMP = datetime(2026, 10, 3, tzinfo=timezone.utc)
@@ -535,12 +537,7 @@ def test_a_smaller_cap_shows_fewer_bullets_and_says_when_even_the_frame_is_over(
 
 
 def _setup(tmp_path: Path) -> Path:
-    home = tmp_path / "home"
-    result = CliRunner().invoke(
-        cli, ["setup", "--non-interactive", "--home", str(home), "--workpad-root", str(tmp_path / "workpads"), "--editor", "/usr/bin/true", "--json"],
-    )
-    assert result.exit_code == 0, result.output
-    return home
+    return setup_home(tmp_path / "home", workpad_root=tmp_path / "workpads")
 
 
 def _home_with_master(tmp_path: Path) -> Path:

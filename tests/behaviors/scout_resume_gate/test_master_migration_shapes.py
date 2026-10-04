@@ -32,6 +32,7 @@ from gigai.scout.master_store import strip_contact
 from gigai.scout.target_resolution import home_scout_target
 
 from tests.support.scout_profile_fixtures import default_find_jobs_config
+from tests.support.setup_home import setup_home
 from tools.media import persona
 
 SHAPES = Path(__file__).resolve().parents[2] / "evals" / "fixtures" / "master" / "shapes"
@@ -360,12 +361,7 @@ def test_the_count_says_what_the_merge_folded_and_what_each_resume_left_out() ->
 
 
 def _setup(tmp_path: Path) -> Path:
-    home = tmp_path / "home"
-    result = CliRunner().invoke(
-        cli, ["setup", "--non-interactive", "--home", str(home), "--workpad-root", str(tmp_path / "workpads"), "--editor", "/usr/bin/true", "--json"],
-    )
-    assert result.exit_code == 0, result.output
-    return home
+    return setup_home(tmp_path / "home", workpad_root=tmp_path / "workpads")
 
 
 def _init(home: Path, *args: str) -> dict:

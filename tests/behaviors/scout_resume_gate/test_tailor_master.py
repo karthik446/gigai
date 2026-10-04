@@ -36,6 +36,8 @@ from gigai.scout.tailored_resume import (
 from gigai.scout.target_resolution import home_scout_target
 from gigai.workpad import resolve_workpad
 
+from tests.support.setup_home import setup_home
+
 FIXTURES = Path(__file__).resolve().parents[2] / "evals" / "fixtures" / "master"
 TODAY = date(2026, 10, 3)
 OLD_ROLES = ("r-tes", "r-bri", "r-cas")  # oldest first
@@ -352,7 +354,7 @@ def test_the_selection_record_and_the_master_source_round_trip_and_refuse_a_brok
 def test_the_stored_master_is_read_once_per_journal_head_and_a_home_without_one_adds_nothing_to_a_tailoring(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     home = tmp_path / "home"
     runner = CliRunner()
-    assert runner.invoke(cli, ["setup", "--non-interactive", "--home", str(home), "--workpad-root", str(tmp_path / "workpads"), "--editor", "/usr/bin/true", "--json"]).exit_code == 0
+    setup_home(home, workpad_root=tmp_path / "workpads")
     assert runner.invoke(cli, ["scout", "install", "--home", str(home), "--json"]).exit_code == 0
     scout = home_scout_target(home)
     spawned: list[object] = []
