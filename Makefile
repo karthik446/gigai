@@ -6,7 +6,7 @@ TEST_XDIST_WORKERS ?= auto
 TEST_XDIST_MAX_WORKERS ?= 14
 TEST_XDIST_DIST ?= worksteal
 
-.PHONY: test test-macos-smoke test-source test-behavior test-wheel test-installed test-live test-debian-offline unit-tests api-e2e eval-live
+.PHONY: test test-macos-smoke test-operator-home test-source test-behavior test-wheel test-installed test-live test-debian-offline unit-tests api-e2e eval-live
 
 # Complete portable offline coverage: one source discovery pass, the existing
 # deterministic behavior evaluation, and a fresh wheel plus every installed
@@ -67,6 +67,16 @@ test-macos-smoke:
 		tests/behaviors/scout_find_jobs/test_scout_run_supervisor.py \
 		tests/behaviors/installed_release/test_g04_installed_scenarios.py \
 		tests/api_e2e/test_setup_config_run_poll_results.py
+
+# 0110-9-01: the operator-sized timing gate (REQUIRED in the release pre-check: the `operator-home` job of
+# pull_request.yaml, profile `release`). The real server process on a synthetic home the size of the operator's
+# (290,000 postings, 10,350 companies, 2 profiles; tests/support/operator_home.py: no request, no real home is read):
+# one build for 8 requests at once, progress and responsive routes during it, warm reads under 500 ms, bounded
+# memory, a warm fresh process. About 2 minutes. Without GIGAI_OPERATOR_GATE=1 (the normal suite) the same test
+# runs on a tenth of that home.
+test-operator-home:
+	GIGAI_OPERATOR_GATE=1 $(UV) run --locked --extra test python -m pytest -n 0 -q -s \
+		tests/behaviors/scout_pipeline/test_operator_sized_home.py
 
 # G28's deterministic evaluator is not a pytest test and therefore remains an
 # explicit offline phase in the aggregate command.
@@ -153,7 +163,7 @@ docs-build: docs-check
 #   make media            build into $(MEDIA_OUT) (git-ignored)
 #   make media-publish    build, then copy the set to gigai-docs/public/media/ (commit that)
 #   make media-check      the committed set matches its manifest (no browser needed)
-.PHONY: media media-publish media-check
+.PHONY: media media-publish media-check operator-ui-check
 MEDIA_OUT ?= build/media
 media:
 	$(UV) run --locked --group media playwright install chromium
@@ -178,3 +188,13 @@ UI_ARTIFACTS ?= build/ui-artifacts
 ui-test:
 	$(UV) run --locked --group ui playwright install chromium
 	GIGAI_UI_REQUIRED=1 GIGAI_UI_ARTIFACTS="$(UI_ARTIFACTS)" $(UV) run --locked --group ui --extra test pytest tests/ui -m ui -n 0 -q --tb=short --durations=5
+
+# 0110-9-01, a standing release rule: load the UI in a REAL browser on the operator-sized synthetic home before every
+# release (tools/media/operator_ui_check.py; Playwright + Chromium, as `make media` installs them; about 2 minutes).
+# The Jobs page loads on a cold server (the "preparing" message, then the rows), one job is opened, BACK shows the
+# rows at once, the Background panel opens. Exits non-zero on a slow step, more than one request in flight for a
+# resource, or a console error; the numbers and screenshots are written to $(OPERATOR_UI_OUT) (git-ignored).
+OPERATOR_UI_OUT ?= build/operator-ui-check
+operator-ui-check:
+	$(UV) run --locked --group media playwright install chromium
+	$(UV) run --locked --group media python -m tools.media.operator_ui_check --out "$(OPERATOR_UI_OUT)"

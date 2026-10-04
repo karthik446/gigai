@@ -225,7 +225,8 @@ def rank_tick(
             profiles.append(entry)
             if not unranked:
                 continue
-            rows = [row for row in postings.profile_posting_rows(view, home_root, target, clock().astimezone()) if row.normalized_url in unranked]  # type: ignore[attr-defined]
+            # 0110-9-01: the boards the unranked rows are on, never the whole index again each turn.
+            rows = [row for row in postings.posting_rows(home_root, unranked.values()) if row.normalized_url in unranked]  # type: ignore[attr-defined]
             rows.sort(key=lambda row: (unranked[row.normalized_url].first_seen, row.normalized_url), reverse=True)  # type: ignore[attr-defined]
             candidate: tuple[str, object] | None = None
             for start in range(0, len(rows), size):

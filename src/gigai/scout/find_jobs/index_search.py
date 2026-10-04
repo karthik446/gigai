@@ -239,6 +239,7 @@ def read_indexed_boards(
     remember_search: bool = True,
     tags: TagStore | None = None,
     home_root: Path | None = None,
+    title_matcher: TitleMatcher | None = None,
 ) -> tuple[list[PostingRow], list[FailureRow], dict[str, object]]:
     """Read the watchlist's postings from the company index. Makes no request.
 
@@ -255,6 +256,11 @@ def read_indexed_boards(
     has a ``keywords`` block (``applied``, ``reason``, ``matched``,
     ``dropped``, ``text_not_checked``). No keywords: no block, and the text
     index is not opened.
+
+    ``title_matcher`` (0110-9-01): the matcher to ask instead of a new one for
+    ``config.roles`` and ``tags``. The posting read model reads the index a
+    few companies at a time and keeps one matcher (and what it decided for a
+    title) for all of them; the rule is the same.
     """
 
     began = time.monotonic() if started_at is None else started_at
@@ -264,7 +270,8 @@ def read_indexed_boards(
         key=lambda board: (board.first_seen.query_key.startswith("catalog:"), board.provider.value, board.board_token),
     )
     since = read_last_search(index)
-    title_matcher = TitleMatcher(config.roles, tags)
+    if title_matcher is None:
+        title_matcher = TitleMatcher(config.roles, tags)
     keywords = KeywordFilter(config.keywords, home_root if home_root is not None else _home_of(index)) if config.keywords else None
     planned = getattr(progress, "boards_planned", None)
     if callable(planned):

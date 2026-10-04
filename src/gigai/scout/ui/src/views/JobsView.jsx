@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { getNewPeek, getPostings, postAssessThese, postMarkAllSeen } from "../api.js";
+import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { getNewPeek, getPostings, getPostingsStatus, postAssessThese, postMarkAllSeen } from "../api.js";
 import AssessApprovalDialog from "../components/AssessApprovalDialog.jsx";
 import SourcesStrip from "../components/SourcesStrip.jsx";
 import { useSourcesStatus } from "../components/SourcesUpdatePanel.jsx";
@@ -19,8 +19,6 @@ import {
   isNew,
   keepActiveProfiles,
   needsAnswers,
-  newCountFromPeek,
-  postingsQuery,
   profileChips,
   profileTags,
   rowChips,
@@ -31,6 +29,7 @@ import {
   toggleState,
   toggleWindow,
 } from "../postingsModel.js";
+import { createPostingsStore, waitingLine } from "../postingsStore.js";
 import { APPLICATIONS_HASH, RUNS_HASH, jobHash } from "../routing.js";
 import { sourcesStrip } from "../sourcesStripModel.js";
 
@@ -152,15 +151,17 @@ function PostingRow({ row, profiles, anchor, selected, onSelect, onOpen, onAsses
   );
 }
 
+// 0110-9-01: the list lives here, at module level (postingsStore.js), so it
+// survives the route changes that unmount this page: opening a job and coming
+// back shows the rows that were read, at once, and refreshes them in place.
+const postingsStore = createPostingsStore({ fetchPostings: getPostings, fetchPeek: getNewPeek, fetchStatus: getPostingsStatus });
+
 export default function JobsView({ selectedProfileId, onSelectProfile, applicationsState, onRows, onCounts }) {
-  const [filter, setFilter] = useState(() => ({ ...EMPTY_FILTER, profileIds: storedProfileFilter() }));
-  const [search, setSearch] = useState("");
-  const [response, setResponse] = useState(null);
-  const [rows, setRows] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [loadingMore, setLoadingMore] = useState(false);
-  const [error, setError] = useState(null);
-  const [newCount, setNewCount] = useState(null);
+  // The filter the page was left with, so coming back is the same list.
+  const [filter, setFilter] = useState(() => postingsStore.lastFilter() || { ...EMPTY_FILTER, profileIds: storedProfileFilter() });
+  const [search, setSearch] = useState(() => filter.query || "");
+  const listed = useSyncExternalStore(postingsStore.subscribe, postingsStore.getState);
+  const { response, rows, loading, loadingMore, error, newCount } = listed;
   const [selectedIds, setSelectedIds] = useState([]);
   // The approval: {dialog} while the question is open; nothing is assessed before its Approve.
   const [approval, setApproval] = useState(null);
@@ -169,56 +170,39 @@ export default function JobsView({ selectedProfileId, onSelectProfile, applicati
   const [approvalError, setApprovalError] = useState(null);
   const [notice, setNotice] = useState(null);
   const [marking, setMarking] = useState(false);
-  const request = useRef(0);
   const sources = useSourcesStatus({ enabled: true });
 
-  const readPeek = useCallback(() => {
-    getNewPeek()
-      .then((peek) => setNewCount(newCountFromPeek(peek)))
-      .catch(() => setNewCount(null));
-  }, []);
-
-  const load = useCallback(
-    (shownFilter) => {
-      const id = (request.current += 1);
-      setLoading(true);
-      setError(null);
-      getPostings(postingsQuery(shownFilter, { limit: PAGE_ROWS, offset: 0 }))
-        .then((loaded) => {
-          if (request.current !== id) {
-            return;
-          }
-          setResponse(loaded);
-          setRows(loaded.postings.rows);
-          setLoading(false);
-          onRows(loaded.postings.rows);
-          if (!hasFilter(shownFilter)) {
-            onCounts(needsAnswers(loaded.counts));
-          }
-        })
-        .catch((err) => {
-          if (request.current !== id) {
-            return;
-          }
-          setLoading(false);
-          // A remembered profile that is no longer active: drop the filter and read again.
-          if (err.code === "profile_not_found" && shownFilter.profileIds.length) {
-            rememberProfileFilter([]);
-            setFilter((current) => ({ ...current, profileIds: [] }));
-            return;
-          }
-          setError(err.message || String(err));
-        });
-    },
-    [onRows, onCounts],
-  );
+  // The kept rows are shown at once; one read goes out unless one is in flight or the kept one is fresh.
+  useEffect(() => {
+    postingsStore.show(filter);
+    setSelectedIds([]);
+  }, [filter]);
 
   useEffect(() => {
-    load(filter);
-    setSelectedIds([]);
-  }, [filter, load]);
+    postingsStore.peekNew();
+    // Leaving the page: nothing stays in flight and nothing keeps polling; the rows that were read stay.
+    return () => postingsStore.release();
+  }, []);
 
-  useEffect(readPeek, [readPeek]);
+  // What the list read goes up to the app: the rows (a job page is built from its row) and the waiting count.
+  useEffect(() => {
+    if (!response) {
+      return;
+    }
+    onRows(rows);
+    if (!hasFilter(filter)) {
+      onCounts(needsAnswers(response.counts));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [response, rows, onRows, onCounts]);
+
+  // A remembered profile that is no longer active: drop the filter and read again.
+  useEffect(() => {
+    if (listed.errorCode === "profile_not_found" && filter.profileIds.length) {
+      rememberProfileFilter([]);
+      setFilter((current) => ({ ...current, profileIds: [] }));
+    }
+  }, [listed.errorCode, filter.profileIds.length]);
 
   // The search box filters after a pause, not on every key.
   useEffect(() => {
@@ -237,29 +221,13 @@ export default function JobsView({ selectedProfileId, onSelectProfile, applicati
       return { ...current, profileIds: next };
     });
 
-  const showMore = () => {
-    const id = request.current;
-    setLoadingMore(true);
-    getPostings(postingsQuery(filter, { limit: PAGE_ROWS, offset: rows.length }))
-      .then((loaded) => {
-        if (request.current !== id) {
-          return;
-        }
-        setRows((current) => current.concat(loaded.postings.rows));
-        onRows(loaded.postings.rows);
-      })
-      .catch((err) => setError(err.message || String(err)))
-      .finally(() => setLoadingMore(false));
-  };
+  const showMore = () => postingsStore.more(filter);
 
   const markAllSeen = () => {
     setMarking(true);
     setNotice(null);
     postMarkAllSeen()
-      .then(() => {
-        readPeek();
-        load(filter);
-      })
+      .then(() => postingsStore.refresh(filter))
       .catch((err) => setNotice(err.message || String(err)))
       .finally(() => setMarking(false));
   };
@@ -290,8 +258,7 @@ export default function JobsView({ selectedProfileId, onSelectProfile, applicati
         setApproval(null);
         setNotice(assessOutcomeLine(answer));
         setSelectedIds([]);
-        readPeek();
-        load(filter);
+        postingsStore.refresh(filter);
       })
       .catch((err) => setApprovalError(err.detail || err.message || String(err)))
       .finally(() => setApproving(false));
@@ -417,8 +384,10 @@ export default function JobsView({ selectedProfileId, onSelectProfile, applicati
             </div>
           </div>
           <div className="result-count">
-            <span data-role="postings-count">
-              {loading ? "Loading postings…" : countLine(counts, rows.length)}
+            <span data-role="postings-count" data-refreshing={listed.refreshing ? "true" : undefined}>
+              {/* 0110-9-01: a message with the percent while the server prepares, never an endless spinner; rows that
+                  are there stay while they are refreshed in place. */}
+              {waitingLine(listed) || countLine(counts, rows.length)}
               {hasFilter(filter) && (
                 <>
                   {" · "}

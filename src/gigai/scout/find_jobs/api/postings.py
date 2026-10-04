@@ -13,6 +13,17 @@ objects).
 - ``POST /api/runs/import`` imports what old runs assessed into the read
   model, once per run; a second call imports nothing.
 
+- ``GET /api/postings/status`` (0110-9-01) says how the posting read model
+  is in this server, from memory alone: it answers at once whatever a build
+  is doing.
+
+0110-9-01: a read never waits for a large build of the read model. It is
+answered from the rows as stored (a small build, a few companies after an
+update, is waited for up to :data:`MODEL_WAIT_SECONDS`), or, when
+there are none yet (the first build, once after an upgrade), with ``202``
+and the ``scout-postings-status:1`` object (``status: "preparing"`` and the
+percent); the build runs once, in its own thread, for every request.
+
 No response mixes: these hold posting text (public-untrusted) and nothing
 the user wrote.
 """
@@ -20,11 +31,13 @@ the user wrote.
 from __future__ import annotations
 
 from http import HTTPStatus
+import os
 from urllib.parse import parse_qs, urlsplit
 
 from ...data_labels import LabelError
 from ...pipeline.store import PipelineStoreError
-from ...posting_search import DEFAULT_LIMIT, PostingModelError, PostingSearchError, assess_these, search_postings
+from ...posting_search import DEFAULT_LIMIT, PostingModelError, PostingModelPreparing, PostingSearchError, assess_these, search_postings
+from ...postings import model_status
 from ...run_history import migrate_runs
 
 _ERROR_STATUS = {
@@ -34,6 +47,26 @@ _ERROR_STATUS = {
     "config_unavailable": HTTPStatus.CONFLICT,
     "assess_batch_running": HTTPStatus.CONFLICT,
 }
+#: How long a read route waits for a SMALL build of the posting read model (``postings.SMALL_BUILD_BOARDS``) before it
+#: answers from what is stored (or 202). A large build is never waited for.
+MODEL_WAIT_SECONDS = 10.0
+MODEL_WAIT_ENV = "GIGAI_SCOUT_POSTINGS_WAIT_SECONDS"
+
+
+def model_wait_seconds() -> float:
+    raw = os.environ.get(MODEL_WAIT_ENV)
+    try:
+        return max(0.0, float(raw)) if raw else MODEL_WAIT_SECONDS
+    except ValueError:
+        return MODEL_WAIT_SECONDS
+
+
+def preparing_body(progress: dict[str, object]) -> dict[str, object]:
+    """What a read answers (202) while the first build runs: the status object, ``status: "preparing"``."""
+
+    return {**progress, "status": "preparing"}
+
+
 _FLAGS = {"1": True, "true": True, "0": False, "false": False}
 _QUERY_KEYS = frozenset({"profile_id", "q", "state", "window", "removed", "history", "include_hidden", "limit", "offset"})
 _ASSESS_KEYS = frozenset({"jobs", "profile_id", "query", "states", "window", "approve", "again", "actor"})
@@ -51,6 +84,9 @@ class PostingsRoutesMixin:
     def _postings_answer(self, build) -> None:
         try:
             response = build()
+        except PostingModelPreparing as exc:
+            self._write_json(HTTPStatus.ACCEPTED, preparing_body(exc.progress))
+            return
         except (PostingSearchError, PostingModelError, PipelineStoreError) as exc:
             self._error(_ERROR_STATUS.get(exc.code, HTTPStatus.CONFLICT), exc.code, str(exc))
             return
@@ -85,9 +121,19 @@ class PostingsRoutesMixin:
         self._postings_answer(
             lambda: search_postings(
                 home_root, target, profile_ids=query.get("profile_id"), query=(query.get("q") or [None])[0],
-                states=query.get("state"), window=(query.get("window") or [None])[0], limit=limit, offset=offset, **flags,
+                states=query.get("state"), window=(query.get("window") or [None])[0], limit=limit, offset=offset,
+                model_wait=model_wait_seconds(), **flags,
             )
         )
+
+    def _handle_get_postings_status(self) -> None:
+        target = self._postings_target()
+        if target is None:
+            return
+        if urlsplit(self.path).query:
+            self._error(HTTPStatus.UNPROCESSABLE_ENTITY, "unknown_key", "this route takes no query keys")
+            return
+        self._write_json(HTTPStatus.OK, model_status(self._backend.home_root, target))
 
     def _handle_post_postings_assess(self) -> None:
         body = self._read_json_body()
@@ -138,4 +184,4 @@ class PostingsRoutesMixin:
         self._postings_answer(lambda: migrate_runs(home_root, target))
 
 
-__all__ = ["PostingsRoutesMixin"]
+__all__ = ["MODEL_WAIT_ENV", "MODEL_WAIT_SECONDS", "PostingsRoutesMixin", "model_wait_seconds", "preparing_body"]

@@ -2593,6 +2593,26 @@ def _git(
     return result
 
 
+def committed_tree_id(workpad: Path, prefix: str) -> str | None:
+    """The Git tree id of ``prefix`` at the journal head: it changes exactly when a committed file under it does.
+
+    One ``git rev-parse``; nothing is read or validated. ``None`` when there
+    is no head, nothing is committed under ``prefix``, or git cannot say. It
+    is an identity to compare (0110-9-01: "is the watchlist the one I read
+    last time?"), never authority: what is under the prefix is still read
+    with :func:`read_committed_snapshot`.
+    """
+
+    if not _snapshot_prefix_is_valid(prefix):
+        raise JournalConflictError("journal snapshot prefixes are invalid")
+    try:
+        root = Path(workpad).resolve(strict=True)
+        found = _git_bytes(root, "rev-parse", "--verify", "--quiet", f"HEAD:{prefix.rstrip('/')}").decode("ascii").strip()
+    except (JournalError, OSError, UnicodeError):
+        return None
+    return found if found and all(character in "0123456789abcdef" for character in found) else None
+
+
 def _git_bytes(root: Path, *args: str) -> bytes:
     executable = shutil.which("git")
     if executable is None:
@@ -2630,6 +2650,7 @@ __all__ = [
     "read_committed_additions",
     "read_committed_artifact",
     "read_committed_family",
+    "committed_tree_id",
     "read_committed_snapshot",
     "run_with_journal_writer",
 ]

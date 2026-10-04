@@ -181,6 +181,20 @@ class TagStore:
     def get(self, title_key: str) -> TitleTag | None:
         return self.get_many([title_key]).get(title_key)
 
+    def stamp(self) -> tuple[object, ...]:
+        """What the stored tags are, as a few numbers: it moves when a tag is added or a function is filled in or changed.
+
+        0110-9-01: the posting read model compares this, not the file's mtime or its ``-wal`` file (which comes and goes
+        with every reader's connection, so two readers at once saw two different stores).
+        """
+
+        row = self._conn().execute(
+            "SELECT COUNT(*), COUNT(function), COALESCE(MAX(tagged_at), ''), COALESCE(SUM(function_source = 'model'), 0), "
+            "COALESCE(SUM(LENGTH(function)), 0) FROM title_tags WHERE tagger_version = ?",
+            (self.tagger_version,),
+        ).fetchone()
+        return (self.tagger_version, *row)
+
     def count(self) -> int:
         """Current-version rows."""
 

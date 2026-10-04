@@ -70,6 +70,7 @@ JOURNEYS: dict[Route, str] = {
     Route("POST", "/api/pipeline/process"): "test_pipeline_journey.py",
     # 0.1.10.7 M4a: the live search, assess these, old runs as history.
     Route("GET", "/api/postings"): "test_postings_journey.py",
+    Route("GET", "/api/postings/status"): "test_postings_journey.py",
     Route("POST", "/api/postings/assess"): "test_postings_journey.py",
     Route("POST", "/api/runs/import"): "test_postings_journey.py",
     Route("GET", "/api/runs"): "test_runs_list_journey.py",

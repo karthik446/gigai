@@ -73,6 +73,9 @@ _REVIEWED: dict[str, dict[str, str]] = {
         "profile_id": "id", "match_digest": "digest", "facts_digest": "digest", "pinned_digest": "digest",
         "settings_digest": "digest", "row_count": "integer", "built_at": "timestamp",
     },
+    # 0110-9-01: what each board's rows of a profile were matched from, and the watchlist digest by its Git tree: digests.
+    "posting_board": {"profile_id": "id", "board": "board", "stamp": "digest"},
+    "posting_source": {"name": "code", "source_digest": "digest", "value_digest": "digest"},
     # 0.1.10.7 M4a: what old find-jobs runs assessed (state, counts, the provenance a run sealed) and the named leases.
     "run_import": {"run_id": "id", "profile_id": "id", "row_count": "integer", "imported_at": "timestamp"},
     "run_assessment": {
@@ -158,6 +161,9 @@ def _scenario(store: PipelineStore) -> None:
     answered = store.record_call(kind="rank", lane="api:openrouter-main", seconds=3.0, items=50, metrics=StepMetrics(adapter="openrouter_api"))
     store.fail_call(answered, "model_output_invalid")
     store.replace_postings(_build(), [_posting_row(), _posting_row(job=_JOB + "/2", removed_at="2026-10-02T09:00:00.000000Z", state="needs_answers")])
+    store.replace_board_postings(_P, {"lever:acme": _digest("stamp"), "lever:gone": None}, [_posting_row(job=_JOB + "/3", rank_score=None)])
+    store.finish_posting_build(_build())
+    store.set_posting_source("watchlist", _digest("tree"), _digest("boards"))
     store.set_match_ranks([(2, _JOB, _P)])
     store.import_run("run_20260901T100000Z", _P, [_run_row(), _run_row(job=_JOB + "/2", state="needs_answers")])
     store.import_run("run_20260801T100000Z", "ephemeral", [_run_row(run_id="run_20260801T100000Z", profile_id="ephemeral", profile_revision=None, profile_digest=None)])
@@ -214,7 +220,8 @@ def test_every_stored_value_is_an_id_a_digest_a_code_or_a_number_and_nothing_is_
                     assert not _PHONE.search(re.sub(r"[0-9a-f]{16,}", "", value)), (table, column, value)
     assert seen["step_run"] >= 4 and seen["approval"] == 1 and seen["anchor"] == 1 and seen["cap_counter"] == 2
     assert seen["model_call"] == 3
-    assert seen["posting"] == 2 and seen["posting_build"] == 1
+    # The board's rows were replaced by the one row matched for it (0110-9-01: per board, in one transaction).
+    assert seen["posting"] == 1 and seen["posting_build"] == 1 and seen["posting_board"] == 1 and seen["posting_source"] == 1
     assert seen["run_import"] == 2 and seen["run_assessment"] == 3 and seen["job_lease"] == 2
     # And the raw file as a whole: no email shape anywhere in its bytes.
     connection.close()

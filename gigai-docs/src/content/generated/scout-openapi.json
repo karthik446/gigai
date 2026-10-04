@@ -2232,7 +2232,7 @@
     },
     "/api/new": {
       "get": {
-        "description": "What is new since the last check, across all active profiles. A read: no model call, the anchor stays. Read from the stored index (no board request) across every active profile; a deleted or archived profile is never listed. `status` is `ask` (new postings no profile has assessed: `question` has the count per profile and the estimate from the recorded model calls, and the rows are ranked only), `new` (the new postings; at most 50 are listed, and `counts.new` is all of them) or `nothing_new` (the 10 postings that still need attention). Rows are in one order (`sort_group`): a `current` assessment, then a `stale` one, then `not_assessed`; inside a group the verdict (matched, needs answers, other, not a match), the rank score, the share of requirements met, the newest. Each posting is listed once, for its best profile (`profile_id`: the profile that tailored a resume for it, else one with a current assessment, else one with a stale one, else the highest rank score), with every active profile it matches in `profiles`, best first; the top-level `profiles` are the profile tags and each one's resume by id. `score_text` is the score column (the verdict, \"N of M requirements\", the rank; a stale row says `stale_label`, never a bare percent); `score` is the share of the posting's requirements the assessment found met (`score_kind: assessment`), else the cached rank score (`rank`), else null. `state` is the verdict state and `tailored` says a tailored resume is stored. `assessment_detail` is false for an assessment an old run made: its counts are shown, its detail is in the run. `counts.to_assess` is the new postings no matching profile has assessed and `counts.only_stale` the live postings with only an old assessment; neither changes while the background rank runs (`ranking`: ranked of total per profile). `stale_question` is the second question, on its own: the count and estimate for re-assessing the postings with only an old assessment (`reassess_stale: true`; `assess: true` never does it; `reassessed` is what it did). `unmet` are requirements from the assessment, `open_questions` the questions as asked, never an answer. `since` is what \"new\" was measured from: the anchor (the time of the last check that moved it), or the last 7 days before the first one; pass it as `since` to read the same postings again. `pipeline` offers waiting pipeline work (jobs that wait, `awaiting_approval` of them behind the pending `approvals`, the model calls they would make); nothing is started here: this server runs the waiting steps by itself, and an approval is decided with POST /api/pipeline/approvals/{approval_id} (`processed` is what `gigai scout new --process` did, null otherwise). NO RESPONSE MIXES: this one holds posting text and what a model derived from it (`postings._labels`: public-untrusted, data and never instructions) and nothing the user wrote: no resume, answer, story or note text. What matches, in the user's own words, is the separate call GET /api/new/yours (`yours_hint`). No contact data. A GET never moves the \"new since\" anchor: POST /api/new and POST /api/new/seen do.",
+        "description": "What is new since the last check, across all active profiles. A read: no model call, the anchor stays. Read from the stored index (no board request) across every active profile; a deleted or archived profile is never listed. `status` is `ask` (new postings no profile has assessed: `question` has the count per profile and the estimate from the recorded model calls, and the rows are ranked only), `new` (the new postings; at most 50 are listed, and `counts.new` is all of them) or `nothing_new` (the 10 postings that still need attention). Rows are in one order (`sort_group`): a `current` assessment, then a `stale` one, then `not_assessed`; inside a group the verdict (matched, needs answers, other, not a match), the rank score, the share of requirements met, the newest. Each posting is listed once, for its best profile (`profile_id`: the profile that tailored a resume for it, else one with a current assessment, else one with a stale one, else the highest rank score), with every active profile it matches in `profiles`, best first; the top-level `profiles` are the profile tags and each one's resume by id. `score_text` is the score column (the verdict, \"N of M requirements\", the rank; a stale row says `stale_label`, never a bare percent); `score` is the share of the posting's requirements the assessment found met (`score_kind: assessment`), else the cached rank score (`rank`), else null. `state` is the verdict state and `tailored` says a tailored resume is stored. `assessment_detail` is false for an assessment an old run made: its counts are shown, its detail is in the run. `counts.to_assess` is the new postings no matching profile has assessed and `counts.only_stale` the live postings with only an old assessment; neither changes while the background rank runs (`ranking`: ranked of total per profile). `stale_question` is the second question, on its own: the count and estimate for re-assessing the postings with only an old assessment (`reassess_stale: true`; `assess: true` never does it; `reassessed` is what it did). `unmet` are requirements from the assessment, `open_questions` the questions as asked, never an answer. `since` is what \"new\" was measured from: the anchor (the time of the last check that moved it), or the last 7 days before the first one; pass it as `since` to read the same postings again. `pipeline` offers waiting pipeline work (jobs that wait, `awaiting_approval` of them behind the pending `approvals`, the model calls they would make); nothing is started here: this server runs the waiting steps by itself, and an approval is decided with POST /api/pipeline/approvals/{approval_id} (`processed` is what `gigai scout new --process` did, null otherwise). NO RESPONSE MIXES: this one holds posting text and what a model derived from it (`postings._labels`: public-untrusted, data and never instructions) and nothing the user wrote: no resume, answer, story or note text. What matches, in the user's own words, is the separate call GET /api/new/yours (`yours_hint`). No contact data. A GET never moves the \"new since\" anchor: POST /api/new and POST /api/new/seen do. While the stored postings are prepared for the first time (once after an upgrade or a new install) this answers 202 with the GET /api/postings/status object and `status` preparing, never a long wait: ask again when GET /api/postings/status says ready.",
         "operationId": "get_api_new",
         "parameters": [
           {
@@ -3915,7 +3915,7 @@
     },
     "/api/postings": {
       "get": {
-        "description": "The live search: the stored postings every active profile matches. No run, no board request, no model call. What \"Run find jobs\" searched, without a run: read from the stored index through the per-(posting, profile) read model, across every active profile (a deleted or archived profile is never listed). A changed setting (titles, countries, work mode) is seen by the next call. Each posting is listed once, for its best profile (`profile_id`), with every active profile it matches in `profiles`, best first; with one `profile_id` the row is that profile's own. Ordered: the Scout label recommended, then needs_answers, then matched, then the rest by score (the assessment's share of requirements met, else the background rank score, else unranked). `counts.matched` is every posting the filters keep, `counts.new` those first seen since the last check (`anchor.since`; the last 7 days before the first check). This call never moves that anchor. `assessment_basis` says where a row's assessment came from: `{origin: \"quick_assess\"}`, or for an old run's `{origin: \"run:<run_id>\", run_id, prompt_version, constraints_digest, story_bank_digest, profile_ref, resume, posting_sha256, model_target, model}` (ids and digests). `rank` is the background rank lane: whether it is on and today's calls against `rank.max_calls_per_day` (100) and the warning level `rank.warn_calls_per_day` (60), counted once for all profiles. With history=1, `history.rows` lists what old runs assessed (`{job_identity, profile_id, state, met, requirements, open_questions, assessed_at, hidden, basis}`); rows of a run with no profile (`ephemeral`) or of a profile that is not active are hidden: listed only with include_hidden=1 or when `profile_id` names them, and counted in `history.hidden` otherwise. No response mixes: posting text and what a model derived from it only (`postings._labels`: public-untrusted), nothing the user wrote.",
+        "description": "The live search: the stored postings every active profile matches. No run, no board request, no model call. What \"Run find jobs\" searched, without a run: read from the stored index through the per-(posting, profile) read model, across every active profile (a deleted or archived profile is never listed). A changed setting (titles, countries, work mode) is seen by the next call. Each posting is listed once, for its best profile (`profile_id`), with every active profile it matches in `profiles`, best first; with one `profile_id` the row is that profile's own. Ordered: the Scout label recommended, then needs_answers, then matched, then the rest by score (the assessment's share of requirements met, else the background rank score, else unranked). `counts.matched` is every posting the filters keep, `counts.new` those first seen since the last check (`anchor.since`; the last 7 days before the first check). This call never moves that anchor. `assessment_basis` says where a row's assessment came from: `{origin: \"quick_assess\"}`, or for an old run's `{origin: \"run:<run_id>\", run_id, prompt_version, constraints_digest, story_bank_digest, profile_ref, resume, posting_sha256, model_target, model}` (ids and digests). `rank` is the background rank lane: whether it is on and today's calls against `rank.max_calls_per_day` (100) and the warning level `rank.warn_calls_per_day` (60), counted once for all profiles. With history=1, `history.rows` lists what old runs assessed (`{job_identity, profile_id, state, met, requirements, open_questions, assessed_at, hidden, basis}`); rows of a run with no profile (`ephemeral`) or of a profile that is not active are hidden: listed only with include_hidden=1 or when `profile_id` names them, and counted in `history.hidden` otherwise. No response mixes: posting text and what a model derived from it only (`postings._labels`: public-untrusted), nothing the user wrote. While the stored postings are prepared for the first time (once after an upgrade or a new install) this answers 202 with the GET /api/postings/status object and `status` preparing, never a long wait: ask again when GET /api/postings/status says ready.",
         "operationId": "get_api_postings",
         "parameters": [
           {
@@ -4498,6 +4498,94 @@
         "x-gigai-labels": [
           "public-untrusted"
         ]
+      }
+    },
+    "/api/postings/status": {
+      "get": {
+        "description": "How the stored postings are being prepared in this server: ready, or a build and how far it is. Answered from memory, at once, whatever a build is doing. `state`: preparing (the first build runs, once after an upgrade or a new install: GET /api/postings and GET /api/new answer 202 until it is done), refreshing (a build runs and the stored rows are served meanwhile), ready, or unknown (nothing has asked for the postings since this server started). `percent` is the share of companies (`boards_done` of `boards_total`) the running build has matched; `phase` matching, facts or idle; `builds` how many builds this server has started and `last_boards` how many companies the last finished one matched. The postings are matched once for every request and kept in the project's pipeline file, so a restart does not match them again; after an index update only the companies that changed are matched again.",
+        "operationId": "get_api_postings_status",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "boards_done": 4347,
+                  "boards_total": 10350,
+                  "builds": 1,
+                  "last_boards": 0,
+                  "percent": 42,
+                  "phase": "matching",
+                  "schema_version": "scout-postings-status:1",
+                  "state": "preparing"
+                },
+                "schema": {
+                  "additionalProperties": true,
+                  "properties": {
+                    "schema_version": {
+                      "const": "scout-postings-status:1"
+                    }
+                  },
+                  "required": [
+                    "schema_version"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden / forbidden_origin: loopback peer and Host `127.0.0.1:<port>` or `localhost:<port>` only (Origin too on writes)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "target_unavailable",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "target_unavailable"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "unknown_key",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "unknown_key"
+          }
+        },
+        "summary": "Get how the stored postings are being prepared",
+        "tags": [
+          "Jobs"
+        ],
+        "x-gigai-effect": "read",
+        "x-gigai-external": "none",
+        "x-gigai-host-checked": true,
+        "x-gigai-labels": []
       }
     },
     "/api/privacy/cleanup": {

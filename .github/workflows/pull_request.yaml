@@ -15,7 +15,7 @@ on:
   workflow_call:
     inputs:
       profile:
-        description: "CI profile: pr (ubuntu/3.11), release = the release pre-check (pr + macOS smoke + release metadata, build and artifact smoke), or full = the post-release compatibility sweep (non-blocking: ubuntu 3.12/3.13 + macOS 3.13 + sharded Debian offline)."
+        description: "CI profile: pr (ubuntu/3.11), release = the release pre-check (pr + macOS smoke + the operator-sized home timing gate + release metadata, build and artifact smoke), or full = the post-release compatibility sweep (non-blocking: ubuntu 3.12/3.13 + macOS 3.13 + sharded Debian offline)."
         required: false
         type: string
         default: pr
@@ -336,6 +336,36 @@ jobs:
           "${RUNNER_TEMP}/venv/bin/gigai" --help >/dev/null
       - name: macOS smoke tests
         run: make test-macos-smoke
+
+  # 0110-9-01: the operator-sized timing gate (profile `release` only). 0.1.10.8 passed
+  # every check and its Jobs page never finished loading on a home of 290,000 postings
+  # and 10,350 companies: no check ran on a home of that size. This runs the real server
+  # process on a synthetic one (no request, no real home): one build for 8 requests at
+  # once, progress and responsive routes during it, warm reads under 500 ms, bounded
+  # memory, a warm fresh process. A failed job fails the pre-check run, so release.yml
+  # finds no green run to release.
+  operator-home:
+    needs: changes
+    if: needs.changes.outputs.code_changed == 'true' && inputs.profile == 'release'
+    name: Operator-sized home timing gate (290k postings)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      GIGAI_TEST_LATENCY_SCALE: "3"
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      - uses: astral-sh/setup-uv@v8.0.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - run: uv sync --locked --extra test --python "3.11"
+      - name: Operator-sized home timing gate
+        run: make test-operator-home
 
   # release-split: the release half of the pre-check (profile `release` only).
   # Everything release.yml used to check before publishing, on the branch head:

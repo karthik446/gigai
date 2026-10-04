@@ -766,7 +766,8 @@ export default function FindJobsView({
     }
     setPostingLookup({ id: jobRouteId, done: false });
     getPostings(postingsQuery(EMPTY_FILTER, { limit: MAX_LOOKUP_ROWS }))
-      .then((response) => addPostingRows(response.postings.rows))
+      // 0110-9-01: a 202 "preparing" answer has no rows yet.
+      .then((response) => addPostingRows(response.postings ? response.postings.rows : []))
       .catch(() => {})
       .finally(() => setPostingLookup((current) => (current.id === jobRouteId ? { id: jobRouteId, done: true } : current)));
   }, [jobRouteId, jobInLoaded, settled, postingLookup.id, addPostingRows]);

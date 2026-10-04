@@ -28,7 +28,8 @@ from urllib.parse import parse_qs, urlsplit
 
 from ...data_labels import LabelError
 from ...pipeline.store import PipelineStoreError
-from ...scout_new import PostingModelError, ScoutNewError, mark_all_seen, scout_new, scout_new_yours
+from ...scout_new import PostingModelError, PostingModelPreparing, ScoutNewError, mark_all_seen, scout_new, scout_new_yours
+from .postings import model_wait_seconds, preparing_body
 
 _ERROR_STATUS = {
     "invalid_value": HTTPStatus.UNPROCESSABLE_ENTITY,
@@ -50,16 +51,21 @@ class NewRoutesMixin:
         return target
 
     def _answer_new(
-        self, target, *, profile_id, peek: bool, assess: bool | None, since, yours: bool = False, reassess_stale: bool = False
+        self, target, *, profile_id, peek: bool, assess: bool | None, since, yours: bool = False, reassess_stale: bool = False,
+        model_wait: float | None = None,
     ) -> None:
         try:
             if yours:
-                response = scout_new_yours(self._backend.home_root, target, profile_id=profile_id, since=since)
+                response = scout_new_yours(self._backend.home_root, target, profile_id=profile_id, since=since, model_wait=model_wait)
             else:
                 response = scout_new(
                     self._backend.home_root, target, profile_id=profile_id, peek=peek, assess=assess, since=since,
-                    reassess_stale=reassess_stale,
+                    reassess_stale=reassess_stale, model_wait=model_wait,
                 )
+        except PostingModelPreparing as exc:
+            # 0110-9-01: the first build of the posting read model is running (a GET only): how far it is, never a hang.
+            self._write_json(HTTPStatus.ACCEPTED, preparing_body(exc.progress))
+            return
         except (ScoutNewError, PostingModelError, PipelineStoreError) as exc:
             self._error(_ERROR_STATUS.get(exc.code, HTTPStatus.CONFLICT), exc.code, str(exc))
             return
@@ -85,7 +91,7 @@ class NewRoutesMixin:
         # A GET is a read: it never moves the anchor, whatever ``peek`` says (POST /api/new and /api/new/seen move it).
         self._answer_new(
             target, profile_id=(query.get("profile_id") or [None])[0], peek=True, assess=None,
-            since=(query.get("since") or [None])[0], yours=yours,
+            since=(query.get("since") or [None])[0], yours=yours, model_wait=model_wait_seconds(),
         )
 
     def _handle_get_new_yours(self) -> None:
