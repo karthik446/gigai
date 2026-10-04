@@ -364,16 +364,17 @@ export default function ProfilesView({ profiles, selectedProfileId, onSelectProf
             {confirmingDelete ? (
               <>
                 <div className="callout danger">{deleteConfirmText(profiles, selected)}</div>
-                <button className="button small danger-outline" onClick={handleDelete} disabled={deleting}>
+                <button className="button small danger-outline" data-action="confirm-delete-profile" onClick={handleDelete} disabled={deleting}>
                   {deleting ? "Deleting…" : "Delete profile"}
                 </button>
-                <button className="button small" onClick={() => setConfirmingDelete(false)} disabled={deleting}>
+                <button className="button small" data-action="cancel-delete-profile" onClick={() => setConfirmingDelete(false)} disabled={deleting}>
                   Cancel
                 </button>
               </>
             ) : (
               <button
                 className="button small danger-outline"
+                data-action="delete-profile"
                 onClick={() => {
                   setDeleteError(deleteBlockedReason(profiles, selected));
                   setConfirmingDelete(deleteBlockedReason(profiles, selected) === null);

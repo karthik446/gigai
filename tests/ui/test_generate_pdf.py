@@ -1,0 +1,123 @@
+"""Flow 6 (REPORT.md 5.3): Generate PDF. Six fields, a download, and nothing of what was typed is stored.
+
+The hero job of the small home has a stored tailored resume, so `#/pdf/<profile>/<job>` is the page an agent's or
+the CLI's headerless PDF is finished on. Real server, real render (Typst), nothing stubbed.
+
+Pinned: the form has the six fields, all empty, and the button is off until a name is typed; Generate is ONE request
+(`POST /api/tailored-resumes/pdf`) whose `header` carries the six values; the browser gets a download named by the
+server (`<company>-<role>-<date>.pdf`, never the user's name) that is a PDF with the typed name in it; the page says
+what it saved; then NOTHING of the six values is kept: not in localStorage, sessionStorage, a cookie or the address,
+not in the form after a reload, and not in any file of the server's home (every file is read, the server log
+included); the resumes folder holds no new file. Zero console errors.
+
+MEASURED (14-core laptop, 2026-10-04, three runs: Python 3.11 twice, 3.13 once): the render 0.08 to 0.10 s wall, 0.07
+server CPU seconds (the three-line resume of the fixture model; a real resume is more).
+"""
+
+from __future__ import annotations
+
+import io
+from pathlib import Path
+from urllib.parse import quote
+
+import pytest
+
+from tests.ui.support import FIRST_LOAD_WALL_SECONDS
+
+pytestmark = pytest.mark.ui
+
+#: Typed in the browser by the test: invented, on the reserved example.test domain and the 555-01xx range, and
+#: different from the demo persona's, so a hit on disk can only come from this form.
+HEADER = {
+    "name": "Zephyrine Quillfeather",
+    "email": "zephyrine.quillfeather@example.test",
+    "phone": "(303) 555-0199",
+    "location": "Ridgway, Colorado",
+    "linkedin": "linkedin.example.test/in/zquillfeather",
+    "link": "zquillfeather.example.test",
+}
+PDF_WALL_SECONDS = FIRST_LOAD_WALL_SECONDS  # a render, not a click: 0.08 to 0.10 s measured on a three-line resume
+PDF_CPU_SECONDS = 5.0  # 0.07 measured; the renderer's first run on a machine reads its fonts
+
+
+def files_holding(root: Path, needles: list[bytes]) -> list[str]:
+    """Every file under `root` whose bytes hold one of `needles` (case as typed)."""
+
+    found = []
+    for path in sorted(root.rglob("*")):
+        if not path.is_file() or path.is_symlink():
+            continue
+        try:
+            data = path.read_bytes()
+        except OSError:
+            continue
+        hits = [needle.decode() for needle in needles if needle in data]
+        if hits:
+            found.append(f"{path.relative_to(root)}: {hits}")
+    return found
+
+
+def test_generate_pdf_six_fields_a_download_and_nothing_stored(ui, scout_server) -> None:
+    demo = scout_server.demo
+    folder = Path(ui.server_json("/api/resumes-folder")["path"])
+    files_before = sorted(path.name for path in folder.iterdir()) if folder.is_dir() else []
+
+    ui.goto("/#/pdf/" + quote(demo.hero_profile_id, safe="") + "/" + quote(demo.hero_job, safe=""))
+    form = ui.page.locator('[data-role="generate-pdf-form"]')
+    form.wait_for()
+    ui.step("form")
+
+    # Six fields, all empty; nothing to generate until there is a name.
+    inputs = form.locator("input")
+    assert inputs.evaluate_all("(fields) => fields.map((field) => field.id)") == [f"generate-pdf-{key}" for key in HEADER]
+    assert inputs.evaluate_all("(fields) => fields.map((field) => field.value)") == [""] * 6
+    button = ui.page.locator('[data-role="generate-pdf"]')
+    assert button.is_disabled()
+    ui.page.fill("#generate-pdf-email", HEADER["email"])
+    assert button.is_disabled(), "an email without a name must not be enough"
+    for key, value in HEADER.items():
+        ui.page.fill(f"#generate-pdf-{key}", value)
+    assert button.is_enabled()
+    assert ui.writes_after("start") == [], "typing must not send anything"
+
+    # Generate: one request with the six values, and a download named by the server.
+    ui.step("typed")
+    with ui.page.expect_download() as waiting:
+        with ui.page.expect_request(lambda request: request.method == "POST" and request.url.endswith("/api/tailored-resumes/pdf")) as sent:
+            button.click()
+    download = waiting.value
+    ui.page.locator('[data-role="pdf-saved"]').wait_for()
+    ui.step("saved")
+    assert ui.writes_after("typed") == ["POST /api/tailored-resumes/pdf"]
+    body = sent.value.post_data_json
+    assert body["header"] == HEADER and body["job_identity"] == demo.hero_job and body["profile_id"] == demo.hero_profile_id
+    name = download.suggested_filename
+    assert name.endswith(".pdf") and name.startswith("tallgrass-health-"), name
+    assert "zephyrine" not in name.lower() and "quillfeather" not in name.lower(), "the file is named for the job, never for the user"
+    assert (ui.page.locator('[data-role="pdf-saved"]').text_content() or "").strip() == f"Saved as {name}."
+    pdf = Path(download.path()).read_bytes()
+    assert pdf.startswith(b"%PDF-") and len(pdf) > 2000
+    from pypdf import PdfReader
+
+    text = "\n".join(page.extract_text() for page in PdfReader(io.BytesIO(pdf)).pages)
+    assert HEADER["name"].upper() in text.upper() and HEADER["email"] in text, "the PDF's header does not carry what was typed"  # the name prints in capitals
+    ui.cpu_budget("Generate PDF (small home)", PDF_CPU_SECONDS, "typed", "saved")
+    ui.wall_budget("Generate PDF (small home)", PDF_WALL_SECONDS, "typed", "saved")
+
+    # Nothing stored in the browser.
+    kept = ui.page.evaluate("() => JSON.stringify([Object.entries(window.localStorage), Object.entries(window.sessionStorage), document.cookie, window.location.href])")
+    cookies = str(ui.page.context.cookies())
+    for value in HEADER.values():
+        assert value not in kept and value not in cookies, f"the browser kept {value!r}"
+
+    # Nothing stored on the server: not one file of its home holds a typed value, and the resumes folder is as it was.
+    needles = [value.encode("utf-8") for value in HEADER.values()]
+    assert files_holding(scout_server.home, needles) == [], "the server's home holds what was typed into the PDF form"
+    assert (sorted(path.name for path in folder.iterdir()) if folder.is_dir() else []) == files_before
+
+    # And the form forgets: after a reload the six fields are empty again.
+    ui.reload()
+    form.wait_for()
+    assert form.locator("input").evaluate_all("(fields) => fields.map((field) => field.value)") == [""] * 6
+
+    ui.assert_clean()  # zero console errors, page errors, HTTP >= 400, failed requests

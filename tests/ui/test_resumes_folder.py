@@ -3,9 +3,8 @@
 The session's HOME is a temporary directory and the GigAI home is a folder inside it that is not ``~/.gigai``, so
 its default resumes folder is ``<home>/resumes`` (only the default home uses ``~/Documents/GigAI/resumes``),
 printed as the user types it (``~/.../resumes``): the real Documents folder is never involved. The chosen folder
-is a temporary one too, and the test ends on the default again, so the shared home is left as it was found. The job page's own line (the job's file in the folder) needs a
-tailored resume, which the demo home has none of; it is covered under node in
-``tests/api_e2e/test_ui_resumes_folder_model.py`` and over HTTP in ``test_edited_tailored_resume_journey.py``.
+is a temporary one too, and the test ends on the default again, so the shared home is left as it was found. The job
+page's own line (the job's file in the folder) is ``test_tailored_resume_panel.py``, on the hero job's tailored resume.
 
 Pinned: the panel is there with the default folder and no "Use the default" button; Save is disabled until
 another folder is typed; saving shows the chosen folder (``data-source="setting"``) and the folder exists, in

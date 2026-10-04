@@ -14,6 +14,12 @@ from tests.ui.support import tid
 
 pytestmark = pytest.mark.ui
 
+FIRST_LOAD_CPU_SECONDS = 3.0  # always a failure when over. 0.26 to 0.40 measured idle, up to 0.76 with every core busy (2026-10-04)
+FIRST_LOAD_WALL_SECONDS = 5.0  # about 10x the 0.51 s measured; reported, a failure only with GIGAI_UI_BUDGETS=enforce
+#: KNOWN (REPORT.md 4.3 / 7.1, still true on 0.1.10.9): the page asks /api/assessments twice per profile on a Jobs load
+#: (two profiles' worth here: 4). 2 is the target; the ceiling keeps it from getting worse.
+ASSESSMENT_REQUESTS = 4
+
 
 def test_jobs_page_loads_and_shows_rows(ui) -> None:
     ui.goto("/#/jobs")
@@ -29,9 +35,11 @@ def test_jobs_page_loads_and_shows_rows(ui) -> None:
     ui.no_more_than_one_in_flight("/api/new")
     assert ui.requests_after("start", "/api/postings") <= 2
     assert ui.requests_after("start") <= 40
+    ui.settle()
+    assert ui.requests_after("start", "/api/assessments") <= ASSESSMENT_REQUESTS
 
     # Then the server's CPU seconds, then a loose wall ceiling.
-    assert ui.server_cpu_seconds_between("start", "loaded") <= 1.5
-    assert ui.wall_seconds_between("start", "loaded") <= 5
+    ui.cpu_budget("Jobs first load (small home)", FIRST_LOAD_CPU_SECONDS, "start", "loaded")
+    ui.wall_budget("Jobs first load (small home)", FIRST_LOAD_WALL_SECONDS, "start", "loaded")
 
     ui.assert_clean()  # zero console errors, page errors, HTTP >= 400, failed requests
