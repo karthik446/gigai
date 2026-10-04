@@ -44,7 +44,7 @@ ACTOR_HEADER = "X-GigAI-Actor"
 
 _LIST_KEYS = frozenset({"q", "tag"})
 _MATCH_KEYS = frozenset({"question_id", "question"})
-_ANSWER_PUT_KEYS = frozenset({"answer", "question", "tag", "revision", "actor"})
+_ANSWER_PUT_KEYS = frozenset({"answer", "question", "tag", "revision", "actor", "source"})
 _DELETE_KEYS = frozenset({"revision", "actor"})
 _STORY_POST_KEYS = frozenset({"story_id", "actor", *stories.STORY_FIELDS})
 _STORY_PUT_KEYS = frozenset({"revision", "actor", *stories.STORY_FIELDS})
@@ -198,11 +198,22 @@ class StoryBankRoutesMixin:
         return body
 
     def _story_bank_actor(self, given: object) -> str:
-        """``actor`` from the body/query, else the ``X-GigAI-Actor`` header, else ``operator``."""
+        """``actor`` from the body/query, else the ``X-GigAI-Actor`` header, else who the request is from.
+
+        0110-10-04: a write that names no writer is the operator's only when
+        it is the Scout UI's: a browser page sends ``Origin`` on every write,
+        and ``_check_csrf`` has already refused any origin but this server's
+        own. Everything else on loopback (curl, a script, the user's agent) is
+        recorded as ``agent``: an answer an agent wrote is never stored as the
+        user's own because the agent did not say who it was.
+        """
 
         if given is not None and not isinstance(given, str):
             raise story_bank.StoryBankError("wrong_type", "actor must be a string")
-        return story_bank.actor_value(given if isinstance(given, str) and given.strip() else self.headers.get(ACTOR_HEADER))
+        said = given if isinstance(given, str) and given.strip() else self.headers.get(ACTOR_HEADER)
+        if said is None or not str(said).strip():
+            return story_bank.ACTOR_OPERATOR if self.headers.get("Origin") else story_bank.ACTOR_AGENT
+        return story_bank.actor_value(said)
 
     # --- answers ---------------------------------------------------------------------------
 
@@ -246,7 +257,7 @@ class StoryBankRoutesMixin:
         if paths is None or body is None:
             return
         home_root, target = paths
-        for key in ("answer", "question", "tag"):
+        for key in ("answer", "question", "tag", "source"):
             if body.get(key) is not None and not isinstance(body[key], str):
                 self._error(HTTPStatus.UNPROCESSABLE_ENTITY, "wrong_type", f"{key} must be a string")
                 return
@@ -254,6 +265,7 @@ class StoryBankRoutesMixin:
             entry = story_bank.edit_answer(
                 home_root=home_root, target=target, question_id=question_id,
                 answer=body.get("answer"), question=body.get("question"), tag=body.get("tag"),  # type: ignore[arg-type]
+                source=body.get("source"),  # type: ignore[arg-type]
                 actor=self._story_bank_actor(body.get("actor")),
                 expected_revision=story_bank.revision_value(body.get("revision"), required=True),
             )

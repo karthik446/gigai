@@ -38,7 +38,7 @@ def test_an_answer_has_the_contract_shape(fx: ProfileFixtureGig) -> None:
     )
 
     body = saved.to_json()
-    assert set(body) == {"question_id", "question", "answer", "tag", "jobs", "written_by", "created_at", "updated_at", "revision", "history"}
+    assert set(body) == {"question_id", "question", "answer", "tag", "jobs", "written_by", "source", "created_at", "updated_at", "revision", "history"}
     assert body["question_id"] == "cloud:gcp" and body["question"] == "Do you have GCP experience?" and body["answer"] == _GCP
     assert body["tag"] == "cloud platforms" and body["written_by"] == "agent" and body["revision"] == 1
     assert body["created_at"] and body["created_at"] == body["updated_at"]

@@ -1217,7 +1217,8 @@ def assess_command(
 @click.option("--question", "question_text", help="The question's own words, kept with the answer.")
 @click.option("--tag", "tag", help="Your own tag; default: a tag from the question.")
 @click.option("--revision", "revision", type=click.IntRange(min=0), help="The revision of the answer you read; the write is refused when it changed since.")
-@click.option("--actor", "actor", type=click.Choice(["operator", "agent"]), default="operator", show_default=True, help="Who is writing: recorded on the answer.")
+@click.option("--as", "--actor", "actor", type=click.Choice(["operator", "agent"]), default="operator", show_default=True, help="Who is writing: recorded on the answer. An agent passes --as agent.")
+@click.option("--source", "source", help="Where the answer came from, in free text (e.g. \"from the user's repo, at the user's request\").")
 @click.option("--target", "target_value", type=click.Path(path_type=Path, file_okay=False))
 @click.option("--home", "home_value", type=click.Path(path_type=Path, file_okay=False))
 @click.option("--json", "as_json", is_flag=True)
@@ -1230,6 +1231,7 @@ def answer_command(
     tag: str | None,
     revision: int | None,
     actor: str,
+    source: str | None,
     target_value: Path | None,
     home_value: Path | None,
     as_json: bool,
@@ -1242,7 +1244,9 @@ def answer_command(
     assess`` call, for a matching question_id (the normalizer makes a
     drifted id from a different call still match the same real-world fact)
     and, through the STORY BANK lines in the prompt, for the same fact worded
-    differently. An answer that holds contact details is refused. Pass
+    differently. An answer that holds contact details is refused. --as
+    records who writes (an agent passes --as agent) and --source, in free
+    text, where the answer came from. Pass
     --reassess JOB_URL_OR_ID to re-run the whole assessment for that job
     immediately, with this answer applied. `gigai scout answers save` is the
     same write without the re-assessment.
@@ -1293,7 +1297,7 @@ def answer_command(
             job = {"job_identity": previous.job.job_identity, "title": previous.job.title, "company": previous.job.company, "url": previous.job.source_url}
         entry = story_bank.save_answer(
             home_root=home_root, target=target, question_id=question_id, answer=answer,
-            question=question_text, tag=tag, job=job, actor=actor, expected_revision=revision,
+            question=question_text, tag=tag, job=job, actor=actor, expected_revision=revision, source=source,
         )
     except (PrivateRecordError, story_bank.StoryBankError) as exc:
         _story_fail(exc, as_json=as_json, fallback="answer_invalid")
@@ -1352,8 +1356,8 @@ _BANK_OPTIONS = (
     click.option("--json", "as_json", is_flag=True),
 )
 _BANK_ACTOR = click.option(
-    "--actor", "actor", type=click.Choice(["operator", "agent"]), default="operator", show_default=True,
-    help="Who is writing: recorded on the answer or story.",
+    "--as", "--actor", "actor", type=click.Choice(["operator", "agent"]), default="operator", show_default=True,
+    help="Who is writing: recorded on the answer or story. An agent passes --as agent.",
 )
 _BANK_REVISION = click.option(
     "--revision", "revision", type=click.IntRange(min=0),
@@ -1427,7 +1431,7 @@ def answers_group() -> None:
 
     Local and model-free. Answers belong to the user, not to a profile.
     Every write runs the contact-data check, names the revision it read, and
-    --actor records who wrote (operator, or an agent working alongside).
+    --as records who wrote (operator, or an agent working alongside).
     """
 
 
@@ -1491,6 +1495,8 @@ def answers_show_command(question_id: str, target_value: Path | None, home_value
         click.echo(f"  Question: {entry.question}")
     click.echo(f"  Answer: {entry.answer}")
     click.echo(f"  Written by {entry.written_by}, updated {entry.updated_at or 'unknown'} (revision {entry.revision}).")
+    if entry.source:
+        click.echo(f"  Source: {entry.source}")
     _job_lines([job.to_json() for job in entry.jobs], home_root)
 
 
@@ -1500,18 +1506,20 @@ def answers_show_command(question_id: str, target_value: Path | None, home_value
 @click.option("--answer-file", "answer_file", help="The answer FILE (or - for stdin).")
 @click.option("--question", "question", help="The question's own words.")
 @click.option("--tag", "tag", help="Your own tag; an empty value puts the automatic tag back.")
+@click.option("--source", "source", help="Where the answer came from, in free text (e.g. \"from the user's repo, at the user's request\"); an empty value removes it.")
 @_BANK_REVISION
 @_BANK_ACTOR
 @_bank_options
 def answers_save_command(
-    question_id: str, answer_text: str | None, answer_file: str | None, question: str | None, tag: str | None, revision: int | None,
-    actor: str, target_value: Path | None, home_value: Path | None, as_json: bool,
+    question_id: str, answer_text: str | None, answer_file: str | None, question: str | None, tag: str | None, source: str | None,
+    revision: int | None, actor: str, target_value: Path | None, home_value: Path | None, as_json: bool,
 ) -> None:
-    """Save an answer: a new one, or a change to its text, question words and/or tag.
+    """Save an answer: a new one, or a change to its text, question words, tag and/or source.
 
     A new QUESTION_ID needs the answer. An existing one takes whatever is
     given; pass --revision (the revision you read) so a concurrent write is
-    refused instead of overwritten.
+    refused instead of overwritten. --as records who writes (an agent passes
+    --as agent); --source says, in free text, where the answer came from.
     """
 
     from ..private_records import PrivateRecordError
@@ -1534,12 +1542,12 @@ def answers_save_command(
                 raise story_bank.StoryBankError("invalid_value", "a new answer needs --answer-text or --answer-file")
             entry = story_bank.save_answer(
                 home_root=home_root, target=target, question_id=question_id, answer=answer, question=question,
-                tag=tag, actor=actor, expected_revision=revision,
+                tag=tag, actor=actor, expected_revision=revision, source=source,
             )
         else:
             entry = story_bank.edit_answer(
                 home_root=home_root, target=target, question_id=question_id, answer=answer, question=question,
-                tag=tag, actor=actor, expected_revision=revision,
+                tag=tag, actor=actor, expected_revision=revision, source=source,
             )
     except (story_bank.StoryBankError, PrivateRecordError) as exc:
         _story_fail(exc, as_json=as_json)

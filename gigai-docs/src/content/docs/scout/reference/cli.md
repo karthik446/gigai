@@ -22,10 +22,10 @@ Example:
 
 ```sh
 gigai scout answer q-visa --answer-text "I need H-1B sponsorship"
-gigai scout answer cloud:gcp --question "Do you have GCP experience?" --answer-text "Yes, 4 years, GKE + BigQuery" --actor agent --json
+gigai scout answer cloud:gcp --question "Do you have GCP experience?" --answer-text "Yes, 4 years, GKE + BigQuery" --as agent --source "from the user's repo infra-charts, at the user's request" --json
 ```
 
-The answer is the user's (0.1.10.7: not one profile's) and is reused by every later assessment, also when a posting words the question differently. --question keeps the question's own words with it; --actor agent records that an agent wrote it; --revision (the revision you read) refuses the write with revision_conflict when the answer changed since. An answer holding an email, phone, link or street address is refused (personal_info_refused). --reassess JOB_URL_OR_ID re-runs the assessment with a model (external=model). The same body as POST /api/answers. 0.1.10.7: a saved answer queues the pipeline (tailored resume, assessment against it, Scout ATS score, Scout label) for every job of an active profile whose assessment left that question open: at most pipeline.auto_jobs_per_trigger (10) run, the rest wait for an approval (gigai scout pipeline approvals). --json then carries pipeline {trigger, state, enqueued, awaiting_approval, unchanged, skipped, approval}: ids, codes and counts. The Scout server runs the queued jobs; without it, gigai scout new --process does.
+The answer is the user's (0.1.10.7: not one profile's) and is reused by every later assessment, also when a posting words the question differently. --question keeps the question's own words with it; --as agent (also --actor agent) records that an agent wrote it, and --source, free text, where the answer came from; --revision (the revision you read) refuses the write with revision_conflict when the answer changed since. An answer holding an email, phone, link or street address is refused (personal_info_refused). --reassess JOB_URL_OR_ID re-runs the assessment with a model (external=model). The same body as POST /api/answers. 0.1.10.7: a saved answer queues the pipeline (tailored resume, assessment against it, Scout ATS score, Scout label) for every job of an active profile whose assessment left that question open: at most pipeline.auto_jobs_per_trigger (10) run, the rest wait for an approval (gigai scout pipeline approvals). --json then carries pipeline {trigger, state, enqueued, awaiting_approval, unchanged, skipped, approval}: ids, codes and counts. The Scout server runs the queued jobs; without it, gigai scout new --process does.
 
 ## `gigai scout answers delete`
 
@@ -58,7 +58,7 @@ gigai scout answers list --json
 gigai scout answers list --search kubernetes --tag technical --json
 ```
 
-Answers belong to the user, not to a profile. Each answer carries question_id, question, answer, tag, jobs (kind answered | confirmed | reused), written_by (operator | agent), created_at, updated_at, revision and history. The same body as GET /api/answers.
+Answers belong to the user, not to a profile. Each answer carries question_id, question, answer, tag, jobs (kind answered | confirmed | reused), written_by (operator | agent), source (free text: where the answer came from, or null), created_at, updated_at, revision and history. The same body as GET /api/answers.
 
 ## `gigai scout answers migrate`
 
@@ -78,7 +78,7 @@ Every read and write does this by itself the first time; this command does it no
 
 ## `gigai scout answers save`
 
-Save an answer: a new one, or a change to its text, question words and/or tag.
+Save an answer: a new one, or a change to its text, question words, tag and/or source.
 
 `gigai scout answers save [OPTIONS] QUESTION_ID`
 
@@ -87,12 +87,13 @@ effect: `write` · external: `none` · output: Human-readable text; --json emits
 Example:
 
 ```sh
-gigai scout answers save cloud:gcp --question "Do you have GCP experience?" --answer-text "Yes, 4 years, GKE + BigQuery" --actor agent --json
-gigai scout answers save cloud:gcp --answer-file answer.md --revision 1 --actor agent --json
+gigai scout answers save cloud:gcp --question "Do you have GCP experience?" --answer-text "Yes, 4 years, GKE + BigQuery" --as agent --json
+gigai scout answers save tooling:helm --answer-text "Yes, Helm charts for six services" --as agent --source "from the user's repo infra-charts, at the user's request" --json
+gigai scout answers save cloud:gcp --answer-file answer.md --revision 1 --as agent --json
 gigai scout answers save cloud:gcp --tag "cloud platforms" --revision 2
 ```
 
-Local, no model call. A new QUESTION_ID needs the answer; an existing one takes whatever is given. Every write bumps the answer's revision and records who wrote it (--actor). Pass --revision (the revision you read with show --json) to be safe against a concurrent write: when the answer changed since, the save is refused with revision_conflict and --json carries the current answer. An empty --tag puts the automatic tag back. Text holding an email, phone, link or street address is refused (personal_info_refused). The same answer object as POST /api/answers and PUT /api/answers/{question_id}. 0.1.10.7: a saved answer (not a tag alone) queues the pipeline (tailored resume, assessment against it, Scout ATS score, Scout label) for every job of an active profile whose assessment left that question open: at most pipeline.auto_jobs_per_trigger (10) run, the rest wait for an approval (gigai scout pipeline approvals). --json then carries pipeline {trigger, state, enqueued, awaiting_approval, unchanged, skipped, approval}: ids, codes and counts. The Scout server runs the queued jobs; without it, gigai scout new --process does.
+Local, no model call. A new QUESTION_ID needs the answer; an existing one takes whatever is given. Every write bumps the answer's revision and records who wrote it (--as operator | agent; --actor is the same option; an agent passes --as agent). --source is free text, where the answer came from ("from the user's repo, at the user's request"): a new answer text without it drops the stored one, an empty value removes it. Pass --revision (the revision you read with show --json) to be safe against a concurrent write: when the answer changed since, the save is refused with revision_conflict and --json carries the current answer. An empty --tag puts the automatic tag back. Text holding an email, phone, link or street address is refused (personal_info_refused). The same answer object as POST /api/answers and PUT /api/answers/{question_id}. 0.1.10.7: a saved answer (not a tag alone) queues the pipeline (tailored resume, assessment against it, Scout ATS score, Scout label) for every job of an active profile whose assessment left that question open: at most pipeline.auto_jobs_per_trigger (10) run, the rest wait for an approval (gigai scout pipeline approvals). --json then carries pipeline {trigger, state, enqueued, awaiting_approval, unchanged, skipped, approval}: ids, codes and counts. The Scout server runs the queued jobs; without it, gigai scout new --process does.
 
 ## `gigai scout answers show`
 

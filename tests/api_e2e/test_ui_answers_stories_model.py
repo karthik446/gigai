@@ -50,7 +50,8 @@ GCP = {
         {"job_identity": "https://jobs.example.test/b", "title": "", "company": "", "url": None, "kind": "reused", "at": "2026-10-02T09:00:00Z"},
     ],
 }
-OLD = {**GCP, "question_id": "years:python", "question": "years:python", "answer": "Six.", "tag": "experience-level", "written_by": "operator", "jobs": [], "history": [], "revision": 0}
+GCP["source"] = "from the user's repo infra-charts, at the user's request"
+OLD = {**GCP, "source": None, "question_id": "years:python", "question": "years:python", "answer": "Six.", "tag": "experience-level", "written_by": "operator", "jobs": [], "history": [], "revision": 0}
 STORY = {
     "story_id": "story:60_acme_ci_cut_time", "title": "Cut CI time 60% at Acme", "company": "Acme", "role": "Staff Engineer", "period": "2023",
     "raw": "Our builds took forty minutes.", "narrative": {"result": "Build time fell 60 percent.", "situation": "Builds took forty minutes."},
@@ -126,7 +127,10 @@ def test_the_page_lists_narrows_shows_jobs_and_deletes_and_nothing_else() -> Non
     assert out["allAnswers"] == ["cloud:gcp", "years:python"] and out["technicalAnswers"] == ["cloud:gcp"]
     assert out["technicalStories"] == ["story:60_acme_ci_cut_time"] and out["ciStories"] == ["story:60_acme_ci_cut_time"]
     assert out["titles"] == ["Do you have GCP experience?", "years:python"], "only an id known: the id is shown"
-    assert out["written"] == ["Written by your agent · updated 2026-10-02", "Written by you · updated 2026-10-02", "Written by your agent · updated 2026-10-02"]
+    assert out["written"] == [
+        "Written by your agent · source: from the user's repo infra-charts, at the user's request · updated 2026-10-02",
+        "Written by you · updated 2026-10-02", "Written by your agent · updated 2026-10-02",
+    ]
     assert out["earlier"] == [{
         "key": "2026-09-20T10:00:00Z:Two years on GCP.", "at": "2026-09-20",
         "note": "earlier answer from profile second, replaced when answers became shared", "answer": "Two years on GCP.",

@@ -21,6 +21,7 @@ is one small local file:
          "tag": "<tag>" | null,
          "created_at": "...", "updated_at": "...",
          "revision": 3, "written_by": "operator" | "agent",
+         "source": "<free text: where the answer came from>" | absent,
          "history": [{"at", "by", "action", "answer"?}],     # newest last, capped
          "edited": true|false, "confirmed_from": "<question_id>" | null,
          "jobs": [{"job_identity", "title", "company", "url", "kind", "at"}],
@@ -32,12 +33,17 @@ A row with no entry (written by an older command) is listed with revision 0.
 
 AN ANSWER, as every surface returns it (``BankEntry.to_json``): ``question_id``,
 ``question``, ``answer``, ``tag``, ``jobs`` (the postings that asked or
-reused it), ``written_by``, ``created_at``, ``updated_at``, ``revision``, and
-``history``.
+reused it), ``written_by``, ``source``, ``created_at``, ``updated_at``,
+``revision``, and ``history``.
 
-TWO WRITERS.  The user's agent (API, CLI ``--actor agent``) and the user
+TWO WRITERS.  The user's agent (API, CLI ``--as agent``) and the user
 write the same answers. Every write bumps the answer's ``revision`` and
-records who wrote it. An edit or a delete names the ``revision`` it read
+records who wrote it. 0110-10-04: a write that does not say who it is, is
+the operator's on the CLI and in the Scout UI, and the AGENT's on the
+loopback API outside the UI (``api/story_bank.py``); ``source`` is free text
+the writer may add, where the answer came from ("from the user's repo, at
+the user's request"). It describes the answer's text: a new text without a
+source lets it go. It is never sent to a model. An edit or a delete names the ``revision`` it read
 (``expected_revision``); when the answer has changed since, the write is
 refused with ``revision_conflict`` and the current answer
 (``StoryBankError.entry``), so neither silently overwrites the other.
@@ -107,6 +113,7 @@ _MAX_SUMMARY_QUESTION_CHARS = 160
 #: The question's own words, as kept with the answer (the record's ``prompt`` bound is 4,096).
 MAX_QUESTION_CHARS = 700
 MAX_TAG_CHARS = 40
+MAX_SOURCE_CHARS = 300
 _MAX_JOBS = 50
 _MAX_HISTORY = 20
 
@@ -151,6 +158,25 @@ def actor_value(actor: str | None) -> str:
     if clean not in ACTORS:
         raise StoryBankError("invalid_value", "actor must be operator or agent")
     return clean
+
+
+def clean_source(source: object) -> str | None:
+    """An answer's ``source`` as it is stored: one line of free text, or ``None`` for none.
+
+    Free text, never an enum: where the answer came from, in the writer's
+    words. Checked for contact shapes like every other text of an answer.
+    """
+
+    if source is None:
+        return None
+    if not isinstance(source, str):
+        raise StoryBankError("invalid_value", "source must be a string")
+    clean = " ".join(source.split())
+    if len(clean) > MAX_SOURCE_CHARS:
+        raise StoryBankError("invalid_value", f"source must be at most {MAX_SOURCE_CHARS} characters")
+    if clean:
+        refuse_personal_info(clean, what="this source")
+    return clean or None
 
 
 def revision_value(value: object, *, required: bool = False) -> int | None:
@@ -460,6 +486,8 @@ class BankEntry:
     revision: int = 0
     #: Who wrote it last: ``operator`` or ``agent``.
     written_by: str = ACTOR_OPERATOR
+    #: Where the answer came from, in the writer's own words (free text); ``None`` when the writer said nothing.
+    source: str | None = None
     #: The last writes, oldest first: ``{"at", "by", "action"}``; a text superseded at migration also carries ``answer``.
     history: tuple[Mapping[str, str], ...] = ()
     edited: bool = False
@@ -475,6 +503,7 @@ class BankEntry:
             "tag": self.tag,
             "jobs": [job.to_json() for job in self.jobs],
             "written_by": self.written_by,
+            "source": self.source,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
             "revision": self.revision,
@@ -512,6 +541,7 @@ def _entry(row: PriorAnswer, meta: Mapping[str, object], events: Iterable[_Answe
         revision_id=row.revision_id,
         revision=meta["revision"] if type(meta.get("revision")) is int else 0,  # type: ignore[arg-type]
         written_by=meta["written_by"] if meta.get("written_by") in ACTORS else ACTOR_OPERATOR,  # type: ignore[arg-type]
+        source=meta["source"] if isinstance(meta.get("source"), str) and meta["source"] else None,  # type: ignore[arg-type]
         history=stored_history(meta.get("history")),
         edited=bool(meta.get("edited")),
         confirmed_from=confirmed if isinstance(confirmed, str) else None,
@@ -838,8 +868,13 @@ def save_answer(
     tag: str | None = None,
     action: str | None = None,
     expected_revision: int | None = None,
+    source: str | None = None,
 ) -> BankEntry:
     """Save one answer: the one write path for every surface. The answer as it now is.
+
+    ``source`` (0110-10-04): where the answer came from, free text. It is
+    about the answer's text, so a write that changes the text and names no
+    source drops the one stored.
 
     The text goes through ``experience_answers.record_answer`` (a new
     revision of the record that holds this answer, else an append); the
@@ -853,6 +888,7 @@ def save_answer(
     """
 
     writer = actor_value(actor)
+    chosen_source = clean_source(source)
     chosen_tag = None if tag is None or not tag.strip() else clean_tag(tag)
     refuse_personal_info(answer, what="this answer")
     clean_question = _clean_question(question)
@@ -883,6 +919,10 @@ def save_answer(
             if current is None:
                 meta["created_at"] = at
             stamp(meta, at=at, actor=writer, action=action or ("answered" if current is None else "answer changed"))
+            if chosen_source is not None:
+                meta["source"] = chosen_source
+            elif current is None or current.answer.strip() != answer.strip():
+                meta.pop("source", None)  # another text: the stored source was about the one before
             if chosen_tag is not None:
                 meta["tag"] = chosen_tag
             if edited:
@@ -906,18 +946,20 @@ def edit_answer(
     tag: str | None = None,
     actor: str | None = None,
     expected_revision: int | None = None,
+    source: str | None = None,
 ) -> BankEntry:
-    """Change an answer's text, question words and/or tag; the updated answer.
+    """Change an answer's text, question words, tag and/or source; the updated answer.
 
     A new answer or question is a new revision through the answer path; a tag
-    is in the answers file only (``""`` puts the automatic tag back).
-    ``expected_revision``: the ``revision`` the caller read;
-    ``revision_conflict`` when it is stale.
+    and a source are in the answers file only (``""`` puts the automatic tag
+    back, and removes the source). ``expected_revision``: the ``revision``
+    the caller read; ``revision_conflict`` when it is stale.
     """
 
-    if answer is None and question is None and tag is None:
-        raise StoryBankError("invalid_value", "give at least one of answer, question or tag")
+    if answer is None and question is None and tag is None and source is None:
+        raise StoryBankError("invalid_value", "give at least one of answer, question, tag or source")
     writer = actor_value(actor)
+    chosen_source = clean_source(source)
     chosen_tag = None if tag is None else ("" if not tag.strip() else clean_tag(tag))
     if question is not None and not _clean_question(question):
         raise StoryBankError("invalid_value", "question must not be empty")
@@ -931,18 +973,27 @@ def edit_answer(
             save_answer(
                 home_root=home_root, target=target, question_id=normalized,
                 answer=current.answer if answer is None else answer,
-                question=question, edited=True, actor=writer,
+                question=question, edited=True, actor=writer, source=chosen_source,
                 action="answer changed" if answer is not None else "question changed",
             )
-        if chosen_tag is not None:
+        if chosen_tag is not None or (source is not None and answer is None and question is None):
             gig = _gig(Path(home_root), Path(target))
             with _LOCK:
                 data = _load(gig)
                 meta = _metas(data).setdefault(normalized, {})
-                meta["tag"] = chosen_tag or None
+                changed: list[str] = []
+                if chosen_tag is not None:
+                    meta["tag"] = chosen_tag or None
+                    changed.append("tag")
+                if source is not None and answer is None and question is None:
+                    if chosen_source is None:
+                        meta.pop("source", None)
+                    else:
+                        meta["source"] = chosen_source
+                    changed.append("source")
                 if answer is None and question is None:
                     meta.setdefault("record_id", current.record_id)
-                    stamp(meta, at=_now(), actor=writer, action="tag changed")
+                    stamp(meta, at=_now(), actor=writer, action=" and ".join(changed) + " changed")
                 _write_file(gig.home_root, gig.target, data)
         updated = get_answer(home_root=home_root, target=target, question_id=normalized)
     assert updated is not None
@@ -1525,6 +1576,7 @@ __all__ = [
     "ACTOR_AGENT",
     "ACTOR_OPERATOR",
     "MAX_PROMPT_SUMMARIES",
+    "MAX_SOURCE_CHARS",
     "MAX_SUMMARY_CHARS",
     "NEAR_MATCH_THRESHOLD",
     "SCHEMA_VERSION",
@@ -1537,6 +1589,7 @@ __all__ = [
     "BankSummary",
     "StoryBankError",
     "actor_value",
+    "clean_source",
     "answers_for_reuse",
     "assess_bank",
     "attach_suggestions",
