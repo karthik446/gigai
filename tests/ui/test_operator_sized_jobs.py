@@ -24,9 +24,10 @@ a minute, so one red run should say everything that is wrong. Only a step that c
 row at all) stops the flow early.
 
 The budgets follow the suite's order (structure, server CPU seconds, wall-clock last and loose);
-the numbers they come from are beside them (MEASURED). The wall-clock ones are reported, and fail
-the test only with GIGAI_UI_BUDGETS=enforce (tests/ui/README.md). On 0.1.10.8
-(`GIGAI_UI_SERVER_ROOT=<a v0.1.10.8 checkout>`) the same test is red: see tests/ui/README.md.
+the numbers they come from are beside them (MEASURED). The timing ceilings (wall-clock, server CPU,
+server memory) are reported, and fail the test only with GIGAI_UI_BUDGETS=enforce
+(tests/ui/README.md). On 0.1.10.8 (`GIGAI_UI_SERVER_ROOT=<a v0.1.10.8 checkout>`) the same test is
+red on its structural checks, and on all of them with `enforce`: see tests/ui/README.md.
 """
 
 from __future__ import annotations
@@ -131,7 +132,7 @@ def test_jobs_load_open_a_job_and_back_on_the_operator_sized_home(operator_ui, o
     failures: list[str] = []
     numbers: dict[str, object] = {
         "postings": server.built.postings, "companies": server.built.companies, "profiles": len(server.built.profiles),
-        "home_build_seconds": round(server.build_seconds, 1), "server_start_seconds": round(server.start_seconds, 2),
+        "home_build_seconds": round(server.build_seconds, 1), "home_prebuilt": server.prebuilt, "server_start_seconds": round(server.start_seconds, 2),
         "server_root": str(server.server_root) if server.server_root else None,
     }
 
@@ -145,7 +146,7 @@ def test_jobs_load_open_a_job_and_back_on_the_operator_sized_home(operator_ui, o
     def cpu(name: str, limit: float, first: str, last: str) -> None:
         try:
             ui.cpu_budget(f"{name} (operator-sized)", limit, first, last)
-        except AssertionError as error:
+        except AssertionError as error:  # only with GIGAI_UI_BUDGETS=enforce
             failures.append(str(error))
 
     def wall(name: str, limit: float, first: str, last: str) -> None:
@@ -237,7 +238,7 @@ def test_jobs_load_open_a_job_and_back_on_the_operator_sized_home(operator_ui, o
     numbers["server_peak_rss_mb"] = round(ui.peak_server_rss_mb())
     try:
         ui.memory_budget("the server's peak memory, cold load (operator-sized)", SERVER_RSS_MB)
-    except AssertionError as error:
+    except AssertionError as error:  # only with GIGAI_UI_BUDGETS=enforce
         failures.append(str(error))
     problems = ui.problems()
     check(not problems, f"{len(problems)} problem(s) in the browser: {problems[:5]}")  # zero console errors, page errors, HTTP >= 400

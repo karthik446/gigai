@@ -14,7 +14,7 @@ from tests.ui.support import tid
 
 pytestmark = pytest.mark.ui
 
-FIRST_LOAD_CPU_SECONDS = 3.0  # always a failure when over. 0.26 to 0.40 measured idle, up to 0.76 with every core busy (2026-10-04)
+FIRST_LOAD_CPU_SECONDS = 3.0  # reported, a failure only with GIGAI_UI_BUDGETS=enforce. 0.26 to 0.40 measured idle, up to 0.76 with every core busy (2026-10-04)
 FIRST_LOAD_WALL_SECONDS = 5.0  # about 10x the 0.51 s measured; reported, a failure only with GIGAI_UI_BUDGETS=enforce
 #: KNOWN (REPORT.md 4.3 / 7.1, still true on 0.1.10.9): the page asks /api/assessments twice per profile on a Jobs load
 #: (two profiles' worth here: 4). 2 is the target; the ceiling keeps it from getting worse.

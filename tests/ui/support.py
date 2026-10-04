@@ -13,10 +13,16 @@ The assertion order the suite follows (REPORT.md 5.4), cheapest to flake last:
 
 There is no retry anywhere, on purpose: a retry turns a wrong budget into a pass.
 
-What blocks (0.1.10.9, the first week of the suite): structure, console and HTTP problems, and the
-server CPU ceilings fail a test. A wall-clock ceiling (`Recorder.wall_budget`) is always measured
-and reported (`BudgetLog`: the terminal summary and `budgets.json`), and fails a test only when
-`GIGAI_UI_BUDGETS=enforce`. The server's memory ceiling (`memory_budget_of`) blocks, as CPU does.
+What blocks (0.1.10.9, the first week of the suite): structure, and console and HTTP problems, fail
+a test. Every timing ceiling (wall-clock `Recorder.wall_budget`, server CPU `cpu_budget`, server
+memory `memory_budget_of`) is always measured and reported (`BudgetLog`: the terminal summary and
+`budgets.json`), and fails a test only when `GIGAI_UI_BUDGETS=enforce`: none of them has been
+measured on a CI runner yet. `report` is the default, here and in CI.
+
+A wait that runs out of patience (Playwright's 20 s) gets a `timeout.txt` beside the other
+artifacts (`timeout_report`): what was in flight, the page's heartbeat (`Heartbeat`), whether the
+server still answered, the console and the server log, so a stalled browser and a slow server are
+told apart afterwards.
 """
 
 from __future__ import annotations
@@ -127,8 +133,10 @@ class Measured(float):
 
 # ---------------------------------------------------------------------------- budgets
 
-#: `GIGAI_UI_BUDGETS=enforce` makes a wall-clock ceiling a failure; anything else measures and reports it.
+#: The one switch. `report` (the default, also when unset): every timing ceiling (wall-clock, server CPU, server
+#: memory) is measured and reported, and none fails a test. `enforce`: a ceiling that is over fails its test.
 BUDGETS_ENV = "GIGAI_UI_BUDGETS"
+REPORT = "report"
 ENFORCE = "enforce"
 
 #: The user-facing wall-clock budgets (REPORT.md 5.4): a click answers in 2 s, a first load in 10 s. A flow's own
@@ -137,15 +145,26 @@ INTERACTIVE_WALL_SECONDS = 2.0
 FIRST_LOAD_WALL_SECONDS = 10.0
 
 
+def budgets_mode(environ: Mapping[str, str] | None = None) -> str:
+    """`report` or `enforce`. Any other value is refused: a misspelt `enforce` would quietly enforce nothing."""
+
+    raw = ((os.environ if environ is None else environ).get(BUDGETS_ENV) or "").strip().lower()
+    if raw in ("", REPORT):
+        return REPORT
+    if raw == ENFORCE:
+        return ENFORCE
+    raise ValueError(f"{BUDGETS_ENV}={raw!r}: use {REPORT!r} (the default) or {ENFORCE!r}")
+
+
 def budgets_enforced(environ: Mapping[str, str] | None = None) -> bool:
-    return ((os.environ if environ is None else environ).get(BUDGETS_ENV) or "").strip().lower() == ENFORCE
+    return budgets_mode(environ) == ENFORCE
 
 
 @dataclass(frozen=True)
 class BudgetLine:
     test: str
     name: str
-    kind: str  # "wall" (reported; blocks only when enforced), "cpu" (server CPU seconds; always blocks), "rss" (server memory; always blocks)
+    kind: str  # "wall" (wall-clock seconds), "cpu" (server CPU seconds), "rss" (server memory); each blocks only when enforced
     measured: float
     limit: float
     blocking: bool
@@ -162,7 +181,7 @@ class BudgetLine:
 
 
 class BudgetLog:
-    """Every timing ceiling a run measured, with what it measured: the report of the wall-clock budgets."""
+    """Every timing ceiling a run measured, with what it measured: the report of the budgets."""
 
     def __init__(self) -> None:
         self.lines: list[BudgetLine] = []
@@ -184,18 +203,24 @@ class BudgetLog:
         reported = [line for line in over if not line.blocking]
         tail = f"{len(self.lines)} ceilings measured, {len(over)} over"
         if reported:
-            tail += f" ({len(reported)} wall-clock, reported only: {BUDGETS_ENV}={ENFORCE} makes them failures)"
+            tail += f" ({len(reported)} reported only: {BUDGETS_ENV}={ENFORCE} makes them failures)"
         return [line.line() for line in self.lines] + [tail]
 
-    def to_json(self, *, enforced: bool) -> dict[str, object]:
-        return {
-            "wall_clock_enforced": enforced,
+    def to_json(self, *, enforced: bool, run: Mapping[str, object] | None = None) -> dict[str, object]:
+        """`budgets.json`. `run`: what the run itself took (seconds, home builds), for the CI job's summary."""
+
+        data: dict[str, object] = {
+            "mode": ENFORCE if enforced else REPORT,
+            "ceilings": len(self.lines),
             "over": len(self.over()),
             "budgets": [
                 {"test": line.test, "name": line.name, "kind": line.kind, "measured": round(line.measured, 3), "limit": line.limit, "unit": line.unit, "over": line.over, "blocking": line.blocking}
                 for line in self.lines
             ],
         }
+        if run:
+            data["run"] = dict(run)
+        return data
 
 
 # ---------------------------------------------------------------------------- request bookkeeping
@@ -370,6 +395,7 @@ class Sampler(threading.Thread):
         self.stop_flag = threading.Event()
         self.peak_rss_bytes = 0
         self.rows: list[str] = [self.HEADER]
+        self.points: list[tuple[float, float, int]] = []  # (page clock, server CPU seconds so far, RSS bytes)
 
     def sample(self) -> None:
         cpu, rss = self.probe_read()
@@ -378,6 +404,16 @@ class Sampler(threading.Thread):
         flying = self.network.in_flight(now)
         oldest = max((now - item.started for item in flying), default=0.0)
         self.rows.append(f"{now:.2f},{cpu:.2f},{rss / 1048576:.0f},{len(flying)},{oldest:.1f}")
+        self.points.append((now, cpu, rss))
+
+    def recent(self, seconds: float = 10.0) -> tuple[float, float, float]:
+        """Over the samples of the last `seconds`: (the span they cover in s, server CPU seconds used in it, RSS in MB at the end)."""
+
+        if not self.points:
+            return 0.0, 0.0, 0.0
+        last_at, last_cpu, last_rss = self.points[-1]
+        first_at, first_cpu, _rss = next(point for point in self.points if point[0] >= last_at - seconds)
+        return last_at - first_at, last_cpu - first_cpu, last_rss / 1048576
 
     def run(self) -> None:
         while not self.stop_flag.is_set():
@@ -500,19 +536,21 @@ class Recorder:
             raise AssertionError(f"wall-clock budget {name!r}: {seconds:.2f} s is over {limit} s" + (f" ({detail})" if detail else ""))
 
     def cpu_budget(self, name: str, limit: float, first: str, last: str = "now") -> Measured:
-        """A ceiling on the server's CPU seconds over a step: measured, reported, and always a failure when over."""
+        """A ceiling on the server's CPU seconds over a step: always measured and reported; a failure only when GIGAI_UI_BUDGETS=enforce."""
 
         value = self.server_cpu_seconds_between(first, last)
-        self.budgets.record(self.test, name, "cpu", value, limit, blocking=True)
-        if value > limit:
+        enforced = budgets_enforced()
+        self.budgets.record(self.test, name, "cpu", value, limit, blocking=enforced)
+        if value > limit and enforced:
             raise AssertionError(f"server CPU budget {name!r}: {float(value):.2f} s is over {limit} s ({first!r} -> {last!r}; {self._step_detail(first, last)})")
         return value
 
     def memory_budget_of(self, name: str, limit_mb: float, peak_mb: float) -> float:
-        """A ceiling on the server's peak resident memory, in MB: recorded, and always a failure when over."""
+        """A ceiling on the server's peak resident memory, in MB: always recorded; a failure only when GIGAI_UI_BUDGETS=enforce."""
 
-        self.budgets.record(self.test, name, "rss", peak_mb, limit_mb, blocking=True, unit="MB")
-        if peak_mb > limit_mb:
+        enforced = budgets_enforced()
+        self.budgets.record(self.test, name, "rss", peak_mb, limit_mb, blocking=enforced, unit="MB")
+        if peak_mb > limit_mb and enforced:
             raise AssertionError(f"server memory budget {name!r}: the peak was {peak_mb:.0f} MB, over {limit_mb:.0f} MB")
         return peak_mb
 
@@ -535,6 +573,194 @@ class Recorder:
         found = self.problems()
         if found:
             raise AssertionError(f"{len(found)} problem(s) in the browser:\n  " + "\n  ".join(found))
+
+
+# ---------------------------------------------------------------------------- a wait that ran out of patience
+
+#: What is asked right after a wait timed out. Nothing is asked of the PAGE: with tracing on (always, here) a
+#: Playwright call into a page whose script is stuck does not time out, it waits for the page (measured: a
+#: `wait_for_function` with a 1 s timeout came back after the page's 6 s busy loop). The page's state is read
+#: from its heartbeat instead, which needs no answer from it.
+PAGE_SCREENSHOT = "the page gives a screenshot"
+SERVER_HEALTH = "the server answers /api/health"
+
+#: The page's heartbeat: every half second its own timer tells the harness the time and how many frames it has
+#: drawn (one frame is asked for per beat). Beats that stop: the page's script is not running. Beats that go on
+#: with a frame count that stands still: the script runs and the browser does not draw.
+HEARTBEAT_SECONDS = 0.5
+HEARTBEAT_BINDING = "__gigaiBeat"
+#: A page that missed this many seconds of beats (or frames) is called silent in the report.
+STALE_SECONDS = 3.0
+#: Installed before the page's own scripts. `window.__gigaiHeartbeat` is the page's own count, for a test to wait on.
+HEARTBEAT_JS = """(() => {
+  if (window.top !== window) return;
+  const state = (window.__gigaiHeartbeat = {count: 0, frames: 0});
+  setInterval(() => {
+    state.count += 1;
+    requestAnimationFrame(() => { state.frames += 1; });
+    try { Promise.resolve(window.%s(Date.now(), state.frames)).catch(() => {}); } catch (error) { /* no binding yet */ }
+  }, %d);
+})()""" % (HEARTBEAT_BINDING, int(HEARTBEAT_SECONDS * 1000))
+
+_TIMEOUT_TEXT = re.compile(r"Timeout \d+ ?ms exceeded|\bTimeoutError\b")
+
+
+def is_timeout(error: BaseException | None) -> bool:
+    """A wait ran out of patience: a `TimeoutError` (Playwright's or the standard one), or a failure that names one.
+
+    The flows that collect their failed checks, and `wait_for_jobs_list`, raise an AssertionError that keeps
+    the timeout's type name or Playwright's "Timeout 20000ms exceeded" in its message.
+    """
+
+    seen: set[int] = set()
+    while error is not None and id(error) not in seen:
+        seen.add(id(error))
+        if any(base.__name__ == "TimeoutError" for base in type(error).__mro__) or _TIMEOUT_TEXT.search(str(error)):
+            return True
+        error = error.__cause__ or error.__context__
+    return False
+
+
+@dataclass(frozen=True)
+class Probe:
+    """One question asked right after a wait timed out, and whether it was answered in time."""
+
+    name: str
+    answered: bool
+    detail: str
+    side: str = "page"  # "page" or "server"
+
+    def line(self) -> str:
+        return f"{self.name}: {self.detail}"
+
+
+@dataclass(frozen=True)
+class Pulse:
+    """What the page's heartbeat says at one moment (seconds; None: nothing to go by)."""
+
+    beats: int  # beats in the window
+    script_silent: float | None  # since the last beat
+    frames_silent: float | None  # since the frame count last moved
+    longest_gap: float  # between two beats in the window (the moment itself closes the last gap)
+    gap_ended: float | None  # how long before the moment the longest gap ended
+
+    @property
+    def script_stalled(self) -> bool:
+        return self.script_silent is not None and self.script_silent > STALE_SECONDS
+
+    @property
+    def drawing_stalled(self) -> bool:
+        return not self.script_stalled and self.frames_silent is not None and self.frames_silent > STALE_SECONDS
+
+    def lines(self) -> list[str]:
+        if not self.beats:
+            return ["no beat was received (the page never ran its heartbeat, or the harness never heard it)"]
+        found = [f"{self.beats} beat(s) received; the last one {self.script_silent:.1f} s before the failure"]
+        found.append("no frame was counted" if self.frames_silent is None else f"the frame count last moved {self.frames_silent:.1f} s before the failure")
+        if self.longest_gap > STALE_SECONDS:
+            found.append(f"the longest silence was {self.longest_gap:.1f} s" + ("" if not self.gap_ended else f", ended {self.gap_ended:.1f} s before the failure"))
+        return found
+
+
+class Heartbeat:
+    """The beats one page sent (`HEARTBEAT_JS` through the `HEARTBEAT_BINDING` binding): its own clock and its frame count."""
+
+    def __init__(self, keep: int = 1200) -> None:
+        self.beats: list[tuple[float, int]] = []  # (the page's clock in epoch seconds, frames counted so far)
+        self.keep = keep
+
+    def beat(self, at_ms: float, frames: int) -> None:
+        self.beats.append((float(at_ms) / 1000.0, int(frames)))
+        del self.beats[: -self.keep]
+
+    def pulse(self, at: float, window: float = 60.0) -> Pulse:
+        """The heartbeat as of `at` (epoch seconds), over the `window` before it."""
+
+        beats = [beat for beat in self.beats if at - window <= beat[0] <= at]
+        if not beats:
+            return Pulse(0, None, None, 0.0, None)
+        moved_at: float | None = None
+        for (_before_at, before), (now_at, now) in zip(beats, beats[1:]):
+            if now != before:
+                moved_at = now_at
+        marks = [beat[0] for beat in beats] + [at]
+        gap, ended = max((later - earlier, later) for earlier, later in zip(marks, marks[1:]))
+        return Pulse(len(beats), at - beats[-1][0], None if moved_at is None else at - moved_at, gap, at - ended)
+
+
+def machine_load() -> str:
+    try:
+        one, five, fifteen = os.getloadavg()
+    except (AttributeError, OSError):  # no load average on this platform
+        return f"{os.cpu_count()} CPUs (no load average here)"
+    return f"load average {one:.1f}, {five:.1f}, {fifteen:.1f} on {os.cpu_count()} CPUs"
+
+
+def timeout_reading(open_requests: list[tuple[Seen, float]], probes: list[Probe], pulse: Pulse | None = None) -> str:
+    """One line: what the numbers point at. A guess, and said to be one; the lines under it are the evidence."""
+
+    silent_server = [probe.name for probe in probes if probe.side == "server" and not probe.answered]
+    # The heartbeat first: a slow server never stops it, and a page whose script is stopped cannot finish a
+    # request the server answered long ago (it stays "in flight" on the page).
+    held = f" ({len(open_requests)} request(s) still open on the page, which a stopped page cannot finish: the server log says whether they were answered)" if open_requests else ""
+    if pulse is not None and not pulse.beats:
+        return f"the page sent no heartbeat at all: its script never ran, or stopped within its first half second (the browser, not the server){held}."
+    if pulse is not None and pulse.script_stalled:
+        return f"the page's script had not run for {pulse.script_silent:.1f} s: the browser stalled, not the server{held}."
+    if open_requests:
+        oldest = max(age for _item, age in open_requests)
+        reading = f"the page was waiting for the server: {len(open_requests)} request(s) open, the oldest for {oldest:.1f} s"
+        return reading + (" (and the server did not answer when asked directly)." if silent_server else ".")
+    if silent_server:
+        return "nothing was in flight and the server did not answer when asked directly: the server is stuck or gone."
+    if pulse is not None and pulse.drawing_stalled:
+        return f"nothing was in flight, the page's script ran, and no frame was drawn for {pulse.frames_silent:.1f} s: the browser stopped drawing, not the server."
+    reading = "nothing was in flight and the page was alive: it waited for something the page never showed (a selector or a state)"
+    if pulse is not None and pulse.longest_gap > STALE_SECONDS:
+        reading += f"; the page had been silent for {pulse.longest_gap:.1f} s before"
+    return reading + "."
+
+
+def timeout_report(
+    *, recorder: Recorder, sampler: Sampler | None, server_log: Path | str | None, error: BaseException | str, probes: list[Probe],
+    pulse: Pulse | None = None, load: str | None = None, recent_seconds: float = 10.0, at: float | None = None,
+) -> str:
+    """`timeout.txt`: what was true when a wait ran out of patience (`at` on the page's clock; now, when not given).
+
+    Call it BEFORE the page is closed (closing ends the open requests). No retry follows: the test has failed;
+    this only makes "the browser stalled", "the server was slow" and "the page never showed it" tell apart.
+    """
+
+    network = recorder.network
+    now = network.now() if at is None else at
+    open_requests = [(item, now - item.started) for item in network.in_flight(now)]
+    with network.lock:
+        ended = [item.line() for item in network.order if item.ended is not None and item.ended <= now][-10:]
+    lines = [
+        f"A wait ran out of patience. What the harness saw right after ({now:.1f} s on the page's clock):",
+        "",
+        f"reading (a guess from the lines below): {timeout_reading(open_requests, probes, pulse)}",
+        "",
+        "the failure",
+        *(f"    {line}" for line in str(error).splitlines()[:12]),
+        "",
+        f"requests in flight: {len(open_requests)}",
+        *(f"    {item.line()}, open for {age:.1f} s" for item, age in open_requests),
+        f"the last {len(ended)} request(s) that ended",
+        *(f"    {line}" for line in ended),
+        "",
+    ]
+    if pulse is not None:
+        lines += [f"the page's heartbeat (its own timer, every {HEARTBEAT_SECONDS} s; the last 60 s)", *(f"    {line}" for line in pulse.lines())]
+    lines += ["asked right after the failure", *(f"    {probe.line()}" for probe in probes)]
+    if sampler is not None:
+        span, cpu, rss_mb = sampler.recent(recent_seconds)
+        lines.append(f"the server's process over the last {recent_seconds:.1f} s of samples: {cpu:.2f} CPU s in {span:.1f} s, {rss_mb:.0f} MB")
+    lines.append(f"the machine: {load if load is not None else machine_load()}")
+    console = list(network.console)
+    lines += ["", f"console: the last {min(len(console), 30)} of {len(console)} line(s)", *(f"    {line}" for line in console[-30:])]
+    lines += ["", "server log: the last 60 lines", *(f"    {line}" for line in tail_text(server_log, 60).splitlines())]
+    return "\n".join(lines) + "\n"
 
 
 # ---------------------------------------------------------------------------- artifacts

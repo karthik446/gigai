@@ -25,17 +25,24 @@ Run it by hand (prints the build time and the counts as JSON)::
 
     uv run python -m tests.support.operator_home <root under $TMPDIR> [--postings N --companies N]
 
+One build for two takers (the release pre-check's ``operator-home`` job: the timing gate, then the
+browser flows): ``--pristine`` moves the built home aside to ``<root>.pristine``, and with
+``GIGAI_OPERATOR_HOME_PREBUILT=<root>`` each taker gets a fresh copy of it back at ``<root>``
+(``take_prebuilt``), so the second one starts as cold as the first.
+
 Build time on the worker's laptop (14 cores, 2026-10-03): see ``BUILD_NOTES``.
 """
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime, timedelta
 import json
 import os
 from pathlib import Path
+import shutil
 import sys
 import tempfile
 import time
@@ -62,6 +69,11 @@ DEFAULT_TITLES = ("Staff Software Engineer", "Staff AI Engineer", "Staff Enginee
 SECOND_TITLES = ("Staff Platform Engineer", "Staff Backend Engineer")
 
 BUILD_NOTES = "290,000 postings x 10,350 companies: about 2 minutes on 14 cores (12 worker processes); 29,000 x 1,035: about 15 s."
+
+#: ``GIGAI_OPERATOR_HOME_PREBUILT=<root>``: a home built earlier in the same job for ``<root>`` and moved aside to
+#: ``<root>.pristine`` (``--pristine``). See ``take_prebuilt``.
+PREBUILT_ENV = "GIGAI_OPERATOR_HOME_PREBUILT"
+PRISTINE_SUFFIX = ".pristine"
 
 SEAM_ENV = {
     "GIGAI_SCOUT_FIND_JOBS_TEST_HTTP": "1",
@@ -153,6 +165,46 @@ def assert_synthetic_root(root: Path) -> None:
         raise OperatorHomeError(f"the operator-sized home must be built under a temporary directory, not {resolved}")
     if resolved.name == ".gigai" or (resolved / ".gigai").exists():
         raise OperatorHomeError("refusing to build over a .gigai folder")
+
+
+def prebuilt_root(environ: Mapping[str, str] | None = None) -> Path | None:
+    """The root a prebuilt home is taken to (``GIGAI_OPERATOR_HOME_PREBUILT``), or None: the caller builds its own."""
+
+    raw = ((os.environ if environ is None else environ).get(PREBUILT_ENV) or "").strip()
+    return Path(raw) if raw else None
+
+
+def take_prebuilt(
+    *, postings: int = OPERATOR_POSTINGS, companies: int = OPERATOR_COMPANIES, environ: Mapping[str, str] | None = None, log=lambda _line: None,
+) -> OperatorHome | None:
+    """A fresh copy of the prebuilt home, at the root it was built for; None when no home is prebuilt.
+
+    The home is built once (``python -m tests.support.operator_home <root> --pristine``) and kept, never
+    read, at ``<root>.pristine``. Every taker replaces ``<root>`` with a copy of it: a server that read the
+    home leaves its read model behind, and the next taker must start cold. The copy goes back to ``<root>``
+    and nowhere else, because the home holds its own absolute path (``config.toml``, the assessment
+    records): a copy at another path is not the home that was built.
+    """
+
+    root = prebuilt_root(environ)
+    if root is None:
+        return None
+    assert_synthetic_root(root)
+    pristine = root.with_name(root.name + PRISTINE_SUFFIX)
+    record = pristine / "operator-home.json"
+    if not record.is_file():
+        raise OperatorHomeError(f"{PREBUILT_ENV}={root}: no prebuilt home at {pristine} (build it with `python -m tests.support.operator_home {root} --pristine`)")
+    built = OperatorHome(**json.loads(record.read_text(encoding="utf-8")))
+    if Path(built.root).resolve() != root.resolve():
+        raise OperatorHomeError(f"{PREBUILT_ENV}={root}: the home at {pristine} was built for {built.root}; it holds that path and cannot be used anywhere else")
+    if (built.postings, built.companies) != (postings, companies):
+        raise OperatorHomeError(f"{PREBUILT_ENV}={root}: the prebuilt home is {built.postings} postings x {built.companies} companies, not the {postings} x {companies} asked for")
+    started = time.monotonic()
+    if root.exists():
+        shutil.rmtree(root)
+    shutil.copytree(pristine, root, symlinks=True)
+    log(f"prebuilt operator-sized home taken to {root}: {time.monotonic() - started:.1f} s (built once, in {built.build_seconds} s)")
+    return built
 
 
 def board_sizes(postings: int, companies: int) -> list[int]:
@@ -406,6 +458,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--companies", type=int, default=OPERATOR_COMPANIES)
     parser.add_argument("--assessed", type=int, default=ASSESSED)
     parser.add_argument("--workers", type=int, default=None)
+    parser.add_argument("--pristine", action="store_true", help=f"move the built home aside to <root>{PRISTINE_SUFFIX}; each taker gets a fresh copy at <root> ({PREBUILT_ENV}=<root>)")
     args = parser.parse_args(argv)
     assert_synthetic_root(args.root)
     os.environ["HOME"] = str(args.root)  # nothing under the real home is ever the default
@@ -414,6 +467,8 @@ def main(argv: list[str] | None = None) -> int:
         log=lambda line: print(line, file=sys.stderr),
     )
     (args.root / "operator-home.json").write_text(json.dumps(built.to_json(), indent=2), encoding="utf-8")
+    if args.pristine:
+        args.root.rename(args.root.with_name(args.root.name + PRISTINE_SUFFIX))
     print(json.dumps(built.to_json(), indent=2))
     return 0
 

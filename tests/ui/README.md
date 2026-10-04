@@ -8,7 +8,7 @@ if it resolves to the real home (`support.refuse_real_home`).
 ## Run
 
 ```sh
-make ui-test        # installs Chromium once, builds the home (about 25 s), runs every `ui` test on the small home (about 80 s in all)
+make ui-test        # installs Chromium once, builds the home (about 25 s), runs every `ui` test on the small home (25 tests: 137 s on a busy laptop, 2026-10-04)
 ```
 
 - The `ui` dependency group (`uv run --group ui ...`) holds Playwright and psutil. No pip.
@@ -20,7 +20,8 @@ make ui-test        # installs Chromium once, builds the home (about 25 s), runs
 - On a failed test, `build/ui-artifacts/<test>/` (`GIGAI_UI_ARTIFACTS` overrides it) holds
   `screenshot.png`, `trace.zip` (`playwright show-trace`), `requests.json` (every `/api/` request
   and step), `console.txt`, `problems.txt`, `server-log-tail.txt`, `samples.csv` (server CPU
-  seconds and RSS, and requests in flight, four times a second). CI uploads that folder.
+  seconds and RSS, and requests in flight, four times a second), and `timeout.txt` when the
+  failure was a wait that ran out of patience (below). CI uploads that folder.
 
 ## The flows
 
@@ -78,6 +79,14 @@ runs on one: 290,000 postings, 10,350 companies, 2 profiles, about 600 matched p
   it (`-m "ui and not operator_sized"`); `make ui-test-full` runs both.
 - The build time, the server start time and the flow's numbers are printed, and written to
   `build/ui-artifacts/operator-sized-jobs.json`.
+- `make ui-test-operator` runs the `operator_sized` tests alone (the half `make ui-test` leaves
+  out). The release pre-check uses it, on a home built ONCE for the timing gate and these flows:
+  `python -m tests.support.operator_home <temporary HOME>/op --pristine` leaves the home, never
+  read, at `op.pristine`; with `GIGAI_OPERATOR_HOME_PREBUILT=<temporary HOME>/op` each of the two
+  takes a fresh copy of it at `op` (`operator_home.take_prebuilt`), so both start on a server that
+  has read nothing. The copy goes back to the path the home was built for and nowhere else: the
+  home holds its own absolute path (`config.toml`, the assessment records). Without the variable
+  every run builds its own home, as before.
 - The session's home is shared and cold only once: a second `operator_sized` test starts warm, and
   must not depend on the order unless it says so. The cold flow says so (`UI_ORDER = -1`: it runs
   first); the others open Jobs with the cold patience and apply warm budgets only on a warm server.
@@ -160,7 +169,32 @@ rows and chips.
 No retry decorator, plugin, `--reruns`, loop or "try again" in any test or helper. A retry turns a
 wrong budget or a real race into a pass and hides it. A flaky step is fixed by changing what it
 asserts (below), not by running it again. A step that fails on timing prints wall, CPU seconds and
-the request list, so "the runner was slow" and "the server did more work" are told apart.
+the request list, so "the runner was slow" and "the server did more work" are told apart. The CI
+jobs have no retry either: no rerun flag, no retry action (`test_ui_ci_job.py` checks).
+
+### A wait that times out explains itself (`timeout.txt`)
+
+U3 saw one browser stall in 20 runs with every core busy: the server idle, the page silent for
+57 s, the next click timing out after 20 s. It was not explained, and it was not retried. So that
+the next one can be read afterwards, a test that fails on a timeout (Playwright's `TimeoutError`,
+or a failure that names one) gets a `timeout.txt` in its artifact folder, and its first lines in
+the test's output:
+
+- a one-line reading, said to be a guess: the page was waiting for the server (requests open), the
+  browser stalled (the page's script had not run), the browser stopped drawing (the script ran, no
+  frame), or the page was alive and never showed what the test waited for;
+- the requests in flight at that moment, with how long each had been open, and the last ten that ended;
+- the page's heartbeat: every page tells the harness twice a second, from its own timer, that its
+  script runs and that it has drawn a frame (`support.Heartbeat`, `ui.heartbeat`). The report says
+  when the last beat and the last frame were, and the longest silence in the last minute;
+- whether the server answered `/api/health` when asked directly (2 s), the server's CPU over the
+  last 10 s of samples, the machine's load average;
+- the browser console and the last 60 lines of the server log.
+
+The page is not asked anything at that moment, on purpose: with tracing on (always, here) a
+Playwright call into a page whose script is stuck does not time out, it waits for the page
+(measured: a `wait_for_function` with a 1 s timeout came back after the page's 6 s busy loop).
+`test_page_heartbeat.py` plants a 4 s stall on a real page and reads it back from the heartbeat.
 
 ## Budgets, in this order
 
@@ -168,7 +202,8 @@ the request list, so "the runner was slow" and "the server did more work" are to
    requests after a step (`requests_after(step) <= n`), what the page shows. **Blocks.**
 2. **Server CPU seconds** between two steps: `ui.cpu_budget(name, LIMIT, a, b)`, about 3x the
    measured value (and not under 1 s: the background threads share the process). A busy runner
-   moves it by under 10%. **Blocks.**
+   moves it by under 10% on a large step and up to 3x on the smallest. **Measured and reported;
+   blocks only with `GIGAI_UI_BUDGETS=enforce`.**
 3. **Wall-clock**, last and loose: `ui.wall_budget(name, LIMIT, a, b)`, 4 to 10x what a laptop
    needs; the user-facing ones are `support.INTERACTIVE_WALL_SECONDS` (2 s: a click) and
    `support.FIRST_LOAD_WALL_SECONDS` (10 s: a page). A 500 ms wall budget on a list request failed
@@ -180,20 +215,53 @@ Every limit is a named constant at the top of its test, with the measured number
 
 ### What blocks, and the report (the first week, 0.1.10.9)
 
-Structure, console / page / HTTP problems, the CPU ceilings and the server's memory ceiling on the
-operator-sized home (`ui.memory_budget`, `operator_home_ui.SERVER_RSS_MB`) fail a test from day
-one. The wall-clock ceilings have not been measured on a CI runner yet, so for now they are only
-reported: every run ends with a `ui budgets` section (each ceiling: measured, limit, `ok` or
-`OVER`) and writes the same to `build/ui-artifacts/budgets.json` (`kind`: `wall`, `cpu` or `rss`;
-`measured`, `limit`, `unit`, `over`, `blocking`).
+Structure and console / page / HTTP problems fail a test from day one, here and in CI: they cannot
+flake. No timing ceiling has been measured on a CI runner yet, so for the first week ALL of them are
+only reported: wall-clock, server CPU seconds, and the server's memory ceiling on the operator-sized
+home (`ui.memory_budget`, `operator_home_ui.SERVER_RSS_MB`). One switch decides:
+
+| `GIGAI_UI_BUDGETS` | A timing ceiling that is over |
+|---|---|
+| `report` (the default, also when unset; what both CI jobs set) | a line in the report, `OVER (reported, not enforced)` |
+| `enforce` | fails its test, with the step's wall time, the server's CPU seconds and its requests |
+
+Any other value stops the run before it starts: a misspelt `enforce` would enforce nothing.
+
+Every run ends with a `ui budgets` section (each ceiling: measured, limit, `ok` or `OVER`) and
+writes the same to `build/ui-artifacts/budgets.json` (`mode`; per ceiling `kind`: `wall`, `cpu` or
+`rss`, `measured`, `limit`, `unit`, `over`, `blocking`; `run`: what the run and the home builds took).
 
 ```sh
-GIGAI_UI_BUDGETS=enforce make ui-test     # a wall-clock ceiling that is over fails its test
+GIGAI_UI_BUDGETS=enforce make ui-test     # a ceiling that is over fails its test
 ```
 
-An enforced wall-clock failure prints the step's wall time, the server's CPU seconds and its
-requests, so "the runner was slow" and "the server did more work" are told apart. Once the CI job
-has a week of `budgets.json`, set the limits from it and make `enforce` the default.
+Once the CI jobs have a week of `budgets.json`, set the limits from it and write `enforce` in the two
+jobs of `pull_request.yaml` (one line each).
+
+## In CI (`.github/workflows/pull_request.yaml`)
+
+| Job | When | Runs | Step limit |
+|---|---|---|---|
+| `ui` (Browser tests, small home) | every PR, every release pre-check; not the post-release sweep | `make ui-test` | 10 min (the job: 20) |
+| `operator-home` (timing gate and browser flows) | the release pre-check only (profile `release`) | the home built once, `make test-operator-home`, then `make ui-test-operator` | 5, 10 and 5 min (the job: 30) |
+
+- Both set `GIGAI_UI_BUDGETS: report`. A failed structural or console check fails the job.
+- The step limits are the smallest multiple of 5 minutes that is at least 3 times the time on a
+  busy laptop (2026-10-04: `make ui-test` 137 s, the home build 44 to 50 s, the browser flows on the
+  prebuilt home 61 s; the timing gate took 42 s and gets 10 minutes, it is the gate that blocks a
+  release). A step that reaches its limit is a failed step, so the summary and the artifacts are
+  still uploaded. None of this has run on a runner yet: the first runs replace the numbers.
+- Chromium is cached in `~/.cache/ms-playwright`, keyed on the installed Playwright version (a new
+  Playwright in `uv.lock` downloads its own browsers). `playwright install --with-deps chromium`
+  runs before the timed step on every run: on a cache hit it only installs the system libraries
+  (they are not in the cache).
+- Every run: `budgets.json` is rendered into the job summary (`tools/ui_budgets_summary.py`: what is
+  over, the ten ceilings closest to their limit, all of them folded) and uploaded as
+  `ui-budgets-<job>-attempt-<n>` (30 days).
+- A failed run also uploads `build/ui-artifacts/` as `ui-failure-<job>-attempt-<n>` (14 days):
+  per failed test the screenshot, the trace, the requests, the console, the server log tail, the
+  samples, and `timeout.txt` when it was a timeout.
+- No retry: no rerun flag, no retry action, no `continue-on-error`.
 
 ### Known, pinned as ceilings (reported in the U3 worker report)
 

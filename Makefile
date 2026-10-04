@@ -177,21 +177,26 @@ media-check:
 
 # Browser tests (tests/ui; the `ui` dependency group, Playwright + Chromium). A small synthetic
 # home (tools/media/demo_home.py) in a temporary HOME, the real Scout server on fixture
-# transports, no network, no model, never ~/.gigai. About 80 s, 25 of them building the home.
+# transports, no network, no model, never ~/.gigai. About 2 minutes, 25 s of them building the home.
 # The default pytest run and the CI shards deselect `ui` tests (-m "not ui" in pyproject.toml).
 # GIGAI_UI_REQUIRED=1: a missing browser is a failure here, not a skip. On a failed test the
 # screenshot, trace, requests, console, server log tail and CPU/RSS samples are written to
 # $(UI_ARTIFACTS)/<test>/. One-time: `playwright install chromium` below (no sudo, no pip).
 # No retry anywhere: see tests/ui/README.md. Every run ends with its timing ceilings, measured against their limits
-# (also $(UI_ARTIFACTS)/budgets.json). Structure, console errors and server CPU ceilings fail a test; a wall-clock
-# ceiling is reported, and fails only with GIGAI_UI_BUDGETS=enforce (the first week: no CI numbers yet).
-#   make ui-test        every `ui` test on the small home (not the `operator_sized` ones): the 11 flows, about 80 s
+# (also $(UI_ARTIFACTS)/budgets.json). Structure and console errors fail a test; a timing ceiling (wall-clock, server
+# CPU, server memory) is reported, and fails only with GIGAI_UI_BUDGETS=enforce (the first week: no CI numbers yet).
+# CI: the `ui` job of pull_request.yaml runs `make ui-test` on every PR and release pre-check; the pre-check's
+# `operator-home` job runs `make ui-test-operator` on the home it built for the timing gate.
+#   make ui-test        every `ui` test on the small home (not the `operator_sized` ones): 25 tests, about 2 minutes
 #   make ui-test-full   the release profile: the same, plus the `operator_sized` tests on the operator-sized
 #                       synthetic home (290,000 postings, 10,350 companies, 2 profiles; tests/support/operator_home.py,
 #                       built once per run in a temporary HOME; the real server process, cold, its background threads
 #                       running). About 2.5 minutes on a laptop; the build time and the flow's numbers are printed and
 #                       written to $(UI_ARTIFACTS)/operator-sized-jobs.json.
-.PHONY: ui-test ui-test-full
+#   make ui-test-operator   the `operator_sized` tests alone: the half of ui-test-full that `make ui-test` leaves out.
+#                       With GIGAI_OPERATOR_HOME_PREBUILT=<temporary HOME>/op it takes a home built once
+#                       (`python -m tests.support.operator_home <that path> --pristine`) instead of building one.
+.PHONY: ui-test ui-test-full ui-test-operator
 UI_ARTIFACTS ?= build/ui-artifacts
 ui-test:
 	$(UV) run --locked --group ui playwright install chromium
@@ -200,6 +205,10 @@ ui-test:
 ui-test-full:
 	$(UV) run --locked --group ui playwright install chromium
 	GIGAI_UI_REQUIRED=1 GIGAI_UI_ARTIFACTS="$(UI_ARTIFACTS)" $(UV) run --locked --group ui --extra test pytest tests/ui -m ui -n 0 -q --tb=short --durations=5
+
+ui-test-operator:
+	$(UV) run --locked --group ui playwright install chromium
+	GIGAI_UI_REQUIRED=1 GIGAI_UI_ARTIFACTS="$(UI_ARTIFACTS)" $(UV) run --locked --group ui --extra test pytest tests/ui -m "ui and operator_sized" -n 0 -q --tb=short --durations=5
 
 # 0110-9-01, a standing release rule: load the UI in a REAL browser on the operator-sized synthetic home before every
 # release (tools/media/operator_ui_check.py; Playwright + Chromium, as `make media` installs them; about 2 minutes).
