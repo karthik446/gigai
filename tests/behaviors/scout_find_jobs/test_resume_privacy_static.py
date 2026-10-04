@@ -102,6 +102,9 @@ _DISPLAY_IMPORTERS: dict[str, frozenset[str]] = {
         # tailored_resume_edit (0110-10-05 B): checks an edited markdown with resume_pdf's markdown parser (the format's one
         # description) and its line patterns; it renders nothing and never touches resume_display or a header form.
         "gigai.scout.tailored_resume_edit",
+        # master_selection (0.1.10.9 master P2): measures a pick of the master (contact-free at import) HEADERLESS with
+        # resume_pdf.measure_markdown to fit it to the page budget; no header form, no display settings, no model.
+        "gigai.scout.master_selection",
     }),
 }
 
