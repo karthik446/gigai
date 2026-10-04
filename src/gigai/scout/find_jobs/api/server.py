@@ -2005,6 +2005,9 @@ def _make_handler(
                 if path == "/api/tailored-resumes/lines":
                     self._handle_put_tailored_resume_line()
                     return
+                if path == "/api/tailored-resumes/length":
+                    self._handle_put_tailored_resume_length()
+                    return
                 if path == "/api/privacy/cleanup":
                     self._handle_put_privacy_cleanup()
                     return

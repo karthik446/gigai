@@ -335,7 +335,10 @@ def _is_old(heading: str) -> bool:
 
 def test_the_prompt_states_the_length_rule_from_the_one_constant() -> None:
     prompt = render_tailor_prompt(_JOB, _CTX)
-    assert "LENGTH: the resume fits in 2 pages; a role that ended more than 8 years ago keeps only its 3 most posting-relevant bullets" in prompt
+    # 0110-10-05 C: the model cuts nothing for length; GigAI measures the pages and leaves out whole roles, oldest first.
+    assert "LENGTH: do not cut anything to save space. GigAI measures the pages itself: when the resume runs over 2 pages it leaves out whole roles, the oldest first" in prompt
+    assert "for a role that ended more than 8 years ago it keeps the first 3 bullets you list" in prompt
+    assert "never drop a role or a bullet, and never shorten a bullet" in prompt and "you may drop whole bullets" not in prompt
     assert "{{" not in prompt and "{{max_pages}}" in load_tailor_instructions()
 
 

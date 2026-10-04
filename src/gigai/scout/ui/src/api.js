@@ -515,6 +515,19 @@ export function putTailoredResumeLine({ profileId, jobIdentity, updatedAt, lineI
   });
 }
 
+// 0110-10-05 C: put back what a tailored resume left out for length (use:
+// "restore"), or leave it out again (use: "cut"): PUT
+// /api/tailored-resumes/length. Same revision check as a line choice.
+// Answers the updated TailorResponse.
+export function putTailoredResumeLength({ profileId, jobIdentity, updatedAt, use }) {
+  return request("PUT", "/api/tailored-resumes/length", {
+    profile_id: profileId,
+    job_identity: jobIdentity,
+    updated_at: updatedAt,
+    use,
+  });
+}
+
 // 0.1.10-003 / 0110-046: the per-profile title and the layout of a resume PDF
 // (find_jobs/api/resume_display.py). GET carries `saved`, the values and,
 // while this profile has no title, a local `suggested` title; PUT saves

@@ -9717,6 +9717,164 @@
         ]
       }
     },
+    "/api/tailored-resumes/length": {
+      "put": {
+        "description": "Put back what a tailored resume left out for length, or leave it out again. A tailored resume over 2 pages leaves out whole roles, the oldest first, until it fits, and a role that ended more than 8 years ago keeps its first 3 bullets; nothing else is ever cut for length. What was left out is in `result.length`: `{max_pages, pages, full_pages, status, cut: [{position, role, entry}], trimmed: [{heading, role, bullets, records}]}` (absent when the resume fits with nothing left out). `pages` is the resume with the cut applied, `full_pages` with everything shown (null when the pages could not be measured). `status` is cut (roles and/or older bullets are left out), restored (you put them back; `cut` and `trimmed` then say what use cut leaves out again), over (over the limit and leaving out older roles would not fix it: no role was cut) or unmeasured (the pages could not be measured: no role was cut). use restore puts every cut role and bullet back where it was, in one step; use cut, after a restore, leaves the same things out again. Idempotent; updated_at is unchanged; the markdown and the PDF follow. Local only: no model call.",
+        "operationId": "put_api_tailored_resumes_length",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "example": {
+                "job_identity": "https://boards.greenhouse.io/acme/jobs/101",
+                "profile_id": "prof_1",
+                "updated_at": "2026-09-29T10:05:00Z",
+                "use": "restore"
+              },
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "job_identity": {
+                    "description": "The job identity.",
+                    "type": "string"
+                  },
+                  "profile_id": {
+                    "description": "The resume identity.",
+                    "type": "string"
+                  },
+                  "updated_at": {
+                    "description": "The updated_at of the tailored resume you read; a newer tailoring answers 409.",
+                    "type": "string"
+                  },
+                  "use": {
+                    "description": "restore puts every cut role and bullet back; cut, after a restore, leaves the same things out again.",
+                    "enum": [
+                      "restore",
+                      "cut"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "profile_id",
+                  "job_identity",
+                  "updated_at",
+                  "use"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "job": {
+                    "job_identity": "https://boards.greenhouse.io/acme/jobs/101"
+                  },
+                  "markdown": "# ...",
+                  "schema_version": "scout-tailor-response:1"
+                },
+                "schema": {
+                  "additionalProperties": true,
+                  "properties": {
+                    "schema_version": {
+                      "const": "scout-tailor-response:1"
+                    }
+                  },
+                  "required": [
+                    "schema_version"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden / forbidden_origin: loopback peer and Host `127.0.0.1:<port>` or `localhost:<port>` only (Origin too on writes)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "tailored_resume_not_found",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "tailored_resume_not_found, target_unavailable"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "tailored_resume_changed",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "tailored_resume_changed"
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "unsupported_media_type: writes need Content-Type: application/json."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "invalid_value",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "invalid_value"
+          }
+        },
+        "summary": "Put back what was cut for length, or cut again",
+        "tags": [
+          "Tailored resumes"
+        ],
+        "x-gigai-effect": "write",
+        "x-gigai-external": "none",
+        "x-gigai-labels": [
+          "user-private",
+          "public-untrusted"
+        ]
+      }
+    },
     "/api/tailored-resumes/lines": {
       "put": {
         "description": "Show the original, the rewrite, or your own text on one line of a stored tailored resume. Idempotent: choosing what is already shown changes nothing. The PDF and the markdown follow the choice; updated_at is unchanged. use custom edits a body line (a summary, skills or other line, or an entry's bullet; never an entry heading): the line becomes kind custom, origin user, with no refs (no source is claimed for it and the no-loss check does not cover it) and edited_from holding the line it replaced, so use original or use rewritten brings that back. Local only: no model reads the text. A text that looks like your name or a contact detail (email, phone, link, address) is refused with 422 personal_info_refused: GigAI stores no name or contact details; they are typed in Scout's Generate PDF form for one PDF. Example, change two bullets then render: PUT this route twice (line_id L3, then L4, each with use custom and text), then POST /api/tailored-resumes/pdf with the same profile_id and job_identity.",

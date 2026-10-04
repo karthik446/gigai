@@ -419,6 +419,70 @@ def _attach_resume_to_profile(
     return profile_records.write_profile(resolved, profile_id=target_profile.profile_id, resume_ref=resume_ref)
 
 
+@resume_group.command("length")
+@click.option("--job-url", "job_url", required=True, help="The posting URL the resume was tailored to.")
+@click.option("--profile", "profile_id", help="The Scout profile ID the resume was tailored from (default: the newest).")
+@click.option("--restore", "restore", is_flag=True, help="Put back every role and bullet that was left out for length.")
+@click.option("--cut", "cut", is_flag=True, help="After --restore: leave the same roles and bullets out again.")
+@click.option("--target", "target_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--home", "home_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--json", "as_json", is_flag=True)
+def resume_length_command(
+    job_url: str, profile_id: str | None, restore: bool, cut: bool, target_value: Path | None, home_value: Path | None, as_json: bool
+) -> None:
+    """What a stored tailored resume left out for length, and the way back.
+
+    A tailored resume over 2 pages leaves out whole roles, the oldest first,
+    until it fits, and a role that ended more than 8 years ago keeps its
+    first 3 bullets; nothing else is cut for length. With no flag this
+    prints what was left out. --restore puts all of it back; --cut leaves
+    the same things out again. No model call.
+    """
+
+    from .find_jobs.contracts import FindJobsContractError
+    from .find_jobs.job_state import normalize_job_identity
+    from .quick_assess import QuickAssessError
+    from .tailor_length import length_note
+    from .tailor_length_store import change_stored_length
+    from .tailored_resume import list_tailored_resumes
+
+    home_root = home_value or default_home_root()
+    if restore and cut:
+        _fail(ValueError("pass at most one of --restore or --cut"), as_json=as_json, fallback="invalid_value")
+        return
+    try:
+        target = _resolved_target(target_value, home_root, as_json=as_json).expanduser().resolve(strict=True)
+        job_identity = normalize_job_identity(job_url)
+        if restore or cut:
+            stored = change_stored_length(
+                home_root, target, profile_id=profile_id or None, job_identity=job_identity, use="restore" if restore else "cut"
+            )
+        else:
+            items = list_tailored_resumes(home_root, target, profile_id=profile_id or None, job_identity=job_identity)
+            if not items:
+                raise QuickAssessError("tailored_resume_not_found", "no stored tailored resume for that job; run `gigai scout resume tailor --job-url ...` first")
+            stored = items[0]
+    except (ScoutTargetError, WorkpadError, QuickAssessError, FindJobsContractError, OSError, ValueError) as exc:
+        _fail(exc, as_json=as_json, fallback="scout_resume_length_failed")
+        return
+    length = stored.result.length
+    payload = {
+        "ok": True,
+        "profile_id": stored.resume.profile_id,
+        "job_identity": stored.job.job_identity,
+        "updated_at": stored.updated_at,
+        "length": None if length is None else length.to_json(),
+        "markdown_path": stored.markdown_path,
+    }
+    lines = [length_note(length) or "Length: fits with nothing left out."]
+    if length is not None and length.status == "cut":
+        lines.append(f"Put it back: gigai scout resume length --job-url {job_url} --restore")
+    elif length is not None and length.status == "restored":
+        lines.append(f"Cut for length again: gigai scout resume length --job-url {job_url} --cut")
+    lines.append(f"Markdown: {stored.markdown_path}")
+    _emit(payload, as_json, "\n".join(lines))
+
+
 @resume_group.command("tailor")
 @click.option("--job-url", "job_url", help="Public job posting URL to fetch and tailor the resume to.")
 @click.option("--job-text", "job_text_file", help="File with the posting text (or - for stdin).")
@@ -526,6 +590,12 @@ def resume_tailor_command(
     click.echo(f"  Resume: {response.resume.profile_id or 'pasted resume (not stored as a profile)'}")
     click.echo(f"  Sections: {', '.join(section.heading for section in result.sections)}")
     click.echo(f"  Lines: {result.line_count()} ({rewritten} rewritten, every one citing its resume lines / answers)")
+    if result.length is not None:
+        from .tailor_length import length_note
+
+        click.echo(f"  {length_note(result.length)}")
+        if result.length.status == "cut" and job_url:
+            click.echo(f"  Put it back: gigai scout resume length --job-url {job_url} --restore")
     click.echo(f"  Model: {response.producer.model_target.value} ({response.producer.adapter})")
     click.echo(f"  Markdown: {response.markdown_path}")
     click.echo(f"  Stored at {response.stored_path}")

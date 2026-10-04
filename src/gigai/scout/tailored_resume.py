@@ -962,8 +962,9 @@ class LineAlternative:
         )
 
 
-#: A line's ``origin``: the model's line, a fallback to the original, or the operator's choice.
-LINE_ORIGINS: frozenset[str] = frozenset({"model", "fallback", "user"})
+#: A line's ``origin``: the model's line, a fallback to the original, the operator's choice, or a
+#: skill GigAI added from an answer that satisfies the posting (``tailor_skills``, 0110-10-05).
+LINE_ORIGINS: frozenset[str] = frozenset({"model", "fallback", "user", "answer"})
 
 
 @dataclass(frozen=True)
@@ -1022,7 +1023,7 @@ class TailoredLine(_Contract):
             _fail("invalid_value", "a custom tailored_line carries no refs, reason or alternative")
         origin = _optional_string(value.get("origin"), "tailored_line.origin")
         if origin is not None and origin not in LINE_ORIGINS:
-            _fail("bad_enum", "tailored_line.origin must be model, fallback or user")
+            _fail("bad_enum", "tailored_line.origin must be model, fallback, user or answer")
         reason = value.get("reason")
         alternative = value.get("alternative")
         return cls(
@@ -1130,29 +1131,42 @@ class TailoredSection(_Contract):
 
 @dataclass(frozen=True)
 class TailoredResume(_Contract):
-    """The validated structure: ``header`` copy lines + ``sections``."""
+    """The validated structure: ``header`` copy lines + ``sections``.
+
+    ``length`` (optional, 0110-10-05; the schema string is unchanged and a
+    result without it parses and serializes as before): what the length rule
+    did (``tailor_length.LengthFit``) -- the roles and the old-role bullets
+    left out for length, whole, so they can be put back, or the flag that the
+    resume is over the limit or could not be measured.  Absent when the
+    resume fits with nothing left out.
+    """
 
     schema_version: ClassVar[str] = "scout-tailored-resume:1"
     header: tuple[TailoredLine, ...]
     sections: tuple[TailoredSection, ...]
+    length: "LengthFit | None" = None
 
     def to_json(self) -> dict[str, object]:
         return {
             "schema_version": self.schema_version,
             "header": [line.to_json() for line in self.header],
             "sections": [section.to_json() for section in self.sections],
+            **({"length": self.length.to_json()} if self.length is not None else {}),
         }
 
     @classmethod
     def from_json(cls, obj: object) -> "TailoredResume":
-        value = _object_with_optional(obj, ("schema_version", "header", "sections"), (), "tailored_resume")
+        value = _object_with_optional(obj, ("schema_version", "header", "sections"), ("length",), "tailored_resume")
         if value["schema_version"] != cls.schema_version:
             _fail("bad_enum", "tailored_resume.schema_version is unsupported")
         if type(value["header"]) is not list or type(value["sections"]) is not list:
             _fail("wrong_type", "tailored_resume.header/sections must be arrays")
+        from .tailor_length import LengthFit
+
         return cls(
             tuple(TailoredLine.from_json(item) for item in value["header"]),
             tuple(TailoredSection.from_json(item) for item in value["sections"]),
+            None if value.get("length") is None else LengthFit.from_json(value["length"]),
         )
 
     def rewritten_lines(self) -> tuple[TailoredLine, ...]:
@@ -1693,6 +1707,8 @@ def apply_no_loss(result: TailoredResume, job: TailorJob, ctx: TailorContext, *,
     assert ctx.model is not None
     visible = dict(ctx.model.lines)
     sections: list[TailoredSection] = []
+    # 0110-10-05: the old-role bullets left out, kept whole so they can be put back (``tailor_length``).
+    trims: list[tuple[int, int, tuple[TailoredLine, ...], list[LineAlternative]]] = []
     for section in result.sections:
         if section.heading in ENTRY_SECTIONS:
             entries: list[TailoredEntry] = []
@@ -1700,15 +1716,25 @@ def apply_no_loss(result: TailoredResume, job: TailorJob, ctx: TailorContext, *,
                 heading = tuple(replace(line, origin="model") for line in entry.heading)
                 bullets, dropped = _settle(entry.bullets, "bullet", job, ctx, visible)
                 trimmed: tuple[TailoredLine, ...] = ()
+                untrimmed: list[LineAlternative] = []
                 if _is_old_role(heading, today) and len(bullets) > LENGTH_RULE.old_role_bullets:
+                    untrimmed = _role_dropped(heading, bullets, (), ctx)
                     bullets, trimmed = bullets[: LENGTH_RULE.old_role_bullets], bullets[LENGTH_RULE.old_role_bullets :]
-                dropped += _role_dropped(heading, bullets, trimmed, ctx)
+                role_dropped = _role_dropped(heading, bullets, trimmed, ctx)
+                if trimmed:
+                    trims.append((len(sections), len(entries), trimmed, [item for item in role_dropped if item not in untrimmed]))
+                dropped += role_dropped
                 entries.append(TailoredEntry(heading, bullets, tuple(dropped)))
             sections.append(TailoredSection(section.heading, (), tuple(entries)))
         else:
             lines, dropped = _settle(section.lines, section.heading, job, ctx, visible)
             sections.append(TailoredSection(section.heading, lines, (), tuple(dropped)))
-    return _with_ids(TailoredResume(result.header, tuple(sections)))
+    settled = _with_ids(TailoredResume(result.header, tuple(sections)))
+    if not trims:
+        return settled
+    from .tailor_length import with_trims
+
+    return with_trims(settled, trims)
 
 
 # --- the operator's per-line choice and the line counts (0110-006) -----------------------------
@@ -1930,7 +1956,7 @@ def tailor_line_stats(result: TailoredResume) -> TailorLineStats:
         shown_rewritten=shown_rewritten,
         copied=sum(line.kind == "copy" for line in shown),
         answer_only_lines=sum(line.kind == "rewritten" and not any(ref.kind == "resume" for ref in line.refs) for line in shown),
-        model_rewrites=sum(line.kind == "rewritten" for line in body)
+        model_rewrites=sum(line.kind == "rewritten" and line.origin != "answer" for line in body)
         + sum(line.kind == "copy" and line.alternative is not None and line.alternative.kind == "rewritten" for line in body)
         + sum(item.kind == "rewritten" for item in dropped),
         fallbacks=len(rejected),
@@ -2043,14 +2069,18 @@ def tailor_once(binding: object, job: TailorJob, ctx: TailorContext) -> AssessAt
     """One tailoring through the shared loop: render, invoke, extract, validate, retry once.
 
     ``attempt.parsed`` is a ``TailoredResume`` when ``ok``, already settled
-    by ``apply_no_loss`` (fallbacks never cost the retry).  Exactly the
+    by ``apply_no_loss`` (fallbacks never cost the retry) and finished by
+    ``tailor_skills.finish_tailoring`` (0110-10-05: no Skills bullet inside
+    another; an answer that satisfies a posting skill is shown).  Exactly the
     exception mapping and retry rule ``assess_once`` has (``invoke_json_once``).
     """
+
+    from .tailor_skills import finish_tailoring
 
     return invoke_json_once(
         binding,
         lambda validation_error: render_tailor_prompt(job, ctx, validation_error),
-        lambda decoded: apply_no_loss(validate_tailored_output(decoded, job, ctx), job, ctx),
+        lambda decoded: finish_tailoring(apply_no_loss(validate_tailored_output(decoded, job, ctx), job, ctx), job, ctx),
     )
 
 
@@ -2447,6 +2477,11 @@ def run_tailored_resume(
 
     result = attempt.parsed
     assert isinstance(result, TailoredResume)
+    # 0110-10-05: over the page limit, the oldest roles are left out whole, recorded on the result (restorable).
+    from .tailor_length import fit_to_pages
+    from .tailor_length_store import measure_pages
+
+    result = fit_to_pages(result, measure=measure_pages)
     from .proposal_execution import _usage_block
 
     usage = _usage_block([attempt.usage] if attempt.usage is not None else [], UsageBlock)

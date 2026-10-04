@@ -964,6 +964,27 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
         ),
     ),
     RouteSpec(
+        "PUT", "/api/tailored-resumes/length", "Put back what a tailored resume left out for length, or leave it out again.", "write", "none",
+        {"schema_version": "scout-tailor-response:1", "job": {"job_identity": _JOB_URL}, "markdown": "# ..."}, schema_version="scout-tailor-response:1",
+        params=(
+            _b("profile_id", "string", "The resume identity.", required=True), _b("job_identity", "string", "The job identity.", required=True),
+            _b("updated_at", "string", "The updated_at of the tailored resume you read; a newer tailoring answers 409.", required=True),
+            _b("use", "string", "restore puts every cut role and bullet back; cut, after a restore, leaves the same things out again.", required=True, enum=("restore", "cut")),
+        ),
+        request_example={"profile_id": "prof_1", "job_identity": _JOB_URL, "updated_at": "2026-09-29T10:05:00Z", "use": "restore"},
+        errors=(_INVALID, (404, "tailored_resume_not_found"), (409, "tailored_resume_changed"), _NO_TARGET),
+        description=(
+            "A tailored resume over 2 pages leaves out whole roles, the oldest first, until it fits, and a role that ended more than 8 years ago keeps its "
+            "first 3 bullets; nothing else is ever cut for length. What was left out is in `result.length`: `{max_pages, pages, full_pages, status, "
+            "cut: [{position, role, entry}], trimmed: [{heading, role, bullets, records}]}` (absent when the resume fits with nothing left out). `pages` is "
+            "the resume with the cut applied, `full_pages` with everything shown (null when the pages could not be measured). `status` is cut (roles and/or "
+            "older bullets are left out), restored (you put them back; `cut` and `trimmed` then say what use cut leaves out again), over (over the limit and "
+            "leaving out older roles would not fix it: no role was cut) or unmeasured (the pages could not be measured: no role was cut). use restore puts "
+            "every cut role and bullet back where it was, in one step; use cut, after a restore, leaves the same things out again. Idempotent; updated_at "
+            "is unchanged; the markdown and the PDF follow. Local only: no model call."
+        ),
+    ),
+    RouteSpec(
         "POST", "/api/tailored-resumes/pdf", "Render the stored tailored resume as a PDF (binary).", "read", "none", {"content_type": "application/pdf"},
         params=(
             _b("profile_id", "string", "The resume identity.", required=True), _b("job_identity", "string", "The job identity.", required=True),
@@ -1682,6 +1703,7 @@ _META: dict[tuple[str, str], tuple[str, str]] = {
     ("POST", "/api/tailored-resumes"): ("Tailor the resume to one posting", "Tailored resumes"),
     ("GET", "/api/tailored-resumes"): ("List tailored resumes", "Tailored resumes"),
     ("PUT", "/api/tailored-resumes/lines"): ("Keep the original or the rewrite of one line, or edit it", "Tailored resumes"),
+    ("PUT", "/api/tailored-resumes/length"): ("Put back what was cut for length, or cut again", "Tailored resumes"),
     ("POST", "/api/tailored-resumes/pdf"): ("Render a tailored resume as a PDF", "Tailored resumes"),
     ("POST", "/api/resume/pdf"): ("Render resume markdown as a PDF", "Tailored resumes"),
     ("GET", "/api/resume-display"): ("Get the PDF layout settings", "Tailored resumes"),
@@ -1769,6 +1791,7 @@ _LABELS: dict[tuple[str, str], tuple[str, ...]] = {
     ("POST", "/api/tailored-resumes"): _BOTH,
     ("GET", "/api/tailored-resumes"): _BOTH,
     ("PUT", "/api/tailored-resumes/lines"): _BOTH,
+    ("PUT", "/api/tailored-resumes/length"): _BOTH,
     ("POST", "/api/tailored-resumes/pdf"): _BOTH,
     ("POST", "/api/resume/pdf"): _PRIVATE,
     ("GET", "/api/resume-display"): _PRIVATE,
@@ -2051,7 +2074,9 @@ def llms_text() -> str:
         "- Jobs without runs: GET /api/postings searches the stored postings (live, no run, no model call; filters profile_id, q, state, window); "
         "POST /api/postings/assess {jobs} asks first (count and estimate) and assesses only with approve: true. POST /api/run is deprecated; "
         "old runs stay readable and POST /api/runs/import puts what they assessed into the read model.\n"
-        "- Tailored resumes: POST /api/tailored-resumes, then POST /api/tailored-resumes/pdf {profile_id, job_identity} for the PDF; PUT /api/tailored-resumes/lines picks the original or the rewrite of one line.\n"
+        "- Tailored resumes: POST /api/tailored-resumes, then POST /api/tailored-resumes/pdf {profile_id, job_identity} for the PDF; PUT /api/tailored-resumes/lines picks the original or the rewrite of one line. "
+        "A tailored resume over 2 pages leaves out whole roles, the oldest first, and an old role's later bullets (`result.length`: `cut` and `trimmed`, absent when nothing was left out); "
+        "PUT /api/tailored-resumes/length {profile_id, job_identity, updated_at, use: \"restore\"} puts all of it back.\n"
         "- Edit a resume and render a new PDF (local, no model call): read the lines with GET /api/tailored-resumes?profile_id=&job_identity= (each body line has an id L<n>), "
         "PUT /api/tailored-resumes/lines {profile_id, job_identity, updated_at, line_id, use: \"custom\", text} once per line you change (use original or rewritten undoes it), "
         "then POST /api/tailored-resumes/pdf. To render your own markdown instead: POST /api/resume/pdf {markdown}. "

@@ -220,13 +220,10 @@ class RenderedPdf:
     spacing_scale: float
 
 
-def _render(
-    sections: list[dict[str, object]], header: PdfHeader | None, *, company: str, timestamp: datetime, spacing_scale: float, auto_fit: bool,
-    count_pages: bool = False,
-) -> RenderedPdf:
-    """``header`` ``None``: no header, a blank block of the header's height reserved (an agent's PDF)."""
+def _data(sections: list[dict[str, object]], header: PdfHeader | None, company: str) -> dict[str, object]:
+    """What the template reads; ``header`` ``None`` reserves a blank block of the header's height."""
     shown = header or PdfHeader()
-    data = {
+    return {
         "doc_title": " ".join(part for part in ("Resume", company.strip()) if part),
         "name": shown.name,
         "title": shown.title,
@@ -234,6 +231,26 @@ def _render(
         "blank_header": header is None,
         "sections": sections,
     }
+
+
+def fewest_pages(result: TailoredResume) -> int:
+    """The fewest pages ``result`` prints on at any spacing: the count at ``SPACING_MIN``, the tightest auto fit may choose.
+
+    The page-fit measurement itself (``_end``, Typst's own layout) with the header's block reserved, so it is the count
+    the finished PDF has; no PDF is compiled.  What the tailoring's length rule reads (``tailor_length``, 0110-10-05)."""
+    root = resources.files("gigai.scout").joinpath("data", "resume")
+    with ExitStack() as stack:
+        directory = str(stack.enter_context(resources.as_file(root)))
+        template = (Path(directory) / "resume.typ").read_bytes()
+        return _end(template, directory, _data(_body(result), None, ""), SPACING_MIN)[0]
+
+
+def _render(
+    sections: list[dict[str, object]], header: PdfHeader | None, *, company: str, timestamp: datetime, spacing_scale: float, auto_fit: bool,
+    count_pages: bool = False,
+) -> RenderedPdf:
+    """``header`` ``None``: no header, a blank block of the header's height reserved (an agent's PDF)."""
+    data = _data(sections, header, company)
     root = resources.files("gigai.scout").joinpath("data", "resume")
     with ExitStack() as stack:
         directory = str(stack.enter_context(resources.as_file(root)))
@@ -498,6 +515,7 @@ __all__ = [
     "RenderedPdf",
     "ResumeMarkdownError",
     "clamp_scale",
+    "fewest_pages",
     "FINISH_LINE",
     "finish_url",
     "fit_scale",

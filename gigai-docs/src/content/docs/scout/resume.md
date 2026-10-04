@@ -44,6 +44,18 @@ into that one PDF and are dropped: GigAI does not save them, so you type them
 each time (your browser may offer to autofill them). The file is named
 `<company>-<role>-<date>.pdf`, never after you.
 
+A skill the posting asks for that your resume does not name, and that one of your
+answers says you have, is added to Skills with that answer as its source. An answer
+that says you do not have it adds nothing.
+
+A tailored resume is kept to 2 pages. Scout measures the pages itself and, when the
+resume runs over, leaves out whole roles, the oldest first, until it fits; a role that
+ended more than 8 years ago also keeps only its first 3 bullets. Nothing else is cut
+for length. The panel says what was left out ("Cut for length: ...") and **Restore**
+puts all of it back in one step (`gigai scout resume length --job-url <url> --restore`,
+or `PUT /api/tailored-resumes/length`). When the pages cannot be measured, or leaving
+out older roles would not be enough, no role is cut and the line says so.
+
 The background pipeline can tailor a resume for a job by itself after you
 answer one of its questions. It never replaces a tailored resume you made or
 edited; to refresh that one, press **Tailor resume** again.
