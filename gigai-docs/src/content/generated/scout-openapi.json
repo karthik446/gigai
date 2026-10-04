@@ -6198,6 +6198,232 @@
         ]
       }
     },
+    "/api/resumes-folder": {
+      "get": {
+        "description": "The resumes folder: where a job's tailored markdown and headerless PDFs are kept. One visible folder (default `~/Documents/GigAI/resumes`; a GigAI home other than `~/.gigai` defaults to `<home>/resumes`) that holds, per job, the tailored resume's markdown and the PDFs rendered without a header, named `<company>-<role>-<YYYY-MM-DD>.md` / `.pdf`. It never holds a name or contact details: a PDF made with the Generate PDF form's header is saved only where the user saves it. GigAI replaces a file there only when it is exactly what GigAI last wrote. `source` is default or setting. `files` is {markdown, pdf}: a file name or null.",
+        "operationId": "get_api_resumes_folder",
+        "parameters": [
+          {
+            "description": "With job_identity: add `files`, the names of that job's files in the folder.",
+            "in": "query",
+            "name": "profile_id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "With profile_id: the job.",
+            "in": "query",
+            "name": "job_identity",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "default": "~/Documents/GigAI/resumes",
+                  "exists": true,
+                  "path": "/home/you/Documents/GigAI/resumes",
+                  "schema_version": "scout-resumes-folder-response:1",
+                  "shown": "~/Documents/GigAI/resumes",
+                  "source": "default"
+                },
+                "schema": {
+                  "additionalProperties": true,
+                  "properties": {
+                    "schema_version": {
+                      "const": "scout-resumes-folder-response:1"
+                    }
+                  },
+                  "required": [
+                    "schema_version"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden / forbidden_origin: loopback peer and Host `127.0.0.1:<port>` or `localhost:<port>` only (Origin too on writes)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "target_unavailable",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "target_unavailable"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "unknown_key",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "unknown_key, invalid_value"
+          }
+        },
+        "summary": "Get the resumes folder",
+        "tags": [
+          "Tailored resumes"
+        ],
+        "x-gigai-effect": "read",
+        "x-gigai-external": "none",
+        "x-gigai-host-checked": true,
+        "x-gigai-labels": [
+          "user-private",
+          "public-untrusted"
+        ]
+      },
+      "put": {
+        "description": "Choose the resumes folder. Files already written stay in the old folder. A relative path, a path that is a file, or a folder inside the GigAI home (GigAI's own store) answers 422 invalid_value; a folder that cannot be created or written answers 409 folder_unwritable.",
+        "operationId": "put_api_resumes_folder",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "example": {
+                "path": "~/Resumes"
+              },
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "path": {
+                    "description": "An absolute folder path, or one that starts with ~; created when missing. Empty or null: the default folder.",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "path"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "default": "~/Documents/GigAI/resumes",
+                  "exists": true,
+                  "path": "/home/you/Resumes",
+                  "schema_version": "scout-resumes-folder-response:1",
+                  "shown": "~/Resumes",
+                  "source": "setting"
+                },
+                "schema": {
+                  "additionalProperties": true,
+                  "properties": {
+                    "schema_version": {
+                      "const": "scout-resumes-folder-response:1"
+                    }
+                  },
+                  "required": [
+                    "schema_version"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden / forbidden_origin: loopback peer and Host `127.0.0.1:<port>` or `localhost:<port>` only (Origin too on writes)."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "folder_unwritable",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "folder_unwritable"
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "unsupported_media_type: writes need Content-Type: application/json."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "unknown_key",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "unknown_key, wrong_type, invalid_value"
+          }
+        },
+        "summary": "Choose the resumes folder",
+        "tags": [
+          "Tailored resumes"
+        ],
+        "x-gigai-effect": "write",
+        "x-gigai-external": "none",
+        "x-gigai-labels": [
+          "user-private"
+        ]
+      }
+    },
     "/api/run": {
       "post": {
         "deprecated": true,
@@ -9667,6 +9893,174 @@
         ],
         "x-gigai-effect": "write",
         "x-gigai-external": "model",
+        "x-gigai-labels": [
+          "user-private",
+          "public-untrusted"
+        ]
+      },
+      "put": {
+        "description": "Store an edited resume markdown as one job's tailored resume (no model call). Attaches the markdown to that one job (and profile) as its tailored resume; other jobs and the profile's resume are untouched. A line that is unchanged from the stored tailored resume keeps its sources; a line that is a resume line is a copy; any other body line becomes kind custom (your own text, no source cited). A custom line is checked, with your whole resume and every answer as the sources: a name or contact detail answers 422 personal_info_refused; a number, a skill the posting names, or a Skills item that neither the resume nor an answer states answers 422 edited_resume_unsupported (save an answer that states it with POST /api/answers, then send the markdown again). An entry heading (employer, title, dates) must be a resume line, unchanged. A refusal lists every problem by the markdown's line number, never a line's text. Lines above the first `## ` section are not stored. The response is the stored resume with `edited` (`written_by` operator or agent, `edited_at`, `source`), `changed` (false when it already was the stored one) and `recheck`: the job is queued in the pipeline, whose tailor step keeps an edited resume, so the re-assessment, the Scout ATS score and the Scout label run against it (`result` enqueued, or not_queued with `error_code`, e.g. assessment_missing; `runner` false: run `gigai scout pipeline run --once`). Background tailoring never replaces an edited resume; POST /api/tailored-resumes does. The markdown also goes to the resumes folder (GET /api/resumes-folder).",
+        "operationId": "put_api_tailored_resumes",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "example": {
+                "actor": "agent",
+                "job_url": "https://boards.greenhouse.io/acme/jobs/101",
+                "markdown": "## Summary\n\n- Platform engineer with nine years building billing systems.\n\n## Experience\n\n### Northwind Health\nStaff Engineer | Jun 2020 - Present\n\n- Rebuilt the scheduling service on Python and Postgres.\n"
+              },
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "actor": {
+                    "description": "Who writes: recorded as written_by. Also the X-GigAI-Actor header. Without either, a write from the Scout UI (a browser page of this server) is the operator's and any other loopback write is the agent's.",
+                    "enum": [
+                      "operator",
+                      "agent"
+                    ],
+                    "type": "string"
+                  },
+                  "job_url": {
+                    "description": "The posting's link: the ONE job this resume is for.",
+                    "type": "string"
+                  },
+                  "markdown": {
+                    "description": "Resume markdown in GigAI's format (what a tailored resume's `markdown` and the resumes folder's file hold), at most 65536 bytes.",
+                    "type": "string"
+                  },
+                  "profile_id": {
+                    "description": "The profile whose resume it was tailored from. Default: the selected profile.",
+                    "type": "string"
+                  },
+                  "source": {
+                    "description": "Free text, at most 300 characters: where the edit came from. Stored in `edited.source`; never sent to a model.",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "job_url",
+                  "markdown"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "changed": true,
+                  "edited": {
+                    "edited_at": "2026-10-04T10:05:00Z",
+                    "source": null,
+                    "written_by": "agent"
+                  },
+                  "job": {
+                    "job_identity": "https://boards.greenhouse.io/acme/jobs/101"
+                  },
+                  "markdown": "## ...",
+                  "recheck": {
+                    "error_code": null,
+                    "result": "enqueued",
+                    "runner": true
+                  },
+                  "schema_version": "scout-tailor-response:1"
+                },
+                "schema": {
+                  "additionalProperties": true,
+                  "properties": {
+                    "schema_version": {
+                      "const": "scout-tailor-response:1"
+                    }
+                  },
+                  "required": [
+                    "schema_version"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden / forbidden_origin: loopback peer and Host `127.0.0.1:<port>` or `localhost:<port>` only (Origin too on writes)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "profile_not_found",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "profile_not_found, target_unavailable"
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "unsupported_media_type: writes need Content-Type: application/json."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "unknown_key",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "unknown_key, wrong_type, invalid_value, resume_markdown_invalid, resume_markdown_too_large, personal_info_refused, edited_resume_unsupported"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "job_fetch_failed",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "job_fetch_failed"
+          }
+        },
+        "summary": "Store an edited resume as a job's tailored resume",
+        "tags": [
+          "Tailored resumes"
+        ],
+        "x-gigai-effect": "write",
+        "x-gigai-external": "none",
         "x-gigai-labels": [
           "user-private",
           "public-untrusted"

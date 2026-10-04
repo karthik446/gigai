@@ -98,7 +98,10 @@ gigai scout status --json
 The first command writes GigAI's default settings on a new machine, starts Scout's local server
 in the background and prints its address (`http://127.0.0.1:8765` unless the port is taken; then
 add `--port`). `--no-browser` keeps it from opening a browser tab from inside an agent session.
-Everything GigAI stores goes under `~/.gigai` on this computer.
+Everything GigAI stores goes under `~/.gigai` on this computer, except the resume files it makes
+for the user: each job's tailored resume (markdown) and the PDFs without a header go to the
+resumes folder, `~/Documents/GigAI/resumes` unless the user chose another (`gigai scout status`
+shows it). That folder never holds a name or contact details.
 
 ## 5. The resume: check first, read second
 

@@ -429,6 +429,9 @@ def _attach_resume_to_profile(
 @click.option("--company", "company", help="Company override (pasted text has none).")
 @click.option("--model-target", "model_target", type=click.Choice([item.value for item in ModelTarget]), help="Adapter kind to tailor with (default: find-jobs.json's default_model_target).")
 @click.option("--out", "out_file", type=click.Path(path_type=Path, dir_okay=False), help="Also write the markdown to FILE.")
+@click.option("--in", "in_file", help="With --job-url: store this edited resume markdown FILE (or - for stdin) as the job's tailored resume instead of asking a model.")
+@click.option("--as", "--actor", "actor", type=click.Choice(["operator", "agent"]), default="operator", show_default=True, help="With --in: who wrote the edited resume. An agent passes --as agent.")
+@click.option("--source", "source", help="With --in: where the edit came from, in your own words (one line).")
 @click.option("--target", "target_value", type=click.Path(path_type=Path, file_okay=False))
 @click.option("--home", "home_value", type=click.Path(path_type=Path, file_okay=False))
 @click.option("--json", "as_json", is_flag=True)
@@ -442,6 +445,9 @@ def resume_tailor_command(
     company: str | None,
     model_target: str | None,
     out_file: Path | None,
+    in_file: str | None,
+    actor: str,
+    source: str | None,
     target_value: Path | None,
     home_value: Path | None,
     as_json: bool,
@@ -455,7 +461,18 @@ def resume_tailor_command(
     validator rejects any number or posting skill the cited sources do not
     state (one retry, then an error). Synchronous: one model call plus at
     most one retry. Prints the markdown path (and copies the markdown to
-    --out FILE when given).
+    --out FILE when given). The markdown also goes to your resumes folder
+    (`gigai scout resume folder`).
+
+    With --in FILE --job-url URL no model tailors: FILE (resume markdown in
+    GigAI's format, for example the job's file from your resumes folder,
+    edited) is stored as that job's tailored resume, marked edited with who
+    wrote it (--as). An unchanged line keeps its sources; a changed or new
+    line is checked: no name or contact detail, and every number and skill
+    it states must be in your resume or an answer (save an answer first when
+    it is not). The Scout ATS score and the Scout label are then run again
+    on it (one model call for the re-assessment), and background tailoring
+    never replaces an edited resume.
     """
 
     from .find_jobs.assess_contracts import AssessJobInput, AssessResumeInput
@@ -473,6 +490,15 @@ def resume_tailor_command(
 
     if job_url and job_text_file:
         _fail(ValueError("pass exactly one of --job-url or --job-text"), as_json=as_json, fallback="job_input_invalid")
+        return
+    if in_file:
+        if not job_url or any(item for item in (resume_file, resume_text, title, company, model_target)):
+            _fail(
+                ValueError("--in FILE goes with --job-url URL (and --profile, --as, --source, --out): no model tailors, so no other option applies"),
+                as_json=as_json, fallback="invalid_value",
+            )
+            return
+        _attach_edited_resume(in_file, job_url, profile_id, actor, source, out_file, home_root, target, as_json)
         return
     if sum(1 for item in (profile_id, resume_file, resume_text) if item) > 1:
         _fail(ValueError("pass at most one of --profile, --resume or --resume-text"), as_json=as_json, fallback="resume_input_invalid")
@@ -529,15 +555,111 @@ def resume_tailor_command(
     click.echo(f"  Model: {response.producer.model_target.value} ({response.producer.adapter})")
     click.echo(f"  Markdown: {response.markdown_path}")
     click.echo(f"  Stored at {response.stored_path}")
+    folder_file = _resume_folder_file(home_root, response)
+    if folder_file is not None:
+        click.echo(f"  In your resumes folder: {folder_file}")
     if out_path is not None:
         click.echo(f"  Copied to {out_path}")
+
+
+def _resume_folder_file(home_root: Path, response: object) -> str | None:
+    """Where the resumes folder holds this stored tailored resume's markdown (as the user types it), or ``None``."""
+
+    from . import resumes_folder
+
+    name = resumes_folder.job_files(home_root, resumes_folder.job_key(home_root, response.stored_path))["markdown"]  # type: ignore[attr-defined]
+    if name is None:
+        return None
+    return _display_path(resumes_folder.resumes_folder(home_root).path / name)
+
+
+def _attach_edited_resume(
+    in_file: str, job_url: str, profile_id: str | None, actor: str, source: str | None, out_file: Path | None,
+    home_root: Path, target: Path, as_json: bool,
+) -> None:
+    """``gigai scout resume tailor --in FILE --job-url URL`` (0110-10-05 B): store the edited markdown, then run the checks again."""
+
+    from .pipeline.runner import pipeline_status, run_once
+    from .quick_assess import QuickAssessError
+    from .tailored_resume_edit import attach_edited_resume, queue_recheck
+
+    try:
+        markdown = _read_text_option(in_file, flag="--in")
+    except (OSError, ValueError) as exc:  # ValueError: not UTF-8
+        _fail(exc, as_json=as_json, fallback="input_file_unreadable")
+        return
+    try:
+        attached = attach_edited_resume(
+            markdown, job_url=job_url, profile_id=profile_id or None, written_by=actor, source=source, home_root=home_root, target=target
+        )
+    except QuickAssessError as exc:
+        _fail(exc, as_json=as_json, fallback="scout_resume_tailor_failed")
+        return
+    response = attached.response
+    out_path: Path | None = None
+    if out_file is not None:
+        out_path = out_file.expanduser()
+        try:
+            out_path.parent.mkdir(parents=True, exist_ok=True)
+            out_path.write_text(response.markdown, encoding="utf-8")
+        except OSError as exc:
+            _fail(exc, as_json=as_json, fallback="output_file_unwritable")
+            return
+
+    recheck = queue_recheck(home_root, target, attached)
+    drain: dict[str, object] | None = None
+    status: dict[str, object] | None = None
+    pair = (response.resume.profile_id, response.job.job_identity)
+    if attached.changed and recheck["error_code"] is None and pair[0] is not None:
+        if not as_json:
+            click.echo("Stored. Checking it again (the assessment against it is one model call; this can take a minute)...")
+        try:
+            drain = run_once(home_root, target, only=pair, force_enabled=True).to_json()  # type: ignore[arg-type]
+            status = pipeline_status(home_root, target, profile_id=pair[0], job=pair[1])
+        except _pipeline_errors() as exc:  # the resume is stored: a failed check is reported, never the command's failure
+            recheck = {**recheck, "result": "not_run", "error_code": getattr(exc, "code", None) or "scout_pipeline_failed"}
+    folder_file = _resume_folder_file(home_root, response)
+    if as_json:
+        _emit(
+            {
+                "ok": True, **response.to_json(), "changed": attached.changed, "out_path": None if out_path is None else str(out_path),
+                "folder_path": folder_file, "recheck": recheck, "drain": drain, "status": status,
+            },
+            True, "",
+        )
+        return
+    job = response.job
+    heading = job.title or "(untitled posting)"
+    if job.company:
+        heading += f" at {_company_shown(home_root, job.company)}"
+    if not attached.changed:
+        click.echo(f"No change: this is already the stored tailored resume for {heading}.")
+    else:
+        from .tailored_resume import tailor_line_stats
+
+        stats = tailor_line_stats(response.result)
+        click.echo(f"Stored your edited resume for {heading} (written by {response.edited.written_by}):")  # type: ignore[union-attr]
+        click.echo(f"  Lines: {response.result.line_count()} ({stats.edited} edited, {stats.copied} copied from your resume, {stats.shown_rewritten} kept rewrites)")
+    click.echo(f"  Markdown: {response.markdown_path}")
+    if folder_file is not None:
+        click.echo(f"  In your resumes folder: {folder_file}")
+    if out_path is not None:
+        click.echo(f"  Copied to {out_path}")
+    if recheck["error_code"] == "assessment_missing":
+        click.echo("  Not checked again: this job has no assessment for this profile yet. Run `gigai scout assess --job-url ...`, then `gigai scout pipeline process <url>`.")
+    elif recheck["error_code"] is not None:
+        click.echo(f"  Not checked again ({recheck['error_code']}); see `gigai scout pipeline status`.")
+    elif drain is not None and status is not None:
+        click.echo("  " + _pipeline_drain_line(drain))
+        for line in _pipeline_status_lines(status)[1:]:
+            click.echo("  " + line)
 
 
 @resume_group.command("pdf")
 @click.option("--in", "in_file", help="Resume markdown FILE in GigAI's resume format (or - for stdin).")
 @click.option("--tailored", "tailored", is_flag=True, help="Render the STORED tailored resume for --job-url instead of a markdown file.")
 @click.option("--job-url", "job_url", help="With --tailored: the posting URL the resume was tailored to.")
-@click.option("--out", "out_file", type=click.Path(path_type=Path, dir_okay=False), help="Write the PDF to FILE (default: <company>-<role>-<YYYY-MM-DD>.pdf, or resume-<YYYY-MM-DD>.pdf, in this folder).")
+@click.option("--out", "out_file", type=click.Path(path_type=Path, dir_okay=False), help="Write the PDF to FILE (default: <company>-<role>-<YYYY-MM-DD>.pdf, or resume-<YYYY-MM-DD>.pdf, in your resumes folder).")
 @click.option("--profile", "profile_id", help="With --tailored: the Scout profile ID the resume was tailored from (default: the newest).")
 @click.option("--spacing", "spacing", type=float, help="Spacing scale 0.7-1.4 for this render (turns auto fit off unless --auto-fit is given). Default: the saved setting.")
 @click.option("--auto-fit/--no-auto-fit", "auto_fit", default=None, help="Pick the spacing that ends the content near a page boundary. Default: the saved setting.")
@@ -568,14 +690,19 @@ def resume_pdf_command(
     Generate PDF form and download (an agent cannot finish that step unless it
     drives your browser). --spacing / --auto-fit change the layout for this
     render only. The file is named <company>-<role>-<YYYY-MM-DD>.pdf, never
-    after you.
+    after you, and without --out it is written into your resumes folder
+    (`gigai scout resume folder`; ~/Documents/GigAI/resumes unless you chose
+    another), never the current directory. That folder never holds contact
+    details: markdown whose printed text has an email, a phone number or a
+    profile link needs --out FILE.
     """
 
     from .find_jobs.contracts import FindJobsContractError
     from .find_jobs.job_state import normalize_job_identity
     from .quick_assess import QuickAssessError
     from . import run_supervisor
-    from .resume_pdf import FINISH_LINE, ResumeMarkdownError, finish_url, markdown_resume_pdf, stored_resume_pdf
+    from . import resumes_folder
+    from .resume_pdf import FINISH_LINE, ResumeMarkdownError, finish_url, markdown_resume_pdf, printed_text, stored_resume_pdf
     from .tailored_resume import list_tailored_resumes
     from .target_resolution import home_scout_target
 
@@ -600,6 +727,9 @@ def resume_pdf_command(
     failure: tuple[Exception, str] | None = None
     rendered = None
     finish_ids: tuple[str | None, str | None] = (None, None)
+    # What the resumes folder is told about the file: the job it belongs to and the text it prints.
+    folder_key: str | None = None
+    printed = ""
     try:
         if tailored:
             assert job_url is not None and target is not None
@@ -608,10 +738,12 @@ def resume_pdf_command(
                 raise QuickAssessError("tailored_resume_not_found", "no stored tailored resume for that job; run `gigai scout resume tailor --job-url ...` first")
             rendered, file_name = stored_resume_pdf(items[0], home_root=home_root, spacing_scale=spacing, auto_fit=auto_fit, count_pages=True)
             finish_ids = (items[0].resume.profile_id or "ephemeral", items[0].job.job_identity)
+            folder_key, printed = resumes_folder.job_key(home_root, items[0].stored_path), items[0].markdown
         else:
             assert in_file is not None
             markdown = _read_text_option(in_file, flag="--in")
             rendered, file_name = markdown_resume_pdf(markdown, home_root=home_root, spacing_scale=spacing, auto_fit=auto_fit)
+            printed = printed_text(markdown)
     except OSError as exc:
         failure = (exc, "input_file_unreadable")
     except (ResumeMarkdownError, QuickAssessError, FindJobsContractError, ValueError) as exc:  # ValueError: --spacing out of range, undecodable input
@@ -623,15 +755,25 @@ def resume_pdf_command(
         _fail(exc, as_json=as_json, fallback=fallback)
         return
 
-    out_path = out_file.expanduser() if out_file is not None else Path.cwd() / file_name
-    # Print the path as the user gave it (the bare file name for the default): an absolute path would carry the home folder into an agent's transcript.
-    shown_path = str(out_file) if out_file is not None else file_name
-    try:
-        out_path.parent.mkdir(parents=True, exist_ok=True)
-        out_path.write_bytes(rendered.pdf)
-    except OSError as exc:
-        _fail(exc, as_json=as_json, fallback="output_file_unwritable")
-        return
+    # Print the path as the user types it (``~/...`` for the folder): an absolute path would carry the home folder into an agent's transcript.
+    if out_file is not None:
+        out_path, shown_path = out_file.expanduser(), str(out_file)
+        try:
+            out_path.parent.mkdir(parents=True, exist_ok=True)
+            out_path.write_bytes(rendered.pdf)
+        except OSError as exc:
+            _fail(exc, as_json=as_json, fallback="output_file_unwritable")
+            return
+    else:
+        # 0110-10-05 A: the headerless PDF goes to the resumes folder, never the current directory.
+        try:
+            saved = resumes_folder.save_pdf(home_root, name=file_name, pdf=rendered.pdf, text=printed, key=folder_key)
+        except resumes_folder.ResumesFolderError as exc:
+            if exc.code == "contact_data_found":
+                exc = resumes_folder.ResumesFolderError(exc.code, f"{exc}; pass --out FILE to save this PDF where you choose")
+            _fail(exc, as_json=as_json, fallback="output_file_unwritable")
+            return
+        shown_path = saved.shown
     # 0110-046: the PDF has no header; the running Scout's page finishes it (the default port when none runs).
     base, running = f"http://127.0.0.1:{run_supervisor.DEFAULT_PORT}", False
     if target is not None:
@@ -645,6 +787,7 @@ def resume_pdf_command(
     payload: dict[str, object] = {
         "ok": True,
         "out_path": shown_path,
+        "in_resumes_folder": out_file is None,
         "source": "tailored" if tailored else "markdown",
         "pages": rendered.pages,
         "bytes": len(rendered.pdf),
@@ -659,6 +802,51 @@ def resume_pdf_command(
     ]
     if not tailored:
         lines.append(f"There, choose {in_file if in_file != '-' else 'the same markdown'} as the resume.")
+    _emit(payload, as_json, "\n".join(lines))
+
+
+@resume_group.command("folder")
+@click.option("--set", "set_value", help="Use this folder from now on (an absolute path, or one that starts with ~); it is created when missing.")
+@click.option("--reset", "reset", is_flag=True, help="Go back to the default folder.")
+@click.option("--home", "home_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--json", "as_json", is_flag=True)
+def resume_folder_command(set_value: str | None, reset: bool, home_value: Path | None, as_json: bool) -> None:
+    """Show or change your resumes folder: the one visible place GigAI puts a job's resume files.
+
+    Default ~/Documents/GigAI/resumes. It holds, per job, the tailored
+    resume's markdown and the PDFs `gigai scout resume pdf` makes, named
+    <company>-<role>-<YYYY-MM-DD>.md / .pdf: never your name or contact
+    details (a PDF with the Generate PDF form's header is saved only where
+    you save it). GigAI replaces a file there only when it is exactly what
+    GigAI last wrote, so a file you edit is yours. Running this also copies
+    in any stored tailored resume of your Scout folder (<home>/scout) that
+    is not there yet; `gigai scout run` does the same for the folder it
+    serves. --set moves nothing: files already written stay in the old folder.
+    """
+
+    from . import resumes_folder
+    from .target_resolution import home_scout_target
+
+    home_root = home_value or default_home_root()
+    if set_value is not None and reset:
+        _fail(ValueError("pass --set PATH or --reset, not both"), as_json=as_json, fallback="invalid_value")
+        return
+    try:
+        if set_value is not None or reset:
+            folder = resumes_folder.set_resumes_folder(home_root, None if reset else set_value)
+        else:
+            folder = resumes_folder.resumes_folder(home_root)
+    except resumes_folder.ResumesFolderError as exc:
+        _fail(exc, as_json=as_json, fallback="invalid_value")
+        return
+    # The folder is the home's, so this command takes no --target and never creates a Scout project:
+    # only an existing default one (<home>/scout) has tailored resumes to copy.
+    candidate = home_scout_target(home_root).expanduser()
+    copied = resumes_folder.sync_tailored(home_root, candidate) if candidate.is_dir() else 0
+    payload = {"ok": True, **folder.to_json(), "copied": copied}
+    lines = [f"Resumes folder: {folder.shown}" + (" (the default)" if folder.source == resumes_folder.SOURCE_DEFAULT else "")]
+    if copied:
+        lines.append(f"Copied {copied} stored tailored resume{'' if copied == 1 else 's'} into it.")
     _emit(payload, as_json, "\n".join(lines))
 
 
@@ -713,6 +901,10 @@ def run_command(
         resolved_target = _resolved_target(target_value, home_root, as_json=as_json)
         # 0110-046: the one-time contact cleanup (idempotent, never raises); its report is also in the UI once.
         cleanup = _contact_cleanup(home_root, resolved_target)
+        # 0110-10-05 A: stored tailored resumes from before the resumes folder are copied into it once (never raises).
+        from . import resumes_folder
+
+        resumes_folder.sync_tailored(home_root, resolved_target)
         result = run_supervisor.start(
             home_root=home_root,
             requested_target=resolved_target,
@@ -792,7 +984,10 @@ def status_command(target_value: Path | None, home_value: Path | None, as_json: 
         _fail(exc, as_json=as_json, fallback="scout_status_failed")
         return
 
-    payload = {"ok": True, **current.to_json()}
+    from . import resumes_folder
+
+    folder = resumes_folder.resumes_folder(home_root)
+    payload = {"ok": True, **current.to_json(), "resumes_folder": folder.to_json()}
     if as_json:
         _emit(payload, True, "")
         return
@@ -808,6 +1003,7 @@ def status_command(target_value: Path | None, home_value: Path | None, as_json: 
         )
     else:
         click.echo("stopped")
+    click.echo(f"Resumes folder: {folder.shown}")
     for other in current.other_servers:
         click.echo(
             f"The Scout server for {_other_server_label(other)} is running at {other.url} "

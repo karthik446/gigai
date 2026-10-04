@@ -1511,6 +1511,7 @@ def _make_handler(
     from .rank import RankRoutesMixin
     from .resume_display import ResumeDisplayRoutesMixin
     from .resumes import ResumesRoutesMixin
+    from .resumes_folder import ResumesFolderRoutesMixin
     from .runs import RunRoutesMixin
     from .runs_list import RunsListRoutesMixin
     from .secrets_status import SecretsStatusRoutesMixin
@@ -1538,6 +1539,7 @@ def _make_handler(
         ResumeExtractRoutesMixin,
         ResumesRoutesMixin,
         ResumeDisplayRoutesMixin,
+        ResumesFolderRoutesMixin,
         PrivacyCleanupRoutesMixin,
         SecretsStatusRoutesMixin,
         MetricsRoutesMixin,
@@ -1786,6 +1788,9 @@ def _make_handler(
                     if path == "/api/resume-display":
                         self._handle_get_resume_display()
                         return
+                    if path == "/api/resumes-folder":
+                        self._handle_get_resumes_folder()
+                        return
                     if path == "/api/privacy/cleanup":
                         if self._check_host():
                             self._handle_get_privacy_cleanup()
@@ -2001,6 +2006,12 @@ def _make_handler(
                     return
                 if path == "/api/resume-display":
                     self._handle_put_resume_display()
+                    return
+                if path == "/api/resumes-folder":
+                    self._handle_put_resumes_folder()
+                    return
+                if path == "/api/tailored-resumes":
+                    self._handle_put_tailored_resume()
                     return
                 if path == "/api/tailored-resumes/lines":
                     self._handle_put_tailored_resume_line()

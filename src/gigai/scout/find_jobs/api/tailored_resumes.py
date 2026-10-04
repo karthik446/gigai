@@ -31,6 +31,13 @@ values fill this one PDF's header and are dropped: never written, logged, cached
 response or an error (the PDF bytes aside; the file name is ``<company>-<role>-<date>.pdf``).
 Without ``header`` the PDF has no header and the response carries ``X-GigAI-Finish-Url``: the local
 Scout page (``#/pdf/...``) where the person adds their details in the Generate PDF form and downloads.
+
+0110-10-05 B: ``PUT /api/tailored-resumes`` ``{job_url, markdown, profile_id?, actor?, source?}`` stores an
+edited resume markdown as ONE job's tailored resume (``tailored_resume_edit.attach_edited_resume``): no
+model call; a changed or new line is checked (no name or contact detail, every number and skill in the
+resume or an answer) and the resume is marked ``edited`` with who wrote it.  The job is then queued in
+the pipeline (``recheck``): the re-assessment, the Scout ATS score and the Scout label run against it.
+A refusal names line numbers and the number or skill, never a line's text.
 """
 
 from __future__ import annotations
@@ -40,6 +47,7 @@ import re
 from urllib.parse import parse_qs, urlsplit
 
 from ...quick_assess import QuickAssessError
+from ...story_bank import StoryBankError
 from ...tailored_resume import (
     LINE_USES,
     TailoredResumesListResponse,
@@ -62,6 +70,7 @@ from ...resume_pdf import (
     parse_resume_markdown,
     stored_resume_pdf,
 )
+from ...tailored_resume_edit import attach_edited_resume, queue_recheck
 from ..contracts import FindJobsContractError
 from .assess import _ERROR_STATUS as _ASSESS_ERROR_STATUS
 
@@ -69,7 +78,13 @@ _ERROR_STATUS: dict[str, HTTPStatus] = {
     **_ASSESS_ERROR_STATUS,
     "tailor_timeout": HTTPStatus.GATEWAY_TIMEOUT,
     "personal_info_refused": HTTPStatus.UNPROCESSABLE_ENTITY,
+    "edited_resume_unsupported": HTTPStatus.UNPROCESSABLE_ENTITY,
+    "resume_markdown_invalid": HTTPStatus.UNPROCESSABLE_ENTITY,
+    "resume_markdown_too_large": HTTPStatus.UNPROCESSABLE_ENTITY,
+    "wrong_type": HTTPStatus.UNPROCESSABLE_ENTITY,
 }
+
+_EDITED_KEYS = frozenset({"job_url", "markdown", "profile_id", "actor", "source"})
 
 _RESUME_PDF_KEYS = frozenset({"markdown", "spacing_scale", "auto_fit", "profile_id", "header"})
 _TAILORED_PDF_KEYS = frozenset({"profile_id", "job_identity"})
@@ -86,7 +101,7 @@ def _status_for(code: str) -> HTTPStatus:
 
 
 class TailoredResumesRoutesMixin:
-    """``Handler`` mixin: ``POST``/``GET /api/tailored-resumes``, ``PUT /api/tailored-resumes/lines``, and the two PDF routes."""
+    """``Handler`` mixin: ``POST``/``GET``/``PUT /api/tailored-resumes``, ``PUT /api/tailored-resumes/lines``, and the two PDF routes."""
 
     def _tailor_target(self):
         backend = self._backend
@@ -114,6 +129,46 @@ class TailoredResumesRoutesMixin:
             self._error(_status_for(exc.code), exc.code, str(exc))
             return
         self._write_json(HTTPStatus.OK, response.to_json())
+
+    def _handle_put_tailored_resume(self) -> None:
+        """``PUT /api/tailored-resumes``: store an edited resume markdown as one job's tailored resume (0110-10-05 B)."""
+
+        if self._refuse_large_body():
+            return
+        body = self._read_json_body()
+        if body is None:
+            return
+        if type(body) is not dict:
+            self._error(HTTPStatus.UNPROCESSABLE_ENTITY, "wrong_type", "request body must be an object")
+            return
+        unknown = sorted(set(body) - _EDITED_KEYS)
+        if unknown:
+            self._error(HTTPStatus.UNPROCESSABLE_ENTITY, "unknown_key", f"unknown key: {unknown[0]}; allowed: {', '.join(sorted(_EDITED_KEYS))}")
+            return
+        job_url, markdown, profile_id = body.get("job_url"), body.get("markdown"), body.get("profile_id")
+        if not isinstance(job_url, str) or not job_url.strip() or not isinstance(markdown, str):
+            self._error(HTTPStatus.UNPROCESSABLE_ENTITY, "invalid_value", "job_url (the posting's link) and markdown (resume markdown in GigAI's format) are required strings")
+            return
+        if profile_id is not None and (not isinstance(profile_id, str) or not _PROFILE_ID.fullmatch(profile_id)):
+            self._error(HTTPStatus.UNPROCESSABLE_ENTITY, "invalid_value", "profile_id must be a profile id")
+            return
+        target = self._tailor_target()
+        if target is None:
+            return
+        home_root = self._backend.home_root
+        try:
+            # 0110-10-04: who wrote it is the body's actor, the X-GigAI-Actor header, else the UI (operator) or anything else (agent).
+            attached = attach_edited_resume(
+                markdown, job_url=job_url.strip(), profile_id=profile_id, written_by=self._story_bank_actor(body.get("actor")),
+                source=body.get("source"), home_root=home_root, target=target,  # type: ignore[arg-type]
+            )
+        except (QuickAssessError, StoryBankError) as exc:
+            self._error(_status_for(exc.code), exc.code, str(exc))
+            return
+        recheck = queue_recheck(home_root, target, attached)
+        # Whether this server runs the pipeline's thread; false: run `gigai scout pipeline run --once`.
+        recheck["runner"] = self._pipeline_kick() if attached.changed and recheck["error_code"] is None else False
+        self._write_json(HTTPStatus.OK, {**attached.response.to_json(), "changed": attached.changed, "recheck": recheck})
 
     def _header_form(self, body: dict[str, object]) -> tuple[bool, dict[str, str] | None]:
         """``(ok, the form's values or None)``; a 422 is written when ``header`` is unusable (never echoing a value)."""
@@ -316,7 +371,7 @@ class TailoredResumesRoutesMixin:
                 except TailorError as exc:
                     failure = (_status_for(exc.code), exc.code, str(exc))
             if failure is None and updated is not stored:
-                save_tailor_response(updated)
+                save_tailor_response(updated, home_root=home_root)
         if failure is not None:
             self._error(*failure)
             return

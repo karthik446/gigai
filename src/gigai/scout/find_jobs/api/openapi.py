@@ -914,6 +914,37 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
         description="Carries resume-derived text (the product). For a job's ids and links use GET /api/jobs?url=.",
     ),
     RouteSpec(
+        "PUT", "/api/tailored-resumes", "Store an edited resume markdown as one job's tailored resume (no model call).", "write", "none",
+        {"schema_version": "scout-tailor-response:1", "job": {"job_identity": _JOB_URL}, "markdown": "## ...", "edited": {"written_by": "agent", "edited_at": "2026-10-04T10:05:00Z", "source": None}, "changed": True, "recheck": {"result": "enqueued", "error_code": None, "runner": True}},
+        schema_version="scout-tailor-response:1",
+        params=(
+            _b("job_url", "string", "The posting's link: the ONE job this resume is for.", required=True),
+            _b("markdown", "string", "Resume markdown in GigAI's format (what a tailored resume's `markdown` and the resumes folder's file hold), at most 65536 bytes.", required=True),
+            _b("profile_id", "string", "The profile whose resume it was tailored from. Default: the selected profile."),
+            _ACTOR_PARAM,
+            _b("source", "string", "Free text, at most 300 characters: where the edit came from. Stored in `edited.source`; never sent to a model."),
+        ),
+        request_example={"job_url": _JOB_URL, "markdown": "## Summary\n\n- Platform engineer with nine years building billing systems.\n\n## Experience\n\n### Northwind Health\nStaff Engineer | Jun 2020 - Present\n\n- Rebuilt the scheduling service on Python and Postgres.\n", "actor": "agent"},
+        errors=(
+            _UNKNOWN_KEY, _WRONG_TYPE, _INVALID, (422, "resume_markdown_invalid"), (422, "resume_markdown_too_large"), (422, "personal_info_refused"),
+            (422, "edited_resume_unsupported"), (404, "profile_not_found"), (502, "job_fetch_failed"), _NO_TARGET,
+        ),
+        description=(
+            "Attaches the markdown to that one job (and profile) as its tailored resume; other jobs and the profile's resume are untouched. "
+            "A line that is unchanged from the stored tailored resume keeps its sources; a line that is a resume line is a copy; any other body line "
+            "becomes kind custom (your own text, no source cited). A custom line is checked, with your whole resume and every answer as the sources: "
+            "a name or contact detail answers 422 personal_info_refused; a number, a skill the posting names, or a Skills item that neither the "
+            "resume nor an answer states answers 422 edited_resume_unsupported (save an answer that states it with POST /api/answers, then send "
+            "the markdown again). An entry heading (employer, title, dates) must be a resume line, unchanged. A refusal lists every problem by "
+            "the markdown's line number, never a line's text. Lines above the first `## ` section are not stored. The response is the stored "
+            "resume with `edited` (`written_by` operator or agent, `edited_at`, `source`), `changed` (false when it already was the stored "
+            "one) and `recheck`: the job is queued in the pipeline, whose tailor step keeps an edited resume, so the re-assessment, the Scout ATS "
+            "score and the Scout label run against it (`result` enqueued, or not_queued with `error_code`, e.g. assessment_missing; `runner` "
+            "false: run `gigai scout pipeline run --once`). Background tailoring never replaces an edited resume; POST /api/tailored-resumes does. "
+            "The markdown also goes to the resumes folder (GET /api/resumes-folder)."
+        ),
+    ),
+    RouteSpec(
         "PUT", "/api/tailored-resumes/lines", "Show the original, the rewrite, or your own text on one line of a stored tailored resume.", "write", "none",
         {"schema_version": "scout-tailor-response:1", "job": {"job_identity": _JOB_URL}, "markdown": "# ..."}, schema_version="scout-tailor-response:1",
         params=(
@@ -963,6 +994,33 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
             "Returns application/pdf with Content-Disposition: attachment; filename=`resume-<YYYY-MM-DD>.pdf`, X-GigAI-Pages and X-GigAI-Spacing-Scale; changes nothing. "
             "Local only: the markdown is not sent to a model, not stored and not logged. " + _HEADER_NOTE + " Lines above the first `## ` section are not printed. Trailing `<!-- ... -->` "
             "comments are dropped, so a tailored resume's `markdown` renders as it is. 422 resume_markdown_invalid names the line number and the rule."
+        ),
+    ),
+    RouteSpec(
+        "GET", "/api/resumes-folder", "The resumes folder: where a job's tailored markdown and headerless PDFs are kept.", "read", "none",
+        {"schema_version": "scout-resumes-folder-response:1", "path": "/home/you/Documents/GigAI/resumes", "shown": "~/Documents/GigAI/resumes", "source": "default", "default": "~/Documents/GigAI/resumes", "exists": True},
+        schema_version="scout-resumes-folder-response:1",
+        params=(
+            _q("profile_id", "string", "With job_identity: add `files`, the names of that job's files in the folder."),
+            _q("job_identity", "string", "With profile_id: the job."),
+        ),
+        errors=(_UNKNOWN_KEY, _INVALID, _NO_TARGET),
+        description=(
+            "One visible folder (default `~/Documents/GigAI/resumes`; a GigAI home other than `~/.gigai` defaults to `<home>/resumes`) that holds, per job, "
+            "the tailored resume's markdown and the PDFs rendered without a header, named `<company>-<role>-<YYYY-MM-DD>.md` / `.pdf`. It never holds a "
+            "name or contact details: a PDF made with the Generate PDF form's header is saved only where the user saves it. GigAI replaces a file "
+            "there only when it is exactly what GigAI last wrote. `source` is default or setting. `files` is {markdown, pdf}: a file name or null."
+        ),
+    ),
+    RouteSpec(
+        "PUT", "/api/resumes-folder", "Choose the resumes folder.", "write", "none",
+        {"schema_version": "scout-resumes-folder-response:1", "path": "/home/you/Resumes", "shown": "~/Resumes", "source": "setting", "default": "~/Documents/GigAI/resumes", "exists": True},
+        schema_version="scout-resumes-folder-response:1",
+        params=(_b("path", "string", "An absolute folder path, or one that starts with ~; created when missing. Empty or null: the default folder.", required=True),),
+        request_example={"path": "~/Resumes"}, errors=(_UNKNOWN_KEY, _WRONG_TYPE, _INVALID, (409, "folder_unwritable")),
+        description=(
+            "Files already written stay in the old folder. A relative path, a path that is a file, or a folder inside the GigAI home (GigAI's own "
+            "store) answers 422 invalid_value; a folder that cannot be created or written answers 409 folder_unwritable."
         ),
     ),
     RouteSpec(
@@ -1652,9 +1710,12 @@ _META: dict[tuple[str, str], tuple[str, str]] = {
     ("GET", "/api/applications"): ("List application events", "Jobs"),
     ("POST", "/api/tailored-resumes"): ("Tailor the resume to one posting", "Tailored resumes"),
     ("GET", "/api/tailored-resumes"): ("List tailored resumes", "Tailored resumes"),
+    ("PUT", "/api/tailored-resumes"): ("Store an edited resume as a job's tailored resume", "Tailored resumes"),
     ("PUT", "/api/tailored-resumes/lines"): ("Keep the original or the rewrite of one line, or edit it", "Tailored resumes"),
     ("POST", "/api/tailored-resumes/pdf"): ("Render a tailored resume as a PDF", "Tailored resumes"),
     ("POST", "/api/resume/pdf"): ("Render resume markdown as a PDF", "Tailored resumes"),
+    ("GET", "/api/resumes-folder"): ("Get the resumes folder", "Tailored resumes"),
+    ("PUT", "/api/resumes-folder"): ("Choose the resumes folder", "Tailored resumes"),
     ("GET", "/api/resume-display"): ("Get the PDF layout settings", "Tailored resumes"),
     ("PUT", "/api/resume-display"): ("Save the PDF layout settings", "Tailored resumes"),
     ("POST", "/api/resume/extract"): ("Extract search preferences from a resume", "Profiles and resume"),
@@ -1739,11 +1800,15 @@ _LABELS: dict[tuple[str, str], tuple[str, ...]] = {
     ("GET", "/api/applications"): _PRIVATE,
     ("POST", "/api/tailored-resumes"): _BOTH,
     ("GET", "/api/tailored-resumes"): _BOTH,
+    ("PUT", "/api/tailored-resumes"): _BOTH,
     ("PUT", "/api/tailored-resumes/lines"): _BOTH,
     ("POST", "/api/tailored-resumes/pdf"): _BOTH,
     ("POST", "/api/resume/pdf"): _PRIVATE,
     ("GET", "/api/resume-display"): _PRIVATE,
     ("PUT", "/api/resume-display"): _PRIVATE,
+    # A folder path and file names (<company>-<role>-<date>): the folder is the user's, the company and role a posting's words.
+    ("GET", "/api/resumes-folder"): _BOTH,
+    ("PUT", "/api/resumes-folder"): _PRIVATE,
     ("POST", "/api/resume/extract"): _PRIVATE,
     ("POST", "/api/resume/check"): _PRIVATE,
     ("POST", "/api/resumes"): _PRIVATE,
@@ -2024,6 +2089,11 @@ def llms_text() -> str:
         "then POST /api/tailored-resumes/pdf. To render your own markdown instead: POST /api/resume/pdf {markdown}. "
         "GigAI stores no name or contact details: these PDFs have no header, and a line holding a name or contact detail is refused (422 personal_info_refused). "
         "The person adds their details in Scout's Generate PDF form, in their browser; an agent cannot finish that step unless it drives that browser.\n"
+        "- Store a whole edited resume for ONE job (local, no model call): PUT /api/tailored-resumes {job_url, markdown, actor: \"agent\", source} attaches resume markdown as that "
+        "job's tailored resume, marked edited with who wrote it. Unchanged lines keep their sources; a changed or new line may state only numbers and skills your resume or an "
+        "answer states (422 edited_resume_unsupported lists every problem by line number: save the missing answer first, then send it again). The job is then queued so the "
+        "Scout ATS score and the Scout label are made again from it, and background tailoring never replaces it. GET /api/resumes-folder is the one visible folder "
+        "(default ~/Documents/GigAI/resumes) that holds each job's tailored markdown and headerless PDFs as <company>-<role>-<date>.md/.pdf; PUT /api/resumes-folder {path} changes it.\n"
         "- Answers and stories (the user's, shared by every profile; local, no model call). An ANSWER is a short fact (\"Do you have GCP experience?\" -> "
         "\"Yes, 4 years, GKE + BigQuery\"): save a factual reply with POST /api/answers {question_id, question, answer, actor: \"agent\", source: \"<where it came from>\"}; read GET /api/answers "
         "(?q=&tag=) or GET /api/answers/<id>; edit PUT /api/answers/<id> {revision, answer|question|tag, actor}; remove DELETE /api/answers/<id>?revision=. "

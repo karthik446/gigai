@@ -981,6 +981,8 @@ class TailoredLine(_Contract):
     (``refs`` is empty), has no ``reason`` and no ``alternative`` -- no source
     and no no-loss claim is made for it -- and ``edited_from`` holds the line
     it replaced, whole, so the original or the rewrite can be shown again.
+    A custom line of an attached edited resume (0110-10-05,
+    ``tailored_resume_edit``) that replaced no line has no ``edited_from``.
     """
 
     schema_version: ClassVar[str] = "scout-tailored-line:1"
@@ -1016,7 +1018,7 @@ class TailoredLine(_Contract):
         if type(value["refs"]) is not list:
             _fail("wrong_type", "tailored_line.refs must be an array")
         edited_from = None if value.get("edited_from") is None else cls.from_json(value["edited_from"])
-        if (kind == "custom") != (edited_from is not None) or (edited_from is not None and edited_from.kind == "custom"):
+        if edited_from is not None and (kind != "custom" or edited_from.kind == "custom"):
             _fail("invalid_value", "tailored_line.edited_from is the copy or rewritten line a custom line replaced")
         if kind == "custom" and (value["refs"] or value.get("reason") is not None or value.get("alternative") is not None):
             _fail("invalid_value", "a custom tailored_line carries no refs, reason or alternative")
@@ -2136,6 +2138,38 @@ class TailorSources(_Contract):
         )
 
 
+#: Who can have written an edited tailored resume (the answers' ``written_by`` values, 0110-10-04).
+EDIT_WRITERS: tuple[str, ...] = ("operator", "agent")
+
+
+@dataclass(frozen=True)
+class TailorEdit:
+    """An edited tailored resume's mark (0110-10-05): who attached the markdown, when, and where it came from.
+
+    ``source`` is one line of free text in the writer's words (or ``None``),
+    like an answer's; it is checked for contact shapes before it is stored.
+    """
+
+    written_by: str
+    edited_at: str
+    source: str | None = None
+
+    def to_json(self) -> dict[str, object]:
+        return {"written_by": self.written_by, "edited_at": self.edited_at, "source": self.source}
+
+    @classmethod
+    def from_json(cls, obj: object) -> "TailorEdit":
+        value = _object_with_optional(obj, ("written_by", "edited_at"), ("source",), "tailor_response.edited")
+        written_by = _string(value["written_by"], "tailor_response.edited.written_by")
+        if written_by not in EDIT_WRITERS:
+            _fail("bad_enum", "tailor_response.edited.written_by must be operator or agent")
+        return cls(
+            written_by,
+            _string(value["edited_at"], "tailor_response.edited.edited_at"),
+            _optional_string(value.get("source"), "tailor_response.edited.source"),
+        )
+
+
 @dataclass(frozen=True)
 class TailorResponse(_Contract):
     """One tailored resume: identities, sources, the validated structure, the markdown, storage.
@@ -2144,6 +2178,11 @@ class TailorResponse(_Contract):
     at most a 60-character ``reason.posting_phrase`` per rewritten line).
     It DOES carry resume-derived text (the copied lines, the rewritten lines
     and every ref's source text) -- that is the product.
+
+    ``edited`` (optional, 0110-10-05; the schema string is unchanged and a
+    stored resume without it parses as before) marks a resume whose markdown
+    the user or their agent attached (``tailored_resume_edit``): who wrote
+    it and when.  A tailoring by a model carries none.
     """
 
     schema_version: ClassVar[str] = "scout-tailor-response:1"
@@ -2159,11 +2198,13 @@ class TailorResponse(_Contract):
     updated_at: str
     stored_path: str
     markdown_path: str
+    edited: TailorEdit | None = None
 
     def to_json(self) -> dict[str, object]:
         job = self.job.to_json()
         del job["text"]
         return {
+            **({"edited": self.edited.to_json()} if self.edited is not None else {}),
             "schema_version": self.schema_version,
             "job": job,
             "resume": self.resume.to_json(),
@@ -2187,7 +2228,7 @@ class TailorResponse(_Contract):
                 "schema_version", "job", "resume", "sources", "result", "markdown", "producer", "usage",
                 "instructions_digest", "created_at", "updated_at", "stored_path", "markdown_path",
             ),
-            (),
+            ("edited",),
             "tailor_response",
         )
         if value["schema_version"] != cls.schema_version:
@@ -2211,6 +2252,7 @@ class TailorResponse(_Contract):
             updated_at=_string(value["updated_at"], "updated_at"),
             stored_path=_string(value["stored_path"], "stored_path"),
             markdown_path=_string(value["markdown_path"], "markdown_path"),
+            edited=None if value.get("edited") is None else TailorEdit.from_json(value["edited"]),
         )
 
 
@@ -2337,6 +2379,55 @@ def tailor_sources(
     return sources
 
 
+def resolve_tailor_job(
+    request: TailorRequest, *, home_root: Path, target: Path, resolved_job: ResolvedJob | None = None
+) -> ResolvedJob:
+    """The job one tailoring (or one attached edit, ``tailored_resume_edit``) is about.
+
+    ``resolved_job`` when given (nothing is fetched), else the posting the
+    assessment read (``job_source``; network only for a URL the index does
+    not hold).  Raises ``TailorError`` with the quick-assess codes.
+    """
+
+    try:
+        if resolved_job is not None:
+            job = resolved_job
+        else:
+            # 0110-10-04: the same posting the assessment read (``job_source``), never a scrape of the company's page.
+            job = resolve_job_for_assessment(
+                request.job, home_root=home_root, target=target, open_client=lambda: job_fetch_client(),
+                resolve=lambda job_input_, client: resolve_job(job_input_, client=client, home_root=home_root),
+            )
+    except FindJobsContractError as exc:
+        raise TailorError(exc.code, str(exc)) from exc
+    from .find_jobs.assess_contracts import AssessRequest
+
+    return _apply_job_overrides(job, AssessRequest(job=request.job, resume=request.resume))
+
+
+def resolve_tailor_resume(request: TailorRequest, *, home_root: Path, target: Path) -> ResolvedResume:
+    """The resume one tailoring (or one attached edit) is made from: the pinned profile resume, or the ephemeral text.
+
+    Raises ``TailorError`` with the quick-assess codes; a resume with no text line is ``resume_input_invalid``.
+    """
+
+    try:
+        if request.resume.is_ephemeral:
+            resume = resolve_resume(request.resume, resolved=None, home_root=home_root, target=target)  # type: ignore[arg-type]
+        else:
+            resolved = _resolve_workpad(home_root, target)
+            profile = resolve_profile(request.resume, resolved=resolved, home_root=home_root, target=target)
+            assert profile is not None
+            resume = resume_for_profile(profile, resolved=resolved, home_root=home_root, target=target)
+    except FindJobsContractError as exc:
+        raise TailorError(exc.code, str(exc)) from exc
+    except QuickAssessError as exc:
+        raise TailorError(exc.code, str(exc)) from exc
+    if not resume_lines(resume.text):
+        raise TailorError("resume_input_invalid", "the resume has no text lines to tailor")
+    return resume
+
+
 def run_tailored_resume(
     request: TailorRequest,
     *,
@@ -2368,38 +2459,10 @@ def run_tailored_resume(
     target = Path(target)
 
     # 1. Job text (public data; network only for a URL).
-    try:
-        if resolved_job is not None:
-            job = resolved_job
-        else:
-            # 0110-10-04: the same posting the assessment read (``job_source``), never a scrape of the company's page.
-            job = resolve_job_for_assessment(
-                request.job, home_root=home_root, target=target, open_client=lambda: job_fetch_client(),
-                resolve=lambda job_input_, client: resolve_job(job_input_, client=client, home_root=home_root),
-            )
-    except FindJobsContractError as exc:
-        raise TailorError(exc.code, str(exc)) from exc
-    from .find_jobs.assess_contracts import AssessRequest
-
-    job = _apply_job_overrides(job, AssessRequest(job=request.job, resume=request.resume))
-
+    job = resolve_tailor_job(request, home_root=home_root, target=target, resolved_job=resolved_job)
     # 2. Resume identity + text (the pinned profile resume, or ephemeral).
-    resolved = None
-    try:
-        if request.resume.is_ephemeral:
-            resume = resolve_resume(request.resume, resolved=None, home_root=home_root, target=target)  # type: ignore[arg-type]
-        else:
-            resolved = _resolve_workpad(home_root, target)
-            profile = resolve_profile(request.resume, resolved=resolved, home_root=home_root, target=target)
-            assert profile is not None
-            resume = resume_for_profile(profile, resolved=resolved, home_root=home_root, target=target)
-    except FindJobsContractError as exc:
-        raise TailorError(exc.code, str(exc)) from exc
-    except QuickAssessError as exc:
-        raise TailorError(exc.code, str(exc)) from exc
+    resume = resolve_tailor_resume(request, home_root=home_root, target=target)
     lines = resume_lines(resume.text)
-    if not lines:
-        raise TailorError("resume_input_invalid", "the resume has no text lines to tailor")
 
     # 3. Answered questions (citable sources), tolerantly: a pasted-text run
     #    with no bound gig simply has none.
@@ -2477,7 +2540,7 @@ def run_tailored_resume(
     if store is not None:
         return store(response)
     with tailored_resume_write_lock(path):
-        save_tailor_response(response)
+        save_tailor_response(response, home_root=home_root)
     return response
 
 
@@ -2511,15 +2574,44 @@ def read_tailored_resume(path: Path) -> TailorResponse | None:
     return _read_stored(Path(path))
 
 
-def save_tailor_response(response: TailorResponse) -> None:
+def export_tailored_markdown(response: TailorResponse, *, home_root: Path):
+    """Put a stored tailored resume's markdown in the resumes folder (0110-10-05 A); where, or ``None``.
+
+    ``<company>-<role>-<YYYY-MM-DD>.md``, dated the day the resume was last
+    tailored or attached; the folder's rules are ``resumes_folder``'s (never
+    contact data, never over a file the user changed).  Never raises: a
+    folder that cannot be written does not fail the store's write.
+    """
+
+    from . import resumes_folder
+    from .find_jobs.company_names import company_display_name
+
+    home_root = Path(home_root)
+    try:
+        day = datetime.fromisoformat(response.updated_at.replace("Z", "+00:00")).astimezone().date()
+    except ValueError:
+        day = datetime.now(UTC).astimezone().date()
+    # 0110-8-11: named for the company (the index's name), not its board token.
+    company = company_display_name(home_root, response.job.company) or response.job.company
+    return resumes_folder.try_save_markdown(
+        home_root, key=resumes_folder.job_key(home_root, response.stored_path), company=company, role=response.job.title, day=day,
+        markdown=response.markdown,
+    )
+
+
+def save_tailor_response(response: TailorResponse, *, home_root: Path | None = None):
     """Write a response's JSON and its sibling ``.md`` (atomically) at the paths it names.
 
     The write alone: a caller that replaces a stored resume holds
-    ``tailored_resume_write_lock`` around its read and this write.
+    ``tailored_resume_write_lock`` around its read and this write.  With
+    ``home_root`` (every product write path passes it) the markdown also
+    goes to the visible resumes folder (``export_tailored_markdown``); the
+    file written there, or ``None``, is returned.
     """
 
     atomic_write(Path(response.stored_path), json.dumps(response.to_json(), indent=2, sort_keys=True).encode("utf-8"))
     atomic_write(Path(response.markdown_path), response.markdown.encode("utf-8"))
+    return None if home_root is None else export_tailored_markdown(response, home_root=home_root)
 
 
 __all__ = [
@@ -2544,6 +2636,7 @@ __all__ = [
     "TERM_ALIASES",
     "TERM_STOP_WORDS",
     "AnswerSource",
+    "EDIT_WRITERS",
     "LengthRule",
     "LineAlternative",
     "LineReason",
@@ -2551,6 +2644,7 @@ __all__ = [
     "NumberMention",
     "SourceRef",
     "TailorContext",
+    "TailorEdit",
     "TailorError",
     "TailorJob",
     "TailorLineStats",
@@ -2566,6 +2660,7 @@ __all__ = [
     "apply_line_choice",
     "apply_line_edit",
     "custom_line_text",
+    "export_tailored_markdown",
     "personal_info_found",
     "replaced_line",
     "apply_no_loss",
@@ -2583,6 +2678,8 @@ __all__ = [
     "render_tailor_prompt",
     "resume_continuations",
     "resume_entries",
+    "resolve_tailor_job",
+    "resolve_tailor_resume",
     "resume_lines",
     "run_tailored_resume",
     "save_tailor_response",

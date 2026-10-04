@@ -88,6 +88,27 @@ the server used several gigabytes of memory, and reloading made it worse. Read "
 - **The three numbers are settings.** Add a `fit` block to the project's `settings.json`:
   `{"fit": {"assess_min_rank": 50, "weak_fit_below_percent": 40, "weak_fit_below_rank": 50}}`.
   Each is 0 to 100, and 0 turns that rule off.
+- **Your resumes have one visible folder.** Each job's tailored resume (markdown) is now also saved
+  in `~/Documents/GigAI/resumes`, named `<company>-<role>-<date>.md`, instead of only under a hidden
+  path with a hash for a name. `gigai scout resume pdf` without `--out` writes its PDF there too
+  (it used to write into whatever directory the command was run from) and prints the path. Change
+  the folder in Settings, with `gigai scout resume folder --set PATH` or `PUT /api/resumes-folder`;
+  `gigai scout status` and the job page show it. The folder never holds your name or contact
+  details: it gets the markdown and the PDFs made without a header, and a PDF you make with the
+  Generate PDF form is saved only where you save it. A file you change in the folder stays yours:
+  Scout replaces only files that are exactly what it last wrote, and gives a newer one a new name
+  (`...-2.md`). Tailored resumes you already have are copied in the next time Scout starts. A GigAI
+  home other than `~/.gigai` keeps its folder inside itself (`<home>/resumes`).
+- **An edited resume can be stored back for one job.** `gigai scout resume tailor --in FILE --job-url
+  URL` (or `PUT /api/tailored-resumes`) stores your edited markdown as that job's tailored resume,
+  marked edited with who wrote it (`--as agent` for an agent, and `--source` for where the edit came
+  from). Before, the only choices were a PDF that was stored nowhere and never scored, or replacing
+  the profile's resume for every job. Lines you did not change keep their sources. A line you
+  changed or added is checked: no name or contact detail, and every number and skill it states must
+  be in your resume or one of your answers; a refusal lists each problem by line number, and the fix
+  is to save the answer first. The Scout ATS score and the Scout label are then made again from the
+  edited resume (one model call, for the assessment against it). Background tailoring never
+  replaces an edited resume; asking for a new tailoring does.
 
 ### 0.1.10.8
 

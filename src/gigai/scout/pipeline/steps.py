@@ -480,7 +480,7 @@ def _tailor(ctx: StepContext, claim: Claim, found: _Inputs) -> StepResult:
             if landed is not None:
                 kept.append((written, landed))
                 return landed
-            save_tailor_response(response)
+            save_tailor_response(response, home_root=ctx.home_root)
             _write_tailor_record(ctx, claim, TAILOR_TAILORED, _bytes_digest(written.read_bytes()))
         return response
 
