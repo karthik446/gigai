@@ -117,15 +117,34 @@ class _Server:
     def _ps(self, field: str) -> str:
         return subprocess.run(["ps", "-o", f"{field}=", "-p", str(self.process.pid)], capture_output=True, text=True, check=False).stdout.strip()
 
+    def _rss_kb(self) -> int | None:
+        """Resident memory in kB: /proc on Linux (a Debian slim container has no ``ps``), ``ps`` elsewhere."""
+
+        status = Path(f"/proc/{self.process.pid}/status")
+        if status.is_file():
+            try:
+                for line in status.read_text(encoding="utf-8").splitlines():
+                    if line.startswith("VmRSS:"):
+                        return int(line.split()[1])
+            except (OSError, ValueError):
+                return None
+            return None
+        found = self._ps("rss")
+        return int(found) if found.isdigit() else None
+
     def _sample(self) -> None:
         while not self._stop.wait(0.25):
-            found = self._ps("rss")
-            if found.isdigit():
-                self.peak_rss_mb = max(self.peak_rss_mb, int(found) // 1024)
+            found = self._rss_kb()
+            if found is not None:
+                self.peak_rss_mb = max(self.peak_rss_mb, found // 1024)
 
     def cpu_seconds(self) -> float:
-        """The process's own CPU time so far (``ps`` cputime: [[dd-]hh:]mm:ss[.cc])."""
+        """The process's own CPU time so far: /proc/<pid>/stat on Linux, ``ps`` cputime ([[dd-]hh:]mm:ss[.cc]) elsewhere."""
 
+        stat = Path(f"/proc/{self.process.pid}/stat")
+        if stat.is_file():
+            fields = stat.read_text(encoding="utf-8").rsplit(")", 1)[1].split()
+            return (int(fields[11]) + int(fields[12])) / os.sysconf("SC_CLK_TCK")
         text = self._ps("cputime").replace("-", ":")
         seconds = 0.0
         for part in text.split(":"):
