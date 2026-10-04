@@ -136,7 +136,7 @@ def test_postings_journey(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> No
         # (U2's fetched_on_demand is in the batch above).
         assert (scored["company"], scored["company_name"], scored["tag_pending"]) == ("acmenew", "Acmenew", False)
         assert (scored["sort_group"], scored["tailored"], scored["stale_label"], scored["assessment_detail"]) == ("current", False, None, True)
-        assert scored["score_text"] == "Needs your answers · 1 of 2 requirements · not ranked yet"
+        assert scored["score_text"] == "Needs your answers · fit 50% · 1 of 2 requirements · not ranked yet"
         assert client.post("/api/postings/assess", json={"jobs": [_JOB], "approve": True}).json()["status"] == "nothing_to_assess"
 
         # 5. The old run is read-only history: imported once, still served by the run routes.

@@ -341,7 +341,8 @@ def test_the_jobs_page_wiring_and_test_ids() -> None:
     store = (UI_SRC / "postingsStore.js").read_text(encoding="utf-8")
     assert "store.show(filter, { ...options, force: true });\n      store.peekNew({ force: true });" in store
     # The ask opens the dialog; only the dialog's Approve sends the approving body.
-    assert view.count("postAssessThese(") == 2 and "postAssessThese(approval.dialog.approveBody)" in view
+    # 0110-10-02: the body is the server's yes, or (the dialog's low-rank box ticked) the one it names for those too.
+    assert view.count("postAssessThese(") == 2 and "postAssessThese(approvalBody(approval.dialog, includeLowRank))" in view
     assert "approve: true" not in view and "onApprove={approve}" in view
     # A profile is a filter here: the top bar's dropdown is not drawn on Jobs.
     assert 'const switcher = currentView === "jobs" ? null :' in (UI_SRC / "components" / "TopBar.jsx").read_text(encoding="utf-8")

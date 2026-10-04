@@ -9,8 +9,8 @@ import {
   PAGE_SIZES,
   PROFILE_FILTER_KEY,
   REMOVED_FILTER,
-  STATE_FILTERS,
   approvalDialog,
+  approvalBody,
   assessAskBody,
   assessOutcomeLine,
   countLine,
@@ -28,6 +28,7 @@ import {
   rowChips,
   scoreText,
   secondProfiles,
+  stateChips,
   timeChips,
   toggleProfile,
   toggleState,
@@ -47,7 +48,9 @@ import { sourcesStrip } from "../sourcesStripModel.js";
 //   time chips      "New since last check (N)" / "7 days" / "30 days", one at
 //                   a time; N is the PEEK's count (GET /api/new never moves
 //                   the anchor). "Mark all seen" moves it (POST /api/new/seen)
-//   state chips     needs your answers, assessed, Scout label recommended;
+//   state chips     needs your answers, assessed, Scout label recommended, weak fit
+//                   (0110-10-02: off by default, and weak fits are listed only
+//                   while it is on; the chip shows how many there are);
 //                   "Removed" lists what the boards no longer show
 //   Assess these    the selected rows, else the filter. The server is asked
 //                   first (count and estimate); nothing is assessed until the
@@ -97,7 +100,13 @@ function PostingRow({ row, profiles, anchor, selected, onSelect, onOpen, onAsses
   const others = secondProfiles(row, profiles);
   const details = detailLine(row);
   return (
-    <li className={`posting-row${row.removed_at ? " removed" : ""}`} data-testid="job-row" data-state={row.state}>
+    <li
+      className={`posting-row${row.removed_at ? " removed" : ""}`}
+      data-testid="job-row"
+      data-state={row.state}
+      data-fit={typeof row.fit === "number" ? row.fit : undefined}
+      data-rank={typeof row.rank_score === "number" ? row.rank_score : undefined}
+    >
       <input
         type="checkbox"
         className="posting-select"
@@ -237,6 +246,8 @@ export default function JobsView({ selectedProfileId, onSelectProfile, applicati
   const [selectedIds, setSelectedIds] = useState([]);
   // The approval: {dialog} while the question is open; nothing is assessed before its Approve.
   const [approval, setApproval] = useState(null);
+  // 0110-10-02: the dialog's second question (the low-ranked postings), off until ticked.
+  const [includeLowRank, setIncludeLowRank] = useState(false);
   const [asking, setAsking] = useState(false);
   const [approving, setApproving] = useState(false);
   const [approvalError, setApprovalError] = useState(null);
@@ -382,6 +393,7 @@ export default function JobsView({ selectedProfileId, onSelectProfile, applicati
       .then((answer) => {
         const dialog = approvalDialog(answer, profiles);
         if (dialog) {
+          setIncludeLowRank(false);
           setApproval({ dialog });
         } else {
           setNotice(assessOutcomeLine(answer));
@@ -394,7 +406,7 @@ export default function JobsView({ selectedProfileId, onSelectProfile, applicati
   const approve = () => {
     setApproving(true);
     setApprovalError(null);
-    postAssessThese(approval.dialog.approveBody)
+    postAssessThese(approvalBody(approval.dialog, includeLowRank))
       .then((answer) => {
         setApproval(null);
         setNotice(assessOutcomeLine(answer));
@@ -513,16 +525,23 @@ export default function JobsView({ selectedProfileId, onSelectProfile, applicati
             <div className="filter-group" data-role="state-filter">
               <div className="chip-group-label">State</div>
               <div className="chip-list">
-                {STATE_FILTERS.map((option) => (
+                {stateChips(filter.states, counts).map((chip) => (
                   <button
-                    key={option.value}
+                    key={chip.value}
                     type="button"
-                    className={`chip${filter.states.includes(option.value) ? " active" : ""}`}
-                    aria-pressed={filter.states.includes(option.value)}
-                    data-state={option.value}
-                    onClick={() => setFilter((current) => ({ ...current, states: toggleState(current.states, option.value) }))}
+                    className={`chip${chip.active ? " active" : ""}`}
+                    aria-pressed={chip.active}
+                    data-state={chip.value}
+                    title={chip.title}
+                    onClick={() => setFilter((current) => ({ ...current, states: toggleState(current.states, chip.value) }))}
                   >
-                    {option.label}
+                    {chip.label}
+                    {chip.count !== null && (
+                      <span className="chip-count" data-role="chip-count">
+                        {" "}
+                        {chip.count}
+                      </span>
+                    )}
                   </button>
                 ))}
                 <button
@@ -610,6 +629,8 @@ export default function JobsView({ selectedProfileId, onSelectProfile, applicati
           dialog={approval.dialog}
           submitting={approving}
           error={approvalError}
+          includeLowRank={includeLowRank}
+          onIncludeLowRank={setIncludeLowRank}
           onApprove={approve}
           onCancel={() => {
             setApproval(null);

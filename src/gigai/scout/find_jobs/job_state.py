@@ -24,12 +24,20 @@ States::
 
     not_assessed
     needs_answers | matched | not_a_match | assessed   (the latest verdict)
+    weak_fit                                           (0110-10-02, below)
     tailored
     applied -> interview_scheduled -> offer_received | rejected | withdrawn
 
 ``assessed`` is an assessment whose result carries no verdict (a result
 shape from before the verdict existed); it is never produced by a current
 assessment.
+
+``weak_fit`` (0110-10-02, ``scout/fit.py``) is ``needs_answers`` for a job
+whose stored assessment has few requirements met AND whose rank score is
+low: it waits on answers that could hardly make it a match, so it is not
+counted with the jobs that need the user's answers. Only
+:class:`JobStateSources` says it (it knows the profile's rank score, from
+the posting read model); the pure :func:`derive_job_state` never does.
 
 The application state is the LATEST active event of the job, in core's own
 order (``occurred_at``, then when it was recorded): an event another event
@@ -64,6 +72,7 @@ from .contracts import Verdict, normalize_url
 NOT_ASSESSED = "not_assessed"
 ASSESSED = "assessed"
 NEEDS_ANSWERS = "needs_answers"
+WEAK_FIT = "weak_fit"
 MATCHED = "matched"
 NOT_A_MATCH = "not_a_match"
 TAILORED = "tailored"
@@ -78,6 +87,7 @@ JOB_STATES: tuple[str, ...] = (
     NOT_ASSESSED,
     ASSESSED,
     NEEDS_ANSWERS,
+    WEAK_FIT,
     MATCHED,
     NOT_A_MATCH,
     TAILORED,
@@ -485,6 +495,9 @@ class JobStateSources:
         self._roots: dict[str, Path | None] = {}
         self._names: dict[Path, frozenset[str]] = {}
         self._basis: object | None = None
+        #: 0110-10-02: (profile_id, job) -> rank score and the fit setting, read once on the first needs-answers job.
+        self._ranks: dict[tuple[str, str], int | None] | None = None
+        self._fit: object | None = None
 
     @property
     def basis(self):
@@ -582,7 +595,21 @@ class JobStateSources:
             return derive_job_state(has_tailored_resume=True, tailored_at=tailored_at)
         item = quick if quick is not None else self.quick_assessment(job_identity, profile_id)
         facts = (run_assessment, None if item is None else quick_assessment_fact(item, basis_stale=self.basis.reason(item)))
-        return derive_job_state(assessments=facts, current_content_sha256=current_content_sha256)
+        state = derive_job_state(assessments=facts, current_content_sha256=current_content_sha256)
+        if state.state == NEEDS_ANSWERS and item is not None and profile_id is not None and self._weak_fit(job_identity, profile_id, item):
+            return JobState(WEAK_FIT, state.since, next_events(WEAK_FIT), state.assessment_stale)
+        return state
+
+    def _weak_fit(self, job_identity: str, profile_id: str, item: AssessResponse) -> bool:
+        """0110-10-02: is this needs-answers assessment a weak fit at the profile's rank score (``scout/fit.py``)?"""
+
+        from .. import fit
+
+        if self._ranks is None:
+            self._ranks = fit.stored_rank_scores(self._home_root, self._target)
+            self._fit = fit.fit_setting(self._home_root, self._target)
+        rank_score = self._ranks.get((profile_id, job_identity))
+        return fit.assessment_is_weak_fit(item, rank_score, self._fit)  # type: ignore[arg-type]
 
 
 __all__ = [
@@ -593,6 +620,7 @@ __all__ = [
     "JobStateError",
     "JobStateSources",
     "STALE_POSTING_CHANGED",
+    "WEAK_FIT",
     "application_state",
     "check_transition",
     "current_application_event",

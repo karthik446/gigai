@@ -1,16 +1,20 @@
-import { estimateLine } from "../postingsModel.js";
+import { approvalBody, estimateLine, lowRankLine } from "../postingsModel.js";
 import { modelTargetLabel } from "../modelTargets.js";
 
 // 0.1.10.7 M4b: the approval "Assess these" asks for. `dialog` is
 // postingsModel.approvalDialog(the ASK's answer): the count and the estimate
 // are the server's. Nothing has been assessed when this shows; Approve sends
 // the body the server named for the yes.
-export default function AssessApprovalDialog({ dialog, submitting, error, onApprove, onCancel }) {
+// 0110-10-02: postings ranked below the assess threshold are left out of the
+// count; they are a second question in the same dialog (a box, off by
+// default), and Approve assesses them only when it is ticked.
+export default function AssessApprovalDialog({ dialog, submitting, error, includeLowRank = false, onIncludeLowRank, onApprove, onCancel }) {
+  const low = dialog.lowRank;
   return (
     <div className="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="assess-approval-title" data-testid="approval-dialog">
       <div className="modal">
         <h2 id="assess-approval-title">
-          Assess {dialog.count} posting{dialog.count === 1 ? "" : "s"}?
+          {dialog.count === 0 && low ? "Only low-ranked postings are selected" : `Assess ${dialog.count} posting${dialog.count === 1 ? "" : "s"}?`}
         </h2>
         <ul className="approval-facts">
           {dialog.byProfile.map((item) => (
@@ -33,6 +37,17 @@ export default function AssessApprovalDialog({ dialog, submitting, error, onAppr
             </li>
           )}
         </ul>
+        {low && (
+          <label className="approval-low-rank" data-testid="approval-low-rank">
+            <input
+              type="checkbox"
+              checked={includeLowRank}
+              disabled={submitting || !low.approveBody}
+              onChange={(event) => onIncludeLowRank && onIncludeLowRank(event.target.checked)}
+            />{" "}
+            {lowRankLine(low)}
+          </label>
+        )}
         <p className="muted" data-role="approval-nothing-yet">
           Nothing has been assessed yet. Assessing starts only when you approve.
         </p>
@@ -41,7 +56,7 @@ export default function AssessApprovalDialog({ dialog, submitting, error, onAppr
           <button type="button" className="button secondary" onClick={onCancel} disabled={submitting} data-action="approval-cancel">
             Cancel
           </button>
-          <button type="button" className="button" onClick={onApprove} disabled={submitting || !dialog.approveBody} data-action="approval-approve">
+          <button type="button" className="button" onClick={onApprove} disabled={submitting || !approvalBody(dialog, includeLowRank)} data-action="approval-approve">
             {submitting ? "Assessing…" : "Approve and assess"}
           </button>
         </div>

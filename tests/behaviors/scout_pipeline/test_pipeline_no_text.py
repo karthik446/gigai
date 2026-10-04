@@ -68,6 +68,7 @@ _REVIEWED: dict[str, dict[str, str]] = {
         "match_rank": "integer", "state": "code", "stale_code": "code", "assessed_at": "timestamp", "reqs_met": "integer",
         "reqs_total": "integer", "open_questions": "integer", "tailored": "integer", "label": "code",
         "ats_score": "integer", "pinned_digest": "digest", "settings_digest": "digest", "updated_at": "timestamp",
+        "fit": "integer",
     },
     "posting_build": {
         "profile_id": "id", "match_digest": "digest", "facts_digest": "digest", "pinned_digest": "digest",

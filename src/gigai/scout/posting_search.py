@@ -14,6 +14,14 @@ A changed setting (titles, countries, work mode) is seen by the very next
 search: the read model matches that profile again. A search never moves the
 "new since" anchor.
 
+WEAK FIT (0110-10-02, ``fit.py``). A posting whose state is ``weak_fit`` (it
+waits on answers, few requirements are met and its rank is low) is LEFT OUT
+of a search unless the ``weak_fit`` state is asked for (or, for "Assess
+these", the posting is named). ``counts.weak_fit`` is how many the other
+filters select, listed or not: the number on the page's "Weak fit" chip.
+The rows are in the grid's order (``scout_new.order_key``): inside a group by
+the fit number, then the rank score, then the newest.
+
 HISTORY (``history=True``). What old find-jobs runs assessed, imported by
 ``run_history.py``, each with the provenance the run sealed. Rows of a run
 with no profile (the ``ephemeral`` pseudo-profile) and of a profile that is
@@ -30,7 +38,11 @@ many, the estimate), registered as live work (the ``assess_batch`` lease:
 the pipeline and the rank lane start nothing while it runs) and assessed
 through the job page's own path (``run_quick_assessment``, from the posting
 text already stored; one with none has its description fetched first, one request for it alone). The results are in the quick-assess
-store, so the read model shows them at once.
+store, so the read model shows them at once. 0110-10-02: a posting whose rank
+score is below the assess threshold (``fit.assess_min_rank``, 50) is left out
+of the batch and counted; ``low_rank`` in the response is the separate
+question for those ("3 low-ranked ones are skipped; assess those too? ~3
+calls"), and ``include_low_rank`` assesses them with the rest.
 
 LABELS (data_labels, P4): like ``scout new``, no response mixes. A response
 holds posting text and what a model derived from it (``public-untrusted``)
@@ -45,6 +57,7 @@ from pathlib import Path
 import threading
 import uuid
 
+from . import fit as fit_rules
 from . import postings, run_history
 from .data_labels import ENVELOPE_KEY, UNTRUSTED_TEXT_RULE, labels_envelope
 from .pipeline.busy import assess_batch
@@ -58,7 +71,18 @@ from .pipeline.store import (
     RunAssessment,
 )
 from .postings import PostingModelError, PostingModelPreparing, ProfileView
-from .scout_new import FIRST_USE_DAYS, POSTINGS_LABELS, _assess, _grouped, _row_json, _score, _shown, check_response, in_order
+from .scout_new import (
+    FIRST_USE_DAYS,
+    POSTINGS_LABELS,
+    _assess,
+    _grouped,
+    _row_json,
+    _score,
+    _shown,
+    check_response,
+    in_order,
+    split_low_rank,
+)
 
 SCHEMA_VERSION = "scout-postings:1"
 ASSESS_SCHEMA_VERSION = "scout-postings-assess:1"
@@ -75,7 +99,7 @@ WINDOWS: Mapping[str, int | None] = {WINDOW_NEW: None, WINDOW_7_DAYS: 7, WINDOW_
 #: The state filters. ``assessed`` is any posting with an assessment; ``recommended`` the Scout label.
 STATE_ASSESSED = "assessed"
 STATE_RECOMMENDED = "recommended"
-_ROW_STATES = frozenset({"not_assessed", "needs_answers", "matched", "not_a_match", "tailored"})
+_ROW_STATES = frozenset({"not_assessed", "needs_answers", "matched", "not_a_match", "tailored", fit_rules.WEAK_FIT})
 STATES = frozenset(_ROW_STATES | {STATE_ASSESSED, STATE_RECOMMENDED})
 
 DEFAULT_LIMIT = 50
@@ -156,6 +180,12 @@ def _wanted(row: PostingRecord, states: Sequence[str]) -> bool:
     return False
 
 
+def _hidden(row: PostingRecord, states: Sequence[str], named: bool) -> bool:
+    """0110-10-02: a weak fit is listed only when asked for: the ``weak_fit`` state, or the posting named."""
+
+    return row.state == fit_rules.WEAK_FIT and not named and fit_rules.WEAK_FIT not in states
+
+
 class _Selection:
     """One refreshed read of the read model with the call's filters applied: every matching posting, in order."""
 
@@ -184,11 +214,18 @@ class _Selection:
             groups = {job: group for job, group in groups.items() if any(row.profile_id in wanted for row in group)}
         only = self.profile_ids[0] if len(self.profile_ids) == 1 else None
         shown = [(group, _shown(group, only)) for group in groups.values()]
-        shown = [(group, row) for group, row in shown if _wanted(row, states) and _in_window(row, window, self.since, moment)]
+        weak = fit_rules.WEAK_FIT
+        shown = [
+            (group, row) for group, row in shown
+            if (_wanted(row, states) or row.state == weak) and _in_window(row, window, self.since, moment)
+        ]
         words = [word for word in (query or "").casefold().split() if word]
         if words:
             text = _index_words(home_root, [row for _group, row in shown])
             shown = [(group, row) for group, row in shown if all(word in text.get(row.job, "") for word in words)]
+        # 0110-10-02: the weak fits the OTHER filters select (the chip's number), then only the ones asked for stay.
+        self.weak_fit = sum(1 for _group, row in shown if row.state == weak)
+        shown = [(group, row) for group, row in shown if _wanted(row, states) and not _hidden(row, states, jobs is not None)]
         # 0110-8-04: the grid's one order (``scout_new.order_key``): current, stale, not assessed; verdict; rank.
         self.shown = shown = in_order(shown)
         self.new = sum(1 for _group, row in shown if row.first_seen > self.since and row.removed_at is None)
@@ -328,6 +365,8 @@ def search_postings(
                 "counts": {
                     "matched": len(selection.shown), "shown": len(page), "new": selection.new,
                     "by_state": dict(sorted(by_state.items())),
+                    # 0110-10-02: the weak fits these filters select; they are in ``matched`` only when the state is asked for.
+                    "weak_fit": selection.weak_fit,
                 },
                 "postings": {
                     ENVELOPE_KEY: labels_envelope(POSTINGS_LABELS),
@@ -385,6 +424,7 @@ def assess_these(
     decided_by: str = "operator",
     now: datetime | None = None,
     config: object | None = None,
+    include_low_rank: bool = False,
 ) -> dict[str, object]:
     """"Assess these": ask first (count and estimate), assess on approval. The ``scout-postings-assess:1`` response.
 
@@ -392,7 +432,9 @@ def assess_these(
     (``query``, ``states``, ``window``, ``profile_id``) selects them. A
     posting is assessed for its best profile, or for ``profile_id``. One with
     a current assessment is left out unless ``again``. Nothing is assessed
-    unless ``approve`` is true.
+    unless ``approve`` is true. 0110-10-02: a posting whose rank score is
+    below the assess threshold is left out and counted (``low_rank``) unless
+    ``include_low_rank``.
     """
 
     from ..workpad import committed_read_cache
@@ -426,11 +468,15 @@ def assess_these(
                 raise PostingSearchError("profile_not_found", "no active Scout profile has this id")
             found = {row.job for _group, row in selection.shown}
             not_found = [job for job in named or () if job not in found]
-            pairs = sorted(
+            candidates = sorted(
                 (row.job, row.profile_id) for _group, row in selection.shown
                 if again or row.state == _NOT_ASSESSED or row.stale_code is not None
             )
-            current = len(selection.shown) - len(pairs)
+            current = len(selection.shown) - len(candidates)
+            # 0110-10-02: only a rank score of the threshold or more is assessed by default; the rest is its own question.
+            setting = fit_rules.fit_setting(home_root, target)
+            ranks = {(row.job, row.profile_id): row.rank_score for _group, row in selection.shown}
+            pairs, low = split_low_rank(candidates, ranks, setting, include=include_low_rank)
             model, estimate = _estimate(pairs, home_root, target)
             per_profile: dict[str, int] = {}
             for _job, owner in pairs:
@@ -452,15 +498,32 @@ def assess_these(
                     body[key] = value
             if again:
                 body["again"] = True
+            if include_low_rank:
+                body["include_low_rank"] = True
+            low_rank: dict[str, object] | None = None
+            if low:
+                low_estimate = _estimate(low, home_root, target)[1]
+                low_tokens = low_estimate["tokens"]
+                low_cost = f", ~{low_tokens / 1000:.0f}k tokens" if isinstance(low_tokens, (int, float)) and low_tokens >= 1000 else ""
+                one = len(low) == 1
+                low_rank = {
+                    "kind": "assess_low_rank", "skipped": len(low), "min_rank": setting.assess_min_rank, "estimate": low_estimate,
+                    "text": (
+                        f"{len(low)} low-ranked {'one is' if one else 'ones are'} skipped (rank below {setting.assess_min_rank}); "
+                        f"assess {'that' if one else 'those'} too? ~{low_estimate['calls']} calls{low_cost}"
+                    ),
+                    "yes": {"api": {"method": "POST", "path": "/api/postings/assess", "body": {**body, "include_low_rank": True}}},
+                }
             question = {
                 "kind": "assess_these", "selected": len(selection.shown), "to_assess": len(pairs), "already_current": current,
+                "low_rank_skipped": len(low),
                 "by_profile": by_profile, "model_target": model, "estimate": estimate, "text": sentence,
                 "yes": {"api": {"method": "POST", "path": "/api/postings/assess", "body": body}},
             }
             assessed: dict[str, object] | None = None
             approval_id: str | None = None
-            if not pairs:
-                status = STATUS_NOTHING
+            if not pairs and (approve or not low):
+                status = STATUS_NOTHING  # nothing above the threshold: the low-ranked ones wait for their own yes
             elif not approve:
                 status = STATUS_ASK  # nothing is assessed without approval: no model call was made
             else:
@@ -502,7 +565,11 @@ def assess_these(
                 "status": status,
                 "checked_at": postings.stamp(moment),
                 "question": question if status == STATUS_ASK else None,
-                "counts": {"selected": len(found), "to_assess": len(pairs), "already_current": current, "not_found": len(not_found)},
+                "counts": {
+                    "selected": len(found), "to_assess": len(pairs), "already_current": current, "not_found": len(not_found),
+                    "low_rank_skipped": len(low),
+                },
+                "low_rank": low_rank,
                 "not_found": not_found,
                 "approval": None if approval_id is None else {"id": approval_id, "decided_by": decided_by, "jobs": len(pairs)},
                 "assessed": assessed,
@@ -535,8 +602,12 @@ def render(response: Mapping[str, object]) -> str:
             lines.append(f"Assessed {assessed['assessed']} of {assessed['requested']}." + (f" Fetched {assessed['fetched_on_demand']} missing description(s) first." if assessed.get("fetched_on_demand") else ""))
             for item in assessed["failed"]:  # type: ignore[union-attr]
                 lines.append(f"  not assessed ({item['error_code']}{': ' + str(item['reason']) if item.get('reason') else ''}): {item['job_identity']}")
-        else:
+        elif not isinstance(response.get("low_rank"), Mapping):
             lines.append("Nothing to assess: every selected posting has a current assessment.")
+        low = response.get("low_rank")
+        if isinstance(low, Mapping):
+            lines.append(str(low["text"]))
+            lines.append("  Yes: run the same command with --yes --include-low-rank.")
         for job in response["not_found"]:  # type: ignore[union-attr]
             lines.append(f"  not in the stored postings: {job}")
     else:

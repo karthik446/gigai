@@ -28,6 +28,7 @@ export const STATE_LABELS = {
   not_assessed: "Not assessed",
   assessed: "Assessed",
   needs_answers: "Needs your answers",
+  weak_fit: "Weak fit",
   matched: "Matched",
   not_a_match: "Not a match",
   tailored: "Resume tailored",
@@ -42,6 +43,7 @@ export const STATE_LABELS = {
 export const STATE_ORDER = [
   "not_assessed",
   "needs_answers",
+  "weak_fit",
   "matched",
   "assessed",
   "not_a_match",

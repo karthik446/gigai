@@ -251,11 +251,11 @@ def test_04_the_grid_orders_current_then_stale_then_not_assessed_and_says_n_of_m
         order = {"current": 0, "stale": 1, "not_assessed": 2}
         assert [order[group] for group in groups] == sorted(order[group] for group in groups)  # type: ignore[index]
         by_name = {names[row["job_identity"]]: row for row in rows}  # type: ignore[index]
-        assert by_name["one_of_one"]["score_text"] == "Matched · 1 of 1 requirements · rank 40"
-        assert by_name["matched"]["score_text"] == "Matched · 2 of 2 requirements · rank 60"
-        assert by_name["answers"]["score_text"] == "Needs your answers · 1 of 2 requirements · rank 90"
-        assert by_name["no"]["score_text"] == "Not a match · 1 of 2 requirements · rank 99"
-        assert by_name["old"]["score_text"] == "Matched (old assessment: older prompt) · 3 of 3 requirements · rank 95"
+        assert by_name["one_of_one"]["score_text"] == "Matched · fit 100% · 1 of 1 requirements · rank 40"
+        assert by_name["matched"]["score_text"] == "Matched · fit 100% · 2 of 2 requirements · rank 60"
+        assert by_name["answers"]["score_text"] == "Needs your answers · fit 50% · 1 of 2 requirements · rank 90"
+        assert by_name["no"]["score_text"] == "Not a match · fit 50% · 1 of 2 requirements · rank 99"
+        assert by_name["old"]["score_text"] == "Matched (old assessment: older prompt) · fit 100% · 3 of 3 requirements · rank 95"
         assert by_name["ranked"]["score_text"] == "rank 97 · not assessed"
         assert by_name["unranked"]["score_text"] == "not ranked yet · not assessed"
         # Compatibility: the old numbers are still there, and the rank score always is.
@@ -318,7 +318,7 @@ def test_08_only_old_assessments_are_their_own_question_and_yes_assesses_the_new
     assert (row["sort_group"], row["stale_reason"], row["assessment_detail"]) == ("stale", "older_prompt", False)
     assert row["stale_label"] == "old assessment: older prompt"
     assert row["assessment"] == {"verdict": None, "met": 3, "requirements": 3, "percent": 100, "assessed_at": "2026-09-30T10:00:00.000000Z"}
-    assert row["score_text"] == "Matched (old assessment: older prompt) · 3 of 3 requirements · not ranked yet"
+    assert row["score_text"] == "Matched (old assessment: older prompt) · fit 100% · 3 of 3 requirements · not ranked yet"
 
     # --reassess-stale is the yes to the other question.
     again = _new(fx, assess=False, reassess_stale=True, peek=True)
@@ -384,7 +384,7 @@ def test_12_a_tailored_posting_keeps_its_verdict_and_shows_under_the_profile_tha
     for response in (_new(fx, peek=True), _search(fx)):
         row = _rows(response)[0]
         assert (row["profile_id"], row["state"], row["tailored"]) == (fx.default_profile_id, "matched", True)
-        assert row["score_text"] == "Matched · 2 of 2 requirements · rank 96 · resume tailored"
+        assert row["score_text"] == "Matched · fit 100% · 2 of 2 requirements · rank 96 · resume tailored"
         assert [item["profile_id"] for item in row["profiles"]] == [fx.default_profile_id, fx.second_profile_id]  # type: ignore[union-attr]
     # The state filter still finds it, by the verdict and by "tailored".
     assert [row["job_identity"] for row in _rows(_search(fx, states=["tailored"]))] == [job]

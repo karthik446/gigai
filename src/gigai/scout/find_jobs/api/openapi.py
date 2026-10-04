@@ -81,7 +81,10 @@ _STALE_NOTE = (
     "state was made on posting text that has since changed: the verdict still reads, and the job should be re-assessed. "
     "The same marker carries reason `older_prompt`, `settings_changed` or `story_bank_changed` when the state comes from a stored "
     "quick assessment made with an older assess prompt, other candidate settings (work mode, countries, location, sponsorship "
-    "need) or answers and stories that have since changed; nothing is re-assessed until you ask (POST /api/assess, or assess-all)."
+    "need) or answers and stories that have since changed; nothing is re-assessed until you ask (POST /api/assess, or assess-all). "
+    "job_state.state `weak_fit` is `needs_answers` for a job whose stored assessment has few requirements met AND whose rank "
+    "score is low (the `fit` block of the project's settings: below 40% and below rank 50): it is not counted with the jobs "
+    "that need your answers."
 )
 _BASIS_NOTE = (
     "A stored assessment records its basis (`prompt_version`, `constraints_digest`, `story_bank`: digests and ids, no settings "
@@ -278,10 +281,13 @@ _NEW_EXAMPLE: dict[str, object] = {
     "schema_version": "scout-new:1", "status": "ask", "since": _NEW_SINCE, "since_source": "anchor",
     "checked_at": "2026-10-03T09:30:00.000000Z", "peek": True, "profile_id": None,
     "anchor": {"last_checked_at": _NEW_SINCE, "advances": False},
-    "counts": {"new": 1, "to_assess": 1, "only_stale": 2, "shown": 1, "by_profile": [{"profile_id": "prof_1", "new": 1}]},
+    "counts": {
+        "new": 1, "to_assess": 1, "low_rank_skipped": 0, "only_stale": 2, "weak_fit": 0, "shown": 1,
+        "by_profile": [{"profile_id": "prof_1", "new": 1}],
+    },
     "message": "1 new posting since Thu 01 Oct 14:02.",
     "question": {
-        "kind": "assess_new", "new": 1, "to_assess": 1, "by_profile": [{"profile_id": "prof_1", "count": 1}],
+        "kind": "assess_new", "new": 1, "to_assess": 1, "low_rank_skipped": 0, "by_profile": [{"profile_id": "prof_1", "count": 1}],
         "model_target": "codex_cli",
         "estimate": {"calls": 1, "tokens": 19500, "seconds": 11.2, "cost": None, "basis_calls": 12},
         "yes": {
@@ -295,7 +301,7 @@ _NEW_EXAMPLE: dict[str, object] = {
         "text": "1 new posting (Staff Engineer 1). Assess them? ~1 calls, ~20k tokens",
     },
     "stale_question": {
-        "kind": "reassess_stale", "to_reassess": 2, "by_profile": [{"profile_id": "prof_1", "count": 2}],
+        "kind": "reassess_stale", "to_reassess": 2, "low_rank_skipped": 0, "by_profile": [{"profile_id": "prof_1", "count": 2}],
         "model_target": "codex_cli",
         "estimate": {"calls": 2, "tokens": 39000, "seconds": 22.4, "cost": None, "basis_calls": 12},
         "yes": {
@@ -304,6 +310,8 @@ _NEW_EXAMPLE: dict[str, object] = {
         },
         "text": "2 have only an old assessment; re-assess? ~2 calls, ~39k tokens",
     },
+    "low_rank_question": None,
+    "fit": {"assess_min_rank": 50, "weak_fit_below_percent": 40, "weak_fit_below_rank": 50, "source": "default"},
     "assessed": None,
     "reassessed": None,
     "ranking": {"enabled": True, "in_progress": True, "by_profile": [{"profile_id": "prof_1", "ranked": 509, "total": 792}]},
@@ -326,7 +334,7 @@ _NEW_EXAMPLE: dict[str, object] = {
             "removed_at": None, "profile_id": "prof_1",
             "profiles": [{"profile_id": "prof_1", "match_rank": 1, "rank_score": 82, "state": "not_assessed"}],
             "state": "not_assessed", "tailored": False, "stale_reason": None, "stale_label": None, "sort_group": "not_assessed",
-            "score": 82, "score_kind": "rank", "score_text": "rank 82 · not assessed", "rank_score": 82, "assessment": None,
+            "score": 82, "score_kind": "rank", "score_text": "rank 82 · not assessed", "fit": None, "rank_score": 82, "assessment": None,
             "assessment_detail": None, "needs_tailoring": None, "unmet": [], "open_questions": [], "label": None, "ats_score": None,
             "tag_pending": False,
         }],
@@ -343,7 +351,7 @@ _POSTINGS_EXAMPLE: dict[str, object] = {
     "schema_version": "scout-postings:1", "checked_at": "2026-10-03T09:30:00.000000Z",
     "filters": {"profile_ids": [], "query": None, "states": [], "window": None, "removed": False, "limit": 50, "offset": 0},
     "anchor": {"last_checked_at": _NEW_SINCE, "since": _NEW_SINCE},
-    "counts": {"matched": 1, "shown": 1, "new": 1, "by_state": {"not_assessed": 1}},
+    "counts": {"matched": 1, "shown": 1, "new": 1, "by_state": {"not_assessed": 1}, "weak_fit": 0},
     "postings": {
         "_labels": _NEW_EXAMPLE["postings"]["_labels"],  # type: ignore[index]
         "rule": UNTRUSTED_TEXT_RULE,
@@ -356,12 +364,14 @@ _POSTINGS_EXAMPLE: dict[str, object] = {
 _POSTINGS_ASSESS_EXAMPLE: dict[str, object] = {
     "schema_version": "scout-postings-assess:1", "status": "ask", "checked_at": "2026-10-03T09:30:00.000000Z",
     "question": {
-        "kind": "assess_these", "selected": 1, "to_assess": 1, "already_current": 0, "by_profile": [{"profile_id": "prof_1", "count": 1}],
+        "kind": "assess_these", "selected": 1, "to_assess": 1, "already_current": 0, "low_rank_skipped": 0,
+        "by_profile": [{"profile_id": "prof_1", "count": 1}],
         "model_target": "codex_cli", "estimate": {"calls": 1, "tokens": 19500, "seconds": 11.2, "cost": None, "basis_calls": 12},
         "text": "Assess 1 posting (Staff Engineer 1)? ~1 calls, ~20k tokens",
         "yes": {"api": {"method": "POST", "path": "/api/postings/assess", "body": {"approve": True, "jobs": [_JOB_URL]}}},
     },
-    "counts": {"selected": 1, "to_assess": 1, "already_current": 0, "not_found": 0},
+    "counts": {"selected": 1, "to_assess": 1, "already_current": 0, "not_found": 0, "low_rank_skipped": 0},
+    "low_rank": None,
     "not_found": [], "approval": None, "assessed": None,
     "postings": _POSTINGS_EXAMPLE["postings"],
     "profiles": _POSTINGS_EXAMPLE["profiles"],
@@ -379,9 +389,13 @@ _POSTINGS_NOTE = (
     "What \"Run find jobs\" searched, without a run: read from the stored index through the per-(posting, profile) read model, "
     "across every active profile (a deleted or archived profile is never listed). A changed setting (titles, countries, "
     "work mode) is seen by the next call. Each posting is listed once, for its best profile (`profile_id`), with every "
-    "active profile it matches in `profiles`, best first; with one `profile_id` the row is that profile's own. Ordered: the "
-    "Scout label recommended, then needs_answers, then matched, then the rest by score (the assessment's share of "
-    "requirements met, else the background rank score, else unranked). `counts.matched` is every posting the filters keep, "
+    "active profile it matches in `profiles`, best first; with one `profile_id` the row is that profile's own. Ordered like "
+    "GET /api/new: a current assessment, then a stale one, then not assessed; inside a group the verdict, then `fit` (the "
+    "row's one fit number: the share of requirements met with the must-haves counted twice, 0 to 100, null when not "
+    "assessed), then the rank score, then the newest. A posting whose state is `weak_fit` (it waits on answers, its `fit` "
+    "is below `fit.weak_fit_below_percent`, 40, AND its rank score is below `fit.weak_fit_below_rank`, 50) is left out "
+    "unless `state=weak_fit` asks for it; it asks no question (`open_questions` is empty) and `counts.weak_fit` is how many "
+    "the other filters select, listed or not. `counts.matched` is every posting the filters keep, "
     "`counts.new` those first seen since the last check (`anchor.since`; the last 7 days before the first check). This call "
     "never moves that anchor. `assessment_basis` says where a row's assessment came from: `{origin: \"quick_assess\"}`, or for "
     "an old run's `{origin: \"run:<run_id>\", run_id, prompt_version, constraints_digest, story_bank_digest, profile_ref, resume, "
@@ -399,11 +413,18 @@ _NEW_NOTE = (
     "from the recorded model calls, and the rows are ranked only), `new` (the new postings; at most 50 are listed, and "
     "`counts.new` is all of them) or `nothing_new` (the 10 postings that still need attention). Rows are in one order "
     "(`sort_group`): a `current` assessment, then a `stale` one, then `not_assessed`; inside a group the verdict (matched, "
-    "needs answers, other, not a match), the rank score, the share of requirements met, the newest. Each posting is listed "
+    "needs answers, other, weak fit, not a match), then `fit` (the row's one fit number: the share of requirements met "
+    "with the must-haves counted twice, 0 to 100; null when not assessed), the rank score, the newest. A `weak_fit` posting "
+    "(it waits on answers, `fit` below `fit.weak_fit_below_percent` AND rank below `fit.weak_fit_below_rank`) is not "
+    "listed: `counts.weak_fit` counts them and GET /api/postings?state=weak_fit lists them. A yes assesses only postings "
+    "whose rank score is at least `fit.assess_min_rank` (50; one not ranked yet is assessed): the ones below are "
+    "`counts.low_rank_skipped` and their own question, `low_rank_question` (count, estimate, the yes), answered by "
+    "`include_low_rank: true` beside `assess: true`. `fit` at the top level is the three numbers in force (the `fit` block "
+    "of the project's settings file; each 0 to 100, 0 switches that rule off). Each posting is listed "
     "once, for its best profile (`profile_id`: the profile that tailored a resume for it, else one with a current "
     "assessment, else one with a stale one, else the highest rank score), with every active profile it matches in "
     "`profiles`, best first; the top-level `profiles` are the profile tags and each one's resume by id. `score_text` is the "
-    "score column (the verdict, \"N of M requirements\", the rank; a stale row says `stale_label`, never a bare percent); "
+    "score column (the verdict, \"fit N%\", \"N of M requirements\", the rank; a stale row says `stale_label`, never a bare percent); "
     "`score` is the share of the posting's requirements the assessment found met (`score_kind: assessment`), else the "
     "cached rank score (`rank`), else null. `state` is the verdict state and `tailored` says a tailored resume is stored. "
     "`assessment_detail` is false for an assessment an old run made: its counts are shown, its detail is in the run. "
@@ -1185,6 +1206,7 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
         params=(
             _b("assess", "boolean", "true: assess the new postings no profile has assessed (one model call each). false: rank only.", required=True),
             _b("reassess_stale", "boolean", "true: the yes to `stale_question`: assess again the postings that have only an old assessment (one model call each). `assess: true` never does this."),
+            _b("include_low_rank", "boolean", "true beside `assess` or `reassess_stale`: also the postings whose rank score is below `fit.assess_min_rank` (the yes to `low_rank_question`). Left out: they are skipped and counted."),
             _b("since", "string", "Measure \"new\" from this time (the since of the response that asked) instead of the anchor."),
             _b("profile_id", "string", "Only this active profile's postings. A filtered call never moves the anchor."),
             _b("peek", "boolean", "true: do not move the anchor."),
@@ -1405,7 +1427,7 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
         params=(
             _q("profile_id", "string", "Only postings this active profile matches; repeat it, or separate ids with commas. One id shows that profile's own row."),
             _q("q", "string", "Words that must all be in the title, company or location."),
-            _q("state", "string", "Keep these states (repeat or separate with commas): not_assessed, needs_answers, matched, not_a_match, tailored, assessed (any assessment), recommended (the Scout label)."),
+            _q("state", "string", "Keep these states (repeat or separate with commas): not_assessed, needs_answers, matched, not_a_match, tailored, assessed (any assessment), recommended (the Scout label), weak_fit (listed only when asked for)."),
             _q("window", "string", "new: first seen since the last check. 7d / 30d: published (else first seen) in the last 7 or 30 days.", enum=("new", "7d", "30d")),
             _q("removed", "string", "1: the postings the board no longer lists, instead of the live ones.", enum=("0", "1", "true", "false")),
             _q("history", "string", "1: add `history`, what old find-jobs runs assessed, with each run's provenance.", enum=("0", "1", "true", "false")),
@@ -1444,6 +1466,7 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
             _b("window", "string", "Filter: new, 7d or 30d (as GET /api/postings).", enum=("new", "7d", "30d")),
             _b("approve", "boolean", "true: assess (one model call per posting). Left out or false: only ask."),
             _b("again", "boolean", "true: also the postings whose assessment is current."),
+            _b("include_low_rank", "boolean", "true: also the postings whose rank score is below `fit.assess_min_rank` (50). Left out: they are skipped and counted (`low_rank`)."),
             _b("actor", "string", "Who approves: operator (default) or agent.", enum=("operator", "agent")),
         ),
         errors=(_INVALID, _WRONG_TYPE, _UNKNOWN_KEY, _NO_TARGET, (404, "profile_not_found"), (409, "assess_batch_running"), (409, "config_unavailable")),
@@ -1459,7 +1482,11 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
             "stored like any assessment, so GET /api/postings, GET /api/new and GET /api/jobs show them. `status` is then "
             "`assessed`; `assessed.failed` lists what could not be assessed, by error code and, for a missing description, a `reason`. A posting whose assessment is current "
             "is left out (`counts.already_current`) unless `again`; `not_found` lists named postings that are not in the stored "
-            "postings. `nothing_to_assess` when nothing is left. The call waits for the model: allow a minute per four postings. "
+            "postings. `nothing_to_assess` when nothing is left. A posting whose rank score is below `fit.assess_min_rank` (50; one "
+            "not ranked yet is not) is left out of the batch and counted (`counts.low_rank_skipped`); `low_rank` is then the "
+            "separate question for those (`{kind, skipped, min_rank, estimate, text, yes}`; its `yes.api` body carries "
+            "`include_low_rank: true`), and when only low-ranked postings are selected the status is `ask` with `question.to_assess` 0. "
+            "The call waits for the model: allow a minute per four postings. "
             "No response mixes: posting text only, nothing the user wrote."
         ),
     ),

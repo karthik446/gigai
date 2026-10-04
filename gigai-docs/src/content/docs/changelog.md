@@ -58,6 +58,26 @@ the server used several gigabytes of memory, and reloading made it worse. Read "
 - **A browser that goes away is no longer an error in the log.** It is logged as "client closed the
   connection".
 
+#### Changed
+
+- **Weak fits no longer sit in "Needs your answers".** A posting that waits on your answers while
+  few of its requirements are met and its rank is low (fit below 40% and rank below 50) is now a
+  "Weak fit". It has its own chip on the Jobs page, off by default, and is listed only while that
+  chip is on (`gigai scout jobs list --state weak_fit`). It asks no questions, is not counted in
+  "Need your answers", is left out of `gigai scout new`, and a saved answer never queues it in the
+  pipeline.
+- **Postings are ordered by how well they fit.** Each assessed posting shows one fit number: the
+  share of its requirements that are met, with the must-haves counted twice ("Matched · fit 85% ·
+  9 of 11 requirements · rank 76"). Inside each group the best fit comes first, then the higher
+  rank, then the newer posting. The Jobs page and `gigai scout new` use the same order.
+- **A yes assesses only postings ranked 50 or more.** `gigai scout new --yes` and "Assess these"
+  leave out the low-ranked postings and ask about them separately ("112 low-ranked ones are skipped
+  (rank below 50); assess those too? ~112 calls"). `--include-low-rank`, or the box in the approval
+  dialog, assesses them too. A posting that has no rank yet is still assessed.
+- **The three numbers are settings.** Add a `fit` block to the project's `settings.json`:
+  `{"fit": {"assess_min_rank": 50, "weak_fit_below_percent": 40, "weak_fit_below_rank": 50}}`.
+  Each is 0 to 100, and 0 turns that rule off.
+
 ### 0.1.10.8
 
 Fixes from the first days of real use of 0.1.10.7, a security fix for everyone who uses Scout
