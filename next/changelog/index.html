@@ -116,6 +116,17 @@ search starts again at page 1, and the counts at the top stay the totals.</li>
 refreshes it in place and asks for one thing at a time. A slow answer says what it is waiting for.</li>
 <li><strong>A browser that goes away is no longer an error in the log.</strong> It is logged as “client closed the
 connection”.</li>
+<li><strong>Re-assessing a job after an answer keeps the posting.</strong> A posting from a Greenhouse board that a
+company shows on its own site (a <code dir="auto">...?gh_jid=...</code> address) was read from the stored posting the
+first time, and from the company’s web page after you answered a question: the page’s menus were
+stored as the posting and the location was lost. Every assessment and tailoring of a job address
+now reads the stored posting first and never falls back to a web page when the board’s own text
+is known. A page that is the only source is read without its menus, header and footer.</li>
+<li><strong>An answer says who wrote it and where it came from.</strong> An answer your agent saved was recorded as
+yours. <code dir="auto">gigai scout answer</code> and <code dir="auto">gigai scout answers save</code> take <code dir="auto">--as agent</code> (<code dir="auto">--actor</code> still
+works) and a free-text <code dir="auto">--source</code> (“from the user’s repo, at the user’s request”). An API write
+that names no writer is yours from the Scout page and the agent’s from anywhere else. The Answers
+and stories page shows both. The agent instructions tell agents to pass them.</li>
 </ul>
 <div class="sl-heading-wrapper level-h3"><h3 id="01108">0.1.10.8</h3><a class="sl-anchor-link" href="#01108"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “0.1.10.8”</span></a></div>
 <p>Fixes from the first days of real use of 0.1.10.7, a security fix for everyone who uses Scout
