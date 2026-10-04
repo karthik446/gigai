@@ -47,7 +47,7 @@ import { SETTINGS_HASH } from "../routing.js";
 //
 // The rules are masterModel.js's (pure). Every text of the master goes into
 // the tree as a React text child.
-function LineForm({ label, initial = "", submit, busy, onDone, onCancel, placeholder }) {
+function LineForm({ label, initial = "", submit, busy, onDone, onCancel, placeholder, saveLabel }) {
   const [value, setValue] = useState(initial);
   const ready = value.trim() !== "" && value.trim() !== initial.trim();
   return (
@@ -63,7 +63,7 @@ function LineForm({ label, initial = "", submit, busy, onDone, onCancel, placeho
       <textarea aria-label={label} rows={2} value={value} placeholder={placeholder} onChange={(event) => setValue(event.target.value)} disabled={busy} />
       <div className="card-actions">
         <button type="submit" className="button small" data-action="save-line" disabled={busy || !ready}>
-          {busy ? "Saving…" : "Save"}
+          {busy ? "Saving…" : (saveLabel && saveLabel(value.trim())) || "Save"}
         </button>
         {onCancel && (
           <button type="button" className="button small secondary" data-action="cancel" onClick={onCancel} disabled={busy}>
@@ -126,6 +126,8 @@ function Line({ item, shownBy, write, busy }) {
 
 function AddLine({ label, target, write, busy }) {
   const [open, setOpen] = useState(false);
+  // The text the server asked about (the master has a line that says nearly this): sending it again adds it anyway.
+  const [asked, setAsked] = useState(null);
   if (!open) {
     return (
       <button className="button small secondary" data-action="add-line" onClick={() => setOpen(true)} disabled={busy}>
@@ -138,9 +140,16 @@ function AddLine({ label, target, write, busy }) {
       label={label}
       busy={busy}
       placeholder="One line, in your own words. Every number is yours."
-      submit={(text) => write((revision) => postMasterLine({ revision, text, ...target }))}
-      onDone={() => setOpen(false)}
-      onCancel={() => setOpen(false)}
+      saveLabel={(text) => (asked !== null && text === asked ? "Add it anyway" : null)}
+      submit={(text) => write((revision) => postMasterLine({ revision, text, force: text === asked, ...target }), { onAsked: () => setAsked(text) })}
+      onDone={() => {
+        setAsked(null);
+        setOpen(false);
+      }}
+      onCancel={() => {
+        setAsked(null);
+        setOpen(false);
+      }}
     />
   );
 }
@@ -387,14 +396,23 @@ export default function MasterView({ reloadProfiles = null }) {
   const revision = master ? master.revision : null;
 
   // One write: `call(revision)` sends it with the revision this page read; resolves true when saved.
+  // A new line the master already has in other words is asked about (nothing was written): false, after `onAsked`.
   const write = useCallback(
-    (call) => {
+    (call, { onAsked } = {}) => {
       setBusy(true);
       setError(null);
       setNotice(null);
       return call(revision)
         .then((response) => {
-          setNotice(nearDuplicateLine(response.near_duplicate, response.master) || afterWriteLine(response.profiles) || (response.status === "unchanged" ? "Nothing changed: the master already says this." : null));
+          const asked = nearDuplicateLine(response);
+          if (asked) {
+            setNotice(asked);
+            if (onAsked) {
+              onAsked();
+            }
+            return false;
+          }
+          setNotice(afterWriteLine(response.profiles) || (response.status === "unchanged" ? "Nothing changed: the master already says this." : null));
           setVersion((count) => count + 1);
           if (reloadProfiles) {
             reloadProfiles(); // a profile that showed the line has a new resume

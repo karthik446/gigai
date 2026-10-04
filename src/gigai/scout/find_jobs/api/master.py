@@ -13,7 +13,14 @@
     PUT  /api/tailored-resumes/selection  Add or Remove one master line on a job's tailored resume
 
 Every route is local and model-free (``master_store``, ``master_edit``,
-``master_profiles``, ``tailor_selection_edit``).  The master belongs to the
+``master_profiles``, ``tailor_selection_edit``).  The line and entry writes
+call the functions ``gigai scout resume master add | edit | remove`` call
+(``master_edit``), so the rules are the same for the page and for the agent:
+a line the master already has in other words is asked about before anything
+is written (``status: near_duplicate``; ``force`` adds it), a removed line is
+retired and can be restored, and who wrote a line is kept.  This module
+checks the shape of a body (``wrong_type``, ``invalid_value``) and maps the
+refusals to a status.  The master belongs to the
 user, not to a profile.  The reads return the user's text, so ``do_GET``
 runs the Host check before them; the writes go through ``_check_csrf``.
 Nothing here logs a line of the master.
@@ -58,7 +65,7 @@ SELECTION_USES: tuple[str, ...] = ("refresh", "sync")
 
 _GET_KEYS = frozenset({"revision"})
 _SELECTION_GET_KEYS = frozenset({"profile_id"})
-_LINE_POST_KEYS = frozenset({"revision", "actor", "text", "entry_id", "section", "tags", "backed"})
+_LINE_POST_KEYS = frozenset({"revision", "actor", "text", "entry_id", "section", "tags", "backed", "force"})
 _LINE_PUT_KEYS = frozenset({"revision", "actor", "id", "use", "text", "tags", "backed"})
 _ENTRY_POST_KEYS = frozenset({"revision", "actor", "section", "heading", "sublines"})
 _ENTRY_PUT_KEYS = frozenset({"revision", "actor", "id", "use", "heading", "sublines"})
@@ -70,6 +77,7 @@ ERROR_STATUS: dict[str, HTTPStatus] = {
     "target_unavailable": HTTPStatus.NOT_FOUND,
     "master_not_found": HTTPStatus.NOT_FOUND,
     "master_line_not_found": HTTPStatus.NOT_FOUND,
+    "master_item_not_found": HTTPStatus.NOT_FOUND,
     "master_entry_not_found": HTTPStatus.NOT_FOUND,
     "master_revision_not_found": HTTPStatus.NOT_FOUND,
     "profile_not_found": HTTPStatus.NOT_FOUND,
@@ -79,6 +87,12 @@ ERROR_STATUS: dict[str, HTTPStatus] = {
     "unknown_key": HTTPStatus.UNPROCESSABLE_ENTITY,
     "revision_required": HTTPStatus.UNPROCESSABLE_ENTITY,
     "personal_info_refused": HTTPStatus.UNPROCESSABLE_ENTITY,
+    "master_text_invalid": HTTPStatus.UNPROCESSABLE_ENTITY,
+    "master_tag_invalid": HTTPStatus.UNPROCESSABLE_ENTITY,
+    "master_backed_invalid": HTTPStatus.UNPROCESSABLE_ENTITY,
+    "master_place_invalid": HTTPStatus.UNPROCESSABLE_ENTITY,
+    "master_edit_empty": HTTPStatus.UNPROCESSABLE_ENTITY,
+    "master_edit_invalid": HTTPStatus.UNPROCESSABLE_ENTITY,
     "master_markdown_invalid": HTTPStatus.UNPROCESSABLE_ENTITY,
     "master_too_large": HTTPStatus.UNPROCESSABLE_ENTITY,
     "master_contact_data": HTTPStatus.UNPROCESSABLE_ENTITY,
@@ -89,6 +103,9 @@ ERROR_STATUS: dict[str, HTTPStatus] = {
     "selection_line_unsupported": HTTPStatus.UNPROCESSABLE_ENTITY,
     "revision_conflict": HTTPStatus.CONFLICT,
     "master_exists": HTTPStatus.CONFLICT,
+    "master_line_exists": HTTPStatus.CONFLICT,
+    "master_entry_exists": HTTPStatus.CONFLICT,
+    "master_empty": HTTPStatus.CONFLICT,
     "tailored_resume_changed": HTTPStatus.CONFLICT,
 }
 _ERRORS = (
@@ -162,13 +179,16 @@ def revision_json(stored: StoredMaster) -> dict[str, object]:
     return {**stored.revision.to_json(), "record_id": stored.record_id, "revisions": stored.revisions}
 
 
-def master_json(stored: StoredMaster) -> dict[str, object]:
-    """The master as ``gigai scout resume master show --json`` prints it: the revision, then every entry and line."""
+def master_json(stored: StoredMaster, home_root: Path, target: Path) -> dict[str, object]:
+    """The master as ``gigai scout resume master show --json`` prints it: the revision, then every entry and line,
+    each with who wrote its text and where its evidence came from (null where that is not known)."""
 
     master = stored.master
+    known = master_edit.provenance(home_root=home_root, target=target, master=master)
     return {
         **revision_json(stored), "format": MASTER_FORMAT, "sections": list(master.sections), "counts": master.counts(),
-        "entries": [entry.to_json() for entry in master.entries.values()], "items": [item.to_json() for item in master.items.values()],
+        "entries": [master_edit.entry_json(entry, known) for entry in master.entries.values()],
+        "items": [master_edit.item_json(item, known) for item in master.items.values()],
     }
 
 
@@ -202,7 +222,7 @@ def master_response(home_root: Path, target: Path, *, revision: int | None = Non
         stored = older
     profiles, shown = _shown_by(home_root, target)
     return {
-        "schema_version": MASTER_SCHEMA, "master": master_json(stored), "current_revision": current.revision.revision,
+        "schema_version": MASTER_SCHEMA, "master": master_json(stored, home_root, target), "current_revision": current.revision.revision,
         "profiles": profiles, "shown_by": shown,
     }
 
@@ -218,7 +238,12 @@ def history_response(home_root: Path, target: Path) -> dict[str, object]:
         previous = master
     return {
         "schema_version": MASTER_HISTORY_SCHEMA, "revision": chain[-1][0].revision if chain else None,
-        "revisions": list(reversed(entries)), "retired": [gone.to_json() for gone in master_edit.retired(chain)],
+        "revisions": list(reversed(entries)),
+        # What `master show --retired` lists, with what the page shows beside it; a line that left with its entry is under the entry.
+        "retired": [
+            {**gone.to_json(), "what": gone.what, "entry_heading": gone.entry_heading, "sublines": list(gone.sublines)}
+            for gone in master_edit.retired(chain)
+        ],
     }
 
 
@@ -246,6 +271,24 @@ def _revision(value: object) -> int:
     raise master_edit.MasterEditError("invalid_value", "revision is required: the revision of the master you read (a whole number)")
 
 
+def _string(body: dict[str, object], key: str, *, required: bool = False) -> str | None:
+    value = body.get(key)
+    if value is None and not required:
+        return None
+    if not isinstance(value, str):
+        raise master_edit.MasterEditError("wrong_type", f"{key} must be a string")
+    return value
+
+
+def _strings(body: dict[str, object], key: str) -> list[str] | None:
+    value = body.get(key)
+    if value is None:
+        return None
+    if type(value) is not list or any(type(item) is not str for item in value):
+        raise master_edit.MasterEditError("wrong_type", f"{key} must be an array of strings")
+    return value  # type: ignore[return-value]
+
+
 class MasterRoutesMixin:
     """``Handler`` mixin: ``/api/master...`` and ``PUT /api/tailored-resumes/selection``."""
 
@@ -258,8 +301,11 @@ class MasterRoutesMixin:
             return
         self._error(status, code, str(exc))
 
-    def _master_write(self, write, status: HTTPStatus = HTTPStatus.OK) -> None:  # noqa: ANN001 - a master_edit.MasterWrite
-        self._write_json(status, {"schema_version": MASTER_SCHEMA, **write.to_json(), "master": master_json(write.stored)})
+    def _master_write(self, write, paths: tuple[Path, Path], *, created: bool = False) -> None:  # noqa: ANN001 - a master_edit.MasterEdit
+        """The reply of a write: 201 for an add that was written; 200 otherwise (also when it was asked, or unchanged)."""
+
+        status = HTTPStatus.CREATED if created and write.written else HTTPStatus.OK
+        self._write_json(status, {"schema_version": MASTER_SCHEMA, **write.to_json(), "master": master_json(write.stored, *paths)})
 
     # --- reads ---------------------------------------------------------------------------------
 
@@ -366,18 +412,19 @@ class MasterRoutesMixin:
             return
         home_root, target = paths
         try:
-            for key in ("entry_id", "section"):
-                if body.get(key) is not None and not isinstance(body[key], str):
-                    raise master_edit.MasterEditError("wrong_type", f"{key} must be a string")
+            section, force = _string(body, "section"), body.get("force", False)
+            if type(force) is not bool:
+                raise master_edit.MasterEditError("wrong_type", "force must be true or false")
             write = master_edit.add_line(
                 home_root=home_root, target=target, revision=_revision(body.get("revision")), actor=self._story_bank_actor(body.get("actor")),
-                text=body.get("text"), entry_id=body.get("entry_id"), section=body.get("section"),  # type: ignore[arg-type]
-                tags=body.get("tags"), backed=body.get("backed"),
+                text=_string(body, "text", required=True) or "", entry_id=_string(body, "entry_id"),
+                section=section.strip().lower() if section is not None else None,
+                tags=_strings(body, "tags") or (), backed=_strings(body, "backed") or (), force=force,
             )
         except _ERRORS as exc:
             self._master_fail(exc)
             return
-        self._master_write(write, HTTPStatus.CREATED)
+        self._master_write(write, paths, created=True)
 
     def _master_use(self, body: dict[str, object]) -> tuple[str, str]:
         item_id, use = body.get("id"), body.get("use", "edit")
@@ -387,9 +434,11 @@ class MasterRoutesMixin:
             raise master_edit.MasterEditError("invalid_value", "use must be edit, retire or restore")
         return item_id.strip(), str(use)
 
-    def _handle_put_master_lines(self) -> None:
+    def _master_put(self, keys: frozenset[str], fields: tuple[str, ...]) -> None:
+        """``PUT /api/master/lines`` and ``/entries``: edit (``fields``), retire or restore one, by id."""
+
         paths = self._story_bank_paths()
-        body = None if paths is None else self._story_bank_body(_LINE_PUT_KEYS)
+        body = None if paths is None else self._story_bank_body(keys)
         if paths is None or body is None:
             return
         home_root, target = paths
@@ -397,15 +446,21 @@ class MasterRoutesMixin:
             item_id, use = self._master_use(body)
             common = {"home_root": home_root, "target": target, "revision": _revision(body.get("revision")), "actor": self._story_bank_actor(body.get("actor"))}
             if use == "edit":
-                write = master_edit.edit_line(item_id=item_id, text=body.get("text"), tags=body.get("tags"), backed=body.get("backed"), **common)
+                given = {key: _string(body, key) if key in ("text", "heading") else _strings(body, key) for key in fields}
+                write = master_edit.edit(item_id=item_id, **given, **common)  # type: ignore[arg-type]
+            elif any(body.get(key) is not None for key in fields):
+                raise master_edit.MasterEditError("invalid_value", f"use {use} takes no {', '.join(fields[:-1])} or {fields[-1]}")
+            elif use == "retire":
+                write = master_edit.remove(item_id=item_id, **common)  # type: ignore[arg-type]
             else:
-                if any(body.get(key) is not None for key in ("text", "tags", "backed")):
-                    raise master_edit.MasterEditError("invalid_value", f"use {use} takes no text, tags or backed")
-                write = (master_edit.retire if use == "retire" else master_edit.restore)(item_id=item_id, **common)
+                write = master_edit.restore(item_id=item_id, **common)  # type: ignore[arg-type]
         except _ERRORS as exc:
             self._master_fail(exc)
             return
-        self._master_write(write)
+        self._master_write(write, paths)
+
+    def _handle_put_master_lines(self) -> None:
+        self._master_put(_LINE_PUT_KEYS, ("text", "tags", "backed"))
 
     def _handle_post_master_entries(self) -> None:
         paths = self._story_bank_paths()
@@ -414,34 +469,18 @@ class MasterRoutesMixin:
             return
         home_root, target = paths
         try:
+            section = _string(body, "section", required=True) or ""
             write = master_edit.add_entry(
                 home_root=home_root, target=target, revision=_revision(body.get("revision")), actor=self._story_bank_actor(body.get("actor")),
-                section=body.get("section"), heading=body.get("heading"), sublines=body.get("sublines"),
+                section=section.strip().lower(), heading=_string(body, "heading", required=True) or "", sublines=_strings(body, "sublines") or (),
             )
         except _ERRORS as exc:
             self._master_fail(exc)
             return
-        self._master_write(write, HTTPStatus.CREATED)
+        self._master_write(write, paths, created=True)
 
     def _handle_put_master_entries(self) -> None:
-        paths = self._story_bank_paths()
-        body = None if paths is None else self._story_bank_body(_ENTRY_PUT_KEYS)
-        if paths is None or body is None:
-            return
-        home_root, target = paths
-        try:
-            entry_id, use = self._master_use(body)
-            common = {"home_root": home_root, "target": target, "revision": _revision(body.get("revision")), "actor": self._story_bank_actor(body.get("actor"))}
-            if use == "edit":
-                write = master_edit.edit_entry(entry_id=entry_id, heading=body.get("heading"), sublines=body.get("sublines"), **common)
-            else:
-                if any(body.get(key) is not None for key in ("heading", "sublines")):
-                    raise master_edit.MasterEditError("invalid_value", f"use {use} takes no heading or sublines")
-                write = (master_edit.retire if use == "retire" else master_edit.restore)(item_id=entry_id, **common)
-        except _ERRORS as exc:
-            self._master_fail(exc)
-            return
-        self._master_write(write)
+        self._master_put(_ENTRY_PUT_KEYS, ("heading", "sublines"))
 
     # --- the profiles' selections ------------------------------------------------------------------
 

@@ -156,8 +156,29 @@ def test_the_master_resume_over_http(tmp_path: Path, monkeypatch: pytest.MonkeyP
             assert wrong.status_code == 422 and wrong.json()["error"]["code"] == code, (bad_body, wrong.text)
         assert "allowed_keys" in client.put("/api/master/lines", json={"revision": 2, "id": line_id, "colour": "red"}).json()["error"]
         missing = client.put("/api/master/lines", json={"revision": 2, "id": "b-nope", "text": "x"})
-        assert missing.status_code == 404 and missing.json()["error"]["code"] == "master_line_not_found"
+        assert missing.status_code == 404 and missing.json()["error"]["code"] == "master_item_not_found"
+        # The rules are the CLI's (one implementation): its refusals come back by their own code, with a status.
+        for bad_body, status, code in (
+            ({"revision": 2, "id": line_id, "text": "x" * 401}, 422, "master_text_invalid"),
+            ({"revision": 2, "id": line_id, "tags": ["two words"]}, 422, "master_tag_invalid"),
+            ({"revision": 2, "id": line_id, "tags": "delivery"}, 422, "wrong_type"),
+            ({"revision": 2, "id": line_id}, 422, "master_edit_empty"),
+            ({"revision": 2, "id": role["id"], "text": "A line."}, 422, "master_edit_invalid"),
+            ({"revision": 2, "id": line_id, "use": "restore"}, 409, "master_line_exists"),
+        ):
+            wrong = client.put("/api/master/lines", json=bad_body)
+            assert wrong.status_code == status and wrong.json()["error"]["code"] == code, (bad_body, wrong.text)
+        # A line the master already has in other words is asked about: 200, nothing written, the line it looks like named.
+        reworded = {"revision": 2, "entry_id": role["id"], "text": "Cut the deploy time of 40 services from 50 minutes to 12 minutes."}
+        asked = client.post("/api/master/lines", json=reworded)
+        assert asked.status_code == 200, asked.text
+        assert (asked.json()["status"], asked.json()["written"], asked.json()["id"], asked.json()["master"]["revision"]) == ("near_duplicate", False, None, 2)
+        assert [(near["id"], near["same_numbers"]) for near in asked.json()["near_duplicates"]] == [(line_id, True)]
+        assert client.post("/api/master/lines", json={**reworded, "force": "yes"}).json()["error"]["code"] == "wrong_type"
         assert client.get("/api/master").json()["master"]["revision"] == 2
+        # Who wrote a line is what `master show --json` says: the agent wrote this one; an imported line names no writer.
+        by_id = {item["id"]: item for item in client.get("/api/master").json()["master"]["items"]}
+        assert (by_id[line_id]["written_by"], by_id[first]["written_by"], by_id[first]["source"]) == ("agent", None, None)
 
         # Edit (the user, in the browser), retire, restore: one revision each; who wrote is recorded.
         edited = client.put("/api/master/lines", json={"revision": 2, "id": line_id, "text": "Cut the deploy time of 40 services from 50 to 11 minutes."}, headers=browser).json()

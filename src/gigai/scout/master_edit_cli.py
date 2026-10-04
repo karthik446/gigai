@@ -87,12 +87,11 @@ def _payload(result, home_root: Path, target: Path, profiles: dict[str, object])
 
 
 def _finish(result, home_root: Path, target: Path, *, as_json: bool) -> None:  # noqa: ANN001 - a MasterEdit
-    """Bring the profiles up to date after a write, then print what happened."""
+    """Print what happened, and what the write did to the profiles (``master_edit`` ends every write with them)."""
 
-    from .master_profiles_cli import after_master_write, echo_after_master_write
+    from .master_profiles_cli import echo_after_master_write
 
-    # P3: a profile that shows an edited or retired line gets its resume printed again; new lines are only offered.
-    profiles = after_master_write(home_root, target) if result.written else {"synced": [], "offers": []}
+    profiles = dict(result.profiles) if result.profiles is not None else {"synced": [], "offers": []}
     payload = _payload(result, home_root, target, profiles)
     if as_json:
         _emit(payload)
@@ -145,7 +144,7 @@ def _evidence(home_root: Path, target: Path, story_id: str | None, question_id: 
 
 
 @master_group.command("add")
-@click.option("--text", "text", help="The line, in the user's own facts: one line, at most 400 characters.")
+@click.option("--text", "text", help="The line, in the user's own facts: one line, at most 400 characters (a summary or a Skills line: 1,000).")
 @click.option("--entry", "entry_id", help="With --text: the role, project or school (its id) the line is a bullet of.")
 @click.option("--section", "section", help="With --text: summary, skills or other. With --heading: experience, projects or education.")
 @click.option("--heading", "heading", help="A new role, project or school: its heading (the employer, the project, the school).")
@@ -231,7 +230,7 @@ def master_add_command(
 
 @master_group.command("edit")
 @click.argument("item_id")
-@click.option("--text", "text", help="A line's new text: one line, at most 400 characters. Its id stays.")
+@click.option("--text", "text", help="A line's new text: one line, at most 400 characters (a summary or a Skills line: 1,000). Its id stays.")
 @click.option("--tag", "tags", multiple=True, help="A line's tags, replacing the ones it has (repeatable); one empty value removes them all.")
 @click.option("--heading", "heading", help="An entry's new heading.")
 @click.option("--role", "sublines", multiple=True, help="An entry's lines under its heading, replacing the ones it has (repeatable).")

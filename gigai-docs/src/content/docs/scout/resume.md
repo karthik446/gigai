@@ -88,11 +88,14 @@ numbers it asks which is right (A, B, or both) and writes nothing until you answ
 profile keeps showing the resume it shows now, so nothing already assessed changes.
 
 **Change it.** The Master page lists the master by role. Add a line under a role, edit
-one, retire one, add a role. A retired line is never selected again; **History** lists
-what is retired and puts it back. Each line shows how strong its evidence is: backed by a
-story or an answer, states a number, or stated. Only your own facts belong here; an agent
-writes through the API (`POST` and `PUT /api/master/lines`) and sends the revision it
-read, so a change that crosses yours is refused instead of overwriting it.
+one, retire one, add a role. A line the master already has in other words is not added
+at once: the page shows the line it looks like, and you edit that one or choose **Add it
+anyway**. A retired line is never selected again; **History** lists what is retired and
+puts it back. Each line shows how strong its evidence is: backed by a story or an answer,
+states a number, or stated. Only your own facts belong here; an agent writes with
+`gigai scout resume master add`, `edit` and `remove` (see [For agents](../agents/#6-your-master-resume)) or
+through the API (`POST` and `PUT /api/master/lines`), under the same rules, and sends the
+revision it read, so a change that crosses yours is refused instead of overwriting it.
 
 **Profiles.** A profile's selection stays as it is until you refresh it. When the master
 gains lines, the profile says so ("3 new master lines: refresh?") under Settings >

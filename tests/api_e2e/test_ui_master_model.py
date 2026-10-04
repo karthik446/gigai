@@ -93,13 +93,15 @@ def test_a_write_that_crosses_the_agents_says_so_and_a_saved_one_says_what_it_di
         out.other = model.conflictOf(input.other);
         out.after = model.afterWriteLine(input.profiles);
         out.nothing = model.afterWriteLine({ synced: [], offers: [] });
-        out.near = model.nearDuplicateLine({ id: input.master.items[5].id, similarity: 0.71 }, input.master);
-        out.notNear = model.nearDuplicateLine(null, input.master);
+        out.near = model.nearDuplicateLine({ status: "near_duplicate", written: false, near_duplicates: [input.near, { id: "b-other", text: "Another.", similarity: 0.63 }] });
+        out.otherNumbers = model.nearDuplicateLine({ status: "near_duplicate", near_duplicates: [{ ...input.near, same_numbers: false }] });
+        out.notNear = [model.nearDuplicateLine(null), model.nearDuplicateLine({ status: "revised", near_duplicates: [] })];
         out.history = model.historyRows(input.history);
         out.retired = model.retiredRows(input.history);
         """,
         {
             "master": _master_json(),
+            "near": {"id": "b-1", "text": "Cut deploy time from 40 minutes to 6.", "entry_id": "r-1", "similarity": 0.71, "same_numbers": True},
             "conflict": {"code": "revision_conflict", "current": {"revision": 5, "written_by": "agent"}},
             "other": {"code": "personal_info_refused", "message": "no"},
             "profiles": {
@@ -110,7 +112,7 @@ def test_a_write_that_crosses_the_agents_says_so_and_a_saved_one_says_what_it_di
                 "revisions": [{"revision": 2, "revision_id": "revision_b", "written_by": "agent", "updated_at": "2026-10-04T10:00:00Z", "items": 72, "added": 1, "removed": 0, "changed": 0}],
                 "retired": [
                     {"id": "b-9", "what": "line", "text": "An old line.", "section": "experience", "entry_heading": "Hexa Cloud", "retired_in": 4},
-                    {"id": "r-9", "what": "entry", "heading": "Casterly", "sublines": ["Engineer | 2012 - 2015"], "section": "experience", "retired_in": 5},
+                    {"id": "r-9", "what": "entry", "kind": "entry", "text": "Casterly", "sublines": ["Engineer | 2012 - 2015"], "section": "experience", "retired_in": 5},
                 ],
             },
         },
@@ -118,7 +120,12 @@ def test_a_write_that_crosses_the_agents_says_so_and_a_saved_one_says_what_it_di
     assert out["conflict"] == {"revision": 5, "message": "Not saved: your agent changed the master after this page read it (it is at revision 5 now). It is shown as it is now; make the change again."}
     assert out["other"] is None
     assert out["after"] == "Staff AI Engineer: the resume now shows this change. Staff Software Engineer: 1 new master line: refresh?" and out["nothing"] == ""
-    assert out["near"].startswith("Added. It reads like a line already there, 71% alike: \"") and out["notNear"] == ""
+    # A line the master already has in other words is asked about, not added: the closest line is named, and "Add it anyway".
+    assert out["near"] == (
+        'Not added: the master already has a line that says nearly this (71% alike): "Cut deploy time from 40 minutes to 6.". '
+        "If it is the same fact, edit that line instead; to keep both, choose Add it anyway."
+    )
+    assert "(71% alike, with different numbers)" in out["otherNumbers"] and out["notNear"] == ["", ""]
     assert out["history"] == [{"key": "revision_b", "revision": 2, "text": "Revision 2 · 2026-10-04 · your agent · 72 lines · 1 added, 0 retired, 0 changed"}]
     assert out["retired"] == [
         {"id": "b-9", "what": "line", "text": "An old line.", "where": "Hexa Cloud", "note": "retired in revision 4"},

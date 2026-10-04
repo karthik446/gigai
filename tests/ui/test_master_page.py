@@ -46,6 +46,7 @@ OLDER_LINE = "Built Python services that price and route 25,000 shipments a day.
 NEWER_LINE = "Built Python services that price and route 40,000 shipments a day."
 NEW_LINE = "Cut the deploy time of 40 services from 50 to 12 minutes."
 EDITED_LINE = "Cut the deploy time of 40 services from 50 to 11 minutes."
+NEAR_LINE = "Cut the deploy time of 40 services from 50 minutes to 11 minutes."  # EDITED_LINE in other words
 
 
 def ensure_master(ui) -> dict:
@@ -254,4 +255,21 @@ def test_the_master_page_lists_by_role_and_adds_edits_retires_and_restores_a_lin
     ui.settle()
     assert ui.writes_after("restored") == ["POST /api/master/selection"]
     ui.wall_budget("Refresh a profile's selection (small home)", REFRESH_WALL_SECONDS, "restored", "refreshed")
+
+    # --- a line the master already has in other words is ASKED about: nothing is written until "Add it anyway" ---
+    entry.locator('[data-action="add-line"]').click()
+    entry.locator("form.master-form textarea").fill(NEAR_LINE)
+    entry.locator('form.master-form [data-action="save-line"]').click()
+    entry.locator('form.master-form [data-action="save-line"]', has_text="Add it anyway").wait_for()
+    said = ui.page.locator(f'{PAGE} [data-role="master-notice"]').text_content() or ""
+    assert said.startswith("Not added: the master already has a line that says nearly this") and EDITED_LINE in said
+    assert ui.server_json("/api/master")["master"]["revision"] == start + 4, "asked means nothing was written"
+    assert entry.locator("form.master-form textarea").input_value() == NEAR_LINE  # the form keeps what was typed
+    entry.locator('form.master-form [data-action="save-line"]').click()
+    wait_for_revision(ui, start + 5)
+    assert entry.locator("li[data-line-id]").last.locator('[data-role="line-text"]').text_content() == NEAR_LINE
+    asked_then_forced = [body for name, body in ui.page.evaluate("() => window.__gigaiWrites") if name == "POST /api/master/lines"][-2:]
+    assert asked_then_forced == [
+        {"revision": start + 4, "text": NEAR_LINE, "entry_id": role["id"]}, {"revision": start + 4, "text": NEAR_LINE, "entry_id": role["id"], "force": True},
+    ]
     ui.assert_clean()  # zero console errors, page errors, HTTP >= 400, failed requests

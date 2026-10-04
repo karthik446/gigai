@@ -44,7 +44,7 @@ The 11 flows of the UI-testing spike (REPORT.md 5.3), and the flows of the featu
 | Weak-fit chip off by default (0110-10-02) | `test_jobs_weak_fit.py` (an answered list) | the real list: `test_operator_sized_pages.py` |
 | Answers: "Written by your agent" with its source | `test_answers_stories.py` | `test_operator_sized_pages.py` |
 | Tailored resume: "Cut for length" + Restore, the resumes-folder line (0110-10-05) | `test_tailored_resume_panel.py`; the folder in Settings: `test_resumes_folder.py` | - |
-| Master resume page: the migration with its question, by role, add / edit / retire / restore, the profiles' "refresh?" offer and Refresh (0.1.10.9 master P5) | `test_master_page.py` (changes the home) | - (the routes are timed on the operator-sized home by hand: see the P5 worker report) |
+| Master resume page: the migration with its question, by role, add / edit / retire / restore, the profiles' "refresh?" offer and Refresh, a near-duplicate asked about and "Add it anyway" (0.1.10.9 master P5, P6) | `test_master_page.py` (changes the home) | - (the routes are timed on the operator-sized home by hand: see the P5 worker report) |
 | Job page: Picked / Left out with reasons, Add and Remove, the "keep 2 pages" question, "Save this wording to your master" | `test_picked_left_out.py` (changes the home) | - |
 
 **Where a test answers for the server.** Everything is the real server unless the test's docstring says otherwise,

@@ -124,15 +124,18 @@ export function afterWriteLine(profiles) {
   return parts.join(" ");
 }
 
-// "This reads like another line (b-hex-03, 71% alike)…" for a new line the
-// server found a near-duplicate of; "" otherwise.
-export function nearDuplicateLine(near, master) {
-  if (!near || !near.id) {
+// A new line the master already has in other words is ASKED about: the
+// server wrote nothing (status near_duplicate) and names the lines it looks
+// like, the closest first. What to say; "" for any other reply.
+export function nearDuplicateLine(response) {
+  const near = response && response.status === "near_duplicate" ? list(response.near_duplicates)[0] : null;
+  if (!near) {
     return "";
   }
-  const item = list(master && master.items).find((candidate) => candidate.id === near.id);
-  const alike = typeof near.similarity === "number" ? `, ${Math.round(near.similarity * 100)}% alike` : "";
-  return `Added. It reads like a line already there${alike}${item ? `: "${item.text}"` : ""}. If it is the same fact, retire one of them.`;
+  const alike = typeof near.similarity === "number" ? `${Math.round(near.similarity * 100)}% alike` : "";
+  const numbers = near.same_numbers === false ? "with different numbers" : "";
+  const how = [alike, numbers].filter(Boolean).join(", ");
+  return `Not added: the master already has a line that says nearly this${how ? ` (${how})` : ""}: "${text(near.text)}". If it is the same fact, edit that line instead; to keep both, choose Add it anyway.`;
 }
 
 // --- history ---------------------------------------------------------------
@@ -158,7 +161,7 @@ export function retiredRows(history) {
   return list(history && history.retired).map((gone) => ({
     id: gone.id,
     what: gone.what === "entry" ? "entry" : "line",
-    text: gone.what === "entry" ? [gone.heading, ...list(gone.sublines)].filter(Boolean).join(" · ") : text(gone.text),
+    text: gone.what === "entry" ? [gone.text, ...list(gone.sublines)].filter(Boolean).join(" · ") : text(gone.text),
     where: gone.what === "entry" ? SECTION_LABELS[gone.section] || "" : gone.entry_heading || SECTION_LABELS[gone.section] || "",
     note: `retired in revision ${gone.retired_in}`,
   }));

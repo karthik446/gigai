@@ -482,15 +482,18 @@ _MASTER_REVISION: dict[str, object] = {
 _MASTER_LINE: dict[str, object] = {
     "id": "b-hex-03", "section": "experience", "kind": "bullet", "text": "Led the migration of 40 services to Helm charts released through ArgoCD.",
     "tags": ["delivery"], "backed": [], "entry_id": "r-hex", "order": 4, "strength": "quantified", "mark": "5d0c2a4b9e1f7a36",
+    "written_by": "agent", "source": "from the user's chat on 3 Oct",
 }
 _MASTER_EXAMPLE: dict[str, object] = {
     **_MASTER_REVISION, "format": 1, "sections": ["summary", "experience", "skills"],
     "counts": {"ids": 4, "items": 3, "entries": 1, "by_kind": {"summary": 1, "bullet": 1, "skills": 1, "other": 0}, "by_strength": {"backed": 0, "quantified": 1, "stated": 2}, "skills": 3},
-    "entries": [{"id": "r-hex", "section": "experience", "heading": "Hexa Cloud", "sublines": ["Staff Software Engineer | Jun 2019 - Jan 2023"], "start": 2019, "end": 2023, "ongoing": False, "bullets": ["b-hex-03"], "order": 3}],
+    "entries": [{"id": "r-hex", "section": "experience", "heading": "Hexa Cloud", "sublines": ["Staff Software Engineer | Jun 2019 - Jan 2023"], "start": 2019, "end": 2023, "ongoing": False, "bullets": ["b-hex-03"], "order": 3, "written_by": None, "source": None}],
     "items": [_MASTER_LINE],
 }
 _MASTER_WRITE_EXAMPLE: dict[str, object] = {
-    "schema_version": "scout-master:1", "status": "revised", "id": "b-hex-03", "changes": {"added": 0, "removed": 0, "changed": 1}, "near_duplicate": None,
+    "schema_version": "scout-master:1", "action": "edit", "status": "revised", "written": True, "id": "b-hex-03", "ids": ["b-hex-03"],
+    "changes": {"added": 0, "removed": 0, "changed": 1}, "retired": [],
+    "skills": {"line": None, "added": [], "removed": [], "already_listed": []}, "near_duplicates": [], "warnings": [],
     "profiles": {"synced": [], "offers": [{"profile_id": "prof_1", "label": "Staff Engineer", "new_lines": ["b-4f0c1a"], "offer": "1 new master line: refresh?"}]},
     "master": _MASTER_EXAMPLE,
 }
@@ -499,23 +502,31 @@ _MASTER_NOTE = (
     "profile shows a selection of it and a tailoring for one job picks from all of it. `master` is null when there is none yet (build it with "
     "POST /api/master/migration, or `gigai scout resume master init`). Each entry: `{id, section, heading, sublines, start, end, ongoing, bullets, "
     "order}`. Each line: `{id, section, kind: summary | bullet | skills | other, text, tags, backed, entry_id, order, strength: backed | quantified | "
-    "stated, mark}` (a Skills line also `label` and `skills`). `strength` is derived: backed when a story or an answer is linked, quantified when the "
-    "line states a number. `revision` is the number a write sends back."
+    "stated, mark, written_by, source}` (a Skills line also `label`, `skills` and `skill_sources`). `strength` is derived: backed when a story or an "
+    "answer is linked, quantified when the line states a number. `written_by` (operator | agent) and `source` say who wrote the line's text through "
+    "these routes or `gigai scout resume master add | edit`, and where its evidence came from; both are null for a line that came with a file. "
+    "`revision` is the number a write sends back."
 )
 _MASTER_WRITE_NOTE = (
     "One new revision of the master. Send the `revision` you read: when the master changed since, the reply is 409 revision_conflict with "
     "`error.current` (the revision it is at now): read it again, then send the change on top of that. A text that looks like contact data (email, "
-    "phone, link, address, a name line) answers 422 personal_info_refused and nothing is written. The reply carries the whole `master` after the "
-    "write, `status` (revised, or unchanged when it already said this), the `id` the change was about, and `profiles`: what the write did to the "
+    "phone, link, address, a name line) answers 422 personal_info_refused and nothing is written. These are the rules of `gigai scout resume master "
+    "add | edit | remove` (one implementation), so a refusal carries that command's code. The reply carries the whole `master` after the "
+    "write, `status` (revised, or unchanged when it already said this) with `written`, the `id` the change was about, `retired` (what the write "
+    "took out, each with the revision that still holds it), and `profiles`: what the write did to the "
     "profiles' selections (`synced`: a profile that shows an edited or retired line had its resume printed again; `offers`: new lines are offered, "
     "never added by themselves). Every tailoring made from the master is out of date after a write and is made again when the pipeline next looks "
     "at its profile. Local only: no model call."
 )
 _MASTER_REVISION_PARAM = _b("revision", "integer", "The revision of the master you read; when it changed since, the reply is 409.", required=True)
 _MASTER_WRITE_ERRORS = (
-    _UNKNOWN_KEY, _WRONG_TYPE, _INVALID, (422, "personal_info_refused"), (422, "master_markdown_invalid"), _REVISION_CONFLICT,
+    _UNKNOWN_KEY, _WRONG_TYPE, _INVALID, (422, "personal_info_refused"), (422, "master_text_invalid"), (422, "master_markdown_invalid"), _REVISION_CONFLICT,
     (404, "master_not_found"), _NO_TARGET,
 )
+_MASTER_RETIRED_EXAMPLE: dict[str, object] = {
+    "id": "b-hex-09", "kind": "bullet", "section": "experience", "entry_id": "r-hex", "text": "Ran the on-call rotation for 4 teams.",
+    "last_revision": 2, "retired_in": 3, "retired_by": "operator",
+}
 _MIGRATION_QUESTION: dict[str, object] = {
     "question_id": "mq-59c304ca47a1", "kind": "number_conflict", "section": "experience", "entry": "Lumenfold",
     "question": "One line of Experience / Lumenfold is worded twice, with different numbers. Which is right: a, b, or both (keep the two lines)?",
@@ -1156,20 +1167,21 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
         {
             "schema_version": "scout-master-history:1", "revision": 3,
             "revisions": [{**{key: value for key, value in _MASTER_REVISION.items() if key not in ("record_id", "revisions")}, "items": 3, "entries": 1, "added": 0, "removed": 1, "changed": 0}],
-            "retired": [{**_MASTER_LINE, "id": "b-hex-09", "what": "line", "last_revision": 2, "retired_in": 3, "entry_heading": "Hexa Cloud"}],
+            "retired": [{**_MASTER_RETIRED_EXAMPLE, "what": "line", "entry_heading": "Hexa Cloud", "sublines": []}],
         },
         schema_version="scout-master-history:1", host_checked=True, errors=(_UNKNOWN_KEY, _NO_TARGET),
         description=(
             "Each revision: who wrote it (`written_by` operator | agent), when, how many lines and entries it holds and what it changed against the one "
-            "before (`added`, `removed`, `changed`, by id). `retired`: every line or entry (`what`) an earlier revision held and the current one does not, "
-            "as the last revision that held it had it (`last_revision`; `retired_in` is the revision that dropped it), the most recently retired first; a "
-            "line retired with its entry is listed under the entry. Put one back with PUT /api/master/lines or /entries {id, use: \"restore\"}. Nothing is "
+            "before (`added`, `removed`, `changed`, by id). `retired`: every line or entry (`what`; `kind` is entry or the line's kind) an earlier revision "
+            "held and the current one does not, as the last revision that held it had it (`text`: the line, or an entry's heading with its `sublines`; "
+            "`last_revision`; `retired_in` is the revision that dropped it and `retired_by` who wrote that one), the most recently retired first; a "
+            "line retired with its entry is not listed on its own: it comes back with the entry. Put one back with PUT /api/master/lines or /entries {id, use: \"restore\"}. Nothing is "
             "ever deleted: every revision stays in the journal. `revision` is null and both lists are empty when there is no master."
         ),
     ),
     RouteSpec(
         "POST", "/api/master/lines", "Add a line to the master: under a role, or to Summary, Skills or Other.", "write", "none",
-        {**_MASTER_WRITE_EXAMPLE, "id": "b-4f0c1a", "changes": {"added": 1, "removed": 0, "changed": 0}, "near_duplicate": {"id": "b-hex-03", "similarity": 0.71}},
+        {**_MASTER_WRITE_EXAMPLE, "action": "add", "id": "b-4f0c1a", "ids": ["b-4f0c1a"], "changes": {"added": 1, "removed": 0, "changed": 0}},
         schema_version="scout-master:1",
         params=(
             _MASTER_REVISION_PARAM,
@@ -1178,13 +1190,18 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
             _b("section", "string", "For a line outside an entry.", enum=("summary", "skills", "other")),
             _b("tags", "array", "Optional tags: words of letters, digits and + # . - _ (at most 12)."),
             _b("backed", "array", "Optional evidence: `story:<id>` or `answer:<question_id>` (at most 12). A backed line's strength is backed."),
+            _b("force", "boolean", "true: add the line although the master has one that says nearly the same (see `near_duplicates`)."),
             _ACTOR_PARAM,
         ),
         request_example={"revision": 3, "entry_id": "r-hex", "text": "Cut the deploy time of 40 services from 50 to 12 minutes.", "actor": "agent"},
-        errors=(*_MASTER_WRITE_ERRORS, (404, "master_entry_not_found"), (409, "master_line_exists")),
+        errors=(*_MASTER_WRITE_ERRORS, (422, "master_place_invalid"), (422, "master_tag_invalid"), (422, "master_backed_invalid"), (404, "master_entry_not_found"), (409, "master_line_exists")),
         description=(
-            "Answers 201. The line gets its id (`id`) and goes last under its entry or in its section. `near_duplicate` names the line of the same section it "
-            "reads like (`{id, similarity}`; a warning: edit that one instead if it is the same fact). Only the user's facts: every number comes from the user. "
+            "Answers 201 when the line was written. The line gets its id (`id`) and goes last under its entry or in its section. A line the master "
+            "already has in other words is ASKED about, not added: the reply is 200 with `status: near_duplicate`, `written: false` and "
+            "`near_duplicates` (up to 5 lines of the same kind it looks like, the closest first: `{id, text, entry_id, similarity, same_numbers}`; "
+            "`same_numbers` false means one of the two is out of date). Edit that line (PUT) if it is the same fact, or send the request again with "
+            "`force: true` to keep both. The same text in the same place is 409 master_line_exists, forced or not. A Skills line lists only the "
+            "skills the master does not list yet (`skills.added`, `skills.already_listed`). Only the user's facts: every number comes from the user. "
             + _MASTER_WRITE_NOTE
         ),
     ),
@@ -1201,11 +1218,16 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
             _ACTOR_PARAM,
         ),
         request_example={"revision": 3, "id": "b-hex-03", "text": "Led the migration of 40 services to Helm charts released through ArgoCD, in 5 months.", "actor": "agent"},
-        errors=(*_MASTER_WRITE_ERRORS, (404, "master_line_not_found"), (409, "master_line_not_retired"), (409, "master_would_be_empty")),
+        errors=(
+            *_MASTER_WRITE_ERRORS, (422, "master_edit_empty"), (422, "master_edit_invalid"), (422, "master_tag_invalid"), (422, "master_backed_invalid"),
+            (404, "master_item_not_found"), (404, "master_entry_not_found"), (409, "master_line_exists"), (409, "master_empty"),
+        ),
         description=(
-            "use edit needs at least one of text, tags, backed. use retire: the line is never selected again; it stays in the earlier revisions and is "
-            "listed by GET /api/master/history. use restore: the line comes back under its own id, as the last revision that held it had it, next to the "
-            "lines it stood beside (its role comes back with it when that was retired too). This is also \"save this wording to your master\" for a line "
+            "use edit needs at least one of text, tags, backed (422 master_edit_empty; an entry's id is 422 master_edit_invalid). use retire: the line "
+            "is never selected again; it stays in the earlier revisions and is listed by GET /api/master/history (the last line of the master cannot "
+            "go: 409 master_empty). use restore: the line comes back under its own id, as the last revision that held it had it, where it stood; a "
+            "line that is in the master is 409 master_line_exists, and a line whose role is retired too is 404 master_entry_not_found: restore the "
+            "role first (PUT /api/master/entries), which brings the lines it had. This is also \"save this wording to your master\" for a line "
             "edited on a tailored resume: send the line's `item_id` as `id` with the edited text. " + _MASTER_WRITE_NOTE
         ),
     ),
@@ -1221,8 +1243,11 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
             _ACTOR_PARAM,
         ),
         request_example={"revision": 3, "section": "experience", "heading": "Orbital Works", "sublines": ["Staff Engineer | Jun 2023 - Present"]},
-        errors=(*_MASTER_WRITE_ERRORS, (409, "master_entry_exists")),
-        description="Answers 201 with the entry's `id`; it goes first in its section (a resume lists the newest first) and has no lines yet: add them with POST /api/master/lines {entry_id}. " + _MASTER_WRITE_NOTE,
+        errors=(*_MASTER_WRITE_ERRORS, (422, "master_place_invalid"), (409, "master_entry_exists")),
+        description=(
+            "Answers 201 with the entry's `id`. It is placed by its dates among the section's entries, the newest first (an ongoing one first; one "
+            "that names no year goes last), and has no lines yet: add them with POST /api/master/lines {entry_id}. " + _MASTER_WRITE_NOTE
+        ),
     ),
     RouteSpec(
         "PUT", "/api/master/entries", "Edit, retire or restore a role, a project or a school of the master, by id.", "write", "none",
@@ -1237,8 +1262,11 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
             _ACTOR_PARAM,
         ),
         request_example={"revision": 3, "id": "r-hex", "sublines": ["Staff Software Engineer | Jun 2019 - Feb 2023"]},
-        errors=(*_MASTER_WRITE_ERRORS, (404, "master_entry_not_found"), (409, "master_line_not_retired"), (409, "master_would_be_empty")),
-        description="The entry's id and its lines stay on an edit. " + _MASTER_WRITE_NOTE,
+        errors=(*_MASTER_WRITE_ERRORS, (422, "master_edit_empty"), (422, "master_edit_invalid"), (404, "master_item_not_found"), (409, "master_line_exists"), (409, "master_empty")),
+        description=(
+            "The entry's id and its lines stay on an edit. use retire takes the entry out with its lines (`retired` lists them); use restore puts it "
+            "back where it stood, with the lines it had that the master does not hold. " + _MASTER_WRITE_NOTE
+        ),
     ),
     RouteSpec(
         "GET", "/api/master/migration", "What building the master from the profiles' resumes would do, and the questions it asks.", "read", "none",

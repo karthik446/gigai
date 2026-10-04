@@ -556,8 +556,8 @@ export function getMasterHistory() {
   return request("GET", "/api/master/history");
 }
 
-export function postMasterLine({ revision, entryId, section, text }) {
-  return request("POST", "/api/master/lines", { revision, text, ...(entryId ? { entry_id: entryId } : { section }) });
+export function postMasterLine({ revision, entryId, section, text, force }) {
+  return request("POST", "/api/master/lines", { revision, text, ...(entryId ? { entry_id: entryId } : { section }), ...(force ? { force: true } : {}) });
 }
 
 // use: "edit" (with text), "retire" or "restore".

@@ -2113,7 +2113,7 @@
     },
     "/api/master": {
       "get": {
-        "description": "The master resume: every entry and line with its id, tags and evidence strength. The master resume is the user's one document of every role, bullet, project and skill, with a stable id on every line and no contact data; a profile shows a selection of it and a tailoring for one job picks from all of it. `master` is null when there is none yet (build it with POST /api/master/migration, or `gigai scout resume master init`). Each entry: `{id, section, heading, sublines, start, end, ongoing, bullets, order}`. Each line: `{id, section, kind: summary | bullet | skills | other, text, tags, backed, entry_id, order, strength: backed | quantified | stated, mark}` (a Skills line also `label` and `skills`). `strength` is derived: backed when a story or an answer is linked, quantified when the line states a number. `revision` is the number a write sends back. `shown_by` maps a line or entry id to the profiles whose selection shows it (`profiles` names them); `current_revision` is the newest revision's number.",
+        "description": "The master resume: every entry and line with its id, tags and evidence strength. The master resume is the user's one document of every role, bullet, project and skill, with a stable id on every line and no contact data; a profile shows a selection of it and a tailoring for one job picks from all of it. `master` is null when there is none yet (build it with POST /api/master/migration, or `gigai scout resume master init`). Each entry: `{id, section, heading, sublines, start, end, ongoing, bullets, order}`. Each line: `{id, section, kind: summary | bullet | skills | other, text, tags, backed, entry_id, order, strength: backed | quantified | stated, mark, written_by, source}` (a Skills line also `label`, `skills` and `skill_sources`). `strength` is derived: backed when a story or an answer is linked, quantified when the line states a number. `written_by` (operator | agent) and `source` say who wrote the line's text through these routes or `gigai scout resume master add | edit`, and where its evidence came from; both are null for a line that came with a file. `revision` is the number a write sends back. `shown_by` maps a line or entry id to the profiles whose selection shows it (`profiles` names them); `current_revision` is the newest revision's number.",
         "operationId": "get_api_master",
         "parameters": [
           {
@@ -2162,10 +2162,12 @@
                         "ongoing": false,
                         "order": 3,
                         "section": "experience",
+                        "source": null,
                         "start": 2019,
                         "sublines": [
                           "Staff Software Engineer | Jun 2019 - Jan 2023"
-                        ]
+                        ],
+                        "written_by": null
                       }
                     ],
                     "format": 1,
@@ -2178,11 +2180,13 @@
                         "mark": "5d0c2a4b9e1f7a36",
                         "order": 4,
                         "section": "experience",
+                        "source": "from the user's chat on 3 Oct",
                         "strength": "quantified",
                         "tags": [
                           "delivery"
                         ],
-                        "text": "Led the migration of 40 services to Helm charts released through ArgoCD."
+                        "text": "Led the migration of 40 services to Helm charts released through ArgoCD.",
+                        "written_by": "agent"
                       }
                     ],
                     "parent_revision": "revision_7c1d7b9a-0d58-4f0b-8f27-91f4f6f6a2c3",
@@ -2285,7 +2289,7 @@
     },
     "/api/master/entries": {
       "post": {
-        "description": "Add a role, a project or a school to the master. Answers 201 with the entry's `id`; it goes first in its section (a resume lists the newest first) and has no lines yet: add them with POST /api/master/lines {entry_id}. One new revision of the master. Send the `revision` you read: when the master changed since, the reply is 409 revision_conflict with `error.current` (the revision it is at now): read it again, then send the change on top of that. A text that looks like contact data (email, phone, link, address, a name line) answers 422 personal_info_refused and nothing is written. The reply carries the whole `master` after the write, `status` (revised, or unchanged when it already said this), the `id` the change was about, and `profiles`: what the write did to the profiles' selections (`synced`: a profile that shows an edited or retired line had its resume printed again; `offers`: new lines are offered, never added by themselves). Every tailoring made from the master is out of date after a write and is made again when the pipeline next looks at its profile. Local only: no model call.",
+        "description": "Add a role, a project or a school to the master. Answers 201 with the entry's `id`. It is placed by its dates among the section's entries, the newest first (an ongoing one first; one that names no year goes last), and has no lines yet: add them with POST /api/master/lines {entry_id}. One new revision of the master. Send the `revision` you read: when the master changed since, the reply is 409 revision_conflict with `error.current` (the revision it is at now): read it again, then send the change on top of that. A text that looks like contact data (email, phone, link, address, a name line) answers 422 personal_info_refused and nothing is written. These are the rules of `gigai scout resume master add | edit | remove` (one implementation), so a refusal carries that command's code. The reply carries the whole `master` after the write, `status` (revised, or unchanged when it already said this) with `written`, the `id` the change was about, `retired` (what the write took out, each with the revision that still holds it), and `profiles`: what the write did to the profiles' selections (`synced`: a profile that shows an edited or retired line had its resume printed again; `offers`: new lines are offered, never added by themselves). Every tailoring made from the master is out of date after a write and is made again when the pipeline next looks at its profile. Local only: no model call.",
         "operationId": "post_api_master_entries",
         "parameters": [],
         "requestBody": {
@@ -2348,12 +2352,16 @@
             "content": {
               "application/json": {
                 "example": {
+                  "action": "edit",
                   "changes": {
                     "added": 1,
                     "changed": 0,
                     "removed": 0
                   },
                   "id": "r-7a01c2",
+                  "ids": [
+                    "b-hex-03"
+                  ],
                   "master": {
                     "content_sha256": "sha256:...",
                     "counts": {
@@ -2384,10 +2392,12 @@
                         "ongoing": false,
                         "order": 3,
                         "section": "experience",
+                        "source": null,
                         "start": 2019,
                         "sublines": [
                           "Staff Software Engineer | Jun 2019 - Jan 2023"
-                        ]
+                        ],
+                        "written_by": null
                       }
                     ],
                     "format": 1,
@@ -2400,11 +2410,13 @@
                         "mark": "5d0c2a4b9e1f7a36",
                         "order": 4,
                         "section": "experience",
+                        "source": "from the user's chat on 3 Oct",
                         "strength": "quantified",
                         "tags": [
                           "delivery"
                         ],
-                        "text": "Led the migration of 40 services to Helm charts released through ArgoCD."
+                        "text": "Led the migration of 40 services to Helm charts released through ArgoCD.",
+                        "written_by": "agent"
                       }
                     ],
                     "parent_revision": "revision_7c1d7b9a-0d58-4f0b-8f27-91f4f6f6a2c3",
@@ -2420,7 +2432,7 @@
                     "updated_at": "2026-10-04T10:05:00.000000Z",
                     "written_by": "operator"
                   },
-                  "near_duplicate": null,
+                  "near_duplicates": [],
                   "profiles": {
                     "offers": [
                       {
@@ -2434,8 +2446,17 @@
                     ],
                     "synced": []
                   },
+                  "retired": [],
                   "schema_version": "scout-master:1",
-                  "status": "revised"
+                  "skills": {
+                    "added": [],
+                    "already_listed": [],
+                    "line": null,
+                    "removed": []
+                  },
+                  "status": "revised",
+                  "warnings": [],
+                  "written": true
                 },
                 "schema": {
                   "additionalProperties": true,
@@ -2519,7 +2540,7 @@
                 }
               }
             },
-            "description": "unknown_key, wrong_type, invalid_value, personal_info_refused, master_markdown_invalid"
+            "description": "unknown_key, wrong_type, invalid_value, personal_info_refused, master_text_invalid, master_markdown_invalid, master_place_invalid"
           }
         },
         "summary": "Add a role, project or school to the master",
@@ -2533,7 +2554,7 @@
         ]
       },
       "put": {
-        "description": "Edit, retire or restore a role, a project or a school of the master, by id. The entry's id and its lines stay on an edit. One new revision of the master. Send the `revision` you read: when the master changed since, the reply is 409 revision_conflict with `error.current` (the revision it is at now): read it again, then send the change on top of that. A text that looks like contact data (email, phone, link, address, a name line) answers 422 personal_info_refused and nothing is written. The reply carries the whole `master` after the write, `status` (revised, or unchanged when it already said this), the `id` the change was about, and `profiles`: what the write did to the profiles' selections (`synced`: a profile that shows an edited or retired line had its resume printed again; `offers`: new lines are offered, never added by themselves). Every tailoring made from the master is out of date after a write and is made again when the pipeline next looks at its profile. Local only: no model call.",
+        "description": "Edit, retire or restore a role, a project or a school of the master, by id. The entry's id and its lines stay on an edit. use retire takes the entry out with its lines (`retired` lists them); use restore puts it back where it stood, with the lines it had that the master does not hold. One new revision of the master. Send the `revision` you read: when the master changed since, the reply is 409 revision_conflict with `error.current` (the revision it is at now): read it again, then send the change on top of that. A text that looks like contact data (email, phone, link, address, a name line) answers 422 personal_info_refused and nothing is written. These are the rules of `gigai scout resume master add | edit | remove` (one implementation), so a refusal carries that command's code. The reply carries the whole `master` after the write, `status` (revised, or unchanged when it already said this) with `written`, the `id` the change was about, `retired` (what the write took out, each with the revision that still holds it), and `profiles`: what the write did to the profiles' selections (`synced`: a profile that shows an edited or retired line had its resume printed again; `offers`: new lines are offered, never added by themselves). Every tailoring made from the master is out of date after a write and is made again when the pipeline next looks at its profile. Local only: no model call.",
         "operationId": "put_api_master_entries",
         "parameters": [],
         "requestBody": {
@@ -2598,12 +2619,16 @@
             "content": {
               "application/json": {
                 "example": {
+                  "action": "edit",
                   "changes": {
                     "added": 0,
                     "changed": 1,
                     "removed": 0
                   },
                   "id": "r-hex",
+                  "ids": [
+                    "b-hex-03"
+                  ],
                   "master": {
                     "content_sha256": "sha256:...",
                     "counts": {
@@ -2634,10 +2659,12 @@
                         "ongoing": false,
                         "order": 3,
                         "section": "experience",
+                        "source": null,
                         "start": 2019,
                         "sublines": [
                           "Staff Software Engineer | Jun 2019 - Jan 2023"
-                        ]
+                        ],
+                        "written_by": null
                       }
                     ],
                     "format": 1,
@@ -2650,11 +2677,13 @@
                         "mark": "5d0c2a4b9e1f7a36",
                         "order": 4,
                         "section": "experience",
+                        "source": "from the user's chat on 3 Oct",
                         "strength": "quantified",
                         "tags": [
                           "delivery"
                         ],
-                        "text": "Led the migration of 40 services to Helm charts released through ArgoCD."
+                        "text": "Led the migration of 40 services to Helm charts released through ArgoCD.",
+                        "written_by": "agent"
                       }
                     ],
                     "parent_revision": "revision_7c1d7b9a-0d58-4f0b-8f27-91f4f6f6a2c3",
@@ -2670,7 +2699,7 @@
                     "updated_at": "2026-10-04T10:05:00.000000Z",
                     "written_by": "operator"
                   },
-                  "near_duplicate": null,
+                  "near_duplicates": [],
                   "profiles": {
                     "offers": [
                       {
@@ -2684,8 +2713,17 @@
                     ],
                     "synced": []
                   },
+                  "retired": [],
                   "schema_version": "scout-master:1",
-                  "status": "revised"
+                  "skills": {
+                    "added": [],
+                    "already_listed": [],
+                    "line": null,
+                    "removed": []
+                  },
+                  "status": "revised",
+                  "warnings": [],
+                  "written": true
                 },
                 "schema": {
                   "additionalProperties": true,
@@ -2727,7 +2765,7 @@
                 }
               }
             },
-            "description": "master_not_found, target_unavailable, master_entry_not_found"
+            "description": "master_not_found, target_unavailable, master_item_not_found"
           },
           "409": {
             "content": {
@@ -2743,7 +2781,7 @@
                 }
               }
             },
-            "description": "revision_conflict, master_line_not_retired, master_would_be_empty"
+            "description": "revision_conflict, master_line_exists, master_empty"
           },
           "415": {
             "content": {
@@ -2769,7 +2807,7 @@
                 }
               }
             },
-            "description": "unknown_key, wrong_type, invalid_value, personal_info_refused, master_markdown_invalid"
+            "description": "unknown_key, wrong_type, invalid_value, personal_info_refused, master_text_invalid, master_markdown_invalid, master_edit_empty, master_edit_invalid"
           }
         },
         "summary": "Edit, retire or restore an entry of the master",
@@ -2785,7 +2823,7 @@
     },
     "/api/master/history": {
       "get": {
-        "description": "The master's revisions, newest first, and what is retired. Each revision: who wrote it (`written_by` operator | agent), when, how many lines and entries it holds and what it changed against the one before (`added`, `removed`, `changed`, by id). `retired`: every line or entry (`what`) an earlier revision held and the current one does not, as the last revision that held it had it (`last_revision`; `retired_in` is the revision that dropped it), the most recently retired first; a line retired with its entry is listed under the entry. Put one back with PUT /api/master/lines or /entries {id, use: \"restore\"}. Nothing is ever deleted: every revision stays in the journal. `revision` is null and both lists are empty when there is no master.",
+        "description": "The master's revisions, newest first, and what is retired. Each revision: who wrote it (`written_by` operator | agent), when, how many lines and entries it holds and what it changed against the one before (`added`, `removed`, `changed`, by id). `retired`: every line or entry (`what`; `kind` is entry or the line's kind) an earlier revision held and the current one does not, as the last revision that held it had it (`text`: the line, or an entry's heading with its `sublines`; `last_revision`; `retired_in` is the revision that dropped it and `retired_by` who wrote that one), the most recently retired first; a line retired with its entry is not listed on its own: it comes back with the entry. Put one back with PUT /api/master/lines or /entries {id, use: \"restore\"}. Nothing is ever deleted: every revision stays in the journal. `revision` is null and both lists are empty when there is no master.",
         "operationId": "get_api_master_history",
         "parameters": [],
         "responses": {
@@ -2795,21 +2833,16 @@
                 "example": {
                   "retired": [
                     {
-                      "backed": [],
                       "entry_heading": "Hexa Cloud",
                       "entry_id": "r-hex",
                       "id": "b-hex-09",
                       "kind": "bullet",
                       "last_revision": 2,
-                      "mark": "5d0c2a4b9e1f7a36",
-                      "order": 4,
+                      "retired_by": "operator",
                       "retired_in": 3,
                       "section": "experience",
-                      "strength": "quantified",
-                      "tags": [
-                        "delivery"
-                      ],
-                      "text": "Led the migration of 40 services to Helm charts released through ArgoCD.",
+                      "sublines": [],
+                      "text": "Ran the on-call rotation for 4 teams.",
                       "what": "line"
                     }
                   ],
@@ -2904,7 +2937,7 @@
     },
     "/api/master/lines": {
       "post": {
-        "description": "Add a line to the master: under a role, or to Summary, Skills or Other. Answers 201. The line gets its id (`id`) and goes last under its entry or in its section. `near_duplicate` names the line of the same section it reads like (`{id, similarity}`; a warning: edit that one instead if it is the same fact). Only the user's facts: every number comes from the user. One new revision of the master. Send the `revision` you read: when the master changed since, the reply is 409 revision_conflict with `error.current` (the revision it is at now): read it again, then send the change on top of that. A text that looks like contact data (email, phone, link, address, a name line) answers 422 personal_info_refused and nothing is written. The reply carries the whole `master` after the write, `status` (revised, or unchanged when it already said this), the `id` the change was about, and `profiles`: what the write did to the profiles' selections (`synced`: a profile that shows an edited or retired line had its resume printed again; `offers`: new lines are offered, never added by themselves). Every tailoring made from the master is out of date after a write and is made again when the pipeline next looks at its profile. Local only: no model call.",
+        "description": "Add a line to the master: under a role, or to Summary, Skills or Other. Answers 201 when the line was written. The line gets its id (`id`) and goes last under its entry or in its section. A line the master already has in other words is ASKED about, not added: the reply is 200 with `status: near_duplicate`, `written: false` and `near_duplicates` (up to 5 lines of the same kind it looks like, the closest first: `{id, text, entry_id, similarity, same_numbers}`; `same_numbers` false means one of the two is out of date). Edit that line (PUT) if it is the same fact, or send the request again with `force: true` to keep both. The same text in the same place is 409 master_line_exists, forced or not. A Skills line lists only the skills the master does not list yet (`skills.added`, `skills.already_listed`). Only the user's facts: every number comes from the user. One new revision of the master. Send the `revision` you read: when the master changed since, the reply is 409 revision_conflict with `error.current` (the revision it is at now): read it again, then send the change on top of that. A text that looks like contact data (email, phone, link, address, a name line) answers 422 personal_info_refused and nothing is written. These are the rules of `gigai scout resume master add | edit | remove` (one implementation), so a refusal carries that command's code. The reply carries the whole `master` after the write, `status` (revised, or unchanged when it already said this) with `written`, the `id` the change was about, `retired` (what the write took out, each with the revision that still holds it), and `profiles`: what the write did to the profiles' selections (`synced`: a profile that shows an edited or retired line had its resume printed again; `offers`: new lines are offered, never added by themselves). Every tailoring made from the master is out of date after a write and is made again when the pipeline next looks at its profile. Local only: no model call.",
         "operationId": "post_api_master_lines",
         "parameters": [],
         "requestBody": {
@@ -2934,6 +2967,10 @@
                   "entry_id": {
                     "description": "The role, project or school the line goes under (an entry's id). Either this or section.",
                     "type": "string"
+                  },
+                  "force": {
+                    "description": "true: add the line although the master has one that says nearly the same (see `near_duplicates`).",
+                    "type": "boolean"
                   },
                   "revision": {
                     "description": "The revision of the master you read; when it changed since, the reply is 409.",
@@ -2972,12 +3009,16 @@
             "content": {
               "application/json": {
                 "example": {
+                  "action": "add",
                   "changes": {
                     "added": 1,
                     "changed": 0,
                     "removed": 0
                   },
                   "id": "b-4f0c1a",
+                  "ids": [
+                    "b-4f0c1a"
+                  ],
                   "master": {
                     "content_sha256": "sha256:...",
                     "counts": {
@@ -3008,10 +3049,12 @@
                         "ongoing": false,
                         "order": 3,
                         "section": "experience",
+                        "source": null,
                         "start": 2019,
                         "sublines": [
                           "Staff Software Engineer | Jun 2019 - Jan 2023"
-                        ]
+                        ],
+                        "written_by": null
                       }
                     ],
                     "format": 1,
@@ -3024,11 +3067,13 @@
                         "mark": "5d0c2a4b9e1f7a36",
                         "order": 4,
                         "section": "experience",
+                        "source": "from the user's chat on 3 Oct",
                         "strength": "quantified",
                         "tags": [
                           "delivery"
                         ],
-                        "text": "Led the migration of 40 services to Helm charts released through ArgoCD."
+                        "text": "Led the migration of 40 services to Helm charts released through ArgoCD.",
+                        "written_by": "agent"
                       }
                     ],
                     "parent_revision": "revision_7c1d7b9a-0d58-4f0b-8f27-91f4f6f6a2c3",
@@ -3044,10 +3089,7 @@
                     "updated_at": "2026-10-04T10:05:00.000000Z",
                     "written_by": "operator"
                   },
-                  "near_duplicate": {
-                    "id": "b-hex-03",
-                    "similarity": 0.71
-                  },
+                  "near_duplicates": [],
                   "profiles": {
                     "offers": [
                       {
@@ -3061,8 +3103,17 @@
                     ],
                     "synced": []
                   },
+                  "retired": [],
                   "schema_version": "scout-master:1",
-                  "status": "revised"
+                  "skills": {
+                    "added": [],
+                    "already_listed": [],
+                    "line": null,
+                    "removed": []
+                  },
+                  "status": "revised",
+                  "warnings": [],
+                  "written": true
                 },
                 "schema": {
                   "additionalProperties": true,
@@ -3146,7 +3197,7 @@
                 }
               }
             },
-            "description": "unknown_key, wrong_type, invalid_value, personal_info_refused, master_markdown_invalid"
+            "description": "unknown_key, wrong_type, invalid_value, personal_info_refused, master_text_invalid, master_markdown_invalid, master_place_invalid, master_tag_invalid, master_backed_invalid"
           }
         },
         "summary": "Add a line to the master",
@@ -3160,7 +3211,7 @@
         ]
       },
       "put": {
-        "description": "Edit, retire or restore one line of the master, by id. use edit needs at least one of text, tags, backed. use retire: the line is never selected again; it stays in the earlier revisions and is listed by GET /api/master/history. use restore: the line comes back under its own id, as the last revision that held it had it, next to the lines it stood beside (its role comes back with it when that was retired too). This is also \"save this wording to your master\" for a line edited on a tailored resume: send the line's `item_id` as `id` with the edited text. One new revision of the master. Send the `revision` you read: when the master changed since, the reply is 409 revision_conflict with `error.current` (the revision it is at now): read it again, then send the change on top of that. A text that looks like contact data (email, phone, link, address, a name line) answers 422 personal_info_refused and nothing is written. The reply carries the whole `master` after the write, `status` (revised, or unchanged when it already said this), the `id` the change was about, and `profiles`: what the write did to the profiles' selections (`synced`: a profile that shows an edited or retired line had its resume printed again; `offers`: new lines are offered, never added by themselves). Every tailoring made from the master is out of date after a write and is made again when the pipeline next looks at its profile. Local only: no model call.",
+        "description": "Edit, retire or restore one line of the master, by id. use edit needs at least one of text, tags, backed (422 master_edit_empty; an entry's id is 422 master_edit_invalid). use retire: the line is never selected again; it stays in the earlier revisions and is listed by GET /api/master/history (the last line of the master cannot go: 409 master_empty). use restore: the line comes back under its own id, as the last revision that held it had it, where it stood; a line that is in the master is 409 master_line_exists, and a line whose role is retired too is 404 master_entry_not_found: restore the role first (PUT /api/master/entries), which brings the lines it had. This is also \"save this wording to your master\" for a line edited on a tailored resume: send the line's `item_id` as `id` with the edited text. One new revision of the master. Send the `revision` you read: when the master changed since, the reply is 409 revision_conflict with `error.current` (the revision it is at now): read it again, then send the change on top of that. A text that looks like contact data (email, phone, link, address, a name line) answers 422 personal_info_refused and nothing is written. These are the rules of `gigai scout resume master add | edit | remove` (one implementation), so a refusal carries that command's code. The reply carries the whole `master` after the write, `status` (revised, or unchanged when it already said this) with `written`, the `id` the change was about, `retired` (what the write took out, each with the revision that still holds it), and `profiles`: what the write did to the profiles' selections (`synced`: a profile that shows an edited or retired line had its resume printed again; `offers`: new lines are offered, never added by themselves). Every tailoring made from the master is out of date after a write and is made again when the pipeline next looks at its profile. Local only: no model call.",
         "operationId": "put_api_master_lines",
         "parameters": [],
         "requestBody": {
@@ -3228,12 +3279,16 @@
             "content": {
               "application/json": {
                 "example": {
+                  "action": "edit",
                   "changes": {
                     "added": 0,
                     "changed": 1,
                     "removed": 0
                   },
                   "id": "b-hex-03",
+                  "ids": [
+                    "b-hex-03"
+                  ],
                   "master": {
                     "content_sha256": "sha256:...",
                     "counts": {
@@ -3264,10 +3319,12 @@
                         "ongoing": false,
                         "order": 3,
                         "section": "experience",
+                        "source": null,
                         "start": 2019,
                         "sublines": [
                           "Staff Software Engineer | Jun 2019 - Jan 2023"
-                        ]
+                        ],
+                        "written_by": null
                       }
                     ],
                     "format": 1,
@@ -3280,11 +3337,13 @@
                         "mark": "5d0c2a4b9e1f7a36",
                         "order": 4,
                         "section": "experience",
+                        "source": "from the user's chat on 3 Oct",
                         "strength": "quantified",
                         "tags": [
                           "delivery"
                         ],
-                        "text": "Led the migration of 40 services to Helm charts released through ArgoCD."
+                        "text": "Led the migration of 40 services to Helm charts released through ArgoCD.",
+                        "written_by": "agent"
                       }
                     ],
                     "parent_revision": "revision_7c1d7b9a-0d58-4f0b-8f27-91f4f6f6a2c3",
@@ -3300,7 +3359,7 @@
                     "updated_at": "2026-10-04T10:05:00.000000Z",
                     "written_by": "operator"
                   },
-                  "near_duplicate": null,
+                  "near_duplicates": [],
                   "profiles": {
                     "offers": [
                       {
@@ -3314,8 +3373,17 @@
                     ],
                     "synced": []
                   },
+                  "retired": [],
                   "schema_version": "scout-master:1",
-                  "status": "revised"
+                  "skills": {
+                    "added": [],
+                    "already_listed": [],
+                    "line": null,
+                    "removed": []
+                  },
+                  "status": "revised",
+                  "warnings": [],
+                  "written": true
                 },
                 "schema": {
                   "additionalProperties": true,
@@ -3357,7 +3425,7 @@
                 }
               }
             },
-            "description": "master_not_found, target_unavailable, master_line_not_found"
+            "description": "master_not_found, target_unavailable, master_item_not_found, master_entry_not_found"
           },
           "409": {
             "content": {
@@ -3373,7 +3441,7 @@
                 }
               }
             },
-            "description": "revision_conflict, master_line_not_retired, master_would_be_empty"
+            "description": "revision_conflict, master_line_exists, master_empty"
           },
           "415": {
             "content": {
@@ -3399,7 +3467,7 @@
                 }
               }
             },
-            "description": "unknown_key, wrong_type, invalid_value, personal_info_refused, master_markdown_invalid"
+            "description": "unknown_key, wrong_type, invalid_value, personal_info_refused, master_text_invalid, master_markdown_invalid, master_edit_empty, master_edit_invalid, master_tag_invalid, master_backed_invalid"
           }
         },
         "summary": "Edit, retire or restore a line of the master",
