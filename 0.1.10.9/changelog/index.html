@@ -1,0 +1,1048 @@
+<!DOCTYPE html><html lang="en" dir="ltr" data-theme="dark" data-has-toc data-has-sidebar class="astro-g5ptsecz"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/><title>Changelog | GigAI</title><link rel="canonical" href="https://karthik446.github.io/gigai/0.1.10.9/changelog/"/><link rel="sitemap" href="/gigai/0.1.10.9/sitemap-index.xml"/><link rel="shortcut icon" href="/gigai/0.1.10.9/favicon.svg" type="image/svg+xml"/><meta name="generator" content="Astro v7.3.5"/><meta name="generator" content="Starlight v0.42.4"/><meta property="og:title" content="Changelog"/><meta property="og:type" content="article"/><meta property="og:url" content="https://karthik446.github.io/gigai/0.1.10.9/changelog/"/><meta property="og:locale" content="en"/><meta property="og:description" content="What changed in each GigAI release."/><meta property="og:site_name" content="GigAI"/><meta name="twitter:card" content="summary_large_image"/><meta name="description" content="What changed in each GigAI release."/><script>
+	window.StarlightThemeProvider = (() => {
+		const storedTheme =
+			typeof localStorage !== 'undefined' && localStorage.getItem('starlight-theme');
+		const theme =
+			storedTheme ||
+			(window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
+		document.documentElement.dataset.theme = theme === 'light' ? 'light' : 'dark';
+		return {
+			updatePickers(theme = storedTheme || 'auto') {
+				document.querySelectorAll('starlight-theme-select').forEach((picker) => {
+					const select = picker.querySelector('select');
+					if (select) select.value = theme;
+					/** @type {HTMLTemplateElement | null} */
+					const tmpl = document.querySelector(`#theme-icons`);
+					const newIcon = tmpl && tmpl.content.querySelector('.' + theme);
+					if (newIcon) {
+						const oldIcon = picker.querySelector('svg.label-icon');
+						if (oldIcon) {
+							oldIcon.replaceChildren(...newIcon.cloneNode(true).childNodes);
+						}
+					}
+				});
+			},
+		};
+	})();
+</script><template id="theme-icons"><svg aria-hidden="true" class="light astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M5 12a1 1 0 0 0-1-1H3a1 1 0 0 0 0 2h1a1 1 0 0 0 1-1Zm.64 5-.71.71a1 1 0 0 0 0 1.41 1 1 0 0 0 1.41 0l.71-.71A1 1 0 0 0 5.64 17ZM12 5a1 1 0 0 0 1-1V3a1 1 0 0 0-2 0v1a1 1 0 0 0 1 1Zm5.66 2.34a1 1 0 0 0 .7-.29l.71-.71a1 1 0 1 0-1.41-1.41l-.66.71a1 1 0 0 0 0 1.41 1 1 0 0 0 .66.29Zm-12-.29a1 1 0 0 0 1.41 0 1 1 0 0 0 0-1.41l-.71-.71a1.004 1.004 0 1 0-1.43 1.41l.73.71ZM21 11h-1a1 1 0 0 0 0 2h1a1 1 0 0 0 0-2Zm-2.64 6A1 1 0 0 0 17 18.36l.71.71a1 1 0 0 0 1.41 0 1 1 0 0 0 0-1.41l-.76-.66ZM12 6.5a5.5 5.5 0 1 0 5.5 5.5A5.51 5.51 0 0 0 12 6.5Zm0 9a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7Zm0 3.5a1 1 0 0 0-1 1v1a1 1 0 0 0 2 0v-1a1 1 0 0 0-1-1Z"/></svg><svg aria-hidden="true" class="dark astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M21.64 13a1 1 0 0 0-1.05-.14 8.049 8.049 0 0 1-3.37.73 8.15 8.15 0 0 1-8.14-8.1 8.59 8.59 0 0 1 .25-2A1 1 0 0 0 8 2.36a10.14 10.14 0 1 0 14 11.69 1 1 0 0 0-.36-1.05Zm-9.5 6.69A8.14 8.14 0 0 1 7.08 5.22v.27a10.15 10.15 0 0 0 10.14 10.14 9.784 9.784 0 0 0 2.1-.22 8.11 8.11 0 0 1-7.18 4.32v-.04Z"/></svg><svg aria-hidden="true" class="auto astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M21 14h-1V7a3 3 0 0 0-3-3H7a3 3 0 0 0-3 3v7H3a1 1 0 0 0-1 1v2a3 3 0 0 0 3 3h14a3 3 0 0 0 3-3v-2a1 1 0 0 0-1-1ZM6 7a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v7H6V7Zm14 10a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-1h16v1Z"/></svg></template><link rel="stylesheet" href="/gigai/0.1.10.9/_astro/print.ehPL0gv-.css" media="print"><link rel="stylesheet" href="/gigai/0.1.10.9/_astro/middleware.DMfu84nx.css"><link rel="stylesheet" href="/gigai/0.1.10.9/_astro/index.Bcnd1xZy.css"><script type="module" src="/gigai/0.1.10.9/_astro/page.CGEljBrB.js"></script></head><body class="astro-g5ptsecz"><a class="sl-skip-link astro-qb7clj6f" href="#_top">Skip to content</a><div class="page sl-flex astro-yntsjkba"><header class="header astro-yntsjkba"><div class="header astro-by6fddyj"><div class="title-wrapper sl-flex astro-by6fddyj"><a href="/gigai/0.1.10.9/" class="site-title sl-flex astro-6rvad3va"><span class="astro-6rvad3va" translate="no">GigAI</span></a></div><div class="sl-flex print:hidden astro-by6fddyj"><site-search class="astro-by6fddyj astro-b5kgnn7o" data-translations="{&quot;placeholder&quot;:&quot;Search&quot;}"><button data-open-modal disabled aria-label="Search" aria-keyshortcuts="Control+K" class="astro-b5kgnn7o"><svg aria-hidden="true" class="astro-b5kgnn7o astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M21.71 20.29 18 16.61A9 9 0 1 0 16.61 18l3.68 3.68a.999.999 0 0 0 1.42 0 1 1 0 0 0 0-1.39ZM11 18a7 7 0 1 1 0-14 7 7 0 0 1 0 14Z"/></svg><span class="sl-hidden md:sl-block astro-b5kgnn7o" aria-hidden="true">Search</span><kbd class="sl-hidden md:sl-flex astro-b5kgnn7o" style="display: none;"><kbd class="astro-b5kgnn7o">Ctrl</kbd><kbd class="astro-b5kgnn7o">K</kbd></kbd></button><dialog style="padding:0" aria-label="Search" class="astro-b5kgnn7o"><div class="dialog-frame sl-flex astro-b5kgnn7o"><button data-close-modal class="sl-flex md:sl-hidden astro-b5kgnn7o">Cancel</button><div class="search-container astro-b5kgnn7o"><div id="starlight__search" class="astro-b5kgnn7o"></div></div></div></dialog></site-search><script>
+	(() => {
+		const openBtn = document.querySelector('button[data-open-modal]');
+		const shortcut = openBtn?.querySelector('kbd');
+		if (!openBtn || !(shortcut instanceof HTMLElement)) return;
+		const platformKey = shortcut.querySelector('kbd');
+		if (platformKey && /(Mac|iPhone|iPod|iPad)/i.test(navigator.platform)) {
+			platformKey.textContent = '⌘';
+			openBtn.setAttribute('aria-keyshortcuts', 'Meta+K');
+		}
+		shortcut.style.display = '';
+	})();
+</script><script type="module" src="/gigai/0.1.10.9/_astro/Search.astro_astro_type_script_index_0_lang.C1GJV2Dj.js"></script></div><div class="sl-hidden md:sl-flex print:hidden right-group astro-by6fddyj"><div class="sl-flex social-icons astro-by6fddyj"><select id="docs-version" aria-label="Docs version" data-version="0.1.10.9" data-base="/gigai/0.1.10.9/" class="astro-sary6ept"><option value="0.1.10.9" selected class="astro-sary6ept">0.1.10.9</option></select><a href="https://github.com/karthik446/gigai" rel="me" class="sl-flex astro-n2mnl6yq"><span class="sr-only astro-n2mnl6yq">GitHub</span><svg aria-hidden="true" class="astro-n2mnl6yq astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M12 .3a12 12 0 0 0-3.8 23.38c.6.12.83-.26.83-.57L9 21.07c-3.34.72-4.04-1.61-4.04-1.61-.55-1.39-1.34-1.76-1.34-1.76-1.08-.74.09-.73.09-.73 1.2.09 1.83 1.24 1.83 1.24 1.08 1.83 2.81 1.3 3.5 1 .1-.78.42-1.31.76-1.61-2.67-.3-5.47-1.33-5.47-5.93 0-1.31.47-2.38 1.24-3.22-.14-.3-.54-1.52.1-3.18 0 0 1-.32 3.3 1.23a11.5 11.5 0 0 1 6 0c2.28-1.55 3.29-1.23 3.29-1.23.64 1.66.24 2.88.12 3.18a4.65 4.65 0 0 1 1.23 3.22c0 4.61-2.8 5.63-5.48 5.92.42.36.81 1.1.81 2.22l-.01 3.29c0 .31.2.69.82.57A12 12 0 0 0 12 .3Z"/></svg></a><script type="module">var e=document.getElementById(`docs-version`),t=e.dataset.version,n=e.dataset.base,r=n.replace(/[^/]+\/$/,``);fetch(r+`versions.json`).then(e=>e.ok?e.json():[]).then(n=>{if(!n.length)return;e.innerHTML=``;for(let r of n){let n=document.createElement(`option`);n.value=r.version,n.textContent=r.title+(r.aliases.length?` (${r.aliases.join(`, `)})`:``),n.selected=r.version===t,e.append(n)}let i=n.find(e=>e.aliases.includes(`latest`));if(i&&i.version!==t&&t!==`dev`&&t!==`next`){let e=document.createElement(`div`);e.className=`old-version-note`,e.innerHTML=`You are reading the docs for ${t}. <a href="${r}${i.version}/">Latest is ${i.version}.</a>`,document.querySelector(`.main-frame`)?.prepend(e)}}).catch(()=>{}),e.addEventListener(`change`,()=>{let t=location.pathname.startsWith(n)?location.pathname.slice(n.length):``;location.href=r+e.value+`/`+t});</script></div><starlight-theme-select><label style="--sl-select-width: 6.25em" class="astro-2z5xp7gb"><span class="sr-only astro-2z5xp7gb">Select theme</span><svg aria-hidden="true" class="icon label-icon astro-2z5xp7gb astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M21 14h-1V7a3 3 0 0 0-3-3H7a3 3 0 0 0-3 3v7H3a1 1 0 0 0-1 1v2a3 3 0 0 0 3 3h14a3 3 0 0 0 3-3v-2a1 1 0 0 0-1-1ZM6 7a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v7H6V7Zm14 10a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-1h16v1Z"/></svg><select autocomplete="off" class="astro-2z5xp7gb"><option value="dark" class="astro-2z5xp7gb">Dark</option><option value="light" class="astro-2z5xp7gb">Light</option><option value="auto" selected class="astro-2z5xp7gb">Auto</option></select><svg aria-hidden="true" class="icon caret astro-2z5xp7gb astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M17 9.17a1 1 0 0 0-1.41 0L12 12.71 8.46 9.17a1 1 0 1 0-1.41 1.42l4.24 4.24a1.002 1.002 0 0 0 1.42 0L17 10.59a1.002 1.002 0 0 0 0-1.42Z"/></svg></label></starlight-theme-select><script>
+	StarlightThemeProvider.updatePickers();
+</script><script type="module">var e=`starlight-theme`,t=e=>e===`auto`||e===`dark`||e===`light`?e:`auto`,n=()=>t(typeof localStorage<`u`&&localStorage.getItem(e));function r(t){typeof localStorage<`u`&&localStorage.setItem(e,t===`light`||t===`dark`?t:``)}var i=()=>matchMedia(`(prefers-color-scheme: light)`).matches?`light`:`dark`;function a(e){StarlightThemeProvider.updatePickers(e),document.documentElement.dataset.theme=e===`auto`?i():e,r(e)}matchMedia(`(prefers-color-scheme: light)`).addEventListener(`change`,()=>{n()===`auto`&&a(`auto`)});var o=class extends HTMLElement{constructor(){super(),a(n()),this.querySelector(`select`)?.addEventListener(`change`,e=>{e.currentTarget instanceof HTMLSelectElement&&a(t(e.currentTarget.value))})}};customElements.define(`starlight-theme-select`,o);</script><script type="module">var e=class extends HTMLElement{constructor(){super();let e=this.querySelector(`select`);e&&(e.addEventListener(`change`,e=>{e.currentTarget instanceof HTMLSelectElement&&(window.location.pathname=e.currentTarget.value)}),window.addEventListener(`pageshow`,t=>{if(!t.persisted)return;let n=e.querySelector(`option[selected]`)?.index;n!==e.selectedIndex&&(e.selectedIndex=n??0)}))}};customElements.define(`starlight-lang-select`,e);</script></div></div></header><nav class="sidebar print:hidden astro-yntsjkba" aria-label="Main"><button popovertarget="starlight__sidebar" class="sl-menu-button sl-flex md:sl-hidden print:hidden astro-r2osgdlg"><svg aria-hidden="true" class="open-menu astro-r2osgdlg astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M3 8h18a1 1 0 1 0 0-2H3a1 1 0 0 0 0 2Zm18 8H3a1 1 0 0 0 0 2h18a1 1 0 0 0 0-2Zm0-5H3a1 1 0 0 0 0 2h18a1 1 0 0 0 0-2Z"/></svg><svg aria-hidden="true" class="close-menu astro-r2osgdlg astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="m13.41 12 6.3-6.29a1.004 1.004 0 1 0-1.42-1.42L12 10.59l-6.29-6.3a1.004 1.004 0 0 0-1.42 1.42l6.3 6.29-6.3 6.29a1 1 0 0 0 0 1.42.998.998 0 0 0 1.42 0l6.29-6.3 6.29 6.3a.999.999 0 0 0 1.42 0 1 1 0 0 0 0-1.42L13.41 12Z"/></svg><span class="sr-only astro-r2osgdlg">Menu</span></button><script type="module">var e=class extends HTMLElement{constructor(){super();let e=matchMedia(`(min-width: 50em)`),t=()=>{this.popover=e.matches?null:`auto`};t(),e.addEventListener(`change`,()=>t()),this.addEventListener(`toggle`,({newState:e})=>this.trapFocus(e===`open`))}trapFocus(e){document.querySelectorAll(`.main-frame, .sl-skip-link`).forEach(t=>{t.toggleAttribute(`inert`,e)})}};customElements.define(`sl-sidebar-pane`,e);</script><sl-sidebar-pane popover id="starlight__sidebar" class="sidebar-pane astro-yntsjkba"><div class="sidebar-content sl-flex astro-yntsjkba"><sl-sidebar-state-persist data-hash="1jvr16o" class="astro-ipdry5cl"><script aria-hidden="true">
+		(() => {
+			try {
+				if (!matchMedia('(min-width: 50em)').matches) return;
+				/** @type {HTMLElement | null} */
+				const target = document.querySelector('sl-sidebar-state-persist');
+				const state = JSON.parse(sessionStorage.getItem('sl-sidebar-state') || '0');
+				if (!target || !state || target.dataset.hash !== state.hash) return;
+				window._starlightScrollRestore = state.scroll;
+				customElements.define(
+					'sl-sidebar-restore',
+					class SidebarRestore extends HTMLElement {
+						connectedCallback() {
+							try {
+								const idx = parseInt(this.dataset.index || '');
+								const details = this.closest('details');
+								if (details && typeof state.open[idx] === 'boolean') details.open = state.open[idx];
+							} catch {}
+						}
+					}
+				);
+			} catch {}
+		})();
+	</script><ul class="top-level astro-rmhv4bp6"><li class="astro-rmhv4bp6"><a href="/gigai/0.1.10.9/roadmap/" class="large astro-rmhv4bp6"><span class="astro-rmhv4bp6">Roadmap</span></a></li><li class="astro-rmhv4bp6"><details open class="astro-rmhv4bp6"><summary class="astro-rmhv4bp6"><span class="group-label astro-rmhv4bp6"><span class="large astro-rmhv4bp6">GigAI</span></span><svg aria-hidden="true" class="caret astro-rmhv4bp6 astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.25rem;"><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg></summary><sl-sidebar-restore data-index="0"></sl-sidebar-restore><ul class="astro-rmhv4bp6"><li class="astro-rmhv4bp6"><a href="/gigai/0.1.10.9/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">What GigAI provides</span></a></li><li class="astro-rmhv4bp6"><a href="/gigai/0.1.10.9/install/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Install</span></a></li><li class="astro-rmhv4bp6"><a href="/gigai/0.1.10.9/concepts/architecture/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Architecture</span></a></li><li class="astro-rmhv4bp6"><a href="/gigai/0.1.10.9/concepts/gigs/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Gigs and goal graphs</span></a></li><li class="astro-rmhv4bp6"><a href="/gigai/0.1.10.9/concepts/runs/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Runs and the journal</span></a></li><li class="astro-rmhv4bp6"><a href="/gigai/0.1.10.9/concepts/model-targets/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Model targets</span></a></li><li class="astro-rmhv4bp6"><a href="/gigai/0.1.10.9/concepts/review/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Review</span></a></li><li class="astro-rmhv4bp6"><a href="/gigai/0.1.10.9/agents/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">For agents</span></a></li><li class="astro-rmhv4bp6"><a href="/gigai/0.1.10.9/development/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Development</span></a></li><li class="astro-rmhv4bp6"><a href="/gigai/0.1.10.9/reference/cli/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">CLI reference</span></a></li></ul></details></li><li class="astro-rmhv4bp6"><details open class="astro-rmhv4bp6"><summary class="astro-rmhv4bp6"><span class="group-label astro-rmhv4bp6"><span class="large astro-rmhv4bp6">Scout</span><span class="sl-badge tip small  astro-rmhv4bp6 astro-f4zorn72">Gig</span></span><svg aria-hidden="true" class="caret astro-rmhv4bp6 astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.25rem;"><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg></summary><sl-sidebar-restore data-index="1"></sl-sidebar-restore><ul class="astro-rmhv4bp6"><li class="astro-rmhv4bp6"><a href="/gigai/0.1.10.9/scout/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Scout</span></a></li><li class="astro-rmhv4bp6"><a href="/gigai/0.1.10.9/scout/first-10-minutes/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Your first 10 minutes</span></a></li><li class="astro-rmhv4bp6"><a href="/gigai/0.1.10.9/scout/quickstart/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Quickstart</span></a></li><li class="astro-rmhv4bp6"><a href="/gigai/0.1.10.9/scout/privacy/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Privacy and security</span></a></li><li class="astro-rmhv4bp6"><a href="/gigai/0.1.10.9/scout/resume/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Resume and PDF</span></a></li><li class="astro-rmhv4bp6"><a href="/gigai/0.1.10.9/scout/numbers/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">What Scout&#39;s numbers and labels mean</span></a></li><li class="astro-rmhv4bp6"><a href="/gigai/0.1.10.9/scout/tokens/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Token usage</span></a></li><li class="astro-rmhv4bp6"><a href="/gigai/0.1.10.9/scout/sources/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Update sources</span></a></li><li class="astro-rmhv4bp6"><a href="/gigai/0.1.10.9/scout/configuration/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Configuration</span></a></li><li class="astro-rmhv4bp6"><a href="/gigai/0.1.10.9/scout/agents/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">For agents</span></a></li><li class="astro-rmhv4bp6"><a href="/gigai/0.1.10.9/scout/agents/start/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Start here</span></a></li><li class="astro-rmhv4bp6"><a href="/gigai/0.1.10.9/scout/limitations/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Known limitations</span></a></li><li class="astro-rmhv4bp6"><a href="/gigai/0.1.10.9/scout/roadmap/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Roadmap</span></a></li><li class="astro-rmhv4bp6"><a href="/gigai/0.1.10.9/scout/reference/cli/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Scout CLI reference</span></a></li><li class="astro-rmhv4bp6"><details class="astro-rmhv4bp6"><summary class="astro-rmhv4bp6"><span class="group-label astro-rmhv4bp6"><span class="large astro-rmhv4bp6">API reference</span></span><svg aria-hidden="true" class="caret astro-rmhv4bp6 astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.25rem;"><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg></summary><sl-sidebar-restore data-index="2"></sl-sidebar-restore><ul class="astro-rmhv4bp6"><li class="astro-rmhv4bp6"><a href="/gigai/0.1.10.9/scout/reference/api/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Overview</span></a></li><li class="astro-rmhv4bp6"><details class="astro-rmhv4bp6"><summary class="astro-rmhv4bp6"><span class="group-label astro-rmhv4bp6"><span class="large astro-rmhv4bp6">Agents and meta</span></span><svg aria-hidden="true" class="caret astro-rmhv4bp6 astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.25rem;"><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg></summary><sl-sidebar-restore data-index="3"></sl-sidebar-restore><ul class="astro-rmhv4bp6"><li class="astro-rmhv4bp6"><a href="/gigai/0.1.10.9/scout/reference/api/operations/get_api/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">List every route</span></a></li><li class="astro-rmhv4bp6"><a href="/gigai/0.1.10.9/scout/reference/api/operations/get_api_health/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Check the server is alive</span></a></li><li class="astro-rmhv4bp6"><a href="/gigai/0.1.10.9/scout/reference/api/operations/get_api_openapi_json/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Get the OpenAPI document</span></a></li><li class="astro-rmhv4bp6"><a href="/gigai/0.1.10.9/scout/reference/api/operations/get_llms_txt/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Get the agent guide</span></a></li></ul></details></li><li class="astro-rmhv4bp6"><details class="astro-rmhv4bp6"><summary class="astro-rmhv4bp6"><span class="group-label astro-rmhv4bp6"><span class="large astro-rmhv4bp6">Runs</span></span><svg aria-hidden="true" class="caret astro-rmhv4bp6 astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.25rem;"><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg></summary><sl-sidebar-restore data-index="4"></sl-sidebar-restore><ul class="astro-rmhv4bp6"><li class="astro-rmhv4bp6"><a href="/gigai/0.1.10.9/scout/reference/api/operations/post_api_run/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Start a find-jobs run (deprecated)</span></a></li><li class="astro-rmhv4bp6"><a href="/gigai/0.1.10.9/scout/reference/api/operations/get_api_runs/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">List runs</span></a></li><li class="astro-rmhv4bp6"><a href="/gigai/0.1.10.9/scout/reference/api/operations/post_api_runs_import/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Import what old runs assessed</span></a></li><li class="astro-rmhv4bp6"><a href="/gigai/0.1.10.9/scout/reference/api/operations/get_api_runs_run_id/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Get one run&#39;s status</span></a></li><li class="astro-rmhv4bp6"><a href="/gigai/0.1.10.9/scout/reference/api/operations/post_api_runs_run_id_assess_all/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Assess every posting of a run</span></a></li><li class="astro-rmhv4bp6"><a href="/gigai/0.1.10.9/scout/reference/api/operations/post_api_runs_run_id_posted_window/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Find older postings for a run</span></a></li><li class="astro-rmhv4bp6"><a href="/gigai/0.1.10.9/scout/reference/api/operations/get_api_runs_run_id_posting/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Get one posting of a run</span></a></li><li class="astro-rmhv4bp6"><a href="/gigai/0.1.10.9/scout/reference/api/operations/get_api_runs_run_id_progress/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Get a run&#39;s live progress</span></a></li><li class="astro-rmhv4bp6"><a href="/gigai/0.1.10.9/scout/reference/api/operations/post_api_runs_run_id_rank/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Rank a run&#39;s postings</span></a></li><li class="astro-rmhv4bp6"><a href="/gigai/0.1.10.9/scout/reference/api/operations/get_api_runs_run_id_results/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">List a run&#39;s results</span></a></li></ul></details></li><li class="astro-rmhv4bp6"><details class="astro-rmhv4bp6"><summary class="astro-rmhv4bp6"><span class="group-label astro-rmhv4bp6"><span class="large astro-rmhv4bp6">Jobs</span></span><svg aria-hidden="true" class="caret astro-rmhv4bp6 astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.25rem;"><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg></summary><sl-sidebar-restore data-index="5"></sl-sidebar-restore><ul class="astro-rmhv4bp6"><li class="astro-rmhv4bp6"><a href="/gigai/0.1.10.9/scout/reference/api/operations/get_api_applications/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">List application events</span></a></li><li class="astro-rmhv4bp6"><a href="/gigai/0.1.10.9/scout/reference/api/operations/post_api_applications/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Record an application event</span></a></li><li class="astro-rmhv4bp6"><a href="/gigai/0.1.10.9/scout/reference/api/operations/get_api_jobs/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Get everything known about one job</span></a></li><li class="astro-rmhv4bp6"><a href="/gigai/0.1.10.9/scout/reference/api/operations/get_api_new/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Get what is new since the last check</span></a></li><li class="astro-rmhv4bp6"><a href="/gigai/0.1.10.9/scout/reference/api/operations/post_api_new/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Assess the new postings, or show them ranked only</span></a></li><li class="astro-rmhv4bp6"><a href="/gigai/0.1.10.9/scout/reference/api/operations/post_api_new_seen/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Mark all postings seen</span></a></li><li class="astro-rmhv4bp6"><a href="/gigai/0.1.10.9/scout/reference/api/operations/get_api_new_yours/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Get your own evidence of what matches</span></a></li><li class="astro-rmhv4bp6"><a href="/gigai/0.1.10.9/scout/reference/api/operations/get_api_pipeline/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Get what the background pipeline is doing</span></a></li><li class="astro-rmhv4bp6"><a href="/gigai/0.1.10.9/scout/reference/api/operations/get_api_pipeline_approvals/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">List the pipeline approvals</span></a></li><li class="astro-rmhv4bp6"><a href="/gigai/0.1.10.9/scout/reference/api/operations/post_api_pipeline_approvals_approval_id/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Approve or deny a pipeline approval</span></a></li><li class="astro-rmhv4bp6"><a href="/gigai/0.1.10.9/scout/reference/api/operations/get_api_pipeline_job/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Get one job&#39;s pipeline steps, ATS breakdown and Scout label</span></a></li><li class="astro-rmhv4bp6"><a href="/gigai/0.1.10.9/scout/reference/api/operations/post_api_pipeline_process/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Process one job now</span></a></li><li class="astro-rmhv4bp6"><a href="/gigai/0.1.10.9/scout/reference/api/operations/get_api_postings/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Search the stored postings</span></a></li><li class="astro-rmhv4bp6"><a href="/gigai/0.1.10.9/scout/reference/api/operations/post_api_postings_assess/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Assess these postings, on approval</span></a></li><li class="astro-rmhv4bp6"><a href="/gigai/0.1.10.9/scout/reference/api/operations/get_api_postings_status/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Get how the stored postings are being prepared</span></a></li></ul></details></li><li class="astro-rmhv4bp6"><details class="astro-rmhv4bp6"><summary class="astro-rmhv4bp6"><span class="group-label astro-rmhv4bp6"><span class="large astro-rmhv4bp6">Assessment</span></span><svg aria-hidden="true" class="caret astro-rmhv4bp6 astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.25rem;"><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg></summary><sl-sidebar-restore data-index="6"></sl-sidebar-restore><ul class="astro-rmhv4bp6"><li class="astro-rmhv4bp6"><a href="/gigai/0.1.10.9/scout/reference/api/operations/post_api_assess/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Assess one job against a resume</span></a></li><li class="astro-rmhv4bp6"><a href="/gigai/0.1.10.9/scout/reference/api/operations/get_api_assessments/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">List stored assessments</span></a></li></ul></details></li><li class="astro-rmhv4bp6"><details class="astro-rmhv4bp6"><summary class="astro-rmhv4bp6"><span class="group-label astro-rmhv4bp6"><span class="large astro-rmhv4bp6">Answers and stories</span></span><svg aria-hidden="true" class="caret astro-rmhv4bp6 astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.25rem;"><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg></summary><sl-sidebar-restore data-index="7"></sl-sidebar-restore><ul class="astro-rmhv4bp6"><li class="astro-rmhv4bp6"><a href="/gigai/0.1.10.9/scout/reference/api/operations/get_api_answers/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">List answers</span></a></li><li class="astro-rmhv4bp6"><a href="/gigai/0.1.10.9/scout/reference/api/operations/post_api_answers/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Save an answer</span></a></li><li class="astro-rmhv4bp6"><a href="/gigai/0.1.10.9/scout/reference/api/operations/get_api_answers_match/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Find an answer for a question</span></a></li><li class="astro-rmhv4bp6"><a href="/gigai/0.1.10.9/scout/reference/api/operations/get_api_answers_question_id/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Get one answer</span></a></li><li class="astro-rmhv4bp6"><a href="/gigai/0.1.10.9/scout/reference/api/operations/put_api_answers_question_id/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Edit an answer</span></a></li><li class="astro-rmhv4bp6"><a href="/gigai/0.1.10.9/scout/reference/api/operations/delete_api_answers_question_id/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Delete an answer</span></a></li><li class="astro-rmhv4bp6"><a href="/gigai/0.1.10.9/scout/reference/api/operations/get_api_stories/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">List stories</span></a></li><li class="astro-rmhv4bp6"><a href="/gigai/0.1.10.9/scout/reference/api/operations/post_api_stories/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Add a story</span></a></li><li class="astro-rmhv4bp6"><a href="/gigai/0.1.10.9/scout/reference/api/operations/get_api_stories_prep/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">List the interview questions the stories answer</span></a></li><li class="astro-rmhv4bp6"><a href="/gigai/0.1.10.9/scout/reference/api/operations/get_api_stories_story_id/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Get one story</span></a></li><li class="astro-rmhv4bp6"><a href="/gigai/0.1.10.9/scout/reference/api/operations/put_api_stories_story_id/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Edit a story</span></a></li><li class="astro-rmhv4bp6"><a href="/gigai/0.1.10.9/scout/reference/api/operations/delete_api_stories_story_id/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Delete a story</span></a></li></ul></details></li><li class="astro-rmhv4bp6"><details class="astro-rmhv4bp6"><summary class="astro-rmhv4bp6"><span class="group-label astro-rmhv4bp6"><span class="large astro-rmhv4bp6">Tailored resumes</span></span><svg aria-hidden="true" class="caret astro-rmhv4bp6 astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.25rem;"><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg></summary><sl-sidebar-restore data-index="8"></sl-sidebar-restore><ul class="astro-rmhv4bp6"><li class="astro-rmhv4bp6"><a href="/gigai/0.1.10.9/scout/reference/api/operations/get_api_resume_display/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Get the PDF layout settings</span></a></li><li class="astro-rmhv4bp6"><a href="/gigai/0.1.10.9/scout/reference/api/operations/put_api_resume_display/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Save the PDF layout settings</span></a></li><li class="astro-rmhv4bp6"><a href="/gigai/0.1.10.9/scout/reference/api/operations/post_api_resume_pdf/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Render resume markdown as a PDF</span></a></li><li class="astro-rmhv4bp6"><a href="/gigai/0.1.10.9/scout/reference/api/operations/get_api_resumes_folder/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Get the resumes folder</span></a></li><li class="astro-rmhv4bp6"><a href="/gigai/0.1.10.9/scout/reference/api/operations/put_api_resumes_folder/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Choose the resumes folder</span></a></li><li class="astro-rmhv4bp6"><a href="/gigai/0.1.10.9/scout/reference/api/operations/get_api_tailored_resumes/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">List tailored resumes</span></a></li><li class="astro-rmhv4bp6"><a href="/gigai/0.1.10.9/scout/reference/api/operations/put_api_tailored_resumes/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Store an edited resume as a job&#39;s tailored resume</span></a></li><li class="astro-rmhv4bp6"><a href="/gigai/0.1.10.9/scout/reference/api/operations/post_api_tailored_resumes/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Tailor the resume to one posting</span></a></li><li class="astro-rmhv4bp6"><a href="/gigai/0.1.10.9/scout/reference/api/operations/put_api_tailored_resumes_length/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Put back what was cut for length, or cut again</span></a></li><li class="astro-rmhv4bp6"><a href="/gigai/0.1.10.9/scout/reference/api/operations/put_api_tailored_resumes_lines/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Keep the original or the rewrite of one line, or edit it</span></a></li><li class="astro-rmhv4bp6"><a href="/gigai/0.1.10.9/scout/reference/api/operations/post_api_tailored_resumes_pdf/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Render a tailored resume as a PDF</span></a></li><li class="astro-rmhv4bp6"><a href="/gigai/0.1.10.9/scout/reference/api/operations/put_api_tailored_resumes_selection/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Add or remove a master line on a job&#39;s tailored resume</span></a></li></ul></details></li><li class="astro-rmhv4bp6"><details class="astro-rmhv4bp6"><summary class="astro-rmhv4bp6"><span class="group-label astro-rmhv4bp6"><span class="large astro-rmhv4bp6">Profiles and resume</span></span><svg aria-hidden="true" class="caret astro-rmhv4bp6 astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.25rem;"><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg></summary><sl-sidebar-restore data-index="9"></sl-sidebar-restore><ul class="astro-rmhv4bp6"><li class="astro-rmhv4bp6"><a href="/gigai/0.1.10.9/scout/reference/api/operations/get_api_master/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Get the master resume</span></a></li><li class="astro-rmhv4bp6"><a href="/gigai/0.1.10.9/scout/reference/api/operations/put_api_master_entries/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Edit, retire or restore an entry of the master</span></a></li><li class="astro-rmhv4bp6"><a href="/gigai/0.1.10.9/scout/reference/api/operations/post_api_master_entries/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Add a role, project or school to the master</span></a></li><li class="astro-rmhv4bp6"><a href="/gigai/0.1.10.9/scout/reference/api/operations/get_api_master_history/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">List the master&#39;s revisions and retired lines</span></a></li><li class="astro-rmhv4bp6"><a href="/gigai/0.1.10.9/scout/reference/api/operations/put_api_master_lines/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Edit, retire or restore a line of the master</span></a></li><li class="astro-rmhv4bp6"><a href="/gigai/0.1.10.9/scout/reference/api/operations/post_api_master_lines/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Add a line to the master</span></a></li><li class="astro-rmhv4bp6"><a href="/gigai/0.1.10.9/scout/reference/api/operations/get_api_master_migration/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Preview building the master from the profiles&#39; resumes</span></a></li><li class="astro-rmhv4bp6"><a href="/gigai/0.1.10.9/scout/reference/api/operations/post_api_master_migration/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Build the master from the profiles&#39; resumes</span></a></li><li class="astro-rmhv4bp6"><a href="/gigai/0.1.10.9/scout/reference/api/operations/get_api_master_selection/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Get each profile&#39;s selection of the master</span></a></li><li class="astro-rmhv4bp6"><a href="/gigai/0.1.10.9/scout/reference/api/operations/post_api_master_selection/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Refresh a profile&#39;s selection of the master</span></a></li><li class="astro-rmhv4bp6"><a href="/gigai/0.1.10.9/scout/reference/api/operations/post_api_master_sync/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Import master.md from the resumes folder</span></a></li><li class="astro-rmhv4bp6"><a href="/gigai/0.1.10.9/scout/reference/api/operations/get_api_privacy_cleanup/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Get the contact cleanup report</span></a></li><li class="astro-rmhv4bp6"><a href="/gigai/0.1.10.9/scout/reference/api/operations/put_api_privacy_cleanup/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Mark the contact cleanup report shown</span></a></li><li class="astro-rmhv4bp6"><a href="/gigai/0.1.10.9/scout/reference/api/operations/get_api_profiles/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">List profiles</span></a></li><li class="astro-rmhv4bp6"><a href="/gigai/0.1.10.9/scout/reference/api/operations/post_api_profiles/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Create a profile</span></a></li><li class="astro-rmhv4bp6"><a href="/gigai/0.1.10.9/scout/reference/api/operations/post_api_profiles_selection/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Select the active profile</span></a></li><li class="astro-rmhv4bp6"><a href="/gigai/0.1.10.9/scout/reference/api/operations/put_api_profiles_profile_id/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Update a profile</span></a></li><li class="astro-rmhv4bp6"><a href="/gigai/0.1.10.9/scout/reference/api/operations/delete_api_profiles_profile_id/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Delete a profile</span></a></li><li class="astro-rmhv4bp6"><a href="/gigai/0.1.10.9/scout/reference/api/operations/post_api_profiles_profile_id_archive/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Archive a profile</span></a></li><li class="astro-rmhv4bp6"><a href="/gigai/0.1.10.9/scout/reference/api/operations/post_api_resume_check/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Check resume text for personal data</span></a></li><li class="astro-rmhv4bp6"><a href="/gigai/0.1.10.9/scout/reference/api/operations/post_api_resume_extract/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Extract search preferences from a resume</span></a></li><li class="astro-rmhv4bp6"><a href="/gigai/0.1.10.9/scout/reference/api/operations/post_api_resumes/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Store a resume</span></a></li></ul></details></li><li class="astro-rmhv4bp6"><details class="astro-rmhv4bp6"><summary class="astro-rmhv4bp6"><span class="group-label astro-rmhv4bp6"><span class="large astro-rmhv4bp6">Sources</span></span><svg aria-hidden="true" class="caret astro-rmhv4bp6 astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.25rem;"><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg></summary><sl-sidebar-restore data-index="10"></sl-sidebar-restore><ul class="astro-rmhv4bp6"><li class="astro-rmhv4bp6"><a href="/gigai/0.1.10.9/scout/reference/api/operations/put_api_config_sources/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Turn the Exa source on or off</span></a></li><li class="astro-rmhv4bp6"><a href="/gigai/0.1.10.9/scout/reference/api/operations/post_api_discover/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Start a company-discovery pass</span></a></li><li class="astro-rmhv4bp6"><a href="/gigai/0.1.10.9/scout/reference/api/operations/get_api_discover_latest/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Get the latest discovery pass</span></a></li><li class="astro-rmhv4bp6"><a href="/gigai/0.1.10.9/scout/reference/api/operations/get_api_sources_update/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Get the board refresh status</span></a></li><li class="astro-rmhv4bp6"><a href="/gigai/0.1.10.9/scout/reference/api/operations/post_api_sources_update/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Refresh the board catalog</span></a></li><li class="astro-rmhv4bp6"><a href="/gigai/0.1.10.9/scout/reference/api/operations/get_api_watchlist/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">List watched company boards</span></a></li><li class="astro-rmhv4bp6"><a href="/gigai/0.1.10.9/scout/reference/api/operations/post_api_watchlist/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Watch a company board</span></a></li></ul></details></li><li class="astro-rmhv4bp6"><details class="astro-rmhv4bp6"><summary class="astro-rmhv4bp6"><span class="group-label astro-rmhv4bp6"><span class="large astro-rmhv4bp6">Settings</span></span><svg aria-hidden="true" class="caret astro-rmhv4bp6 astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.25rem;"><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg></summary><sl-sidebar-restore data-index="11"></sl-sidebar-restore><ul class="astro-rmhv4bp6"><li class="astro-rmhv4bp6"><a href="/gigai/0.1.10.9/scout/reference/api/operations/get_api_config/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Get the find-jobs config</span></a></li><li class="astro-rmhv4bp6"><a href="/gigai/0.1.10.9/scout/reference/api/operations/get_api_metrics/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Get the model call averages</span></a></li><li class="astro-rmhv4bp6"><a href="/gigai/0.1.10.9/scout/reference/api/operations/get_api_secrets_status/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Show which provider keys are set</span></a></li><li class="astro-rmhv4bp6"><a href="/gigai/0.1.10.9/scout/reference/api/operations/get_api_settings_background/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Get the background settings</span></a></li><li class="astro-rmhv4bp6"><a href="/gigai/0.1.10.9/scout/reference/api/operations/put_api_settings_background/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Change the background settings</span></a></li><li class="astro-rmhv4bp6"><a href="/gigai/0.1.10.9/scout/reference/api/operations/get_api_setup/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Get the saved preferences</span></a></li><li class="astro-rmhv4bp6"><a href="/gigai/0.1.10.9/scout/reference/api/operations/put_api_setup/" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Save preferences and derive the config</span></a></li></ul></details></li></ul></details></li></ul></details></li><li class="astro-rmhv4bp6"><details open class="astro-rmhv4bp6"><summary class="astro-rmhv4bp6"><span class="group-label astro-rmhv4bp6"><span class="large astro-rmhv4bp6">Project</span></span><svg aria-hidden="true" class="caret astro-rmhv4bp6 astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.25rem;"><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg></summary><sl-sidebar-restore data-index="12"></sl-sidebar-restore><ul class="astro-rmhv4bp6"><li class="astro-rmhv4bp6"><a href="/gigai/0.1.10.9/changelog/" aria-current="page" class="astro-rmhv4bp6"><span class="astro-rmhv4bp6">Changelog</span></a></li></ul></details></li></ul><script aria-hidden="true">
+		(() => {
+			const scroller = document.getElementById('starlight__sidebar');
+			if (!window._starlightScrollRestore || !scroller) return;
+			scroller.scrollTop = window._starlightScrollRestore;
+			delete window._starlightScrollRestore;
+		})();
+	</script></sl-sidebar-state-persist><div class="md:sl-hidden"><div class="mobile-preferences sl-flex astro-p4azlveh"><div class="social-icons astro-p4azlveh"><select id="docs-version" aria-label="Docs version" data-version="0.1.10.9" data-base="/gigai/0.1.10.9/" class="astro-sary6ept"><option value="0.1.10.9" selected class="astro-sary6ept">0.1.10.9</option></select><a href="https://github.com/karthik446/gigai" rel="me" class="sl-flex astro-n2mnl6yq"><span class="sr-only astro-n2mnl6yq">GitHub</span><svg aria-hidden="true" class="astro-n2mnl6yq astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M12 .3a12 12 0 0 0-3.8 23.38c.6.12.83-.26.83-.57L9 21.07c-3.34.72-4.04-1.61-4.04-1.61-.55-1.39-1.34-1.76-1.34-1.76-1.08-.74.09-.73.09-.73 1.2.09 1.83 1.24 1.83 1.24 1.08 1.83 2.81 1.3 3.5 1 .1-.78.42-1.31.76-1.61-2.67-.3-5.47-1.33-5.47-5.93 0-1.31.47-2.38 1.24-3.22-.14-.3-.54-1.52.1-3.18 0 0 1-.32 3.3 1.23a11.5 11.5 0 0 1 6 0c2.28-1.55 3.29-1.23 3.29-1.23.64 1.66.24 2.88.12 3.18a4.65 4.65 0 0 1 1.23 3.22c0 4.61-2.8 5.63-5.48 5.92.42.36.81 1.1.81 2.22l-.01 3.29c0 .31.2.69.82.57A12 12 0 0 0 12 .3Z"/></svg></a></div><starlight-theme-select><label style="--sl-select-width: 6.25em" class="astro-2z5xp7gb"><span class="sr-only astro-2z5xp7gb">Select theme</span><svg aria-hidden="true" class="icon label-icon astro-2z5xp7gb astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M21 14h-1V7a3 3 0 0 0-3-3H7a3 3 0 0 0-3 3v7H3a1 1 0 0 0-1 1v2a3 3 0 0 0 3 3h14a3 3 0 0 0 3-3v-2a1 1 0 0 0-1-1ZM6 7a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v7H6V7Zm14 10a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-1h16v1Z"/></svg><select autocomplete="off" class="astro-2z5xp7gb"><option value="dark" class="astro-2z5xp7gb">Dark</option><option value="light" class="astro-2z5xp7gb">Light</option><option value="auto" selected class="astro-2z5xp7gb">Auto</option></select><svg aria-hidden="true" class="icon caret astro-2z5xp7gb astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M17 9.17a1 1 0 0 0-1.41 0L12 12.71 8.46 9.17a1 1 0 1 0-1.41 1.42l4.24 4.24a1.002 1.002 0 0 0 1.42 0L17 10.59a1.002 1.002 0 0 0 0-1.42Z"/></svg></label></starlight-theme-select><script>
+	StarlightThemeProvider.updatePickers();
+</script></div></div></div></sl-sidebar-pane></nav><div class="main-frame astro-yntsjkba"><script type="module">var e=document.getElementById(`starlight__sidebar`),t=e?.querySelector(`sl-sidebar-state-persist`),n=`sl-sidebar-state`,r=()=>{let r=[],i=t?.dataset.hash||``;try{let e=sessionStorage.getItem(n),t=JSON.parse(e||`{}`);Array.isArray(t.open)&&t.hash===i&&(r=t.open)}catch{}return{hash:i,open:r,scroll:e?.scrollTop||0}},i=e=>{try{sessionStorage.setItem(n,JSON.stringify(e))}catch{}},a=()=>i(r()),o=(e,t)=>{let n=r();n.open[t]=e,i(n)};t?.addEventListener(`click`,e=>{if(!(e.target instanceof Element))return;let t=e.target.closest(`summary`)?.closest(`details`);if(!t)return;let n=t.querySelector(`sl-sidebar-restore`),r=parseInt(n?.dataset.index||``);isNaN(r)||o(!t.open,r)}),addEventListener(`visibilitychange`,()=>{document.visibilityState===`hidden`&&a()});</script><div class="lg:sl-flex astro-lrzkfocr"><aside class="right-sidebar-container print:hidden astro-lrzkfocr"><div class="right-sidebar astro-lrzkfocr"><div class="lg:sl-hidden astro-qok35upx"><mobile-starlight-toc data-min-h="2" data-max-h="3" class="astro-66cqc7ze"><nav aria-labelledby="starlight__on-this-page--mobile" class="astro-66cqc7ze"><details id="starlight__mobile-toc" class="astro-66cqc7ze"><summary id="starlight__on-this-page--mobile" class="sl-flex astro-66cqc7ze"><span class="toggle sl-flex astro-66cqc7ze">On this page<svg aria-hidden="true" class="caret astro-66cqc7ze astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1rem;"><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg></span><span class="display-current astro-66cqc7ze"></span></summary><div class="dropdown astro-66cqc7ze"><ul class="isMobile astro-jugkfwgx" style="--depth: 0;"><li style="--depth: 0;" class="astro-jugkfwgx"><a href="#_top" style="--depth: 0;" class="astro-jugkfwgx"><span style="--depth: 0;" class="astro-jugkfwgx">Overview</span></a></li><li style="--depth: 0;" class="astro-jugkfwgx"><a href="#unreleased-capability-milestones" style="--depth: 0;" class="astro-jugkfwgx"><span style="--depth: 0;" class="astro-jugkfwgx">Unreleased capability milestones</span></a><ul class="isMobile astro-jugkfwgx" style="--depth: 1;"><li style="--depth: 1;" class="astro-jugkfwgx"><a href="#added" style="--depth: 1;" class="astro-jugkfwgx"><span style="--depth: 1;" class="astro-jugkfwgx">Added</span></a></li></ul></li><li style="--depth: 0;" class="astro-jugkfwgx"><a href="#released-versions" style="--depth: 0;" class="astro-jugkfwgx"><span style="--depth: 0;" class="astro-jugkfwgx">Released versions</span></a><ul class="isMobile astro-jugkfwgx" style="--depth: 1;"><li style="--depth: 1;" class="astro-jugkfwgx"><a href="#01109" style="--depth: 1;" class="astro-jugkfwgx"><span style="--depth: 1;" class="astro-jugkfwgx">0.1.10.9</span></a></li><li style="--depth: 1;" class="astro-jugkfwgx"><a href="#01108" style="--depth: 1;" class="astro-jugkfwgx"><span style="--depth: 1;" class="astro-jugkfwgx">0.1.10.8</span></a></li><li style="--depth: 1;" class="astro-jugkfwgx"><a href="#01107" style="--depth: 1;" class="astro-jugkfwgx"><span style="--depth: 1;" class="astro-jugkfwgx">0.1.10.7</span></a></li><li style="--depth: 1;" class="astro-jugkfwgx"><a href="#01106" style="--depth: 1;" class="astro-jugkfwgx"><span style="--depth: 1;" class="astro-jugkfwgx">0.1.10.6</span></a></li><li style="--depth: 1;" class="astro-jugkfwgx"><a href="#01105" style="--depth: 1;" class="astro-jugkfwgx"><span style="--depth: 1;" class="astro-jugkfwgx">0.1.10.5</span></a></li><li style="--depth: 1;" class="astro-jugkfwgx"><a href="#01104" style="--depth: 1;" class="astro-jugkfwgx"><span style="--depth: 1;" class="astro-jugkfwgx">0.1.10.4</span></a></li><li style="--depth: 1;" class="astro-jugkfwgx"><a href="#01103" style="--depth: 1;" class="astro-jugkfwgx"><span style="--depth: 1;" class="astro-jugkfwgx">0.1.10.3</span></a></li><li style="--depth: 1;" class="astro-jugkfwgx"><a href="#01102" style="--depth: 1;" class="astro-jugkfwgx"><span style="--depth: 1;" class="astro-jugkfwgx">0.1.10.2</span></a></li><li style="--depth: 1;" class="astro-jugkfwgx"><a href="#01101" style="--depth: 1;" class="astro-jugkfwgx"><span style="--depth: 1;" class="astro-jugkfwgx">0.1.10.1</span></a></li><li style="--depth: 1;" class="astro-jugkfwgx"><a href="#0110" style="--depth: 1;" class="astro-jugkfwgx"><span style="--depth: 1;" class="astro-jugkfwgx">0.1.10</span></a></li><li style="--depth: 1;" class="astro-jugkfwgx"><a href="#0191" style="--depth: 1;" class="astro-jugkfwgx"><span style="--depth: 1;" class="astro-jugkfwgx">0.1.9.1</span></a></li><li style="--depth: 1;" class="astro-jugkfwgx"><a href="#019" style="--depth: 1;" class="astro-jugkfwgx"><span style="--depth: 1;" class="astro-jugkfwgx">0.1.9</span></a></li><li style="--depth: 1;" class="astro-jugkfwgx"><a href="#0181" style="--depth: 1;" class="astro-jugkfwgx"><span style="--depth: 1;" class="astro-jugkfwgx">0.1.8.1</span></a></li><li style="--depth: 1;" class="astro-jugkfwgx"><a href="#018" style="--depth: 1;" class="astro-jugkfwgx"><span style="--depth: 1;" class="astro-jugkfwgx">0.1.8</span></a></li><li style="--depth: 1;" class="astro-jugkfwgx"><a href="#017" style="--depth: 1;" class="astro-jugkfwgx"><span style="--depth: 1;" class="astro-jugkfwgx">0.1.7</span></a></li><li style="--depth: 1;" class="astro-jugkfwgx"><a href="#015" style="--depth: 1;" class="astro-jugkfwgx"><span style="--depth: 1;" class="astro-jugkfwgx">0.1.5</span></a></li><li style="--depth: 1;" class="astro-jugkfwgx"><a href="#014" style="--depth: 1;" class="astro-jugkfwgx"><span style="--depth: 1;" class="astro-jugkfwgx">0.1.4</span></a></li><li style="--depth: 1;" class="astro-jugkfwgx"><a href="#013" style="--depth: 1;" class="astro-jugkfwgx"><span style="--depth: 1;" class="astro-jugkfwgx">0.1.3</span></a></li></ul></li><li style="--depth: 0;" class="astro-jugkfwgx"><a href="#deferred-and-not-advertised" style="--depth: 0;" class="astro-jugkfwgx"><span style="--depth: 0;" class="astro-jugkfwgx">Deferred and not advertised</span></a></li></ul></div></details></nav></mobile-starlight-toc><script type="module" src="/gigai/0.1.10.9/_astro/MobileTableOfContents.astro_astro_type_script_index_0_lang.C3fM4Kra.js"></script></div><div class="right-sidebar-panel sl-hidden lg:sl-block astro-qok35upx"><div class="sl-container astro-qok35upx"><starlight-toc data-min-h="2" data-max-h="3"><nav aria-labelledby="starlight__on-this-page"><h2 id="starlight__on-this-page">On this page</h2><ul class="astro-jugkfwgx" style="--depth: 0;"><li style="--depth: 0;" class="astro-jugkfwgx"><a href="#_top" style="--depth: 0;" class="astro-jugkfwgx"><span style="--depth: 0;" class="astro-jugkfwgx">Overview</span></a></li><li style="--depth: 0;" class="astro-jugkfwgx"><a href="#unreleased-capability-milestones" style="--depth: 0;" class="astro-jugkfwgx"><span style="--depth: 0;" class="astro-jugkfwgx">Unreleased capability milestones</span></a><ul class="astro-jugkfwgx" style="--depth: 1;"><li style="--depth: 1;" class="astro-jugkfwgx"><a href="#added" style="--depth: 1;" class="astro-jugkfwgx"><span style="--depth: 1;" class="astro-jugkfwgx">Added</span></a></li></ul></li><li style="--depth: 0;" class="astro-jugkfwgx"><a href="#released-versions" style="--depth: 0;" class="astro-jugkfwgx"><span style="--depth: 0;" class="astro-jugkfwgx">Released versions</span></a><ul class="astro-jugkfwgx" style="--depth: 1;"><li style="--depth: 1;" class="astro-jugkfwgx"><a href="#01109" style="--depth: 1;" class="astro-jugkfwgx"><span style="--depth: 1;" class="astro-jugkfwgx">0.1.10.9</span></a></li><li style="--depth: 1;" class="astro-jugkfwgx"><a href="#01108" style="--depth: 1;" class="astro-jugkfwgx"><span style="--depth: 1;" class="astro-jugkfwgx">0.1.10.8</span></a></li><li style="--depth: 1;" class="astro-jugkfwgx"><a href="#01107" style="--depth: 1;" class="astro-jugkfwgx"><span style="--depth: 1;" class="astro-jugkfwgx">0.1.10.7</span></a></li><li style="--depth: 1;" class="astro-jugkfwgx"><a href="#01106" style="--depth: 1;" class="astro-jugkfwgx"><span style="--depth: 1;" class="astro-jugkfwgx">0.1.10.6</span></a></li><li style="--depth: 1;" class="astro-jugkfwgx"><a href="#01105" style="--depth: 1;" class="astro-jugkfwgx"><span style="--depth: 1;" class="astro-jugkfwgx">0.1.10.5</span></a></li><li style="--depth: 1;" class="astro-jugkfwgx"><a href="#01104" style="--depth: 1;" class="astro-jugkfwgx"><span style="--depth: 1;" class="astro-jugkfwgx">0.1.10.4</span></a></li><li style="--depth: 1;" class="astro-jugkfwgx"><a href="#01103" style="--depth: 1;" class="astro-jugkfwgx"><span style="--depth: 1;" class="astro-jugkfwgx">0.1.10.3</span></a></li><li style="--depth: 1;" class="astro-jugkfwgx"><a href="#01102" style="--depth: 1;" class="astro-jugkfwgx"><span style="--depth: 1;" class="astro-jugkfwgx">0.1.10.2</span></a></li><li style="--depth: 1;" class="astro-jugkfwgx"><a href="#01101" style="--depth: 1;" class="astro-jugkfwgx"><span style="--depth: 1;" class="astro-jugkfwgx">0.1.10.1</span></a></li><li style="--depth: 1;" class="astro-jugkfwgx"><a href="#0110" style="--depth: 1;" class="astro-jugkfwgx"><span style="--depth: 1;" class="astro-jugkfwgx">0.1.10</span></a></li><li style="--depth: 1;" class="astro-jugkfwgx"><a href="#0191" style="--depth: 1;" class="astro-jugkfwgx"><span style="--depth: 1;" class="astro-jugkfwgx">0.1.9.1</span></a></li><li style="--depth: 1;" class="astro-jugkfwgx"><a href="#019" style="--depth: 1;" class="astro-jugkfwgx"><span style="--depth: 1;" class="astro-jugkfwgx">0.1.9</span></a></li><li style="--depth: 1;" class="astro-jugkfwgx"><a href="#0181" style="--depth: 1;" class="astro-jugkfwgx"><span style="--depth: 1;" class="astro-jugkfwgx">0.1.8.1</span></a></li><li style="--depth: 1;" class="astro-jugkfwgx"><a href="#018" style="--depth: 1;" class="astro-jugkfwgx"><span style="--depth: 1;" class="astro-jugkfwgx">0.1.8</span></a></li><li style="--depth: 1;" class="astro-jugkfwgx"><a href="#017" style="--depth: 1;" class="astro-jugkfwgx"><span style="--depth: 1;" class="astro-jugkfwgx">0.1.7</span></a></li><li style="--depth: 1;" class="astro-jugkfwgx"><a href="#015" style="--depth: 1;" class="astro-jugkfwgx"><span style="--depth: 1;" class="astro-jugkfwgx">0.1.5</span></a></li><li style="--depth: 1;" class="astro-jugkfwgx"><a href="#014" style="--depth: 1;" class="astro-jugkfwgx"><span style="--depth: 1;" class="astro-jugkfwgx">0.1.4</span></a></li><li style="--depth: 1;" class="astro-jugkfwgx"><a href="#013" style="--depth: 1;" class="astro-jugkfwgx"><span style="--depth: 1;" class="astro-jugkfwgx">0.1.3</span></a></li></ul></li><li style="--depth: 0;" class="astro-jugkfwgx"><a href="#deferred-and-not-advertised" style="--depth: 0;" class="astro-jugkfwgx"><span style="--depth: 0;" class="astro-jugkfwgx">Deferred and not advertised</span></a></li></ul></nav></starlight-toc><script type="module" src="/gigai/0.1.10.9/_astro/TableOfContents.astro_astro_type_script_index_0_lang.BpJaGz7G.js"></script></div></div></div></aside><div class="main-pane astro-lrzkfocr"><main data-pagefind-body class="astro-g5ptsecz" lang="en" dir="ltr"><div class="content-panel astro-a7po4psb"><div class="sl-container astro-a7po4psb"><h1 id="_top" class="astro-bebwqqxs">Changelog</h1></div></div><div class="content-panel astro-a7po4psb"><div class="sl-container astro-a7po4psb"><div class="sl-markdown-content"><!-- GENERATED by tools/docs_gen.py. Do not edit; run `make docs-gen`. -->
+<p>This is the external, capability-focused history of GigAI. It describes what
+an operator can do, not how the implementation works. The internal technical
+history is kept in the maintainers’ local notes, outside this repo.</p>
+<p>Goal labels are milestone references, not package-version numbers. Goal order,
+phase order, and release order are deliberately different; release notes must
+not be inferred from a Goal number.</p>
+<div class="sl-heading-wrapper level-h2"><h2 id="unreleased-capability-milestones">Unreleased capability milestones</h2><a class="sl-anchor-link" href="#unreleased-capability-milestones"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “Unreleased capability milestones”</span></a></div>
+<p>Backfill from the accepted Goal completion audits is intentionally tracked in
+the internal changelog first. Entries added here must describe only a verified,
+operator-visible capability and must link to the relevant release or evidence.</p>
+<div class="sl-heading-wrapper level-h3"><h3 id="added">Added</h3><a class="sl-anchor-link" href="#added"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “Added”</span></a></div>
+<div class="sl-heading-wrapper level-h2"><h2 id="released-versions">Released versions</h2><a class="sl-anchor-link" href="#released-versions"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “Released versions”</span></a></div>
+<div class="sl-heading-wrapper level-h3"><h3 id="01109">0.1.10.9</h3><a class="sl-anchor-link" href="#01109"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “0.1.10.9”</span></a></div>
+<p>The Jobs page now loads on a large store of postings (about 290,000 postings from about 10,000
+companies, where it never finished loading) and has real pages. Fixes from the first days of real
+use: re-assessing a job keeps its posting, an answer says who wrote it, an assessment lists every
+stated requirement, one missing tool from a list no longer holds a job back, weak fits have their
+own group, postings are ordered by how well they fit, and a yes assesses only postings ranked 50 or
+more. Tailoring puts a skill you confirmed in an answer on the resume, cuts for length only by
+leaving out your oldest roles (with Restore), stores a resume you edited back for one job, and saves
+your resumes in a folder you can see. New: a master resume, one document that holds everything you
+have done, from which each profile and each job takes its lines. Read “After you upgrade”.</p>
+<div class="sl-heading-wrapper level-h4"><h4 id="after-you-upgrade">After you upgrade</h4><a class="sl-anchor-link" href="#after-you-upgrade"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “After you upgrade”</span></a></div>
+<ul>
+<li><strong>One more preparation, with progress.</strong> The stored postings are prepared again once, in the
+background. The Jobs page shows “Preparing your postings (one time after an upgrade)… N%” and
+the rest of Scout stays usable meanwhile; <code dir="auto">gigai scout new</code> prints the progress too. After that
+the Jobs page answers in a fraction of a second.</li>
+<li><strong>You cannot go back to 0.1.10.8 without one step.</strong> Scout’s local posting store
+(<code dir="auto">pipeline.sqlite</code>, a cache plus the history of its background work) has a new layout. If you
+install 0.1.10.8 again, delete that file first; it is rebuilt.</li>
+<li><strong>Stored assessments read “Assessed with older settings” once.</strong> The assessment rules changed (see
+“One missing tool from a list” and “Every stated requirement” under Fixed), so an assessment made
+before this release is offered for re-assessment like any other old one. Nothing is assessed again
+until you say yes.</li>
+<li><strong>The pipeline may tailor a job’s resume again.</strong> The tailoring instructions changed (see “A skill
+you confirmed” and “over 2 pages” under Fixed), so the next time the background pipeline processes
+a job it tailors that job’s resume again, within the daily limit on model calls. A resume you
+tailored or edited yourself is kept, as before.</li>
+<li><strong>In the API and in <code dir="auto">--json</code> output, <code dir="auto">company</code> is now the company’s name.</strong> The board’s id (what
+<code dir="auto">company</code> held before) is in <code dir="auto">company_slug</code>. <code dir="auto">company_name</code> is still there and says the same name.
+A script that used <code dir="auto">company</code> as an id should read <code dir="auto">company_slug</code>.</li>
+<li><strong>Your tailored resumes are copied into a folder you can see.</strong> The next time Scout starts (or
+when you run <code dir="auto">gigai scout resume folder</code>) it copies the tailored resumes you already have, as
+markdown, into <code dir="auto">~/Documents/GigAI/resumes</code>, which it makes when it first writes there. Nothing is
+moved or deleted, and the folder never gets your name or contact details. See “Your resumes have
+one visible folder” under Changed.</li>
+<li><strong>The master resume changes nothing until you make one.</strong> The upgrade makes no master: profiles,
+assessments and tailored resumes work as before until you run <code dir="auto">gigai scout resume master init</code> or
+make the master on the Master resume page in Settings (opening the page writes nothing). Look
+first: <code dir="auto">gigai scout resume master init --dry-run</code> writes nothing and lists every line of your
+resumes that would be left out.</li>
+<li><strong>Once you have a master.</strong> An assessment for a profile reads the lines of your whole master that
+fit the posting best, not only the profile’s 2-page resume; making the master marks no stored
+assessment as old. The background pipeline tailors a job’s resume again the next time it processes
+that job, within the daily limit on model calls (a resume you tailored or edited yourself is
+kept). You can no longer go back to an older version: it cannot read a profile that selects from
+the master, nor an assessment made since (<code dir="auto">resume_basis</code>). And creating a profile answers at once,
+with the profile’s first selection made a few seconds later (up to about 15 seconds on a very
+large home). Saving a change to the master takes several seconds on a very large home: about 4.5 s
+with 290,000 postings and 10,350 companies, about 12 s when two profiles show the changed line.</li>
+</ul>
+<div class="sl-heading-wrapper level-h4"><h4 id="fixed">Fixed</h4><a class="sl-anchor-link" href="#fixed"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “Fixed”</span></a></div>
+<ul>
+<li><strong>The Jobs page loads on a real-sized home.</strong> Scout now prepares the postings once and shares the
+result between every request instead of each request doing the whole job itself. It remembers
+the result between runs, so the command line and a restarted Scout start ready, and a company’s
+update re-checks only that company. On a test home of 290,000 postings and 10,350 companies the
+server stays near 200 MB, a warm request takes about a tenth of a second (it took 5 to 40
+seconds), and <code dir="auto">gigai scout new</code> takes under a second.</li>
+<li><strong>A skill you confirmed in an answer is put on the tailored resume.</strong> When a posting asks for a
+skill, your resume does not name it, and one of your answers says you have it, the tailored resume
+now shows it in Skills, with the answer as its source (for example Helm, after you answer “yes” to
+the Helm question). Before, the answer was passed to the tailoring and the resume often came back
+unchanged, so the Scout ATS score still listed the skill as missing. An answer that says you do
+not have the skill adds nothing.</li>
+<li><strong>A tailored resume over 2 pages is cut to 2, and only by leaving out your oldest roles.</strong> Scout
+measures the pages itself and leaves out whole roles, the oldest first, until the resume fits.
+Nothing else is cut for length: the tailoring no longer drops bullets from recent roles to save
+space. One older rule stays: a role that ended more than 8 years ago keeps its first 3 bullets.
+The job page shows what was left out (“Cut for length: …”, the roles and the older bullets)
+with a <strong>Restore</strong> button that puts all of it back in one step, and “Cut for length again” to
+undo that. <code dir="auto">gigai scout resume tailor</code> prints the same line, <code dir="auto">gigai scout resume length --job-url URL</code> shows it later (<code dir="auto">--restore</code>, <code dir="auto">--cut</code>), and the API has <code dir="auto">result.length</code> and
+<code dir="auto">PUT /api/tailored-resumes/length</code>. If the pages cannot be measured, nothing is cut and the line
+says so; if leaving out older roles would not get the resume to 2 pages, no role is cut and the
+line says it is over the limit.</li>
+<li><strong>The Skills section no longer repeats one bullet inside another.</strong> A Skills line whose every
+skill another Skills line already lists is dropped (it happened when a resume’s skills lines had
+no bullet markers and the tailoring listed them in a new order).</li>
+<li><strong>The background ranking no longer slows everything down.</strong> It used to match the whole store of
+postings against your profiles again on every turn.</li>
+<li><strong>The Jobs page has real pages.</strong> Pages of 50 postings (25 or 100 if you prefer) with Prev, Next
+and page numbers, and “Showing 51-100 of 591 postings”, instead of a list that grows by “Show 50
+more”. The page, its size and your filters are in the address (<code dir="auto">#/jobs?page=3&amp;state=needs_answers</code>),
+so Back from a job returns to the same page and a page can be bookmarked. Changing a filter or the
+search starts again at page 1, and the counts at the top stay the totals.</li>
+<li><strong>Going back from a job to the list keeps the list.</strong> The Jobs page keeps what it loaded,
+refreshes it in place and asks for one thing at a time. A slow answer says what it is waiting for.</li>
+<li><strong>A browser that goes away is no longer an error in the log.</strong> It is logged as “client closed the
+connection”.</li>
+<li><strong>Re-assessing a job after an answer keeps the posting.</strong> A posting from a Greenhouse board that a
+company shows on its own site (a <code dir="auto">...?gh_jid=...</code> address) was read from the stored posting the
+first time, and from the company’s web page after you answered a question: the page’s menus were
+stored as the posting and the location was lost. Every assessment and tailoring of a job address
+now reads the stored posting first and never falls back to a web page when the board’s own text
+is known. A page that is the only source is read without its menus, header and footer.</li>
+<li><strong>An answer says who wrote it and where it came from.</strong> An answer your agent saved was recorded as
+yours. <code dir="auto">gigai scout answer</code> and <code dir="auto">gigai scout answers save</code> take <code dir="auto">--as agent</code> (<code dir="auto">--actor</code> still
+works) and a free-text <code dir="auto">--source</code> (“from the user’s repo, at the user’s request”). An API write
+that names no writer is yours from the Scout page and the agent’s from anywhere else. The Answers
+and stories page shows both. The agent instructions tell agents to pass them.</li>
+<li><strong>One missing tool from a list no longer holds a job back.</strong> A posting that asked for “Docker,
+Helm, and Kubernetes” in one sentence waited at “Needs your answers” when your resume showed
+everything but Helm: one tool inside a list counted as much as “8+ years of experience”. A tool
+named inside a list of three or more is now its own kind of requirement (“One of a list”). One of
+them unknown leaves the job Matched, says “1 minor gap: Helm”, and still asks the question, which
+you can answer or leave. Two or more unknown tools of a list, or one unknown requirement that
+stands on its own line, wait for your answer as before. Requirements under “bonus” or “highly
+desirable” that you do not meet are named as minor gaps too.</li>
+<li><strong>Every stated requirement gets a row.</strong> An assessment listed at most 12 requirements and dropped
+the rest without saying so, so many jobs read “N of 12”. It now lists every requirement the
+posting states, must-haves first, including “highly desirable” lines and experience such as
+mentoring engineers or having worked in a named kind of company. Past 40 rows it keeps the first
+40 and says “+N not shown”.</li>
+<li><strong>A job opened by its address on the company’s own site has its rank, pay and location.</strong>
+<code dir="auto">GET /api/jobs?url=</code> for a posting that no find-jobs run had picked up (every posting <code dir="auto">gigai scout new</code> assesses, including a Greenhouse posting shown on the company’s site as <code dir="auto">...?gh_jid=...</code>)
+answered with no rank, no pay, no work-mode fit and no H-1B figures. It now reads them from the
+stored posting, and answers for a stored posting that has not been assessed yet.</li>
+<li><strong>The API says a company’s name in <code dir="auto">company</code>.</strong> <code dir="auto">posting.company</code> was the board’s id (for example
+<code dir="auto">ospreylabs</code>) while the name sat beside it in <code dir="auto">company_name</code>, and agents read the id as the name.</li>
+<li><strong>The job page shows the resume the pipeline just tailored.</strong> After you answered a question on a
+job page, the timeline said “Tailor resume: Done” while the Tailored resume panel, “Tailor again”
+and the state “Resume tailored” appeared only after a reload. The page now reads the stored
+resume again when the tailor step finishes.</li>
+<li><strong>Past runs lists the selected profile’s runs.</strong> Past runs could show every profile’s runs under
+the selected profile when the first read answered last.</li>
+<li><strong>Saving is faster on a home that watches many companies.</strong> Every write of a resume, of the master
+resume or of a profile’s selection read and checked every file of the watched-companies list first
+(one file per board: over 10,000 on a large home). A write now reads only what it uses. On a synthetic
+home of 290,000 postings and 10,350 boards, adding a line to the master went from about 6.9 s to
+about 4.5 s, an edit of a line that two profiles show from about 18.6 s to about 12.1 s, and <code dir="auto">gigai scout resume add</code> from about 7.7 s to about 5.3 s. Saving an answer is not changed by this.</li>
+</ul>
+<div class="sl-heading-wrapper level-h4"><h4 id="changed">Changed</h4><a class="sl-anchor-link" href="#changed"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “Changed”</span></a></div>
+<ul>
+<li><strong>Weak fits no longer sit in “Needs your answers”.</strong> A posting that waits on your answers while
+few of its requirements are met and its rank is low (fit below 40% and rank below 50) is now a
+“Weak fit”. It has its own chip on the Jobs page, off by default, and is listed only while that
+chip is on (<code dir="auto">gigai scout jobs list --state weak_fit</code>). It asks no questions, is not counted in
+“Need your answers”, is left out of <code dir="auto">gigai scout new</code>, and a saved answer never queues it in the
+pipeline.</li>
+<li><strong>Postings are ordered by how well they fit.</strong> Each assessed posting shows one fit number: the
+share of its requirements that are met, with the must-haves counted twice (“Matched · fit 85% ·
+9 of 11 requirements · rank 76”). Inside each group the best fit comes first, then the higher
+rank, then the newer posting. The Jobs page and <code dir="auto">gigai scout new</code> use the same order.</li>
+<li><strong>A yes assesses only postings ranked 50 or more.</strong> <code dir="auto">gigai scout new --yes</code> and “Assess these”
+leave out the low-ranked postings and ask about them separately (“112 low-ranked ones are skipped
+(rank below 50); assess those too? ~112 calls”). <code dir="auto">--include-low-rank</code>, or the box in the approval
+dialog, assesses them too. A posting that has no rank yet is still assessed.</li>
+<li><strong>The three numbers are settings.</strong> Add a <code dir="auto">fit</code> block to the project’s <code dir="auto">settings.json</code>:
+<code dir="auto">{"fit": {"assess_min_rank": 50, "weak_fit_below_percent": 40, "weak_fit_below_rank": 50}}</code>.
+Each is 0 to 100, and 0 turns that rule off.</li>
+<li><strong>Your resumes have one visible folder.</strong> Each job’s tailored resume (markdown) is now also saved
+in <code dir="auto">~/Documents/GigAI/resumes</code>, named <code dir="auto">&lt;company&gt;-&lt;role&gt;-&lt;date&gt;.md</code>, instead of only under a hidden
+path with a hash for a name. <code dir="auto">gigai scout resume pdf</code> without <code dir="auto">--out</code> writes its PDF there too
+(it used to write into whatever directory the command was run from) and prints the path. Change
+the folder in Settings, with <code dir="auto">gigai scout resume folder --set PATH</code> or <code dir="auto">PUT /api/resumes-folder</code>;
+<code dir="auto">gigai scout status</code> and the job page show it. The folder never holds your name or contact
+details: it gets the markdown and the PDFs made without a header, and a PDF you make with the
+Generate PDF form is saved only where you save it. A file you change in the folder stays yours:
+Scout replaces only files that are exactly what it last wrote, and gives a newer one a new name
+(<code dir="auto">...-2.md</code>). Tailored resumes you already have are copied in the next time Scout starts. A GigAI
+home other than <code dir="auto">~/.gigai</code> keeps its folder inside itself (<code dir="auto">&lt;home&gt;/resumes</code>).</li>
+<li><strong>An edited resume can be stored back for one job.</strong> <code dir="auto">gigai scout resume tailor --in FILE --job-url URL</code> (or <code dir="auto">PUT /api/tailored-resumes</code>) stores your edited markdown as that job’s tailored resume,
+marked edited with who wrote it (<code dir="auto">--as agent</code> for an agent, and <code dir="auto">--source</code> for where the edit came
+from). Before, the only choices were a PDF that was stored nowhere and never scored, or replacing
+the profile’s resume for every job. Lines you did not change keep their sources. A line you
+changed or added is checked: no name or contact detail, and every number and skill it states must
+be in your resume or one of your answers; a refusal lists each problem by line number, and the fix
+is to save the answer first. The Scout ATS score and the Scout label are then made again from the
+edited resume (one model call, for the assessment against it). Background tailoring never
+replaces an edited resume; asking for a new tailoring does.</li>
+</ul>
+<div class="sl-heading-wrapper level-h4"><h4 id="added-1">Added</h4><a class="sl-anchor-link" href="#added-1"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “Added”</span></a></div>
+<ul>
+<li><strong>A master resume.</strong> One document that holds every role, bullet, project and skill you have, with
+an id on every line and no contact details. Each profile shows a selection of its lines, each
+job’s tailored resume is picked from the whole of it, and an assessment reads the lines that fit
+the posting best. Lines are picked by code, with no model call; the one tailoring call and the one
+assessment call are the ones Scout made before. It is opt-in: nothing changes until you make one
+(see “After you upgrade”).
+<ul>
+<li><strong>The store, and a file you can edit.</strong> <code dir="auto">gigai scout resume master show</code> lists every line with
+its id and <code dir="auto">gigai scout resume master history</code> lists the revisions: each change is a new
+revision and nothing is rewritten. The master is also a file, <code dir="auto">master.md</code> in your resumes folder
+(<code dir="auto">~/Documents/GigAI/resumes</code> unless you chose another), written again after every change,
+whoever made it. Edit it in your own editor, then import it with <strong>Import the file</strong> on the
+Master page or <code dir="auto">gigai scout resume master sync</code>: a line you typed gets an id, every other line
+keeps its id, and a line you removed is retired and can be restored. GigAI never reads the file
+by itself; until you import it, Scout says “master.md has changes not imported yet” and never
+replaces it (a change made in Scout meanwhile is written beside it as <code dir="auto">master-2.md</code>). An import
+is refused, with your file left as it is, when the file does not read as a master, when it holds
+a name, email, phone number, link or address (named by line number), or when the master changed
+since the file was written, unless you import it anyway (<code dir="auto">--revision N</code>, or <strong>Import it
+anyway</strong>): what was added since is then retired.</li>
+<li><strong>What a profile shows.</strong> When the master is made, each profile’s first selection is its own
+resume, which is not rewritten, so nothing you assessed or ranked goes stale. A selection is
+sticky: when you edit or retire a line a profile shows, its resume follows; lines you add to the
+master are only offered (<code dir="auto">gigai scout resume master selection status</code>: “3 new master lines:
+refresh?”). <code dir="auto">gigai scout resume master selection refresh</code> selects again from the whole master,
+against the postings the profile’s titles match in your local index, and makes the result the
+profile’s resume. A selection is fitted to 2 pages by measuring it with the PDF template: recent
+roles always appear, and for length the oldest roles are shortened, then dropped, first. <code dir="auto">gigai scout resume master selection show</code> lists it as Picked / Left out, each line with its reason,
+for a profile or for one job (<code dir="auto">--job-url</code>, or <code dir="auto">--job-text FILE</code>). A new profile gets its own
+first selection the same way. A profile whose resume you replace by hand keeps that resume: the
+master leaves it alone until you refresh its selection.</li>
+<li><strong>Making it from your resumes.</strong> <code dir="auto">gigai scout resume master init</code> merges the resumes your
+profiles hold: the lines of all of them, the same line kept once, and a line worded twice folded
+into the newer wording. When two resumes state one line with different numbers, Scout asks which
+is right and writes nothing until you answer (<code dir="auto">--answer ID=a</code>, <code dir="auto">=b</code>, or <code dir="auto">=both</code> to keep the two
+lines). Nothing is left out silently: <code dir="auto">init</code> and <code dir="auto">init --dry-run</code> count every line of your
+resumes as kept, folded into a line the master holds, or left out, and name each left-out line
+by its line number in the stored resume and the reason, never by its text (“Of 20 lines of
+resume text …: 18 kept, 0 folded into a line the master holds, 2 left out”;
+<code dir="auto">migration.source_lines</code> in <code dir="auto">--json</code>). Your name, a headline and contact lines are never kept.
+<code dir="auto">gigai scout resume master init --from FILE</code> stores a resume markdown file as the master
+instead.</li>
+<li><strong>A job’s tailored resume is picked from the whole master.</strong> Code first picks that job’s
+candidate lines from the whole master (about twice what fits on 2 pages), starting from the
+lines the profile shows. The one tailoring call then orders and words the lines inside that set,
+as before, and code cuts the result to 2 pages: the oldest roles first, every recent role still
+present, and a line that is the only one naming something the posting requires kept. What was
+cut is listed and one Restore puts it back; the “Cut for length” line says “older bullets” only
+when every bullet it names belongs to a role that ended more than 8 years ago. The Skills line
+is put together by code (the posting’s required skills that your master lists, then its
+nice-to-haves, then what the offered lines name; 28 skills at most), so the master’s whole
+Skills list is never put on one resume. When the model call fails or no model is available,
+tailoring on demand still gives you a resume: the code’s own 2-page selection, marked as picked
+by code. A pasted resume, a profile whose resume you replaced by hand and a home without a
+master are tailored exactly as before.</li>
+<li><strong>An assessment reads it, and says when your resume changed for it.</strong> Assessing a job for a
+profile (the job page’s Assess, <code dir="auto">gigai scout assess</code>, “Assess all new”, <code dir="auto">gigai scout new --yes</code>)
+shows the model the lines of your whole master that fit that posting best, picked by code,
+within the same limit on the resume’s size and in the same single call. A requirement your
+master covers is no longer a question because one profile’s 2 pages left the line out: in our
+test on invented postings (11 cases, each assessed twice both ways) the open questions went from
+63 to 6, no case got a worse verdict and no evidence was invented; the prompt is about 14%
+larger. The assessment of a tailored resume still reads the 2 pages that will be sent, a
+find-jobs run still reads the profile’s resume, and a pasted resume or a profile whose resume
+you replaced by hand is assessed as before. A stored assessment can now read “old assessment:
+resume changed” (“Resume changed” on a job’s card), only when the change concerns it: a line it
+quoted as evidence was edited or retired, or a new line names something it left as an open
+question (“A new line of your resume may answer: Have you used Helm?”). Nothing is assessed
+again on its own. For agents: <code dir="auto">basis_stale_reason: "resume_changed"</code> with <code dir="auto">basis_stale_resume</code>,
+and <code dir="auto">resume_basis</code> on an assessment that read the master.</li>
+<li><strong>Your agent keeps it up to date from a chat.</strong> <code dir="auto">gigai scout resume master add</code>, <code dir="auto">edit</code> and
+<code dir="auto">remove</code> change one line, role or skill by its id. A story or an answer becomes a line of the
+master with <code dir="auto">--from-story ID</code> or <code dir="auto">--from-answer ID</code>: the line is linked to it, and from then on
+every profile and every job can select it. An agent passes <code dir="auto">--as agent</code> and says where the
+evidence came from with <code dir="auto">--source</code>. An edit or a removal names the revision it read (<code dir="auto">--revision N</code>) and is refused when the master changed since. Text that looks like contact data is refused
+and stored nowhere, and a line the master already has in other words is not added unless you
+pass <code dir="auto">--force</code>. A removed line is retired, not deleted: <code dir="auto">gigai scout resume master show --retired</code> still lists it, and <code dir="auto">gigai scout resume master add --restore ID</code> puts it back under
+the same id. The agent instructions (<code dir="auto">gigai agent-skill</code>) have a step for this: after saving a
+story or an answer with substance, the agent asks “Want this on your resume?”. An agent reads
+the master with <code dir="auto">gigai scout resume master show --json</code>, never from the file.</li>
+<li><strong>The Master page, and Picked / Left out on a job.</strong> Settings has a new page, <strong>Master resume</strong>
+(<code dir="auto">#/master</code>). With no master yet it offers to make one: it shows what the merge would do, counts
+every line of your resumes and lists each left-out line by resume, line number and reason, asks
+about each line your resumes word with different numbers (keep A, keep B, or both), and writes
+nothing until you answer. After that it lists the master by role: add a line or a role, edit
+one, retire one (History puts it back); each line shows how strong its evidence is (backed by a
+story or an answer, states a number, or stated) and which profiles show it. A change that
+crosses one your agent made is refused, and the page shows the master as it is now. Each profile
+says where its selection stands (“3 new master lines: refresh?”) with a <strong>Refresh</strong> button. On a
+job page, a resume tailored from the master has <strong>Picked (n)</strong> and <strong>Left out (m)</strong>: every line
+with the reason it is shown or not, <strong>Remove</strong> to take a line off this job’s resume and <strong>Add</strong>
+to put one on; when an added line would make the resume 3 pages, Scout names the line that would
+be cut to keep 2 and asks. A line your agent edited on a tailored resume offers <strong>Save this
+wording to your master</strong>. The API has <code dir="auto">GET /api/master</code>, <code dir="auto">GET /api/master/history</code>, <code dir="auto">POST</code> and
+<code dir="auto">PUT /api/master/lines</code> and <code dir="auto">/api/master/entries</code>, <code dir="auto">GET</code> and <code dir="auto">POST /api/master/migration</code>, <code dir="auto">GET</code>
+and <code dir="auto">POST /api/master/selection</code>, <code dir="auto">POST /api/master/sync</code> and <code dir="auto">PUT /api/tailored-resumes/selection</code>; a tailored resume carries what was picked and left out as
+<code dir="auto">selection</code> (<code dir="auto">gigai scout resume tailor --json</code>, <code dir="auto">GET /api/tailored-resumes</code>).</li>
+</ul>
+</li>
+</ul>
+<div class="sl-heading-wrapper level-h3"><h3 id="01108">0.1.10.8</h3><a class="sl-anchor-link" href="#01108"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “0.1.10.8”</span></a></div>
+<p>Fixes from the first days of real use of 0.1.10.7, a security fix for everyone who uses Scout
+with the Codex CLI, and the pages an AI agent needs to set GigAI up by itself. Read “After you
+upgrade” and Security first.</p>
+<div class="sl-heading-wrapper level-h4"><h4 id="after-you-upgrade-1">After you upgrade</h4><a class="sl-anchor-link" href="#after-you-upgrade-1"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “After you upgrade”</span></a></div>
+<ul>
+<li><strong>The stored postings are rebuilt once, on the next read.</strong> The rules for which profile a
+posting belongs to and for when a posting counts as changed were fixed (see Fixed), so the first
+<code dir="auto">gigai scout new</code> or Jobs page after the upgrade works them out again. No model call is made.
+That first read can take longer than usual.</li>
+<li><strong>Postings with only an old assessment are a separate question now.</strong> <code dir="auto">gigai scout new</code> offers
+them with their own count and estimate. Nothing is assessed again until you say yes to that
+question (<code dir="auto">--reassess-stale</code>).</li>
+<li><strong>Scout’s Codex calls check Codex’s tool list before every call.</strong> A Codex upgrade that adds a
+tool is handled: Scout reads the list again each time and turns the new tool off. If a Codex
+release changes the commands Scout reads that list with, Scout’s Codex calls stop with a clear
+error instead of running with tools on, until GigAI is updated. Checked with codex-cli 0.159.3.</li>
+<li><strong>A Codex call sends fewer input tokens</strong>, because Codex no longer adds its tool definitions to
+it. Your averages in <code dir="auto">gigai scout metrics</code> will move.</li>
+<li><strong>If you pasted the 0.1.10.7 permissions snippet into Claude Code, replace it</strong> with what
+<code dir="auto">gigai agent-permissions</code> prints now (see Changed).</li>
+</ul>
+<div class="sl-heading-wrapper level-h4"><h4 id="security">Security</h4><a class="sl-anchor-link" href="#security"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “Security”</span></a></div>
+<ul>
+<li><strong>Every model call now runs with all tools off. For Codex this closes a real gap.</strong> In 0.1.10.7
+and earlier, a Scout call through the Codex CLI turned off Codex’s shell tool and memories, and
+nothing else. Codex’s web search is on by default, so it stayed on, together with any MCP
+servers, app connectors and plugins in your Codex settings, sub-agents and the image tool. Job
+posting text is written by strangers. A posting could in principle have steered the model into
+a web request or a tool call in the same call that holds your resume. Scout now turns off web
+search, every configured MCP server, apps, plugins, hooks, browser and computer use,
+sub-agents and the other tool features on every Codex call, whatever your Codex settings say.
+Your Codex login, model provider and default model are unchanged. The 0.1.10.7 notes said
+Scout’s model calls had no tools; for the Codex CLI that was not true.</li>
+<li><strong>It fails closed.</strong> If Scout cannot read Codex’s lists of features, MCP servers or models, or a
+server stays on, no model call is made. If Codex ever reports a tool call, Scout discards that
+answer.</li>
+<li><strong>Claude Code, the hosted APIs and Ollama needed no change.</strong> Claude Code calls already ran
+with no tools, no MCP servers and no user settings; the hosted API and Ollama calls send no
+tool definitions. This is now checked by tests.</li>
+<li><strong>A resume is checked for contact details before an agent reads it.</strong> See the two new commands
+below. The agent skill tells your agent to run the check first and to stop when it finds
+something. If you paste a resume with contact details straight into a chat, that is outside
+GigAI’s control.</li>
+</ul>
+<div class="sl-heading-wrapper level-h4"><h4 id="added-2">Added</h4><a class="sl-anchor-link" href="#added-2"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “Added”</span></a></div>
+<ul>
+<li><strong><code dir="auto">gigai scout resume check FILE</code>: is this resume free of contact details?</strong> It runs on your
+computer, with no model and no network, and prints the kind and the line number of each
+finding (name, email, phone, address, link, work authorization), never the text itself. It
+exits with code 2 when it finds something. It works on patterns and can miss a detail inside a
+sentence.</li>
+<li><strong><code dir="auto">gigai scout resume clean FILE --out COPY</code>: a copy without those lines.</strong> Your file is not
+changed. The copy passes the check.</li>
+<li><strong>A “Start here” page for your agent.</strong> One docs page that you give to Claude Code or Codex
+before anything is installed. It walks the agent through installing, the resume check, a few
+questions for your profile, Update sources and the first <code dir="auto">gigai scout new</code>, and it tells the
+agent to ask before anything that uses the network or a model. The README has a prompt to
+paste, and the docs site has a plain-text <code dir="auto">llms.txt</code> with the same steps.</li>
+<li><strong>How to use Scout from each agent.</strong> The For agents page now says, for Claude Code, Codex and
+other agents, what to install, where it goes and what to type.</li>
+<li><strong>“Your first 10 minutes”</strong>: the same path for a person, from install to a PDF.</li>
+<li><strong>A Token usage page.</strong> Measured tokens and time per step (rank, assess, tag, tailor,
+re-assess) on Codex and on Claude Code, and what a first catch-up and a normal day used on a
+real install. Tokens, not prices. The first run is the expensive one.</li>
+<li><strong>A network notice before the first Update sources.</strong> Scout checks about 10,000 public job
+boards and keeps checking 8 times a day, so run it on your own computer and your own network.
+The UI shows the notice once, the README and the docs carry it, and an agent tells you before
+it starts the first update. Background checks can be turned off in Settings.</li>
+<li><strong>Progress while a batch is assessed.</strong> <code dir="auto">gigai scout new --yes</code> prints lines such as
+“assessed 120 of 333 · ~18 min left” while it works. They go to the error stream, so <code dir="auto">--json</code>
+output is unchanged.</li>
+<li><strong><code dir="auto">gigai scout profile list</code> warns about a title that matches too much.</strong> A generic title such
+as “Staff Engineer” on its own matches every posting with those words. The command says how
+many, so you can add a more specific title.</li>
+</ul>
+<div class="sl-heading-wrapper level-h4"><h4 id="changed-1">Changed</h4><a class="sl-anchor-link" href="#changed-1"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “Changed”</span></a></div>
+<ul>
+<li><strong>The order of the grid.</strong> Postings with a current assessment come first, then ones whose only
+assessment is old, then ones not assessed. Inside each group: Scout’s “recommended” label,
+then the verdict (matched, needs your answers, other, not a match), then the rank. <code dir="auto">gigai scout new</code>, <code dir="auto">gigai scout jobs list</code> and the Jobs page use the same order.</li>
+<li><strong>The score column is words, not a bare percent</strong>: the verdict, “9 of 11 requirements” and the
+rank. An old assessment says so and why (“old assessment: older prompt”).</li>
+<li><strong><code dir="auto">--yes</code> answers the “new postings” question only.</strong> The old assessments are the second
+question, and <code dir="auto">--reassess-stale</code> is its yes. The two can be combined.</li>
+<li><strong>“To assess” means new postings that no matching profile has assessed.</strong> It no longer moves
+while the background ranking runs, and after a full yes it counts only the ones that failed.
+Postings with only an old assessment are counted apart.</li>
+<li><strong>A generic title no longer pulls in other functions.</strong> When a profile has both a generic
+title (“Staff Engineer”) and a specific one, a posting that only the generic title matches is
+kept only if its known function fits the profile. “Staff Security Engineer” no longer lands in
+a software profile. A profile with only generic titles is unchanged, and gets the warning
+above.</li>
+<li><strong>Company names read as the company writes them</strong> (“Garner Health”, not “Garnerhealth”), in
+<code dir="auto">gigai scout new</code>, the Jobs page, the job page, tailored resumes and PDF file names.</li>
+<li><strong>A posting stays with the profile that assessed it.</strong> A later rank for another profile no
+longer moves it to that profile’s “not assessed” row. A tailored job keeps its verdict and
+says “resume tailored” beside it.</li>
+<li><strong>Update sources fetches descriptions for every active profile’s titles</strong>, not only the
+selected profile’s. A posting whose description is still missing has it fetched when you
+assess it, with one request.</li>
+<li><strong>The agent artefacts.</strong> <code dir="auto">gigai agent-skill --out</code> creates the folders it needs. The skill’s
+description names “what’s new on Scout”, so Claude Code picks it up for that question. The
+permissions snippet’s curl rules name Scout’s port (<code dir="auto">curl http://127.0.0.1:8765/*</code>), the form
+Claude Code’s rule syntax matches.</li>
+</ul>
+<div class="sl-heading-wrapper level-h4"><h4 id="fixed-1">Fixed</h4><a class="sl-anchor-link" href="#fixed-1"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “Fixed”</span></a></div>
+<ul>
+<li>A posting was marked “changed since it was assessed” when only its description had been
+missing at the time. It is read as current now, without a new model call.</li>
+<li><code dir="auto">gigai scout new --yes</code> skipped postings whose description was not stored yet. It fetches the
+description first, and says why when it cannot (removed, refused by the board, no text,
+network error).</li>
+<li>A city that shares a state’s name (“New York, NY”) was read as no city at all, so a
+remote-only profile kept those on-site roles. It is read as the city.</li>
+<li>A model call could be recorded as successful while no assessment was stored. Such a call is
+now recorded as failed, with the reason, and the batch lists it. A failed write no longer
+stops the whole batch.</li>
+<li>Assessments imported from old runs that recorded no prompt version are labelled as made with
+an older prompt, instead of showing nothing.</li>
+<li>The yes and no commands that <code dir="auto">gigai scout new --profile</code> suggests keep the <code dir="auto">--profile</code>.</li>
+</ul>
+<div class="sl-heading-wrapper level-h3"><h3 id="01107">0.1.10.7</h3><a class="sl-anchor-link" href="#01107"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “0.1.10.7”</span></a></div>
+<p>Scout can now be used day to day from your own AI agent: ask “what’s new?”, answer the open
+questions in chat, and let Scout tailor and score in the background. GigAI no longer stores your
+name or contact details. Read “After you upgrade” first.</p>
+<div class="sl-heading-wrapper level-h4"><h4 id="after-you-upgrade-2">After you upgrade</h4><a class="sl-anchor-link" href="#after-you-upgrade-2"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “After you upgrade”</span></a></div>
+<ul>
+<li><strong>Every stored assessment reads “Assessed with older settings”.</strong> The assessment prompt changed
+(see Security), so every assessment made by an earlier version is flagged. The verdicts still
+show. Nothing is assessed again by itself: “Assess these” on the Jobs page (and “Assess all” on
+a past run) plans them again, one model call each, and only when you click.</li>
+<li><strong>The next ranking pass ranks every posting again, once,</strong> and a search run started by a script
+assesses its unchanged postings again, once. After that, costs are as before.</li>
+<li><strong>A one-time cleanup removes stored contact details</strong> from your resumes and from Resume display,
+and tells you what it removed (counts only). Older copies can remain in GigAI’s local history on
+your computer; see Security.</li>
+<li><strong>Your story bank is moved once</strong> to answers that every profile shares. Nothing is lost: when two
+profiles answered the same question differently, the newest is the answer and the other is kept
+in its history. <code dir="auto">gigai scout answers migrate</code> prints the counts.</li>
+</ul>
+<div class="sl-heading-wrapper level-h4"><h4 id="added-3">Added</h4><a class="sl-anchor-link" href="#added-3"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “Added”</span></a></div>
+<ul>
+<li><strong><code dir="auto">gigai scout new</code>: what is new since your last check.</strong> One command, for you or your agent,
+across all your active profiles, read from the stored postings (no job board is asked). It asks
+before it assesses, with the count and an estimate from your own past calls; <code dir="auto">--yes</code> assesses,
+<code dir="auto">--no-assess</code> shows ranks only. With nothing new it lists the 10 postings that still need your
+attention. The grid shows each posting, its score, what it still needs and its open questions.
+“What matches” comes from your own resume and answers, so it is a separate call (<code dir="auto">--yours</code>) and
+is never shown next to posting text. The first use looks back 7 days.</li>
+<li><strong>An agent skill and a permissions snippet.</strong> <code dir="auto">gigai agent-skill</code> prints the instructions that
+teach your agent the daily loop (as a Claude Code skill, or as a section for an <code dir="auto">AGENTS.md</code>).
+<code dir="auto">gigai agent-permissions</code> prints a recommended Claude Code permissions snippet. GigAI prints it
+and never applies it: it does not touch your agent’s settings.</li>
+<li><strong>Answers and stories, shared by every profile.</strong> An answer is a short fact a posting asked for.
+A story is an experience worth telling: a title, where and when, your own words, a short
+narrative and the questions it answers. Your agent asks “Want me to make this a story?” when a
+reply has substance. An assessment reuses your answers and gets the few stories that fit the job.
+Both are written through <code dir="auto">gigai scout answers</code>, <code dir="auto">gigai scout story</code> and the matching API, with a
+stale-write check. Scout’s own page (Settings &gt; Answers and stories) is read-only: it lists them,
+shows which jobs used each, and deletes one that is wrong.</li>
+<li><strong>A background pipeline for the jobs you engage with.</strong> After you answer a job’s question (or
+press “Process now”), Scout tailors a resume for that job, assesses the tailored resume, computes
+a Scout ATS score and sets a Scout label, in the background. It is on by default and works only
+on jobs you engaged with. One trigger starts at most 10 jobs and the rest wait for your approval;
+the pipeline makes at most 40 model calls a day; background ranking makes at most 100 a day, with
+a warning past 60. All of these are settings (Settings &gt; Background pipeline). The job page shows
+each step with its model, tokens and time, and “73 → 91 after tailoring”.</li>
+<li><strong>A tailored resume you edited is never replaced by the background.</strong> If you tailored a job’s
+resume yourself or changed a line, the pipeline keeps it and scores your text. To refresh it,
+tailor that job again yourself.</li>
+<li><strong>Scout label.</strong> “Recommended” or “needs attention”, with the reasons. It is Scout’s own
+suggestion from your settings, resume and answers, not a prediction of what an employer will
+decide.</li>
+<li><strong>Scout ATS score.</strong> A score from 0 to 100 for a tailored resume PDF against its posting: how
+cleanly the PDF reads back, how many of the posting’s skills it names, and basic format rules,
+with the missing skills listed. It is GigAI’s own local check, with no model call, and not any
+real ATS’s score. It is shown, never used to block anything. Skills in the PDF are now separated
+by a dot so they read back as separate words.</li>
+<li><strong>What your model calls cost.</strong> Every Scout model call is recorded on your computer: kind, model,
+tokens, time, and cost when the provider reports one (no text). Averages show beside Re-assess
+and Assess all, Settings has a Model usage table, <code dir="auto">gigai scout metrics</code> prints them, and they
+feed the estimates <code dir="auto">gigai scout new</code> shows.</li>
+<li><strong>A page that explains the numbers.</strong> “What Scout’s numbers and labels mean” covers rank,
+verdict, Scout label and Scout ATS score, and a “?” beside each of them on the job page opens it.</li>
+<li><strong>Delete a profile.</strong> On the Profiles page, and with <code dir="auto">gigai scout profile delete</code>. Its past runs
+are hidden. The default profile can never be deleted, and neither can your only active one.</li>
+<li><strong>A Generate PDF form.</strong> See Security.</li>
+</ul>
+<div class="sl-heading-wrapper level-h4"><h4 id="changed-2">Changed</h4><a class="sl-anchor-link" href="#changed-2"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “Changed”</span></a></div>
+<ul>
+<li><strong>The Jobs page lists postings, not a run.</strong> It shows the stored postings that match your
+profiles, live, with a tag for each profile a posting matches. The profile switcher became a
+filter. Chips narrow the list: New since last check, 7 days, 30 days, and state (needs your
+answers, assessed, Scout label, removed). “Mark all seen” resets “new”.</li>
+<li><strong>“Run find jobs” is gone.</strong> Ranking runs in the background. <strong>First assessments happen only
+when you approve them</strong>: “Assess these” on the Jobs page, <code dir="auto">gigai scout new</code> and
+<code dir="auto">gigai scout jobs assess</code> all ask first, with the count and an estimate. Past runs stay readable
+as history (read-only), and what they assessed shows beside newer assessments.</li>
+<li><strong><code dir="auto">POST /api/run</code> is deprecated.</strong> It still works in this release, for scripts, and will be
+removed later. Use <code dir="auto">GET /api/postings</code> (<code dir="auto">gigai scout jobs list</code>) to search and
+<code dir="auto">POST /api/postings/assess</code> (<code dir="auto">gigai scout jobs assess</code>) to assess.</li>
+<li><strong>The per-profile story bank is replaced, with no alias.</strong> <code dir="auto">gigai scout story-bank</code> and the
+<code dir="auto">/api/story-bank</code> routes are removed. Use <code dir="auto">gigai scout answers</code> and <code dir="auto">gigai scout story</code>, and
+<code dir="auto">/api/answers</code> and <code dir="auto">/api/stories</code>. The sharing setting is gone: every profile reads the same
+answers and stories. The Story bank page with its forms is replaced by the read-only page above.</li>
+<li><strong>A hybrid profile now keeps on-site roles in its own area.</strong> A hybrid profile in Houston keeps
+an on-site Houston role and still drops an on-site New York one. The filter and the assessment
+use the same rule.</li>
+<li><strong>PDF files are named after the job, not you</strong>: <code dir="auto">&lt;company&gt;-&lt;role&gt;-&lt;date&gt;.pdf</code>.</li>
+<li><strong>Resume display holds only the title and the layout.</strong> The name and contact fields are gone
+(see Security).</li>
+</ul>
+<div class="sl-heading-wrapper level-h4"><h4 id="security-1">Security</h4><a class="sl-anchor-link" href="#security-1"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “Security”</span></a></div>
+<ul>
+<li><strong>GigAI never stores your name, email, phone, address or links.</strong> You type them in the new
+Generate PDF form, they go into that one PDF, and GigAI forgets them. A resume you add is stored
+with its name and contact lines removed, and you are told what was removed. The limits: the
+removal works on patterns and can miss a detail inside a sentence; and versions before this one
+did store those lines, so a one-time cleanup removes them from the current files, but older
+copies can remain in GigAI’s local history on your computer. <code dir="auto">gigai scout privacy</code> shows what
+the cleanup removed.</li>
+<li><strong>A PDF made by an agent or the command line has no name or contact details.</strong> GigAI has none to
+give it. The command prints an “Open in Scout” link; you open it, fill the form in your own
+browser and download the finished PDF.</li>
+<li><strong>Anything GigAI gives your agent is sent to that agent’s model provider.</strong> Agents get no contact
+data from GigAI, but an agent with shell access can read local files. The docs say this in bold,
+with what it means.</li>
+<li><strong>Every reply to an agent is checked for contact details.</strong> Text shaped like an email address, a
+phone number, a profile link or a street address in your own fields is replaced by a marker
+before a reply leaves the local API. Posting text is left as published. It is a backstop that
+works on shapes, and it can miss things.</li>
+<li><strong>Replies say what kind of data they hold.</strong> Each API reply is labelled: your private text,
+public text written by strangers, or neither. <code dir="auto">gigai scout new</code> never mixes the two in one
+reply.</li>
+<li><strong>Posting text is fenced in Scout’s own prompts.</strong> Every prompt that carries a posting marks it
+as text written by strangers: data to read, never instructions to follow. In a test on synthetic
+postings written to steer the model, one of five steered the old prompt and none steered the new
+one; ordinary verdicts did not change. It lowers the risk and does not remove it.</li>
+<li><strong>The local API checks the Host of every request</strong>, not only writes, so a web page you visit
+cannot read your data through your browser.</li>
+</ul>
+<div class="sl-heading-wrapper level-h4"><h4 id="fixed-2">Fixed</h4><a class="sl-anchor-link" href="#fixed-2"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “Fixed”</span></a></div>
+<ul>
+<li><strong>Reading the configuration no longer launches about a hundred helper processes.</strong> A first read
+from Update sources, setup and a few other paths launched 109 processes; it now launches 30, and
+a repeat read launches none.</li>
+<li><strong>A resume with one very long line no longer takes minutes to process.</strong> A single line of
+100,000 characters took almost two minutes; it now takes a fraction of a second. What is removed
+is unchanged.</li>
+</ul>
+<div class="sl-heading-wrapper level-h3"><h3 id="01106">0.1.10.6</h3><a class="sl-anchor-link" href="#01106"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “0.1.10.6”</span></a></div>
+<div class="sl-heading-wrapper level-h4"><h4 id="fixed-3">Fixed</h4><a class="sl-anchor-link" href="#fixed-3"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “Fixed”</span></a></div>
+<ul>
+<li><strong><code dir="auto">gigai status</code> and other commands no longer slow down as your history grows.</strong> <code dir="auto">gigai status</code>
+took 14 seconds with a long history (37 seconds with a longer one) because it re-read every saved
+change each time; it now takes a fraction of a second whatever the history length. <code dir="auto">gigai scout profile list</code> and <code dir="auto">gigai scout story-bank list</code> are also flat, and a read-only command checks your
+data folder once instead of several times. The first command after upgrading does the one-time
+work.</li>
+</ul>
+<div class="sl-heading-wrapper level-h3"><h3 id="01105">0.1.10.5</h3><a class="sl-anchor-link" href="#01105"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “0.1.10.5”</span></a></div>
+<div class="sl-heading-wrapper level-h4"><h4 id="added-4">Added</h4><a class="sl-anchor-link" href="#added-4"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “Added”</span></a></div>
+<ul>
+<li><strong>Story bank.</strong> Every answer you give to a question about a job goes into your profile’s story
+bank, kept per profile (a profile can read another profile’s bank only if you set that). A new
+Story bank page lists, searches, edits and deletes entries and shows which jobs used each. When a
+later job asks a similar question, the assessment reuses your answer instead of asking again, or
+shows “We already know: … use it?” prefilled. Agents can read and write the bank too:
+<code dir="auto">gigai scout story-bank add|list|show|edit|delete|share</code> and the matching API, with a stale-write
+check and a record of who wrote each entry. Answers are checked for personal contact details.</li>
+<li><strong>Agents can render a resume PDF.</strong> <code dir="auto">gigai scout resume pdf</code> and <code dir="auto">POST /api/resume/pdf</code> turn
+resume markdown into a PDF with your saved header, and a tailored line can be replaced with your
+own text (<code dir="auto">use: custom</code>), marked as edited, with the same personal-info check.</li>
+<li><strong>Work mode in assessments.</strong> The assessment now knows whether you want remote, hybrid or on-site
+work, so a remote-only profile no longer gets “Matched” on an on-site role.</li>
+<li><strong>Older assessments are flagged.</strong> An assessment made before your settings changed (or before this
+release) shows “Assessed with older settings: re-assess”. “Assess all” counts them separately and
+re-assesses them only when you click. A story bank answer flags only the assessments whose own
+open question it answers.</li>
+<li><strong>Check times setting.</strong> Settings &gt; Background updates lets you change when the background check
+runs.</li>
+</ul>
+<div class="sl-heading-wrapper level-h4"><h4 id="changed-3">Changed</h4><a class="sl-anchor-link" href="#changed-3"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “Changed”</span></a></div>
+<ul>
+<li><strong>Background checks run 8 times a day in work hours, at a moderate pace.</strong> On weekdays at 03:00 and
+every two hours from 07:00 to 19:00, on weekend days at 09:00 and 18:00 (your local time), busy
+boards every time and quiet boards about twice a day, a few requests a second, backing off when a
+site asks. One catch-up check runs if Scout was closed. The strip says when the next check is;
+Update sources still runs at full speed.</li>
+<li><strong>First runs after this upgrade re-assess postings once, which means more model calls once.</strong>
+Runs now give the assessment your real settings (see Fixed), so earlier verdicts are not carried
+forward. Runs also say why a posting was not assessed, and keep much less in their saved history.</li>
+</ul>
+<div class="sl-heading-wrapper level-h4"><h4 id="fixed-4">Fixed</h4><a class="sl-anchor-link" href="#fixed-4"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “Fixed”</span></a></div>
+<ul>
+<li><strong>Runs assessed without your settings.</strong> A search run’s assessment did not see your location,
+countries, sponsorship need or target titles, so it could call a New York hybrid role with “no
+H1B” a fit for a Houston profile that needs sponsorship. It now does.</li>
+<li><strong>Pages loaded in 4 to 7 seconds.</strong> The profile, config, setup, applications and runs reads are
+now tens of milliseconds, and Mark applied and the first applications read no longer slow down as
+your history grows. The workpad check behind every page and command no longer walks the whole
+history either.</li>
+<li><strong>The first background check no longer looks frozen.</strong> The one-time tagging and keyword-index
+work now runs after the first boards, with a heartbeat. Tag counts say what they count, and only
+titles a model will tag are called “waiting”. Tagging has its own thread and no longer starves.</li>
+<li><strong>The “Where this data comes from” link and the README links no longer 404.</strong></li>
+<li><strong>Keyword search and tagging on Debian 12</strong> and other systems with an older SQLite no longer
+return nothing.</li>
+<li><strong>A rare “complete with the wrong counts” in Assess all</strong> is fixed.</li>
+</ul>
+<div class="sl-heading-wrapper level-h3"><h3 id="01104">0.1.10.4</h3><a class="sl-anchor-link" href="#01104"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “0.1.10.4”</span></a></div>
+<div class="sl-heading-wrapper level-h4"><h4 id="added-5">Added</h4><a class="sl-anchor-link" href="#added-5"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “Added”</span></a></div>
+<ul>
+<li><strong>Releases are now one click after a green pre-check.</strong> The release gate also builds and smoke
+tests the package, and Release publishes exactly that tested build. A <code dir="auto">rollback</code> workflow can
+yank a bad version and point the docs <code dir="auto">latest</code> alias back.</li>
+<li><strong>Posted window on the Jobs page.</strong> Posted chips (7d, 10d, 30d, 60d, Any) filter the shown
+postings at once, with no new run. A button finds postings from a wider window in the local index
+and adds only the new ones; existing assessments and answers stay.</li>
+<li><strong>Each profile has its own location, work mode, countries and posted window.</strong> The first profile
+keeps the setup settings; other profiles are prefilled from it and editable in the profile form
+and with <code dir="auto">gigai scout profile list</code> and <code dir="auto">gigai scout profile update</code>.</li>
+<li><strong>Update sources is incremental.</strong> Boards checked recently are skipped, so a second update right
+after the first takes seconds. A Full refresh option checks every board. Switching profiles never
+starts an update.</li>
+<li><strong>Background refresh.</strong> While Scout runs, boards are refreshed in the background: busy boards
+about hourly, quiet boards every six hours or so, spread out instead of in a burst. Turn it off
+with the new Background updates setting.</li>
+<li><strong>Title tags.</strong> Postings are tagged with a level and a job function (director, engineering and so
+on), so “Director, Engineering”, “Engineering Director” and “Dir. of Engineering” are found for a
+“Director of Engineering” profile. Tags come from rules; a model fills in the function for the
+titles your profiles can reach (backfilling the rest is off until you enable it). Titles and
+locations are all a model sees.</li>
+<li><strong>Keyword search.</strong> An optional Keywords field on the search form filters candidates by the text
+of their descriptions (Greenhouse descriptions are now fetched once per board, then only for new
+postings). Postings without stored text are kept and counted.</li>
+<li><strong>Starter snapshot.</strong> Update sources can start from a shared metadata snapshot (companies, titles,
+tags and change markers; no descriptions) so a first update is much faster. Offline or not
+published is quiet; turn it off in Background updates. <code dir="auto">gigai scout snapshot export</code>, <code dir="auto">import</code> and
+<code dir="auto">status</code> manage it.</li>
+</ul>
+<div class="sl-heading-wrapper level-h4"><h4 id="fixed-5">Fixed</h4><a class="sl-anchor-link" href="#fixed-5"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “Fixed”</span></a></div>
+<ul>
+<li><strong>Title matching</strong> matches whole words and ignores filler words and punctuation, so
+“Director, Engineering” matches “Director of Engineering” and “ai” no longer matches “maintain”.</li>
+<li><strong>Rank years.</strong> The posting’s main years-of-experience requirement is read correctly
+(“10+ years … 2+ years managing” is 10; a range is its lower bound). Cached ranks are refreshed
+once.</li>
+</ul>
+<div class="sl-heading-wrapper level-h4"><h4 id="changed-4">Changed</h4><a class="sl-anchor-link" href="#changed-4"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “Changed”</span></a></div>
+<ul>
+<li><strong>Converting a PDF or DOCX resume now needs nothing beyond <code dir="auto">uv</code>.</strong> The
+Quickstart, the Resume page and the <code dir="auto">scout resume add</code> error use
+<code dir="auto">uvx --from 'markitdown[pdf,docx]' markitdown resume.pdf &gt; resume.md</code> instead of
+<code dir="auto">pdftotext</code> or <code dir="auto">textutil</code>, which a stock Mac does not have. <code dir="auto">pdftotext</code>,
+<code dir="auto">pandoc</code> and <code dir="auto">textutil</code> still work if you already have them.</li>
+</ul>
+<div class="sl-heading-wrapper level-h3"><h3 id="01103">0.1.10.3</h3><a class="sl-anchor-link" href="#01103"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “0.1.10.3”</span></a></div>
+<div class="sl-heading-wrapper level-h4"><h4 id="changed-5">Changed</h4><a class="sl-anchor-link" href="#changed-5"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “Changed”</span></a></div>
+<ul>
+<li><strong>The resume PDF no longer leaves large gaps.</strong> It uses a tighter type scale
+(a lighter body weight) and even spacing between every block.</li>
+</ul>
+<div class="sl-heading-wrapper level-h4"><h4 id="added-6">Added</h4><a class="sl-anchor-link" href="#added-6"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “Added”</span></a></div>
+<ul>
+<li><strong>Spacing and Auto fit in Resume display.</strong> A Spacing setting (0.7x to 1.4x)
+and an Auto fit toggle sit in Resume display, with a small live preview. Auto
+fit adjusts spacing only, never font size or margins, to fill the pages it
+already uses. Spacing alone has limits: a resume of about 1.5 pages ends its
+last page around 70% full at best, and content up to about 1.1 pages is pulled
+onto one page.</li>
+</ul>
+<div class="sl-heading-wrapper level-h3"><h3 id="01102">0.1.10.2</h3><a class="sl-anchor-link" href="#01102"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “0.1.10.2”</span></a></div>
+<div class="sl-heading-wrapper level-h4"><h4 id="fixed-6">Fixed</h4><a class="sl-anchor-link" href="#fixed-6"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “Fixed”</span></a></div>
+<ul>
+<li><strong>A new profile can have its own resume.</strong> The new-profile form in Settings
+lets you paste a resume (the default), upload one, or choose an existing one,
+instead of silently reusing the selected profile’s resume. The profiles list
+shows which resume each profile uses and flags two profiles that share one.</li>
+</ul>
+<div class="sl-heading-wrapper level-h3"><h3 id="01101">0.1.10.1</h3><a class="sl-anchor-link" href="#01101"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “0.1.10.1”</span></a></div>
+<div class="sl-heading-wrapper level-h4"><h4 id="fixed-7">Fixed</h4><a class="sl-anchor-link" href="#fixed-7"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “Fixed”</span></a></div>
+<ul>
+<li><strong>The PDF skills section no longer repeats itself.</strong> Your skills show as
+de-duplicated tag chips, and the text is real, selectable text.</li>
+<li><strong>Fewer awkward page breaks in the PDF.</strong> An entry no longer leaves a single
+bullet alone at the top of the next page, and a resume that barely overflows
+one page is fitted onto it.</li>
+<li><strong>The tailored resume text prints a wrapped line once.</strong> A hard-wrapped line
+of your resume is no longer repeated in the <code dir="auto">.md</code> text, the API markdown or
+the stored result, and a resume saved by 0.1.10 renders once too. The list in
+<strong>Show changes</strong> shows a resume saved before this release as it was stored,
+so it may still repeat lines: tailor again to refresh it.</li>
+<li><strong>The reason label in Show changes starts with a lower-case letter</strong>
+(“for a working practice …”), while acronyms such as AWS keep their case.</li>
+</ul>
+<div class="sl-heading-wrapper level-h3"><h3 id="0110">0.1.10</h3><a class="sl-anchor-link" href="#0110"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “0.1.10”</span></a></div>
+<div class="sl-heading-wrapper level-h4"><h4 id="added-7">Added</h4><a class="sl-anchor-link" href="#added-7"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “Added”</span></a></div>
+<ul>
+<li><strong>Your name and contact lines are removed before a model sees your resume.</strong> Before any resume text
+goes to a model, Scout removes the name and contact lines (email, phone,
+address, links); the tailored resume it writes has no header. The <strong>Resume
+display</strong> fields (name, title, contact line) are never sent to a model or
+over the network; they are added only to your PDF, on this machine. It
+cannot catch personal details elsewhere in the text (a first line that holds
+both a title and your name, or contact details inside a sentence), so keep
+those out of the resume body.</li>
+<li><strong>Resume display is easier to find.</strong> It is a step in the setup wizard, a
+row on the Review screen, a section under the profile card in Settings, and
+an <strong>Edit</strong> link next to <strong>Download PDF</strong>.</li>
+<li><strong>Keep original / Use rewrite anyway.</strong> In the tailored resume panel, each
+line can be switched between your original and the rewrite, and the PDF
+follows your choice.</li>
+<li><strong>A calmer first run.</strong> The first-run steps are one compact stepper, a
+disabled button says why once, and the empty state is shorter.</li>
+<li><strong>A “posting text changed” marker.</strong> When a posting’s text changed after
+it was assessed, the job shows “Posting text changed since this assessment:
+re-assess” next to the verdict, which stays visible. A posting whose
+requirement list looks cut off is labelled “Posting text looks incomplete”
+and is not assessed.</li>
+<li><strong>An API and CLI manual for agents.</strong> Scout’s server has a <code dir="auto">GET /api</code> index,
+an OpenAPI 3.1 description at <code dir="auto">/api/openapi.json</code> and <code dir="auto">/llms.txt</code>;
+<code dir="auto">GET /api/jobs?url=</code> returns one job with everything known about it; an
+<code dir="auto">unknown_key</code> error names the allowed top-level keys. <code dir="auto">gigai agent-context</code>
+prints the CLI manual (<code dir="auto">--json</code> for the machine-readable form).</li>
+<li><strong>A public docs site</strong> at <a href="https://karthik446.github.io/gigai/">https://karthik446.github.io/gigai/</a> (quickstart,
+concepts, CLI and API reference, changelog), and a short README that links
+to it.</li>
+</ul>
+<div class="sl-heading-wrapper level-h4"><h4 id="changed-6">Changed</h4><a class="sl-anchor-link" href="#changed-6"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “Changed”</span></a></div>
+<ul>
+<li><strong>Tailoring keeps your lines as written.</strong> It copies your resume lines
+verbatim by default. A rewrite needs a stated reason and must keep every
+number, named technology, scope word and ownership verb of the lines it
+comes from; otherwise your original line is kept. Resumes aim for at most two
+pages; roles older than about eight years keep at most three bullets, and
+bullets are dropped whole, never shortened.</li>
+<li><strong>The personal-info warning</strong> now says your name and contact lines are
+removed before a model sees the resume, and what it cannot catch.</li>
+<li><strong>Downgrade note.</strong> Tailored resumes written by 0.1.10 do not appear in the
+list of an older version after a downgrade. They are not corrupted and
+return after upgrading again.</li>
+<li><strong>The PDF layout is tidier.</strong> Spacing is more even, lines wrapped in your
+resume text are joined, and skills and summary read as paragraphs.</li>
+<li><strong><code dir="auto">gigai scout run</code> frees the port from an older Scout.</strong> If an older Scout
+server (including 0.1.9.x) is verifiably holding the port, it is stopped
+and <code dir="auto">gigai scout run --json</code> reports it as <code dir="auto">stopped_server</code>. A process that
+is not Scout is left alone.</li>
+</ul>
+<div class="sl-heading-wrapper level-h4"><h4 id="fixed-8">Fixed</h4><a class="sl-anchor-link" href="#fixed-8"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “Fixed”</span></a></div>
+<ul>
+<li><strong><code dir="auto">gigai scout resume add</code> works as the first command</strong> on a fresh
+machine, without running <code dir="auto">gigai setup</code> first.</li>
+</ul>
+<div class="sl-heading-wrapper level-h3"><h3 id="0191">0.1.9.1</h3><a class="sl-anchor-link" href="#0191"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “0.1.9.1”</span></a></div>
+<div class="sl-heading-wrapper level-h4"><h4 id="added-8">Added</h4><a class="sl-anchor-link" href="#added-8"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “Added”</span></a></div>
+<ul>
+<li><strong>Download PDF for tailored resumes.</strong> The tailored resume panel downloads a
+PDF. A new <strong>Resume display</strong> section on the profile page holds your name, a
+title per profile and a contact line; they are stored only on this machine
+and added to the PDF locally. GigAI now depends on Typst to draw the PDF;
+Alpine/musl Linux is not supported.</li>
+<li><strong>A personal-info warning wherever a resume is added</strong> (the setup wizard,
+Assessments paste, Settings &gt; Profiles and <code dir="auto">gigai scout resume add</code>), and a
+local heads-up when the text contains an email address, phone number, link
+or street address.</li>
+</ul>
+<div class="sl-heading-wrapper level-h4"><h4 id="changed-7">Changed</h4><a class="sl-anchor-link" href="#changed-7"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “Changed”</span></a></div>
+<ul>
+<li><strong>Codex and Claude CLI calls run locked down.</strong> Codex runs with its shell
+tool and memories disabled; Claude runs with its settings, MCP servers and
+tools turned off. Your installed Codex or Claude must support these flags,
+or the call fails with a message to upgrade it.</li>
+<li><strong>Download .md is replaced by Download PDF</strong> in the tailored resume panel.</li>
+</ul>
+<div class="sl-heading-wrapper level-h3"><h3 id="019">0.1.9</h3><a class="sl-anchor-link" href="#019"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “0.1.9”</span></a></div>
+<div class="sl-heading-wrapper level-h4"><h4 id="added-9">Added</h4><a class="sl-anchor-link" href="#added-9"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “Added”</span></a></div>
+<ul>
+<li><strong>Ranking on your own model.</strong> Find-jobs ranks the postings that pass your
+filters with the model target you already use, as a step of the run (up to
+a per-run limit on model calls; postings past it keep date order). Results
+stream into the grid as batches finish, with live progress (“Ranked 350 of
+1,458”), and the run’s 500-posting import keeps the best-ranked postings
+instead of the newest. The order is “likely fits first, likely no-matches
+last”; postings with a hard blocker (no sponsorship, citizenship,
+clearance) move down and are never hidden. If ranking cannot run, the
+search falls back to date order and still assesses.</li>
+<li><strong>Rank / Re-rank</strong> a run from its page. A re-rank is its own record, so you
+can see, resume or cancel it, and it does not appear in your run list.</li>
+<li><strong>Work mode and location filters.</strong> Choose Remote, Hybrid + an area,
+Onsite + an area, or Any. The mode comes from the job board’s own field
+when there is one, else from the location text (labelled as derived);
+postings whose mode cannot be told are kept and labelled.</li>
+<li><strong>Assess button</strong> on run postings that were not assessed, on the job page.</li>
+<li><strong>Assess all new.</strong> A finished run has an <strong>Assess all new</strong> button that
+assesses every new posting the run did not assess, in the background, four
+at a time; you can cancel it and click again to resume without redoing
+finished ones, and the counts and cards update as results land. The run
+dialog’s “Full assessments” now offers <strong>All new postings</strong>, the starting
+choice for the Codex, Claude and Ollama targets (OpenRouter starts on a
+number). A time estimate is shown only when a per-call time has been
+measured. Codex and Claude CLI runs use your own CLI login and its usage limits
+(Scout passes them no API key); a hosted
+target sends each posting’s assessment to that provider.</li>
+<li><strong>Tailored resume “Show changes”.</strong> The tailored resume shows each rewritten
+line with the original line(s) it came from struck through above it, the
+new words highlighted, and a summary of lines rewritten and copied and
+“New words (not in the cited lines)”. A <strong>Clean copy</strong> toggle shows the
+resume as formatted text; the downloaded <code dir="auto">.md</code> is unchanged.</li>
+<li><strong>Questions first</strong> on the job page: your open questions sit at the top,
+with the requirements table collapsed below.</li>
+<li><strong>Per-skill requirement rows.</strong> A requirement that joins unrelated skills
+in one bullet is split into one row and one question per skill; related
+stacks (“Java + Spring Boot”) and alternatives (“Python or Kotlin”) stay
+one row.</li>
+<li><strong>Pages of results.</strong> The jobs grid loads a run’s postings a page at a
+time, about 50 cards per page.</li>
+<li><strong>Work mode, pay and H-1B chips</strong> on job cards and the job page; a posting
+that does not state sponsorship says “Sponsorship not stated”.</li>
+<li><strong>Every job has one state</strong>, and <strong>Applications</strong> shows the jobs you have
+applied to and beyond. <strong>Assessments</strong> lists the assessments you ran on
+demand. The app has a top bar with a page for each, and breadcrumbs.</li>
+<li><strong>Company index and Update sources.</strong> <code dir="auto">gigai scout sources update</code> (or
+<strong>Update sources</strong> in Settings) stores every watchlist company’s postings
+locally, so a search reads the store in seconds instead of fetching boards.
+Only companies Exa newly finds during a search are fetched then, at most 20
+per search. Acquire rotates through the shipped company catalog, least
+recently fetched first.</li>
+<li><strong>Profiles.</strong> Keep several resumes and preferences as profiles; runs,
+assessment, discovery and the CLI use the selected one.
+<code dir="auto">gigai scout resume add</code> stores a resume; <code dir="auto">gigai scout resume tailor</code> (and
+the job page) produce a tailored resume for a posting.</li>
+<li><strong>Setup and discovery.</strong> A setup interview in the Scout UI, a Discover
+panel and <code dir="auto">gigai scout discover</code> propose companies to watch. Interview prep
+(<code dir="auto">gigai scout prep</code>) is hidden in this release until it has been tested.</li>
+<li><strong>One-command Scout.</strong> <code dir="auto">gigai scout install</code>, <code dir="auto">gigai scout run</code>, <code dir="auto">stop</code> and
+<code dir="auto">status</code>, <code dir="auto">gigai gig use</code>, and <code dir="auto">gigai secrets add|list|rm</code> (stores API keys
+locally; the Exa key is read from there).</li>
+<li><strong>Claude as a model target.</strong> Scout can rank and assess with Claude (the
+<code dir="auto">claude</code> CLI on your PATH), offered as “Claude (claude CLI)” wherever a
+model target is chosen; Codex or Claude is the one model target Scout
+needs. Assessments run Claude Code’s default model.</li>
+<li><strong>Tailored resumes are drafts.</strong> Review each line; every line shows its
+sources. Two confirming live runs on the release candidate (155 and 151
+lines) found no fabricated facts once one judge-flagged plural (“Kubernetes
+platforms” for the source’s “Kubernetes platform”) was reviewed as a wording
+difference, not a new fact; each run had 1 minor precision flag (0.6% and
+0.66% of lines).</li>
+</ul>
+<div class="sl-heading-wrapper level-h4"><h4 id="changed-8">Changed</h4><a class="sl-anchor-link" href="#changed-8"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “Changed”</span></a></div>
+<ul>
+<li><strong>A clearer README.</strong> A numbered Quickstart (requirements, a resume with your
+personal info removed, install, run), a Roadmap / TODO with known
+limitations, and privacy wording that no longer promises contact lines are
+stripped from ranking.</li>
+<li><strong><code dir="auto">gigai scout run</code> sets itself up.</strong> On a new machine it writes GigAI’s
+settings with the defaults <code dir="auto">gigai setup</code> offers, then starts Scout; no
+separate <code dir="auto">gigai setup</code> step. An existing config is never changed.</li>
+<li><strong>Full assessments wording.</strong> The run dialog’s cap is “Full assessments” with
+a line saying every matching posting is ranked; postings past the limit are
+labelled “Not fully assessed” (use Assess to assess one), and Settings says
+“Default full assessments”. A saved “all” shows as “All new postings”.</li>
+<li><strong>Tailoring status sits next to the Tailor button</strong> with the model name and
+a running timer, and points to the result or the error when it finishes.
+The requirements table on the job page is always open.</li>
+<li><strong>The setup wizard saves your model choice as the default model target.</strong> The one
+“Model for Scout” choice reads your resume and is also the model your runs use
+(change it later in Settings or in a run’s dialog). An existing setup keeps
+every other saved value.</li>
+<li><strong>Exa is off for a new setup.</strong> A new <code dir="auto">find-jobs.json</code> (the starter file or
+the first setup save) starts with Exa off, so searches use the bundled
+company list and stored boards and a model target is the only requirement.
+Settings has a “Search sources” toggle, “Also search the open web with Exa
+(needs an Exa key)”, after <code dir="auto">gigai secrets add exa</code>; the setup wizard no
+longer mentions an Exa key while Exa is off. An existing config keeps the
+Exa setting it saved.</li>
+<li>Assessing a job by URL reads a company-careers link’s text from the job
+board’s own posting (Greenhouse <code dir="auto">gh_jid</code> links), and a page whose text has
+no readable requirements is now reported as “couldn’t read this posting’s
+requirements” instead of being called a match.</li>
+<li>Tailored resumes resolve board postings the same way.</li>
+<li>Scout always lives in <code dir="auto">&lt;home&gt;/scout</code>, whichever folder you run it from.</li>
+<li>The setup wizard stores your resume itself and finishes without the CLI; a
+new profile never rewrites the selected one; <code dir="auto">resume add</code> accepts any file
+name.</li>
+<li><code dir="auto">gigai scout run</code> stops an older project’s Scout server that holds the
+port, and restarts a server left running old code.</li>
+<li>Run pages open in a fraction of a second, and the grid renders from the
+first page.</li>
+<li>The local Scout API rejects cross-site write requests.</li>
+<li>What Scout sends to a model is now stated in the README: ranking sends
+one-line posting digests and a compact resume digest (digest-v3: titles,
+skills, domain and years, no header or contact details); assessment sends
+the posting and your resume; with a local Ollama target nothing leaves the
+machine.</li>
+</ul>
+<div class="sl-heading-wrapper level-h4"><h4 id="fixed-9">Fixed</h4><a class="sl-anchor-link" href="#fixed-9"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “Fixed”</span></a></div>
+<ul>
+<li><strong>Lever postings keep their requirements.</strong> When Lever’s plain text is cut
+down, Scout now uses the full HTML description (about 2% of Lever postings).
+The first Update sources after upgrading re-reads every Lever company once
+from the local cache; postings whose text grew show as changed.</li>
+<li>An assessment of a long posting that finds fewer than 3 real requirement
+rows is no longer reported as Matched: it is not assessed, with “Posting text
+looks incomplete: open the posting”.
+Known limit: an assessment saved before this fix stays as it was until you
+click Assess again.</li>
+<li>The tailored resume preview no longer shows doubled heading markers
+(“### ### EXAMPLE CORP”).</li>
+</ul>
+<p>Known limit: choosing “All new postings” in the run dialog is not written back
+to <code dir="auto">find-jobs.json</code>; set <code dir="auto">"default_assess_cap": "all"</code> there to make it the
+saved default.</p>
+<div class="sl-heading-wrapper level-h4"><h4 id="removed">Removed</h4><a class="sl-anchor-link" href="#removed"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “Removed”</span></a></div>
+<ul>
+<li><strong>Jev ranking</strong> — its settings, budget, usage and the “Score with Jev”
+actions are gone, and nothing calls Jev any more. <code dir="auto">gigai secrets add jev</code>
+now fails because <code dir="auto">jev</code> is no longer a known service. A Jev key you
+stored earlier stays on disk, untouched and unused, and so does any old
+Jev score cache.</li>
+</ul>
+<div class="sl-heading-wrapper level-h3"><h3 id="0181">0.1.8.1</h3><a class="sl-anchor-link" href="#0181"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “0.1.8.1”</span></a></div>
+<ul>
+<li>Assess now sends the model the real posting text and a real assessment
+prompt (with the output schema and examples) instead of the title alone.</li>
+<li>Assess tolerates sloppy model output (normalizes odd field shapes) and
+isolates a bad answer to that one posting instead of failing the whole
+run; when a posting can’t be assessed, the recorded cause explains why.</li>
+<li>Raw Exa and applicant-tracking-board responses are now stored per run for
+debugging and as test fixtures.</li>
+<li>Acquire applies an explicit country filter and prefers a job board’s own
+posting over an Exa search result for the same job.</li>
+<li>Adds a visa-sponsorship filter to find-jobs.</li>
+<li>Adds search and filters to the Scout UI.</li>
+<li>Fixes the release pipeline: the GitHub Release now publishes right after
+PyPI, and PyPI/TestPyPI clean-install checks run as non-blocking
+post-publish checks with a bounded wait for the index instead of racing
+it.</li>
+</ul>
+<div class="sl-heading-wrapper level-h3"><h3 id="018">0.1.8</h3><a class="sl-anchor-link" href="#018"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “0.1.8”</span></a></div>
+<ul>
+<li>Adds Scout’s <code dir="auto">find-jobs</code> workflow, GigAI’s first shipped Gig: acquire public
+postings from Exa search and the Greenhouse/Lever/Ashby applicant-tracking
+boards through an auto-managed watchlist; assess each posting with a
+requirements-by-resume matrix that surfaces suggestions and open questions,
+defaulting to a local model with explicit hosted-model targets available;
+and present results through a localhost API and Vite UI that asks for
+explicit consent before any network call or hosted-model use.</li>
+<li>Moves the Scout package to <code dir="auto">gigai.scout</code> so it imports and packages as a
+self-contained Gig built on GigAI core. Core still imports Scout in places;
+removing those so core never imports a Gig is planned for v0.1.9.</li>
+<li>Reorganizes the test suite into behavior-grouped directories (S11) with a
+<code dir="auto">make test</code> runner that separates source, behavior, and wheel-resource
+suites.</li>
+<li>Fixes release CI’s setup verifier and workflow model-target wiring, and adds
+an interpreter safety guard to the wheel-resource test lane.</li>
+</ul>
+<div class="sl-heading-wrapper level-h3"><h3 id="017">0.1.7</h3><a class="sl-anchor-link" href="#017"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “0.1.7”</span></a></div>
+<ul>
+<li>Adds the bundled Scout authoring source, local record workflow, bounded public
+acquisition import, and rebuildable local report surface.</li>
+<li>Adds resumable interview and private-transfer preparation plus a local runtime
+comparison workflow with explicit synthetic/offline boundaries.</li>
+</ul>
+<div class="sl-heading-wrapper level-h3"><h3 id="015">0.1.5</h3><a class="sl-anchor-link" href="#015"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “0.1.5”</span></a></div>
+<ul>
+<li>Adds a browser-first local setup flow for GigAI’s private workspace,
+workpads, model choices, and machine-wide role defaults.</li>
+<li>Adds adaptive Gig-definition interviews that turn an operator’s intent and
+selected local context into a reviewable proposal before approval.</li>
+<li>Adds explicit proposal feedback, revision, approval, rejection, Run
+inspection, and recurring/comparison command flows around local Gig state.</li>
+<li>Keeps the workpad, proposal history, approved versions, and review evidence
+under the operator’s selected local home.</li>
+</ul>
+<div class="sl-heading-wrapper level-h3"><h3 id="014">0.1.4</h3><a class="sl-anchor-link" href="#014"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “0.1.4”</span></a></div>
+<ul>
+<li>Adds the model-facilitated Gig builder for UAT: GigAI can guide an operator
+through a Gig definition, ask bounded adaptive follow-up questions, build a
+reviewable proposal, and require explicit approval before sealing it.</li>
+<li>This release is an alpha UAT candidate; configured live model families and
+real operator workflows remain subject to the G24/G26 UAT gate.</li>
+</ul>
+<div class="sl-heading-wrapper level-h3"><h3 id="013">0.1.3</h3><a class="sl-anchor-link" href="#013"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “0.1.3”</span></a></div>
+<p>Release-specific capability notes will be reconciled from the G12 release
+evidence and the verified capability inventory.</p>
+<div class="sl-heading-wrapper level-h2"><h2 id="deferred-and-not-advertised">Deferred and not advertised</h2><a class="sl-anchor-link" href="#deferred-and-not-advertised"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “Deferred and not advertised”</span></a></div>
+<p>This section records capability families that research or implementation
+documents explicitly do not advertise as shipped. It prevents a feasibility
+spike or roadmap item from becoming an external support claim by implication.</p>
+</div><footer class="sl-flex astro-ddtxxk7k"><div class="meta sl-flex astro-ddtxxk7k"><a href="https://github.com/karthik446/gigai/edit/main/gigai-docs/src/content/docs/changelog.md" class="sl-flex print:hidden astro-qlekgd3o"><svg aria-hidden="true" class="astro-qlekgd3o astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.2em;"><path d="M22 7.24a1 1 0 0 0-.29-.71l-4.24-4.24a1 1 0 0 0-1.1-.22 1 1 0 0 0-.32.22l-2.83 2.83L2.29 16.05a1 1 0 0 0-.29.71V21a1 1 0 0 0 1 1h4.24a1 1 0 0 0 .76-.29l10.87-10.93L21.71 8c.1-.1.17-.2.22-.33a1 1 0 0 0 0-.24v-.14l.07-.05ZM6.83 20H4v-2.83l9.93-9.93 2.83 2.83L6.83 20ZM18.17 8.66l-2.83-2.83 1.42-1.41 2.82 2.82-1.41 1.42Z"/></svg>Edit page</a></div><div class="pagination-links print:hidden astro-b5raizh3" dir="ltr"><a href="/gigai/0.1.10.9/scout/reference/api/operations/put_api_setup/" rel="prev" class="astro-b5raizh3"><svg aria-hidden="true" class="astro-b5raizh3 astro-hkc32dio" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.5rem;"><path d="M17 11H9.41l3.3-3.29a1.004 1.004 0 1 0-1.42-1.42l-5 5a1 1 0 0 0-.21.33 1 1 0 0 0 0 .76 1 1 0 0 0 .21.33l5 5a1.002 1.002 0 0 0 1.639-.325 1 1 0 0 0-.219-1.095L9.41 13H17a1 1 0 0 0 0-2Z"/></svg><span class="astro-b5raizh3">Previous<br class="astro-b5raizh3"><span class="link-title astro-b5raizh3">Save preferences and derive the config</span></span></a></div></footer></div></div></main></div></div></div></div></body></html>
