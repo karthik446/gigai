@@ -27,6 +27,14 @@ file the user changed, or one GigAI did not write, is left alone and the new fil
 free name (``...-2.md``).  A job has one markdown: a newer one replaces the older one GigAI
 wrote.  PDFs are kept; the same name is written again only over GigAI's own untouched file.
 
+**The master resume's file** (0.1.10.9 master P8).  ``master.md`` is the stored master, written
+again after every change of it (``save_master``).  The same rule holds: when ``master.md`` is
+not exactly what GigAI last wrote there (the user edited it and has not imported the edit yet),
+it is left alone and the new revision is written beside it (``master-2.md``).  The index keeps,
+for ``master.md``, the revision GigAI last wrote into it, so ``master_file`` can say "changes
+not imported yet" and an import can tell which revision the edit was made on.  One more file may
+be replaced: one whose bytes GigAI has just imported at the user's request (``imported``).
+
 Nothing here calls a model or the network.  Errors name a rule, never a resume's text.
 """
 
@@ -58,6 +66,14 @@ SOURCE_SETTING = "setting"
 
 MARKDOWN = ".md"
 PDF = ".pdf"
+
+#: The master resume's file in the folder, and what names it in the index.
+MASTER_NAME = "master.md"
+MASTER_KEY = "master"
+#: ``master.md`` against what GigAI last wrote there: not in the folder, exactly that, or anything else.
+MASTER_MISSING = "missing"
+MASTER_CURRENT = "current"
+MASTER_CHANGED = "changed"
 
 #: A folder path's length bound (the setting is one line of text).
 MAX_PATH_CHARS = 1024
@@ -278,10 +294,19 @@ def _load_index(home_root: Path, folder: Path) -> dict[str, dict[str, object]]:
     if type(files) is not dict:
         return {}
     return {
-        name: {"sha256": entry.get("sha256"), "key": entry.get("key")}
+        name: _index_entry(entry)
         for name, entry in files.items()
         if isinstance(name, str) and type(entry) is dict and isinstance(entry.get("sha256"), str)
     }
+
+
+def _index_entry(entry: dict[str, object]) -> dict[str, object]:
+    """One file's index entry: its digest and key, and for the master's files the revision written into it."""
+
+    kept: dict[str, object] = {"sha256": entry.get("sha256"), "key": entry.get("key")}
+    if type(entry.get("revision")) is int and isinstance(entry.get("revision_id"), str):
+        kept["revision"], kept["revision_id"] = entry["revision"], entry["revision_id"]
+    return kept
 
 
 def _save_index(home_root: Path, folder: Path, files: dict[str, dict[str, object]]) -> None:
@@ -425,6 +450,153 @@ def job_files(home_root: Path, key: str) -> dict[str, str | None]:
     return found
 
 
+# --- the master resume's file (0.1.10.9 master P8) -------------------------------------------
+
+
+@dataclass(frozen=True)
+class MasterFile:
+    """``master.md`` in the resumes folder, against what GigAI last wrote there."""
+
+    path: Path
+    #: ``missing``, ``current`` (exactly what GigAI last wrote) or ``changed`` (edited since, or never GigAI's).
+    state: str
+    #: The master revision GigAI last wrote into ``master.md`` (its number and id); ``None`` when it never did.
+    revision: int | None = None
+    revision_id: str | None = None
+    #: The digest of the file's bytes now (``None`` when it is missing or not a plain file).
+    sha256: str | None = None
+    #: GigAI's own file beside ``master.md`` that holds a newer revision while ``master.md`` has changes not imported.
+    beside: Path | None = None
+    #: ``save_master``: whether this call wrote bytes (``False`` when the file already held them).
+    written: bool = False
+
+    @property
+    def name(self) -> str:
+        return self.path.name
+
+    @property
+    def shown(self) -> str:
+        return _display_path(self.path)
+
+    def to_json(self) -> dict[str, object]:
+        return {
+            "name": self.name, "path": self.shown, "state": self.state, "not_imported": self.state == MASTER_CHANGED,
+            "revision": self.revision, "beside": self.beside.name if self.beside is not None else None,
+        }
+
+
+def _digest_of(path: Path) -> str | None:
+    try:
+        return digest_imported_bytes(path.read_bytes()) if not path.is_symlink() and path.is_file() else None
+    except OSError:
+        return None
+
+
+def _master_entry(files: dict[str, dict[str, object]], name: str = MASTER_NAME) -> dict[str, object] | None:
+    entry = files.get(name)
+    return entry if entry is not None and entry["key"] == MASTER_KEY else None
+
+
+def _master_besides(files: dict[str, dict[str, object]]) -> list[str]:
+    """The index's names of the files GigAI wrote beside ``master.md`` (``master-2.md``, ...)."""
+
+    return sorted(name for name, entry in files.items() if entry["key"] == MASTER_KEY and name != MASTER_NAME and _is_numbered(name, MASTER_NAME))
+
+
+def master_file(home_root: Path) -> MasterFile:
+    """How ``master.md`` stands in the resumes folder.  Reads only (the index and the one file's bytes)."""
+
+    home_root = Path(home_root)
+    folder = resumes_folder(home_root).path
+    path = folder / MASTER_NAME
+    files = _load_index(home_root, folder)
+    entry = _master_entry(files) or {}
+    revision, revision_id = entry.get("revision"), entry.get("revision_id")
+    beside = next((folder / name for name in _master_besides(files) if _untouched(folder / name, files[name]["sha256"])), None)
+    known = {"revision": revision if type(revision) is int else None, "revision_id": revision_id if isinstance(revision_id, str) else None, "beside": beside}
+    if not path.is_symlink() and not path.exists():
+        return MasterFile(path, MASTER_MISSING, **known)  # type: ignore[arg-type]
+    digest = _digest_of(path)
+    state = MASTER_CURRENT if digest is not None and digest == entry.get("sha256") else MASTER_CHANGED
+    return MasterFile(path, state, sha256=digest, **known)  # type: ignore[arg-type]
+
+
+def save_master(home_root: Path, *, markdown: str, text: str, revision: int, revision_id: str, imported: str | None = None) -> MasterFile:
+    """Write the stored master's ``markdown`` (revision ``revision``) into the resumes folder; how the file stands after.
+
+    ``master.md`` is written when it is not there, when it is exactly what GigAI last wrote, or
+    when its bytes are ``imported`` (the digest of the file GigAI has just imported at the user's
+    request).  Otherwise it holds changes GigAI did not write: it is left alone, and the markdown
+    goes beside it as ``master-2.md`` (GigAI's own; the next write replaces it), state
+    ``changed``.  Once ``master.md`` is written again, GigAI's beside file is removed.  ``text``
+    is what the file says without its id comments: a contact shape in it is refused,
+    ``contact_data_found``.  Raises ``ResumesFolderError``.
+    """
+
+    found = detect_contact_details(text)
+    if found:
+        raise ResumesFolderError(
+            "contact_data_found",
+            f"the master resume holds contact details ({', '.join(found)}); GigAI's resumes folder never holds them",
+        )
+    home_root = Path(home_root)
+    folder = resumes_folder(home_root).path
+    _make_folder(folder)
+    data = markdown.encode("utf-8")
+    digest = digest_imported_bytes(data)
+    stamp: dict[str, object] = {"sha256": digest, "key": MASTER_KEY, "revision": revision, "revision_id": revision_id}
+    try:
+        with _folder_lock(folder):
+            files = _load_index(home_root, folder)
+            before = {name: dict(entry) for name, entry in files.items()}
+            path = folder / MASTER_NAME
+            entry = _master_entry(files)
+            free = not path.is_symlink() and not path.exists()
+            mine = entry is not None and _untouched(path, entry["sha256"])
+            asked = imported is not None and _untouched(path, imported)
+            besides = _master_besides(files)
+            if free or mine or asked:
+                written = not _untouched(path, digest)
+                if written:
+                    atomic_write(path, data)
+                files[MASTER_NAME] = stamp
+                for name in besides:
+                    if _untouched(folder / name, files[name]["sha256"]):
+                        (folder / name).unlink()
+                    del files[name]  # removed, or changed by the user: theirs now
+                result = MasterFile(path, MASTER_CURRENT, revision, revision_id, digest, None, written)
+            else:
+                # master.md holds changes GigAI did not write (or was never GigAI's): never replaced.
+                chosen: str | None = None
+                for name in besides:
+                    if chosen is None and _untouched(folder / name, files[name]["sha256"]):
+                        chosen = name
+                    elif not _untouched(folder / name, files[name]["sha256"]):
+                        del files[name]
+                for attempt in range(2, _MAX_NAME_TRIES + 1):
+                    if chosen is not None:
+                        break
+                    candidate = folder / _numbered(MASTER_NAME, attempt)
+                    if not candidate.is_symlink() and not candidate.exists():
+                        chosen = candidate.name
+                if chosen is None:
+                    raise ResumesFolderError("folder_unwritable", "the resumes folder has no free file name for the master resume")
+                target = folder / chosen
+                written = not _untouched(target, digest)
+                if written:
+                    atomic_write(target, data)
+                files[chosen] = stamp
+                result = MasterFile(
+                    path, MASTER_CHANGED, entry.get("revision") if entry else None, entry.get("revision_id") if entry else None,  # type: ignore[arg-type]
+                    _digest_of(path), target, written,
+                )
+            if files != before:
+                _save_index(home_root, folder, files)
+            return result
+    except OSError as exc:
+        raise ResumesFolderError("folder_unwritable", "the master resume could not be written into the resumes folder") from exc
+
+
 def sync_tailored(home_root: Path, target: Path) -> int:
     """Write the markdown of every stored tailored resume that was never put in the folder; how many were written.
 
@@ -458,7 +630,13 @@ def sync_tailored(home_root: Path, target: Path) -> int:
 __all__ = [
     "INDEX_SCHEMA",
     "MARKDOWN",
+    "MASTER_CHANGED",
+    "MASTER_CURRENT",
+    "MASTER_KEY",
+    "MASTER_MISSING",
+    "MASTER_NAME",
     "MAX_PATH_CHARS",
+    "MasterFile",
     "PDF",
     "RESPONSE_SCHEMA",
     "SETTING_SCHEMA",
@@ -472,10 +650,12 @@ __all__ = [
     "index_path",
     "job_files",
     "job_key",
+    "master_file",
     "readable_markdown",
     "resumes_folder",
     "save",
     "save_markdown",
+    "save_master",
     "save_pdf",
     "set_resumes_folder",
     "setting_path",

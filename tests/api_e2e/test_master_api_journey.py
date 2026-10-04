@@ -85,7 +85,8 @@ def test_the_master_resume_over_http(tmp_path: Path, monkeypatch: pytest.MonkeyP
 
         # --- no master yet: a state, not an error ---------------------------------------------------
         empty = client.get("/api/master")
-        assert empty.status_code == 200 and empty.json() == {"schema_version": "scout-master:1", "master": None, "current_revision": None, "profiles": [], "shown_by": {}}
+        without_file = {key: value for key, value in empty.json().items() if key != "file"}  # P8's `file`: test_master_file_journey.py
+        assert empty.status_code == 200 and without_file == {"schema_version": "scout-master:1", "master": None, "current_revision": None, "profiles": [], "shown_by": {}}
         assert empty.headers["X-GigAI-Labels"] == "user-private"
         assert client.get("/api/master/history").json() == {"schema_version": "scout-master-history:1", "revision": None, "revisions": [], "retired": []}
         assert client.get("/api/master/selection").json() == {"schema_version": "scout-master-selection:1", "master": None, "profiles": [], "pending": []}

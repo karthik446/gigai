@@ -127,6 +127,8 @@ def migration_payload(result) -> dict[str, object]:  # noqa: ANN001 - a master_p
         "profiles": profiles,
         # What the privacy strip left out of a resume (the profile, the kind, the line number; never a value), or null.
         "contact_removed": [{"profile": label, "kind": kind, "line": line} for label, kind, line in result.contact_removed] or None,
+        # P8: where the master went in the resumes folder (null when nothing was written).
+        "file": dict(result.written.file) if result.written is not None and result.written.file is not None else None,
     }
 
 
@@ -189,6 +191,11 @@ def run_migration(
             )
     for label, kind, line in result.contact_removed:
         click.echo(f"Not imported from the resume of {label}: line {line} ({kind.replace('_', ' ')}).")
+    if payload["file"] is not None:
+        from .master_file import write_line
+
+        file = payload["file"]
+        click.echo(write_line(file) or f"It is also in your resumes folder: {file['path']}.")  # type: ignore[index,arg-type]
     if result.status != "dry_run":
         click.echo("Next: `gigai scout resume master show`, then `gigai scout resume master selection status`.")
 

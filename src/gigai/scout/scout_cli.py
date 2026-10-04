@@ -1059,7 +1059,9 @@ def status_command(target_value: Path | None, home_value: Path | None, as_json: 
     from . import resumes_folder
 
     folder = resumes_folder.resumes_folder(home_root)
-    payload = {"ok": True, **current.to_json(), "resumes_folder": folder.to_json()}
+    # 0.1.10.9 master P8: how the master resume's file in that folder stands (the index and one digest; no journal read).
+    master_file = resumes_folder.master_file(home_root)
+    payload = {"ok": True, **current.to_json(), "resumes_folder": folder.to_json(), "master_file": master_file.to_json()}
     if as_json:
         _emit(payload, True, "")
         return
@@ -1076,6 +1078,8 @@ def status_command(target_value: Path | None, home_value: Path | None, as_json: 
     else:
         click.echo("stopped")
     click.echo(f"Resumes folder: {folder.shown}")
+    if master_file.state == resumes_folder.MASTER_CHANGED:
+        click.echo(f"{master_file.name} has changes not imported yet ({master_file.shown}). Import them: `gigai scout resume master sync`.")
     for other in current.other_servers:
         click.echo(
             f"The Scout server for {_other_server_label(other)} is running at {other.url} "

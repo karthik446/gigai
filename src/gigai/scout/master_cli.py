@@ -114,6 +114,7 @@ def master_show_command(
 
     from .master_edit import entry_json, item_json, provenance
     from .master_edit_cli import show_retired
+    from .master_file import file_status, status_line
     from .master_resume import MASTER_FORMAT, SECTION_HEADINGS
     from .master_store import MasterStoreError, load_master
 
@@ -137,6 +138,8 @@ def master_show_command(
             raise MasterStoreError("master_entry_not_found", f"the master has no entry {entry_id!r}")
         # P6: who wrote a line's text and where its evidence came from (null where that is not known).
         known = provenance(home_root=home_root, target=target, master=master)
+        # P8: how master.md in the resumes folder stands against the stored master (the current one, also for --revision).
+        file = file_status(home_root, stored if revision is None else load_master(home_root=home_root, target=target))
     except _errors() as exc:
         _fail(exc, as_json=as_json)
         return
@@ -155,6 +158,7 @@ def master_show_command(
                 "revisions": stored.revisions,
                 "entries": [entry_json(entry, known) for entry in entries], "items": [item_json(item, known) for item in items],
             },
+            "file": file,
         })
         return
     counts = master.counts()
@@ -183,6 +187,9 @@ def master_show_command(
                 click.echo(f"    {line(item)}")
         for item in (item for item in items if item.section == name and item.entry_id is None):
             click.echo(f"  {line(item)}")
+    said = status_line(file)
+    if said:
+        click.echo(f"\n{said}")
 
 
 @master_group.command("init")
@@ -223,6 +230,7 @@ def master_init_command(
     """
 
     from . import scout_cli
+    from .master_file import write_line
     from .master_profiles_cli import after_master_write, echo_after_master_write, run_migration
     from .master_store import MasterStoreError, import_master
 
@@ -260,6 +268,8 @@ def master_init_command(
         # What the privacy strip took out (kinds and line numbers, never a value), or null.
         "contact_removed": removed,
         "profiles": profiles,
+        # P8: where the revision went in the resumes folder (null when nothing was written).
+        "file": dict(result.file) if result.file is not None else None,
     }
     if as_json:
         _emit(payload)
@@ -275,6 +285,9 @@ def master_init_command(
     if removed is not None:
         where = ", ".join(f"line {line}: {kind.replace('_', ' ')}" for kind, line in result.contact_removed.lines)
         click.echo(f"{removed['message']} Not imported: {where}.")
+    said = write_line(result.file)
+    if said:
+        click.echo(said)
     echo_after_master_write(profiles)
     click.echo("Next: `gigai scout resume master show`.")
 
@@ -553,6 +566,8 @@ def selection_show_command(
 from . import master_profiles_cli as _master_profiles_cli  # noqa: E402,F401
 # P6: `add`, `edit` and `remove` do the same.
 from . import master_edit_cli as _master_edit_cli  # noqa: E402,F401
+# P8: `sync` too.
+from . import master_file_cli as _master_file_cli  # noqa: E402,F401
 
 __all__ = [
     "master_group", "master_history_command", "master_init_command", "master_show_command", "selection_group", "selection_show_command",

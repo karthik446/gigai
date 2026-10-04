@@ -6,6 +6,7 @@ import {
   postMasterEntry,
   postMasterLine,
   postMasterMigration,
+  postMasterSync,
   putMasterEntry,
   putMasterLine,
 } from "../api.js";
@@ -19,7 +20,11 @@ import {
   conflictOf,
   entryWhen,
   errorText,
+  fileLine,
+  fileWriteLine,
   historyRows,
+  importAnywayOf,
+  leftOutRows,
   masterSections,
   migrationState,
   migrationSummary,
@@ -28,7 +33,9 @@ import {
   retiredRows,
   revisionLine,
   shownByLabel,
+  sourceLinesLine,
   strengthMark,
+  syncLine,
 } from "../masterModel.js";
 import { SETTINGS_HASH } from "../routing.js";
 
@@ -44,6 +51,10 @@ import { SETTINGS_HASH } from "../routing.js";
 // With no master yet the page is the MIGRATION: the master is built from
 // the resumes the profiles hold, and two versions of a line that state
 // different numbers are asked about before anything is written.
+//
+// P8: the master is also a file in the resumes folder (master.md). The page
+// says how that file stands ("has changes not imported yet") and has the one
+// button that imports it; nothing reads the file by itself.
 //
 // The rules are masterModel.js's (pure). Every text of the master goes into
 // the tree as a React text child.
@@ -260,6 +271,7 @@ function Migration({ onMade }) {
 
   const state = migrationState(plan);
   const questions = plan ? plan.questions || [] : [];
+  const leftOut = leftOutRows(plan);
   return (
     <section className="panel" data-role="master-migration" data-migration-state={state}>
       <h2>Make your master resume</h2>
@@ -274,6 +286,19 @@ function Migration({ onMade }) {
       {(state === "questions" || state === "ready") && (
         <>
           <p data-role="migration-summary">{migrationSummary(plan)}</p>
+          {sourceLinesLine(plan) && <p data-role="migration-source-lines">{sourceLinesLine(plan)}</p>}
+          {leftOut.length > 0 && (
+            <>
+              <p className="muted small">Left out, by line number in the resume as GigAI stores it (the text is not shown here):</p>
+              <ul className="story-postings" data-role="migration-left-out">
+                {leftOut.map((row) => (
+                  <li key={row.key} data-reason={row.reason}>
+                    The resume of {row.resume}, {row.lines}: {row.why}.
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
           {questions.length > 0 && (
             <p>
               <strong>Your resumes disagree on {questions.length === 1 ? "one line" : `${questions.length} lines`}.</strong> Pick the one that is right; GigAI does not guess.
@@ -365,6 +390,8 @@ export default function MasterView({ reloadProfiles = null }) {
   const [history, setHistory] = useState(null);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [version, setVersion] = useState(0);
+  // An import the server refused because the master moved on: {revision, message, button}.
+  const [anyway, setAnyway] = useState(null);
 
   const load = useCallback(() => {
     return getMaster()
@@ -412,7 +439,8 @@ export default function MasterView({ reloadProfiles = null }) {
             }
             return false;
           }
-          setNotice(afterWriteLine(response.profiles) || (response.status === "unchanged" ? "Nothing changed: the master already says this." : null));
+          const said = [afterWriteLine(response.profiles), fileWriteLine(response.file)].filter(Boolean).join(" ");
+          setNotice(said || (response.status === "unchanged" ? "Nothing changed: the master already says this." : null));
           setVersion((count) => count + 1);
           if (reloadProfiles) {
             reloadProfiles(); // a profile that showed the line has a new resume
@@ -433,7 +461,39 @@ export default function MasterView({ reloadProfiles = null }) {
     [load, reloadProfiles, revision],
   );
 
+  // P8: import master.md from the resumes folder (or write it when it is missing). `revision` only for "Import it anyway".
+  const importFile = useCallback(
+    (anywayRevision) => {
+      setBusy(true);
+      setError(null);
+      setNotice(null);
+      return postMasterSync(anywayRevision ? { revision: anywayRevision } : {})
+        .then((response) => {
+          setAnyway(null);
+          setNotice(syncLine(response));
+          setVersion((count) => count + 1);
+          if (response.written && reloadProfiles) {
+            reloadProfiles();
+          }
+          return load();
+        })
+        .catch((err) => {
+          const ask = importAnywayOf(err);
+          if (ask) {
+            setAnyway(ask);
+            return load();
+          }
+          setAnyway(null);
+          setError(errorText(err));
+          return load();
+        })
+        .finally(() => setBusy(false));
+    },
+    [load, reloadProfiles],
+  );
+
   const sections = useMemo(() => masterSections(master), [master]);
+  const file = fileLine(body ? body.file : null);
 
   if (body === null) {
     return (
@@ -460,6 +520,25 @@ export default function MasterView({ reloadProfiles = null }) {
           from all of it. Only your own facts go here, and never a name or contact details. Kept on this machine.
         </p>
         <p data-role="master-revision">{revisionLine(master)}</p>
+        {file && (
+          <p data-role="master-file" data-file-state={file.state} className={file.state === "current" ? "muted small" : undefined}>
+            {file.text}{" "}
+            <button className="button small secondary" data-action="import-file" onClick={() => importFile(null)} disabled={busy}>
+              {busy ? "Working…" : file.button}
+            </button>
+          </p>
+        )}
+        {anyway && (
+          <div className="callout" data-role="import-anyway">
+            {anyway.message}{" "}
+            <button className="button small" data-action="import-anyway" onClick={() => importFile(anyway.revision)} disabled={busy}>
+              {anyway.button}
+            </button>{" "}
+            <button className="button small secondary" data-action="import-cancel" onClick={() => setAnyway(null)} disabled={busy}>
+              Cancel
+            </button>
+          </div>
+        )}
         <p className="muted small">
           <span className="master-strength backed">B</span> backed by a story or an answer · <span className="master-strength quantified">#</span> states a number ·{" "}
           <span className="master-strength stated">·</span> stated

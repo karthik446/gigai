@@ -83,12 +83,15 @@ def _payload(result, home_root: Path, target: Path, profiles: dict[str, object])
         "near_duplicates": [line.to_json() for line in result.near_duplicates],
         "warnings": list(result.warnings),
         "profiles": profiles,
+        # P8: where the revision went in the resumes folder (master.md, or beside it when that file has changes not imported).
+        "file": dict(result.file) if result.file is not None else None,
     }
 
 
 def _finish(result, home_root: Path, target: Path, *, as_json: bool) -> None:  # noqa: ANN001 - a MasterEdit
     """Print what happened, and what the write did to the profiles (``master_edit`` ends every write with them)."""
 
+    from .master_file import write_line
     from .master_profiles_cli import echo_after_master_write
 
     profiles = dict(result.profiles) if result.profiles is not None else {"synced": [], "offers": []}
@@ -132,6 +135,9 @@ def _finish(result, home_root: Path, target: Path, *, as_json: bool) -> None:  #
         click.echo(f"Check: {warning}.")
     if result.written:
         click.echo(f"The master is at revision {number} (written by {result.stored.revision.written_by}).")
+        said = write_line(result.file)
+        if said:
+            click.echo(said)
     echo_after_master_write(profiles)
 
 

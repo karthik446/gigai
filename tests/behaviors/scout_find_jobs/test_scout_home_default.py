@@ -156,6 +156,7 @@ _TARGET_COMMANDS: dict[str, tuple[str, ...]] = {
     "resume master add": ("scout", "resume", "master", "add", "--section", "other", "--text", "Certification: Example (2020)"),
     "resume master edit": ("scout", "resume", "master", "edit", "b-example", "--text", "Shipped the export.", "--revision", "1"),
     "resume master remove": ("scout", "resume", "master", "remove", "b-example", "--revision", "1"),
+    "resume master sync": ("scout", "resume", "master", "sync"),
     "resume master selection show": ("scout", "resume", "master", "selection", "show"),
     "resume master selection status": ("scout", "resume", "master", "selection", "status"),
     "resume master selection refresh": ("scout", "resume", "master", "selection", "refresh"),
