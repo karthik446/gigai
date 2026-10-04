@@ -562,7 +562,7 @@ def _resume_sources(
             raise MasterProfileError("migration_resume_unreadable", f"the resume of profile {', '.join(labels)} cannot be read as text")
         clean, gone = strip_contact(text)
         removed += [(labels[0], kind, line) for kind, line in gone.lines]
-        found.append((str(stored.get("created_at", "")), SourceResume(digest, clean, labels)))
+        found.append((str(stored.get("created_at", "")), SourceResume(digest, clean, labels, tuple(sorted({line for _kind, line in gone.lines})))))
     found.sort(key=lambda item: (item[0], item[1].key), reverse=True)
     return [source for _created, source in found], removed
 

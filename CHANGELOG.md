@@ -259,6 +259,17 @@ the server used several gigabytes of memory, and reloading made it worse. Read "
   new`. `gigai scout resume master init` makes no assessment stale. For agents: `basis_stale_reason:
   "resume_changed"` with `basis_stale_resume` (what changed for that assessment), and
   `resume_basis` on an assessment that read the master (its revision and the selector's version).
+- **A master resume: the merge reads the resume you have, and says what it left out.** `gigai scout
+  resume master init` keeps a summary paragraph that has no heading above it as your Summary (your
+  name, a title, a headline and contact lines above it are still never kept). A title line under an
+  employer (`**Senior Software Engineer** | 2021 - present`) is that employer's role line, a second
+  one is the next role there, and dates written in an entry's heading become its role line, so every
+  role has its dates and the oldest-first rule can order them. A Skills block of `Category: a, b, c`
+  lines and a plain list of certifications are read a line each. Nothing is left out silently:
+  `init` and `init --dry-run` count every line of your resumes as kept, folded into a line the
+  master holds, or left out, and name each left-out line by its line number in the stored resume and
+  the reason, never by its text ("Of 20 lines of resume text ...: 18 kept, 0 folded into a line the
+  master holds, 2 left out"; `migration.source_lines` in `--json`). Look at `--dry-run` first.
 
 ### 0.1.10.8
 

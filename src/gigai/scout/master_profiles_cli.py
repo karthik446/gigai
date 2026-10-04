@@ -73,6 +73,23 @@ def echo_after_master_write(result: dict[str, object]) -> None:
 # --- the migration ------------------------------------------------------------------------------
 
 
+def _echo_source_lines(plan) -> None:  # noqa: ANN001 - a master_migration.MigrationPlan
+    """What became of every line of the resumes: kept, folded, or left out (by resume, line number and reason; never the text)."""
+
+    lines = plan.source_lines.to_json()
+    left = ", ".join(f"{count} {reason.replace('_', ' ')}" for reason, count in lines["left_out_by_reason"].items() if count)
+    click.echo(
+        f"Of {_n(lines['in'], 'line')} of resume text (headings, role lines and wrapped lines counted): {lines['kept']} kept, "
+        f"{lines['folded']} folded into a line the master holds, "
+        f"{lines['left_out']} left out" + (f" ({left})." if left else ".")
+    )
+    for resume in lines["resumes"]:
+        for row in resume["left_out"]:
+            if row["reason"] != "contact":  # named below, by kind
+                numbers = ", ".join(str(line) for line in row["lines"])
+                click.echo(f"  Left out of the resume of {', '.join(resume['profiles'])}: line {numbers}: {row['why']}.")
+
+
 def _answers(values: tuple[str, ...]) -> dict[str, str]:
     answers: dict[str, str] = {}
     for value in values:
@@ -138,6 +155,7 @@ def run_migration(
     )
     if result.status == "needs_answers":
         click.echo(f"Merged {merged}. Your resumes disagree on {_n(len(questions), 'line')}; nothing was written. Answer each, then run it again:")
+        _echo_source_lines(plan)
         for question in plan.unanswered:
             click.echo(f"\n  {question.question_id}  {question.section.capitalize()}{' / ' + question.entry if question.entry else ''}")
             for key, text, labels in question.options:
@@ -152,6 +170,7 @@ def run_migration(
         number = result.stored.revision.revision if result.stored is not None else 0
         verb = "is unchanged at" if result.status == "unchanged" else "stored as"
         click.echo(f"Merged {merged}. Master resume {verb} revision {number}: {_size(counts)}.")
+    _echo_source_lines(plan)
     for near in plan.near_duplicates:
         click.echo(f"  Folded into {near.kept_id} (similarity {near.similarity}): {near.folded}")
     for profile, selection in result.profiles:
