@@ -184,6 +184,27 @@ and it should not ask you for those details.
 
 Every line comes from your resume, answers or stories. Read it before you send it.
 
+**Where the files are.** Each job's tailored resume (markdown) and the PDFs made without a header
+are in your resumes folder, `~/Documents/GigAI/resumes`, named `<company>-<role>-<date>.md` and
+`.pdf`. `gigai scout resume pdf` writes there unless you pass `--out`. `gigai scout status` and
+Settings show the folder; `gigai scout resume folder --set PATH` changes it. The folder never
+holds your name or contact details: a PDF you make with the Generate PDF form is saved only where
+you save it. A file you change there stays yours; Scout replaces only what it wrote itself.
+
+**Changing a tailored resume by hand.** Edit the job's markdown file, then store it back for that
+one job:
+
+```sh
+gigai scout resume tailor --in edited.md --job-url <job-url> --as agent --json   # no model tailors
+```
+
+The stored resume is marked edited, with who wrote it. Lines you did not change keep their
+sources. A line you changed or added may state only numbers and skills that your resume or one of
+your answers states; a refusal lists each problem by line number, and the fix is to save the
+answer first (`gigai scout answer`), not to reword the line. The Scout ATS score and the Scout
+label are then made again from the edited resume (one model call, for the assessment against it),
+and the background never replaces it.
+
 ## Use it from your agent
 
 Three ways to teach an agent the daily loop. They carry the same instructions; pick the one

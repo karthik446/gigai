@@ -36,6 +36,11 @@ The check is pattern-based and can miss things. Never ask the user to paste a re
 8. Tailored resume / PDF: `gigai scout resume pdf --tailored --job-url URL --json`. The PDF
    is HEADERLESS. The command prints an "open in Scout" link: give it to the user. They add
    their own contact details in the browser. You never do.
+   Tailored markdown and headerless PDFs go to the user's resumes folder (`gigai scout resume
+   folder --json`). Never put a name or contact detail there.
+9. To change a tailored resume, edit that job's markdown and store it back, for that one job:
+   `gigai scout resume tailor --in FILE --job-url URL --as agent --json`. If it lists lines whose
+   numbers or skills no resume line or answer states, save the missing answer (step 5); never reword around it.
 
 ## Command reference
 
@@ -50,7 +55,8 @@ The check is pattern-based and can miss things. Never ask the user to paste a re
 - `gigai scout pipeline approvals list --json`, then `approvals approve` / `approvals deny` on the user's word
 - `gigai scout metrics [--kind assess|rank|tag|tailor] [--json]`: average cost per call, for estimates.
 - `gigai scout resume check PATH [--json]` and `gigai scout resume clean PATH --out FILE [--force] [--json]`: local, no model, kinds and line numbers only.
-- `gigai scout resume pdf (--in FILE | --tailored --job-url URL) [--out FILE] [--json]`
+- `gigai scout resume pdf (--in FILE | --tailored --job-url URL) [--out FILE] [--json]`: without `--out` the PDF goes to the resumes folder.
+- `gigai scout resume tailor --in FILE --job-url URL --as agent [--source TEXT] [--json]`; `gigai scout resume folder [--set PATH | --reset] [--json]`
 - `gigai scout status --json`: is Scout running. `gigai agent-context --json`: the full manual.
 
 Add `--json` and read the result; do not scrape tables.

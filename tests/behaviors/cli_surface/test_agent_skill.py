@@ -159,5 +159,5 @@ def test_agent_permissions_prints_valid_json_and_writes_nothing(tmp_path: Path, 
     assert list(home.rglob("*")) == [] and list(work.rglob("*")) == []
 
 
-GOLDEN_SKILL = "272f3cbda5e1912bb6cd8b6515427fd46f3dabd49059c035995159e4110ebd5e"
-GOLDEN_AGENTS = "6c124abec00b6d61d287dd05139724f957e0709e213a993bd6d25e3b75dd35e5"
+GOLDEN_SKILL = "adbd9fd00b3fb06b275ed37a68939beebe5ea57688dfcfd4552bee92c022bef7"
+GOLDEN_AGENTS = "33f091cb2bf495ae915243a230e68978d42c3f9039a66b4617f597ddc82fdf41"

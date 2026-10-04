@@ -1,8 +1,10 @@
 """0.1.10.7-fix2: ``gigai scout resume pdf`` prints the path the user gave, never an absolute one it made up.
 
 An absolute path ("/Users/<name>/...", "/private/var/...") in an agent's
-transcript is a home-path leak. The default name prints as the bare file name;
-``--out`` prints as typed. Both the human line and ``--json`` ``out_path``.
+transcript is a home-path leak. ``--out`` prints as typed. Without it the PDF
+goes to the resumes folder (0110-10-05 A) and prints the way the user types
+that folder: ``~/...`` when it is under their home, never the expanded home.
+Both the human line and ``--json`` ``out_path``.
 """
 
 from __future__ import annotations
@@ -52,13 +54,20 @@ def test_a_relative_out_prints_as_typed(tmp_path: Path, monkeypatch: pytest.Monk
     assert (tmp_path / "out" / "me.pdf").read_bytes().startswith(b"%PDF")
 
 
-def test_the_default_name_prints_as_the_bare_file_name(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.chdir(tmp_path)
+def test_the_default_place_prints_with_a_tilde_never_the_expanded_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The user's home is this test's temporary folder, so the GigAI home (and its resumes folder) is under it."""
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+    cwd = tmp_path / "cwd"
+    cwd.mkdir()
+    (cwd / "resume.md").write_text(_RESUME, encoding="utf-8")
+    monkeypatch.chdir(cwd)
     human, payload = _run(tmp_path)
     written = re.match(r"Wrote (\S+\.pdf) \(", human).group(1)
-    assert "/" not in written and payload["out_path"] == written
+    assert re.fullmatch(r"~/h/home/resumes/resume-\d{4}-\d{2}-\d{2}\.pdf", written) and payload["out_path"] == written
     assert str(tmp_path.resolve()) not in human and str(tmp_path) not in human
-    assert (tmp_path / written).read_bytes().startswith(b"%PDF")
+    assert Path(written).expanduser().read_bytes().startswith(b"%PDF")
+    assert [path.name for path in cwd.iterdir()] == ["resume.md"], "nothing is written into the current directory"
 
 
 def test_an_absolute_out_the_user_typed_stays_absolute(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

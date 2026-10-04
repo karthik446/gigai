@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ApiError, getTailoredResumes, postTailoredResume, postTailoredResumePdf, putTailoredResumeLine } from "../api.js";
+import { ApiError, getResumesFolder, getTailoredResumes, postTailoredResume, postTailoredResumePdf, putTailoredResumeLine } from "../api.js";
+import { editedLine, folderFilePath } from "../resumesFolderModel.js";
 import { dateTimeLabel } from "../jobModel.js";
 import GeneratePdfForm from "./GeneratePdfForm.jsx";
 import { TAILORED_WORDING } from "../wording.js";
@@ -271,6 +272,7 @@ export function Preview({ response, profileLabel, promptFor, initialView = "chan
     <>
       <div className="tailor-meta" title={response.updated_at || undefined}>
         Tailored {dateTimeLabel(response.updated_at) || "just now"} · from resume <strong>{resumeName}</strong>
+        {editedLine(response) && <span data-role="edited-by"> · {editedLine(response)}</span>}
       </div>
       <div className="resume-change-bar">
         <div className="resume-summary" data-testid="change-summary">
@@ -409,6 +411,23 @@ export default function TailoredResumePanel({ state, profileLabel, questionPromp
   const [pdfOpen, setPdfOpen] = useState(false);
   const [choosing, setChoosing] = useState(false);
   const [choiceError, setChoiceError] = useState(null);
+  // 0110-10-05 A: where this job's markdown is in the resumes folder; asked
+  // again when the stored resume changes (a line choice rewrites the file).
+  const [folderFile, setFolderFile] = useState("");
+  const storedStamp = stored ? `${stored.updated_at}|${stored.markdown ? stored.markdown.length : 0}` : "";
+  useEffect(() => {
+    let current = true;
+    setFolderFile("");
+    if (!storedStamp || !state.profileId || !state.jobIdentity) {
+      return undefined;
+    }
+    getResumesFolder({ profileId: state.profileId, jobIdentity: state.jobIdentity })
+      .then((response) => current && setFolderFile(folderFilePath(response)))
+      .catch(() => {}); // the folder line is extra: the panel works without it
+    return () => {
+      current = false;
+    };
+  }, [storedStamp, state.profileId, state.jobIdentity]);
 
   const renderPdf = useCallback(
     (header) => postTailoredResumePdf({ profileId: state.profileId, jobIdentity: state.jobIdentity, header }),
@@ -465,6 +484,11 @@ export default function TailoredResumePanel({ state, profileLabel, questionPromp
       {stored && !tailoring && (
         <p className="muted small" data-role="tailored-wording">
           {TAILORED_WORDING}
+        </p>
+      )}
+      {stored && !tailoring && folderFile && (
+        <p className="muted small" data-testid="resumes-folder-file">
+          In your resumes folder: <code>{folderFile}</code>
         </p>
       )}
       {stored && !tailoring && pdfOpen && <GeneratePdfForm render={renderPdf} />}

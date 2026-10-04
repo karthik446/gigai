@@ -32,7 +32,7 @@ SRC = REPO_ROOT / "src"
 
 _READERS = frozenset({
     "read_pinned_resume", "_read_pinned_resume", "resume_for_profile", "resolve_resume", "read_stored_resume",
-    "current_resume", "_read_resume_text_for_rank",
+    "current_resume", "_read_resume_text_for_rank", "resolve_tailor_resume",
 })
 
 #: (module, enclosing function, reader) -> where the text goes. Reviewed 2026-09-29 (0110-003 P1).
@@ -59,8 +59,11 @@ _READER_ALLOWLIST: dict[tuple[str, str, str], str] = {
     ("gigai.scout.proposal_execution", "read_pinned_resume", "read_record"): "returned to its callers (allowlisted here)",
     ("gigai.scout.quick_assess", "run_quick_assessment", "resolve_resume"): "assessment_core.render_assess_prompt (model_resume)",
     ("gigai.scout.quick_assess", "run_quick_assessment", "resume_for_profile"): "assessment_core.render_assess_prompt (model_resume)",
-    ("gigai.scout.tailored_resume", "run_tailored_resume", "resolve_resume"): "tailored_resume.tailor_context (model_resume)",
-    ("gigai.scout.tailored_resume", "run_tailored_resume", "resume_for_profile"): "tailored_resume.tailor_context (model_resume)",
+    # 0110-10-05 B: the one resume resolution of a tailoring and of an attached edit (resolve_tailor_resume).
+    ("gigai.scout.tailored_resume", "resolve_tailor_resume", "resolve_resume"): "returned to its callers (allowlisted here)",
+    ("gigai.scout.tailored_resume", "resolve_tailor_resume", "resume_for_profile"): "returned to its callers (allowlisted here)",
+    ("gigai.scout.tailored_resume", "run_tailored_resume", "resolve_tailor_resume"): "tailored_resume.tailor_context (model_resume)",
+    ("gigai.scout.tailored_resume_edit", "attach_edited_resume", "resolve_tailor_resume"): "tailored_resume.tailor_context (model_resume); local validation of the edited markdown, no model call",
 }
 
 #: (module, function) -> the strip calls its body must make.
@@ -91,6 +94,9 @@ _DISPLAY_IMPORTERS: dict[str, frozenset[str]] = {
     "gigai.scout.resume_pdf": frozenset({
         "gigai.scout.find_jobs.api.tailored_resumes", "gigai.scout.scout_cli", "gigai.scout.posting_keywords",  # scout_cli: `scout resume pdf` renders locally (0110-032)
         "gigai.scout.pipeline.steps",
+        # tailored_resume_edit (0110-10-05 B): checks an edited markdown with resume_pdf's markdown parser (the format's one
+        # description) and its line patterns; it renders nothing and never touches resume_display or a header form.
+        "gigai.scout.tailored_resume_edit",
     }),
 }
 

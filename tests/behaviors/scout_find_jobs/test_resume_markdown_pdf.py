@@ -206,17 +206,19 @@ def test_cli_renders_markdown_headerless_with_the_saved_layout_and_creates_nothi
 
 
 def test_cli_default_out_is_dated_and_never_the_persons_name(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """0110-046 addendum: no --out writes resume-<YYYY-MM-DD>.pdf in the current folder (the markdown's '# Name' is not used)."""
-    source, home = tmp_path / "resume.md", tmp_path / "home"
+    """0110-046 addendum: no --out writes resume-<YYYY-MM-DD>.pdf (the markdown's '# Name' is not used).
+
+    0110-10-05 A: into the resumes folder, never the current directory. This home is a temporary one, so
+    its folder is ``<home>/resumes`` (only ``~/.gigai`` uses ``~/Documents/GigAI/resumes``, printed with ``~``)."""
+    source, home, cwd = tmp_path / "resume.md", tmp_path / "home", tmp_path / "cwd"
     source.write_text(MARKDOWN, encoding="utf-8")
-    monkeypatch.chdir(tmp_path)
+    cwd.mkdir()
+    monkeypatch.chdir(cwd)
     code, payload = _cli("--in", str(source), "--home", str(home))
     assert code == 0, payload
-    # fix2 privacy contract: the default is printed as the bare file name (no absolute path), and the file really sits in the cwd.
-    printed = Path(payload["out_path"])
-    assert printed == Path(printed.name), payload["out_path"]
-    written = tmp_path / printed.name
-    assert written.is_file()
+    written = Path(payload["out_path"]).expanduser()
+    assert written.parent == home / "resumes" and payload["in_resumes_folder"] is True
+    assert written.is_file() and list(cwd.iterdir()) == [], "nothing is written into the current directory"
     assert written.name.startswith("resume-") and written.name.endswith(".pdf") and len(written.name) == len("resume-2026-10-02.pdf")
     assert "riley" not in written.name.lower() and written.read_bytes().startswith(b"%PDF")
 

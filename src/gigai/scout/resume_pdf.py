@@ -20,7 +20,6 @@ from __future__ import annotations
 
 import json
 import re
-import unicodedata
 from contextlib import ExitStack
 from datetime import date, datetime, timezone
 from importlib import resources
@@ -33,6 +32,7 @@ from dataclasses import dataclass
 from gigai.scout.resume_display import (
     SPACING_DEFAULT, SPACING_MAX, SPACING_MIN, ContactItem, DisplaySettings, PdfHeader, form_header, load_display, profile_title, valid_spacing,
 )
+from gigai.scout.resumes_folder import file_name
 from gigai.scout.tailored_resume import (
     ENTRY_SECTIONS,
     MAX_HEADING_LINES,
@@ -46,21 +46,12 @@ from gigai.scout.tailored_resume import (
     shown_text,
 )
 
-_PART_MAX = 40
-_ROLE_MAX = 60
-
-
-def _slug(text: str, limit: int = _PART_MAX) -> str:
-    ascii_text = unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode("ascii").lower()
-    return re.sub(r"[^a-z0-9]+", "-", ascii_text).strip("-")[:limit].strip("-")
-
-
 def pdf_file_name(company: str, role: str, day: date) -> str:
     """``<company>-<role>-<YYYY-MM-DD>.pdf`` (lowercase ASCII, hyphens, each part length-capped);
-    ``resume-<YYYY-MM-DD>.pdf`` when neither is known.  Never carries the user's name (0110-046)."""
+    ``resume-<YYYY-MM-DD>.pdf`` when neither is known.  Never carries the user's name (0110-046).
+    The one naming rule is the resumes folder's (``resumes_folder.file_name``)."""
 
-    parts = [part for part in (_slug(company), _slug(role, _ROLE_MAX)) if part] or ["resume"]
-    return "-".join([*parts, day.isoformat()]) + ".pdf"
+    return file_name(company, role, day, ".pdf")
 
 
 _YEAR = re.compile(r"\b(?:19|20)\d\d\b|\bPresent\b", re.IGNORECASE)
@@ -402,6 +393,23 @@ def parse_resume_markdown(markdown: str) -> tuple[str, list[dict[str, object]]]:
     return name, sections
 
 
+def printed_text(markdown: str) -> str:
+    """Every text a PDF of ``markdown`` prints (its sections' lines, tags, entry headings and bullets), one per line.
+
+    What the resumes folder checks before it keeps a headerless PDF of this markdown: the lines
+    above the first ``## `` section are not printed, so they are not in it."""
+
+    _name, sections = parse_resume_markdown(markdown)
+    out: list[str] = []
+    for section in sections:
+        out.extend(str(line["text"]) for line in section["lines"])  # type: ignore[union-attr]
+        out.extend(str(tag) for tag in section["tags"])  # type: ignore[union-attr]
+        for entry in section["entries"]:  # type: ignore[union-attr]
+            out.extend(" ".join(part for part in (item["text"], item["dates"]) if part) for item in entry["heading"])
+            out.extend(str(bullet) for bullet in entry["bullets"])
+    return "\n".join(out)
+
+
 def render_markdown_pdf(
     markdown: str, header: PdfHeader | None, *, timestamp: datetime, spacing_scale: float = SPACING_DEFAULT, auto_fit: bool = True, company: str = "",
 ) -> RenderedPdf:
@@ -506,6 +514,7 @@ __all__ = [
     "parse_resume_markdown",
     "pdf_file_name",
     "pdf_header",
+    "printed_text",
     "render_markdown_pdf",
     "render_pdf",
     "stored_resume_pdf",

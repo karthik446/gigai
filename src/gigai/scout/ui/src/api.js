@@ -528,6 +528,24 @@ export function putResumeDisplay(body) {
   return request("PUT", "/api/resume-display", body);
 }
 
+// 0110-10-05 A: the resumes folder (find_jobs/api/resumes_folder.py): where
+// it is ({path, shown, source, default, exists}) and, with a profile and a
+// job, the names of that job's files there (`files`). PUT {path} chooses
+// another folder; an empty path is the default.
+export function getResumesFolder({ profileId, jobIdentity } = {}) {
+  const params = new URLSearchParams();
+  if (profileId && jobIdentity) {
+    params.set("profile_id", profileId);
+    params.set("job_identity", jobIdentity);
+  }
+  const qs = params.toString();
+  return request("GET", `/api/resumes-folder${qs ? `?${qs}` : ""}`);
+}
+
+export function putResumesFolder(body) {
+  return request("PUT", "/api/resumes-folder", body);
+}
+
 // 0110-046: the one-time contact cleanup's report (find_jobs/api/
 // privacy_cleanup.py). GET runs the cleanup when it has not run yet; PUT
 // records that the UI showed the report.

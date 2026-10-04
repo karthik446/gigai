@@ -187,12 +187,15 @@ def test_an_agent_changes_two_bullets_and_renders_a_new_pdf(tmp_path: Path, monk
         assert ran.exit_code == 0, ran.output
         assert cli_md.read_bytes().startswith(b"%PDF") and json.loads(ran.output)["pages"] == 1
         assert _text(cli_md.read_bytes()) == _text(from_markdown.content) == _text(stored_pdf.content)
-        # No --out: the file is named after the company, role and date, in the current folder; never after the person.
+        # No --out: the file is named after the company, role and date, never after the person, and is written into the
+        # resumes folder (0110-10-05 A; this temporary home's is <home>/resumes), never the current directory.
         monkeypatch.chdir(tmp_path)
+        here = sorted(path.name for path in tmp_path.iterdir())
         named = CliRunner().invoke(cli, ["scout", "resume", "pdf", "--tailored", "--job-url", key["job_identity"], "--home", str(home), "--target", str(target)])
         assert named.exit_code == 0, named.output
-        written = re.search(r"Wrote (\S+\.pdf)", named.output).group(1)
-        assert re.fullmatch(r"acme-staff-engineer-\d{4}-\d{2}-\d{2}\.pdf", written) and (tmp_path / written).read_bytes().startswith(b"%PDF"), "the bare file name, written in the current folder"
+        written = Path(re.search(r"Wrote (\S+\.pdf)", named.output).group(1)).expanduser()
+        assert re.fullmatch(r"acme-staff-engineer-\d{4}-\d{2}-\d{2}\.pdf", written.name) and written.parent == home / "resumes"
+        assert written.read_bytes().startswith(b"%PDF") and sorted(path.name for path in tmp_path.iterdir()) == here
         assert f"Open in Scout to add your name and contact details and download: {stored_pdf.headers['x-gigai-finish-url']}" in named.output
         missing = CliRunner().invoke(cli, ["scout", "resume", "pdf", "--tailored", "--job-url", "https://example.test/none", "--out", str(tmp_path / "x.pdf"), "--home", str(home), "--target", str(target), "--json"])
         assert missing.exit_code == 1 and json.loads(missing.output)["error"]["code"] == "tailored_resume_not_found"

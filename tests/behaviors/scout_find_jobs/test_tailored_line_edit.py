@@ -250,7 +250,6 @@ def test_the_contract_rejects_a_custom_line_that_claims_a_source() -> None:
     payload = _line(good, "L3").to_json()
     for mutate in (
         lambda p: {**p, "refs": [_ref(3, ORIGINAL).to_json()]},
-        lambda p: {key: value for key, value in p.items() if key != "edited_from"},
         lambda p: {**p, "edited_from": p},
         lambda p: {**p["edited_from"], "edited_from": p["edited_from"]},  # a copy line never carries edited_from
     ):
@@ -259,3 +258,6 @@ def test_the_contract_rejects_a_custom_line_that_claims_a_source() -> None:
         assert caught.value.code == "invalid_value"
     with pytest.raises(FindJobsContractError):
         TailoredLine.from_json({**payload, "kind": "typed"})
+    # 0110-10-05 B: a custom line of an attached edited resume that replaced no line has no edited_from.
+    added = TailoredLine.from_json({key: value for key, value in payload.items() if key != "edited_from"})
+    assert (added.kind, added.refs, added.edited_from) == ("custom", (), None) and TailoredLine.from_json(added.to_json()) == added
