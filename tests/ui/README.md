@@ -8,7 +8,7 @@ if it resolves to the real home (`support.refuse_real_home`).
 ## Run
 
 ```sh
-make ui-test        # installs Chromium once, builds the home (about 25 s), runs every `ui` test on the small home
+make ui-test        # installs Chromium once, builds the home (about 25 s), runs every `ui` test on the small home (about 80 s in all)
 ```
 
 - The `ui` dependency group (`uv run --group ui ...`) holds Playwright and psutil. No pip.
@@ -22,10 +22,42 @@ make ui-test        # installs Chromium once, builds the home (about 25 s), runs
   and step), `console.txt`, `problems.txt`, `server-log-tail.txt`, `samples.csv` (server CPU
   seconds and RSS, and requests in flight, four times a second). CI uploads that folder.
 
+## The flows
+
+The 11 flows of the UI-testing spike (REPORT.md 5.3), and the flows of the features 0.1.10.9 added. "Small" runs in
+`make ui-test` (every PR); "operator-sized" only in `make ui-test-full` (the release profile).
+
+| Flow | Small home | Operator-sized home |
+|---|---|---|
+| 1. Jobs loads, rows shown | `test_smoke_flow.py` | `test_operator_sized_jobs.py` (cold), `test_operator_sized_pages.py` (warm) |
+| 2. Open a job, Back, the list is still there | `test_jobs_open_and_back.py` | `test_operator_sized_jobs.py`; from page 2 in `test_operator_sized_pages.py` |
+| 3. Chips: profile, New / 7 / 30 days, state | `test_jobs_chips.py` | `test_operator_sized_pages.py` |
+| 4. "Assess these": the dialog, approve on the fixture model | `test_jobs_assess_these.py` (changes the home); the low-ranked second question in `test_jobs_weak_fit.py` | - |
+| 5. Job page: questions, answer one, the timeline runs | `test_job_page_questions.py` (changes the home) | a job page in a second tab WHILE the list is prepared: `test_operator_sized_jobs.py` |
+| 6. Generate PDF: six fields, a download, nothing stored | `test_generate_pdf.py` | - |
+| 7. Answers and stories | `test_answers_stories.py` | the agent writes one: `test_operator_sized_pages.py` |
+| 8. Settings > Background updates | `test_settings_background.py` | Settings in a second tab WHILE the list is prepared: `test_operator_sized_jobs.py` |
+| 9. Past runs | `test_past_runs.py` | - |
+| 10. Delete a profile | `test_profile_delete.py` (last: it changes the home for good) | - |
+| 11. The one-time network notice | `test_network_notice.py` | - |
+| Real pages (0110-10-01) | `test_jobs_pagination.py` (an answered list of 130) | `test_operator_sized_pages.py`: the real list, page 2 = rows 51-100, a job, Back lands on page 2 |
+| Weak-fit chip off by default (0110-10-02) | `test_jobs_weak_fit.py` (an answered list) | the real list: `test_operator_sized_pages.py` |
+| Answers: "Written by your agent" with its source | `test_answers_stories.py` | `test_operator_sized_pages.py` |
+| Tailored resume: "Cut for length" + Restore, the resumes-folder line (0110-10-05) | `test_tailored_resume_panel.py`; the folder in Settings: `test_resumes_folder.py` | - |
+
+**Where a test answers for the server.** Everything is the real server unless the test's docstring says otherwise,
+and then only the named requests are answered by the test (the page, its stores and the router stay real):
+the list of 130 and the weak fits (`test_jobs_pagination.py`, `test_jobs_weak_fit.py`: the small home has neither);
+the length record of a tailored resume (`test_tailored_resume_panel.py`: a cut needs a resume that prints on three
+pages, and the fixture model writes three lines); `/api/sources/update` of a home that never had an update
+(`test_network_notice.py`: a real first update would seed the real company catalog into the shared home); two past
+runs (`test_past_runs.py`: the small home has none). Each of those has the real route proven elsewhere, named in
+the docstring.
+
 ## The operator-sized home (`make ui-test-full`)
 
 ```sh
-make ui-test-full   # the release profile: everything above, plus the `operator_sized` tests (about 2 minutes)
+make ui-test-full   # the release profile: everything above, plus the `operator_sized` tests (about 2.5 minutes)
 ```
 
 0.1.10.8 passed every test and its Jobs page never loaded on the operator's home (0110-9-01): no
@@ -44,12 +76,20 @@ runs on one: 290,000 postings, 10,350 companies, 2 profiles, about 600 matched p
 - The build time, the server start time and the flow's numbers are printed, and written to
   `build/ui-artifacts/operator-sized-jobs.json`.
 - The session's home is shared and cold only once: a second `operator_sized` test starts warm, and
-  must not depend on the order unless it says so.
+  must not depend on the order unless it says so. The cold flow says so (`UI_ORDER = -1`: it runs
+  first); the others open Jobs with the cold patience and apply warm budgets only on a warm server.
+- The server's background rank lane ranks about 200 not-assessed postings every half minute for its
+  first minutes, which MOVES rows in the list while the tests run. Compare a page with the answer
+  the server gave that page (`jobs_page.click_chip`, `expect_response`), never with a second read.
+- The generator's clock is fixed (`NOW`, 2026-10-03): the "7 days" chip lists nothing a week later
+  and "30 days" a month later. The flows hold with an empty window; "New since last check" is
+  relative to the home's own anchor and does not age.
 
 `test_operator_sized_jobs.py` is the 0110-9-01 flow: Jobs loads (the "preparing" message, then the
-rows), a job is opened, Back, the list is still there; at most one request in flight for the list,
-the peek and the status; one build; zero console errors. It collects every failed check and fails
-once, at the end, with all of them.
+rows; while it prepares, a second tab opens Settings and a job page), a job is opened, Back, the
+list is still there; at most one request in flight for the list, the peek and the status; one
+build; the server's memory under its ceiling; zero console errors. It collects every failed check
+and fails once, at the end, with all of them.
 
 ### Showing a test red on an older release
 
@@ -94,7 +134,23 @@ def test_something(ui):
 Every test fails on its own for a console error, a page error, an HTTP status of 400 or more, or
 a request that failed (a request cut short by a navigation is not a failure). Use `ui.reload()`,
 not `page.reload()`: Playwright sends no event for the requests a reload drops.
-The home and server are shared by the whole session: a flow that changes the home runs last.
+
+The home and server are shared by the whole session, so:
+
+- a flow that changes the home through the page says so with a module-level `UI_ORDER = <n>` (a
+  positive number runs after every module without one, lowest first; `test_profile_delete.py` is
+  the last);
+- a flow that has to write something to look at it (an agent's answer) removes it again, in a
+  `finally`;
+- what a flow expects is asked of the server at the start of the test (`ui.server_json(path)`, the
+  server asked directly, as an agent would; the page's books do not count it), not written down
+  from what the fixture held when the test was written.
+
+Useful on `ui`: `wait_for_job_page()` (the title, the state line and the timeline: a heading alone
+passed in the spike with every request still open), `settle()` (nothing in flight, before counting
+requests), `requests_between(a, b, resource)`, `writes_after(step)` (every request that is not a
+GET: a page that only reads must have none), `job_titles()`; `tests/ui/jobs_page.py` for the Jobs
+rows and chips.
 
 ## No retries. Ever.
 
@@ -106,10 +162,42 @@ the request list, so "the runner was slow" and "the server did more work" are to
 ## Budgets, in this order
 
 1. **Structure** (cannot flake): requests in flight per resource (`no_more_than_one_in_flight`),
-   requests after a step (`requests_after(step) <= n`), what the page shows.
-2. **Server CPU seconds** between two steps (`server_cpu_seconds_between(a, b) <= x`): about 3x the
-   measured value. A busy runner moves it by under 10%.
-3. **Wall-clock**, last and loose: 4 to 10x what a laptop needs. A 500 ms wall budget on a list
-   request failed 3 of 6 runs on a loaded machine with the server doing the same work.
+   requests after a step (`requests_after(step) <= n`), what the page shows. **Blocks.**
+2. **Server CPU seconds** between two steps: `ui.cpu_budget(name, LIMIT, a, b)`, about 3x the
+   measured value (and not under 1 s: the background threads share the process). A busy runner
+   moves it by under 10%. **Blocks.**
+3. **Wall-clock**, last and loose: `ui.wall_budget(name, LIMIT, a, b)`, 4 to 10x what a laptop
+   needs; the user-facing ones are `support.INTERACTIVE_WALL_SECONDS` (2 s: a click) and
+   `support.FIRST_LOAD_WALL_SECONDS` (10 s: a page). A 500 ms wall budget on a list request failed
+   3 of 6 runs on a loaded machine with the server doing the same work. **Measured and reported;
+   blocks only with `GIGAI_UI_BUDGETS=enforce`.**
 
-Write down the measured numbers next to the ceilings, as `test_smoke_flow.py` does.
+Every limit is a named constant at the top of its test, with the measured numbers beside it. Never
+`assert` a wall time directly (a test in `test_harness_support.py` refuses it).
+
+### What blocks, and the report (the first week, 0.1.10.9)
+
+Structure, console / page / HTTP problems, the CPU ceilings and the server's memory ceiling on the
+operator-sized home (`ui.memory_budget`, `operator_home_ui.SERVER_RSS_MB`) fail a test from day
+one. The wall-clock ceilings have not been measured on a CI runner yet, so for now they are only
+reported: every run ends with a `ui budgets` section (each ceiling: measured, limit, `ok` or
+`OVER`) and writes the same to `build/ui-artifacts/budgets.json` (`kind`: `wall`, `cpu` or `rss`;
+`measured`, `limit`, `unit`, `over`, `blocking`).
+
+```sh
+GIGAI_UI_BUDGETS=enforce make ui-test     # a wall-clock ceiling that is over fails its test
+```
+
+An enforced wall-clock failure prints the step's wall time, the server's CPU seconds and its
+requests, so "the runner was slow" and "the server did more work" are told apart. Once the CI job
+has a week of `budgets.json`, set the limits from it and make `enforce` the default.
+
+### Known, pinned as ceilings (reported in the U3 worker report)
+
+- The page asks `/api/assessments` twice per profile on a Jobs load (`test_smoke_flow.py`,
+  `ASSESSMENT_REQUESTS`).
+- A job page asks `/api/answers/match` up to four times for one open question
+  (`test_job_page_questions.py`, `MATCH_REQUESTS`).
+- The job page does not show the tailored resume the background pipeline just stored until a
+  reload: `test_job_page_questions.py` reports itself as an expected failure (xfail) with that
+  reason after every other check passed, and passes by itself once that is fixed.

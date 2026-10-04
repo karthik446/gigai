@@ -1,7 +1,7 @@
 // Shared data hooks for the F3 app views (P9). Kept separate from App.jsx
 // so each view module (views/*.jsx) can import just what it needs without
 // growing App.jsx into the single file that owns every fetch.
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { getApplications, getProfiles, getRuns, selectProfile } from "./api.js";
 
 // F1: the profile list + which one is selected, shared by every view
@@ -49,12 +49,16 @@ export function useProfiles() {
 // fetches every profile's runs unfiltered.
 export function useRuns(profileId) {
   const [state, setState] = useState({ loading: true, runs: [], error: null });
+  // 0.1.10.9 (found by tests/ui/test_past_runs.py): only the newest read counts. The app reads once before it
+  // knows the profile (every profile's runs) and again for the profile; the first answer may come back last.
+  const newest = useRef(0);
 
   const reload = useCallback(() => {
+    const mine = ++newest.current;
     setState((prev) => ({ ...prev, loading: true, error: null }));
     getRuns(profileId ? { profileId } : undefined)
-      .then((response) => setState({ loading: false, runs: response.runs, error: null }))
-      .catch((error) => setState({ loading: false, runs: [], error: error.message || String(error) }));
+      .then((response) => newest.current === mine && setState({ loading: false, runs: response.runs, error: null }))
+      .catch((error) => newest.current === mine && setState({ loading: false, runs: [], error: error.message || String(error) }));
   }, [profileId]);
 
   useEffect(reload, [reload]);

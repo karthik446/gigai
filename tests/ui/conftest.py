@@ -19,6 +19,11 @@ marked `operator_sized` as well: `make ui-test` deselects it, `make ui-test-full
 
 On a failed test, `ui` writes screenshot, Playwright trace, requests, console, server log tail
 and the CPU/RSS samples to `$GIGAI_UI_ARTIFACTS/<test>/` (default `build/ui-artifacts/`).
+
+Order: a module that changes the shared home says so with `UI_ORDER = <n>` (a positive number runs
+after every module without one, lowest first; a negative one runs first). Budgets: every timing
+ceiling a flow measures is printed at the end of the run and written to `budgets.json` beside the
+artifacts; a wall-clock ceiling fails a test only when `GIGAI_UI_BUDGETS=enforce` (support.py).
 """
 
 from __future__ import annotations
@@ -26,15 +31,19 @@ from __future__ import annotations
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
+import json
 import os
 from pathlib import Path
 import shutil
 import tempfile
 import time
+import urllib.request
 
 import pytest
 
-from tests.ui import support
+pytest.register_assert_rewrite("tests.ui.jobs_page")  # its asserts explain themselves, like a test module's
+
+from tests.ui import support  # noqa: E402
 
 REPO = Path(__file__).resolve().parents[2]
 REQUIRED_ENV = "GIGAI_UI_REQUIRED"
@@ -50,6 +59,10 @@ FIXTURE_LATENCY_SCALE = "8"  # only widens the server's 15 s health wait on a sl
 
 _OPERATOR_FIXTURES = frozenset({"operator_ui", "operator_server"})
 _UI_FIXTURES = frozenset({"ui", "ui_browser", "scout_server"}) | _OPERATOR_FIXTURES
+#: A module's place in the run (see the docstring): the name of the module attribute.
+ORDER_ATTRIBUTE = "UI_ORDER"
+#: Every timing ceiling the session's flows measured (printed and written at the end of the run).
+_BUDGETS = support.BudgetLog()
 
 
 # ---------------------------------------------------------------------------- marking and failure state
@@ -65,6 +78,14 @@ def pytest_collection_modifyitems(items) -> None:
             item.add_marker(pytest.mark.ui)
         if _OPERATOR_FIXTURES & used:
             item.add_marker(pytest.mark.operator_sized)
+    # The home is shared by the session: a module that changes it runs after the ones that only read it
+    # (a stable sort: everything without UI_ORDER keeps its place).
+    items.sort(key=ui_order)
+
+
+def ui_order(item) -> int:
+    value = getattr(getattr(item, "module", None), ORDER_ATTRIBUTE, 0)
+    return value if type(value) is int else 0
 
 
 @pytest.hookimpl(hookwrapper=True)
@@ -72,6 +93,29 @@ def pytest_runtest_makereport(item, call):
     outcome = yield
     report = outcome.get_result()
     setattr(item, f"rep_{report.when}", report)
+
+
+def artifacts_folder() -> Path:
+    return Path(os.environ.get(ARTIFACTS_ENV) or REPO / "build" / "ui-artifacts").resolve()
+
+
+def pytest_terminal_summary(terminalreporter) -> None:
+    """The timing ceilings of the run, measured against their limits: printed, and written to budgets.json."""
+
+    lines = _BUDGETS.report()
+    if not lines:
+        return
+    enforced = support.budgets_enforced()
+    terminalreporter.section(f"ui budgets (wall-clock {'ENFORCED' if enforced else 'reported only'}; server CPU always enforced)")
+    for line in lines:
+        terminalreporter.write_line(line)
+    folder = artifacts_folder()
+    try:
+        folder.mkdir(parents=True, exist_ok=True)
+        (folder / "budgets.json").write_text(json.dumps(_BUDGETS.to_json(enforced=enforced), indent=2), encoding="utf-8")
+        terminalreporter.write_line(f"written to {folder / 'budgets.json'}")
+    except OSError as error:  # the report is on the terminal either way
+        terminalreporter.write_line(f"budgets.json was not written: {error}")
 
 
 def _unavailable(reason: str) -> None:
@@ -183,7 +227,7 @@ def operator_server(request: pytest.FixtureRequest) -> Iterator[object]:
 
 @pytest.fixture(scope="session")
 def ui_artifacts() -> Path:
-    folder = Path(os.environ.get(ARTIFACTS_ENV) or REPO / "build" / "ui-artifacts").resolve()
+    folder = artifacts_folder()
     if folder.exists():
         shutil.rmtree(folder)  # one run's failures only
     return folder
@@ -214,8 +258,8 @@ def ui_browser() -> Iterator[object]:
 class Ui(support.Recorder):
     """One page with its books: `ui.page`, `ui.step(...)`, the assertions of `support.Recorder`."""
 
-    def __init__(self, page, server, network: support.Network, probe: support.ProcessTreeProbe, sampler: support.Sampler | None = None) -> None:
-        super().__init__(network, probe.cpu_seconds)
+    def __init__(self, page, server, network: support.Network, probe: support.ProcessTreeProbe, sampler: support.Sampler | None = None, *, test: str = "") -> None:
+        super().__init__(network, probe.cpu_seconds, budgets=_BUDGETS, test=test)
         self.page, self.server, self.sampler = page, server, sampler
 
     def goto(self, route: str = "/#/jobs") -> None:
@@ -243,6 +287,30 @@ class Ui(support.Recorder):
     def job_rows(self) -> int:
         return self.page.locator(support.tid("job-row")).count()
 
+    def job_titles(self) -> list[str]:
+        """The titles of the rows shown, in order."""
+
+        return self.page.locator(f"{support.tid('job-row')} [data-action='open-job']").all_text_contents()
+
+    def wait_for_job_page(self, timeout_ms: int = PATIENCE_MS) -> None:
+        """A job page is shown in full: its title, its state line and its pipeline timeline (not the "Loading job…" stub)."""
+
+        self.page.wait_for_function(support.JOB_PAGE_READY_JS, timeout=timeout_ms)
+
+    def settle(self) -> None:
+        """Nothing is in flight any more (so the requests of a step can be counted)."""
+
+        self.page.wait_for_load_state("networkidle")
+
+    def server_json(self, path: str, body: dict | None = None, *, method: str | None = None, timeout: float = 60) -> dict:
+        """Ask the server directly, as an agent or the CLI would (never through the page: its books do not count this)."""
+
+        data = None if body is None else json.dumps(body).encode("utf-8")
+        request = urllib.request.Request(self.server.url + path, data=data, method=method or ("GET" if body is None else "POST"), headers={"Content-Type": "application/json"})
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            raw = response.read()
+        return json.loads(raw) if raw else {}
+
     def watch_count_line(self) -> None:
         """From the next page load on, keep every text the Jobs count line shows (call before `goto`)."""
 
@@ -255,6 +323,11 @@ class Ui(support.Recorder):
 
     def peak_server_rss_mb(self) -> float:
         return (self.sampler.peak_rss_bytes if self.sampler is not None else 0) / 1048576
+
+    def memory_budget(self, name: str, limit_mb: float) -> float:
+        """The server's peak resident memory since this page opened, against a ceiling (recorded; always a failure when over)."""
+
+        return self.memory_budget_of(name, limit_mb, self.peak_server_rss_mb())
 
 
 @contextmanager
@@ -270,7 +343,7 @@ def _ui_session(request: pytest.FixtureRequest, ui_browser, scout_server, ui_art
     probe = support.ProcessTreeProbe(scout_server.pid)
     sampler = support.Sampler(probe.read, network)
     sampler.start()
-    session = Ui(page, scout_server, network, probe, sampler)
+    session = Ui(page, scout_server, network, probe, sampler, test=request.node.name)
     folder = ui_artifacts / support.safe_name(request.node.nodeid)
     try:
         yield session

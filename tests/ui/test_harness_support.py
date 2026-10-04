@@ -214,6 +214,146 @@ def test_wall_seconds_between(net: support.Network, clock: Clock) -> None:
     assert ui.wall_seconds_between("start", "b") == pytest.approx(7)
 
 
+def test_requests_between_counts_one_step_and_writes_after_lists_what_was_not_a_read(net: support.Network) -> None:
+    ui = make_recorder(net, [0.0])
+    net.started(api("/api/postings"))
+    ui.step("a")
+    net.started(api("/api/postings?window=new"))
+    net.started(FakeRequest("http://127.0.0.1:1234/api/answers", method="POST"))
+    ui.step("b")
+    net.started(FakeRequest("http://127.0.0.1:1234/api/profiles/p1", method="DELETE"))
+    assert ui.requests_between("a", "b") == 2 and ui.requests_between("a", "b", "/api/postings") == 1
+    assert ui.requests_between("start", "a") == 1 and ui.requests_between("b") == 1
+    assert ui.writes_after("start") == ["POST /api/answers", "DELETE /api/profiles/p1"]
+    assert ui.writes_after("b") == ["DELETE /api/profiles/p1"] and ui.writes_after("now") == []
+
+
+# ---------------------------------------------------------------------------- budgets: wall-clock is reported, CPU blocks
+
+
+def test_a_wall_budget_is_recorded_and_does_not_fail_unless_enforced(net: support.Network, clock: Clock, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv(support.BUDGETS_ENV, raising=False)
+    log = support.BudgetLog()
+    ui = support.Recorder(net, lambda: 0.0, budgets=log, test="test_flow")
+    ui.step("a")
+    clock.advance(7)
+    ui.step("b")
+    assert ui.wall_budget("slow step", 2.0, "a", "b") == pytest.approx(7)  # over, and not a failure
+    ui.wall_budget("quick step", 10.0, "a", "b")
+    assert [(line.name, line.kind, line.over, line.blocking) for line in log.lines] == [("slow step", "wall", True, False), ("quick step", "wall", False, False)]
+    report = log.report()
+    assert "OVER (reported, not enforced)" in report[0] and "slow step" in report[0] and "[test_flow]" in report[0]
+    assert report[-1] == f"2 ceilings measured, 1 over (1 wall-clock, reported only: {support.BUDGETS_ENV}=enforce makes them failures)"
+    assert log.to_json(enforced=False) == {
+        "wall_clock_enforced": False, "over": 1,
+        "budgets": [
+            {"test": "test_flow", "name": "slow step", "kind": "wall", "measured": 7.0, "limit": 2.0, "unit": "s", "over": True, "blocking": False},
+            {"test": "test_flow", "name": "quick step", "kind": "wall", "measured": 7.0, "limit": 10.0, "unit": "s", "over": False, "blocking": False},
+        ],
+    }
+
+
+def test_a_wall_budget_fails_when_enforced_and_says_wall_cpu_and_the_requests(net: support.Network, clock: Clock, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv(support.BUDGETS_ENV, "enforce")
+    cpu = [1.0]
+    log = support.BudgetLog()
+    ui = support.Recorder(net, lambda: cpu[0], budgets=log, test="test_flow")
+    ui.step("a")
+    net.started(api("/api/postings?limit=50"))
+    clock.advance(7)
+    cpu[0] = 1.25
+    ui.step("b")
+    with pytest.raises(AssertionError) as caught:
+        ui.wall_budget("slow step", 2.0, "a", "b")
+    message = str(caught.value)
+    assert "wall-clock budget 'slow step': 7.00 s is over 2.0 s" in message
+    assert "wall 7.00 s, server CPU 0.25 s, 1 request(s)" in message and "GET /api/postings?limit=50" in message
+    ui.wall_budget("quick step", 10.0, "a", "b")  # under: no failure, enforced or not
+    assert [(line.over, line.blocking) for line in log.lines] == [(True, True), (False, True)]
+    assert "OVER, FAILED" in log.report()[0]
+    with pytest.raises(AssertionError, match="12.00 s is over 10.0 s"):
+        ui.wall_budget_of("a second tab", 10.0, 12.0)
+
+
+def test_only_the_word_enforce_enforces() -> None:
+    assert support.budgets_enforced({support.BUDGETS_ENV: "enforce"}) and support.budgets_enforced({support.BUDGETS_ENV: " Enforce "})
+    for value in ("", "report", "1", "true", "yes"):
+        assert not support.budgets_enforced({support.BUDGETS_ENV: value}), value
+    assert not support.budgets_enforced({})
+
+
+def test_a_cpu_budget_always_fails_when_over_and_is_recorded(net: support.Network, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv(support.BUDGETS_ENV, raising=False)
+    cpu = [0.0]
+    log = support.BudgetLog()
+    ui = support.Recorder(net, lambda: cpu[0], budgets=log, test="test_flow")
+    ui.step("a")
+    cpu[0] = 4.0
+    ui.step("b")
+    assert ui.cpu_budget("fine", 5.0, "a", "b") == pytest.approx(4.0)
+    with pytest.raises(AssertionError, match="server CPU budget 'too much': 4.00 s is over 1.0 s"):
+        ui.cpu_budget("too much", 1.0, "a", "b")
+    assert [(line.name, line.kind, line.over, line.blocking) for line in log.lines] == [("fine", "cpu", False, True), ("too much", "cpu", True, True)]
+    assert log.report()[-1] == "2 ceilings measured, 1 over"
+    assert support.BudgetLog().report() == []  # nothing measured: nothing printed
+
+
+def test_a_memory_budget_is_in_megabytes_and_always_fails_when_over(net: support.Network) -> None:
+    log = support.BudgetLog()
+    ui = support.Recorder(net, lambda: 0.0, budgets=log, test="test_flow")
+    assert ui.memory_budget_of("server memory", 600, 229.4) == pytest.approx(229.4)
+    with pytest.raises(AssertionError, match="the peak was 845 MB, over 600 MB"):
+        ui.memory_budget_of("server memory", 600, 845.0)
+    assert [(line.kind, line.unit, line.over, line.blocking) for line in log.lines] == [("rss", "MB", False, True), ("rss", "MB", True, True)]
+    assert "229 MB of    600 MB" in log.report()[0] and log.to_json(enforced=False)["budgets"][0]["unit"] == "MB"
+
+
+def test_no_test_asserts_a_wall_time_directly() -> None:
+    """Wall-clock ceilings go through `wall_budget` (reported; enforced on request), never through a bare assert."""
+
+    here = Path(__file__).resolve().parent
+    for path in sorted(here.glob("test_*.py")):
+        if path.name == Path(__file__).name:
+            continue
+        for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+            if "wall_seconds_between" in line:
+                assert "assert" not in line and "measured(" not in line, f"{path.name}:{number} asserts a wall time; use ui.wall_budget(name, LIMIT, first, last)"
+
+
+# ---------------------------------------------------------------------------- the order of the run
+
+
+def test_modules_that_change_the_home_run_last_and_the_cold_flow_first() -> None:
+    from types import SimpleNamespace
+
+    from tests.ui import conftest
+
+    def item(name: str, order: object = None) -> SimpleNamespace:
+        module = SimpleNamespace() if order is None else SimpleNamespace(**{conftest.ORDER_ATTRIBUTE: order})
+        return SimpleNamespace(name=name, module=module)
+
+    items = [item("reads-1"), item("deletes", 90), item("reads-2"), item("assesses", 10), item("cold", -1), item("odd", "soon"), item("reads-3")]
+    items.sort(key=conftest.ui_order)
+    assert [entry.name for entry in items] == ["cold", "reads-1", "reads-2", "odd", "reads-3", "assesses", "deletes"]
+    assert conftest.ui_order(SimpleNamespace(name="no module")) == 0
+
+
+def test_the_flows_that_change_the_small_home_say_so() -> None:
+    """A flow that writes to the shared home through the page declares UI_ORDER, so it runs after the readers."""
+
+    here = Path(__file__).resolve().parent
+    orders = {}
+    for path in sorted(here.glob("test_*.py")):
+        text = path.read_text(encoding="utf-8")
+        found = [line for line in text.splitlines() if line.startswith("UI_ORDER = ")]
+        if found:
+            orders[path.name] = int(found[0].split("=")[1].split("#")[0])
+    assert orders["test_operator_sized_jobs.py"] < 0, "the cold flow must be the first to read the operator-sized list"
+    changing = {"test_jobs_assess_these.py", "test_job_page_questions.py", "test_profile_delete.py"}
+    assert changing <= set(orders) and all(orders[name] > 0 for name in changing)
+    assert orders["test_profile_delete.py"] == max(orders.values()), "deleting a profile is the last thing done to the small home"
+
+
 def test_no_more_than_one_in_flight_passes_for_sequential_and_fails_for_overlap(net: support.Network, clock: Clock) -> None:
     ui = make_recorder(net, [0.0])
     one, two = api("/api/postings"), api("/api/postings")

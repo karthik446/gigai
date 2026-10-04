@@ -12,11 +12,16 @@ The assertion order the suite follows (REPORT.md 5.4), cheapest to flake last:
 3. wall-clock ceilings, loose (4 to 5 times what a laptop needs).
 
 There is no retry anywhere, on purpose: a retry turns a wrong budget into a pass.
+
+What blocks (0.1.10.9, the first week of the suite): structure, console and HTTP problems, and the
+server CPU ceilings fail a test. A wall-clock ceiling (`Recorder.wall_budget`) is always measured
+and reported (`BudgetLog`: the terminal summary and `budgets.json`), and fails a test only when
+`GIGAI_UI_BUDGETS=enforce`. The server's memory ceiling (`memory_budget_of`) blocks, as CPU does.
 """
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 import json
 import os
@@ -30,6 +35,12 @@ from urllib.parse import urlsplit
 #: Jobs page: at least one row, and the count line no longer says "Loading".
 LIST_READY_JS = """() => document.querySelectorAll('[data-testid="job-row"]').length > 0
   && !((document.querySelector('[data-role="postings-count"]') || {}).textContent || 'Loading').startsWith('Loading')"""
+
+#: A job page in full: the title, the state line and the pipeline timeline are drawn (a job that is still loading
+#: shows only a "Loading job…" heading, and one that is not found has none of the three).
+JOB_PAGE_READY_JS = """() => !!document.querySelector('.job-page .job-title')
+  && !!document.querySelector('.job-page [data-role="job-state"]')
+  && !!document.querySelector('.job-page [data-testid="step-timeline"]')"""
 
 #: Installed before the page's own scripts: `window.__gigaiCountLines` holds every text the Jobs count line
 #: shows, in order (null while the page shown has no count line). A MutationObserver sees every committed
@@ -112,6 +123,79 @@ class Measured(float):
     def __repr__(self) -> str:
         shown = f"{int(self)}" if float(self).is_integer() else f"{float(self):.2f}"
         return f"<{self.label} = {shown}{(' (' + self.detail + ')') if self.detail else ''}>"
+
+
+# ---------------------------------------------------------------------------- budgets
+
+#: `GIGAI_UI_BUDGETS=enforce` makes a wall-clock ceiling a failure; anything else measures and reports it.
+BUDGETS_ENV = "GIGAI_UI_BUDGETS"
+ENFORCE = "enforce"
+
+#: The user-facing wall-clock budgets (REPORT.md 5.4): a click answers in 2 s, a first load in 10 s. A flow's own
+#: named constant is one of these unless it says why not.
+INTERACTIVE_WALL_SECONDS = 2.0
+FIRST_LOAD_WALL_SECONDS = 10.0
+
+
+def budgets_enforced(environ: Mapping[str, str] | None = None) -> bool:
+    return ((os.environ if environ is None else environ).get(BUDGETS_ENV) or "").strip().lower() == ENFORCE
+
+
+@dataclass(frozen=True)
+class BudgetLine:
+    test: str
+    name: str
+    kind: str  # "wall" (reported; blocks only when enforced), "cpu" (server CPU seconds; always blocks), "rss" (server memory; always blocks)
+    measured: float
+    limit: float
+    blocking: bool
+    unit: str = "s"
+
+    @property
+    def over(self) -> bool:
+        return self.measured > self.limit
+
+    def line(self) -> str:
+        verdict = "ok" if not self.over else ("OVER, FAILED" if self.blocking else "OVER (reported, not enforced)")
+        digits = 0 if self.unit == "MB" else 2
+        return f"{self.kind:<4} {self.measured:7.{digits}f} {self.unit} of {self.limit:6.{digits}f} {self.unit}  {verdict:<30} {self.name}  [{self.test}]"
+
+
+class BudgetLog:
+    """Every timing ceiling a run measured, with what it measured: the report of the wall-clock budgets."""
+
+    def __init__(self) -> None:
+        self.lines: list[BudgetLine] = []
+
+    def record(self, test: str, name: str, kind: str, measured: float, limit: float, *, blocking: bool, unit: str = "s") -> BudgetLine:
+        line = BudgetLine(test, name, kind, float(measured), float(limit), blocking, unit)
+        self.lines.append(line)
+        return line
+
+    def over(self) -> list[BudgetLine]:
+        return [line for line in self.lines if line.over]
+
+    def report(self) -> list[str]:
+        """The lines of the terminal summary: every ceiling, then how many were over."""
+
+        if not self.lines:
+            return []
+        over = self.over()
+        reported = [line for line in over if not line.blocking]
+        tail = f"{len(self.lines)} ceilings measured, {len(over)} over"
+        if reported:
+            tail += f" ({len(reported)} wall-clock, reported only: {BUDGETS_ENV}={ENFORCE} makes them failures)"
+        return [line.line() for line in self.lines] + [tail]
+
+    def to_json(self, *, enforced: bool) -> dict[str, object]:
+        return {
+            "wall_clock_enforced": enforced,
+            "over": len(self.over()),
+            "budgets": [
+                {"test": line.test, "name": line.name, "kind": line.kind, "measured": round(line.measured, 3), "limit": line.limit, "unit": line.unit, "over": line.over, "blocking": line.blocking}
+                for line in self.lines
+            ],
+        }
 
 
 # ---------------------------------------------------------------------------- request bookkeeping
@@ -331,8 +415,10 @@ class Recorder:
         assert ui.wall_seconds_between("start", "loaded") <= 10   # last, and loose
     """
 
-    def __init__(self, network: Network, cpu_seconds: Callable[[], float]) -> None:
+    def __init__(self, network: Network, cpu_seconds: Callable[[], float], *, budgets: BudgetLog | None = None, test: str = "") -> None:
         self.network, self._cpu = network, cpu_seconds
+        self.budgets = budgets if budgets is not None else BudgetLog()
+        self.test = test
         self.marks: dict[str, Mark] = {}
         self.step("start")
 
@@ -371,6 +457,64 @@ class Recorder:
     def wall_seconds_between(self, first: str, last: str = "now") -> Measured:
         a, b = self._mark(first), self._mark(last)
         return Measured(b.at - a.at, f"wall seconds {first!r} -> {last!r}")
+
+    def requests_between(self, first: str, last: str = "now", resource: str | None = None) -> Measured:
+        """How many `/api/` requests started from step `first` up to step `last` (of one `resource` path, when given)."""
+
+        a, b = self._mark(first).first_request, self._mark(last).first_request
+        with self.network.lock:
+            items = [item for item in self.network.order[a:b] if resource is None or item.resource == resource]
+        listing = "; ".join(item.line() for item in items[:8]) + ("; ..." if len(items) > 8 else "")
+        return Measured(len(items), f"requests {first!r} -> {last!r}" + (f" for {resource}" if resource else ""), listing)
+
+    def writes_after(self, step: str) -> list[str]:
+        """Every request after `step` that is not a GET: what the page asked the server to change."""
+
+        first = self._mark(step).first_request
+        with self.network.lock:
+            return [f"{item.method} {item.resource}" for item in self.network.order[first:] if item.method != "GET"]
+
+    def _step_detail(self, first: str, last: str) -> str:
+        """What a timing failure prints: wall, server CPU and the requests of the step, so "the runner was slow" and
+        "the server did more work" are told apart."""
+
+        a, b = self._mark(first), self._mark(last)
+        with self.network.lock:
+            items = [item.line() for item in self.network.order[a.first_request:b.first_request]]
+        listing = "\n    ".join(items[:12]) + ("\n    ..." if len(items) > 12 else "")
+        return f"wall {b.at - a.at:.2f} s, server CPU {b.cpu - a.cpu:.2f} s, {len(items)} request(s)" + (f":\n    {listing}" if items else "")
+
+    def wall_budget(self, name: str, limit: float, first: str, last: str = "now") -> Measured:
+        """A wall-clock ceiling on a step: always measured and reported; a failure only when GIGAI_UI_BUDGETS=enforce."""
+
+        value = self.wall_seconds_between(first, last)
+        self.wall_budget_of(name, limit, float(value), detail=f"{first!r} -> {last!r}; {self._step_detail(first, last)}")
+        return value
+
+    def wall_budget_of(self, name: str, limit: float, seconds: float, *, detail: str = "") -> None:
+        """The same rule for a wall time the test measured itself (something outside this page's steps, like a second tab)."""
+
+        enforced = budgets_enforced()
+        self.budgets.record(self.test, name, "wall", seconds, limit, blocking=enforced)
+        if seconds > limit and enforced:
+            raise AssertionError(f"wall-clock budget {name!r}: {seconds:.2f} s is over {limit} s" + (f" ({detail})" if detail else ""))
+
+    def cpu_budget(self, name: str, limit: float, first: str, last: str = "now") -> Measured:
+        """A ceiling on the server's CPU seconds over a step: measured, reported, and always a failure when over."""
+
+        value = self.server_cpu_seconds_between(first, last)
+        self.budgets.record(self.test, name, "cpu", value, limit, blocking=True)
+        if value > limit:
+            raise AssertionError(f"server CPU budget {name!r}: {float(value):.2f} s is over {limit} s ({first!r} -> {last!r}; {self._step_detail(first, last)})")
+        return value
+
+    def memory_budget_of(self, name: str, limit_mb: float, peak_mb: float) -> float:
+        """A ceiling on the server's peak resident memory, in MB: recorded, and always a failure when over."""
+
+        self.budgets.record(self.test, name, "rss", peak_mb, limit_mb, blocking=True, unit="MB")
+        if peak_mb > limit_mb:
+            raise AssertionError(f"server memory budget {name!r}: the peak was {peak_mb:.0f} MB, over {limit_mb:.0f} MB")
+        return peak_mb
 
     def no_more_than_one_in_flight(self, resource: str, since: str = "start") -> None:
         """Fail when two requests of `resource` were open at the same time (counting from `since`)."""

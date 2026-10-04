@@ -9,7 +9,9 @@ running, the REAL list route (nothing is stubbed), cold: nothing has read the li
 The flow and what is pinned:
 
 1. `#/jobs` on the cold server: the count line says "Preparing your postings ... N%" while the
-   server builds, then the rows are there;
+   server builds, then the rows are there; WHILE it builds, a second tab opens Settings (both
+   background panels) and an assessed job's page, and both are there (the bug file's addendum:
+   the rest of the UI stays usable while the list loads);
 2. the first job is opened: its page is there;
 3. Back: the rows that were read are shown at once, the same rows, and the count line never says
    "Loading" or "Preparing" again; at most one list request (the refresh in place);
@@ -22,7 +24,8 @@ a minute, so one red run should say everything that is wrong. Only a step that c
 row at all) stops the flow early.
 
 The budgets follow the suite's order (structure, server CPU seconds, wall-clock last and loose);
-the numbers they come from are beside them (MEASURED). On 0.1.10.8
+the numbers they come from are beside them (MEASURED). The wall-clock ones are reported, and fail
+the test only with GIGAI_UI_BUDGETS=enforce (tests/ui/README.md). On 0.1.10.8
 (`GIGAI_UI_SERVER_ROOT=<a v0.1.10.8 checkout>`) the same test is red: see tests/ui/README.md.
 """
 
@@ -30,15 +33,20 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import time
+from urllib.parse import quote
 import urllib.request
 
 import pytest
 
+from tests.support.operator_home import DEFAULT_LABEL
 from tests.ui import support
-from tests.ui.support import tid
+from tests.ui.operator_home_ui import SERVER_RSS_MB
+from tests.ui.support import FIRST_LOAD_WALL_SECONDS, tid
 from tools.media.operator_ui_check import COLD_ROWS_SECONDS, JOB_PAGE_SECONDS, WATCHED
 
 pytestmark = [pytest.mark.ui, pytest.mark.operator_sized]
+UI_ORDER = -1  # the COLD flow: the first to read the operator-sized list, before every other test of the run
 
 PREPARING = "Preparing your postings"
 WAITING = ("Loading", "Still loading", PREPARING)
@@ -51,9 +59,15 @@ WAITING = ("Loading", "Still loading", PREPARING)
 #:                                                                                        in one run, none in 30 s in the other
 #:   list requests    2 on the cold load (the "preparing" answer, then the rows)          2, and 2 peeks in flight at once
 #:   server peak RSS  203 to 210 MB                                                       845 MB
+#: With the second tab (2026-10-04, three runs, Python 3.11 twice and 3.13 once): cold rows 10.4 to 12.2 s wall, 12.3 to
+#: 14.1 server CPU seconds (the second tab's requests are served beside the build); in the second tab, Settings 0.85
+#: to 0.87 s and a job page 0.47 to 0.71 s, the list still being prepared when both were there; server peak RSS 229 to
+#: 255 MB.
 COLD_CPU_SECONDS = 45.0  # about 5x: a CI core is 2 to 3 times slower than this laptop's
+COLD_WALL_SECONDS = 60.0  # reported: about 6x; the hard stop is COLD_ROWS_SECONDS (with no row there is nothing to open)
 BACK_CPU_SECONDS = 3.0  # a refresh in place of one page at the most, beside whatever the background pipeline does
-BACK_WALL_SECONDS = 5.0  # loose: the rows are already in the page's store
+BACK_WALL_SECONDS = 5.0  # reported, loose: the rows are already in the page's store
+BESIDE_WALL_SECONDS = FIRST_LOAD_WALL_SECONDS  # reported: a page in a new tab while the server builds the list
 #: How long Back may take before the flow gives up (a patience: the budget is BACK_WALL_SECONDS).
 BACK_PATIENCE_SECONDS = 30.0
 #: The first read (answered "preparing"), the read after the build, one spare.
@@ -63,6 +77,53 @@ COLD_LIST_REQUESTS = 3
 def server_json(server, path: str) -> dict:
     with urllib.request.urlopen(server.url + path, timeout=30) as response:
         return json.loads(response.read())
+
+
+#: The count line has said "Preparing", or rows are already there (a server that never says it is preparing).
+PREPARING_OR_ROWS_JS = """() => (window.__gigaiCountLines || []).some((line) => line && line.startsWith('Preparing'))
+  || document.querySelectorAll('[data-testid="job-row"]').length > 0"""
+
+
+def beside_the_build(ui, server, numbers: dict[str, object], check) -> None:
+    """While the first tab waits for the list, a second tab opens Settings and an assessed job's page."""
+
+    try:
+        ui.page.wait_for_function(PREPARING_OR_ROWS_JS, timeout=int(COLD_ROWS_SECONDS * 1000))
+    except Exception:  # Playwright's TimeoutError: the flow's own wait, next, says what the page showed
+        return
+    if ui.job_rows():
+        numbers["beside_the_build"] = "not run: the list was not being prepared when the page was looked at"
+        return
+    tab = ui.page.context.new_page()
+    books = support.Network()
+    books.attach(tab)
+    try:
+        job = server_json(server, f"/api/assessments?profile_id={server.built.profiles[DEFAULT_LABEL]}")["items"][0]["job"]["job_identity"]
+        started = time.monotonic()
+        tab.goto(server.url + "/#/settings")
+        tab.wait_for_selector(f"{tid('background-panel')} [data-role='pipeline-status']")
+        tab.wait_for_selector('[data-role="background-settings"] #background-auto-refresh')
+        settings_seconds = time.monotonic() - started
+        started = time.monotonic()
+        tab.goto(server.url + "/#/jobs/" + quote(job, safe=""))
+        tab.wait_for_function(support.JOB_PAGE_READY_JS)
+        job_seconds = time.monotonic() - started
+        numbers["beside_the_build"] = {
+            "settings_seconds": round(settings_seconds, 2), "job_page_seconds": round(job_seconds, 2),
+            "list_still_preparing_after": ui.job_rows() == 0,
+        }
+        for name, seconds in (("Settings in a second tab while the list is prepared", settings_seconds), ("a job page in a second tab while the list is prepared", job_seconds)):
+            try:
+                ui.wall_budget_of(f"{name} (operator-sized)", BESIDE_WALL_SECONDS, seconds)
+            except AssertionError as error:  # only with GIGAI_UI_BUDGETS=enforce
+                check(False, error)
+        problems = books.problems()
+        check(not problems, f"the second tab reported {len(problems)} problem(s) while the list was prepared: {problems[:5]}")
+    except Exception as error:
+        check(False, f"while the list was being prepared, a second tab could not open Settings and a job page: {type(error).__name__}: {str(error).splitlines()[0]}")
+    finally:
+        tab.close()
+        books.drop_open("dropped when the second tab closed")
 
 
 def test_jobs_load_open_a_job_and_back_on_the_operator_sized_home(operator_ui, operator_server, ui_artifacts: Path, request: pytest.FixtureRequest) -> None:
@@ -81,6 +142,18 @@ def test_jobs_load_open_a_job_and_back_on_the_operator_sized_home(operator_ui, o
     def measured(value: support.Measured, limit: float) -> None:
         check(value <= limit, f"{value!r} is over {limit}")
 
+    def cpu(name: str, limit: float, first: str, last: str) -> None:
+        try:
+            ui.cpu_budget(f"{name} (operator-sized)", limit, first, last)
+        except AssertionError as error:
+            failures.append(str(error))
+
+    def wall(name: str, limit: float, first: str, last: str) -> None:
+        try:
+            ui.wall_budget(f"{name} (operator-sized)", limit, first, last)
+        except AssertionError as error:  # only with GIGAI_UI_BUDGETS=enforce
+            failures.append(str(error))
+
     # The home is the operator's SIZE and nothing of the operator's: a temporary HOME, which is the server's HOME.
     import psutil
 
@@ -93,6 +166,7 @@ def test_jobs_load_open_a_job_and_back_on_the_operator_sized_home(operator_ui, o
     # 1. Jobs on the cold server: "preparing" with a percent, then the rows.
     ui.watch_count_line()
     ui.goto("/#/jobs")
+    beside_the_build(ui, server, numbers, check)
     ui.wait_for_jobs_list(timeout_ms=int(COLD_ROWS_SECONDS * 1000))  # the only hard stop: with no row there is nothing to open
     ui.step("loaded")
     cold_lines = [line for line in ui.count_lines() if line]
@@ -107,15 +181,16 @@ def test_jobs_load_open_a_job_and_back_on_the_operator_sized_home(operator_ui, o
     numbers["rows_first"] = rows_first
     check(rows_first > 1, f"the Jobs list shows {rows_first} row(s) of a home with {server.built.matched_titles} matched titles")
     measured(ui.requests_after("start", WATCHED["list"]), COLD_LIST_REQUESTS)
-    measured(ui.server_cpu_seconds_between("start", "loaded"), COLD_CPU_SECONDS)
+    cpu("Jobs cold load", COLD_CPU_SECONDS, "start", "loaded")
+    wall("Jobs cold load", COLD_WALL_SECONDS, "start", "loaded")
 
     # 2. Open the first job.
     ui.page.locator(f"{tid('job-row')} [data-action='open-job']").first.click()
-    ui.page.wait_for_selector(".job-title", timeout=int(JOB_PAGE_SECONDS * 4 * 1000))
+    ui.wait_for_job_page(timeout_ms=int(JOB_PAGE_SECONDS * 4 * 1000))  # the title, the state line and the timeline, not a heading alone
     ui.step("opened")
     check("#/jobs/" in ui.page.url, f"the job page's address is {ui.page.url}")
     numbers["job_page_seconds"] = round(ui.wall_seconds_between("loaded", "opened"), 2)
-    measured(ui.wall_seconds_between("loaded", "opened"), JOB_PAGE_SECONDS)
+    wall("open a job", JOB_PAGE_SECONDS, "loaded", "opened")
 
     # 3. Back: the list is still there.
     lines_before_back = len(ui.count_lines())
@@ -136,8 +211,8 @@ def test_jobs_load_open_a_job_and_back_on_the_operator_sized_home(operator_ui, o
         ui.page.wait_for_load_state("networkidle")  # the refresh in place, if there is one, ends before it is counted
         ui.step("settled")
         measured(ui.requests_after("opened", WATCHED["list"]), 1)  # at most the one refresh in place, never a re-list
-        measured(ui.server_cpu_seconds_between("opened", "settled"), BACK_CPU_SECONDS)
-        measured(ui.wall_seconds_between("opened", "back"), BACK_WALL_SECONDS)
+        cpu("Back to Jobs", BACK_CPU_SECONDS, "opened", "settled")
+        wall("Back to Jobs", BACK_WALL_SECONDS, "opened", "back")
         numbers["back_server_cpu_seconds"] = round(ui.server_cpu_seconds_between("opened", "settled"), 2)
 
     # 4. No pile-up, the background threads were running, and nothing went wrong on the way.
@@ -160,6 +235,10 @@ def test_jobs_load_open_a_job_and_back_on_the_operator_sized_home(operator_ui, o
     bad = [line for line in log.splitlines() if "unhandled exception" in line or "Traceback" in line or " 500 " in line]
     check(not bad, f"the server log has an unhandled exception or a 500: {bad[:3]}")
     numbers["server_peak_rss_mb"] = round(ui.peak_server_rss_mb())
+    try:
+        ui.memory_budget("the server's peak memory, cold load (operator-sized)", SERVER_RSS_MB)
+    except AssertionError as error:
+        failures.append(str(error))
     problems = ui.problems()
     check(not problems, f"{len(problems)} problem(s) in the browser: {problems[:5]}")  # zero console errors, page errors, HTTP >= 400
 

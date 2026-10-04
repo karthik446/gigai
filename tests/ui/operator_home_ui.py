@@ -37,6 +37,9 @@ SERVER_ROOT_ENV = "GIGAI_UI_SERVER_ROOT"
 #: The build is about 30 s on a 14-core laptop and 2 to 5 minutes on a small runner; this is a patience, not a budget.
 BUILD_PATIENCE_SECONDS = 1800
 HEALTH_PATIENCE_SECONDS = 60
+#: The ceiling on the server's peak resident memory while a flow runs on this home. 200 to 330 MB measured on the
+#: fixed build (2026-10-04, macOS); 0.1.10.8 peaked at 845 MB here and 1,182 to 1,271 MB in the spike.
+SERVER_RSS_MB = 600
 
 
 class OperatorHomeUiError(RuntimeError):
