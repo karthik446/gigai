@@ -22,6 +22,37 @@ operator-visible capability and must link to the relevant release or evidence.
 
 ## Released versions
 
+### 0.1.10.9
+
+A fix for the Jobs page, which never finished loading on a large store of postings (about 290,000
+postings from about 10,000 companies): the first page load took minutes, every request took seconds,
+the server used several gigabytes of memory, and reloading made it worse. Read "After you upgrade".
+
+#### After you upgrade
+
+- **One more preparation, with progress.** The stored postings are prepared again once, in the
+  background. The Jobs page shows "Preparing your postings (one time after an upgrade)... N%" and
+  the rest of Scout stays usable meanwhile; `gigai scout new` prints the same progress. After that
+  the Jobs page answers in a fraction of a second.
+- **You cannot go back to 0.1.10.8 without one step.** Scout's local posting store (`pipeline.sqlite`,
+  a cache plus the history of its background work) has a new layout. If you install 0.1.10.8 again,
+  delete that file first; it is rebuilt.
+
+#### Fixed
+
+- **The Jobs page loads on a real-sized home.** Scout now prepares the postings once and shares the
+  result between every request instead of each request doing the whole job itself. It remembers
+  the result between runs, so the command line and a restarted Scout start ready, and a company's
+  update re-checks only that company. On a test home of 290,000 postings and 10,350 companies the
+  server stays near 200 MB, a warm request takes about a tenth of a second (it took 5 to 40
+  seconds), and `gigai scout new` takes under a second.
+- **The background ranking no longer slows everything down.** It used to match the whole store of
+  postings against your profiles again on every turn.
+- **Going back from a job to the list keeps the list.** The Jobs page keeps what it loaded,
+  refreshes it in place and asks for one thing at a time. A slow answer says what it is waiting for.
+- **A browser that goes away is no longer an error in the log.** It is logged as "client closed the
+  connection".
+
 ### 0.1.10.8
 
 Fixes from the first days of real use of 0.1.10.7, a security fix for everyone who uses Scout
