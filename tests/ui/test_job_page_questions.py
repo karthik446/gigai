@@ -11,13 +11,16 @@ This flow CHANGES the shared home (an answer, an assessment, a tailored resume),
 Pinned: the page is the job (title, state "Needs your answers", the questions section with the server's question and
 the requirement it is about); Re-assess is ONE `POST /api/answers` carrying the typed answer and this job; after it
 the questions section is gone and the state leaves "Needs your answers", without a reload; the timeline reaches
-"done" with the Scout label and Scout ATS chips by the page's own polling; the server holds the typed answer as the
-user's ("Written by you"), and its row for the job agrees; after a reload the page shows the tailored resume the
-pipeline stored, its resumes-folder line and the state "Resume tailored". Zero console errors.
+"done" with the Scout label and Scout ATS chips by the page's own polling; the page then shows the tailored resume
+the pipeline stored, its resumes-folder line, "Tailor again" and the state "Resume tailored", WITHOUT a reload (the
+0.1.10.9 U3 flow found it shown only after one): ONE `GET /api/tailored-resumes` when the timeline says the tailor
+step finished, and the timeline is not read again for it; the server holds the typed answer as the user's ("Written
+by you"), and its row for the job agrees; a reload shows the same. Zero console errors.
 
-KNOWN BUG (found by this flow, not fixed here): WITHOUT that reload the page never shows the tailored resume the
-pipeline stored. Every check above is made first; the test then reports itself as an expected failure (xfail) with
-that reason, and passes by itself once the page follows the pipeline.
+A second flow (first in the file: it writes nothing) holds `GET /api/answers` until the box is filled: the answers
+on record then arrive with one for this job's question, so the open questions change under a typed answer. The box
+keeps what was typed, and the near-match lookup (`GET /api/answers/match`) was made once. The response is the real
+server's, only late.
 
 MEASURED (14-core laptop, 2026-10-04, four runs: Python 3.11 three times, 3.13 once): the job page 0.09 to 0.10 s;
 the re-assessment 3.4 to 4.3 s wall, 1.6 to 2.3 server CPU seconds (the answer's journal write, one fixture-model
@@ -43,15 +46,54 @@ REASSESS_CPU_SECONDS = 10.0  # 1.6 to 2.3 measured: the journal write, the asses
 PIPELINE_WALL_SECONDS = 45.0  # four background steps and a 3 s poll: 3.8 to 6.8 s measured
 #: How long the flow waits for the background pipeline (a patience: the budget is PIPELINE_WALL_SECONDS).
 PIPELINE_PATIENCE_MS = 90_000
-#: KNOWN, found by this flow: the page asks GET /api/answers/match up to four times for ONE open question while it
-#: settles (once per render that changes what is on record). 1 is the target; the ceiling keeps it from getting worse.
-MATCH_REQUESTS = 4
-#: KNOWN BUG, found by this flow (0.1.10.9 U3 report): everything above it passed when this is the outcome.
-KNOWN_STALE_PANEL = (
-    "the job page does not show the tailored resume the background pipeline just stored: the timeline says the tailor "
-    "step is done, but the Tailored resume panel, 'Tailor again' and the state 'Resume tailored' appear only after a "
-    "reload (the page reads GET /api/tailored-resumes once, when the job opens)"
-)
+#: ONE GET /api/answers/match for one open question (it was up to four while the page settled: two holders of the
+#: same drafts each asked, and again on every render that made new objects of the same questions and answers).
+MATCH_REQUESTS = 1
+DRAFT = "Typed before the answers on record arrived."
+
+
+def test_a_typed_answer_stays_when_the_open_questions_change(ui) -> None:
+    """The answers on record arrive AFTER the user typed, and they hold one for the question: the box keeps what was typed.
+
+    The page looks a near match up once per open question, and again only when the open questions change. Here they
+    change under a typed answer: the small home has an answer to this job's question on record (the job was assessed
+    before it existed), and the test holds `GET /api/answers` until the box is filled. Nothing is written.
+    """
+
+    job = ui.server_json("/api/postings?state=needs_answers&limit=50")["postings"]["rows"][0]
+    question = job["open_questions"][0]
+    on_record = {item["question_id"]: item["answer"] for item in ui.server_json("/api/answers")["answers"]}
+    assert question["question_id"] in on_record and on_record[question["question_id"]] != DRAFT
+    held: list = []
+
+    def answer(route) -> None:
+        if route.request.method == "GET" and urlsplit(route.request.url).path == "/api/answers":
+            held.append(route)
+        else:
+            route.continue_()  # the near-match lookup and everything else is the real server's
+
+    ui.goto("/#/jobs?state=needs_answers")
+    ui.wait_for_jobs_list()
+    ui.settle()
+    ui.step("listed")
+    ui.page.route("**/api/answers*", answer)
+    with ui.page.expect_response(lambda response: urlsplit(response.url).path == "/api/answers/match"):
+        ui.page.locator(f"{tid('job-row')} [data-action='open-job']", has_text=job["title"]).first.click()
+    ui.wait_for_job_page()
+    section = ui.page.locator('.job-page [data-role="questions-section"]')
+    box = section.locator(f'.row-question[data-question-id="{question["question_id"]}"] input')
+    box.fill(DRAFT)
+    assert len(held) == 1, "the job page reads the answers on record once"
+
+    # The answers on record arrive (the real server's), with one for this question: nothing is left to look up.
+    with ui.page.expect_response(lambda response: urlsplit(response.url).path == "/api/answers"):
+        held.pop().continue_()
+    ui.settle()
+    assert box.input_value() == DRAFT, "the typed answer was lost when the open questions changed"
+    assert section.locator('[data-action="reassess"]').is_enabled()
+    assert ui.requests_after("listed", "/api/answers/match") == MATCH_REQUESTS, "one lookup for the question while it was open, none after"
+    assert ui.writes_after("start") == []
+    ui.assert_clean()
 
 
 def test_answer_a_question_on_the_job_page_and_the_pipeline_runs(ui) -> None:
@@ -97,6 +139,7 @@ def test_answer_a_question_on_the_job_page_and_the_pipeline_runs(ui) -> None:
     assert (sent["question_id"], sent["answer"], sent["reassess"]) == (question["question_id"], ANSWER, {"job_identity": job["job_identity"]})
     assert saved.value.status in (200, 201) and saved.value.json()["reassessed"], "the answer was saved but the job was not re-assessed"
     assert ui.writes_after("typed") == ["POST /api/answers"]
+    assert ui.requests_after("typed", "/api/answers/match") == 0, "the answered question was looked up again"
     state = ui.page.locator('.job-page [data-role="job-state"]')
     assert state.get_attribute("data-state") != "needs_answers"
     assert "#/jobs/" in ui.page.url, "the page left the job"
@@ -113,9 +156,20 @@ def test_answer_a_question_on_the_job_page_and_the_pipeline_runs(ui) -> None:
     assert timeline.locator(tid("scout-label-chip")).count() == 1 and timeline.locator(tid("ats-chip")).count() == 1
     assert ui.writes_after("reassessed") == [], "the pipeline ran by itself: the page asked for nothing"
     ui.wall_budget("the background pipeline finishes the job (fixture model)", PIPELINE_WALL_SECONDS, "reassessed", "pipeline-done")
-    ui.settle()
+
+    # The page shows the resume the pipeline stored: the panel, its folder line, "Tailor again", "Resume tailored".
+    # No reload: one read of the stored resume when the tailor step finished, and the timeline stays as it is.
     panel = ui.page.locator('#tailored-resume[data-state="stored"]')
-    shown_without_reload = panel.count() == 1 and state.get_attribute("data-state") == "tailored"
+    tailored_state = ui.page.locator('.job-page [data-role="job-state"][data-state="tailored"]')
+    panel.wait_for()
+    ui.page.locator(f"#tailored-resume {tid('resumes-folder-file')}").wait_for()
+    tailored_state.wait_for()
+    assert ui.page.locator('.job-page [data-action="tailor"]').text_content() == "Tailor again"
+    ui.settle()
+    assert ui.requests_after("reassessed", "/api/tailored-resumes") == 1
+    assert ui.requests_after("pipeline-done", "/api/pipeline/job") == 0, "the timeline was read again for the resume the pipeline stored"
+    assert timeline.get_attribute("data-state") == "done"
+    assert ui.writes_after("reassessed") == []
 
     # The server agrees: the answer is the user's, and the job no longer waits.
     recorded = next(item for item in ui.server_json("/api/answers")["answers"] if item["question_id"] == question["question_id"])
@@ -126,12 +180,10 @@ def test_answer_a_question_on_the_job_page_and_the_pipeline_runs(ui) -> None:
     assert job_state["state"] == "done"
     ui.no_more_than_one_in_flight("/api/pipeline/job")
 
-    # The tailored resume the pipeline stored is on the job page (with its line in the resumes folder) after a reload.
+    # A reload shows the same.
     ui.reload()
     ui.wait_for_job_page()
     panel.wait_for()
     ui.page.locator(f"#tailored-resume {tid('resumes-folder-file')}").wait_for()
-    ui.page.locator('.job-page [data-role="job-state"][data-state="tailored"]').wait_for()
+    tailored_state.wait_for()
     ui.assert_clean()  # zero console errors, page errors, HTTP >= 400, failed requests
-    if not shown_without_reload:
-        pytest.xfail(KNOWN_STALE_PANEL)

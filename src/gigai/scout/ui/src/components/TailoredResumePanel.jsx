@@ -9,6 +9,7 @@ import {
   inlineSegments,
   latestStored,
   lineActions,
+  newerStored,
   lostLabels,
   previewLines,
   previewStats,
@@ -346,7 +347,12 @@ export function useTailoredResume({ jobIdentity, jobUrl, profileId }) {
   const [elapsed, setElapsed] = useState(0);
   const [error, setError] = useState(null);
   const [outcome, setOutcome] = useState(null); // uat-bug-043: "done" | "error" after a run, for the status by the button
+  const [changes, setChanges] = useState(0); // resumes made or edited on THIS page: the pipeline takes each up, so the job page reads its timeline again
   const requestKey = useRef(0);
+  const replaceStored = useCallback((response) => {
+    setStored(response);
+    setChanges((count) => count + 1);
+  }, []);
 
   useEffect(() => {
     const key = ++requestKey.current;
@@ -399,7 +405,7 @@ export function useTailoredResume({ jobIdentity, jobUrl, profileId }) {
         if (requestKey.current !== key) {
           return;
         }
-        setStored(response);
+        replaceStored(response);
         setOutcome("done");
         setTailoring(false);
       })
@@ -411,9 +417,23 @@ export function useTailoredResume({ jobIdentity, jobUrl, profileId }) {
         setOutcome("error");
         setError(err instanceof ApiError ? err : { message: err.message || String(err) });
       });
-  }, [jobUrl, profileId]);
+  }, [jobUrl, profileId, replaceStored]);
 
-  return { stored, setStored, loadingStored, tailoring, elapsed, error, outcome, tailor, jobIdentity, profileId, visible: Boolean(stored || tailoring || error) };
+  // The background pipeline stored a resume for this job (the timeline says
+  // its tailor step finished): read it again, quietly. What the page shows
+  // stays until the answer arrives, and `changes` does not move, so the
+  // timeline that reported it is not read again for it.
+  const reload = useCallback(() => {
+    if (!jobIdentity || !profileId) {
+      return;
+    }
+    const key = requestKey.current;
+    getTailoredResumes({ profileId, jobIdentity })
+      .then((response) => requestKey.current === key && setStored((held) => newerStored(held, latestStored(response.items))))
+      .catch(() => {}); // what is shown stays; the next finished tailor step, or opening the job again, reads it
+  }, [jobIdentity, profileId]);
+
+  return { stored, setStored: replaceStored, changes, reload, loadingStored, tailoring, elapsed, error, outcome, tailor, jobIdentity, profileId, visible: Boolean(stored || tailoring || error) };
 }
 
 export default function TailoredResumePanel({ state, profileLabel, questionPrompts }) {

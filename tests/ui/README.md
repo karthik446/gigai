@@ -33,7 +33,7 @@ The 11 flows of the UI-testing spike (REPORT.md 5.3), and the flows of the featu
 | 2. Open a job, Back, the list is still there | `test_jobs_open_and_back.py` | `test_operator_sized_jobs.py`; from page 2 in `test_operator_sized_pages.py` |
 | 3. Chips: profile, New / 7 / 30 days, state | `test_jobs_chips.py` | `test_operator_sized_pages.py` |
 | 4. "Assess these": the dialog, approve on the fixture model | `test_jobs_assess_these.py` (changes the home); the low-ranked second question in `test_jobs_weak_fit.py` | - |
-| 5. Job page: questions, answer one, the timeline runs | `test_job_page_questions.py` (changes the home) | a job page in a second tab WHILE the list is prepared: `test_operator_sized_jobs.py` |
+| 5. Job page: questions, answer one, the timeline runs, the tailored resume it stored shows without a reload | `test_job_page_questions.py` (changes the home) | a job page in a second tab WHILE the list is prepared: `test_operator_sized_jobs.py` |
 | 6. Generate PDF: six fields, a download, nothing stored | `test_generate_pdf.py` | - |
 | 7. Answers and stories | `test_answers_stories.py` | the agent writes one: `test_operator_sized_pages.py` |
 | 8. Settings > Background updates | `test_settings_background.py` | Settings in a second tab WHILE the list is prepared: `test_operator_sized_jobs.py` |
@@ -196,8 +196,3 @@ has a week of `budgets.json`, set the limits from it and make `enforce` the defa
 
 - The page asks `/api/assessments` twice per profile on a Jobs load (`test_smoke_flow.py`,
   `ASSESSMENT_REQUESTS`).
-- A job page asks `/api/answers/match` up to four times for one open question
-  (`test_job_page_questions.py`, `MATCH_REQUESTS`).
-- The job page does not show the tailored resume the background pipeline just stored until a
-  reload: `test_job_page_questions.py` reports itself as an expected failure (xfail) with that
-  reason after every other check passed, and passes by itself once that is fixed.

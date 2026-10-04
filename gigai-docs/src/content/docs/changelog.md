@@ -119,6 +119,12 @@ the server used several gigabytes of memory, and reloading made it worse. Read "
   stored posting, and answers for a stored posting that has not been assessed yet.
 - **The API says a company's name in `company`.** `posting.company` was the board's id (for example
   `ospreylabs`) while the name sat beside it in `company_name`, and agents read the id as the name.
+- **The job page shows the resume the pipeline just tailored.** After you answered a question on a
+  job page, the timeline said "Tailor resume: Done" while the Tailored resume panel, "Tailor again"
+  and the state "Resume tailored" appeared only after a reload. The page now reads the stored
+  resume again when the tailor step finishes.
+- **Past runs lists the selected profile's runs.** Past runs could show every profile's runs under
+  the selected profile when the first read answered last.
 
 #### Changed
 

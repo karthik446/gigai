@@ -92,7 +92,13 @@ import { ASSESSMENTS_HASH, JOBS_HASH } from "../routing.js";
 //   pipeline    0.1.10.7 M4b: GET /api/pipeline/job, the step timeline
 //               (tailor -> reassess + Scout ATS -> Scout label) with the
 //               Scout ATS chip and the Scout label chip; "Process now" is
-//               POST /api/pipeline/process (PipelineTimeline)
+//               POST /api/pipeline/process (PipelineTimeline). When the
+//               pipeline's tailor step finishes, the timeline says so and
+//               the stored resume is read again (useTailoredResume.reload):
+//               the panel, "Tailor again" and the state "Resume tailored"
+//               follow without a reload. The timeline is read again (its
+//               refreshKey) for a new verdict and for a resume made or
+//               edited on this page, not for one the pipeline stored
 //
 // Q4b: work_mode / pay (posting) and h1b (the row, via job.h1b) render only
 // when present -- no placeholder chips (operator answer 3).
@@ -519,7 +525,8 @@ export default function JobPage({
         jobIdentity={job.id}
         profileId={profileId}
         assessed={Boolean(assessment)}
-        refreshKey={`${assessment ? assessment.verdict || "assessed" : "none"}:${tailored.stored ? tailored.stored.updated_at || "stored" : "none"}`}
+        refreshKey={`${assessment ? assessment.verdict || "assessed" : "none"}:${tailored.changes}`}
+        onTailorDone={tailored.reload}
       />
 
       <TailoredResumePanel state={tailored} profileLabel={profileLabel} questionPrompts={questionPrompts} />

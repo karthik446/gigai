@@ -57,9 +57,12 @@ export function useAnswerDrafts({ assessment, jobIdentity, priorAnswers, onAnswe
   }, [priorAnswers, saved]);
 
   // 0110-034: one near-match lookup per open question nothing answers yet.
+  // Keyed by the open questions themselves: a render that only makes new
+  // objects of the same questions and answers asks nothing again.
+  const openKey = useMemo(() => JSON.stringify(questions.filter((question) => !recorded.has(question.question_id)).map((question) => [question.question_id, question.question])), [questions, recorded]);
   useEffect(() => {
     let current = true;
-    const open = questions.filter((question) => !recorded.has(question.question_id));
+    const open = JSON.parse(openKey).map(([question_id, question]) => ({ question_id, question }));
     if (open.length === 0) {
       setSuggestions(new Map());
       return undefined;
@@ -74,7 +77,7 @@ export function useAnswerDrafts({ assessment, jobIdentity, priorAnswers, onAnswe
     return () => {
       current = false;
     };
-  }, [questions, recorded]);
+  }, [openKey]);
 
   const states = useMemo(() => answerStates(questions, drafts, recorded, { suggestions, used }), [questions, drafts, recorded, suggestions, used]);
   const gate = useMemo(() => reassessGate({ assessed: Boolean(assessment), states }), [assessment, states]);

@@ -153,6 +153,22 @@ export function pipelineLive(detail) {
   return Boolean(detail) && LIVE_STATES.has(detail.state);
 }
 
+// The tailor step as one value: its `updated_at` once it is done, "" until then.
+export function tailorDoneStamp(detail) {
+  const step = ((detail && detail.steps) || []).find((item) => item.name === "tailor");
+  return step && step.state === "done" ? String(step.updated_at || "done") : "";
+}
+
+// The job page reads the stored tailored resume when the job opens; the
+// pipeline stores one in the background, later. True when this read of the
+// timeline says the tailor step finished since the read before it: the page
+// reads the stored resume again. `before` is the stamp of the previous read
+// of this job, undefined on the first read (which tells nothing new: the
+// page read the stored resume at the same moment).
+export function tailorFinished(before, stamp) {
+  return Boolean(stamp) && before !== undefined && before !== stamp;
+}
+
 // The "process now" button: {enabled, label, reason, body}. A job enters the
 // pipeline only once it is assessed; a finished one is processed again with `force`.
 export function processAction(detail, { assessed, jobIdentity, profileId }) {
