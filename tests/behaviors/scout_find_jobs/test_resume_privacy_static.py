@@ -45,6 +45,8 @@ _READER_ALLOWLIST: dict[tuple[str, str, str], str] = {
     ("gigai.scout.find_jobs.api.rank", "_resolve", "read_record"): "model_rank.rank_postings -> rank_digest.resume_digest",
     ("gigai.scout.find_jobs.api.run_reads", "_resume_text", "read_record"): "local run reads (RowJoins), never sent",
     ("gigai.scout.contact_cleanup", "_clean_resumes", "read_record"): "0110-046: stripped locally (resume_pii.strip_contact_lines) and stored back, never sent",
+    # 0.1.10.9 master P1: the master resume (contact lines never imported); parsed for `resume master show|history|init`, no model.
+    ("gigai.scout.master_store", "_read_master", "read_record"): "parsed locally (master_resume.parse_master) for the master CLI, never sent",
     ("gigai.scout.find_jobs.market_acquisition", "_read_resume_text_for_rank", "read_record"): "returned to the rank step below",
     ("gigai.scout.find_jobs.market_acquisition", "_rank_rows_with_status", "_read_resume_text_for_rank"): "model_rank.rank_postings -> rank_digest.resume_digest",
     ("gigai.scout.find_jobs.resume_input", "resolve_resume", "resume_for_profile"): "returned to its callers (allowlisted here)",
