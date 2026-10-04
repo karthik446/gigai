@@ -4,7 +4,9 @@ First flow, the MIGRATION with its conflict question. The small home's two profi
 first gives the second profile a resume of its own through the real routes (`POST /api/resumes`, `PUT /api/profiles`):
 the same resume with one line worded with older numbers. The page then shows the merge and asks the ONE question
 (both wordings, and the profile that holds each); the button stays off until it is answered; one click makes the
-master, and each profile keeps the resume it showed.
+master, and each profile keeps the resume it showed. That resume also starts with a headline, which the merge leaves
+out: the preview counts every line of the two resumes and lists the left-out one by resume, line number and reason
+(0.1.10.9 M8: `migration.source_lines`), never by its text.
 
 Second flow, the page itself: the master is listed BY ROLE as the server gives it, every line with the strength the
 server derived, and the revision the page read. A line is added under a role, edited, retired (it asks first) and
@@ -47,6 +49,7 @@ NEWER_LINE = "Built Python services that price and route 40,000 shipments a day.
 NEW_LINE = "Cut the deploy time of 40 services from 50 to 12 minutes."
 EDITED_LINE = "Cut the deploy time of 40 services from 50 to 11 minutes."
 NEAR_LINE = "Cut the deploy time of 40 services from 50 minutes to 11 minutes."  # EDITED_LINE in other words
+HEADLINE = "Backend and data platforms | Remote"  # above the first section and not a summary: the merge leaves it out
 
 
 def ensure_master(ui) -> dict:
@@ -88,7 +91,7 @@ def test_the_migration_asks_its_question_and_makes_the_master(ui) -> None:
     first = next(item for item in profiles.values() if item["profile_id"] != second["profile_id"])
     # The second profile gets its own resume: the same one, one line with older numbers (the real routes, as the Settings page uses them).
     assert NEWER_LINE in persona.RESUME_MARKDOWN
-    stored = ui.server_json("/api/resumes", {"text": persona.RESUME_MARKDOWN.replace(NEWER_LINE, OLDER_LINE)})["resume_ref"]
+    stored = ui.server_json("/api/resumes", {"text": f"{HEADLINE}\n\n" + persona.RESUME_MARKDOWN.replace(NEWER_LINE, OLDER_LINE)})["resume_ref"]
     ui.server_json(
         f"/api/profiles/{second['profile_id']}",
         {"label": second["label"], "titles": second["titles"], "resume_record_id": stored["record_id"], "resume_revision_id": stored["revision_id"]},
@@ -109,6 +112,18 @@ def test_the_migration_asks_its_question_and_makes_the_master(ui) -> None:
     shown = " ".join(row.locator("p.story-answer").all_text_contents())
     assert NEWER_LINE in shown and OLDER_LINE in shown and first["label"] in shown and second["label"] in shown
     assert [button.get_attribute("data-choice") for button in row.locator("[data-choice]").all()] == ["a", "b", "both"]
+    # Every line of the two resumes is counted, and the one the merge leaves out is named by resume, line number and reason.
+    lines = plan["migration"]["source_lines"]
+    assert lines["left_out"] == 1 and lines["in"] == lines["kept"] + lines["folded"] + lines["left_out"]
+    assert panel.locator('[data-role="migration-source-lines"]').text_content() == (
+        f"Of {lines['in']} lines of resume text (headings, role lines and wrapped lines counted): {lines['kept']} kept, "
+        f"{lines['folded']} folded into a line the master already holds, 1 left out."
+    )
+    left_out = panel.locator('[data-role="migration-left-out"] li')
+    assert left_out.count() == 1 and left_out.first.get_attribute("data-reason") == "above_first_section"
+    served = next(row for resume in lines["resumes"] for row in resume["left_out"])
+    assert left_out.first.text_content() == f"The resume of {second['label']}, line {served['lines'][0]}: {served['why']}."
+    assert HEADLINE not in (panel.text_content() or ""), "the preview shows a left-out line's text"
     make = panel.locator('[data-action="make-master"]')
     assert make.is_disabled(), "the master cannot be made before the question is answered"
     ui.settle()

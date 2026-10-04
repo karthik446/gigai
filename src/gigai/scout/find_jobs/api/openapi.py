@@ -497,11 +497,29 @@ _MASTER_EXAMPLE: dict[str, object] = {
     "entries": [{"id": "r-hex", "section": "experience", "heading": "Hexa Cloud", "sublines": ["Staff Software Engineer | Jun 2019 - Jan 2023"], "start": 2019, "end": 2023, "ongoing": False, "bullets": ["b-hex-03"], "order": 3, "written_by": None, "source": None}],
     "items": [_MASTER_LINE],
 }
+# 0.1.10.9 master P8: the master is also a file in the resumes folder (master.md), written after every change.
+_MASTER_FILE_WRITTEN: dict[str, object] = {
+    "name": "master.md", "path": "~/Documents/GigAI/resumes/master.md", "state": "current", "not_imported": False, "revision": 3, "beside": None,
+    "written": True, "wrote": "master.md",
+}
+_MASTER_FILE_STATUS: dict[str, object] = {
+    "schema_version": "scout-master-file:1", "name": "master.md", "path": "~/Documents/GigAI/resumes/master.md", "state": "changed",
+    "not_imported": True, "revision": 3, "beside": None, "folder": "~/Documents/GigAI/resumes", "behind": False, "master_revision": 3,
+    "action": "import",
+}
+_MASTER_FILE_NOTE = (
+    "`file` is the master's file in the resumes folder (GET /api/resumes-folder): GigAI writes the stored master there as master.md after every "
+    "change, and the user may edit it. `state`: current (exactly what GigAI last wrote), changed (`not_imported` true: it holds changes that are "
+    "not in the master yet) or missing. `revision` is the revision GigAI last wrote into it, `behind` whether the master moved on since, `beside` "
+    "the file that holds the newer revision meanwhile (master-2.md), `action` what POST /api/master/sync would do now (import, write, or null). "
+    "No route reads the file by itself: only POST /api/master/sync imports it."
+)
 _MASTER_WRITE_EXAMPLE: dict[str, object] = {
     "schema_version": "scout-master:1", "action": "edit", "status": "revised", "written": True, "id": "b-hex-03", "ids": ["b-hex-03"],
     "changes": {"added": 0, "removed": 0, "changed": 1}, "retired": [],
     "skills": {"line": None, "added": [], "removed": [], "already_listed": []}, "near_duplicates": [], "warnings": [],
     "profiles": {"synced": [], "offers": [{"profile_id": "prof_1", "label": "Staff Engineer", "new_lines": ["b-4f0c1a"], "offer": "1 new master line: refresh?"}]},
+    "file": _MASTER_FILE_WRITTEN,
     "master": _MASTER_EXAMPLE,
 }
 _MASTER_NOTE = (
@@ -523,7 +541,8 @@ _MASTER_WRITE_NOTE = (
     "took out, each with the revision that still holds it), and `profiles`: what the write did to the "
     "profiles' selections (`synced`: a profile that shows an edited or retired line had its resume printed again; `offers`: new lines are offered, "
     "never added by themselves). Every tailoring made from the master is out of date after a write and is made again when the pipeline next looks "
-    "at its profile. Local only: no model call."
+    "at its profile. `file` says where the revision went in the resumes folder (null when nothing was written): `wrote` is master.md, or the "
+    "file beside it (master-2.md) when master.md holds changes the user has not imported, which GigAI never replaces. Local only: no model call."
 )
 _MASTER_REVISION_PARAM = _b("revision", "integer", "The revision of the master you read; when it changed since, the reply is 409.", required=True)
 _MASTER_WRITE_ERRORS = (
@@ -545,10 +564,23 @@ _MIGRATION_QUESTION: dict[str, object] = {
 }
 _MIGRATION_EXAMPLE: dict[str, object] = {
     "schema_version": "scout-master-migration:1", "ok": True, "mode": "migration", "status": "needs_answers", "written": False, "master": None,
-    "migration": {"resumes": 2, "lines_in": 71, "lines_out": 65, "entries": 13, "exact_duplicates": 4, "ids_assigned": 78, "near_duplicates": [], "questions": [_MIGRATION_QUESTION], "unanswered": ["mq-59c304ca47a1"]},
+    "migration": {
+        "resumes": 2, "lines_in": 71, "lines_out": 65, "entries": 13, "exact_duplicates": 4, "ids_assigned": 78, "near_duplicates": [], "questions": [_MIGRATION_QUESTION], "unanswered": ["mq-59c304ca47a1"],
+        "source_lines": {
+            "in": 131, "kept": 112, "folded": 17, "left_out": 2,
+            "folded_by_reason": {"exact_duplicate": 4, "near_duplicate": 2, "conflict": 1, "same_entry": 6, "role_line": 3, "skills_joined": 1},
+            "left_out_by_reason": {"contact": 0, "above_first_section": 2, "title_heading": 0, "unknown_section": 0, "empty_section": 0, "unread": 0},
+            "resumes": [
+                {"profiles": ["Staff AI Engineer"], "in": 61, "left_out": [
+                    {"reason": "above_first_section", "why": "above the first section and not a summary paragraph (a name, a title or a headline)", "lines": [1, 3]},
+                ]},
+                {"profiles": ["Staff Software Engineer"], "in": 70, "left_out": []},
+            ],
+        },
+    },
     "questions": [_MIGRATION_QUESTION],
     "profiles": [{"profile_id": "prof_1", "label": "Staff AI Engineer", "shown": None, "skills": None, "resume_ref": {"record_id": "record_...", "revision_id": "revision_...", "content_sha256": "sha256:..."}}],
-    "contact_removed": None, "blocked": None,
+    "contact_removed": None, "file": None, "blocked": None,
 }
 _MIGRATION_NOTE = (
     "The master is built from the resumes the profiles hold: the union of their lines, the same line and near-duplicates folded (the newer wording "
@@ -556,7 +588,11 @@ _MIGRATION_NOTE = (
     "is written until every question has an answer (a, b, or both). Each profile's first selection is its own resume, which is not rewritten, so "
     "nothing assessed stays as it was. `status`: needs_answers (questions are open), ready (GET only: a POST would write it), created | revised | "
     "unchanged (written), blocked (GET only: `blocked` says why, e.g. migration_no_profiles or migration_resume_unreadable). `contact_removed` "
-    "lists what the privacy strip left out of a resume by profile, kind and line number, never a value. Local only: no model call."
+    "lists what the privacy strip left out of a resume by profile, kind and line number, never a value. `migration.source_lines` says what became "
+    "of EVERY line of the resumes (a line that is not blank; headings, role lines and each line of a wrapped bullet count): `in` = `kept` (in the "
+    "master) + `folded` (the master holds it already; `folded_by_reason`) + `left_out` (`left_out_by_reason`), and per resume the lines left out, "
+    "by `reason`, a sentence saying `why`, and their line numbers in the stored resume, never their text. Read it before answering: a line "
+    "the reader left out is not in the master. `file` (after a write): where the master went in the resumes folder. Local only: no model call."
 )
 _SELECTION_STATUS: dict[str, object] = {
     "profile_id": "prof_1", "label": "Staff Engineer", "state": "active", "has_selection": True, "attached": True, "source": "migration",
@@ -1163,11 +1199,18 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
     # --- the master resume (0.1.10.9 master P5) -----------------------------------------------
     RouteSpec(
         "GET", "/api/master", "The master resume: every entry and line with its id, tags and evidence strength.", "read", "none",
-        {"schema_version": "scout-master:1", "master": _MASTER_EXAMPLE, "current_revision": 3, "profiles": [{"profile_id": "prof_1", "label": "Staff Engineer", "state": "active"}], "shown_by": {"b-hex-03": ["prof_1"]}},
+        {
+            "schema_version": "scout-master:1", "master": _MASTER_EXAMPLE, "current_revision": 3,
+            "profiles": [{"profile_id": "prof_1", "label": "Staff Engineer", "state": "active"}], "shown_by": {"b-hex-03": ["prof_1"]},
+            "file": _MASTER_FILE_STATUS,
+        },
         schema_version="scout-master:1", host_checked=True,
         params=(_q("revision", "integer", "An earlier revision's number (a tailored resume's `sources.master.revision`); omitted = the current one."),),
         errors=(_UNKNOWN_KEY, _INVALID, (404, "master_revision_not_found"), _NO_TARGET),
-        description=_MASTER_NOTE + " `shown_by` maps a line or entry id to the profiles whose selection shows it (`profiles` names them); `current_revision` is the newest revision's number.",
+        description=(
+            _MASTER_NOTE + " `shown_by` maps a line or entry id to the profiles whose selection shows it (`profiles` names them); `current_revision` "
+            "is the newest revision's number. " + _MASTER_FILE_NOTE
+        ),
     ),
     RouteSpec(
         "GET", "/api/master/history", "The master's revisions, newest first, and what is retired.", "read", "none",
@@ -1276,13 +1319,53 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
         ),
     ),
     RouteSpec(
+        "POST", "/api/master/sync", "Import master.md from the resumes folder as the master's next revision (or write the file when it is missing).", "write", "none",
+        {
+            "schema_version": "scout-master:1", "action": "sync", "status": "imported", "written": True, "changes": {"added": 1, "removed": 1, "changed": 1},
+            "added": [{"id": "b-9fe325", "what": "line", "section": "experience", "entry_id": "r-hex", "text": "Wrote the paging policy for 3 regions."}],
+            "changed": [{"id": "b-hex-03", "what": "line", "section": "experience", "entry_id": "r-hex", "text": "Led the migration of 42 services to Helm charts released through ArgoCD."}],
+            "retired": [{"id": "b-hex-09", "what": "line", "section": "experience", "entry_id": "r-hex", "text": "Ran the on-call rotation for 4 teams."}],
+            "ids": {"kept": 3, "assigned": 1, "restored": 0},
+            "file": {**_MASTER_FILE_WRITTEN, "revision": 4},
+            "profiles": {"synced": [], "offers": []},
+            "master": {**_MASTER_EXAMPLE, "revision": 4, "revisions": 4},
+        },
+        schema_version="scout-master:1",
+        params=(
+            _b("revision", "integer", "Only to import a file the master has moved on from: the revision of the master you read (`error.current.revision` of the 409, or GET /api/master)."),
+            _ACTOR_PARAM,
+        ),
+        request_example={},
+        errors=(
+            _UNKNOWN_KEY, _WRONG_TYPE, _INVALID, (422, "personal_info_refused"), (422, "master_markdown_invalid"), (422, "revision_required"),
+            (422, "master_file_unreadable"), (409, "master_file_changed"), _REVISION_CONFLICT, (404, "master_not_found"), _NO_TARGET,
+        ),
+        description=(
+            "The explicit import of the user's own edits. GigAI writes the master into the resumes folder as master.md after every change and never "
+            "reads it back by itself; this route (the Master page's **Import the file**, `gigai scout resume master sync`) stores that file as the next "
+            "revision. `status`: imported (`written` true: `added`, `changed` and `retired` list the lines by id with their text; `ids` counts the ids "
+            "kept, newly assigned, and restored for a line whose id comment was deleted while its text stayed), unchanged (the file says what the master "
+            "holds), or written (master.md was missing or held an earlier revision untouched: it was written, nothing was imported). A line the file no "
+            "longer holds is retired and can be restored (PUT /api/master/lines {id, use: \"restore\"}). Nothing is imported, and the file is left as it "
+            "is, when: it does not read as a master (422 master_markdown_invalid names the line, never its text); it holds a name line, an email, a phone "
+            "number, a link or an address (422 personal_info_refused, by line number and kind: GigAI stores no contact details); the master changed "
+            "since GigAI wrote the file (409 revision_conflict with `error.current`: importing would retire what was added since; send `revision` = "
+            "the current revision to import the file as it is); or GigAI never wrote this master.md (422 revision_required with `error.current`: the "
+            "same `revision` imports it). After an import master.md is written again with every id, unless it was saved again meanwhile. `profiles` is "
+            "what the write did to the profiles' selections, as for every write of the master. Local only: no model call."
+        ),
+    ),
+    RouteSpec(
         "GET", "/api/master/migration", "What building the master from the profiles' resumes would do, and the questions it asks.", "read", "none",
         _MIGRATION_EXAMPLE, schema_version="scout-master-migration:1", host_checked=True, errors=(_UNKNOWN_KEY, _NO_TARGET),
         description="Writes nothing. " + _MIGRATION_NOTE,
     ),
     RouteSpec(
         "POST", "/api/master/migration", "Build the master resume from the profiles' resumes, with the answers to its questions.", "write", "none",
-        {**_MIGRATION_EXAMPLE, "status": "created", "written": True, "master": {**_MASTER_REVISION, "counts": _MASTER_EXAMPLE["counts"]}, "questions": [], "after": {"synced": [], "offers": []}},
+        {
+            **_MIGRATION_EXAMPLE, "status": "created", "written": True, "master": {**_MASTER_REVISION, "counts": _MASTER_EXAMPLE["counts"]}, "questions": [],
+            "file": {**_MASTER_FILE_WRITTEN, "revision": 1}, "after": {"synced": [], "offers": []},
+        },
         schema_version="scout-master-migration:1",
         params=(
             _b("answers", "object", "`{question_id: \"a\" | \"b\" | \"both\"}`: one answer per question of GET /api/master/migration."),
@@ -2088,6 +2171,7 @@ _META: dict[tuple[str, str], tuple[str, str]] = {
     ("PUT", "/api/master/lines"): ("Edit, retire or restore a line of the master", "Profiles and resume"),
     ("POST", "/api/master/entries"): ("Add a role, project or school to the master", "Profiles and resume"),
     ("PUT", "/api/master/entries"): ("Edit, retire or restore an entry of the master", "Profiles and resume"),
+    ("POST", "/api/master/sync"): ("Import master.md from the resumes folder", "Profiles and resume"),
     ("GET", "/api/master/migration"): ("Preview building the master from the profiles' resumes", "Profiles and resume"),
     ("POST", "/api/master/migration"): ("Build the master from the profiles' resumes", "Profiles and resume"),
     ("GET", "/api/master/selection"): ("Get each profile's selection of the master", "Profiles and resume"),
@@ -2191,6 +2275,7 @@ _LABELS: dict[tuple[str, str], tuple[str, ...]] = {
     ("PUT", "/api/master/lines"): _PRIVATE,
     ("POST", "/api/master/entries"): _PRIVATE,
     ("PUT", "/api/master/entries"): _PRIVATE,
+    ("POST", "/api/master/sync"): _PRIVATE,
     ("GET", "/api/master/migration"): _PRIVATE,
     ("POST", "/api/master/migration"): _PRIVATE,
     ("GET", "/api/master/selection"): _PRIVATE,  # ids, counts and a profile's label
@@ -2486,6 +2571,8 @@ def llms_text() -> str:
         "- The master resume (the user's one document of every role, bullet and skill, an id on every line; local, no model call): read GET /api/master; "
         "add POST /api/master/lines {revision, entry_id | section, text, actor: \"agent\"}; edit, retire or restore PUT /api/master/lines {revision, id, use, text}; "
         "roles the same with /api/master/entries. Only the user's facts, every number from the user. Send the revision you read (409 revision_conflict carries the current one). "
+        "The master is also a file the user may edit, master.md in the resumes folder: GET /api/master's `file.not_imported` says it has changes not in the master yet; "
+        "never read that file yourself (it may hold what the user has not imported); POST /api/master/sync imports it only when the user asks. "
         "GET /api/master/selection says which profiles are offered new lines; a tailored resume made from the master lists what it picked and left out in `selection`, "
         "and PUT /api/tailored-resumes/selection {profile_id, job_identity, updated_at, use: \"add\" | \"remove\", item_id} changes that for one job.\n"
         "- Edit a resume and render a new PDF (local, no model call): read the lines with GET /api/tailored-resumes?profile_id=&job_identity= (each body line has an id L<n>), "

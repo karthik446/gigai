@@ -125,6 +125,12 @@ the server used several gigabytes of memory, and reloading made it worse. Read "
   resume again when the tailor step finishes.
 - **Past runs lists the selected profile's runs.** Past runs could show every profile's runs under
   the selected profile when the first read answered last.
+- **Saving is faster on a home that watches many companies.** Every write of a resume, of the master
+  resume or of a profile's view read and checked every file of the watched-companies list first (one
+  file per board: over 10,000 on a large home). A write now reads only what it uses. On a synthetic
+  home of 290,000 postings and 10,350 boards, adding a line to the master went from about 7 s to
+  about 4.5 s, an edit of a line that two profiles show from about 18.5 s to about 12 s, and `gigai
+  scout resume add` from about 7.7 s to about 5.3 s. Saving an answer is not changed by this.
 
 #### Changed
 
@@ -285,6 +291,27 @@ the server used several gigabytes of memory, and reloading made it worse. Read "
   master holds, or left out, and name each left-out line by its line number in the stored resume and
   the reason, never by its text ("Of 20 lines of resume text ...: 18 kept, 0 folded into a line the
   master holds, 2 left out"; `migration.source_lines` in `--json`). Look at `--dry-run` first.
+- **A master resume: a file you can edit.** Your master is now also a file, `master.md` in your
+  resumes folder (`~/Documents/GigAI/resumes` unless you chose another), written again after every
+  change of the master, whoever made it. Edit it in your own editor, then import it: **Import the
+  file** on the Master page, or `gigai scout resume master sync`. The import is the master's next
+  revision: a line you typed gets an id, every other line keeps its id (also when you deleted the id
+  comment and left the text), and a line you removed is retired and can be restored; the command and
+  the page say what was added, changed and retired. GigAI never reads the file by itself. Until you
+  import it, Scout says "master.md has changes not imported yet" (`gigai scout status`, `gigai scout
+  resume master show`, the Master page), and it never replaces a file you changed: a change made in
+  Scout or by your agent meanwhile is written beside it as `master-2.md`, and says so. Refused, with
+  nothing imported and your file left as it is: a file that does not read as a master (the line is
+  named), a name, email, phone number, link or address in it (by line number; GigAI stores no
+  contact details), and a master that changed since the file was written, unless you say to import
+  it anyway (`--revision N`, or **Import it anyway**): what was added since is then retired, and
+  can be restored. For agents: `file` on `GET /api/master` and on every write of the master, and
+  `POST /api/master/sync`; an agent reads the master with `master show --json`, never from the file.
+- **The Master page's preview says what the merge left out.** Before you make the master, the page
+  now shows the count of every line of your resumes (kept, folded into a line the master already
+  holds, left out) and lists each left-out line by resume, line number and reason, never by its
+  text, as `gigai scout resume master init --dry-run` does. `migration.source_lines` is in the API's
+  description of `GET` and `POST /api/master/migration`.
 
 ### 0.1.10.8
 

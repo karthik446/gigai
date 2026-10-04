@@ -97,6 +97,22 @@ states a number, or stated. Only your own facts belong here; an agent writes wit
 through the API (`POST` and `PUT /api/master/lines`), under the same rules, and sends the
 revision it read, so a change that crosses yours is refused instead of overwriting it.
 
+**The file.** Your master is also a file you can open: `master.md` in your resumes folder
+(`~/Documents/GigAI/resumes` unless you chose another in Settings). Scout writes it again
+after every change of the master. Edit it in your own editor, then import it: **Import the
+file** on the Master page, or `gigai scout resume master sync`. A line you typed gets an
+id, every other line keeps its own (leave the `<!-- id:... -->` comments as they are; a
+deleted one comes back when the line's text is unchanged), and a line you removed is
+retired and can be put back from **History**. Scout never reads the file by itself:
+until you import it, the Master page, `gigai scout status` and `gigai scout resume master
+show` say "master.md has changes not imported yet". It never replaces a file you changed
+either: a change made in Scout or by your agent meanwhile is written beside it as
+`master-2.md`. An import is refused, and your file left as it is, when the file does not
+read as a master (the line is named), when it holds a name, an email, a phone number, a
+link or an address (Scout stores no contact details), and when the master changed since
+the file was written; **Import it anyway** (`--revision N`) then imports your file as it
+is, and what was added since is retired.
+
 **Profiles.** A profile's selection stays as it is until you refresh it. When the master
 gains lines, the profile says so ("3 new master lines: refresh?") under Settings >
 Profiles and on the Master page; **Refresh** selects again from the whole master, by

@@ -250,9 +250,23 @@ class JournalWriter:
             allow_artifact_replacement,
         )
 
-    def snapshot(self, prefixes: tuple[str, ...]) -> "JournalSnapshot":
-        """Capture and verify one committed private-artifact tree at this lock."""
+    def snapshot(
+        self, prefixes: tuple[str, ...], child_prefixes: tuple[tuple[str, str], ...] = ()
+    ) -> "JournalSnapshot":
+        """Capture and verify one committed private-artifact tree at this lock.
 
+        ``child_prefixes`` is :func:`read_committed_snapshot`'s: each
+        ``(parent, pattern)`` adds ``<parent><child>/`` for every committed
+        direct child directory of ``parent`` whose name fully matches
+        ``pattern``, listed at the head this section holds (it cannot move).
+        A writer that consults only ``records/record_<uuid>/`` names that
+        family this way instead of capturing all of ``records/``.
+        """
+
+        if child_prefixes:
+            head = self.head()
+            children = _committed_child_prefixes(self.root, head, child_prefixes) if head is not None else ()
+            prefixes = tuple(dict.fromkeys((*prefixes, *children)))
         return _capture_committed_snapshot(
             self.root, self.project_id, self.gig_id, prefixes
         )

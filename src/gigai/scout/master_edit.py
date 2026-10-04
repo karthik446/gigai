@@ -216,6 +216,8 @@ class MasterEdit:
     warnings: tuple[str, ...] = ()
     #: What ``after_master_write`` did (``synced``, ``offers``); ``None`` when no revision was written.
     profiles: Mapping[str, object] | None = None
+    #: P8: where the revision went in the resumes folder (``master_store.write_file``); ``None`` when no revision was written.
+    file: Mapping[str, object] | None = None
 
     @property
     def written(self) -> bool:
@@ -239,6 +241,7 @@ class MasterEdit:
             },
             "near_duplicates": [line.to_json() for line in self.near_duplicates], "warnings": list(self.warnings),
             "profiles": dict(self.profiles) if self.profiles is not None else {"synced": [], "offers": []},
+            "file": dict(self.file) if self.file is not None else None,
         }
 
 
@@ -683,6 +686,7 @@ def _revise(
         warnings=plan.warnings,
         # P3: a profile that shows an edited or retired line gets its resume printed again; new lines are only offered.
         profiles=after_master_write(home_root, target) if revised else None,
+        file=written.file,
     )
 
 

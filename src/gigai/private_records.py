@@ -200,6 +200,10 @@ RECORD_DIRECTORY_PATTERN = (
 )
 
 
+#: The whole families a publish captures under the writer lock (with ``records/record_<uuid>/`` beside them).
+PUBLISH_PREFIXES: tuple[str, ...] = ("references/", "run-inputs/", "records/operations/")
+
+
 def _read_snapshot(resolved: ResolvedWorkpad, *, prefixes: tuple[str, ...] = (), records: bool = False) -> JournalSnapshot:
     """Committed private evidence, read without the journal writer lock."""
     try:
@@ -266,7 +270,11 @@ def _receipt_for_artifact(resolved: ResolvedWorkpad, operation: str, artifact_pa
 def _publish(*, resolved: ResolvedWorkpad, operation: str, key: str, payload: dict[str, object], artifacts: tuple[JournalArtifact, ...], transition: str, uuid_factory: callable, parent_record_id: str | None = None, parent_revision: str | None = None, equivalent_artifact_path: Callable[[JournalSnapshot], str | None] | None = None) -> tuple[dict[str, object], bool, bool]:
     payload_sha = digest_imported_bytes(canonical_json_bytes(payload))
     def publish(writer: object) -> tuple[dict[str, object], bool]:
-        snapshot = writer.snapshot(("records/", "references/", "run-inputs/"))  # type: ignore[attr-defined]
+        # What a publish consults, and no more: the receipts, the references and Run inputs (an equivalent
+        # import), and the records' own revisions (the parent check). Not all of ``records/``: other
+        # families live there too (a watchlist of 10,000 boards is 10,000 files), and capturing them cost
+        # every private write seconds on a large home. The same selection ``_private_snapshot`` reads.
+        snapshot = writer.snapshot(PUBLISH_PREFIXES, child_prefixes=(("records/", RECORD_DIRECTORY_PATTERN),))  # type: ignore[attr-defined]
         existing = _existing_receipt(resolved, operation, key, payload_sha, snapshot)
         if existing is not None:
             return existing, False

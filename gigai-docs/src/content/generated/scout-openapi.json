@@ -2113,7 +2113,7 @@
     },
     "/api/master": {
       "get": {
-        "description": "The master resume: every entry and line with its id, tags and evidence strength. The master resume is the user's one document of every role, bullet, project and skill, with a stable id on every line and no contact data; a profile shows a selection of it and a tailoring for one job picks from all of it. `master` is null when there is none yet (build it with POST /api/master/migration, or `gigai scout resume master init`). Each entry: `{id, section, heading, sublines, start, end, ongoing, bullets, order}`. Each line: `{id, section, kind: summary | bullet | skills | other, text, tags, backed, entry_id, order, strength: backed | quantified | stated, mark, written_by, source}` (a Skills line also `label`, `skills` and `skill_sources`). `strength` is derived: backed when a story or an answer is linked, quantified when the line states a number. `written_by` (operator | agent) and `source` say who wrote the line's text through these routes or `gigai scout resume master add | edit`, and where its evidence came from; both are null for a line that came with a file. `revision` is the number a write sends back. `shown_by` maps a line or entry id to the profiles whose selection shows it (`profiles` names them); `current_revision` is the newest revision's number.",
+        "description": "The master resume: every entry and line with its id, tags and evidence strength. The master resume is the user's one document of every role, bullet, project and skill, with a stable id on every line and no contact data; a profile shows a selection of it and a tailoring for one job picks from all of it. `master` is null when there is none yet (build it with POST /api/master/migration, or `gigai scout resume master init`). Each entry: `{id, section, heading, sublines, start, end, ongoing, bullets, order}`. Each line: `{id, section, kind: summary | bullet | skills | other, text, tags, backed, entry_id, order, strength: backed | quantified | stated, mark, written_by, source}` (a Skills line also `label`, `skills` and `skill_sources`). `strength` is derived: backed when a story or an answer is linked, quantified when the line states a number. `written_by` (operator | agent) and `source` say who wrote the line's text through these routes or `gigai scout resume master add | edit`, and where its evidence came from; both are null for a line that came with a file. `revision` is the number a write sends back. `shown_by` maps a line or entry id to the profiles whose selection shows it (`profiles` names them); `current_revision` is the newest revision's number. `file` is the master's file in the resumes folder (GET /api/resumes-folder): GigAI writes the stored master there as master.md after every change, and the user may edit it. `state`: current (exactly what GigAI last wrote), changed (`not_imported` true: it holds changes that are not in the master yet) or missing. `revision` is the revision GigAI last wrote into it, `behind` whether the master moved on since, `beside` the file that holds the newer revision meanwhile (master-2.md), `action` what POST /api/master/sync would do now (import, write, or null). No route reads the file by itself: only POST /api/master/sync imports it.",
         "operationId": "get_api_master",
         "parameters": [
           {
@@ -2132,6 +2132,19 @@
               "application/json": {
                 "example": {
                   "current_revision": 3,
+                  "file": {
+                    "action": "import",
+                    "behind": false,
+                    "beside": null,
+                    "folder": "~/Documents/GigAI/resumes",
+                    "master_revision": 3,
+                    "name": "master.md",
+                    "not_imported": true,
+                    "path": "~/Documents/GigAI/resumes/master.md",
+                    "revision": 3,
+                    "schema_version": "scout-master-file:1",
+                    "state": "changed"
+                  },
                   "master": {
                     "content_sha256": "sha256:...",
                     "counts": {
@@ -2289,7 +2302,7 @@
     },
     "/api/master/entries": {
       "post": {
-        "description": "Add a role, a project or a school to the master. Answers 201 with the entry's `id`. It is placed by its dates among the section's entries, the newest first (an ongoing one first; one that names no year goes last), and has no lines yet: add them with POST /api/master/lines {entry_id}. One new revision of the master. Send the `revision` you read: when the master changed since, the reply is 409 revision_conflict with `error.current` (the revision it is at now): read it again, then send the change on top of that. A text that looks like contact data (email, phone, link, address, a name line) answers 422 personal_info_refused and nothing is written. These are the rules of `gigai scout resume master add | edit | remove` (one implementation), so a refusal carries that command's code. The reply carries the whole `master` after the write, `status` (revised, or unchanged when it already said this) with `written`, the `id` the change was about, `retired` (what the write took out, each with the revision that still holds it), and `profiles`: what the write did to the profiles' selections (`synced`: a profile that shows an edited or retired line had its resume printed again; `offers`: new lines are offered, never added by themselves). Every tailoring made from the master is out of date after a write and is made again when the pipeline next looks at its profile. Local only: no model call.",
+        "description": "Add a role, a project or a school to the master. Answers 201 with the entry's `id`. It is placed by its dates among the section's entries, the newest first (an ongoing one first; one that names no year goes last), and has no lines yet: add them with POST /api/master/lines {entry_id}. One new revision of the master. Send the `revision` you read: when the master changed since, the reply is 409 revision_conflict with `error.current` (the revision it is at now): read it again, then send the change on top of that. A text that looks like contact data (email, phone, link, address, a name line) answers 422 personal_info_refused and nothing is written. These are the rules of `gigai scout resume master add | edit | remove` (one implementation), so a refusal carries that command's code. The reply carries the whole `master` after the write, `status` (revised, or unchanged when it already said this) with `written`, the `id` the change was about, `retired` (what the write took out, each with the revision that still holds it), and `profiles`: what the write did to the profiles' selections (`synced`: a profile that shows an edited or retired line had its resume printed again; `offers`: new lines are offered, never added by themselves). Every tailoring made from the master is out of date after a write and is made again when the pipeline next looks at its profile. `file` says where the revision went in the resumes folder (null when nothing was written): `wrote` is master.md, or the file beside it (master-2.md) when master.md holds changes the user has not imported, which GigAI never replaces. Local only: no model call.",
         "operationId": "post_api_master_entries",
         "parameters": [],
         "requestBody": {
@@ -2357,6 +2370,16 @@
                     "added": 1,
                     "changed": 0,
                     "removed": 0
+                  },
+                  "file": {
+                    "beside": null,
+                    "name": "master.md",
+                    "not_imported": false,
+                    "path": "~/Documents/GigAI/resumes/master.md",
+                    "revision": 3,
+                    "state": "current",
+                    "written": true,
+                    "wrote": "master.md"
                   },
                   "id": "r-7a01c2",
                   "ids": [
@@ -2554,7 +2577,7 @@
         ]
       },
       "put": {
-        "description": "Edit, retire or restore a role, a project or a school of the master, by id. The entry's id and its lines stay on an edit. use retire takes the entry out with its lines (`retired` lists them); use restore puts it back where it stood, with the lines it had that the master does not hold. One new revision of the master. Send the `revision` you read: when the master changed since, the reply is 409 revision_conflict with `error.current` (the revision it is at now): read it again, then send the change on top of that. A text that looks like contact data (email, phone, link, address, a name line) answers 422 personal_info_refused and nothing is written. These are the rules of `gigai scout resume master add | edit | remove` (one implementation), so a refusal carries that command's code. The reply carries the whole `master` after the write, `status` (revised, or unchanged when it already said this) with `written`, the `id` the change was about, `retired` (what the write took out, each with the revision that still holds it), and `profiles`: what the write did to the profiles' selections (`synced`: a profile that shows an edited or retired line had its resume printed again; `offers`: new lines are offered, never added by themselves). Every tailoring made from the master is out of date after a write and is made again when the pipeline next looks at its profile. Local only: no model call.",
+        "description": "Edit, retire or restore a role, a project or a school of the master, by id. The entry's id and its lines stay on an edit. use retire takes the entry out with its lines (`retired` lists them); use restore puts it back where it stood, with the lines it had that the master does not hold. One new revision of the master. Send the `revision` you read: when the master changed since, the reply is 409 revision_conflict with `error.current` (the revision it is at now): read it again, then send the change on top of that. A text that looks like contact data (email, phone, link, address, a name line) answers 422 personal_info_refused and nothing is written. These are the rules of `gigai scout resume master add | edit | remove` (one implementation), so a refusal carries that command's code. The reply carries the whole `master` after the write, `status` (revised, or unchanged when it already said this) with `written`, the `id` the change was about, `retired` (what the write took out, each with the revision that still holds it), and `profiles`: what the write did to the profiles' selections (`synced`: a profile that shows an edited or retired line had its resume printed again; `offers`: new lines are offered, never added by themselves). Every tailoring made from the master is out of date after a write and is made again when the pipeline next looks at its profile. `file` says where the revision went in the resumes folder (null when nothing was written): `wrote` is master.md, or the file beside it (master-2.md) when master.md holds changes the user has not imported, which GigAI never replaces. Local only: no model call.",
         "operationId": "put_api_master_entries",
         "parameters": [],
         "requestBody": {
@@ -2624,6 +2647,16 @@
                     "added": 0,
                     "changed": 1,
                     "removed": 0
+                  },
+                  "file": {
+                    "beside": null,
+                    "name": "master.md",
+                    "not_imported": false,
+                    "path": "~/Documents/GigAI/resumes/master.md",
+                    "revision": 3,
+                    "state": "current",
+                    "written": true,
+                    "wrote": "master.md"
                   },
                   "id": "r-hex",
                   "ids": [
@@ -2937,7 +2970,7 @@
     },
     "/api/master/lines": {
       "post": {
-        "description": "Add a line to the master: under a role, or to Summary, Skills or Other. Answers 201 when the line was written. The line gets its id (`id`) and goes last under its entry or in its section. A line the master already has in other words is ASKED about, not added: the reply is 200 with `status: near_duplicate`, `written: false` and `near_duplicates` (up to 5 lines of the same kind it looks like, the closest first: `{id, text, entry_id, similarity, same_numbers}`; `same_numbers` false means one of the two is out of date). Edit that line (PUT) if it is the same fact, or send the request again with `force: true` to keep both. The same text in the same place is 409 master_line_exists, forced or not. A Skills line lists only the skills the master does not list yet (`skills.added`, `skills.already_listed`). Only the user's facts: every number comes from the user. One new revision of the master. Send the `revision` you read: when the master changed since, the reply is 409 revision_conflict with `error.current` (the revision it is at now): read it again, then send the change on top of that. A text that looks like contact data (email, phone, link, address, a name line) answers 422 personal_info_refused and nothing is written. These are the rules of `gigai scout resume master add | edit | remove` (one implementation), so a refusal carries that command's code. The reply carries the whole `master` after the write, `status` (revised, or unchanged when it already said this) with `written`, the `id` the change was about, `retired` (what the write took out, each with the revision that still holds it), and `profiles`: what the write did to the profiles' selections (`synced`: a profile that shows an edited or retired line had its resume printed again; `offers`: new lines are offered, never added by themselves). Every tailoring made from the master is out of date after a write and is made again when the pipeline next looks at its profile. Local only: no model call.",
+        "description": "Add a line to the master: under a role, or to Summary, Skills or Other. Answers 201 when the line was written. The line gets its id (`id`) and goes last under its entry or in its section. A line the master already has in other words is ASKED about, not added: the reply is 200 with `status: near_duplicate`, `written: false` and `near_duplicates` (up to 5 lines of the same kind it looks like, the closest first: `{id, text, entry_id, similarity, same_numbers}`; `same_numbers` false means one of the two is out of date). Edit that line (PUT) if it is the same fact, or send the request again with `force: true` to keep both. The same text in the same place is 409 master_line_exists, forced or not. A Skills line lists only the skills the master does not list yet (`skills.added`, `skills.already_listed`). Only the user's facts: every number comes from the user. One new revision of the master. Send the `revision` you read: when the master changed since, the reply is 409 revision_conflict with `error.current` (the revision it is at now): read it again, then send the change on top of that. A text that looks like contact data (email, phone, link, address, a name line) answers 422 personal_info_refused and nothing is written. These are the rules of `gigai scout resume master add | edit | remove` (one implementation), so a refusal carries that command's code. The reply carries the whole `master` after the write, `status` (revised, or unchanged when it already said this) with `written`, the `id` the change was about, `retired` (what the write took out, each with the revision that still holds it), and `profiles`: what the write did to the profiles' selections (`synced`: a profile that shows an edited or retired line had its resume printed again; `offers`: new lines are offered, never added by themselves). Every tailoring made from the master is out of date after a write and is made again when the pipeline next looks at its profile. `file` says where the revision went in the resumes folder (null when nothing was written): `wrote` is master.md, or the file beside it (master-2.md) when master.md holds changes the user has not imported, which GigAI never replaces. Local only: no model call.",
         "operationId": "post_api_master_lines",
         "parameters": [],
         "requestBody": {
@@ -3014,6 +3047,16 @@
                     "added": 1,
                     "changed": 0,
                     "removed": 0
+                  },
+                  "file": {
+                    "beside": null,
+                    "name": "master.md",
+                    "not_imported": false,
+                    "path": "~/Documents/GigAI/resumes/master.md",
+                    "revision": 3,
+                    "state": "current",
+                    "written": true,
+                    "wrote": "master.md"
                   },
                   "id": "b-4f0c1a",
                   "ids": [
@@ -3211,7 +3254,7 @@
         ]
       },
       "put": {
-        "description": "Edit, retire or restore one line of the master, by id. use edit needs at least one of text, tags, backed (422 master_edit_empty; an entry's id is 422 master_edit_invalid). use retire: the line is never selected again; it stays in the earlier revisions and is listed by GET /api/master/history (the last line of the master cannot go: 409 master_empty). use restore: the line comes back under its own id, as the last revision that held it had it, where it stood; a line that is in the master is 409 master_line_exists, and a line whose role is retired too is 404 master_entry_not_found: restore the role first (PUT /api/master/entries), which brings the lines it had. This is also \"save this wording to your master\" for a line edited on a tailored resume: send the line's `item_id` as `id` with the edited text. One new revision of the master. Send the `revision` you read: when the master changed since, the reply is 409 revision_conflict with `error.current` (the revision it is at now): read it again, then send the change on top of that. A text that looks like contact data (email, phone, link, address, a name line) answers 422 personal_info_refused and nothing is written. These are the rules of `gigai scout resume master add | edit | remove` (one implementation), so a refusal carries that command's code. The reply carries the whole `master` after the write, `status` (revised, or unchanged when it already said this) with `written`, the `id` the change was about, `retired` (what the write took out, each with the revision that still holds it), and `profiles`: what the write did to the profiles' selections (`synced`: a profile that shows an edited or retired line had its resume printed again; `offers`: new lines are offered, never added by themselves). Every tailoring made from the master is out of date after a write and is made again when the pipeline next looks at its profile. Local only: no model call.",
+        "description": "Edit, retire or restore one line of the master, by id. use edit needs at least one of text, tags, backed (422 master_edit_empty; an entry's id is 422 master_edit_invalid). use retire: the line is never selected again; it stays in the earlier revisions and is listed by GET /api/master/history (the last line of the master cannot go: 409 master_empty). use restore: the line comes back under its own id, as the last revision that held it had it, where it stood; a line that is in the master is 409 master_line_exists, and a line whose role is retired too is 404 master_entry_not_found: restore the role first (PUT /api/master/entries), which brings the lines it had. This is also \"save this wording to your master\" for a line edited on a tailored resume: send the line's `item_id` as `id` with the edited text. One new revision of the master. Send the `revision` you read: when the master changed since, the reply is 409 revision_conflict with `error.current` (the revision it is at now): read it again, then send the change on top of that. A text that looks like contact data (email, phone, link, address, a name line) answers 422 personal_info_refused and nothing is written. These are the rules of `gigai scout resume master add | edit | remove` (one implementation), so a refusal carries that command's code. The reply carries the whole `master` after the write, `status` (revised, or unchanged when it already said this) with `written`, the `id` the change was about, `retired` (what the write took out, each with the revision that still holds it), and `profiles`: what the write did to the profiles' selections (`synced`: a profile that shows an edited or retired line had its resume printed again; `offers`: new lines are offered, never added by themselves). Every tailoring made from the master is out of date after a write and is made again when the pipeline next looks at its profile. `file` says where the revision went in the resumes folder (null when nothing was written): `wrote` is master.md, or the file beside it (master-2.md) when master.md holds changes the user has not imported, which GigAI never replaces. Local only: no model call.",
         "operationId": "put_api_master_lines",
         "parameters": [],
         "requestBody": {
@@ -3284,6 +3327,16 @@
                     "added": 0,
                     "changed": 1,
                     "removed": 0
+                  },
+                  "file": {
+                    "beside": null,
+                    "name": "master.md",
+                    "not_imported": false,
+                    "path": "~/Documents/GigAI/resumes/master.md",
+                    "revision": 3,
+                    "state": "current",
+                    "written": true,
+                    "wrote": "master.md"
                   },
                   "id": "b-hex-03",
                   "ids": [
@@ -3483,7 +3536,7 @@
     },
     "/api/master/migration": {
       "get": {
-        "description": "What building the master from the profiles' resumes would do, and the questions it asks. Writes nothing. The master is built from the resumes the profiles hold: the union of their lines, the same line and near-duplicates folded (the newer wording kept). Two versions of a line that state DIFFERENT NUMBERS are asked about (`questions`: both wordings, and the profile that holds each); nothing is written until every question has an answer (a, b, or both). Each profile's first selection is its own resume, which is not rewritten, so nothing assessed stays as it was. `status`: needs_answers (questions are open), ready (GET only: a POST would write it), created | revised | unchanged (written), blocked (GET only: `blocked` says why, e.g. migration_no_profiles or migration_resume_unreadable). `contact_removed` lists what the privacy strip left out of a resume by profile, kind and line number, never a value. Local only: no model call.",
+        "description": "What building the master from the profiles' resumes would do, and the questions it asks. Writes nothing. The master is built from the resumes the profiles hold: the union of their lines, the same line and near-duplicates folded (the newer wording kept). Two versions of a line that state DIFFERENT NUMBERS are asked about (`questions`: both wordings, and the profile that holds each); nothing is written until every question has an answer (a, b, or both). Each profile's first selection is its own resume, which is not rewritten, so nothing assessed stays as it was. `status`: needs_answers (questions are open), ready (GET only: a POST would write it), created | revised | unchanged (written), blocked (GET only: `blocked` says why, e.g. migration_no_profiles or migration_resume_unreadable). `contact_removed` lists what the privacy strip left out of a resume by profile, kind and line number, never a value. `migration.source_lines` says what became of EVERY line of the resumes (a line that is not blank; headings, role lines and each line of a wrapped bullet count): `in` = `kept` (in the master) + `folded` (the master holds it already; `folded_by_reason`) + `left_out` (`left_out_by_reason`), and per resume the lines left out, by `reason`, a sentence saying `why`, and their line numbers in the stored resume, never their text. Read it before answering: a line the reader left out is not in the master. `file` (after a write): where the master went in the resumes folder. Local only: no model call.",
         "operationId": "get_api_master_migration",
         "parameters": [],
         "responses": {
@@ -3493,6 +3546,7 @@
                 "example": {
                   "blocked": null,
                   "contact_removed": null,
+                  "file": null,
                   "master": null,
                   "migration": {
                     "entries": 13,
@@ -3533,6 +3587,53 @@
                       }
                     ],
                     "resumes": 2,
+                    "source_lines": {
+                      "folded": 17,
+                      "folded_by_reason": {
+                        "conflict": 1,
+                        "exact_duplicate": 4,
+                        "near_duplicate": 2,
+                        "role_line": 3,
+                        "same_entry": 6,
+                        "skills_joined": 1
+                      },
+                      "in": 131,
+                      "kept": 112,
+                      "left_out": 2,
+                      "left_out_by_reason": {
+                        "above_first_section": 2,
+                        "contact": 0,
+                        "empty_section": 0,
+                        "title_heading": 0,
+                        "unknown_section": 0,
+                        "unread": 0
+                      },
+                      "resumes": [
+                        {
+                          "in": 61,
+                          "left_out": [
+                            {
+                              "lines": [
+                                1,
+                                3
+                              ],
+                              "reason": "above_first_section",
+                              "why": "above the first section and not a summary paragraph (a name, a title or a headline)"
+                            }
+                          ],
+                          "profiles": [
+                            "Staff AI Engineer"
+                          ]
+                        },
+                        {
+                          "in": 70,
+                          "left_out": [],
+                          "profiles": [
+                            "Staff Software Engineer"
+                          ]
+                        }
+                      ]
+                    },
                     "unanswered": [
                       "mq-59c304ca47a1"
                     ]
@@ -3658,7 +3759,7 @@
         ]
       },
       "post": {
-        "description": "Build the master resume from the profiles' resumes, with the answers to its questions. Answers 201 when the master was written (`status` created or revised, `written` true, `master` the new revision). With a question still open it answers 200, `status` needs_answers, and writes nothing. Only profiles without a selection take part; with a master already stored their resumes are merged into it. The master is built from the resumes the profiles hold: the union of their lines, the same line and near-duplicates folded (the newer wording kept). Two versions of a line that state DIFFERENT NUMBERS are asked about (`questions`: both wordings, and the profile that holds each); nothing is written until every question has an answer (a, b, or both). Each profile's first selection is its own resume, which is not rewritten, so nothing assessed stays as it was. `status`: needs_answers (questions are open), ready (GET only: a POST would write it), created | revised | unchanged (written), blocked (GET only: `blocked` says why, e.g. migration_no_profiles or migration_resume_unreadable). `contact_removed` lists what the privacy strip left out of a resume by profile, kind and line number, never a value. Local only: no model call.",
+        "description": "Build the master resume from the profiles' resumes, with the answers to its questions. Answers 201 when the master was written (`status` created or revised, `written` true, `master` the new revision). With a question still open it answers 200, `status` needs_answers, and writes nothing. Only profiles without a selection take part; with a master already stored their resumes are merged into it. The master is built from the resumes the profiles hold: the union of their lines, the same line and near-duplicates folded (the newer wording kept). Two versions of a line that state DIFFERENT NUMBERS are asked about (`questions`: both wordings, and the profile that holds each); nothing is written until every question has an answer (a, b, or both). Each profile's first selection is its own resume, which is not rewritten, so nothing assessed stays as it was. `status`: needs_answers (questions are open), ready (GET only: a POST would write it), created | revised | unchanged (written), blocked (GET only: `blocked` says why, e.g. migration_no_profiles or migration_resume_unreadable). `contact_removed` lists what the privacy strip left out of a resume by profile, kind and line number, never a value. `migration.source_lines` says what became of EVERY line of the resumes (a line that is not blank; headings, role lines and each line of a wrapped bullet count): `in` = `kept` (in the master) + `folded` (the master holds it already; `folded_by_reason`) + `left_out` (`left_out_by_reason`), and per resume the lines left out, by `reason`, a sentence saying `why`, and their line numbers in the stored resume, never their text. Read it before answering: a line the reader left out is not in the master. `file` (after a write): where the master went in the resumes folder. Local only: no model call.",
         "operationId": "post_api_master_migration",
         "parameters": [],
         "requestBody": {
@@ -3707,6 +3808,16 @@
                   },
                   "blocked": null,
                   "contact_removed": null,
+                  "file": {
+                    "beside": null,
+                    "name": "master.md",
+                    "not_imported": false,
+                    "path": "~/Documents/GigAI/resumes/master.md",
+                    "revision": 1,
+                    "state": "current",
+                    "written": true,
+                    "wrote": "master.md"
+                  },
                   "master": {
                     "content_sha256": "sha256:...",
                     "counts": {
@@ -3773,6 +3884,53 @@
                       }
                     ],
                     "resumes": 2,
+                    "source_lines": {
+                      "folded": 17,
+                      "folded_by_reason": {
+                        "conflict": 1,
+                        "exact_duplicate": 4,
+                        "near_duplicate": 2,
+                        "role_line": 3,
+                        "same_entry": 6,
+                        "skills_joined": 1
+                      },
+                      "in": 131,
+                      "kept": 112,
+                      "left_out": 2,
+                      "left_out_by_reason": {
+                        "above_first_section": 2,
+                        "contact": 0,
+                        "empty_section": 0,
+                        "title_heading": 0,
+                        "unknown_section": 0,
+                        "unread": 0
+                      },
+                      "resumes": [
+                        {
+                          "in": 61,
+                          "left_out": [
+                            {
+                              "lines": [
+                                1,
+                                3
+                              ],
+                              "reason": "above_first_section",
+                              "why": "above the first section and not a summary paragraph (a name, a title or a headline)"
+                            }
+                          ],
+                          "profiles": [
+                            "Staff AI Engineer"
+                          ]
+                        },
+                        {
+                          "in": 70,
+                          "left_out": [],
+                          "profiles": [
+                            "Staff Software Engineer"
+                          ]
+                        }
+                      ]
+                    },
                     "unanswered": [
                       "mq-59c304ca47a1"
                     ]
@@ -4243,6 +4401,265 @@
           }
         },
         "summary": "Refresh a profile's selection of the master",
+        "tags": [
+          "Profiles and resume"
+        ],
+        "x-gigai-effect": "write",
+        "x-gigai-external": "none",
+        "x-gigai-labels": [
+          "user-private"
+        ]
+      }
+    },
+    "/api/master/sync": {
+      "post": {
+        "description": "Import master.md from the resumes folder as the master's next revision (or write the file when it is missing). The explicit import of the user's own edits. GigAI writes the master into the resumes folder as master.md after every change and never reads it back by itself; this route (the Master page's **Import the file**, `gigai scout resume master sync`) stores that file as the next revision. `status`: imported (`written` true: `added`, `changed` and `retired` list the lines by id with their text; `ids` counts the ids kept, newly assigned, and restored for a line whose id comment was deleted while its text stayed), unchanged (the file says what the master holds), or written (master.md was missing or held an earlier revision untouched: it was written, nothing was imported). A line the file no longer holds is retired and can be restored (PUT /api/master/lines {id, use: \"restore\"}). Nothing is imported, and the file is left as it is, when: it does not read as a master (422 master_markdown_invalid names the line, never its text); it holds a name line, an email, a phone number, a link or an address (422 personal_info_refused, by line number and kind: GigAI stores no contact details); the master changed since GigAI wrote the file (409 revision_conflict with `error.current`: importing would retire what was added since; send `revision` = the current revision to import the file as it is); or GigAI never wrote this master.md (422 revision_required with `error.current`: the same `revision` imports it). After an import master.md is written again with every id, unless it was saved again meanwhile. `profiles` is what the write did to the profiles' selections, as for every write of the master. Local only: no model call.",
+        "operationId": "post_api_master_sync",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "example": {},
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "actor": {
+                    "description": "Who writes: recorded as written_by. Also the X-GigAI-Actor header. Without either, a write from the Scout UI (a browser page of this server) is the operator's and any other loopback write is the agent's.",
+                    "enum": [
+                      "operator",
+                      "agent"
+                    ],
+                    "type": "string"
+                  },
+                  "revision": {
+                    "description": "Only to import a file the master has moved on from: the revision of the master you read (`error.current.revision` of the 409, or GET /api/master).",
+                    "type": "integer"
+                  }
+                },
+                "required": [],
+                "type": "object"
+              }
+            }
+          },
+          "required": false
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "action": "sync",
+                  "added": [
+                    {
+                      "entry_id": "r-hex",
+                      "id": "b-9fe325",
+                      "section": "experience",
+                      "text": "Wrote the paging policy for 3 regions.",
+                      "what": "line"
+                    }
+                  ],
+                  "changed": [
+                    {
+                      "entry_id": "r-hex",
+                      "id": "b-hex-03",
+                      "section": "experience",
+                      "text": "Led the migration of 42 services to Helm charts released through ArgoCD.",
+                      "what": "line"
+                    }
+                  ],
+                  "changes": {
+                    "added": 1,
+                    "changed": 1,
+                    "removed": 1
+                  },
+                  "file": {
+                    "beside": null,
+                    "name": "master.md",
+                    "not_imported": false,
+                    "path": "~/Documents/GigAI/resumes/master.md",
+                    "revision": 4,
+                    "state": "current",
+                    "written": true,
+                    "wrote": "master.md"
+                  },
+                  "ids": {
+                    "assigned": 1,
+                    "kept": 3,
+                    "restored": 0
+                  },
+                  "master": {
+                    "content_sha256": "sha256:...",
+                    "counts": {
+                      "by_kind": {
+                        "bullet": 1,
+                        "other": 0,
+                        "skills": 1,
+                        "summary": 1
+                      },
+                      "by_strength": {
+                        "backed": 0,
+                        "quantified": 1,
+                        "stated": 2
+                      },
+                      "entries": 1,
+                      "ids": 4,
+                      "items": 3,
+                      "skills": 3
+                    },
+                    "entries": [
+                      {
+                        "bullets": [
+                          "b-hex-03"
+                        ],
+                        "end": 2023,
+                        "heading": "Hexa Cloud",
+                        "id": "r-hex",
+                        "ongoing": false,
+                        "order": 3,
+                        "section": "experience",
+                        "source": null,
+                        "start": 2019,
+                        "sublines": [
+                          "Staff Software Engineer | Jun 2019 - Jan 2023"
+                        ],
+                        "written_by": null
+                      }
+                    ],
+                    "format": 1,
+                    "items": [
+                      {
+                        "backed": [],
+                        "entry_id": "r-hex",
+                        "id": "b-hex-03",
+                        "kind": "bullet",
+                        "mark": "5d0c2a4b9e1f7a36",
+                        "order": 4,
+                        "section": "experience",
+                        "source": "from the user's chat on 3 Oct",
+                        "strength": "quantified",
+                        "tags": [
+                          "delivery"
+                        ],
+                        "text": "Led the migration of 40 services to Helm charts released through ArgoCD.",
+                        "written_by": "agent"
+                      }
+                    ],
+                    "parent_revision": "revision_7c1d7b9a-0d58-4f0b-8f27-91f4f6f6a2c3",
+                    "record_id": "record_...",
+                    "revision": 4,
+                    "revision_id": "revision_0b6f2f0e-5a0e-4c58-9a57-2d1b6a0c1e11",
+                    "revisions": 4,
+                    "sections": [
+                      "summary",
+                      "experience",
+                      "skills"
+                    ],
+                    "updated_at": "2026-10-04T10:05:00.000000Z",
+                    "written_by": "operator"
+                  },
+                  "profiles": {
+                    "offers": [],
+                    "synced": []
+                  },
+                  "retired": [
+                    {
+                      "entry_id": "r-hex",
+                      "id": "b-hex-09",
+                      "section": "experience",
+                      "text": "Ran the on-call rotation for 4 teams.",
+                      "what": "line"
+                    }
+                  ],
+                  "schema_version": "scout-master:1",
+                  "status": "imported",
+                  "written": true
+                },
+                "schema": {
+                  "additionalProperties": true,
+                  "properties": {
+                    "schema_version": {
+                      "const": "scout-master:1"
+                    }
+                  },
+                  "required": [
+                    "schema_version"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden / forbidden_origin: loopback peer and Host `127.0.0.1:<port>` or `localhost:<port>` only (Origin too on writes)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "master_not_found",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "master_not_found, target_unavailable"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "master_file_changed",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "master_file_changed, revision_conflict"
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "unsupported_media_type: writes need Content-Type: application/json."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "unknown_key",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "unknown_key, wrong_type, invalid_value, personal_info_refused, master_markdown_invalid, revision_required, master_file_unreadable"
+          }
+        },
+        "summary": "Import master.md from the resumes folder",
         "tags": [
           "Profiles and resume"
         ],

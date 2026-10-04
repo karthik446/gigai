@@ -1961,6 +1961,9 @@ def _make_handler(
                 if path == "/api/master/entries":
                     self._handle_post_master_entries()
                     return
+                if path == "/api/master/sync":
+                    self._handle_post_master_sync()
+                    return
                 if path == "/api/master/migration":
                     self._handle_post_master_migration()
                     return

@@ -34,12 +34,21 @@ change to the stored master through the same last step, ``_store``):
 A file that does not parse leaves the last good revision in place: nothing
 is written before the whole file is accepted. Nothing here logs, prints or
 returns a line of the master in an error.
+
+0.1.10.9 master P8: the last thing ``_store`` does once a revision is written
+is put the master in the resumes folder as ``master.md`` (``write_file``;
+``resumes_folder.save_master`` holds the rule: a file the user changed since
+GigAI wrote it is never replaced, the revision then goes beside it). So every
+write of the master, by whatever command or route, leaves the visible file
+saying what is stored. The file is never read here except by ``import_master``
+when ``master sync`` (``master_file.sync``) names it.
 """
 
 from __future__ import annotations
 
 from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass, field
+import logging
 from pathlib import Path
 import shutil
 import tempfile
@@ -70,6 +79,7 @@ ACTORS: tuple[str, ...] = ("operator", "agent")
 _ACTOR_IDS = {"operator": "local-user", "agent": "local-agent"}
 #: How often the detector runs again after its findings were blanked (a line can only be flagged once the one above it went).
 _STRIP_PASSES = 4
+_logger = logging.getLogger("gigai.scout.master_store")
 
 
 class MasterStoreError(ValueError):
@@ -138,6 +148,8 @@ class MasterImport:
     ids_assigned: int
     ids_restored: int
     contact_removed: ContactRemoved = field(default_factory=ContactRemoved)
+    #: P8: where the revision went in the resumes folder (``write_file``); ``None`` when nothing was written.
+    file: Mapping[str, object] | None = None
 
 
 def master_record_id(resolved: ResolvedWorkpad) -> str:
@@ -332,6 +344,40 @@ def _still_contact(master: Master) -> None:
         )
 
 
+def _is_visible_file(home_root: Path, source: Path) -> bool:
+    """``source`` is the resumes folder's ``master.md`` (a plain file, named by any path that leads to it)."""
+
+    from . import resumes_folder
+
+    visible = resumes_folder.resumes_folder(home_root).path / resumes_folder.MASTER_NAME
+    try:
+        return not visible.is_symlink() and visible.is_file() and source.resolve(strict=True) == visible.resolve(strict=True)
+    except (OSError, RuntimeError):
+        return False
+
+
+def write_file(home_root: Path, stored: StoredMaster, *, imported: str | None = None) -> dict[str, object]:
+    """Put ``stored`` in the resumes folder as ``master.md`` (P8) and say where it went. Never raises.
+
+    ``{name, path, state, not_imported, revision, beside, written}`` as ``resumes_folder.MasterFile`` gives it, with
+    ``wrote`` (the name of the file this call wrote: ``master.md``, or the file beside it when ``master.md`` holds
+    changes that were not imported). A folder that cannot be written is ``{"error": code}`` and one log line: the
+    revision is stored either way. ``imported`` is the digest of the ``master.md`` bytes an import has just read."""
+
+    from . import resumes_folder
+
+    master = stored.master
+    try:
+        saved = resumes_folder.save_master(
+            home_root, markdown=master.markdown(), text=master.markdown(ids=False), revision=stored.revision.revision,
+            revision_id=stored.revision.revision_id, imported=imported,
+        )
+    except resumes_folder.ResumesFolderError as exc:
+        _logger.warning("resumes folder: the master resume was not written (%s)", exc.code)
+        return {"name": resumes_folder.MASTER_NAME, "written": False, "wrote": None, "error": exc.code}
+    return {**saved.to_json(), "written": saved.written, "wrote": (saved.beside or saved.path).name}
+
+
 def import_master(
     *,
     home_root: Path,
@@ -340,27 +386,53 @@ def import_master(
     actor: str = "operator",
     revision: int | None = None,
     gig_id: str | None = None,
+    refuse_contact: bool = False,
+    visible_sha256: str | None = None,
 ) -> MasterImport:
-    """Store ``source`` as the master: the first revision, or a new one on top of ``revision``."""
+    """Store ``source`` as the master: the first revision, or a new one on top of ``revision``.
+
+    P8, for ``master sync``: with ``refuse_contact`` a line the privacy strip flags is not dropped but refuses the
+    whole import (``master_contact_data``, the lines by number and kind), unless the stored master's own text is
+    flagged the same; ``visible_sha256`` is the digest ``source`` must have when it is the resumes folder's
+    ``master.md`` (``master_file_changed`` when the file was saved again meanwhile), and lets the new revision be
+    written over that file."""
 
     if actor not in ACTORS:
         raise MasterStoreError("master_actor_invalid", "the writer is operator or agent")
-    text, removed = strip_contact(_read_source(source))
+    raw = _read_source(source)
+    read_sha256 = digest_imported_bytes(raw.encode("utf-8"))
+    if visible_sha256 is not None and read_sha256 != visible_sha256:
+        raise MasterStoreError("master_file_changed", f"{source.name} was saved again while it was being read; run the import again")
+    if visible_sha256 is None and _is_visible_file(home_root, source):
+        visible_sha256 = read_sha256  # `init --from <the folder's master.md>`: the same explicit import
+    text, removed = strip_contact(raw)
     resolved = _resolve(home_root, target, gig_id)
     chain = _chain(resolved)
     current = chain[-1] if chain else None
     previous = _read_master(home_root, target, resolved, current) if current is not None else None
+    if refuse_contact and removed.lines:
+        before = strip_contact(previous.markdown())[1].counts if previous is not None else {}
+        if any(count > before.get(kind, 0) for kind, count in removed.counts.items()):
+            where = ", ".join(f"line {line}: {kind.replace('_', ' ')}" for kind, line in removed.lines)
+            raise MasterStoreError(
+                "master_contact_data",
+                f"{source.name} holds what looks like contact data ({where}). GigAI stores no name or contact details: "
+                "remove those lines from the file, then import it again. Nothing was imported.",
+            )
 
     draft = draft_master(text)
     assignment = assign_ids(draft, previous)
-    return _store(home_root, target, resolved, chain, previous, build_master(draft), actor, revision, assignment, removed)
+    return _store(home_root, target, resolved, chain, previous, build_master(draft), actor, revision, assignment, removed, visible_sha256)
 
 
 def _store(
     home_root: Path, target: Path | None, resolved: ResolvedWorkpad, chain: list[MasterRevision], previous: Master | None,
     master: Master, actor: str, revision: int | None, assignment: IdAssignment, removed: ContactRemoved,
+    visible_sha256: str | None = None,
 ) -> MasterImport:
-    """``master`` as the next revision on top of ``chain`` (``previous`` is its last revision, parsed): the one write."""
+    """``master`` as the next revision on top of ``chain`` (``previous`` is its last revision, parsed): the one write.
+
+    A revision that was written also goes to the resumes folder (``write_file``), whoever the caller is."""
 
     current = chain[-1] if chain else None
     _still_contact(master)
@@ -371,7 +443,10 @@ def _store(
     change = compare(previous, master)
     record_id = master_record_id(resolved)
     if current is not None and previous is not None and previous.markdown() == markdown:
-        return MasterImport("unchanged", StoredMaster(record_id, current, len(chain), previous), change, 0, assignment.restored, removed)
+        same = StoredMaster(record_id, current, len(chain), previous)
+        # An imported master.md that says what is stored in other bytes (spacing, a lost id comment) is written again in the stored form.
+        file = write_file(home_root, same, imported=visible_sha256) if visible_sha256 is not None else None
+        return MasterImport("unchanged", same, change, 0, assignment.restored, removed, file=file)
     if current is None and revision not in (None, 0):
         raise MasterStoreError("revision_conflict", f"there is no master yet, so there is no revision {revision}")
     if current is not None and revision is None:
@@ -419,7 +494,10 @@ def _store(
             current=moved[-1] if moved else None,
         ) from exc
     stored = StoredMaster(record_id, _revision(len(chain) + 1, written.revision), len(chain) + 1, master)
-    return MasterImport("created" if current is None else "revised", stored, change, assignment.assigned, assignment.restored, removed)
+    return MasterImport(
+        "created" if current is None else "revised", stored, change, assignment.assigned, assignment.restored, removed,
+        file=write_file(home_root, stored, imported=visible_sha256),
+    )
 
 
 # --- a change to the stored master (0.1.10.9 master P6) ------------------------------------------
@@ -495,4 +573,5 @@ __all__ = [
     "read_revisions",
     "revise_master",
     "strip_contact",
+    "write_file",
 ]

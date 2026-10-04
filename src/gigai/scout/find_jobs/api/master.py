@@ -8,6 +8,7 @@
     PUT  /api/master/entries            edit, retire or restore one, by id
     GET  /api/master/migration          what building the master from the profiles' resumes would do, and its questions
     POST /api/master/migration          build it, with the answers
+    POST /api/master/sync               import master.md from the resumes folder (0.1.10.9 master P8), or write it
     GET  /api/master/selection          each profile's selection against the master ("3 new master lines: refresh?")
     POST /api/master/selection          refresh (select again) or sync (print again) one profile's selection
     PUT  /api/tailored-resumes/selection  Add or Remove one master line on a job's tailored resume
@@ -37,6 +38,12 @@ check and refuses with ``422 personal_info_refused``; every write ends with
 
 A master that does not exist yet is a state, not an error: the reads answer
 200 with ``master: null``.
+
+P8: the master is also a file in the resumes folder (``master.md``), written
+after every change.  ``GET /api/master`` says how that file stands (``file``:
+``not_imported`` when the user changed it), every write says where its
+revision went (``file``), and ``POST /api/master/sync`` is the explicit
+import (``master_file.sync``): no route reads the file by itself.
 """
 
 from __future__ import annotations
@@ -49,7 +56,7 @@ from urllib.parse import parse_qs, urlsplit
 
 from ....private_records import PrivateRecordError
 from ....workpad import WorkpadError, resolve_workpad
-from ... import master_edit, master_profiles, profile_records, story_bank
+from ... import master_edit, master_file, master_profiles, profile_records, story_bank
 from ...master_resume import MASTER_FORMAT, MasterResumeError, compare
 from ...master_store import MasterStoreError, StoredMaster, load_master
 from ...tailored_resume import TailorError
@@ -70,6 +77,7 @@ _LINE_PUT_KEYS = frozenset({"revision", "actor", "id", "use", "text", "tags", "b
 _ENTRY_POST_KEYS = frozenset({"revision", "actor", "section", "heading", "sublines"})
 _ENTRY_PUT_KEYS = frozenset({"revision", "actor", "id", "use", "heading", "sublines"})
 _MIGRATION_POST_KEYS = frozenset({"answers", "revision", "actor"})
+_SYNC_POST_KEYS = frozenset({"revision", "actor"})
 _SELECTION_POST_KEYS = frozenset({"profile_id", "use", "dry_run"})
 _JOB_SELECTION_KEYS = frozenset({"profile_id", "job_identity", "updated_at", "use", "item_id", "fit"})
 
@@ -95,6 +103,9 @@ ERROR_STATUS: dict[str, HTTPStatus] = {
     "master_edit_invalid": HTTPStatus.UNPROCESSABLE_ENTITY,
     "master_markdown_invalid": HTTPStatus.UNPROCESSABLE_ENTITY,
     "master_too_large": HTTPStatus.UNPROCESSABLE_ENTITY,
+    "master_file_unreadable": HTTPStatus.UNPROCESSABLE_ENTITY,
+    "master_file_binary": HTTPStatus.UNPROCESSABLE_ENTITY,
+    "master_format_unsupported": HTTPStatus.UNPROCESSABLE_ENTITY,
     "master_contact_data": HTTPStatus.UNPROCESSABLE_ENTITY,
     "master_actor_invalid": HTTPStatus.UNPROCESSABLE_ENTITY,
     "migration_answer_invalid": HTTPStatus.UNPROCESSABLE_ENTITY,
@@ -106,6 +117,7 @@ ERROR_STATUS: dict[str, HTTPStatus] = {
     "master_line_exists": HTTPStatus.CONFLICT,
     "master_entry_exists": HTTPStatus.CONFLICT,
     "master_empty": HTTPStatus.CONFLICT,
+    "master_file_changed": HTTPStatus.CONFLICT,
     "tailored_resume_changed": HTTPStatus.CONFLICT,
 }
 _ERRORS = (
@@ -213,8 +225,10 @@ def master_response(home_root: Path, target: Path, *, revision: int | None = Non
     from ...tailor_master import stored_master
 
     current = stored_master(home_root, target)
+    # P8: how master.md in the resumes folder stands (one small index file and the one file's digest; never its text).
+    file = master_file.file_status(home_root, current)
     if current is None:
-        return {"schema_version": MASTER_SCHEMA, "master": None, "current_revision": None, "profiles": [], "shown_by": {}}
+        return {"schema_version": MASTER_SCHEMA, "master": None, "current_revision": None, "profiles": [], "shown_by": {}, "file": file}
     stored = current
     if revision is not None and revision != current.revision.revision:
         older = load_master(home_root=home_root, target=target, revision=revision)
@@ -223,7 +237,7 @@ def master_response(home_root: Path, target: Path, *, revision: int | None = Non
     profiles, shown = _shown_by(home_root, target)
     return {
         "schema_version": MASTER_SCHEMA, "master": master_json(stored, home_root, target), "current_revision": current.revision.revision,
-        "profiles": profiles, "shown_by": shown,
+        "profiles": profiles, "shown_by": shown, "file": file,
     }
 
 
@@ -369,7 +383,7 @@ class MasterRoutesMixin:
                 # Asked "what would it do": that it cannot is the answer, with why.
                 self._write_json(HTTPStatus.OK, {
                     "schema_version": MASTER_MIGRATION_SCHEMA, "ok": True, "mode": "migration", "status": "blocked", "written": False,
-                    "master": None, "migration": None, "questions": [], "profiles": [], "contact_removed": None,
+                    "master": None, "migration": None, "questions": [], "profiles": [], "contact_removed": None, "file": None,
                     "blocked": {"code": exc.code, "message": str(exc)},
                 })
                 return
@@ -402,6 +416,30 @@ class MasterRoutesMixin:
             self._master_fail(exc)
             return
         self._migration(paths, answers={key: value.strip().lower() for key, value in answers.items()}, revision=revision, actor=actor, dry_run=False)
+
+    # --- the visible file (P8) -------------------------------------------------------------------
+
+    def _handle_post_master_sync(self) -> None:
+        """``POST /api/master/sync``: import ``master.md`` from the resumes folder as the next revision, or write it when it is missing."""
+
+        paths = self._story_bank_paths()
+        body = None if paths is None else self._story_bank_body(_SYNC_POST_KEYS)
+        if paths is None or body is None:
+            return
+        home_root, target = paths
+        try:
+            revision = _revision(body["revision"]) if body.get("revision") is not None else None
+            try:
+                result = master_file.sync(home_root=home_root, target=target, actor=self._story_bank_actor(body.get("actor")), revision=revision)
+            except MasterStoreError as exc:
+                if exc.code != "master_contact_data":
+                    raise
+                # The code every other write of the master refuses contact data with.
+                raise master_edit.MasterEditError("personal_info_refused", str(exc)) from None
+        except _ERRORS as exc:
+            self._master_fail(exc)
+            return
+        self._write_json(HTTPStatus.OK, {"schema_version": MASTER_SCHEMA, **result.to_json(), "master": master_json(result.stored, *paths)})
 
     # --- lines and entries -----------------------------------------------------------------------
 

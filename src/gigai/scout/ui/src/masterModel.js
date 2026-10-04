@@ -138,6 +138,80 @@ export function nearDuplicateLine(response) {
   return `Not added: the master already has a line that says nearly this${how ? ` (${how})` : ""}: "${text(near.text)}". If it is the same fact, edit that line instead; to keep both, choose Add it anyway.`;
 }
 
+// --- the file in the resumes folder (0.1.10.9 master P8) ---------------------
+
+// The master is also a file the user may edit: master.md in the resumes
+// folder, written by GigAI after every change (GET /api/master `file`).
+// GigAI never reads it by itself, so the page says how it stands and offers
+// the one button: {state, text, button}. null when there is nothing to say
+// (no master and no file).
+export function fileLine(file) {
+  if (!file || typeof file !== "object") {
+    return null;
+  }
+  const name = text(file.name) || "master.md";
+  if (file.not_imported) {
+    const beside = file.beside ? `; the master as it is now is in ${file.beside}` : "";
+    const moved = file.behind ? ` The master changed here since that file was written (revision ${file.revision}, now ${file.master_revision}${beside}).` : "";
+    return { state: "changed", text: `${name} has changes not imported yet (${text(file.path)}).${moved}`, button: "Import the file" };
+  }
+  if (file.action === "write") {
+    const what = file.state === "missing" ? `${name} is not in your resumes folder (${text(file.folder)}).` : `${name} in your resumes folder holds revision ${file.revision}, not ${file.master_revision}.`;
+    return { state: file.state === "missing" ? "missing" : "behind", text: what, button: "Write the file" };
+  }
+  if (file.state !== "current") {
+    return null;
+  }
+  return { state: "current", text: `Also a file you can edit: ${text(file.path)}. Change it in your own editor, then import it here.`, button: "Import the file" };
+}
+
+// What POST /api/master/sync did, in one line.
+export function syncLine(response) {
+  if (!response) {
+    return "";
+  }
+  const name = text(response.file && response.file.name) || "master.md";
+  if (response.status === "written") {
+    return `Wrote ${name} to your resumes folder. Nothing was imported.`;
+  }
+  if (response.status !== "imported") {
+    return `Nothing to import: ${name} says what the master holds.`;
+  }
+  const changes = response.changes || {};
+  const ids = response.ids || {};
+  const retired = changes.removed > 0 ? " History can put a retired line back." : "";
+  const kept = `${plural(ids.kept || 0, "id")} kept, ${ids.assigned || 0} new${ids.restored ? `, ${ids.restored} restored` : ""}`;
+  const after = afterWriteLine(response.profiles);
+  return `Imported ${name} as revision ${response.master ? response.master.revision : "?"}: ${changes.added || 0} added, ${changes.changed || 0} changed, ${changes.removed || 0} retired; ${kept}.${retired}${after ? ` ${after}` : ""}`;
+}
+
+// An import the server refused because the file was not written from the
+// master as it is now: what to ask, and the revision that imports it anyway.
+// null for any other error.
+export function importAnywayOf(err) {
+  const current = err && err.current && typeof err.current === "object" ? err.current : null;
+  if (!err || !current || (err.code !== "revision_conflict" && err.code !== "revision_required")) {
+    return null;
+  }
+  const why =
+    err.code === "revision_conflict"
+      ? `the master changed here or through your agent after master.md was written (it is at revision ${current.revision} now). Importing the file as it is retires what was added since`
+      : "GigAI did not write this master.md, so it does not know which revision it was written from. Importing it as it is retires every line the file does not hold";
+  return { revision: current.revision, message: `Not imported: ${why}. A retired line can be put back from History.`, button: "Import it anyway" };
+}
+
+// After a write made on this page: where the revision went when master.md
+// was not replaced; "" otherwise.
+export function fileWriteLine(file) {
+  if (!file || typeof file !== "object") {
+    return "";
+  }
+  if (file.error) {
+    return "The master could not be written into your resumes folder; it is stored.";
+  }
+  return file.not_imported ? `${text(file.name) || "master.md"} has changes not imported yet, so it was left as it is: this revision is in ${text(file.wrote)} beside it.` : "";
+}
+
 // --- history ---------------------------------------------------------------
 
 // One row per revision, newest first: "3 · 2026-10-04 · your agent · 72 lines · +1 −0 ~0".
@@ -221,6 +295,41 @@ export function migrationSummary(payload) {
     list(plan.near_duplicates).length,
     "near-duplicate",
   )} folded, ${plural(list(plan.questions).length, "conflict")}. The master would hold ${plural(plan.lines_out || 0, "line")} and ${plural(plan.entries || 0, "entry", "entries")}.`;
+}
+
+// What became of EVERY line of the resumes (`migration.source_lines`): "Of
+// 131 lines of resume text ...: 112 kept, 17 folded into a line the master
+// holds, 2 left out." "" when the server did not count them.
+export function sourceLinesLine(payload) {
+  const lines = payload && payload.migration && payload.migration.source_lines;
+  if (!lines || typeof lines !== "object") {
+    return "";
+  }
+  return `Of ${plural(lines.in || 0, "line")} of resume text (headings, role lines and wrapped lines counted): ${lines.kept || 0} kept, ${lines.folded || 0} folded into a line the master already holds, ${lines.left_out || 0} left out.`;
+}
+
+// The lines the merge leaves out, one row per resume and reason:
+// {key, resume, lines: "line 1, 3", count, reason, why}. The text of a line
+// is never sent: the row names the resume (its profiles), the line numbers
+// in the stored resume, and why.
+export function leftOutRows(payload) {
+  const lines = payload && payload.migration && payload.migration.source_lines;
+  const rows = [];
+  list(lines && lines.resumes).forEach((resume, index) => {
+    const who = list(resume.profiles).join(", ");
+    list(resume.left_out).forEach((row) => {
+      const numbers = list(row.lines);
+      rows.push({
+        key: `${index}:${row.reason}`,
+        resume: who,
+        lines: `${numbers.length === 1 ? "line" : "lines"} ${numbers.join(", ")}`,
+        count: numbers.length,
+        reason: text(row.reason),
+        why: text(row.why),
+      });
+    });
+  });
+  return rows;
 }
 
 // The page's state for a migration answer: blocked (why), nothing (every

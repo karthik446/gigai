@@ -581,6 +581,13 @@ export function postMasterMigration(answers) {
   return request("POST", "/api/master/migration", { answers: answers || {} });
 }
 
+// 0.1.10.9 master P8: import master.md from the resumes folder (or write it
+// when it is missing). `revision` only to import a file the master has
+// moved on from (the 409 / 422 carries `current`).
+export function postMasterSync({ revision } = {}) {
+  return request("POST", "/api/master/sync", revision ? { revision } : {});
+}
+
 export function getMasterSelection() {
   return request("GET", "/api/master/selection");
 }
