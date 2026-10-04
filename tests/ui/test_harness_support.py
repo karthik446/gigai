@@ -316,8 +316,60 @@ def test_the_default_run_deselects_ui_tests_and_make_ui_test_selects_them() -> N
     if not (root / "Makefile").is_file():
         pytest.skip("the Makefile is excluded from the offline container build context")
     makefile = (root / "Makefile").read_text(encoding="utf-8")
-    recipe = next(line for line in makefile.splitlines() if "pytest tests/ui" in line)
-    assert " -m ui " in recipe and "GIGAI_UI_REQUIRED=1" in recipe and "-n 0" in recipe
+    small, full = (line for line in makefile.splitlines() if "pytest tests/ui" in line)
+    for recipe in (small, full):
+        assert "GIGAI_UI_REQUIRED=1" in recipe and "-n 0" in recipe
+    # `make ui-test` never builds the operator-sized home; `make ui-test-full` (the release profile) runs everything.
+    assert ' -m "ui and not operator_sized" ' in small
+    assert " -m ui " in full
+    assert any(marker.startswith("operator_sized:") for marker in options["markers"])
+
+
+# ---------------------------------------------------------------------------- the operator-sized home's child processes
+
+
+def test_operator_children_get_the_temporary_home_and_none_of_the_shells_scout_settings(tmp_path: Path) -> None:
+    from tests.ui import operator_home_ui
+
+    shell = {"HOME": "/Users/someone", "PATH": "/usr/bin", "GIGAI_HOME": "/Users/someone/.gigai", "GIGAI_SCOUT_PIPELINE": "0", "GIGAI_SCOUT_AUTO_REFRESH": "1", "GIGAI_TEST_LATENCY_SCALE": "4"}
+    env = operator_home_ui.child_environment(tmp_path, environ=shell)
+    assert env["HOME"] == str(tmp_path.resolve())
+    assert "GIGAI_HOME" not in env and not [name for name in env if name.startswith("GIGAI_SCOUT_")]
+    assert env["PATH"] == "/usr/bin" and env["GIGAI_TEST_LATENCY_SCALE"] == "4"
+    assert "PYTHONPATH" not in env and "PYTHONPYCACHEPREFIX" not in env  # this tree's product code, as installed
+
+
+def test_operator_children_refuse_the_real_home() -> None:
+    from tests.ui import operator_home_ui
+
+    with pytest.raises(support.UnsafeHomeError):
+        operator_home_ui.child_environment(support.real_user_home() / ".gigai", environ={})
+
+
+def test_a_server_root_puts_that_checkouts_code_first_and_writes_nothing_into_it(tmp_path: Path) -> None:
+    from tests.ui import operator_home_ui
+
+    checkout = tmp_path / "old-release"
+    (checkout / "src" / "gigai").mkdir(parents=True)
+    (checkout / "src" / "gigai" / "__init__.py").write_text("", encoding="utf-8")
+    home = tmp_path / "home"
+    home.mkdir()
+    shell = {"PYTHONPATH": "/somewhere/else", operator_home_ui.SERVER_ROOT_ENV: str(checkout)}
+    assert operator_home_ui.server_root(shell) == checkout.resolve()
+    env = operator_home_ui.child_environment(home, environ=shell)
+    assert env["PYTHONPATH"].split(":") == [str(checkout.resolve() / "src"), "/somewhere/else"]
+    assert Path(env["PYTHONPYCACHEPREFIX"]).is_relative_to(home.resolve())  # bytecode goes to the temporary HOME
+    assert operator_home_ui.server_root({}) is None
+    with pytest.raises(operator_home_ui.OperatorHomeUiError, match="not a GigAI checkout"):
+        operator_home_ui.server_root({operator_home_ui.SERVER_ROOT_ENV: str(tmp_path)})
+
+
+def test_the_operator_home_is_never_built_outside_the_temporary_directory() -> None:
+    from tests.support import operator_home
+    from tests.ui import operator_home_ui
+
+    with pytest.raises(operator_home.OperatorHomeError, match="temporary directory"):
+        operator_home_ui.build_home(support.real_user_home() / "gigai-ui-operator" / "op", env={})
 
 
 def test_no_retry_anywhere_in_the_ui_tests() -> None:

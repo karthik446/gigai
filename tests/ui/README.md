@@ -8,7 +8,7 @@ if it resolves to the real home (`support.refuse_real_home`).
 ## Run
 
 ```sh
-make ui-test        # installs Chromium once, builds the home (about 25 s), runs every `ui` test
+make ui-test        # installs Chromium once, builds the home (about 25 s), runs every `ui` test on the small home
 ```
 
 - The `ui` dependency group (`uv run --group ui ...`) holds Playwright and psutil. No pip.
@@ -21,6 +21,56 @@ make ui-test        # installs Chromium once, builds the home (about 25 s), runs
   `screenshot.png`, `trace.zip` (`playwright show-trace`), `requests.json` (every `/api/` request
   and step), `console.txt`, `problems.txt`, `server-log-tail.txt`, `samples.csv` (server CPU
   seconds and RSS, and requests in flight, four times a second). CI uploads that folder.
+
+## The operator-sized home (`make ui-test-full`)
+
+```sh
+make ui-test-full   # the release profile: everything above, plus the `operator_sized` tests (about 2 minutes)
+```
+
+0.1.10.8 passed every test and its Jobs page never loaded on the operator's home (0110-9-01): no
+test opened the UI on a home of that size. A test that takes `operator_ui` (or `operator_server`)
+runs on one: 290,000 postings, 10,350 companies, 2 profiles, about 600 matched postings.
+
+- The home is `tests/support/operator_home.py` (synthetic; the same generator as the timing gate
+  and `make operator-ui-check`), built **once per session**, by a child process, in a fresh
+  temporary HOME that is removed at the end. About 45 s on a laptop. Never `~/.gigai`: the fixture
+  refuses a HOME outside the temporary directory, and the test asserts the server's own HOME.
+- The server is the real process (`tools.media.operator_ui_check.start_server`, the one
+  `make operator-ui-check` starts), with its background threads running, and **cold**: nothing has
+  read the list before the first page does. Nothing is stubbed; the list is the real route.
+- Such a test is marked `operator_sized` (automatically) as well as `ui`. `make ui-test` deselects
+  it (`-m "ui and not operator_sized"`); `make ui-test-full` runs both.
+- The build time, the server start time and the flow's numbers are printed, and written to
+  `build/ui-artifacts/operator-sized-jobs.json`.
+- The session's home is shared and cold only once: a second `operator_sized` test starts warm, and
+  must not depend on the order unless it says so.
+
+`test_operator_sized_jobs.py` is the 0110-9-01 flow: Jobs loads (the "preparing" message, then the
+rows), a job is opened, Back, the list is still there; at most one request in flight for the list,
+the peek and the status; one build; zero console errors. It collects every failed check and fails
+once, at the end, with all of them.
+
+### Showing a test red on an older release
+
+`GIGAI_UI_SERVER_ROOT=<checkout>` builds and serves the operator-sized home with the product code
+of another checkout (its `src/` first on `PYTHONPATH` of the two child processes; bytecode goes to
+the temporary HOME, so nothing is written into that checkout). The tests, the generator and the
+harness stay this tree's.
+
+```sh
+GIGAI_UI_SERVER_ROOT=/path/to/a/v0.1.10.8/checkout GIGAI_UI_REQUIRED=1 \
+  uv run --locked --group ui --extra test pytest tests/ui/test_operator_sized_jobs.py -m ui -n 0 -q
+```
+
+On v0.1.10.8 that run fails (2026-10-03, two runs, 140 and 145 s). Both runs: the page never said
+it was preparing (it said "Loading postings…" for 63 to 67 s); 51 and 76 server CPU seconds for the
+first page (ceiling 45); **back from the job, the list was loading again** (one run: no row in
+30 s, `/api/postings` and `/api/new` still in flight; the other: "Loading postings…", rows after
+4 s, and two `/api/new` requests in flight at once); no single build logged. On this tree the same
+run passes in about 60 s.
+
+It applies to the operator-sized fixtures only: the small home is built in this process.
 
 ## Add a flow
 
