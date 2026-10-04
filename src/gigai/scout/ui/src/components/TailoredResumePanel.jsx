@@ -17,6 +17,8 @@ import {
   sourceLabel,
   statsLine,
 } from "../tailoredResumeModel.js";
+import { putTailoredResumeLength } from "../api.js";
+import { lengthNote } from "../tailorLengthModel.js";
 
 // Q4b-ui (v0.1.9): the tailored-resume panel on the job page
 // (mockups/cards-and-job-page.html, "Tailored resume"), over Q3's routes:
@@ -251,11 +253,13 @@ function PreviewLine({ line, index, open, onToggle, promptFor, showChanges, onCh
   );
 }
 
-export function Preview({ response, profileLabel, promptFor, initialView = "changes", onChooseLine = null, choiceBusy = false, choiceError = null }) {
+export function Preview({ response, profileLabel, promptFor, initialView = "changes", onChooseLine = null, choiceBusy = false, choiceError = null, onLength = null }) {
   const [open, setOpen] = useState(() => new Set());
   const [view, setView] = useState(initialView); // "changes" (default) | "clean"
   const lines = previewLines(response.result);
   const stats = previewStats(lines);
+  // 0110-10-05 C: what was left out for length, and the way back.
+  const length = lengthNote(response);
   const toggle = useCallback((index) => {
     setOpen((current) => {
       const next = new Set(current);
@@ -287,6 +291,16 @@ export function Preview({ response, profileLabel, promptFor, initialView = "chan
           </button>
         </div>
       </div>
+      {length && (
+        <div className="callout info length-note" data-testid="length-note" data-status={length.status}>
+          <span>{length.text}</span>{" "}
+          {length.action && onLength && (
+            <button type="button" className="button small secondary" data-action={`length-${length.action.use}`} disabled={choiceBusy} onClick={() => onLength(length.action.use)}>
+              {length.action.label}
+            </button>
+          )}
+        </div>
+      )}
       {view === "changes" && (
       <div className="resume-legend">
         <span>
@@ -456,6 +470,27 @@ export default function TailoredResumePanel({ state, profileLabel, questionPromp
     [stored, state],
   );
 
+  // 0110-10-05 C: Restore / Cut for length again. The response replaces
+  // `stored`, like a line choice; a 409 reloads the stored resume.
+  const changeLength = useCallback(
+    (use) => {
+      setChoosing(true);
+      setChoiceError(null);
+      putTailoredResumeLength({ profileId: state.profileId, jobIdentity: state.jobIdentity, updatedAt: stored.updated_at, use })
+        .then((response) => state.setStored(response))
+        .catch((err) => {
+          setChoiceError(err.detail || err.message || String(err));
+          if (err.code === "tailored_resume_changed") {
+            getTailoredResumes({ profileId: state.profileId, jobIdentity: state.jobIdentity })
+              .then((response) => state.setStored(latestStored(response.items)))
+              .catch(() => {});
+          }
+        })
+        .finally(() => setChoosing(false));
+    },
+    [stored, state],
+  );
+
   // uat-bug-043: the action sits above the requirement table and its status
   // sits by the button; when a run finishes (result or error) bring the panel
   // into view.
@@ -498,7 +533,7 @@ export default function TailoredResumePanel({ state, profileLabel, questionPromp
           {errorView(error).hint && <div className="muted" style={{ marginTop: 4, fontSize: "0.82rem" }}>{errorView(error).hint}</div>}
         </div>
       )}
-      {stored && <Preview key={stored.updated_at || stored.stored_path} response={stored} profileLabel={profileLabel} promptFor={promptFor} onChooseLine={chooseLine} choiceBusy={choosing} choiceError={choiceError} />}
+      {stored && <Preview key={stored.updated_at || stored.stored_path} response={stored} profileLabel={profileLabel} promptFor={promptFor} onChooseLine={chooseLine} choiceBusy={choosing} choiceError={choiceError} onLength={changeLength} />}
     </section>
   );
 }

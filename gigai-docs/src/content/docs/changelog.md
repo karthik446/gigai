@@ -41,6 +41,10 @@ the server used several gigabytes of memory, and reloading made it worse. Read "
   "One missing tool from a list" and "Every stated requirement" under Fixed), so an assessment made
   before this release is offered for re-assessment like any other old one. Nothing is assessed again
   until you say yes.
+- **The pipeline may tailor a job's resume again.** The tailoring instructions changed (see "A
+  skill you confirmed" and "over 2 pages" under Fixed), so the next time the background pipeline
+  processes a job it tailors that job's resume again, within the daily limit on model calls. A
+  resume you tailored or edited yourself is kept, as before.
 - **In the API and in `--json` output, `company` is now the company's name.** The board's id (what
   `company` held before) is in `company_slug`. `company_name` is still there and says the same name.
   A script that used `company` as an id should read `company_slug`.
@@ -53,6 +57,26 @@ the server used several gigabytes of memory, and reloading made it worse. Read "
   update re-checks only that company. On a test home of 290,000 postings and 10,350 companies the
   server stays near 200 MB, a warm request takes about a tenth of a second (it took 5 to 40
   seconds), and `gigai scout new` takes under a second.
+- **A skill you confirmed in an answer is put on the tailored resume.** When a posting asks for a
+  skill, your resume does not name it, and one of your answers says you have it, the tailored resume
+  now shows it in Skills, with the answer as its source (for example Helm, after you answer "yes" to
+  the Helm question). Before, the answer was passed to the tailoring and the resume often came back
+  unchanged, so the Scout ATS score still listed the skill as missing. An answer that says you do
+  not have the skill adds nothing.
+- **A tailored resume over 2 pages is cut to 2, and only by leaving out your oldest roles.** Scout
+  measures the pages itself and leaves out whole roles, the oldest first, until the resume fits.
+  Nothing else is cut for length: the tailoring no longer drops bullets from recent roles to save
+  space. One older rule stays: a role that ended more than 8 years ago keeps its first 3 bullets.
+  The job page shows what was left out ("Cut for length: ...", the roles and the older bullets)
+  with a **Restore** button that puts all of it back in one step, and "Cut for length again" to
+  undo that. `gigai scout resume tailor` prints the same line, `gigai scout resume length --job-url
+  URL` shows it later (`--restore`, `--cut`), and the API has `result.length` and
+  `PUT /api/tailored-resumes/length`. If the pages cannot be measured, nothing is cut and the line
+  says so; if leaving out older roles would not get the resume to 2 pages, no role is cut and the
+  line says it is over the limit.
+- **The Skills section no longer repeats one bullet inside another.** A Skills line whose every
+  skill another Skills line already lists is dropped (it happened when a resume's skills lines had
+  no bullet markers and the tailoring listed them in a new order).
 - **The background ranking no longer slows everything down.** It used to match the whole store of
   postings against your profiles again on every turn.
 - **The Jobs page has real pages.** Pages of 50 postings (25 or 100 if you prefer) with Prev, Next

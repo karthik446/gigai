@@ -377,6 +377,39 @@ class TailoredResumesRoutesMixin:
             return
         self._write_json(HTTPStatus.OK, updated.to_json())
 
+    def _handle_put_tailored_resume_length(self) -> None:
+        """``PUT /api/tailored-resumes/length`` (0110-10-05): put back the roles cut for length, or cut for length again."""
+
+        from ...tailor_length import LENGTH_USES
+        from ...tailor_length_store import change_stored_length
+
+        body = self._read_json_body()
+        if body is None:
+            return
+        keys = {"profile_id", "job_identity", "updated_at", "use"}
+        if type(body) is not dict or set(body) != keys or not all(isinstance(body[key], str) and body[key] for key in keys):
+            self._error(
+                HTTPStatus.UNPROCESSABLE_ENTITY, "invalid_value",
+                "body must be exactly profile_id, job_identity, updated_at and use, each a non-empty string",
+            )
+            return
+        if body["use"] not in LENGTH_USES:
+            self._error(HTTPStatus.UNPROCESSABLE_ENTITY, "invalid_value", "use must be restore or cut")
+            return
+        target = self._tailor_target()
+        if target is None:
+            return
+        try:
+            updated = change_stored_length(
+                self._backend.home_root, target, profile_id=body["profile_id"], job_identity=body["job_identity"], use=body["use"],
+                updated_at=body["updated_at"],
+            )
+        except QuickAssessError as exc:
+            status = {"tailored_resume_not_found": HTTPStatus.NOT_FOUND, "tailored_resume_changed": HTTPStatus.CONFLICT}.get(exc.code)
+            self._error(status or _status_for(exc.code), exc.code, str(exc))
+            return
+        self._write_json(HTTPStatus.OK, updated.to_json())
+
     def _handle_get_tailored_resumes(self) -> None:
         target = self._tailor_target()
         if target is None:

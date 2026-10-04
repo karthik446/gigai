@@ -164,6 +164,7 @@ _TARGET_COMMANDS: dict[str, tuple[str, ...]] = {
     "watchlist add": ("scout", "watchlist", "add", "https://boards.greenhouse.io/example"),
     "sources update": ("scout", "sources", "update"),
     "resume pdf": ("scout", "resume", "pdf", "--tailored", "--job-url", "https://boards.greenhouse.io/example/jobs/1", "--out", "out.pdf"),
+    "resume length": ("scout", "resume", "length", "--job-url", "https://boards.greenhouse.io/example/jobs/1"),
     "answers list": ("scout", "answers", "list"),
     "answers show": ("scout", "answers", "show", "technical:python"),
     "answers save": ("scout", "answers", "save", "technical:python", "--answer-text", "Eight years."),

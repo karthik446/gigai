@@ -1,0 +1,164 @@
+{
+ "schema": "gigai-tailor-cases:1",
+ "note": "0110-10-05 C: five synthetic cases for the tailor prompt's before/after eval (run_tailor_cases_eval.py). Every name, company and number is invented.",
+ "cases": [
+  {
+   "id": "helm_answer",
+   "repeat": 3,
+   "kind": "answer_skill",
+   "title": "Staff Platform Engineer",
+   "company": "Northgate Systems",
+   "location": "Remote",
+   "posting": "Northgate Systems runs the booking platform behind 2,000 clinics. The platform team owns the Kubernetes clusters every product team deploys to.\n\nWhat you will do:\n- Run and improve our Kubernetes platform on AWS.\n- Own the delivery path from merge to production.\n\nRequirements:\n- 7+ years operating Kubernetes in production\n- Helm charts for packaging and releasing services\n- GitOps delivery with ArgoCD\n- Terraform for infrastructure as code\n- Monitoring with Prometheus and Grafana\n\nNice to have:\n- Go\n",
+   "resume": "## Summary\nPlatform engineer with 9 years building and running Kubernetes platforms for logistics and payments companies; owned CI/CD and infrastructure as code end to end.\n\n## Experience\n**Senior Platform Engineer — Lumen Freight** (2021–Present)\n- Led the migration of 40 services from EC2 to Kubernetes on EKS, cutting deploy time from 45 minutes to 6.\n- Built Terraform modules for networking and IAM used by 5 product teams.\n- Owned the on-call rotation and incident reviews for the platform team of 6 engineers.\n- Introduced GitHub Actions pipelines with automated canary analysis for every service.\n\n**Platform Engineer — Brightpay** (2017–2021)\n- Operated a multi-tenant Kubernetes cluster serving 120 microservices in production.\n- Wrote Python tooling that reduced cloud spend by 18% through rightsizing.\n- Built Prometheus and Grafana dashboards and alerts for payment latency.\n\n**Systems Engineer — Corvid Hosting** (2015–2017)\n- Automated Linux server provisioning with Ansible for 300 hosts.\n- Maintained Nagios monitoring and a Bash-based backup system.\n\n## Skills\n- Kubernetes, Docker, Terraform, AWS, GitHub Actions\n- Python, Go, Bash\n- Prometheus, Grafana, Linux\n\n## Education\n**B.Sc. Computer Science — Halden University** (2015)\n",
+   "answers": [
+    {
+     "question_id": "tool:helm",
+     "prompt": "Do you have hands-on Helm experience?",
+     "answer": "Yes. At Lumen Freight I packaged and released our services with Helm charts for the last 3 years."
+    },
+    {
+     "question_id": "tool:argocd",
+     "prompt": "Have you used ArgoCD?",
+     "answer": "No, I have not used ArgoCD; our delivery runs on GitHub Actions."
+    }
+   ],
+   "matrix": [
+    {
+     "requirement": "7+ years operating Kubernetes in production",
+     "status": "met"
+    },
+    {
+     "requirement": "Helm charts for packaging and releasing services",
+     "status": "met"
+    },
+    {
+     "requirement": "GitOps delivery with ArgoCD",
+     "status": "unmet"
+    },
+    {
+     "requirement": "Terraform for infrastructure as code",
+     "status": "met"
+    },
+    {
+     "requirement": "Monitoring with Prometheus and Grafana",
+     "status": "met"
+    },
+    {
+     "requirement": "Go",
+     "status": "met"
+    }
+   ],
+   "expect": {
+    "added": [
+     "Helm"
+    ],
+    "never": [
+     "ArgoCD"
+    ]
+   }
+  },
+  {
+   "id": "helm_terse_answer",
+   "repeat": 3,
+   "kind": "answer_skill",
+   "title": "Staff Platform Engineer",
+   "company": "Northgate Systems",
+   "location": "Remote",
+   "posting": "Northgate Systems runs the booking platform behind 2,000 clinics. The platform team owns the Kubernetes clusters every product team deploys to.\n\nWhat you will do:\n- Run and improve our Kubernetes platform on AWS.\n- Own the delivery path from merge to production.\n\nRequirements:\n- 7+ years operating Kubernetes in production\n- Helm charts for packaging and releasing services\n- GitOps delivery with ArgoCD\n- Terraform for infrastructure as code\n- Monitoring with Prometheus and Grafana\n\nNice to have:\n- Go\n",
+   "resume": "## Summary\nPlatform engineer with 9 years building and running Kubernetes platforms for logistics and payments companies; owned CI/CD and infrastructure as code end to end.\n\n## Experience\n**Senior Platform Engineer — Lumen Freight** (2021–Present)\n- Led the migration of 40 services from EC2 to Kubernetes on EKS, cutting deploy time from 45 minutes to 6.\n- Built Terraform modules for networking and IAM used by 5 product teams.\n- Owned the on-call rotation and incident reviews for the platform team of 6 engineers.\n- Introduced GitHub Actions pipelines with automated canary analysis for every service.\n\n**Platform Engineer — Brightpay** (2017–2021)\n- Operated a multi-tenant Kubernetes cluster serving 120 microservices in production.\n- Wrote Python tooling that reduced cloud spend by 18% through rightsizing.\n- Built Prometheus and Grafana dashboards and alerts for payment latency.\n\n**Systems Engineer — Corvid Hosting** (2015–2017)\n- Automated Linux server provisioning with Ansible for 300 hosts.\n- Maintained Nagios monitoring and a Bash-based backup system.\n\n## Skills\n- Kubernetes, Docker, Terraform, AWS, GitHub Actions\n- Python, Go, Bash\n- Prometheus, Grafana, Linux\n\n## Education\n**B.Sc. Computer Science — Halden University** (2015)\n",
+   "answers": [
+    {
+     "question_id": "tool:helm",
+     "prompt": "Do you have hands-on Helm experience?",
+     "answer": "Yes, about 3 years of hands-on use."
+    },
+    {
+     "question_id": "tool:argocd",
+     "prompt": "Have you used ArgoCD?",
+     "answer": "No."
+    }
+   ],
+   "matrix": [
+    {
+     "requirement": "7+ years operating Kubernetes in production",
+     "status": "met"
+    },
+    {
+     "requirement": "Helm charts for packaging and releasing services",
+     "status": "met"
+    },
+    {
+     "requirement": "GitOps delivery with ArgoCD",
+     "status": "unmet"
+    },
+    {
+     "requirement": "Terraform for infrastructure as code",
+     "status": "met"
+    },
+    {
+     "requirement": "Monitoring with Prometheus and Grafana",
+     "status": "met"
+    },
+    {
+     "requirement": "Go",
+     "status": "met"
+    }
+   ],
+   "expect": {
+    "added": [
+     "Helm"
+    ],
+    "never": [
+     "ArgoCD"
+    ]
+   }
+  },
+  {
+   "id": "over_long",
+   "repeat": 2,
+   "kind": "length",
+   "title": "Senior Backend Engineer",
+   "company": "Fennel Logistics",
+   "location": "Remote",
+   "posting": "Fennel Logistics moves 3 million parcels a week for online retailers. The backend team builds the services that route and track every parcel.\n\nRequirements:\n- 8+ years building backend services in Python or Go\n- PostgreSQL at scale\n- Event streaming with Kafka\n- Experience leading a small team\n\nNice to have:\n- Airflow\n",
+   "resume": "## Summary\nBackend engineer with 18 years building high-throughput services in Python, Go and PostgreSQL for logistics, banking, media and health companies; led teams of up to 5 and owned services end to end.\n\n## Experience\n**Staff Backend Engineer — Meridian Parcel** (2022–Present)\n- Led the redesign of the parcel tracking service in Python and PostgreSQL, raising throughput from 2,000 to 11,000 events per second while keeping p99 latency under 80 ms.\n- Owned the Kafka ingestion pipeline end to end, including schema evolution, replay tooling and the runbooks used by 4 on-call engineers.\n- Architected the move from a shared database to per-service schemas, removing 37 cross-service joins and cutting incident count by 40%.\n- Built the rate limiting and quota service used by 60 partner integrations, with per-tenant dashboards and alerts.\n- Mentored 5 engineers through design reviews and pairing, two of whom were promoted to senior within 18 months.\n- Introduced contract tests between 14 services, catching breaking API changes before release in the CI pipeline.\n- Designed the idempotent event replay tool that reprocessed 90 million tracking events after a carrier outage without a single duplicate delivery notice.\n- Owned the service level objectives for 8 backend services and ran the weekly reliability review with product and support leads.\n- Built the address normalisation service in Go, raising first-attempt delivery rates by 6% across 3 countries.\n- Led the PostgreSQL major version upgrade for 11 databases with under 4 minutes of total write downtime.\n\n**Senior Backend Engineer — Tallow Bank** (2019–2022)\n- Built the ledger reconciliation service in Python, matching 3 million card transactions a day against the core banking system with a 99.98% match rate.\n- Designed the PostgreSQL partitioning scheme for the transactions tables, reducing the nightly batch window from 5 hours to 50 minutes.\n- Led a team of 4 engineers delivering the instant payments integration, shipped 3 weeks ahead of the regulatory deadline.\n- Owned the fraud scoring API, serving 900 requests per second with a p95 latency of 35 ms in production.\n- Wrote the migration tooling that moved 220 batch jobs from cron to Airflow with no missed runs.\n- Ran the quarterly disaster recovery exercises for the payments domain across 2 regions.\n- Designed the double-entry bookkeeping library adopted by 7 services, with property-based tests covering 200 invariants.\n- Built the statement generation pipeline producing 2 million PDF statements a month within a 6-hour window.\n- Owned the secrets rotation process for 45 services, completing every rotation without a production incident.\n- Introduced blue-green deployments for the payments gateway, cutting release-related errors by 80%.\n\n**Senior Software Engineer — Quillfeather Media** (2017–2019)\n- Built the video metadata service in Go and PostgreSQL, serving 25 million catalogue lookups a day for the web and mobile apps.\n- Designed the caching layer with Redis that cut origin load by 70% during live events.\n- Owned the search indexing pipeline on Kafka and Elasticsearch, reindexing 8 million titles in under 2 hours.\n- Led the adoption of structured logging and tracing across 20 services, shortening incident diagnosis from hours to minutes.\n- Created the feature flag service used by 9 teams, with gradual rollout and automatic rollback on error budgets.\n- Reduced cloud costs by 22% by consolidating 30 small services onto a shared runtime.\n- Built the subtitle delivery service handling 30 languages and 1.5 million subtitle files.\n- Designed the A/B testing backend that ran 120 experiments a year for the recommendations team.\n- Owned the playback session API, sustaining 50,000 concurrent viewers during premieres.\n- Wrote the PostgreSQL to Elasticsearch synchronisation worker with exactly-once delivery through Kafka offsets.\n\n**Software Engineer — Ostrava Health** (2015–2017)\n- Built the appointment scheduling API in Python and Django used by 150 clinics, handling 400,000 bookings a month.\n- Designed the audit trail for patient record access under HIPAA, storing 2 years of events with tamper-evident hashing.\n- Owned the HL7 integration with 6 laboratory systems, including retries, dead-letter handling and alerting.\n- Wrote the data export service producing nightly files for 12 partner insurers.\n- Improved API response times by 45% by replacing N+1 queries and adding PostgreSQL indexes.\n- Ran the on-call rotation for the scheduling domain, authoring 15 runbooks.\n\n**Software Engineer — Pinecrest Travel** (2013–2015)\n- Built the fare search aggregator in Java, combining results from 9 airline APIs in under 2 seconds.\n- Designed the booking state machine that reduced double bookings from 1.2% to 0.05%.\n- Owned the payment retry logic for 3 payment providers, recovering 8% of failed transactions.\n- Wrote the nightly pricing import processing 40 million fare records.\n- Created the load testing suite simulating 10,000 concurrent searches before each peak season.\n- Maintained the customer notification service sending 500,000 emails and texts a week.\n\n**Software Engineer — Harrow Analytics** (2011–2013)\n- Built ETL pipelines in Python and SQL loading 200 GB of retail sales data a day into the reporting warehouse.\n- Designed the dimensional model for store performance used by 300 analysts.\n- Owned the data quality checks that flagged 95% of upstream feed errors before reports ran.\n- Wrote the scheduling framework that replaced 80 hand-run scripts.\n- Created dashboards for 25 regional managers showing weekly sales against plan.\n- Tuned the largest 50 warehouse queries, cutting report generation time by 60%.\n\n**Junior Developer — Bellweather Retail** (2009–2011)\n- Developed the store inventory web application in PHP and MySQL used by 120 stores.\n- Built the barcode scanning integration for stock counts, cutting count time by 30%.\n- Wrote the weekly replenishment report generating orders for 4,000 products.\n- Maintained the point-of-sale synchronisation jobs across 3 time zones.\n- Fixed over 200 defects in the legacy ordering system during its final 2 years.\n- Automated the nightly database backups and restore tests.\n\n**Junior Developer — Dunmore Telecom** (2007–2009)\n- Developed billing report scripts in Perl and SQL for 1.5 million subscriber accounts.\n- Built the internal tool for call detail record lookups used by 40 support agents.\n- Wrote the monthly invoice batch job and its reconciliation checks.\n- Maintained the SMS gateway integration handling 2 million messages a month.\n- Migrated 60 shell scripts from a retired Solaris host to Linux.\n- Documented the billing data model for the 12-person operations team.\n\n## Skills\n- Python, Go, Java, SQL\n- PostgreSQL, Kafka, Redis, Elasticsearch, Airflow\n- AWS, Docker, Kubernetes\n\n## Education\n**B.Sc. Software Engineering — Varrow Institute of Technology** (2007)\n",
+   "answers": [],
+   "matrix": [],
+   "expect": {
+    "full_pages": 3,
+    "max_pages": 2
+   }
+  },
+  {
+   "id": "duplicate_skills",
+   "repeat": 3,
+   "kind": "skills",
+   "title": "Data Platform Engineer",
+   "company": "Marlow Grid",
+   "location": "Remote",
+   "posting": "Marlow Grid builds forecasting software for energy retailers. The data platform team runs the streaming stack every model reads from.\n\nRequirements:\n- Kafka in production\n- Kubernetes and Terraform\n- PostgreSQL\n- Python\n\nNice to have:\n- Airflow\n",
+   "resume": "## Summary\nData platform engineer with 7 years building streaming and batch pipelines on Kubernetes for retail and insurance companies.\n\n## Experience\n**Senior Data Platform Engineer — Sorrel Insurance** (2020–Present)\n- Built the claims event pipeline on Kafka and Flink, processing 4 million events a day.\n- Owned the Kubernetes cluster for data workloads, 45 nodes across 2 regions.\n- Wrote Terraform modules for the data lake buckets, IAM and networking.\n\n**Data Engineer — Kestrel Retail** (2017–2020)\n- Built Airflow pipelines loading 90 source tables into the PostgreSQL warehouse nightly.\n- Designed the Redis cache for the pricing API, cutting p95 latency by 55%.\n\n## Skills\nLanguages: Python, Go, TypeScript\nCloud and infrastructure: AWS, GCP, Kubernetes, Terraform\nData: PostgreSQL, Kafka, Redis, Airflow\n\n## Education\n**B.Eng. Computer Engineering — Loxley Polytechnic** (2017)\n",
+   "answers": [],
+   "matrix": [],
+   "expect": {
+    "duplicates": 0
+   }
+  },
+  {
+   "id": "control",
+   "repeat": 2,
+   "kind": "control",
+   "title": "Senior Frontend Engineer",
+   "company": "Hollis Tickets",
+   "location": "Remote",
+   "posting": "Hollis Tickets sells event tickets in 12 countries. The web team owns the purchase flow.\n\nRequirements:\n- 5+ years building React applications\n- TypeScript\n- Web performance work\n- End-to-end testing\n\nNice to have:\n- GraphQL\n",
+   "resume": "## Summary\nFrontend engineer with 6 years building React applications for booking and e-commerce products.\n\n## Experience\n**Senior Frontend Engineer — Alder Stays** (2021–Present)\n- Led the rebuild of the booking flow in React and TypeScript, raising conversion by 9%.\n- Built the design system used by 4 product teams, with 60 documented components.\n- Owned web performance, cutting largest contentful paint from 4.1 s to 1.8 s.\n\n**Frontend Engineer — Petrel Market** (2018–2021)\n- Built the product listing and checkout pages in React, serving 300,000 visits a day.\n- Wrote the end-to-end test suite in Playwright covering 85 user journeys.\n\n## Skills\n- React, TypeScript, JavaScript, Node.js\n- Playwright, Jest, GraphQL\n\n## Education\n**B.A. Interaction Design — Wexcombe College** (2018)\n",
+   "answers": [],
+   "matrix": [],
+   "expect": {
+    "unchanged": true
+   }
+  }
+ ]
+}

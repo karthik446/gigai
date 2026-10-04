@@ -79,6 +79,7 @@ JOURNEYS: dict[Route, str] = {
     Route("POST", "/api/tailored-resumes"): "test_tailored_resumes_journey.py",
     Route("GET", "/api/tailored-resumes"): "test_tailored_resumes_journey.py",
     Route("POST", "/api/tailored-resumes/pdf"): "test_tailored_resume_pdf_journey.py",
+    Route("PUT", "/api/tailored-resumes/length"): "test_tailored_resume_length_journey.py",
     Route("PUT", "/api/tailored-resumes/lines"): "test_tailored_resume_line_choice_journey.py",
     Route("PUT", "/api/tailored-resumes"): "test_edited_tailored_resume_journey.py",
     Route("GET", "/api/resumes-folder"): "test_edited_tailored_resume_journey.py",

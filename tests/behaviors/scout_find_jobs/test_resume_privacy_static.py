@@ -94,6 +94,9 @@ _DISPLAY_IMPORTERS: dict[str, frozenset[str]] = {
     # pipeline.steps (0.1.10.7 M2): the ATS step renders the stored tailored resume HEADERLESS (form=None) to score it;
     # it passes no header form, so the per-profile title and every header value stay out of the pipeline.
     "gigai.scout.resume_pdf": frozenset({
+        # tailor_length_store (0110-10-05 C): asks the renderer for a page count only (fewest_pages, headerless); it reads
+        # no display setting and no header form.
+        "gigai.scout.tailor_length_store",
         "gigai.scout.find_jobs.api.tailored_resumes", "gigai.scout.scout_cli", "gigai.scout.posting_keywords",  # scout_cli: `scout resume pdf` renders locally (0110-032)
         "gigai.scout.pipeline.steps",
         # tailored_resume_edit (0110-10-05 B): checks an edited markdown with resume_pdf's markdown parser (the format's one

@@ -1020,6 +1020,17 @@
       ],
       "notes": "Works as the very first command on a fresh machine: writes the default GigAI settings (like 'gigai scout run'), installs Scout if needed, then imports the file. Never rewrites an existing config. The name and contact lines (email, phone, address, links) are removed and discarded before the resume is stored; --json carries contact_removed {removed: {kind: count}, message} (null when there were none)."
     },
+    "scout resume length": {
+      "summary": "Show what a stored tailored resume left out for length; put it back (--restore) or leave it out again (--cut).",
+      "effect": "write",
+      "external": "none",
+      "output": "Human-readable text; --json emits one JSON object: {ok, profile_id, job_identity, updated_at, length, markdown_path}.",
+      "examples": [
+        "gigai scout resume length --job-url https://boards.greenhouse.io/acme/jobs/1 --json",
+        "gigai scout resume length --job-url https://boards.greenhouse.io/acme/jobs/1 --restore"
+      ],
+      "notes": "No model call and no network. A tailored resume over 2 pages leaves out whole roles, the oldest first, until it fits, and a role that ended more than 8 years ago keeps its first 3 bullets; nothing else is cut for length. length is null when the resume fits with nothing left out, else {max_pages, pages, full_pages, status, cut: [{position, role, entry}], trimmed: [{heading, role, bullets, records}]}: pages is the resume with the cut applied, full_pages with everything shown. status cut (roles and/or older bullets are left out), restored (you put them back; cut and trimmed then say what --cut leaves out again), over (over the limit and leaving out older roles would not fix it; no role cut) or unmeasured (the pages could not be measured; no role cut). With no flag nothing is written. --restore puts every cut role and bullet back where it was, in one step; --cut, after a restore, leaves the same things out again. --profile picks the profile the resume was tailored from (default: the newest for that job)."
+    },
     "scout resume master show": {
       "summary": "Show your master resume: every entry and line with its id, tags and evidence strength.",
       "effect": "read",
