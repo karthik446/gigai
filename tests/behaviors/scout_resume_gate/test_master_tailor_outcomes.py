@@ -38,6 +38,7 @@ from gigai.workpad import resolve_workpad
 
 from tests.support.master_tailor import copies_what_it_is_shown, install_prompt_model as _install_model, listed as _listed
 from tests.support.scout_profile_fixtures import default_find_jobs_config
+from tests.support.setup_home import setup_home
 from tests.support.tailor_cases import ollama_config
 
 FIXTURES = Path(__file__).resolve().parents[2] / "evals" / "fixtures" / "master"
@@ -69,8 +70,7 @@ class _Home:
     def __init__(self, tmp_path: Path) -> None:
         self.home = tmp_path / "home"
         runner = CliRunner()
-        done = runner.invoke(cli, ["setup", "--non-interactive", "--home", str(self.home), "--workpad-root", str(tmp_path / "workpads"), "--editor", "/usr/bin/true", "--json"])
-        assert done.exit_code == 0, done.output
+        setup_home(self.home, workpad_root=tmp_path / "workpads")
         assert runner.invoke(cli, ["scout", "install", "--home", str(self.home), "--json"]).exit_code == 0
         self.scout = home_scout_target(self.home)
         older = import_resume_file(home_root=self.home, requested_target=self.scout, source=SWE_RESUME)

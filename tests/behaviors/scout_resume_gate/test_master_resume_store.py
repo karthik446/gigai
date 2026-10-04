@@ -21,6 +21,8 @@ from gigai.cli import cli
 from gigai.scout import master_resume
 from gigai.scout.master_resume import MasterResumeError, assign_ids, build_master, draft_master, parse_master
 
+from tests.support.setup_home import setup_home
+
 FIXTURE = Path(__file__).resolve().parents[2] / "evals" / "fixtures" / "master" / "master.md"
 _ID = re.compile(r"<!--[^>]*\bid:([A-Za-z0-9_-]+)")
 _TRAILING_COMMENT = re.compile(r"\s*<!--.*?-->\s*$")
@@ -55,13 +57,7 @@ Staff Engineer | Jun 2019 - Present
 def _setup(tmp_path: Path, name: str = "home") -> Path:
     """Non-interactive ``gigai setup`` only: the master commands install Scout themselves, as ``resume add`` does."""
 
-    home = tmp_path / name
-    result = CliRunner().invoke(
-        cli,
-        ["setup", "--non-interactive", "--home", str(home), "--workpad-root", str(tmp_path / f"{name}-workpads"), "--editor", "/usr/bin/true", "--json"],
-    )
-    assert result.exit_code == 0, result.output
-    return home
+    return setup_home(tmp_path / name, workpad_root=tmp_path / f"{name}-workpads")
 
 
 def _master(home: Path, *args: str, ok: bool = True) -> dict[str, object]:
