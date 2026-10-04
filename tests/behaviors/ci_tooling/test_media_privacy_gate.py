@@ -7,12 +7,13 @@ Pillow and the `tesseract` binary; without them those tests skip.
 from __future__ import annotations
 
 import importlib.util
+import os
 from pathlib import Path
 import shutil
 
 import pytest
 
-from tools.media import persona, privacy_scan
+from tools.media import demo_home, persona, privacy_scan
 
 # Built from parts so no real-looking address sits in a tracked file as one string.
 REAL_LOOKING_EMAIL = "jordan.avery" + "@" + "gmail" + ".com"
@@ -38,6 +39,38 @@ def test_negative_control_a_planted_home_path_fails_the_gate() -> None:
 )
 def test_home_and_temp_paths_are_hits(path: str) -> None:
     assert "home-path" in _kinds(f"home: {path}")
+
+
+def test_the_demo_home_shows_its_resumes_folder_as_a_path_the_gate_passes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """0110-10-07: the 0.1.10.9 release published no screenshots because the demo's resumes folder read as a home path.
+
+    The demo home is `<temporary HOME>/demo/home`, so its DEFAULT resumes folder shows as
+    `~/demo/home/resumes`, and `/home/resumes` matches the gate's home-path rule. The rule is right
+    and stays; `make media` gives the demo home the folder a default install has instead.
+    """
+
+    from gigai.scout import resumes_folder
+
+    user_home = tmp_path.resolve()
+    monkeypatch.setenv("HOME", str(user_home))
+    monkeypatch.delenv("GIGAI_HOME", raising=False)
+    gigai_home = user_home / "demo" / "home"  # demo_home.build: root / "home", root = <HOME>/demo (build.py)
+    gigai_home.mkdir(parents=True)
+    line = "In your resumes folder: {}/tallgrass-health-senior-software-engineer-scheduling-2026-10-04.md"
+
+    # The home-path rule is NOT loosened: the default folder of that home is still a hit.
+    default = resumes_folder.resumes_folder(gigai_home)
+    assert default.shown == "~/demo/home/resumes"
+    assert [str(hit) for hit in privacy_scan.scan_text(line.format(default.shown))] == ["home-path: /home/resumes"]
+
+    # `make media` sets the neutral folder (and tests/ui, which pin the default folder, do not).
+    build_source = (Path(demo_home.__file__).parent / "build.py").read_text(encoding="utf-8")
+    assert "resumes_folder=demo_home.media_resumes_folder()" in build_source, "make media shows the demo home's default folder: ~/demo/home/resumes, a home-path hit"
+    folder = resumes_folder.set_resumes_folder(gigai_home, os.fspath(demo_home.media_resumes_folder()))
+    assert folder.shown == "~/Documents/GigAI/resumes", "what a default install shows"
+    assert folder.path.is_relative_to(user_home) and not folder.path.is_relative_to(gigai_home)
+    for text in (folder.shown, line.format(folder.shown), resumes_folder.master_file(gigai_home).shown, f"Resumes folder: {folder.shown}"):
+        assert privacy_scan.scan_text(text) == [], text
 
 
 def test_the_os_user_name_is_a_hit_as_a_word_only() -> None:

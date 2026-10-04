@@ -101,6 +101,51 @@ def _job_pipeline(page, demo: DemoHome) -> None:
     _top_of(page, _tid("step-timeline"))
 
 
+def _open_tailored(page, demo: DemoHome) -> None:
+    """The job page with its Tailored resume panel read: the stored resume, its file in the resumes folder, who picked."""
+
+    _open_job(page, demo)
+    page.wait_for_selector(f'#tailored-resume[data-state="stored"] {_tid("resumes-folder-file")}', timeout=WAIT_MS)
+    page.wait_for_selector(_tid("picked-left-out"), timeout=WAIT_MS)
+    _settle(page)
+
+
+def _job_resume(page, demo: DemoHome) -> None:
+    _open_tailored(page, demo)
+    _top_of(page, "#tailored-resume")
+
+
+def _picked_or_left_out(page, demo: DemoHome, which: str) -> None:
+    _open_tailored(page, demo)
+    page.click(f'{_tid("picked-left-out")} [data-action="show-{which}"]')
+    # The list is there once the master is read: every line with its reason.
+    page.wait_for_selector(f'{_tid("picked-left-out")} [data-role="{which}"] [data-item-id]', timeout=WAIT_MS)
+    _settle(page)
+    _top_of(page, _tid("picked-left-out"))
+
+
+def _job_picked(page, demo: DemoHome) -> None:
+    _picked_or_left_out(page, demo, "picked")
+
+
+def _job_left_out(page, demo: DemoHome) -> None:
+    _picked_or_left_out(page, demo, "left-out")
+
+
+def _master(page, demo: DemoHome) -> None:
+    page.goto(demo.url + "/#/master")
+    page.wait_for_selector('[data-role="master-page"]:not([data-master-revision=""]) [data-role="master-file"][data-file-state="current"]', timeout=WAIT_MS)
+    page.wait_for_selector('[data-role="master-selections"] li[data-profile-id]', timeout=WAIT_MS)
+    page.wait_for_selector('[data-master-section] li[data-line-id]', timeout=WAIT_MS)
+    _settle(page)
+
+
+def _master_lines(page, demo: DemoHome) -> None:
+    _master(page, demo)
+    # From the first section down: every role with its lines and each line's strength.
+    _top_of(page, "[data-master-section]")
+
+
 def _open_answers(page, demo: DemoHome) -> None:
     page.goto(demo.url + "/#/answers")
     page.wait_for_selector('[data-role="answers"]', timeout=WAIT_MS)
@@ -140,6 +185,11 @@ SHOTS: tuple[Shot, ...] = (
     Shot("approval-dialog", "The approval dialog: Scout says how many postings and what it costs before it assesses anything.", _approval_dialog),
     Shot("job-page", "A job page: the posting, its verdict and the requirements against your resume and answers.", _job_page),
     Shot("job-pipeline", "The same job page further down: the background pipeline's steps, the Scout label and the Scout ATS score, then the tailored resume.", _job_pipeline),
+    Shot("job-resume", "The tailored resume on the job page, with where its file is in your resumes folder.", _job_resume),
+    Shot("job-picked", "Picked: the lines of your master resume this job's resume shows, each with why.", _job_picked),
+    Shot("job-left-out", "Left out: the other lines of your master resume, each with why, and Add to show one on this resume.", _job_left_out),
+    Shot("master", "The Master resume page: its revision, the file you can edit in your resumes folder, and each profile's selection of it.", _master),
+    Shot("master-lines", "The same page further down: every role and line of the master, each marked backed, stating a number, or stated.", _master_lines),
     Shot("answers", "Answers: what you told Scout or your agent, kept once and reused.", _answers),
     Shot("stories", "Stories: your experiences in your own words, with the questions each one answers.", _stories),
     Shot("pdf", "Generate PDF: you add your own name and contact details in the browser; GigAI stores none.", _pdf),

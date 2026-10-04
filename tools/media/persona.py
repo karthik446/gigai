@@ -230,6 +230,26 @@ TERMINAL_STORY = {
     "answers": "Tell me about an incident you handled",
 }
 
+#: The master resume (made from RESUME_MARKDOWN). Each of these stories backs the master line that
+#: tells the same thing, so the Master page marks that line "backed" (story title -> the line).
+MASTER_BACKED: dict[str, str] = {
+    "Moved a 4 TB Postgres primary with no downtime": "Led a Postgres migration of a 4 TB primary with no downtime.",
+    "Cut CI time from 38 to 14 minutes": "Cut CI time from 38 to 14 minutes by splitting the test suite and caching builds.",
+}
+#: The master lines "you" add to the hero job's resume with the page's own Add. The fixture model
+#: shows none of the master's lines, so without these Picked would be empty.
+MASTER_ADDED: tuple[str, ...] = (
+    "Senior backend engineer with nine years building Python services, data pipelines and the platforms they run on.",
+    "Built Python services that price and route 40,000 shipments a day.",
+    "Led a Postgres migration of a 4 TB primary with no downtime.",
+    "Cut CI time from 38 to 14 minutes by splitting the test suite and caching builds.",
+)
+#: The terminal's master frames: the agent adds TERMINAL_STORY to the master as one line, under this role.
+TERMINAL_MASTER = {
+    "entry": "Mossbank Analytics",
+    "text": "Kept ingestion running through the loss of two of twelve Kafka brokers at quarter-end; no report was late.",
+}
+
 
 def posting_count(wave: int | None = None) -> int:
     return sum(len(company.postings) for company in COMPANIES if wave is None or company.wave == wave)
@@ -245,6 +265,7 @@ def all_text() -> str:
             parts += [posting.title, posting.place, posting.about]
     for answer in (*ANSWERS, TERMINAL_ANSWER):
         parts += list(answer.values())
+    parts += [*MASTER_BACKED, *MASTER_BACKED.values(), *MASTER_ADDED, *TERMINAL_MASTER.values()]
     for story in (*STORIES, TERMINAL_STORY):
         for value in story.values():
             if isinstance(value, dict):

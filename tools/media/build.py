@@ -79,7 +79,8 @@ def main(argv: list[str] | None = None) -> int:
         demo_home.assert_synthetic_home(root)
         with step("demo home"):
             server_started = True
-            demo = demo_home.build(root, log=lambda line: print(f"  {line}", flush=True))
+            # The folder a default install shows (0110-10-07), and a master resume for the Master page and Picked / Left out.
+            demo = demo_home.build(root, log=lambda line: print(f"  {line}", flush=True), resumes_folder=demo_home.media_resumes_folder(), master=True)
         with step("UI screenshots"):
             rows += ui_shots.take_all(demo, out)
         with step("terminal frames"):

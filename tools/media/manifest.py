@@ -23,8 +23,14 @@ MAX_TOTAL_BYTES = 2 * 1024 * 1024  # the whole set, so the docs site and the rep
 REPO = Path(__file__).resolve().parents[2]
 DOCS_MEDIA = REPO / "gigai-docs" / "public" / "media"
 
-UI_NAMES: tuple[str, ...] = ("jobs", "jobs-new", "approval-dialog", "job-page", "job-pipeline", "answers", "stories", "pdf", "background")
-TERMINAL_NAMES: tuple[str, ...] = ("terminal-new", "terminal-assessed", "terminal-yours", "terminal-answer", "terminal-story", "terminal-pdf")
+UI_NAMES: tuple[str, ...] = (
+    "jobs", "jobs-new", "approval-dialog", "job-page", "job-pipeline", "job-resume", "job-picked", "job-left-out", "master", "master-lines",
+    "answers", "stories", "pdf", "background",
+)
+TERMINAL_NAMES: tuple[str, ...] = (
+    "terminal-new", "terminal-assessed", "terminal-yours", "terminal-answer", "terminal-story", "terminal-pdf",
+    "terminal-master", "terminal-master-add",
+)
 EXPECTED_FILES: tuple[str, ...] = tuple(
     sorted([f"{name}-{scheme}.png" for name in UI_NAMES for scheme in ("light", "dark")] + [f"{name}.png" for name in TERMINAL_NAMES])
 )
