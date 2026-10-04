@@ -10,7 +10,10 @@ Pinned: the timeline is always tailor -> reassess + Scout ATS -> Scout label,
 with each step's state and the model, tokens and time of its last attempt;
 "N -> M after tailoring" is the backend's requirements_met numbers; the Scout
 ATS chip's breakdown and the Scout label chip, each with the wording the
-SERVER sends (the UI writes none of its own); "process now"; the daily caps
+SERVER sends (the UI writes none of its own); "process now"; the job page
+reads the stored tailored resume again when a read of the timeline says the
+tailor step finished since the read before it, never for the first read, and
+the timeline is not read again for that resume (0.1.10.9); the daily caps
 with the rank counter's warning state past 60 and its stop at 100; the lanes;
 the approvals with the Approve / Deny body; the settings form's patch; the
 last errors as codes.
@@ -48,6 +51,7 @@ _TERRAFORM = ("tooling:terraform", "Have you used Terraform in production?")
 
 SCRIPT = """
 import * as m from MODEL_URL;
+import { newerStored } from TAILORED_URL;
 
 const data = DATA;
 const out = {};
@@ -82,6 +86,27 @@ out.actions = {
 };
 out.results = [m.processResultLine({ result: "enqueued", runner: true }), m.processResultLine({ result: "noop_unchanged", runner: false }), m.processResultLine(null)];
 out.liveStates = ["running", "waiting", "done", "failed", "awaiting_approval", null].map((state) => m.pipelineLive({ state }));
+
+// The job page follows the tailor step: its stamp, a read against the read before it, and the resume it keeps.
+const doneStamp = m.tailorDoneStamp(data.done);
+out.tailor = {
+  stamps: [doneStamp, m.tailorDoneStamp(data.waiting), m.tailorDoneStamp(data.never), m.tailorDoneStamp(null), m.tailorDoneStamp({ steps: [{ name: "tailor", state: "done" }] })],
+  finished: {
+    first: m.tailorFinished(undefined, doneStamp),
+    polled: m.tailorFinished("", doneStamp),
+    same: m.tailorFinished(doneStamp, doneStamp),
+    again: m.tailorFinished(doneStamp, "2030-01-01T00:00:00+00:00"),
+    running: m.tailorFinished(doneStamp, ""),
+    never: m.tailorFinished("", ""),
+  },
+};
+const older = { stored_path: "older", updated_at: "2026-10-04T10:00:00+00:00" };
+const newer = { stored_path: "newer", updated_at: "2026-10-04T10:05:00+00:00" };
+const path = (item) => (item ? item.stored_path : null);
+out.tailor.kept = [
+  path(newerStored(null, older)), path(newerStored(older, null)), path(newerStored(null, null)),
+  path(newerStored(older, newer)), path(newerStored(newer, older)), newerStored(older, { ...older }) === older,
+];
 
 // Settings: caps, lanes, approvals, errors.
 out.caps = Object.fromEntries(Object.entries(data.caps).map(([name, caps]) => [name, m.capRows({ caps })]));
@@ -185,6 +210,7 @@ def out(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict:
     path.write_text(json.dumps({"schema_version": "scout-settings:1", "pipeline": {"models": {"tailor": "codex_cli"}}}), encoding="utf-8")
     data["settingsWithModel"] = background_settings.background_settings(fx.home_root, fx.target)
     script = SCRIPT.replace("MODEL_URL", json.dumps((UI_SRC / "pipelineModel.js").resolve().as_uri())).replace("DATA", json.dumps(data))
+    script = script.replace("TAILORED_URL", json.dumps((UI_SRC / "tailoredResumeModel.js").resolve().as_uri()))
     completed = subprocess.run([node, "--input-type=module", "-e", script], capture_output=True, text=True, timeout=60, check=False)
     assert completed.returncode == 0, f"node failed (rc {completed.returncode}):\n{completed.stderr}"
     result = json.loads(completed.stdout)
@@ -274,6 +300,30 @@ def test_process_now(out: dict) -> None:
     assert actions["off"]["enabled"] is False and "off" in actions["off"]["reason"]
     assert actions["noProfile"]["enabled"] is False
     assert out["results"] == ["enqueued", "noop unchanged; this server runs no pipeline (run: gigai scout pipeline run --once)", None]
+
+
+def test_the_job_page_reads_the_stored_resume_again_when_the_tailor_step_finishes(out: dict) -> None:
+    """0.1.10.9 (found by the U3 browser flow): the panel, "Tailor again" and "Resume tailored" needed a reload."""
+
+    served = {step["name"]: step for step in out["data"]["done"]["steps"]}
+    tailor = out["tailor"]
+    # The stamp is the tailor step's own `updated_at` once it is done; a step that waits, or never started, has none.
+    assert served["tailor"]["state"] == "done" and isinstance(served["tailor"]["updated_at"], str) and served["tailor"]["updated_at"]
+    assert tailor["stamps"] == [served["tailor"]["updated_at"], "", "", "", "done"]
+    # The first read of a job tells nothing new (the page read the stored resume at the same moment); a read that
+    # finds the step done after one that did not, or done again later, does; a step that runs again does not, yet.
+    assert tailor["finished"] == {"first": False, "polled": True, "same": False, "again": True, "running": False, "never": False}
+    # The quiet re-read never puts an older resume, or nothing, over what the page holds; the same one changes nothing.
+    assert tailor["kept"] == ["older", "older", None, "newer", "newer", True]
+    # The wiring: the timeline reports it, the page reads again, and its timeline is not read again for that resume.
+    timeline = (UI_SRC / "components" / "PipelineTimeline.jsx").read_text(encoding="utf-8")
+    assert "tailorFinished(before, stamp)" in timeline and "tailorDone.current();" in timeline
+    hook = (UI_SRC / "components" / "TailoredResumePanel.jsx").read_text(encoding="utf-8")
+    assert "setStored((held) => newerStored(held, latestStored(response.items)))" in hook
+    page = (UI_SRC / "views" / "JobPage.jsx").read_text(encoding="utf-8")
+    assert "onTailorDone={tailored.reload}" in page
+    assert 'refreshKey={`${assessment ? assessment.verdict || "assessed" : "none"}:${tailored.changes}`}' in page
+    assert "tailored.stored.updated_at" not in page, "the timeline's refreshKey follows the stored resume again: it resets itself"
 
 
 def test_the_caps_warn_past_60_rank_calls_and_stop_at_100(out: dict) -> None:

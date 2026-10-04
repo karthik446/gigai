@@ -399,3 +399,13 @@ export function latestStored(items) {
   list.sort((a, b) => String(b.updated_at || "").localeCompare(String(a.updated_at || "")));
   return list[0] || null;
 }
+
+// A quiet re-read (the background pipeline stored a resume) never replaces
+// what the page holds with an older one, or with nothing: a resume tailored
+// or edited on the page while the read was on its way stays.
+export function newerStored(held, loaded) {
+  if (!loaded || !held) {
+    return loaded || held || null;
+  }
+  return String(loaded.updated_at || "") > String(held.updated_at || "") ? loaded : held;
+}

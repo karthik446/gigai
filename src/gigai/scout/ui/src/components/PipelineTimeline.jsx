@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { getPipelineJob, postPipelineProcess } from "../api.js";
 import HelpLink from "./HelpLink.jsx";
-import { atsChip, labelChip, pipelineLive, processAction, processResultLine, stepTimeline, variantLine } from "../pipelineModel.js";
+import { atsChip, labelChip, pipelineLive, processAction, processResultLine, stepTimeline, tailorDoneStamp, tailorFinished, variantLine } from "../pipelineModel.js";
 
 const POLL_MS = 3000;
 
@@ -26,13 +26,19 @@ function ChipPopover({ label, tone, testId, children }) {
 // its reasons; the sentence under each is the server's own wording.
 // "Process now" queues the job (POST /api/pipeline/process, 202: it never
 // waits for a model) and the timeline is read again while it moves.
-export default function PipelineTimeline({ jobIdentity, profileId, assessed, refreshKey }) {
+// `onTailorDone` is called when a read says the tailor step finished since
+// the read before it (pipelineModel.tailorFinished): the pipeline stored a
+// resume, and the job page reads it again.
+export default function PipelineTimeline({ jobIdentity, profileId, assessed, refreshKey, onTailorDone }) {
   const [detail, setDetail] = useState(null);
   const [error, setError] = useState(null);
   const [posting, setPosting] = useState(false);
   const [result, setResult] = useState(null);
   const timer = useRef(null);
   const current = useRef(null);
+  const tailorSeen = useRef({ key: null, stamp: "" }); // the tailor step at the last read; it outlives a refreshKey reset
+  const tailorDone = useRef(onTailorDone);
+  tailorDone.current = onTailorDone;
 
   const read = useCallback(() => {
     if (!jobIdentity || !profileId) {
@@ -51,6 +57,12 @@ export default function PipelineTimeline({ jobIdentity, profileId, assessed, ref
         }
         setDetail(loaded);
         setError(null);
+        const stamp = tailorDoneStamp(loaded);
+        const before = tailorSeen.current.key === key ? tailorSeen.current.stamp : undefined;
+        tailorSeen.current = { key, stamp };
+        if (tailorDone.current && tailorFinished(before, stamp)) {
+          tailorDone.current();
+        }
         if (pipelineLive(loaded)) {
           timer.current = setTimeout(read, POLL_MS);
         }
