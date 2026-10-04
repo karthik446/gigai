@@ -326,7 +326,10 @@ def test_d_the_41st_model_call_of_the_day_waits_and_two_profiles_share_the_count
     finally:
         store.close()
 
-    drained = _runner(fx, now=lambda: today, workers=1).drain()
+    # 0.1.10.9: the store clock must be the SAME fake moment as `now`: with the real wall clock the step's
+    # `not_before` (clock + time to the next local midnight) depended on when the suite ran, and a run just after
+    # 00:00 UTC put it past the fake "tomorrow" below (CI run 37164818416). Both are injected, never the machine's.
+    drained = _runner(fx, now=lambda: today, clock=lambda: today.timestamp(), workers=1).drain()
 
     # Calls 38, 39 and 40 are made (across BOTH profiles); the 41st is not: its step waits for tomorrow.
     assert drained.model_calls == 3 and fx.model.calls == 3
@@ -336,10 +339,10 @@ def test_d_the_41st_model_call_of_the_day_waits_and_two_profiles_share_the_count
     assert {profile_id for profile_id, _name in made} == {default, second}  # both profiles spent from the one counter
     caps = triggers.caps(fx.home_root, fx.target, now=today)
     assert caps["pipeline_calls"] == {"used": 40, "limit": 40} and caps["jobs_per_trigger"] == 10
-    status = overview(fx.home_root, fx.target, busy=lambda: None, now=today)
+    status = overview(fx.home_root, fx.target, busy=lambda: None, now=today, clock=lambda: today.timestamp())
     assert status["caps"]["pipeline_calls"] == {"used": 40, "limit": 40}
     assert [item["waiting"] for item in status["jobs"] if item["waiting"]] == [WAIT_DAILY_CAP]
-    assert _runner(fx, now=lambda: today, workers=1).drain().model_calls == 0  # still today: nothing more
+    assert _runner(fx, now=lambda: today, clock=lambda: today.timestamp(), workers=1).drain().model_calls == 0  # still today: nothing more
 
     tomorrow = today + timedelta(days=1)
     later = _runner(fx, now=lambda: tomorrow, clock=lambda: tomorrow.timestamp(), workers=1).drain()
