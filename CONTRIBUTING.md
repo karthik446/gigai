@@ -29,6 +29,12 @@ verifier lanes retain their own sequencing. The runner forces
 `GIGAI_G30_UAT=0` for ordinary offline lanes; `make test-live` remains a separate
 explicit opt-in and is not affected by source xdist settings.
 
+Browser tests of the Scout UI are separate: `make ui-test` (real Chromium, a small
+synthetic home, about 2 minutes) is not part of `make test` and runs as the `ui` job
+on every pull request. [tests/ui/README.md](tests/ui/README.md) says how to run them,
+how to add a flow, why nothing is ever retried, which checks block, how to read a red
+run's artifacts, and what the tests do not cover.
+
 ## Repository boundaries
 
 - src/gigai/ contains only shipped package code and resources.
@@ -76,6 +82,8 @@ Pure relocation always preserves the exact filename set and SHA-256 mapping.
 - Keep runtime and test-only dependencies separate.
 - Run `make test` for the complete portable offline coverage. `make
   test-source` is the source-only subtarget used by each CI OS/Python lane.
+- If the Scout UI changes (`src/gigai/scout/ui/src`), run `make ui-test`, rebuild
+  `ui/dist`, and add or update the page's flow ([tests/ui/README.md](tests/ui/README.md)).
 - If packaging changes, build the wheel and run
   tools/verify_installed_schemas.py with the wheel-installed interpreter.
 - Scan for credentials, personal paths, session identifiers, and generated
