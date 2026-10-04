@@ -232,6 +232,18 @@ then dropped, first. A line that is the only one naming something the posting re
 after first trying a recent role’s line that names the same thing. Nothing is reworded. <code dir="auto">--evidence</code>
 shows the lines most relevant to the job that an assessment could read. Nothing uses the selection
 yet: profiles, assessments and tailored resumes work as before.</li>
+<li><strong>A master resume, third step: your profiles select from it.</strong> <code dir="auto">gigai scout resume master init</code>
+(without <code dir="auto">--from</code>) builds the master from the resumes your profiles hold today: the lines of all
+of them, the same line kept once, and a line worded twice folded into the newer wording. When two
+resumes state one line with different numbers, Scout asks which is right and writes nothing until
+you answer (<code dir="auto">--answer ID=a</code>, <code dir="auto">=b</code>, or <code dir="auto">=both</code> to keep the two lines); <code dir="auto">--dry-run</code> shows the merge
+first. Each profile’s first selection is its own resume, which is not rewritten, so nothing you
+assessed, ranked or tailored goes stale. A profile’s selection is sticky: when you edit or retire
+a line it shows, its resume follows; lines you add to the master are only offered (<code dir="auto">gigai scout resume master selection status</code>: “3 new master lines: refresh?”). <code dir="auto">gigai scout resume master selection refresh</code> selects again from the whole master, by code and with no model call, against
+the postings the profile’s titles match in your local index, and makes the result the profile’s
+resume. A new profile made with a master stored gets its own first selection the same way instead
+of a copy of another profile’s resume. Tailoring a resume for one job still reads the profile’s
+resume, as before.</li>
 </ul>
 <div class="sl-heading-wrapper level-h3"><h3 id="01108">0.1.10.8</h3><a class="sl-anchor-link" href="#01108"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “0.1.10.8”</span></a></div>
 <p>Fixes from the first days of real use of 0.1.10.7, a security fix for everyone who uses Scout
