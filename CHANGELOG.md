@@ -187,6 +187,20 @@ the server used several gigabytes of memory, and reloading made it worse. Read "
   after first trying a recent role's line that names the same thing. Nothing is reworded. `--evidence`
   shows the lines most relevant to the job that an assessment could read. Nothing uses the selection
   yet: profiles, assessments and tailored resumes work as before.
+- **A master resume, third step: your profiles select from it.** `gigai scout resume master init`
+  (without `--from`) builds the master from the resumes your profiles hold today: the lines of all
+  of them, the same line kept once, and a line worded twice folded into the newer wording. When two
+  resumes state one line with different numbers, Scout asks which is right and writes nothing until
+  you answer (`--answer ID=a`, `=b`, or `=both` to keep the two lines); `--dry-run` shows the merge
+  first. Each profile's first selection is its own resume, which is not rewritten, so nothing you
+  assessed, ranked or tailored goes stale. A profile's selection is sticky: when you edit or retire
+  a line it shows, its resume follows; lines you add to the master are only offered (`gigai scout
+  resume master selection status`: "3 new master lines: refresh?"). `gigai scout resume master
+  selection refresh` selects again from the whole master, by code and with no model call, against
+  the postings the profile's titles match in your local index, and makes the result the profile's
+  resume. A new profile made with a master stored gets its own first selection the same way instead
+  of a copy of another profile's resume. Tailoring a resume for one job still reads the profile's
+  resume, as before.
 
 ### 0.1.10.8
 

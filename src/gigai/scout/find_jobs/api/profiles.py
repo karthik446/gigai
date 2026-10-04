@@ -404,7 +404,27 @@ class ProfilesRoutesMixin:
         except ProfileRecordError as exc:
             self._error_from_profile_error(exc)
             return
+        if "resume_record_id" not in body and "resume_revision_id" not in body:
+            record = self._first_master_selection(record)
         self._profile_response(HTTPStatus.CREATED, resolved, record)
+
+    def _first_master_selection(self, record: ProfileRecord) -> ProfileRecord:
+        """0.1.10.9 master P3: with a master resume stored, a new profile that names no resume gets its OWN resume.
+
+        Its first selection of the master, made by code from the postings its
+        titles match in the local index (no model, no request), instead of
+        the selected profile's resume it was created with. Best effort: with
+        no master, or when the selection cannot be made, the profile stays as
+        created.
+        """
+
+        from ...master_profiles import first_selection
+
+        try:
+            made = first_selection(home_root=self._backend.home_root, target=self._backend.target, profile_id=record.profile_id)
+        except (ValueError, RuntimeError, OSError):  # every store, record and layout refusal is one of these
+            return record
+        return made or record
 
     # -- PUT /api/profiles/{profile_id} --------------------------------------
 

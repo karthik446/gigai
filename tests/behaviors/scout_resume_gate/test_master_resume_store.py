@@ -169,7 +169,8 @@ def test_show_and_history_say_how_to_start_when_there_is_no_master(tmp_path: Pat
     for command in ("show", "history"):
         error = _master(home, command, ok=False)["error"]
         assert error["code"] == "master_not_found" and "master init --from FILE" in error["message"]  # type: ignore[index]
-    assert _master(home, "init", ok=False)["error"]["code"] == "master_source_missing"  # type: ignore[index]
+    # P3: `init` without --from is the migration from the profiles' resumes; a home with no profile says what to do.
+    assert _master(home, "init", ok=False)["error"]["code"] == "migration_no_profiles"  # type: ignore[index]
 
 
 # --- ids are assigned at import -----------------------------------------------------------------

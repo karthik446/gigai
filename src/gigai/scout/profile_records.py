@@ -179,6 +179,86 @@ class ProfileSearchSettings:
         )
 
 
+MASTER_SELECTION_KEYS = (
+    "excludes", "item_ids", "master_revision_id", "pins", "resume_revision_id", "selector_version", "skills", "source", "synced_revision_id",
+)
+MASTER_SELECTION_SOURCES = ("migration", "index", "titles", "refresh")
+
+
+@dataclass(frozen=True)
+class ProfileMasterSelection:
+    """0.1.10.9 master P3: which lines of the master resume this profile's resume shows.
+
+    ``resume_ref`` stays what every reader reads: it pins the selection's
+    VIEW, a resume like any other. This key says what that view is made of.
+
+    * ``item_ids``: every entry and line of the master the view shows, in
+      the order it prints them; ``skills``: the skills it lists, by name.
+    * ``pins`` / ``excludes``: lines a later selection always or never
+      shows. Stored and carried through every write; nothing sets them yet.
+    * ``master_revision_id``: the master revision the selection was MADE
+      from (the migration, the first selection or a refresh). Lines the
+      master gained after it are the ones offered ("3 new lines: refresh?").
+    * ``synced_revision_id``: the master revision the view's text was last
+      brought up to date with (an edited or retired shown line moves it).
+    * ``resume_revision_id``: the resume revision the selection describes.
+      A profile whose ``resume_ref`` was since replaced by hand no longer
+      shows this selection, and nothing rewrites that resume.
+    * ``source``: ``migration`` (the profile's own old resume, kept as it
+      was), ``index`` (the postings its titles match in the local index),
+      ``titles`` (its titles alone) or ``refresh``.
+
+    Not one of the revision-bumping fields: what a selection changes for a
+    reader is the resume it pins, and ``resume_ref`` is. A record without
+    the key reads as before and keeps its bytes and ``content_digest``.
+    """
+
+    item_ids: tuple[str, ...]
+    skills: tuple[str, ...]
+    master_revision_id: str
+    synced_revision_id: str
+    resume_revision_id: str
+    selector_version: str
+    source: str
+    pins: tuple[str, ...] = ()
+    excludes: tuple[str, ...] = ()
+
+    def to_json(self) -> dict[str, object]:
+        return {
+            "item_ids": list(self.item_ids),
+            "skills": list(self.skills),
+            "pins": list(self.pins),
+            "excludes": list(self.excludes),
+            "master_revision_id": self.master_revision_id,
+            "synced_revision_id": self.synced_revision_id,
+            "resume_revision_id": self.resume_revision_id,
+            "selector_version": self.selector_version,
+            "source": self.source,
+        }
+
+    @classmethod
+    def from_json(cls, value: object) -> "ProfileMasterSelection":
+        if not isinstance(value, Mapping) or set(value) != set(MASTER_SELECTION_KEYS):
+            raise ProfileRecordError("scout_profile_invalid", "profile master_selection is malformed")
+        lists = {key: value[key] for key in ("item_ids", "skills", "pins", "excludes")}
+        texts = {key: value[key] for key in ("master_revision_id", "synced_revision_id", "resume_revision_id", "selector_version", "source")}
+        if not all(isinstance(items, (list, tuple)) and all(isinstance(item, str) and item for item in items) for items in lists.values()):
+            raise ProfileRecordError("scout_profile_invalid", "master_selection lists must hold non-empty strings")
+        if not all(isinstance(text, str) and text for text in texts.values()) or texts["source"] not in MASTER_SELECTION_SOURCES:
+            raise ProfileRecordError("scout_profile_invalid", "profile master_selection is malformed")
+        return cls(
+            item_ids=tuple(lists["item_ids"]),
+            skills=tuple(lists["skills"]),
+            pins=tuple(lists["pins"]),
+            excludes=tuple(lists["excludes"]),
+            master_revision_id=texts["master_revision_id"],
+            synced_revision_id=texts["synced_revision_id"],
+            resume_revision_id=texts["resume_revision_id"],
+            selector_version=texts["selector_version"],
+            source=texts["source"],
+        )
+
+
 @dataclass(frozen=True)
 class ProfileRecord:
     schema_version: str
@@ -201,6 +281,10 @@ class ProfileRecord:
     # then left out of the written file, so such a record's bytes and
     # ``content_digest`` are exactly what they were.
     search_settings: ProfileSearchSettings | None = None
+    # 0.1.10.9 master P3: additive and optional, like ``search_settings``.
+    # ``None`` (every record written before it) is "this profile owns its
+    # resume, as before"; the key is then left out of the written file.
+    master_selection: ProfileMasterSelection | None = None
 
     def to_json(self) -> dict[str, object]:
         value: dict[str, object] = {
@@ -222,6 +306,8 @@ class ProfileRecord:
         }
         if self.search_settings is not None:
             value["search_settings"] = self.search_settings.to_json()
+        if self.master_selection is not None:
+            value["master_selection"] = self.master_selection.to_json()
         return value
 
     @classmethod
@@ -232,6 +318,7 @@ class ProfileRecord:
             resume_ref = PinnedResume.from_json(value["resume_ref"])
             parent_seq = value["parent_seq"]
             search_settings = value.get("search_settings")
+            master_selection = value.get("master_selection")
             return cls(
                 schema_version=str(value["schema_version"]),
                 profile_id=str(value["profile_id"]),
@@ -249,6 +336,7 @@ class ProfileRecord:
                 updated_at=str(value["updated_at"]),
                 parent_seq=None if parent_seq is None else int(parent_seq),
                 search_settings=None if search_settings is None else ProfileSearchSettings.from_json(search_settings),
+                master_selection=None if master_selection is None else ProfileMasterSelection.from_json(master_selection),
             )
         except (KeyError, TypeError) as exc:
             raise ProfileRecordError("scout_profile_invalid", "profile record is malformed") from exc
@@ -984,6 +1072,7 @@ def write_profile(
     replacement_profile_id: str | None = None,
     search_settings: ProfileSearchSettings | None = None,
     clear_search_settings: bool = False,
+    master_selection: ProfileMasterSelection | None = None,
     uuid_factory: Callable[[], uuid.UUID] = uuid.uuid4,
 ) -> ProfileRecord:
     """The ONE write function for an existing profile's content or metadata.
@@ -1008,6 +1097,12 @@ def write_profile(
     ``clear_search_settings`` drops them, back to "same as default". The
     default profile (``default_profile``) never stores any: giving them for
     it is refused with ``scout_profile_default_search_settings``.
+
+    0.1.10.9 master P3: ``master_selection`` replaces the profile's
+    selection of the master resume (``ProfileMasterSelection``). Like
+    ``label`` it never bumps ``revision`` by itself: the resume a reader
+    reads is ``resume_ref``, and a selection that changes it passes the new
+    pin in the same call. Left out, the profile keeps the one it has.
     """
 
     if not _PROFILE_ID.fullmatch(profile_id):
@@ -1136,6 +1231,7 @@ def write_profile(
             updated_at=now,
             parent_seq=existing.seq,
             search_settings=new_search_settings,
+            master_selection=existing.master_selection if master_selection is None else master_selection,
         )
         record_bytes = _validated(record)
         record_path = _write_path(profile_id, next_seq)
@@ -1228,8 +1324,11 @@ def retrieve_profile_revision(
 
 
 __all__ = [
+    "MASTER_SELECTION_KEYS",
+    "MASTER_SELECTION_SOURCES",
     "MigrationResult",
     "NoResumeAvailable",
+    "ProfileMasterSelection",
     "ProfileRecord",
     "ProfileRecordError",
     "ProfileSearchSettings",

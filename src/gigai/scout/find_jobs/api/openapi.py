@@ -703,7 +703,7 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
             _b("search_settings", "object", "This profile's own {location, work_mode, countries, max_age_days}; omitted = a copy of the default's, null = same as default."),
         ),
         request_example={"label": "Backend", "titles": ["Software Engineer"]}, errors=(_WRONG_TYPE, (400, "invalid_value"), _NOT_FOUND),
-        description="Every profile but the default one has its own location, work mode, countries and posted window. The first profile is the default and uses the setup settings.",
+        description="Every profile but the default one has its own location, work mode, countries and posted window. The first profile is the default and uses the setup settings. The resume: the one named by resume_record_id and resume_revision_id; else, with a master resume stored, the profile's own first selection of the master (made by code, with no model call, from the postings its titles match in the local index); else the selected profile's resume.",
     ),
     RouteSpec(
         "PUT", "/api/profiles/{profile_id}", "Update a profile.", "write", "none", {"profile": {"profile_id": "prof_1"}},

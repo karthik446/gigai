@@ -207,6 +207,13 @@ def load_master(*, home_root: Path, target: Path | None, gig_id: str | None = No
     return StoredMaster(master_record_id(resolved), chosen, len(chain), _read_master(home_root, target, resolved, chosen))
 
 
+def master_revisions(*, home_root: Path, target: Path | None, gig_id: str | None = None) -> list[MasterRevision]:
+    """Every revision of the master, oldest first (its number, id and writer), without reading any content."""
+
+    resolved = _resolve_for_read(home_root, target, gig_id)
+    return _chain(resolved) if resolved is not None else []
+
+
 @dataclass(frozen=True)
 class HistoryEntry:
     revision: MasterRevision
@@ -399,5 +406,6 @@ __all__ = [
     "load_master",
     "master_history",
     "master_record_id",
+    "master_revisions",
     "strip_contact",
 ]
