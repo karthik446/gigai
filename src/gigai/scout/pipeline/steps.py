@@ -12,7 +12,9 @@ step       input digest over                                   output (in the st
 tailor     the posting digest, the profile's id and its        the tailored-resume store:
            resume's digest, every answer's revision, the       ``resumes/<profile>/<sha>.json`` + ``.md``
            matching stories' marks, the base assessment's
-           matrix, the tailor instructions, the model target
+           matrix, the tailor instructions, the model target;
+           with a master resume also its revision, the
+           selector's version and the candidate rule
 reassess   the tailored markdown's digest, the posting         the TAILORED VARIANT of the assessment:
            digest, the assess prompt version, the              ``quick_assess_tailored/<profile>/<sha>.json``
            constraints digest, the answers-and-stories         (the base assessment is never written)
@@ -106,6 +108,9 @@ TAILOR_DIR = "pipeline/tailor"
 TAILOR_TAILORED = "tailored"
 TAILOR_KEPT_USER_EDITS = "tailor_kept_user_edits"
 TAILOR_OUTCOMES: tuple[str, ...] = (TAILOR_TAILORED, TAILOR_KEPT_USER_EDITS)
+
+#: The tailor call's failures the master resume's code-only selection may stand in for inside the pipeline.
+TAILOR_FALLBACK_CODES: frozenset[str] = frozenset({"model_output_invalid"})
 
 #: The label's name, everywhere it is shown.
 LABEL_NAME = "Scout label"  # its one-line notice is LABEL_WORDING (gigai.scout.wording)
@@ -290,6 +295,11 @@ def _tailor_digest(ctx: StepContext, found: _Inputs, model_target: str | None) -
         home_root=ctx.home_root, target=ctx.target, profile_id=profile.profile_id, resume_text="",  # type: ignore[attr-defined]
         title=found.job.title, posting_text=found.job.text,  # type: ignore[attr-defined]
     )
+    # 0.1.10.9 master P4: a tailoring that reads the master resume is also keyed by the master's revision, the
+    # selector's version and the candidate rule (``tailor_master.digest_parts``). Nothing is added without a
+    # master, so such a digest is exactly what it was.
+    from ..tailor_master import digest_parts
+
     return _digest(
         "tailor",
         found.posting_sha256,
@@ -299,6 +309,7 @@ def _tailor_digest(ctx: StepContext, found: _Inputs, model_target: str | None) -
         [(row.requirement, row.status.value) for row in found.base.result.matrix],  # type: ignore[attr-defined]
         TAILOR_INSTRUCTIONS_DIGEST,
         model_target,
+        *digest_parts(ctx.home_root, ctx.target, profile, resolved=found.resolved),
     )
 
 
@@ -489,6 +500,9 @@ def _tailor(ctx: StepContext, claim: Claim, found: _Inputs) -> StepResult:
         TailorRequest(job=_job_input(found.job), resume=AssessResumeInput(profile_id=claim.profile_id), model_target=_model_target(claim)),
         home_root=ctx.home_root, target=ctx.target, config=ctx.config, resolved_job=found.job,  # type: ignore[arg-type]
         store=store,
+        # With a master resume, the code's own selection stands in only for an answer that stayed invalid: a model
+        # that is unavailable or timed out fails the step as before, so the queue's retries and lane backoff apply.
+        fallback_codes=TAILOR_FALLBACK_CODES,
     )
     if kept:
         return _keep(ctx, claim, *kept[0])

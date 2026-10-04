@@ -410,6 +410,129 @@ def fit_to_pages(result: TailoredResume, *, measure: Measure, max_pages: int = L
     return marked(base, pages, full_pages)
 
 
+def _merged_trims(new: Sequence[TrimmedRole], old: Sequence[TrimmedRole], order: Sequence[str | None]) -> tuple[TrimmedRole, ...]:
+    """One record per role, in the page's order (``order``: the roles' heading ids as the resume lists them).
+
+    A role's bullets: the ones ``new`` leaves out (earlier in its list), then those ``old`` had already left out. The
+    page's order is the order ``cut_again`` rebuilds the record in, so a Restore and a cut again give the same record."""
+
+    by_heading = {role.heading: role for role in new}
+    merged = [
+        replace(role, bullets=(*by_heading.pop(role.heading).bullets, *role.bullets)) if role.heading in by_heading else role
+        for role in old
+    ]
+    merged += [role for role in new if role.heading in by_heading]
+    place = {heading: index for index, heading in enumerate(order)}
+    return tuple(sorted(merged, key=lambda role: place.get(role.heading, len(place))))
+
+
+#: How many cut lines ``fit_by_cuts`` tries to put back into the room the last cut left.
+REFILL_TRIES = 12
+
+
+def fit_by_cuts(
+    result: TailoredResume, cuts: Sequence[tuple[str, str]], *, measure: Measure, max_pages: int = LENGTH_RULE.max_pages,
+    refill: Iterable[str] = (),
+) -> TailoredResume:
+    """A freshly settled result cut to ``max_pages`` by the FEWEST of ``cuts``, taken in the order given.
+
+    The master resume's fit (0.1.10.9 master P4, ``tailor_master``): the
+    caller decides the order (the oldest role's bullets, that role, the next
+    oldest, then recent roles' lowest-value lines); this applies it and
+    keeps the record ``fit_to_pages`` keeps.  A cut is ``("bullet", <line
+    id>)`` or ``("role", <the id of the role's first heading line>)``.  A
+    cut role goes to ``LengthFit.cut`` whole; a cut bullet of a role that
+    stays goes to ``LengthFit.trimmed`` beside the old-role bullets
+    ``apply_no_loss`` left out, so ``restore_cut`` puts everything back and
+    ``cut_again`` leaves the same things out.  When every cut is applied and
+    the result is still over the limit they all stay applied and the record
+    says so (``LengthFit.over``).  A result that fits, a result with no cut
+    to make and an unmeasurable one are marked exactly as ``fit_to_pages``
+    marks them.
+
+    ``refill``: the line ids among the bullet cuts that may come back when
+    room is left.  A cut frees a whole line or more, so the fewest cuts that
+    fit can leave room: each such line, from the last one cut back
+    (``REFILL_TRIES`` at most), is put back when the result still fits.
+    """
+
+    record = result.length
+    if record is not None and (record.status != STATUS_CUT or record.cut):
+        raise ValueError("fit_by_cuts takes a result as apply_no_loss settled it")
+    base = replace(result, length=None)
+    old_trims = record.trimmed if record is not None else ()
+    order = [_heading_id(entry) for section in base.sections for entry in section.entries]
+
+    def marked(shown: TailoredResume, pages: int | None, full_pages: int | None, cut: tuple[CutRole, ...] = (), new: Sequence[TrimmedRole] = ()) -> TailoredResume:
+        trimmed = _merged_trims(new, old_trims, order)
+        if cut or trimmed:
+            return replace(shown, length=LengthFit(max_pages, pages, full_pages, STATUS_CUT, cut, trimmed))
+        if pages is None:
+            return replace(shown, length=LengthFit(max_pages, None, None, STATUS_UNMEASURED))
+        if pages > max_pages:
+            return replace(shown, length=LengthFit(max_pages, pages, pages, STATUS_OVER))
+        return shown
+
+    def applied(chosen: Sequence[tuple[str, str]]) -> tuple[TailoredResume, tuple[CutRole, ...], tuple[TrimmedRole, ...]]:
+        roles = [target for kind, target in chosen if kind == "role"]
+        gone = {target for kind, target in chosen if kind == "bullet"}
+        wanted: list[TrimmedRole] = []
+        for section in base.sections:
+            for entry in section.entries:
+                heading = _heading_id(entry)
+                if heading is None or heading in roles:
+                    continue  # a role cut whole carries its bullets with it
+                lines = tuple(line for line in entry.bullets if line.id in gone)
+                if lines:
+                    wanted.append(TrimmedRole(heading, role_label(entry), lines))
+        return _left_out(base, roles, wanted)
+
+    pages = measure(base)
+    if pages is None:
+        return marked(base, None, None)
+    full_pages = measure(shown_whole(result)) if old_trims else pages
+    if pages <= max_pages or not cuts:
+        return marked(base, pages, full_pages)
+    measured: dict[int, int | None] = {}
+
+    def pages_after(count: int) -> int | None:
+        if count not in measured:
+            measured[count] = measure(applied(cuts[:count])[0])
+        return measured[count]
+
+    count = len(cuts)
+    fits = (pages_after(count) or max_pages + 1) <= max_pages
+    if fits:
+        low, high = 1, count  # the fewest cuts that fit: every cut removes lines, so the pages never grow with the count
+        while low < high:
+            middle = (low + high) // 2
+            if (pages_after(middle) or max_pages + 1) <= max_pages:
+                high = middle
+            else:
+                low = middle + 1
+        count = low
+    now = pages_after(count)
+    if now is None:
+        return marked(base, pages, full_pages)  # the renderer stopped answering: nothing is cut on a guess
+    chosen = list(cuts[:count])
+    if fits:
+        allowed = set(refill)
+        tries = 0
+        for index in range(count - 1, -1, -1):
+            kind, target = cuts[index]
+            if kind != "bullet" or target not in allowed:
+                continue
+            if tries == REFILL_TRIES:
+                break
+            tries += 1
+            trial = [item for item in chosen if item != (kind, target)]
+            back = measure(applied(trial)[0])
+            if back is not None and back <= max_pages:
+                chosen, now = trial, back
+    shown, cut, new = applied(chosen)
+    return marked(shown, now, full_pages, cut, new)
+
+
 def restore_cut(result: TailoredResume) -> TailoredResume:
     """``result`` with everything left out for length back in place, marked ``restored``.
 
@@ -478,6 +601,7 @@ def length_note(length: LengthFit | None) -> str:
 __all__ = [
     "LENGTH_STATUSES",
     "LENGTH_USES",
+    "REFILL_TRIES",
     "ROLE_SECTION",
     "STATUS_CUT",
     "STATUS_OVER",
@@ -489,6 +613,7 @@ __all__ = [
     "TrimmedRole",
     "apply_length_use",
     "cut_again",
+    "fit_by_cuts",
     "fit_to_pages",
     "length_note",
     "oldest_first",

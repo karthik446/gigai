@@ -442,6 +442,9 @@ class Selected:
     keywords: PostingKeywords | None
     #: With a posting: which of its keywords the markdown names (``must_covered``, ``must_missing``, ...).
     coverage: dict[str, tuple[str, ...]]
+    #: Every bullet of the master -> what showing it is worth for this posting or profile (the number the
+    #: cut order sorts by). What the tailor path's fit reads (0.1.10.9 master P4, ``tailor_master``).
+    values: dict[str, float] = field(default_factory=dict)
 
     @property
     def fits(self) -> bool:
@@ -887,15 +890,17 @@ def select(
         roles_dropped=tuple(entry.id for entry in dropped),
         keywords=terms.keywords if terms is not None else None,
         coverage=coverage,
+        values={item.id: worth(item.id) for item in master.items.values() if item.kind == KIND_BULLET},
     )
 
 
-def render_selection(master: Master, item_ids: Iterable[str], skills: Iterable[str]) -> str:
+def render_selection(master: Master, item_ids: Iterable[str], skills: Iterable[str], *, ids: bool = False) -> str:
     """The resume markdown of a STORED selection: the entries and lines ``item_ids`` names, and ``skills``.
 
     What the master no longer has is left out (a retired line, a skill it no longer lists), and an edited
     line prints as the master words it now. An entry prints when ``item_ids`` names it or one of its lines.
-    For the ids and skills of a ``Selected`` this is its ``markdown``.
+    For the ids and skills of a ``Selected`` this is its ``markdown``; ``ids`` keeps each line's master id in
+    a trailing comment (its ``markdown_with_ids``).
     """
 
     wanted = list(dict.fromkeys(item_ids))
@@ -916,7 +921,7 @@ def render_selection(master: Master, item_ids: Iterable[str], skills: Iterable[s
             pick.entries.setdefault(item.entry_id or "", []).append(item.id)
     listed = {name.casefold(): name for name in master.skills()}
     pick.skills = list(dict.fromkeys(listed[name.casefold()] for name in skills if name.casefold() in listed))
-    return _render(master, pick, ids=False)
+    return _render(master, pick, ids=ids)
 
 
 # --- the evidence view ------------------------------------------------------------------------

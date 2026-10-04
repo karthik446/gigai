@@ -107,6 +107,9 @@ _DISPLAY_IMPORTERS: dict[str, frozenset[str]] = {
         # master_selection (0.1.10.9 master P2): measures a pick of the master (contact-free at import) HEADERLESS with
         # resume_pdf.measure_markdown to fit it to the page budget; no header form, no display settings, no model.
         "gigai.scout.master_selection",
+        # tailor_master (0.1.10.9 master P4): asks the renderer for a page count only (pages_at, headerless) to fit a
+        # tailoring of the master's lines to the page budget; no header form, no display settings.
+        "gigai.scout.tailor_master",
     }),
 }
 

@@ -9757,7 +9757,7 @@
         ]
       },
       "post": {
-        "description": "Tailor the resume to one posting (markdown + structure, each line cited). Synchronous: blocks for the model call (one retry on a rejected answer).",
+        "description": "Tailor the resume to one posting (markdown + structure, each line cited). Synchronous: blocks for the model call (one retry on a rejected answer). With a master resume stored, a profile's tailoring reads that job's candidate lines of the whole master instead of the profile's own resume: each resume ref then carries `item_id` (the master line it is), `sources.master` names the master revision, and `selection` lists what was picked and what was left out, each line with its reason. The result is cut to 2 pages, the oldest roles first (`result.length`; PUT /api/tailored-resumes/length puts it back). When the model call then fails or no model is available, the response is the code's own selection (`selection.picked_by` is `code`, `selection.fallback` the error code) instead of an error.",
         "operationId": "post_api_tailored_resumes",
         "parameters": [],
         "requestBody": {
