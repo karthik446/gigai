@@ -100,6 +100,7 @@ from .data_labels import ENVELOPE_KEY, PUBLIC_UNTRUSTED, UNTRUSTED_TEXT_RULE, US
 from .pipeline.busy import LiveBatch, assess_batch
 from .pipeline.store import MODEL_STEPS, PipelineStore, PipelineStoreError, PostingRecord, pipeline_path
 from .postings import PostingModelError, PostingModelPreparing, PostingText, ProfileView, split_board
+from .requirement_weights import minor_gap_text, minor_gaps
 
 SCHEMA_VERSION = "scout-new:1"
 SEEN_SCHEMA_VERSION = "scout-new-seen:1"
@@ -132,11 +133,14 @@ _AWAITING_APPROVAL = "awaiting_approval"
 POSTINGS_LABELS = {
     "/rows/*/title": PUBLIC_UNTRUSTED,
     "/rows/*/company": PUBLIC_UNTRUSTED,
+    "/rows/*/company_slug": PUBLIC_UNTRUSTED,
     "/rows/*/company_name": PUBLIC_UNTRUSTED,
     "/rows/*/location": PUBLIC_UNTRUSTED,
     "/rows/*/salary": PUBLIC_UNTRUSTED,
     "/rows/*/description": PUBLIC_UNTRUSTED,
     "/rows/*/unmet/*": PUBLIC_UNTRUSTED,
+    "/rows/*/minor_gaps/*": PUBLIC_UNTRUSTED,
+    "/rows/*/minor_gap_text": PUBLIC_UNTRUSTED,
     "/rows/*/open_questions/*/question": PUBLIC_UNTRUSTED,
 }
 YOURS_LABELS = {"/evidence/*/lines/*": USER_PRIVATE}
@@ -319,11 +323,13 @@ def _row_json(
 
     score, kind = _score(row)
     unmet: list[str] = []
+    gaps: list[str] = []
     questions: list[dict[str, object]] = []
     assessment: dict[str, object] | None = None
     if item is not None:
         result = item.result  # type: ignore[attr-defined]
         unmet = [entry.requirement for entry in result.matrix if entry.status.value != "met"]
+        gaps = minor_gaps(result.matrix)  # 0110-10-03: a bonus or one-of-a-list row that is not met never blocks a match
         if result.structured_questions:
             questions = [{"question_id": question.question_id, "question": question.question} for question in result.structured_questions]
         else:
@@ -347,7 +353,9 @@ def _row_json(
         "normalized_url": row.job,
         "job_url": text.url if text is not None else row.job,
         "title": text.title if text is not None else None,
-        "company": text.company if text is not None else None,
+        # 0110-10-03: ``company`` is the NAME; the board token is ``company_slug`` (``company_name`` stays, the same name).
+        "company": display_company_name(text.company_name or text.company) if text is not None else None,
+        "company_slug": text.company if text is not None else None,
         # 0110-8-11: the index's name for the board when it has one ("Garner Health"), else the slug rule.
         "company_name": display_company_name(text.company_name or text.company) if text is not None else None,
         "location": text.location if text is not None else None,
@@ -376,6 +384,10 @@ def _row_json(
         "assessment_detail": (item is not None) if assessed else None,
         "needs_tailoring": (bool(unmet) and not row.tailored) if assessed and item is not None else None,
         "unmet": unmet[:UNMET_SHOWN],
+        # 0110-10-03: "1 minor gap: Helm" (every gap is in ``minor_gaps``), and the rows past the matrix bound ("+N not shown").
+        "minor_gaps": gaps,
+        "minor_gap_text": minor_gap_text(gaps),
+        "rows_not_shown": item.result.rows_not_shown if item is not None else 0,  # type: ignore[attr-defined]
         "open_questions": questions,
         "label": row.label,
         "ats_score": row.ats_score,
@@ -1270,7 +1282,7 @@ def render(response: Mapping[str, object]) -> str:
             if row.get("tag_pending"):
                 details.append("tag pending")  # 0110-8-05: matched by a generic title's words; its function tag is not known yet
             # One part per line (the column is narrow): the verdict, "old assessment: ...", "N of M requirements", the rank.
-            score = str(row["score_text"]).split(" · ")
+            score = str(row["score_text"]).split(" · ") + ([str(row["minor_gap_text"])] if row.get("minor_gap_text") and row.get("state") == "matched" else [])
             if row.get("stale_label"):
                 score[0:1] = [score[0].split(" (")[0], str(row["stale_label"])]
             if row["needs_tailoring"] is None:

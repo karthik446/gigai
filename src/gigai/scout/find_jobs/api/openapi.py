@@ -86,6 +86,20 @@ _STALE_NOTE = (
     "score is low (the `fit` block of the project's settings: below 40% and below rank 50): it is not counted with the jobs "
     "that need your answers."
 )
+#: 0110-10-03: how a response names a posting's company, and what an assessment's rows weigh.
+_COMPANY_NOTE = (
+    "In every response `company` is the company's NAME (the company index's, e.g. \"Osprey Lane\"); `company_slug` is the "
+    "board token (\"ospreylabs\": an id, never a name; null for a posting read from a page or pasted text) and `company_name` "
+    "repeats the name."
+)
+_WEIGHTS_NOTE = (
+    "A matrix row's `class` says what it weighs: `hard` and `askable` are must-haves (an open question on one holds the job at "
+    "`pending_user_answers`), `list_item` is one tool of a list a single sentence names (\"Docker, Helm, and Kubernetes\": its "
+    "question is still asked, and one of them open does not hold a match), `nice_to_have` is a bonus. So a `matched_above_threshold` "
+    "assessment can carry one question. `minor_gaps` names the `list_item` and `nice_to_have` rows that are not met and "
+    "`minor_gap_text` says them in one line (\"1 minor gap: Helm\"). The matrix has a row for every requirement the posting "
+    "states, must-haves first; past 40 rows `rows_not_shown` counts the rest."
+)
 _BASIS_NOTE = (
     "A stored assessment records its basis (`prompt_version`, `constraints_digest`, `story_bank`: digests and ids, no settings "
     "or answer text). Served with `basis_stale` (true | false) and, when true, `basis_stale_reason` (`older_prompt` | "
@@ -334,20 +348,22 @@ _NEW_EXAMPLE: dict[str, object] = {
     "processed": None,
     "postings": {
         "_labels": {
-            "/rows/*/title": "public-untrusted", "/rows/*/company": "public-untrusted", "/rows/*/company_name": "public-untrusted", "/rows/*/location": "public-untrusted",
+            "/rows/*/title": "public-untrusted", "/rows/*/company": "public-untrusted", "/rows/*/company_slug": "public-untrusted", "/rows/*/company_name": "public-untrusted", "/rows/*/location": "public-untrusted",
             "/rows/*/salary": "public-untrusted", "/rows/*/description": "public-untrusted",
-            "/rows/*/unmet/*": "public-untrusted", "/rows/*/open_questions/*/question": "public-untrusted",
+            "/rows/*/unmet/*": "public-untrusted", "/rows/*/minor_gaps/*": "public-untrusted", "/rows/*/minor_gap_text": "public-untrusted",
+            "/rows/*/open_questions/*/question": "public-untrusted",
         },
         "rule": UNTRUSTED_TEXT_RULE,
         "rows": [{
-            "job_identity": _JOB_URL, "normalized_url": _JOB_URL, "job_url": _JOB_URL, "title": "Staff Engineer", "company": "acme", "company_name": "Acme",
+            "job_identity": _JOB_URL, "normalized_url": _JOB_URL, "job_url": _JOB_URL, "title": "Staff Engineer", "company": "Acme", "company_slug": "acme", "company_name": "Acme",
             "location": "Remote - US", "work_mode": "remote", "salary": "USD 180,000-220,000 per year",
             "description": "Acme is hiring a Staff Engineer to own its Python services…", "first_seen": "2026-10-02T08:00:00.000000Z",
             "removed_at": None, "profile_id": "prof_1",
             "profiles": [{"profile_id": "prof_1", "match_rank": 1, "rank_score": 82, "state": "not_assessed"}],
             "state": "not_assessed", "tailored": False, "stale_reason": None, "stale_label": None, "sort_group": "not_assessed",
             "score": 82, "score_kind": "rank", "score_text": "rank 82 · not assessed", "fit": None, "rank_score": 82, "assessment": None,
-            "assessment_detail": None, "needs_tailoring": None, "unmet": [], "open_questions": [], "label": None, "ats_score": None,
+            "assessment_detail": None, "needs_tailoring": None, "unmet": [], "minor_gaps": [], "minor_gap_text": None, "rows_not_shown": 0,
+            "open_questions": [], "label": None, "ats_score": None,
             "tag_pending": False,
         }],
     },
@@ -417,7 +433,9 @@ _POSTINGS_NOTE = (
     "requirements, open_questions, assessed_at, hidden, basis}`); rows of a run with no profile (`ephemeral`) or of a profile "
     "that is not active are hidden: listed only with include_hidden=1 or when `profile_id` names them, and counted in "
     "`history.hidden` otherwise. No response mixes: posting text and what a model derived from it only (`postings._labels`: "
-    "public-untrusted), nothing the user wrote."
+    "public-untrusted), nothing the user wrote. " + _COMPANY_NOTE + " A row's `minor_gaps` / `minor_gap_text` name the bonus and "
+    "one-of-a-list requirements its assessment did not meet (they never block a match: \"Matched\" with \"1 minor gap: Helm\", "
+    "and the question about it stays in `open_questions`); `rows_not_shown` counts requirement rows past the 40 an assessment keeps."
 )
 _NEW_NOTE = (
     "Read from the stored index (no board request) across every active profile; a deleted or archived profile is never "
@@ -482,13 +500,18 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
         {
             "schema_version": "scout-job-response:1",
             "job_identity": _JOB_URL,
-            "posting": {"normalized_url": _JOB_URL, "title": "Software Engineer", "company": "Acme", "text": "..."},
+            "posting": {"normalized_url": _JOB_URL, "title": "Software Engineer", "company": "Acme", "company_slug": "acme", "company_name": "Acme", "location": "Remote - US", "text": "..."},
             "runs": [{"run_id": "run_20260929T100000Z", "outcome": "new"}],
             "rank": {"normalized_url": _JOB_URL, "score": 82, "reasons": ["Python"], "blockers": [], "demoted": False, "unscored_reason": None},
             "rank_score": None,
             "work_mode_fit": None,
             "h1b": None,
-            "assessments": [{"source": "run", "run_id": "run_20260929T100000Z", "profile_id": None, "verdict": "matched_above_threshold", "matrix": [], "suggestions": [], "questions": []}],
+            "index_posting": None,
+            "assessments": [{
+                "source": "run", "run_id": "run_20260929T100000Z", "profile_id": None, "verdict": "matched_above_threshold",
+                "matrix": [{"requirement": "Helm", "class": "list_item", "status": "unclear", "resume_evidence": []}],
+                "suggestions": [], "questions": [], "minor_gaps": ["Helm"], "minor_gap_text": "1 minor gap: Helm", "rows_not_shown": 0,
+            }],
             "open_questions": [{"question_id": "auth:work_authorization", "question": "Are you authorized to work in the US?", "requirement": None}],
             "answers": [],
             "tailored_resumes": [{"profile_id": "prof_1", "job_identity": _JOB_URL, "company": "Acme", "title": "Software Engineer", "created_at": "2026-09-29T10:05:00Z", "updated_at": "2026-09-29T10:05:00Z", "links": {"pdf": {"method": "POST", "path": "/api/tailored-resumes/pdf", "body": {"profile_id": "prof_1", "job_identity": _JOB_URL}}, "line": {"method": "PUT", "path": "/api/tailored-resumes/lines", "body": {"profile_id": "prof_1", "job_identity": _JOB_URL, "updated_at": "2026-09-29T10:05:00Z", "line_id": "<L id from the resume>", "use": "original"}}}}],
@@ -511,6 +534,12 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
             "Read only; never calls a model or the network. Aggregates the newest run posting, its rank, every run or quick "
             "assessment of the job (with the requirement matrix), the questions still unanswered, stored tailored resumes, the job's "
             "state with the events it accepts next, and the action links. The UI route `#/jobs/<posting url>` maps to this route. "
+            "A job no run acquired is joined to its index posting by the URL alone, whatever host it is on (a Greenhouse board "
+            "embedded in a company's own site: `https://www.<company>/jobs?gh_jid=<id>`): `posting` then has the index's `location`, "
+            "`work_mode`, `salary`, `provider` and `board_token`, `rank` is `{normalized_url, score, profile_id, source: \"posting_index\"}` "
+            "(the stored score; a run's rank line has reasons and blockers instead), `work_mode_fit` and `h1b` are a run row's, and "
+            "`index_posting` is the GET /api/postings row for the job (null when the index does not hold it). "
+            + _COMPANY_NOTE + " " + _WEIGHTS_NOTE + " "
             "Each `source: \"quick\"` assessment carries `basis_stale` (and `basis_stale_reason` when true). "
             + _STALE_NOTE
         ),
@@ -715,7 +744,7 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
         schema_version="scout-assess-response:1", params=(*_JOB_INPUT, _b("preferences", "object", "Override the effective preferences."), _b("origin", "string", "quick_assess | job_page.")),
         request_example={"job": {"job_url": _JOB_URL}},
         errors=(*_ROW_ERRORS, (422, "job_input_invalid"), (502, "job_fetch_failed"), (504, "assess_timeout"), *_MODEL_ERRORS, (500, "assessment_not_stored"), _NO_TARGET),
-        description="Synchronous: blocks for the model call (and a public fetch for job_url). Stores the assessment; read it back with GET /api/jobs?url=. " + _BASIS_NOTE,
+        description="Synchronous: blocks for the model call (and a public fetch for job_url). Stores the assessment; read it back with GET /api/jobs?url=. " + _WEIGHTS_NOTE + " " + _BASIS_NOTE,
     ),
     RouteSpec(
         "GET", "/api/assessments", "Stored quick assessments, newest first, each with its job_state.", "read", "none",
@@ -2007,7 +2036,11 @@ def llms_text() -> str:
         "A loopback JSON API for a personal job search (find jobs, assess, tailor a resume, track applications).\n\n"
         "- Start at GET /api (every route, its effect, and its cost class).\n"
         "- Full spec: GET /api/openapi.json (OpenAPI 3.1: params, examples, error codes; x-gigai-effect read|write, x-gigai-external none|model|network).\n"
-        "- One job, everything known about it: GET /api/jobs?url=<posting url> (read only, no model calls). The UI's #/jobs/<url> is this route.\n"
+        "- One job, everything known about it: GET /api/jobs?url=<posting url> (read only, no model calls). The UI's #/jobs/<url> is this route. "
+        "The URL may be the company's own page for the job (…/jobs?gh_jid=<id>): it is joined to the index posting's rank, pay, location and H-1B.\n"
+        "- Reading a posting: `company` is the company's name, `company_slug` its board token (an id, not a name). "
+        "A matched job may still carry one question and `minor_gap_text` (\"1 minor gap: Helm\"): a tool named inside a list that the resume does not show. "
+        "Answering it is optional. `rows_not_shown` counts requirement rows past the 40 kept.\n"
         "- Writes (POST/PUT) need Content-Type: application/json. Every request (reads too) must carry Host 127.0.0.1:<port> or localhost:<port> (else 403 forbidden_origin); this server only answers loopback peers.\n"
         "- Errors are {\"error\": {\"code\", \"message\"}}; an unknown_key 422 lists allowed_keys.\n"
         f"- Labels: every operation has x-gigai-labels and every JSON response X-GigAI-Labels ({', '.join(LABELS)}; {NO_LABELS} when it holds ids, counts and states only). "

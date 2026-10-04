@@ -44,6 +44,7 @@ from .call_metrics import note_invalid_output
 from .find_jobs.contracts import FindJobsContractError, NotAssessedReason
 from .find_jobs.work_mode import in_person_modes
 from .question_ids import normalize_question_id
+from .requirement_weights import bound_rows, settled_verdict
 from .resume_privacy import model_resume
 from .untrusted_text import fence_untrusted_posting
 
@@ -82,13 +83,19 @@ _IN_PERSON_PLACEHOLDER = "{{in_person_mode}}"
 #: v6 is older wording now (``assessment_basis``: ``older_prompt``). The three
 #: constants stay, one per paragraph a prompt can carry, so a later change to
 #: one work mode's words can rename that one alone, as v6 did.
+#: v8 (0110-10-03) weighs requirements: the LIST_ITEM class (one tool of a
+#: list a sentence names), a verdict one open LIST_ITEM question does not
+#: hold (rule 7), a row for every stated requirement and no 12-row cap
+#: (``requirement_weights``). The rules are every prompt's, so again all
+#: three names moved together: an assessment sealed as v7 has a matrix cut
+#: to 12 rows and no weights, and reads as older wording.
 #: ``tests/behaviors/scout_find_jobs/test_assessment_core.py`` pins it with
 #: the file's digest.
-ASSESS_PROMPT_VERSION = "assess-prompt-v7"
+ASSESS_PROMPT_VERSION = "assess-prompt-v8"
 #: The name of a prompt rendered with no CANDIDATE WORK MODE paragraph.
-ASSESS_PROMPT_VERSION_NO_WORK_MODE = "assess-prompt-v7"
+ASSESS_PROMPT_VERSION_NO_WORK_MODE = "assess-prompt-v8"
 #: The name of a prompt rendered for a HYBRID candidate (decision #207).
-ASSESS_PROMPT_VERSION_HYBRID = "assess-prompt-v7"
+ASSESS_PROMPT_VERSION_HYBRID = "assess-prompt-v8"
 #: The versions the shipped ``assess.md`` renders today. An assessment sealed
 #: with none of them is older wording. One sealed with one of them is current
 #: when the constraints digest (which includes the work mode) is the same and
@@ -337,7 +344,7 @@ def render_assess_prompt(job: AssessJob, ctx: AssessContext, validation_error: s
     the prior validation error is fed back: the template's last paragraph
     (the one carrying ``{{validation_error}}``) names the violated bound or
     rule -- ``proposals.validate_assessment_bounds`` produces messages with
-    the count and the limit ("matrix has 14 rows; at most 12 allowed",
+    the count and the limit ("questions has 44 items; at most 40 allowed",
     "verdict matched_above_threshold but 1 hard requirement is unmet (rule
     7 ...)") -- and tells the model it cannot see the rejected attempt
     (every attempt is a fresh, ephemeral session), so it produces a fresh
@@ -623,6 +630,10 @@ _CLASS_SYNONYMS = {
     "nice_to_have": "nice_to_have",
     "nice-to-have": "nice_to_have",
     "nice to have": "nice_to_have",
+    # 0110-10-03: one tool of a list a single sentence names.
+    "list_item": "list_item",
+    "list-item": "list_item",
+    "list item": "list_item",
 }
 
 _VERDICT_SYNONYMS = {
@@ -740,6 +751,12 @@ def _normalize_assessment_payload(decoded: Mapping[str, object]) -> dict[str, ob
       (``proposals.parse_assessment_proposal``), not here.
     - unknown top-level keys are dropped so the frozen contract's closed-object check still applies cleanly
     - ``sponsorship`` synonyms map to offered/not_offered/unknown; absent stays absent
+    - 0110-10-03 (``requirement_weights``): the matrix is put must-haves first and
+      bounded (``bound_rows``): rows past the bound are counted in
+      ``rows_not_shown``, never an error and never dropped in silence; and a
+      matched or pending verdict is settled by what its questions are on
+      (``settled_verdict``): one open question on a one-of-a-list row is kept
+      and the job is matched.
     - assess-prompt-v3-r1: a ``not_a_match`` verdict keeps NO questions
       (``_strip_not_a_match_questions``): both the plain ``questions`` list and
       ``structured_questions`` are emptied before validation, so the answer is
@@ -818,6 +835,10 @@ def _normalize_and_strip(decoded: Mapping[str, object]) -> tuple[dict[str, objec
             normalized_matrix.append(normalized_row)
     else:
         normalized_matrix = matrix
+    # 0110-10-03: must-haves first; past the bound the rest are counted ("+N not shown"), never an error.
+    rows_not_shown = 0
+    if isinstance(normalized_matrix, list) and all(isinstance(row, Mapping) for row in normalized_matrix):
+        normalized_matrix, rows_not_shown = bound_rows(normalized_matrix)
 
     raw_questions = _normalize_string_list(decoded.get("questions"))
     plain_questions: list[str] = []
@@ -846,7 +867,10 @@ def _normalize_and_strip(decoded: Mapping[str, object]) -> tuple[dict[str, objec
     if "verdict" in decoded:
         verdict = _normalize_verdict(decoded.get("verdict"))
         if verdict is not None:
-            result["verdict"] = verdict
+            # 0110-10-03: a lone open question on a one-of-a-list row does not hold a match (and a must-have one does).
+            result["verdict"] = settled_verdict(verdict, normalized_matrix if isinstance(normalized_matrix, list) else (), structured_questions)
+    if rows_not_shown:
+        result["rows_not_shown"] = rows_not_shown
     if "not_a_match_reason" in decoded:
         reason = decoded.get("not_a_match_reason")
         if isinstance(reason, str):

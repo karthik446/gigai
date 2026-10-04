@@ -321,6 +321,28 @@ def test_the_label_needs_attention_when_the_tailored_assessment_still_asks(fx: P
     assert label["reasons"] == ["tailored_assessment_not_matched", "open_questions"]
 
 
+def test_a_lone_question_on_a_one_of_a_list_row_does_not_hold_the_label(fx: PipelineFixture) -> None:
+    """0110-10-03: the tailored assessment is matched with one minor gap (Helm): asked, counted, and no reason for attention."""
+
+    fx.model.assessed = json.dumps(
+        {
+            "verdict": "pending_user_answers",  # what a model that learned "any question -> pending" says
+            "matrix": [{"requirement": "5+ years of Python", "class": "hard", "status": "met", "resume_evidence": ["six years"]},
+                       {"requirement": "Docker", "class": "list_item", "status": "met", "resume_evidence": ["Docker"]},
+                       {"requirement": "Helm", "class": "list_item", "status": "unclear", "resume_evidence": []}],
+            "suggestions": [],
+            "questions": [{"question_id": "tooling:helm", "question": "Have you used Helm?", "requirement": "Helm"}],
+            "not_a_match_reason": None,
+        }
+    )
+
+    _process(fx)
+
+    label = steps.read_label(fx.home_root, fx.target, fx.profile_id, JOB)
+    assert (label["label"], label["reasons"]) == ("recommended", [])
+    assert label["tailored_verdict"] == "matched_above_threshold" and label["open_questions"] == 1  # the question is still there
+
+
 @pytest.mark.parametrize(
     ("facts", "expected"),
     [

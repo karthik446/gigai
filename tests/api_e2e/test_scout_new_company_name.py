@@ -62,7 +62,8 @@ def test_scout_new_prints_the_company_name_and_keeps_the_slug(tmp_path: Path, mo
         table = run()
         assert "Osprey Lane: Software Engineer" in table and "osprey-lane:" not in table
         (row,) = json.loads(run("--json"))["postings"]["rows"]
-        assert (row["company"], row["company_name"]) == ("osprey-lane", "Osprey Lane")
+        # 0110-10-03: ``company`` is the name; the slug is kept as ``company_slug``.
+        assert (row["company"], row["company_slug"], row["company_name"]) == ("Osprey Lane", "osprey-lane", "Osprey Lane")
     finally:
         stop_server(server)
     assert_clean_and_healthy(workpad, home)

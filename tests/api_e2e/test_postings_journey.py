@@ -105,7 +105,8 @@ def test_postings_journey(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> No
         assert found["schema_version"] == "scout-postings:1" and found["history"] is None
         (profile,) = found["profiles"]
         row = next(item for item in found["postings"]["rows"] if item["job_identity"] == _JOB)
-        assert (row["title"], row["company"], row["state"], row["assessment"], row["assessment_basis"]) == ("Software Engineer", "acmenew", "not_assessed", None, None)
+        # 0110-10-03: ``company`` is the name (no index name here: the slug rule); the board token is ``company_slug``.
+        assert (row["title"], row["company"], row["company_slug"], row["state"], row["assessment"], row["assessment_basis"]) == ("Software Engineer", "Acmenew", "acmenew", "not_assessed", None, None)
         assert row["profile_id"] == profile["profile_id"] and [item["profile_id"] for item in row["profiles"]] == [profile["profile_id"]]
         assert found["rank"]["calls_today"]["limit"] == 100 and found["rank"]["calls_today"]["warn_at"] == 60
         assert found["anchor"]["last_checked_at"] is None  # a search never moves the "new since" anchor
@@ -134,7 +135,7 @@ def test_postings_journey(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> No
         assert scored["state"] != "not_assessed" and scored["score_kind"] == "assessment" and scored["assessment_basis"] == {"origin": "quick_assess"}
         # The combined 0.1.10.8 contract on a posting row: U4's company_name and tag_pending next to U3's group, flag and score text
         # (U2's fetched_on_demand is in the batch above).
-        assert (scored["company"], scored["company_name"], scored["tag_pending"]) == ("acmenew", "Acmenew", False)
+        assert (scored["company"], scored["company_slug"], scored["company_name"], scored["tag_pending"]) == ("Acmenew", "acmenew", "Acmenew", False)
         assert (scored["sort_group"], scored["tailored"], scored["stale_label"], scored["assessment_detail"]) == ("current", False, None, True)
         assert scored["score_text"] == "Needs your answers · fit 50% · 1 of 2 requirements · not ranked yet"
         assert client.post("/api/postings/assess", json={"jobs": [_JOB], "approve": True}).json()["status"] == "nothing_to_assess"

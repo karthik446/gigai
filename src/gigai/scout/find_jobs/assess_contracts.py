@@ -39,6 +39,7 @@ from .contracts import (
     _optional_string,
     _string,
     _strings,
+    rows_not_shown_count,
 )
 from .rank_contracts import RankScore
 
@@ -340,6 +341,8 @@ class AssessmentBody(_Contract):
     verdict: Verdict | None = None
     structured_questions: tuple[AssessmentQuestion, ...] = ()
     not_a_match_reason: str | None = None
+    # 0110-10-03: as on ``AssessmentResult``: rows past the matrix bound ("+N not shown"); omitted at 0.
+    rows_not_shown: int = 0
 
     def to_json(self) -> dict[str, object]:
         value: dict[str, object] = {
@@ -355,6 +358,8 @@ class AssessmentBody(_Contract):
             value["structured_questions"] = [item.to_json() for item in self.structured_questions]
         if self.not_a_match_reason is not None:
             value["not_a_match_reason"] = self.not_a_match_reason
+        if self.rows_not_shown:
+            value["rows_not_shown"] = self.rows_not_shown
         return value
 
     @classmethod
@@ -362,7 +367,7 @@ class AssessmentBody(_Contract):
         value = _object_with_optional(
             obj,
             ("matrix", "suggestions", "questions"),
-            ("sponsorship", "verdict", "structured_questions", "not_a_match_reason"),
+            ("sponsorship", "verdict", "structured_questions", "not_a_match_reason", "rows_not_shown"),
             "assessment_body",
         )
         if type(value["matrix"]) is not list:
@@ -383,6 +388,7 @@ class AssessmentBody(_Contract):
             verdict,
             structured_questions,
             not_a_match_reason,
+            rows_not_shown_count(value, "assessment_body"),
         )
 
 

@@ -48,16 +48,19 @@ def test_the_assessment_and_the_assessments_list_carry_the_index_name(tmp_path: 
         client = server.client
         assessed = client.post("/api/assess", json={"job": {"job_url": _URL}})
         assert assessed.status_code == 200, assessed.text
-        token = assessed.json()["job"]["company"]
+        # 0110-10-03: ``company`` is the name; the board token is ``company_slug``.
+        first = assessed.json()["job"]
+        token = first["company_slug"]
+        assert token == "shell"
         # No index yet: the slug rule, as the UI showed it before.
-        assert assessed.json()["job"]["company_name"] == token.capitalize()
+        assert first["company"] == first["company_name"] == token.capitalize()
 
         _index_names_the_company(home, "Shell Robotics")
 
         (item,) = client.get("/api/assessments").json()["items"]
-        assert (item["job"]["company"], item["job"]["company_name"]) == (token, "Shell Robotics")
+        assert (item["job"]["company"], item["job"]["company_slug"], item["job"]["company_name"]) == ("Shell Robotics", token, "Shell Robotics")
         again = client.post("/api/assess", json={"job": {"job_url": _URL}}).json()
-        assert (again["job"]["company"], again["job"]["company_name"]) == (token, "Shell Robotics")
+        assert (again["job"]["company"], again["job"]["company_slug"], again["job"]["company_name"]) == ("Shell Robotics", token, "Shell Robotics")
     finally:
         stop_server(server)
     assert_clean_and_healthy(workpad, home)

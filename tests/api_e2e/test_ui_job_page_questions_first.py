@@ -47,7 +47,8 @@ def test_questions_render_before_the_always_open_requirements_table() -> None:
     # uat-bug-045: no disclosure around the requirements, in the layout or anywhere in the body.
     assert "<details" not in layout and "<summary" not in layout and "requirements-details" not in layout
     assert "<details" not in _body() and "requirements-details" not in _body()
-    assert "<h3>Requirements (" in layout
+    # 0110-10-03: the heading comes from the model ("Requirements (16)", "+N not shown" past the server's bound).
+    assert "<h3>{requirementsHeading(assessment)}</h3>" in layout
     # No open questions, no questions section: it renders only when there are some.
     assert "{hasQuestions ? (" in layout and layout.index("{hasQuestions ? (") < layout.index('data-role="questions-section"')
 

@@ -244,6 +244,8 @@ def test_url_posting_text_is_served_and_listed_and_no_rank_score_is_written(runn
     # posting-shaped object; no index entry here, so it is the stored name itself). The stored file never carries it.
     assert listed[0]["job"].pop("company_name") == listed[0]["job"]["company"] == "Acme"
     assert body["job"]["company_name"] == "Acme"
+    # 0110-10-03: and ``company_slug``: null here, since "Acme" is a name its page gave, not a board token.
+    assert listed[0]["job"].pop("company_slug") is None and body["job"]["company_slug"] is None
     assert listed[0] == json.loads(Path(body["stored_path"]).read_text(encoding="utf-8"))
 
 

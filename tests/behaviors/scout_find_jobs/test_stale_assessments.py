@@ -104,7 +104,7 @@ def test_a_stored_assessment_records_the_basis_a_run_seals(fx: ProfileFixtureGig
 
     item = _assess(fx)
 
-    assert item.prompt_version == "assess-prompt-v7"
+    assert item.prompt_version == "assess-prompt-v8"
     assert item.constraints_digest == constraints_digest(
         visa_sponsorship_required=True, countries=("US",), location="Austin, TX", work_mode="remote"
     )
@@ -122,7 +122,7 @@ def test_a_profile_with_no_work_mode_records_the_v4_name(fx: ProfileFixtureGig, 
 
     item = _assess(fx)
 
-    assert item.prompt_version == "assess-prompt-v7"
+    assert item.prompt_version == "assess-prompt-v8"
     assert item.constraints_digest == constraints_digest(visa_sponsorship_required=False, countries=("US",), location="Austin, TX")
 
 
@@ -485,7 +485,7 @@ def test_the_job_skips_a_current_stored_assessment_and_not_a_stale_one(fx: Profi
     assert _calls(model) == made
 
     again = _assess(fx)  # the job's own single-posting call
-    assert again.prompt_version == "assess-prompt-v7" and again.result.verdict.value == "not_a_match"
+    assert again.prompt_version == "assess-prompt-v8" and again.result.verdict.value == "not_a_match"
     assert current(item) and _reason(fx, again) is None
     assert [entry.trigger for entry in again.history] == ["assess", "reassess"], "the earlier verdict stays in the history"
 

@@ -1,0 +1,77 @@
+{
+ "schema": "gigai-assess-matrix-eval-fixture:1",
+ "note": "Synthetic only (0110-10-03): an invented resume, invented companies and invented postings. Each case is called 'repeat' times on the shipped prompt. 'expected' is the verdict the requirement weights give (a must-have still blocks, one unknown item of a list does not); 'expected_before' is what the 12-row, no-weights prompt gave for the same posting. 'rows' are requirements the posting states: a pattern finds the matrix row that carries each.",
+ "resume": "# Staff Site Reliability Engineer\n\n## Summary\nSite reliability and platform engineer with 10 years of experience running production infrastructure for enterprise SaaS products. Works in Python and Go.\n\n## Experience\n**Staff Site Reliability Engineer -- Larkwater Cloud (synthetic, enterprise SaaS)** (2019-present)\n- Runs the production platform on AWS (EKS, EC2, RDS, S3) for an enterprise SaaS product: 300 services on Kubernetes, packaged as Docker images.\n- Manages all infrastructure as code with Terraform; built the CI/CD pipelines (GitHub Actions) every team deploys through.\n- Built monitoring and alerting with Prometheus and Grafana; leads on-call and incident response, and writes the postmortems.\n- Did capacity planning and performance tuning for the PostgreSQL fleet (RDS) and the Linux hosts under it; debugged kernel and network (TCP, DNS) problems in production.\n- Mentored four engineers and set the technical direction for the platform team's three-year roadmap.\n\n**Site Reliability Engineer -- Pinebrook Systems (synthetic)** (2015-2019)\n- Wrote deployment and automation tooling in Python and Go for Linux fleets on AWS.\n- Moved the build and release system to containers (Docker) and wrote the service runbooks.\n\n## Skills\nPython, Go, AWS, Kubernetes, Docker, Terraform, Prometheus, Grafana, PostgreSQL, Linux, CI/CD, incident response\n",
+ "titles": ["staff site reliability engineer", "site reliability engineer"],
+ "candidate": {"location": "Denver, CO", "countries": ["US"], "visa_sponsorship_required": false, "work_mode": ""},
+ "cases": [
+  {
+   "id": "list-helm-gap",
+   "what": "the Helm-in-a-list case: one tool of a list (Helm) is the only thing the resume does not show",
+   "repeat": 4,
+   "title": "Staff Site Reliability Engineer",
+   "company": "Harborlight Security (synthetic)",
+   "location": "Remote - United States",
+   "posting": "Harborlight Security (synthetic) is hiring a Staff Site Reliability Engineer for its cloud platform team. This role is fully remote within the United States.\n\nWhat you'll do:\n- Run and scale the production platform behind our product.\n- Lead incident response and drive reliability work across teams.\n\nThe ideal candidate will have:\n- 8+ years of experience in site reliability, platform or infrastructure engineering\n- Strong programming skills in Python or Go\n- Experience with AWS, GCP, or similar cloud platforms, as well as Docker, Helm, and Kubernetes\n- Experience with infrastructure as code (Terraform or similar)\n- Experience building monitoring and alerting (Prometheus, Grafana or similar)",
+   "expected": ["matched_above_threshold"],
+   "expected_before": ["pending_user_answers"],
+   "rows": [{"name": "helm", "pattern": "\\bhelm\\b"}, {"name": "kubernetes", "pattern": "kubernetes"}],
+   "minor_gap": "helm"
+  },
+  {
+   "id": "list-three-gaps",
+   "what": "three tools of one list are not in the resume (Helm, Istio, Argo CD): several unknowns still wait for answers",
+   "repeat": 2,
+   "title": "Staff Site Reliability Engineer",
+   "company": "Quarry Lantern (synthetic)",
+   "location": "Remote - United States",
+   "posting": "Quarry Lantern (synthetic) is hiring a Staff Site Reliability Engineer. This role is fully remote within the United States.\n\nRequirements:\n- 8+ years of experience in site reliability, platform or infrastructure engineering\n- Strong programming skills in Python or Go\n- Experience with Docker, Helm, Kubernetes, Istio and Argo CD\n- Experience with infrastructure as code (Terraform or similar)",
+   "expected": ["pending_user_answers"],
+   "expected_before": ["pending_user_answers"],
+   "rows": [{"name": "helm", "pattern": "\\bhelm\\b"}, {"name": "istio", "pattern": "istio"}, {"name": "argo", "pattern": "argo"}]
+  },
+  {
+   "id": "stated-rows",
+   "what": "the unstated-row case: 16 stated requirements, two of them the kind that had no row (a 'highly desirable' company background; mentoring and technical direction)",
+   "repeat": 3,
+   "title": "Staff Site Reliability Engineer",
+   "company": "Tidewatch Systems (synthetic)",
+   "location": "Remote - United States",
+   "posting": "Tidewatch Systems (synthetic) is hiring a Staff Site Reliability Engineer. This role is fully remote within the United States.\n\nWhat you'll do:\n- Own the reliability of the production platform.\n- Work with product teams on launches.\n\nQualifications:\n- 8+ years of experience in site reliability, platform or infrastructure engineering\n- Strong programming skills in Python or Go\n- Experience running production workloads on AWS\n- Experience operating Kubernetes in production\n- Experience building and shipping Docker images\n- Experience with infrastructure as code using Terraform\n- Experience building monitoring and alerting with Prometheus\n- Experience building CI/CD pipelines\n- Strong Linux systems and networking fundamentals\n- Experience operating PostgreSQL or another relational database\n- Experience leading on-call and incident response\n- Proven ability to mentor fellow engineers and influence technical direction\n- Experience with capacity planning and performance tuning\n- Experience in an enterprise SaaS or cybersecurity software company is highly desirable\n\nBonus:\n- Experience with eBPF\n- Contributions to open-source infrastructure projects",
+   "expected": ["matched_above_threshold"],
+   "expected_before": ["matched_above_threshold"],
+   "stated_requirements": 16,
+   "rows": [
+    {"name": "saas_or_security_company", "pattern": "saas|cybersecurity"},
+    {"name": "mentor_and_direction", "pattern": "mentor|technical direction"},
+    {"name": "ebpf", "pattern": "ebpf"},
+    {"name": "open_source", "pattern": "open.source"},
+    {"name": "capacity_planning", "pattern": "capacity"}
+   ]
+  },
+  {
+   "id": "must-have-tool-gap",
+   "what": "control: a required tool on its own line (Kafka) that the resume does not show still waits for an answer",
+   "repeat": 2,
+   "title": "Staff Site Reliability Engineer",
+   "company": "Osprey Lane (synthetic)",
+   "location": "Remote - United States",
+   "posting": "Osprey Lane (synthetic) is hiring a Staff Site Reliability Engineer. This role is fully remote within the United States.\n\nRequirements:\n- 8+ years of experience in site reliability, platform or infrastructure engineering\n- Strong programming skills in Python or Go\n- Deep production experience operating Apache Kafka\n- Experience running production workloads on AWS",
+   "expected": ["pending_user_answers"],
+   "expected_before": ["pending_user_answers"],
+   "rows": [{"name": "kafka", "pattern": "kafka"}]
+  },
+  {
+   "id": "control-all-met",
+   "what": "control: a normal posting whose every requirement the resume shows",
+   "repeat": 2,
+   "title": "Senior Site Reliability Engineer",
+   "company": "Fernhollow Systems (synthetic)",
+   "location": "Remote - United States",
+   "posting": "Fernhollow Systems (synthetic) is hiring a Senior Site Reliability Engineer. This role is fully remote within the United States.\n\nRequirements:\n- 5+ years of experience in site reliability or infrastructure engineering\n- Strong programming skills in Python or Go\n- Experience running production workloads on AWS\n- Experience operating Kubernetes in production\n- Experience with infrastructure as code using Terraform",
+   "expected": ["matched_above_threshold"],
+   "expected_before": ["matched_above_threshold"],
+   "rows": [{"name": "kubernetes", "pattern": "kubernetes"}]
+  }
+ ]
+}
