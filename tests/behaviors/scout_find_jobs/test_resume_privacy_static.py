@@ -49,6 +49,9 @@ _READER_ALLOWLIST: dict[tuple[str, str, str], str] = {
     ("gigai.scout.master_store", "_read_master", "read_record"): "parsed locally (master_resume.parse_master) for the master CLI, never sent",
     # 0.1.10.9 master P3: the migration merges the profiles' stored resumes into the master, locally (master_migration), no model.
     ("gigai.scout.master_profiles", "_resume_sources", "read_record"): "merged locally into the master (master_migration.plan_migration), never sent",
+    # 0.1.10.9 master P7: the `resume_changed` stale check compares an earlier revision of a profile's resume with the
+    # resume now, as flattened lines, against a stored assessment's own evidence. In memory, on a read; no model.
+    ("gigai.scout.assess_master", "ResumeCheck._resume.read", "read_pinned_resume"): "compared locally, line by line (assess_master.resume_changes), never sent, never stored",
     ("gigai.scout.find_jobs.market_acquisition", "_read_resume_text_for_rank", "read_record"): "returned to the rank step below",
     ("gigai.scout.find_jobs.market_acquisition", "_rank_rows_with_status", "_read_resume_text_for_rank"): "model_rank.rank_postings -> rank_digest.resume_digest",
     ("gigai.scout.find_jobs.resume_input", "resolve_resume", "resume_for_profile"): "returned to its callers (allowlisted here)",

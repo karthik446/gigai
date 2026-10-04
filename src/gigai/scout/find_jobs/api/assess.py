@@ -32,6 +32,10 @@ assessed with now (``assessment_basis``). Derived on read, never stored, and
 no model is called. ``POST /api/assess`` answers ``basis_stale: false`` for
 an assessment made with the profile's own settings. In the list, a stale
 item's ``job_state`` carries ``assessment_stale`` with the same reason.
+
+0.1.10.9 master P7: with a master resume stored, ``basis_stale_reason`` may
+be ``resume_changed`` (``assess_master``), with ``basis_stale_resume`` saying
+what changed for that assessment.
 """
 
 from __future__ import annotations

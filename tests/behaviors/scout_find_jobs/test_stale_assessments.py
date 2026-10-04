@@ -491,7 +491,8 @@ def test_the_job_skips_a_current_stored_assessment_and_not_a_stale_one(fx: Profi
 
 
 def test_the_reasons_are_a_closed_set() -> None:
-    assert assessment_basis.BASIS_STALE_REASONS == ("older_prompt", "settings_changed", "story_bank_changed")
+    # 0.1.10.9 master P7 added the fourth: only with a master resume stored (``test_assess_master.py``).
+    assert assessment_basis.BASIS_STALE_REASONS == ("older_prompt", "settings_changed", "story_bank_changed", "resume_changed")
 
 
 def test_a_job_that_ended_while_a_request_was_read_is_never_interrupted(tmp_path: Path) -> None:

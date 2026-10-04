@@ -153,7 +153,8 @@ class JobState:
     or ``story_bank_changed`` (``assessment_basis``) when the state comes from
     a stored quick assessment made with an older prompt, other candidate
     settings or a story bank that has since changed. A changed posting text
-    is named first.
+    is named first. 0.1.10.9 master P7: and ``resume_changed`` when a master
+    resume is stored and the resume changed in a way that concerns it.
     """
 
     state: str
