@@ -278,6 +278,25 @@ master already has in other words is not added: Scout lists the line it looks li
 change that one or pass <code dir="auto">--force</code>. A removed line is retired, not deleted: no resume shows it any
 more, <code dir="auto">gigai scout resume master show --retired</code> still lists it with its text, and <code dir="auto">gigai scout resume master add --restore ID</code> puts it back under the same id. The agent instructions (<code dir="auto">gigai agent-skill</code>) have a step for this: after saving a story or an answer with substance, the agent
 asks “Want this on your resume?”.</li>
+<li><strong>A master resume: an assessment reads it.</strong> Once a master is stored, assessing a job for a
+profile (the job page’s Assess, <code dir="auto">gigai scout assess</code>, “Assess all new”, <code dir="auto">gigai scout new --yes</code>)
+no longer reads only the profile’s 2-page resume. The model is shown the lines of your whole
+master that are most relevant to that posting, picked by code, within the same limit on the
+resume’s size and in the same single call. A verdict then says what you can truthfully claim: a
+requirement your master covers is no longer a question because one profile’s 2 pages left the
+line out. In our test on invented postings (11 cases, each assessed twice both ways) the open
+questions went from 63 to 6, no case got a worse verdict and no evidence was invented; the prompt
+is about 14% larger. The assessment of a tailored resume still reads the 2 pages that will be
+sent, and a find-jobs run still reads the profile’s resume. A pasted resume, a profile whose
+resume you replaced by hand and a home without a master are assessed exactly as before.</li>
+<li><strong>A stored assessment says when your resume changed for it.</strong> With a master stored, an assessment
+can read “old assessment: resume changed” (<code dir="auto">resume_changed</code>; “Resume changed” on a job’s card).
+It is said only for the assessments the change concerns: a resume line the assessment quoted as
+evidence was edited, retired or is no longer in the profile’s resume, or a new line names
+something the assessment left as an open question (“A new line of your resume may answer: Have
+you used Helm?”). Editing another line flags nothing. Nothing is assessed again on its own:
+re-assess the job with one click, or say yes to the “old assessments” question of <code dir="auto">gigai scout new</code>. <code dir="auto">gigai scout resume master init</code> makes no assessment stale. For agents: <code dir="auto">basis_stale_reason: "resume_changed"</code> with <code dir="auto">basis_stale_resume</code> (what changed for that assessment), and
+<code dir="auto">resume_basis</code> on an assessment that read the master (its revision and the selector’s version).</li>
 </ul>
 <div class="sl-heading-wrapper level-h3"><h3 id="01108">0.1.10.8</h3><a class="sl-anchor-link" href="#01108"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “0.1.10.8”</span></a></div>
 <p>Fixes from the first days of real use of 0.1.10.7, a security fix for everyone who uses Scout
