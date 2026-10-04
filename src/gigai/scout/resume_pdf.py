@@ -419,6 +419,18 @@ def render_markdown_pdf(
     return _render(sections, header, company=company, timestamp=timestamp, spacing_scale=spacing_scale, auto_fit=auto_fit, count_pages=True)
 
 
+def measure_markdown(markdown: str, *, spacing_scale: float = SPACING_DEFAULT) -> tuple[int, float]:
+    """``(last page, fill of that page 0..1)`` where resume markdown ends at ``spacing_scale``: one layout query.
+
+    Headerless, as an agent's PDF is (the header's height is reserved), and no PDF is compiled: this is
+    how the master resume's selector fits a pick to the page budget (0.1.10.9 master P2)."""
+
+    _name, sections = parse_resume_markdown(markdown)
+    data = {"doc_title": "Resume", "name": "", "title": "", "contact": [], "blank_header": True, "sections": sections}
+    with resources.as_file(resources.files("gigai.scout").joinpath("data", "resume")) as directory:
+        return _end((Path(directory) / "resume.typ").read_bytes(), str(directory), data, clamp_scale(spacing_scale))
+
+
 # --- the header and layout both entry points use ---------------------------------------------
 
 
@@ -511,6 +523,7 @@ __all__ = [
     "fit_scale",
     "layout",
     "markdown_resume_pdf",
+    "measure_markdown",
     "parse_resume_markdown",
     "pdf_file_name",
     "pdf_header",

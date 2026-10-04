@@ -1,0 +1,965 @@
+{
+ "note": "SYNTHETIC. What the code selector (SELECTOR_VERSION sel-1) picks from master.md for profiles.json x postings/, on 2026-10-03. Regenerate only with a deliberate selector change.",
+ "selector_version": "sel-1",
+ "today": "2026-10-03",
+ "cases": {
+  "profile-ai/base": {
+   "pages_before_fit": 4,
+   "pages": 2,
+   "summary": [
+    "sum-ai"
+   ],
+   "entries": {
+    "r-lum": [
+     "b-lum-01",
+     "b-lum-03",
+     "b-lum-04",
+     "b-lum-21",
+     "b-lum-10",
+     "b-lum-07",
+     "b-lum-14",
+     "b-lum-15",
+     "b-lum-20"
+    ],
+    "r-kes": [
+     "b-kes-03",
+     "b-kes-01"
+    ],
+    "r-hex": [
+     "b-hex-01",
+     "b-hex-02"
+    ],
+    "r-fin": [
+     "b-fin-12",
+     "b-fin-04"
+    ],
+    "p-task": [
+     "b-task-04"
+    ],
+    "p-eval": [
+     "b-eval-01",
+     "b-eval-02",
+     "b-eval-03"
+    ],
+    "p-pgq": [
+     "b-pgq-01"
+    ],
+    "e-ms": [],
+    "e-bs": []
+   },
+   "other": [
+    "o-cert-aws",
+    "o-cert-gcp",
+    "o-talk-evals",
+    "o-vol"
+   ],
+   "skills": [
+    "Python",
+    "Go",
+    "LLM",
+    "agents",
+    "LLM evaluation",
+    "PyTorch",
+    "Machine Learning",
+    "pgvector",
+    "PostgreSQL",
+    "Spark",
+    "Airflow",
+    "SQLite",
+    "Kubernetes",
+    "AWS",
+    "GCP",
+    "CI/CD"
+   ],
+   "cut_for_length": [
+    "b-tes-02",
+    "b-tes-03",
+    "b-tes-01",
+    "r-tes",
+    "b-bri-04",
+    "b-bri-01",
+    "b-bri-06",
+    "r-bri",
+    "b-cas-16",
+    "b-cas-03",
+    "b-cas-02",
+    "r-cas",
+    "b-kes-06",
+    "b-pgq-04",
+    "b-pgq-02",
+    "b-fin-01",
+    "b-hex-06",
+    "b-hex-05",
+    "b-hex-04",
+    "b-hex-03",
+    "b-kes-05",
+    "b-kes-04",
+    "b-kes-02",
+    "b-task-01",
+    "b-task-03",
+    "b-fin-23",
+    "b-fin-05"
+   ],
+   "added_to_fill": [],
+   "only_evidence": {},
+   "shown_instead": {},
+   "roles_dropped": [
+    "r-cas",
+    "r-bri",
+    "r-tes"
+   ]
+  },
+  "profile-ai/p1-staff-ai-agent-platform": {
+   "pages_before_fit": 4,
+   "pages": 2,
+   "summary": [
+    "sum-ai"
+   ],
+   "entries": {
+    "r-lum": [
+     "b-lum-08",
+     "b-lum-05",
+     "b-lum-07",
+     "b-lum-12",
+     "b-lum-01",
+     "b-lum-03",
+     "b-lum-04",
+     "b-lum-09",
+     "b-lum-18",
+     "b-lum-10"
+    ],
+    "r-kes": [
+     "b-kes-01",
+     "b-kes-03"
+    ],
+    "r-hex": [
+     "b-hex-02",
+     "b-hex-21"
+    ],
+    "r-fin": [
+     "b-fin-12",
+     "b-fin-03"
+    ],
+    "p-task": [
+     "b-task-01"
+    ],
+    "p-eval": [
+     "b-eval-01"
+    ],
+    "p-trace": [
+     "b-trace-01"
+    ],
+    "e-ms": [],
+    "e-bs": []
+   },
+   "other": [
+    "o-cert-cka",
+    "o-cert-gcp",
+    "o-talk-evals",
+    "o-blog"
+   ],
+   "skills": [
+    "CI/CD",
+    "LLM",
+    "LLM evaluation",
+    "embeddings",
+    "prompt caching",
+    "agents",
+    "Python",
+    "TypeScript",
+    "Kubernetes",
+    "Prometheus",
+    "Observability",
+    "OpenTelemetry",
+    "PostgreSQL",
+    "retrieval-augmented generation",
+    "PyTorch",
+    "fine-tuning",
+    "Go",
+    "Rust",
+    "Model Context Protocol",
+    "SOC 2",
+    "Machine Learning",
+    "pgvector",
+    "Spark",
+    "Airflow",
+    "Grafana",
+    "SLOs"
+   ],
+   "cut_for_length": [
+    "b-tes-03",
+    "b-tes-01",
+    "b-tes-02",
+    "r-tes",
+    "b-bri-04",
+    "b-bri-01",
+    "b-bri-06",
+    "r-bri",
+    "b-cas-03",
+    "b-cas-16",
+    "b-cas-02",
+    "r-cas",
+    "b-kes-06",
+    "b-trace-03",
+    "b-kes-02",
+    "b-kes-05",
+    "b-kes-04",
+    "b-task-04",
+    "b-task-03",
+    "b-eval-02",
+    "b-eval-03",
+    "b-hex-16",
+    "b-fin-06",
+    "b-fin-16",
+    "b-fin-18",
+    "b-trace-02",
+    "b-hex-27",
+    "b-hex-10",
+    "b-hex-01"
+   ],
+   "added_to_fill": [
+    "b-lum-10"
+   ],
+   "only_evidence": {},
+   "shown_instead": {},
+   "roles_dropped": [
+    "r-cas",
+    "r-bri",
+    "r-tes"
+   ]
+  },
+  "profile-ai/p2-staff-swe-core-infrastructure": {
+   "pages_before_fit": 3,
+   "pages": 2,
+   "summary": [
+    "sum-mlplat"
+   ],
+   "entries": {
+    "r-lum": [
+     "b-lum-17",
+     "b-lum-18",
+     "b-lum-03"
+    ],
+    "r-kes": [
+     "b-kes-01",
+     "b-kes-03"
+    ],
+    "r-hex": [
+     "b-hex-05",
+     "b-hex-03",
+     "b-hex-02",
+     "b-hex-01",
+     "b-hex-07",
+     "b-hex-28"
+    ],
+    "r-fin": [
+     "b-fin-12",
+     "b-fin-09"
+    ],
+    "p-eval": [
+     "b-eval-01"
+    ],
+    "p-kce": [
+     "b-kce-01",
+     "b-kce-02",
+     "b-kce-03"
+    ],
+    "p-pgq": [
+     "b-pgq-01",
+     "b-pgq-03"
+    ],
+    "e-ms": [],
+    "e-bs": []
+   },
+   "other": [
+    "o-cert-aws",
+    "o-cert-gcp",
+    "o-cert-tf",
+    "o-blog"
+   ],
+   "skills": [
+    "ArgoCD",
+    "Helm",
+    "SLOs",
+    "AWS",
+    "Go",
+    "Python",
+    "Kubernetes",
+    "Terraform",
+    "Linux",
+    "PostgreSQL",
+    "Kafka",
+    "Prometheus",
+    "Grafana",
+    "Observability",
+    "incident response",
+    "Rust",
+    "SOC 2",
+    "ISO 27001",
+    "LLM",
+    "LLM evaluation",
+    "Machine Learning",
+    "Microservices",
+    "Spark",
+    "Airflow",
+    "GCP"
+   ],
+   "cut_for_length": [
+    "b-tes-01",
+    "b-tes-03",
+    "b-tes-02",
+    "r-tes",
+    "b-bri-01",
+    "b-bri-03",
+    "b-bri-06",
+    "r-bri",
+    "b-cas-02",
+    "b-cas-07",
+    "b-cas-05",
+    "r-cas",
+    "b-kes-06",
+    "b-kes-02",
+    "b-pgq-02",
+    "b-kes-05",
+    "b-eval-02",
+    "b-kes-04",
+    "b-fin-04",
+    "b-eval-03",
+    "b-lum-20",
+    "b-lum-22",
+    "b-fin-06",
+    "b-fin-03",
+    "b-hex-06",
+    "b-lum-26",
+    "b-lum-11",
+    "b-lum-05",
+    "b-lum-04"
+   ],
+   "added_to_fill": [],
+   "only_evidence": {
+    "b-hex-07": [
+     "incident response"
+    ]
+   },
+   "shown_instead": {
+    "b-hex-28": [
+     "b-cas-07",
+     [
+      "Linux"
+     ]
+    ]
+   },
+   "roles_dropped": [
+    "r-cas",
+    "r-bri",
+    "r-tes"
+   ]
+  },
+  "profile-ai/p3-staff-engineer-ml-platform": {
+   "pages_before_fit": 4,
+   "pages": 2,
+   "summary": [
+    "sum-mlplat"
+   ],
+   "entries": {
+    "r-lum": [
+     "b-lum-17",
+     "b-lum-15",
+     "b-lum-03",
+     "b-lum-11"
+    ],
+    "r-kes": [
+     "b-kes-01",
+     "b-kes-02"
+    ],
+    "r-hex": [
+     "b-hex-01",
+     "b-hex-18",
+     "b-hex-02",
+     "b-hex-26"
+    ],
+    "r-fin": [
+     "b-fin-09",
+     "b-fin-12",
+     "b-fin-01"
+    ],
+    "r-cas": [
+     "b-cas-08"
+    ],
+    "p-task": [
+     "b-task-01"
+    ],
+    "p-eval": [
+     "b-eval-01"
+    ],
+    "p-kce": [
+     "b-kce-01"
+    ],
+    "e-ms": [],
+    "e-bs": []
+   },
+   "other": [
+    "o-cert-aws",
+    "o-cert-gcp",
+    "o-talk-evals",
+    "o-blog"
+   ],
+   "skills": [
+    "Kubernetes",
+    "Spark",
+    "Airflow",
+    "HIPAA",
+    "hiring",
+    "Python",
+    "SQL",
+    "Go",
+    "Java",
+    "feature stores",
+    "mentoring",
+    "LLM",
+    "LLM evaluation",
+    "Snowflake",
+    "dbt",
+    "Kafka",
+    "PyTorch",
+    "AWS",
+    "GCP",
+    "agents",
+    "Machine Learning",
+    "PostgreSQL",
+    "Prometheus"
+   ],
+   "cut_for_length": [
+    "b-tes-01",
+    "b-tes-03",
+    "b-tes-02",
+    "r-tes",
+    "b-bri-03",
+    "b-bri-01",
+    "b-bri-06",
+    "r-bri",
+    "b-cas-13",
+    "b-cas-01",
+    "b-kes-06",
+    "b-kce-02",
+    "b-kes-04",
+    "b-task-03",
+    "b-task-04",
+    "b-kes-05",
+    "b-eval-02",
+    "b-hex-14",
+    "b-fin-04",
+    "b-fin-05",
+    "b-eval-03",
+    "b-kes-03",
+    "b-lum-20",
+    "b-lum-04",
+    "b-lum-12",
+    "b-kce-03",
+    "b-lum-10",
+    "b-lum-01",
+    "b-hex-21"
+   ],
+   "added_to_fill": [],
+   "only_evidence": {
+    "b-cas-08": [
+     "SQL"
+    ],
+    "b-fin-01": [
+     "Java"
+    ]
+   },
+   "shown_instead": {},
+   "roles_dropped": [
+    "r-bri",
+    "r-tes"
+   ]
+  },
+  "profile-swe/base": {
+   "pages_before_fit": 3,
+   "pages": 2,
+   "summary": [
+    "sum-backend"
+   ],
+   "entries": {
+    "r-lum": [
+     "b-lum-17",
+     "b-lum-18",
+     "b-lum-24",
+     "b-lum-23"
+    ],
+    "r-kes": [
+     "b-kes-06",
+     "b-kes-02"
+    ],
+    "r-hex": [
+     "b-hex-01",
+     "b-hex-02",
+     "b-hex-03",
+     "b-hex-05",
+     "b-hex-06",
+     "b-hex-09",
+     "b-hex-23",
+     "b-hex-26"
+    ],
+    "r-fin": [
+     "b-fin-11",
+     "b-fin-06",
+     "b-fin-24",
+     "b-fin-08"
+    ],
+    "p-task": [
+     "b-task-02",
+     "b-task-09"
+    ],
+    "p-kce": [
+     "b-kce-02"
+    ],
+    "p-pgq": [
+     "b-pgq-02"
+    ],
+    "e-ms": [],
+    "e-bs": []
+   },
+   "other": [
+    "o-cert-aws",
+    "o-talk-recon",
+    "o-patent",
+    "o-paper"
+   ],
+   "skills": [
+    "Python",
+    "Go",
+    "Microservices",
+    "Kafka",
+    "Redis",
+    "PostgreSQL",
+    "Kubernetes",
+    "Docker",
+    "Terraform",
+    "Helm",
+    "ArgoCD",
+    "AWS",
+    "GCP",
+    "Prometheus",
+    "Grafana",
+    "SLOs",
+    "Git",
+    "HIPAA"
+   ],
+   "cut_for_length": [
+    "b-tes-02",
+    "b-tes-03",
+    "b-tes-01",
+    "r-tes",
+    "b-bri-05",
+    "b-bri-09",
+    "b-bri-01",
+    "r-bri",
+    "b-cas-15",
+    "b-cas-12",
+    "b-cas-04",
+    "r-cas",
+    "b-kes-05",
+    "b-kce-01",
+    "b-kes-01",
+    "b-kes-04",
+    "b-kes-03",
+    "b-lum-09",
+    "b-lum-25",
+    "b-pgq-01",
+    "b-task-05",
+    "b-fin-01",
+    "b-lum-22",
+    "b-lum-11",
+    "b-lum-06",
+    "b-pgq-03",
+    "b-kce-03"
+   ],
+   "added_to_fill": [
+    "b-hex-23",
+    "b-hex-26"
+   ],
+   "only_evidence": {},
+   "shown_instead": {},
+   "roles_dropped": [
+    "r-cas",
+    "r-bri",
+    "r-tes"
+   ]
+  },
+  "profile-swe/p1-staff-ai-agent-platform": {
+   "pages_before_fit": 4,
+   "pages": 2,
+   "summary": [
+    "sum-ai"
+   ],
+   "entries": {
+    "r-lum": [
+     "b-lum-08",
+     "b-lum-05",
+     "b-lum-07",
+     "b-lum-12",
+     "b-lum-17",
+     "b-lum-18",
+     "b-lum-01"
+    ],
+    "r-kes": [
+     "b-kes-01",
+     "b-kes-03"
+    ],
+    "r-hex": [
+     "b-hex-02",
+     "b-hex-21"
+    ],
+    "r-fin": [
+     "b-fin-06",
+     "b-fin-16"
+    ],
+    "p-task": [
+     "b-task-01"
+    ],
+    "p-pgq": [
+     "b-pgq-01"
+    ],
+    "p-trace": [
+     "b-trace-01"
+    ],
+    "e-ms": [],
+    "e-bs": []
+   },
+   "other": [
+    "o-cert-cka",
+    "o-talk-evals",
+    "o-paper",
+    "o-blog"
+   ],
+   "skills": [
+    "CI/CD",
+    "LLM",
+    "LLM evaluation",
+    "embeddings",
+    "prompt caching",
+    "agents",
+    "Python",
+    "TypeScript",
+    "Kubernetes",
+    "Prometheus",
+    "Observability",
+    "OpenTelemetry",
+    "PostgreSQL",
+    "retrieval-augmented generation",
+    "PyTorch",
+    "fine-tuning",
+    "Go",
+    "Rust",
+    "Model Context Protocol",
+    "SOC 2",
+    "Machine Learning",
+    "Kafka",
+    "Spark",
+    "Airflow",
+    "Docker",
+    "Grafana",
+    "SLOs"
+   ],
+   "cut_for_length": [
+    "b-tes-03",
+    "b-tes-01",
+    "b-tes-02",
+    "r-tes",
+    "b-bri-07",
+    "b-bri-09",
+    "b-bri-01",
+    "r-bri",
+    "b-cas-02",
+    "b-cas-15",
+    "b-cas-04",
+    "r-cas",
+    "b-kes-05",
+    "b-kes-02",
+    "b-kes-04",
+    "b-kes-06",
+    "b-trace-03",
+    "b-pgq-02",
+    "b-task-03",
+    "b-fin-18",
+    "b-trace-02",
+    "b-fin-13",
+    "b-fin-03",
+    "b-task-06",
+    "b-pgq-03",
+    "b-hex-05",
+    "b-hex-26",
+    "b-hex-08",
+    "b-hex-01",
+    "b-lum-09",
+    "b-lum-03"
+   ],
+   "added_to_fill": [],
+   "only_evidence": {},
+   "shown_instead": {},
+   "roles_dropped": [
+    "r-cas",
+    "r-bri",
+    "r-tes"
+   ]
+  },
+  "profile-swe/p2-staff-swe-core-infrastructure": {
+   "pages_before_fit": 4,
+   "pages": 2,
+   "summary": [
+    "sum-backend"
+   ],
+   "entries": {
+    "r-lum": [
+     "b-lum-17",
+     "b-lum-18",
+     "b-lum-11"
+    ],
+    "r-kes": [
+     "b-kes-01",
+     "b-kes-06"
+    ],
+    "r-hex": [
+     "b-hex-05",
+     "b-hex-03",
+     "b-hex-02",
+     "b-hex-25",
+     "b-hex-07",
+     "b-hex-28"
+    ],
+    "r-fin": [
+     "b-fin-06",
+     "b-fin-09"
+    ],
+    "p-task": [
+     "b-task-01"
+    ],
+    "p-kce": [
+     "b-kce-01",
+     "b-kce-03"
+    ],
+    "p-pgq": [
+     "b-pgq-03"
+    ],
+    "e-ms": [],
+    "e-bs": []
+   },
+   "other": [
+    "o-cert-aws",
+    "o-cert-tf",
+    "o-award",
+    "o-blog"
+   ],
+   "skills": [
+    "ArgoCD",
+    "Helm",
+    "SLOs",
+    "AWS",
+    "Go",
+    "Python",
+    "Kubernetes",
+    "Terraform",
+    "Linux",
+    "PostgreSQL",
+    "Kafka",
+    "Prometheus",
+    "Grafana",
+    "Observability",
+    "incident response",
+    "Rust",
+    "SOC 2",
+    "ISO 27001",
+    "LLM",
+    "agents",
+    "Machine Learning",
+    "Microservices",
+    "Spark",
+    "Airflow",
+    "Docker",
+    "GCP"
+   ],
+   "cut_for_length": [
+    "b-tes-01",
+    "b-tes-03",
+    "b-tes-02",
+    "r-tes",
+    "b-bri-09",
+    "b-bri-10",
+    "b-bri-01",
+    "r-bri",
+    "b-cas-07",
+    "b-cas-05",
+    "b-cas-04",
+    "r-cas",
+    "b-kes-05",
+    "b-kes-03",
+    "b-kes-02",
+    "b-kes-04",
+    "b-task-02",
+    "b-fin-11",
+    "b-pgq-02",
+    "b-lum-23",
+    "b-task-09",
+    "b-lum-13",
+    "b-lum-22",
+    "b-fin-12",
+    "b-fin-03",
+    "b-lum-04",
+    "b-lum-03",
+    "b-lum-05",
+    "b-hex-06",
+    "b-pgq-01",
+    "b-kce-02",
+    "b-hex-01"
+   ],
+   "added_to_fill": [
+    "b-hex-25"
+   ],
+   "only_evidence": {
+    "b-hex-07": [
+     "incident response"
+    ],
+    "b-kce-03": [
+     "Terraform"
+    ]
+   },
+   "shown_instead": {
+    "b-hex-28": [
+     "b-cas-07",
+     [
+      "Linux"
+     ]
+    ]
+   },
+   "roles_dropped": [
+    "r-cas",
+    "r-bri",
+    "r-tes"
+   ]
+  },
+  "profile-swe/p3-staff-engineer-ml-platform": {
+   "pages_before_fit": 4,
+   "pages": 2,
+   "summary": [
+    "sum-mlplat"
+   ],
+   "entries": {
+    "r-lum": [
+     "b-lum-17",
+     "b-lum-15",
+     "b-lum-11",
+     "b-lum-03"
+    ],
+    "r-kes": [
+     "b-kes-01",
+     "b-kes-02"
+    ],
+    "r-hex": [
+     "b-hex-01",
+     "b-hex-18",
+     "b-hex-02",
+     "b-hex-26"
+    ],
+    "r-fin": [
+     "b-fin-09",
+     "b-fin-06",
+     "b-fin-01"
+    ],
+    "r-cas": [
+     "b-cas-08"
+    ],
+    "p-task": [
+     "b-task-01"
+    ],
+    "p-kce": [
+     "b-kce-01",
+     "b-kce-03"
+    ],
+    "p-pgq": [
+     "b-pgq-01"
+    ],
+    "e-ms": [],
+    "e-bs": []
+   },
+   "other": [
+    "o-cert-aws",
+    "o-cert-gcp",
+    "o-talk-evals",
+    "o-blog"
+   ],
+   "skills": [
+    "Kubernetes",
+    "Spark",
+    "Airflow",
+    "HIPAA",
+    "hiring",
+    "Python",
+    "SQL",
+    "Go",
+    "Java",
+    "feature stores",
+    "mentoring",
+    "LLM",
+    "LLM evaluation",
+    "Snowflake",
+    "dbt",
+    "Kafka",
+    "PyTorch",
+    "AWS",
+    "GCP",
+    "agents",
+    "Machine Learning",
+    "PostgreSQL",
+    "Docker",
+    "Terraform",
+    "Prometheus"
+   ],
+   "cut_for_length": [
+    "b-tes-01",
+    "b-tes-03",
+    "b-tes-02",
+    "r-tes",
+    "b-bri-10",
+    "b-bri-09",
+    "b-bri-01",
+    "r-bri",
+    "b-cas-05",
+    "b-cas-04",
+    "b-kes-05",
+    "b-kes-04",
+    "b-kes-03",
+    "b-pgq-03",
+    "b-task-02",
+    "b-kes-06",
+    "b-kce-02",
+    "b-fin-11",
+    "b-pgq-02",
+    "b-task-09",
+    "b-lum-18",
+    "b-lum-24",
+    "b-hex-06",
+    "b-lum-10",
+    "b-lum-05",
+    "b-lum-12",
+    "b-fin-12",
+    "b-hex-21"
+   ],
+   "added_to_fill": [],
+   "only_evidence": {
+    "b-cas-08": [
+     "SQL"
+    ],
+    "b-fin-01": [
+     "Java"
+    ]
+   },
+   "shown_instead": {},
+   "roles_dropped": [
+    "r-bri",
+    "r-tes"
+   ]
+  }
+ }
+}

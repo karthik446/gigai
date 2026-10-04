@@ -153,6 +153,7 @@ _TARGET_COMMANDS: dict[str, tuple[str, ...]] = {
     "resume master show": ("scout", "resume", "master", "show"),
     "resume master init": ("scout", "resume", "master", "init", "--from", "{resume}"),
     "resume master history": ("scout", "resume", "master", "history"),
+    "resume master selection show": ("scout", "resume", "master", "selection", "show"),
     "run": ("scout", "run", "--no-browser"),
     "stop": ("scout", "stop"),
     "status": ("scout", "status"),

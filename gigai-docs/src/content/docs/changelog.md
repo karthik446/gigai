@@ -146,6 +146,15 @@ the server used several gigabytes of memory, and reloading made it worse. Read "
   show` lists every line with its id, and `gigai scout resume master history` lists its revisions:
   each change is a new revision and nothing is rewritten. Nothing reads the master yet: profiles,
   assessments and tailored resumes work as before.
+- **A master resume, second step: which lines a resume shows.** `gigai scout resume master selection
+  show` picks the lines of the master for a profile or for one job (`--job-url` for a posting Scout
+  already holds, or `--job-text FILE`) and lists them as Picked / Left out, each line with its
+  reason. The pick is made by code alone, with no model call, and fitted to 2 pages by measuring it
+  with the PDF template: recent roles always appear, and for length the oldest roles are shortened,
+  then dropped, first. A line that is the only one naming something the posting requires is kept,
+  after first trying a recent role's line that names the same thing. Nothing is reworded. `--evidence`
+  shows the lines most relevant to the job that an assessment could read. Nothing uses the selection
+  yet: profiles, assessments and tailored resumes work as before.
 
 ### 0.1.10.8
 
