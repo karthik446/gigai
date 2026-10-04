@@ -13,7 +13,8 @@ resume reader (the newest-resume resolution, the profile migration, the
 contact cleanup) lists the references of kind ``resume``, and the master
 must not become "the newest resume" of any of them. P1 changes no reader.
 
-``import_master`` is the one write path:
+``import_master`` stores a file (``revise_master``, 0.1.10.9 master P6, stores a
+change to the stored master through the same last step, ``_store``):
 
 1. the file is read (``.md``/``.markdown``/``.txt``, UTF-8, at most 1 MiB);
 2. the privacy strip runs, with the resume import's own detector
@@ -37,7 +38,7 @@ returns a line of the master in an error.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 import shutil
@@ -48,6 +49,7 @@ from ..private_records import PrivateRecordError, create_record, import_referenc
 from ..workpad import ResolvedWorkpad, WorkpadError, resolve_workpad
 from .master_resume import (
     MASTER_MAX_BYTES,
+    IdAssignment,
     Master,
     MasterChange,
     MasterResumeError,
@@ -351,7 +353,16 @@ def import_master(
 
     draft = draft_master(text)
     assignment = assign_ids(draft, previous)
-    master = build_master(draft)
+    return _store(home_root, target, resolved, chain, previous, build_master(draft), actor, revision, assignment, removed)
+
+
+def _store(
+    home_root: Path, target: Path | None, resolved: ResolvedWorkpad, chain: list[MasterRevision], previous: Master | None,
+    master: Master, actor: str, revision: int | None, assignment: IdAssignment, removed: ContactRemoved,
+) -> MasterImport:
+    """``master`` as the next revision on top of ``chain`` (``previous`` is its last revision, parsed): the one write."""
+
+    current = chain[-1] if chain else None
     _still_contact(master)
     markdown = master.markdown()
     encoded = markdown.encode("utf-8")
@@ -411,6 +422,60 @@ def import_master(
     return MasterImport("created" if current is None else "revised", stored, change, assignment.assigned, assignment.restored, removed)
 
 
+# --- a change to the stored master (0.1.10.9 master P6) ------------------------------------------
+
+
+def revise_master(
+    *, home_root: Path, target: Path | None, change: Callable[[StoredMaster], Master], actor: str = "operator",
+    revision: int | None = None, gig_id: str | None = None,
+) -> MasterImport:
+    """Store a changed copy of the stored master as its next revision: what ``master add | edit | remove`` end with.
+
+    ``change`` gets the stored master and returns the new one. ``revision`` is the revision the writer read: it is
+    checked BEFORE ``change`` runs, so a stale write is ``revision_conflict`` and never a failure of the change
+    itself; ``None`` writes on top of the current revision. The privacy strip runs on the new text as it does at
+    import, but here a line it flags is refused (``master_contact_data``), never dropped. The same content again
+    writes nothing (``unchanged``)."""
+
+    if actor not in ACTORS:
+        raise MasterStoreError("master_actor_invalid", "the writer is operator or agent")
+    resolved = _resolve_for_read(home_root, target, gig_id)
+    chain = _chain(resolved) if resolved is not None else []
+    if resolved is None or not chain:
+        raise MasterStoreError("master_not_found", "there is no master resume yet")
+    current = chain[-1]
+    if revision is not None and revision != current.revision:
+        raise MasterStoreError(
+            "revision_conflict",
+            f"the master is at revision {current.revision}, not {revision}: read it again (master show), then write on top of revision {current.revision}",
+            current=current,
+        )
+    previous = _read_master(home_root, target, resolved, current)
+    master = change(StoredMaster(master_record_id(resolved), current, len(chain), previous))
+    found = strip_contact(master.markdown())[1].counts
+    # Only what this change brought: a line the import accepted is not held against a later change.
+    before = strip_contact(previous.markdown())[1].counts if found else {}
+    flagged = sorted(kind for kind, count in found.items() if count > before.get(kind, 0))
+    if flagged:
+        raise MasterStoreError(
+            "master_contact_data",
+            "the master would hold what looks like contact data (" + ", ".join(kind.replace("_", " ") for kind in flagged) + "); remove it and write again",
+        )
+    return _store(home_root, target, resolved, chain, previous, master, actor, current.revision, IdAssignment(), ContactRemoved())
+
+
+def earlier_masters(*, home_root: Path, target: Path | None, gig_id: str | None = None) -> Iterator[tuple[MasterRevision, MasterRevision, Master]]:
+    """Every revision before the current one, newest first: ``(the revision, the one that followed it, its master)``.
+
+    Each is read when it is reached, so a search for one retired line stops at the revision that holds it."""
+
+    resolved = _resolve_for_read(home_root, target, gig_id)
+    chain = _chain(resolved) if resolved is not None else []
+    for index in range(len(chain) - 2, -1, -1):
+        assert resolved is not None
+        yield chain[index], chain[index + 1], _read_master(home_root, target, resolved, chain[index])
+
+
 __all__ = [
     "ACTORS",
     "ContactRemoved",
@@ -421,11 +486,13 @@ __all__ = [
     "MasterRevision",
     "MasterStoreError",
     "StoredMaster",
+    "earlier_masters",
     "import_master",
     "load_master",
     "master_history",
     "master_record_id",
     "master_revisions",
     "read_revisions",
+    "revise_master",
     "strip_contact",
 ]

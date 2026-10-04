@@ -205,6 +205,39 @@ answer first (`gigai scout answer`), not to reword the line. The Scout ATS score
 label are then made again from the edited resume (one model call, for the assessment against it),
 and the background never replaces it.
 
+### 6. Your master resume
+
+Your master resume is the one document that holds every role, line and skill you have; each
+profile's resume, and each job's, is a selection of it. An agent keeps it up to date from the
+conversation: after it saves a story or an answer with substance it asks "Want this on your
+resume?", and on a yes it adds one line.
+
+```sh
+gigai scout resume master show --json                          # every line with its id; the revision
+gigai scout resume master add --entry <entry-id> --text "..." --from-story <story-id> --as agent --source "from the chat" --json
+gigai scout resume master add --skill Helm --from-answer <question-id> --as agent --json
+gigai scout resume master edit <line-id> --text "..." --revision <n> --as agent --json
+gigai scout resume master remove <line-id> --revision <n> --as agent --json
+```
+
+- **The line is your facts.** The agent writes the line from what you said; `--from-story` and
+  `--from-answer` link it to that story or answer, and `--source` says where the evidence came
+  from. `gigai scout resume master show` shows who wrote each line and its source. A number in
+  the line that the story or answer does not state comes back as a warning to check with you.
+- **Nothing is overwritten blindly.** An edit or a removal names the revision it read; if the
+  master changed since, it is refused with `revision_conflict` and the current revision.
+- **No contact data.** Text that looks like an email, a phone number, a link or an address is
+  refused, and nothing of it is stored.
+- **No second copy of a line.** A line the master already has in other words is not added: the
+  reply lists the line it looks like (`status: near_duplicate`). The agent changes that line, or
+  adds both with `--force` when you say so.
+- **Removed means retired.** No resume shows a removed line any more, but it is not lost:
+  `gigai scout resume master show --retired` lists it with its text, and
+  `gigai scout resume master add --restore <line-id>` puts it back under the same id.
+
+A profile whose resume shows a line you changed or removed follows by itself. A new line is only
+offered to a profile (`gigai scout resume master selection status`), never added to it.
+
 ## Use it from your agent
 
 Three ways to teach an agent the daily loop. They carry the same instructions; pick the one
