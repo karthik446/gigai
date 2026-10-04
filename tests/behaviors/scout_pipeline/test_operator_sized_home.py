@@ -86,7 +86,10 @@ LIGHT_ROUTES = ("/api/health", "/api/profiles", "/api/runs", "/api/config", "/ap
 def home(tmp_path_factory: pytest.TempPathFactory) -> Iterator[operator_home.OperatorHome]:
     kept = dict(os.environ)
     try:
-        built = operator_home.build(tmp_path_factory.mktemp("operator-home") / "op", postings=POSTINGS, companies=COMPANIES, workers=None if FULL else 4, assessed=operator_home.ASSESSED if FULL else 8)
+        # The release pre-check builds the home once for this gate and the browser flows (tests/ui): a fresh copy of it.
+        built = operator_home.take_prebuilt(postings=POSTINGS, companies=COMPANIES, log=print) if FULL else None
+        if built is None:
+            built = operator_home.build(tmp_path_factory.mktemp("operator-home") / "op", postings=POSTINGS, companies=COMPANIES, workers=None if FULL else 4, assessed=operator_home.ASSESSED if FULL else 8)
     finally:
         os.environ.clear()
         os.environ.update(kept)

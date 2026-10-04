@@ -15,7 +15,7 @@ on:
   workflow_call:
     inputs:
       profile:
-        description: "CI profile: pr (ubuntu/3.11), release = the release pre-check (pr + macOS smoke + the operator-sized home timing gate + release metadata, build and artifact smoke), or full = the post-release compatibility sweep (non-blocking: ubuntu 3.12/3.13 + macOS 3.13 + sharded Debian offline)."
+        description: "CI profile: pr (ubuntu/3.11), release = the release pre-check (pr + macOS smoke + the operator-sized home timing gate and browser flows + release metadata, build and artifact smoke), or full = the post-release compatibility sweep (non-blocking: ubuntu 3.12/3.13 + macOS 3.13 + sharded Debian offline)."
         required: false
         type: string
         default: pr
@@ -258,6 +258,85 @@ jobs:
             exit 1
           fi
 
+  # U4 (0.1.10.9): the browser tests (tests/ui). Real Chromium against the real Scout
+  # server on a small synthetic home (`make ui-test`: no network, no model, never a
+  # real home). Every PR and every release pre-check; not the post-release sweep (the
+  # gate ran it on this commit).
+  # What fails the job from day one: structure (request counts, one request in flight
+  # per resource, what the page shows) and console / page / HTTP problems. The timing
+  # ceilings (wall-clock, server CPU, server memory) are REPORTED for the first week
+  # (GIGAI_UI_BUDGETS: report): in the job summary and in the budgets artifact of every
+  # run. Set the limits from a week of those, then write `enforce` here and in
+  # `operator-home`.
+  # No retry, on purpose (tests/ui/README.md): no rerun flag and no retry action. A wait
+  # that times out writes timeout.txt (what was in flight, the page's heartbeat, whether
+  # the server answered, the console, the server log) into the failure artifact.
+  # Time limits: `make ui-test` (25 tests) took 137 s on a busy laptop on 2026-10-04,
+  # 34 s of it the home build (U3 measured 70 s idle when the suite was 20 tests). The
+  # step gets the smallest multiple of 5 minutes that is at least 3 times that
+  # (3 x 137 s = 6.9 min -> 10). A step that reaches its limit is a failed step, so the
+  # summary and the artifacts are still uploaded; the job limit only has to leave room
+  # for the setup before the step and the uploads after it. NOT measured on a runner yet.
+  ui:
+    needs: changes
+    if: needs.changes.outputs.code_changed == 'true' && (inputs.profile || 'pr') != 'full'
+    name: Browser tests (small home)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      GIGAI_UI_BUDGETS: report
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      - uses: astral-sh/setup-uv@v8.0.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - run: uv sync --locked --extra test --group ui --python "3.11"
+      # ui-browser-setup: the three steps below are the same in `operator-home`
+      # (tests/behaviors/ci_tooling/test_ui_ci_job.py compares them). The browser is
+      # installed here, not inside the timed test step: on a cache hit only the system
+      # libraries are installed (they are not in the cache).
+      - name: Playwright version (the key of the browser cache)
+        id: playwright
+        run: |
+          version="$(uv run --locked --extra test --group ui python -c 'from importlib.metadata import version; print(version("playwright"))')"
+          test -n "${version}"
+          echo "version=${version}" >> "${GITHUB_OUTPUT}"
+      - name: Chromium, cached per Playwright version
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-chromium-${{ runner.os }}-${{ runner.arch }}-${{ steps.playwright.outputs.version }}
+      - name: Chromium and its system libraries
+        run: uv run --locked --extra test --group ui playwright install --with-deps chromium
+      - name: Browser tests on the small home
+        timeout-minutes: 10
+        run: make ui-test
+      - name: Budgets in the job summary
+        if: ${{ !cancelled() }}
+        run: python3 tools/ui_budgets_summary.py build/ui-artifacts/budgets.json --title "small home (make ui-test)" >> "${GITHUB_STEP_SUMMARY}"
+      - name: Upload budgets.json (every run)
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: ui-budgets-small-home-attempt-${{ github.run_attempt }}
+          path: build/ui-artifacts/budgets.json
+          if-no-files-found: warn
+          retention-days: 30
+      - name: Upload the failure artifacts (screenshot, trace, requests, console, server log, timeout.txt)
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: ui-failure-small-home-attempt-${{ github.run_attempt }}
+          path: build/ui-artifacts/
+          if-no-files-found: warn
+          retention-days: 14
+
   debian-offline:
     needs: changes
     if: needs.changes.outputs.code_changed == 'true' && (inputs.profile || 'pr') == 'full'
@@ -344,14 +423,29 @@ jobs:
   # once, progress and responsive routes during it, warm reads under 500 ms, bounded
   # memory, a warm fresh process. A failed job fails the pre-check run, so release.yml
   # finds no green run to release.
+  # U4 (0.1.10.9): the same job then loads the UI on that home in a real browser
+  # (`make ui-test-operator`: the `operator_sized` half of `make ui-test-full`; the `ui`
+  # job runs the other half on the small home). The home is built ONCE: the build step
+  # leaves it, never read, at <root>.pristine, and the gate and the browser flows each
+  # take a fresh copy at the root it was built for (GIGAI_OPERATOR_HOME_PREBUILT;
+  # tests/support/operator_home.py), so both start on a server that has read nothing.
+  # The browser steps run whatever the timing gate did: one pre-check run shows both.
+  # Timing ceilings of the browser flows are reported, as in `ui`; the timing GATE above
+  # them is unchanged and blocks.
+  # Step limits, from the laptop times of 2026-10-04 (a busy laptop), each the smallest
+  # multiple of 5 minutes that is at least 3 times its step: the build 44 to 50 s -> 5;
+  # the browser flows 61 s -> 5. The gate took 42 s on the prebuilt home (-> 5 by the
+  # same rule) and gets 10: it is the blocking gate that had no limit of its own, and a
+  # limit that is too tight would fail a release for nothing. NOT measured on a runner yet.
   operator-home:
     needs: changes
     if: needs.changes.outputs.code_changed == 'true' && inputs.profile == 'release'
-    name: Operator-sized home timing gate (290k postings)
+    name: Operator-sized home timing gate and browser flows (290k postings)
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     env:
       GIGAI_TEST_LATENCY_SCALE: "3"
+      GIGAI_UI_BUDGETS: report
     steps:
       - uses: actions/checkout@v6
         with:
@@ -364,8 +458,62 @@ jobs:
           enable-cache: true
           cache-dependency-glob: uv.lock
       - run: uv sync --locked --extra test --python "3.11"
+      - name: Build the operator-sized home once (for the timing gate and the browser flows)
+        id: home
+        timeout-minutes: 5
+        run: |
+          # Under /tmp: the generator refuses any root outside the temporary directory.
+          home="$(mktemp -d /tmp/gigai-operator-XXXXXX)"
+          uv run --locked --extra test python -m tests.support.operator_home "${home}/op" --pristine
+          echo "GIGAI_OPERATOR_HOME_PREBUILT=${home}/op" >> "${GITHUB_ENV}"
       - name: Operator-sized home timing gate
+        timeout-minutes: 10
         run: make test-operator-home
+      - name: Add the browser-test dependencies
+        if: ${{ !cancelled() && steps.home.outcome == 'success' }}
+        run: uv sync --locked --extra test --group ui --python "3.11"
+      # ui-browser-setup: the three steps below are the same as in `ui`.
+      - name: Playwright version (the key of the browser cache)
+        id: playwright
+        if: ${{ !cancelled() && steps.home.outcome == 'success' }}
+        run: |
+          version="$(uv run --locked --extra test --group ui python -c 'from importlib.metadata import version; print(version("playwright"))')"
+          test -n "${version}"
+          echo "version=${version}" >> "${GITHUB_OUTPUT}"
+      - name: Chromium, cached per Playwright version
+        if: ${{ !cancelled() && steps.home.outcome == 'success' }}
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-chromium-${{ runner.os }}-${{ runner.arch }}-${{ steps.playwright.outputs.version }}
+      - name: Chromium and its system libraries
+        if: ${{ !cancelled() && steps.home.outcome == 'success' }}
+        run: uv run --locked --extra test --group ui playwright install --with-deps chromium
+      - name: Browser flows on the operator-sized home
+        if: ${{ !cancelled() && steps.home.outcome == 'success' }}
+        timeout-minutes: 5
+        run: make ui-test-operator
+      - name: Budgets in the job summary
+        if: ${{ !cancelled() && steps.home.outcome == 'success' }}
+        run: python3 tools/ui_budgets_summary.py build/ui-artifacts/budgets.json --title "operator-sized home (make ui-test-operator)" >> "${GITHUB_STEP_SUMMARY}"
+      - name: Upload budgets.json and the flow's numbers (every run)
+        if: ${{ !cancelled() && steps.home.outcome == 'success' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: ui-budgets-operator-home-attempt-${{ github.run_attempt }}
+          path: |
+            build/ui-artifacts/budgets.json
+            build/ui-artifacts/operator-sized-jobs.json
+          if-no-files-found: warn
+          retention-days: 30
+      - name: Upload the failure artifacts (screenshot, trace, requests, console, server log, timeout.txt)
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: ui-failure-operator-home-attempt-${{ github.run_attempt }}
+          path: build/ui-artifacts/
+          if-no-files-found: ignore
+          retention-days: 14
 
   # release-split: the release half of the pre-check (profile `release` only).
   # Everything release.yml used to check before publishing, on the branch head:

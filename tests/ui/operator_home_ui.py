@@ -13,6 +13,10 @@ setup preferences a browser needs); this module only runs it and serves it:
 `src/` goes first on PYTHONPATH of both child processes; the generator and the tests stay this
 tree's). That is how a test is shown red on an older release without editing that checkout.
 
+`GIGAI_OPERATOR_HOME_PREBUILT=<temporary HOME>/op` (the release pre-check's `operator-home` job):
+the home was built once, for the timing gate too; this module takes a fresh, never-read copy of it
+(`operator_home.take_prebuilt`) instead of building a second one. HOME is then the folder it sits in.
+
 No Playwright and no psutil here; nothing is imported from the product in this process.
 """
 
@@ -53,10 +57,11 @@ class OperatorServer:
     log_path: str
     home: Path  # the temporary HOME
     built: operator_home.OperatorHome
-    build_seconds: float  # wall, the child process included
+    build_seconds: float  # wall, the child process included (a prebuilt home: the time to take the copy)
     start_seconds: float  # until /api/health answered
     server_root: Path | None
     process: subprocess.Popen
+    prebuilt: bool = False  # the home was built once by an earlier step of the job, not by this run
 
     @property
     def target(self) -> Path:
@@ -107,6 +112,28 @@ def build_home(root: Path, *, env: dict[str, str], log=lambda _line: None) -> op
     return operator_home.OperatorHome(**json.loads((root / "operator-home.json").read_text(encoding="utf-8")))
 
 
+def prebuilt_home(environ: Mapping[str, str] | None = None) -> Path | None:
+    """The temporary HOME of a prebuilt home (the folder `GIGAI_OPERATOR_HOME_PREBUILT` sits in), or None."""
+
+    root = operator_home.prebuilt_root(environ)
+    return None if root is None else root.resolve().parent
+
+
+def take_home(home: Path, *, env: dict[str, str], log=lambda _line: None) -> operator_home.OperatorHome:
+    """The home under the temporary HOME `home`: a fresh copy of the prebuilt one when the job built one, else built here."""
+
+    root = operator_home.prebuilt_root()
+    if root is None:
+        return build_home(home / "op", env=env, log=log)
+    if server_root() is not None:
+        raise OperatorHomeUiError(f"{operator_home.PREBUILT_ENV} cannot be combined with {SERVER_ROOT_ENV}: the prebuilt home was built with this tree's code")
+    if root.resolve().parent != Path(home).resolve():
+        raise OperatorHomeUiError(f"{operator_home.PREBUILT_ENV}={root} is not under the temporary HOME {home}")
+    built = operator_home.take_prebuilt(log=log)
+    assert built is not None
+    return built
+
+
 def wait_healthy(process: subprocess.Popen, url: str, log_path: Path) -> None:
     """`/api/health` answers (it reads nothing of the postings: the list stays cold)."""
 
@@ -130,7 +157,7 @@ def start(home: Path, *, log=lambda _line: None) -> OperatorServer:
 
     env = child_environment(home)
     started = time.monotonic()
-    built = build_home(home / "op", env=env, log=log)
+    built = take_home(home, env=env, log=log)
     build_seconds = time.monotonic() - started
     log_path = home / "server.log"
     started = time.monotonic()
@@ -140,7 +167,7 @@ def start(home: Path, *, log=lambda _line: None) -> OperatorServer:
     except BaseException:
         stop(process)
         raise
-    return OperatorServer(url, process.pid, str(log_path), home, built, build_seconds, time.monotonic() - started, server_root(), process)
+    return OperatorServer(url, process.pid, str(log_path), home, built, build_seconds, time.monotonic() - started, server_root(), process, operator_home.prebuilt_root() is not None)
 
 
 def stop(process: subprocess.Popen) -> None:
