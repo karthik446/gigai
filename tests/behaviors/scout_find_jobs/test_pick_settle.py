@@ -473,10 +473,25 @@ def test_c1_a_line_code_added_goes_before_any_line_the_model_picked() -> None:
     roomy = _c1(C1_PICK, C1_ROWS, 9)
     assert [item.code for item in roomy.added_by_code] == ["recent_role_present"] and set(C1_PICK) <= set(roomy.printed)
     given = roomy.added_by_code[0].id
-    # Nine lines, room for eight: the line the model did not give is the one that goes, its role with it.
-    settled = _c1(C1_PICK, C1_ROWS, 8)
+    # Nine lines, room for eight, and a row rests on EVERY picked line: the line the model did not give is the one that goes, its role with it.
+    leaning = (_row(GO, "Go in production", "hard", C1_PICK),)
+    settled = _c1(C1_PICK, leaning, 8)
     assert set(_bullets(settled.result)) == set(C1_PICK), _bullets(settled.result)
     assert given not in settled.printed and settled.added_by_code == () and settled.conflicts == ()
+
+
+def test_c1_the_line_given_to_a_recent_role_outlives_a_picked_line_no_row_rests_on() -> None:
+    """The employment gap: a role gone between two printed ones is the worse loss, so a bare picked line goes first."""
+
+    roomy = _c1(C1_PICK, C1_ROWS, 9)
+    given = roomy.added_by_code[0].id
+    settled = _c1(C1_PICK, C1_ROWS, 8)
+    shown = _bullets(settled.result)
+    assert given in shown and len(shown) == 8 and {"a2", "a5"} <= set(shown), shown
+    assert len(set(C1_PICK) - set(shown)) == 1 and not set(C1_PICK) - set(shown) & {"a2", "a5"}
+    # Down to the lines a row rests on, the recent role's line still outlives the bare ones; it goes only before a line a row rests on.
+    tight = _c1(C1_PICK, C1_ROWS, 3)
+    assert {"a2", "a5"} <= set(_bullets(tight.result)), _bullets(tight.result)
 
 
 def test_c1_a_pinned_line_the_model_did_not_pick_stays_with_the_picked_ones() -> None:

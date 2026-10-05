@@ -612,8 +612,12 @@ def _fill_lines(master: Master, validated: Validated, rows: Sequence[suggestions
 
 def _unpicked_cuts(
     master: Master, settled: TailoredResume, added: Sequence[Added], pins: Sequence[str], values: Mapping[str, float],
-) -> tuple[frozenset[str], list[tuple[str, str]]]:
-    """``(the shown line ids code added, the cuts that take them first)``: C1, no unpicked line prints while a picked one is cut.
+) -> tuple[frozenset[str], list[tuple[str, str]], list[tuple[str, str]]]:
+    """``(the shown line ids code added, the cuts that take them first, the cuts of a recent role's line)``: C1, no unpicked line prints while a picked one is cut.
+
+    The third list is the line code gave a recent role the pick left out (``recent_role_present``): it goes after the other
+    code-added lines and the picked lines no row rests on, so a resume does not lose a role between two printed ones while a
+    line nothing rests on stays (``_pick_selection`` places it); before any picked line a row rests on.
 
     A pinned line is the user's own and stays with the picked ones; so does the line given to the CURRENT role (a resume
     without its current job is the worse loss: it is cut by the ordinary order, last). An entry left with nothing but code's
@@ -624,7 +628,9 @@ def _unpicked_cuts(
     current = {entry.id for entry in master.entries_in("experience") if entry.ongoing}
     code_added = {item.id for item in added if item.id not in pins and master.items[item.id].entry_id not in current}
     gone: set[str] = set()
+    recent_code = {item.id for item in added if item.code == ADDED_RECENT_ROLE}
     cuts: list[tuple[float, tuple[str, str]]] = []
+    recent: list[tuple[float, tuple[str, str]]] = []
     for section in settled.sections:
         if section.heading not in ("experience", "projects"):
             continue
@@ -636,12 +642,10 @@ def _unpicked_cuts(
             if not mine:
                 continue
             worth = {line.id: values.get(tm.line_item_id(line) or "", 0.0) for line in mine}
-            if len(mine) < len(entry.bullets):
-                cuts += [(worth[line.id], ("bullet", line.id)) for line in mine]  # type: ignore[misc]
-            else:
-                cuts.append((max(worth.values()), ("role", entry.heading[0].id)))
+            made = [(worth[line.id], ("bullet", line.id)) for line in mine] if len(mine) < len(entry.bullets) else [(max(worth.values()), ("role", entry.heading[0].id))]  # type: ignore[misc]
+            (recent if any(tm.line_item_id(line) in recent_code for line in mine) else cuts).extend(made)
             gone.update(line.id for line in mine)  # type: ignore[misc]
-    return frozenset(gone), [cut for _worth, cut in sorted(cuts, key=lambda pair: pair[0])]
+    return frozenset(gone), [cut for _worth, cut in sorted(cuts, key=lambda pair: pair[0])], [cut for _worth, cut in sorted(recent, key=lambda pair: pair[0])]
 
 
 def _pick_selection(
@@ -671,7 +675,7 @@ def _pick_selection(
 
     def fit(built: _Built, *, protected: bool) -> TailoredResume:
         cuts, refill = tm.cut_order(built.settled, built.candidates, master, today=today)
-        unpicked, first = _unpicked_cuts(master, built.settled, added, profile.pins, built.candidates.selected.values)
+        unpicked, first, recent = _unpicked_cuts(master, built.settled, added, profile.pins, built.candidates.selected.values)
         if not protected:
             # Protected: the last printed source of a met mandatory row, and the pins. A role that holds one is not cut whole.
             shown = [item for section in built.settled.sections for entry in section.entries for line in entry.bullets if (item := tm.line_item_id(line)) is not None]
@@ -682,8 +686,17 @@ def _pick_selection(
                 if entry.heading and any(tm.line_item_id(line) in kept for line in entry.bullets)
             }
             cuts = [cut for cut in cuts if (cut[1] not in holds if cut[0] == "role" else line_item.get(cut[1]) not in kept)]
-        # 0.1.11 (C1): a line the model did not pick goes before any line it did pick; those cuts are never refilled.
-        cuts = [*first, *(cut for cut in cuts if cut not in first and cut[1] not in unpicked)]
+        # 0.1.11 (C1): a line the model did not pick goes before any line it did pick; those cuts are never refilled. The line given
+        # to a recent role goes after the picked lines no row rests on (a gap between two printed roles is the worse loss), before the rest.
+        rest = [cut for cut in cuts if cut not in first and cut[1] not in unpicked]
+        rests = {item for requirement in built.candidates.selected.requirements for item in requirement.supporters}
+        items = {line.id: tm.line_item_id(line) for section in built.settled.sections for entry in section.entries for line in entry.bullets}
+        roles_items = {
+            entry.heading[0].id: {items.get(line.id) for line in entry.bullets}
+            for section in built.settled.sections for entry in section.entries if entry.heading
+        }
+        bare = [cut for cut in rest if not ({items.get(cut[1])} if cut[0] == "bullet" else roles_items.get(cut[1], {None})) & rests]
+        cuts = [*first, *bare, *recent, *(cut for cut in rest if cut not in bare)]
         return fit_by_cuts(built.settled, cuts, measure=pages, max_pages=max_pages, refill=refill - unpicked)
 
     all_skills = list(base.skills)
