@@ -10,6 +10,10 @@ tagged with every active profile it matches (best first) and shown for its
 best profile, or for the one profile the call filters to. Filters: profiles,
 words in the title, company or location, states, a time window ("new since
 the last check", the last 7 or 30 days), postings the board no longer lists.
+The 7 and 30 days are counted from the day the posting WENT UP (its
+``published_at``; 0110-10-14: never its last change), or from when Scout
+first saw it when the board gives no date. ``sort="newest_posted"`` orders
+the rows by that same date, the newest first, in place of the grid's order.
 A changed setting (titles, countries, work mode) is seen by the very next
 search: the read model matches that profile again. A search never moves the
 "new since" anchor.
@@ -102,6 +106,11 @@ WINDOW_7_DAYS = "7d"
 WINDOW_30_DAYS = "30d"
 WINDOWS: Mapping[str, int | None] = {WINDOW_NEW: None, WINDOW_7_DAYS: 7, WINDOW_30_DAYS: 30}
 
+#: The orders (0110-10-14). ``fit`` is the grid's own (``scout_new.order_key``, then the newest seen) and the default.
+SORT_FIT = "fit"
+SORT_NEWEST_POSTED = "newest_posted"
+SORTS = (SORT_FIT, SORT_NEWEST_POSTED)
+
 #: The state filters. ``assessed`` is any posting with an assessment; ``recommended`` the Scout label.
 STATE_ASSESSED = "assessed"
 STATE_RECOMMENDED = "recommended"
@@ -162,13 +171,19 @@ def _index_words(home_root: Path, rows: Iterable[PostingRecord]) -> dict[str, st
     return found
 
 
+def _posted(row: PostingRecord) -> str:
+    """The date the 7 / 30 days and "newest posted" judge: the day the posting went up; for a board that gives none, when it was first seen."""
+
+    return row.published_at or row.first_seen
+
+
 def _in_window(row: PostingRecord, window: str | None, since: str, moment: datetime) -> bool:
     if window is None:
         return True
     if window == WINDOW_NEW:
         return row.first_seen > since
     edge = postings.stamp(moment - timedelta(days=WINDOWS[window] or 0)) or ""
-    return (row.published_at or row.first_seen) >= edge  # a board that gives no date: when it was first seen
+    return _posted(row) >= edge
 
 
 def _wanted(row: PostingRecord, states: Sequence[str]) -> bool:
@@ -198,7 +213,7 @@ class _Selection:
     def __init__(
         self, home_root: Path, target: Path, store: PipelineStore, *, profile_ids: Sequence[str], query: str | None,
         states: Sequence[str], window: str | None, removed: bool, jobs: Sequence[str] | None, moment: datetime,
-        model_wait: float | None = None,
+        model_wait: float | None = None, sort: str = SORT_FIT,
     ) -> None:
         refreshed = postings.refresh(home_root, target, store=store, now=moment, wait=model_wait)
         #: Rows read as stored while a build runs (``postings.BUILD_STALE``), for a caller that acts on them.
@@ -236,6 +251,8 @@ class _Selection:
         shown = [(group, row) for group, row in shown if _wanted(row, states) and not _hidden(row, states, jobs is not None)]
         # 0110-8-04: the grid's one order (``scout_new.order_key``): current, stale, not assessed; verdict; rank.
         self.shown = shown = in_order(shown)
+        if sort == SORT_NEWEST_POSTED:
+            shown.sort(key=lambda pair: _posted(pair[1]), reverse=True)  # stable: postings of one instant keep the grid's order
         self.new = sum(1 for _group, row in shown if row.first_seen > self.since and row.removed_at is None)
 
     def profiles_json(self) -> list[dict[str, object]]:
@@ -327,8 +344,12 @@ def search_postings(
     offset: int = 0,
     now: datetime | None = None,
     model_wait: float | None = None,
+    sort: str | None = None,
 ) -> dict[str, object]:
     """The live search, as the ``scout-postings:1`` response. See the module docstring.
+
+    ``sort`` (0110-10-14): ``fit`` (the default: the grid's order) or
+    ``newest_posted`` (the day the posting went up, the newest first).
 
     ``model_wait`` (0110-9-01, the server's GET): how long to wait for a build
     of the posting read model; past it the rows are read as stored, or
@@ -343,6 +364,9 @@ def search_postings(
     home_root, target = Path(home_root), Path(target)
     if window is not None and window not in WINDOWS:
         raise PostingSearchError("invalid_value", f"window must be one of: {', '.join(WINDOWS)}")
+    sort = SORT_FIT if sort is None else sort
+    if sort not in SORTS:
+        raise PostingSearchError("invalid_value", f"sort must be one of: {', '.join(SORTS)}")
     if type(limit) is not int or not 1 <= limit <= MAX_LIMIT or type(offset) is not int or offset < 0:
         raise PostingSearchError("invalid_value", f"limit must be 1..{MAX_LIMIT} and offset 0 or more")
     wanted_states = _names(states, STATES, "state")
@@ -353,7 +377,7 @@ def search_postings(
         try:
             selection = _Selection(
                 home_root, target, store, profile_ids=wanted_profiles, query=query, states=wanted_states, window=window,
-                removed=removed, jobs=None, moment=moment, model_wait=model_wait,
+                removed=removed, jobs=None, moment=moment, model_wait=model_wait, sort=sort,
             )
             unknown = [item for item in selection.hidden_profiles if item != EPHEMERAL_PROFILE and not history]
             if unknown:
@@ -367,7 +391,7 @@ def search_postings(
                 "checked_at": postings.stamp(moment),
                 "filters": {
                     "profile_ids": list(wanted_profiles), "query": query or None, "states": list(wanted_states), "window": window,
-                    "removed": bool(removed), "limit": limit, "offset": offset,
+                    "removed": bool(removed), "limit": limit, "offset": offset, "sort": sort,
                 },
                 "anchor": {"last_checked_at": selection.anchor, "since": selection.since},
                 "counts": {
@@ -690,6 +714,7 @@ __all__ = [
     "DEFAULT_LIMIT",
     "MAX_LIMIT",
     "SCHEMA_VERSION",
+    "SORTS",
     "STATES",
     "STATUS_ASK",
     "STATUS_ASSESSED",

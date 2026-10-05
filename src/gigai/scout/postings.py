@@ -19,7 +19,9 @@ index and the board cache for the rows a response serves
 (:func:`posting_rows`).
 
 WHAT A ROW CARRIES: ``first_seen`` / ``published_at`` / ``removed_at`` from the
-index; the profile's rank score from the home's rank score cache (never a
+index (``published_at`` is the day the posting went up, never its last change:
+0110-10-14; the board's last change is not a column, it is read back from the
+index with the text, ``PostingText.updated_at``); the profile's rank score from the home's rank score cache (never a
 model call here: a posting nothing ranked yet has none); the job state
 (``job_state``: not assessed / needs answers / matched / not a match /
 tailored), why a stored assessment is stale, its requirement counts and open
@@ -125,7 +127,10 @@ from .pipeline.store import PipelineStore, PostingBuild, PostingRecord, RunAsses
 # :5 is 0110-9-01: rows are matched and stamped per board (``posting_board``).
 # :6 is 0.1.10.11 (C8): a board's stamp no longer holds the UTC day, and a row's ``published_at`` is the date the posted
 # window judged (the index's). One build of every board after the upgrade; the stored rows are served meanwhile.
-MATCH_VERSION = "posting-match:6"
+# :7 is 0110-10-14 (the correction): a Greenhouse row's ``published_at`` is the posting's ``first_published``, not its
+# list ``updated_at``, so the window and the filters judge it by another date. The same one build covers it for a home
+# that comes from 0.1.10.10; a home that ran an earlier 0.1.10.11 build prepares once more.
+MATCH_VERSION = "posting-match:7"
 # :3 is 0110-10-02: a row carries its fit number, and a weak fit has its own state.
 FACTS_VERSION = "posting-facts:3"
 
@@ -643,6 +648,8 @@ def _board_records(
             seen.add(row.normalized_url)  # type: ignore[attr-defined]
             # The date the posted window judged is the INDEX's (``index_search._keep``); the cached row's is the same
             # date unless its body dropped it. Kept so a new day knows which boards hold a posting the window left.
+            # 0110-10-14: both are the day the posting went up. A Greenhouse index entry from before that
+            # (``dates_pending``) has no date until the next sources update; the cached body's own is used meanwhile.
             published_at = stamp(posting.published_at) or stamp(row.published_at)  # type: ignore[attr-defined]
             found[row.normalized_url] = PostingRecord(  # type: ignore[attr-defined]
                 job=row.normalized_url, profile_id=view.profile_id, board=key, first_seen=first_seen,  # type: ignore[attr-defined]
@@ -1438,6 +1445,9 @@ class PostingText:
     posting_id: str | None = None
     #: 0110-8-11: the company index's own name for the board ("Garner Health"); ``company`` is the cached row's (the board token).
     company_name: str | None = None
+    #: 0110-10-14: the board's LAST CHANGE to the posting, as a stamp (the index's ``updated_at``; ``None`` when the
+    #: board gives none). Never the posted date: that is the row's ``published_at``.
+    updated_at: str | None = None
 
 
 def _salary(pay: object | None) -> str | None:
@@ -1541,10 +1551,10 @@ def posting_texts(home_root: Path, rows: Iterable[PostingRecord]) -> dict[str, P
             row = cached.get(posting_id)
             if row is None:
                 mode = derive_work_mode(posting.location, None)  # type: ignore[attr-defined]
-                read[job] = PostingText(posting.title, entry.company, posting.location, posting.url, None, mode.mode, None, board, posting_id, entry.company)  # type: ignore[attr-defined]
+                read[job] = PostingText(posting.title, entry.company, posting.location, posting.url, None, mode.mode, None, board, posting_id, entry.company, stamp(posting.updated_at))  # type: ignore[attr-defined]
                 continue
             mode = derive_work_mode(row.location, row.work_mode)
-            read[job] = PostingText(row.title, row.company, row.location, row.url, row.text, mode.mode, _salary(row.pay), board, posting_id, entry.company)
+            read[job] = PostingText(row.title, row.company, row.location, row.url, row.text, mode.mode, _salary(row.pay), board, posting_id, entry.company, stamp(posting.updated_at))  # type: ignore[attr-defined]
         found.update({job: text for job, text in read.items() if text is not None})
         _keep_texts(key, files, read)
     return found

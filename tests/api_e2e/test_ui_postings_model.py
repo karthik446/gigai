@@ -276,6 +276,7 @@ def test_the_row_chips_say_the_state_the_scout_label_stale_and_removed(out: dict
     assert (junk["page"], junk["size"], junk["filter"]["window"], junk["filter"]["states"], junk["filter"]["query"]) == (1, 50, None, [], "go")
     assert round_trip["page"] == 5 and round_trip["size"] == 100 and round_trip["filter"] == {
         "profileIds": ["p1", "p2"], "window": "30d", "states": ["recommended"], "removed": True, "query": "a&b=c",
+        "sort": None,  # 0110-10-14: the order rides with the filters; off (the server's own order) unless the address says so
     }
     assert out["needsAnswers"] == [0, 4]
 

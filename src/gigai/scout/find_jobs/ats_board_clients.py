@@ -11,7 +11,7 @@ change its response shape without notice, so failures are treated as
 
 * Greenhouse ``GET https://boards-api.greenhouse.io/v1/boards/{token}/jobs?content=true``
   -> ``{"jobs": [{"id", "title", "absolute_url", "location": {"name"},
-  "updated_at", "content"}]}``.
+  "first_published", "updated_at", "content"}]}``.
 * Lever ``GET https://api.lever.co/v0/postings/{token}?mode=json``
   -> ``[{"id", "text", "hostedUrl", "categories": {"location"},
   "createdAt" (epoch ms), "descriptionPlain"}]``.
@@ -33,6 +33,13 @@ Ashby lists already carry the description, so their prefilter is applied
 in-list and no detail request exists. ``list_board`` (single ``?content=true``
 request, no cache) is unchanged: ``job_input.py``'s one-posting fallback and
 the older tests still use it.
+
+A row's ``published_at`` is the day the posting WENT UP (:data:`PUBLISHED_FIELDS`),
+never its last change (0110-10-14): Greenhouse's ``first_published`` (on the
+list and on the job; the public documentation shows it on the job), Lever's
+``createdAt`` (the only date its list carries), Ashby's ``publishedAt``. A
+Greenhouse job with no ``first_published`` has no ``published_at``; its
+``updated_at`` stays what it is, the change marker (and the index's "updated").
 """
 
 from __future__ import annotations
@@ -290,6 +297,11 @@ def posting_content_digest(title: str, text: str | None) -> str:
     return content_hash(_text_bytes(title, text or None))
 
 
+#: 0110-10-14: the list field each provider's ``published_at`` is read from: the day the posting went up. A provider
+#: added here says so in ``scout_new.PUBLISHED_KINDS`` too (its test compares the two tables).
+PUBLISHED_FIELDS = {"greenhouse": "first_published", "lever": "createdAt", "ashby": "publishedAt"}
+
+
 def _published_at_from_iso(value: object) -> str | None:
     if type(value) is not str or not value:
         return None
@@ -543,12 +555,17 @@ def _greenhouse_row(
     """One Greenhouse job (+ its HTML ``content``, from the list or a detail call) -> ``PostingRow``.
 
     ``detail`` is the already-fetched detail payload when the two-phase
-    fetch made one; its ``pay_input_ranges`` win over the list item's.
+    fetch made one; its ``pay_input_ranges`` win over the list item's, and
+    its ``first_published`` is read when the list item carries none.
     """
 
     pay = greenhouse_pay(detail) if detail is not None else None
     if pay is None:
         pay = greenhouse_pay(job)
+    # 0110-10-14: the day the posting went up. Never ``updated_at``: an edit is not a posting day.
+    published_at = _published_at_from_iso(job.get("first_published"))
+    if published_at is None and detail is not None:
+        published_at = _published_at_from_iso(detail.get("first_published"))
     location = job.get("location")
     location_name = ""
     if type(location) is dict and type(location.get("name")) is str:
@@ -565,7 +582,7 @@ def _greenhouse_row(
         company=_company_from_token(board_token),
         title=title,
         location=location_name,
-        published_at=_published_at_from_iso(job.get("updated_at")),
+        published_at=published_at,
         content_sha256=posting_content_digest(title, text),
         source_kind=SourceKind.ATS,
         query_key=f"ats:greenhouse:{board_token}",
@@ -1494,6 +1511,7 @@ __all__ = [
     "BoardFetchStats",
     "CachedResponse",
     "LAST_FETCHED_SCHEMA",
+    "PUBLISHED_FIELDS",
     "ashby_pay",
     "ashby_work_mode",
     "fetch_ashby_board",

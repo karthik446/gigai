@@ -14,7 +14,7 @@ In this file: [Run](#run) · [The flows](#the-flows) ·
 ## Run
 
 ```sh
-make ui-test        # installs Chromium once, builds the home (about 25 s), runs every `ui` test on the small home (29 tests: 143 s on a busy laptop, 2026-10-04)
+make ui-test        # installs Chromium once, builds the home (about 25 s), runs every `ui` test on the small home (30 tests: 29 took 143 s on a busy laptop, 2026-10-04)
 ```
 
 | Command | Home | What runs | Where it runs |
@@ -69,6 +69,7 @@ The 11 flows of the UI-testing spike (REPORT.md 5.3), and the flows of the featu
 | Master resume page and the file in the resumes folder: the line about `master.md`, "changes not imported yet" after the user edits the file, **Import the file** (one write), a page write that leaves the edited file alone (0.1.10.9 master P8) | `test_master_file.py` (changes the home) | - (timed on the operator-sized home by hand: see the M8 worker report) |
 | Job page: Picked / Left out with reasons, Add and Remove, the "keep 2 pages" question, "Save this wording to your master" | `test_picked_left_out.py` (changes the home) | - |
 | A posting's date on its Jobs row and its job page: "posted ...", the server's `published_at`, never the day Scout first saw it; from the row when opened from the list, ONE `GET /api/jobs?url=` when opened by its link (0110-10-14) | `test_posting_date.py` | - (the rows are the list's own; `GET /api/jobs?url=` is a row of the write timing gate) |
+| Jobs: the "Newest posted" order chip: off by default (the best fit first); on, ONE list request with `sort=newest_posted`, the rows in the server's order (the day each posting went up, the newest first); the address keeps it over a reload; it selects nothing (the whole list, no "Clear filters") (0110-10-14, the correction) | `test_posting_date.py` | - (reads only: the list's own request) |
 | An old assessment: the Jobs row says it once, in the server's words; the job page's ONE Re-assess is on with no question open, says why and the cost, is one `POST /api/assess`; then the new assessment's date, and a Scout label and a tailored resume from before it say so (0110-10-12) | `test_reassess_stale.py` (changes the home: a setting and one assessment, both put back) | - |
 
 **Where a test answers for the server.** Everything is the real server unless the test's docstring says otherwise,

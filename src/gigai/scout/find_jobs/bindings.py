@@ -223,13 +223,16 @@ def _test_bulk_postings() -> list[dict[str, object]]:
             fit, note = 30 + index % 40, "Build reliable Python services."
         minutes = index % 60
         hours = index // 60
+        # 0110-10-14: a Greenhouse job says when it went up (``first_published``) beside its last change; here they are one instant.
+        posted = _test_days_ago(ages[index]) if index < len(ages) else f"2026-09-22T{23 - hours:02d}:{59 - minutes:02d}:00Z"
         jobs.append(
             {
                 "id": str(1000 + index),
                 "title": f"Software Engineer fit {fit}",
                 "absolute_url": f"https://boards.greenhouse.io/acme/jobs/{1000 + index}",
                 "location": {"name": "Denver, CO"},
-                "updated_at": _test_days_ago(ages[index]) if index < len(ages) else f"2026-09-22T{23 - hours:02d}:{59 - minutes:02d}:00Z",
+                "first_published": posted,
+                "updated_at": posted,
                 "company_name": "Acme",
                 "content": f"&lt;p&gt;{note} Posting {index}.&lt;/p&gt;",
             }
@@ -266,6 +269,7 @@ def _test_provider_handler(request: httpx.Request) -> httpx.Response:
                 "title": "Software Engineer",
                 "absolute_url": "https://boards.greenhouse.io/acme/jobs/101",
                 "location": {"name": "Denver, CO"},
+                "first_published": "2026-09-22T00:00:00Z",
                 "updated_at": "2026-09-22T00:00:00Z",
                 "company_name": "Acme",
                 "content": "&lt;p&gt;Build reliable Python services.&lt;/p&gt;",
@@ -295,6 +299,7 @@ def _test_provider_handler(request: httpx.Request) -> httpx.Response:
                         "title": "Platform Engineer",
                         "absolute_url": "https://boards.greenhouse.io/shell/jobs/303",
                         "location": {"name": "Remote, US"},
+                        "first_published": "2026-09-22T00:00:00Z",
                         "updated_at": "2026-09-22T00:00:00Z",
                         "content": "&lt;p&gt;Operate Python platform services on GCP.&lt;/p&gt;",
                     }
@@ -315,6 +320,7 @@ def _test_provider_handler(request: httpx.Request) -> httpx.Response:
                         "title": "Software Engineer",
                         "absolute_url": "https://boards.greenhouse.io/acme/jobs/101",
                         "location": {"name": "Denver, CO"},
+                        "first_published": "2026-09-22T00:00:00Z",
                         "updated_at": "2026-09-22T00:00:00Z",
                         "content": "Build reliable Python services.",
                     }

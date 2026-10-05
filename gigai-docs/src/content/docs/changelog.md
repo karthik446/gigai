@@ -33,7 +33,17 @@ things still take more than a second (see "Still slower than one second"): the n
 - **One more preparation of the postings, once.** The first Jobs load, or the first `gigai scout new`,
   after you install this version prepares every company's postings again (about 10 to 13 seconds with
   10,000 companies, in the background; the list you had is shown meanwhile, with progress). Nothing is
-  lost and nothing needs to be done.
+  lost and nothing needs to be done. The same preparation puts every Greenhouse posting under the day it
+  was posted (next note). If you ran an earlier build of 0.1.10.11, the postings are prepared once more.
+- **Greenhouse postings get their posting day; your next sources update finishes it.** Until now Scout
+  kept the day a Greenhouse posting last CHANGED as its date. After the preparation above, a Greenhouse
+  posting shows the day it was posted wherever the company's stored list has it, and "first seen"
+  otherwise; the 7 days and 30 days filters go by that day at once. Your "posted within" window goes by
+  it for a company after the next `gigai scout sources update` (or "Update sources") has checked that
+  company: the update reads each Greenhouse company's list once more with the request it makes anyway
+  (no extra request; a company whose list did not change is read again from what is stored). Until
+  then a Greenhouse posting that is older than your window can still be listed. No posting is marked new
+  or changed by this, and nothing needs to be done.
 - **Nothing else changes.** Which jobs are checked again after a change, and the limits on them, are
   what they were; no assessment, ranking or tailored resume becomes out of date.
 
@@ -71,8 +81,23 @@ things still take more than a second (see "Still slower than one second"): the n
   Settings reads, looked up the project once for every job it lists (up to 200); it now looks it up
   once.
 
+#### Added
+
+- **Newest posted first.** Jobs has an "Order" chip, "Newest posted": on, the list is ordered by the day
+  each posting went up, the newest first (a posting whose board gives no date: by the day Scout first
+  saw it). Off, the order is what it was: the best fit first. The address keeps it, so a reload or a
+  bookmark does too. `GET /api/postings?sort=newest_posted` is the same order for an agent (`sort=fit`
+  is the default).
+
 #### Fixed
 
+- **A Greenhouse posting's date is the day it was posted, not the day it last changed.** Scout stored a
+  Greenhouse posting's last change as its date. A posting that had been up for two months and was edited
+  three days ago counted as three days old: it passed the 7 days and 30 days filters and your "posted
+  within" window, and would have read "updated 3 days ago". Scout now reads the day the board first
+  published it, and the filters, the window and the new "Newest posted" order go by that day. The day of
+  the last change is kept beside it, never in its place (see "After you upgrade"). Lever and Ashby
+  postings already had the right day.
 - **Re-assess works on an old assessment.** A job whose assessment was marked old (made with an older
   prompt, or before you changed a setting, an answer or your resume) could not be re-assessed from its
   job page when it had no open question: the button was off. It is now on, says why the assessment is
@@ -86,11 +111,12 @@ things still take more than a second (see "Still slower than one second"): the n
   resume made before the new assessment says so ("from before the latest assessment"), with what to
   click to make it again. "Minor gaps" is said beside a match only, not under "Needs your answers".
 - **A posting's date is shown.** Jobs rows and the job page say "posted 10 days ago" (the exact day on
-  hover), from the board's own date. Some boards give only the day a posting last changed: those say
-  "updated 3 days ago". When a board gives no date, the page says "first seen 3 days ago", which is the
-  day Scout first stored the posting. `gigai scout jobs list` and `gigai scout new` say the same with
-  the day ("posted 2026-09-24"), and their JSON and the API rows carry both dates under their own names
-  (`published_at` with `published_kind`, and `first_seen_at`).
+  hover): the day the posting went up on its board. When the board changed the posting on a later day,
+  the job page says so beside it ("posted 2 months ago · updated 3 days ago"). When a board gives no
+  posting day, the page says "first seen 3 days ago", which is the day Scout first stored the posting.
+  `gigai scout jobs list` and `gigai scout new` say the same with the day ("posted 2026-09-24"), and
+  their JSON and the API rows carry each date under its own name (`published_at` with `published_kind`,
+  `updated_at` for the board's last change, and `first_seen_at`).
 - **`gigai scout resume master init` reads the resumes people have.** It refused a resume with a
   `---` rule between two roles ("text after an entry's bullets"), and `--from FILE` refused section
   headings such as `## WORK EXPERIENCE` or `## AGENTIC AI PROJECTS` and a project written as a bold

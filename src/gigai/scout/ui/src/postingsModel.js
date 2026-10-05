@@ -126,7 +126,21 @@ export function toggleState(states, value) {
   return current.includes(value) ? current.filter((item) => item !== value) : current.concat(value);
 }
 
-export const EMPTY_FILTER = { profileIds: [], window: null, states: [], removed: false, query: "" };
+// 0110-10-14: the list's ORDER, beside the filters. Off (null) is the server's own order (the fit, the rank, the newest
+// seen); on, `sort=newest_posted`: the day the posting went up, the newest first. An order is not a filter: it selects
+// nothing (`hasFilter` does not count it), but it rides with them in the request and in the address.
+export const NEWEST_POSTED = "newest_posted";
+export const ORDER_CHIP = {
+  value: NEWEST_POSTED,
+  label: "Newest posted",
+  title: "Order by the day the posting went up, the newest first. Off: the best fit first.",
+};
+
+export function toggleSort(sort) {
+  return sort === NEWEST_POSTED ? null : NEWEST_POSTED;
+}
+
+export const EMPTY_FILTER = { profileIds: [], window: null, states: [], removed: false, query: "", sort: null };
 
 export function hasFilter(filter) {
   return Boolean(filter.profileIds.length || filter.window || filter.states.length || filter.removed || filter.query.trim());
@@ -145,6 +159,9 @@ export function postingsQuery(filter, { limit = PAGE_ROWS, offset = 0 } = {}) {
   }
   if (filter.removed) {
     query.set("removed", "1");
+  }
+  if (filter.sort === NEWEST_POSTED) {
+    query.set("sort", NEWEST_POSTED);
   }
   query.set("limit", String(limit));
   if (offset) {
@@ -288,13 +305,15 @@ export function detailLine(row) {
 
 // --- the posting's date (0110-10-14) -----------------------------------------------------------
 
-// A posting has two dates and they are different facts (scout_new.posting_dates):
-//   published_at   the BOARD's own date, the one the 7 / 30 days chips judge. `published_kind` says what the board
-//                  means by it: "posted" (Lever, Ashby: the day the posting went up) or "updated" (Greenhouse: the
-//                  posting's last change; its list gives no posting day)
+// A posting has three dates and they are different facts (scout_new.posting_dates):
+//   published_at   the BOARD's own date, the one the 7 / 30 days chips judge. `published_kind` says what it is:
+//                  "posted" (Greenhouse, Lever, Ashby: the day the posting went up) or "updated" (a board kind that
+//                  gives only the posting's last change: none today)
+//   updated_at     the board's LAST CHANGE to the posting (null when it gives none): never the posting day
 //   first_seen_at  when Scout first stored the posting: what "New since last check" judges (`first_seen`, its older name)
 // The row shows ONE of them with its own word, never one as the other: "posted 10 days ago", "updated 3 days ago",
-// or, when the board gives no date, "first seen 3 days ago". Null when the row has no date at all.
+// or, when the board gives no date, "first seen 3 days ago". Null when the row has no date at all. The job page adds
+// the last change beside it (`updated`, below) when it is a later day than the posting day.
 const DATE_WORDS = { posted: "posted", updated: "updated", first_seen: "first seen" };
 
 export function postingDate(row) {
@@ -341,8 +360,10 @@ function exactDate(iso) {
   return new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
 }
 
-// {kind, at, text, date, title}: `text` is the line ("posted 10 days ago"), `date` the exact day ("Sep 24, 2026"),
-// `title` the hover, which says what the date is and, when there is a board date, when Scout first saw the posting.
+// {kind, at, text, date, title, updated}: `text` is the line ("posted 10 days ago"), `date` the exact day ("Sep 24,
+// 2026"), `title` the hover, which says what the date is and, when there is a board date, when Scout first saw the
+// posting. `updated` ({at, text, date}, else null) is the board's last change when it is a later day than the posting
+// day ("updated 3 days ago"), or the only board date there is: it is said BESIDE the line, never in its place.
 export function postedLine(row, now = Date.now()) {
   const found = postingDate(row);
   if (!found) {
@@ -350,12 +371,17 @@ export function postedLine(row, now = Date.now()) {
   }
   const date = exactDate(found.at);
   const seen = found.firstSeenAt ? `First seen by Scout ${exactDate(found.firstSeenAt)}.` : "";
+  const changedAt = typeof row.updated_at === "string" && row.updated_at && !Number.isNaN(new Date(row.updated_at).getTime()) ? row.updated_at : null;
+  const later = changedAt && (found.kind === "first_seen" || (found.kind === "posted" && calendarDays(found.at, changedAt) >= 1));
+  const updated = later ? { at: changedAt, text: `updated ${agoText(changedAt, now)}`, date: exactDate(changedAt) } : null;
   const titles = {
-    posted: `Posted ${date} (the board's date). ${seen}`,
+    posted: `Posted ${date} (the board's date).${updated ? ` The board last changed it ${updated.date}.` : ""} ${seen}`,
     updated: `The board last changed this posting ${date}; it gives no posting day. ${seen}`,
-    first_seen: `First seen by Scout ${date}. The board gives no date for this posting.`,
+    first_seen: updated
+      ? `First seen by Scout ${date}. The board gives no posting day; it last changed this posting ${updated.date}.`
+      : `First seen by Scout ${date}. The board gives no date for this posting.`,
   };
-  return { kind: found.kind, at: found.at, text: `${DATE_WORDS[found.kind]} ${agoText(found.at, now)}`, date, title: titles[found.kind].trim() };
+  return { kind: found.kind, at: found.at, text: `${DATE_WORDS[found.kind]} ${agoText(found.at, now)}`, date, title: titles[found.kind].trim(), updated };
 }
 
 // The matching profiles a row is NOT shown for: the "Assess as <profile>" actions.
@@ -574,6 +600,9 @@ export function jobsHash(filter, page = 1, size = PAGE_ROWS) {
   if (filter.query && filter.query.trim()) {
     query.set("q", filter.query.trim());
   }
+  if (filter.sort === NEWEST_POSTED) {
+    query.set("sort", NEWEST_POSTED);
+  }
   const text = query.toString();
   return text ? `${JOBS_HASH_BASE}?${text}` : JOBS_HASH_BASE;
 }
@@ -592,6 +621,7 @@ export function parseJobsHash(hash) {
       states: [...new Set(states)],
       removed: query.get("removed") === "1",
       query: query.get("q") || "",
+      sort: query.get("sort") === NEWEST_POSTED ? NEWEST_POSTED : null,
     },
     page: cleanPage(query.get("page")),
     size: cleanSize(query.get("size")),

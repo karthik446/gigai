@@ -147,6 +147,7 @@ def test_greenhouse_url_and_mapping() -> None:
                         "title": "Software Engineer",
                         "absolute_url": "https://boards.greenhouse.io/acme/jobs/101",
                         "location": {"name": "Denver, CO"},
+                        "first_published": "2026-08-02T00:00:00Z",
                         "updated_at": "2026-09-20T00:00:00Z",
                         "content": "<p>Build things.</p>",
                     },
@@ -174,7 +175,8 @@ def test_greenhouse_url_and_mapping() -> None:
     assert row.url == "https://boards.greenhouse.io/acme/jobs/101"
     assert row.normalized_url == normalize_url(row.url)
     assert row.location == "Denver, CO"
-    assert row.published_at == "2026-09-20T00:00:00Z"
+    # 0110-10-14: the day the posting went up (`first_published`), never its last change (`updated_at`).
+    assert row.published_at == "2026-08-02T00:00:00Z"
     assert row.source_kind is SourceKind.ATS
     # U25: the stored text is HTML converted to plain text, and the digest
     # hashes that plain text (not the raw HTML markup).

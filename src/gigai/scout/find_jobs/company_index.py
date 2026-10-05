@@ -13,7 +13,7 @@ One plain JSON file per company under the GigAI home::
      "postings": {"<id>": {"title", "location", "url", "updated_at",
                            "content_sha256", "first_seen", "last_seen",
                            "changed_at"?, "removed_at"?, "published_at"?,
-                           "countries"?}}}
+                           "published_kind"?, "countries"?}}}
 
 This is a CACHE, not a record: it lives next to the board response cache
 (``<home>/cache/scout/ats-boards``), never in a workpad or the journal, every
@@ -39,6 +39,20 @@ payload. The index is role-independent: every listed posting is indexed, not
 only the titles the current config matches. Greenhouse's list carries no
 description, so a Greenhouse posting's ``content_sha256`` is ``null`` until
 its detail is in the board cache; ``updated_at`` is its change signal.
+
+The two board dates of a posting (0110-10-14). ``published_at`` is the day it
+WENT UP (``ats_board_clients.PUBLISHED_FIELDS``); ``updated_at`` is its last
+change, and is never read as the first. Up to 0.1.10.10 a Greenhouse
+posting's ``published_at`` WAS the list's ``updated_at``. So a Greenhouse
+posting dated by this version carries ``"published_kind": "posted"``, and a
+stored Greenhouse date without that mark is the old last change: it is not
+read as a posted date (the posting reads as undated; the same value is in
+``updated_at``), and the company is ``dates_pending``. The NEXT update reads a
+pending company's body again though the board did not change (a ``304``, the
+same digest): from the cached body, or, with no body on disk, by the
+update's own list request made unconditional (:meth:`CompanyIndex.validators_for_url`).
+That pass changes dates only: no posting is new or changed for it, and the
+company's status is still ``untouched``.
 """
 
 from __future__ import annotations
@@ -138,6 +152,17 @@ def company_key(ats: str, slug: str) -> str:
     return f"{ats}:{slug}"
 
 
+#: What a posting's ``published_kind`` says when this version dated it: the day the posting went up.
+PUBLISHED_POSTED = "posted"
+#: Providers whose stored ``published_at`` was once the posting's LAST CHANGE (Greenhouse's list ``updated_at``, up to
+#: 0.1.10.10). Only their postings carry the mark, and only for them is a date without it not a posted date.
+_ONCE_UPDATED = frozenset({"greenhouse"})
+
+
+def _published_kind(ats: str, published_at: str | None) -> str | None:
+    return PUBLISHED_POSTED if published_at is not None and ats in _ONCE_UPDATED else None
+
+
 def board_list_url(ats: str, slug: str) -> str:
     """The list URL the acquire path fetches (and caches) for this company's board."""
 
@@ -177,6 +202,8 @@ class IndexedPosting:
     removed_at: str | None = None
     published_at: str | None = None
     countries: tuple[str, ...] | None = None
+    #: ``posted`` on a posting of a provider in ``_ONCE_UPDATED`` whose ``published_at`` is the day it went up.
+    published_kind: str | None = None
 
     @property
     def removed(self) -> bool:
@@ -204,6 +231,8 @@ class IndexedPosting:
             value["removed_at"] = self.removed_at
         if self.published_at is not None:
             value["published_at"] = self.published_at
+            if self.published_kind is not None:
+                value["published_kind"] = self.published_kind
         if self.countries is not None:
             value["countries"] = list(self.countries)
         return value
@@ -236,6 +265,7 @@ class IndexedPosting:
             removed_at=_optional_str(payload.get("removed_at")),
             published_at=_optional_str(payload.get("published_at")),
             countries=countries,
+            published_kind=_optional_str(payload.get("published_kind")),
         )
 
 
@@ -270,6 +300,9 @@ class CompanyIndexEntry:
     last_modified: str | None = None
     #: When the posting set last changed (``None`` until a change after the first build).
     changed_at: str | None = None
+    #: 0110-10-14: the file held a date that was a posting's last change (see the module docstring). The next update
+    #: reads the board's body again, changed or not; that read clears it.
+    dates_pending: bool = False
 
     @property
     def key(self) -> str:
@@ -286,7 +319,7 @@ class CompanyIndexEntry:
         return tuple(posting for posting in self.live() if since is None or posting.touched_at > since)
 
     def to_json(self) -> dict[str, object]:
-        return {
+        value: dict[str, object] = {
             "schema_version": COMPANY_INDEX_SCHEMA,
             "company": self.company,
             "ats": self.ats,
@@ -298,6 +331,9 @@ class CompanyIndexEntry:
             "body_sha256": self.body_sha256,
             "postings": {posting_id: posting.to_json() for posting_id, posting in sorted(self.postings.items())},
         }
+        if self.dates_pending:
+            value["dates_pending"] = True
+        return value
 
     @classmethod
     def from_json(cls, payload: object) -> "CompanyIndexEntry | None":
@@ -316,6 +352,13 @@ class CompanyIndexEntry:
             posting = IndexedPosting.from_json(posting_id, raw) if type(posting_id) is str and posting_id else None
             if posting is not None:
                 postings[posting_id] = posting
+        dates_pending = payload.get("dates_pending") is True
+        if ats in _ONCE_UPDATED:
+            for posting_id, posting in postings.items():
+                if posting.published_at is not None and posting.published_kind != PUBLISHED_POSTED:
+                    # Written before this provider's posted date was read: the value is the posting's last change.
+                    postings[posting_id] = replace(posting, published_at=None, published_kind=None)
+                    dates_pending = True
         company = payload.get("company")
         return cls(
             company=company if type(company) is str and company else slug,
@@ -327,6 +370,7 @@ class CompanyIndexEntry:
             postings=postings,
             last_modified=_optional_str(payload.get("last_modified")),
             changed_at=_optional_str(payload.get("changed_at")),
+            dates_pending=dates_pending,
         )
 
 
@@ -402,9 +446,17 @@ def observe_company(
     stamps, the digest and the validators all stay; only ``checked_at``
     moves. Otherwise ``observed`` (the parsed body) is diffed against the
     indexed postings. With no ``previous`` entry every posting is new.
+
+    0110-10-14: a ``previous`` entry that is ``dates_pending`` is NOT left
+    untouched when ``observed`` is given: the same body is diffed so its
+    postings get the dates this version reads. Nothing else of a posting
+    differs then, so none is new or changed and the status stays
+    ``untouched`` (the text index and the tags have nothing to do); the
+    entry is no longer pending.
     """
 
-    if previous is not None and (not_modified or (body_sha256 is not None and body_sha256 == previous.body_sha256)):
+    same_body = previous is not None and (not_modified or (body_sha256 is not None and body_sha256 == previous.body_sha256))
+    if previous is not None and same_body and not (previous.dates_pending and observed is not None):
         entry = replace(previous, checked_at=observed_at)
         return entry, CompanyChange(ats, slug, STATUS_UNTOUCHED, live=len(entry.live()))
     if observed is None:
@@ -430,6 +482,7 @@ def observe_company(
                 last_seen=observed_at,
                 published_at=item.published_at,
                 countries=item.countries,
+                published_kind=_published_kind(ats, item.published_at),
             )
             continue
         is_change = known.removed or _differs(known, item)
@@ -450,6 +503,7 @@ def observe_company(
             removed_at=None,
             published_at=item.published_at if item.published_at is not None else known.published_at,
             countries=item.countries if item.countries is not None else known.countries,
+            published_kind=_published_kind(ats, item.published_at) if item.published_at is not None else known.published_kind,
         )
     cutoff = _retention_cutoff(observed_at)
     for posting_id, known in before.items():
@@ -476,7 +530,7 @@ def observe_company(
     return entry, CompanyChange(
         ats,
         slug,
-        STATUS_INDEXED if previous is None else STATUS_UPDATED,
+        STATUS_INDEXED if previous is None else STATUS_UNTOUCHED if same_body else STATUS_UPDATED,
         new=tuple(sorted(new)),
         changed=tuple(sorted(changed)),
         removed=tuple(sorted(removed)),
@@ -723,13 +777,16 @@ class CompanyIndex:
 
         Only a list URL maps to a company; a detail URL, an unindexed board
         or an entry with no validators reads as ``None`` (the request stays
-        unconditional).
+        unconditional). So does an entry that is ``dates_pending``: its one
+        list request has to bring the body.
         """
 
         slug = slug_from_list_url(ats, url)
         entry = self.read(ats, slug) if slug is not None else None
         if entry is None or not (entry.etag or entry.last_modified):
             return None
+        if entry.dates_pending:
+            return None  # 0110-10-14: a 304 would bring no body, and the body is where the posted dates are
         return entry.etag, entry.last_modified
 
     def read(self, ats: str, slug: str) -> CompanyIndexEntry | None:
@@ -821,7 +878,9 @@ def refresh_company(
 
     * no cached list body -> ``missing`` (nothing written);
     * the indexed digest equals the cached body's -> ``untouched``, only
-      ``checked_at`` moves;
+      ``checked_at`` moves (0110-10-14: unless the entry is
+      ``dates_pending``; then the same body is read for its dates, without
+      the description lookups: still ``untouched``, nothing new or changed);
     * otherwise the body is parsed and diffed (``indexed`` the first time,
       ``updated`` after), and the file is replaced atomically.
 
@@ -854,8 +913,10 @@ def refresh_company(
     name = company or (previous.company if previous is not None else slug)
     observed: dict[str, ObservedPosting] | None = None
     digest = indexed_body_digest(ats, entry.sha256)
-    if previous is None or previous.body_sha256 != digest:
-        lookup = cached_detail_lookup(cache, slug) if details and ats == "greenhouse" else None
+    same_body = previous is not None and previous.body_sha256 == digest
+    if not same_body or previous.dates_pending:  # type: ignore[union-attr]
+        # The same body again, for its dates only: the stored digests stand, so no description is looked up.
+        lookup = cached_detail_lookup(cache, slug) if details and ats == "greenhouse" and not same_body else None
         try:
             observed = parse_board_body(ats, slug, entry.body, detail_lookup=lookup)
         except CompanyIndexError as exc:
@@ -1032,6 +1093,7 @@ __all__ = [
     "STATUS_UNTOUCHED",
     "STATUS_UPDATED",
     "UPDATE_SUMMARY_SCHEMA",
+    "PUBLISHED_POSTED",
     "CachedRows",
     "CompanyChange",
     "CompanyIndex",

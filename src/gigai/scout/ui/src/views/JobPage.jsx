@@ -119,7 +119,9 @@ import { ASSESSMENTS_HASH, JOBS_HASH } from "../routing.js";
 //               tailored before it: neither is the new assessment's
 // 0110-10-14: the posting's date in the header: "posted 10 days ago (Sep 24,
 // 2026)", "updated ..." or "first seen ..." (postingsModel.postedLine), from
-// the Jobs row the page was opened from, else ONE GET /api/jobs?url=.
+// the Jobs row the page was opened from, else ONE GET /api/jobs?url=. When
+// the board changed the posting on a later day, that is said beside it
+// ("· updated 3 days ago"), never in place of the posting day.
 //
 // Q4b: work_mode / pay (posting) and h1b (the row, via job.h1b) render only
 // when present -- no placeholder chips (operator answer 3).
@@ -527,6 +529,12 @@ export default function JobPage({
               {posted ? (
                 <span data-role="posted" data-kind={posted.kind} data-at={posted.at} title={posted.title}>
                   {posted.text} ({posted.date})
+                  {posted.updated && (
+                    <span data-role="posting-updated" data-at={posted.updated.at}>
+                      {" · "}
+                      {posted.updated.text} ({posted.updated.date})
+                    </span>
+                  )}
                 </span>
               ) : job.status === "on_demand" || job.fromPostings ? null : (
                 <span title={posting.published_at || undefined}>

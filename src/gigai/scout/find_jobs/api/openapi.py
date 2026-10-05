@@ -365,7 +365,8 @@ _NEW_EXAMPLE: dict[str, object] = {
             "job_identity": _JOB_URL, "normalized_url": _JOB_URL, "job_url": _JOB_URL, "title": "Staff Engineer", "company": "Acme", "company_slug": "acme", "company_name": "Acme",
             "location": "Remote - US", "work_mode": "remote", "salary": "USD 180,000-220,000 per year",
             "description": "Acme is hiring a Staff Engineer to own its Python services…", "first_seen": "2026-10-02T08:00:00.000000Z",
-            "published_at": "2026-09-24T16:00:00.000000Z", "published_kind": "posted", "first_seen_at": "2026-10-02T08:00:00.000000Z",
+            "published_at": "2026-09-24T16:00:00.000000Z", "published_kind": "posted", "updated_at": "2026-09-30T11:00:00.000000Z",
+            "first_seen_at": "2026-10-02T08:00:00.000000Z",
             "removed_at": None, "profile_id": "prof_1",
             "profiles": [{"profile_id": "prof_1", "match_rank": 1, "rank_score": 82, "state": "not_assessed"}],
             "state": "not_assessed", "tailored": False, "stale_reason": None, "stale_label": None, "sort_group": "not_assessed",
@@ -385,7 +386,7 @@ _NEW_EXAMPLE: dict[str, object] = {
 }
 _POSTINGS_EXAMPLE: dict[str, object] = {
     "schema_version": "scout-postings:1", "checked_at": "2026-10-03T09:30:00.000000Z",
-    "filters": {"profile_ids": [], "query": None, "states": [], "window": None, "removed": False, "limit": 50, "offset": 0},
+    "filters": {"profile_ids": [], "query": None, "states": [], "window": None, "removed": False, "limit": 50, "offset": 0, "sort": "fit"},
     "anchor": {"last_checked_at": _NEW_SINCE, "since": _NEW_SINCE},
     "counts": {"matched": 1, "shown": 1, "new": 1, "by_state": {"not_assessed": 1}, "weak_fit": 0},
     "postings": {
@@ -442,10 +443,14 @@ _POSTINGS_NOTE = (
     "unless `state=weak_fit` asks for it; it asks no question (`open_questions` is empty) and `counts.weak_fit` is how many "
     "the other filters select, listed or not. `counts.matched` is every posting the filters keep, "
     "`counts.new` those first seen since the last check (`anchor.since`; the last 7 days before the first check). This call "
-    "never moves that anchor. A row's dates: `published_at` is the board's own date, the one `window=7d|30d` judges (null when "
-    "the board gives none), `published_kind` what the board means by it (`posted`: the day the posting went up; `updated`: its "
-    "last change, all a Greenhouse list gives) and `first_seen_at` when Scout first stored the posting, the date `window=new` "
-    "judges. `assessment_basis` says where a row's assessment came from: `{origin: \"quick_assess\"}`, or for "
+    "never moves that anchor. `sort=newest_posted` orders the rows by the day the posting went up instead, the newest first "
+    "(a posting the board gives no date for: by when Scout first saw it); `sort=fit`, the default, is the order above. "
+    "A row's dates: `published_at` is the day the posting WENT UP (Greenhouse's `first_published`, Lever's `createdAt`, "
+    "Ashby's `publishedAt`), the one `window=7d|30d`, the profile's \"posted within\" and `sort=newest_posted` judge (null when "
+    "the board gives none), `published_kind` what the date is (`posted`; `updated`, a last change, only for a board kind "
+    "that gives nothing else: none today), `updated_at` the board's LAST CHANGE to the posting (null when it gives none; a "
+    "posting up for two months and edited three days ago is two months old) and `first_seen_at` when Scout first stored "
+    "the posting, the date `window=new` judges. `assessment_basis` says where a row's assessment came from: `{origin: \"quick_assess\"}`, or for "
     "an old run's `{origin: \"run:<run_id>\", run_id, prompt_version, constraints_digest, story_bank_digest, profile_ref, resume, "
     "posting_sha256, model_target, model}` (ids and digests). `rank` is the background rank lane: whether it is on and today's "
     "calls against `rank.max_calls_per_day` (100) and the warning level `rank.warn_calls_per_day` (60), counted once for all "
@@ -475,10 +480,11 @@ _NEW_NOTE = (
     "assessment, else one with a stale one, else the highest rank score), with every active profile it matches in "
     "`profiles`, best first; the top-level `profiles` are the profile tags and each one's resume by id. `score_text` is the "
     "score column (the verdict, \"fit N%\", \"N of M requirements\", the rank; a stale row says `stale_label`, never a bare percent); "
-    "A row has two dates, and they are different facts: `published_at` is the BOARD's own date, the one `window: 7d | 30d` "
-    "judges (null when the board gives none), and `published_kind` says what the board means by it: `posted` (Lever, Ashby: "
-    "the day the posting went up) or `updated` (Greenhouse: the posting's last change; its list gives no posting day), so say "
-    "\"updated\", never \"posted\", for the second. `first_seen_at` is when Scout first stored the posting, the date `new` "
+    "A row has three dates, and they are different facts: `published_at` is the day the posting WENT UP on its board, the one "
+    "`window: 7d | 30d` judges (null when the board gives none), and `published_kind` says what the date is: `posted` "
+    "(Greenhouse, Lever, Ashby), or `updated` for a board kind that only gives its last change (none today), so say "
+    "\"updated\", never \"posted\", for that. `updated_at` is the board's last change to the posting (null when it gives "
+    "none): never the posting day. `first_seen_at` is when Scout first stored the posting, the date `new` "
     "judges (`first_seen` is the same value under its older name). "
     "`score` is the share of the posting's requirements the assessment found met (`score_kind: assessment`), else the "
     "cached rank score (`rank`), else null. `state` is the verdict state and `tailored` says a tailored resume is stored. "
@@ -696,8 +702,9 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
             "`work_mode`, `salary`, `provider` and `board_token`, `rank` is `{normalized_url, score, profile_id, source: \"posting_index\"}` "
             "(the stored score; a run's rank line has reasons and blockers instead), `work_mode_fit` and `h1b` are a run row's, and "
             "`index_posting` is the GET /api/postings row for the job (null when the index does not hold it). "
-            "For a posting the index holds, `posting` carries its dates as that row does: `published_at` (the board's date; null when "
-            "it gives none), `published_kind` (posted | updated) and `first_seen_at` (when Scout first stored it). "
+            "For a posting the index holds, `posting` carries its dates as that row does: `published_at` (the day it went up; null when "
+            "the board gives none), `published_kind` (posted | updated), `updated_at` (the board's last change, null when it gives "
+            "none) and `first_seen_at` (when Scout first stored it). "
             + _COMPANY_NOTE + " " + _WEIGHTS_NOTE + " "
             "Each `source: \"quick\"` assessment carries `basis_stale` (and `basis_stale_reason` when true). "
             + _STALE_NOTE
@@ -1978,7 +1985,8 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
             _q("profile_id", "string", "Only postings this active profile matches; repeat it, or separate ids with commas. One id shows that profile's own row."),
             _q("q", "string", "Words that must all be in the title, company or location."),
             _q("state", "string", "Keep these states (repeat or separate with commas): not_assessed, needs_answers, matched, not_a_match, tailored, assessed (any assessment), recommended (the Scout label), weak_fit (listed only when asked for)."),
-            _q("window", "string", "new: first seen since the last check. 7d / 30d: published (else first seen) in the last 7 or 30 days.", enum=("new", "7d", "30d")),
+            _q("window", "string", "new: first seen since the last check. 7d / 30d: posted (the day it went up; else first seen) in the last 7 or 30 days.", enum=("new", "7d", "30d")),
+            _q("sort", "string", "fit (the default): the grid's order. newest_posted: the day the posting went up, the newest first.", enum=("fit", "newest_posted")),
             _q("removed", "string", "1: the postings the board no longer lists, instead of the live ones.", enum=("0", "1", "true", "false")),
             _q("history", "string", "1: add `history`, what old find-jobs runs assessed, with each run's provenance.", enum=("0", "1", "true", "false")),
             _q("include_hidden", "string", "1 with history=1: also the hidden rows (a run with no profile, a profile that is not active).", enum=("0", "1", "true", "false")),

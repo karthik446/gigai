@@ -512,6 +512,7 @@ def test_no_description_text_is_ever_in_the_imported_data(day1: _Release, tmp_pa
                     assert forbidden not in raw, path
     assert set(json.loads(CompanyIndex.for_home(home).path("greenhouse", "acme").read_text())["postings"]["1"]) <= {
         "title", "location", "url", "updated_at", "content_sha256", "first_seen", "last_seen", "changed_at", "published_at", "countries",
+        "published_kind",  # 0110-10-14: a code (`posted`) beside a Greenhouse posting's date, never text
     }
 
 

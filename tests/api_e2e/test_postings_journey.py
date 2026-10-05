@@ -113,6 +113,10 @@ def test_postings_journey(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> No
         only_new = client.get("/api/postings?window=new&state=not_assessed&q=software+engineer").json()
         assert _JOB in [item["job_identity"] for item in only_new["postings"]["rows"]]
         assert client.get("/api/postings?q=nosuchword").json()["counts"]["matched"] == 0
+        # 0110-10-14: the order is the grid's unless `sort=newest_posted` asks for the day the posting went up.
+        assert found["filters"]["sort"] == "fit"
+        newest = _assert_public_only(client.get("/api/postings?sort=newest_posted"))
+        assert newest["filters"]["sort"] == "newest_posted" and _JOB in [item["job_identity"] for item in newest["postings"]["rows"]]
 
         # 4. Assess these: the question first, and nothing assessed without approval.
         asked = client.post("/api/postings/assess", json={"jobs": [_JOB]})
@@ -174,6 +178,7 @@ def test_postings_journey(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> No
         for url, status, code in (
             ("/api/postings?bogus=1", 422, "unknown_key"),
             ("/api/postings?window=yesterday", 422, "invalid_value"),
+            ("/api/postings?sort=oldest", 422, "invalid_value"),
             ("/api/postings?state=great", 422, "invalid_value"),
             ("/api/postings?limit=0", 422, "invalid_value"),
             ("/api/postings?history=maybe", 422, "invalid_value"),

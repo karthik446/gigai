@@ -18,6 +18,15 @@ link (a reload), an assessed job's page asks for the job ONCE (`GET /api/jobs?ur
 
 MEASURED (14-core laptop, 2026-10-04, three runs): the job page from the list 0.07 to 0.10 s; the reload until the date
 is shown 0.25 to 0.4 s.
+
+The correction (0.1.10.11): the date is the day the posting WENT UP for every board kind (a Greenhouse posting's used
+to be its last change), and the list can be ordered by it. The second flow pins the "Newest posted" chip: off by
+default (the server's own order: the best fit first); on, ONE list request with `sort=newest_posted`, the rows in the
+order the server answered, newest posting day first; the address keeps it over a reload; off again, the plain list.
+It selects nothing: the count is the whole list's and no "Clear filters" is offered for it. No write. (The job page's
+"updated N days ago" beside the posting day needs a board that gives a last change; the small home's Lever boards give
+none, so that rule is pinned in `tests/api_e2e/test_ui_posted_date_model.py` and the server's rows in
+`tests/behaviors/scout_pipeline/test_posting_dates.py`.)
 """
 
 from __future__ import annotations
@@ -27,12 +36,15 @@ from urllib.parse import unquote
 
 import pytest
 
+from tests.ui import jobs_page
 from tests.ui.support import FIRST_LOAD_WALL_SECONDS, INTERACTIVE_WALL_SECONDS, tid
 
 pytestmark = pytest.mark.ui
 
 OPEN_JOB_WALL_SECONDS = INTERACTIVE_WALL_SECONDS
 RELOAD_WALL_SECONDS = FIRST_LOAD_WALL_SECONDS
+ORDER_WALL_SECONDS = INTERACTIVE_WALL_SECONDS
+ORDER_CPU_SECONDS = 1.0  # a chip's read of the list: 0.02 to 0.03 measured for the others
 WORDS = {"posted": "posted", "updated": "updated", "first_seen": "first seen"}
 
 ROW_DATES_JS = """() => Array.from(document.querySelectorAll('[data-testid="job-row"]')).map((row) => {
@@ -127,6 +139,52 @@ def test_a_jobs_row_and_its_job_page_show_the_postings_date(ui) -> None:
     assert ui.requests_after("reloaded", "/api/jobs") == 1, "a job page opened by its link reads the job once for its date"
     ui.no_more_than_one_in_flight("/api/jobs")
     ui.wall_budget("a job page by its link shows the date (small home)", RELOAD_WALL_SECONDS, "reloaded", "date-shown")
+
+    assert ui.writes_after("start") == []
+    ui.assert_clean()  # zero console errors, page errors, HTTP >= 400, failed requests
+
+
+def test_newest_posted_orders_the_list_by_the_day_each_posting_went_up(ui) -> None:
+    plain = ui.server_json("/api/postings?limit=50")
+    total = plain["counts"]["matched"]
+    assert plain["filters"]["sort"] == "fit" and 3 < total <= 50, "the small home's postings fit one page"
+
+    ui.goto("/#/jobs")
+    ui.wait_for_jobs_list()
+    ui.settle()
+    ui.step("listed")
+    chip = tid("order-chip-newest-posted")
+    assert (ui.page.locator(chip).text_content() or "").strip() == "Newest posted"
+    assert not jobs_page.pressed(ui, chip), "the order is the best fit first unless the chip is on"
+    assert ui.job_rows() == total
+
+    truth, page = jobs_page.click_chip(
+        ui, chip, "newest-posted", "sort=newest_posted", home="small home", cpu_seconds=ORDER_CPU_SECONDS, wall_seconds=ORDER_WALL_SECONDS,
+    )
+    assert jobs_page.pressed(ui, chip) and ui.page.url.endswith("#/jobs?sort=newest_posted")
+    rows = truth["postings"]["rows"]
+    # The server ordered them (the page never sorts): the day each posting went up, the newest first.
+    days = [row["published_at"] or row["first_seen_at"] for row in rows]
+    assert truth["filters"]["sort"] == "newest_posted" and days == sorted(days, reverse=True) and len(set(days)) > 1
+    assert jobs_page.identities(page["rows"]) == jobs_page.identities(rows)
+    shown = ui.page.evaluate(ROW_DATES_JS)
+    assert [item["at"] for item in shown] == [expected_date(row)[1] for row in rows], "the dates on the page are not in the order the server gave"
+    # An order selects nothing: every posting is still listed, and there is no filter to clear.
+    assert truth["counts"]["matched"] == total and ui.job_rows() == total
+    assert ui.page.locator('[data-action="clear-filters"]').count() == 0
+
+    # The address keeps the order: a reload shows the same list.
+    ui.reload()
+    ui.wait_for_jobs_list()
+    assert jobs_page.pressed(ui, chip)
+    assert [item["at"] for item in ui.page.evaluate(ROW_DATES_JS)] == [item["at"] for item in shown]
+
+    # Off again: the plain list, the bare address.
+    ui.page.click(chip)
+    ui.page.wait_for_function("() => location.hash === '#/jobs'")
+    ui.page.wait_for_function(jobs_page.SETTLED_ROWS_JS, arg=total)
+    assert not jobs_page.pressed(ui, chip)
+    ui.settle()
 
     assert ui.writes_after("start") == []
     ui.assert_clean()  # zero console errors, page errors, HTTP >= 400, failed requests

@@ -200,10 +200,11 @@ _STALE_WORDS = {
     "resume_changed": "resume changed",
 }
 _RECOMMENDED = "recommended"
-#: 0110-10-14: what a board means by the date stored as ``published_at`` (``ats_board_clients``). Lever's ``createdAt``
-#: and Ashby's ``publishedAt`` are the day the posting went up; Greenhouse's list gives ``updated_at``, the posting's
-#: last change. Served beside the date (``published_kind``) so an update is never shown as "posted".
-PUBLISHED_KINDS = {"lever": "posted", "ashby": "posted", "greenhouse": "updated"}
+#: 0110-10-14: what a board means by the date stored as ``published_at`` (``ats_board_clients.PUBLISHED_FIELDS``):
+#: Greenhouse's ``first_published``, Lever's ``createdAt`` and Ashby's ``publishedAt`` are the day the posting went up.
+#: Served beside the date (``published_kind``) so a last change is never shown as "posted": a provider that can only
+#: give its last change is listed here as ``updated``, and one nobody listed reads ``updated`` too.
+PUBLISHED_KINDS = {"greenhouse": "posted", "lever": "posted", "ashby": "posted"}
 
 
 def sort_group(row: PostingRecord) -> str:
@@ -258,16 +259,21 @@ def stale_label(row: PostingRecord) -> str | None:
     return f"old assessment: {_STALE_WORDS.get(row.stale_code, row.stale_code.replace('_', ' '))}"
 
 
-def posting_dates(row: PostingRecord) -> dict[str, object]:
-    """A posting's two dates, each under its own name (0110-10-14).
+def posting_dates(row: PostingRecord, text: PostingText | None = None) -> dict[str, object]:
+    """A posting's dates, each under its own name (0110-10-14).
 
     ``published_at`` is the BOARD's date, the one the 7 / 30 days window judges (``None`` when the board gives none),
     and ``published_kind`` what the board means by it (:data:`PUBLISHED_KINDS`; a board kind this table does not know
-    is ``updated``, the weaker claim). ``first_seen_at`` is when Scout first stored the posting: what "new since" judges.
+    is ``updated``, the weaker claim). ``updated_at`` is the board's last change to the posting (``None`` when it
+    gives none, or when ``text``, the posting as the index holds it, was not read): a second date, never the first.
+    ``first_seen_at`` is when Scout first stored the posting: what "new since" judges.
     """
 
     kind = None if row.published_at is None else PUBLISHED_KINDS.get(row.board.partition(":")[0], "updated")
-    return {"published_at": row.published_at, "published_kind": kind, "first_seen_at": row.first_seen}
+    return {
+        "published_at": row.published_at, "published_kind": kind,
+        "updated_at": text.updated_at if text is not None else None, "first_seen_at": row.first_seen,
+    }
 
 
 def posted_text(row: Mapping[str, object]) -> str:
@@ -391,7 +397,7 @@ def _row_json(
         "salary": text.salary if text is not None else None,
         "description": _excerpt(text.text) if text is not None else None,
         "first_seen": row.first_seen,
-        **posting_dates(row),  # 0110-10-14: published_at (the board's date), published_kind, first_seen_at
+        **posting_dates(row, text),  # 0110-10-14: published_at (the day it went up), published_kind, updated_at, first_seen_at
         "removed_at": row.removed_at,
         "profile_id": row.profile_id,
         "profiles": [
