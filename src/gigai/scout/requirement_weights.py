@@ -37,6 +37,19 @@ boundary, the validator, the API, the CLI and the grid agree by construction.
 whatever the count (OD2); :data:`MINOR_GAPS_ALLOWED` is the threshold for
 every older matrix only. :func:`minor_gaps` and :func:`minor_gap_text` are
 unchanged: "Matched · 2 minor gaps: Cassandra, ClickHouse".
+
+0.1.11 N3b (decision #11). On v9 rows a must-have row that is ``unclear``
+holds the verdict with or without a question on it
+(``resume_gate.unasked_rows``); :func:`settled_verdict` reads that from the
+gate too. :func:`blocking_question_count` still counts QUESTIONS: no stored
+assessment has such a row without its question (the validator refuses it,
+and the model boundary then asks it in code).
+
+0.1.11 N3b (orchestrator #14). A v9 assessment keeps at most
+:data:`MAX_LIST_ITEM_QUESTIONS` questions on ``list_item`` rows
+(:func:`cap_list_item_questions`): the model boundary drops the rest, with
+no retry. Their rows stay ``unclear`` with no question and read as minor
+gaps; a must-have's question is never capped.
 """
 
 from __future__ import annotations
@@ -52,6 +65,9 @@ NICE_TO_HAVE = "nice_to_have"
 MINOR_CLASSES = frozenset({LIST_ITEM, NICE_TO_HAVE})
 #: Open questions on ``list_item`` rows a match tolerates, in a matrix made before 0.1.11 (a v9 matrix tolerates any number).
 MINOR_GAPS_ALLOWED = 1
+#: Questions on ``list_item`` rows one v9 assessment keeps (orchestrator #14): those of the rows first in the matrix.
+#: The rest are dropped by code (:func:`cap_list_item_questions`); their rows stay ``unclear`` and read as minor gaps.
+MAX_LIST_ITEM_QUESTIONS = 3
 #: Rows one assessment keeps. A sanity bound on a model's answer, far above what a posting states; past it: "+N not shown".
 MAX_MATRIX_ROWS = 40
 #: Gaps named in one line of text before "+N more".
@@ -136,6 +152,30 @@ def question_weights(matrix: Iterable[object], questions: object) -> tuple[int, 
     return blocking, minor
 
 
+def cap_list_item_questions(matrix: Iterable[object], questions: Sequence[object]) -> tuple[list[object], list[object]]:
+    """``(kept, dropped)``: at most :data:`MAX_LIST_ITEM_QUESTIONS` of ``questions`` are on ``list_item`` rows.
+
+    The ones kept are those whose rows come first in the matrix (the model
+    lists what matters most to the role first; rows of one class keep that
+    order). A question on any other row, and one that names no row, is
+    always kept: a must-have's question is never capped. ``kept`` is in the
+    order the questions came. Pure; the caller decides which matrices it
+    applies to (the model boundary: v9 ones).
+    """
+
+    place: dict[str, int | None] = {}
+    for index, row in enumerate(matrix):
+        key = _key(_field(row, "requirement"))
+        if key and key not in place:  # the first row of those words says the class, as in ``question_weights``
+            place[key] = index if row_class(row) == LIST_ITEM else None
+    on_list = sorted(
+        (rank, index) for index, question in enumerate(questions)
+        if (rank := place.get(_key(_field(question, "requirement")))) is not None
+    )
+    over = {index for _rank, index in on_list[MAX_LIST_ITEM_QUESTIONS:]}
+    return [item for index, item in enumerate(questions) if index not in over], [item for index, item in enumerate(questions) if index in over]
+
+
 def blocking_question_count(matrix: Iterable[object], questions: object) -> int:
     """How many questions hold the verdict at "needs your answers": 0 when all that is open is a minor gap.
 
@@ -163,12 +203,21 @@ def settled_verdict(verdict: object, matrix: Iterable[object], questions: object
     pending, ``suggest`` and ``hold_unmet`` (an unmet ``askable`` row of a v9
     matrix: the verdict stays the model's, the gate holds the resume) are
     matched, and a hard gap is not this rule's to settle.
+
+    0.1.11 N3b: on v9 rows the gate also holds for a must-have row that is
+    ``unclear`` with no question on it (``resume_gate.unasked_rows``), so
+    such an answer is settled by the gate too, whether or not it carries a
+    question. Every older matrix: an answer with no question is returned as
+    it came, as above.
     """
 
-    if verdict not in (MATCHED, PENDING) or not isinstance(questions, (list, tuple)) or not questions:
+    if verdict not in (MATCHED, PENDING):
         return verdict
-    from .resume_gate import HOLD_QUESTION, NOT_A_MATCH, gate  # the gate reads rows through this module
+    from .resume_gate import HOLD_QUESTION, NOT_A_MATCH, gate, unasked_rows  # the gate reads rows through this module
 
+    matrix = list(matrix)
+    if (not isinstance(questions, (list, tuple)) or not questions) and not unasked_rows(matrix, questions):
+        return verdict
     decision = gate(matrix, questions, verdict).decision
     if decision == NOT_A_MATCH:
         return verdict  # a hard gap: not this rule's to settle
@@ -180,12 +229,14 @@ __all__ = [
     "GAPS_NAMED",
     "HARD",
     "LIST_ITEM",
+    "MAX_LIST_ITEM_QUESTIONS",
     "MAX_MATRIX_ROWS",
     "MINOR_CLASSES",
     "MINOR_GAPS_ALLOWED",
     "NICE_TO_HAVE",
     "blocking_question_count",
     "bound_rows",
+    "cap_list_item_questions",
     "is_minor",
     "minor_gap_text",
     "minor_gaps",

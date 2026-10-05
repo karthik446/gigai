@@ -11,6 +11,10 @@ packet does not touch.  What is pinned:
   filtered to ``gap`` / ``master_line`` on ``pending_user_answers``;
 - a source the prompt did not offer is dropped and recorded; without ids in the prompt there are no sources and no pick;
 - the one v9 rule that DOES spend the retry: a matrix that does not hold the listed requirement ids.
+
+0.1.11 N3b (orchestrator #14): a suggestion that names its requirement by the row's words gets the row's id (a first
+assessment's ``gap`` suggestion with no line is kept); at most three questions on ``list_item`` rows are kept, the
+rest dropped by code and counted, with no retry.  (The unclear must-have rule of decision #11 is in ``test_resume_gate``.)
 """
 
 from __future__ import annotations
@@ -21,7 +25,9 @@ from types import SimpleNamespace
 import pytest
 
 from gigai.canonical import parse_json_bytes
-from gigai.scout import assessment_core, proposals
+from gigai.scout import assessment_core, proposals, requirements_list, resume_gate
+from gigai.scout import requirement_weights as weights
+from gigai.scout.assessment_basis import posting_sha256
 from gigai.scout.assessment_core import AssessExtras, AssessJob, Boundary, assess_once, build_assess_context
 from gigai.scout.find_jobs.assess_contracts import (
     AssessmentBody,
@@ -276,6 +282,120 @@ def test_structured_suggestions_are_kept_beside_the_payload_and_each_why_joins_t
     attempt, _binding = _assess(_answer(suggestions=many))
     assert attempt.ok and attempt.attempts == 1 and len(attempt.extras.structured_suggestions) == 8
     assert len(attempt.extras.structured_suggestions[0].why) == 300 and len(attempt.extras.structured_suggestions[0].posting_phrase) == 60
+
+
+def test_a_first_assessments_suggestion_names_its_requirement_by_the_rows_words_and_gets_the_rows_id() -> None:
+    # Orchestrator #14. A first assessment's rows have no id yet: the model names the row by its words, code gives the id.
+    sha = posting_sha256(JOB.title, JOB.posting_text)
+    go_id, kubernetes_id = requirements_list.assign_ids(sha, ["Go in production", "Kubernetes"])
+    suggested = [
+        {"kind": "gap", "requirement": "Kubernetes", "why": "Nothing in the resume says where Kubernetes ran."},  # no line: was dropped
+        {"kind": "gap", "requirement": "  go IN  production ", "why": "Say how long."},  # the words as a question's are matched
+        {"kind": "reword", "line": "b-aaaaaa", "requirement": "Kubernetes", "why": "Name the clusters."},
+        {"kind": "gap", "requirement": "Terraform", "why": "No row says this."},  # no row's words and no line: names nothing
+        {"kind": "gap", "requirement": "elig-region", "why": "Only an answer can say."},  # an id is taken as it always was
+        {"kind": "keyword", "line": "b-bbbbbb", "requirement": "Terraform", "why": "A line is enough."},
+    ]
+    attempt, _binding = _assess(_answer(suggestions=suggested))
+    assert attempt.ok and attempt.attempts == 1
+    assert [(item.kind, item.line, item.requirement) for item in attempt.extras.structured_suggestions] == [
+        ("gap", None, kubernetes_id), ("gap", None, go_id), ("reword", "b-aaaaaa", kubernetes_id), ("gap", None, "elig-region"), ("keyword", "b-bbbbbb", None),
+    ]
+    assert attempt.parsed.suggestions == tuple(item.why for item in attempt.extras.structured_suggestions)
+    # The ids are the ones the stored rows carry (``requirements_list.extracted``, what ``quick_assess`` stores them with).
+    assert requirements_list.extracted(sha, attempt.parsed.matrix, extracted_at="")[1] == (go_id, kubernetes_id)
+    # A pending answer keeps its gap suggestions, each with its row's id.
+    attempt, _binding = _assess(_answer(PENDING, suggestions=suggested))
+    assert [(item.kind, item.requirement) for item in attempt.extras.structured_suggestions] == [("gap", kubernetes_id), ("gap", go_id), ("gap", "elig-region")]
+    # With the list in the prompt a row has the list's id, whichever words name it: the model's or the list's.
+    answer = _listed_answer("req-aaaaaa", "req-bbbbbb")
+    answer["matrix"][1]["requirement"] = "K8s"
+    answer["suggestions"] = [{"kind": "gap", "requirement": "K8s", "why": "one"}, {"kind": "gap", "requirement": "Kubernetes (EKS or GKE)", "why": "two"}]
+    attempt, _binding = _assess(answer, ctx=_ctx(requirements=LISTED))
+    assert [item.requirement for item in attempt.extras.structured_suggestions] == ["req-bbbbbb", "req-bbbbbb"]
+    # An answer in the v8 shape (no v9 key on a row) has no row ids: nothing is mapped, as before.
+    v8 = {**V8_ANSWER, "suggestions": [{"kind": "gap", "requirement": "Helm", "why": "why"}]}
+    attempt, _binding = _assess(v8, ctx=build_assess_context(resume_text="- Built Go services"))
+    assert attempt.ok and attempt.extras == AssessExtras() and attempt.parsed.suggestions == ()
+
+
+def _list_answer(tools: tuple[str, ...], asked: tuple[str, ...], *, verdict: str = MATCHED, v9: bool = True, kubernetes: str = "met") -> dict[str, object]:
+    """Go (hard) and Kubernetes (askable), then one ``list_item`` row per tool, all unclear; a question for each of ``asked``, in that order."""
+
+    answer = _answer(verdict if verdict != PENDING else MATCHED)
+    if kubernetes == "unclear":
+        answer["matrix"][1] = {**answer["matrix"][1], "status": "unclear", "resume_evidence": [], "sources": []}
+    answer["verdict"] = verdict
+    for tool in tools:
+        answer["matrix"].append({"requirement": tool, "class": "list_item", "class_basis": f"Tools: {tool}", "status": "unclear", "resume_evidence": []})
+    if not v9:
+        answer["matrix"] = [{key: value for key, value in row.items() if key in ("requirement", "class", "status", "resume_evidence")} for row in answer["matrix"]]
+    answer["questions"] = [{"question_id": f"tooling:{name.lower()}", "question": f"Have you used {name}?", "requirement": name} for name in asked]
+    return answer
+
+
+TOOLS = ("Helm", "Istio", "Argo", "Linkerd", "Flux")
+
+
+def test_at_most_three_questions_on_list_item_rows_are_kept_those_of_the_rows_first_in_the_matrix() -> None:
+    # Orchestrator #14. Five one-of-a-list rows, a question on each, asked in another order than the rows are in.
+    attempt, binding = _assess(_list_answer(TOOLS, ("Flux", "Helm", "Linkerd", "Istio", "Argo")))
+    assert attempt.ok and attempt.attempts == 1 and len(binding.port.prompts) == 1  # dropped by code: no retry
+    body = attempt.parsed
+    # Kept: the questions of the three rows first in the matrix, in the order they were asked; from both lists.
+    assert [question.question_id for question in body.structured_questions] == ["tooling:helm", "tooling:istio", "tooling:argo"]
+    assert body.questions == ("Have you used Helm?", "Have you used Istio?", "Have you used Argo?")
+    # Dropped: counted like dropped_questions, and kept apart from that count (the not_a_match strip's).
+    assert (attempt.capped_questions, attempt.capped_question_ids) == (2, ("tooling:flux", "tooling:linkerd"))
+    assert attempt.extras.capped_questions == ("tooling:flux", "tooling:linkerd") and (attempt.dropped_questions, attempt.dropped_question_ids) == (0, ())
+    # Their rows stay unclear with no question and read as minor gaps; an optional row never holds the verdict.
+    assert [(row.requirement, row.status.value) for row in body.matrix[2:]] == [(tool, "unclear") for tool in TOOLS]
+    assert body.verdict.value == MATCHED and weights.minor_gap_text(weights.minor_gaps(body.matrix)) == "5 minor gaps: Helm, Istio, Argo +2 more"
+    assert resume_gate.gate(body.matrix, body.structured_questions, body.verdict).decision == "suggest"
+    # Three or fewer: nothing is dropped.
+    attempt, _binding = _assess(_list_answer(TOOLS, ("Flux", "Linkerd", "Argo")))
+    assert [question.question_id for question in attempt.parsed.structured_questions] == ["tooling:flux", "tooling:linkerd", "tooling:argo"]
+    assert (attempt.capped_questions, attempt.capped_question_ids, attempt.extras.capped_questions) == (0, (), ())
+
+
+def test_a_must_haves_question_is_never_capped_and_a_plain_question_keeps_its_place() -> None:
+    answer = _list_answer(TOOLS, TOOLS, verdict=PENDING, kubernetes="unclear")
+    kubernetes = {"question_id": "tooling:kubernetes", "question": "Have you run Kubernetes?", "requirement": "Kubernetes"}
+    other = {"question_id": "years:go", "question": "How many years of Go?", "requirement": None}  # names no row: nothing says it is minor
+    answer["questions"] = ["A question in the old shape?", *answer["questions"], kubernetes, other]
+    attempt, _binding = _assess(answer)
+    body = attempt.parsed
+    assert attempt.ok and attempt.attempts == 1 and body.verdict.value == PENDING
+    assert [question.question_id for question in body.structured_questions] == ["tooling:helm", "tooling:istio", "tooling:argo", "tooling:kubernetes", "years:go"]
+    assert body.questions == ("A question in the old shape?", "Have you used Helm?", "Have you used Istio?", "Have you used Argo?", "Have you run Kubernetes?", "How many years of Go?")
+    assert attempt.capped_question_ids == ("tooling:linkerd", "tooling:flux")
+    # The pure rule: only ``list_item`` rows are counted, and the first row of some words says the class.
+    rows = [{"requirement": name, "class": klass, "status": "unclear"} for name, klass in (
+        ("a", "list_item"), ("b", "nice_to_have"), ("c", "list_item"), ("d", "askable"), ("e", "list_item"), ("f", "list_item"), ("g", None),
+    )]
+    asked = [{"question_id": f"x:{name}", "requirement": name} for name in "gfedcba"]
+    kept, dropped = weights.cap_list_item_questions(rows, asked)
+    assert [item["requirement"] for item in kept] == ["g", "e", "d", "c", "b", "a"] and [item["requirement"] for item in dropped] == ["f"]
+    assert weights.cap_list_item_questions(rows, []) == ([], []) and weights.MAX_LIST_ITEM_QUESTIONS == 3
+
+
+def test_the_cap_is_a_v9_rule_and_a_not_a_match_answer_keeps_its_own_count() -> None:
+    # A v8 matrix: every question is kept, and the 0110-10-03 threshold reads them as it always did (two or more hold).
+    attempt, _binding = _assess(_list_answer(TOOLS, TOOLS, verdict=PENDING, v9=False), ctx=build_assess_context(resume_text="- Built Go services"))
+    assert attempt.ok and len(attempt.parsed.structured_questions) == 5 and attempt.parsed.verdict.value == PENDING
+    assert (attempt.capped_questions, attempt.extras) == (0, AssessExtras())
+    # Not a match: no question is kept at all, and all five are the strip's count, none the cap's.
+    answer = _list_answer(TOOLS, TOOLS, verdict=NOT_A_MATCH)
+    answer["matrix"][0] = {**answer["matrix"][0], "status": "unmet", "resume_evidence": [], "sources": []}
+    answer["not_a_match_reason"] = "No Go."
+    attempt, _binding = _assess(answer)
+    assert attempt.ok and attempt.parsed.structured_questions == () and (attempt.dropped_questions, attempt.capped_questions) == (5, 0)
+    # Outside ``assess_once`` the same v9 answer is capped the same way (the rule is the boundary's, not the retry's).
+    boundary = Boundary()
+    payload = assessment_core._normalize_and_strip(_list_answer(TOOLS, TOOLS), boundary=boundary)[0]
+    assert [item["question_id"] for item in payload["structured_questions"]] == ["tooling:helm", "tooling:istio", "tooling:argo"]
+    assert len(payload["questions"]) == 3 and boundary.extras.capped_questions == ("tooling:linkerd", "tooling:flux")
+    proposals.validate_assessment_bounds(payload)
 
 
 def test_suggestions_are_dropped_on_not_a_match_and_filtered_on_pending() -> None:

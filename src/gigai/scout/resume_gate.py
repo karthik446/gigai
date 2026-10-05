@@ -14,7 +14,8 @@ no class is an old one and reads ``hard``):
 ``not_a_match``     the verdict is ``not_a_match``, or a ``hard`` row is        Not a match
                     ``unmet``
 ``hold_question``   a question waits on a mandatory row (or on no row of the    Needs your answers
-                    matrix: nothing says it is minor)
+                    matrix: nothing says it is minor); or, v9 rows only, a
+                    mandatory row is ``unclear`` with no question on it
 ``hold_unmet``      v9 rows only (OD1): an ``askable`` row is ``unmet`` and     Has a gap
                     nothing above holds. The model's verdict stays stored as
                     it came; no resume is made until the user asks for a draft
@@ -40,6 +41,18 @@ an answer in the old shape) is read by the rules it was made under:
   with an unmet ``askable`` row stays ``suggest``: a job that reads Matched
   today reads "Has a gap" only after its v9 assessment.
 
+AN UNRESOLVED MUST-HAVE HOLDS AND ASKS (0.1.11 N3b, orchestrator decision #11).
+On v9 rows a mandatory row that is ``unclear`` holds the verdict whether or
+not the model asked about it (:func:`unasked_rows`): the accepted table says
+an unresolved must-have holds for the answer, and "the model forgot the
+question" is not an answer.  So that the hold is never a dead end, no stored
+assessment carries such a row without its question: the validator refuses the
+answer (``proposals``; the message names the row, and the model boundary
+spends the one retry on it), and when the retry's answer still asks nothing
+code asks the row's own question (``assessment_core``).  An optional row that
+is ``unclear`` with no question stays as it is and never holds.  Older rows:
+nothing of this; such a row reads Matched, as it always did.
+
 ``ready`` is not decided here: it is the final-selection check's
 (``suggestions.check_selection``), made after the pick.
 
@@ -48,7 +61,7 @@ Pure: no file, no model, no clock.
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 
 from .find_jobs.assess_contracts import (
@@ -102,6 +115,44 @@ def holding_questions(matrix: Iterable[object], questions: object) -> int:
     return blocking + minor if blocking or minor > MINOR_GAPS_ALLOWED else 0
 
 
+def unasked_rows(matrix: Iterable[object], questions: object) -> list[object]:
+    """The mandatory rows of a v9 matrix that are ``unclear`` with no question on them, in matrix order (the module text).
+
+    A question is on a row when it names the row's requirement words (the
+    model boundary turns a row id into them). Always empty for an older
+    matrix.
+    """
+
+    rows = list(matrix)
+    if not uses_v9_rules(rows):
+        return []
+    asked = {_key(_field(question, "requirement")) for question in questions} if isinstance(questions, (list, tuple)) else set()
+    asked.discard("")  # a question that names no row is on none
+    return [row for row in rows if _field(row, "status") == "unclear" and is_mandatory(row) and _key(_field(row, "requirement")) not in asked]
+
+
+#: Rows named after the first in :func:`unasked_message` (the model boundary feeds back the first 300 characters).
+_UNASKED_NAMED = 3
+
+
+def unasked_message(names: Sequence[str]) -> str:
+    """The validation error for :func:`unasked_rows`, each row named by its id: ``unclear mandatory row req-xxxx has no question``.
+
+    It is fed back to the model on the one retry, so it says the rule too
+    (the model cannot see the answer that was refused). Ids only: never a
+    requirement's words, which are the posting's.
+    """
+
+    rest = list(names[1:])
+    more = ""
+    if rest:
+        more = f" (and {len(rest)} more: {', '.join(rest[:_UNASKED_NAMED])}{', ...' if len(rest) > _UNASKED_NAMED else ''})"
+    return (
+        f"unclear mandatory row {names[0]} has no question{more}: every hard or askable row whose status is unclear needs "
+        "its own entry in questions, with requirement set to that row's requirement text; or settle the row met or unmet"
+    )
+
+
 @dataclass(frozen=True)
 class GateRow:
     """One row behind a decision: why, the row's id (v9 rows) and its requirement words (the posting's)."""
@@ -148,7 +199,8 @@ def gate(matrix: Iterable[object], structured_questions: object, verdict: object
     if hard_unmet or verdict == NOT_A_MATCH:
         return ResumeGate(NOT_A_MATCH, tuple(_row(GATE_REASON_HARD_UNMET, row) for row in hard_unmet))
     questions = structured_questions if isinstance(structured_questions, (list, tuple)) else ()
-    if holding_questions(rows, questions):
+    unasked = unasked_rows(rows, questions)  # v9 rows only: an unresolved must-have holds, asked about or not
+    if holding_questions(rows, questions) or unasked:
         by_text = {_key(_field(row, "requirement")): row for row in reversed(rows)}
         asked: list[GateRow] = []
         seen: set[int] = set()
@@ -159,6 +211,7 @@ def gate(matrix: Iterable[object], structured_questions: object, verdict: object
             elif is_mandatory(row) and id(row) not in seen:
                 seen.add(id(row))
                 asked.append(_row(GATE_REASON_QUESTION_OPEN, row))
+        asked.extend(_row(GATE_REASON_QUESTION_OPEN, row) for row in unasked)
         return ResumeGate(HOLD_QUESTION, tuple(asked))
     if uses_v9_rules(rows):
         gaps = [row for row in rows if _field(row, "status") == "unmet" and row_class(row) == ASKABLE]
@@ -201,5 +254,7 @@ __all__ = [
     "holding_questions",
     "is_mandatory",
     "stored_gate",
+    "unasked_message",
+    "unasked_rows",
     "uses_v9_rules",
 ]

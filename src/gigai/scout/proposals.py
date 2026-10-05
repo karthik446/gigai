@@ -26,7 +26,7 @@ from .find_jobs.contracts import (
     is_row_id,
 )
 from .requirement_weights import MAX_MATRIX_ROWS, blocking_question_count
-from .resume_gate import uses_v9_rules
+from .resume_gate import unasked_message, unasked_rows, uses_v9_rules
 from .untrusted_text import UNTRUSTED_POSTING_RULE, fence_untrusted_posting
 
 from ..adapters.port import InvocationRequest
@@ -625,6 +625,16 @@ def _validate_verdict_consistency(raw: Mapping[str, object]) -> None:
       structured question.
     - ``not_a_match``: at least one HARD-unmet row.
 
+    0.1.11 N3b (decision #11), v9 rows only: beside a matched or pending
+    verdict, a mandatory row (``hard`` or ``askable``) that is ``unclear``
+    with no question on it is refused, and the message names the row
+    ("unclear mandatory row req-xxxx has no question"): an unresolved
+    must-have holds for its answer (``resume_gate``), and a hold with nothing
+    to answer is a dead end. The model boundary spends its one retry on this
+    and then asks the row's own question in code, so only a payload built
+    another way meets it here. An optional row is never checked, nor is any
+    row of an older matrix.
+
     Each violation message NAMES the violated rule and the count it found
     ("verdict matched_above_threshold but 1 hard requirement is unmet (rule
     7 ...)") so the one retry (``assessment_core.assess_once``, U22) feeds
@@ -649,6 +659,10 @@ def _validate_verdict_consistency(raw: Mapping[str, object]) -> None:
     else:
         holds = "any question on a hard or askable row, or two or more list_item questions -> pending_user_answers"
         nothing_holds = "no hard unmet row, and no question but at most one on a list_item row -> matched_above_threshold"
+    if hard_unmet_rows == 0 and verdict in ("matched_above_threshold", "pending_user_answers"):
+        unasked = unasked_rows(rows, raw.get("structured_questions"))
+        if unasked:
+            raise FindJobsContractError("invalid_value", unasked_message(_row_names(rows, unasked)))
     if verdict == "matched_above_threshold":
         if hard_unmet_rows > 0:
             raise FindJobsContractError(
@@ -680,6 +694,16 @@ def _validate_verdict_consistency(raw: Mapping[str, object]) -> None:
                 "verdict not_a_match but no hard requirement is unmet "
                 "(rule 7: not_a_match needs a hard row with status unmet)",
             )
+
+
+def _row_names(rows: list[object], named: list[object]) -> list[str]:
+    """Each of ``named`` (rows of ``rows``) as a message names it: its id, or its place in the matrix when it carries none."""
+
+    places = {id(row): index for index, row in enumerate(rows)}
+    return [
+        row["id"] if isinstance(row, Mapping) and is_row_id(row.get("id")) else f"matrix[{places[id(row)]}]"  # type: ignore[misc]
+        for row in named
+    ]
 
 
 def _count_phrase(count: int, singular: str, plural: str) -> str:
