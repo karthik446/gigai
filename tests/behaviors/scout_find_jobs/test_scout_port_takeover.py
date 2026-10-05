@@ -640,6 +640,22 @@ def two_homes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     user_b.mkdir()
     monkeypatch.delenv("GIGAI_HOME", raising=False)
     monkeypatch.setenv("HOME", str(user_a))
+    # A first ``gigai scout run`` needs an installed, logged-in model CLI to set a home up (a developer's machine has one,
+    # a CI runner does not): a stand-in that answers --version and "login status" and refuses every model call.
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    stub = bin_dir / "codex"
+    stub.write_text(
+        '#!/bin/sh\n'
+        'case "$1" in\n'
+        '  --version) echo "codex-cli 0.0.0-test-stub"; exit 0;;\n'
+        '  login) if [ "$2" = status ]; then echo "Logged in (test stub)"; exit 0; fi;;\n'
+        'esac\n'
+        'echo "test stub: no model call" >&2\n'
+        'exit 97\n'
+    )
+    stub.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}")
     yield user_a / ".gigai", user_b / ".gigai", user_b
     # Found by command line (the server module AND a --home inside this test's tmp_path), then stopped by pid.
     stop_test_servers(scout_test_servers(under=tmp_path))
