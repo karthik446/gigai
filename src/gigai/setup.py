@@ -73,8 +73,10 @@ def detect_editor_argv() -> tuple[str, ...] | None:
 def resolve_editor_argv(
     editor: str | None, editor_args: tuple[str, ...] = ()
 ) -> tuple[str, ...]:
-    if editor is not None:
+    if editor is not None and editor.strip():
         base_argv = (editor,)
+    elif editor is not None:
+        base_argv = ()
     else:
         configured = os.environ.get("VISUAL") or os.environ.get("EDITOR")
         try:
@@ -83,7 +85,8 @@ def resolve_editor_argv(
             raise ValueError(f"configured editor environment is malformed: {exc}") from exc
     if not base_argv:
         raise ValueError(
-            "no editor is configured; pass --editor or set VISUAL or EDITOR"
+            "no editor is configured: set EDITOR, or pass --editor <program>; "
+            "any program works, e.g. true"
         )
     argv = (*base_argv, *editor_args)
     if any(not item or "\0" in item for item in argv):
