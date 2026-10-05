@@ -86,16 +86,28 @@ operator-visible capability and must link to the relevant release or evidence.</
 <div class="sl-heading-wrapper level-h3"><h3 id="0111">0.1.11</h3><a class="sl-anchor-link" href="#0111"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “0.1.11”</span></a></div>
 <p>(In progress.) The assessment picks the resume for a job from your master; no model rewrites it. Stub: rewritten at the end to what is true.</p>
 <div class="sl-heading-wrapper level-h3"><h3 id="011011">0.1.10.11</h3><a class="sl-anchor-link" href="#011011"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “0.1.10.11”</span></a></div>
-<p>Speed, first part. On a store with a lot of finished work, saving something no longer takes minutes,
-and the first Jobs load of a day no longer waits for every company to be matched again. Several
-things still take more than a second (see “Still slower than one second”): the next patch is for them.</p>
+<p>Speed, and the fixes from the first days of daily use. On a store with a lot of finished work a save
+no longer takes minutes (saving your preferences took about six minutes and now takes about a second
+and a half), and the first Jobs load of a day no longer waits for every company to be matched again.
+A posting says when it was posted, when its board last changed it, or when Scout first saw it, and a
+Greenhouse posting’s date is the day it went up. An old assessment can be re-assessed from its job page.
+<code dir="auto">gigai scout resume master init</code> reads resumes the way people write them, and a heading that is a link
+keeps its name. A resume made from your master resume keeps the lines its job’s assessment points to
+and the project or role the posting’s title is about. An offer to assess many postings acts on the
+newest 50 at a time. For an agent, the assess preview says what would be sent, a failed assessment
+says what happened, and the guide names the three approvals. <code dir="auto">gigai doctor --repair-journal</code> finishes
+a save that a crash cut off. The first steps of a new user were walked through from a fresh install,
+and the docs and messages that sent them wrong are corrected. Scout’s memory no longer grows with
+every resume pick. Several saves still take more than a second: see “Still slower than one second”.
+Read “After you upgrade”.</p>
 <div class="sl-heading-wrapper level-h4"><h4 id="after-you-upgrade">After you upgrade</h4><a class="sl-anchor-link" href="#after-you-upgrade"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “After you upgrade”</span></a></div>
 <ul>
 <li><strong>One more preparation of the postings, once.</strong> The first Jobs load, or the first <code dir="auto">gigai scout new</code>,
-after you install this version prepares every company’s postings again (about 10 to 13 seconds with
-10,000 companies, in the background; the list you had is shown meanwhile, with progress). Nothing is
-lost and nothing needs to be done. The same preparation puts every Greenhouse posting under the day it
-was posted (next note). If you ran an earlier build of 0.1.10.11, the postings are prepared once more.</li>
+after you install this version prepares every company’s postings again, in the background: about 7
+seconds with 290,000 postings from 10,350 companies on our test machine, longer on a slower one. The
+list you had is shown meanwhile, with progress. Nothing is lost and nothing needs to be done. The
+same preparation puts every Greenhouse posting under the day it was posted (next note). If you ran
+an earlier build of 0.1.10.11, the postings are prepared once more.</li>
 <li><strong>Greenhouse postings get their posting day; your next sources update finishes it.</strong> Until now Scout
 kept the day a Greenhouse posting last CHANGED as its date. After the preparation above, a Greenhouse
 posting shows the day it was posted wherever the company’s stored list has it, and “first seen”
@@ -104,19 +116,232 @@ it for a company after the next <code dir="auto">gigai scout sources update</cod
 company: the update reads each Greenhouse company’s list once more with the request it makes anyway
 (no extra request; a company whose list did not change is read again from what is stored). Until
 then a Greenhouse posting that is older than your window can still be listed. No posting is marked new
-or changed by this, and nothing needs to be done.</li>
-<li><strong>Old assessments: the re-assess offer is 50 at a time, and it says the size.</strong> This version makes no
-assessment old. But if you came from 0.1.10.8 or earlier, 0.1.10.9 marked every assessment made before
-it “old assessment: older prompt”, and <code dir="auto">gigai scout new</code> offers to re-assess them. On a large store
-that is a big number: one store had 574 marked old, 422 of them ranked 50 or more, and re-assessing
-all 422 was quoted at about 422 model calls, 9.9 million tokens and 4.9 hours. The offer now acts on
-the newest 50 at a time and never more, and says the real total, the 50 and what the 50 cost:
-“422 have only an old assessment; re-assess the newest 50 of 422? ~50 calls, ~1170k tokens (372 more
-after these 50)”. For that store, 50 are about 1.2 million tokens and 35 minutes. Nothing is
+or changed by this.</li>
+<li><strong>Ashby postings that had no text get it; your next sources update finishes it.</strong> Some Ashby boards
+send a posting’s description as HTML only, and Scout stored no text for such a posting (see “Fixed”).
+One that is already in your list can be assessed at once. The next <code dir="auto">gigai scout sources update</code> reads
+each Ashby company’s list once more with the request it makes anyway (no extra request); a posting
+that gets its text this way is then found by a keyword search and counts once as changed in a
+search’s “new or changed since the last search”. No other Ashby posting is marked new or changed.</li>
+<li><strong>Resumes made from your master resume are made again, one job at a time.</strong> The rule that picks the
+lines for a job has a new version (<code dir="auto">sel-4</code>, see “Master resume: the lines picked for a job”). A
+profile’s stored selection stays as it is until you refresh it. Every tailored resume the background
+pipeline made from your master is out of date under the new rule, so there are as many to make again
+as you have such resumes stored. None is made again at once: each is made again when the pipeline
+next works on its job (after an answer that job asked for, a change to its profile, or “Process
+now”), as one tailoring within the pipeline’s limits (10 jobs per change, the daily cap on model
+calls). The pick itself is about 0.2 seconds a job, in the background. A resume you edited or
+attached yourself is never replaced.</li>
+<li><strong>Old assessments: the re-assess offer is the newest 50 at a time, and it says the size.</strong> This
+version makes no assessment old. But if you came from 0.1.10.8 or earlier, 0.1.10.9 marked every
+assessment made before it “old assessment: older prompt”, and <code dir="auto">gigai scout new</code> offers to re-assess
+them. On a large store that is a big number: one store had 574 marked old, 422 of them ranked 50 or
+more, and re-assessing all 422 was quoted at about 422 model calls, 9.9 million tokens and 4.9 hours.
+The offer now acts on the newest 50 and never more, and says the real total, the 50 and what the 50
+cost: “422 have only an old assessment; re-assess the newest 50 of 422? ~50 calls, ~1170k tokens (372
+more after these 50)”. For that store, 50 are about 1.2 million tokens and 35 minutes. Nothing is
 re-assessed unless you say yes. An old assessment stays readable, the same command again takes the
 next 50, and a job page re-assesses its own job in one call.</li>
+<li><strong>A bare <code dir="auto">gigai scout run</code> no longer stops another home’s Scout.</strong> If you keep more than one GigAI
+home (<code dir="auto">--home</code>), <code dir="auto">gigai scout run</code> used to stop whatever Scout held the port. It now stops only a
+Scout of its own home; for another home’s it ends with one line that names the port and that home
+and says to pass <code dir="auto">--port</code>. A Scout whose command line names no home (one started by hand) is not
+stopped either: stop it yourself or pass <code dir="auto">--port</code>.</li>
 <li><strong>Nothing else changes.</strong> Which jobs are checked again after a change, and the limits on them, are
-what they were; no assessment, ranking or tailored resume becomes out of date.</li>
+what they were.</li>
+</ul>
+<div class="sl-heading-wrapper level-h4"><h4 id="faster">Faster</h4><a class="sl-anchor-link" href="#faster"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “Faster”</span></a></div>
+<p>Measured on a test store of 290,000 postings from 10,350 companies, with 2 profiles and 100 jobs per
+profile that the background pipeline had finished, on a quiet machine. “First call” is the first one
+after Scout starts (a command such as <code dir="auto">gigai scout resume add</code> is always a first call): the slowest you
+would see. Scout keeps its store’s history in git and starts a git process for every question it asks
+of it; the count is in the table because, unlike seconds, it does not move with how busy the machine
+is.</p>
+<table>
+<thead>
+<tr>
+<th>What you do</th>
+<th>0.1.10.10, seconds</th>
+<th>Now, first call</th>
+<th>Now, median of 3 calls</th>
+<th>Git processes, 0.1.10.10</th>
+<th>Now</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Save your preferences</td>
+<td>372</td>
+<td>1.6</td>
+<td>1.0</td>
+<td>45,234</td>
+<td>110</td>
+</tr>
+<tr>
+<td>Rename a profile</td>
+<td>274</td>
+<td>1.2</td>
+<td>0.65</td>
+<td>22,812</td>
+<td>75</td>
+</tr>
+<tr>
+<td>Answer a question many jobs asked</td>
+<td>249</td>
+<td>1.9</td>
+<td>1.45</td>
+<td>30,020</td>
+<td>130</td>
+</tr>
+<tr>
+<td>Edit a master resume line both profiles show</td>
+<td>244</td>
+<td>3.4</td>
+<td>2.6</td>
+<td>21,410</td>
+<td>302</td>
+</tr>
+<tr>
+<td><code dir="auto">gigai scout resume add</code></td>
+<td>116</td>
+<td>2.5</td>
+<td>1.7</td>
+<td>9,890</td>
+<td>166</td>
+</tr>
+<tr>
+<td>Refresh a profile’s selection from the master</td>
+<td>100</td>
+<td>7.0</td>
+<td>(one call)</td>
+<td>9,962</td>
+<td>196</td>
+</tr>
+<tr>
+<td>Answer a question no job asked</td>
+<td>6.8</td>
+<td>1.4</td>
+<td>1.0</td>
+<td>218</td>
+<td>100</td>
+</tr>
+<tr>
+<td>Add a master resume line</td>
+<td>5.6</td>
+<td>1.6</td>
+<td>0.97</td>
+<td>199</td>
+<td>106</td>
+</tr>
+<tr>
+<td>Retire a master resume line</td>
+<td>5.8</td>
+<td>0.96</td>
+<td>0.96</td>
+<td>199</td>
+<td>106</td>
+</tr>
+<tr>
+<td>Create a profile</td>
+<td>3.3</td>
+<td>1.1</td>
+<td>0.60</td>
+<td>129</td>
+<td>78</td>
+</tr>
+<tr>
+<td>Assess from the job page (GigAI’s own time; the model’s is extra)</td>
+<td>1.8</td>
+<td>0.31</td>
+<td>0.11</td>
+<td>185</td>
+<td>27</td>
+</tr>
+<tr>
+<td>Open a job page</td>
+<td>1.9</td>
+<td>0.45</td>
+<td>0.07</td>
+<td>172</td>
+<td>34</td>
+</tr>
+<tr>
+<td>The Jobs list on a Scout that just started</td>
+<td>0.81</td>
+<td>0.59</td>
+<td>0.13</td>
+<td>40</td>
+<td>40</td>
+</tr>
+</tbody>
+</table>
+<p>The 0.1.10.10 column is the same test on a busy machine: its seconds would be lower on a quiet one, its
+counts would not.</p>
+<ul>
+<li><strong>Saving no longer takes minutes once the background pipeline has finished jobs.</strong> Saving your
+preferences, renaming a profile, adding a resume, editing a master resume line your profiles show, or
+answering a question many jobs asked made Scout check every finished job for changes, and each job’s
+check read the same profile, answers and master resume again. The check now reads what the jobs
+share once. Which jobs run again after a change, and the limits on them (10 jobs per change, the
+daily cap), are what they were.</li>
+<li><strong>Three more things are out of every save.</strong> Saving an answer first read the stored record of every
+watched company (one answer opened about 11,000 files with 10,350 companies; it opens about 660):
+it now reads the answers and what they cite. Every save of an answer, a master resume line or a
+resume rebuilt an internal index of your records before it replied; on a store with a watchlist that
+rebuild had been failing every time, after about half a second of work, and was thrown away. The
+index is now brought up to date in the background when Scout starts, and no save waits for it. And
+each time the store checked that a folder is its own, it started 7 git processes; it starts 3, and
+one save no longer repeats the check for every step.</li>
+<li><strong>The first Jobs load of a day.</strong> Every watched company used to be matched again the first time you
+opened Jobs, ran <code dir="auto">gigai scout new</code> or clicked “Assess these” after midnight UTC (a wait of 7 to 11
+seconds with 10,350 companies, every day). Now only the postings that just became older than your
+“posted within” window are looked at, and no company is matched again for it: with the app running,
+that first load is as fast as any other (0.1 to 0.3 seconds). The window itself works as before: a
+posting leaves the list on the first load of the day after it becomes too old.</li>
+<li><strong>The job page, the pipeline status, and assessing or tailoring a job.</strong> The job page, the lists of
+assessments and answers, the pipeline status, “Assess”, “Assess these”, “Tailor resume” and “Process
+now” checked your store again and again within one request. They now check it once: the time GigAI
+itself spends on one of them (the model’s own time is extra) went from 0.7 to 2.2 seconds down to
+0.04 to 0.35 seconds, measured on a busy machine before and after. A batch (<code dir="auto">gigai scout new</code>,
+“Assess these”) checks once for each posting it assesses too. The job page reads only its own job’s
+assessment and tailored resume, not every one you have stored, and the pipeline status, which the
+Background pipeline panel in Settings reads, no longer looks up the project once for every job it
+lists.</li>
+<li><strong>“Assess these” no longer waits for the Jobs list to refresh.</strong> While the list is being matched
+again in the background, the question is answered from the list you see. A posting the refresh is
+still working on is assessed when the refresh is done, as before.</li>
+</ul>
+<div class="sl-heading-wrapper level-h4"><h4 id="still-slower-than-one-second">Still slower than one second</h4><a class="sl-anchor-link" href="#still-slower-than-one-second"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “Still slower than one second”</span></a></div>
+<p>The bar is one second for anything you wait on. These are still over it, measured as under “Faster”
+(the same store, a quiet machine); they are next in line, not done in this version:</p>
+<ul>
+<li><strong>Refreshing a profile’s selection from the master: 7.0 seconds.</strong> <code dir="auto">gigai scout resume master selection refresh</code> (and <code dir="auto">POST /api/master/selection</code>). It makes 3 writes to the store; where the
+rest of its time goes has not been measured yet.</li>
+<li><strong>Editing a master resume line that two profiles show: 3.4 seconds</strong> (2.5 to 2.6 after the first
+call). One edit is 8 writes to the store: the line, then each profile’s selection and resume written
+again.</li>
+<li><strong><code dir="auto">gigai scout resume add</code>: 2.5 seconds</strong> (1.6 to 1.7 after the first). 3 writes to the store, in a
+command that starts fresh every time.</li>
+<li><strong>Answering a question many jobs asked: 1.9 seconds</strong> (1.4 to 1.5 after the first). One write, and
+the jobs that asked are looked up for the pipeline.</li>
+<li><strong>Saving your preferences, answering a new question, adding a master resume line, renaming or
+creating a profile: 1.1 to 1.6 seconds on the first call after Scout starts,</strong> 0.5 to 1.0 seconds
+after it.</li>
+</ul>
+<p>What is left in each of these saves is the store’s own write (its journal: one entry is a git commit
+with the checks around it) and the store reading its own state again before and after it.</p>
+<p>Also over a second, measured on a second test store (20,720 companies, about 290,000 postings, 2
+profiles) with each command run twice:</p>
+<ul>
+<li><strong><code dir="auto">gigai scout sources update</code></strong> asks every company that is due: against 20,720 local test boards it
+took 76 seconds, then 39 seconds. The <code dir="auto">gigai scout new</code> after it matches every company again (8 to 9
+seconds there), not only the ones that changed, because the update writes every company’s “checked”
+time.</li>
+<li><strong><code dir="auto">gigai scout resume master selection refresh --all</code></strong>: 7 to 9 seconds for the two profiles (one
+refresh for each).</li>
+<li><strong><code dir="auto">gigai scout resume master init</code>: 1.3 to 2.5 seconds</strong> (1.3 to 1.5 with <code dir="auto">--dry-run</code>), and
+<strong><code dir="auto">gigai scout resume tailor</code>: 1.2 to 2.1 seconds</strong> of GigAI’s own time. Where their time goes has
+not been measured.</li>
 </ul>
 <div class="sl-heading-wrapper level-h4"><h4 id="master-resume-the-lines-picked-for-a-job">Master resume: the lines picked for a job</h4><a class="sl-anchor-link" href="#master-resume-the-lines-picked-for-a-job"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “Master resume: the lines picked for a job”</span></a></div>
 <ul>
@@ -130,6 +355,19 @@ an answer, then one that states a number). How recent a role is only breaks a ti
 line stays when it is the only evidence for a requirement, while recent lines that support nothing
 the posting asks for are cut first. No role is printed without a line, and every recent role keeps
 at least its best one.</li>
+<li><strong>A job you assessed keeps the lines its assessment pointed to.</strong> An assessment says which lines of
+your master back each requirement, and it reads them by meaning: the line it points to may share no
+word with the requirement. The pick for that job keeps one of those lines for every requirement
+the assessment found evidence for, the required ones first, before any line chosen by shared words.
+A job with no assessment is picked by words.</li>
+<li><strong>A job’s resume keeps the project or role its title is about.</strong> A posting’s title says what the
+job is about (<code dir="auto">... Agent Platform</code>). The pick did not read it: a project whose own heading says the
+same could be dropped whole, while older roles kept lines about nothing the posting asks for.
+A role or project the title names (its heading or its own title holds a word of the posting’s title,
+or half of its lines do) now always keeps its best line; it goes only when nothing but required
+lines and pins fit, and then <code dir="auto">conflicts</code> says so (<code dir="auto">title_entry</code>). What is left of the page after
+every requirement has its line goes to lines about the posting before lines that are only stronger
+or more recent. No required line and no skill is cut for it.</li>
 <li><strong>Your Skills section is kept whole.</strong> A job’s resume showed only the skills the posting or a shown
 line named, and a group written as <code dir="auto">Python/Go/TypeScript</code> counted as one name that no posting ever
 asked for. Skills are now matched inside a group, the ones the posting asks for come first, and the
@@ -142,127 +380,61 @@ stored tailored resume say which and why (<code dir="auto">conflicts</code>). No
 the master as it is now. The new one is stored when it is no worse on any check; the one held is
 kept when it is still valid and the new one is worse on a check; when neither can stand, nothing is
 stored and the command says what is unresolved.</li>
-<li><strong>A job you assessed keeps the lines its assessment pointed to.</strong> An assessment says which lines of
-your master back each requirement, and it reads them by meaning: the line it points to may share no
-word with the requirement. The pick for that job now keeps one of those lines for every requirement
-the assessment found evidence for, the required ones first, before any line chosen by shared words.
-A job with no assessment is picked by words, as before.</li>
-<li><strong>A job’s resume keeps the project or role its title is about.</strong> A posting’s title says what the
-job is about (<code dir="auto">... Agent Platform</code>). The pick did not read it: a project whose own heading says the
-same could be dropped whole, while older roles kept lines about nothing the posting asks for,
-because none of the project’s lines was one the assessment pointed to and none stated a number. A
-role or project the title names (its heading or its own title holds a word of the posting’s title,
-or half of its lines do) now always keeps its best line; it goes only when nothing but required
-lines and pins fit, and then <code dir="auto">conflicts</code> says so (<code dir="auto">title_entry</code>). What is left of the page after
-every requirement has its line goes to lines about the posting before lines that are only stronger
-or more recent. No required line and no skill is cut for it.</li>
-<li><strong>After you upgrade:</strong> the rule that picks lines has a new version (<code dir="auto">sel-4</code>). A profile’s stored
-selection stays as it is until you refresh it. Tailored resumes the background pipeline made from
-your master are out of date under the new rule and are made again when the pipeline next works on
-each job; a resume you edited or attached yourself is never replaced.</li>
+<li><strong>A job’s resume says what it was made from.</strong> The job page read “from resume <strong>(profile)</strong>” also
+for a resume picked from your master. It now reads “from your master resume (revision 3), picked for
+profile …”; <code dir="auto">gigai scout resume tailor</code> prints the same, and an older stored resume keeps saying
+what it was made from. <code dir="auto">gigai scout resume master selection status</code> says for each profile whether a
+resume for a job is picked from your whole master resume or made from that profile’s own resume (a
+profile whose resume you replaced by hand after its selection was made). The rule itself is what it
+was.</li>
 <li>The same lines in another order in your master give the same resume, and a line that repeats
 another line is shown once.</li>
-</ul>
-<div class="sl-heading-wrapper level-h4"><h4 id="faster">Faster</h4><a class="sl-anchor-link" href="#faster"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “Faster”</span></a></div>
-<ul>
-<li><strong>Faster: the first Jobs load of a day.</strong> Every watched company used to be matched again the first
-time you opened Jobs, ran <code dir="auto">gigai scout new</code> or clicked “Assess these” after midnight UTC (9 to 13
-seconds with 10,000 companies, every day). Now only the postings that just became older than your
-“posted within” window are looked at, and no company is matched again for it: with the app running,
-that first load is as fast as any other (0.1 to 0.3 seconds). The window itself works as before: a
-posting leaves the list on the first load of the day after it becomes too old. The first load after
-you install this version matches everything once more; the list you had is shown meanwhile.</li>
-<li><strong>Faster: the job page, the pipeline status, and assessing or tailoring a job.</strong> The job page, the
-lists of assessments and answers, the pipeline status, “Assess”, “Assess these”, “Tailor resume” and
-“Process now” checked your store again and again within one request. They now check it once. On a
-large store the time GigAI itself spends on one of them (the model’s own time is extra) went from
-0.3 to 2.2 seconds down to 0.05 to 0.4 seconds. A batch (<code dir="auto">gigai scout new</code>, “Assess these”) saves the
-same on every posting it assesses. The job page also reads only its own job’s assessment and
-tailored resume, not every one you have stored.</li>
-<li><strong>“Assess these” no longer waits for the Jobs list to refresh.</strong> While the list is being matched
-again in the background, the question is answered from the list you see. A posting the refresh is
-still working on is assessed when the refresh is done, as before.</li>
-<li><strong>Faster: saving no longer takes minutes once the background pipeline has finished jobs.</strong> Saving
-your preferences, renaming a profile, adding a resume, editing a master resume line your profiles
-show, or answering a question many jobs asked made Scout check every finished job for changes, and
-each job’s check read the same profile, answers and master resume again. Measured on a large store
-with 100 finished jobs per profile, on a busy machine: a rename took 166 s and saving preferences
-380 s. The check now reads what the jobs share once: the same rename and the same save of
-preferences take about 2 s each, an answer to a question 298 jobs asked about 7 s where it took
-282 s, a master resume line both profiles show about 9 s where it took 226 s, and
-<code dir="auto">gigai scout resume add</code> about 5 s where it took 100 s. Which jobs run again after a change, and the
-limits on them (10 jobs per change, the daily cap), are what they were. The seconds that remain are
-the store’s own writes, which later notes of this version cover.</li>
-<li><strong>Faster: the pipeline status.</strong> <code dir="auto">GET /api/pipeline</code>, which the Background pipeline panel in
-Settings reads, looked up the project once for every job it lists (up to 200); it now looks it up
-once.</li>
-<li><strong>Faster: saving an answer, a master resume line or a resume.</strong> Two things the store did inside
-every one of these saves are out of the wait. Saving an answer first read the stored record of every
-watched company (10,000 files with 10,000 companies); it now reads the answers and what they cite.
-And every save of an answer, a master resume line or a resume rebuilt an internal index of your
-records before it replied. On a store with a watchlist that rebuild had been failing every time,
-after about half a second of work, and was thrown away; the index is now brought up to date in the
-background when Scout starts, and no save waits for it. Measured on a store of 290,000 postings from
-10,000 companies with 25 finished jobs per profile, on a machine in use: an answer to a new question
-takes about 1.7 s where it took 3.8 s, an answer to a question many jobs asked 2.3 to 2.5 s where
-it took 5.6 s, adding a master resume line 1.3 to 1.6 s where it took 2.5 s, editing a line both
-profiles show 3.4 to 4.2 s where it took 6.7 s, and <code dir="auto">gigai scout resume add</code> 2.0 to 2.4 s where it
-took 3.2 s. All of them are still over one second.</li>
 </ul>
 <div class="sl-heading-wrapper level-h4"><h4 id="added-1">Added</h4><a class="sl-anchor-link" href="#added-1"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “Added”</span></a></div>
 <ul>
 <li><strong>Newest posted first.</strong> Jobs has an “Order” chip, “Newest posted”: on, the list is ordered by the day
 each posting went up, the newest first (a posting whose board gives no date: by the day Scout first
 saw it). Off, the order is what it was: the best fit first. The address keeps it, so a reload or a
-bookmark does too. <code dir="auto">GET /api/postings?sort=newest_posted</code> is the same order for an agent (<code dir="auto">sort=fit</code>
-is the default).</li>
-<li><strong><code dir="auto">gigai agent-permissions --port PORT</code></strong> prints the permissions snippet for a Scout you started on another port than 8765.</li>
+bookmark does too.</li>
+<li><strong>New commands and options,</strong> each described below: <code dir="auto">gigai doctor --repair-journal</code> and
+<code dir="auto">gigai scout resume master init --from FILE --dry-run</code> (under “Fixed”), and
+<code dir="auto">gigai agent-permissions --port PORT</code> (under “For agents”).</li>
 </ul>
 <div class="sl-heading-wrapper level-h4"><h4 id="changed">Changed</h4><a class="sl-anchor-link" href="#changed"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “Changed”</span></a></div>
 <ul>
-<li><strong>50 at a time.</strong> Every offer and every command that assesses many postings now acts on the newest
-50 and never more in one go: the “assess the new ones” question of <code dir="auto">gigai scout new</code> (and <code dir="auto">--yes</code>),
+<li><strong>50 at a time.</strong> The offers and commands that assess many postings now act on the newest 50 and
+never more in one go: the “assess the new ones” question of <code dir="auto">gigai scout new</code> (and <code dir="auto">--yes</code>),
 its low-ranked question (<code dir="auto">--include-low-rank</code>), the old-assessments question (<code dir="auto">--reassess-stale</code>),
 “Assess these” on Jobs and <code dir="auto">gigai scout jobs assess</code>, “Assess all new” on a run, and
 <code dir="auto">gigai scout new --process</code> (at most 50 waiting steps a call). “Newest” is the day the posting went
 up on its board, or the day Scout first stored it when the board gives none. Each question says the
 real total, the 50 and what the 50 cost, for example “Assess the newest 50 of 120 postings? ~50
-calls (70 more after these 50)”, and after a batch the output says how many are left and how to take
-the next 50 (the same command or click again). 50 or fewer: nothing changes.</li>
+calls (70 more after these 50)”. After a batch that left some, the output says how many are left and
+prints the command for the next 50 (“70 more …: 50 at a time. Next: …”). For new postings run
+that command, not a bare <code dir="auto">gigai scout new --yes</code> again: the yes moved the “new since” time, and the
+printed command carries the time the 70 were counted from (<code dir="auto">--since</code>). For “Assess these” and
+<code dir="auto">gigai scout jobs assess</code>, the same click or command again takes the next 50. 50 or fewer: nothing
+changes. One path is not covered: a find-jobs run started with the cap “all” still assesses up to
+500 postings in that run. The background pipeline keeps its own limits (10 jobs per change, the
+daily cap on model calls).</li>
 </ul>
 <div class="sl-heading-wrapper level-h4"><h4 id="fixed">Fixed</h4><a class="sl-anchor-link" href="#fixed"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “Fixed”</span></a></div>
+<p>Posting dates:</p>
 <ul>
-<li><strong><code dir="auto">gigai scout new --no-assess</code> never waits for an answer.</strong> In a terminal it stopped at “N have
-only an old assessment; re-assess? [y/N]” and waited, although <code dir="auto">--no-assess</code> means “do not ask and do
-not assess”. It now prints the offers with their counts and ends, in a terminal and without one.</li>
-<li><strong>A run you leave at a question does not use up “new”.</strong> <code dir="auto">gigai scout new</code> moved its “new since”
-time before it asked its first question. If you pressed Ctrl-C at the question, the next run said
-“nothing new since” the run you had left. The time now moves when the run has done its work (every
-question answered, or none asked): leave at a question and the next run shows the same postings as
-new.</li>
-<li><strong><code dir="auto">gigai scout new --json</code> that asks is a preview; the yes after it assesses.</strong> An asking call
-(status <code dir="auto">ask</code>: <code dir="auto">gigai scout new --json</code>, or any call without a terminal) moved the “new since” time,
-so the next step, <code dir="auto">gigai scout new --yes --json</code>, said “Nothing new” and assessed nothing. An asking
-call now moves nothing: ask again and you get the same postings, and a plain <code dir="auto">--yes</code> assesses them.
-The time moves with the answer: <code dir="auto">--yes</code>, or <code dir="auto">--no-assess</code> for a no.</li>
-<li><strong>“Nothing new” says what it counts.</strong> <code dir="auto">gigai scout new</code> could say “Nothing new since your last
-check” right after a sources update that stored hundreds of new postings. Both were right, and
-nothing said why: “new” counts the postings your profiles match that Scout first stored after your
-last check, and an update counts every new posting on every board, whatever its title. The message
-and the update’s summary now say so. (“First stored” is the time Scout first read the posting, never
-a date of the board’s; a posting that changes later is not new again.)</li>
-<li><strong><code dir="auto">gigai scout sources update</code> says how many companies it checked out of all of them.</strong> It said
-“3859 boards” while <code dir="auto">gigai scout sources status</code> said 10,349 stored companies. An update asks only
-the companies that are due; the ones checked within the last day are left alone. The line now reads
-“Checked 3,859 of 10,349 companies this run (…). The other 6,490 were checked within the last day
-and were not asked again.”</li>
+<li><strong>A posting’s date is shown.</strong> Jobs rows and the job page say “posted 10 days ago” (the exact day on
+hover): the day the posting went up on its board. When the board changed the posting on a later day,
+the job page says so beside it (“posted 2 months ago · updated 3 days ago”). When a board gives no
+posting day, the page says “first seen 3 days ago”, which is the day Scout first stored the posting.
+<code dir="auto">gigai scout jobs list</code> and <code dir="auto">gigai scout new</code> say the same with the day (“posted 2026-09-24”).</li>
 <li><strong>A Greenhouse posting’s date is the day it was posted, not the day it last changed.</strong> Scout stored a
 Greenhouse posting’s last change as its date. A posting that had been up for two months and was edited
 three days ago counted as three days old: it passed the 7 days and 30 days filters and your “posted
-within” window, and would have read “updated 3 days ago”. Scout now reads the day the board first
-published it, and the filters, the window and the new “Newest posted” order go by that day. The day of
-the last change is kept beside it, never in its place (see “After you upgrade”). Lever and Ashby
-postings already had the right day.</li>
+within” window. Scout now reads the day the board first published it, and the filters, the window and
+the new “Newest posted” order go by that day. The day of the last change is kept beside it, never in
+its place (see “After you upgrade”). Lever and Ashby postings already had the right day.</li>
+</ul>
+<p>Assessments:</p>
+<ul>
 <li><strong>Re-assess works on an old assessment.</strong> A job whose assessment was marked old (made with an older
 prompt, or before you changed a setting, an answer or your resume) could not be re-assessed from its
 job page when it had no open question: the button was off. It is now on, says why the assessment is
@@ -275,13 +447,41 @@ words.</li>
 job’s first assessment; it now shows the day of the one on the page. A Scout label or a tailored
 resume made before the new assessment says so (“from before the latest assessment”), with what to
 click to make it again. “Minor gaps” is said beside a match only, not under “Needs your answers”.</li>
-<li><strong>A posting’s date is shown.</strong> Jobs rows and the job page say “posted 10 days ago” (the exact day on
-hover): the day the posting went up on its board. When the board changed the posting on a later day,
-the job page says so beside it (“posted 2 months ago · updated 3 days ago”). When a board gives no
-posting day, the page says “first seen 3 days ago”, which is the day Scout first stored the posting.
-<code dir="auto">gigai scout jobs list</code> and <code dir="auto">gigai scout new</code> say the same with the day (“posted 2026-09-24”), and
-their JSON and the API rows carry each date under its own name (<code dir="auto">published_at</code> with <code dir="auto">published_kind</code>,
-<code dir="auto">updated_at</code> for the board’s last change, and <code dir="auto">first_seen_at</code>).</li>
+<li><strong>An Ashby posting whose description is only HTML can be assessed.</strong> Some Ashby boards send a
+posting’s description as HTML only, with no plain-text copy. Scout read only the plain-text copy, so
+such a posting had no text at all: assessing it failed every time with <code dir="auto">job_text_unavailable</code>
+(reason <code dir="auto">no_text</code>), and a keyword search never found it. Scout now reads the HTML description, turned
+into text the same way as for the other boards, when there is no plain-text one (see “After you
+upgrade”). A posting that has a plain-text description is read exactly as before. This is not a fix
+for an assessment that failed with <code dir="auto">posting_requirements_unreadable</code>: that posting had its text, and
+the answer now says which rule refused (see “For agents”).</li>
+</ul>
+<p><code dir="auto">gigai scout new</code> and <code dir="auto">gigai scout sources update</code>:</p>
+<ul>
+<li><strong><code dir="auto">gigai scout new --no-assess</code> never waits for an answer.</strong> In a terminal it stopped at “N have
+only an old assessment; re-assess? [y/N]” and waited, although <code dir="auto">--no-assess</code> means “do not ask and do
+not assess”. It now prints the offers with their counts and ends, in a terminal and without one.</li>
+<li><strong>A question you have not answered does not use up “new”.</strong> <code dir="auto">gigai scout new</code> moved its “new since”
+time before it asked its first question. If you pressed Ctrl-C at the question, the next run said
+“nothing new since” the run you had left; and an agent’s asking call (<code dir="auto">gigai scout new --json</code>, or
+any call without a terminal) was followed by a <code dir="auto">gigai scout new --yes --json</code> that said “Nothing
+new” and assessed nothing. A call that asks now moves nothing: ask again and you get the same
+postings. The time moves with the answer: a yes or a no at the prompt, <code dir="auto">--yes</code>, or <code dir="auto">--no-assess</code>.</li>
+<li><strong>“Nothing new” says what it counts.</strong> <code dir="auto">gigai scout new</code> could say “Nothing new since your last
+check” right after a sources update that stored hundreds of new postings. Both were right, and
+nothing said why: “new” counts the postings your profiles match that Scout first stored after your
+last check, and an update counts every new posting on every board, whatever its title. The message
+and the update’s summary now say so. (“First stored” is the time Scout first read the posting, never
+a date of the board’s; a posting that changes later is not new again.)</li>
+<li><strong><code dir="auto">gigai scout sources update</code> says how many companies it checked out of all of them.</strong> It said
+“3859 boards” while <code dir="auto">gigai scout sources status</code> said 10,349 stored companies. An update asks only
+the companies that are due; the ones checked within the last day are left alone. The line now reads
+“Checked 3,859 of 10,349 companies this run (…). The other 6,490 were checked within the last day
+and were not asked again.”</li>
+<li><strong>“~1 call”, not “~1 calls”,</strong> in the questions of <code dir="auto">gigai scout new</code> and <code dir="auto">gigai scout jobs assess</code>.</li>
+</ul>
+<p>Your resume and the master resume:</p>
+<ul>
 <li><strong><code dir="auto">gigai scout resume master init</code> reads the resumes people have.</strong> It refused a resume with a
 <code dir="auto">---</code> rule between two roles (“text after an entry’s bullets”), and <code dir="auto">--from FILE</code> refused section
 headings such as <code dir="auto">## WORK EXPERIENCE</code> or <code dir="auto">## AGENTIC AI PROJECTS</code> and a project written as a bold
@@ -290,10 +490,10 @@ six sections is read as the closest one (Technical Skills is Skills, Selected Pr
 Source are Projects, Publications, Awards and Certifications are Other lines, anything unknown is
 Other); text with no place of its own in its section is kept, never refused. The command says which
 heading it read as which section and which lines it left out, by line number, with a count that adds
-up. New: <code dir="auto">gigai scout resume master init --from FILE --dry-run</code> shows what would be stored and
-writes nothing. A file whose first line is `` is still held to GigAI’s own
-format, and contact lines are removed as before. A refusal names the line number and the rule; on
-the terminal it now also shows that line.</li>
+up; <code dir="auto">--from FILE --dry-run</code> shows it and writes nothing. A file that starts with the marker line of
+GigAI’s own <code dir="auto">master.md</code> (<code dir="auto">gigai-master:1</code>) is still held to GigAI’s own format, and contact lines are
+removed as before. A refusal names the line number and the rule; on the terminal it now also shows
+that line.</li>
 <li><strong>A heading that is a link keeps its name.</strong> A project or employer written as a link
 (<code dir="auto">### [Driftwatch](https://github.com/...)</code>) lost its whole line when you made the master from a
 file or imported <code dir="auto">master.md</code>, so the project had no name and its bullets went to the entry above;
@@ -301,9 +501,17 @@ file or imported <code dir="auto">master.md</code>, so the project had no name a
 entry’s heading, a bold title line and a role line right under one: the entry is “Driftwatch”, with
 its bullets. The command says which heading lost a link, by line number (“link removed from the
 heading Driftwatch”); <code dir="auto">--dry-run</code> shows it. A heading that is only a link is refused by line number
-(“this heading is only a link: give the project a name”) instead of being dropped. Nothing else
-changes: GigAI still stores no links, a link in a bullet or a paragraph, an email or a phone number
-in a heading, and your name and contact lines are handled as before.</li>
+(“this heading is only a link: give the project a name”) instead of being dropped: for
+<code dir="auto">gigai scout resume add</code> that means the resume is not imported until the heading has a name. Nothing
+else changes: GigAI still stores no links, and a link in a bullet or a paragraph, an email or a
+phone number in a heading, and your name and contact lines are handled as before.</li>
+<li><strong><code dir="auto">gigai scout resume clean</code> keeps a title that is a link.</strong> <code dir="auto">**[Dispatch Optimizer](https://...)** *(Python, Kafka)*</code> came out as <code dir="auto">**[Dispatch Optimizer]( *(Python, Kafka)*</code>, the check called that
+clean, and the broken line reached the master resume and the PDF. The link goes and the words stay,
+as <code dir="auto">gigai scout resume add</code> does; the cleaned copy is now what <code dir="auto">resume add</code> stores. A heading that is
+only a link is refused by line number, as <code dir="auto">resume add</code> refuses it.</li>
+</ul>
+<p>The store and the running app:</p>
+<ul>
 <li><strong>A save cut off by a crash no longer leaves a store with no way out.</strong> When GigAI was killed, or the
 machine lost power, in the middle of a save, every later save was refused (and, when the crash came
 after the save’s files were written, every read of your answers too), and all you saw was a Python
@@ -312,39 +520,36 @@ such a save, but no command ran that. Now one does: <code dir="auto">gigai docto
 interrupted save in every workpad of the home and says what it finished; the save that was cut off is
 completed, not lost, and the next save works. On a healthy home it reports “nothing to repair” and
 changes no file, and it can run beside a running Scout server. GigAI does not run it on its own, not
-when the server starts and not before a save.
-How you learn about it: the refused save (and, when the crash came after the save’s files were
-written, the refused read too) ends in one line that names the command with your <code dir="auto">--home</code>
-(<code dir="auto">next_action</code> in <code dir="auto">--json</code>), and the API answers with the same text, the code
-<code dir="auto">journal_reconciliation_required</code> and <code dir="auto">next_action</code> instead of <code dir="auto">internal_error</code>. When the crash came
-after the files were written, plain <code dir="auto">gigai doctor</code> also fails on <code dir="auto">journal.index</code> with the command in
-its remediation (<code dir="auto">--json</code>). The command checks that each workpad’s ownership markers name the folder
-it is in, and refuses one where they do not, saying which marker differs.</li>
-<li><strong><code dir="auto">gigai scout run</code> on a machine with no model CLI says what to install.</strong> It used to say “rerun <code dir="auto">gigai setup</code>” to someone who never ran it; now: “no model CLI was found: install Codex or Claude Code, then run <code dir="auto">gigai scout run</code> again”, with the way in for an API key or a local Ollama model.</li>
-<li><strong>With no settings yet, <code dir="auto">gigai scout status</code> and <code dir="auto">gigai doctor</code> name the way in.</strong> “configuration is missing at …; run ‘gigai setup’” is now “…; run ‘gigai scout run’ once (it needs Codex or Claude Code installed) or run ‘gigai setup’”. The quickstart no longer says a local Ollama model or an OpenRouter key “also work”: Scout does not start without Codex or Claude Code installed.</li>
-<li><strong><code dir="auto">gigai scout resume clean</code> keeps a title that is a link.</strong> <code dir="auto">**[Dispatch Optimizer](https://...)** *(Python, Kafka)*</code> came out as <code dir="auto">**[Dispatch Optimizer]( *(Python, Kafka)*</code>, the check called that clean, and the broken line reached the master resume and the PDF. The link goes and the words stay, as <code dir="auto">gigai scout resume add</code> already did; the cleaned copy is now what <code dir="auto">resume add</code> stores. A heading that is only a link is refused by line number, as <code dir="auto">resume add</code> refuses it.</li>
+when the server starts and not before a save. You learn about it where you are stopped: the refused
+save or read ends in one line that names the command with your <code dir="auto">--home</code>, in the terminal and from
+the API. When the crash came after the files were written, plain <code dir="auto">gigai doctor</code> also fails on
+<code dir="auto">journal.index</code> and names the command. The command checks that each workpad’s ownership markers name
+the folder it is in, and refuses one where they do not, saying which marker differs.</li>
+<li><strong>Scout’s memory no longer grows by about 32 MB with every resume pick.</strong> Every time Scout measured
+how many pages a resume takes (one pick from a master resume measures about 18 times), the layout
+engine kept memory that was never given back: a Scout left running through many tailorings grew by
+gigabytes. Its memory now stays level. Measured in one process: 50 picks grew it by 1,599 MB before
+and by 17 MB now, and the read-only pick report peaked at 2,099 MB before and at 146 MB now. The
+price: a pick takes about 1.15 times as long (0.15 s before, 0.17 s now).</li>
+<li><strong><code dir="auto">gigai scout run</code> never stops the Scout of another GigAI home</strong> (see “After you upgrade”).</li>
+<li><strong><code dir="auto">gigai scout status</code> no longer says “stopped” about a running Scout.</strong> Where it could not
+identify the server’s process (inside an agent’s sandbox), it said “stopped” and forgot the running
+Scout. It now checks the process and the API apart and says what it found (see “For agents”).</li>
+</ul>
+<p>A new user’s first steps:</p>
+<ul>
+<li><strong><code dir="auto">gigai scout run</code> on a machine with no model CLI says what to install.</strong> It used to say “rerun
+<code dir="auto">gigai setup</code>” to someone who never ran it; now: “no model CLI was found: install Codex or Claude
+Code, then run <code dir="auto">gigai scout run</code> again”, with the way in for an API key or a local Ollama model.</li>
+<li><strong>With no settings yet, <code dir="auto">gigai scout status</code> and <code dir="auto">gigai doctor</code> name the way in.</strong> “configuration is
+missing at …; run ‘gigai setup’” is now “…; run ‘gigai scout run’ once (it needs Codex or Claude
+Code installed) or run ‘gigai setup’”.</li>
+<li><strong>The getting-started pages say what is true.</strong> The quickstart no longer says a local Ollama model
+or an OpenRouter key “also work”: Scout does not start without Codex or Claude Code installed. The
+install page runs <code dir="auto">gigai doctor</code> after the first <code dir="auto">gigai scout run</code>, not before it. The agent start
+page, the agent guide, llms.txt and the instructions <code dir="auto">gigai agent-skill</code> prints give the exact
+command for a yes (the one the question carries).</li>
 <li><strong><code dir="auto">gigai models</code> prints a CLI’s version as <code dir="auto">v0.160.0</code>,</strong> not <code dir="auto">vcodex-cli 0.160.0</code>.</li>
-<li><strong>“~1 call”, not “~1 calls”,</strong> in the questions of <code dir="auto">gigai scout new</code> and <code dir="auto">gigai scout jobs assess</code>.</li>
-<li><strong>An Ashby posting whose description is only HTML can be assessed.</strong> Some Ashby boards send a
-posting’s description as HTML only, with no plain-text copy. Scout read only the plain-text copy, so
-such a posting had no text at all: assessing it failed every time with <code dir="auto">job_text_unavailable</code>
-(reason <code dir="auto">no_text</code>), and a keyword search never found it. Scout now reads the HTML description, turned
-into text the same way as for the other boards, when there is no plain-text one. A posting that has a
-plain-text description is read exactly as before.
-After you upgrade: such a posting that is already in your list can be assessed at once (its text is
-read from the company’s stored list; nothing is fetched again). Your next <code dir="auto">gigai scout sources update</code>
-(or “Update sources”) finishes it: it reads each Ashby company’s list once more with the request it
-makes anyway (no extra request; a company whose list did not change is read again from what is
-stored), and a posting that gets its text this way is found by a keyword search and counts once as
-changed in a search’s “new or changed since the last search”. No other Ashby posting is marked new or
-changed by this, and nothing needs to be done.
-This is not a fix for an assessment that failed with <code dir="auto">posting_requirements_unreadable</code>: that posting
-had its text, and the answer now says which rule refused (see “For agents”).</li>
-<li><strong><code dir="auto">gigai scout run</code> never stops the Scout of another GigAI home.</strong> It stopped whatever Scout held the
-port, also one that another home (<code dir="auto">--home</code>) had started. Now only a Scout of the same home is stopped:
-another home’s keeps running, and the command ends with one line that names the port and that home
-and says to pass <code dir="auto">--port</code>.</li>
-<li><strong>The Scout server no longer grows by about 12 MB per tailoring.</strong> Every time Scout measured how many pages a resume takes (a tailoring from a master resume measures a dozen times or more), memory was left behind that was never given back: a Scout left running through many tailorings could grow by gigabytes. Its memory now stays level.</li>
 </ul>
 <div class="sl-heading-wrapper level-h4"><h4 id="for-agents">For agents</h4><a class="sl-anchor-link" href="#for-agents"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “For agents”</span></a></div>
 <ul>
@@ -357,21 +562,40 @@ a line of your resume or answers. In a terminal the same facts are printed above
 <li><strong>A failed assessment says what happened and what to do.</strong> For <code dir="auto">model_target_unavailable</code>,
 <code dir="auto">model_denied</code>, <code dir="auto">model_unavailable</code>, <code dir="auto">assess_timeout</code>, <code dir="auto">model_output_invalid</code> and
 <code dir="auto">assessment_not_stored</code>, the CLI’s JSON, the API’s error and the job page now also say whether a model
-call started, whether it may have used tokens, that no new assessment was stored, and the next action.</li>
-<li><strong>“Could not read this posting’s requirements” says which rule refused.</strong> <code dir="auto">posting_requirements_unreadable</code>
-is one code for two rules (the model said “Matched” on fewer than three requirements for a long
-posting; or the text has no requirement wording and the model found none). A batch’s failure, the
-terminal line and the API’s error now carry a <code dir="auto">reason</code> (<code dir="auto">matched_on_too_few_requirements</code> or
-<code dir="auto">no_requirements_in_text</code>). The model answered in both cases and nothing is stored.</li>
+call started (<code dir="auto">model_call_started</code>), whether it may have used tokens (<code dir="auto">may_have_used_tokens</code>), that
+no new assessment was stored (<code dir="auto">fresh_assessment_stored</code>), and the next action (<code dir="auto">next_action</code>).</li>
+<li><strong>“Could not read this posting’s requirements” says which rule refused.</strong>
+<code dir="auto">posting_requirements_unreadable</code> is one code for two rules (the model said “Matched” on fewer than
+three requirements for a long posting; or the text has no requirement wording and the model found
+none). A batch’s failure, the terminal line and the API’s error now carry a <code dir="auto">reason</code>
+(<code dir="auto">matched_on_too_few_requirements</code> or <code dir="auto">no_requirements_in_text</code>). The model answered in both cases
+and nothing is stored.</li>
 <li><strong>Batches are 50: the questions carry the numbers.</strong> Each question of <code dir="auto">gigai scout new --json</code> and of
-<code dir="auto">gigai scout jobs assess --json</code> (and <code dir="auto">GET /api/new</code>, <code dir="auto">POST /api/postings/assess</code>) has the total, <code dir="auto">batch</code>
-(what a yes acts on, at most 50) and <code dir="auto">more_after</code>; the estimate is the batch’s. After a yes that left
-some, <code dir="auto">assessed</code> / <code dir="auto">reassessed</code> name the call for the next 50 (<code dir="auto">next</code>).</li>
-<li><strong><code dir="auto">gigai scout status</code> no longer says “stopped” from inside a sandbox.</strong> It checks the process and the
-API apart. A running Scout whose address cannot be reached from where the command ran is reported as
+<code dir="auto">gigai scout jobs assess --json</code> (and <code dir="auto">GET /api/new</code>, <code dir="auto">POST /api/postings/assess</code>) has the total,
+<code dir="auto">batch</code> (what a yes acts on, at most 50) and <code dir="auto">more_after</code>; the estimate is the batch’s. After a yes
+that left some, <code dir="auto">assessed</code> / <code dir="auto">reassessed</code> carry <code dir="auto">more_after</code> and <code dir="auto">next</code> (the call for the next 50,
+<code dir="auto">cli</code> and <code dir="auto">api</code>). Run <code dir="auto">next</code>: for new postings a bare <code dir="auto">--yes</code> again says nothing new.</li>
+<li><strong>A <code dir="auto">gigai scout new</code> reply that asks is a preview.</strong> A reply with status <code dir="auto">ask</code> moves nothing
+(<code dir="auto">anchor.advances</code> is <code dir="auto">false</code>): ask again and you get the same postings and the same question. The
+“new since” time moves with the answer: <code dir="auto">--yes</code> (the command in <code dir="auto">question.yes.cli</code> carries <code dir="auto">--since</code>
+and covers exactly the postings you showed; a bare <code dir="auto">gigai scout new --yes --json</code> right after the
+question works too) or <code dir="auto">--no-assess</code> for a no. A reply that asks nothing (nothing new, every new
+posting assessed, or only the low-ranked question) moves it as before. <code dir="auto">GET /api/new</code> never moves it.</li>
+<li><strong>A posting’s dates each have their own name.</strong> <code dir="auto">gigai scout jobs list --json</code>, <code dir="auto">gigai scout new --json</code> and the API rows carry <code dir="auto">published_at</code> with <code dir="auto">published_kind</code> (<code dir="auto">posted</code> for Greenhouse, Lever
+and Ashby; <code dir="auto">updated</code>, the weaker claim, for a kind of board Scout has no posting day for),
+<code dir="auto">updated_at</code> for the board’s last change, and <code dir="auto">first_seen_at</code>.
+<code dir="auto">GET /api/postings?sort=newest_posted</code> is the “Newest posted” order (<code dir="auto">sort=fit</code> is the default).</li>
+<li><strong><code dir="auto">gigai scout status</code> has a state <code dir="auto">unreachable</code>.</strong> It checks the process and the API apart. A
+running Scout whose address cannot be reached from where the command ran (a sandbox) is reported as
 <code dir="auto">process: running (pid N); API: not reachable from here</code> (state <code dir="auto">unreachable</code>), and the JSON has a
-<code dir="auto">process</code> and an <code dir="auto">api</code> block. It says “running” only when the API answers, and it no longer forgets a
-running Scout whose process it could not identify.</li>
+<code dir="auto">process</code> and an <code dir="auto">api</code> block. It says “running” only when the API answers. A script that switches on
+running / stopped / crashed sees a new value.</li>
+<li><strong>A store that needs the repair says so in a code.</strong> A save or a read refused after an interrupted
+save carries <code dir="auto">next_action</code> (the <code dir="auto">gigai doctor --repair-journal --home ...</code> command) in <code dir="auto">--json</code>, and
+the API answers with the code <code dir="auto">journal_reconciliation_required</code> and <code dir="auto">next_action</code> instead of
+<code dir="auto">internal_error</code>.</li>
+<li><strong><code dir="auto">gigai agent-permissions --port PORT</code></strong> prints the permissions snippet for a Scout you started on
+another port than 8765.</li>
 <li><strong>The agent guide names three separate approvals</strong> (your choice to assess, Scout’s own <code dir="auto">--yes</code>, and
 your agent runtime’s own approval), says what one assessment sends, what to check after an
 interruption before retrying, and gives the address of a job’s page. <code dir="auto">gigai agent-skill</code> prints the
@@ -382,17 +606,12 @@ write. A write no longer rebuilds the internal index of records before it replie
 it now says <code dir="auto">true</code>: the record is stored, and the index follows when Scout next starts. Nothing reads
 that index to answer you. <code dir="auto">rebuild_action</code> is now always <code dir="auto">null</code>: it used to name <code dir="auto">rebuild_index</code>,
 which was never a command, and there is nothing to run.</li>
-</ul>
-<div class="sl-heading-wrapper level-h4"><h4 id="still-slower-than-one-second">Still slower than one second</h4><a class="sl-anchor-link" href="#still-slower-than-one-second"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “Still slower than one second”</span></a></div>
-<p>Measured on a store of 290,000 postings from 10,000 companies with finished background work. These
-are next in line, not done in this version:</p>
-<ul>
-<li><strong>Saving:</strong> answering a question many jobs asked takes about 7 seconds, editing a master resume line
-that two profiles show about 9 seconds, <code dir="auto">gigai scout resume add</code> about 5 seconds, a master resume
-line added one at a time about 4 to 5 seconds. What remains is the store’s own writing.</li>
-<li><strong><code dir="auto">gigai scout sources update</code></strong> takes more than a minute on 10,000 companies, and the
-<code dir="auto">gigai scout new</code> after it matches every company again (about 12 seconds), not only the ones that changed.</li>
-<li><strong><code dir="auto">gigai scout resume master selection refresh --all</code></strong> takes about 13 seconds.</li>
+<li><strong>Which resume a job’s resume is made from.</strong> <code dir="auto">gigai scout resume master selection status --json</code> and
+<code dir="auto">GET /api/master/selection</code> carry <code dir="auto">tailoring_basis</code> (<code dir="auto">master</code> or <code dir="auto">profile_resume</code>) and
+<code dir="auto">tailoring_basis_line</code> (the sentence) for each profile. A resume with a heading that is only a link
+is refused by <code dir="auto">gigai scout resume add</code> and <code dir="auto">gigai scout resume clean</code> with the code
+<code dir="auto">resume_heading_only_link</code>. <code dir="auto">gigai scout run</code> on a port another home’s Scout holds ends with
+<code dir="auto">scout_run_port_in_use</code>.</li>
 </ul>
 <div class="sl-heading-wrapper level-h3"><h3 id="011010">0.1.10.10</h3><a class="sl-anchor-link" href="#011010"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “0.1.10.10”</span></a></div>
 <p>A fix for 0.1.10.9: <code dir="auto">gigai scout new</code> stopped with an error on the first run after an update when
