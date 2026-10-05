@@ -6,7 +6,16 @@ TEST_XDIST_WORKERS ?= auto
 TEST_XDIST_MAX_WORKERS ?= 14
 TEST_XDIST_DIST ?= worksteal
 
-.PHONY: test test-macos-smoke test-operator-home test-source test-behavior test-wheel test-installed test-live test-debian-offline unit-tests api-e2e eval-live
+.PHONY: test test-macos-smoke test-operator-home test-source test-behavior test-wheel test-installed test-live test-debian-offline unit-tests api-e2e eval-live lint
+
+# 0110-10-08: names the package uses and never defines (ruff F821 undefined name, F823 local read before it is
+# assigned). 0.1.10.9 shipped `time.monotonic()` in a module with no `import time`, on a line only a large store
+# reaches: no test ran it, and nothing read the code for it. Every PR runs this (the `lint` job of
+# pull_request.yaml). ruff is not a project dependency (uv.lock does not hold it): `uv tool run` fetches the one
+# version pinned here. Only these two rules, on purpose: the other F rules have findings that are not errors.
+RUFF_VERSION ?= 0.16.10
+lint:
+	$(UV) tool run ruff@$(RUFF_VERSION) check --select F821,F823 --no-fix src/gigai
 
 # Complete portable offline coverage: one source discovery pass, the existing
 # deterministic behavior evaluation, and a fresh wheel plus every installed
@@ -72,7 +81,8 @@ test-macos-smoke:
 # pull_request.yaml, profile `release`). The real server process on a synthetic home the size of the operator's
 # (290,000 postings, 10,350 companies, 2 profiles; tests/support/operator_home.py: no request, no real home is read):
 # one build for 8 requests at once, progress and responsive routes during it, warm reads under 500 ms, bounded
-# memory, a warm fresh process. About 2 minutes. Without GIGAI_OPERATOR_GATE=1 (the normal suite) the same test
+# memory, a warm fresh process, and (0110-10-08) `gigai scout new --no-assess --json` doing the first build itself
+# with the server stopped. About 2 minutes. Without GIGAI_OPERATOR_GATE=1 (the normal suite) the same test
 # runs on a tenth of that home.
 test-operator-home:
 	GIGAI_OPERATOR_GATE=1 $(UV) run --locked --extra test python -m pytest -n 0 -q -s \

@@ -14,6 +14,7 @@ from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 import json
 from pathlib import Path
+from typing import TYPE_CHECKING
 import uuid
 
 from .. import model_execution
@@ -86,6 +87,10 @@ from ..adapters.factory import AdapterFactoryError, resolve_model_adapter
 from ..adapters.port import ModelInvocationError
 from ..validators import validate_goal_graph, validate_serialized_contract
 from ..validators import validate_model_invocation
+
+if TYPE_CHECKING:
+    # Annotations only: at run time the graph contracts are imported where they are used.
+    from .find_jobs.contracts import AssessInput, AssessOutput, NodeContext
 
 
 _ROLE = "reviewer"

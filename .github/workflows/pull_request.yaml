@@ -71,6 +71,26 @@ jobs:
           WORKFLOW_FILE: pull_request.yaml
         run: python3 tools/ci_changes.py
 
+  # 0110-10-08: names the package uses and never defines (`make lint`: ruff F821 and
+  # F823 over src/gigai, the ruff version pinned in the Makefile). 0.1.10.9 shipped
+  # `time.monotonic()` in a module with no `import time`, on a line only a large store
+  # reaches. It does not wait for `changes` and has no condition: every PR, every
+  # profile, a few seconds. A finding fails the run, so a release pre-check with one is
+  # not green.
+  lint:
+    name: Lint (undefined names)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+      - uses: astral-sh/setup-uv@v8.0.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - run: make lint
+
   source-matrix:
     needs: changes
     if: needs.changes.outputs.code_changed == 'true'
@@ -421,8 +441,10 @@ jobs:
   # and 10,350 companies: no check ran on a home of that size. This runs the real server
   # process on a synthetic one (no request, no real home): one build for 8 requests at
   # once, progress and responsive routes during it, warm reads under 500 ms, bounded
-  # memory, a warm fresh process. A failed job fails the pre-check run, so release.yml
-  # finds no green run to release.
+  # memory, a warm fresh process, and (0110-10-08) `gigai scout new --no-assess --json`
+  # doing the first build itself, in its own process, with the server stopped (0.1.10.9
+  # crashed there). A failed job fails the pre-check run, so release.yml finds no green
+  # run to release.
   # U4 (0.1.10.9): the same job then loads the UI on that home in a real browser
   # (`make ui-test-operator`: the `operator_sized` half of `make ui-test-full`; the `ui`
   # job runs the other half on the small home). The home is built ONCE: the build step
