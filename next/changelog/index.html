@@ -87,6 +87,10 @@ operator-visible capability and must link to the relevant release or evidence.</
 <p>Speed: nothing you wait for in the local app should take more than a second, also on a very large
 store of postings. Work in progress; the notes are written as the changes land.</p>
 <ul>
+<li><strong>Fixed: <code dir="auto">gigai scout new</code> crashed on a large store.</strong> On the first run after an update, with 500 or
+more companies to match again, <code dir="auto">gigai scout new</code> stopped with <code dir="auto">NameError: name 'time' is not defined</code>
+instead of an answer (it worked again once the local app had opened the Jobs page). It now prepares
+the postings itself and says how far it is (“preparing your postings: 40% …”) while you wait.</li>
 <li><strong>Screenshots.</strong> The screenshots in the docs are from this version again (0.1.10.9 kept the older
 ones) and now show the Master resume page, Picked and Left out on a job’s resume, where a job’s
 resume file is in your resumes folder, and an agent adding a story to your master resume.</li>
