@@ -214,6 +214,7 @@ each posting went up, the newest first (a posting whose board gives no date: by 
 saw it). Off, the order is what it was: the best fit first. The address keeps it, so a reload or a
 bookmark does too. <code dir="auto">GET /api/postings?sort=newest_posted</code> is the same order for an agent (<code dir="auto">sort=fit</code>
 is the default).</li>
+<li><strong><code dir="auto">gigai agent-permissions --port PORT</code></strong> prints the permissions snippet for a Scout you started on another port than 8765.</li>
 </ul>
 <div class="sl-heading-wrapper level-h4"><h4 id="changed">Changed</h4><a class="sl-anchor-link" href="#changed"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “Changed”</span></a></div>
 <ul>
@@ -317,6 +318,10 @@ written, the refused read too) ends in one line that names the command with your
 after the files were written, plain <code dir="auto">gigai doctor</code> also fails on <code dir="auto">journal.index</code> with the command in
 its remediation (<code dir="auto">--json</code>). The command checks that each workpad’s ownership markers name the folder
 it is in, and refuses one where they do not, saying which marker differs.</li>
+<li><strong><code dir="auto">gigai scout run</code> on a machine with no model CLI says what to install.</strong> It used to say “rerun <code dir="auto">gigai setup</code>” to someone who never ran it; now: “no model CLI was found: install Codex or Claude Code, then run <code dir="auto">gigai scout run</code> again”, with the way in for an API key or a local Ollama model.</li>
+<li><strong><code dir="auto">gigai scout resume clean</code> keeps a title that is a link.</strong> <code dir="auto">**[Dispatch Optimizer](https://...)** *(Python, Kafka)*</code> came out as <code dir="auto">**[Dispatch Optimizer]( *(Python, Kafka)*</code>, the check called that clean, and the broken line reached the master resume and the PDF. The link goes and the words stay, as <code dir="auto">gigai scout resume add</code> already did; the cleaned copy is now what <code dir="auto">resume add</code> stores. A heading that is only a link is refused by line number, as <code dir="auto">resume add</code> refuses it.</li>
+<li><strong><code dir="auto">gigai models</code> prints a CLI’s version as <code dir="auto">v0.160.0</code>,</strong> not <code dir="auto">vcodex-cli 0.160.0</code>.</li>
+<li><strong>“~1 call”, not “~1 calls”,</strong> in the questions of <code dir="auto">gigai scout new</code> and <code dir="auto">gigai scout jobs assess</code>.</li>
 <li><strong>An Ashby posting whose description is only HTML can be assessed.</strong> Some Ashby boards send a
 posting’s description as HTML only, with no plain-text copy. Scout read only the plain-text copy, so
 such a posting had no text at all: assessing it failed every time with <code dir="auto">job_text_unavailable</code>
