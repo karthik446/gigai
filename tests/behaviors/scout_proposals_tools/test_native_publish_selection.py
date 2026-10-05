@@ -387,7 +387,7 @@ def test_a_crash_between_the_steps_of_a_native_write_is_recovered_by_the_same_ca
     #    projection is pending; the same call again returns the same receipt and commits nothing.
     qa = _create(pad, "crash-qa")
     sealed = _update(pad, qa.record_id, qa.revision_id, "crash-qa-2")
-    assert sealed.created is True and sealed.projection_pending is True and sealed.rebuild_action == "rebuild_index"
+    assert sealed.created is True and sealed.projection_pending is True and sealed.rebuild_action is None
     head = pad.head()
     replay = _update(pad, qa.record_id, qa.revision_id, "crash-qa-2")
     assert (replay.created, replay.revision_id, replay.receipt) == (False, sealed.revision_id, sealed.receipt) and pad.head() == head

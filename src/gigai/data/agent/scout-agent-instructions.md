@@ -60,6 +60,7 @@ The check is pattern-based and can miss things. Never ask the user to paste a re
 - `gigai scout run [--no-browser] --json` starts Scout and prints its URL (`http://127.0.0.1:8765`); it opens the browser unless `--no-browser`, which is a choice. A job's page is that URL + `#/jobs/` + the posting's URL percent-encoded: give the user that link.
 
 Add `--json` and read the result; do not scrape tables.
+A write's JSON may say `projection_pending: true` (with `rebuild_action: null`). That needs no action: the record is saved, and Scout's internal index follows when Scout next starts.
 
 ## What the numbers mean
 

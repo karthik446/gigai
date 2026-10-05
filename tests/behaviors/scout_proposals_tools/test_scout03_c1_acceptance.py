@@ -128,7 +128,7 @@ def test_post_commit_runtime_failure_returns_pending_result(private_gig, monkeyp
     # 0110-10-16: a save never calls the rebuild, so a projection that cannot be rebuilt cannot cost it anything.
     monkeypatch.setattr(records, "rebuild_scout_projection", unavailable)
     result = records.import_run_input(**options, data=b"Job posting", operation_key="pending")
-    assert result.created and result.projection_pending and result.rebuild_action == "rebuild_index"
+    assert result.created and result.projection_pending and result.rebuild_action is None
     assert attempts == []
     assert result.receipt is not None
     assert "projection_pending" not in result.receipt

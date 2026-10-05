@@ -840,6 +840,8 @@ Example:
 gigai record native create --content-file content.json --operation-key op-1
 ```
 
+In the JSON, `projection_pending: true` needs no action: the record is stored, and the internal index of records follows when Scout next starts. `rebuild_action` is always null; there is no command to run.
+
 ## `gigai record native list`
 
 List native records (metadata only).
@@ -867,6 +869,8 @@ Example:
 ```sh
 gigai record native override --content-file content.json --base-record rec-1 --base-revision rev-1 --operation-key op-1
 ```
+
+In the JSON, `projection_pending: true` needs no action: the record is stored, and the internal index of records follows when Scout next starts.
 
 ## `gigai record native read`
 

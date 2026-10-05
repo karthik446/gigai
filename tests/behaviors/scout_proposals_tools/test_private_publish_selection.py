@@ -248,7 +248,7 @@ def test_a_crash_between_the_steps_of_a_write_is_recovered_by_the_same_calls(tmp
     private_records.catch_up_scout_projection(resolved=private_records._resolved(**pad.scope))  # type: ignore[arg-type]
     other = pad.reference("the resume, changed\n", "crash-ref-2")
     sealed = pad.record(other.item_id, "crash-record-2", record_id=record.record_id, parent_revision=record.revision_id)
-    assert sealed.created is True and sealed.projection_pending is True and sealed.rebuild_action == "rebuild_index"
+    assert sealed.created is True and sealed.projection_pending is True and sealed.rebuild_action is None
     context = json.loads((pad.workpad / "indexes" / "context.json").read_bytes())
     assert sealed.revision_id not in json.dumps(context)  # the derived index is behind
     replay = pad.record(other.item_id, "crash-record-2", record_id=record.record_id, parent_revision=record.revision_id)

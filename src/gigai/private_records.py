@@ -13,6 +13,7 @@ from datetime import UTC, datetime
 import logging
 import os
 from pathlib import Path
+import re
 import sqlite3
 import tempfile
 import threading
@@ -54,7 +55,9 @@ class ImportResult:
     created: bool
     record: dict[str, object]
     receipt: dict[str, object] | None
+    #: The projection is behind this write. It needs no action: Scout brings it to the head when it next starts.
     projection_pending: bool = False
+    #: Always ``None``: no command rebuilds the projection, so a result names none (STORE1B).
     rebuild_action: str | None = None
 
 
@@ -65,6 +68,7 @@ class RevisionResult:
     created: bool
     revision: dict[str, object]
     receipt: dict[str, object] | None
+    #: As ``ImportResult``: behind, and nothing to run.
     projection_pending: bool = False
     rebuild_action: str | None = None
 
@@ -190,7 +194,7 @@ def _resolved(*, home_root: Path, requested_target: Path | None, gig_id: str | N
 def _receipt_path(operation: str, key: str) -> str:
     if not key or len(key) > 160 or any(char not in "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._:-" for char in key):
         raise PrivateRecordError("private_operation_invalid", "operation key is invalid")
-    return f"records/operations/{operation}-{digest_imported_bytes(key.encode()).removeprefix('sha256:')}.json"
+    return owned_receipt_path(operation, key)
 
 
 def _read_json(root: Path, path: str, *, code: str) -> dict[str, object]:
@@ -225,10 +229,31 @@ PUBLISH_PREFIXES: tuple[str, ...] = ("references/", "run-inputs/", "records/oper
 #: known without reading the file, and a receipt of an owned kind that does not read is still an error.
 OWNED_OPERATIONS: frozenset[str] = frozenset({"reference_add", "run_input_add", "record_create", "record_update", "record_archive"})
 
+_RECEIPT_DIGEST = re.compile(r"[0-9a-f]{64}")
+
 
 def _receipt_kind(path: str) -> str:
     stem = path.removeprefix("records/operations/").removesuffix(".json")
+    # An owned kind is read off the FRONT of the name, so nothing that follows the operation (a digest in
+    # another form, a uuid with its dashes) can make an owned receipt look like another module's and be
+    # skipped in silence. Every other name keeps the rule it had: everything before the last dash.
+    for operation in OWNED_OPERATIONS:
+        if stem.startswith(f"{operation}-"):
+            return operation
     return stem.rpartition("-")[0] or stem
+
+
+def owned_receipt_path(operation: str, key: str) -> str:
+    """The ONE place the file name of an owned receipt is built: ``<operation>-<64 hex>.json``.
+
+    ``_receipt_kind`` reads a receipt's owner from this name, so a name that would not read back as its
+    operation is refused here, at write time and before anything is committed: an operation outside
+    ``OWNED_OPERATIONS``, or a digest that is not the 64 hex characters of the key's SHA-256.
+    """
+    digest = digest_imported_bytes(key.encode()).removeprefix("sha256:")
+    if operation not in OWNED_OPERATIONS or not _RECEIPT_DIGEST.fullmatch(digest):
+        raise PrivateRecordError("operation_receipt_name_invalid", "operation receipt name would not read back as its operation")
+    return f"records/operations/{operation}-{digest}.json"
 
 
 def _read_snapshot(resolved: ResolvedWorkpad, *, prefixes: tuple[str, ...] = (), records: bool = False) -> JournalSnapshot:
@@ -350,7 +375,8 @@ def _publish(*, resolved: ResolvedWorkpad, operation: str, key: str, payload: di
         raise PrivateRecordError("private_record_not_authenticated", str(exc)) from exc
     # 0110-10-16: a save never rebuilds the projection, and neither does its retry. Authority is sealed by
     # the commit above; the projection is derived from it and is now behind, which is what the result says
-    # (``projection_pending`` with its rebuild action). ``catch_up_scout_projection`` brings it to the head.
+    # (``projection_pending``, and no action: there is none to run). ``catch_up_scout_projection`` brings it
+    # to the head when Scout next starts.
     # A retry that committed nothing says whether the projection is at the head it read under the lock.
     return receipt, created, created or scout_projection_behind(resolved, journal_head=heads[-1])
 
@@ -384,7 +410,7 @@ def import_reference(*, home_root: Path, requested_target: Path | None, kind: st
             raise PrivateRecordError("private_operation_conflict", "original reference receipt is malformed")
         record = _committed_json(resolved, "/".join(original), code="reference_not_found", schema="reference-record.schema.json")
         reference_id = str(record["reference_id"])
-    return ImportResult(reference_id, created, record, receipt, pending, "rebuild_index" if pending else None)
+    return ImportResult(reference_id, created, record, receipt, pending)
 
 
 def import_run_input(*, home_root: Path, requested_target: Path | None, data: bytes, label: str = "pasted-job-description", media_type: str = "text/plain", gig_id: str | None = None, operation_key: str | None = None, uuid_factory: callable = uuid.uuid4) -> ImportResult:
@@ -421,7 +447,7 @@ def import_run_input(*, home_root: Path, requested_target: Path | None, data: by
             raise PrivateRecordError("private_operation_conflict", "original Run input receipt is malformed")
         record = _committed_json(resolved, "/".join(original), code="run_input_not_found", schema="run-input-record.schema.json")
         input_id = str(record["run_input_id"])
-    return ImportResult(input_id, created, record, receipt, pending, "rebuild_index" if pending else None)
+    return ImportResult(input_id, created, record, receipt, pending)
 
 
 def list_imports(*, home_root: Path, requested_target: Path | None, family: str, gig_id: str | None = None) -> list[dict[str, object]]:
@@ -508,7 +534,7 @@ def create_record(*, home_root: Path, requested_target: Path | None, kind: str, 
             raise PrivateRecordError("private_operation_conflict", "original record receipt is malformed")
         revision = _committed_json(resolved, str(refs[0].get("path")), code="private_record_not_found", schema="private-record-revision.schema.json")
         stable_id, revision_id = str(revision["record_id"]), str(revision["revision_id"])
-    return RevisionResult(stable_id, revision_id, created, revision, receipt, pending, "rebuild_index" if pending else None)
+    return RevisionResult(stable_id, revision_id, created, revision, receipt, pending)
 
 
 def list_revisions(*, resolved: ResolvedWorkpad, record_id: str, snapshot: JournalSnapshot | None = None) -> list[dict[str, object]]:
