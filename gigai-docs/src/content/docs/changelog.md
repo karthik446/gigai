@@ -116,6 +116,8 @@ Read "After you upgrade" and "Not proven".
   side is thin on this set. An assessment made with a model other than the Claude reference says so.
   Read the standard, the method, the per-point columns and what the test cannot show on the
   [accuracy page](https://karthik446.github.io/gigai/scout/accuracy-0-1-11/) of the docs.
+  A real install of the candidate on a real home, with the time of each step, is on the
+  [real-run check page](https://karthik446.github.io/gigai/scout/real-run-0-1-11/).
 - A real agent session through the brief and the hand-back, on Claude Code and on Codex, was not run
   when this was written. The Codex sandbox on this flow is untested.
 - The hand-back check's refusals of true lines were measured on synthetic text only.

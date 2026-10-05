@@ -183,6 +183,8 @@ Over-asks and under-asks of the same runs, in order of the rows above: Claude 2 
 - **Only the Opus row was pinned.** The Sonnet row is Claude Code's own default, resolved and recorded
   per call; a run on another model is a different measurement.
 - **One master.** One person's resume, one set of stored answers and preferences.
+- **A real install on a real home is a separate check:** see
+  [Real-run check and timings (0.1.11)](../real-run-0-1-11/).
 - **A real agent session** through the brief and the hand-back is a separate test and is not in these
   numbers.
 - **A failed call is a failure here**, including the one that is now fixed.
