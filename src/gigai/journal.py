@@ -38,6 +38,7 @@ from .workpad import (
     WORKPAD_LAYOUT_PATH,
     committed_read_cache_active,
     layout_paths_touched,
+    ownership_config_proven,
     read_cache_key_lock as _read_cache_key_lock,
     read_still_holds,
     repository_check_holds,
@@ -832,6 +833,11 @@ def _check_workpad(root: Path, project_id: str, gig_id: str) -> None:
     expected_ignore = WORKPAD_V2_GITIGNORE if layout_version == 2 else WORKPAD_GITIGNORE
     if (root / ".gitignore").read_bytes() != expected_ignore:
         raise JournalConflictError("journal workpad ignore rules differ from declared layout")
+    # 0110-11 STORE2: one git process when it proves all five answers below
+    # (``workpad.ownership_config_proven``); the five questions themselves,
+    # and every refusal, whenever it does not.
+    if ownership_config_proven(root, project_id, gig_id):
+        return
     for key, value in expected.items():
         observed = _git(root, "config", "--local", "--get", key, check=False)
         if observed.returncode != 0 or observed.stdout.rstrip("\n") != value:

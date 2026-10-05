@@ -89,6 +89,7 @@ import re
 import threading
 
 from ..private_records import PrivateRecordError
+from ..workpad import one_operation
 from . import experience_answers
 from .experience_answers import AnswerScope, PriorAnswer
 from .find_jobs.discovery.storage import atomic_write, project_id
@@ -854,6 +855,7 @@ def clean_tag(tag: str) -> str:
     return clean
 
 
+@one_operation()
 def save_answer(
     *,
     home_root: Path,

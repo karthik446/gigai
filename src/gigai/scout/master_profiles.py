@@ -57,7 +57,7 @@ import tempfile
 
 from ..canonical import EntityPrefix, derive_deterministic_id, digest_imported_bytes
 from ..private_records import PrivateRecordError, create_record, import_reference, list_revisions, read_record
-from ..workpad import ResolvedWorkpad, committed_read_cache, resolve_workpad
+from ..workpad import ResolvedWorkpad, committed_read_cache, one_operation, resolve_workpad
 from . import profile_records
 from .find_jobs.contracts import FindJobsContractError, PinnedResume
 from .master_migration import MigrationPlan, MigrationResumeError, SourceResume, plan_migration
@@ -461,6 +461,7 @@ def index_stand_in(home_root: Path, target: Path, profile: ProfileRecord, master
     return SelectionPosting(title=profile.titles[0] if profile.titles else profile.label, text=text), len(sample)
 
 
+@one_operation()
 def refresh_selection(
     *, home_root: Path, target: Path, profile_id: str, dry_run: bool = False, today: date | None = None, measure: Measure | None = None,
 ) -> SelectionChange:

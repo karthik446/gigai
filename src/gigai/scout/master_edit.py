@@ -72,6 +72,7 @@ import re
 import threading
 
 from ..canonical import digest_imported_bytes
+from ..workpad import one_operation
 from . import master_resume
 from .master_migration import NEAR_DUPLICATE, near_duplicate
 from .master_resume import (
@@ -641,6 +642,7 @@ def entry_json(entry: MasterEntry, known: Mapping[str, Mapping[str, object]]) ->
 # --- the one way a change is stored --------------------------------------------------------------
 
 
+@one_operation()
 def _revise(
     action: str, *, home_root: Path, target: Path, actor: str, revision: int | None, source: str | None,
     apply: Callable[[StoredMaster, MasterDraft], _Plan], record: bool = True,

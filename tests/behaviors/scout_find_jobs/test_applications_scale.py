@@ -895,9 +895,9 @@ def test_the_journals_own_workpad_check_is_not_asked_twice_in_a_read(scout, spaw
     spawns.clear()
     assert journal.committed_head(workpad=resolved.path, project_id=resolved.project_id, gig_id=resolved.gig_id)
     # 0110-043: the layout marker's kept publisher is admitted in 2 subprocesses (it was a walk and 4 more);
-    # the four ownership markers and the remote are asked as before.
-    assert len(spawns) >= 7
-    assert sum(" config --local --get " in call for call in spawns) == 4 and any(call.endswith(" remote") for call in spawns)
+    # 0110-11 STORE2: the four ownership markers and the remote are asked in one (it was five).
+    assert len(spawns) >= 3
+    assert sum(call.endswith(" config --list -z --show-scope") for call in spawns) == 1
     # A changed ownership marker is refused by the journal's check inside a read, too.
     subprocess.run(["git", "-C", str(scout.workpad), "config", "--local", "gigai.gig-id", "gig_00000000-0000-4000-8000-000000000000"], check=True)
     try:
