@@ -329,9 +329,15 @@ def _requirements(master: Master, rows: Sequence[suggestions.RequirementRow], te
 
 
 def _values(master: Master, lines: Sequence[str], requirements: Sequence[Requirement], rank: Mapping[str, int]) -> dict[str, float]:
-    """Each line's place in the cut order of 3.2: a smaller number is cut first (``tailor_master.cut_order`` reads it)."""
+    """Each line's place in the cut order of 3.2: a smaller number is cut first (``tailor_master.cut_order`` reads it).
+
+    0.1.11 (C1): a line a row rests on outlives the lines that support nothing, and among those the model's order decides;
+    the line's strength no longer reorders them (the judge's T20: a nice-to-have's defining line, 7th in the pick, went while
+    the 13th stayed). The last printed source of a met mandatory row is protected by the cut order's own tier.
+    """
 
     sourced = {item_id for requirement in requirements for item_id in requirement.supporters}
+
     count = len(lines) + 1
     roles = len(rank) + 1
     out: dict[str, float] = {}
@@ -339,7 +345,7 @@ def _values(master: Master, lines: Sequence[str], requirements: Sequence[Require
         item = master.items[item_id]
         # The model's ranking: its first line stays longest. The older role only between two lines otherwise equal.
         place = (count - position) + (roles - rank.get(item.entry_id or "", roles)) / (roles + 1)
-        out[item_id] = place + (count * (1 + _STRENGTH[item.strength]) if item_id in sourced else 0.0)
+        out[item_id] = place + (count if item_id in sourced else 0.0)
     return out
 
 
@@ -604,6 +610,40 @@ def _fill_lines(master: Master, validated: Validated, rows: Sequence[suggestions
     return out[:FILL_LINES]
 
 
+def _unpicked_cuts(
+    master: Master, settled: TailoredResume, added: Sequence[Added], pins: Sequence[str], values: Mapping[str, float],
+) -> tuple[frozenset[str], list[tuple[str, str]]]:
+    """``(the shown line ids code added, the cuts that take them first)``: C1, no unpicked line prints while a picked one is cut.
+
+    A pinned line is the user's own and stays with the picked ones; so does the line given to the CURRENT role (a resume
+    without its current job is the worse loss: it is cut by the ordinary order, last). An entry left with nothing but code's
+    lines is cut whole (a role with no line does not print), so another recent role the pick left out is not kept by one
+    line the code gave it.
+    """
+
+    current = {entry.id for entry in master.entries_in("experience") if entry.ongoing}
+    code_added = {item.id for item in added if item.id not in pins and master.items[item.id].entry_id not in current}
+    gone: set[str] = set()
+    cuts: list[tuple[float, tuple[str, str]]] = []
+    for section in settled.sections:
+        if section.heading not in ("experience", "projects"):
+            continue
+        for entry in section.entries:
+            if not entry.heading or entry.heading[0].id is None:
+                continue
+            lines = [line for line in entry.bullets if line.id is not None]
+            mine = [line for line in lines if tm.line_item_id(line) in code_added]
+            if not mine:
+                continue
+            worth = {line.id: values.get(tm.line_item_id(line) or "", 0.0) for line in mine}
+            if len(mine) < len(entry.bullets):
+                cuts += [(worth[line.id], ("bullet", line.id)) for line in mine]  # type: ignore[misc]
+            else:
+                cuts.append((max(worth.values()), ("role", entry.heading[0].id)))
+            gone.update(line.id for line in mine)  # type: ignore[misc]
+    return frozenset(gone), [cut for _worth, cut in sorted(cuts, key=lambda pair: pair[0])]
+
+
 def _pick_selection(
     master: Master, pick: AssessmentPick, rows: Sequence[suggestions.RequirementRow], texts: Mapping[str, str], *, profile: SelectionProfile,
     posting: SelectionPosting, job: TailorJob, answers: object, excludes: Sequence[str], today: date, pages: _Pages, max_pages: int,
@@ -631,6 +671,7 @@ def _pick_selection(
 
     def fit(built: _Built, *, protected: bool) -> TailoredResume:
         cuts, refill = tm.cut_order(built.settled, built.candidates, master, today=today)
+        unpicked, first = _unpicked_cuts(master, built.settled, added, profile.pins, built.candidates.selected.values)
         if not protected:
             # Protected: the last printed source of a met mandatory row, and the pins. A role that holds one is not cut whole.
             shown = [item for section in built.settled.sections for entry in section.entries for line in entry.bullets if (item := tm.line_item_id(line)) is not None]
@@ -641,7 +682,9 @@ def _pick_selection(
                 if entry.heading and any(tm.line_item_id(line) in kept for line in entry.bullets)
             }
             cuts = [cut for cut in cuts if (cut[1] not in holds if cut[0] == "role" else line_item.get(cut[1]) not in kept)]
-        return fit_by_cuts(built.settled, cuts, measure=pages, max_pages=max_pages, refill=refill)
+        # 0.1.11 (C1): a line the model did not pick goes before any line it did pick; those cuts are never refilled.
+        cuts = [*first, *(cut for cut in cuts if cut not in first and cut[1] not in unpicked)]
+        return fit_by_cuts(built.settled, cuts, measure=pages, max_pages=max_pages, refill=refill - unpicked)
 
     all_skills = list(base.skills)
     lines = list(validated.lines)
