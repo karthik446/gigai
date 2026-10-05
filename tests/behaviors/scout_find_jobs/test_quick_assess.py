@@ -620,7 +620,7 @@ def test_nexhealth_junk_text_is_not_assessed_and_never_matched(fx: ProfileFixtur
     """The exact scraped NexHealth text, with the model answering as it did in the UAT
     ("No stated requirements", MATCHED): the end result is no assessment at all."""
 
-    _install(monkeypatch, [_NO_STATED])
+    _install(monkeypatch, [_NO_STATED, _NO_STATED])  # 0.1.11: the refused answer gets one more call before the error
 
     with pytest.raises(QuickAssessError) as excinfo:
         _run(fx, AssessRequest(job=AssessJobInput(job_text=_NEXHEALTH_JUNK)))
@@ -663,7 +663,7 @@ def test_matched_on_a_thin_matrix_of_a_long_posting_is_not_assessed_and_stores_n
             "not_a_match_reason": None,
         }
     )
-    _install(monkeypatch, [thin])
+    _install(monkeypatch, [thin, thin])
     long_text = "We build clinical software and value careful engineering. " * 30
 
     with pytest.raises(QuickAssessError) as excinfo:
@@ -672,3 +672,28 @@ def test_matched_on_a_thin_matrix_of_a_long_posting_is_not_assessed_and_stores_n
     assert excinfo.value.code == "posting_requirements_unreadable"
     assert str(excinfo.value) == "Posting text looks incomplete: open the posting"
     assert list_quick_assessments(fx.home_root, fx.target) == ()
+
+
+def test_a_refused_answer_gets_one_more_call_and_a_good_second_answer_is_stored(fx: ProfileFixtureGig, monkeypatch: pytest.MonkeyPatch) -> None:
+    """0.1.11 (orchestrator #44): too few requirement rows for a posting that states many is retried once before the user sees an error."""
+
+    thin = json.dumps(
+        {
+            "verdict": "matched_above_threshold",
+            "matrix": [{"requirement": "May work remotely anywhere in the US", "class": "hard", "status": "met", "resume_evidence": ["Denver"]}],
+            "suggestions": [], "questions": [], "not_a_match_reason": None,
+        }
+    )
+    full = json.dumps(
+        {
+            "verdict": "matched_above_threshold",
+            "matrix": [{"requirement": f"Requirement {n}", "class": "askable", "status": "met", "resume_evidence": ["six years"]} for n in range(8)],
+            "suggestions": [], "questions": [], "not_a_match_reason": None,
+        }
+    )
+    binding, _closed = _install(monkeypatch, [thin, full])
+    before = len(quick_assess.GUARD_RETRIES)
+    response = _run(fx, AssessRequest(job=AssessJobInput(job_text="We build clinical software and value careful engineering. " * 30)))
+    assert response.result.verdict is Verdict.MATCHED_ABOVE_THRESHOLD
+    assert len(binding.port.prompts) == 2 and len(quick_assess.GUARD_RETRIES) == before + 1
+    assert len(list_quick_assessments(fx.home_root, fx.target)) == 1

@@ -84,7 +84,7 @@ def test_row_2_a_mandatory_requirement_unresolved_holds_for_the_answer() -> None
 
 
 def test_row_3_a_hard_requirement_confirmed_unmet_is_not_a_match() -> None:
-    rows = [_row("US work authorization", "hard", "unmet", id="req-bbbbbb"), _row("Kafka", "askable", "unmet")]
+    rows = [_row("Security clearance", "hard", "unmet", id="req-bbbbbb"), _row("Kafka", "askable", "unmet")]
     found = gate(rows, [], FAILED)
     assert found.decision == NOT_A_MATCH and [(reason.code, reason.requirement_id) for reason in found.reasons] == [("hard_unmet", "req-bbbbbb")]
     # The rows decide, whatever verdict word came with them; a row with no class is an old one and reads hard.

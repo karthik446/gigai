@@ -68,6 +68,11 @@ MINOR_GAPS_ALLOWED = 1
 #: Questions on ``list_item`` rows one v9 assessment keeps (orchestrator #14): those of the rows first in the matrix.
 #: The rest are dropped by code (:func:`cap_list_item_questions`); their rows stay ``unclear`` and read as minor gaps.
 MAX_LIST_ITEM_QUESTIONS = 3
+#: 0.1.11 (orchestrator #39): at most this many questions are ASKED on must-have rows in one assessment, the most
+#: decisive first (a ``hard`` row before an ``askable`` one, then the rows in matrix order: the posting's own lead).
+#: Every unclear must-have row still HOLDS the resume; the others are listed "not verified yet" and are asked when
+#: the answers to these come in (the re-assessment).
+MAX_MANDATORY_QUESTIONS = 4
 #: Rows one assessment keeps. A sanity bound on a model's answer, far above what a posting states; past it: "+N not shown".
 MAX_MATRIX_ROWS = 40
 #: Gaps named in one line of text before "+N more".
@@ -176,6 +181,31 @@ def cap_list_item_questions(matrix: Iterable[object], questions: Sequence[object
     return [item for index, item in enumerate(questions) if index not in over], [item for index, item in enumerate(questions) if index in over]
 
 
+def mandatory_question_order(matrix: Iterable[object]) -> dict[str, int]:
+    """Row words -> the place of a must-have row in the order its question is worth asking: hard first, then matrix order."""
+
+    ranked = [(0 if row_class(row) == HARD else 1, index, _key(_field(row, "requirement"))) for index, row in enumerate(matrix) if row_class(row) in (HARD, ASKABLE)]
+    out: dict[str, int] = {}
+    for place, (_klass, _index, key) in enumerate(sorted(ranked)):
+        if key and key not in out:
+            out[key] = place
+    return out
+
+
+def cap_mandatory_questions(matrix: Iterable[object], questions: Sequence[object]) -> tuple[list[object], list[object]]:
+    """``(kept, dropped)``: at most :data:`MAX_MANDATORY_QUESTIONS` of ``questions`` are on must-have rows.
+
+    Kept: the questions of the most decisive rows (a ``hard`` row before an ``askable`` one, then matrix order).
+    A question on an optional row, and one that names no row, is untouched (the list-item cap is its own). The row
+    of a dropped question stays ``unclear`` and holds; it is not asked this round. Pure.
+    """
+
+    order = mandatory_question_order(list(matrix))
+    ranked = sorted((order[key], index) for index, question in enumerate(questions) if (key := _key(_field(question, "requirement"))) in order)
+    over = {index for _place, index in ranked[MAX_MANDATORY_QUESTIONS:]}
+    return [item for index, item in enumerate(questions) if index not in over], [item for index, item in enumerate(questions) if index in over]
+
+
 def blocking_question_count(matrix: Iterable[object], questions: object) -> int:
     """How many questions hold the verdict at "needs your answers": 0 when all that is open is a minor gap.
 
@@ -230,6 +260,8 @@ __all__ = [
     "HARD",
     "LIST_ITEM",
     "MAX_LIST_ITEM_QUESTIONS",
+    "MAX_MANDATORY_QUESTIONS",
+    "cap_mandatory_questions",
     "MAX_MATRIX_ROWS",
     "MINOR_CLASSES",
     "MINOR_GAPS_ALLOWED",

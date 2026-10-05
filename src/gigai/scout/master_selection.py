@@ -1110,8 +1110,14 @@ def select(
     measure: Measure | None = None,
     max_pages: int = MAX_PAGES,
     fill: bool = True,
+    title_floor: bool = True,
 ) -> Selected:
     """One selection: ``posting`` ``None`` gives the profile's standing pick, else the pick for that job.
+
+    ``title_floor`` (0.1.11): ``False`` leaves out the 0.1.10.11 rule that an entry the posting's TITLE names keeps its
+    best line (and the title's weight in the order of the rest). It is for the base of a MODEL's pick
+    (``pick.settle``): a valid pick is not overridden by a word-match of the title ("Agent Platform" in a job about
+    endpoint agents); the code selector's own selection keeps the rule.
 
     ``measure`` lays out resume markdown and answers ``(last page, fill)``; the default is the shipped
     template at ``FIT_SCALE``. ``today`` decides which roles are old (default: today's date).
@@ -1135,7 +1141,7 @@ def select(
     summary = _summary_choice(master, scores, posting)
     keys = _keys(
         master, terms, scores, recency, pins, posting.cited if posting is not None else (), summary.id if summary is not None else None,
-        posting.title if posting is not None else "",
+        posting.title if posting is not None and title_floor else "",
     )
     cited_rows = {requirement.id for requirement in keys.requirements if requirement.cited}
     key = keys.key

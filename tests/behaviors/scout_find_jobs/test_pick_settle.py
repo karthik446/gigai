@@ -429,3 +429,22 @@ def test_the_seven_picks_each_end_in_two_pages_with_no_empty_role_and_nothing_si
             assert any(master.items[item.id].entry_id == current.id for item in settled.added_by_code), name
         if name == "only_old_lines":
             assert "added_for_coverage" in {item.code for item in settled.added_by_code}, name
+
+
+@pytest.mark.parametrize("budget", [99, 8, 6])
+def test_the_order_the_model_gives_is_the_order_printed_inside_a_role_even_after_a_cut(budget: int) -> None:
+    """The v9.1 prompt promises it: within one role the lines print in the pick's order; a cut removes lines, never reorders."""
+
+    lines = ("a4", "a1", "a5", "a2", "b6", "b3", "b1", "a3")
+    reversed_lines = tuple(reversed(lines))
+    for given in (lines, reversed_lines):
+        settled = _settle(given, budget)
+        printed = {entry_id: [tm.line_item_id(line) for line in entry.bullets] for section in settled.result.sections for entry in section.entries
+                   if (entry_id := tm.line_item_id(entry.heading[0]))}
+        assert printed["r-alpha"] and printed["r-beta"]
+        for role in ("r-alpha", "r-beta"):
+            in_pick = [item for item in given if MASTER.items[item].entry_id == role]
+            shown = printed[role]
+            # The picked lines print in the pick's order. A line CODE adds (room left on the page, coverage) is not the
+            # model's and comes after them: the promise is about the lines the model gave.
+            assert [item for item in shown if item in in_pick] == [item for item in in_pick if item in shown], (budget, role, shown, in_pick)

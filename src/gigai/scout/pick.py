@@ -611,7 +611,8 @@ def _pick_selection(
     """The selection of a model's pick, or the ``Validated`` that refuses it (V6)."""
 
     # The selector's own pick BEFORE its page fit: no layout is run. Its summary, Skills order, reasons and values are read.
-    base = select(master, profile, posting, today=today, measure=lambda _markdown: (1, 0.0), max_pages=_UNFITTED, fill=False)
+    # 0.1.11 (orchestrator #35): the title-entry floor of the code selector is NOT applied to a model's pick.
+    base = select(master, profile, posting, today=today, measure=lambda _markdown: (1, 0.0), max_pages=_UNFITTED, fill=False, title_floor=False)
     validated = validate_pick(
         master, pick, rows, today=today, code_summary=base.summary[0] if base.summary else None, values=base.values, pins=profile.pins,
     )

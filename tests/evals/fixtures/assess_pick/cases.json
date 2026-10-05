@@ -1,0 +1,341 @@
+{
+ "note": "SYNTHETIC. The 20 cases of the 0.1.11 N3 live eval (SPEC 8.2). The person is the pick eval's invented one (fixtures/pick/master.md: no name, no contact data). 16 postings on the medium master, 4 of them again on the large one (16 cases as SPEC 8.2 counts them, and one added on the orchestrator's review of the v9 list rule: a bare list of five tools). A case is one first assessment: a posting, a target (which master the gig holds, and the answers its bank holds), a profile and the model target that answers. Each case keeps its model target in every run (BEFORE and AFTER are compared on the same CLI); 11 cases run on claude_cli and 9 on codex_cli. The 4 postings assessed twice are the 'same posting, another resume' pairs of DECISIONS.md addition 1: two pairs differ in the profile (and the master size) on the same CLI, two differ in the CLI (and the master size) for the same profile. Cases m18 to m20 were added on the orchestrator's AFTER-1 review (#35): sponsorship and work authorization never gate (two shapes: a label only, #45 overriding #35 fix 1) and a list after 'such as' inside one requirement line.",
+ "candidate": {
+  "location": "Denver, CO",
+  "countries": [
+   "US"
+  ],
+  "visa_sponsorship_required": false,
+  "work_mode": ""
+ },
+ "profiles": {
+  "ai": {
+   "label": "Staff AI Engineer",
+   "titles": [
+    "Staff AI Engineer",
+    "Principal AI Engineer"
+   ]
+  },
+  "swe": {
+   "label": "Staff Software Engineer",
+   "titles": [
+    "Staff Software Engineer",
+    "Staff Infrastructure Engineer"
+   ]
+  }
+ },
+ "targets": {
+  "medium": {
+   "master": "medium",
+   "answers": []
+  },
+  "large": {
+   "master": "large",
+   "answers": []
+  },
+  "answered": {
+   "master": "medium",
+   "answers": [
+    {
+     "question_id": "database:cassandra",
+     "question": "Have you run Cassandra in production?",
+     "answer": "No Cassandra in production. MongoDB in production at two employers, Quillon Health and Brassline Pay, for about four years in total."
+    },
+    {
+     "question_id": "language:rust",
+     "question": "Do you have production experience with Rust?",
+     "answer": "Familiar with Rust from two side projects; I have never shipped Rust in production."
+    }
+   ]
+  },
+  "sponsored": {
+   "master": "medium",
+   "answers": [],
+   "candidate": {
+    "visa_sponsorship_required": true
+   }
+  }
+ },
+ "postings": {
+  "spike-agentic": {
+   "file": "assess_pick/postings/spike-agentic.md",
+   "type": "agentic / AI platform",
+   "origin": "the agent-tailoring spike's p1"
+  },
+  "spike-backend": {
+   "file": "assess_pick/postings/spike-backend.md",
+   "type": "backend platform",
+   "origin": "the agent-tailoring spike's p2"
+  },
+  "spike-weakfit": {
+   "file": "assess_pick/postings/spike-weakfit.md",
+   "type": "a weak fit",
+   "origin": "the agent-tailoring spike's p3"
+  },
+  "spike-injection": {
+   "file": "assess_pick/postings/spike-injection.md",
+   "type": "agentic / AI platform, with an injected instruction",
+   "origin": "the agent-tailoring spike's p4"
+  },
+  "agentic": {
+   "file": "pick/postings/agentic.md",
+   "type": "agentic / AI platform",
+   "origin": "the pick eval (N0)"
+  },
+  "backend": {
+   "file": "pick/postings/backend.md",
+   "type": "backend platform",
+   "origin": "the pick eval (N0)"
+  },
+  "sre": {
+   "file": "pick/postings/sre.md",
+   "type": "SRE / infrastructure",
+   "origin": "the pick eval (N0)"
+  },
+  "leadership": {
+   "file": "pick/postings/leadership.md",
+   "type": "leadership-heavy",
+   "origin": "the pick eval (N0)"
+  },
+  "titlematch": {
+   "file": "pick/postings/titlematch.md",
+   "type": "backend platform (the title names a project)",
+   "origin": "the pick eval (N0)"
+  },
+  "required-list": {
+   "file": "assess_pick/postings/required-list.md",
+   "type": "SRE / infrastructure",
+   "origin": "N3: a list WORDED as required, one item missing (P5, OD2)"
+  },
+  "examples-list": {
+   "file": "assess_pick/postings/examples-list.md",
+   "type": "backend platform",
+   "origin": "N3: a list worded as examples, two items missing (OD2, the SentinelOne shape)"
+  },
+  "answered-backend": {
+   "file": "assess_pick/postings/answered-backend.md",
+   "type": "backend platform",
+   "origin": "N3: two stored answers, one with a no and a yes, one with a level word (1.6 item 4)"
+  },
+  "bare-list": {
+   "file": "assess_pick/postings/bare-list.md",
+   "type": "backend platform",
+   "origin": "N3, added on review: a list of five tools with no wording either way, two missing (stays optional)"
+  },
+  "work-permit": {
+   "file": "assess_pick/postings/work-permit.md",
+   "type": "backend platform",
+   "origin": "N3, #35: 'must have an eligible work permit' for a candidate who needs sponsorship"
+  },
+  "no-sponsor": {
+   "file": "assess_pick/postings/no-sponsor.md",
+   "type": "backend platform",
+   "origin": "N3, #35: 'we do not sponsor visas' for a candidate who needs sponsorship"
+  },
+  "examples-line": {
+   "file": "assess_pick/postings/examples-line.md",
+   "type": "backend platform",
+   "origin": "N3, #35: a list after 'such as' inside one requirement line under 'Required Skills'"
+  }
+ },
+ "cases": [
+  {
+   "id": "m01-spike-agentic",
+   "posting": "spike-agentic",
+   "target": "medium",
+   "profile": "ai",
+   "model_target": "claude_cli"
+  },
+  {
+   "id": "m02-spike-backend",
+   "posting": "spike-backend",
+   "target": "medium",
+   "profile": "swe",
+   "model_target": "codex_cli"
+  },
+  {
+   "id": "m03-spike-weakfit",
+   "posting": "spike-weakfit",
+   "target": "medium",
+   "profile": "swe",
+   "model_target": "claude_cli"
+  },
+  {
+   "id": "m04-spike-injection",
+   "posting": "spike-injection",
+   "target": "medium",
+   "profile": "ai",
+   "model_target": "codex_cli"
+  },
+  {
+   "id": "m05-agentic",
+   "posting": "agentic",
+   "target": "medium",
+   "profile": "ai",
+   "model_target": "codex_cli"
+  },
+  {
+   "id": "m06-backend",
+   "posting": "backend",
+   "target": "medium",
+   "profile": "swe",
+   "model_target": "claude_cli"
+  },
+  {
+   "id": "m07-sre",
+   "posting": "sre",
+   "target": "medium",
+   "profile": "swe",
+   "model_target": "codex_cli"
+  },
+  {
+   "id": "m08-leadership",
+   "posting": "leadership",
+   "target": "medium",
+   "profile": "swe",
+   "model_target": "claude_cli"
+  },
+  {
+   "id": "m09-titlematch",
+   "posting": "titlematch",
+   "target": "medium",
+   "profile": "ai",
+   "model_target": "claude_cli"
+  },
+  {
+   "id": "m10-required-list",
+   "posting": "required-list",
+   "target": "medium",
+   "profile": "swe",
+   "model_target": "codex_cli"
+  },
+  {
+   "id": "m11-examples-list",
+   "posting": "examples-list",
+   "target": "medium",
+   "profile": "swe",
+   "model_target": "claude_cli"
+  },
+  {
+   "id": "m12-answered-backend",
+   "posting": "answered-backend",
+   "target": "answered",
+   "profile": "swe",
+   "model_target": "codex_cli"
+  },
+  {
+   "id": "l13-agentic",
+   "posting": "agentic",
+   "target": "large",
+   "profile": "swe",
+   "model_target": "codex_cli"
+  },
+  {
+   "id": "l14-backend",
+   "posting": "backend",
+   "target": "large",
+   "profile": "ai",
+   "model_target": "claude_cli"
+  },
+  {
+   "id": "l15-sre",
+   "posting": "sre",
+   "target": "large",
+   "profile": "swe",
+   "model_target": "claude_cli"
+  },
+  {
+   "id": "l16-spike-agentic",
+   "posting": "spike-agentic",
+   "target": "large",
+   "profile": "ai",
+   "model_target": "codex_cli"
+  },
+  {
+   "id": "m17-bare-list",
+   "posting": "bare-list",
+   "target": "medium",
+   "profile": "swe",
+   "model_target": "claude_cli"
+  },
+  {
+   "id": "m18-work-permit",
+   "posting": "work-permit",
+   "target": "sponsored",
+   "profile": "swe",
+   "model_target": "claude_cli"
+  },
+  {
+   "id": "m19-no-sponsor",
+   "posting": "no-sponsor",
+   "target": "sponsored",
+   "profile": "swe",
+   "model_target": "codex_cli"
+  },
+  {
+   "id": "m20-examples-line",
+   "posting": "examples-line",
+   "target": "medium",
+   "profile": "swe",
+   "model_target": "codex_cli"
+  }
+ ],
+ "pairs": [
+  {
+   "posting": "agentic",
+   "cases": [
+    "m05-agentic",
+    "l13-agentic"
+   ],
+   "differs": [
+    "profile",
+    "master size"
+   ],
+   "same": [
+    "model target (codex_cli)"
+   ]
+  },
+  {
+   "posting": "backend",
+   "cases": [
+    "m06-backend",
+    "l14-backend"
+   ],
+   "differs": [
+    "profile",
+    "master size"
+   ],
+   "same": [
+    "model target (claude_cli)"
+   ]
+  },
+  {
+   "posting": "sre",
+   "cases": [
+    "m07-sre",
+    "l15-sre"
+   ],
+   "differs": [
+    "model target",
+    "master size"
+   ],
+   "same": [
+    "profile (swe)"
+   ]
+  },
+  {
+   "posting": "spike-agentic",
+   "cases": [
+    "m01-spike-agentic",
+    "l16-spike-agentic"
+   ],
+   "differs": [
+    "model target",
+    "master size"
+   ],
+   "same": [
+    "profile (ai)"
+   ]
+  }
+ ]
+}

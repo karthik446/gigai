@@ -61,6 +61,8 @@ Pure: no file, no model, no clock.
 
 from __future__ import annotations
 
+import re
+
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 
@@ -76,7 +78,7 @@ from .find_jobs.assess_contracts import (
     GateRecord,
 )
 from .find_jobs.contracts import is_row_id
-from .requirement_weights import ASKABLE, HARD, MINOR_GAPS_ALLOWED, _field, _key, question_weights, row_class
+from .requirement_weights import ASKABLE, HARD, MAX_MANDATORY_QUESTIONS, MINOR_GAPS_ALLOWED, _field, _key, mandatory_question_order, question_weights, row_class
 
 SUGGEST = GATE_SUGGEST
 HOLD_QUESTION = GATE_HOLD_QUESTION
@@ -86,6 +88,58 @@ NOT_A_MATCH = GATE_NOT_A_MATCH
 HOLDS: frozenset[str] = frozenset({HOLD_QUESTION, HOLD_UNMET, NOT_A_MATCH})
 
 _V9_ROW_FIELDS = ("id", "class_basis", "alternatives", "sources")
+
+
+# --- sponsorship and work authorization never gate (0.1.11, orchestrator #45, the operator's rule) -------------------
+#
+# A posting line about visa sponsorship, a work permit or work authorization is a LABEL (``AssessmentBody.sponsorship``,
+# the posting's ``sponsorship`` read the job list already shows: "Sponsors visas" / "No sponsorship" / "Sponsorship not
+# stated"), shown when the user's setting says sponsorship is required. It produces no hold, no question, no
+# not_a_match and no row that counts in the score or the gate. The prompt says so; the model boundary removes such rows
+# and their questions from a v9 answer, and the gate ignores them whatever a stored matrix holds (a prompt-only rule
+# would leak). Country, region and work-mode eligibility (rule 4, ``elig-location``...) is NOT this: it still gates.
+
+AUTHORIZATION_ROW_ID = "elig-sponsorship"
+# The EMPLOYMENT sense only (orchestrator #47). Bare "sponsor" ("an executive sponsor"), bare "visa" ("Visa and Mastercard
+# card networks") and bare "immigration" ("immigration tech") are real requirement words and must never drop a row.
+_AUTHORIZATION_WORDS = re.compile(
+    r"work permit|work authori[sz]ation|employment authori[sz]ation|work eligibility|employment eligibility|"
+    r"(?:authori[sz]ed|eligible|permitted|entitled|legally\s+(?:authori[sz]ed|permitted|entitled))\s+to\s+work|right\s+to\s+work|"
+    r"work\s+visa|employment\s+visa|visa\s+(?:sponsorship|status|transfer|holder)|visa-?\s*sponsor\w*|\bh-?1b\b|"
+    r"sponsor\w*\s+(?:a\s+|an\s+|your\s+|any\s+|work\s+|employment\s+)*visas?\b|"
+    r"(?:work|employment|immigration)\s+(?:visa\s+)?sponsorship|"
+    r"\b(?:requires?|requiring|needs?|needing)\s+(?:\w+\s+){0,2}sponsorship|\bno\s+sponsorship\b|\bwithout\s+(?:visa\s+|employment\s+|work\s+)?sponsorship|"
+    r"immigration\s+(?:status|sponsorship)",
+    re.IGNORECASE,
+)
+_NOT_SPONSORING = re.compile(
+    r"(?:do(?:es)? not|don't|doesn't|cannot|can't|unable to|no|not able to|will not|won't)\s+(?:\w+\s+){0,3}?sponsor|without (?:visa )?sponsorship|must not require sponsorship|no (?:visa )?sponsorship",
+    re.IGNORECASE,
+)
+
+
+def is_authorization_row(row: object) -> bool:
+    """Whether a requirement row is about visa sponsorship or work authorization (never about where the work is done). Pure."""
+
+    if _field(row, "id") == AUTHORIZATION_ROW_ID:
+        return True
+    text = f"{_field(row, 'requirement') or ''} {_field(row, 'class_basis') or ''}"
+    return bool(_AUTHORIZATION_WORDS.search(text))
+
+
+def is_authorization_question(question: object) -> bool:
+    """Whether a question asks about sponsorship or work authorization in the employment sense (its id or its words). Pure."""
+
+    question_id = str(_field(question, "question_id") or "")
+    if question_id.startswith(("authorization:", "sponsorship:")):
+        return True
+    return bool(_AUTHORIZATION_WORDS.search(f"{question_id.replace('_', ' ').replace(':', ' ')} {_field(question, 'question') or ''} {_field(question, 'requirement') or ''}"))
+
+
+def says_no_sponsorship(rows: Iterable[object]) -> bool:
+    """Whether any of ``rows`` states that the employer does not sponsor visas (the label ``not_offered``). Pure."""
+
+    return any(_NOT_SPONSORING.search(f"{_field(row, 'requirement') or ''} {' '.join(map(str, _field(row, 'resume_evidence') or ()))}") for row in rows)
 
 
 def uses_v9_rules(matrix: Iterable[object]) -> bool:
@@ -126,9 +180,34 @@ def unasked_rows(matrix: Iterable[object], questions: object) -> list[object]:
     rows = list(matrix)
     if not uses_v9_rules(rows):
         return []
+    rows = [row for row in rows if not is_authorization_row(row)]  # a label, never a gate
     asked = {_key(_field(question, "requirement")) for question in questions} if isinstance(questions, (list, tuple)) else set()
     asked.discard("")  # a question that names no row is on none
-    return [row for row in rows if _field(row, "status") == "unclear" and is_mandatory(row) and _key(_field(row, "requirement")) not in asked]
+    open_rows = [row for row in rows if _field(row, "status") == "unclear" and is_mandatory(row)]
+    without = [row for row in open_rows if _key(_field(row, "requirement")) not in asked]
+    # 0.1.11 (orchestrator #39): at most MAX_MANDATORY_QUESTIONS are ASKED, the most decisive first. Rows beyond the cap
+    # are not "unasked": they still hold (see ``also_unverified``) and wait for the next round. Code tops the asked
+    # ones up to the cap only (the most decisive of the rows without a question).
+    room = max(0, MAX_MANDATORY_QUESTIONS - (len(open_rows) - len(without)))
+    order = mandatory_question_order(rows)
+    chosen = sorted(without, key=lambda row: order.get(_key(_field(row, "requirement")), len(order)))[:room]
+    return [row for row in without if any(row is item for item in chosen)]
+
+
+def also_unverified(matrix: Iterable[object], questions: object) -> list[object]:
+    """The must-have rows of a v9 matrix that are ``unclear``, hold the resume and are NOT asked this round (over the cap of questions).
+
+    Shown as "also unverified: N". Always empty for an older matrix. Pure.
+    """
+
+    rows = list(matrix)
+    if not uses_v9_rules(rows):
+        return []
+    rows = [row for row in rows if not is_authorization_row(row)]  # a label, never a gate
+    asked = {_key(_field(question, "requirement")) for question in questions} if isinstance(questions, (list, tuple)) else set()
+    asked.discard("")
+    skip = {id(row) for row in unasked_rows(rows, questions)}
+    return [row for row in rows if _field(row, "status") == "unclear" and is_mandatory(row) and _key(_field(row, "requirement")) not in asked and id(row) not in skip]
 
 
 #: Rows named after the first in :func:`unasked_message` (the model boundary feeds back the first 300 characters).
@@ -194,6 +273,10 @@ def gate(matrix: Iterable[object], structured_questions: object, verdict: object
     """
 
     rows = list(matrix)
+    if uses_v9_rules(rows):
+        rows = [row for row in rows if not is_authorization_row(row)]  # a label, never a gate
+        if isinstance(structured_questions, (list, tuple)):
+            structured_questions = [q for q in structured_questions if not is_authorization_question(q)]
     verdict = getattr(verdict, "value", verdict)
     hard_unmet = [row for row in rows if _field(row, "status") == "unmet" and row_class(row) in (HARD, None)]
     if hard_unmet or verdict == NOT_A_MATCH:
@@ -255,6 +338,10 @@ __all__ = [
     "is_mandatory",
     "stored_gate",
     "unasked_message",
+    "also_unverified",
+    "is_authorization_question",
+    "is_authorization_row",
+    "says_no_sponsorship",
     "unasked_rows",
     "uses_v9_rules",
 ]

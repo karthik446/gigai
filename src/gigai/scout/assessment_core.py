@@ -66,9 +66,18 @@ from .find_jobs.contracts import (
 )
 from .find_jobs.work_mode import in_person_modes
 from .question_ids import normalize_question_id
-from .requirement_weights import bound_rows, cap_list_item_questions, settled_verdict
+from .requirement_weights import bound_rows, cap_list_item_questions, cap_mandatory_questions, settled_verdict
 from .requirements_list import ListedRequirement, check_listed, extracted, fold
-from .resume_gate import HOLD_QUESTION, gate, unasked_message, unasked_rows, uses_v9_rules
+from .resume_gate import (
+    HOLD_QUESTION,
+    gate,
+    is_authorization_question,
+    is_authorization_row,
+    says_no_sponsorship,
+    unasked_message,
+    unasked_rows,
+    uses_v9_rules,
+)
 from .resume_privacy import model_resume
 from .untrusted_text import fence_untrusted_posting
 
@@ -128,11 +137,11 @@ REQUIREMENTS_BLOCK_HEADER = "REQUIREMENTS (id | class | requirement | the postin
 #: to 12 rows and no weights, and reads as older wording.
 #: ``tests/behaviors/scout_find_jobs/test_assessment_core.py`` pins it with
 #: the file's digest.
-ASSESS_PROMPT_VERSION = "assess-prompt-v8"
+ASSESS_PROMPT_VERSION = "assess-prompt-v9"
 #: The name of a prompt rendered with no CANDIDATE WORK MODE paragraph.
-ASSESS_PROMPT_VERSION_NO_WORK_MODE = "assess-prompt-v8"
+ASSESS_PROMPT_VERSION_NO_WORK_MODE = "assess-prompt-v9"
 #: The name of a prompt rendered for a HYBRID candidate (decision #207).
-ASSESS_PROMPT_VERSION_HYBRID = "assess-prompt-v8"
+ASSESS_PROMPT_VERSION_HYBRID = "assess-prompt-v9"
 #: The versions the shipped ``assess.md`` renders today. An assessment sealed
 #: with none of them is older wording. One sealed with one of them is current
 #: when the constraints digest (which includes the work mode) is the same and
@@ -956,6 +965,8 @@ class AssessExtras:
     unknown_sources: tuple[tuple[str, str], ...] = ()
     asked_by_code: tuple[str, ...] = ()
     capped_questions: tuple[str, ...] = ()
+    #: 0.1.11 (orchestrator #39): the questions on must-have rows dropped past ``MAX_MANDATORY_QUESTIONS`` (their rows hold, unasked).
+    capped_mandatory_questions: tuple[str, ...] = ()
 
 
 @dataclass
@@ -1167,6 +1178,43 @@ def _row_ids(matrix: list[Mapping[str, object]], posting_sha256: str) -> list[st
     return [str(row["id"]) if is_row_id(row.get("id")) else derived[index] for index, row in enumerate(matrix)]
 
 
+def _without_authorization(decoded: Mapping[str, object]) -> Mapping[str, object]:
+    """``decoded`` of a v9 answer without the rows and questions about sponsorship or work authorization (0.1.11, orchestrator #45).
+
+    The operator's rule: sponsorship and work authorization NEVER gate. They are a label (the answer's ``sponsorship``,
+    which the job list already shows), not a requirement: no hold, no question, no not_a_match, no row in the score.
+    Whatever the model returns about them is removed here, so a prompt-only rule cannot leak; a ``not_a_match`` that
+    rested on such a row alone is read from the remaining rows (matched, or pending when a must-have question is
+    open). The label becomes ``not_offered`` when a removed row says the employer does not sponsor. An answer in
+    the v8 shape is returned untouched. Pure.
+    """
+
+    matrix = decoded.get("matrix")
+    if not isinstance(matrix, list) or not all(isinstance(row, Mapping) for row in matrix) or not uses_v9_rules(matrix):
+        return decoded
+    dropped = [row for row in matrix if is_authorization_row(row)]
+    if not dropped or len(dropped) == len(matrix):
+        return decoded
+    kept = [row for row in matrix if not is_authorization_row(row)]
+    out = dict(decoded)
+    out["matrix"] = kept
+    questions = decoded.get("questions")
+    if isinstance(questions, list):
+        out["questions"] = [item for item in questions if not (isinstance(item, Mapping) and is_authorization_question(item))]
+    if "sponsorship" not in out and says_no_sponsorship(dropped):
+        out["sponsorship"] = "not_offered"
+    said = _normalize_verdict(decoded.get("verdict"))
+    if said in ("matched_above_threshold", "pending_user_answers") or (
+        said == "not_a_match" and not any(row.get("status") == "unmet" and row.get("class") in (None, "hard") for row in kept)
+    ):
+        # The verdict the model gave may rest on the removed row: read it again from what is left. ``settled_verdict``
+        # below makes it pending when a must-have question is open, and matched when none is.
+        out["verdict"] = "matched_above_threshold"
+        if said == "not_a_match":
+            out["not_a_match_reason"] = None
+    return out
+
+
 def _normalize_and_strip(decoded: Mapping[str, object], *, boundary: Boundary | None = None) -> tuple[dict[str, object], tuple[str, ...], int]:
     """``_normalize_assessment_payload`` plus what the not_a_match strip removed.
 
@@ -1206,6 +1254,7 @@ def _normalize_and_strip(decoded: Mapping[str, object], *, boundary: Boundary | 
     question at all, as before, and its count is the strip's.
     """
     boundary = boundary if boundary is not None else Boundary()
+    decoded = _without_authorization(decoded)
     unknown_sources: list[tuple[str, str]] = []
     matrix = decoded.get("matrix")
     normalized_matrix: list[object] = []
@@ -1284,10 +1333,19 @@ def _normalize_and_strip(decoded: Mapping[str, object], *, boundary: Boundary | 
     # Orchestrator #14: at most three questions on one-of-a-list rows, those of the rows first in the matrix; the rest
     # are dropped here (no retry) and their rows read as minor gaps. A not_a_match answer keeps none at all (below).
     capped: list[str] = []
+    dropped_questions_all: list[object] = []
     if is_v9 and said != "not_a_match":
         structured_questions, over = cap_list_item_questions(normalized_matrix, structured_questions)  # type: ignore[arg-type]
         capped = [str(item["question_id"]) for item in over]  # type: ignore[index]
-        gone = {plain_at[id(item)] for item in over}
+        dropped_questions_all = list(over)
+    # Orchestrator #39: at most four questions ASKED on must-have rows, the most decisive first (hard, then the posting's
+    # own order); the rows of the others stay unclear and hold ("also unverified"); no retry, and code does not ask them.
+    capped_mandatory: list[str] = []
+    if is_v9 and said != "not_a_match":
+        structured_questions, over_mandatory = cap_mandatory_questions(normalized_matrix, structured_questions)  # type: ignore[arg-type]
+        capped_mandatory = [str(item["question_id"]) for item in over_mandatory]  # type: ignore[index]
+        dropped_questions_all += over_mandatory
+        gone = {plain_at[id(item)] for item in dropped_questions_all}
         plain_questions = [text for index, text in enumerate(plain_questions) if index not in gone]
 
     # 0.1.11 N3b (decision #11): an unclear must-have row of a v9 answer holds for its answer, so it carries a question.
@@ -1352,6 +1410,7 @@ def _normalize_and_strip(decoded: Mapping[str, object], *, boundary: Boundary | 
         unknown_sources=tuple(unknown_sources),
         asked_by_code=tuple(asked_by_code),
         capped_questions=tuple(capped),
+        capped_mandatory_questions=tuple(capped_mandatory),
     )
     # Drop any other unknown keys (e.g. a model echoing "posting" back, or
     # inventing extra fields): the frozen contract is a closed object, and
