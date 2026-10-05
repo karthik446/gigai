@@ -116,6 +116,42 @@ next 50, and a job page re-assesses its own job in one call.</li>
 <li><strong>Nothing else changes.</strong> Which jobs are checked again after a change, and the limits on them, are
 what they were; no assessment, ranking or tailored resume becomes out of date.</li>
 </ul>
+<div class="sl-heading-wrapper level-h4"><h4 id="master-resume-the-lines-picked-for-a-job">Master resume: the lines picked for a job</h4><a class="sl-anchor-link" href="#master-resume-the-lines-picked-for-a-job"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “Master resume: the lines picked for a job”</span></a></div>
+<ul>
+<li><strong>A resume made from your master resume no longer gets worse when the master gets better.</strong> Adding
+strong lines to your master could push other strong lines out of the resume for a job and leave
+older, general ones in: for length the oldest roles went first and then lines were cut by a score
+that favoured what your profile already showed, with a fixed minimum of lines for every recent
+role. Now the lines are picked for what the posting asks: every requirement of the posting that
+your master can support keeps a line, and it keeps the strongest one (a line backed by a story or
+an answer, then one that states a number). How recent a role is only breaks a tie: an older role’s
+line stays when it is the only evidence for a requirement, while recent lines that support nothing
+the posting asks for are cut first. No role is printed without a line, and every recent role keeps
+at least its best one.</li>
+<li><strong>Your Skills section is kept whole.</strong> A job’s resume showed only the skills the posting or a shown
+line named, and a group written as <code dir="auto">Python/Go/TypeScript</code> counted as one name that no posting ever
+asked for. Skills are now matched inside a group, the ones the posting asks for come first, and the
+whole section is shown. A skill is cut for length only when no line is left to cut (a master that
+lists more than 40 skill names gives up the ones nothing asks for first), and every cut is listed.</li>
+<li><strong>When something required cannot fit, you are told.</strong> If the strongest line for a requirement, or a
+line you pinned, cannot be shown within 2 pages, <code dir="auto">gigai scout resume master selection show</code> and the
+stored tailored resume say which and why (<code dir="auto">conflicts</code>). Nothing required is dropped silently.</li>
+<li><strong>A refresh does not replace a profile’s selection with a worse one.</strong> <code dir="auto">gigai scout resume master selection refresh</code> compares the selection a profile holds with the new one, check by check, against
+the master as it is now. The new one is stored when it is no worse on any check; the one held is
+kept when it is still valid and the new one is worse on a check; when neither can stand, nothing is
+stored and the command says what is unresolved.</li>
+<li><strong>A job you assessed keeps the lines its assessment pointed to.</strong> An assessment says which lines of
+your master back each requirement, and it reads them by meaning: the line it points to may share no
+word with the requirement. The pick for that job now keeps one of those lines for every requirement
+the assessment found evidence for, the required ones first, before any line chosen by shared words.
+A job with no assessment is picked by words, as before.</li>
+<li><strong>After you upgrade:</strong> the rule that picks lines has a new version (<code dir="auto">sel-3</code>). A profile’s stored
+selection stays as it is until you refresh it. Tailored resumes the background pipeline made from
+your master are out of date under the new rule and are made again when the pipeline next works on
+each job; a resume you edited or attached yourself is never replaced.</li>
+<li>The same lines in another order in your master give the same resume, and a line that repeats
+another line is shown once.</li>
+</ul>
 <div class="sl-heading-wrapper level-h4"><h4 id="faster">Faster</h4><a class="sl-anchor-link" href="#faster"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “Faster”</span></a></div>
 <ul>
 <li><strong>Faster: the first Jobs load of a day.</strong> Every watched company used to be matched again the first
