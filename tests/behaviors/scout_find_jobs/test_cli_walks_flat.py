@@ -759,7 +759,8 @@ def test_a_changed_and_an_uncommitted_working_file_are_refused_as_before(gig: Si
     assert _snapshot_both_ways(gig, spawns) == ("JournalConflictError", "journal working evidence differs from committed bytes")
     record.write_bytes(committed)
     (gig.root / f"{SYNTHETIC}stray.json").write_bytes(b"{}\n")
-    assert _snapshot_both_ways(gig, spawns) == ("JournalConflictError", "journal working evidence is extra or redirected")
+    # 0110-10-17: the refusal of a file no commit holds also names the command that finishes an interrupted save.
+    assert _snapshot_both_ways(gig, spawns) == ("JournalConflictError", "journal working evidence is extra or redirected" + journal.INTERRUPTED_WRITE_HINT)
     (gig.root / f"{SYNTHETIC}stray.json").unlink()
     assert _snapshot_both_ways(gig, spawns)[0] == "read"
     # Another Gig asking is refused by the workpad check, before any publisher is looked up.

@@ -7,6 +7,7 @@ from importlib.metadata import version
 import json
 import os
 from pathlib import Path
+import shlex
 import shutil
 import subprocess
 import sys
@@ -52,8 +53,9 @@ class DoctorReport:
         return asdict(self)
 
 
-def run_doctor(home_root: Path) -> DoctorReport:
-    checks: list[DiagnosticCheck] = []
+def _checked_config(home_root: Path, checks: list[DiagnosticCheck]) -> GigAIConfig | None:
+    """The home's configuration, with its ``config.valid`` check added; ``None`` when that check failed."""
+
     started = time.monotonic_ns()
     try:
         config = load_config(home_root)
@@ -69,7 +71,7 @@ def run_doctor(home_root: Path) -> DoctorReport:
                 started,
             )
         )
-        return _report(checks)
+        return None
 
     if config.home_root.resolve(strict=False) != home_root.resolve(strict=False):
         checks.append(
@@ -84,7 +86,7 @@ def run_doctor(home_root: Path) -> DoctorReport:
                 started,
             )
         )
-        return _report(checks)
+        return None
 
     checks.append(
         _check(
@@ -97,12 +99,102 @@ def run_doctor(home_root: Path) -> DoctorReport:
             started,
         )
     )
+    return config
+
+
+def run_doctor(home_root: Path) -> DoctorReport:
+    checks: list[DiagnosticCheck] = []
+    config = _checked_config(home_root, checks)
+    if config is None:
+        return _report(checks)
     checks.extend(_path_checks(config))
     checks.extend(_credential_checks(config))
     checks.append(_editor_check(config))
     checks.extend(run_mount_probes(config.workpad_root))
     checks.extend(_journal_index_checks(config))
     return _report(checks)
+
+
+def run_journal_repair(home_root: Path) -> DoctorReport:
+    """0110-10-17: finish the interrupted journal write of every managed workpad, and report what was finished.
+
+    A journal write records a transaction before it replaces a file. A process that dies after that leaves a
+    workpad whose every later write is refused until ``journal.reconcile_journal`` has run, and nothing else
+    runs it. This asks it of each managed workpad in turn (the ones ``journal.index`` checks) and decides
+    nothing itself: a workpad with no interrupted write is left as it was, one that cannot be reconciled is
+    reported with the journal's own refusal and the others are still visited.
+    """
+
+    # ``journal`` imports this module (the mount probes), so it is imported here.
+    from .journal import JournalError, reconcile_journal
+
+    checks: list[DiagnosticCheck] = []
+    config = _checked_config(home_root, checks)
+    if config is None:
+        return _report(checks, scope="journal_repair")
+    started = time.monotonic_ns()
+    workpads = tuple(sorted(config.workpad_root.resolve(strict=False).glob("projects/*/gigs/*")))
+    finished: list[str] = []
+    failed: list[str] = []
+    for workpad in workpads:
+        try:
+            if workpad.is_symlink() or not workpad.is_dir():
+                raise JournalIndexError("managed workpad is unavailable or redirected")
+            project = _git_config(workpad, "gigai.project-id")
+            gig = _git_config(workpad, "gigai.gig-id")
+            if project is None or gig is None:
+                raise JournalIndexError("managed workpad lacks Git ownership markers")
+            result = reconcile_journal(workpad=workpad, project_id=project, gig_id=gig)
+        except (JournalError, JournalIndexError, OSError) as exc:
+            failed.append(f"failed_gig={workpad.name} code={getattr(exc, 'code', type(exc).__name__)} reason={exc}")
+            continue
+        if result.reconciled:
+            finished.append(f"finished_gig={workpad.name} sequence={result.sequence} commit={result.commit}")
+    counts = (f"managed_workpads={len(workpads)}", f"finished_writes={len(finished)}", f"failed_journals={len(failed)}")
+    if failed:
+        status = "FAIL"
+        summary = f"{len(failed)} of {len(workpads)} managed journals could not be reconciled"
+        if finished:
+            summary += f"; finished {len(finished)} interrupted journal write{'s' if len(finished) != 1 else ''}"
+        remediation: str | None = (
+            "Stop a running Scout server and run the command again; if the reason stays, leave the workpad as "
+            "it is and report the reason."
+        )
+    elif finished:
+        status = "PASS"
+        summary = (
+            f"finished {len(finished)} interrupted journal write{'s' if len(finished) != 1 else ''} "
+            f"in {len(workpads)} managed journals: writes are accepted again"
+        )
+        remediation = None
+    else:
+        status = "PASS"
+        summary = f"no interrupted journal write in {len(workpads)} managed journals: nothing to repair"
+        remediation = None
+    checks.append(
+        _check("journal.repair", "managed private journals", status, summary, (*counts, *finished, *failed), remediation, started)
+    )
+    return _report(checks, scope="journal_repair")
+
+
+def journal_repair_refusal(exc: BaseException, home_root: Path | None) -> tuple[str, str] | None:
+    """0110-10-17: ``(message, command)`` of a write refused behind an interrupted journal write; else ``None``.
+
+    The journal's refusal names ``gigai doctor --repair-journal``. Here the command gets ``--home`` when the
+    home is not the default one, so it can be run as written.
+    """
+
+    # ``journal`` and ``setup`` import this module, so they are imported here.
+    from .journal import JournalReconciliationRequired
+    from .setup import default_home_root
+
+    command = getattr(exc, "next_action", None)
+    if not isinstance(exc, JournalReconciliationRequired) or not command:
+        return None
+    for_home = command
+    if home_root is not None and home_root.expanduser().resolve(strict=False) != default_home_root().expanduser().resolve(strict=False):
+        for_home = f"{command} --home {shlex.quote(os.fspath(home_root))}"
+    return str(exc).replace(command, for_home), for_home
 
 
 def run_live_doctor(home_root: Path, model_target: str) -> DoctorReport:
@@ -251,7 +343,8 @@ def _journal_index_checks(config: GigAIConfig) -> tuple[DiagnosticCheck, ...]:
                 "FAIL",
                 str(exc),
                 (f"indexed_workpads={checked}",),
-                "Repair the authoritative journal; do not trust or edit state.sqlite as a substitute.",
+                "Repair the authoritative journal; do not trust or edit state.sqlite as a substitute. "
+                "If a save was interrupted (a crash, a power loss), run 'gigai doctor --repair-journal' to finish it.",
                 started,
             ),
         )
@@ -621,8 +714,10 @@ __all__ = [
     "DIAGNOSTIC_SCHEMA_VERSION",
     "DiagnosticCheck",
     "DoctorReport",
+    "journal_repair_refusal",
     "render_report_json",
     "run_doctor",
+    "run_journal_repair",
     "run_live_doctor",
     "run_mount_probes",
 ]

@@ -195,6 +195,11 @@ def _assert_snapshot_equivalent(old_journal: types.ModuleType, root: Path, prefi
 
     old_result = _call_snapshot(old_journal, root, prefixes)
     new_result = _call_snapshot(new_journal, root, prefixes)
+    if new_result[0] == "error":
+        # 0110-10-17: the new refusal of a file no commit holds also names the command that finishes an
+        # interrupted save; the reference predates that sentence. Everything before it is still compared.
+        name, code, message = new_result[1]
+        new_result = ("error", (name, code, message.removesuffix(new_journal.INTERRUPTED_WRITE_HINT)))
     assert old_result == new_result, (
         f"snapshot diverged:\nOLD: {old_result!r}\nNEW: {new_result!r}"
     )
@@ -484,6 +489,9 @@ def test_equivalence_error_tampered_working_tree_extra_file(
     extra.write_text("not committed through the journal\n", encoding="utf-8")
 
     _assert_snapshot_equivalent(old_journal, workpad)
+    import gigai.journal as new_journal
+
+    assert _call_snapshot(new_journal, workpad)[1][2] == "journal working evidence is extra or redirected" + new_journal.INTERRUPTED_WRITE_HINT
 
 
 # --------------------------------------------------------------------------

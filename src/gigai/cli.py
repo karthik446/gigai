@@ -39,7 +39,7 @@ from .runtime_comparison import (
     run_comparison,
     show_comparison,
 )
-from .diagnostics import render_report_json, run_doctor, run_live_doctor
+from .diagnostics import journal_repair_refusal, render_report_json, run_doctor, run_journal_repair, run_live_doctor
 from .default_init import DefaultInitError, initialize_defaults
 from .evaluation import EvaluationError, load_manifest, score_behavior, write_report
 from .external_cli import external_group
@@ -57,6 +57,7 @@ from .secrets_cli import secrets_group
 from .index import JournalIndexError, JournalProjection, read_index
 from .listing import GigListingError, list_gigs
 from .invocation import InvocationValidationError, load_invocation_bytes
+from .journal import JournalReconciliationRequired
 from .lifecycle import (
     LifecycleError,
     approve_interview_session,
@@ -160,9 +161,41 @@ class InvocationGroup(click.Group):
         ctx.meta["invocation_argv"] = (ctx.info_name or "gigai", *args)
         return super().parse_args(ctx, args)
 
+    def invoke(self, ctx: click.Context) -> object:
+        """0110-10-17: a write refused behind an interrupted journal write ends with the command that finishes it.
+
+        No command catches that refusal, so it used to end in a traceback. Only a refusal whose raise site
+        set ``next_action`` is taken here; every other error passes as before.
+        """
+
+        try:
+            return super().invoke(ctx)
+        except JournalReconciliationRequired as exc:
+            argv = tuple(ctx.meta.get("invocation_argv", ()))
+            refusal = journal_repair_refusal(exc, _invocation_home(argv))
+            if refusal is None:
+                raise
+            message, command = refusal
+            if "--json" in argv:
+                error = {"code": exc.code, "message": message, "next_action": command}
+                click.echo(json.dumps({"status": "error", "error": error}, sort_keys=True, separators=(",", ":")))
+                raise click.exceptions.Exit(1) from exc
+            raise click.ClickException(message) from exc
+
 
 def _invocation_argv() -> tuple[str, ...]:
     return click.get_current_context().find_root().meta["invocation_argv"]
+
+
+def _invocation_home(argv: tuple[str, ...]) -> Path | None:
+    """The ``--home`` an invocation named, in either spelling; ``None`` when it named none."""
+
+    for word, after in zip(argv, (*argv[1:], "")):
+        if word == "--home" and after:
+            return Path(after)
+        if word.startswith("--home="):
+            return Path(word.partition("=")[2])
+    return None
 
 
 @click.group(
@@ -2057,25 +2090,42 @@ def _browser_model_description(
     "--model-target",
     help="Configured remote model target required with --live.",
 )
+@click.option(
+    "--repair-journal",
+    "repair_journal",
+    is_flag=True,
+    help=(
+        "Instead of the checks: finish a journal write that a crash interrupted, in every "
+        "managed workpad of the home, and report what was finished. Changes nothing on a healthy home."
+    ),
+)
 def doctor_command(
-    home_value: Path | None, as_json: bool, live: bool, model_target: str | None
+    home_value: Path | None, as_json: bool, live: bool, model_target: str | None, repair_journal: bool
 ) -> None:
     """Run offline, zero-token installation and configured-mount checks."""
 
     _require_supported_platform()
     if live != (model_target is not None):
         raise click.UsageError("--live and --model-target must be supplied together")
+    if repair_journal and live:
+        raise click.UsageError("--repair-journal cannot be combined with --live")
     home_root = (home_value or default_home_root()).expanduser().resolve(strict=False)
-    report = (
-        run_live_doctor(home_root, model_target)
-        if live and model_target is not None
-        else run_doctor(home_root)
-    )
+    if repair_journal:
+        report = run_journal_repair(home_root)
+    else:
+        report = (
+            run_live_doctor(home_root, model_target)
+            if live and model_target is not None
+            else run_doctor(home_root)
+        )
     if as_json:
         click.echo(render_report_json(report), nl=False)
     else:
         for check in report.checks:
             click.echo(f"{check.status:4} {check.id}: {check.summary}")
+            if check.id == "journal.repair":  # 0110-10-17: which journals, and why one could not be reconciled
+                for line in (*check.evidence_safe_to_share, *((check.remediation,) if check.remediation else ())):
+                    click.echo(f"     {line}")
         click.echo(f"Overall: {report.overall_status}")
     if report.overall_status == "FAIL":
         raise click.exceptions.Exit(1)

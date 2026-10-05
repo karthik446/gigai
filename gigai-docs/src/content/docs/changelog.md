@@ -229,6 +229,22 @@ things still take more than a second (see "Still slower than one second"): the n
   ("this heading is only a link: give the project a name") instead of being dropped. Nothing else
   changes: GigAI still stores no links, a link in a bullet or a paragraph, an email or a phone number
   in a heading, and your name and contact lines are handled as before.
+- **A save cut off by a crash no longer leaves a store with no way out.** When GigAI was killed, or the
+  machine lost power, in the middle of a save, every later save was refused (and, when the crash came
+  after the save's files were written, every read of your answers too), and all you saw was a Python
+  traceback (in the Scout page: "an internal error occurred"). The store already knew how to finish
+  such a save, but no command ran that. Now one does: `gigai doctor --repair-journal`. It finishes the
+  interrupted save in every workpad of the home and says what it finished; the save that was cut off is
+  completed, not lost, and the next save works. On a healthy home it reports "nothing to repair" and
+  changes no file, and it can run beside a running Scout server. GigAI does not run it on its own, not
+  when the server starts and not before a save.
+  How you learn about it depends on when the crash came. Before the save's files were written: the
+  refused save ends in one line that names the command with your `--home` (`next_action` in `--json`),
+  and the API answers with the same text, the code `journal_reconciliation_required` and `next_action`
+  instead of `internal_error`. After the files were written: the error is still a traceback (the API
+  still says "an internal error occurred"), but its last line now names the command, and plain
+  `gigai doctor` fails on `journal.index` with the command in its remediation (`--json`). Making that
+  second case as plain as the first is not done yet.
 
 #### For agents
 
