@@ -42,6 +42,20 @@ Derived, never typed: an item's evidence ``strength`` (``backed`` when a
 story or an answer is linked, ``quantified`` when the line states a number
 by the shipped ``numeric_values``, else ``stated``) and its ``mark`` (16
 hex characters over the id and the text, for targeted staleness).
+
+NOTES (0.1.11).  A line or an entry heading may carry one note, in a second
+trailing comment::
+
+    - Built the durable runtime ... <!-- id:b-4d2a91 --> <!-- note: agentic roles: lead with this -->
+
+A note is free text for a model and an agent to read (``note_of``): it guides
+which lines are chosen and in what order, and it cannot make a line true. It
+is never printed (``markdown(ids=False)`` and the renderer drop it) and it is
+not part of ``mark``, so a note edit makes no assessment stale; it IS part of
+the stored markdown, so it makes a new revision. The format stays 1: the
+note comment is taken out of the line whole before anything else is read,
+and what is left is read as before. ``note_rule`` keeps a note to what the
+0.1.10 reader drops without misreading a word of it.
 """
 
 from __future__ import annotations
@@ -60,6 +74,8 @@ MASTER_MAX_BYTES = 1_048_576
 MASTER_MAX_LINES = 20_000
 MASTER_MAX_ITEMS = 5_000
 MASTER_MAX_ITEM_CHARS = 2_000
+#: A note is one line of free text, at most this long (``note_rule``).
+NOTE_MAX_CHARS = 300
 
 KIND_SUMMARY = "summary"
 KIND_BULLET = "bullet"
@@ -68,6 +84,10 @@ KIND_OTHER = "other"
 STRENGTHS: tuple[str, ...] = ("backed", "quantified", "stated")
 
 _COMMENT = re.compile(r"\s*<!--(.*?)-->\s*\Z")
+#: The note comment: a comment whose body starts with ``note:``; it ends at its own ``-->``.
+_NOTE_COMMENT = re.compile(r"\s*<!--\s*note:(.*?)-->")
+#: What the 0.1.10 reader takes from ANY word of a trailing comment: a note with such a word would be misread by it.
+_NOTE_RESERVED = ("id:", "tags:", "backed:", "gigai-master:")
 _MARKER = re.compile(r"\Agigai-master:(\d+)\Z")
 _HASHES = re.compile(r"\A(#{1,6})\s+(.*)\Z")
 _BULLET = re.compile(r"\A[-*•]\s+(.*)\Z")
@@ -133,6 +153,8 @@ class MasterItem:
     backed: tuple[str, ...] = ()
     entry_id: str | None = None
     order: int = 0
+    #: 0.1.11: free text that guides which lines are chosen (``note_of``). Never printed, never in ``mark``.
+    note: str | None = None
 
     @property
     def strength(self) -> str:
@@ -148,6 +170,7 @@ class MasterItem:
         out: dict[str, object] = {
             "id": self.id, "section": self.section, "kind": self.kind, "text": self.text, "tags": list(self.tags),
             "backed": list(self.backed), "entry_id": self.entry_id, "order": self.order, "strength": self.strength, "mark": self.mark,
+            "note": self.note,
         }
         if self.kind == KIND_SKILLS:
             label, names = skill_names(self.text)
@@ -165,6 +188,8 @@ class MasterEntry:
     sublines: tuple[str, ...] = ()
     bullets: tuple[str, ...] = ()
     order: int = 0
+    #: 0.1.11: a note on the entry's heading (see ``MasterItem.note``).
+    note: str | None = None
 
     @property
     def ongoing(self) -> bool:
@@ -186,6 +211,7 @@ class MasterEntry:
         return {
             "id": self.id, "section": self.section, "heading": self.heading, "sublines": list(self.sublines),
             "start": self.start, "end": self.end, "ongoing": self.ongoing, "bullets": list(self.bullets), "order": self.order,
+            "note": self.note,
         }
 
 
@@ -196,6 +222,30 @@ def _comment(item_id: str, tags: tuple[str, ...] = (), backed: tuple[str, ...] =
     if backed:
         parts.append("backed:" + ",".join(backed))
     return f"<!-- {' '.join(parts)} -->"
+
+
+def note_rule(note: str) -> str | None:
+    """The rule ``note`` breaks, or ``None``: what the file's reader and ``master_edit`` both check.
+
+    ``note`` is the text as it would be stored (whitespace collapsed). A comment mark would end the note early or
+    open another comment. A word that starts with ``id:``, ``tags:``, ``backed:`` or ``gigai-master:`` is what the
+    0.1.10 reader takes from any trailing comment: it would read the word as the line's own id, tags or evidence."""
+
+    if "<!--" in note or "-->" in note:
+        return "a note may not hold a comment mark (<!-- or -->)"
+    if any(word.startswith(_NOTE_RESERVED) for word in note.split()):
+        return "a note may not hold a word that starts with id:, tags:, backed: or gigai-master: (those name the line itself)"
+    if len(note) > NOTE_MAX_CHARS:
+        return f"a note has at most {NOTE_MAX_CHARS} characters; this one has {len(note)}"
+    return None
+
+
+def note_of(item: "MasterItem | MasterEntry") -> str | None:
+    """The note of a line or an entry, or ``None``: the one reader for a prompt or a brief.
+
+    Guidance only: which lines to choose and in what order. A note is never a source and never printed."""
+
+    return item.note or None
 
 
 @dataclass(frozen=True)
@@ -240,21 +290,26 @@ class Master:
         }
 
     def markdown(self, *, ids: bool = True) -> str:
-        """The canonical markdown (what is stored); ``ids=False`` leaves the id comments and the marker out."""
+        """The canonical markdown (what is stored); ``ids=False`` leaves the id comments, the notes and the marker out."""
 
-        def mark(item_id: str, tags: tuple[str, ...] = (), backed: tuple[str, ...] = ()) -> str:
-            return f" {_comment(item_id, tags, backed)}" if ids else ""
+        def mark(item_id: str, tags: tuple[str, ...] = (), backed: tuple[str, ...] = (), note: str | None = None) -> str:
+            if not ids:
+                return ""
+            return f" {_comment(item_id, tags, backed)}" + (f" <!-- note: {note} -->" if note else "")
+
+        def line(item: MasterItem) -> str:
+            return f"- {item.text}{mark(item.id, item.tags, item.backed, item.note)}"
 
         out: list[str] = [MASTER_MARKER, ""] if ids else []
         for section in self.sections:
             out += [f"## {section.capitalize()}", ""]
             if section in ENTRY_SECTIONS:
                 for entry in self.entries_in(section):
-                    out += [f"### {entry.heading}{mark(entry.id)}", *entry.sublines]
-                    out += [f"- {self.items[i].text}{mark(i, self.items[i].tags, self.items[i].backed)}" for i in entry.bullets]
+                    out += [f"### {entry.heading}{mark(entry.id, note=entry.note)}", *entry.sublines]
+                    out += [line(self.items[i]) for i in entry.bullets]
                     out.append("")
             else:
-                out += [f"- {item.text}{mark(item.id, item.tags, item.backed)}" for item in self.in_section(section)]
+                out += [line(item) for item in self.in_section(section)]
                 out.append("")
         return "\n".join(out).rstrip("\n") + "\n"
 
@@ -277,24 +332,56 @@ class _Fields:
     tags: tuple[str, ...] = ()
     backed: tuple[str, ...] = ()
     marker: int | None = None
+    note: str | None = None
 
     def merge(self, other: "_Fields", number: int) -> None:
         if other.id is not None:
             if self.id is not None and self.id != other.id:
                 _bad(number, "one line has two ids")
             self.id = other.id
+        if other.note is not None:
+            if self.note is not None:
+                _bad(number, "one line has two notes")
+            self.note = other.note
         self.tags += tuple(tag for tag in other.tags if tag not in self.tags)
         self.backed += tuple(ref for ref in other.backed if ref not in self.backed)
+
+
+_NOTE_PLACE = "a note is a comment of its own at the end of the line: <!-- id:... --> <!-- note: ... -->"
+
+
+def _take_note(raw: str, number: int) -> tuple[str, str | None]:
+    """``(the line without its note comment, the note)``: the note is taken whole, before any word of a comment is read.
+
+    The note comment (``<!-- note: ... -->``) stands among the line's trailing comments. It ends at its own ``-->``,
+    so only another comment may follow it; an empty one is no note."""
+
+    trailing = _COMMENT.search(raw)
+    found = _NOTE_COMMENT.search(raw, trailing.start()) if trailing is not None else None
+    if trailing is None or found is None:
+        return raw, None
+    before, after = raw[trailing.start(): found.start()].strip(), raw[found.end():]
+    if before and not before.endswith("-->"):
+        _bad(number, _NOTE_PLACE)  # inside another comment
+    if after.strip() and not after.lstrip().startswith("<!--"):
+        _bad(number, "a note ends at its '-->': it may not hold one, and only another comment may follow it")
+    if _NOTE_COMMENT.search(after):
+        _bad(number, "one line has two notes")
+    note = _flat(found.group(1))
+    rule = note_rule(note)
+    if rule is not None:
+        _bad(number, rule)
+    return raw[: found.start()] + after, note or None
 
 
 def _split(raw: str, number: int) -> tuple[str, _Fields]:
     """``(the line without its trailing comments, what the comments say)``.
 
-    A comment's ``id:``, ``tags:`` and ``backed:`` words are read; anything else in it is a note and is dropped,
-    as the shipped renderer drops a trailing comment."""
+    The note comment is taken first, whole (``_take_note``). Of the other comments the ``id:``, ``tags:`` and
+    ``backed:`` words are read; anything else in them is dropped, as the shipped renderer drops a trailing comment."""
 
     fields = _Fields()
-    line = raw
+    line, fields.note = _take_note(raw, number)
     while True:
         found = _COMMENT.search(line)
         if found is None:
@@ -303,7 +390,9 @@ def _split(raw: str, number: int) -> tuple[str, _Fields]:
         for word in found.group(1).split():
             key, colon, value = word.partition(":")
             if not colon:
-                continue  # a note's word
+                continue  # a word that says nothing
+            if key == "note":
+                _bad(number, _NOTE_PLACE)  # beside an id in one comment: it would be dropped unread
             if key == "id":
                 if not _ID.fullmatch(value):
                     _bad(number, "an id holds letters, digits, '-' and '_' (at most 64) and starts with a letter or digit")
@@ -337,6 +426,7 @@ class DraftItem:
     id: str | None = None
     tags: tuple[str, ...] = ()
     backed: tuple[str, ...] = ()
+    note: str | None = None
 
 
 @dataclass
@@ -347,6 +437,7 @@ class DraftEntry:
     id: str | None = None
     sublines: list[str] = field(default_factory=list)
     bullets: list[DraftItem] = field(default_factory=list)
+    note: str | None = None
 
 
 @dataclass
@@ -394,7 +485,7 @@ def draft_master(markdown: str) -> MasterDraft:
 
     def close_item() -> None:
         if last is not None and last_fields is not None:
-            last.id, last.tags, last.backed = last_fields.id, last_fields.tags, last_fields.backed
+            last.id, last.tags, last.backed, last.note = last_fields.id, last_fields.tags, last_fields.backed, last_fields.note
             if len(last.text) > MASTER_MAX_ITEM_CHARS:
                 _bad(last.line, f"a line has at most {MASTER_MAX_ITEM_CHARS} characters")
             if "<!--" in last.text or "-->" in last.text:
@@ -410,6 +501,8 @@ def draft_master(markdown: str) -> MasterDraft:
                     "master_format_unsupported",
                     f"line {number}: this is master format {fields.marker}; this GigAI reads format {MASTER_FORMAT}",
                 )
+            if fields.note is not None and section is not None:
+                _bad(number, "a note stands at the end of its line or entry heading, not on a line of its own")
             after_blank = True
             continue
         blank_before, after_blank = after_blank, False
@@ -417,6 +510,8 @@ def draft_master(markdown: str) -> MasterDraft:
         if hashes and len(hashes.group(1)) == 2:
             close_item()
             last = last_fields = None
+            if fields.note is not None:
+                _bad(number, "a section heading takes no note; a note belongs on a line or on an entry heading ('### ')")
             name = _flat(hashes.group(2)).rstrip(":").lower()
             if name not in SECTION_HEADINGS:
                 _bad(number, "unknown section; use ## " + ", ## ".join(item.capitalize() for item in SECTION_HEADINGS))
@@ -440,7 +535,7 @@ def draft_master(markdown: str) -> MasterDraft:
             heading = _flat(hashes.group(2))
             if not heading:
                 _bad(number, "an entry heading needs a name")
-            section.entries.append(DraftEntry(number, section.name, heading, fields.id))
+            section.entries.append(DraftEntry(number, section.name, heading, fields.id, note=fields.note))
             continue
         bullet = _BULLET.match(line)
         text = _flat(bullet.group(1) if bullet else line)
@@ -459,6 +554,8 @@ def draft_master(markdown: str) -> MasterDraft:
                     _bad(number, f"an entry heading has at most {MAX_HEADING_LINES} lines; bullets start with '- '")
                 if fields.id or fields.tags or fields.backed:
                     _bad(number, "a heading line takes no id; the id belongs on the '### ' line")
+                if fields.note is not None:
+                    _bad(number, "a heading line takes no note; the note belongs on the '### ' line")
                 entry.sublines.append(text)
             elif last is not None and last_fields is not None and not blank_before:
                 last.text = f"{last.text} {text}"
@@ -590,13 +687,13 @@ def build_master(draft: MasterDraft) -> Master:
             for bullet in entry.bullets:
                 order += 1
                 bullet_id = claim(bullet.id, bullet.line)
-                items[bullet_id] = MasterItem(bullet_id, section.name, KIND_BULLET, bullet.text, bullet.tags, bullet.backed, entry_id, order)
+                items[bullet_id] = MasterItem(bullet_id, section.name, KIND_BULLET, bullet.text, bullet.tags, bullet.backed, entry_id, order, bullet.note)
                 bullets.append(bullet_id)
-            entries[entry_id] = MasterEntry(entry_id, section.name, entry.heading, tuple(entry.sublines), tuple(bullets), entry_order)
+            entries[entry_id] = MasterEntry(entry_id, section.name, entry.heading, tuple(entry.sublines), tuple(bullets), entry_order, entry.note)
         for item in section.items:
             order += 1
             item_id = claim(item.id, item.line)
-            items[item_id] = MasterItem(item_id, section.name, _kind(section.name), item.text, item.tags, item.backed, None, order)
+            items[item_id] = MasterItem(item_id, section.name, _kind(section.name), item.text, item.tags, item.backed, None, order, item.note)
     return Master(tuple(section.name for section in draft.sections), entries, items)
 
 
@@ -622,8 +719,8 @@ def compare(previous: Master | None, current: Master) -> MasterChange:
     """``current`` against ``previous``: ids that are new, ids that are gone, ids whose content differs."""
 
     def facts(master: Master) -> dict[str, object]:
-        out: dict[str, object] = {entry.id: ("entry", entry.section, entry.heading, entry.sublines) for entry in master.entries.values()}
-        out.update({item.id: ("item", item.section, item.entry_id, item.text, item.tags, item.backed) for item in master.items.values()})
+        out: dict[str, object] = {entry.id: ("entry", entry.section, entry.heading, entry.sublines, entry.note) for entry in master.entries.values()}
+        out.update({item.id: ("item", item.section, item.entry_id, item.text, item.tags, item.backed, item.note) for item in master.items.values()})
         return out
 
     now = facts(current)
@@ -650,11 +747,14 @@ __all__ = [
     "MasterEntry",
     "MasterItem",
     "MasterResumeError",
+    "NOTE_MAX_CHARS",
     "STRENGTHS",
     "assign_ids",
     "build_master",
     "compare",
     "draft_master",
+    "note_of",
+    "note_rule",
     "parse_master",
     "skill_names",
 ]

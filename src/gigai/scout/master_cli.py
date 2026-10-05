@@ -220,6 +220,9 @@ def master_show_command(
         f"{_size(counts)}."
     )
 
+    def noted(item) -> str:  # noqa: ANN001 - a MasterItem or a MasterEntry
+        return f"  (note: {item.note})" if item.note else ""
+
     def line(item) -> str:  # noqa: ANN001 - a MasterItem
         tags = "".join(f" #{tag}" for tag in item.tags)
         kept = known.get(item.id, {})
@@ -227,14 +230,14 @@ def master_show_command(
         who = f"  ({': '.join(said) if kept.get('written_by') else 'source: ' + said[0]})" if said else ""
         for skill in kept.get("skills", ()):  # a Skills line: the skills a write added, by who added them
             who += f"  ({skill['written_by']}: {skill['name']})"
-        return f"{item.id}  [{item.strength}]  {item.text}{tags}{who}"
+        return f"{item.id}  [{item.strength}]  {item.text}{tags}{who}{noted(item)}"
 
     for name in master.sections:
         if not any(entry.section == name for entry in entries) and not any(item.section == name for item in items):
             continue
         click.echo(f"\n## {name.capitalize()}")
         for entry in (entry for entry in entries if entry.section == name):
-            click.echo(f"  {entry.id}  {entry.heading}" + "".join(f" / {subline}" for subline in entry.sublines))
+            click.echo(f"  {entry.id}  {entry.heading}" + "".join(f" / {subline}" for subline in entry.sublines) + noted(entry))
             for item in (item for item in items if item.entry_id == entry.id):
                 click.echo(f"    {line(item)}")
         for item in (item for item in items if item.section == name and item.entry_id is None):
