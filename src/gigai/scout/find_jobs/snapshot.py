@@ -642,6 +642,7 @@ def _posting_from_row(row: Mapping[str, object], last_seen: str) -> IndexedPosti
         changed_at=_text(row, "changed_at"),
         published_at=_text(row, "published_at"),
         countries=tuple(item for item in countries if type(item) is str) if isinstance(countries, list) else None,
+        published_kind=_text(row, "published_kind"),  # 0110-10-14: without it a Greenhouse date is its last change (company_index)
     )
 
 
@@ -1199,6 +1200,7 @@ def _posting_row(entry: CompanyIndexEntry, posting_id: str) -> dict[str, object]
         "first_seen": posting.first_seen,
         "changed_at": posting.changed_at,
         "published_at": posting.published_at,
+        "published_kind": posting.published_kind,
         "countries": list(posting.countries) if posting.countries is not None else None,
     }
     return row

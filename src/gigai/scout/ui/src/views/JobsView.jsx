@@ -6,6 +6,7 @@ import { useSourcesStatus } from "../components/SourcesUpdatePanel.jsx";
 import { inProgressCount } from "../jobStateModel.js";
 import {
   EMPTY_FILTER,
+  ORDER_CHIP,
   PAGE_SIZES,
   PROFILE_FILTER_KEY,
   REMOVED_FILTER,
@@ -33,6 +34,7 @@ import {
   timeChips,
   toggleProfile,
   toggleState,
+  toggleSort,
   toggleWindow,
 } from "../postingsModel.js";
 import { createPostingsStore, waitingLine } from "../postingsStore.js";
@@ -53,6 +55,9 @@ import { sourcesStrip } from "../sourcesStripModel.js";
 //                   (0110-10-02: off by default, and weak fits are listed only
 //                   while it is on; the chip shows how many there are);
 //                   "Removed" lists what the boards no longer show
+//   order chip      0110-10-14: "Newest posted" (off by default: the best
+//                   fit first). On, the server orders by the day the posting
+//                   went up (`sort=newest_posted`); it is not a filter
 //   Assess these    the selected rows, else the filter. The server is asked
 //                   first (count and estimate); nothing is assessed until the
 //                   approval dialog's Approve
@@ -572,6 +577,21 @@ export default function JobsView({ selectedProfileId, onSelectProfile, applicati
                 </button>
               </div>
             </div>
+            <div className="filter-group" data-role="order-filter">
+              <div className="chip-group-label">Order</div>
+              <div className="chip-list">
+                <button
+                  type="button"
+                  className={`chip${filter.sort === ORDER_CHIP.value ? " active" : ""}`}
+                  aria-pressed={filter.sort === ORDER_CHIP.value}
+                  data-testid="order-chip-newest-posted"
+                  title={ORDER_CHIP.title}
+                  onClick={() => setFilter((current) => ({ ...current, sort: toggleSort(current.sort) }))}
+                >
+                  {ORDER_CHIP.label}
+                </button>
+              </div>
+            </div>
           </div>
           <div className="result-count">
             <span data-role="postings-count" data-refreshing={listed.refreshing ? "true" : undefined}>
@@ -588,7 +608,7 @@ export default function JobsView({ selectedProfileId, onSelectProfile, applicati
                     onClick={() => {
                       rememberProfileFilter([]);
                       setSearch("");
-                      setFilter(EMPTY_FILTER);
+                      setFilter((current) => ({ ...EMPTY_FILTER, sort: current.sort })); // the order is not a filter
                     }}
                   >
                     Clear filters

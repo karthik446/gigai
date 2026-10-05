@@ -41,9 +41,10 @@ class _Boards:
         self.version = 1
         self.honor_content = False  # 0110-026d: True = the board answers ?content=true with descriptions (the fill)
         self.greenhouse = [
-            {"id": 11, "title": "Software Engineer", "absolute_url": "https://boards.greenhouse.io/acme/jobs/11", "location": {"name": "Denver, CO"}, "updated_at": "2026-09-20T00:00:00Z"},
-            {"id": 12, "title": "Marketing Manager", "absolute_url": "https://boards.greenhouse.io/acme/jobs/12", "location": {"name": "Remote"}, "updated_at": "2026-09-20T00:00:00Z"},
-            {"id": 13, "title": "Software Engineer, Old", "absolute_url": "https://boards.greenhouse.io/acme/jobs/13", "location": {"name": "Denver, CO"}, "updated_at": "2026-01-05T00:00:00Z"},
+            {"id": 11, "title": "Software Engineer", "absolute_url": "https://boards.greenhouse.io/acme/jobs/11", "location": {"name": "Denver, CO"}, "updated_at": "2026-09-20T00:00:00Z", "first_published": "2026-09-20T00:00:00Z"},
+            {"id": 12, "title": "Marketing Manager", "absolute_url": "https://boards.greenhouse.io/acme/jobs/12", "location": {"name": "Remote"}, "updated_at": "2026-09-20T00:00:00Z", "first_published": "2026-09-20T00:00:00Z"},
+            # 0110-10-14: up since January and edited last week. The window judges the day it went up, so it is too old.
+            {"id": 13, "title": "Software Engineer, Old", "absolute_url": "https://boards.greenhouse.io/acme/jobs/13", "location": {"name": "Denver, CO"}, "updated_at": "2026-09-21T00:00:00Z", "first_published": "2026-01-05T00:00:00Z"},
         ]
         self.lever = [
             {"id": "lev-1", "text": "Staff Software Engineer", "hostedUrl": "https://jobs.lever.co/initech/lev-1", "categories": {"location": "Austin, TX"}, "country": "US", "createdAt": 1790000000000, "descriptionPlain": "Build things."},
@@ -208,7 +209,9 @@ def test_the_summary_counts_what_is_new_or_changed_since_the_last_search(tmp_pat
     _update(tmp_path, boards, full_refresh=True)  # the boards were just checked: force the re-check
     rows, _failures, third = _search(tmp_path, now=datetime.now(timezone.utc))
     assert third["touched_since_last_search"] == 1
-    assert rows[0].text == "Build 11 v2." and rows[0].published_at == "2026-09-26T00:00:00Z"
+    # 0110-10-14: the edit is the news (one posting changed, its new text is read); the day it went up does not move.
+    assert rows[0].text == "Build 11 v2." and rows[0].published_at == "2026-09-20T00:00:00Z"
+    assert index.read("greenhouse", "acme").postings["11"].updated_at == "2026-09-26T00:00:00Z"  # type: ignore[union-attr]
 
     # A dry read (the API's preview) does not move the marker.
     before = read_last_search(index)

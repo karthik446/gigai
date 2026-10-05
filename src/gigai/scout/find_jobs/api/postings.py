@@ -7,6 +7,8 @@ objects).
 - ``GET /api/postings`` is the live search over the stored index, across the
   active profiles: no board request, no run, no model call, and the "new
   since" anchor stays. ``history=1`` adds what old find-jobs runs assessed.
+  ``sort=newest_posted`` (0110-10-14) orders the rows by the day the posting
+  went up, the newest first; ``sort=fit``, the default, is the grid's order.
 - ``POST /api/postings/assess`` is "Assess these". Without ``approve: true``
   it answers ``status: "ask"`` (the count and the estimate) and assesses
   nothing; with it the batch is assessed through the job page's own path.
@@ -75,7 +77,7 @@ def preparing_body(progress: dict[str, object]) -> dict[str, object]:
 
 
 _FLAGS = {"1": True, "true": True, "0": False, "false": False}
-_QUERY_KEYS = frozenset({"profile_id", "q", "state", "window", "removed", "history", "include_hidden", "limit", "offset"})
+_QUERY_KEYS = frozenset({"profile_id", "q", "state", "window", "removed", "history", "include_hidden", "limit", "offset", "sort"})
 _ASSESS_KEYS = frozenset({"jobs", "profile_id", "query", "states", "window", "approve", "again", "actor", "include_low_rank"})
 
 
@@ -129,7 +131,7 @@ class PostingsRoutesMixin:
             lambda: search_postings(
                 home_root, target, profile_ids=query.get("profile_id"), query=(query.get("q") or [None])[0],
                 states=query.get("state"), window=(query.get("window") or [None])[0], limit=limit, offset=offset,
-                model_wait=model_wait_seconds(), **flags,
+                model_wait=model_wait_seconds(), sort=(query.get("sort") or [None])[0], **flags,
             )
         )
 

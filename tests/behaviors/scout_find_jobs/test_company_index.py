@@ -276,7 +276,7 @@ def test_a_foreign_or_torn_payload_reads_as_not_indexed() -> None:
 
 
 _GREENHOUSE_JOBS = [
-    {"id": 11, "title": "Software Engineer", "absolute_url": "https://boards.greenhouse.io/acme/jobs/11", "location": {"name": "Denver, CO"}, "updated_at": "2026-09-20T00:00:00Z"},
+    {"id": 11, "title": "Software Engineer", "absolute_url": "https://boards.greenhouse.io/acme/jobs/11", "location": {"name": "Denver, CO"}, "updated_at": "2026-09-20T00:00:00Z", "first_published": "2026-08-02T00:00:00Z"},
     {"id": 12, "title": "Marketing Manager", "absolute_url": "https://boards.greenhouse.io/acme/jobs/12", "location": {"name": "Remote"}, "updated_at": "2026-09-21T00:00:00Z"},
     {"id": 13, "title": "No URL"},
 ]
@@ -317,7 +317,10 @@ def test_a_greenhouse_list_indexes_every_title_with_updated_at_and_no_digest() -
     assert sorted(observed) == ["11", "12"]
     assert observed["12"].title == "Marketing Manager" and observed["12"].location == "Remote"
     assert observed["11"].url == "https://boards.greenhouse.io/acme/jobs/11"
-    assert observed["11"].updated_at == "2026-09-20T00:00:00Z" and observed["11"].published_at == "2026-09-20T00:00:00Z"
+    # 0110-10-14: two dates, never one as the other: the day it went up (`first_published`) and its last change.
+    assert observed["11"].updated_at == "2026-09-20T00:00:00Z" and observed["11"].published_at == "2026-08-02T00:00:00Z"
+    # A job the board gives no first day for has no posted date; its last change is still the change signal.
+    assert observed["12"].updated_at == "2026-09-21T00:00:00Z" and observed["12"].published_at is None
     # The list has no description: no digest, updated_at is the signal.
     assert observed["11"].content_sha256 is None and observed["11"].countries is None
 

@@ -104,7 +104,7 @@ def _index_join(home_root: Path, target: Path, identity: str, *, profile_id: str
         "job_identity": identity, "normalized_url": identity, "source_url": identity, "fetch_kind": "ats_board",
         "provider": found.provider, "board_token": found.board_token,
         "first_seen": row.first_seen, "removed_at": row.removed_at,  # type: ignore[attr-defined]
-        **posting_dates(row),  # 0110-10-14: the board's date, what it means, and when Scout first stored the posting
+        **posting_dates(row, text),  # 0110-10-14: the board's dates, what they mean, and when Scout first stored the posting
     }
     fit: dict[str, object] | None = None
     if text is not None:
