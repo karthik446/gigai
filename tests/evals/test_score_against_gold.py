@@ -308,3 +308,20 @@ def test_a_row_the_key_calls_matched_or_pending_accepts_both_verdicts_with_a_har
     for result in (answer(verdict="matched_above_threshold", status={"req-k8s": "met"}, ask=()), answer(status={"req-k8s": "met", "req-years": "unclear"}, ask=(("years:backend", "req-years"),))):
         assert gold.score_result(key, result, lines)["verdict"]["right"]
     assert gold.key_view(key)["verdicts"] == ["matched_above_threshold", "pending_user_answers"]
+
+
+def test_a_met_row_citing_none_of_the_keys_settling_lines_is_a_wrong_citation_and_advisory_only(lines: list[dict[str, Any]]) -> None:
+    key = build_key(lines, cloud="met")["postings"]["01"]
+    for must in key["musts"]:
+        must["status"] = "met"
+        must["settled_by"] = ["b-aaa"] if must["item"] != "Go" else []  # a row with no settled_by is skipped
+    key["musts"][0]["status_either"] = ["met", "unclear"]  # an open-either row is skipped too
+    rows = {"req-years": ["b-zzz"], "req-go": ["b-zzz"], "req-k8s": ["b-zzz"], "req-tf": ["b-aaa", "b-zzz"], "req-cloud": ["b-zzz"]}
+    result = answer(verdict="matched_above_threshold", status={"req-k8s": "met", "req-cloud": "met"}, ask=())
+    for row in result["result"]["matrix"]:
+        row["sources"] = rows.get(row["id"], [])
+    out = gold.score_result(key, result, lines)
+    assert [(item["item"], item["cited"]) for item in out["wrong_citation"]] == [("Kubernetes", ["b-zzz"]), (None, ["b-zzz"])]
+    assert out["wrong_citation"][1]["line"] == 6 and out["fully_correct"]  # advisory: the verdict still stands
+    unclear = gold.score_result(key, answer(status={"req-k8s": "unclear"}, ask=()), lines)  # an unclear row is not a met row with a wrong citation
+    assert all(item["item"] != "Kubernetes" for item in unclear["wrong_citation"])

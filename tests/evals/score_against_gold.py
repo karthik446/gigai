@@ -61,6 +61,10 @@ not pinned, not recent_role_present) printed while a picked line is cut, or (ii)
 recent_role_present line printed while a picked line a met row rests on is cut and
 that row has no line left on the page.  No stored resume: ``c1`` is None.
 
+WRONG CITATION (advisory, never in ``fully_correct``): a must-have row the result marks met
+whose cited ``sources`` share no line with the key's ``settled_by`` (rows the key calls met
+with a settled_by, not open either way).  Per result ``wrong_citation`` [{line, item, cited}].
+
 WHAT IS REPORTED, per result: verdict and gate right or wrong; the location
 answer; every question as ``right`` (on a row the key leaves unclear),
 ``over`` (on a row the key settles, on a soft line, on a nice-to-have, about
@@ -93,7 +97,7 @@ ELIG_IDS = ("elig-location", "elig-region", "elig-work-mode")
 SPONSORSHIP_WORDS = ("sponsor", "authorization", "authorisation", "eligib", "work_permit", "visa")
 MATCH_FLOOR = 0.6
 TOTALS = ("results", "unread", "fully_correct", "verdict_right", "gate_right", "location_right", "over_asks", "soft_asks", "under_asks", "musts_right", "list_exact",
-          "rows_missing", "rows_extra", "rows_unmapped", "class_wrong", "status_wrong", "required_lines", "lines_covered", "resume_checked", "resume_covers", "resume_verbatim", "resume_pages_skills", "resume_c1", "resume_bar")
+          "rows_missing", "rows_extra", "rows_unmapped", "class_wrong", "status_wrong", "required_lines", "lines_covered", "resume_checked", "resume_covers", "resume_verbatim", "resume_pages_skills", "resume_c1", "resume_bar", "wrong_citation")
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -309,6 +313,16 @@ def score_result(key: Mapping[str, Any], whole: object, lines: Sequence[Mapping[
         if got != key_row["status"] and got not in (key_row.get("status_either") or ()) and not (key_row.get("soft_ask") and got == "unclear"):
             status_wrong.append({"line": key_row["line"], "item": key_row.get("item"), "key": key_row["status"], "got": got})
 
+    # advisory: a row marked met whose cited lines share none with the key's settled_by (the user sees irrelevant lines as the proof)
+    wrong_citation = []
+    for index, key_row in enumerate(key_rows):
+        row = matched.get(index)
+        if key_row["kind"] != "must" or row is None or key_row["status"] != "met" or key_row.get("status_either") or not key_row.get("settled_by") or str(row.get("status")) != "met":
+            continue
+        cited = {str(item) for item in row.get("sources") or ()}
+        if not cited & {str(item) for item in key_row["settled_by"]}:
+            wrong_citation.append({"line": key_row["line"], "item": key_row.get("item"), "cited": sorted(cited)})
+
     # the questions
     by_requirement = {fold(row.get("requirement")): row for row in rows}
     by_id = {str(row["id"]): row for row in rows if row.get("id")}
@@ -379,6 +393,7 @@ def score_result(key: Mapping[str, Any], whole: object, lines: Sequence[Mapping[
             "musts_right": not must(missing) and not must(class_wrong) and not must(extra), "exact": not missing and not class_wrong and not extra and not unmapped,
             "line_coverage": {"required_lines": len(required), "covered": len(covered), "must_lines": len(must_lines), "must_covered": len(covered & must_lines)},
         },
+        "wrong_citation": wrong_citation,
         "status": {"must_rows_found": sum(1 for index, row in enumerate(key_rows) if row["kind"] == "must" and index in matched), "wrong": status_wrong},
     }
     score["fully_correct"] = bool(score["verdict"]["right"] and score["gate"]["right"] and score["location"]["right"] and not score["questions"]["over_asks"] and not under
@@ -594,6 +609,7 @@ def score_folder(key: Mapping[str, Any], results: Path, postings: Path, master: 
         total["lines_covered"] += row["list"]["line_coverage"]["covered"]
         total["fully_correct"] += int(row["fully_correct"])
         total["soft_asks"] += row["questions"]["soft_asks"]
+        total["wrong_citation"] += len(row["wrong_citation"])
         if "resume" in row:
             resume = row["resume"]
             total["resume_checked"] += 1
@@ -621,6 +637,11 @@ def render(report: Mapping[str, Any]) -> str:
         questions, listing, cover = row["questions"], row["list"], row["list"]["line_coverage"]
         lines.append(f"| {row['posting']} | {row['cli']} | {'yes' if row['fully_correct'] else 'no'} | {mark(row['verdict'])}: {row['verdict']['got']} ({' or '.join(row['verdict']['key'])}) | {mark(row['gate'])} | {mark(row['location'])} | "
                      f"{questions['asked']} | {questions['right']} | {questions['over_asks']} | {questions['under_asks']} | {len(listing['missing'])} | {len(listing['extra'])} | {len(listing['class_wrong'])} | {len(row['status']['wrong'])} | {cover['covered']}/{cover['required_lines']} |")
+    lines += ["", "Wrong-citation rows (advisory, not in fully correct): a must-have row marked met whose cited lines share none with the key's settled_by lines. Row = posting line.", "",
+              "| cli | wrong-citation rows | posting: lines |", "|---|---|---|"]
+    for cli, total in sorted(report["by_cli"].items()):
+        where = "; ".join(f"{row['posting']}: {', '.join(str(item['line']) for item in row['wrong_citation'])}" for row in report["results"] if row["cli"] == cli and row["ok"] and row["wrong_citation"])
+        lines.append(f"| {cli} | {total['wrong_citation']} | {where or '-'} |")
     return "\n".join(lines) + "\n"
 
 
@@ -652,7 +673,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     (out / "score.json").write_text(json.dumps(report, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
     (out / "score.md").write_text(render(report), encoding="utf-8")
     for cli, total in sorted(report["by_cli"].items()):
-        print(f"{cli}: {total['results']} results, fully correct {total['fully_correct']}, verdict right {total['verdict_right']}, over-asks {total['over_asks']}, under-asks {total['under_asks']}")
+        print(f"{cli}: {total['results']} results, fully correct {total['fully_correct']}, verdict right {total['verdict_right']}, over-asks {total['over_asks']}, under-asks {total['under_asks']}, wrong-citation rows {total['wrong_citation']}")
     print(f"written under {out}")
     return 0
 
