@@ -6,7 +6,7 @@ TEST_XDIST_WORKERS ?= auto
 TEST_XDIST_MAX_WORKERS ?= 14
 TEST_XDIST_DIST ?= worksteal
 
-.PHONY: test test-macos-smoke test-operator-home test-core-flow test-source test-behavior test-wheel test-installed test-live test-debian-offline unit-tests api-e2e eval-live lint
+.PHONY: test test-macos-smoke test-operator-home test-operator-writes test-core-flow test-source test-behavior test-wheel test-installed test-live test-debian-offline unit-tests api-e2e eval-live lint
 
 # 0110-10-08: names the package uses and never defines. 0.1.10.9 shipped `time.monotonic()` in a module with no
 # `import time`, on a line only a large store reaches: no test ran it, and nothing read the code for it. Every PR
@@ -89,6 +89,23 @@ test-macos-smoke:
 test-operator-home:
 	GIGAI_OPERATOR_GATE=1 $(UV) run --locked --extra test python -m pytest -n 0 -q -s \
 		tests/behaviors/scout_pipeline/test_operator_sized_home.py
+
+# 0.1.10.11 SGATE: the write timing gate (a step of the release pre-check's `operator-home` job). The bar: no
+# interactive operation over 1 s on the operator-sized home. Thirteen saves and reads (PUT /api/setup, the answers,
+# a profile rename and create, the master's add, edit and retire, `gigai scout resume add`, a selection refresh,
+# Assess, the job page, the Jobs list of a fresh server), each on a fresh copy of the 0.1.10.10 S1 fixture (the
+# operator-sized home plus a stored master, GIGAI_WRITE_GATE_JOBS finished pipeline jobs per profile, default 100,
+# and a question every assessed job asked) and a fresh server process, with the git processes each one started
+# beside its seconds. The table to paste into the "ready" message: build/write-gate/table.md (GIGAI_WRITE_GATE_OUT).
+#   GIGAI_WRITE_GATE=report (the default)  prints the table; fails only when an operation is refused or a finished
+#                                          one is over its git-process ceiling
+#   GIGAI_WRITE_GATE=enforce               an operation over 1 s (x GIGAI_TEST_LATENCY_SCALE) fails it too
+# An operation still running after GIGAI_WRITE_GATE_STOP_SECONDS (default 30; 0 waits to the end) is stopped and
+# reported as such. GIGAI_WRITE_GATE_HOME=<a folder under the temporary directory> keeps the fixture for the next
+# run. Runtime on a laptop: see the gate's docstring (tests/behaviors/scout_pipeline/test_operator_sized_writes.py).
+test-operator-writes:
+	GIGAI_OPERATOR_GATE=1 GIGAI_WRITE_GATE=$${GIGAI_WRITE_GATE:-report} $(UV) run --locked --extra test python -m pytest -n 0 -q -s \
+		tests/behaviors/scout_pipeline/test_operator_sized_writes.py
 
 # 0110-10-hf2, a standing release rule: `gigai scout new` and the commands around it must run to the end before a
 # release is called ready (REQUIRED in the release pre-check: the `operator-home` job of pull_request.yaml).

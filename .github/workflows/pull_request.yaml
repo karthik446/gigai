@@ -472,12 +472,30 @@ jobs:
   # build/ui-artifacts/core-flow/logs/, so a failed run uploads it with the rest. Step
   # limit by the same rule: 6 min on a laptop on 2026-10-04 -> 20. The job's limit is
   # the steps' limits plus 10 minutes for the setup and the uploads.
+  # 0.1.10.11 SGATE: the same job then runs the WRITE TIMING GATE (`make
+  # test-operator-writes`, tests/behaviors/scout_pipeline/test_operator_sized_writes.py)
+  # in REPORT mode. The bar is no interactive operation over 1 s on this home; the
+  # 0.1.10.10 S1 measurement found saves that take minutes once the background pipeline
+  # has finished jobs. The gate adds that content to a fresh copy of the prebuilt home (a
+  # stored master, finished pipeline jobs for both profiles, a question every assessed job
+  # asked), then times thirteen saves and reads, each on a fresh copy and a fresh server
+  # process, with the git processes each one started. Its table goes to the job summary
+  # and the every-run artifact. In report mode an operation over the bar is a row of the
+  # table, not a failure: the step fails only when an operation is refused or a finished
+  # one starts more git processes than its ceiling. `GIGAI_WRITE_GATE: enforce` makes an
+  # operation over the bar fail the step; switch it when the speed packets have landed.
+  # GIGAI_WRITE_GATE_JOBS is 25 finished pipeline jobs per profile, not the fixture's 100:
+  # before the pipeline's own speed fix (S2) a job costs seconds to build, and 100 a
+  # profile would take this step past half an hour. Every row of the table names the job
+  # count. Raise it to 100 (delete the line) when S2 has landed. Step limit by the same
+  # rule: 13 min on a busy laptop on 2026-10-04 at 25 jobs a profile (the content 7, the
+  # operations 6) -> 40. NOT measured on a runner yet.
   operator-home:
     needs: changes
     if: needs.changes.outputs.code_changed == 'true' && inputs.profile == 'release'
     name: Operator-sized home timing gate, browser flows and core-flow smoke (290k postings)
     runs-on: ubuntu-24.04
-    timeout-minutes: 50
+    timeout-minutes: 90
     env:
       GIGAI_TEST_LATENCY_SCALE: "3"
       GIGAI_UI_BUDGETS: report
@@ -541,6 +559,24 @@ jobs:
       - name: Budgets in the job summary
         if: ${{ !cancelled() && steps.home.outcome == 'success' }}
         run: python3 tools/ui_budgets_summary.py build/ui-artifacts/budgets.json --title "operator-sized home (make ui-test-operator)" >> "${GITHUB_STEP_SUMMARY}"
+      # 0.1.10.11 SGATE: the write timing gate, report mode (see the comment above the job).
+      # Last of the checks: it takes its own fresh copy of the prebuilt home and runs
+      # whatever the steps before it did.
+      - name: Write timing gate on the operator-sized home (report mode)
+        if: ${{ !cancelled() && steps.home.outcome == 'success' }}
+        timeout-minutes: 40
+        env:
+          GIGAI_WRITE_GATE: report
+          GIGAI_WRITE_GATE_JOBS: "25"
+        run: make test-operator-writes
+      - name: Write gate table in the job summary
+        if: ${{ !cancelled() && steps.home.outcome == 'success' }}
+        run: |
+          if [ -f build/write-gate/table.md ]; then
+            cat build/write-gate/table.md >> "${GITHUB_STEP_SUMMARY}"
+          else
+            echo "### Write timing gate: no table (the gate stopped before its operations ran; see the step's log)" >> "${GITHUB_STEP_SUMMARY}"
+          fi
       - name: Upload budgets.json, the flow's numbers and the core-flow table (every run)
         if: ${{ !cancelled() && steps.home.outcome == 'success' }}
         uses: actions/upload-artifact@v4
@@ -550,6 +586,8 @@ jobs:
             build/ui-artifacts/budgets.json
             build/ui-artifacts/operator-sized-jobs.json
             build/ui-artifacts/core-flow/table.md
+            build/write-gate/table.md
+            build/write-gate/table.json
           if-no-files-found: warn
           retention-days: 30
       - name: Upload the failure artifacts (screenshot, trace, requests, console, server log, timeout.txt; the core-flow steps' output)
