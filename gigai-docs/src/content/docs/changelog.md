@@ -274,6 +274,10 @@ things still take more than a second (see "Still slower than one second"): the n
   changed by this, and nothing needs to be done.
   This is not a fix for an assessment that failed with `posting_requirements_unreadable`: that posting
   had its text, and the answer now says which rule refused (see "For agents").
+- **`gigai scout run` never stops the Scout of another GigAI home.** It stopped whatever Scout held the
+  port, also one that another home (`--home`) had started. Now only a Scout of the same home is stopped:
+  another home's keeps running, and the command ends with one line that names the port and that home
+  and says to pass `--port`.
 
 #### For agents
 
