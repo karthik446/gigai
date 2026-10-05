@@ -281,6 +281,8 @@ def test_the_ats_chip_and_the_label_chip_carry_only_the_servers_wording(out: dic
     assert attention == {
         "label": "Scout label: needs attention", "code": "needs_attention", "tone": "warn",
         "reasons": ["open questions", "ats below minimum"], "minAts": 70, "wording": "L",
+        # 0110-10-12: not older than the assessment shown (none was named): no suffix, no note.
+        "older": False, "note": None, "at": None,
     }
     assert unknown is None, "a label code the backend does not have is never shown"
     # The UI's own files hold neither sentence: both arrive in the response.

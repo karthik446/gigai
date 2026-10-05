@@ -23,6 +23,7 @@
 // A state id is never shown: STATE_LABELS has the words, and an id this
 // table does not know is humanized.
 import { humanizeId } from "./jobModel.js";
+import { staleWords } from "./postingsModel.js";
 
 export const STATE_LABELS = {
   not_assessed: "Not assessed",
@@ -161,7 +162,10 @@ export const STALE_ASSESSMENT_TEXT = "Posting text changed since this assessment
 // (assessment_basis.py). A quiet note, never an error: the verdict still
 // reads, and one click re-assesses. Nothing re-assesses on its own.
 export const BASIS_STALE_REASONS = ["older_prompt", "settings_changed", "story_bank_changed", "resume_changed"];
-export const OLDER_SETTINGS_TEXT = "Assessed with older settings: re-assess";
+// 0110-10-12: the note says the reason in the words the Jobs row uses ("old assessment: older prompt"): one reason,
+// one wording. It was "Assessed with older settings" for an older prompt and for changed settings alike.
+export const OLDER_PROMPT_TEXT = "Old assessment (older prompt): re-assess";
+export const SETTINGS_CHANGED_TEXT = "Old assessment (settings changed): re-assess";
 export const STORY_BANK_CHANGED_TEXT = "Your story bank changed since this assessment: re-assess";
 export const OLDER_SETTINGS_CHIP = "Older settings";
 
@@ -228,16 +232,29 @@ function quickIsCurrent(quick) {
   return quick.basis_stale === false || Boolean(quick.prompt_version);
 }
 
+// 0110-10-12: the stored item says it itself (`basis_stale: true`, `basis_stale_reason`). The served `job_state` carries
+// the marker only while the state is the VERDICT's: for a job whose state is "Resume tailored" or "Applied" it has
+// none, and the page showed an old assessment as current and kept Re-assess off. Read only when the item is the
+// assessment shown (not when a run's own, newer one is).
+function basisStaleReason(job) {
+  const quick = job.quick;
+  if (!quick || typeof quick !== "object" || quick.basis_stale !== true || job.assessmentSource === "run") {
+    return null;
+  }
+  return typeof quick.basis_stale_reason === "string" && quick.basis_stale_reason ? quick.basis_stale_reason : "settings_changed";
+}
+
 export function assessmentStaleFor(job) {
   if (!job) {
     return null;
   }
   const raws = [job.quick && job.quick.job_state, job.row && job.row.jobState];
   const found = raws.find((raw) => raw && typeof raw === "object" && raw.assessment_stale && typeof raw.assessment_stale === "object");
-  if (!found) {
+  const own = basisStaleReason(job);
+  if (!found && !own) {
     return null;
   }
-  const reason = found.assessment_stale.reason || "posting_changed";
+  const reason = found ? found.assessment_stale.reason || "posting_changed" : own;
   if (isBasisStaleReason(reason) && quickIsCurrent(job.quick)) {
     return null;
   }
@@ -259,7 +276,17 @@ export function staleAssessmentNote(job) {
   if (stale.reason === "resume_changed") {
     return resumeChangedNote(stale.resume);
   }
-  return isBasisStaleReason(stale.reason) ? OLDER_SETTINGS_TEXT : STALE_ASSESSMENT_TEXT;
+  if (stale.reason === "older_prompt") {
+    return OLDER_PROMPT_TEXT;
+  }
+  return isBasisStaleReason(stale.reason) ? SETTINGS_CHANGED_TEXT : STALE_ASSESSMENT_TEXT;
+}
+
+// 0110-10-12: why the job's assessment is old, in the Jobs row's words ("older prompt", "settings changed", "answers
+// changed", "resume changed", "posting changed"); null for a current one. The Re-assess gate says it (answersModel).
+export function staleReasonWords(job) {
+  const stale = assessmentStaleFor(job);
+  return stale ? staleWords(stale.reason) : null;
 }
 
 // The card's short marker: only for an assessment made with older settings

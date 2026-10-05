@@ -71,7 +71,8 @@ def test_posting_incomplete_has_its_label(out: dict) -> None:
 
 def test_marker_and_label_are_wired_into_the_views() -> None:
     page = (UI_SRC / "views" / "JobPage.jsx").read_text()
-    assert "staleAssessmentNote(job)" in page and 'label="Re-assess"' in page
+    # 0110-10-12: the note, and the page's ONE Re-assess is told the assessment is old (it was a second button in the note).
+    assert "staleAssessmentNote(job)" in page and "stale: staleReasonWords(job)," in page and 'label="Re-assess"' not in page
     card = (UI_SRC / "components" / "PostingCard.jsx").read_text()
     assert "staleAssessmentNote({ row })" in card
     board = (UI_SRC / "components" / "PostingsBoard.jsx").read_text()

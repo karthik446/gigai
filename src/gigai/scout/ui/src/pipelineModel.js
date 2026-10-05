@@ -130,19 +130,35 @@ export function atsChip(detail) {
   return { label: `${SCOUT_ATS_NAME} ${ats.score}`, score: ats.score, line: ats.line || null, rows, wording: ats.wording || null };
 }
 
-// The Scout label chip; null until the label step is done.
-export function labelChip(detail) {
+// 0110-10-12: the Scout label is made from the job's own assessment (its verdict, its open questions, whether it is
+// old). A re-assessment does not make it again, so a label made BEFORE the assessment the page shows is not that
+// assessment's: true then. Both stamps are the server's fixed-width UTC stamps, so they compare as strings.
+export function labelIsOlder(detail, assessedAt) {
+  const at = detail && detail.label && detail.label.updated_at;
+  return typeof at === "string" && typeof assessedAt === "string" && at !== "" && assessedAt !== "" && at < assessedAt;
+}
+
+export const OLDER_LABEL_SUFFIX = "from before the latest assessment";
+export const OLDER_LABEL_NOTE = "This label was made before the latest assessment and does not reflect it. Process again to make it from the assessment shown.";
+
+// The Scout label chip; null until the label step is done. `assessedAt` (optional) is when the assessment the page
+// shows was made: a label older than it says so (`older`, the suffix in its words, a plain tone and `note`).
+export function labelChip(detail, { assessedAt = null } = {}) {
   const label = detail && detail.label;
   if (!label || !LABEL_WORDS[label.label]) {
     return null;
   }
+  const older = labelIsOlder(detail, assessedAt);
   return {
-    label: `${label.name || SCOUT_LABEL_NAME}: ${LABEL_WORDS[label.label]}`,
+    label: `${label.name || SCOUT_LABEL_NAME}: ${LABEL_WORDS[label.label]}${older ? ` (${OLDER_LABEL_SUFFIX})` : ""}`,
     code: label.label,
-    tone: label.label === "recommended" ? "ok" : "warn",
+    tone: older ? "plain" : label.label === "recommended" ? "ok" : "warn",
     reasons: (label.reasons || []).map(words),
     minAts: typeof label.min_ats === "number" ? label.min_ats : null,
     wording: label.wording || null,
+    older,
+    note: older ? OLDER_LABEL_NOTE : null,
+    at: typeof label.updated_at === "string" ? label.updated_at : null,
   };
 }
 

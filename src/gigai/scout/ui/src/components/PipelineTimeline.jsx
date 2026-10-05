@@ -7,10 +7,10 @@ const POLL_MS = 3000;
 
 // A chip whose click opens its breakdown: a <details>, so it needs no
 // script to open, close or reach by keyboard.
-function ChipPopover({ label, tone, testId, children }) {
+function ChipPopover({ label, tone, testId, older, children }) {
   return (
     <details className="chip-popover">
-      <summary className={`state-pill tone-${tone}`} data-testid={testId}>
+      <summary className={`state-pill tone-${tone}`} data-testid={testId} data-older={older ? "true" : undefined}>
         {label}
       </summary>
       <div className="chip-popover-body">{children}</div>
@@ -29,7 +29,11 @@ function ChipPopover({ label, tone, testId, children }) {
 // `onTailorDone` is called when a read says the tailor step finished since
 // the read before it (pipelineModel.tailorFinished): the pipeline stored a
 // resume, and the job page reads it again.
-export default function PipelineTimeline({ jobIdentity, profileId, assessed, refreshKey, onTailorDone }) {
+// 0110-10-12: `assessedAt` is when the assessment the page shows was made. A
+// Scout label made before it (a re-assessment does not make the label again)
+// says so on its chip and in its popover, instead of reading as the new
+// assessment's (pipelineModel.labelChip).
+export default function PipelineTimeline({ jobIdentity, profileId, assessed, assessedAt, refreshKey, onTailorDone }) {
   const [detail, setDetail] = useState(null);
   const [error, setError] = useState(null);
   const [posting, setPosting] = useState(false);
@@ -104,7 +108,7 @@ export default function PipelineTimeline({ jobIdentity, profileId, assessed, ref
   const stages = stepTimeline(detail);
   const variant = variantLine(detail);
   const ats = atsChip(detail);
-  const label = labelChip(detail);
+  const label = labelChip(detail, { assessedAt });
 
   return (
     <section className="panel" data-testid="step-timeline" data-state={detail && detail.state ? detail.state : "not_started"}>
@@ -164,7 +168,12 @@ export default function PipelineTimeline({ jobIdentity, profileId, assessed, ref
           )}
           {ats && <HelpLink topic="ats" />}
           {label && (
-            <ChipPopover label={label.label} tone={label.tone} testId="scout-label-chip">
+            <ChipPopover label={label.label} tone={label.tone} testId="scout-label-chip" older={label.older}>
+              {label.note && (
+                <div className="chip-popover-line" data-role="label-older">
+                  {label.note}
+                </div>
+              )}
               {label.reasons.length > 0 ? (
                 <ul>
                   {label.reasons.map((reason) => (

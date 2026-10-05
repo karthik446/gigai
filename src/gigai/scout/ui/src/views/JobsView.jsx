@@ -23,6 +23,7 @@ import {
   pageCount,
   pageNumbers,
   parseJobsHash,
+  postedLine,
   profileChips,
   profileTags,
   rowChips,
@@ -56,7 +57,12 @@ import { sourcesStrip } from "../sourcesStripModel.js";
 //                   first (count and estimate); nothing is assessed until the
 //                   approval dialog's Approve
 //   per row         open its job page; "Assess as <profile>" for another
-//                   profile it matches (the same question and approval)
+//                   profile it matches (the same question and approval).
+//                   0110-10-14: its date, beside company and location:
+//                   "posted 10 days ago" (the board's date), "updated ..."
+//                   (a board that gives only its last change) or "first seen
+//                   ..." (no board date), the exact day on hover
+//                   (postingsModel.postedLine)
 //
 // Everything a row shows is the posting's own text, a code or a number, and
 // is drawn as text. Old find-jobs runs are history: "Past runs".
@@ -99,6 +105,7 @@ function PostingRow({ row, profiles, anchor, selected, onSelect, onOpen, onAsses
   const tags = profileTags(row, profiles);
   const others = secondProfiles(row, profiles);
   const details = detailLine(row);
+  const posted = postedLine(row);
   return (
     <li
       className={`posting-row${row.removed_at ? " removed" : ""}`}
@@ -124,7 +131,17 @@ function PostingRow({ row, profiles, anchor, selected, onSelect, onOpen, onAsses
             New
           </span>
         )}
-        {details && <div className="posting-detail">{details}</div>}
+        {(details || posted) && (
+          <div className="posting-detail">
+            {details}
+            {details && posted ? " · " : ""}
+            {posted && (
+              <span data-role="posted" data-kind={posted.kind} data-at={posted.at} title={posted.title}>
+                {posted.text}
+              </span>
+            )}
+          </div>
+        )}
         <div className="posting-tags" data-role="profile-tags">
           {tags.map((tag) => (
             <span

@@ -835,6 +835,7 @@ export default function FindJobsView({
         profileLabel={profile.label}
         visaRequired={visaRequired}
         runId={runId}
+        listedRow={listed || null}
         loading={fromAssessments ? quickLoading : resultsLoading || pagesLoading || quickLoading || (newestLoading && !runId) || !(postingLookup.id === jobId && postingLookup.done)}
         onQuickUpdated={handleQuickUpdated}
         onApplicationsChanged={applicationsState.reload}

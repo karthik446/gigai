@@ -37,7 +37,9 @@ process.stdout.write(JSON.stringify({
 }));
 """
 
-OLDER = "Assessed with older settings: re-assess"
+# 0110-10-12: the reason in the Jobs row's words ("old assessment: older prompt"), not one line for two reasons.
+PROMPT = "Old assessment (older prompt): re-assess"
+OLDER = "Old assessment (settings changed): re-assess"
 BANK = "Your story bank changed since this assessment: re-assess"
 POSTING = "Posting text changed since this assessment: re-assess"
 SERVED = {"state": "matched", "since": None, "next_events": ["applied"]}
@@ -104,12 +106,12 @@ def test_the_ui_knows_the_servers_reasons(out: dict) -> None:
 
 
 def test_the_note_names_older_settings_and_keeps_the_posting_changed_words(out: dict) -> None:
-    assert out["notes"] == [OLDER, OLDER, BANK, POSTING, None, None, None, POSTING, None]
+    assert out["notes"] == [PROMPT, OLDER, BANK, POSTING, None, None, None, POSTING, None]
 
 
 def test_the_card_marker_is_for_older_settings_only(out: dict) -> None:
     chip = {"label": "Older settings", "title": OLDER}
-    assert out["chips"] == [chip, chip, {"label": "Older settings", "title": BANK}, None, None, None, None, None, None]
+    assert out["chips"] == [{**chip, "title": PROMPT}, chip, {"label": "Older settings", "title": BANK}, None, None, None, None, None, None]
     assert out["count"] == 3
     assert out["lines"] == [
         "",
@@ -152,7 +154,8 @@ def test_assess_all_new_counts_the_stale_ones_as_such(out: dict) -> None:
 
 def test_the_marker_is_wired_into_the_views() -> None:
     page = (UI_SRC / "views" / "JobPage.jsx").read_text()
-    assert "staleAssessmentNote(job)" in page and 'label="Re-assess"' in page, "the job page: the note and the one-click Re-assess"
+    # 0110-10-12: the note says the reason; the page's ONE Re-assess is on for it (tests/api_e2e/test_ui_stale_reassess_model.py).
+    assert "staleAssessmentNote(job)" in page and "stale: staleReasonWords(job)," in page, "the job page: the note, and Re-assess told why"
     card = (UI_SRC / "components" / "JobCard.jsx").read_text()
     assert "olderSettingsChip(job)" in card and 'data-role="assessment-older-settings"' in card
     tab = (UI_SRC / "views" / "AssessmentsView.jsx").read_text()
