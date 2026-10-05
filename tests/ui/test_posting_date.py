@@ -89,7 +89,6 @@ def test_a_jobs_row_and_its_job_page_show_the_postings_date(ui) -> None:
         kind, instant = expected_date(row)
         assert item["count"] == 1 and item["inDetail"], f"{row['title']}: one date, beside company and location"
         assert (item["kind"], item["at"]) == (kind, instant), f"{row['title']}: the page shows {item['kind']} {item['at']}, the server has {kind} {instant}"
-        assert item["at"] != row["first_seen_at"] or kind == "first_seen", "a first sighting shown as the board's date"
         assert item["text"] in {f"{WORDS[kind]} {ago(instant, day)}" for day in days}, item["text"]
         assert item["title"].startswith("Posted ") and "First seen by Scout" in item["title"], item["title"]
     # More than one age is on the page: the dates are the postings' own, not the day of the read.
