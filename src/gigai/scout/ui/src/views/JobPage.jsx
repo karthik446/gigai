@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ApiError, getAnswers, getConfig, getJob, getRunPosting, postApplication, postAssess } from "../api.js";
+import { getAnswers, getConfig, getJob, getRunPosting, postApplication, postAssess, postAssessThese } from "../api.js";
 import { REQUIREMENTS_UNREADABLE_TEXT, isRequirementsUnreadable } from "../rankModel.js";
 import AssessmentBody from "../components/AssessmentBody.jsx";
 import RequirementActions from "../components/RequirementActions.jsx";
@@ -15,7 +15,7 @@ import PrepPanel from "../components/PrepPanel.jsx";
 import TailoredResumePanel, { useTailoredResume } from "../components/TailoredResumePanel.jsx";
 import PipelineTimeline from "../components/PipelineTimeline.jsx";
 import { useAnswerDrafts } from "../answerDrafts.js";
-import { reassessGate, tailorGate } from "../answersModel.js";
+import { assessSendsLine, assessSummaryLines, reassessErrorText, reassessGate, tailorGate } from "../answersModel.js";
 import { postedLine, postingDate } from "../postingsModel.js";
 import { displayCompanyName, notAssessedReasonDetail, unchangedSinceLabel } from "../display.js";
 import {
@@ -247,10 +247,8 @@ function AssessNow({ posting, origin, onAssessed, label = "Assess" }) {
               setState("idle");
               if (isRequirementsUnreadable(err)) {
                 setUnreadable(true);
-              } else if (err instanceof ApiError && err.status === 504) {
-                setError("The model timed out assessing this posting. Try again, or a faster model target.");
               } else {
-                setError(err.message || String(err));
+                setError(reassessErrorText(err)); // 0110-10-13: a typed cause says its facts and next action
               }
             });
         }}
@@ -264,6 +262,31 @@ function AssessNow({ posting, origin, onAssessed, label = "Assess" }) {
       )}
       {error && <div className="field-error">{error}</div>}
     </span>
+  );
+}
+
+// 0110-10-13: what one assessment sends, beside the Assess / Re-assess actions. Opened, it asks the no-call
+// preview (POST /api/postings/assess without approve) for this job's summary: profile, resume source, answers
+// and stories, whether the posting is fetched first. No model call either way.
+function AssessSends({ jobUrl, profileId, target }) {
+  const [lines, setLines] = useState(null);
+  return (
+    <details
+      className="muted small"
+      data-role="assess-sends"
+      onToggle={(event) => {
+        if (event.currentTarget.open && lines === null && jobUrl) {
+          postAssessThese({ jobs: [jobUrl], again: true, ...(profileId ? { profile_id: profileId } : {}) })
+            .then((response) => setLines(assessSummaryLines(response.model_input_summary)))
+            .catch(() => setLines([]));
+        }
+      }}
+    >
+      <summary>{assessSendsLine(target, target ? modelTargetLabel(target) : null)}</summary>
+      {(lines || []).map((line) => (
+        <div key={line}>{line}</div>
+      ))}
+    </details>
   );
 }
 
@@ -321,10 +344,20 @@ export default function JobPage({
   const [answers, setAnswers] = useState([]);
   const [tailorError, setTailorError] = useState(null);
   const [modelName, setModelName] = useState(null);
+  const [modelTarget, setModelTarget] = useState(null);
   useEffect(() => {
     let current = true;
     getConfig()
-      .then((config) => current && config && config.default_model_target && setModelName(modelTargetLabel(config.default_model_target).replace(/\s*\(.*\)$/, "")))
+      .then((config) => {
+        if (!current || !config) {
+          return;
+        }
+        if (config.default_model_target) {
+          setModelName(modelTargetLabel(config.default_model_target).replace(/\s*\(.*\)$/, ""));
+        }
+        // 0110-10-13: GET /api/config holds the settings under `config`.
+        setModelTarget((config.config && config.config.default_model_target) || config.default_model_target || null);
+      })
       .catch(() => {});
     return () => {
       current = false;
@@ -551,6 +584,7 @@ export default function JobPage({
           )}
         </div>
         <JobStateActions jobId={job.id} state={state} pasted={pasted} tailoredBefore={tailoredBefore} onRecorded={handleApplicationRecorded} />
+        {!pasted && <AssessSends jobUrl={posting.url} profileId={profileId} target={modelTarget} />}
       </section>
 
       <JobDescription posting={posting} pasted={pasted} />

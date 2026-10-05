@@ -1213,7 +1213,7 @@
     },
     "/api/assess": {
       "post": {
-        "description": "Assess one job (URL or pasted text) against a resume: verdict, requirement matrix, questions. Synchronous: blocks for the model call (and a public fetch for job_url). Stores the assessment; read it back with GET /api/jobs?url=. A matrix row's `class` says what it weighs: `hard` and `askable` are must-haves (an open question on one holds the job at `pending_user_answers`), `list_item` is one tool of a list a single sentence names (\"Docker, Helm, and Kubernetes\": its question is still asked, and one of them open does not hold a match), `nice_to_have` is a bonus. So a `matched_above_threshold` assessment can carry one question. `minor_gaps` names the `list_item` and `nice_to_have` rows that are not met and `minor_gap_text` says them in one line (\"1 minor gap: Helm\"). The matrix has a row for every requirement the posting states, must-haves first; past 40 rows `rows_not_shown` counts the rest. A stored assessment records its basis (`prompt_version`, `constraints_digest`, `story_bank`: digests and ids, no settings or answer text). Served with `basis_stale` (true | false) and, when true, `basis_stale_reason` (`older_prompt` | `settings_changed` | `story_bank_changed`): whether it is what its profile would be assessed with now. Derived on read; no model is called. `story_bank_changed` is targeted: an answer or story added or edited since answers one of the assessment's own open questions (the same id, the near match behind `bank_suggestions`, or a story about it), or it cites an answer or story that was edited or deleted. Such an item also carries `basis_stale_bank`: the entries that made it stale, each `{match: \"exact\" | \"near\" | \"cited\", bank_question_id, bank_question?, question_id?, question?}` (ids and question words, never an answer). With a master resume stored a fourth reason exists, `resume_changed`, targeted the same way: a resume line the assessment quoted as evidence is no longer in what its profile would be assessed with, or a line that was not there names the subject of one of its open questions. Such an item carries `basis_stale_resume`: each `{change: \"line_changed\", requirement}` or `{change: \"new_line\", question_id, question?}` (the assessment's own words, never a resume line). An assessment that read the evidence view of the master carries `resume_basis`: `{input: \"evidence\", master_revision_id, master_revision, selector_version}`.",
+        "description": "Assess one job (URL or pasted text) against a resume: verdict, requirement matrix, questions. Synchronous: blocks for the model call (and a public fetch for job_url). Stores the assessment; read it back with GET /api/jobs?url=. An error whose code is model_target_unavailable, model_denied, model_unavailable, assess_timeout, model_output_invalid or assessment_not_stored also carries `model_call_started`, `may_have_used_tokens`, `fresh_assessment_stored` (always false) and `next_action`. This route does not ask first: POST /api/postings/assess without `approve` is the no-call preview of what an assessment sends. A matrix row's `class` says what it weighs: `hard` and `askable` are must-haves (an open question on one holds the job at `pending_user_answers`), `list_item` is one tool of a list a single sentence names (\"Docker, Helm, and Kubernetes\": its question is still asked, and one of them open does not hold a match), `nice_to_have` is a bonus. So a `matched_above_threshold` assessment can carry one question. `minor_gaps` names the `list_item` and `nice_to_have` rows that are not met and `minor_gap_text` says them in one line (\"1 minor gap: Helm\"). The matrix has a row for every requirement the posting states, must-haves first; past 40 rows `rows_not_shown` counts the rest. A stored assessment records its basis (`prompt_version`, `constraints_digest`, `story_bank`: digests and ids, no settings or answer text). Served with `basis_stale` (true | false) and, when true, `basis_stale_reason` (`older_prompt` | `settings_changed` | `story_bank_changed`): whether it is what its profile would be assessed with now. Derived on read; no model is called. `story_bank_changed` is targeted: an answer or story added or edited since answers one of the assessment's own open questions (the same id, the near match behind `bank_suggestions`, or a story about it), or it cites an answer or story that was edited or deleted. Such an item also carries `basis_stale_bank`: the entries that made it stale, each `{match: \"exact\" | \"near\" | \"cited\", bank_question_id, bank_question?, question_id?, question?}` (ids and question words, never an answer). With a master resume stored a fourth reason exists, `resume_changed`, targeted the same way: a resume line the assessment quoted as evidence is no longer in what its profile would be assessed with, or a line that was not there names the subject of one of its open questions. Such an item carries `basis_stale_resume`: each `{change: \"line_changed\", requirement}` or `{change: \"new_line\", question_id, question?}` (the assessment's own words, never a resume line). An assessment that read the evidence view of the master carries `resume_basis`: `{input: \"evidence\", master_revision_id, master_revision, selector_version}`.",
         "operationId": "post_api_assess",
         "parameters": [],
         "requestBody": {
@@ -6868,7 +6868,7 @@
     },
     "/api/postings/assess": {
       "post": {
-        "description": "Assess these: ask first (count and estimate), assess the postings on approval. What a run's assess step did, without a run. Nothing is assessed without approval: with no `approve: true` the answer is `status: \"ask\"` with `question` (how many would be assessed, per profile, and the estimate from the recorded model calls; `question.yes.api` is the call that approves) and no model call is made. With `approve: true` the batch is recorded as approved (`approval`: its id, who approved, how many), runs as live work (the pipeline and the rank lane start nothing meanwhile; a second batch answers 409 assess_batch_running) and each posting is assessed for its best profile through the job page's own path, from the posting text already stored (a posting with none has its description fetched first: one request for it alone, counted in `assessed.fetched_on_demand`). The results are stored like any assessment, so GET /api/postings, GET /api/new and GET /api/jobs show them. `status` is then `assessed`; `assessed.failed` lists what could not be assessed, by error code and, for a missing description, a `reason`. A posting whose assessment is current is left out (`counts.already_current`) unless `again`; `not_found` lists named postings that are not in the stored postings. `nothing_to_assess` when nothing is left. A posting whose rank score is below `fit.assess_min_rank` (50; one not ranked yet is not) is left out of the batch and counted (`counts.low_rank_skipped`); `low_rank` is then the separate question for those (`{kind, skipped, min_rank, estimate, text, yes}`; its `yes.api` body carries `include_low_rank: true`), and when only low-ranked postings are selected the status is `ask` with `question.to_assess` 0. The call waits for the model: allow a minute per four postings. No response mixes: posting text only, nothing the user wrote.",
+        "description": "Assess these: ask first (count and estimate), assess the postings on approval. What a run's assess step did, without a run. Nothing is assessed without approval: with no `approve: true` the answer is `status: \"ask\"` with `question` (how many would be assessed, per profile, and the estimate from the recorded model calls; `question.yes.api` is the call that approves) and no model call is made. `model_input_summary` then says what the postings asked about would send and where: per profile its id, label and `resume_source` (`profile_view` | `master_evidence`), whether saved answers and stories go with it, the `model_target` and where it runs, and whether a posting is fetched from its public board first; ids, labels and counts, never a line of the user's text (null once a batch ran). `approve: true` is Scout's own approval: it does not replace the user's choice, or an agent runtime's own approval of the call. With `approve: true` the batch is recorded as approved (`approval`: its id, who approved, how many), runs as live work (the pipeline and the rank lane start nothing meanwhile; a second batch answers 409 assess_batch_running) and each posting is assessed for its best profile through the job page's own path, from the posting text already stored (a posting with none has its description fetched first: one request for it alone, counted in `assessed.fetched_on_demand`). The results are stored like any assessment, so GET /api/postings, GET /api/new and GET /api/jobs show them. `status` is then `assessed`; `assessed.failed` lists what could not be assessed, by error code and, for a missing description, a `reason`; a typed cause (model_target_unavailable, model_denied, model_unavailable, assess_timeout, model_output_invalid, assessment_not_stored) also carries `model_call_started`, `may_have_used_tokens`, `fresh_assessment_stored` and `next_action`. A posting whose assessment is current is left out (`counts.already_current`) unless `again`; `not_found` lists named postings that are not in the stored postings. `nothing_to_assess` when nothing is left. A posting whose rank score is below `fit.assess_min_rank` (50; one not ranked yet is not) is left out of the batch and counted (`counts.low_rank_skipped`); `low_rank` is then the separate question for those (`{kind, skipped, min_rank, estimate, text, yes}`; its `yes.api` body carries `include_low_rank: true`), and when only low-ranked postings are selected the status is `ask` with `question.to_assess` 0. The call waits for the model: allow a minute per four postings. No response mixes: posting text only, nothing the user wrote.",
         "operationId": "post_api_postings_assess",
         "parameters": [],
         "requestBody": {
@@ -6952,6 +6952,42 @@
                     "to_assess": 1
                   },
                   "low_rank": null,
+                  "model_input_summary": {
+                    "answers_saved": 12,
+                    "answers_used": true,
+                    "contact_lines": "removed_by_pattern",
+                    "model_calls": 1,
+                    "model_target": "codex_cli",
+                    "model_target_runs": "own_login",
+                    "postings": 1,
+                    "profiles": [
+                      {
+                        "label": "Staff Engineer",
+                        "postings": 1,
+                        "profile_id": "prof_1",
+                        "resume_source": "master_evidence"
+                      }
+                    ],
+                    "public_fetch_needed": false,
+                    "public_fetch_postings": 0,
+                    "schema_version": "scout-assess-input:1",
+                    "search_preferences": [
+                      "sponsorship",
+                      "countries",
+                      "location",
+                      "titles",
+                      "work_mode"
+                    ],
+                    "sends": [
+                      "stored_posting",
+                      "resume",
+                      "search_preferences",
+                      "answers",
+                      "stories"
+                    ],
+                    "stories_saved": 3,
+                    "stories_used": true
+                  },
                   "not_found": [],
                   "postings": {
                     "_labels": {

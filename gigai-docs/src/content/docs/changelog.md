@@ -92,6 +92,28 @@ things still take more than a second (see "Still slower than one second"): the n
   the day ("posted 2026-09-24"), and their JSON and the API rows carry both dates under their own names
   (`published_at` with `published_kind`, and `first_seen_at`).
 
+#### For agents
+
+- **The assess preview says what would be sent.** `gigai scout jobs assess URL --json` without `--yes`
+  (and `POST /api/postings/assess` without `approve`) still makes no model call. Its reply now carries
+  `model_input_summary`: the profile (id and label), where the resume comes from (`profile_view` or
+  `master_evidence`), whether your answers and stories go with it, the model target and where it runs,
+  and whether a posting is fetched from its public board first. It holds ids, labels and counts, never
+  a line of your resume or answers. In a terminal the same facts are printed above the y/n question.
+- **A failed assessment says what happened and what to do.** For `model_target_unavailable`,
+  `model_denied`, `model_unavailable`, `assess_timeout`, `model_output_invalid` and
+  `assessment_not_stored`, the CLI's JSON, the API's error and the job page now also say whether a model
+  call started, whether it may have used tokens, that no new assessment was stored, and the next action.
+- **`gigai scout status` no longer says "stopped" from inside a sandbox.** It checks the process and the
+  API apart. A running Scout whose address cannot be reached from where the command ran is reported as
+  `process: running (pid N); API: not reachable from here` (state `unreachable`), and the JSON has a
+  `process` and an `api` block. It says "running" only when the API answers, and it no longer forgets a
+  running Scout whose process it could not identify.
+- **The agent guide names three separate approvals** (your choice to assess, Scout's own `--yes`, and
+  your agent runtime's own approval), says what one assessment sends, what to check after an
+  interruption before retrying, and gives the address of a job's page. `gigai agent-skill` prints the
+  updated instructions: install them again to get them.
+
 #### Still slower than one second
 
 Measured on a store of 290,000 postings from 10,000 companies with finished background work. These

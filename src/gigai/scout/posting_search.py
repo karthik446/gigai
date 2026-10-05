@@ -32,7 +32,10 @@ ASSESS THESE (:func:`assess_these`). The postings named (``jobs``) or the
 ones a filter selects, each for its best profile (or ``profile_id``), that
 have no current assessment. Nothing is assessed without approval: a call
 without ``approve`` answers ``status: "ask"`` with the count and the estimate
-from the recorded model calls, and makes no model call. With ``approve`` the
+from the recorded model calls, and makes no model call; ``model_input_summary``
+(0110-10-13, ``assess_preview``) says what the postings asked about would send
+and where: profile, resume source, answers and stories, the model target, and
+whether a posting is fetched first; never a line of the user's text. With ``approve`` the
 batch is recorded as an approved batch (``approval``: who approved, when, how
 many, the estimate), registered as live work (the ``assess_batch`` lease:
 the pipeline and the rank lane start nothing while it runs) and assessed
@@ -59,6 +62,8 @@ import uuid
 
 from . import fit as fit_rules
 from . import postings, run_history
+from .assess_causes import failure_lines
+from .assess_preview import model_input_summary, summary_lines
 from .data_labels import ENVELOPE_KEY, UNTRUSTED_TEXT_RULE, labels_envelope
 from .pipeline.busy import assess_batch
 from .pipeline.store import (
@@ -595,6 +600,16 @@ def assess_these(
                     home_root, target, store, profile_ids=(profile_id,) if profile_id else (), query=None, states=(), window=None,
                     removed=False, jobs=[job for job, _owner in pairs], moment=moment,
                 )
+            # 0110-10-13: what the question's postings would send, by category (ids, labels, counts; no text). Only while
+            # nothing was assessed: the low-ranked ones when only their question is left.
+            summary: dict[str, object] | None = None
+            asked = pairs or low
+            if status != STATUS_ASSESSED and asked:
+                stored_text = {(row.job, row.profile_id): row.listing_known for _group, row in selection.shown}
+                summary = model_input_summary(
+                    home_root=home_root, target=target, pairs=asked, profiles=selection.views, model_target=model,
+                    without_text=sum(1 for pair in asked if not stored_text.get(pair, False)), resolved=selection.resolved,
+                )
             chosen = set(pairs)
             page = [pair for pair in selection.shown if (pair[1].job, pair[1].profile_id) in chosen][:MAX_LIMIT]
             response: dict[str, object] = {
@@ -602,6 +617,7 @@ def assess_these(
                 "status": status,
                 "checked_at": postings.stamp(moment),
                 "question": question if status == STATUS_ASK else None,
+                "model_input_summary": summary,
                 "counts": {
                     "selected": len(found), "to_assess": len(pairs), "already_current": current, "not_found": len(not_found),
                     "low_rank_skipped": len(low),
@@ -632,6 +648,9 @@ def render(response: Mapping[str, object]) -> str:
     lines: list[str] = []
     if response["schema_version"] == ASSESS_SCHEMA_VERSION:
         question, assessed = response.get("question"), response.get("assessed")
+        summary = response.get("model_input_summary")
+        if isinstance(summary, Mapping):
+            lines.extend(summary_lines(summary))  # 0110-10-13: what would be sent, above the question
         if isinstance(question, Mapping):
             lines.append(str(question["text"]))
             lines.append("  Nothing was assessed. Yes: run the same command with --yes.")
@@ -639,6 +658,7 @@ def render(response: Mapping[str, object]) -> str:
             lines.append(f"Assessed {assessed['assessed']} of {assessed['requested']}." + (f" Fetched {assessed['fetched_on_demand']} missing description(s) first." if assessed.get("fetched_on_demand") else ""))
             for item in assessed["failed"]:  # type: ignore[union-attr]
                 lines.append(f"  not assessed ({item['error_code']}{': ' + str(item['reason']) if item.get('reason') else ''}): {item['job_identity']}")
+            lines.extend(failure_lines(assessed["failed"]))  # 0110-10-13: each typed cause once, with its facts and next action
         elif not isinstance(response.get("low_rank"), Mapping):
             lines.append("Nothing to assess: every selected posting has a current assessment.")
         low = response.get("low_rank")

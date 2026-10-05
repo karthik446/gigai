@@ -76,6 +76,7 @@ from ...quick_assess import (
     run_quick_assessment,
 )
 from ..assess_contracts import ORIGIN_JOB_PAGE, AssessJobInput, AssessRequest, AssessResumeInput
+from .assess import write_assess_error
 from .story_bank import ANSWERS_SCHEMA, ERROR_STATUS, answers_response, error_extra
 
 _ANSWER_ERROR_STATUS: dict[str, HTTPStatus] = {
@@ -221,7 +222,7 @@ class AnswersRoutesMixin:
                 try:
                     reassessed = self._reassess(target, job_identity, trigger=TRIGGER_ANSWER_PREFIX + normalized_question_id)
                 except QuickAssessError as exc:
-                    self._error(_status_for(exc.code), exc.code, str(exc))
+                    write_assess_error(self, _status_for(exc.code), exc)  # 0110-10-13: the typed cause's facts
                     return
         finally:
             self._pipeline_fire(asked)

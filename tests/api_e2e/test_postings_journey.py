@@ -122,6 +122,13 @@ def test_postings_journey(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> No
         question = ask["question"]
         assert (question["kind"], question["to_assess"], question["by_profile"]) == ("assess_these", 1, [{"profile_id": profile["profile_id"], "count": 1}])
         assert question["estimate"]["calls"] == 1 and question["yes"]["api"] == {"method": "POST", "path": "/api/postings/assess", "body": {"approve": True, "jobs": [_JOB]}}
+        # 0110-10-13: the no-call preview says what the posting would send: the profile, where its resume comes from, the
+        # model target, and that nothing is fetched (its text is stored). Ids, labels and counts only.
+        summary = ask["model_input_summary"]
+        assert summary["profiles"] == [{"profile_id": profile["profile_id"], "label": profile["label"], "postings": 1, "resume_source": "profile_view"}]
+        assert (summary["postings"], summary["model_calls"], summary["public_fetch_needed"]) == (1, 1, False)
+        assert summary["model_target"] == client.get("/api/config").json()["config"]["default_model_target"]
+        assert set(summary) == set(_example("POST", "/api/postings/assess")["model_input_summary"])
         assert sum(item["calls"] for item in client.get("/api/metrics?kind=assess").json()["aggregates"]) == assess_calls
         assert next(item for item in client.get("/api/postings").json()["postings"]["rows"] if item["job_identity"] == _JOB)["state"] == "not_assessed"
 
@@ -130,6 +137,7 @@ def test_postings_journey(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> No
         done = _assert_public_only(approved)
         assert done["status"] == "assessed" and done["assessed"] == {"requested": 1, "assessed": 1, "failed": [], "stopped": None, "fetched_on_demand": 0}
         assert done["approval"]["decided_by"] == "operator" and done["approval"]["jobs"] == 1 and done["approval"]["id"].startswith("apv_")
+        assert done["model_input_summary"] is None  # the batch ran: there is no preview to give
         assert sum(item["calls"] for item in client.get("/api/metrics?kind=assess").json()["aggregates"]) == assess_calls + 1
         scored = next(item for item in client.get("/api/postings?state=assessed").json()["postings"]["rows"] if item["job_identity"] == _JOB)
         assert scored["state"] != "not_assessed" and scored["score_kind"] == "assessment" and scored["assessment_basis"] == {"origin": "quick_assess"}

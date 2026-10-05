@@ -18,6 +18,14 @@ stored is ``quick_assess._origin_for``'s rule.  Every error is
 ``quick_assess`` can raise to its status, and an unmapped code still gets a
 safe 409 rather than a 500.
 
+0110-10-13: a failed assessment whose code is a typed cause
+(``assess_causes``: ``model_target_unavailable``, ``model_denied``,
+``model_unavailable``, ``assess_timeout``, ``model_output_invalid``,
+``assessment_not_stored``) also carries, beside ``code`` and ``message``:
+``model_call_started``, ``may_have_used_tokens``, ``fresh_assessment_stored``
+(always false) and ``next_action``. ``POST /api/answers`` with ``reassess``
+answers the same body for a failed re-assessment.
+
 uat-bug-018: each ``GET /api/assessments`` item carries an additive
 ``job_state`` ``{state, since, next_events}`` (``job_state.py``): the job's
 state for the resume the item was assessed with, where the item itself is
@@ -44,6 +52,7 @@ from http import HTTPStatus
 import logging
 from urllib.parse import parse_qs, urlsplit
 
+from ...assess_causes import cause_fields
 from ...quick_assess import QuickAssessError, list_quick_assessments, run_quick_assessment
 from ..assess_contracts import AssessRequest, AssessmentsListResponse
 from ..contracts import FindJobsContractError, Verdict
@@ -86,6 +95,17 @@ def _status_for(code: str) -> HTTPStatus:
     return _ERROR_STATUS.get(code, HTTPStatus.CONFLICT)
 
 
+def write_assess_error(handler, status: HTTPStatus, exc: QuickAssessError) -> None:
+    """A failed assessment's error body. 0110-10-13: a typed cause (``assess_causes``) also says whether a model call
+    started, whether it may have used tokens, that no fresh assessment was stored, and the next action."""
+
+    extra = cause_fields(exc.code)
+    if extra:
+        handler._error_with_extra(status, exc.code, str(exc), extra)
+    else:
+        handler._error(status, exc.code, str(exc))
+
+
 class AssessRoutesMixin:
     """``Handler`` mixin: ``POST /api/assess`` and ``GET /api/assessments``."""
 
@@ -112,7 +132,7 @@ class AssessRoutesMixin:
         try:
             response = run_quick_assessment(request, home_root=self._backend.home_root, target=target)
         except QuickAssessError as exc:
-            self._error(_status_for(exc.code), exc.code, str(exc))
+            write_assess_error(self, _status_for(exc.code), exc)
             return
         # 0110-034: a near match from the profile's story bank, per open question.
         from ... import story_bank
@@ -173,4 +193,4 @@ class AssessRoutesMixin:
                 row.update(sources.basis.served(item))  # 0110-039: settings read once per resume identity
 
 
-__all__ = ["AssessRoutesMixin"]
+__all__ = ["AssessRoutesMixin", "write_assess_error"]
