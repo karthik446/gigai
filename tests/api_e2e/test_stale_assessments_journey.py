@@ -152,7 +152,7 @@ def test_a_stored_assessment_made_under_older_settings_is_stale_and_assess_all_a
         clicked = client.post("/api/assess", json={"job": {"job_url": url}, "origin": "job_page"})
         assert clicked.status_code == 200, clicked.text
         fresh = clicked.json()
-        assert fresh["basis_stale"] is False and fresh["prompt_version"] == "assess-prompt-v8"
+        assert fresh["basis_stale"] is False and fresh["prompt_version"] == "assess-prompt-v9"
         assert set(BASIS_KEYS) <= set(fresh)
         after_click = _store_bytes(home)
         changed = [path for path in after_click if after_click[path] != before_click[path]]
@@ -181,7 +181,7 @@ def test_a_stored_assessment_made_under_older_settings_is_stale_and_assess_all_a
         assert after_job[changed[0]] == after_click[changed[0]], "the current one was not assessed again"
         for path, raw in after_job.items():
             stored = json.loads(raw)
-            assert stored["prompt_version"] == "assess-prompt-v8" and "constraints_digest" in stored
+            assert stored["prompt_version"] == "assess-prompt-v9" and "constraints_digest" in stored
             assert [entry["trigger"] for entry in stored["history"]] == ["assess", "reassess"], "the earlier verdict stays in the history"
         items = _items(client)
         assert all(item["basis_stale"] is False and "assessment_stale" not in item["job_state"] for item in items.values())

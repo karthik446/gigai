@@ -68,11 +68,20 @@ def _asked_model(argv: list[str]) -> str | None:
     return argv[argv.index("--model") + 1] if "--model" in argv else None
 
 
-def main(record: str, refuse: tuple[str, ...] = (), answer_text: str | None = None, echo_model: bool = False) -> int:
+def main(
+    record: str,
+    refuse: tuple[str, ...] = (),
+    answer_text: str | None = None,
+    echo_model: bool = False,
+    answers: tuple[str, ...] = (),
+    helper_usage: tuple[str, int] | None = None,
+) -> int:
     """``refuse``: models the CLI refuses (exit 1, like a plan without the model or a spent limit).
 
     ``answer_text`` replaces the fake model's answer; ``echo_model`` names the asked model in ``modelUsage`` (the CLI's
-    default, ``FAKE_CLAUDE_MODEL``, when no ``--model`` was given).
+    default, ``FAKE_CLAUDE_MODEL``, when no ``--model`` was given). ``answers``: the answers of the calls the CLI did not
+    refuse, in order (the last one repeats). ``helper_usage``: ``(model, output tokens)`` of a second model listed in
+    ``modelUsage`` (a small helper model next to the one that answered).
     """
 
     argv = sys.argv[1:]
@@ -92,15 +101,21 @@ def main(record: str, refuse: tuple[str, ...] = (), answer_text: str | None = No
         print(f"model {asked} is not available", file=sys.stderr)
         return 1
     ran = asked if echo_model and asked is not None else FAKE_CLAUDE_MODEL
+    answered = [line for line in open(record, encoding="utf-8").read().splitlines() if line]
+    served = sum(1 for line in answered if _asked_model(json.loads(line)["argv"]) not in refuse)  # this call included
+    text = answers[min(served, len(answers)) - 1] if answers else answer_text
+    usage = {ran: {"inputTokens": 120, "outputTokens": 30}}
+    if helper_usage is not None:
+        usage[helper_usage[0]] = {"inputTokens": 40, "outputTokens": helper_usage[1]}
     print(
         json.dumps(
             {
                 "type": "result",
                 "subtype": "success",
                 "is_error": False,
-                "result": answer_text if answer_text is not None else answer(prompt),
+                "result": text if text is not None else answer(prompt),
                 "usage": {"input_tokens": 120, "output_tokens": 30},
-                "modelUsage": {ran: {"inputTokens": 120, "outputTokens": 30}},
+                "modelUsage": usage,
                 "total_cost_usd": 0.0,
             }
         )
@@ -109,7 +124,14 @@ def main(record: str, refuse: tuple[str, ...] = (), answer_text: str | None = No
 
 
 def write_fake_claude(
-    directory: Path, *, record: Path | None = None, refuse: tuple[str, ...] = (), answer_text: str | None = None, echo_model: bool = False
+    directory: Path,
+    *,
+    record: Path | None = None,
+    refuse: tuple[str, ...] = (),
+    answer_text: str | None = None,
+    echo_model: bool = False,
+    answers: tuple[str, ...] = (),
+    helper_usage: tuple[str, int] | None = None,
 ) -> Path:
     """Write ``directory/claude``; returns the record file its calls append to."""
 
@@ -121,7 +143,7 @@ def write_fake_claude(
         "import sys\n"
         f"sys.path.insert(0, {str(REPO_ROOT)!r})\n"
         "from tests.support.fake_claude import main\n"
-        f"sys.exit(main({str(record)!r}, {tuple(refuse)!r}, {answer_text!r}, {echo_model!r}))\n",
+        f"sys.exit(main({str(record)!r}, {tuple(refuse)!r}, {answer_text!r}, {echo_model!r}, {tuple(answers)!r}, {helper_usage!r}))\n",
         encoding="utf-8",
     )
     executable.chmod(executable.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)

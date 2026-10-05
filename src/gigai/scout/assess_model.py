@@ -33,35 +33,52 @@ def _refused(exc: ModelInvocationError) -> bool:
     return not isinstance(exc.__cause__, subprocess.TimeoutExpired) and "timed out" not in str(exc).lower()
 
 
-class AssessModelPort:
-    """``inner`` with the assessment's model policy applied to every call."""
+class PolicyState:
+    """What one assessment asked for and whether the CLI refused it; shared by every port the assessment builds.
 
-    def __init__(self, inner: object, adapter_kind: str) -> None:
-        self._inner = inner
-        self._kind = adapter_kind
-        self._fell_back = False
+    A guard retry (``quick_assess``) binds a new port; the state outlives it, so a refused model is asked once.
+    """
+
+    def __init__(self) -> None:
         #: What the first call asked for (``None`` before a call, or for a target with no evaluated model).
         self.asked: str | None = None
         #: ``True`` once the CLI refused the asked model and the default answered.
         self.fallback = False
 
+
+class AssessModelPort:
+    """``inner`` with the assessment's model policy applied to every call."""
+
+    def __init__(self, inner: object, adapter_kind: str, state: PolicyState | None = None) -> None:
+        self._inner = inner
+        self._kind = adapter_kind
+        self.state = state if state is not None else PolicyState()
+
+    @property
+    def asked(self) -> str | None:
+        return self.state.asked
+
+    @property
+    def fallback(self) -> bool:
+        return self.state.fallback
+
     def invoke(self, request: InvocationRequest) -> object:
+        state = self.state
         policy = self._kind in EVALUATED_MODELS and isinstance(request, InvocationRequest)  # a scripted test port's request is not one
         first = request
         pinned = False
-        if policy and not self._fell_back:
+        if policy and not state.fallback:
             wanted = asked_model(self._kind, request.model)
             pinned = request.model == DEFAULT_MODEL and wanted != DEFAULT_MODEL
             first = replace(request, model=wanted)
-        if policy and self.asked is None:
-            self.asked = first.model
+        if policy and state.asked is None:
+            state.asked = first.model
         try:
             result = self._inner.invoke(first)  # type: ignore[attr-defined]
         except ModelInvocationError as exc:
             if not (pinned and self._kind in ASKED_BY_DEFAULT and _refused(exc)):
                 raise
-            self._fell_back = True
-            self.fallback = True
+            state.fallback = True
             result = self._inner.invoke(replace(request, model=DEFAULT_MODEL))  # type: ignore[attr-defined]
         return result
 
@@ -69,12 +86,12 @@ class AssessModelPort:
         return getattr(self._inner, name)
 
 
-def apply(binding: object, adapter_kind: str) -> AssessModelPort:
-    """Put the policy on ``binding``'s port (in place); returns the port, which carries what was asked and answered."""
+def apply(binding: object, adapter_kind: str, state: PolicyState | None = None) -> AssessModelPort:
+    """Put the policy on ``binding``'s port (in place); ``state`` is the assessment's, shared across its bindings."""
 
-    port = AssessModelPort(binding.port, adapter_kind)  # type: ignore[attr-defined]
+    port = AssessModelPort(binding.port, adapter_kind, state)  # type: ignore[attr-defined]
     binding.port = port  # type: ignore[attr-defined]
     return port
 
 
-__all__ = ["AssessModelPort", "apply"]
+__all__ = ["AssessModelPort", "PolicyState", "apply"]

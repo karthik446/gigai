@@ -106,6 +106,10 @@ EPHEMERAL_RESUME_KEY = "ephemeral"
 #: profile id (``profile_<uuid>``) or ``"ephemeral"`` -- never a path.
 _SAFE_RESUME_KEY = re.compile(r"\A[A-Za-z0-9_-]+\Z")
 
+#: How many more calls a refused answer (too few requirement rows) gets before the error; the jobs that got one, in this process.
+GUARD_RETRY_LIMIT = 1
+GUARD_RETRIES: list[str] = []
+
 _PRODUCER_CALLABLE = "scout.assess"
 _PRODUCER_VERSION = "1"
 _PRODUCER_ACTOR = "scout-assess"
@@ -832,30 +836,45 @@ def run_quick_assessment(
     meter = CallMeter(
         KIND_ASSESS, model_target.value, home_root, target, profile_id=resume.profile_id, job=job.job_identity
     )
-    binding = meter.bind(_resolve_binding(active, model_target, home_root=home_root))
-    # 0.1.11 MODELPIN: the evaluated model is asked for, one fallback call when the CLI refuses it (outside the meter: both counted).
-    policy = assess_model.apply(binding, model_target.value)
-    try:
-        attempt = assess_once(
-            binding,
-            AssessJob(title=job.title, company=job.company, location=job.location, posting_text=job.text),
-            build_assess_context(
-                resume_text=resume.text if master_input is None else master_input.resume_text,
-                visa_sponsorship_required=preferences.visa_sponsorship_required,
-                countries=tuple(preferences.countries),
-                titles=tuple(preferences.titles),
-                location=candidate_location,
-                bank=job_bank,
-                work_mode=candidate_work_mode,
-                resume_ids=() if master_input is None else master_input.resume_ids,
-                resume_notes=master_input is not None and master_input.resume_notes,
-                pick_lines=0 if master_input is None else master_input.pick_lines,
-                requirements=() if listed is None else listed.rows,
-            ),
-            parse=_parse_body,
-        )
-    finally:
-        binding.close()
+    assess_context = build_assess_context(
+        resume_text=resume.text if master_input is None else master_input.resume_text,
+        visa_sponsorship_required=preferences.visa_sponsorship_required,
+        countries=tuple(preferences.countries),
+        titles=tuple(preferences.titles),
+        location=candidate_location,
+        bank=job_bank,
+        work_mode=candidate_work_mode,
+        resume_ids=() if master_input is None else master_input.resume_ids,
+        resume_notes=master_input is not None and master_input.resume_notes,
+        pick_lines=0 if master_input is None else master_input.pick_lines,
+        requirements=() if listed is None else listed.rows,
+    )
+    # 0.1.11 (orchestrator #44): a model that returns too few real requirement rows for a posting that states many
+    # (the guard below refuses to store it) gets ONE more call before the user sees an error. The refused call is
+    # recorded as unused (0110-8-09); ``GUARD_RETRIES`` counts how often this happened, for the eval's report.
+    guard_retries = 0
+    # 0.1.11 MODELPIN: ONE model-policy state per assessment, not per binding: a guard retry builds a new binding, and a
+    # refused evaluated model is asked (and refused) once, the default model answers the rest (outside the meter: all counted).
+    policy = assess_model.PolicyState()
+    while True:
+        binding = meter.bind(_resolve_binding(active, model_target, home_root=home_root))
+        assess_model.apply(binding, model_target.value, policy)
+        try:
+            attempt = assess_once(
+                binding,
+                AssessJob(title=job.title, company=job.company, location=job.location, posting_text=job.text),
+                assess_context,
+                parse=_parse_body,
+            )
+        finally:
+            binding.close()
+        refused = attempt.incomplete_posting if not attempt.ok else posting_requirements_unreadable(job.text, attempt.parsed)  # type: ignore[arg-type]
+        if refused and guard_retries < GUARD_RETRY_LIMIT:
+            meter.unused(ERROR_POSTING_UNREADABLE)
+            guard_retries += 1
+            GUARD_RETRIES.append(job.job_identity)
+            continue
+        break
 
     if not attempt.ok:
         if attempt.incomplete_posting:

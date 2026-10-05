@@ -153,8 +153,13 @@ def _parse_codex_jsonl(stdout: str, requested_model: str) -> tuple[str, str, Map
             raise ModelInvocationError("Codex returned malformed JSONL") from exc
         if type(event) is not dict:
             raise ModelInvocationError("Codex returned a non-object JSON event")
-        if isinstance(event.get("model"), str) and event["model"]:
-            resolved_model = event["model"]
+        # the model Codex says answered: on the event, or in a session header's ``msg`` (when it reports one at all;
+        # otherwise the request's ``default`` stays, and the assessment says the model is not reported)
+        reported = event.get("model") if isinstance(event.get("model"), str) else None
+        if reported is None and type(event.get("msg")) is dict and isinstance(event["msg"].get("model"), str):
+            reported = event["msg"]["model"]
+        if reported:
+            resolved_model = reported
         if isinstance(event.get("usage"), dict):
             usage = event["usage"]
         item = event.get("item")

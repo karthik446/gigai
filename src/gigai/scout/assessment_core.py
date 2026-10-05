@@ -33,7 +33,7 @@ pins the golden strings).
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from importlib import resources
 import json
 import re
@@ -66,9 +66,19 @@ from .find_jobs.contracts import (
 )
 from .find_jobs.work_mode import in_person_modes
 from .question_ids import normalize_question_id
-from .requirement_weights import bound_rows, cap_list_item_questions, settled_verdict
+from .requirement_weights import bound_rows, cap_list_item_questions, cap_mandatory_questions, settled_verdict
 from .requirements_list import ListedRequirement, check_listed, extracted, fold
-from .resume_gate import HOLD_QUESTION, gate, unasked_message, unasked_rows, uses_v9_rules
+from .suggestion_check import MasterLine, check_suggestions, parse_master_lines, with_verbatim_evidence
+from .resume_gate import (
+    HOLD_QUESTION,
+    gate,
+    is_authorization_question,
+    is_authorization_row,
+    says_no_sponsorship,
+    unasked_message,
+    unasked_rows,
+    uses_v9_rules,
+)
 from .resume_privacy import model_resume
 from .untrusted_text import fence_untrusted_posting
 
@@ -128,11 +138,11 @@ REQUIREMENTS_BLOCK_HEADER = "REQUIREMENTS (id | class | requirement | the postin
 #: to 12 rows and no weights, and reads as older wording.
 #: ``tests/behaviors/scout_find_jobs/test_assessment_core.py`` pins it with
 #: the file's digest.
-ASSESS_PROMPT_VERSION = "assess-prompt-v8"
+ASSESS_PROMPT_VERSION = "assess-prompt-v9"
 #: The name of a prompt rendered with no CANDIDATE WORK MODE paragraph.
-ASSESS_PROMPT_VERSION_NO_WORK_MODE = "assess-prompt-v8"
+ASSESS_PROMPT_VERSION_NO_WORK_MODE = "assess-prompt-v9"
 #: The name of a prompt rendered for a HYBRID candidate (decision #207).
-ASSESS_PROMPT_VERSION_HYBRID = "assess-prompt-v8"
+ASSESS_PROMPT_VERSION_HYBRID = "assess-prompt-v9"
 #: The versions the shipped ``assess.md`` renders today. An assessment sealed
 #: with none of them is older wording. One sealed with one of them is current
 #: when the constraints digest (which includes the work mode) is the same and
@@ -598,7 +608,13 @@ def assess_once(
     # 0.1.11 N3 (v9): what THIS prompt offered: the ids a row's sources may name, the requirement list it carried.
     from .assessment_basis import posting_sha256  # that module imports this one
 
-    boundary = Boundary(source_ids=offered_sources(ctx), listed=ctx.requirements, posting_sha256=posting_sha256(job.title, job.posting_text))
+    boundary = Boundary(
+        source_ids=offered_sources(ctx), listed=ctx.requirements, posting_sha256=posting_sha256(job.title, job.posting_text), posting_text=job.posting_text,
+        countries=tuple(item.strip().upper() for item in ctx.countries if item and item.strip()),
+        lines=parse_master_lines(ctx.resume_text) if ctx.resume_ids else {},
+        answers={item.question_id.lower(): item.answer for item in ctx.prior_answers},
+        stories={item.question_id.lower(): item.summary for item in ctx.bank_answers},
+    )
     prompts = 0
 
     def render(validation_error: str | None) -> str:
@@ -956,6 +972,10 @@ class AssessExtras:
     unknown_sources: tuple[tuple[str, str], ...] = ()
     asked_by_code: tuple[str, ...] = ()
     capped_questions: tuple[str, ...] = ()
+    #: 0.1.11 (orchestrator #39): the questions on must-have rows dropped past ``MAX_MANDATORY_QUESTIONS`` (their rows hold, unasked).
+    capped_mandatory_questions: tuple[str, ...] = ()
+    #: 0.1.11 C3: ``(kind, reason)`` of every structured suggestion the code check dropped (``suggestion_check``); a suggestion turned into a gap is counted as ``master_line_to_gap``.
+    checked_suggestions: tuple[tuple[str, str], ...] = ()
 
 
 @dataclass
@@ -983,6 +1003,15 @@ class Boundary:
     extras: AssessExtras | None = None
     retry: bool | None = None
     posting_sha256: str | None = None
+    #: 0.1.11 C4: the posting's text (what a location the header names may be contradicted by), ``None`` outside ``assess_once``.
+    posting_text: str | None = None
+    #: 0.1.11 C4b: the candidate's eligible countries (upper-case codes; empty: none stated), from the setup.
+    countries: tuple[str, ...] = ()
+    #: 0.1.11 C2/C3: the master lines the prompt showed by id (``suggestion_check.parse_master_lines``), the answers
+    #: (``question_id`` -> text) and the stories (``question_id`` -> summary) it listed. Empty: no check, no verbatim evidence.
+    lines: Mapping[str, MasterLine] = field(default_factory=dict)
+    answers: Mapping[str, str] = field(default_factory=dict)
+    stories: Mapping[str, str] = field(default_factory=dict)
 
 
 def offered_sources(ctx: AssessContext) -> frozenset[str] | None:
@@ -1167,6 +1196,143 @@ def _row_ids(matrix: list[Mapping[str, object]], posting_sha256: str) -> list[st
     return [str(row["id"]) if is_row_id(row.get("id")) else derived[index] for index, row in enumerate(matrix)]
 
 
+# --- 0.1.11 C4 / C4b (orchestrator decision B): the location requirement is MET when the posting says "anywhere" --------
+#
+# A location row that is ``unmet`` or ``unclear`` is read as ``met`` (and its question dropped: no row unclear, no
+# question, no hold) when the posting text (1) carries a worldwide or remote-anywhere statement ("work from anywhere in
+# the world", "a globally distributed team"), or (2) shows a pay band, office or hiring entity in one of the candidate's
+# eligible countries next to a remote statement. Location questions remain only for what rule 4 names (state or
+# province limits: ``elig-region``; a named city with no work mode). The prompt says the same (rule 4); two live runs
+# showed the prompt alone does not hold it.
+
+LOCATION_ROW_ID = "elig-location"
+_WORLDWIDE = re.compile(
+    r"anywhere\s+in\s+the\s+world|globally\s+(?:distributed|remote)|global\s+remote|"
+    r"(?:work|working)\s+(?:remotely\s+)?from\s+anywhere|remote\s+anywhere|anywhere\s+remote|"
+    r"hire\s+in\s+any\s+countr(?:y|ies)|distributed\s+(?:team\s+)?(?:across|around)\s+the\s+(?:world|globe)",
+    re.IGNORECASE,
+)
+_DENIES = re.compile(r"\b(?:not|cannot|can't|unable|except|excluding|only)\b|n't\b", re.IGNORECASE)
+_REMOTE = re.compile(r"\bremote(?:ly|-first)?\b|\bwork\s+from\s+home\b", re.IGNORECASE)
+_PAY_OFFICE_ENTITY = re.compile(
+    r"pay\s+(?:band|range)|salary|compensation|office|offices|headquarter\w*|hiring\s+(?:entity|through|via)|hired\s+(?:through|via|by)|employer\s+of\s+record|\bEOR\b|"
+    r"\bentity\b|employed\s+(?:by|through)",
+    re.IGNORECASE,
+)
+#: Names a posting writes for the countries a candidate may list as a code (the code itself is matched as a word, upper case).
+_COUNTRY_NAMES: Mapping[str, tuple[str, ...]] = {
+    "US": ("united states", "usa", "u.s."), "GB": ("united kingdom", "uk", "u.k.", "england", "great britain"), "CA": ("canada",),
+    "DE": ("germany",), "FR": ("france",), "NL": ("netherlands",), "ES": ("spain",), "IE": ("ireland",), "AU": ("australia",),
+    "IN": ("india",), "PL": ("poland",), "PT": ("portugal",), "IT": ("italy",), "SE": ("sweden",), "CH": ("switzerland",),
+}
+_LOCATION_QUESTION = "The posting names {where} and also says the role is open more widely. Where are you able to work from?"
+
+
+def says_worldwide(posting_text: str) -> bool:
+    """Whether the posting text says the role can be done from anywhere (and does not take it back in the same sentence). Pure."""
+
+    sentences = re.split(r"(?<=[.!?])\s+|\n+", posting_text)
+    for sentence in sentences:
+        if _DENIES.search(sentence):
+            continue
+        if _WORLDWIDE.search(sentence):
+            return True
+    return False
+
+
+def _names_country(sentence: str, code: str) -> bool:
+    names = _COUNTRY_NAMES.get(code, ())
+    lowered = sentence.lower()
+    return any(re.search(rf"(?<![\w.]){re.escape(name)}(?![\w])", lowered) for name in names) or re.search(rf"(?<![\w]){re.escape(code)}(?![\w])", sentence) is not None
+
+
+def says_eligible_pay_office_or_entity(posting_text: str, countries: tuple[str, ...]) -> bool:
+    """Whether the posting shows a pay band, office or hiring entity in an eligible country and says the work is remote. Pure.
+
+    Needs a remote statement anywhere in the text and, in one sentence (or one line) that is not a denial, a pay, office or
+    entity word next to the name or code of an eligible country. With no eligible country stated it is never true.
+    """
+
+    codes = [code for code in countries if code and code != "ANY"]
+    if not codes or not _REMOTE.search(posting_text):
+        return False
+    for sentence in re.split(r"(?<=[.!?])\s+|\n+", posting_text):
+        if _DENIES.search(sentence) or not _PAY_OFFICE_ENTITY.search(sentence):
+            continue
+        if any(_names_country(sentence, code) for code in codes):
+            return True
+    return False
+
+
+def _location_unclear(decoded: Mapping[str, object], boundary: Boundary) -> Mapping[str, object]:
+    """``decoded`` of a v9 answer with an ``unmet`` or ``unclear`` ``elig-location`` row read as ``met`` when the posting says it can be done from anywhere. Pure.
+
+    The row's questions (the model's) are dropped; a ``not_a_match`` that rested on the row alone is read again from
+    the remaining rows (``pending_user_answers`` when a must-have question is still open, else matched), and the
+    model's reason for it is dropped. Anything else is returned untouched.
+    """
+
+    matrix = decoded.get("matrix")
+    if not boundary.posting_text or not isinstance(matrix, list) or not all(isinstance(row, Mapping) for row in matrix) or not uses_v9_rules(matrix):
+        return decoded
+    rows = [row for row in matrix if row.get("id") == LOCATION_ROW_ID and row.get("status") in ("unmet", "unclear")]
+    if not rows or not (says_worldwide(boundary.posting_text) or says_eligible_pay_office_or_entity(boundary.posting_text, boundary.countries)):
+        return decoded
+    out = dict(decoded)
+    out["matrix"] = [{**row, "status": "met"} if any(row is hit for hit in rows) else row for row in matrix]
+    named = {fold(str(row.get("requirement") or "")) for row in rows} | {LOCATION_ROW_ID, row_question_id(LOCATION_ROW_ID)}
+    raw = decoded.get("questions")
+    if isinstance(raw, list):
+        out["questions"] = [
+            item for item in raw
+            if not (isinstance(item, Mapping) and (fold(str(item.get("requirement") or "")) in named or str(item.get("requirement") or "") in named or str(item.get("question_id") or "") in named))
+        ]
+    kept_unmet = any(row.get("status") == "unmet" and row.get("class") in (None, "hard") for row in out["matrix"])  # type: ignore[union-attr]
+    said = _normalize_verdict(decoded.get("verdict"))
+    if not kept_unmet and said in ("not_a_match", "pending_user_answers"):
+        out["verdict"] = "matched_above_threshold"
+        if said == "not_a_match":
+            out["not_a_match_reason"] = None
+    return out
+
+
+def _without_authorization(decoded: Mapping[str, object]) -> Mapping[str, object]:
+    """``decoded`` of a v9 answer without the rows and questions about sponsorship or work authorization (0.1.11, orchestrator #45).
+
+    The operator's rule: sponsorship and work authorization NEVER gate. They are a label (the answer's ``sponsorship``,
+    which the job list already shows), not a requirement: no hold, no question, no not_a_match, no row in the score.
+    Whatever the model returns about them is removed here, so a prompt-only rule cannot leak; a ``not_a_match`` that
+    rested on such a row alone is read from the remaining rows (matched, or pending when a must-have question is
+    open). The label becomes ``not_offered`` when a removed row says the employer does not sponsor. An answer in
+    the v8 shape is returned untouched. Pure.
+    """
+
+    matrix = decoded.get("matrix")
+    if not isinstance(matrix, list) or not all(isinstance(row, Mapping) for row in matrix) or not uses_v9_rules(matrix):
+        return decoded
+    dropped = [row for row in matrix if is_authorization_row(row)]
+    if not dropped or len(dropped) == len(matrix):
+        return decoded
+    kept = [row for row in matrix if not is_authorization_row(row)]
+    out = dict(decoded)
+    out["matrix"] = kept
+    questions = decoded.get("questions")
+    if isinstance(questions, list):
+        out["questions"] = [item for item in questions if not (isinstance(item, Mapping) and is_authorization_question(item))]
+    if "sponsorship" not in out and says_no_sponsorship(dropped):
+        out["sponsorship"] = "not_offered"
+    said = _normalize_verdict(decoded.get("verdict"))
+    if said in ("matched_above_threshold", "pending_user_answers") or (
+        said == "not_a_match" and not any(row.get("status") == "unmet" and row.get("class") in (None, "hard") for row in kept)
+    ):
+        # The verdict the model gave may rest on the removed row: read it again from what is left. ``settled_verdict``
+        # below makes it pending when a must-have question is open, and matched when none is.
+        out["verdict"] = "matched_above_threshold"
+        if said == "not_a_match":
+            out["not_a_match_reason"] = None
+    return out
+
+
 def _normalize_and_strip(decoded: Mapping[str, object], *, boundary: Boundary | None = None) -> tuple[dict[str, object], tuple[str, ...], int]:
     """``_normalize_assessment_payload`` plus what the not_a_match strip removed.
 
@@ -1206,6 +1372,8 @@ def _normalize_and_strip(decoded: Mapping[str, object], *, boundary: Boundary | 
     question at all, as before, and its count is the strip's.
     """
     boundary = boundary if boundary is not None else Boundary()
+    decoded = _without_authorization(decoded)
+    decoded = _location_unclear(decoded, boundary)
     unknown_sources: list[tuple[str, str]] = []
     matrix = decoded.get("matrix")
     normalized_matrix: list[object] = []
@@ -1247,15 +1415,20 @@ def _normalize_and_strip(decoded: Mapping[str, object], *, boundary: Boundary | 
     if all_rows:
         normalized_matrix, rows_not_shown = bound_rows(normalized_matrix)  # type: ignore[arg-type]
     is_v9 = all_rows and uses_v9_rules(normalized_matrix)  # type: ignore[arg-type]
+    if is_v9 and boundary.lines:
+        # 0.1.11 C2: a met row's evidence is the cited master line(s) by id, never the model's paraphrase of them.
+        with_verbatim_evidence(normalized_matrix, boundary.lines, boundary.answers, boundary.stories)  # type: ignore[arg-type]
     # Orchestrator #14: the words of each kept row of a v9 matrix -> its id (its own, or the one a first assessment's
     # row is given: that needs the posting's digest, so outside ``assess_once`` only a row's own id is known).
     row_ids: dict[str, str] = {}
+    id_of_row: dict[int, str] = {}  # a kept row (by identity) -> its id, its own or the one a first assessment gives it
     if is_v9:
         ids: list[object] = (
             _row_ids(normalized_matrix, boundary.posting_sha256) if boundary.posting_sha256 is not None  # type: ignore[arg-type]
             else [row.get("id") for row in normalized_matrix]  # type: ignore[union-attr]
         )
         by_row = {id(row): row_id for row, row_id in zip(normalized_matrix, ids) if is_row_id(row_id)}
+        id_of_row = by_row  # type: ignore[assignment]
         for row in normalized_matrix:
             named_rows.setdefault(fold(str(row.get("requirement") or "")), row)  # type: ignore[union-attr]
         row_ids = {words: by_row[id(row)] for words, row in named_rows.items() if words and id(row) in by_row}
@@ -1284,10 +1457,19 @@ def _normalize_and_strip(decoded: Mapping[str, object], *, boundary: Boundary | 
     # Orchestrator #14: at most three questions on one-of-a-list rows, those of the rows first in the matrix; the rest
     # are dropped here (no retry) and their rows read as minor gaps. A not_a_match answer keeps none at all (below).
     capped: list[str] = []
+    dropped_questions_all: list[object] = []
     if is_v9 and said != "not_a_match":
         structured_questions, over = cap_list_item_questions(normalized_matrix, structured_questions)  # type: ignore[arg-type]
         capped = [str(item["question_id"]) for item in over]  # type: ignore[index]
-        gone = {plain_at[id(item)] for item in over}
+        dropped_questions_all = list(over)
+    # Orchestrator #39: at most four questions ASKED on must-have rows, the most decisive first (hard, then the posting's
+    # own order); the rows of the others stay unclear and hold ("also unverified"); no retry, and code does not ask them.
+    capped_mandatory: list[str] = []
+    if is_v9 and said != "not_a_match":
+        structured_questions, over_mandatory = cap_mandatory_questions(normalized_matrix, structured_questions)  # type: ignore[arg-type]
+        capped_mandatory = [str(item["question_id"]) for item in over_mandatory]  # type: ignore[index]
+        dropped_questions_all += over_mandatory
+        gone = {plain_at[id(item)] for item in dropped_questions_all}
         plain_questions = [text for index, text in enumerate(plain_questions) if index not in gone]
 
     # 0.1.11 N3b (decision #11): an unclear must-have row of a v9 answer holds for its answer, so it carries a question.
@@ -1309,6 +1491,12 @@ def _normalize_and_strip(decoded: Mapping[str, object], *, boundary: Boundary | 
 
     raw_suggestions = _normalize_string_list(decoded.get("suggestions"))
     suggested = _structured_suggestions(raw_suggestions, row_ids)
+    checked: list[tuple[str, str]] = []
+    if is_v9 and boundary.lines:
+        # 0.1.11 C3: a suggestion whose premises the matrix and the master do not hold is dropped (or becomes a gap).
+        with_ids = [{**row, "id": id_of_row[id(row)]} if id(row) in id_of_row else row for row in normalized_matrix]  # type: ignore[union-attr]
+        suggested, refused = check_suggestions(suggested, with_ids, boundary.lines, boundary.answers)  # type: ignore[arg-type]
+        checked = [(item.kind, why) for item, why in refused]
     result: dict[str, object] = {
         "matrix": normalized_matrix,
         "suggestions": [item for item in raw_suggestions if isinstance(item, str)],
@@ -1348,10 +1536,12 @@ def _normalize_and_strip(decoded: Mapping[str, object], *, boundary: Boundary | 
         pick=pick if keeps_pick else None,
         structured_suggestions=tuple(kept),
         dropped_pick=pick is not None and not keeps_pick,
-        dropped_suggestions=len(suggested) - len(kept),
+        dropped_suggestions=len(checked) + len(suggested) - len(kept),
         unknown_sources=tuple(unknown_sources),
         asked_by_code=tuple(asked_by_code),
         capped_questions=tuple(capped),
+        capped_mandatory_questions=tuple(capped_mandatory),
+        checked_suggestions=tuple(checked),
     )
     # Drop any other unknown keys (e.g. a model echoing "posting" back, or
     # inventing extra fields): the frozen contract is a closed object, and

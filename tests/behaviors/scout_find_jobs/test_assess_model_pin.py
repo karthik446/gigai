@@ -109,7 +109,10 @@ def test_one_table_decides_evaluated_or_not() -> None:
 
 
 def test_codex_keeps_its_default_and_the_same_rule_applies() -> None:
-    assert model_notice("codex_cli", "default") is None  # the model the accuracy run measured
+    # the Codex CLI does not report the model its default resolves to: never claimed to be the evaluated one
+    unreported = model_notice("codex_cli", "default")
+    assert unreported is not None
+    assert unreported.text == "Assessed with the Codex CLI's configured model (not reported). GigAI's results for Codex are for gpt-6-astra."
     assert model_notice("codex_cli", "gpt-6-astra") is None
     other = model_notice("codex_cli", "gpt-5.1-codex")
     assert other is not None

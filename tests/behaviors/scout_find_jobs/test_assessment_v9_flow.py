@@ -1,7 +1,9 @@
 """0.1.11 N3 (SPEC 1.7 steps 1 to 4): what ``run_quick_assessment`` does after the model answers, end to end.
 
-A FAKE model (the pipeline fixture's scripted one) on a synthetic home with a stored master.  The shipped prompt is
-the v8 file; this packet does not touch it.  So:
+A FAKE model (the pipeline fixture's scripted one) on a synthetic home with a stored master.  The template is the
+shipped text with its v9 placeholders neutralized (the ``fx`` fixture), so the v8-shaped cases below still render the
+prompt they always did; the shipped v9 text itself is pinned in ``test_assess_prompt_v92.py`` and
+``test_assessment_v9_boundary.py``.  So:
 
 - INERT: a v8-shaped answer leaves exactly what it left before: no v9 key in the stored assessment (which
   re-serializes byte for byte), no requirement list, no suggestion record, no job resume, no id in the prompt;
@@ -100,6 +102,10 @@ V9_PARAGRAPHS = (
 
 @pytest.fixture
 def fx(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture) -> PostingsFixture:
+    shipped = assessment_core.load_assess_instructions()
+    for name in ("id_example", "note_example", "pick_lines", "requirements"):
+        shipped = shipped.replace("{{" + name + "}}", "x")
+    monkeypatch.setattr(assessment_core, "load_assess_instructions", lambda: shipped)
     base = build_pipeline_fixture(tmp_path, monkeypatch, base=False, resume=RESUME)
     monkeypatch.setattr("gigai.config.load_config", fixture_config)
     fixture = PostingsFixture(base, second_profile_id="", deleted_profile_id=None)
@@ -159,7 +165,7 @@ def _v9_answer(fx: PostingsFixture, *, kubernetes: str = "met", row_ids: tuple[s
         if row_ids is not None:
             row["id"] = row_ids[index]
     suggested = [
-        {"kind": "reword", "line": ids[PYTHON_LINE], "posting_phrase": "own Python inference services", "why": "Lead with what the posting calls inference services."},
+        {"kind": "reword", "line": ids[OWN_LINE], "posting_phrase": "own Python inference services", "why": "Lead with what the posting calls inference services."},
         {"kind": "gap", "requirement": "elig-location", "why": "Only an answer can say where you may work."},
     ]
     chosen = {"summary": None, "section_order": ["experience", "projects"], "lines": [ids[OWN_LINE], ids[TERRAFORM_LINE], ids[PYTHON_LINE], ids[KUBERNETES_LINE]]}

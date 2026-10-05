@@ -44,7 +44,7 @@ JOBS = [
     {"quick": {**_STATE}},  # 4 no list
     {"row": {"jobState": {**SERVED, "assessment_stale": {"reason": "resume_changed"}}}},  # 5 a grid row alone
     # 6: re-assessed on this page: the response replaced job.quick, the row was read before it.
-    {"quick": {"basis_stale": False, "prompt_version": "assess-prompt-v8"}, "row": {"jobState": {**SERVED, "assessment_stale": {"reason": "resume_changed"}}}},
+    {"quick": {"basis_stale": False, "prompt_version": "assess-prompt-v9"}, "row": {"jobState": {**SERVED, "assessment_stale": {"reason": "resume_changed"}}}},
 ]
 CHANGED = "Your resume changed since this assessment: re-assess"
 ROWS = [{"state": "needs_answers", "stale_reason": "resume_changed"}]
