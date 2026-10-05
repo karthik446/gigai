@@ -33,7 +33,9 @@ requirement and class_basis against the posting's lines (``--postings``).
 
 A line the key marks ``either`` (``{"classes": [...]}``) is one where a row and
 no row are both defensible: a row there is not an extra row, a missing one is
-not missing, and only a class outside ``classes`` is wrong.  A must-have row
+not missing, and only a class outside ``classes`` is wrong.  With
+``row_needed`` a row is required on the line (one row, whichever key row it
+stands for).  A call that left no ``assessment.json`` is an unread (failed) result.  A must-have row
 with ``status_either`` is accepted with any of those statuses, asked or not.
 Alternatives are not compared; a must-have "A or B" line is one row, so a
 second row on it is an extra row.
@@ -69,8 +71,8 @@ HEADER = ("title", "company", "location", "url")
 ELIG_IDS = ("elig-location", "elig-region", "elig-work-mode")
 SPONSORSHIP_WORDS = ("sponsor", "authorization", "authorisation", "eligib", "work_permit", "visa")
 MATCH_FLOOR = 0.6
-TOTALS = ("results", "unread", "fully_correct", "verdict_right", "gate_right", "location_right", "over_asks", "under_asks", "musts_right", "list_exact",
-          "rows_missing", "rows_extra", "rows_unmapped", "class_wrong", "status_wrong", "required_lines", "lines_covered")
+TOTALS = ("results", "unread", "fully_correct", "verdict_right", "gate_right", "location_right", "over_asks", "soft_asks", "under_asks", "musts_right", "list_exact",
+          "rows_missing", "rows_extra", "rows_unmapped", "class_wrong", "status_wrong", "required_lines", "lines_covered", "resume_checked", "resume_covers", "resume_verbatim", "resume_pages_skills", "resume_c1", "resume_bar")
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -252,9 +254,14 @@ def score_result(key: Mapping[str, Any], whole: object, lines: Sequence[Mapping[
         row = matched.get(index)
         name = {"line": key_row["line"], "item": key_row.get("item"), "class": key_row["class"]}
         if row is None:
-            if key_row["line"] not in either and (key_row["line"] != 0 or key_row["kind"] == "must"):
-                missing.append(name)
-        elif row_class(row) != key_row["class"]:
+            line_either = either.get(key_row["line"])
+            if line_either is None:
+                if key_row["line"] != 0 or key_row["kind"] == "must":
+                    missing.append(name)
+            elif line_either.get("row_needed") and not any(line == key_row["line"] for line, _ in mapped):
+                if not any(item["line"] == key_row["line"] for item in missing):
+                    missing.append(name)
+        elif row_class(row) != key_row["class"] and row_class(row) not in (either.get(key_row["line"]) or {}).get("classes", ()):
             class_wrong.append({**name, "got": row_class(row)})
     for line, row in mapped:
         if id(row) in row_of or (line == 0 and str(row.get("status")) == "met"):
@@ -309,6 +316,8 @@ def score_result(key: Mapping[str, Any], whole: object, lines: Sequence[Mapping[
         elif key_row.get("status_either"):
             entry.update({"call": "either", "why": "the key accepts this row asked or settled"})
             asked_loose.add(spot)
+        elif key_row["status"] == "met" and key_row.get("close_call"):
+            entry.update({"call": "soft", "why": "a close call the key reads met (both readings defensible): a soft over-ask, not a failure"})
         elif key_row["status"] != "unclear":
             entry.update({"call": "over", "why": f"the key settles this row: {key_row['status']}"})
         elif key_row["kind"] == "optional":
@@ -338,7 +347,7 @@ def score_result(key: Mapping[str, Any], whole: object, lines: Sequence[Mapping[
         "sponsorship": {"key": key.get("sponsorship"), "got": answer.get("sponsorship"), "row": any(str(row.get("id") or "") == "elig-sponsorship" for row in rows)},
         "questions": {
             "asked": len(questions), "right": sum(entry["call"] == "right" for entry in questions), "either": sum(entry["call"] == "either" for entry in questions),
-            "optional": sum(entry["call"] == "optional" for entry in questions), "over_asks": len(over) + over_cap + optional_over_cap, "under_asks": under,
+            "optional": sum(entry["call"] == "optional" for entry in questions), "soft_asks": sum(entry["call"] in ("soft", "either") for entry in questions), "over_asks": len(over) + over_cap + optional_over_cap, "under_asks": under,
             "over_cap": over_cap, "optional_over_cap": optional_over_cap, "each": questions,
             "key_unclear_not_asked": [{"line": row["line"], "item": row.get("item")} for row in firm_open if (row["line"], fold(row.get("item"))) not in asked_firm],
         },
@@ -352,6 +361,98 @@ def score_result(key: Mapping[str, Any], whole: object, lines: Sequence[Mapping[
     score["fully_correct"] = bool(score["verdict"]["right"] and score["gate"]["right"] and score["location"]["right"] and not score["questions"]["over_asks"] and not under
                                   and score["list"]["musts_right"] and not status_wrong)
     return score
+
+
+# --- the resume, checked in code ---------------------------------------------------------------------------
+
+
+COMMENT = re.compile(r"<!--.*?-->")
+SECTIONS = ("summary", "experience", "projects", "skills", "education", "other")
+
+
+def norm_line(text: str) -> str:
+    """A master or resume line without its id/mark comment, bold, heading hashes and bullet dash. Pure."""
+
+    text = COMMENT.sub("", text).replace("**", "").strip()
+    return " ".join(text.lstrip("#").lstrip("-").split())
+
+
+def split_skills(text: str) -> list[str]:
+    """The skill tokens of a skills line: split on commas outside parentheses. Pure."""
+
+    out, depth, cur = [], 0, ""
+    for char in text:
+        depth += (char == "(") - (char == ")")
+        if char == "," and depth == 0:
+            out.append(cur.strip())
+            cur = ""
+        else:
+            cur += char
+    return [item for item in out + [cur.strip()] if item]
+
+
+def master_parts(master_text: str) -> dict[str, Any]:
+    """``{lines: {norm text}, skills: [token]}`` of the master. Pure."""
+
+    lines, skills, in_skills = set(), [], False
+    for raw in master_text.splitlines():
+        if raw.startswith("## "):
+            in_skills = norm_line(raw).casefold() == "skills"
+            continue
+        text = norm_line(COMMENT.sub("", raw)) if raw.strip() else ""
+        if not text:
+            continue
+        if in_skills:
+            skills += split_skills(text)
+        else:
+            lines.add(text)
+    return {"lines": lines, "skills": skills}
+
+
+def resume_check(key: Mapping[str, Any], suggestions: Mapping[str, Any], printed: Mapping[str, Any], selection_md: str, master_text: str) -> dict[str, Any]:
+    """The four things code can check of a resume (orchestrator #82 B). Pure.
+
+    1. covers: every must-have row the key calls met (and not open either way)
+       has at least one of its ``settled_by`` lines printed (the summary id, a
+       bullet id, an entry id; a skills id counts when skills are printed);
+    2. verbatim: every printed line is a line of the master (skills: a token);
+    3. pages_ok / skills_kept: within the page limit, and every master skill kept;
+    4. c1: no line printed that the model did not pick while a picked one is cut.
+    """
+
+    selection = suggestions.get("selection") or {}
+    bullets = {str(item) for ids in (printed.get("entries") or {}).values() for item in ids}
+    entries = {str(item) for item in (printed.get("entries") or {})}
+    summary = {str(item) for item in (printed.get("summary") or ())}
+    skills = [str(item) for item in printed.get("skills") or ()]
+    shown = bullets | entries | summary | {str(item) for item in printed.get("other") or ()}
+    uncovered = []
+    for row in key["musts"]:
+        if row["status"] != "met" or row.get("status_either") or not row.get("settled_by"):
+            continue
+        ids = {str(item) for item in row["settled_by"]}
+        if not ids & shown and not (skills and any(item.startswith("s-") for item in ids)):
+            uncovered.append({"line": row["line"], "item": row.get("item")})
+    master = master_parts(master_text)
+    bad, in_skills = [], False
+    for raw in selection_md.splitlines():
+        if raw.startswith("## "):
+            in_skills = norm_line(raw).casefold() == "skills"
+            continue
+        text = norm_line(raw)
+        if text and not in_skills and text not in master["lines"]:
+            bad.append(text[:60])
+    bad += [token[:60] for token in skills if token not in master["skills"]]
+    picked = {str(item) for item in (selection.get("model_pick") or {}).get("lines", ())} | {str(item) for item in [(selection.get("model_pick") or {}).get("summary")] if item}
+    added = {str(item) for item in selection.get("added_by_code") or ()}
+    on_page = (bullets | summary) - {item for item in bullets if not item.startswith("b-")}
+    extra_printed, cut = sorted(on_page - picked - added), sorted(picked - on_page)
+    pages, limit = selection.get("pages"), selection.get("max_pages")
+    pages_ok = isinstance(pages, int) and isinstance(limit, int) and pages <= limit
+    kept = sorted(set(master["skills"]) - set(skills))
+    return {"covers": not uncovered, "uncovered": uncovered, "verbatim": not bad, "not_verbatim": bad, "pages": pages, "max_pages": limit, "pages_ok": pages_ok,
+            "skills_kept": not kept, "skills_cut": kept[:5], "c1": not (extra_printed and cut), "c1_printed_unpicked": extra_printed, "c1_picked_cut": cut,
+            "bar": bool(not uncovered and not bad and pages_ok and not kept and not (extra_printed and cut))}
 
 
 # --- a results folder --------------------------------------------------------------------------------------
@@ -376,10 +477,13 @@ def posting_lines(postings: Path, posting_id: str, key: Mapping[str, Any]) -> li
     return lines
 
 
-def score_folder(key: Mapping[str, Any], results: Path, postings: Path) -> dict[str, Any]:
+def score_folder(key: Mapping[str, Any], results: Path, postings: Path, master: Path | None = None) -> dict[str, Any]:
     """Every ``<NN-slug>/<cli>/assessment.json`` under ``results`` against the key."""
 
     out: list[dict[str, Any]] = []
+    for case in sorted(results.glob("*/*/case.json")):  # a call that left no assessment.json (refused twice) is a failed result, not a silent gap
+        if not (case.parent / "assessment.json").exists():
+            out.append({"posting": case.parent.parent.name[:2], "cli": case.parent.name, "ok": False, "error": "no result (no assessment.json: the call failed)"})
     for path in sorted(results.glob("*/*/assessment.json")):
         posting_id, cli = path.parent.parent.name[:2], path.parent.name
         entry: dict[str, Any] = {"posting": posting_id, "cli": cli}
@@ -388,7 +492,12 @@ def score_folder(key: Mapping[str, Any], results: Path, postings: Path) -> dict[
             out.append({**entry, "ok": False, "error": "posting not in the key"})
             continue
         whole = json.loads(path.read_text(encoding="utf-8"))
-        out.append({**entry, **score_result(posting_key, whole, posting_lines(postings, posting_id, posting_key))})
+        scored = score_result(posting_key, whole, posting_lines(postings, posting_id, posting_key))
+        files = [path.parent / name for name in ("suggestions.json", "code-selection.json", "selection.md")]
+        if master is not None and master.exists() and scored["ok"] and all(file.exists() for file in files):
+            scored["resume"] = resume_check(posting_key, json.loads(files[0].read_text(encoding="utf-8")), json.loads(files[1].read_text(encoding="utf-8")),
+                                            files[2].read_text(encoding="utf-8"), master.read_text(encoding="utf-8"))
+        out.append({**entry, **scored})
     by_cli: dict[str, dict[str, int]] = {}
     for row in out:
         total = by_cli.setdefault(row["cli"], dict.fromkeys(TOTALS, 0))
@@ -410,6 +519,15 @@ def score_folder(key: Mapping[str, Any], results: Path, postings: Path) -> dict[
         total["required_lines"] += row["list"]["line_coverage"]["required_lines"]
         total["lines_covered"] += row["list"]["line_coverage"]["covered"]
         total["fully_correct"] += int(row["fully_correct"])
+        total["soft_asks"] += row["questions"]["soft_asks"]
+        if "resume" in row:
+            resume = row["resume"]
+            total["resume_checked"] += 1
+            total["resume_covers"] += int(resume["covers"])
+            total["resume_verbatim"] += int(resume["verbatim"])
+            total["resume_pages_skills"] += int(resume["pages_ok"] and resume["skills_kept"])
+            total["resume_c1"] += int(resume["c1"])
+            total["resume_bar"] += int(resume["bar"])
     return {"schema_version": SCORE_SCHEMA, "key_set": key.get("set"), "results_label": results.name, "by_cli": by_cli, "results": out}
 
 
@@ -437,6 +555,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--key", type=Path, required=True, help="the gold key (<data-dir>/gold/key.json)")
     parser.add_argument("--results", type=Path, required=True, help="one results folder of run_assess_real_eval (<data-dir>/results/<label>)")
     parser.add_argument("--postings", type=Path, default=None, help="the set's postings folder (default: <key's set folder>/postings)")
+    parser.add_argument("--master", type=Path, default=None, help="the master the resumes were cut from (default: <key's set folder>/master.md); enables the resume checks")
     parser.add_argument("--out", type=Path, default=None, help="where score.json and score.md go (default: <key folder>/scores/<label>/); never under this repository")
     return parser
 
@@ -451,7 +570,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 2
     try:
         key = load_key(key_path)
-        report = score_folder(key, results, (args.postings or key_path.parent.parent / "postings").resolve())
+        report = score_folder(key, results, (args.postings or key_path.parent.parent / "postings").resolve(), (args.master or key_path.parent.parent / "master.md").resolve())
     except (OSError, ValueError) as exc:
         print(f"score_against_gold: {exc}", file=sys.stderr)
         return 2

@@ -179,3 +179,57 @@ def test_a_results_folder_is_scored_per_cli_and_nothing_is_written_inside_the_re
     (data / "postings" / "01-example-works-staff-engineer.md").write_text(POSTING.replace("8+ years", "9+ years"), encoding="utf-8")
     assert gold.main(["--key", str(data / "gold" / "key.json"), "--results", str(data / "results" / "arm")]) == 2
     assert "not the lines the key was built on" in capsys.readouterr().err
+
+
+MASTER = """<!-- gigai-master:1 -->
+
+## Summary
+
+- Builder of example systems. <!-- id:sum-1 -->
+
+## Experience
+
+### ACME <!-- id:r-1 -->
+**Engineer | 2020 - Present**
+- Ran the example platform. <!-- id:b-1 -->
+- Cut example costs. <!-- id:b-2 -->
+- Led example migrations. <!-- id:b-3 -->
+
+## Skills
+
+- Go, Rust (async, tokio), Postgres <!-- id:s-1 -->
+"""
+RESUME_KEY = {"musts": [{"line": 1, "item": None, "class": "hard", "status": "met", "settled_by": ["b-1", "b-9"]},
+                        {"line": 2, "item": None, "class": "askable", "status": "met", "settled_by": ["b-2"], "status_either": ["met", "unclear"]},
+                        {"line": 3, "item": None, "class": "askable", "status": "unclear", "settled_by": ["b-3"]}]}
+SUGGESTIONS = {"selection": {"model_pick": {"summary": "sum-1", "lines": ["b-1", "b-2"]}, "added_by_code": [], "pages": 1, "max_pages": 2}}
+PRINTED = {"summary": ["sum-1"], "entries": {"r-1": ["b-1", "b-2"]}, "other": [], "skills": ["Go", "Rust (async, tokio)", "Postgres"]}
+SELECTION_MD = "## Summary\n\n- Builder of example systems. <!-- R1 -->\n\n## Experience\n\n### ACME <!-- R2 -->\nEngineer | 2020 - Present\n- Ran the example platform. <!-- R3 -->\n- Cut example costs. <!-- R4 -->\n\n## Skills\n\n- Go, Rust (async, tokio), Postgres\n"
+
+
+def resume(**changes: Any) -> dict[str, Any]:
+    args = {"key": RESUME_KEY, "suggestions": SUGGESTIONS, "printed": PRINTED, "selection_md": SELECTION_MD, "master_text": MASTER} | changes
+    return gold.resume_check(args["key"], args["suggestions"], args["printed"], args["selection_md"], args["master_text"])
+
+
+def test_a_resume_that_prints_a_settling_line_of_every_met_row_verbatim_within_limits_meets_the_bar() -> None:
+    assert resume()["bar"] is True
+
+
+def test_a_met_row_with_none_of_its_settling_lines_printed_is_uncovered_but_an_open_or_either_row_is_not_owed() -> None:
+    printed = {**PRINTED, "entries": {"r-1": ["b-2"]}}
+    out = resume(printed=printed, suggestions={"selection": {**SUGGESTIONS["selection"], "model_pick": {"summary": "sum-1", "lines": ["b-2"]}}})
+    assert out["uncovered"] == [{"line": 1, "item": None}] and out["covers"] is False and out["bar"] is False
+
+
+def test_a_printed_line_not_in_the_master_a_cut_skill_or_too_many_pages_fails() -> None:
+    assert resume(selection_md=SELECTION_MD.replace("- Cut example costs.", "- Ran the example platform at scale."))["verbatim"] is False
+    assert resume(printed={**PRINTED, "skills": ["Go", "Postgres"]})["skills_kept"] is False
+    assert resume(suggestions={"selection": {**SUGGESTIONS["selection"], "pages": 3}})["pages_ok"] is False
+
+
+def test_c1_fails_only_when_an_unpicked_line_is_printed_while_a_picked_one_is_cut() -> None:
+    picked = {"selection": {**SUGGESTIONS["selection"], "model_pick": {"summary": "sum-1", "lines": ["b-1", "b-2", "b-3"]}}}
+    both = resume(suggestions=picked, printed={**PRINTED, "entries": {"r-1": ["b-1", "b-9"]}})
+    assert both["c1"] is False and both["c1_printed_unpicked"] == ["b-9"] and both["c1_picked_cut"] == ["b-2", "b-3"]
+    assert resume(suggestions=picked)["c1"] is True  # picked lines cut and nothing unpicked printed: the fit cut, not C1
