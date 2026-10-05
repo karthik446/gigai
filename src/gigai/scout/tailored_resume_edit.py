@@ -642,6 +642,48 @@ def edit_mark(written_by: object, source: object, *, now: str | None = None) -> 
     return TailorEdit(writer, now or _now(), cleaned)
 
 
+def _fitted(
+    result: TailoredResume, *, master: Master, job: object, home_root: Path, target: Path, profile_id: str | None, job_url: str,
+) -> TailoredResume:
+    """``result`` cut to the page limit by SPEC 3.2: ``pick``'s cut order and ``tailor_length.fit_by_cuts``, the cut recorded (``length``).
+
+    The cut order reads the job's stored assessment (its rows' sources protect the last printed evidence of a
+    mandatory row) and the posting; the pages are the check's own (the tightest spacing the PDF may choose).
+    Raises ``HandbackRefused`` (``over_page_limit``) when even every cut leaves it over the limit.
+    """
+
+    from datetime import date
+
+    from .assess_master import cited_requirements
+    from .find_jobs.job_state import normalize_job_identity
+    from .master_selection import SelectionPosting, SelectionProfile
+    from .quick_assess import read_quick_assessment
+    from .tailor_length import fit_by_cuts
+    from .tailor_master import MODE_VIEW, cut_order, job_candidates
+
+    today = date.today()
+    assessment = None
+    if profile_id is not None:
+        try:
+            assessment = read_quick_assessment(home_root, target, profile_id, normalize_job_identity(job_url))
+        except FindJobsContractError:
+            assessment = None
+    matrix = tuple(assessment.result.matrix) if assessment is not None else ()
+    posting = SelectionPosting(getattr(job, "title", "") or "", getattr(job, "text", "") or "", getattr(job, "company", "") or "", getattr(job, "location", "") or "")
+    posting = replace(posting, cited=cited_requirements(master, matrix))
+    candidates = job_candidates(master, SelectionProfile(), posting, mode=MODE_VIEW, today=today)
+    cuts, refill = cut_order(result, candidates, master, today=today)
+
+    def measure(shown: TailoredResume) -> int | None:
+        return _pages(render_markdown(shown))
+
+    fitted = fit_by_cuts(result, cuts, measure=measure, max_pages=LENGTH_RULE.max_pages, refill=refill)
+    pages = measure(fitted)
+    if pages is not None and pages > LENGTH_RULE.max_pages:
+        raise HandbackRefused([over_page_limit(pages)])
+    return fitted
+
+
 def _assessed_job(home_root: Path, target: Path, profile_id: str | None, job_url: str):
     """The posting this profile's stored assessment of the job was made on, or ``None``: nothing is fetched for it.
 
@@ -673,6 +715,7 @@ def attach_edited_resume(
     written_by: str = "operator",
     source: str | None = None,
     resolved_job=None,
+    fit: bool = False,
 ) -> AttachedResume:
     """Store ``markdown`` as the tailored resume of the job at ``job_url`` for one profile (default: the selected one).
 
@@ -683,6 +726,10 @@ def attach_edited_resume(
     already stored changes nothing (``changed`` false).  Raises ``TailorError`` with the check's
     codes (``HandbackRefused`` lists every problem) or the tailoring's input codes
     (``job_input_invalid``, ``job_fetch_failed``, ``profile_not_found`` ...).
+
+    ``fit`` (0.1.11 N5b, SPEC 5.3): a master-checked hand-back over the page limit is cut to it by code (3.2), the
+    cut recorded on the stored resume (``length``, so one Restore puts it back); without ``fit`` it is refused
+    (``over_page_limit``).  It changes nothing for a resume that fits.
     """
 
     home_root, target = Path(home_root), Path(target)
@@ -723,9 +770,13 @@ def attach_edited_resume(
         if basis is None:
             result = edited_result(markdown, ctx=ctx, job=tailor_job, previous=previous)
         else:
+            over = fit and pages is not None and pages > LENGTH_RULE.max_pages
             result = handback_result(
-                markdown, master=basis.master, answers=answers, previous=None if previous is None else previous.result, pages=pages,
+                markdown, master=basis.master, answers=answers, previous=None if previous is None else previous.result,
+                pages=None if over else pages,  # --fit: the length is code's to settle below
             )
+            if over:
+                result = _fitted(result, master=basis.master, job=job, home_root=home_root, target=target, profile_id=resume.profile_id, job_url=job_url)
         if previous is not None and previous.result == result:
             return AttachedResume(previous, False)
         response = TailorResponse(
