@@ -448,3 +448,68 @@ def test_the_order_the_model_gives_is_the_order_printed_inside_a_role_even_after
             # The picked lines print in the pick's order. A line CODE adds (room left on the page, coverage) is not the
             # model's and comes after them: the promise is about the lines the model gave.
             assert [item for item in shown if item in in_pick] == [item for item in in_pick if item in shown], (budget, role, shown, in_pick)
+
+
+# --- 0.1.11 C1: a picked line is never displaced by an unpicked one ------------------------------------------------------
+
+
+def _row_optional(row_id: str, requirement: str, sources: tuple[str, ...]) -> RequirementMatrixRow:
+    return _row(row_id, requirement, "list_item", sources)
+
+
+def _c1(lines: tuple[str, ...], rows: tuple[RequirementMatrixRow, ...], budget: int, *, profile: ms.SelectionProfile = PROFILE):
+    return pick.settle(MASTER, _body(lines, rows=rows), None, TODAY, profile=profile, posting=POSTING, measure=_counted(budget, other=False), max_pages=1)
+
+
+C1_ROWS = (_row(GO, "Go in production", "hard", ("a2", "a5")),)
+# No line of Beta Labs (a recent role): V8 gives that role one, the best of its lines by the selector's worth.
+C1_PICK = ("a1", "a2", "a3", "a4", "a5", "a6", "p1", "c1")
+
+
+def test_c1_a_line_code_added_goes_before_any_line_the_model_picked() -> None:
+    """The judge's T12 shape: the pick leaves a recent role out, code adds it one line, and a picked line is cut to keep it."""
+
+    # With room the line code gave the recent role prints: C1 is a cut order, not a ban.
+    roomy = _c1(C1_PICK, C1_ROWS, 9)
+    assert [item.code for item in roomy.added_by_code] == ["recent_role_present"] and set(C1_PICK) <= set(roomy.printed)
+    given = roomy.added_by_code[0].id
+    # Nine lines, room for eight, and a row rests on EVERY picked line: the line the model did not give is the one that goes, its role with it.
+    leaning = (_row(GO, "Go in production", "hard", C1_PICK),)
+    settled = _c1(C1_PICK, leaning, 8)
+    assert set(_bullets(settled.result)) == set(C1_PICK), _bullets(settled.result)
+    assert given not in settled.printed and settled.added_by_code == () and settled.conflicts == ()
+
+
+def test_c1_the_line_given_to_a_recent_role_outlives_a_picked_line_no_row_rests_on() -> None:
+    """The employment gap: a role gone between two printed ones is the worse loss, so a bare picked line goes first."""
+
+    roomy = _c1(C1_PICK, C1_ROWS, 9)
+    given = roomy.added_by_code[0].id
+    settled = _c1(C1_PICK, C1_ROWS, 8)
+    shown = _bullets(settled.result)
+    assert given in shown and len(shown) == 8 and {"a2", "a5"} <= set(shown), shown
+    assert len(set(C1_PICK) - set(shown)) == 1 and not set(C1_PICK) - set(shown) & {"a2", "a5"}
+    # Down to the lines a row rests on, the recent role's line still outlives the bare ones; it goes only before a line a row rests on.
+    tight = _c1(C1_PICK, C1_ROWS, 3)
+    assert {"a2", "a5"} <= set(_bullets(tight.result)), _bullets(tight.result)
+
+
+def test_c1_a_pinned_line_the_model_did_not_pick_stays_with_the_picked_ones() -> None:
+    settled = _c1(C1_PICK, C1_ROWS, 8, profile=ms.SelectionProfile(titles=PROFILE.titles, pins=("b5",)))
+    assert "b5" in settled.printed and len(_bullets(settled.result)) == 8
+
+
+def test_c1_the_cut_follows_the_pick_order_not_the_strength_of_a_line_an_optional_row_rests_on() -> None:
+    """The judge's T20 shape: two lines of two optional rows; the earlier in the pick (a stated line) outlives the later (a quantified one)."""
+
+    rows = (
+        _row(GO, "Go in production", "hard", ("a5",)),
+        _row_optional("req-000010", "Control planes", ("a1",)),  # stated, 2nd in the pick
+        _row_optional("req-000011", "Faster rollouts", ("a2",)),  # quantified, 3rd in the pick
+    )
+    lines = ("a5", "a1", "a2", "b6", "b4", "b5", "p1", "c1")
+    for budget in (5, 4):
+        settled = _c1(lines, rows, budget)
+        assert {"a1", "a5", "b6", "p1"} <= set(settled.printed), (budget, settled.printed)
+        assert ("a2" in settled.printed) == (budget == 5), (budget, settled.printed)
+        assert settled.added_by_code == ()
