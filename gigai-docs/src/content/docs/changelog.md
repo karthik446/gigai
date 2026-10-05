@@ -223,11 +223,12 @@ things still take more than a second (see "Still slower than one second"): the n
   your agent runtime's own approval), says what one assessment sends, what to check after an
   interruption before retrying, and gives the address of a job's page. `gigai agent-skill` prints the
   updated instructions: install them again to get them.
-- **A record write says `projection_pending: true`.** The JSON of `gigai record native create` and
-  `override`, and a record tool's result, used to say `false` after a write.
-  A write no longer rebuilds the internal index of records before it replies (see "Faster"), so it now
-  says `true` with `rebuild_action: rebuild_index`: the record is stored, the index follows when Scout
-  next starts. Nothing reads that index to answer you, and there is nothing to run.
+- **A record write says `projection_pending: true`, and that needs no action.** The JSON of
+  `gigai record native create` and `override`, and a record tool's result, used to say `false` after a
+  write. A write no longer rebuilds the internal index of records before it replies (see "Faster"), so
+  it now says `true`: the record is stored, and the index follows when Scout next starts. Nothing reads
+  that index to answer you. `rebuild_action` is now always `null`: it used to name `rebuild_index`,
+  which was never a command, and there is nothing to run.
 
 #### Still slower than one second
 

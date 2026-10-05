@@ -38,10 +38,12 @@ import time
 from types import SimpleNamespace
 import uuid
 
+from click.testing import CliRunner
 import pytest
 
 import gigai.private_records as private_records
 from gigai.canonical import canonical_json_bytes
+from gigai.cli import cli
 from gigai.index import database_lock
 from gigai.journal import JournalArtifact, record_transition
 from gigai.native_records import archive_native_record, create_native_record, update_native_record
@@ -267,12 +269,12 @@ def test_a_save_and_its_retry_make_no_rebuild_attempt(tmp_path: Path, monkeypatc
     assert len([1 for prefixes, _paths in captures if "records/operations/" in prefixes or "records/" in prefixes]) == len(results)  # one capture a save
 
     for name, result in results.items():
-        assert (result.created, result.projection_pending, result.rebuild_action) == (True, True, "rebuild_index"), name  # type: ignore[attr-defined]
+        assert (result.created, result.projection_pending, result.rebuild_action) == (True, True, None), name  # type: ignore[attr-defined]
     head = pad.head()
     retries = {name: write() for name, write in writes.items()}
     for name, retry in retries.items():
         # The retry answers from the receipt, commits nothing, and still says the truth: the projection is behind.
-        assert (retry.created, retry.receipt, retry.projection_pending, retry.rebuild_action) == (False, results[name].receipt, True, "rebuild_index"), name  # type: ignore[attr-defined]
+        assert (retry.created, retry.receipt, retry.projection_pending, retry.rebuild_action) == (False, results[name].receipt, True, None), name  # type: ignore[attr-defined]
     assert pad.head() == head
 
     assert calls == [], f"{len(calls)} rebuild attempts inside {len(results) + len(retries)} saves"
@@ -290,6 +292,36 @@ def test_a_save_and_its_retry_make_no_rebuild_attempt(tmp_path: Path, monkeypatc
         assert (retry.created, retry.receipt, retry.projection_pending, retry.rebuild_action) == (False, results[name].receipt, False, None), name  # type: ignore[attr-defined]
     assert catch_up_scout_projection(resolved=_resolved(pad)) is None
     assert calls == [1]
+
+
+def test_a_write_says_the_index_is_pending_and_names_no_action(tmp_path: Path) -> None:
+    """STORE1B: every write said ``rebuild_action: rebuild_index``, and no command of that name exists.
+
+    The index is pending (that is true) and needs no action: it follows when Scout next starts.
+    """
+    pad = _Pad(tmp_path, other_files=0)
+    source = tmp_path / "experience.json"
+    source.write_text(json.dumps(_experience()), encoding="utf-8")
+    scope = ["--home", str(pad.home), "--target", str(pad.target), "--gig", pad.gig_id, "--json"]
+    create = ["record", "native", "create", "--content-file", str(source), "--operation-key", "cli-pending", *scope]
+    runner = CliRunner()
+
+    created = runner.invoke(cli, create)
+    assert created.exit_code == 0, created.output
+    payload = json.loads(created.output)
+    assert (payload["created"], payload["projection_pending"]) == (True, True)
+    assert "rebuild_action" in payload and payload["rebuild_action"] is None  # the key stays; it names nothing
+    override = runner.invoke(cli, [
+        "record", "native", "override", "--content-file", str(source), "--base-record", payload["record_id"], "--base-revision", payload["revision_id"],
+        "--operation-key", "cli-pending-override", *scope,
+    ])
+    assert override.exit_code == 0, override.output
+    assert json.loads(override.output)["projection_pending"] is True and json.loads(override.output).get("rebuild_action") is None
+
+    # Nothing a result names is something to run: after the catch-up (Scout's start) the same request says "not pending".
+    assert catch_up_scout_projection(resolved=_resolved(pad)) is not None
+    retried = json.loads(runner.invoke(cli, create).output)
+    assert (retried["created"], retried["record_id"], retried["projection_pending"], retried["rebuild_action"]) == (False, payload["record_id"], False, None)
 
 
 def test_a_rebuild_keeps_scouts_own_read_model_row(tmp_path: Path) -> None:

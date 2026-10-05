@@ -108,7 +108,7 @@ def test_committed_bytes_parent_chain_and_projection_recovery(tmp_path: Path) ->
     record_path.write_bytes(canonical_json_bytes(reference.record))
     # 0110-10-16: a sealed write says the projection is pending; the catch-up recovers it, and the retry then says so.
     pending = import_run_input(home_root=home, requested_target=target, gig_id=created.gig_id, data=b"posting", operation_key="c1-pending")
-    assert pending.projection_pending is True and pending.rebuild_action == "rebuild_index" and pending.receipt is not None
+    assert pending.projection_pending is True and pending.rebuild_action is None and pending.receipt is not None
     rebuilt = private_records.catch_up_scout_projection(resolved=private_records._resolved(home_root=home, requested_target=target, gig_id=created.gig_id))
     assert rebuilt is not None and rebuilt.records == 1
     replay = import_run_input(home_root=home, requested_target=target, gig_id=created.gig_id, data=b"posting", operation_key="c1-pending")

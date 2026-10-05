@@ -19,7 +19,7 @@ from jsonschema import Draft202012Validator
 
 from .canonical import EntityPrefix, canonical_json_bytes, digest_imported_bytes, parse_json_bytes, validate_entity_id
 from .journal import JournalArtifact, JournalConflictError, JournalSnapshot, JournalTransition, read_committed_snapshot, run_with_journal_writer
-from .private_records import RECORD_DIRECTORY_PATTERN, PrivateRecordError, scout_projection_behind
+from .private_records import RECORD_DIRECTORY_PATTERN, PrivateRecordError, owned_receipt_path, scout_projection_behind
 from .validators import validate_serialized_contract
 from .workpad import ResolvedWorkpad, resolve_workpad, workpad_layout_version
 
@@ -42,7 +42,9 @@ class NativeRecordResult:
     state: str
     receipt: dict[str, object] | None
     task_context_id: str | None
+    #: The projection is behind this write. It needs no action: Scout brings it to the head when it next starts.
     projection_pending: bool = False
+    #: Always ``None``: no command rebuilds the projection, so a result names none (STORE1B).
     rebuild_action: str | None = None
 
 
@@ -71,7 +73,7 @@ def _resolved(*, home_root: Path, requested_target: Path | None, gig_id: str | N
 def _receipt_path(operation: str, key: str) -> str:
     if not re.fullmatch(r"[A-Za-z0-9._:-]{1,160}", key):
         raise PrivateRecordError("native_operation_invalid", "operation key is invalid")
-    return f"records/operations/{operation}-{digest_imported_bytes(key.encode()).removeprefix('sha256:')}.json"
+    return owned_receipt_path(operation, key)
 
 
 def _schema() -> Draft202012Validator:
@@ -401,9 +403,9 @@ def _publish(*, resolved: ResolvedWorkpad, operation_name: str, operation_key: s
         raise PrivateRecordError("native_record_not_authenticated", str(exc)) from exc
     # 0110-10-16: a save never rebuilds the projection, and neither does its retry (``private_records._publish``
     # says why). A write that committed leaves it behind; a retry that committed nothing says whether it is
-    # at the head it read under the lock.
+    # at the head it read under the lock. Pending names no action: there is none to run.
     if created or scout_projection_behind(resolved, journal_head=heads[-1]):
-        return NativeRecordResult(**{**result.__dict__, "projection_pending": True, "rebuild_action": "rebuild_index"})
+        return NativeRecordResult(**{**result.__dict__, "projection_pending": True})
     return result
 
 

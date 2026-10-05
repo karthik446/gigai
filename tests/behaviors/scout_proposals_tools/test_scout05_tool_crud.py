@@ -168,6 +168,8 @@ def test_fresh_wrapper_executes_approved_create_update_archive_with_cas_and_repl
     assert second["record_id"] == record_id  # type: ignore[index]
     # 0110-10-16: a write never rebuilds the projection, so it says the projection is pending (it is: behind the head).
     assert second["projection_pending"] is True  # type: ignore[index]
+    # STORE1B: and it names no action, because there is none to run: the index follows when Scout next starts.
+    assert "rebuild_action" in second and second["rebuild_action"] is None  # type: ignore[index, operator]
 
     replay = _run(wrapper, home, target, *update_args)
     replay_payload = _payload(replay)
