@@ -179,8 +179,13 @@ def test_b_the_anchor_rules(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> 
             _new(fx)
     assert _anchor(fx) is None
 
-    # The plain call moves it, to the time it read the postings; the response still says what "new" was measured from.
-    plain = _new(fx)
+    # 0.1.10.11 NA: the plain call ASKS about the two new postings, so it is a preview and moves nothing.
+    asked = _new(fx)
+    assert asked["status"] == "ask" and asked["anchor"] == {"last_checked_at": None, "advances": False}
+    assert _anchor(fx) is None
+
+    # The answer moves it (here the no), to the time it read the postings; the response still says what "new" was measured from.
+    plain = _new(fx, assess=False)
     assert plain["since_source"] == "first_use_7_days" and plain["counts"]["new"] == 2  # type: ignore[index]
     assert plain["anchor"] == {"last_checked_at": None, "advances": True}
     anchor = _anchor(fx)
@@ -193,7 +198,8 @@ def test_b_the_anchor_rules(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> 
         looked = _new(fx, peek=True, now=later)
         assert (looked["since"], looked["since_source"], looked["counts"]["new"]) == ("2026-10-03T15:00:00.000000Z", "anchor", 1)  # type: ignore[index]
     assert _anchor(fx) == anchor
-    seen = _new(fx, now=later)
+    assert _new(fx, now=later)["status"] == "ask" and _anchor(fx) == anchor  # asking about it leaves it new as well
+    seen = _new(fx, now=later, assess=False)
     assert [row["job_identity"] for row in _rows(seen)] == [job_url("late", 1)]
     assert _anchor(fx).last_checked_at == "2026-10-03T20:00:00.000000Z"  # type: ignore[union-attr]
     assert _new(fx, now=later.replace(minute=5))["status"] == "nothing_new"

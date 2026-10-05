@@ -90,6 +90,17 @@ the run has done its work, so a run abandoned at a prompt consumes nothing). ``s
 selects a window again (the yes, or the ``yours`` call, after a call that
 already moved the anchor). ``mark_all_seen`` moves the same anchor.
 
+AN ASKING CALL IS A PREVIEW (0.1.10.11 NA, :func:`is_preview`): a response
+that carries the assess-new question (``status: "ask"``) never moves the
+anchor, with a terminal or without one (``gigai scout new --json``, a pipe).
+It used to move it as soon as the response was built, so the next step the
+docs give, a bare ``gigai scout new --yes --json``, found "nothing new" and
+assessed nothing. The anchor moves when the question has been ANSWERED, which
+is every response that is not a preview: the yes (``assess=True``, ``--yes``),
+the no (``assess=False``, ``--no-assess``: what ``question.no`` names), and a
+response that had nothing to ask. Asked twice, a preview shows the same
+postings (before the first answer ever, "new" stays the last 7 days).
+
 LABELS (data_labels, P4): NO RESPONSE MIXES. The response holds posting text
 and what a model derived from it (the ``postings`` envelope:
 ``public-untrusted``) next to ids, counts, codes, timestamps and the profile
@@ -1002,6 +1013,23 @@ def check_response(response: Mapping[str, object]) -> None:
     assert_not_mixed(response_labels(response), what="scout new")
 
 
+def is_preview(response: Mapping[str, object]) -> bool:
+    """0.1.10.11 NA, the ONE place that says a question is still open: this response is a PREVIEW.
+
+    A response that carries the assess-new question (``status: "ask"``) shows
+    what is new and asks; nothing is decided yet, so it must not consume
+    "new": the anchor stays (``anchor.advances`` is false), and the same call
+    again, or a bare ``--yes`` after it, measures from the same time. Every
+    other response is ANSWERED and moves the anchor as a plain call does: the
+    yes that assessed, the explicit no (``assess=False``, ``--no-assess``) and
+    a response with nothing to ask. ``stale_question``, ``low_rank_question``
+    and the pipeline offer do not make a preview: a plain yes never answers
+    them, and each names its own call (with ``--since``).
+    """
+
+    return response.get("status") == STATUS_ASK
+
+
 def scout_new(
     home_root: Path,
     target: Path,
@@ -1027,7 +1055,9 @@ def scout_new(
     ``advance=False`` (0110-10-11): this call does not move the anchor,
     whatever else it is (``anchor.advances`` is false). For a caller that asks
     the user something before the run is done; it moves the anchor itself
-    with :func:`settle_anchor` when the run has done its work.
+    with :func:`settle_anchor` when the run has done its work. A response
+    that asks (``status: "ask"``) is a preview and never moves it, whatever
+    ``advance`` says (:func:`is_preview`).
 
     ``model_wait`` (0110-9-01, the server's GET): how long to wait for a build
     of the posting read model (``postings.refresh(wait=...)``); past it the
@@ -1276,7 +1306,8 @@ def _scout_new(
         for group in groups.values():
             for row in group:
                 per_profile[row.profile_id] = per_profile.get(row.profile_id, 0) + 1
-        advances = advance and not peek and profile_id is None and not process
+        # 0.1.10.11 NA: a response that asks is a preview; the question is not answered yet, so "new" is not consumed.
+        advances = advance and not peek and profile_id is None and not process and not is_preview({"status": status})
         response: dict[str, object] = {
             "schema_version": SCHEMA_VERSION,
             "status": status,
@@ -1556,6 +1587,7 @@ __all__ = [
     "check_response",
     "fit_of",
     "in_order",
+    "is_preview",
     "mark_all_seen",
     "newest_batch",
     "batch_date",
