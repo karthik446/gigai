@@ -60,12 +60,12 @@ PROMPT_SHA256_V8 = {
     "onsite": "1435bc410449b861fdbc9062767f92a7f841fcc1ebd25e33f98b688ecd5ffc4d",
     "hybrid": "91e8cd53e8d76726094bfb77876b6123fc4345bf00b27271fd31a4de651e96ed",
 }
-#: sha256 of the prompt each work mode renders for ``_JOB`` / ``_ctx`` now (assess-prompt-v9, 9.2 wording).
+#: sha256 of the prompt each work mode renders for ``_JOB`` / ``_ctx`` now (assess-prompt-v9, 9.4 wording).
 PROMPT_SHA256 = {
-    "": "6482ba3d4a2e5a03320d4db6208b5335ca5ea0cd8d24e0e091fdf1621aef4d52",
-    "remote": "eaee20945ce46efb350db0934ad4b6a63e21f63a1d795fa40653ed1619e83a35",
-    "onsite": "71d3de4b950843acbd537256efda0eff8c7bf579c8adff7f5559aa4189a734b3",
-    "hybrid": "f7fd4b7d461d1297a336d50b3dda7b28ec2eac9735dc33b2c497e433c7fafab0",
+    "": "7292e9aa64d43bb12277a517e6ca50e961ceed457fda82122dde945e8cd10ed0",
+    "remote": "53d03d6a5c8a9051165b50fff952f4d5bae63976084351720264dff70194345d",
+    "onsite": "a44cb994fcd27f126c2b9b848dcbae48cd4ef8bb2140498c95431a875d959d2e",
+    "hybrid": "abc44aa289387fec433fdcf66184d8c3ccfe498531c1daf4bb05e6156f5bb70a",
 }
 #: The same under assess-prompt-v7: the fenced prompt, before the requirement weights (0110-10-03).
 PROMPT_SHA256_V7 = {

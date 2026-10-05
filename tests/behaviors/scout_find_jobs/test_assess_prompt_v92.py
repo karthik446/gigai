@@ -21,16 +21,25 @@ def _paragraph(text: str, start: str) -> str:
     return match.group(0)
 
 
-def test_a_number_or_a_scope_is_met_only_by_that_scoped_evidence() -> None:
-    line = _paragraph(_prompt(), "A number or a scope in a must-have")
-    assert "General years of experience do not meet years in a named area" in line
-    assert "one named example does not meet a named set" in line
+def test_numbers_and_named_sets_are_strict() -> None:
+    line = _paragraph(_prompt(), "Numbers and named tools are strict")
+    assert "not met by general years" in line
+    assert "Protobuf alone does not meet Parquet, Arrow and Iceberg" in line
     assert '"unclear" and you ask' in line
 
 
 def test_a_plainly_settled_must_have_is_met_and_never_asked() -> None:
-    line = _paragraph(_prompt(), "A number or a scope in a must-have")
-    assert 'the row is "met" and is never asked' in line
+    line = _paragraph(_prompt(), "Numbers and named tools are strict")
+    assert 'the row is "met" and never asked' in line
+
+
+def test_a_scope_or_strength_word_does_not_turn_stated_work_into_a_question() -> None:
+    line = _paragraph(_prompt(), "The standard for \"met\" is the reasonable reader")
+    assert "recruiter reading the cited line(s)" in line
+    for word in ("at scale", "large, complex", "high-volume", "significant", "proven"):
+        assert word in line
+    assert "does not turn stated work into a question" in line
+    assert "A strength word is part of the requirement" not in _prompt()
 
 
 def test_a_who_you_are_requirement_heading_still_gives_rows() -> None:

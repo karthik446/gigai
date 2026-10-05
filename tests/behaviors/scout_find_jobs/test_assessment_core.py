@@ -151,9 +151,9 @@ GOLDEN_PROMPT = (
     "1. Status is decided from the candidate's facts (resume text plus CANDIDATE CONSTRAINTS plus PRIOR ANSWERS), never from your overall impression:\n"
     '   - The facts satisfy the requirement\'s substance, stated or clearly paraphrased -> "met". Put the quote or close paraphrase you relied on in resume_evidence. A row with "alternatives" is met when the facts satisfy any ONE of them.\n'
     '   - The facts explicitly contradict it (their own words state a lower level, fewer years, the wrong domain, or that the candidate lacks it) -> "unmet". Quote the contradicting text in resume_evidence. An explicit disclaimer in the resume ("has not worked on X", "does not do X", "no experience with X") is a judgement call, not a keyword match: weigh how explicit the statement is and how central the requirement is to the role. A clear disclaimer against a core HARD requirement usually means "unmet" (a resume that says "has not worked on cloud infrastructure, SRE, or platform engineering" is unmet for an SRE posting\'s production-infrastructure requirement; do not ask about it), while partial or adjacent evidence is not a contradiction ("writes little product code" or "minimal application-level coding" against a required language does not rule the language out: that row stays "unclear" and you ask). A disclaimer that covers an area ("has not worked on X") answers every row about that area, HARD or ASKABLE: mark each of them unmet and ask nothing about it. A degree, enrolment or student-status requirement ("currently pursuing a degree", "enrolled student") is ASKABLE and is never "unmet" on the resume alone: a resume that states current enrolment meets it; a completed degree or years of full-time work do not settle whether the candidate is enrolled now, so otherwise the row is "unclear" and you ask once, with the question_id "education:enrolled".\n'
-    '   - A must-have bullet that names SEVERAL practices ("feature flags, staged rollout and rollback"; "compliance, tracing, evals") is "met" only when the evidence covers them; evidence for one of them leaves the row "unclear" and you ask about the rest.\n'
-    '   - A strength word is part of the requirement: "strong", "deep", "expert" or "advanced" proficiency in X is met only by a line that shows X at that level (work done with X, owned, at scale). A line that merely names X, or shows a neighbouring technology (React Native for "modern front-end development: React, TypeScript, component architecture, state management, testing, design systems"), leaves the row "unclear", and you ask.\n'
-    '   - A number or a scope in a must-have is part of it ("5+ years in cloud data platforms", "production", a named set of formats): the row is "met" only by evidence of THAT scoped thing. General years of experience do not meet years in a named area, and one named example does not meet a named set; the row stays "unclear" and you ask. The reverse holds as firmly: when a resume line or a prior answer plainly states what the row asks, the row is "met" and is never asked; do not ask what the facts already settle.\n'
+    '   - A must-have bullet that names SEVERAL practices ("feature flags, staged rollout and rollback"; "compliance, tracing, evals") is "met" when a recruiter would accept the cited lines as covering them; ask only about a named tool or number they do not show, or where the resume is silent.\n'
+    '   - The standard for "met" is the reasonable reader: would a recruiter reading the cited line(s) accept them? A scope or strength word the posting adds ("strong", "deep", "at scale", "large, complex", "high-volume", "significant", "proven") does not turn stated work into a question. A line that merely names X, or shows a neighbouring technology (React Native for "modern front-end development: React, TypeScript, component architecture, state management, testing, design systems"), leaves the row "unclear", and you ask.\n'
+    '   - Numbers and named tools are strict: "5+ years in cloud data platforms" is not met by general years, nor a named set by one item (Protobuf alone does not meet Parquet, Arrow and Iceberg): it stays "unclear" and you ask. When a resume line or a prior answer plainly states what the row asks, the row is "met" and never asked; do not ask what the facts already settle.\n'
     '   - The facts are simply silent (the topic is not mentioned at all) -> "unclear", with an empty resume_evidence list. Silence is never "unmet", no matter how central the requirement looks.\n'
     '   - One statement can hold a no and a yes ("No Cassandra in production; MongoDB at two employers"). Decide each claim on its own: the "no" settles only what it names, the "yes" settles only what it names, and neither spreads to the other. Against "Cassandra or MongoDB" that statement is "met" (by the MongoDB claim); against "Cassandra" alone it is "unmet".\n'
     '   - A level word is part of the fact. "Familiar with X", "exposure to X", "used X in side projects", "learning X" do not meet "production experience with X", "expert X", "deep X" or a number of years of X; "ran X in production for three years" meets "familiar with X". When the candidate\'s facts state a level below the one the posting requires, the row is "unmet" (the facts have answered it: do not ask again); when they state X with no level at all and the posting requires a level, the row is "unclear" and you ask.\n'
@@ -234,12 +234,12 @@ GOLDEN_RETRY_PROMPT = (
 
 # sha256 of the golden prompts (the strings above are the source of truth;
 # the digests guard the transcription). Re-captured for assess-prompt-v8.
-GOLDEN_SHA256 = "a7ed1c7761bc036f54f10987187ad6fc117c3f77258326313dd0cc95b7e859a2"
-GOLDEN_RETRY_SHA256 = "a088d9e912b5248640707804377a9fc024191e2ddabff558c72762f1df5db2b0"
+GOLDEN_SHA256 = "fef562c263f7c46f1d71a5fdbe82d439d3c925e682d2580c6e9cb0d8e9c0c2ed"
+GOLDEN_RETRY_SHA256 = "1619b0d0d93440b13d1c14ba6c5ac48b9c5876e86a2623f2b79642735bb9fe5c"
 # 13,000-byte posting text and resume plus a 400-char validation error:
 # the three ``_MAX_PROMPT_*`` bounds (12_000 / 12_000 / 300) produce this exact prompt.
-GOLDEN_BOUNDED_SHA256 = "a6e7e474e8df20575afe8e10a78847f9dd2cef99b6725b973377aff5d800f0e8"
-GOLDEN_BOUNDED_LEN = 54_477
+GOLDEN_BOUNDED_SHA256 = "9082a1654be50a64823336946530a347d165b24e8a791bc9cafaa1e211e8c643"
+GOLDEN_BOUNDED_LEN = 54_463
 
 # Digest of the shipped ``assess.md`` bytes; bump ONLY when the template changes on purpose.
 # assess-prompt-v2 (v0.1.9) INTENTIONAL CHANGE: bumped for the rewritten body (see above).
@@ -266,7 +266,7 @@ GOLDEN_BOUNDED_LEN = 54_477
 # (``requirement_weights``). The rules are every prompt's, so every golden above was re-captured (EXECUTED, from
 # ``render_assess_prompt`` on the same fixed inputs) and v7 became v8 for every work mode. Live eval, before and
 # after: ``tests/evals/run_assess_rules_eval.py --matrix``.
-SHIPPED_INSTRUCTIONS_DIGEST = "sha256:abe46e6ce80b7bfad348598b3f8331d76e66840eb70a07ba755237a56a6e71c2"
+SHIPPED_INSTRUCTIONS_DIGEST = "sha256:bf65bd8ab5405c4ef149356523212ad320f855dcc3986e155b00ae08154555ca"
 SHIPPED_PROMPT_VERSION = "assess-prompt-v9"
 
 
