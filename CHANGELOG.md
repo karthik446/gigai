@@ -35,6 +35,21 @@ mechanics here. Those belong in the internal changelog.
 Speed: saves and the first Jobs load of a day on a store with a lot of finished work. Work in progress;
 the notes are written as the changes land.
 
+- **Faster: saving no longer takes minutes once the background pipeline has finished jobs.** Saving
+  your preferences, renaming a profile, adding a resume, editing a master resume line your profiles
+  show, or answering a question many jobs asked made Scout check every finished job for changes, and
+  each job's check read the same profile, answers and master resume again. Measured on a large store
+  with 100 finished jobs per profile, on a busy machine: a rename took 166 s and saving preferences
+  380 s. The check now reads what the jobs share once: the same rename and the same save of
+  preferences take about 2 s each, an answer to a question 298 jobs asked about 7 s where it took
+  282 s, a master resume line both profiles show about 9 s where it took 226 s, and
+  `gigai scout resume add` about 5 s where it took 100 s. Which jobs run again after a change, and the
+  limits on them (10 jobs per change, the daily cap), are what they were. The seconds that remain are
+  the store's own writes, which later notes of this version cover.
+- **Faster: the pipeline status.** `GET /api/pipeline`, which the Background pipeline panel in
+  Settings reads, looked up the project once for every job it lists (up to 200); it now looks it up
+  once.
+
 ### 0.1.10.10
 
 A fix for 0.1.10.9: `gigai scout new` stopped with an error on the first run after an update when
