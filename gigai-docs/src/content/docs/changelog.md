@@ -238,13 +238,13 @@ things still take more than a second (see "Still slower than one second"): the n
   completed, not lost, and the next save works. On a healthy home it reports "nothing to repair" and
   changes no file, and it can run beside a running Scout server. GigAI does not run it on its own, not
   when the server starts and not before a save.
-  How you learn about it depends on when the crash came. Before the save's files were written: the
-  refused save ends in one line that names the command with your `--home` (`next_action` in `--json`),
-  and the API answers with the same text, the code `journal_reconciliation_required` and `next_action`
-  instead of `internal_error`. After the files were written: the error is still a traceback (the API
-  still says "an internal error occurred"), but its last line now names the command, and plain
-  `gigai doctor` fails on `journal.index` with the command in its remediation (`--json`). Making that
-  second case as plain as the first is not done yet.
+  How you learn about it: the refused save (and, when the crash came after the save's files were
+  written, the refused read too) ends in one line that names the command with your `--home`
+  (`next_action` in `--json`), and the API answers with the same text, the code
+  `journal_reconciliation_required` and `next_action` instead of `internal_error`. When the crash came
+  after the files were written, plain `gigai doctor` also fails on `journal.index` with the command in
+  its remediation (`--json`). The command checks that each workpad's ownership markers name the folder
+  it is in, and refuses one where they do not, saying which marker differs.
 
 #### For agents
 
