@@ -95,6 +95,24 @@ def _job(home_root: Path, target: Path, job_url: str, profile_id: str | None) ->
         raise _refused(exc) from exc
 
 
+def default_profile(home_root: Path, target: Path, job_url: str, profile_id: str | None = None) -> str | None:
+    """THE profile a job command acts on when none is named (brief, pick, suggestions AND resume store).
+
+    ``profile_id`` given: it, unchanged.  Otherwise the profile whose assessment of the job is newest
+    (``job_brief.stored_job``); two profiles with a stored resume for the job refuse (``profile_ambiguous``).
+    A job with no stored assessment answers ``None`` (the caller's own default and refusals stand).
+    """
+
+    if profile_id:
+        return profile_id
+    try:
+        return job_brief.stored_job(home_root, target, job_url, None).profile_id
+    except job_brief.BriefError as exc:
+        if exc.code == "assessment_missing":
+            return None
+        raise _refused(exc) from exc
+
+
 def suggestion_ids(value: object) -> tuple[str, ...]:
     """``sg-1,sg-3`` (or a list of ids) as ids, in order, each once; ``invalid_value`` for anything that is not ``sg-<n>``."""
 
@@ -140,8 +158,19 @@ def _missing(job: job_brief.StoredJob) -> JobActionError:
     )
 
 
-def list_suggestions(home_root: Path, target: Path, job_url: str, *, profile_id: str | None = None, status: str | None = None) -> dict[str, object]:
-    """The suggestions of one job as they are stored; ``status`` keeps one of open, done, dismissed. Read only."""
+#: What the OPEN read adds to the suggestions (``GET /api/jobs/suggestions``, the page): ``pick_view``'s stored view.
+OPEN_KEYS: tuple[str, ...] = ("verdict", "stale", "picked", "problems", "added_by_code", "conflicts", "selection_error", "proposed", "selected_lines", "requirements")
+
+
+def list_suggestions(
+    home_root: Path, target: Path, job_url: str, *, profile_id: str | None = None, status: str | None = None, with_view: bool = False,
+) -> dict[str, object]:
+    """The suggestions of one job as they are stored; ``status`` keeps one of open, done, dismissed. Read only.
+
+    ``with_view``: also the job's stored view for the page (SPEC 2.4, opening a job): the derived ``stale`` list, the
+    selection (``picked``: who, pages, max pages), its ``conflicts``, the ``proposed`` selection (the line ids of each side
+    for Compare) and the requirement ``requirements`` rows. Nothing is recomputed and nothing is written.
+    """
 
     if status is not None and status not in STATUSES:
         raise JobActionError("invalid_value", "status must be one of: " + ", ".join(STATUSES))
@@ -149,7 +178,11 @@ def list_suggestions(home_root: Path, target: Path, job_url: str, *, profile_id:
     record = store.read_record(_record_path(home_root, target, job))
     if record is None:
         raise _missing(job)
-    return _suggestions_body(record, status=status)
+    body = _suggestions_body(record, status=status)
+    if with_view:
+        view = pick_view(home_root, target, job_url, profile_id=job.profile_id)
+        body.update({key: view[key] for key in OPEN_KEYS})
+    return body
 
 
 def _change(home_root: Path, target: Path, job_url: str, profile_id: str | None, change) -> dict[str, object]:  # noqa: ANN001 - record -> record
@@ -260,14 +293,12 @@ def after_handback(
             if record is None:
                 return None
             rows = [store.RequirementRow(row.id, row.requirement_class, row.status, row.sources) for row in record.requirements]
-            # The selection's own conflicts stay as recorded (what ``use_proposed`` does too): a hand-back does not settle them.
-            conflicts = [
-                store.CheckReason(store.REASON_CONFLICT, item.get("requirement"))
-                for item in (record.selection or {}).get("conflicts", ()) if isinstance(item, Mapping)
-            ]
-            check = store.check_selection(rows, store.printed_ids(response.result), conflicts=conflicts)  # type: ignore[attr-defined]
+            # Recomputed from the STORED resume (SPEC 10.2 item 5): a recorded conflict the resume no longer has is gone.
+            printed = store.printed_ids(response.result)  # type: ignore[attr-defined]
+            selection, conflicts = store.live_selection(record.selection, printed)
+            check = store.check_selection(rows, printed, conflicts=conflicts)
             record = store.with_selection(
-                record, now=when, check=check, selection=record.selection, proposed=record.proposed, selection_error=record.selection_error,
+                record, now=when, check=check, selection=selection, proposed=record.proposed, selection_error=record.selection_error,
             )
             for name in resolves:
                 record = store.resolve_suggestion(record, name, by=by, how=HOW_JOB_RESUME_EDIT, now=when)
@@ -345,7 +376,14 @@ def pick_view(home_root: Path, target: Path, job_url: str, *, profile_id: str | 
         "added_by_code": list(selection.get("added_by_code", ())) if selection is not None else [],  # type: ignore[arg-type]
         "conflicts": list(selection.get("conflicts", ())) if selection is not None else [],  # type: ignore[arg-type]
         "selection_error": record.get("selection_error"),
-        "proposed": None if proposed is None else {key: proposed.get(key) for key in ("picked_by", "fallback", "draft", "made_at", "pages", "conflicts")},
+        # What the page's Compare needs: the master line ids each side prints (names are the master's, by id).
+        "proposed": None if proposed is None else {
+            **{key: proposed.get(key) for key in ("picked_by", "fallback", "draft", "made_at", "pages", "max_pages", "conflicts")},
+            "lines": list(store.recorded_marks(proposed)),
+        },
+        "selected_lines": list(store.recorded_marks(selection)),
+        # The requirement rows as stored (id, class, status, sources, in_resume, coverage): nothing is recomputed.
+        "requirements": [dict(row) for row in record.get("requirements", ()) if isinstance(row, Mapping)],
     }
 
 

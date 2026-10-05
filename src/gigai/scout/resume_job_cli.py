@@ -12,8 +12,8 @@
 * ``store``: the hand-back. The markdown is checked in code and stored as that ONE job's resume, or refused line
   by line (``tailored_resume_edit.attach_edited_resume``; the command adds no check of its own). ``--resolves``
   names the suggestions this edit settles: they are checked BEFORE anything is stored and set to ``done`` after.
-  ``--fit`` asks the check to cut to two pages and record the cut; a GigAI whose check cannot do that answers
-  ``fit_not_available`` and stores nothing. The job is then put through the pipeline, as the old spelling did.
+  ``--fit`` lets code cut a hand-back that is over two pages (SPEC 3.2) and record the cut, which one Restore puts
+  back; without it a resume over two pages is refused (``over_page_limit``). The job is then put through the pipeline, as the old spelling did.
 * ``pick`` (``job_actions``): the job resume as it is stored, who picked it, the gate, the stale list and the
   conflicts; one flag takes one explicit step. No model call in any form.
 * ``suggestions`` (``job_actions``): the job's suggestion record; ``add`` / ``resolve`` / ``dismiss`` say who wrote
@@ -32,7 +32,6 @@ calls it once).
 
 from __future__ import annotations
 
-import inspect
 import json
 from pathlib import Path
 
@@ -180,24 +179,6 @@ def _folder_file(home_root: Path, response: object) -> str | None:
     return None if name is None else _display_path(resumes_folder.resumes_folder(home_root).path / name)
 
 
-def _attach(markdown: str, *, job_url: str, profile_id: str | None, actor: str, source: str | None, fit: bool, home_root: Path, target: Path):
-    """``tailored_resume_edit.attach_edited_resume`` as it stands; ``fit`` only when the check takes it (else ``fit_not_available``)."""
-
-    from .job_resume_port import NotBuilt
-    from .tailored_resume_edit import attach_edited_resume
-
-    extra: dict[str, object] = {}
-    if fit:
-        if "fit" not in inspect.signature(attach_edited_resume).parameters:
-            raise NotBuilt(
-                "fit_not_available",
-                "this GigAI cannot cut a hand-back to two pages yet. Nothing was stored: cut lines yourself and count the pages "
-                "(`gigai scout resume pdf --in FILE --out FILE.pdf --json` prints `pages`)",
-            )
-        extra["fit"] = True
-    return attach_edited_resume(markdown, job_url=job_url, profile_id=profile_id, written_by=actor, source=source, home_root=home_root, target=target, **extra)
-
-
 def store_resume(
     in_file: str, job_url: str, profile_id: str | None, actor: str, source: str | None, out_file: Path | None, home_root: Path, target: Path, as_json: bool,
     *, resolves: str | None = None, fit: bool = False, renamed_from: str | None = None,
@@ -206,7 +187,7 @@ def store_resume(
 
     from . import job_actions, scout_cli
     from .pipeline.runner import pipeline_status, run_once
-    from .tailored_resume_edit import queue_recheck
+    from .tailored_resume_edit import attach_edited_resume, queue_recheck
 
     profile_id = profile_id or None
     try:
@@ -215,10 +196,14 @@ def store_resume(
         _fail(exc, as_json=as_json, fallback="input_file_unreadable")
         return
     try:
+        # ONE default for every command of the job: the profile of its newest assessment (``--profile`` names another).
+        profile_id = job_actions.default_profile(home_root, target, job_url, profile_id)
         names = job_actions.suggestion_ids(resolves)
         # A hand-back that names a suggestion the job does not have stores nothing.
         job_actions.check_resolves(home_root, target, job_url, profile_id, names)
-        attached = _attach(markdown, job_url=job_url, profile_id=profile_id, actor=actor, source=source, fit=fit, home_root=home_root, target=target)
+        attached = attach_edited_resume(
+            markdown, job_url=job_url, profile_id=profile_id, written_by=actor, source=source, home_root=home_root, target=target, fit=fit,
+        )
     except _errors() as exc:
         _fail(exc, as_json=as_json, fallback="scout_resume_store_failed")
         return
@@ -273,6 +258,9 @@ def store_resume(
         stats = tailor_line_stats(response.result)
         click.echo(f"Stored your edited resume for {heading} (written by {response.edited.written_by}):")  # type: ignore[union-attr]
         click.echo(f"  Lines: {response.result.line_count()} ({stats.edited} edited, {stats.copied} copied from your resume, {stats.shown_rewritten} kept rewrites)")
+    length = response.result.length
+    if fit and attached.changed and length is not None and length.leaves_out():
+        click.echo(f"  Cut to {length.pages} of {length.max_pages} pages: {length.trimmed_count()} lines and {len(length.cut)} roles left out; the resume page can put them back.")
     click.echo(f"  Markdown: {response.markdown_path}")
     if folder_file is not None:
         click.echo(f"  In your resumes folder: {folder_file}")
@@ -297,7 +285,7 @@ def store_resume(
 @click.command("store")
 @click.option("--in", "in_file", required=True, help="The edited resume markdown FILE (or - for stdin), in GigAI's resume format.")
 @_JOB_URL
-@click.option("--profile", "profile_id", help="The Scout profile ID the resume is for (default: the selected profile).")
+@click.option("--profile", "profile_id", help="The Scout profile ID the resume is for (default: the profile whose assessment of the job is newest).")
 @_ACTOR
 @click.option("--source", "source", help="Where the edit came from, in your own words (one line).")
 @click.option("--resolves", "resolves", help="The suggestions this edit settles, by id: sg-1,sg-3. They are set to done once the resume is stored.")
@@ -336,7 +324,7 @@ def resume_store_command(
 @click.command("tailor")
 @click.option("--job-url", "job_url", help="The posting URL.")
 @click.option("--in", "in_file", help="Old spelling of `gigai scout resume store --in FILE --job-url URL`: store this edited resume markdown for the job.")
-@click.option("--profile", "profile_id", help="With --in: the Scout profile ID the resume is for (default: the selected profile).")
+@click.option("--profile", "profile_id", help="With --in: the Scout profile ID the resume is for (default: the profile whose assessment of the job is newest).")
 @_ACTOR
 @click.option("--source", "source", help="With --in: where the edit came from, in your own words (one line).")
 @click.option("--out", "out_file", type=click.Path(path_type=Path, dir_okay=False), help="With --in: also write the stored markdown to FILE.")
@@ -509,7 +497,7 @@ def suggestions_list_command(job_url: str, profile_id: str | None, status: str |
     from . import job_actions
 
     _run_suggestions(
-        lambda home_root, target: job_actions.list_suggestions(home_root, target, job_url, profile_id=profile_id or None, status=status),
+        lambda home_root, target: job_actions.list_suggestions(home_root, target, job_url, profile_id=profile_id or None, status=status, with_view=True),
         target_value=target_value, home_value=home_value, as_json=as_json, read_only=True,
     )
 

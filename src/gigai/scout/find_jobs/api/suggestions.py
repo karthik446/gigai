@@ -119,6 +119,7 @@ class JobSuggestionsRoutesMixin:
         try:
             body = job_actions.list_suggestions(
                 self._backend.home_root, target, query["url"], profile_id=query.get("profile_id") or None, status=query.get("status") or None,
+                with_view=True,
             )
         except _ERRORS as exc:
             self._job_route_error(exc)

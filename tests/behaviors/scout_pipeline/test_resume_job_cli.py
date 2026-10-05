@@ -22,7 +22,6 @@ every model call counted) with the small invented master of N2's hand-back tests
 from __future__ import annotations
 
 import hashlib
-import inspect
 import json
 from pathlib import Path
 
@@ -35,7 +34,6 @@ from gigai.scout.pipeline.settings import PIPELINE_ENV
 from gigai.scout.resume_job_cli import TAILOR_IN_RENAMED_LINE, TAILORING_REMOVED_LINE, resume_tailor_removed_command
 from gigai.scout.scout_cli import scout_group
 from gigai.scout.tailored_resume import list_tailored_resumes
-from gigai.scout.tailored_resume_edit import attach_edited_resume
 
 from tests.support.pipeline_fixtures import ANSWER, JOB, POSTING, PipelineFixture, build_pipeline_fixture
 
@@ -275,13 +273,54 @@ def test_the_removed_tailor_command_is_a_typed_exit_that_names_resume_pick_and_s
 # --- --fit and --resolves: checked before anything is stored ------------------------------------------------------
 
 
-def test_fit_is_a_typed_refusal_and_stores_nothing_while_the_check_cannot_cut(fx: PipelineFixture, tmp_path: Path) -> None:
-    if "fit" in inspect.signature(attach_edited_resume).parameters:
-        pytest.skip("the hand-back check takes --fit in this tree: the refusal is gone")
-    error = _refused(fx, "resume", "store", "--in", _file(tmp_path, MASTER), "--job-url", JOB, "--as", "agent", "--fit")
-    assert error["code"] == "fit_not_available"
-    assert "Nothing was stored" in str(error["message"]) and "gigai scout resume pdf --in FILE --out FILE.pdf --json" in str(error["message"])
+def _long_master() -> str:
+    """A master whose every line handed back prints on well over two pages (six roles of sixteen long bullets)."""
+
+    words = "alpha bravo charlie delta echo foxtrot golf hotel india juliet kilo lima mike november oscar papa quebec romeo sierra tango".split()
+    out = ["## Summary", "", "- Engineer with nine years on Python inference services.", "", "## Experience", ""]
+    for role in range(6):
+        out += [f"### {['Northwind Labs', 'Acme Corp', 'Initech', 'Globex', 'Umbrella', 'Hooli'][role]}", f"Staff Engineer | {2023 - 2 * role} - {2025 - 2 * role}" if role else "Staff Engineer | 2023 - Present", ""]
+        for bullet in range(16):
+            out.append(f"- Shipped {words[(bullet + role) % 20]} {words[(bullet * 3 + role) % 20]} {words[(bullet * 7 + 1) % 20]} service work for the {words[bullet % 20]} platform team " + "and kept it running " * 3 + f"item {role}{bullet}.")
+        out.append("")
+    out += ["## Skills", "", "- Platform: Python, Kubernetes, PostgreSQL, Terraform", ""]
+    return "\n".join(out)
+
+
+@pytest.fixture
+def long_fx(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> PipelineFixture:
+    monkeypatch.delenv(PIPELINE_ENV, raising=False)
+    fx = build_pipeline_fixture(tmp_path, monkeypatch, resume=RESUME)
+    source = tmp_path / "long-master.md"
+    source.write_text(_long_master(), encoding="utf-8")
+    assert import_master(home_root=fx.home_root, target=fx.target, source=source, gig_id=fx.gig.resolved.gig_id).status == "created"
+    return fx
+
+
+def test_fit_cuts_an_over_long_handback_by_code_and_records_a_restorable_cut_and_without_it_the_page_limit_refuses(
+    long_fx: PipelineFixture, tmp_path: Path,
+) -> None:
+    fx = long_fx
+    long = _long_master()
+    refused = _refused(fx, "resume", "store", "--in", _file(tmp_path, long), "--job-url", JOB, "--as", "agent")
+    assert refused["code"] == "edited_resume_unsupported" and any(item["code"] == "over_page_limit" for item in refused["problems"])
     assert _stored(fx) == ()
+
+    payload = _store(fx, tmp_path, long, "--fit")
+    (stored,) = _stored(fx)
+    length = stored.result.length
+    assert payload["changed"] is True and length is not None and length.status == "cut" and length.leaves_out()
+    assert length.pages is not None and length.pages <= 2 and not length.over()
+    lines_cut = length.trimmed_count() + len(length.cut)
+    assert lines_cut > 0 and stored.result.line_count() < long.count("\n- ") + long.count("\n### ")
+    # Restorable: one Restore puts every cut line back.
+    from gigai.scout.tailor_length import restore_cut
+
+    assert restore_cut(stored.result).line_count() > stored.result.line_count()
+    # A hand-back that fits two pages is stored whole with --fit: nothing is cut.
+    short = "\n".join(long.split("\n")[:12]) + "\n\n## Skills\n\n- Platform: Python, Kubernetes, PostgreSQL, Terraform\n"
+    assert _store(fx, tmp_path, short, "--fit")["changed"] is True
+    assert _stored(fx)[0].result.length is None
 
 
 def test_a_handback_that_names_a_suggestion_the_job_does_not_have_stores_nothing(fx: PipelineFixture, tmp_path: Path) -> None:
