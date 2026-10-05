@@ -75,7 +75,7 @@ from .call_metrics import KIND_ASSESS, CallMeter
 from .assessment_core import INSTRUCTIONS_DIGEST, PLACEHOLDER_REQUIREMENTS, AssessExtras, AssessJob, build_assess_context
 from .assessment_core import POSTING_INCOMPLETE_MESSAGE, assess_once, assess_prompt_version, constraints_digest
 from .assessment_core import prompt_reads_ids, template_takes
-from . import story_bank
+from . import assess_model, story_bank
 from .find_jobs.assess_contracts import (
     ORIGIN_QUICK_ASSESS,
     AssessmentBody,
@@ -833,6 +833,8 @@ def run_quick_assessment(
         KIND_ASSESS, model_target.value, home_root, target, profile_id=resume.profile_id, job=job.job_identity
     )
     binding = meter.bind(_resolve_binding(active, model_target, home_root=home_root))
+    # 0.1.11 MODELPIN: the evaluated model is asked for, one fallback call when the CLI refuses it (outside the meter: both counted).
+    policy = assess_model.apply(binding, model_target.value)
     try:
         attempt = assess_once(
             binding,
@@ -939,6 +941,8 @@ def run_quick_assessment(
         resume_basis=None if master_input is None else master_input.basis,
         requirements_ref=requirements_ref,
         resume_gate=resume_gate,
+        model_asked=_model_id(policy.asked),
+        model_fallback=policy.fallback,
     )
     # 1. Store the assessment (0110-8-09: a call is ok only when its answer was stored).
     try:

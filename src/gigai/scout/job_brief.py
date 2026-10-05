@@ -144,6 +144,8 @@ class YoursInputs:
     folder: str | None = None
     #: What a resume for this profile is made from (``tailor_master.BASES``).
     basis: str = "master"
+    #: 0.1.11 MODELPIN: ``evaluated_models.ModelNotice.to_json()`` when a model GigAI's accuracy results are not for made the assessment.
+    model_notice: Mapping[str, object] | None = None
 
 
 @dataclass(frozen=True)
@@ -344,6 +346,8 @@ def yours_part(inputs: YoursInputs) -> dict[str, object]:
         "suggestions": [dict(item) for item in inputs.suggestions],
         "sends": {"nothing": SENDS_NOTHING, "assess": SENDS_ASSESS},
     }
+    if inputs.model_notice is not None:
+        part["state"]["model_notice"] = dict(inputs.model_notice)  # type: ignore[index]
     part[ENVELOPE_KEY] = labels_envelope({
         "/resume/markdown": USER_PRIVATE, "/resume/folder": USER_PRIVATE, "/master/entries/*/heading": USER_PRIVATE,
         "/master/entries/*/sublines": USER_PRIVATE, "/master/entries/*/note": USER_PRIVATE, "/master/lines/*/text": USER_PRIVATE,
@@ -430,6 +434,9 @@ def _render_yours(part: Mapping[str, object]) -> str:
         "STATE",
         f"verdict: {state['verdict'] or '(none)'}",
     ]
+    notice = state.get("model_notice")
+    if isinstance(notice, Mapping):
+        out.append(f"{notice['text']} Results: {notice['link']}")
     gate = state["gate"]
     if isinstance(gate, Mapping):
         ready = {True: "yes", False: "no"}.get(gate.get("ready"), "(not checked)")  # type: ignore[arg-type]
@@ -686,7 +693,7 @@ def load_yours(home_root: Path, target: Path, job_url: str, profile_id: str | No
 
     from ..workpad import WorkpadError, resolve_workpad
     from . import profile_records, resumes_folder
-    from .assessment_basis import BasisCheck
+    from .assessment_basis import BasisCheck, assessment_notice
     from .tailor_master import BASIS_MASTER, measure_pages, stored_master, tailoring_basis
     from .tailored_resume import LENGTH_RULE, read_tailored_resume, tailor_sources, tailored_resume_path
 
@@ -732,6 +739,7 @@ def load_yours(home_root: Path, target: Path, job_url: str, profile_id: str | No
         max_pages=LENGTH_RULE.max_pages,
         folder=resumes_folder.resumes_folder(home_root).shown,
         basis=basis,
+        model_notice=None if (notice := assessment_notice(assessment)) is None else notice.to_json(),  # type: ignore[arg-type]
     )
 
 

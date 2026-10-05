@@ -115,7 +115,8 @@ class ClaudeCLIAdapter:
                         f"upgrade Claude Code ({exc})"
                     ) from exc
                 raise
-        text, model, usage = _parse_claude_json(output.stdout, request.model, model_usage_fallback=self._lean)
+        # MODELPIN: every mode names the model that answered from ``modelUsage`` (an assessment is stored with it).
+        text, model, usage = _parse_claude_json(output.stdout, request.model, model_usage_fallback=True, joined=self._lean)
         return InvocationResult(
             status="success",
             output_text=text,
@@ -128,7 +129,7 @@ class ClaudeCLIAdapter:
 
 
 def _parse_claude_json(
-    stdout: str, requested_model: str, *, model_usage_fallback: bool = False
+    stdout: str, requested_model: str, *, model_usage_fallback: bool = False, joined: bool = True
 ) -> tuple[str, str, Mapping[str, object]]:
     try:
         payload: Any = json.loads(stdout)
@@ -146,9 +147,20 @@ def _parse_claude_json(
     if model_usage_fallback and not isinstance(payload.get("model"), str) and isinstance(model_usage, dict) and model_usage:
         # Lean mode only: ``claude -p --output-format json`` names the model
         # that actually ran as the ``modelUsage`` key, not a ``model`` field.
-        model = ",".join(str(name) for name in model_usage)
+        model = ",".join(str(name) for name in model_usage) if joined else _answering_model(model_usage)
     usage = payload.get("usage") if isinstance(payload.get("usage"), dict) else {}
     return text, model, usage
+
+
+def _answering_model(model_usage: Mapping[str, object]) -> str:
+    """The ``modelUsage`` key that wrote the most output (the first on a tie): the model that answered."""
+
+    def written(name: object) -> int:
+        entry = model_usage[name]  # type: ignore[index]
+        tokens = entry.get("outputTokens") if isinstance(entry, dict) else None
+        return tokens if type(tokens) is int else 0
+
+    return str(max(model_usage, key=written))
 
 
 def _reported_cost(stdout: str) -> float | None:

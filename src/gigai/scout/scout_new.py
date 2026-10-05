@@ -129,6 +129,7 @@ from ..canonical import digest_imported_bytes
 from . import fit as fit_rules
 from . import postings
 from .assess_causes import cause_fields, failure_lines
+from .evaluated_models import notice_lines
 from .data_labels import ENVELOPE_KEY, PUBLIC_UNTRUSTED, UNTRUSTED_TEXT_RULE, USER_PRIVATE, assert_not_mixed, labels_envelope
 from .pipeline.busy import LiveBatch, assess_batch
 from .pipeline.store import MODEL_STEPS, PipelineStore, PipelineStoreError, PostingRecord, pipeline_path
@@ -509,6 +510,7 @@ def _assess(
     from .find_jobs.assess_contracts import ORIGIN_JOB_PAGE, AssessJobInput, AssessRequest, AssessResumeInput, ResolvedJob
     from ..workpad import committed_read_cache
     from .find_jobs.market_acquisition import AcquireLimits
+    from .assessment_basis import assessment_notice
     from .quick_assess import ERROR_NOT_STORED, QuickAssessError, run_quick_assessment
 
     marked = nullcontext(live) if live is not None else assess_batch(home_root, target)
@@ -516,6 +518,7 @@ def _assess(
     failed: list[dict[str, object]] = []
     stop: list[str] = []
     fetched: list[str] = []
+    notices: dict[str, dict[str, object]] = {}  # MODELPIN: one per model that is not an evaluated one, by model
     pace = threading.Lock()
     clients: list[object] = []
     next_request = [0.0]
@@ -584,6 +587,9 @@ def _assess(
         # 0110-8-09: "assessed" means a record the grid will read, under THIS job and profile; anything else is a named failure.
         if stored.job.job_identity != job or stored.resume.profile_id != profile_id or not Path(stored.stored_path or "").is_file():
             return (ERROR_NOT_STORED, None)
+        notice = assessment_notice(stored)
+        if notice is not None:
+            notices[notice.model] = notice.to_json()
         return None
 
     # PL5: the batch is live work the pipeline's runner yields to (DESIGN 7), like an "assess all" batch.
@@ -604,10 +610,13 @@ def _assess(
                 failure["reason"] = reason
             failure.update(cause_fields(code))  # 0110-10-13: did a model call start, may it have used tokens, what next
             failed.append(failure)
-    return {
+    batch: dict[str, object] = {
         "requested": len(pairs), "assessed": len(pairs) - len(failed), "failed": failed, "stopped": stop[0] if stop else None,
         "fetched_on_demand": len(fetched),
     }
+    if notices:
+        batch["model_notices"] = [notices[model] for model in sorted(notices)]  # omitted when every assessment was by an evaluated model
+    return batch
 
 
 # --- progress (0110-8-14) -------------------------------------------------------------------
@@ -1467,6 +1476,7 @@ def render(response: Mapping[str, object]) -> str:
         for item in assessed["failed"]:  # type: ignore[union-attr]
             lines.append(f"  not assessed ({_failure_code(item)}): {item['job_identity']}")
         lines.extend(failure_lines(assessed["failed"]))  # 0110-10-13
+        lines.extend(notice_lines(assessed))
         lines.extend(_next_lines(assessed, "not assessed yet"))
     reassessed = response.get("reassessed")
     if isinstance(reassessed, Mapping):
@@ -1474,6 +1484,7 @@ def render(response: Mapping[str, object]) -> str:
         for item in reassessed["failed"]:  # type: ignore[union-attr]
             lines.append(f"  not re-assessed ({_failure_code(item)}): {item['job_identity']}")
         lines.extend(failure_lines(reassessed["failed"]))
+        lines.extend(notice_lines(reassessed))
         lines.extend(_next_lines(reassessed, "with only an old assessment"))
     question = response.get("question")
     if isinstance(question, Mapping):
