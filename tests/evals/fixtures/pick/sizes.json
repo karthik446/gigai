@@ -1,0 +1,69 @@
+{
+ "note": "SYNTHETIC. master.md is the LARGE master. Each smaller size is the large one without the ids listed (an entry id drops the entry and its lines). Medium is the master as it was before richer project content and older detail were added; small fits two pages with nothing cut.",
+ "today": "2026-10-03",
+ "sizes": {
+  "large": {
+   "drop": []
+  },
+  "medium": {
+   "drop": [
+    "p-relay",
+    "p-host",
+    "loom-07",
+    "loom-08",
+    "eval-05",
+    "pgq-04",
+    "trail-04",
+    "pel-07",
+    "pel-08",
+    "pel-09",
+    "pel-10",
+    "pel-11",
+    "ost-06",
+    "ost-07",
+    "ost-08",
+    "tar-05",
+    "tar-06"
+   ]
+  },
+  "small": {
+   "drop": [
+    "p-relay",
+    "p-host",
+    "p-pgq",
+    "p-trail",
+    "r-tar",
+    "loom-04",
+    "loom-05",
+    "loom-06",
+    "loom-07",
+    "loom-08",
+    "eval-03",
+    "eval-04",
+    "eval-05",
+    "hal-06",
+    "qui-04",
+    "bra-03",
+    "pel-03",
+    "pel-04",
+    "pel-05",
+    "pel-06",
+    "pel-07",
+    "pel-08",
+    "pel-09",
+    "pel-10",
+    "pel-11",
+    "ost-03",
+    "ost-04",
+    "ost-05",
+    "ost-06",
+    "ost-07",
+    "ost-08",
+    "sum-lead",
+    "o-mentor",
+    "o-meetup",
+    "o-tf"
+   ]
+  }
+ }
+}

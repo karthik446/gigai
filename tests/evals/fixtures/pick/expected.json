@@ -1,0 +1,710 @@
+{
+ "note": "SYNTHETIC labels for the pick eval (0110-10-15), written by the worker by reading every master line against every posting line; TO BE REVIEWED by a person (the report says how each was derived). Per posting: the requirement list (a posting line each; a years-of-experience line is not listed: role dates evidence it and every selection prints them), and for each requirement the master lines that support it: 'strong' (the strongest evidence: any ONE of them shown is the strongest evidence kept) and 'support' (weaker evidence that still covers the requirement). 'must_keep': groups of lines a reviewer would not accept this resume without; a group is satisfied by any one of its lines. A line that a master size does not hold is ignored for that size; a requirement with no line left is not supportable there and is not counted.",
+ "postings": {
+  "agentic": {
+   "type": "agentic / AI platform",
+   "summary": [
+    "sum-ai"
+   ],
+   "requirements": [
+    {
+     "id": "A1",
+     "text": "Design and operate the agent runtime in production: tool calling with typed tool contracts, retries and budgets.",
+     "mandatory": true,
+     "strong": [
+      "hal-01"
+     ],
+     "support": [
+      "loom-01",
+      "relay-03"
+     ]
+    },
+    {
+     "id": "A2",
+     "text": "Build multi-agent workflows in which a planner agent hands work to specialist agents and merges their results.",
+     "mandatory": true,
+     "strong": [
+      "relay-01",
+      "loom-01"
+     ],
+     "support": []
+    },
+    {
+     "id": "A3",
+     "text": "Make long agent runs durable: checkpointed state, so a workflow resumes after a crash or a restart.",
+     "mandatory": true,
+     "strong": [
+      "relay-02",
+      "loom-02"
+     ],
+     "support": [
+      "relay-03"
+     ]
+    },
+    {
+     "id": "A4",
+     "text": "Own LLM evaluation: regression suites that score every prompt change against labelled cases before release.",
+     "mandatory": true,
+     "strong": [
+      "hal-03"
+     ],
+     "support": [
+      "loom-04",
+      "eval-01",
+      "eval-02",
+      "eval-03",
+      "eval-05"
+     ]
+    },
+    {
+     "id": "A5",
+     "text": "Build human checkpoints and approval gates before any irreversible action.",
+     "mandatory": true,
+     "strong": [
+      "loom-03",
+      "relay-01"
+     ],
+     "support": []
+    },
+    {
+     "id": "A6",
+     "text": "Build retrieval over customer documents with pgvector or a similar vector store.",
+     "mandatory": true,
+     "strong": [
+      "hal-04"
+     ],
+     "support": []
+    },
+    {
+     "id": "A7",
+     "text": "Control LLM cost with prompt caching and model routing.",
+     "mandatory": true,
+     "strong": [
+      "hal-05",
+      "relay-06"
+     ],
+     "support": []
+    },
+    {
+     "id": "A8",
+     "text": "Strong Python and TypeScript.",
+     "mandatory": true,
+     "strong": [
+      "hal-03",
+      "loom-01",
+      "relay-01",
+      "trail-01"
+     ],
+     "support": [
+      "eval-01"
+     ]
+    },
+    {
+     "id": "A9",
+     "text": "Experience operating services on Kubernetes.",
+     "mandatory": true,
+     "strong": [
+      "hal-06",
+      "qui-01"
+     ],
+     "support": [
+      "pgq-04"
+     ]
+    },
+    {
+     "id": "A10",
+     "text": "A record of leading a team and mentoring senior engineers.",
+     "mandatory": true,
+     "strong": [
+      "hal-02",
+      "hal-07"
+     ],
+     "support": [
+      "bra-03"
+     ]
+    },
+    {
+     "id": "A11",
+     "text": "Defending agents against prompt injection and unsafe tool use.",
+     "mandatory": false,
+     "strong": [
+      "relay-05"
+     ],
+     "support": [
+      "loom-08"
+     ]
+    },
+    {
+     "id": "A12",
+     "text": "Tracing and replay for agent runs, with token and cost accounting.",
+     "mandatory": false,
+     "strong": [
+      "trail-01",
+      "relay-04"
+     ],
+     "support": [
+      "loom-05",
+      "trail-04"
+     ]
+    },
+    {
+     "id": "A13",
+     "text": "Experience with the Model Context Protocol.",
+     "mandatory": false,
+     "strong": [
+      "loom-07"
+     ],
+     "support": []
+    },
+    {
+     "id": "A14",
+     "text": "Open-source work that other developers use.",
+     "mandatory": false,
+     "strong": [
+      "relay-07",
+      "loom-06"
+     ],
+     "support": [
+      "eval-01",
+      "eval-04"
+     ]
+    }
+   ],
+   "must_keep": [
+    [
+     "hal-01"
+    ],
+    [
+     "hal-03"
+    ],
+    [
+     "hal-04"
+    ],
+    [
+     "loom-01"
+    ],
+    [
+     "relay-01"
+    ],
+    [
+     "relay-02"
+    ]
+   ]
+  },
+  "backend": {
+   "type": "backend platform",
+   "summary": [
+    "sum-backend"
+   ],
+   "requirements": [
+    {
+     "id": "B1",
+     "text": "Design and operate distributed backend services in Go or Java that stay available under heavy load.",
+     "mandatory": true,
+     "strong": [
+      "qui-01",
+      "bra-01"
+     ],
+     "support": [
+      "pgq-01",
+      "ost-01",
+      "pel-01",
+      "hal-06"
+     ]
+    },
+    {
+     "id": "B2",
+     "text": "Own the event backbone on Kafka, with exactly-once handling where money is involved.",
+     "mandatory": true,
+     "strong": [
+      "qui-02"
+     ],
+     "support": [
+      "pel-11"
+     ]
+    },
+    {
+     "id": "B3",
+     "text": "Model and tune data on PostgreSQL for write-heavy workloads.",
+     "mandatory": true,
+     "strong": [
+      "bra-01"
+     ],
+     "support": [
+      "pgq-01",
+      "pgq-02",
+      "hal-04",
+      "relay-02"
+     ]
+    },
+    {
+     "id": "B4",
+     "text": "Design public APIs over REST and gRPC that are safe to retry.",
+     "mandatory": true,
+     "strong": [
+      "bra-02"
+     ],
+     "support": [
+      "ost-07",
+      "relay-03"
+     ]
+    },
+    {
+     "id": "B5",
+     "text": "Define SLOs with the teams that run on the platform and reduce customer-visible incidents.",
+     "mandatory": true,
+     "strong": [
+      "qui-03"
+     ],
+     "support": [
+      "hal-06"
+     ]
+    },
+    {
+     "id": "B6",
+     "text": "Production experience with Elasticsearch or another search engine: indexing pipelines at scale.",
+     "mandatory": true,
+     "strong": [
+      "pel-01"
+     ],
+     "support": [
+      "pel-03",
+      "pel-05",
+      "pel-09"
+     ]
+    },
+    {
+     "id": "B7",
+     "text": "A record of leading projects across teams and mentoring engineers.",
+     "mandatory": true,
+     "strong": [
+      "hal-02",
+      "bra-03"
+     ],
+     "support": [
+      "hal-07",
+      "pel-06",
+      "pel-10"
+     ]
+    },
+    {
+     "id": "B8",
+     "text": "Payments or ledger experience; PCI DSS.",
+     "mandatory": false,
+     "strong": [
+      "bra-01",
+      "bra-03"
+     ],
+     "support": [
+      "bra-02"
+     ]
+    },
+    {
+     "id": "B9",
+     "text": "Experience building job queues or workflow engines.",
+     "mandatory": false,
+     "strong": [
+      "pgq-01",
+      "relay-01"
+     ],
+     "support": [
+      "pgq-02",
+      "relay-02",
+      "relay-08",
+      "loom-02"
+     ]
+    },
+    {
+     "id": "B10",
+     "text": "Redis.",
+     "mandatory": false,
+     "strong": [
+      "ost-04"
+     ],
+     "support": []
+    }
+   ],
+   "must_keep": [
+    [
+     "qui-01"
+    ],
+    [
+     "qui-02"
+    ],
+    [
+     "qui-03"
+    ],
+    [
+     "bra-01"
+    ],
+    [
+     "bra-02"
+    ],
+    [
+     "pel-01"
+    ]
+   ],
+   "older_role_only": [
+    "B6"
+   ]
+  },
+  "sre": {
+   "type": "SRE / infra",
+   "summary": [
+    "sum-backend"
+   ],
+   "requirements": [
+    {
+     "id": "S1",
+     "text": "Operate Kubernetes clusters across AWS and GCP for services with strict availability targets.",
+     "mandatory": true,
+     "strong": [
+      "qui-01",
+      "hal-06"
+     ],
+     "support": [
+      "pgq-04",
+      "pel-05"
+     ]
+    },
+    {
+     "id": "S2",
+     "text": "Manage infrastructure as code with Terraform, with policy checks before changes are applied.",
+     "mandatory": true,
+     "strong": [
+      "qui-04"
+     ],
+     "support": [
+      "pgq-04",
+      "o-tf"
+     ]
+    },
+    {
+     "id": "S3",
+     "text": "Define SLOs and build burn-rate alerting on Prometheus and Grafana.",
+     "mandatory": true,
+     "strong": [
+      "qui-03"
+     ],
+     "support": [
+      "pgq-03"
+     ]
+    },
+    {
+     "id": "S4",
+     "text": "Lead the on-call rotation and incident response, and write the runbooks the rotation uses.",
+     "mandatory": true,
+     "strong": [
+      "hal-06",
+      "pel-10"
+     ],
+     "support": [
+      "hal-02",
+      "qui-03",
+      "pel-06"
+     ]
+    },
+    {
+     "id": "S5",
+     "text": "Build and speed up the CI/CD pipelines that every team deploys through.",
+     "mandatory": true,
+     "strong": [
+      "ost-08",
+      "pel-08"
+     ],
+     "support": []
+    },
+    {
+     "id": "S6",
+     "text": "Run load tests before releases to find capacity limits.",
+     "mandatory": true,
+     "strong": [
+      "ost-05"
+     ],
+     "support": [
+      "relay-08",
+      "pgq-02"
+     ]
+    },
+    {
+     "id": "S7",
+     "text": "Operating Kafka clusters.",
+     "mandatory": false,
+     "strong": [
+      "pel-11"
+     ],
+     "support": [
+      "qui-02"
+     ]
+    },
+    {
+     "id": "S8",
+     "text": "Distributed tracing with OpenTelemetry.",
+     "mandatory": false,
+     "strong": [
+      "trail-01"
+     ],
+     "support": []
+    },
+    {
+     "id": "S9",
+     "text": "GPU autoscaling for model serving.",
+     "mandatory": false,
+     "strong": [
+      "hal-06"
+     ],
+     "support": []
+    }
+   ],
+   "must_keep": [
+    [
+     "qui-01"
+    ],
+    [
+     "qui-03"
+    ],
+    [
+     "qui-04"
+    ],
+    [
+     "hal-06"
+    ],
+    [
+     "ost-05"
+    ],
+    [
+     "ost-08",
+     "pel-08"
+    ]
+   ],
+   "older_role_only": [
+    "S5",
+    "S6"
+   ]
+  },
+  "leadership": {
+   "type": "leadership-heavy",
+   "summary": [
+    "sum-lead"
+   ],
+   "requirements": [
+    {
+     "id": "L1",
+     "text": "Lead a team of engineers and own its roadmap from design review to operations.",
+     "mandatory": true,
+     "strong": [
+      "hal-02"
+     ],
+     "support": [
+      "bra-03"
+     ]
+    },
+    {
+     "id": "L2",
+     "text": "Mentor senior engineers and grow them to staff-level scope.",
+     "mandatory": true,
+     "strong": [
+      "hal-07"
+     ],
+     "support": [
+      "o-mentor",
+      "pel-06",
+      "pel-10"
+     ]
+    },
+    {
+     "id": "L3",
+     "text": "Set technical direction for a platform that many internal teams build on.",
+     "mandatory": true,
+     "strong": [
+      "hal-01"
+     ],
+     "support": [
+      "eval-04",
+      "qui-01"
+     ]
+    },
+    {
+     "id": "L4",
+     "text": "Raise the reliability bar: SLOs, on-call practice and fewer customer-visible incidents.",
+     "mandatory": true,
+     "strong": [
+      "qui-03"
+     ],
+     "support": [
+      "hal-06",
+      "pel-10"
+     ]
+    },
+    {
+     "id": "L5",
+     "text": "Lead cross-team delivery of compliance work with security and legal partners.",
+     "mandatory": true,
+     "strong": [
+      "bra-03"
+     ],
+     "support": []
+    },
+    {
+     "id": "L6",
+     "text": "Represent engineering in public: conference talks, community and open-source work.",
+     "mandatory": true,
+     "strong": [
+      "o-talk"
+     ],
+     "support": [
+      "o-meetup",
+      "relay-07",
+      "loom-06"
+     ]
+    },
+    {
+     "id": "L7",
+     "text": "Hands-on background in distributed systems at scale.",
+     "mandatory": true,
+     "strong": [
+      "qui-01",
+      "qui-02",
+      "bra-01"
+     ],
+     "support": [
+      "hal-06",
+      "pel-01"
+     ]
+    },
+    {
+     "id": "L8",
+     "text": "Experience introducing AI tooling to engineering teams.",
+     "mandatory": false,
+     "strong": [
+      "hal-01",
+      "eval-04"
+     ],
+     "support": [
+      "hal-03"
+     ]
+    }
+   ],
+   "must_keep": [
+    [
+     "hal-01"
+    ],
+    [
+     "hal-02"
+    ],
+    [
+     "hal-07"
+    ],
+    [
+     "qui-03"
+    ],
+    [
+     "bra-03"
+    ],
+    [
+     "o-talk"
+    ]
+   ]
+  },
+  "weakfit": {
+   "type": "weak fit",
+   "summary": [
+    "sum-ai",
+    "sum-backend",
+    "sum-lead"
+   ],
+   "requirements": [
+    {
+     "id": "W1",
+     "text": "Lead the architecture of the iOS app in Swift and SwiftUI.",
+     "mandatory": true,
+     "strong": [],
+     "support": []
+    },
+    {
+     "id": "W2",
+     "text": "Own app performance: launch time, scroll smoothness and crash-free sessions.",
+     "mandatory": true,
+     "strong": [],
+     "support": []
+    },
+    {
+     "id": "W3",
+     "text": "Build the mobile CI/CD pipeline and speed up builds.",
+     "mandatory": true,
+     "strong": [
+      "ost-08"
+     ],
+     "support": [
+      "pel-08"
+     ]
+    },
+    {
+     "id": "W4",
+     "text": "Work with backend teams on the REST and gRPC APIs the iOS and Android clients call.",
+     "mandatory": true,
+     "strong": [
+      "ost-07"
+     ],
+     "support": [
+      "bra-02"
+     ]
+    },
+    {
+     "id": "W5",
+     "text": "Mentor engineers and set technical direction for mobile.",
+     "mandatory": true,
+     "strong": [
+      "hal-02",
+      "hal-07"
+     ],
+     "support": [
+      "pel-06"
+     ]
+    },
+    {
+     "id": "W6",
+     "text": "Experience in payments or banking; PCI DSS awareness.",
+     "mandatory": true,
+     "strong": [
+      "bra-01",
+      "bra-03"
+     ],
+     "support": [
+      "bra-02"
+     ]
+    },
+    {
+     "id": "W7",
+     "text": "Kotlin and Android experience.",
+     "mandatory": false,
+     "strong": [
+      "ost-06",
+      "ost-07"
+     ],
+     "support": []
+    }
+   ],
+   "must_keep": [
+    [
+     "bra-01",
+     "bra-03"
+    ],
+    [
+     "bra-02"
+    ],
+    [
+     "ost-07"
+    ],
+    [
+     "hal-02",
+     "hal-07"
+    ]
+   ],
+   "older_role_only": [
+    "W3",
+    "W4"
+   ]
+  }
+ }
+}

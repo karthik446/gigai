@@ -7,7 +7,9 @@ postings) and nothing calls a model: the one model-shaped thing, a stored assess
 made with the scripted test transport. Every CLI test runs against a temp ``--home``.
 
 The golden cases pin ``today`` to 2026-10-03 (which roles are "old" depends on the year); what they
-expect is ``selection-golden.json``, written for ``SELECTOR_VERSION`` ``sel-1``.
+expect is ``selection-golden.json``, written for ``SELECTOR_VERSION`` ``sel-2`` (0110-10-15: requirement
+coverage, then evidence strength, then pins, recency only as the tie-break; the Skills section kept whole).
+The labelled eval of that rule is ``tests/evals/run_pick_eval.py`` (``test_pick_eval.py``).
 """
 
 from __future__ import annotations
@@ -123,7 +125,18 @@ def test_a_job_selection_from_the_whole_master_fits_two_pages(master: Master, go
     printed = [line for line in _shown_lines(selected.markdown) if line != ", ".join(selected.skills)]
     assert printed and all(line in texts for line in printed)
     assert [master.items[item_id].text for item_id in selected.item_ids()] == printed
-    assert set(selected.skills) <= set(master.skills())
+    # The Skills section: this master lists 79 names, more than prints whole (``SKILLS_WHOLE``). What the posting
+    # asks for and what the shown lines name are all there; only names past that count that nothing asks for
+    # were cut, and each cut is on the record.
+    left_out = [skill for skill in selected.skill_reasons if not skill.picked]
+    assert set(selected.skills) <= set(master.skills()) and ms.SKILLS_WHOLE <= len(selected.skills) < 79
+    assert left_out and {skill.code for skill in left_out} == {"cut_for_length"}
+    assert {skill.name for skill in left_out} == {cut.id for cut in selected.cut_for_length if cut.kind == "skill"}
+    assert {skill.code for skill in selected.skill_reasons if skill.picked and skill.code != "listed"} <= {"posting_must", "posting_nice", "named_by_line"}
+    shown_text = " ".join(master.items[item_id].text for item_id in selected.item_ids())
+    assert not any(mentions(shown_text, skill.name) or mentions(_posting(posting_id).text, skill.name) for skill in left_out)
+    assert selected.conflicts == () and [conflict for conflict in expected["conflicts"]] == []
+    assert {key: list(value) for key, value in selected.evidence_for.items()} == expected["evidence_for"]
     # Every must-have of the posting that the master can show at all is on the resume.
     assert selected.coverage["must_missing"] == selected.coverage["must_missing_in_master"] == ()
     assert selected.coverage["nice_missing"] == ()
@@ -202,44 +215,43 @@ def test_each_posting_gets_the_summary_its_title_names(master: Master) -> None:
     assert _selected(master, "profile-swe", None).summary == ("sum-backend",)
 
 
-# --- the cut order (decision 1) ---------------------------------------------------------------
-
-
-def _cut_stage(master: Master, cut: ms.LengthCut) -> tuple[int, int]:
-    """Where a cut belongs in the one allowed order: (0, the old role's rank oldest first), then (1, 0) recent
-    roles and projects, then (2, 0) Other lines."""
-
-    if cut.kind == "other":
-        return (2, 0)
-    entry_id = cut.id if cut.kind == "role" else master.items[cut.id].entry_id
-    return (0, OLD_ROLES.index(entry_id)) if entry_id in OLD_ROLES else (1, 0)
+# --- the cut order (0110-10-15: value for the posting, never age alone) ------------------------
 
 
 @pytest.mark.parametrize("profile_id", PROFILE_IDS)
 @pytest.mark.parametrize("posting_id", POSTING_IDS)
-def test_recent_roles_always_appear_and_the_oldest_roles_go_first(master: Master, profile_id: str, posting_id: str) -> None:
+def test_recent_roles_always_appear_and_what_supports_nothing_goes_first(master: Master, profile_id: str, posting_id: str) -> None:
     selected = _selected(master, profile_id, posting_id)
 
-    # Recent roles are always present, at or above their floors (3 bullets for the newest, 2 for the others).
+    # The page constraint: every recent role is present, and no role or project is printed without a bullet.
     for index, role in enumerate(RECENT_ROLES):
-        assert len(selected.entries[role]) >= ms.FLOORS[index], role
-    # The cuts were made oldest role first; a role is dropped only after its own bullets; nothing recent is
-    # touched before every old role is finished.
-    stages = [_cut_stage(master, cut) for cut in selected.cut_for_length]
-    assert stages == sorted(stages)
-    for role in OLD_ROLES:
-        ids = [cut.id for cut in selected.cut_for_length]
-        if role in ids:
-            own = [index for index, cut in enumerate(selected.cut_for_length) if cut.kind == "bullet" and master.items[cut.id].entry_id == role]
-            assert own and max(own) < ids.index(role)
-            assert role not in selected.entries and role in selected.roles_dropped
-    # The two oldest roles are gone in every case; each cut says why, in the words the user reads.
-    assert {"r-tes", "r-bri"} <= set(selected.roles_dropped)
+        assert len(selected.entries[role]) >= ms.FLOORS[index] >= 1, role
+    assert all(bullets for entry_id, bullets in selected.entries.items() if master.entries[entry_id].section != "education")
+    # No requirement's evidence was cut, and nothing mandatory is left without a line: no conflict.
+    cut = {item.id for item in selected.cut_for_length}
+    evidence = {requirement.supporters[0] for requirement in selected.requirements if requirement.mandatory and requirement.supporters}
+    assert evidence and not evidence & cut and evidence <= set(selected.item_ids())
+    assert selected.conflicts == ()
+    # The bullets were cut lowest value first (``values``: a line's place in the keep order), so every bullet cut
+    # is worth less than any requirement's evidence; a line that supports no requirement at all was among them.
+    bullets = [item.id for item in selected.cut_for_length if item.kind == "bullet"]
+    places = [selected.values[item_id] for item_id in bullets]
+    assert places == sorted(places) and max(places) < min(selected.values[item_id] for item_id in evidence)
+    supports = {item_id for requirement in selected.requirements for item_id in requirement.supporters}
+    assert any(item_id not in supports for item_id in bullets)
+    # Whatever is shown beyond the evidence is worth more than whatever of the same kind was cut for length.
+    shown_bullets = [item_id for entry_id, shown in selected.entries.items() if master.entries[entry_id].section == "projects" for item_id in shown]
+    cut_projects = [item_id for item_id in bullets if master.entries[master.items[item_id].entry_id].section == "projects" and master.items[item_id].entry_id in selected.entries]
+    assert not shown_bullets or not cut_projects or min(selected.values[item_id] for item_id in shown_bullets) > max(selected.values[item_id] for item_id in cut_projects)
+    # An old role goes whole when none of its lines is evidence; each cut says why, in the words the user reads.
+    for role in selected.roles_dropped:
+        assert role in OLD_ROLES and role not in selected.entries
+        assert not set(master.entries[role].bullets) & evidence
     reasons = {line.id: line for line in selected.lines}
-    assert all(reasons[bullet].reason == "cut for length: oldest role dropped" for bullet in ("b-tes-01", "b-tes-02", "b-tes-03"))
-    assert {cut.code for cut in selected.cut_for_length} <= {
-        "cut_oldest_role_dropped", "cut_oldest_role_shortened", "cut_lowest_value", "cut_shown_by_recent_role",
-    }
+    assert {"r-tes", "r-bri"} <= set(selected.roles_dropped)
+    assert all(reasons[bullet].code in {"cut_role_dropped", "role_dropped"} for bullet in master.entries["r-tes"].bullets)
+    assert {item.code for item in selected.cut_for_length} <= {"cut_role_dropped", "cut_lowest_value", "cut_for_length"}
+    assert {item.kind for item in selected.cut_for_length if item.code == "cut_for_length"} == {"skill"}
 
 
 def test_a_tighter_budget_only_applies_more_of_the_same_cut_order(master: Master) -> None:
@@ -247,7 +259,7 @@ def test_a_tighter_budget_only_applies_more_of_the_same_cut_order(master: Master
 
     profile, posting = _profile("profile-swe"), _posting("p2-staff-swe-core-infrastructure")
     cuts = [
-        [cut.id for cut in ms.select(master, profile, posting, today=TODAY, measure=_by_bullets(per_page), fill=False).cut_for_length]
+        [(cut.kind, cut.id) for cut in ms.select(master, profile, posting, today=TODAY, measure=_by_bullets(per_page), fill=False).cut_for_length if cut.kind != "role"]
         for per_page in (30, 22, 16, 12)
     ]
 
@@ -256,24 +268,32 @@ def test_a_tighter_budget_only_applies_more_of_the_same_cut_order(master: Master
         assert tighter[: len(looser)] == looser
 
 
-def test_a_pick_that_cannot_fit_says_so_and_keeps_every_recent_role(master: Master) -> None:
+def test_a_pick_that_cannot_fit_says_so_keeps_every_recent_role_and_reports_the_conflict(master: Master) -> None:
     selected = ms.select(master, _profile("profile-ai"), _posting("p1-staff-ai-agent-platform"), today=TODAY, measure=lambda _markdown: (3, 0.5))
 
     assert not selected.fits and selected.pages == 3 and selected.to_json(master)["fits"] is False
     assert selected.added_to_fill == ()
-    # Every cut the rules allow was made, and no more: recent roles stay at their floors or above, each shown
-    # project keeps a line, every Other line went.
-    for index, role in enumerate(RECENT_ROLES):
-        only = [bullet for bullet in selected.entries[role] if bullet in selected.only_evidence or bullet in selected.shown_instead]
-        assert len(selected.entries[role]) == max(ms.FLOORS[index], len(only)) or len(selected.entries[role]) - len(only) <= ms.FLOORS[index], role
-    assert selected.other == ()
-    assert all(len(selected.entries[entry.id]) >= 1 for entry in master.entries_in("projects") if entry.id in selected.entries)
+    # Every cut the rules allow was made: each recent role keeps its one best line, the old roles, the projects,
+    # the Other lines and the skills are gone.
+    assert {role: len(selected.entries[role]) for role in RECENT_ROLES} == {role: 1 for role in RECENT_ROLES}
+    assert set(selected.entries) == set(RECENT_ROLES) | {entry.id for entry in master.entries_in("education")}
+    assert selected.other == () and selected.skills == ()
+    assert {skill.code for skill in selected.skill_reasons} == {"cut_for_length"}
+    # Nothing mandatory went silently: the result names every requirement that lost its evidence, and the page count.
+    kinds = [conflict.kind for conflict in selected.conflicts]
+    assert kinds.count("over_budget") == 1 and "mandatory_evidence" in kinds
+    lost = [conflict for conflict in selected.conflicts if conflict.kind == "mandatory_evidence"]
+    assert all(conflict.requirement and conflict.ids and conflict.ids[0] not in selected.item_ids() for conflict in lost)
+    assert any(not conflict.covered for conflict in lost)
+    out = selected.to_json(master)
+    assert out["counts"]["conflicts"] == len(selected.conflicts) and out["conflicts"][0]["reason"]
+    assert {cut.code for cut in selected.cut_for_length} >= {"cut_conflict", "cut_for_length"}
 
 
-# --- the only evidence of a must-have (decision 2) --------------------------------------------
+# --- a requirement's evidence stays, wherever its role stands in time -------------------------
 
 
-def test_an_old_roles_only_evidence_line_is_kept_and_its_role_shortened_to_it(master: Master) -> None:
+def test_an_old_roles_line_that_is_the_only_evidence_is_kept_and_its_role_stays(master: Master) -> None:
     """ML platform posting: SQL is a must-have and one bullet of the master names it, in a role that ended in 2015."""
 
     naming = [item.id for item in master.items.values() if item.kind == "bullet" and mentions(item.text, "SQL")]
@@ -281,37 +301,35 @@ def test_an_old_roles_only_evidence_line_is_kept_and_its_role_shortened_to_it(ma
     for profile_id in PROFILE_IDS:
         selected = _selected(master, profile_id, "p3-staff-engineer-ml-platform")
         assert selected.keywords is not None and "SQL" in selected.keywords.must
-        # The role is shortened to that one line, not dropped; the older two roles are dropped.
-        assert selected.entries["r-cas"] == ("b-cas-08",)
-        assert selected.roles_dropped == ("r-bri", "r-tes")
-        assert selected.only_evidence["b-cas-08"] == ("SQL",)
+        asked = next(requirement for requirement in selected.requirements if requirement.text == "SQL")
+        assert asked.mandatory and asked.supporters == ("b-cas-08",)
+        # The old role is shown for that line while recent lines that support nothing were cut; the older two roles went.
+        assert "b-cas-08" in selected.entries["r-cas"] and selected.roles_dropped == ("r-bri", "r-tes")
+        assert asked.id in selected.evidence_for["b-cas-08"]
         reason = next(line for line in selected.lines if line.id == "b-cas-08")
-        assert reason.picked and reason.code == "only_evidence" and reason.reason == "kept: the only line shown that names SQL"
-        assert "b-cas-08" not in [cut.id for cut in selected.cut_for_length]
-        assert [cut.code for cut in selected.cut_for_length if cut.kind == "bullet" and master.items[cut.id].entry_id == "r-cas"] == ["cut_oldest_role_shortened"] * 2
+        assert reason.picked and reason.code == "requirement_evidence" and reason.reason == "the strongest evidence for: SQL"
+        cut = [item.id for item in selected.cut_for_length]
+        assert "b-cas-08" not in cut
+        recent_cut = [item_id for item_id in cut if item_id in master.items and master.items[item_id].entry_id in RECENT_ROLES]
+        assert recent_cut and all(selected.values[item_id] < selected.values["b-cas-08"] for item_id in recent_cut)
 
 
-def test_a_recent_roles_line_is_shown_in_place_of_an_old_roles_only_evidence(master: Master) -> None:
-    """Core infrastructure posting: Linux is a must-have. The first pick shows it only in a 2012-2015 role; a 2019-2023
-    role has an unshown line naming it. That line is shown instead, and the old role goes like the others."""
+def test_a_recent_line_is_the_evidence_when_it_supports_a_must_have_as_well_as_an_old_one(master: Master) -> None:
+    """Core infrastructure posting: Linux is a must-have. A 2012-2015 role names it and so do lines of a 2019-2023
+    role: of lines of equal strength the recent one is the evidence, and the old line is not needed for it."""
 
     for profile_id in PROFILE_IDS:
         selected = _selected(master, profile_id, "p2-staff-swe-core-infrastructure")
         assert selected.keywords is not None and "Linux" in selected.keywords.must
-        assert selected.shown_instead == {"b-hex-28": ("b-cas-07", ("Linux",))}
-        assert master.items["b-cas-07"].entry_id == "r-cas" and master.items["b-hex-28"].entry_id == "r-hex"
-        assert mentions(master.items["b-cas-07"].text, "Linux") and mentions(master.items["b-hex-28"].text, "Linux")
-        assert "b-hex-28" in selected.entries["r-hex"]
-        assert "r-cas" not in selected.entries and "r-cas" in selected.roles_dropped
-        # Linux is still evidenced by a shown bullet, not only by the skills line.
-        assert [bullet for bullets in selected.entries.values() for bullet in bullets if mentions(master.items[bullet].text, "Linux")] == ["b-hex-28"]
-        reasons = {line.id: line for line in selected.lines}
-        assert reasons["b-hex-28"].picked and reasons["b-hex-28"].code == "shown_instead"
-        assert reasons["b-hex-28"].reason == "names Linux; shown in place of an older role's line"
-        assert not reasons["b-cas-07"].picked and reasons["b-cas-07"].code == "cut_shown_by_recent_role"
-        assert reasons["b-cas-07"].reason == "cut for length: oldest role dropped; a recent role's line now shows Linux"
-        # The line now shown was not cut again: it is the only evidence left.
-        assert "b-hex-28" not in [cut.id for cut in selected.cut_for_length]
+        asked = next(requirement for requirement in selected.requirements if requirement.text == "Linux")
+        assert set(asked.supporters) == {"b-hex-12", "b-hex-28", "b-cas-07"}
+        evidence = asked.supporters[0]
+        assert master.items[evidence].entry_id == "r-hex" and master.items["b-cas-07"].entry_id == "r-cas"
+        assert master.items[evidence].strength == master.items["b-cas-07"].strength, "recency only breaks the tie"
+        assert evidence in selected.entries["r-hex"] and asked.id in selected.evidence_for[evidence]
+        assert "b-cas-07" not in selected.item_ids()
+        # sel-1's stand-in fields are no longer filled: the evidence is chosen from the whole master up front.
+        assert selected.shown_instead == {} and selected.only_evidence == {}
 
 
 # --- the reason per line ----------------------------------------------------------------------
@@ -328,12 +346,13 @@ def test_every_line_of_the_master_is_picked_or_left_out_with_a_reason(master: Ma
     # The fallback reason is never needed: each left-out line has a specific one.
     assert "not_picked" not in {line.code for line in selected.lines}
     assert {line.code for line in selected.lines if line.picked} <= {
-        "names_keywords", "posting_wording", "profile_focus", "strongest_remaining", "room_left", "only_evidence", "shown_instead",
+        "requirement_evidence", "names_keywords", "posting_wording", "profile_focus", "strongest_remaining", "general", "room_left",
+        "summary_variant", "pinned",
     }
-    # Every skill of the master is accounted for too, once.
+    # Every skill of the master is accounted for too, once: shown, or cut for length and said so.
     assert sorted(skill.name for skill in selected.skill_reasons) == sorted(master.skills())
     assert [skill.name for skill in selected.skill_reasons if skill.picked] == list(selected.skills)
-    assert len(selected.skills) <= ms.MAX_SKILLS
+    assert len(selected.skills) >= ms.SKILLS_WHOLE and {skill.code for skill in selected.skill_reasons if not skill.picked} <= {"cut_for_length"}
 
     out = selected.to_json(master)
     assert [row["id"] for row in out["picked"]] == list(selected.item_ids())
@@ -342,23 +361,67 @@ def test_every_line_of_the_master_is_picked_or_left_out_with_a_reason(master: Ma
     assert out["counts"]["picked"] == len(out["picked"]) and out["counts"]["left_out"] == len(out["left_out"])
 
 
-def test_a_skill_is_shown_because_the_posting_asks_for_it_or_a_shown_line_names_it(master: Master) -> None:
+def test_the_skills_section_is_kept_whole_what_the_posting_asks_for_first(master: Master) -> None:
     selected = _selected(master, "profile-ai", "p1-staff-ai-agent-platform")
     assert selected.keywords is not None
     shown_text = " ".join(master.items[bullet].text for bullets in selected.entries.values() for bullet in bullets)
 
-    for skill in selected.skill_reasons:
+    assert len(master.skills()) == 79 > len(selected.skills) >= ms.SKILLS_WHOLE
+    for skill in (skill for skill in selected.skill_reasons if skill.picked):
+        atoms = ms.skill_atoms(skill.name)
         if skill.code == "posting_must":
-            assert any(mentions(skill.name, term) for term in selected.keywords.must), skill.name
+            assert any(mentions(atom, term) for atom in atoms for term in selected.keywords.must), skill.name
         elif skill.code == "posting_nice":
-            assert any(mentions(skill.name, term) for term in selected.keywords.nice), skill.name
+            assert any(mentions(atom, term) for atom in atoms for term in selected.keywords.nice), skill.name
         elif skill.code == "named_by_line":
-            assert mentions(shown_text, skill.name), skill.name
+            assert any(mentions(shown_text, atom) for atom in atoms), skill.name
         else:
-            assert not skill.picked and skill.code in {"not_asked", "skills_limit"}
-    # Must-haves come first, in the posting's order.
+            assert skill.code == "listed"
+    # Must-haves come first, then nice-to-haves; what no line and no posting names comes last.
     codes = [skill.code for skill in selected.skill_reasons if skill.picked]
-    assert codes == sorted(codes, key=["posting_must", "posting_nice", "named_by_line"].index)
+    order = ["posting_must", "posting_nice", "named_by_line", "listed"]
+    asked = [code for code in codes if code in order[:2]]
+    assert asked == sorted(asked, key=order.index) and codes[: len(asked)] == asked
+    # Too long to print whole: the names cut are ones nothing asks for and no picked line names, never another.
+    cut = [skill for skill in selected.skill_reasons if not skill.picked]
+    assert cut and all(skill.code == "cut_for_length" for skill in cut)
+    assert not any(mentions(atom, term) for skill in cut for atom in ms.skill_atoms(skill.name) for term in (*selected.keywords.must, *selected.keywords.nice))
+
+
+_GROUPED = """<!-- gigai-master:1 -->
+
+## Experience
+
+### Newco <!-- id:r-new -->
+Staff Engineer | Jun 2021 - Present
+- Ran the payments API in Go on Kubernetes for 40 teams. <!-- id:b-new-1 -->
+- Mentored 3 engineers. <!-- id:b-new-2 -->
+
+## Skills
+
+- Python/Go/TypeScript · PostgreSQL/Redis · CI/CD · Model Context Protocol (MCP) <!-- id:s-1 -->
+"""
+
+
+def test_a_skill_is_matched_inside_its_group_whatever_the_master_groups() -> None:
+    """``Python/Go/TypeScript`` is one name on the Skills line and three skills to match: a posting that asks for Go
+    reads ``Go`` as a keyword, and the group prints whole."""
+
+    assert ms.skill_atoms("Python/Go/TypeScript") == ("Python", "Go", "TypeScript")
+    assert ms.skill_atoms("Model Context Protocol (MCP)") == ("Model Context Protocol", "MCP")
+    assert ms.skill_atoms("CI/CD") == ("CI/CD",) and ms.skill_atoms("A/B testing") == ("A/B testing",)
+    grouped = parse_master(_GROUPED)
+    flat = parse_master(_GROUPED.replace("Python/Go/TypeScript · PostgreSQL/Redis", "Python, Go, TypeScript, PostgreSQL, Redis"))
+    posting = ms.SelectionPosting("Staff Engineer", "Requirements:\n- Go services in production.\n- Redis.\n\nNice to have:\n- MCP.\n")
+
+    one = ms.select(grouped, ms.SelectionProfile(), posting, today=TODAY, measure=_by_bullets(40))
+    two = ms.select(flat, ms.SelectionProfile(), posting, today=TODAY, measure=_by_bullets(40))
+    assert one.keywords == two.keywords and one.keywords is not None
+    assert one.keywords.must == ("Go", "Redis") and one.keywords.nice == ("MCP",)
+    # In the posting's order (Go, Redis, then the nice-to-have MCP), then the rest; each group printed whole.
+    assert one.skills == ("Python/Go/TypeScript", "PostgreSQL/Redis", "Model Context Protocol (MCP)", "CI/CD")
+    assert [skill.code for skill in one.skill_reasons] == ["posting_must", "posting_must", "posting_nice", "listed"]
+    assert one.item_ids() == two.item_ids()
 
 
 # --- the pure rules, on small inputs (no renderer) --------------------------------------------
@@ -404,27 +467,64 @@ def test_a_profile_is_just_its_titles_when_it_has_no_focus_tags() -> None:
     assert ms.select(small, stored, None, today=TODAY, measure=_by_bullets(40)).summary == ("sum-data",)
 
 
-def test_an_old_role_is_dropped_before_any_recent_line_unless_it_holds_the_only_evidence() -> None:
+def test_an_old_role_goes_whole_unless_one_of_its_lines_is_evidence_and_recency_only_breaks_ties() -> None:
     small = parse_master(_SMALL)
     profile = ms.SelectionProfile(titles=("Staff Backend Engineer",))
     plain = ms.SelectionPosting("Staff Engineer", "Requirements:\n- Kubernetes in production.\n- On-call experience.\n")
     fortran = ms.SelectionPosting("Staff Engineer", "Requirements:\n- Kubernetes in production.\n- Fortran.\n")
-    tight = _by_bullets(3)  # 8 bullet lines in the first pick: 3 pages
+    tight = _by_bullets(3)  # 9 bullet lines in the first pick: 3 pages
 
     dropped = ms.select(small, profile, plain, today=TODAY, measure=tight, fill=False)
     assert dropped.pages_before_fit == 3 and dropped.fits
-    assert [(cut.kind, cut.id) for cut in dropped.cut_for_length][:3] == [("bullet", "b-old-2"), ("bullet", "b-old-1"), ("role", "r-old")]
-    assert "r-old" not in dropped.entries and len(dropped.entries["r-new"]) >= ms.FLOORS[0]
+    # Lines that support nothing go first: the stated ones before the quantified one (strength), and of two stated
+    # lines the old role's before the recent role's (recency, the tie-break). No heading is left without a bullet.
+    assert [(cut.kind, cut.id) for cut in dropped.cut_for_length] == [("bullet", "b-old-2"), ("bullet", "b-new-3"), ("bullet", "b-old-1"), ("role", "r-old")]
+    assert "r-old" not in dropped.entries and dropped.roles_dropped == ("r-old",)
+    assert "### Oldco" not in dropped.markdown
+    # The evidence of both requirements is shown.
+    assert dropped.evidence_for.keys() == {"b-new-1", "b-new-2"} and dropped.conflicts == ()
 
     kept = ms.select(small, profile, fortran, today=TODAY, measure=tight, fill=False)
+    asked = next(requirement for requirement in kept.requirements if requirement.text == "Fortran")
+    assert asked.mandatory and asked.supporters == ("b-old-1",)
+    # The old role holds the only line that names Fortran: it stays while recent lines that support nothing are cut.
     assert kept.entries["r-old"] == ("b-old-1",) and kept.roles_dropped == ()
-    assert kept.only_evidence == {"b-old-1": ("Fortran",)}
-    assert [(cut.kind, cut.id) for cut in kept.cut_for_length][0] == ("bullet", "b-old-2")
-    assert ("role", "r-old") not in [(cut.kind, cut.id) for cut in kept.cut_for_length]
+    assert kept.evidence_for["b-old-1"] == (asked.id,)
+    assert [(cut.kind, cut.id) for cut in kept.cut_for_length] == [("bullet", "b-old-2"), ("bullet", "b-new-3"), ("bullet", "b-new-4")]
+    assert len(kept.entries["r-new"]) == 2 >= ms.FLOORS[0]
 
-    # The same role is not old for someone reading it in 2020: nothing is cut "oldest first" then.
-    earlier = ms.select(small, profile, plain, today=date(2020, 1, 1), measure=_by_bullets(40), fill=False)
-    assert earlier.cut_for_length == () and set(earlier.entries["r-old"]) == {"b-old-1", "b-old-2"}
+    # With room for everything nothing is cut.
+    roomy = ms.select(small, profile, plain, today=TODAY, measure=_by_bullets(40), fill=False)
+    assert roomy.cut_for_length == () and set(roomy.entries["r-old"]) == {"b-old-1", "b-old-2"}
+
+
+def test_a_pin_is_kept_when_everything_else_that_supports_nothing_goes_and_reported_when_it_cannot_be() -> None:
+    small = parse_master(_SMALL)
+    posting = ms.SelectionPosting("Staff Engineer", "Requirements:\n- Kubernetes in production.\n- On-call experience.\n")
+    pinned = ms.SelectionProfile(titles=("Staff Backend Engineer",), pins=("b-old-2",))
+
+    kept = ms.select(small, pinned, posting, today=TODAY, measure=_by_bullets(3), fill=False)
+    assert "b-old-2" in kept.entries["r-old"] and kept.conflicts == ()
+    assert next(line for line in kept.lines if line.id == "b-old-2").code == "pinned"
+    # With no room even for the requirements' evidence and the pin, the pin goes before the evidence and the result says so.
+    none = ms.select(small, pinned, posting, today=TODAY, measure=lambda markdown: (3 if "Kept the build green" in markdown else 2, 0.5), fill=False)
+    assert "b-old-2" not in none.item_ids() and none.fits
+    assert [(conflict.kind, conflict.ids) for conflict in none.conflicts] == [("must_keep", ("b-old-2",))]
+    assert none.evidence_for.keys() == {"b-new-1", "b-new-2"}
+
+
+def test_a_line_that_says_what_a_better_line_says_is_left_out() -> None:
+    twice = _SMALL.replace(
+        "- Ran the on-call rotation for 4 teams. <!-- id:b-new-2 -->",
+        "- Ran the on-call rotation for 4 teams. <!-- id:b-new-2 -->\n- Ran the on-call rotation for all 4 teams. <!-- id:b-new-9 -->\n- Ran the on-call rotation for 9 teams. <!-- id:b-new-8 -->",
+    )
+    selected = ms.select(parse_master(twice), ms.SelectionProfile(), None, today=TODAY, measure=_by_bullets(40))
+
+    # The same words and the same numbers: one of the two is shown. Another number is another fact.
+    assert selected.duplicates == {"b-new-9": "b-new-2"}
+    assert "b-new-2" in selected.item_ids() and "b-new-8" in selected.item_ids() and "b-new-9" not in selected.item_ids()
+    reason = next(line for line in selected.lines if line.id == "b-new-9")
+    assert not reason.picked and reason.code == "near_duplicate"
 
 
 def test_room_left_on_the_page_goes_to_recent_roles() -> None:
@@ -439,6 +539,22 @@ def test_room_left_on_the_page_goes_to_recent_roles() -> None:
     # No room: the page holds exactly the first pick.
     full = ms.select(small, profile, None, today=TODAY, measure=_by_bullets(ms.PICK_CAPS[0]), max_pages=1)
     assert full.fits and full.added_to_fill == () and len(full.entries["r-new"]) == ms.PICK_CAPS[0]
+
+
+def test_the_same_lines_in_another_order_give_the_same_pick() -> None:
+    """No tie is broken by where a line stands in the file: a master reordered by hand keeps its selections."""
+
+    small = parse_master(_SMALL)
+    lines = _SMALL.splitlines()
+    first, last = lines.index("- Cut deploy time from 40 minutes to 6 with a staged pipeline on Kubernetes. <!-- id:b-new-1 tags:backend -->"), lines.index("- Mentored 3 engineers. <!-- id:b-new-4 -->")
+    lines[first : last + 1] = reversed(lines[first : last + 1])
+    turned = parse_master("\n".join(lines) + "\n")
+    posting = ms.SelectionPosting("Staff Engineer", "Requirements:\n- Kubernetes in production.\n- On-call experience.\n")
+    for measure in (_by_bullets(3), _by_bullets(4), _by_bullets(40)):
+        one = ms.select(small, ms.SelectionProfile(), posting, today=TODAY, measure=measure, fill=False)
+        two = ms.select(turned, ms.SelectionProfile(), posting, today=TODAY, measure=measure, fill=False)
+        assert set(one.item_ids()) == set(two.item_ids()) and one.skills == two.skills
+        assert [cut.id for cut in one.cut_for_length] == [cut.id for cut in two.cut_for_length]
 
 
 def test_a_posting_written_as_prose_is_read_whole() -> None:
@@ -583,7 +699,7 @@ def test_selection_show_for_a_job_lists_picked_and_left_out_with_reasons(tmp_pat
     out = _show(home, *_AI, "--job-text", str(posting), "--title", title, "--company", company)
 
     selection = out["selection"]
-    assert out["ok"] is True and selection["selector_version"] == "sel-1"
+    assert out["ok"] is True and selection["selector_version"] == "sel-2"
     assert selection["fits"] is True and selection["pages"] == 2 and selection["pages_before_fit"] > 2 and selection["max_pages"] == 2
     assert render_markdown_pdf(selection["markdown"], None, timestamp=STAMP).pages == 2
     assert selection["master"]["revision"] == 1 and selection["master"]["content_sha256"].startswith("sha256:")
@@ -596,9 +712,14 @@ def test_selection_show_for_a_job_lists_picked_and_left_out_with_reasons(tmp_pat
     assert all(row["reason"] and row["code"] and row["text"] for row in (*picked, *left))
     assert selection["summary"] == ["sum-ai"]
     assert {"r-lum", "r-kes", "r-hex"} <= {entry["id"] for entry in selection["entries"] if entry["shown"]}
-    assert selection["cut_for_length"] and selection["cut_for_length"][0]["reason"].startswith("cut for length: oldest role")
+    assert selection["cut_for_length"] and all(cut["reason"].startswith("cut for length") for cut in selection["cut_for_length"])
     assert selection["keywords"]["must_missing"] == [] and "Python" in selection["keywords"]["must"]
-    assert len(selection["skills"]["picked"]) <= 28 and selection["skills"]["left_out"]
+    # The Skills section is kept whole; what the posting asks for, and its evidence, are listed; no conflict.
+    assert len(selection["skills"]["picked"]) >= 40 and {skill["code"] for skill in selection["skills"]["left_out"]} == {"cut_for_length"}
+    asked = selection["requirements"]
+    assert asked and all(row["id"] and row["text"] and isinstance(row["mandatory"], bool) for row in asked)
+    assert all(row["shown"] for row in asked if row["mandatory"] and row["supporters"])
+    assert selection["evidence_for"] and selection["conflicts"] == [] and selection["counts"]["conflicts"] == 0
     # A read: nothing was committed or left behind in the journal.
     assert _journal_state(home) == before
 
@@ -607,11 +728,12 @@ def test_selection_show_for_a_job_lists_picked_and_left_out_with_reasons(tmp_pat
     ])
     assert plain.exit_code == 0, plain.output
     assert plain.output.startswith(f"Selection for {title} at {company}, profile Staff AI Engineer: 2 pages (")
-    assert "Picked " in plain.output and "left out " in plain.output and "Selector sel-1, master revision 1." in plain.output
+    assert "Picked " in plain.output and "left out " in plain.output and "Selector sel-2, master revision 1." in plain.output
     assert "    + sum-ai  Staff engineer with 16 years" in plain.output
     assert "    - sum-backend  " in plain.output and "another summary fits this posting better" in plain.output
     assert "r-tes  Tessel Robotics" in plain.output and ": not shown" in plain.output
-    assert "cut for length: oldest role dropped" in plain.output
+    assert "cut for length: no line of this older role is evidence for this posting" in plain.output
+    assert "the strongest evidence for: " in plain.output
     assert "## Skills: " in plain.output and "the posting asks for it" in plain.output
 
     markdown = CliRunner().invoke(cli, [
@@ -747,3 +869,74 @@ def test_selection_show_job_url_reads_the_posting_scout_already_holds(tmp_path: 
     # --title overrides the stored title (it decides the summary).
     assert show("--job-url", _URL, "--title", "Staff AI Engineer, Agent Platform")["summary"] == ["sum-ai"]
     assert asked == [], "selection show made a request"
+
+
+# --- re-making a pick: the previous selection and the new one on the same current sources (0110-10-15) ---
+
+
+def _stored(selected: ms.Selected) -> tuple[str, ...]:
+    """What a stored selection holds of a ``Selected``: every entry and line it shows."""
+
+    return (*selected.summary, *(item for entry_id, bullets in selected.entries.items() for item in (entry_id, *bullets)), *selected.other)
+
+
+def test_a_pick_made_again_replaces_the_previous_one_only_when_it_regresses_on_no_check() -> None:
+    small = parse_master(_SMALL)
+    profile = ms.SelectionProfile(titles=("Staff Backend Engineer",))
+    posting = ms.SelectionPosting("Staff Engineer", "Requirements:\n- Kubernetes in production.\n- On-call experience.\n")
+    page = _by_bullets(3)
+    good = ms.select(small, profile, posting, today=TODAY, measure=page, fill=False)
+    assert good.fits and good.conflicts == () and {"b-new-1", "b-new-2"} <= set(good.item_ids())
+
+    # The same selection made again: nothing regresses, the new one stands.
+    same = ms.compare_selections(small, good, _stored(good), good.skills, measure=page)
+    assert (same.decision, same.regressions, same.problems) == ("new", (), ())
+    assert same.previous.valid and same.previous.fits and same.previous.lost == () == same.new.lost and same.new.weak == ()
+
+    # A new selection that lost the evidence of a mandatory requirement (here: made under a budget nothing fits), while
+    # the previous one is still valid and still fits: the previous one is kept, and the result says on which check.
+    worse = ms.select(small, profile, posting, today=TODAY, measure=lambda _markdown: (3, 0.5), fill=False)
+    assert "b-new-2" not in worse.item_ids() and any(conflict.kind == "mandatory_evidence" for conflict in worse.conflicts)
+    kept = ms.compare_selections(small, worse, _stored(good), good.skills, measure=page)
+    assert kept.decision == "previous" and kept.problems == ()
+    assert len(kept.regressions) == 1 and kept.regressions[0].startswith("mandatory coverage: no line now for On-call experience.")
+    # No blended score: the worse selection is not saved by anything else it has more of. Give the previous one no skill at all.
+    assert ms.compare_selections(small, worse, _stored(good), (), measure=page).decision == "previous"
+
+    # The previous one cannot be kept when it shows a line the master corrected since, or one the master no longer
+    # has, or when it no longer fits: then neither is chosen, and the result says what is unresolved.
+    corrected = ms.compare_selections(small, worse, _stored(good), good.skills, stale=("b-new-2",), measure=page)
+    assert corrected.decision == "unresolved" and corrected.regressions and "b-new-2" in corrected.problems[0]
+    retired = ms.compare_selections(small, worse, (*_stored(good), "b-gone"), good.skills, measure=page)
+    assert retired.decision == "unresolved" and retired.previous.invalid == ("b-gone",)
+    too_long = ms.compare_selections(small, worse, _stored(ms.select(small, profile, posting, today=TODAY, measure=_by_bullets(40))), good.skills, measure=lambda markdown: (3 if "Oldco" in markdown else 2, 0.5))
+    assert too_long.decision == "unresolved" and "no longer meets the page limit" in too_long.problems[0]
+    # A previous selection that is invalid is still replaced when the new one regresses on nothing.
+    assert ms.compare_selections(small, good, (*_stored(good), "b-gone"), good.skills, measure=page).decision == "new"
+
+    out = kept.to_json()
+    assert out["decision"] == "previous" and out["previous"]["lost"] == [] and out["new"]["lost"] and out["new"]["fits"] is True
+
+
+def test_a_pick_made_again_is_checked_for_strength_and_pins_too() -> None:
+    small = parse_master(_SMALL)
+    posting = ms.SelectionPosting("Staff Engineer", "Requirements:\n- Kubernetes in production.\n")
+    roomy = _by_bullets(40)
+    new = ms.select(small, ms.SelectionProfile(pins=("b-new-4",)), posting, today=TODAY, measure=roomy)
+    evidence = next(requirement for requirement in new.requirements if requirement.mandatory).supporters[0]
+    assert evidence == "b-new-1"
+
+    checks = ms.check_selection(small, new.requirements, ("r-new", "b-new-2", "o-cka"), ("Kubernetes",), pins=("b-new-4",), measure=roomy)
+    # The certification names Kubernetes, so the requirement is covered; its strongest line and the pin are not shown.
+    assert checks.lost == () and checks.weak and checks.pins_missing == ("b-new-4",) and checks.fits and checks.valid
+    # Against a previous selection that showed the pin, a new one that had no room for it regresses on that check
+    # (and says so itself: a conflict), so the previous one is kept.
+    thin = ms.select(small, ms.SelectionProfile(pins=("b-new-4",)), posting, today=TODAY, measure=lambda markdown: (3 if "Mentored" in markdown else 2, 0.5), fill=False)
+    assert "b-new-4" not in thin.item_ids() and [conflict.kind for conflict in thin.conflicts] == ["must_keep"]
+    again = ms.compare_selections(small, thin, _stored(new), new.skills, pins=("b-new-4",), measure=roomy)
+    assert again.decision == "previous" and again.regressions == ("must-keep lines no longer shown: b-new-4",)
+    # A previous selection that showed only a weaker line for the requirement loses nothing to a new one that shows the strongest.
+    assert ms.compare_selections(small, new, ("r-new", "b-new-2", "o-cka"), ("Kubernetes",), measure=roomy).decision == "new"
+    # A heading shown with none of its lines breaks the page constraint.
+    empty = ms.check_selection(small, new.requirements, ("r-new", "r-old", "b-new-1"), (), measure=roomy)
+    assert empty.empty_entries == ("r-old",) and not empty.fits

@@ -1,0 +1,309 @@
+{
+ "note": "SYNTHETIC lines the eval adds to a master to make its variations. 'like' names the master line a duplicate or near-duplicate copies: it inherits that line's labels (it is an acceptable line wherever the original is). A line whose 'like' or whose entry a master size does not hold is not added to that size. 'labels' (useful lines only): posting -> requirement id -> strong | support. 'new_entries' are added whole. 'same_fact_as' (three useful lines): posting -> must-keep groups this line also satisfies. It states the fact that group's line states, in a recent role and with a number, so a reviewer who must see that fact accepts either line; without it, adding the stronger line would count as dropping the weaker one.",
+ "new_entries": [
+  {
+   "id": "p-plot",
+   "section": "projects",
+   "heading": "Plotwise: a garden planner",
+   "sublines": []
+  }
+ ],
+ "irrelevant": [
+  {
+   "id": "irr-01",
+   "entry": "r-hal",
+   "text": "Organized the team's quarterly offsite and the office seating plan for 40 people."
+  },
+  {
+   "id": "irr-02",
+   "entry": "r-hal",
+   "text": "Took notes at the weekly forum and kept the wiki's meeting pages tidy."
+  },
+  {
+   "id": "irr-03",
+   "entry": "r-hal",
+   "text": "Coordinated moving the wiki from one vendor to another over 3 months."
+  },
+  {
+   "id": "irr-04",
+   "entry": "r-qui",
+   "text": "Served on the hiring committee for the facilities coordinator position."
+  },
+  {
+   "id": "irr-05",
+   "entry": "r-qui",
+   "text": "Maintained the shared calendar of public holidays and office closures."
+  },
+  {
+   "id": "irr-06",
+   "entry": "r-bra",
+   "text": "Ran the office book club for 2 years."
+  },
+  {
+   "id": "irr-07",
+   "entry": "r-pel",
+   "text": "Judged the annual company hackathon 3 times."
+  },
+  {
+   "id": "irr-08",
+   "entry": "p-plot",
+   "text": "A weekend web app that plans vegetable beds by season and frost date."
+  },
+  {
+   "id": "irr-09",
+   "entry": "p-plot",
+   "text": "Imports seed catalogues from 4 suppliers as CSV files."
+  },
+  {
+   "id": "irr-10",
+   "entry": "p-plot",
+   "text": "Used by about 50 hobby gardeners."
+  },
+  {
+   "id": "irr-11",
+   "entry": "other",
+   "text": "Completed a 200-hour yoga teacher training in 2019."
+  }
+ ],
+ "duplicates": [
+  {
+   "id": "dup-01",
+   "entry": "p-eval",
+   "text": null,
+   "like": "hal-03"
+  },
+  {
+   "id": "dup-02",
+   "entry": "r-hal",
+   "text": null,
+   "like": "hal-02"
+  },
+  {
+   "id": "dup-03",
+   "entry": "r-qui",
+   "text": null,
+   "like": "qui-03"
+  },
+  {
+   "id": "dup-04",
+   "entry": "r-bra",
+   "text": null,
+   "like": "bra-01"
+  },
+  {
+   "id": "dup-05",
+   "entry": "p-loom",
+   "text": null,
+   "like": "loom-02"
+  },
+  {
+   "id": "dup-06",
+   "entry": "r-pel",
+   "text": null,
+   "like": "pel-01"
+  },
+  {
+   "id": "dup-07",
+   "entry": "r-hal",
+   "text": null,
+   "like": "hal-01"
+  }
+ ],
+ "near_duplicates": [
+  {
+   "id": "near-01",
+   "entry": "r-hal",
+   "text": "Architected the agent runtime executing 400,000 tool-calling LLM tasks a day for 60 internal teams, with typed tool contracts, retries and budgets per team, and ran it through three years of growth from a 2-team pilot to the company's default way to ship LLM features.",
+   "like": "hal-01"
+  },
+  {
+   "id": "near-02",
+   "entry": "r-hal",
+   "text": "Built a Python evaluation harness that scores each prompt change against 2,200 labelled cases before release, cutting regressions reaching production from 9 a quarter to 1 and making evaluation a required check in every team's release pipeline.",
+   "like": "hal-03"
+  },
+  {
+   "id": "near-03",
+   "entry": "r-qui",
+   "text": "Owned the control plane of the scheduling platform in Go: 30 microservices on Kubernetes in AWS and GCP at 99.98% availability, serving 2,400 clinics through two regional failovers and a full cluster migration without customer-visible downtime.",
+   "like": "qui-01"
+  },
+  {
+   "id": "near-04",
+   "entry": "r-qui",
+   "text": "Designed the Kafka event backbone for appointments carrying 150 million messages per day with exactly-once handling of billing events, replacing nightly batch files between 11 services and cutting the delay before a booking is billable from hours to seconds.",
+   "like": "qui-02"
+  },
+  {
+   "id": "near-05",
+   "entry": "r-bra",
+   "text": "Designed idempotent payment APIs over REST and gRPC used by 250 merchants, eliminating duplicate charges on retries and cutting integration support tickets by a third with versioned contracts and a public sandbox.",
+   "like": "bra-02"
+  },
+  {
+   "id": "near-06",
+   "entry": "p-loom",
+   "text": "Built a local Python agent runtime where a coordinator agent plans work and dispatches it to worker agents, each with its own tools and brief, and merges what they return into one reviewed result.",
+   "like": "loom-01"
+  },
+  {
+   "id": "near-07",
+   "entry": "r-pel",
+   "text": "Built the Java indexing pipeline ingesting 40 million documents a day into Elasticsearch with a 5-minute freshness target.",
+   "like": "pel-01"
+  },
+  {
+   "id": "near-08",
+   "entry": "r-hal",
+   "text": "Mentored 3 senior engineers to staff-level scope with weekly design reviews and shared ownership of the platform's hardest projects, one promoted within 14 months.",
+   "like": "hal-07"
+  }
+ ],
+ "long": [
+  {
+   "id": "long-01",
+   "entry": "r-hal",
+   "text": "Coordinated the company-wide move to a new set of internal working agreements over the course of a year, which involved many conversations with many people in many departments, a long series of drafts that were circulated and commented on and circulated again, a number of workshops in which the drafts were discussed at length, and a final document that was published to everyone and then revisited every quarter in a recurring meeting whose notes were kept in a shared folder so that anyone who had missed a session could catch up on what had been said and decided."
+  },
+  {
+   "id": "long-02",
+   "entry": "r-qui",
+   "text": "Took part in a broad range of day-to-day activities across the group, including regular planning sessions, status meetings, retrospectives and reviews, and helped wherever help was needed, from answering questions in the shared channels and updating pages that had gone out of date to tidying old tickets, following up on open threads and making sure that the things people had agreed to do in one meeting were written down somewhere before the next one, which over time made the group somewhat easier to work in for the people who joined it later."
+  },
+  {
+   "id": "long-03",
+   "entry": "p-loom",
+   "text": "Started as a small experiment on a few free evenings and grew slowly, with several rewrites along the way as ideas about what the tool should be changed, some of which were abandoned after a few weeks and some of which stayed, and with long stretches in which nothing much happened at all, until it eventually settled into a shape that a handful of other people found useful enough to try for themselves and to send a few suggestions about, most of which are still on a list of things to look at one day."
+  },
+  {
+   "id": "long-04",
+   "entry": "r-hal",
+   "text": "Ran the platform's production Kubernetes clusters across AWS and GCP through 3 years of growth, which meant planning node pools and autoscaling for each new workload, rehearsing regional failover twice a year, upgrading the control plane and every add-on without customer-visible downtime, tracking capacity and cost per team in a monthly review, and keeping the 99.95% availability target through 4 major version upgrades and the move of 60 internal teams onto the shared clusters.",
+   "labels": {
+    "agentic": {
+     "A9": "support"
+    },
+    "sre": {
+     "S1": "support"
+    }
+   }
+  }
+ ],
+ "useful": [
+  {
+   "id": "use-01",
+   "entry": "r-hal",
+   "text": "Built a multi-agent dispatch workflow in which a planner agent hands shipment exceptions to 5 specialist agents and merges their results, resolving 70% without a person.",
+   "labels": {
+    "agentic": {
+     "A2": "strong"
+    }
+   },
+   "same_fact_as": {
+    "agentic": [
+     "relay-01"
+    ]
+   }
+  },
+  {
+   "id": "use-02",
+   "entry": "r-hal",
+   "text": "Made agent runs durable with checkpointed state, so 99.9% of interrupted workflows resume after a restart without repeating a model call.",
+   "labels": {
+    "agentic": {
+     "A3": "strong"
+    }
+   },
+   "same_fact_as": {
+    "agentic": [
+     "relay-02"
+    ]
+   }
+  },
+  {
+   "id": "use-03",
+   "entry": "r-qui",
+   "text": "Led the move of 30 services to gRPC behind backward-compatible REST gateways with idempotent retries and no customer-visible downtime.",
+   "labels": {
+    "backend": {
+     "B4": "strong"
+    },
+    "weakfit": {
+     "W4": "support"
+    }
+   }
+  },
+  {
+   "id": "use-04",
+   "entry": "r-qui",
+   "text": "Built the CI/CD pipelines on GitHub Actions and Helm through which 12 teams deploy 40 times a day, and cut the median pipeline from 22 minutes to 8.",
+   "labels": {
+    "sre": {
+     "S5": "strong"
+    },
+    "weakfit": {
+     "W3": "support"
+    }
+   }
+  },
+  {
+   "id": "use-05",
+   "entry": "r-hal",
+   "text": "Set the technical direction for the AI platform that 60 internal teams build on, and aligned 6 engineering directors behind a 3-year plan.",
+   "labels": {
+    "leadership": {
+     "L3": "strong"
+    }
+   }
+  },
+  {
+   "id": "use-06",
+   "entry": "r-qui",
+   "text": "Led incident response as incident commander for 25 major incidents and wrote the on-call runbooks 18 teams use.",
+   "labels": {
+    "sre": {
+     "S4": "strong"
+    },
+    "leadership": {
+     "L4": "support"
+    }
+   }
+  },
+  {
+   "id": "use-07",
+   "entry": "r-bra",
+   "text": "Built the payments backend behind the iOS and Android apps of 250 merchants, working with the mobile teams on its REST and gRPC APIs.",
+   "labels": {
+    "weakfit": {
+     "W4": "strong",
+     "W6": "support"
+    },
+    "backend": {
+     "B4": "support",
+     "B8": "support"
+    }
+   }
+  },
+  {
+   "id": "use-08",
+   "entry": "r-qui",
+   "text": "Ran load tests that replay production traffic at 3 times peak before every release, finding 14 capacity limits before customers did.",
+   "labels": {
+    "sre": {
+     "S6": "strong"
+    }
+   },
+   "same_fact_as": {
+    "sre": [
+     "ost-05"
+    ]
+   }
+  }
+ ],
+ "skills_regrouped": [
+  "Languages: Python, Go, TypeScript, Java, Kotlin, SQL, Bash",
+  "AI: OpenAI, Anthropic APIs, LLM agents, multi-agent systems, tool calling, RAG, pgvector, embeddings, LLM evaluation, prompt caching, Model Context Protocol (MCP)",
+  "Data: PostgreSQL, Redis, Kafka, gRPC, REST, Spark, Airflow, Elasticsearch",
+  "Infrastructure: Kubernetes, Docker, Helm, Terraform, AWS, GCP, Prometheus, Grafana, OpenTelemetry"
+ ]
+}

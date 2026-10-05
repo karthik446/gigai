@@ -473,6 +473,11 @@ def _echo_selection(master, selected, heading: str, revision: int) -> None:  # n
     lines_section("other", selected.other)
     if selected.keywords is not None and selected.coverage.get("must_missing"):
         click.echo("\nMust-haves of the posting this resume does not name: " + ", ".join(selected.coverage["must_missing"]) + ".")
+    if selected.conflicts:
+        click.echo("\nDid not fit although the rules say it stays:")
+        for conflict in selected.conflicts:
+            what = f" {conflict.requirement}:" if conflict.requirement else ""
+            click.echo(f"  -{what} {conflict.reason}" + (f" ({', '.join(conflict.ids)})" if conflict.ids else ""))
 
 
 @master_group.group("selection")

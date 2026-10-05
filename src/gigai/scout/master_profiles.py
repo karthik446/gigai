@@ -16,7 +16,15 @@ STICKY (the operator's decision 5). A selection changes only when
   gone) and moves the profile's pin. Nothing else is touched: no new line
   comes in, no line is re-ranked;
 * the user refreshes: ``refresh_selection`` selects again from the whole
-  master, with the lines the profile shows now as the prior.
+  master, with the lines the profile shows now as the prior. THE RE-MAKE
+  RULE (0110-10-15, ``master_selection.compare_selections``): the selection
+  the profile holds and the new one are checked against the same current
+  master, requirements and page limit on separate checks. The new one is
+  stored when it regresses on none of them; the one held is KEPT when it is
+  still valid and the new one regresses; when the new one regresses and the
+  one held cannot be kept (it shows a retired or corrected line, or no
+  longer fits) NOTHING is stored and the change says so (``unresolved``):
+  the caller shows it, and ``accept=True`` stores the new one all the same.
 
 Lines the master gained since the selection was made are only OFFERED
 (``SelectionStatus.offer``: "3 new master lines: refresh?").
@@ -62,7 +70,18 @@ from . import profile_records
 from .find_jobs.contracts import FindJobsContractError, PinnedResume
 from .master_migration import MigrationPlan, MigrationResumeError, SourceResume, plan_migration
 from .master_resume import KIND_SKILLS, Master
-from .master_selection import SELECTOR_VERSION, Measure, Selected, SelectionPosting, SelectionProfile, render_selection, select
+from .master_selection import (
+    REMAKE_NEW,
+    SELECTOR_VERSION,
+    Measure,
+    Remake,
+    Selected,
+    SelectionPosting,
+    SelectionProfile,
+    compare_selections,
+    render_selection,
+    select,
+)
 from .master_store import ACTORS, MASTER_FILE_NAME, MasterImport, MasterStoreError, StoredMaster, import_master, load_master, master_revisions, strip_contact
 from .posting_keywords import extract_keywords
 from .profile_records import ProfileMasterSelection, ProfileRecord
@@ -78,6 +97,8 @@ INDEX_BOARDS_MAX = 600
 STAND_IN_MUST_SHARE = 0.25
 STAND_IN_NICE_SHARE = 0.10
 STAND_IN_TERMS = 15
+#: How many times a refresh selects again with its own result as the prior before it takes the result as settled.
+REFRESH_SETTLE_TRIES = 3
 
 _NO_MASTER = (
     "there is no master resume yet; make one from your profiles' resumes with `gigai scout resume master init`, "
@@ -305,7 +326,8 @@ class SelectionChange:
 
     profile_id: str
     label: str
-    #: ``first`` | ``refreshed`` | ``synced`` | ``unchanged``
+    #: ``first`` | ``refreshed`` | ``synced`` | ``unchanged`` | ``kept`` (a refresh that kept the selection the
+    #: profile holds) | ``unresolved`` (a refresh that stored nothing: see ``remake``)
     action: str
     source: str
     written: bool
@@ -322,8 +344,16 @@ class SelectionChange:
     #: How many matching postings of the local index the stand-in posting was made from (a refresh, a first selection).
     postings: int = 0
     record: ProfileRecord | None = None
+    #: A refresh of a profile that held a selection: the two selections checked side by side, and which stands.
+    remake: Remake | None = None
 
     def to_json(self) -> dict[str, object]:
+        value = self._json()
+        if self.remake is not None:
+            value["remake"] = self.remake.to_json()
+        return value
+
+    def _json(self) -> dict[str, object]:
         return {
             "profile_id": self.profile_id, "label": self.label, "action": self.action, "source": self.source, "written": self.written,
             "resume_ref": self.resume_ref.to_json() if self.resume_ref is not None else None,
@@ -463,29 +493,46 @@ def index_stand_in(home_root: Path, target: Path, profile: ProfileRecord, master
 
 def refresh_selection(
     *, home_root: Path, target: Path, profile_id: str, dry_run: bool = False, today: date | None = None, measure: Measure | None = None,
+    accept: bool = False,
 ) -> SelectionChange:
     """Select again from the whole master for one profile and, unless ``dry_run``, store the view and the selection.
 
     The first selection of a profile that has none; a refresh of one that
     has. The posting is the stand-in from the local index (``index_stand_in``);
-    the prior is the lines the profile shows now, else its titles.
+    the prior is the lines the profile shows now, else its titles. A profile
+    that holds a selection gets the re-make rule (the module text): the new
+    selection is stored only when it regresses on no check, or with
+    ``accept`` (the user saw what regresses and chose it).
     """
 
     resolved = _resolve(home_root, target)
     profile = _profiles(resolved, home_root, target, profile_id)[0]
     with committed_read_cache():
-        current = _Masters(home_root, target).current
+        masters = _Masters(home_root, target)
+        current = masters.current
+        status = _status(home_root, masters, profile)
     before = profile.master_selection
     attached = _attached(home_root, profile)
     posting, postings_read = index_stand_in(home_root, target, profile, current.master)
-    selected = select(
-        current.master,
-        SelectionProfile(
-            titles=tuple(profile.titles), base_ids=tuple(before.item_ids) if before is not None and attached else None,
-            profile_id=profile.profile_id, label=profile.label,
-        ),
-        posting, today=today, measure=measure,
+    prior = SelectionProfile(
+        titles=tuple(profile.titles), base_ids=tuple(before.item_ids) if before is not None and attached else None,
+        profile_id=profile.profile_id, label=profile.label, pins=tuple(before.pins) if before is not None else (),
     )
+    selected = select(current.master, prior, posting, today=today, measure=measure)
+    # A selection is its own prior from the next refresh on. It is settled here, so that the same refresh again
+    # makes the same selection: selected again with what it shows as the prior until nothing changes.
+    for _again in range(REFRESH_SETTLE_TRIES):
+        settled = select(current.master, replace(prior, base_ids=selection_ids(selected)), posting, today=today, measure=measure)
+        if (selection_ids(settled), settled.skills) == (selection_ids(selected), selected.skills):
+            break
+        selected = settled
+    remake: Remake | None = None
+    if before is not None and attached:
+        # Both selections against the same current sources. A line the master corrected or retired since the
+        # view was last brought up to date makes the one held invalid.
+        remake = compare_selections(
+            current.master, selected, before.item_ids, before.skills, stale=(*status.changed, *status.retired), pins=before.pins, measure=measure,
+        )
     item_ids, skills = selection_ids(selected), tuple(selected.skills)
     markdown = render_selection(current.master, item_ids, skills)
     had = set(before.item_ids) if before is not None and attached else set()
@@ -500,8 +547,18 @@ def refresh_selection(
         profile.profile_id, profile.label, action, source, False, None, len(item_ids), len(skills), selected.pages, selected.fits,
         added=tuple(item_id for item_id in item_ids if before is not None and item_id not in had),
         removed=tuple(item_id for item_id in (before.item_ids if before is not None and attached else ()) if item_id not in set(item_ids)),
-        postings=postings_read,
+        postings=postings_read, remake=remake,
     )
+    if remake is not None and remake.decision != REMAKE_NEW and not accept:
+        # Nothing is stored: the selection held stands (``kept``), or neither does and the problem is shown.
+        kept = remake.decision == "previous"
+        return replace(
+            change, action="kept" if kept else "unresolved", resume_ref=profile.resume_ref if kept else None,
+            shown=len(before.item_ids) if kept and before is not None else change.shown,
+            skills=len(before.skills) if kept and before is not None else change.skills,
+            pages=remake.previous.pages if kept else change.pages, fits=remake.previous.fits if kept else change.fits,
+            added=() if kept else change.added, removed=() if kept else change.removed, record=profile if kept else None,
+        )
     if dry_run:
         return change
     record, pin = _write_selection(resolved, home_root, target, profile, markdown, selection)
