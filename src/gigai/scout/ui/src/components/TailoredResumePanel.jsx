@@ -20,7 +20,7 @@ import {
 } from "../tailoredResumeModel.js";
 import { getMaster, putMasterLine, putTailoredResumeLength } from "../api.js";
 import { lengthNote } from "../tailorLengthModel.js";
-import { conflictOf, saveWordingTarget } from "../masterModel.js";
+import { conflictOf, madeFrom, saveWordingTarget } from "../masterModel.js";
 import PickedLeftOut from "./PickedLeftOut.jsx";
 
 // Q4b-ui (v0.1.9): the tailored-resume panel on the job page
@@ -288,11 +288,12 @@ export function Preview({ response, profileLabel, promptFor, initialView = "chan
       return next;
     });
   }, []);
-  const resumeName = response.resume && response.resume.profile_id ? profileLabel || response.resume.profile_id : "a pasted resume";
+  // 0110-10-10 item 3: what the stored resume records it was made from (the master, or the profile's own resume).
+  const from = madeFrom(response, profileLabel);
   return (
     <>
-      <div className="tailor-meta" title={response.updated_at || undefined}>
-        Tailored {dateTimeLabel(response.updated_at) || "just now"} · from resume <strong>{resumeName}</strong>
+      <div className="tailor-meta" title={response.updated_at || undefined} data-basis={from.basis}>
+        Tailored {dateTimeLabel(response.updated_at) || "just now"} · <span data-role="made-from">{from.lead} <strong>{from.name}</strong></span>
         {editedLine(response) && <span data-role="edited-by"> · {editedLine(response)}</span>}
       </div>
       <div className="resume-change-bar">

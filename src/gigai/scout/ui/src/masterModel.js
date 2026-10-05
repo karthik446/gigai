@@ -246,6 +246,10 @@ export function retiredRows(history) {
 // One profile against the master: {line, offer, action}. `action` is the
 // button to offer: refresh (select again), sync (print the resume again) or
 // null. `offer` is the server's own sentence ("3 new master lines: refresh?").
+// The line ends with the server's sentence for what a resume for a job is
+// made from (`tailoring_basis_line`, the one rule: 0110-10-10 item 3), so a
+// profile that "shows its own resume" still says its jobs' resumes are picked
+// from the master. The page decides nothing about that itself.
 export function selectionRow(status) {
   if (!status) {
     return null;
@@ -253,20 +257,21 @@ export function selectionRow(status) {
   if (status.pending) {
     return { line: "Making its first selection from your master…", offer: "", action: null, state: "pending" };
   }
+  const basis = text(status.tailoring_basis_line) ? ` ${text(status.tailoring_basis_line)}` : "";
   if (!status.has_selection) {
-    return { line: "Shows its own resume, not a selection of the master.", offer: "", action: { use: "refresh", label: "Select from the master" }, state: "none" };
+    return { line: `Shows its own resume, not a selection of the master.${basis}`, offer: "", action: { use: "refresh", label: "Select from the master" }, state: "none" };
   }
   const made = status.made_from_revision ? `revision ${status.made_from_revision}` : "an earlier master";
   const size = `${plural(status.shown || 0, "entry and line", "entries and lines")}, ${plural(status.skills || 0, "skill")}, made from ${made}`;
   if (status.attached === false) {
-    return { line: `${size}. Its resume was replaced after that, so it no longer shows this selection.`, offer: "", action: { use: "refresh", label: "Select from the master again" }, state: "detached" };
+    return { line: `${size}. Its resume was replaced after that, so it no longer shows this selection.${basis}`, offer: "", action: { use: "refresh", label: "Select from the master again" }, state: "detached" };
   }
   if (status.stale) {
     const edited = list(status.changed).length;
     const gone = list(status.retired).length + list(status.skills_retired).length;
-    return { line: `${size}. The master changed under it (${plural(edited, "shown line")} edited, ${gone} retired).`, offer: text(status.offer), action: { use: "sync", label: "Print its resume again" }, state: "stale" };
+    return { line: `${size}. The master changed under it (${plural(edited, "shown line")} edited, ${gone} retired).${basis}`, offer: text(status.offer), action: { use: "sync", label: "Print its resume again" }, state: "stale" };
   }
-  return { line: `${size}.`, offer: text(status.offer), action: status.offer ? { use: "refresh", label: "Refresh" } : null, state: status.offer ? "offer" : "current" };
+  return { line: `${size}.${basis}`, offer: text(status.offer), action: status.offer ? { use: "refresh", label: "Refresh" } : null, state: status.offer ? "offer" : "current" };
 }
 
 // What a refresh did, in one line.
@@ -433,6 +438,36 @@ export function pickedLeftOut(response, master) {
     leftOut,
     counts: { picked: list(selection.picked).length, leftOut: list(selection.left_out).length },
   };
+}
+
+// What a STORED tailored resume was made from, as it recorded it (never
+// worked out again here): "master" when `sources.master` names the master
+// revision its lines were picked from (`selection`, stored with it, lists
+// them), else "profile_resume", or "pasted_resume" for a resume no profile
+// holds. The header (`madeFrom`) and Picked / Left out's line
+// (`pickedByLine`, shown for a stored `selection`) both follow this record,
+// so they name the same basis (0110-10-10 item 3).
+export function recordedBasis(response) {
+  const sources = response && response.sources;
+  const fromMaster = (sources && sources.master && typeof sources.master === "object") || (response && response.selection && typeof response.selection === "object");
+  if (fromMaster) {
+    return "master";
+  }
+  return response && response.resume && response.resume.profile_id ? "profile_resume" : "pasted_resume";
+}
+
+// The header's "from ...": {basis, lead, name}; the page prints `lead` and
+// `name` in bold. A resume picked from the master says so and names the
+// profile it was picked for; the profile's own resume is named only when
+// that resume is what the lines came from.
+export function madeFrom(response, profileLabel) {
+  const basis = recordedBasis(response);
+  const profile = response && response.resume && response.resume.profile_id ? text(profileLabel) || response.resume.profile_id : "";
+  if (basis === "master") {
+    const revision = response.sources && response.sources.master ? response.sources.master.revision : null;
+    return { basis, lead: `from your master resume${revision ? ` (revision ${revision})` : ""}, picked for profile`, name: profile };
+  }
+  return { basis, lead: "from resume", name: basis === "pasted_resume" ? "a pasted resume" : profile };
 }
 
 // "Picked by the model inside the lines GigAI offered it." / the fallback.

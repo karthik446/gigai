@@ -436,7 +436,7 @@ def _attach_resume_to_profile(
 
 @resume_group.command("length")
 @click.option("--job-url", "job_url", required=True, help="The posting URL the resume was tailored to.")
-@click.option("--profile", "profile_id", help="The Scout profile ID the resume was tailored from (default: the newest).")
+@click.option("--profile", "profile_id", help="The Scout profile ID the resume was tailored for (default: the newest).")
 @click.option("--restore", "restore", is_flag=True, help="Put back every role and bullet that was left out for length.")
 @click.option("--cut", "cut", is_flag=True, help="After --restore: leave the same roles and bullets out again.")
 @click.option("--target", "target_value", type=click.Path(path_type=Path, file_okay=False))
@@ -628,7 +628,9 @@ def resume_tailor_command(
     result = response.result
     rewritten = len(result.rewritten_lines())
     click.echo(f"Tailored resume for {heading}:")
-    click.echo(f"  Resume: {response.resume.profile_id or 'pasted resume (not stored as a profile)'}")
+    from .tailor_master import made_from
+
+    click.echo(f"  Resume: {made_from(response)}")
     click.echo(f"  Sections: {', '.join(section.heading for section in result.sections)}")
     click.echo(f"  Lines: {result.line_count()} ({rewritten} rewritten, every one citing its resume lines / answers)")
     if result.length is not None:
@@ -745,7 +747,7 @@ def _attach_edited_resume(
 @click.option("--tailored", "tailored", is_flag=True, help="Render the STORED tailored resume for --job-url instead of a markdown file.")
 @click.option("--job-url", "job_url", help="With --tailored: the posting URL the resume was tailored to.")
 @click.option("--out", "out_file", type=click.Path(path_type=Path, dir_okay=False), help="Write the PDF to FILE (default: <company>-<role>-<YYYY-MM-DD>.pdf, or resume-<YYYY-MM-DD>.pdf, in your resumes folder).")
-@click.option("--profile", "profile_id", help="With --tailored: the Scout profile ID the resume was tailored from (default: the newest).")
+@click.option("--profile", "profile_id", help="With --tailored: the Scout profile ID the resume was tailored for (default: the newest).")
 @click.option("--spacing", "spacing", type=float, help="Spacing scale 0.7-1.4 for this render (turns auto fit off unless --auto-fit is given). Default: the saved setting.")
 @click.option("--auto-fit/--no-auto-fit", "auto_fit", default=None, help="Pick the spacing that ends the content near a page boundary. Default: the saved setting.")
 @click.option("--target", "target_value", type=click.Path(path_type=Path, file_okay=False))

@@ -629,7 +629,8 @@ _SELECTION_STATUS: dict[str, object] = {
     "profile_id": "prof_1", "label": "Staff Engineer", "state": "active", "has_selection": True, "attached": True, "source": "migration",
     "selector_version": "sel-1", "shown": 36, "skills": 20, "pins": [], "excludes": [], "master_revision": 3, "made_from_revision": 1,
     "new_lines": ["b-4f0c1a", "b-91be02", "o-77aa10"], "changed": [], "retired": [], "skills_retired": [], "stale": False,
-    "offer": "3 new master lines: refresh?", "pending": False,
+    "offer": "3 new master lines: refresh?", "tailoring_basis": "master",
+    "tailoring_basis_line": "A resume for a job is picked from your whole master resume.", "pending": False,
 }
 _SELECTION_EXAMPLE: dict[str, object] = {
     "schema_version": "scout-master-selection:1", "master": {**_MASTER_REVISION, "counts": _MASTER_EXAMPLE["counts"]},
@@ -640,7 +641,9 @@ _SELECTION_NOTE = (
     "since the selection was made are offered (`new_lines`, and `offer`: \"3 new master lines: refresh?\"), never added by themselves. `attached` false: "
     "the profile's resume was replaced by hand after the selection was made, so it no longer shows it (a refresh selects again). `stale`: the master "
     "edited or retired a line the selection shows and the profile's resume has not been printed again (use sync). `has_selection` false: the profile "
-    "still shows its own resume. `pending` lists profiles whose first selection is being made right now (a profile created a moment ago). Ids, "
+    "still shows its own resume. `tailoring_basis`: what a resume for a job is made from for the profile, by the one rule the tailoring itself "
+    "follows: `master` (the job's candidate lines of the whole master; a profile with no selection too) or `profile_resume` (its own resume: "
+    "only when `attached` is false); `tailoring_basis_line` is the sentence for it. `pending` lists profiles whose first selection is being made right now (a profile created a moment ago). Ids, "
     "counts and states only: no line's text."
 )
 
@@ -1118,7 +1121,8 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
         errors=(*_ROW_ERRORS, (502, "job_fetch_failed"), (504, "tailor_timeout"), *_MODEL_ERRORS, _NO_TARGET),
         description=(
             "Synchronous: blocks for the model call (one retry on a rejected answer). With a master resume stored, a profile's tailoring reads "
-            "that job's candidate lines of the whole master instead of the profile's own resume: each resume ref then carries `item_id` (the "
+            "that job's candidate lines of the whole master instead of the profile's own resume (a profile with no selection too; not one whose "
+            "resume was replaced by hand after its selection: GET /api/master/selection, `tailoring_basis`): each resume ref then carries `item_id` (the "
             "master line it is), `sources.master` names the master revision, and `selection` lists what was picked and what was left out, each "
             "line with its reason. The result is cut to 2 pages, the oldest roles first (`result.length`; PUT /api/tailored-resumes/length puts it "
             "back). When the model call then fails or no model is available, the response is the code's own selection (`selection.picked_by` is "
@@ -1139,7 +1143,7 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
         params=(
             _b("job_url", "string", "The posting's link: the ONE job this resume is for.", required=True),
             _b("markdown", "string", "Resume markdown in GigAI's format (what a tailored resume's `markdown` and the resumes folder's file hold), at most 65536 bytes.", required=True),
-            _b("profile_id", "string", "The profile whose resume it was tailored from. Default: the selected profile."),
+            _b("profile_id", "string", "The profile it was tailored for. Default: the selected profile."),
             _ACTOR_PARAM,
             _b("source", "string", "Free text, at most 300 characters: where the edit came from. Stored in `edited.source`; never sent to a model."),
         ),

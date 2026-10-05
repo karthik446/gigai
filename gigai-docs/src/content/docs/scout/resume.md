@@ -135,7 +135,13 @@ Profiles and on the Master page; **Refresh** selects again from the whole master
 code and with no model call, and makes the result the profile's resume. When you edit
 or retire a line a profile shows, its resume follows by itself.
 
-**One job.** A resume tailored from the master shows **Picked (n)** and **Left out (m)**
+**One job.** With a master stored, a profile's resume for a job is picked from the whole
+master, also for a profile that has no selection yet. The one exception is a profile whose
+resume you replaced by hand after its selection was made: its jobs' resumes are made from
+that resume. The header of the resume on the job page says which ("from your master
+resume" or "from resume" and the profile), and so does each profile's line on the Master
+page and in `gigai scout resume master selection status`. A resume tailored from the
+master shows **Picked (n)** and **Left out (m)**
 on the job page, every line with the reason it is shown or not. **Remove** takes a line
 off this job's resume; **Add** puts one on. If an added line would make the resume 3
 pages, Scout names the line that would be cut to keep 2 and asks: cut it, or keep both.

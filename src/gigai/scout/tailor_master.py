@@ -11,6 +11,21 @@ available the code's own selection is the resume (the fallback).
 Without a master nothing here runs: ``master_tailoring`` answers ``None`` and
 ``tailored_resume.run_tailored_resume`` does exactly what it did.
 
+WHEN THE MASTER IS THE BASIS (``tailoring_basis``, the ONE rule; 0110-10-10
+item 3).  A resume for a job is made from the master when a master is stored
+and can be read, the resume is a profile's (not pasted text), and the profile's
+resume was not replaced by hand after its selection was made (``detached``).  A
+profile with NO selection is not detached: its resume is still its own, and a
+resume for a job is picked from the whole master all the same, with the
+profile's titles as the prior.  What a tailoring reads (``master_tailoring``),
+what keys the pipeline's tailor digest (``digest_parts``), what an assessment
+reads (``assess_master.reads_evidence``) and every text that says it
+(``basis_line``: the selection status of the CLI and of ``GET
+/api/master/selection``) come from that one function.  A STORED tailored
+resume says what it WAS made from (``recorded_basis``: ``sources.master``),
+whatever the rule answers now; the CLI's summary and the job page's header and
+Picked / Left out line read that record.
+
 THE CANDIDATE SET (``job_candidates``; ``CANDIDATES`` names the one a
 tailoring uses, settled by the P4 live eval):
 
@@ -141,6 +156,18 @@ CANDIDATES = MODE_SHORTLIST
 #: Names the candidate rules and the fit's cut order above; the pipeline's tailor digest holds it beside
 #: ``SELECTOR_VERSION`` and ``CANDIDATES``, so changing one is a deliberate re-open of the stored tailorings.
 CANDIDATES_VERSION = "job-candidates:2"
+
+#: What a resume for a job is made from (``tailoring_basis`` decides; ``recorded_basis`` reads what a stored one says).
+BASIS_MASTER = "master"
+BASIS_PROFILE_RESUME = "profile_resume"
+BASIS_PASTED_RESUME = "pasted_resume"
+BASES: tuple[str, ...] = (BASIS_MASTER, BASIS_PROFILE_RESUME, BASIS_PASTED_RESUME)
+#: The sentence a profile's status carries for its basis (the CLI prints it; the UI shows the API's own copy).
+BASIS_LINES: Mapping[str, str] = {
+    BASIS_MASTER: "A resume for a job is picked from your whole master resume.",
+    BASIS_PROFILE_RESUME: "A resume for a job is made from this profile's own resume, not from your master resume.",
+    BASIS_PASTED_RESUME: "A resume for a job is made from the resume text you paste.",
+}
 
 PICKED_BY_MODEL = "model"
 PICKED_BY_CODE = "code"
@@ -925,6 +952,60 @@ def detached(home_root: Path, profile: object) -> bool:
     return not same_resume_revision(home_root, selection.resume_revision_id, profile.resume_ref.revision_id)  # type: ignore[attr-defined]
 
 
+def tailoring_basis(home_root: Path, profile: object | None, *, master_stored: bool) -> str:
+    """THE ONE RULE (0110-10-10 item 3): what a resume for a job is made from, for ``profile`` as it is now.
+
+    ``BASIS_MASTER``: the job's candidate set of the whole master.  A master
+    is stored (``master_stored``: the caller read it, ``stored_master``), the
+    resume is a profile's, and the profile is not ``detached``.  A profile
+    with NO selection is on this basis too (its titles are the prior).
+    ``BASIS_PROFILE_RESUME``: the profile's own resume (no master, one that
+    cannot be read, or a resume put there by hand after the selection).
+    ``BASIS_PASTED_RESUME``: ``profile`` is ``None`` (pasted text).
+
+    Every reader and every text asks here; nothing else decides it.
+    """
+
+    if profile is None:
+        return BASIS_PASTED_RESUME
+    if not master_stored or detached(home_root, profile):
+        return BASIS_PROFILE_RESUME
+    return BASIS_MASTER
+
+
+def basis_line(basis: str) -> str:
+    """One sentence for a profile's status: what a resume for a job is made from on ``basis`` (``BASIS_LINES``)."""
+
+    return BASIS_LINES[basis]
+
+
+def recorded_basis(response: object) -> str:
+    """What a STORED tailored resume (``TailorResponse``) was made from, as it recorded it.
+
+    The record, never the rule as it stands now: ``sources.master`` names the
+    master revision its lines were picked from (and ``selection``, stored
+    with it, lists them); without them the lines are the profile's own
+    resume's, or a pasted resume's.
+    """
+
+    if response.sources.master is not None or response.selection is not None:  # type: ignore[attr-defined]
+        return BASIS_MASTER
+    return BASIS_PROFILE_RESUME if response.resume.profile_id is not None else BASIS_PASTED_RESUME  # type: ignore[attr-defined]
+
+
+def made_from(response: object) -> str:
+    """``recorded_basis`` in words, for one stored tailored resume (the CLI's ``Resume:`` line)."""
+
+    basis = recorded_basis(response)
+    profile_id = response.resume.profile_id  # type: ignore[attr-defined]
+    if basis == BASIS_MASTER:
+        source = response.sources.master  # type: ignore[attr-defined]
+        return f"your master resume{'' if source is None else f', revision {source.revision}'} (picked for profile {profile_id})"
+    if basis == BASIS_PROFILE_RESUME:
+        return f"the resume of profile {profile_id}"
+    return "pasted resume (not stored as a profile)"
+
+
 def digest_parts(home_root: Path, target: Path, profile: object, *, resolved: object | None = None) -> tuple[object, ...]:
     """What the pipeline's tailor digest adds when this profile's tailoring reads the master; ``()`` when it does not.
 
@@ -936,8 +1017,9 @@ def digest_parts(home_root: Path, target: Path, profile: object, *, resolved: ob
     """
 
     stored = stored_master(home_root, target, resolved=resolved)
-    if stored is None or detached(home_root, profile):
+    if tailoring_basis(home_root, profile, master_stored=stored is not None) != BASIS_MASTER:
         return ()
+    assert stored is not None
     return ("master", stored.revision.revision_id, SELECTOR_VERSION, CANDIDATES_VERSION, CANDIDATES)
 
 
@@ -977,19 +1059,20 @@ def master_tailoring(
 ) -> MasterTailoring | None:
     """How one tailoring reads the master, or ``None`` when it does not (see the module text).
 
-    ``None``: no master is stored, the resume is not a profile's (pasted
-    text), or the profile's resume was replaced by hand after its selection
-    (``detached``).  The profile's prior is the lines its selection shows,
-    else its titles.  ``job_identity``: the job, so that its stored
-    assessment for this profile (when there is one) says which master lines
-    evidence each requirement; without it the posting is matched by words.
+    ``None`` whenever ``tailoring_basis`` is not the master: no master is
+    stored, the resume is not a profile's (pasted text), or the profile's
+    resume was replaced by hand after its selection (``detached``).  The
+    profile's prior is the lines its selection shows, else its titles.
+    ``job_identity``: the job, so that its stored assessment for this
+    profile (when there is one) says which master lines evidence each
+    requirement; without it the posting is matched by words.
     """
 
-    if profile is None:
+    # Pasted text reads no master: nothing is looked up for it.
+    stored = None if profile is None else stored_master(home_root, target, resolved=resolved)
+    if tailoring_basis(home_root, profile, master_stored=stored is not None) != BASIS_MASTER:
         return None
-    stored = stored_master(home_root, target, resolved=resolved)
-    if stored is None or detached(home_root, profile):
-        return None
+    assert stored is not None and profile is not None
     selection = getattr(profile, "master_selection", None)
     prior = SelectionProfile(
         titles=tuple(profile.titles),  # type: ignore[attr-defined]
@@ -1038,6 +1121,11 @@ def tailoring_for_resume(
 
 
 __all__ = [
+    "BASES",
+    "BASIS_LINES",
+    "BASIS_MASTER",
+    "BASIS_PASTED_RESUME",
+    "BASIS_PROFILE_RESUME",
     "CANDIDATES",
     "CANDIDATES_VERSION",
     "CANDIDATE_MODES",
@@ -1055,6 +1143,7 @@ __all__ = [
     "SelectedSkill",
     "SelectionCut",
     "TailorSelection",
+    "basis_line",
     "code_only",
     "compare_tailorings",
     "cut_order",
@@ -1064,10 +1153,13 @@ __all__ = [
     "fit_selected",
     "job_candidates",
     "line_item_id",
+    "made_from",
     "master_tailoring",
     "measure_pages",
+    "recorded_basis",
     "selection_record",
     "shown_evidence",
     "stored_master",
+    "tailoring_basis",
     "tailoring_for_resume",
 ]
