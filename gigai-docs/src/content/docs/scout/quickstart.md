@@ -11,7 +11,10 @@ One path from zero to a running Scout: find jobs, assess them, tailor a resume.
 - [`uv`](https://docs.astral.sh/uv/getting-started/installation/) (one line: `curl -LsSf https://astral.sh/uv/install.sh | sh`).
 - **One model CLI, installed and logged in.** Codex: run `codex login`
   (check it with `codex login status`). Or Claude Code: run `claude`, then
-  `/login`. A local Ollama model or an OpenRouter key also work, but are optional.
+  `/login`. Scout does not start without one of the two installed. A local
+  Ollama model or an OpenRouter key alone does not start it:
+  [Install](../../install/#requirements) says what that takes today, and
+  assessing through them is not verified.
 - Exa search is optional and off; you do not need it.
 - Internet access for **Update sources** (it reads public job boards).
 

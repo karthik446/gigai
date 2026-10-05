@@ -10,9 +10,12 @@ description: Install GigAI with uv and check it is healthy.
   `curl -LsSf https://astral.sh/uv/install.sh | sh`
 - **One model CLI, installed and logged in.** Codex: `codex login`
   (check with `codex login status`). Or Claude Code: run `claude`, then `/login`.
-  Scout does not start without one of the two installed. A local Ollama model or an
-  OpenRouter key work as the model too, in addition; a setup with only those is on the
-  [roadmap](../roadmap/).
+  Scout does not start without one of the two installed. With only a local Ollama model
+  or an OpenRouter key, Scout starts only after a `gigai setup --non-interactive` that
+  adds that model (`gigai setup --help`: `--endpoint`, `--model-target`,
+  `--create-model-target`; [For agents](../agents/#setup-projects-and-gigs-advanced) has
+  an example), and assessing through them is not verified. A plain setup with only those
+  is on the [roadmap](../roadmap/).
 
 ## Install
 
@@ -40,7 +43,8 @@ gigai doctor          # confirms the install is healthy
 
 Before that first run there are no settings yet, and `gigai doctor` fails with
 `config.valid: configuration is missing`. That is a machine that is not set up yet, not a broken
-install.
+install. The line names the way in: `gigai scout run` once (it needs Codex or Claude Code
+installed), or `gigai setup`. `gigai scout status` says the same until the settings exist.
 
 Run `gigai setup` to change the settings; every command is in the
 [CLI reference](../reference/cli/).

@@ -22,7 +22,7 @@ portable, reviewable units of work, not plugins the runtime depends on.
 | --- | --- | --- |
 | What it is | The runtime: setup, config, secrets, journal, proposal/approval lifecycle, model targets | A job-search workflow: `find-jobs` |
 | You use it to | Bind a project, register and run Gigs, read runs and failures | Find postings, rank and assess them against your resume, tailor a resume, download a PDF |
-| Runs on | Your machine, with the model you already use (Codex CLI, Claude Code CLI, Ollama, OpenRouter) | Same, plus public job boards (Greenhouse, Lever, Ashby) |
+| Runs on | Your machine, with the model CLI you already use (Codex or Claude Code; for Ollama or OpenRouter see [Install](install/#requirements)) | Same, plus public job boards (Greenhouse, Lever, Ashby) |
 | Interfaces | `gigai` CLI | `gigai scout ...` CLI, a localhost API and web UI |
 
 ## Scout in four verbs

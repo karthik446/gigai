@@ -258,3 +258,32 @@ def test_no_model_runtime_fails_like_setup_and_writes_nothing(
     error = json.loads(as_json.output)["error"]
     assert error["code"] == "setup_invalid" and error["message"].startswith("no model CLI was found: install Codex or Claude Code")
     assert not (fresh_user / ".gigai" / "config.toml").exists()
+
+
+def test_status_and_doctor_after_a_refused_start_name_the_way_in(
+    fresh_user: Path, monkeypatch: pytest.MonkeyPatch, started: list[dict[str, object]]
+) -> None:
+    """0.1.10.11 NF2: after a refused start the next commands used to name only `gigai setup`, to someone who never ran it."""
+
+    monkeypatch.setattr("gigai.cli.discover_runtime_snapshot", lambda **_: SimpleNamespace(models=()))
+    refused = CliRunner().invoke(cli, ["scout", "run", "--no-browser", "--port", "18797"])
+    assert refused.exit_code == 1, refused.output
+    config_file = (fresh_user / ".gigai" / "config.toml").resolve()
+    expected = (
+        f"configuration is missing at {config_file}; run 'gigai scout run' once "
+        "(it needs Codex or Claude Code installed) or run 'gigai setup'"
+    )
+
+    status = CliRunner().invoke(cli, ["scout", "status", "--json"])
+
+    # The states and exit codes are the old ones; only the sentence changed.
+    assert status.exit_code == 1, status.output
+    assert json.loads(status.output)["error"]["message"] == expected
+    plain = CliRunner().invoke(cli, ["scout", "status"])
+    assert plain.exit_code == 1 and f"Error: {expected}" in plain.output
+
+    doctor = CliRunner().invoke(cli, ["doctor", "--json"])
+    assert doctor.exit_code == 1, doctor.output
+    check = json.loads(doctor.output)["checks"][0]
+    assert (check["id"], check["status"], check["summary"]) == ("config.valid", "FAIL", expected)
+    assert not config_file.exists()
