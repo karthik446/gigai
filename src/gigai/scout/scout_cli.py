@@ -2880,7 +2880,7 @@ def _jobs_errors() -> tuple[type[BaseException], ...]:
 @jobs_group.command("list")
 @click.option("--profile", "profile_ids", multiple=True, help="Only postings this active profile matches (repeatable). With one profile, its own row is shown.")
 @click.option("--query", "query", help="Words that must all be in the title, company or location.")
-@click.option("--state", "states", multiple=True, help="Keep this state (repeatable): not_assessed, needs_answers, matched, not_a_match, tailored, assessed, recommended, weak_fit. A weak fit (waits on answers, few requirements met, low rank) is listed only with --state weak_fit.")
+@click.option("--state", "states", multiple=True, help="Keep this state (repeatable): not_assessed, needs_answers, matched, has_gap, not_a_match, tailored, assessed, recommended, weak_fit. A weak fit (waits on answers, few requirements met, low rank) is listed only with --state weak_fit.")
 @click.option("--window", "window", type=click.Choice(["new", "7d", "30d"]), help="new: first seen since your last check. 7d / 30d: published in the last 7 or 30 days.")
 @click.option("--removed", "removed", is_flag=True, help="The postings the board no longer lists, instead of the live ones.")
 @click.option("--history", "history", is_flag=True, help="Also what old find-jobs runs assessed, with each run's provenance.")

@@ -28,6 +28,15 @@ that the rest are counted, never dropped in silence (:func:`bound_rows`:
 Everything here is a pure function over the rows as JSON objects (the model
 boundary) or as ``RequirementMatrixRow`` (a stored assessment), so the model
 boundary, the validator, the API, the CLI and the grid agree by construction.
+
+0.1.11 N3 (SPEC 1.5). What holds a verdict is decided in ONE place,
+``resume_gate.gate``: :func:`settled_verdict` and
+:func:`blocking_question_count` ask it. On the rows of a v9 assessment
+(``resume_gate.uses_v9_rules``: a row carries an id, a ``class_basis``,
+``alternatives`` or ``sources``) an optional row never holds the verdict,
+whatever the count (OD2); :data:`MINOR_GAPS_ALLOWED` is the threshold for
+every older matrix only. :func:`minor_gaps` and :func:`minor_gap_text` are
+unchanged: "Matched · 2 minor gaps: Cassandra, ClickHouse".
 """
 
 from __future__ import annotations
@@ -41,7 +50,7 @@ NICE_TO_HAVE = "nice_to_have"
 
 #: Classes whose rows never hold a match up by themselves.
 MINOR_CLASSES = frozenset({LIST_ITEM, NICE_TO_HAVE})
-#: Open questions on ``list_item`` rows a match tolerates.
+#: Open questions on ``list_item`` rows a match tolerates, in a matrix made before 0.1.11 (a v9 matrix tolerates any number).
 MINOR_GAPS_ALLOWED = 1
 #: Rows one assessment keeps. A sanity bound on a model's answer, far above what a posting states; past it: "+N not shown".
 MAX_MATRIX_ROWS = 40
@@ -130,30 +139,40 @@ def question_weights(matrix: Iterable[object], questions: object) -> tuple[int, 
 def blocking_question_count(matrix: Iterable[object], questions: object) -> int:
     """How many questions hold the verdict at "needs your answers": 0 when all that is open is a minor gap.
 
-    Every question counts once one of them is on a must-have row, or once
-    more than :data:`MINOR_GAPS_ALLOWED` one-of-a-list rows are open.
+    Every question counts once one of them is on a must-have row, or (a
+    matrix made before 0.1.11 only) once more than :data:`MINOR_GAPS_ALLOWED`
+    one-of-a-list rows are open. The rule is the gate's
+    (``resume_gate.holding_questions``).
     """
 
-    blocking, minor = question_weights(matrix, questions)
-    return blocking + minor if blocking or minor > MINOR_GAPS_ALLOWED else 0
+    from .resume_gate import holding_questions  # the gate reads rows through this module
+
+    return holding_questions(matrix, questions)
 
 
 def settled_verdict(verdict: object, matrix: Iterable[object], questions: object) -> object:
-    """``verdict`` with the minor-gap rule applied: matched and pending are decided by what the questions are on.
+    """``verdict`` with the gate's rule applied: matched and pending are decided by what the questions are on.
 
     A model that asked one question on a one-of-a-list row and answered
     "pending" (the rule every earlier prompt taught) is read as matched; one
     that answered "matched" with a must-have question open is read as
     pending. Any other verdict, and an answer with no question, is returned
     as it came: the validator still checks it against the rows.
+
+    The decision is ``resume_gate.gate``'s (0.1.11 N3): ``hold_question`` is
+    pending, ``suggest`` and ``hold_unmet`` (an unmet ``askable`` row of a v9
+    matrix: the verdict stays the model's, the gate holds the resume) are
+    matched, and a hard gap is not this rule's to settle.
     """
 
     if verdict not in (MATCHED, PENDING) or not isinstance(questions, (list, tuple)) or not questions:
         return verdict
-    rows = list(matrix)
-    if any(_field(row, "status") == "unmet" and row_class(row) in (HARD, None) for row in rows):
+    from .resume_gate import HOLD_QUESTION, NOT_A_MATCH, gate  # the gate reads rows through this module
+
+    decision = gate(matrix, questions, verdict).decision
+    if decision == NOT_A_MATCH:
         return verdict  # a hard gap: not this rule's to settle
-    return PENDING if blocking_question_count(rows, questions) else MATCHED
+    return PENDING if decision == HOLD_QUESTION else MATCHED
 
 
 __all__ = [

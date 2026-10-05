@@ -6585,7 +6585,7 @@
             }
           },
           {
-            "description": "Keep these states (repeat or separate with commas): not_assessed, needs_answers, matched, not_a_match, tailored, assessed (any assessment), recommended (the Scout label), weak_fit (listed only when asked for).",
+            "description": "Keep these states (repeat or separate with commas): not_assessed, needs_answers, matched, has_gap (matched, with a must-have confirmed unmet), not_a_match, tailored, assessed (any assessment), recommended (the Scout label), weak_fit (listed only when asked for).",
             "in": "query",
             "name": "state",
             "required": false,

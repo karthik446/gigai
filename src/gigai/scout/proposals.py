@@ -15,8 +15,18 @@ import re
 from types import MappingProxyType
 from typing import Literal
 
-from .find_jobs.contracts import AssessmentResult, FindJobsContractError
+from .find_jobs.contracts import (
+    MAX_ALTERNATIVE_CHARS,
+    MAX_CLASS_BASIS_CHARS,
+    MAX_ROW_ALTERNATIVES,
+    MAX_ROW_SOURCES,
+    MAX_SOURCE_CHARS,
+    AssessmentResult,
+    FindJobsContractError,
+    is_row_id,
+)
 from .requirement_weights import MAX_MATRIX_ROWS, blocking_question_count
+from .resume_gate import uses_v9_rules
 from .untrusted_text import UNTRUSTED_POSTING_RULE, fence_untrusted_posting
 
 from ..adapters.port import InvocationRequest
@@ -632,6 +642,13 @@ def _validate_verdict_consistency(raw: Mapping[str, object]) -> None:
 
     hard_unmet = _count_phrase(hard_unmet_rows, "hard requirement is unmet", "hard requirements are unmet")
     open_questions = _count_phrase(question_count, "question is open", "questions are open")
+    # 0.1.11 N3: on v9 rows an optional row never holds the verdict (``resume_gate``); the message says the rule that applied.
+    if uses_v9_rules(rows):
+        holds = "any question on a hard or askable row -> pending_user_answers; a question on a list_item or nice_to_have row never holds the verdict"
+        nothing_holds = "no hard unmet row, and no question on a hard or askable row -> matched_above_threshold"
+    else:
+        holds = "any question on a hard or askable row, or two or more list_item questions -> pending_user_answers"
+        nothing_holds = "no hard unmet row, and no question but at most one on a list_item row -> matched_above_threshold"
     if verdict == "matched_above_threshold":
         if hard_unmet_rows > 0:
             raise FindJobsContractError(
@@ -642,8 +659,7 @@ def _validate_verdict_consistency(raw: Mapping[str, object]) -> None:
         if question_count > 0:
             raise FindJobsContractError(
                 "invalid_value",
-                f"verdict matched_above_threshold but {open_questions} "
-                "(rule 7: any question on a hard or askable row, or two or more list_item questions -> pending_user_answers)",
+                f"verdict matched_above_threshold but {open_questions} (rule 7: {holds})",
             )
     elif verdict == "pending_user_answers":
         if hard_unmet_rows > 0:
@@ -655,8 +671,7 @@ def _validate_verdict_consistency(raw: Mapping[str, object]) -> None:
         if question_count < 1:
             raise FindJobsContractError(
                 "invalid_value",
-                "verdict pending_user_answers but no question holds it "
-                "(rule 7: no hard unmet row, and no question but at most one on a list_item row -> matched_above_threshold)",
+                f"verdict pending_user_answers but no question holds it (rule 7: {nothing_holds})",
             )
     elif verdict == "not_a_match":
         if hard_unmet_rows < 1:
@@ -712,7 +727,39 @@ def validate_assessment_bounds(raw: Mapping[str, object]) -> None:
                     f"{field}[{index}] is invalid: must be a non-empty string under {_MAX_QUESTION} characters",
                 )
     _validate_structured_questions(raw.get("structured_questions"))
+    _validate_v9_row_keys(matrix)
     _validate_verdict_consistency(raw)
+
+
+def _validate_v9_row_keys(matrix: list[object]) -> None:
+    """0.1.11 N3 (assessment v9): the bounds of the row keys a v9 answer adds (types and lengths).
+
+    The model boundary cleans these keys before this runs, so an answer is
+    not refused for them; a payload built any other way is held to the same
+    numbers the stored contract checks (``RequirementMatrixRow.from_json``).
+    """
+
+    for index, row in enumerate(matrix):
+        if not isinstance(row, Mapping):
+            continue
+        if "id" in row and not is_row_id(row["id"]):
+            raise FindJobsContractError("invalid_value", f"matrix[{index}].id must be a listed requirement id (req-...) or an elig- id")
+        basis = row.get("class_basis")
+        if "class_basis" in row and (type(basis) is not str or not basis or len(basis) > MAX_CLASS_BASIS_CHARS or "\x00" in basis):
+            raise FindJobsContractError(
+                "invalid_value", f"matrix[{index}].class_basis must be a non-empty string of at most {MAX_CLASS_BASIS_CHARS} characters"
+            )
+        for key, most, chars in (("alternatives", MAX_ROW_ALTERNATIVES, MAX_ALTERNATIVE_CHARS), ("sources", MAX_ROW_SOURCES, MAX_SOURCE_CHARS)):
+            if key not in row:
+                continue
+            items = row[key]
+            if type(items) is not list or len(items) > most:
+                count = len(items) if type(items) is list else "no"
+                raise FindJobsContractError("invalid_value", f"matrix[{index}].{key} has {count} items; it must be a list of at most {most}")
+            if any(type(item) is not str or not item.strip() or len(item) > chars or "\x00" in item for item in items):
+                raise FindJobsContractError(
+                    "invalid_value", f"matrix[{index}].{key} items must be non-empty strings of at most {chars} characters"
+                )
 
 
 def parse_assessment_proposal(raw: Mapping[str, object]) -> AssessmentResult:

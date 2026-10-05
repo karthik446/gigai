@@ -65,6 +65,19 @@ rule above).  The selector reads the result (``master_selection.SelectionPosting
 assessment met with a line keeps that line in the resume, whatever words the two share.  A quote that traces to
 no line now (the line was retired or reworded since) cites nothing, and a row that cites nothing is not passed.
 
+0.1.11 N3 (assessment v9, SPEC 1.1 and 2.2).  WITH IDS: when the shipped prompt explains master line ids
+(``assessment_core.prompt_reads_ids``; the v8 file does not, and then nothing here changes), the evidence view
+is rendered with each line's and each entry's id in a trailing comment and each note after it (``assess_input``
+with ``ids``), and the prompt is told how many lines a pick should hold (``pick_line_count``).  A v9 assessment
+then names, per ``met`` row, the lines it relied on (``sources``), and two guesses above become facts:
+
+- ``cited_requirements``: a row that carries ``sources`` cites exactly the master lines among them; nothing is
+  traced from its quotes.  It is mandatory when its class is ``hard`` or ``askable`` (an optional row never
+  holds a verdict, ``resume_gate``).
+- ``resume_changed`` (``source_changes``): a v9 assessment is stale for its resume when a line among its
+  sources is retired or has another ``mark`` (its text changed) than at the master revision it read.  The
+  ``new_line`` half is unchanged.  A v8 record keeps the word rule.
+
 Pure except ``assess_input`` / ``ResumeCheck`` / ``stored_citations`` (committed journal reads: the
 stored master, kept per journal head by ``tailor_master.stored_master``; an
 earlier revision of the master or of a resume, read once per process, since a
@@ -81,9 +94,9 @@ from pathlib import Path
 import re
 import threading
 
-from .find_jobs.assess_contracts import RESUME_INPUT_EVIDENCE, ResumeBasis
+from .find_jobs.assess_contracts import MAX_PICK_LINES, RESUME_INPUT_EVIDENCE, ResumeBasis
 from .master_resume import KIND_SKILLS, Master, skill_names
-from .master_selection import EVIDENCE_CAP, CitedRequirement, EvidenceView, SelectionPosting, SelectionProfile, evidence_view
+from .master_selection import EVIDENCE_CAP, CitedRequirement, EvidenceView, SelectionPosting, SelectionProfile, evidence_view, select
 
 INPUT_VIEW = "view"
 INPUT_EVIDENCE = RESUME_INPUT_EVIDENCE
@@ -123,14 +136,33 @@ def profile_prior(*, titles: tuple[str, ...], item_ids: tuple[str, ...] | None, 
 
 def evidence_text(
     master: Master, prior: SelectionProfile, *, title: str, posting_text: str, company: str = "", location: str = "", today: date | None = None,
+    ids: bool = False,
 ) -> EvidenceView:
     """The evidence view one assessment of this posting reads: its ``markdown`` is the prompt's RESUME. Pure.
 
     Never longer than the assess prompt's resume cap, so the prompt cuts
-    nothing off it.
+    nothing off it. ``ids`` (0.1.11 N3): with each line's and each entry's
+    master id, and its note (``master_selection.evidence_view``).
     """
 
-    return evidence_view(master, prior, SelectionPosting(title, posting_text, company, location), today=today, cap=EVIDENCE_CAP)
+    return evidence_view(master, prior, SelectionPosting(title, posting_text, company, location), today=today, cap=EVIDENCE_CAP, ids=ids)
+
+
+#: The pick asked of a model holds a quarter more lines than the code selector fits on the pages, so the fit has something to cut.
+PICK_HEADROOM = 1.25
+#: What is asked for when the pages cannot be measured (no renderer): the pick is validated and fitted later all the same.
+PICK_LINES_UNMEASURED = 40
+
+
+def pick_line_count(master: Master, prior: SelectionProfile, posting: SelectionPosting, *, today: date | None = None) -> int:
+    """How many lines the prompt asks a pick to hold: what the code selector fits for this posting, plus a quarter (SPEC 1.6 item 7)."""
+
+    try:
+        selected = select(master, prior, posting, today=today)
+    except (ImportError, OSError, RuntimeError, ValueError):
+        return PICK_LINES_UNMEASURED  # no renderer to measure pages with
+    shown = len(selected.other) + sum(len(bullets) for entry_id, bullets in selected.entries.items() if master.entries[entry_id].section != "education")
+    return max(1, min(MAX_PICK_LINES, -(-int(shown * PICK_HEADROOM * 100) // 100)))
 
 
 @dataclass(frozen=True)
@@ -139,10 +171,26 @@ class AssessInput:
 
     view: EvidenceView
     basis: ResumeBasis
+    #: 0.1.11 N3: how many lines the prompt asks a pick to hold; 0 when the view shows no ids (no pick is asked for).
+    pick_lines: int = 0
+    #: The stored master the view was made of (``master_store.StoredMaster``): what a pick is validated against.
+    stored: object | None = None
+    #: The selector's prior the view was made with (the profile's titles and shown lines).
+    prior: SelectionProfile | None = None
 
     @property
     def resume_text(self) -> str:
         return self.view.markdown
+
+    @property
+    def resume_ids(self) -> tuple[str, ...]:
+        """The master line ids the RESUME block shows (what a row's sources and a pick may name); empty without ids."""
+
+        return self.view.item_ids() if self.view.ids else ()
+
+    @property
+    def resume_notes(self) -> bool:
+        return self.view.notes > 0
 
 
 def reads_evidence(home_root: Path, profile: object) -> bool:
@@ -177,14 +225,16 @@ def resume_source(*, home_root: Path, target: Path, profile: object | None, reso
 
 def assess_input(
     *, home_root: Path, target: Path, profile: object | None, title: str, posting_text: str, company: str = "", location: str = "",
-    resolved: object | None = None, today: date | None = None,
+    resolved: object | None = None, today: date | None = None, ids: bool = False,
 ) -> AssessInput | None:
     """The evidence view this assessment reads, or ``None`` when it reads the profile's resume as before.
 
     ``None``: the switch is on the profile's view, the resume is not a
     profile's (pasted text), no master is stored, or the profile's resume was
     replaced by hand after its selection.  The profile's prior is the lines
-    its selection shows, else its titles.
+    its selection shows, else its titles.  ``ids`` (0.1.11 N3; the caller
+    passes ``assessment_core.prompt_reads_ids()``): the view carries master
+    line ids and notes, and the input says how many lines a pick should hold.
     """
 
     stored = _evidence_master(home_root, target, profile, resolved)
@@ -198,8 +248,9 @@ def assess_input(
         label=profile.label,  # type: ignore[attr-defined]
     )
     revision = stored.revision  # type: ignore[attr-defined]
-    view = evidence_text(stored.master, prior, title=title, posting_text=posting_text, company=company, location=location, today=today)  # type: ignore[attr-defined]
-    return AssessInput(view, ResumeBasis(INPUT_EVIDENCE, revision.revision_id, revision.revision, view.selector_version))
+    view = evidence_text(stored.master, prior, title=title, posting_text=posting_text, company=company, location=location, today=today, ids=ids)  # type: ignore[attr-defined]
+    pick_lines = pick_line_count(stored.master, prior, SelectionPosting(title, posting_text, company, location), today=today) if ids else 0  # type: ignore[attr-defined]
+    return AssessInput(view, ResumeBasis(INPUT_EVIDENCE, revision.revision_id, revision.revision, view.selector_version), pick_lines, stored, prior)
 
 
 # --- the lines of a resume, as they compare ---------------------------------------------------------
@@ -389,13 +440,25 @@ def cited_requirements(master: Master, matrix: Iterable[object], *, citations: M
     ``matrix``: ``RequirementMatrixRow`` items (``requirement``, ``resume_evidence``, ``status``,
     ``requirement_class``).  A row's id is its place in the matrix (``r<n>``, from 1); it is mandatory unless
     its class is ``nice_to_have``, and met when its status is ``met``.  A row that cites no line is left out.
+    A v9 row that carries ``sources`` cites the master lines among them and keeps its own id (the module text).
     """
 
     from .find_jobs.contracts import MatrixStatus, RequirementClass
+    from .resume_gate import is_mandatory
 
-    citations = citations or MasterCitations(master)
     out: list[CitedRequirement] = []
     for place, row in enumerate(matrix, 1):
+        sources = tuple(getattr(row, "sources", ()) or ())
+        if sources:
+            # 0.1.11 N3 (v9): the row says which lines it relied on; nothing is traced from its quotes.
+            cited = tuple(dict.fromkeys(source for source in sources if source in master.items and master.items[source].kind != KIND_SKILLS))
+            if cited:
+                out.append(CitedRequirement(
+                    getattr(row, "id", None) or f"r{place}", row.requirement, is_mandatory(row), cited,  # type: ignore[attr-defined]
+                    met=row.status == MatrixStatus.MET,  # type: ignore[attr-defined]
+                ))
+            continue
+        citations = citations or MasterCitations(master)
         lines, _skills = citations.row(row.resume_evidence)  # type: ignore[attr-defined]
         if lines:
             out.append(CitedRequirement(
@@ -498,11 +561,41 @@ def resume_changes(*, matrix: Iterable[object], questions: Iterable[object], the
     return tuple(found)
 
 
+def has_sources(matrix: Iterable[object]) -> bool:
+    """Whether an assessment's rows say which lines they relied on (a v9 assessment whose prompt showed ids)."""
+
+    return any(getattr(row, "sources", ()) for row in matrix)
+
+
+def source_changes(matrix: Iterable[object], then: Master, now: Master) -> tuple[ResumeChange, ...]:
+    """The ``line_changed`` half for a v9 assessment (SPEC 2.2): one change per row a source line of which moved. Pure.
+
+    A source line moved when the master as it is ``now`` no longer holds it
+    (retired), or holds it with another ``mark`` than ``then`` (its text
+    changed). An answer or a story among the sources is not a line of the
+    master: the story bank's own rule watches those.
+    """
+
+    found: list[ResumeChange] = []
+    for row in matrix:
+        for source in getattr(row, "sources", ()) or ():
+            was = then.items.get(source)
+            if was is None:
+                continue  # an answer or a story, or a line that master never held
+            held = now.items.get(source)
+            if held is None or held.mark != was.mark:
+                found.append(ResumeChange(CHANGE_LINE, requirement=str(getattr(row, "requirement", "") or "")))
+                break
+    return tuple(found)
+
+
 # --- one request's reads -----------------------------------------------------------------------------
 
 _LOCK = threading.Lock()
 #: (workpad path, revision id) -> the lines of that revision of the master or of a resume. A revision never changes.
 _revision_lines: dict[tuple[str, str], ResumeLines] = {}
+#: (workpad path, master revision id) -> that revision of the master (0.1.11 N3: a v9 assessment's sources are compared by mark).
+_revision_masters: dict[tuple[str, str], Master] = {}
 
 
 class ResumeCheck:
@@ -540,14 +633,27 @@ class ResumeCheck:
                     _revision_lines[key] = found
         return found
 
-    def _master_then(self, basis: ResumeBasis) -> ResumeLines | None:
+    def _master_at(self, basis: ResumeBasis) -> Master | None:
+        """The master at the revision ``basis`` names, read once per process (a revision never changes)."""
+
         from .master_store import load_master
 
-        def read() -> ResumeLines | None:
+        key = (str(self._resolved.path), basis.master_revision_id)  # type: ignore[attr-defined]
+        with _LOCK:
+            found = _revision_masters.get(key)
+        if found is None:
             earlier = load_master(home_root=self._home_root, target=self._target, gig_id=self._resolved.gig_id, revision=basis.master_revision)  # type: ignore[attr-defined]
             if earlier is None or earlier.revision.revision_id != basis.master_revision_id:
                 return None
-            return master_lines(earlier.master)
+            found = earlier.master
+            with _LOCK:
+                _revision_masters[key] = found
+        return found
+
+    def _master_then(self, basis: ResumeBasis) -> ResumeLines | None:
+        def read() -> ResumeLines | None:
+            earlier = self._master_at(basis)
+            return None if earlier is None else master_lines(earlier)
 
         return self._kept(basis.master_revision_id, read)
 
@@ -599,6 +705,13 @@ class ResumeCheck:
         if now is None:
             return ()
         result = item.result  # type: ignore[attr-defined]
+        if basis is not None and evidence_now and has_sources(result.matrix):
+            # 0.1.11 N3 (v9): the lines it relied on are named, so the line half compares THEIR marks; the
+            # new-line half (a new line names the subject of an open question) is the same rule as before.
+            earlier = self._master_at(basis)
+            if earlier is not None:
+                moved = source_changes(result.matrix, earlier, stored.master)  # type: ignore[attr-defined]
+                return (*moved, *resume_changes(matrix=(), questions=result.structured_questions, then=then, now=now))
         return resume_changes(matrix=result.matrix, questions=result.structured_questions, then=then, now=now)
 
 
@@ -620,11 +733,14 @@ __all__ = [
     "assess_input",
     "cited_requirements",
     "evidence_text",
+    "has_sources",
     "master_lines",
+    "pick_line_count",
     "profile_prior",
     "reads_evidence",
     "resume_changes",
     "resume_lines",
     "resume_source",
+    "source_changes",
     "stored_citations",
 ]

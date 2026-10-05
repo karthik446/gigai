@@ -41,10 +41,33 @@ import re
 from ..adapters.port import ModelInvocationError, NormalizedUsage
 from ..canonical import digest_imported_bytes
 from .call_metrics import note_invalid_output
-from .find_jobs.contracts import FindJobsContractError, NotAssessedReason
+from .find_jobs.assess_contracts import (
+    MAX_MASTER_ID_CHARS,
+    MAX_PICK_LINES,
+    MAX_STRUCTURED_SUGGESTIONS,
+    MAX_SUGGESTION_PHRASE_CHARS,
+    MAX_SUGGESTION_WHY_CHARS,
+    PICK_SECTIONS,
+    SUGGESTION_KINDS,
+    SUGGESTION_KINDS_WITHOUT_RESUME,
+    AssessmentPick,
+    AssessmentSuggestion,
+)
+from .find_jobs.contracts import (
+    ELIGIBILITY_ROW_IDS,
+    MAX_ALTERNATIVE_CHARS,
+    MAX_CLASS_BASIS_CHARS,
+    MAX_ROW_ALTERNATIVES,
+    MAX_ROW_SOURCES,
+    MAX_SOURCE_CHARS,
+    FindJobsContractError,
+    NotAssessedReason,
+    is_row_id,
+)
 from .find_jobs.work_mode import in_person_modes
 from .question_ids import normalize_question_id
 from .requirement_weights import bound_rows, settled_verdict
+from .requirements_list import ListedRequirement, check_listed, fold
 from .resume_privacy import model_resume
 from .untrusted_text import fence_untrusted_posting
 
@@ -61,6 +84,19 @@ _PRIOR_ANSWERS_PLACEHOLDER = "{{prior_answers}}"
 _BANK_ANSWERS_PLACEHOLDER = "{{bank_answers}}"
 _REMOTE_ONLY_PLACEHOLDER = "{{remote_only_area}}"
 _IN_PERSON_PLACEHOLDER = "{{in_person_mode}}"
+# 0.1.11 N3 (assessment v9, SPEC 1.1): the placeholders a v9 ``assess.md`` may carry. The shipped v8 file carries
+# none of them, so nothing below changes a byte of a v8 prompt. A paragraph that carries one is dropped when the
+# assessment has nothing to put there (``render_assess_prompt``):
+# - ``{{id_example}}``: an id comment as the RESUME block shows it; dropped when the block shows no ids;
+# - ``{{note_example}}``: a private note line as the block shows one; dropped when the block shows no note;
+# - ``{{pick_lines}}``: how many lines the pick should hold; dropped when the block shows no ids;
+# - ``{{requirements}}``: the posting's stored requirement list, fenced as untrusted; dropped without a list.
+PLACEHOLDER_ID_EXAMPLE = "id_example"
+PLACEHOLDER_NOTE_EXAMPLE = "note_example"
+PLACEHOLDER_PICK_LINES = "pick_lines"
+PLACEHOLDER_REQUIREMENTS = "requirements"
+_ID_PLACEHOLDERS = (PLACEHOLDER_ID_EXAMPLE, PLACEHOLDER_PICK_LINES)
+REQUIREMENTS_BLOCK_HEADER = "REQUIREMENTS (id | class | requirement | the posting wording behind the class):"
 
 #: The name of the shipped ``assess.md`` wording. v4 (0110-034) adds the
 #: STORY BANK paragraph: the profile's answered questions (id, the question
@@ -162,6 +198,25 @@ INSTRUCTIONS_DIGEST = digest_imported_bytes(_instruction_bytes())
 """Digest of the shipped ``assess.md`` bytes (``digest_imported_bytes``); changes only with the file."""
 
 
+def template_takes(name: str) -> bool:
+    """Whether the shipped ``assess.md`` carries the placeholder ``{{name}}``.
+
+    0.1.11 N3: what an assessment sends follows the prompt that is shipped.
+    The RESUME block is rendered with master line ids, and a posting's stored
+    requirement list is sent, only when the template has a paragraph that
+    says what they are (:func:`prompt_reads_ids`, ``PLACEHOLDER_REQUIREMENTS``).
+    With the v8 file both answer ``False`` and every prompt is what it was.
+    """
+
+    return "{{" + name + "}}" in load_assess_instructions()
+
+
+def prompt_reads_ids() -> bool:
+    """Whether the shipped prompt explains master line ids (and so may be given a RESUME block that shows them)."""
+
+    return any(template_takes(name) for name in _ID_PLACEHOLDERS)
+
+
 @dataclass(frozen=True)
 class AssessJob:
     """What the prompt needs to know about one posting -- nothing sealed."""
@@ -232,6 +287,15 @@ class AssessContext:
     # for "any"): the CANDIDATE WORK MODE paragraph is then dropped and the
     # prompt renders as v4 did. The area it names is ``location`` above.
     work_mode: str = ""
+    # 0.1.11 N3 (assessment v9, SPEC 1.1). All empty by default, and then nothing of v9 is in the prompt or
+    # read from the answer. ``resume_ids``: the master line ids the RESUME block shows in id comments (what a
+    # row's ``sources`` and the pick may name); ``resume_notes``: the block shows at least one note comment;
+    # ``pick_lines``: how many lines the pick should hold; ``requirements``: the posting's stored requirement
+    # list the prompt carries (the answer must then hold exactly its ids, ``requirements_list.check_listed``).
+    resume_ids: tuple[str, ...] = ()
+    resume_notes: bool = False
+    pick_lines: int = 0
+    requirements: tuple[ListedRequirement, ...] = ()
 
 
 def build_assess_context(
@@ -243,6 +307,10 @@ def build_assess_context(
     location: str = "",
     bank: object | None = None,
     work_mode: object = "",
+    resume_ids: tuple[str, ...] = (),
+    resume_notes: bool = False,
+    pick_lines: int = 0,
+    requirements: tuple[ListedRequirement, ...] = (),
 ) -> AssessContext:
     """The candidate side of one assessment: the ONE builder every path uses.
 
@@ -265,6 +333,10 @@ def build_assess_context(
         location=location or "",
         bank_answers=tuple(getattr(bank, "bank_answers", ()) or ()),
         work_mode=normalize_work_mode(work_mode),
+        resume_ids=tuple(resume_ids),
+        resume_notes=bool(resume_notes),
+        pick_lines=int(pick_lines),
+        requirements=tuple(requirements),
     )
 
 
@@ -325,6 +397,10 @@ class AssessAttempt:
     # matrix for a long posting (``posting_looks_incomplete``): the answer is
     # withheld, ``validation_error`` carries ``POSTING_INCOMPLETE_MESSAGE``.
     incomplete_posting: bool = False
+    # 0.1.11 N3 (assessment v9): what the SUCCESSFUL attempt's answer carried beside the normalized payload
+    # (:class:`AssessExtras`: the pick, the structured suggestions, what the boundary dropped). ``None`` for a
+    # failed attempt and for ``invoke_json_once``. The run path ignores it; ``quick_assess`` merges it into the body.
+    extras: "AssessExtras | None" = None
 
     def __post_init__(self) -> None:
         if self.ok and (self.parsed is None or self.not_assessed_reason is not None):
@@ -376,6 +452,14 @@ def render_assess_prompt(job: AssessJob, ctx: AssessContext, validation_error: s
             else f"- {item.question_id} | answer: {item.summary}"
             for item in ctx.bank_answers
         ),
+        # 0.1.11 N3 (v9): each is in the prompt only when the template carries its placeholder (the v8 file: none).
+        PLACEHOLDER_ID_EXAMPLE: f"<!-- id:{ctx.resume_ids[0]} -->" if ctx.resume_ids else "",
+        PLACEHOLDER_NOTE_EXAMPLE: "<!-- private note: ... -->",
+        PLACEHOLDER_PICK_LINES: str(ctx.pick_lines),
+        # The list's words are the posting's: inside a fence of their own, like the posting.
+        PLACEHOLDER_REQUIREMENTS: fence_untrusted_posting(
+            REQUIREMENTS_BLOCK_HEADER + "\n" + "\n".join(row.prompt_line() for row in ctx.requirements)
+        ) if ctx.requirements else "",
     }
     blocks = load_assess_instructions().split("\n\n")
     if not validation_error:
@@ -389,6 +473,14 @@ def render_assess_prompt(job: AssessJob, ctx: AssessContext, validation_error: s
         blocks = [block for block in blocks if _REMOTE_ONLY_PLACEHOLDER not in block]
     if ctx.work_mode not in _IN_PERSON_MODE_TEXT:
         blocks = [block for block in blocks if _IN_PERSON_PLACEHOLDER not in block]
+    # 0.1.11 N3 (v9): the paragraphs about ids, notes, the pick and the requirement list, each only with something to say.
+    absent = [
+        *(_ID_PLACEHOLDERS if not ctx.resume_ids else ()),
+        *((PLACEHOLDER_NOTE_EXAMPLE,) if not (ctx.resume_ids and ctx.resume_notes) else ()),
+        *((PLACEHOLDER_REQUIREMENTS,) if not ctx.requirements else ()),
+    ]
+    for name in absent:
+        blocks = [block for block in blocks if "{{" + name + "}}" not in block]
 
     def fill(match: re.Match[str]) -> str:
         key = match.group(1)
@@ -491,11 +583,14 @@ def assess_once(
 
     dropped: tuple[str, ...] = ()
     dropped_count = 0
+    # 0.1.11 N3 (v9): what THIS prompt offered: the ids a row's sources may name, the requirement list it carried.
+    boundary = Boundary(source_ids=offered_sources(ctx), listed=ctx.requirements)
 
     def parse_normalized(decoded: Mapping[str, object]) -> object:
         nonlocal dropped, dropped_count
         dropped, dropped_count = (), 0
-        normalized, dropped, dropped_count = _normalize_and_strip(decoded)
+        boundary.extras = None
+        normalized, dropped, dropped_count = _normalize_and_strip(decoded, boundary=boundary)
         return parse(normalized)
 
     attempt = invoke_json_once(
@@ -505,6 +600,8 @@ def assess_once(
     )
     if attempt.ok and dropped_count:
         attempt = replace(attempt, dropped_questions=dropped_count, dropped_question_ids=dropped)
+    if attempt.ok and boundary.extras is not None:
+        attempt = replace(attempt, extras=boundary.extras)
     if attempt.ok and posting_looks_incomplete(job.posting_text, attempt.parsed):
         # Never Matched on a posting whose requirements look cut off: the
         # answer is withheld and the posting stays not assessed.
@@ -805,7 +902,164 @@ def _strip_not_a_match_questions(result: dict[str, object]) -> tuple[tuple[str, 
     return ids, count
 
 
-def _normalize_and_strip(decoded: Mapping[str, object]) -> tuple[dict[str, object], tuple[str, ...], int]:
+# --- 0.1.11 N3 (assessment v9, SPEC 1.3): the v9 keys at the model boundary ------------------------------------------
+#
+# Every v9 key is read leniently: one that is missing, null or malformed is normalized to "none" and never spends
+# the one retry (which stays for an invalid matrix, question or verdict, and for a matrix that does not hold the
+# listed requirement ids). An answer in the v8 shape carries none of these keys and is normalized exactly as before.
+
+_ID_COMMENT = re.compile(r"\s*<!--\s*(?:id|note|private note):.*?-->")
+_ANSWER_SOURCE = re.compile(r"\AA\s+(\S.*)\Z")
+
+
+@dataclass(frozen=True)
+class AssessExtras:
+    """What a v9 answer carried BESIDE the normalized payload, and what the boundary dropped from it.
+
+    ``pick`` and ``structured_suggestions`` are returned here, not inside the
+    payload: the run path's parser is a closed object. ``dropped_pick``: the
+    answer carried a pick the rules do not keep (a verdict that is not
+    Matched, or a prompt that showed no ids). ``dropped_suggestions``: the
+    structured suggestions a ``not_a_match`` or pending verdict does not keep.
+    ``unknown_sources``: ``(the row's requirement words, the source)`` for
+    every source the prompt did not offer (dropped from the row).
+    """
+
+    pick: AssessmentPick | None = None
+    structured_suggestions: tuple[AssessmentSuggestion, ...] = ()
+    dropped_pick: bool = False
+    dropped_suggestions: int = 0
+    unknown_sources: tuple[tuple[str, str], ...] = ()
+
+
+@dataclass
+class Boundary:
+    """What one prompt offered, for reading its answer; ``extras`` is what the last normalized answer carried.
+
+    ``source_ids``: every id a row's ``sources`` may name (:func:`offered_sources`),
+    or ``None`` when the RESUME block showed no ids (sources and a pick are
+    then dropped). ``listed``: the requirement list the prompt carried
+    (empty: none; the matrix is then not checked against a list).
+    """
+
+    source_ids: frozenset[str] | None = None
+    listed: tuple[ListedRequirement, ...] = ()
+    extras: AssessExtras | None = None
+
+
+def offered_sources(ctx: AssessContext) -> frozenset[str] | None:
+    """The sources a v9 answer may cite for ``ctx``'s prompt, or ``None`` when its RESUME block shows no ids.
+
+    The master line ids the block shows, ``A <question_id>`` for each answer
+    and ``A story:<slug>`` for each story the prompt lists.
+    """
+
+    if not ctx.resume_ids:
+        return None
+    answers = {f"A {item.question_id}" for item in (*ctx.prior_answers, *ctx.bank_answers)}
+    return frozenset(ctx.resume_ids) | answers
+
+
+def _short_strings(value: object, *, most: int, chars: int) -> list[str]:
+    """The clean strings of a list a model returned: stripped, non-empty, at most ``chars`` long, each once, ``most`` kept."""
+
+    out: list[str] = []
+    for item in value if isinstance(value, list) else ():
+        text = " ".join(item.split()) if isinstance(item, str) else ""
+        if text and len(text) <= chars and text not in out:
+            out.append(text)
+    return out[:most]
+
+
+def _source(value: str) -> str:
+    """A source as it is compared: ``A  Tooling:Temporal`` is ``A tooling:temporal``; a line id is itself."""
+
+    found = _ANSWER_SOURCE.fullmatch(value)
+    return f"A {found.group(1).strip().lower()}" if found else value
+
+
+def _v9_row_keys(row: Mapping[str, object], boundary: Boundary, unknown: list[tuple[str, str]]) -> dict[str, object]:
+    """The v9 keys of one matrix row, each only when it is present and well formed."""
+
+    out: dict[str, object] = {}
+    row_id = row.get("id")
+    row_id = row_id.strip() if isinstance(row_id, str) else None
+    # An id means something only where one was offered: a listed row's, or one of the four fixed ids.
+    if row_id in ELIGIBILITY_ROW_IDS or (boundary.listed and is_row_id(row_id)):
+        out["id"] = row_id
+    basis = row.get("class_basis")
+    if isinstance(basis, str) and basis.strip():
+        out["class_basis"] = " ".join(basis.split())[:MAX_CLASS_BASIS_CHARS].rstrip()
+    alternatives = _short_strings(row.get("alternatives"), most=MAX_ROW_ALTERNATIVES, chars=MAX_ALTERNATIVE_CHARS)
+    if alternatives:
+        out["alternatives"] = alternatives
+    if boundary.source_ids is not None:
+        kept: list[str] = []
+        for source in _short_strings(row.get("sources"), most=MAX_ROW_SOURCES, chars=MAX_SOURCE_CHARS):
+            source = _source(source)
+            if source in boundary.source_ids:
+                if source not in kept:
+                    kept.append(source)
+            else:
+                unknown.append((str(row.get("requirement") or ""), source))
+        if kept:
+            out["sources"] = kept
+    return out
+
+
+def _master_id(value: object) -> str | None:
+    text = value.strip() if isinstance(value, str) else ""
+    return text if text and len(text) <= MAX_MASTER_ID_CHARS and not any(char.isspace() for char in text) else None
+
+
+def _structured_suggestions(value: object) -> list[AssessmentSuggestion]:
+    """The well-formed suggestion objects of a v9 answer, at most ``MAX_STRUCTURED_SUGGESTIONS``; a bare string is not one."""
+
+    out: list[AssessmentSuggestion] = []
+    for item in value if isinstance(value, list) else ():
+        if not isinstance(item, Mapping):
+            continue
+        kind = item.get("kind")
+        kind = kind.strip().lower() if isinstance(kind, str) else None
+        why = " ".join(item["why"].split()) if isinstance(item.get("why"), str) else ""
+        line = _master_id(item.get("line"))
+        requirement = item.get("requirement")
+        requirement = requirement.strip() if isinstance(requirement, str) and is_row_id(requirement.strip()) else None
+        if kind not in SUGGESTION_KINDS or not why or (line is None and requirement is None):
+            continue
+        phrase = " ".join(item["posting_phrase"].split()) if isinstance(item.get("posting_phrase"), str) else ""
+        out.append(AssessmentSuggestion(
+            kind=kind, why=why[:MAX_SUGGESTION_WHY_CHARS].rstrip(), line=line, requirement=requirement,
+            posting_phrase=phrase[:MAX_SUGGESTION_PHRASE_CHARS].rstrip() or None,
+        ))
+    return out[:MAX_STRUCTURED_SUGGESTIONS]
+
+
+def _lenient_pick(value: object) -> AssessmentPick | None:
+    """The pick of a v9 answer, read leniently: non-strings and repeats dropped, more than ``MAX_PICK_LINES`` cut.
+
+    ``None`` when no line id is left. Nothing is checked against a master
+    here: that is ``pick.settle``'s, and a bad pick never fails an assessment.
+    """
+
+    if not isinstance(value, Mapping):
+        return None
+    lines: list[str] = []
+    for item in value.get("lines") if isinstance(value.get("lines"), list) else ():  # type: ignore[union-attr]
+        line = _master_id(item)
+        if line is not None and line not in lines:
+            lines.append(line)
+    if not lines:
+        return None
+    order: list[str] = []
+    for item in value.get("section_order") if isinstance(value.get("section_order"), list) else ():  # type: ignore[union-attr]
+        section = item.strip().lower() if isinstance(item, str) else ""
+        if section in PICK_SECTIONS and section not in order:
+            order.append(section)
+    return AssessmentPick(summary=_master_id(value.get("summary")), section_order=tuple(order), lines=tuple(lines[:MAX_PICK_LINES]))
+
+
+def _normalize_and_strip(decoded: Mapping[str, object], *, boundary: Boundary | None = None) -> tuple[dict[str, object], tuple[str, ...], int]:
     """``_normalize_assessment_payload`` plus what the not_a_match strip removed.
 
     Returns ``(normalized payload, dropped structured question ids, dropped
@@ -813,7 +1067,20 @@ def _normalize_and_strip(decoded: Mapping[str, object]) -> tuple[dict[str, objec
     ``AssessAttempt`` for the eval harness. The strip runs LAST, on the
     fully normalized shape, so it sees the canonical verdict word and every
     structured question that ``_normalize_question_item`` accepted.
+
+    0.1.11 N3 (assessment v9). ``boundary`` says what the prompt offered
+    (none: nothing). A row's v9 keys are kept when well formed (``_v9_row_keys``;
+    an id comment copied into an evidence quote is stripped); with a
+    requirement list in the prompt the matrix must hold exactly its ids
+    (``requirements_list.check_listed``: the one v9 rule that raises, and so
+    spends the retry) and each listed row is made the list's. The pick and
+    the structured suggestions are NOT in the payload: they are left on
+    ``boundary.extras`` (:class:`AssessExtras`), with what was dropped. Each
+    kept suggestion's ``why`` joins the plain ``suggestions`` list, so a
+    reader that knows only strings still shows something.
     """
+    boundary = boundary if boundary is not None else Boundary()
+    unknown_sources: list[tuple[str, str]] = []
     matrix = decoded.get("matrix")
     normalized_matrix: list[object] = []
     if isinstance(matrix, list):
@@ -824,7 +1091,8 @@ def _normalize_and_strip(decoded: Mapping[str, object]) -> tuple[dict[str, objec
             normalized_row: dict[str, object] = {
                 "requirement": row.get("requirement"),
                 "resume_evidence": [
-                    item for item in _normalize_string_list(row.get("resume_evidence")) if isinstance(item, str)
+                    _ID_COMMENT.sub("", item).strip() if "<!--" in item else item
+                    for item in _normalize_string_list(row.get("resume_evidence")) if isinstance(item, str)
                 ],
                 "status": _normalize_status(row.get("status")),
             }
@@ -832,13 +1100,24 @@ def _normalize_and_strip(decoded: Mapping[str, object]) -> tuple[dict[str, objec
                 requirement_class = _normalize_class(row.get("class"))
                 if requirement_class is not None:
                     normalized_row["class"] = requirement_class
+            normalized_row.update(_v9_row_keys(row, boundary, unknown_sources))
             normalized_matrix.append(normalized_row)
     else:
         normalized_matrix = matrix
+    all_rows = isinstance(normalized_matrix, list) and all(isinstance(row, Mapping) for row in normalized_matrix)
+    # v9: a question may name its row by id, or in the model's words for a row whose words are the list's now.
+    renamed: dict[str, object] = {}
+    if all_rows:
+        asked_as = {fold(str(row.get("requirement") or "")): index for index, row in enumerate(normalized_matrix)}  # type: ignore[union-attr]
+        if boundary.listed:
+            normalized_matrix = check_listed(normalized_matrix, boundary.listed)  # type: ignore[arg-type]
+        for words, index in asked_as.items():
+            renamed[words] = normalized_matrix[index].get("requirement")  # type: ignore[union-attr]
+        renamed.update({str(row["id"]): row.get("requirement") for row in normalized_matrix if row.get("id")})  # type: ignore[union-attr]
     # 0110-10-03: must-haves first; past the bound the rest are counted ("+N not shown"), never an error.
     rows_not_shown = 0
-    if isinstance(normalized_matrix, list) and all(isinstance(row, Mapping) for row in normalized_matrix):
-        normalized_matrix, rows_not_shown = bound_rows(normalized_matrix)
+    if all_rows:
+        normalized_matrix, rows_not_shown = bound_rows(normalized_matrix)  # type: ignore[arg-type]
 
     raw_questions = _normalize_string_list(decoded.get("questions"))
     plain_questions: list[str] = []
@@ -850,12 +1129,19 @@ def _normalize_and_strip(decoded: Mapping[str, object]) -> tuple[dict[str, objec
         normalized_item = _normalize_question_item(item)
         if normalized_item is None:
             continue
+        named = normalized_item["requirement"]  # type: ignore[index]
+        if isinstance(named, str):
+            known = renamed.get(named.strip()) if named.strip() in renamed else renamed.get(fold(named))
+            if isinstance(known, str) and known != named:
+                normalized_item["requirement"] = known  # type: ignore[index]
         structured_questions.append(normalized_item)
         plain_questions.append(normalized_item["question"])
 
+    raw_suggestions = _normalize_string_list(decoded.get("suggestions"))
+    suggested = _structured_suggestions(raw_suggestions)
     result: dict[str, object] = {
         "matrix": normalized_matrix,
-        "suggestions": [item for item in _normalize_string_list(decoded.get("suggestions")) if isinstance(item, str)],
+        "suggestions": [item for item in raw_suggestions if isinstance(item, str)],
         "questions": plain_questions,
     }
     if structured_questions:
@@ -877,6 +1163,24 @@ def _normalize_and_strip(decoded: Mapping[str, object]) -> tuple[dict[str, objec
             result["not_a_match_reason"] = reason
         elif reason is None:
             result["not_a_match_reason"] = None
+    # v9, on the settled verdict: a failed verdict keeps no suggestion (it has no next action, like its questions);
+    # a pending one keeps the kinds that need no resume; only a Matched answer whose prompt showed ids keeps a pick.
+    settled = result.get("verdict")
+    kept = suggested
+    if settled == "not_a_match":
+        kept = []
+    elif settled == "pending_user_answers":
+        kept = [item for item in suggested if item.kind in SUGGESTION_KINDS_WITHOUT_RESUME]
+    result["suggestions"] = [*result["suggestions"], *(item.why for item in kept)]  # type: ignore[misc]
+    pick = _lenient_pick(decoded.get("pick"))
+    keeps_pick = settled == "matched_above_threshold" and boundary.source_ids is not None
+    boundary.extras = AssessExtras(
+        pick=pick if keeps_pick else None,
+        structured_suggestions=tuple(kept),
+        dropped_pick=pick is not None and not keeps_pick,
+        dropped_suggestions=len(suggested) - len(kept),
+        unknown_sources=tuple(unknown_sources),
+    )
     # Drop any other unknown keys (e.g. a model echoing "posting" back, or
     # inventing extra fields): the frozen contract is a closed object, and
     # normalization's job is to fix shape, not to smuggle new keys through.
@@ -891,7 +1195,14 @@ __all__ = [
     "CURRENT_ASSESS_PROMPT_VERSIONS",
     "AssessAttempt",
     "AssessContext",
+    "AssessExtras",
     "AssessJob",
+    "Boundary",
+    "PLACEHOLDER_ID_EXAMPLE",
+    "PLACEHOLDER_NOTE_EXAMPLE",
+    "PLACEHOLDER_PICK_LINES",
+    "PLACEHOLDER_REQUIREMENTS",
+    "REQUIREMENTS_BLOCK_HEADER",
     "BankAnswer",
     "INSTRUCTIONS_DIGEST",
     "POSTING_INCOMPLETE_MESSAGE",
@@ -904,5 +1215,8 @@ __all__ = [
     "invoke_json_once",
     "load_assess_instructions",
     "normalize_work_mode",
+    "offered_sources",
+    "prompt_reads_ids",
     "render_assess_prompt",
+    "template_takes",
 ]
