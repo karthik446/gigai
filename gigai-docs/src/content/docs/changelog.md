@@ -22,6 +22,10 @@ operator-visible capability and must link to the relevant release or evidence.
 
 ## Released versions
 
+### 0.1.11
+
+(In progress.) The assessment picks the resume for a job from your master; no model rewrites it. Stub: rewritten at the end to what is true.
+
 ### 0.1.10.11
 
 Speed, first part. On a store with a lot of finished work, saving something no longer takes minutes,
