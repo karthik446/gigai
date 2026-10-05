@@ -700,7 +700,12 @@ def _assessed_job(home_root: Path, target: Path, profile_id: str | None, job_url
         base = read_quick_assessment(home_root, target, profile_id, normalize_job_identity(job_url))
     except FindJobsContractError:
         return None  # not a posting link: the resolution below says so
-    if base is None or not base.posting_text:
+    if base is None:
+        return None
+    if base.job.fetch_kind == "pasted":
+        # A pasted posting has no link to fetch (E2EFIX F1): its stored assessment is the job, whatever text it kept.
+        return replace(base.job, text=base.posting_text or base.job.text or "")
+    if not base.posting_text:
         return None
     return replace(base.job, text=base.posting_text)
 

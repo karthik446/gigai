@@ -233,8 +233,8 @@ def test_a_note_is_printed_once_as_the_note_of_its_master_line_in_the_private_pa
 def test_requirement_rows_are_ids_only_in_the_private_part_and_carry_their_words_in_the_posting_part() -> None:
     yours, posting = _both()
     assert yours["requirements"] == [
-        {"id": "req-3fa91c", "class": "askable", "status": "met", "sources": ["b-runtime", "A tooling:temporal"], "in_resume": ["b-runtime"], "coverage": "kept"},
-        {"id": "req-77b0aa", "class": "hard", "status": "met", "sources": ["b-oncall"], "in_resume": [], "coverage": "lost"},
+        {"id": "req-3fa91c", "class": "askable", "status": "met", "sources": ["b-runtime", "A tooling:temporal"], "in_resume": ["b-runtime"], "coverage": "kept", "question_id": None},
+        {"id": "req-77b0aa", "class": "hard", "status": "met", "sources": ["b-oncall"], "in_resume": [], "coverage": "lost", "question_id": None},
     ]
     text = job_brief.render(yours)
     assert "req-3fa91c  askable  met  sources: b-runtime, A tooling:temporal  in the resume: yes" in text

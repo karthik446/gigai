@@ -361,6 +361,8 @@ def pick_view(home_root: Path, target: Path, job_url: str, *, profile_id: str | 
     if gate is None and getattr(job.assessment, "resume_gate", None) is not None:
         stored_gate = job.assessment.resume_gate  # type: ignore[attr-defined]
         gate = {"decision": stored_gate.decision, "ready": None, "reasons": [reason.to_json() for reason in stored_gate.reasons]}
+    questions = job_brief.open_questions(home_root, target, job.assessment)
+    asked = {str(item["row"]): str(item["question_id"]) for item in questions if item["row"]}
     return {
         "schema_version": PICK_SCHEMA,
         "job_identity": job.job_identity,
@@ -382,8 +384,10 @@ def pick_view(home_root: Path, target: Path, job_url: str, *, profile_id: str | 
             "lines": list(store.recorded_marks(proposed)),
         },
         "selected_lines": list(store.recorded_marks(selection)),
-        # The requirement rows as stored (id, class, status, sources, in_resume, coverage): nothing is recomputed.
-        "requirements": [dict(row) for row in record.get("requirements", ()) if isinstance(row, Mapping)],
+        # The requirement rows as stored (id, class, status, sources, in_resume, coverage): nothing is recomputed. A row an
+        # open question asks also names it (`question_id`, what `gigai scout answers save` takes); `open_questions` lists them all.
+        "requirements": [{**row, "question_id": asked.get(str(row.get("id")))} for row in record.get("requirements", ()) if isinstance(row, Mapping)],
+        "open_questions": list(questions),
     }
 
 

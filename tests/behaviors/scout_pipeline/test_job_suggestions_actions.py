@@ -281,7 +281,7 @@ def test_store_resolves_the_named_suggestions_and_checks_the_evidence_again(fx: 
     # The brief of the job says the same, by id.
     brief = _ok(fx, "resume", "brief", "--job-url", JOB)
     assert brief["state"]["gate"]["ready"] is True and brief["state"]["picked"] == {"picked_by": "model", "fallback": None, "draft": False}
-    assert {"id": REQ_PYTHON, "class": "hard", "status": "met", "sources": [ids[OWN]], "in_resume": [ids[OWN]], "coverage": "kept"} in brief["requirements"]
+    assert {"id": REQ_PYTHON, "class": "hard", "status": "met", "sources": [ids[OWN]], "in_resume": [ids[OWN]], "coverage": "kept", "question_id": None} in brief["requirements"]
     by_id = {item["id"]: item for item in brief["suggestions"]}
     assert by_id["sg-1"]["why"] is None and by_id["sg-1"]["status"] == "done" and by_id["sg-2"]["status"] == "open"
     posting = _ok(fx, "resume", "brief", "--job-url", JOB, "--posting")
@@ -399,5 +399,5 @@ def test_opening_a_job_serves_stale_pages_conflicts_proposed_and_rows_and_writes
         assert isinstance(view["selected_lines"], list)
         rows = {row["id"]: row for row in view["requirements"]}
         assert set(rows) == {REQ_PYTHON, REQ_TERRAFORM, REQ_GCP}
-        assert set(rows[REQ_PYTHON]) == {"id", "class", "status", "sources", "in_resume", "coverage"} and rows[REQ_PYTHON]["class"] == "hard"
+        assert set(rows[REQ_PYTHON]) == {"id", "class", "status", "sources", "in_resume", "coverage", "question_id"} and rows[REQ_PYTHON]["class"] == "hard"
     assert sibling.exists()

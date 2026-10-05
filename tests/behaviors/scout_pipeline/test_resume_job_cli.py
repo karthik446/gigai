@@ -342,6 +342,105 @@ def test_a_refused_handback_lists_every_problem_as_data(fx: PipelineFixture, tmp
     assert _stored(fx) == ()
 
 
+def test_store_takes_the_identity_of_a_pasted_job_like_brief_and_pick(fx: PipelineFixture, tmp_path: Path) -> None:
+    """E2EFIX F1: a pasted posting's ``text:sha256:...`` identity was refused by store (``url must use http or https``)."""
+
+    from gigai.scout.find_jobs.assess_contracts import AssessJobInput, AssessRequest, AssessResumeInput, ResolvedJob
+    from gigai.scout.quick_assess import run_quick_assessment
+    from tests.support.answers_stories_fixtures import config
+    from tests.support.pipeline_fixtures import assessment
+
+    text = POSTING + "\nPasted by the user, not fetched."
+    digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
+    identity = f"text:sha256:{digest}"
+    fx.model.assessed = assessment(met=1)
+    pasted = ResolvedJob(
+        job_identity=identity, source_url=None, normalized_url=None, fetch_kind="pasted", title="", company="", location="",
+        text=text, text_sha256=f"sha256:{digest}",
+    )
+    run_quick_assessment(
+        AssessRequest(job=AssessJobInput(job_text=text), resume=AssessResumeInput(profile_id=fx.profile_id)),
+        home_root=fx.home_root, target=fx.target, config=config(fx.home_root), resolved_job=pasted,
+    )
+    brief = _ok(fx, "resume", "brief", "--job-url", identity)
+    assert brief["label"] == "user-private"
+    stored = _ok(fx, "resume", "store", "--in", _file(tmp_path, MASTER), "--job-url", identity, "--as", "agent")
+    assert stored["ok"] is True and stored["changed"] is True and stored["job"]["job_identity"] == identity
+    (resume,) = list_tailored_resumes(fx.home_root, fx.target, profile_id=fx.profile_id, job_identity=identity)
+    assert "Northwind Labs" in resume.markdown
+
+
+def _hold_the_job(fx: PipelineFixture, question_id: str = "technical:gcp") -> None:
+    """Assess the fixture's posting again: the model holds it on one question about the GCP row (a different answer than the fixture's)."""
+
+    from gigai.scout.quick_assess import run_quick_assessment
+    from tests.support.answers_stories_fixtures import config
+    from tests.support.pipeline_fixtures import resolved_job
+    from gigai.scout.find_jobs.assess_contracts import AssessJobInput, AssessRequest, AssessResumeInput
+
+    rows = [
+        {"requirement": "5+ years of Python", "class": "hard", "status": "met", "resume_evidence": ["six years"]},
+        {"requirement": "GCP experience", "class": "askable", "status": "unmet", "resume_evidence": []},
+    ]
+    questions = [{"question_id": question_id, "question": "Have you run workloads on GCP?", "requirement": "GCP experience"}]
+    fx.model.assessed = json.dumps({"verdict": "pending_user_answers", "matrix": rows, "suggestions": [], "questions": questions, "not_a_match_reason": None})
+    run_quick_assessment(
+        AssessRequest(job=AssessJobInput(job_url=JOB), resume=AssessResumeInput(profile_id=fx.profile_id)),
+        home_root=fx.home_root, target=fx.target, config=config(fx.home_root), resolved_job=resolved_job(JOB),
+    )
+
+
+def test_every_open_question_carries_its_id_in_the_brief_and_the_pick_and_answers_save_takes_that_id(fx: PipelineFixture, tmp_path: Path) -> None:
+    """E2EFIX F3: an agent could not read a question's id (only the requirement ids), so it guessed one."""
+
+    _hold_the_job(fx)
+    brief = _brief(fx)
+    assert [item["question_id"] for item in brief["open_questions"]] == ["technical:gcp"]
+    (asked,) = [row for row in brief["requirements"] if row["question_id"]]
+    assert asked["question_id"] == "technical:gcp" and brief["open_questions"][0]["row"] == asked["id"]
+    assert all(row["question_id"] is None for row in brief["requirements"] if row is not asked)
+    assert "Have you run workloads" not in json.dumps(brief), "the private part holds ids, never the question's words"
+    text = _invoke(fx, "resume", "brief", "--job-url", JOB, as_json=False).output
+    assert f"asked: answers save technical:gcp" in text
+
+    picked = _ok(fx, "resume", "pick", "--job-url", JOB)
+    assert [item["question_id"] for item in picked["open_questions"]] == ["technical:gcp"]
+    assert picked["open_questions"][0]["row"] == asked["id"]
+
+    saved = _ok(fx, "answers", "save", picked["open_questions"][0]["question_id"], "--answer-text", "Two years on GCP.", "--as", "agent")
+    assert saved["answer"]["question_id"] == "technical:gcp"
+    assert _ok(fx, "answers", "show", "technical:gcp")["answer"]["answer"] == "Two years on GCP."
+    assert _brief(fx)["open_questions"] == [], "an answered question is no longer open"
+
+
+def test_a_store_whose_check_could_not_reach_the_model_says_so_in_a_typed_field_and_a_visible_line(
+    fx: PipelineFixture, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """E2EFIX F5: a sandbox without network failed the check inside store's drain, and store ended ``ok`` with no word of it."""
+
+    def unreachable(prompt: str):
+        raise OSError("connection refused")
+
+    monkeypatch.setattr(fx.model, "answer", unreachable)
+    payload = _store(fx, tmp_path)
+    assert payload["ok"] is True and payload["changed"] is True and len(_stored(fx)) == 1, "the store itself succeeded"
+    assert payload["recheck_failed"] is not None and payload["recheck_failed"]["error_code"] in ("model_unavailable", "model_target_unavailable")
+    assert payload["recheck_failed"]["steps"], payload
+
+
+def test_a_store_whose_check_could_not_reach_the_model_prints_a_warning_with_the_code(
+    fx: PipelineFixture, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def unreachable(prompt: str):
+        raise OSError("connection refused")
+
+    monkeypatch.setattr(fx.model, "answer", unreachable)
+    result = _invoke(fx, "resume", "store", "--in", _file(tmp_path, MASTER), "--job-url", JOB, "--as", "agent", as_json=False)
+    assert result.exit_code == 0, result.output
+    (warning,) = [line for line in result.output.splitlines() if "WARNING" in line]
+    assert "stored" in warning and ("model_unavailable" in warning or "model_target_unavailable" in warning), result.output
+
+
 # --- resume pick ---------------------------------------------------------------------------------------------------
 
 
