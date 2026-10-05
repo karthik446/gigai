@@ -100,7 +100,7 @@ def test_a_withheld_answer_is_a_named_failure_and_its_call_is_not_ok(tmp_path: P
     assert [(item["job_identity"], item["error_code"]) for item in assessed["failed"]] == [(unreadable, "posting_requirements_unreadable")]  # type: ignore[union-attr,index]
     assert not _stored(fx, unreadable, fx.default_profile_id)
     # THE REPRO: this call answered (it was ``ok`` before the fix) and nothing was stored for it.
-    assert [(outcome, code) for job, _profile, outcome, code in _calls(fx) if job == unreadable] == [("error", "posting_requirements_unreadable")]
+    assert [(outcome, code) for job, _profile, outcome, code in _calls(fx) if job == unreadable] == [("error", "posting_requirements_unreadable")] * 2  # 0.1.11: the refused answer got one more call, also refused
     _assert_invariant(fx, assessed, pairs)
 
 
