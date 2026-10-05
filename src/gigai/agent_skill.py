@@ -21,6 +21,8 @@ SKILL_DESCRIPTION = (
     "asks \"what's new on Scout\", about job postings or GigAI."
 )
 FORMATS = ("skill", "agents-md")
+#: The port `gigai scout run` uses unless it is given another; `gigai agent-permissions --port` names another.
+DEFAULT_PORT = 8765
 
 #: What a user can paste into their Claude Code settings.json. GigAI prints it, never applies it.
 PERMISSIONS_SNIPPET: dict[str, dict[str, list[str]]] = {
@@ -80,9 +82,12 @@ def agent_skill_command(fmt: str, out: Path | None, force: bool) -> None:
 
 @click.command("agent-permissions")
 @click.option("--agent", type=click.Choice(["claude-code"]), default="claude-code", show_default=True)
-def agent_permissions_command(agent: str) -> None:
+@click.option("--port", type=click.IntRange(1, 65535), default=DEFAULT_PORT, show_default=True,
+              help="The port Scout runs on, if you started it with `gigai scout run --port`.")
+def agent_permissions_command(agent: str, port: int) -> None:
     """Print a recommended Claude Code permissions snippet for you to apply. Writes nothing."""
 
+    # The snippet and its explanation name the port in one way only (``:8765/``), so another port is a plain swap.
+    text = json.dumps(PERMISSIONS_SNIPPET, indent=2) + "\n\n" + PERMISSIONS_EXPLANATION
     click.echo("Add this to your Claude Code settings.json (merge with what is there):\n")
-    click.echo(json.dumps(PERMISSIONS_SNIPPET, indent=2))
-    click.echo("\n" + PERMISSIONS_EXPLANATION)
+    click.echo(text.replace(f":{DEFAULT_PORT}/", f":{port}/"))

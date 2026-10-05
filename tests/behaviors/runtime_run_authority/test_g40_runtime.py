@@ -329,6 +329,33 @@ def test_models_json_redacts_local_runtime_paths(
     assert payload["detected"][0]["executable"] == "<redacted>"
 
 
+def test_models_prints_a_detected_cli_with_the_short_version_tag_setup_shows(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """0.1.10.11 NF: `gigai models` put a "v" in front of the CLI's whole version line ("vcodex-cli 0.160.0")."""
+
+    snapshot = discover_runtime_snapshot(shell="/bin/sh", uuid_factory=lambda: uuid.UUID("12345678-1234-4234-9234-123456789abc"))
+    snapshot = snapshot.__class__(
+        **{
+            **snapshot.__dict__,
+            "models": (
+                DetectedModel("codex", Path("/runtime/path/codex"), "detected", "codex-cli 0.160.0", "path", "login_shell", None),
+                DetectedModel("claude", Path("/runtime/path/claude"), "detected", "2.1.251 (Claude Code)", "path", "login_shell", None),
+            ),
+        }
+    )
+    monkeypatch.setattr("gigai.cli.discover_runtime_snapshot", lambda **_: snapshot)
+    home = tmp_path / "home"
+    run_setup(build_config(home_root=home, workpad_root=tmp_path / "workpads", editor_argv=("/usr/bin/true",), open_with_target=False))
+
+    result = CliRunner().invoke(cli, ["models", "--home", str(home)])
+
+    assert result.exit_code == 0, result.output
+    lines = result.output.splitlines()
+    assert "Codex CLI · v0.160.0: detected" in lines and "Claude Code · v2.1.251: detected" in lines, result.output
+    assert "vcodex" not in result.output and "v2.1.251 (" not in result.output
+
+
 @pytest.mark.parametrize(
     ("stdout", "stderr", "returncode", "expected"),
     [

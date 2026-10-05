@@ -114,7 +114,7 @@ def test_scout_new_journey(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> N
         assert question["by_profile"] == [{"profile_id": profile["profile_id"], "count": 1}]
         assert question["estimate"] == {"calls": 1, "tokens": None, "seconds": None, "cost": None, "basis_calls": 0}  # no history: the count only
         assert question["yes"]["api"] == {"method": "POST", "path": "/api/new", "body": {"assess": True, "since": ask["since"]}}
-        assert question["text"].startswith("1 new posting (") and "Assess them? ~1 calls" in question["text"]
+        assert question["text"].startswith("1 new posting (") and "Assess them? ~1 call" in question["text"] and "~1 calls" not in question["text"]
         assert ask["yours_hint"]["api"] == {"method": "GET", "path": f"/api/new/yours?since={ask['since']}"} and ask["yours_hint"]["available"] == 0
         assert client.get("/api/metrics").json()["aggregates"] == []
 

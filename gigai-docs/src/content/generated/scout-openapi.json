@@ -5017,7 +5017,7 @@
                       },
                       "cli": "gigai scout new --no-assess --since 2026-10-01T14:02:00.000000Z"
                     },
-                    "text": "1 new posting (Staff Engineer 1). Assess them? ~1 calls, ~20k tokens",
+                    "text": "1 new posting (Staff Engineer 1). Assess them? ~1 call, ~20k tokens",
                     "to_assess": 1,
                     "yes": {
                       "api": {
@@ -7120,7 +7120,7 @@
                     "model_target": "codex_cli",
                     "more_after": 0,
                     "selected": 1,
-                    "text": "Assess 1 posting (Staff Engineer 1)? ~1 calls, ~20k tokens",
+                    "text": "Assess 1 posting (Staff Engineer 1)? ~1 call, ~20k tokens",
                     "to_assess": 1,
                     "yes": {
                       "api": {

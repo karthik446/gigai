@@ -15,6 +15,7 @@ import click
 
 from .resume_import import RESUME_MAX_BYTES, RESUME_MEDIA_TYPE_MESSAGE, RESUME_SUFFIXES
 from .resume_pii import RESUME_WARNING, ContactFinding, clean_contact_text, contact_findings
+from .resume_privacy import HeadingOnlyLink
 
 EXIT_FOUND = 2
 #: The one sentence that says the check is pattern-based (the import warning's own words).
@@ -114,7 +115,11 @@ def resume_clean_command(path: Path, out: Path, force: bool, as_json: bool) -> N
         if out.exists() and not force:
             raise _FileError("resume_out_exists", f"{out} already exists; pass --force to replace it")
         findings = contact_findings(text)
-        cleaned = clean_contact_text(text)
+        try:
+            cleaned = clean_contact_text(text)
+        except HeadingOnlyLink as exc:
+            # The import's own refusal (``resume add`` gives the same one): by line number, never the heading's text.
+            raise _FileError("resume_heading_only_link", f"{exc}, then clean the file again. Nothing was written.") from None
         try:
             out.parent.mkdir(parents=True, exist_ok=True)
             out.write_text(cleaned, encoding="utf-8")

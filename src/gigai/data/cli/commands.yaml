@@ -1649,9 +1649,10 @@
       "output": "A JSON snippet and a short plain explanation on stdout.",
       "examples": [
         "gigai agent-permissions",
-        "gigai agent-permissions --agent claude-code"
+        "gigai agent-permissions --agent claude-code",
+        "gigai agent-permissions --port 8766"
       ],
-      "notes": "Offline. Prints only; GigAI never edits your agent's settings."
+      "notes": "Offline. Prints only; GigAI never edits your agent's settings. The curl rules name Scout's port: pass --port if you started Scout with `gigai scout run --port`."
     }
   }
 }

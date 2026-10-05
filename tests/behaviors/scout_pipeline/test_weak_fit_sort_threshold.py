@@ -409,7 +409,7 @@ def test_assess_these_leaves_the_low_ranked_out_by_default_and_reports_them(tmp_
     # Only low-ranked postings selected (even by name): asked, never assessed by a plain approval.
     named = _these(fx, jobs=[jobs["r20"]])
     assert (named["status"], named["question"]["to_assess"], named["low_rank"]["skipped"]) == ("ask", 0, 1)  # type: ignore[index]
-    assert str(named["low_rank"]["text"]).startswith("1 low-ranked one is skipped (rank below 50); assess that too? ~1 calls")  # type: ignore[index]
+    assert str(named["low_rank"]["text"]).startswith("1 low-ranked one is skipped (rank below 50); assess that too? ~1 call") and "~1 calls" not in str(named["low_rank"]["text"])  # type: ignore[index]
     refused = _these(fx, jobs=[jobs["r20"]], approve=True)
     assert (refused["status"], refused["assessed"], refused["approval"]) == ("nothing_to_assess", None, None)
     assert refused["low_rank"]["skipped"] == 1 and len(fx.base.model.assess_prompts) == 3  # type: ignore[index]
@@ -432,14 +432,14 @@ def test_re_assessing_old_assessments_leaves_the_low_ranked_out_too(tmp_path: Pa
     look = _new(fx, peek=True)
     stale = look["stale_question"]
     assert (look["counts"]["only_stale"], stale["to_reassess"], stale["low_rank_skipped"]) == (2, 1, 1)  # type: ignore[index]
-    assert stale["text"].startswith("1 has only an old assessment; re-assess? ~1 calls")  # type: ignore[index]
+    assert stale["text"].startswith("1 has only an old assessment; re-assess? ~1 call") and "~1 calls" not in stale["text"]  # type: ignore[index]
     assert "(1 more is low-ranked, rank below 50, and left out; add --include-low-rank to include them)" in stale["text"]  # type: ignore[index]
 
     done = _new(fx, peek=True, assess=False, reassess_stale=True)
     assert done["reassessed"]["requested"] == 1 and len(fx.base.model.assess_prompts) == 1  # type: ignore[index]
     left = done["stale_question"]
     assert (left["to_reassess"], left["low_rank_skipped"]) == (0, 1)  # type: ignore[index]
-    assert left["text"].startswith("1 low-ranked (rank below 50) has only an old assessment and is left out; re-assess that one too? ~1 calls")  # type: ignore[index]
+    assert left["text"].startswith("1 low-ranked (rank below 50) has only an old assessment and is left out; re-assess that one too? ~1 call") and "~1 calls" not in left["text"]  # type: ignore[index]
     assert "--reassess-stale --include-low-rank" in left["yes"]["cli"] and left["yes"]["api"]["body"]["include_low_rank"] is True  # type: ignore[index]
 
     rest = _new(fx, peek=True, assess=False, reassess_stale=True, include_low_rank=True)

@@ -44,13 +44,15 @@ Assess them? ~12 calls". The postings are shown ranked, not assessed. Nothing is
 you answer:
 
 ```sh
-gigai scout new --yes --json          # yes: assess the new postings (one model call each), then show the grid
-gigai scout new --no-assess --json    # no: show the grid with ranks only
+gigai scout new --yes --since 2026-10-03T14:02:00Z --json   # yes: the command the reply gives in question.yes.cli; one model call per posting, then the grid
+gigai scout new --no-assess --json                          # no: show the grid with ranks only
 ```
 
-The agent's job is to tell you the count and the estimate, and wait for your word. When the
-question was asked by an earlier call, the reply gives the exact command for a yes, with
-`--since`, so the yes covers the postings you were shown.
+The agent's job is to tell you the count and the estimate, and wait for your word. On a yes it
+runs the command the reply gives in `question.yes.cli`. That command carries `--since`, the
+start of what you were shown, so the yes covers exactly those postings, also when another check
+ran in between. A bare `gigai scout new --yes --json` right after the question assesses the same
+postings.
 
 **Old assessments are a second question.** A posting whose only assessment was made with an
 older prompt, other settings or an old run is not "new", so `--yes` never touches it. The reply
@@ -244,6 +246,27 @@ gigai scout pipeline process <job-url> --json    # one job, now
 `gigai scout pipeline approvals approve <approval-id>` and `approvals deny <approval-id>` decide
 one approval. An agent approves only on your word.
 
+**An answer makes the job's first assessment old.** That assessment was made before your
+answer. Until the job is assessed again its row reads "old assessment: answers changed", and its
+Scout label is `needs_attention` with the reason `base_assessment_stale`, whatever the tailored
+resume scored. To have the label made from a current assessment, save the answer with a
+re-assess of the job that asked (one model call; the pipeline runs after it):
+
+```sh
+gigai scout answer cloud:gcp --question "Do you have GCP experience?" --answer-text "Yes, 4 years, GKE and BigQuery" --reassess <job-url> --as agent --json
+```
+
+On the job's page that is the question box and **Re-assess**. For a job the pipeline already
+labelled, assess it again and run its pipeline again:
+
+```sh
+gigai scout jobs assess <job-url> --again --yes --actor agent --json   # one model call
+gigai scout pipeline process <job-url> --json                          # makes the label again
+```
+
+Other jobs that asked the same question keep their old assessment until they are assessed again
+(`gigai scout new` asks about them: "N have only an old assessment; re-assess?").
+
 **A tailored resume you edited is never replaced by the background.** If you tailored a job's
 resume yourself, or changed a line of it, the pipeline keeps it and works with your text. To get a
 new tailoring for that job, tailor it yourself (`gigai scout resume tailor`, or **Tailor resume**
@@ -359,6 +382,8 @@ file at all.
    Put it in `~/.claude/settings.json` (all projects) or `.claude/settings.local.json` (this
    project only), merged into the `permissions` you already have. It allows the `gigai` command
    and Scout's local API at `http://127.0.0.1:8765/`, and denies reading `~/.gigai` directly.
+   If you started Scout with `--port`, print it with `gigai agent-permissions --port <port>`, and
+   use your port wherever a command on this page says `8765`.
    **GigAI prints it and never applies it.** It does not read or write your agent's settings.
 3. Start a new Claude Code session, so that the skill is listed.
 4. Type:
@@ -504,16 +529,23 @@ gigai scout new --yours --json
 > pipeline onto Kafka. Result: delay fell from a day to under a minute."
 >
 > **Robin:** Yes, save it. And GCP: four years, GKE and BigQuery.
+>
+> **Agent:** Those two answers make the first assessments of the two jobs old: they were made
+> before you answered, and the jobs' labels would read "needs attention" until they are assessed
+> again. I can save the answers and assess both jobs again in the same step: 2 model calls. Do
+> that?
+>
+> **Robin:** Yes.
 
 ```sh
-gigai scout answers save streaming:kafka --question "Have you run Kafka in production?" --answer-text "Yes, three years" --as agent --json
+gigai scout answer streaming:kafka --question "Have you run Kafka in production?" --answer-text "Yes, three years" --reassess https://jobs.lever.co/northwind/1a2b3c --as agent --json
 gigai scout story save --title "Order pipeline moved from nightly batch to Kafka" --raw-text "We moved the order pipeline off a nightly batch onto Kafka and cut the delay from a day to under a minute." --situation "Orders were processed once a day." --action "Moved the pipeline onto Kafka." --result "Delay fell from a day to under a minute." --tag streaming --answers "Tell me about a time you improved a slow process" --as agent --json
-gigai scout answers save cloud:gcp --question "Do you have GCP experience?" --answer-text "Yes, 4 years, GKE and BigQuery" --as agent --json
+gigai scout answer cloud:gcp --question "Do you have GCP experience?" --answer-text "Yes, 4 years, GKE and BigQuery" --reassess https://jobs.lever.co/globex/4d5e6f --as agent --json
 gigai scout new --peek --json
 ```
 
-> **Agent:** Saved. Two jobs asked those questions and now wait in the pipeline: about 4 model
-> calls, inside today's limit of 40. Process them now?
+> **Agent:** Saved, and both jobs are assessed again with your answers. They now wait in the
+> pipeline: about 4 model calls, inside today's limit of 40. Process them now?
 >
 > **Robin:** Go.
 
@@ -679,7 +711,7 @@ What to know:
   It is there for the Generate PDF form. Details an agent sends in it went through that agent and
   its model provider first, so an agent should leave it out and hand over the finish link.
 - Without `--out`, the CLI names the file `<company>-<role>-<date>.pdf` (or `resume-<date>.pdf`
-  for markdown) in the current folder. Your name is never in a file name.
+  for markdown) in your resumes folder. Your name is never in a file name.
 - `POST /api/resume/pdf` renders markdown you send: `{"markdown": "...", "spacing_scale": 0.9,
   "auto_fit": false, "profile_id": "..."}` (only `markdown` is required) answers `application/pdf`,
   with the page count in `X-GigAI-Pages`. The markdown is rendered and dropped: not stored, not
@@ -958,7 +990,7 @@ gigai scout stop --json    # stop it; safe to rerun
 `gigai scout run` is backgrounded by default: it prints the URL and log
 path and returns. Pass `--foreground` to run it in the current process
 instead (Ctrl-C stops it), `--no-browser` to skip opening a tab, and `--port`
-if 8765 is taken. Logs live at `<home>/logs/scout-<project_id>.log`; run
+if 8765 is taken (then use your port in every command that says `8765`). Logs live at `<home>/logs/scout-<project_id>.log`; run
 state at `<home>/run/scout/<project_id>.json`.
 
 If a project has more than one installed, approved Gig, switch which one is

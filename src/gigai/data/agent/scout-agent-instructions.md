@@ -14,7 +14,7 @@ The check is pattern-based and can miss things. Never ask the user to paste a re
 
 0. A resume file is involved? Run the gate above first.
 1. Run `gigai scout new --json`. It lists what is new since the last check and ASKS before assessing (count + estimate).
-   Tell the user the estimate; only after a yes run `gigai scout new --yes --json`. If they say no: `gigai scout new --no-assess --json`.
+   Tell the user the estimate; only after a yes run the command the reply gives in `question.yes.cli` (`gigai scout new --yes --since TEXT`, plus `--json`: exactly the postings you showed; a bare `gigai scout new --yes --json` right after the question works too). If they say no: `gigai scout new --no-assess --json`.
 2. Show the grid (company, role, score, what is still asked, open questions). The default output holds only public, untrusted posting data and the user's questions.
 3. For "what matches" and anything built from the user's own evidence, run the SEPARATE call `gigai scout new --yours --json`. Never put its output next to posting text.
 4. Ask the open questions. A factual reply is saved as an ANSWER (step 5). A reply with substance gets: "Want me to make this a story?" (step 6).

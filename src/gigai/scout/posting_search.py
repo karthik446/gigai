@@ -91,6 +91,7 @@ from .scout_new import (
     FIRST_USE_DAYS,
     POSTINGS_LABELS,
     _assess,
+    _calls,
     _grouped,
     _row_json,
     _score,
@@ -567,7 +568,7 @@ def assess_these(
             cost = f", ~{tokens / 1000:.0f}k tokens" if isinstance(tokens, (int, float)) and tokens >= 1000 else ""
             sentence = (
                 (f"Assess the newest {len(pairs)} of {len(wanted)} postings" if later else f"Assess {len(pairs)} posting{'s' if len(pairs) != 1 else ''}")
-                + (f" ({named_profiles})" if named_profiles else "") + f"? ~{estimate['calls']} calls{cost}"
+                + (f" ({named_profiles})" if named_profiles else "") + f"? {_calls(estimate['calls'])}{cost}"
                 + (f" ({later} more after these {len(pairs)})" if later else "")
             )
             body: dict[str, object] = {"approve": True}
@@ -592,7 +593,7 @@ def assess_these(
                     "text": (
                         f"{len(low)} low-ranked {'one is' if one else 'ones are'} skipped (rank below {setting.assess_min_rank}); "
                         f"assess {f'the newest {len(low_batch)} of ' if low_later else ''}{'that' if one else 'those'} too? "
-                        f"~{low_estimate['calls']} calls{low_cost}" + (f" ({low_later} more after these {len(low_batch)})" if low_later else "")
+                        f"{_calls(low_estimate['calls'])}{low_cost}" + (f" ({low_later} more after these {len(low_batch)})" if low_later else "")
                     ),
                     "yes": {"api": {"method": "POST", "path": "/api/postings/assess", "body": {**body, "include_low_rank": True}}},
                 }

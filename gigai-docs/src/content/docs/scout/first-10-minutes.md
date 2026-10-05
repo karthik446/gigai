@@ -19,7 +19,7 @@ You can turn the background checks off under **Settings > Background updates**.
 
 You need macOS or Linux, [`uv`](https://docs.astral.sh/uv/getting-started/installation/), and
 one model CLI that is installed and logged in: Codex (`codex login`) or Claude Code (`claude`,
-then `/login`).
+then `/login`). Scout does not start without one of the two installed.
 
 ```sh
 uv tool install gigai
@@ -82,6 +82,13 @@ not put your name or contact details in an answer.
 Jobs whose questions you answered are tailored and scored in the background, within the daily
 limits (40 pipeline model calls a day).
 
+Your answer makes that job's first assessment old: it was made before the answer. Until the job
+is assessed again it still reads "Needs your answers (old assessment: answers changed)", and its
+Scout label reads "needs attention". To answer and assess again in one step, ask your agent to
+save the answer with a re-assess of that job (`gigai scout answer <question-id> --answer-text
+"..." --reassess <job-url> --as agent`, one model call), or type the answer in the question box
+on the job's page and press **Re-assess**.
+
 ## 5. Make the PDF (2 minutes)
 
 Ask your agent for the PDF of one job. It runs:
@@ -93,6 +100,10 @@ gigai scout resume pdf --tailored --job-url <job-url> --json
 and gives you an **open in Scout** link. The agent's own PDF has no name and no contact
 details, because GigAI has none. Open the link, type your details into the Generate PDF form in
 your browser, and download the finished PDF. GigAI does not keep what you type there.
+
+The PDF exists only after the job was tailored: by the background pipeline, after you answered
+one of its questions (step 4), or with `gigai scout resume tailor --job-url <job-url>` (one model
+call). Before that the command says there is no tailored resume for the job yet.
 
 Every line comes from your resume, answers or stories. Read it before you send it.
 

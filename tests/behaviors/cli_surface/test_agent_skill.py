@@ -159,5 +159,23 @@ def test_agent_permissions_prints_valid_json_and_writes_nothing(tmp_path: Path, 
     assert list(home.rglob("*")) == [] and list(work.rglob("*")) == []
 
 
-GOLDEN_SKILL = "170a52d280caa2557cb100e316c67acd2885d931baba20c37f9255060ba9387d"
-GOLDEN_AGENTS = "0a32b0b8bc2951e8f1ee4a2b096766d94f4b9fa56cdfffb7d0fed0de9414a0d4"
+def test_agent_permissions_takes_the_port_scout_runs_on(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """0.1.10.11 NF: a user who started Scout with ``--port`` got a snippet for 8765 only and had to change each line by hand."""
+
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    result = CliRunner().invoke(cli, ["agent-permissions", "--port", "18766"])
+    assert result.exit_code == 0, result.output
+    snippet = json.loads(result.output[result.output.index("{"): result.output.rindex("}") + 1])
+    assert snippet["permissions"]["allow"] == ["Bash(gigai *)", "Bash(curl http://127.0.0.1:18766/*)", "Bash(curl http://localhost:18766/*)"]
+    assert snippet["permissions"]["deny"] == PERMISSIONS_SNIPPET["permissions"]["deny"]
+    assert "curl http://127.0.0.1:18766/" in result.output and "8765" not in result.output
+    assert list(home.rglob("*")) == []
+    # The default is the snippet as it always was, and a port that is none is refused.
+    assert CliRunner().invoke(cli, ["agent-permissions", "--port", "8765"]).output == CliRunner().invoke(cli, ["agent-permissions"]).output
+    assert CliRunner().invoke(cli, ["agent-permissions", "--port", "0"]).exit_code == 2
+
+
+GOLDEN_SKILL = "77228cbef60aa8f5c5730a7bae99b499118676f9a5dcfa92cf31b91c5e4b5bc9"
+GOLDEN_AGENTS = "98b88eccc2ed5b312363090c054119cc01199c75a17bb92bcf2fbf185d681847"
