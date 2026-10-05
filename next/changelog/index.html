@@ -287,6 +287,22 @@ heading Driftwatch”); <code dir="auto">--dry-run</code> shows it. A heading th
 (“this heading is only a link: give the project a name”) instead of being dropped. Nothing else
 changes: GigAI still stores no links, a link in a bullet or a paragraph, an email or a phone number
 in a heading, and your name and contact lines are handled as before.</li>
+<li><strong>A save cut off by a crash no longer leaves a store with no way out.</strong> When GigAI was killed, or the
+machine lost power, in the middle of a save, every later save was refused (and, when the crash came
+after the save’s files were written, every read of your answers too), and all you saw was a Python
+traceback (in the Scout page: “an internal error occurred”). The store already knew how to finish
+such a save, but no command ran that. Now one does: <code dir="auto">gigai doctor --repair-journal</code>. It finishes the
+interrupted save in every workpad of the home and says what it finished; the save that was cut off is
+completed, not lost, and the next save works. On a healthy home it reports “nothing to repair” and
+changes no file, and it can run beside a running Scout server. GigAI does not run it on its own, not
+when the server starts and not before a save.
+How you learn about it depends on when the crash came. Before the save’s files were written: the
+refused save ends in one line that names the command with your <code dir="auto">--home</code> (<code dir="auto">next_action</code> in <code dir="auto">--json</code>),
+and the API answers with the same text, the code <code dir="auto">journal_reconciliation_required</code> and <code dir="auto">next_action</code>
+instead of <code dir="auto">internal_error</code>. After the files were written: the error is still a traceback (the API
+still says “an internal error occurred”), but its last line now names the command, and plain
+<code dir="auto">gigai doctor</code> fails on <code dir="auto">journal.index</code> with the command in its remediation (<code dir="auto">--json</code>). Making that
+second case as plain as the first is not done yet.</li>
 </ul>
 <div class="sl-heading-wrapper level-h4"><h4 id="for-agents">For agents</h4><a class="sl-anchor-link" href="#for-agents"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “For agents”</span></a></div>
 <ul>
