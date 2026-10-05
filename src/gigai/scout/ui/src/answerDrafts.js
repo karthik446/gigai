@@ -8,9 +8,6 @@
 //                  with all of them (find_jobs/api/answers.py records one
 //                  answer per call and re-assesses only when asked). The
 //                  returned `reassessed` AssessResponse goes to onAnswered.
-//   saveUnsaved()  POST the answers the record does not hold yet, without
-//                  re-assessing: "Tailor resume" calls it first, since
-//                  tailoring reads the recorded answers.
 //
 // `priorAnswers` (Map question_id -> GET /api/answers row) fills a box the
 // operator never touched: an answer given on another posting counts here
@@ -35,7 +32,7 @@
 // was: the answers are saved and the last one re-assesses.
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ApiError, getAnswerMatch, postAnswer } from "./api.js";
-import { answerRequests, answerStates, reassessErrorText, reassessGate, unsavedAnswerRequests } from "./answersModel.js";
+import { answerRequests, answerStates, reassessErrorText, reassessGate } from "./answersModel.js";
 
 export function useAnswerDrafts({ assessment, jobIdentity, priorAnswers, onAnswered, onReassessUnavailable, stale = null }) {
   const [drafts, setDrafts] = useState({});
@@ -170,30 +167,5 @@ export function useAnswerDrafts({ assessment, jobIdentity, priorAnswers, onAnswe
     }
   }, [states, jobIdentity, busy, onAnswered, onReassessUnavailable, stale]);
 
-  // Rejects when a save fails, so the caller does not go on to tailor with
-  // an answer missing.
-  const saveUnsaved = useCallback(async () => {
-    const requests = unsavedAnswerRequests(states);
-    if (requests.length === 0) {
-      return 0;
-    }
-    setBusy("saving");
-    setError(null);
-    const done = {};
-    try {
-      for (const body of requests) {
-        await postAnswer(body);
-        done[body.question_id] = body.answer;
-      }
-      return requests.length;
-    } catch (err) {
-      setError(err.message || String(err));
-      throw err;
-    } finally {
-      setSaved((current) => ({ ...current, ...done }));
-      setBusy(null);
-    }
-  }, [states]);
-
-  return { questions, states, gate, busy, error, setDraft, valueFor, reassess, saveUnsaved, suggestionFor, applySuggestion, canReassess: Boolean(jobIdentity) };
+  return { questions, states, gate, busy, error, setDraft, valueFor, reassess, suggestionFor, applySuggestion, canReassess: Boolean(jobIdentity) };
 }

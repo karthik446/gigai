@@ -131,7 +131,8 @@ export default function PipelinePanel() {
     <section className="panel" id="settings-pipeline" data-testid="background-panel">
       <h2>Background pipeline</h2>
       <p className="muted">
-        After you answer a job's questions (or ask for it on the job page), Scout tailors your resume for it, assesses the tailored resume, scores it and sets the Scout label.
+        After a job is assessed (or when you ask for it on the job page), Scout picks its resume from your master, scores it and sets the Scout label. No model is called for that; only an
+        assessment that has become old is made again, one model call.
       </p>
       {error && <div className="callout danger">{error}</div>}
       {unreadable && <div className="callout warn">{UNREADABLE_WARNING}</div>}
@@ -214,8 +215,7 @@ export default function PipelinePanel() {
             {number("pipeline-rank-warn", "rankWarnAt", "Rank warning level")}
           </div>
           <div className="pipeline-fields models">
-            {model("pipeline-model-tailor", "tailorModel", "Tailor with")}
-            {model("pipeline-model-reassess", "reassessModel", "Assess the tailored resume with")}
+            {model("pipeline-model-assess", "assessModel", "Re-assess an old assessment with")}
           </div>
           {invalid && <div className="field-error">{invalid}</div>}
           <div className="actions">

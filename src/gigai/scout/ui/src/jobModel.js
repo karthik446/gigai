@@ -566,20 +566,6 @@ export function assessedAt(job) {
   return job && job.quick ? assessmentTime(job.quick) : "";
 }
 
-// 0110-10-12: a stored tailored resume made BEFORE the assessment the page shows (a re-assessment does not tailor
-// again): the line that says so, with the two days when they differ; null when it is not older, or either is unknown.
-// Both are the server's fixed-width UTC stamps, so they compare as strings.
-export function tailoredBeforeAssessment(stored, assessedTime) {
-  const at = stored && typeof stored.updated_at === "string" ? stored.updated_at : "";
-  if (!at || !assessedTime || !(at < assessedTime)) {
-    return null;
-  }
-  const tailored = dateLabel(at);
-  const assessed = dateLabel(assessedTime);
-  const when = tailored === assessed ? "The resume was tailored before the latest assessment." : `The resume was tailored ${tailored}, before the latest assessment (${assessed}).`;
-  return `${when} Tailor again to make it from the assessment shown.`;
-}
-
 export function sortByAssessedAt(jobs) {
   return jobs.slice().sort((a, b) => assessedAt(b).localeCompare(assessedAt(a)));
 }

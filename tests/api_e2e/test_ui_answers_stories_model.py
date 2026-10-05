@@ -181,10 +181,8 @@ process.stdout.write(JSON.stringify({{
   taken: answers.answerRequests(taken, "https://jobs.example.test/b"),
   takenSuggestion: taken[0].suggestion,
   typed: answers.answerRequests(typed, null),
-  unsaved: answers.unsavedAnswerRequests(taken),
   plainStates: plain,
   plainRequests: answers.answerRequests(plain, "https://jobs.example.test/b"),
-  plainUnsaved: answers.unsavedAnswerRequests(plain),
 }}));
 """
 
@@ -216,13 +214,12 @@ def test_a_near_match_is_offered_then_confirmed_and_no_request_names_a_profile()
             "question": "How many years of Python?",
         },
     ]
-    assert [(item["question_id"], item.get("from_bank")) for item in out["unsaved"]] == [("tooling:cloud_google_platform", "cloud:gcp")]
     assert out["typed"][0] == {
         "question_id": "tooling:cloud_google_platform", "answer": "My own words.", "reassess": None,
         "question": "Do you have hands-on Google Cloud Platform experience?",
     }
     # POST /api/answers refuses a profile_id (an answer is the user's): no request carries one.
-    assert not [body for key in ("taken", "typed", "unsaved", "plainRequests", "plainUnsaved") for body in out[key] if "profile_id" in body]
+    assert not [body for key in ("taken", "typed", "plainRequests") for body in out[key] if "profile_id" in body]
 
     # Without the bank argument: the states and bodies of before, key for key.
     assert out["plainStates"] == [
@@ -233,7 +230,6 @@ def test_a_near_match_is_offered_then_confirmed_and_no_request_names_a_profile()
         {"question_id": "tooling:cloud_google_platform", "answer": "My own words.", "reassess": None},
         {"question_id": "years:python", "answer": "Six.", "reassess": {"job_identity": "https://jobs.example.test/b"}},
     ]
-    assert out["plainUnsaved"] == [{"question_id": "tooling:cloud_google_platform", "answer": "My own words.", "reassess": None}]
 
 
 def _code(path: Path) -> str:
@@ -286,4 +282,4 @@ def test_the_page_is_read_only_and_the_0_1_10_5_forms_are_gone() -> None:
     assert body.count("onUseSuggestion={answers.applySuggestion}") == 2, "both layouts (in the table, and questions first)"
     drafts = (SRC / "answerDrafts.js").read_text(encoding="utf-8")
     assert "getAnswerMatch({ questionId: question.question_id, question: question.question })" in drafts
-    assert "answerRequests(states, jobIdentity)" in drafts and "unsavedAnswerRequests(states)" in drafts
+    assert "answerRequests(states, jobIdentity)" in drafts and "unsavedAnswerRequests" not in drafts  # 0.1.11: no "save before tailoring" step

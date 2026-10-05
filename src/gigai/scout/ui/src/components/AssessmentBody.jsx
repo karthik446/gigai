@@ -1,9 +1,11 @@
+import { useState } from "react";
 import MatrixBadge from "./MatrixBadge.jsx";
 import RequirementActions from "./RequirementActions.jsx";
 import { useAnswerDrafts } from "../answerDrafts.js";
 import { placeQuestions } from "../answersModel.js";
 import { minorGapLine, requirementStatusLabel, requirementsHeading, sortMatrixRows } from "../jobModel.js";
 import { suggestionNotice } from "../answersStoriesModel.js";
+import { alternativesLine, coverageNote } from "../jobResumeModel.js";
 
 // One open question, inside the requirement row it settles (uat-batch1 N5):
 // the question's own words and an answer box. The id is a normalized token
@@ -52,13 +54,57 @@ function QuestionBox({ question, state, value, onChange, disabled, showRequireme
 
 // uat-batch1 (N8, operator decision: option A): a row's class and status
 // are one chip, "Must-have: Met" / "Can ask: Unclear" / "Bonus: Met".
-function StatusCells({ row }) {
+//
+// 0.1.11 N6 (SPEC section 6, item 2): a `met` row also says where its
+// evidence is on the job's resume: "in the resume", "not in the resume" (with
+// the master line to put back: one click shows it under Left out) or "from
+// your answer only". `coverage` is jobResumeModel.coverageRows().
+function StatusCells({ row, coverage, onShowLine }) {
   if (!row) {
     return <td className="muted">–</td>;
   }
+  const note = coverageNote(row, coverage);
   return (
     <td>
       <span className={`status-badge ${row.status}`}>{requirementStatusLabel(row)}</span>
+      {note && (
+        <div className="muted small row-coverage" data-role="row-coverage" data-coverage={note.coverage}>
+          {note.label}
+          {note.putBack.map((id) => (
+            <button key={id} type="button" className="link-button" data-action="show-line" data-line={id} title="Show this line under Left out, where Add puts it back" onClick={() => onShowLine && onShowLine(id)}>
+              put back {id}
+            </button>
+          ))}
+        </div>
+      )}
+    </td>
+  );
+}
+
+// 0.1.11 N6: what a v9 row carries beyond its words: its stable id, "any one
+// of: ..." for a row any one alternative meets, and the posting's own wording
+// behind its class (`class_basis`): on hover, and on a click (the table
+// itself is never collapsed). A row made before 0.1.11 has none of them and
+// reads as it did.
+function RequirementCell({ row }) {
+  const [why, setWhy] = useState(false);
+  const alternatives = alternativesLine(row);
+  return (
+    <td data-row-id={row.id || undefined}>
+      {row.requirement}
+      {alternatives && (
+        <div className="muted small" data-role="row-alternatives">
+          {alternatives}
+        </div>
+      )}
+      {row.class_basis && (
+        <div className="muted small row-class-basis" data-role="row-class-basis" title={`The posting says: ${row.class_basis}`}>
+          <button type="button" className="link-button" data-action="show-class-basis" aria-expanded={why} onClick={() => setWhy((open) => !open)}>
+            Why this class{row.id ? ` · ${row.id}` : ""}
+          </button>
+          {why && <span data-role="class-basis"> The posting says: {row.class_basis}</span>}
+        </div>
+      )}
     </td>
   );
 }
@@ -81,14 +127,13 @@ function StatusCells({ row }) {
 // Each one sits in the row it settles (rows with a question come first),
 // and ONE "Re-assess" above the table saves every filled box and
 // re-assesses once. `controller` is a useAnswerDrafts() result when the
-// caller needs the same state (the job page gates "Tailor resume" on it);
-// without one this component keeps its own. `tailor` (optional) is the
-// second action's {enabled, reason, label, busy, onClick}; `showVerdict`
-// hides the verdict badge where the page already shows the chip.
+// caller needs the same state (the job page's resume panel re-assesses with
+// it); without one this component keeps its own. `showVerdict` hides the
+// verdict badge where the page already shows the chip.
 //
 // uat-bug-027: `questionsFirst` (the job page) supersedes N5's boxes inside
 // the table. The open questions get their own section at the top (the task,
-// with the same Re-assess / Tailor actions and the same drafts); the table
+// with the same Re-assess action and the same drafts); the table
 // below it is the reference, always open (uat-bug-045), and carries no answer boxes. No open
 // questions, no questions section. Other callers keep the N5 layout.
 export default function AssessmentBody({
@@ -98,10 +143,16 @@ export default function AssessmentBody({
   priorAnswers,
   onReassessUnavailable,
   controller,
-  tailor,
   showVerdict = true,
   questionsFirst = false,
   profileId,
+  // 0.1.11 N6, the job page: the ONE action is always shown and says its cost (`reassessLabel`); `coverage` and
+  // `onShowLine` are the rows' "in the resume" notes; `structuredSuggestions` says the Suggestions panel lists them.
+  reassessLabel = null,
+  alwaysActions = false,
+  coverage = null,
+  onShowLine = null,
+  structuredSuggestions = false,
 }) {
   // With a controller this component's own state is not used: it gets no assessment, so it looks nothing up.
   const own = useAnswerDrafts({ assessment: controller ? null : assessment, jobIdentity, priorAnswers, onAnswered, onReassessUnavailable });
@@ -148,7 +199,7 @@ export default function AssessmentBody({
           const questions = withBoxes ? questionsByRow.get(row.requirement) || [] : [];
           return (
             <tr key={row.requirement} className={questions.length ? "has-question" : undefined}>
-              <td>{row.requirement}</td>
+              <RequirementCell row={row} />
               <td>
                 {row.resume_evidence && row.resume_evidence.length ? (
                   <ul>
@@ -161,7 +212,7 @@ export default function AssessmentBody({
                 )}
                 {boxes(questions)}
               </td>
-              <StatusCells row={row} />
+              <StatusCells row={row} coverage={coverage} onShowLine={onShowLine} />
             </tr>
           );
         })}
@@ -178,7 +229,7 @@ export default function AssessmentBody({
     </table>
   );
 
-  const suggestions = assessment.suggestions && assessment.suggestions.length > 0 && (
+  const suggestions = !structuredSuggestions && assessment.suggestions && assessment.suggestions.length > 0 && (
     <>
       <div className="label" style={{ marginTop: 8 }}>
         Suggestions
@@ -191,19 +242,19 @@ export default function AssessmentBody({
     </>
   );
 
-  const actions = (hasQuestions || tailor) && (
+  const actions = (hasQuestions || alwaysActions) && (
     <RequirementActions
       reassess={{
         ...answers.gate,
-        label: jobIdentity ? "Re-assess" : "Save answers",
+        label: jobIdentity ? reassessLabel || "Re-assess" : "Save answers",
+        helpName: "Re-assess",
         average: Boolean(jobIdentity),
         busy: answers.busy === "reassess",
         // 0110-10-12: an old assessment is re-assessed as it is when no answer box is filled.
         plain: Boolean(answers.gate.stale),
         onClick: answers.reassess,
       }}
-      tailor={tailor}
-      busy={busy || Boolean(tailor && tailor.busy)}
+      busy={busy}
       error={answers.error}
     />
   );
@@ -212,7 +263,7 @@ export default function AssessmentBody({
     return (
       <>
         {hasQuestions ? (
-          <section className="panel questions-section" data-role="questions-section">
+          <section className="panel questions-section" id="job-questions" data-role="questions-section">
             <h3>Questions for you ({answers.questions.length})</h3>
             <p className="muted small">Answer what you can, then Re-assess once. Your answers are saved with it.</p>
             {answers.questions.map((question) => (

@@ -1,15 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import { ApiError, getResumesFolder, getTailoredResumes, postTailoredResume, postTailoredResumePdf, putTailoredResumeLine } from "../api.js";
-import { editedLine, folderFilePath } from "../resumesFolderModel.js";
+import { useCallback, useState } from "react";
+import { editedLine } from "../resumesFolderModel.js";
 import { dateTimeLabel } from "../jobModel.js";
-import GeneratePdfForm from "./GeneratePdfForm.jsx";
-import { TAILORED_WORDING } from "../wording.js";
 import {
   changeSummary,
   inlineSegments,
-  latestStored,
   lineActions,
-  newerStored,
   lostLabels,
   previewLines,
   previewStats,
@@ -18,59 +13,27 @@ import {
   sourceLabel,
   statsLine,
 } from "../tailoredResumeModel.js";
-import { getMaster, putMasterLine, putTailoredResumeLength } from "../api.js";
 import { lengthNote } from "../tailorLengthModel.js";
-import { conflictOf, madeFrom, saveWordingTarget } from "../masterModel.js";
-import PickedLeftOut from "./PickedLeftOut.jsx";
+import { recordedBasis, saveWordingTarget } from "../masterModel.js";
 
-// Q4b-ui (v0.1.9): the tailored-resume panel on the job page
-// (mockups/cards-and-job-page.html, "Tailored resume"), over Q3's routes:
+// The PREVIEW of one stored job resume: the resume as it will print, and the
+// same lines with where each came from. The panel around it is
+// JobResumePanel.jsx (0.1.11 N6: the suggested resume; it replaced the
+// "Tailored resume" panel, its button and the tailor call's status and
+// errors, which went with the call).
 //
-//   load     GET /api/tailored-resumes?profile_id=<selected>&job_identity=<job>
-//            -> the latest stored one, shown with "Tailor again"
-//   tailor   POST /api/tailored-resumes {job:{job_url}, resume:{profile_id}}
-//            (one model call, one retry on a rejected draft; Codex ~25 s, up to ~45 s)
-//   errors   422 (server message), 502 model_output_invalid (the draft failed
-//            a guard; the message names the line), 504 tailor_timeout
 //   preview  tailoredResumeModel.previewLines(result): every content line is
-//            the response's own text, with its refs (the cited resume line /
-//            answer text) on hover and on click. Nothing is fabricated here.
-//   download "Generate PDF" opens the form (GeneratePdfForm.jsx, 0110-046):
-//            name and contact details typed for this PDF only, sent in the
-//            one POST /api/tailored-resumes/pdf body and never stored; the
-//            PDF is saved under the server's Content-Disposition name
-//            (<company>-<role>-<date>.pdf). The .md link is gone from the UI,
-//            the API's `markdown` field stays
+//            the stored resume's own text, with its refs (the master line /
+//            the answer text) on hover and on click. Nothing is made up here.
+//   views    "Clean copy" is the resume as it will print; "Show changes"
+//            marks each line: R copied word for word, a pencil for a line
+//            whose wording was changed (in chat by the user's agent, which
+//            cites its sources; or by the tailoring of 0.1.10, labelled
+//            "reworded by the old tailor"), E for typed text
+//   length   what was cut for length, with its ONE Restore (0110-10-05 C)
 //
-// uat-batch1 (N6): the right-hand column is gone, and with it this panel's
-// own button and explainer. "Tailor resume" is one of the two actions at
-// the top of Requirements (RequirementActions.jsx); the state both share is
-// useTailoredResume() below, and the panel renders under Requirements only
-// once there is something to show (a stored resume, a run in progress, an
-// error).
-//
-// A posting without a URL (a pasted-text quick assessment: the store never
-// serializes the text) cannot be tailored from here (answersModel.tailorGate
-// says so on the action); a stored one for it still shows.
-function errorView(error) {
-  const detail = error.detail || error.message || String(error);
-  if (error.code === "model_output_invalid") {
-    return {
-      heading: "The model's draft was rejected",
-      body: detail,
-      hint: "Every line must be supported by your resume or your answers. Try again; the model gets a fresh attempt.",
-    };
-  }
-  if (error.code === "tailor_timeout" || error.status === 504) {
-    return {
-      heading: "The model timed out",
-      body: detail,
-      hint: "Try again, or pick a faster model target in Settings.",
-    };
-  }
-  return { heading: "Could not tailor the resume", body: detail, hint: null };
-}
-
+// The store, its files and its routes keep the names they had
+// (/api/tailored-resumes): the file here keeps its name for the same reason.
 // uat-bug-044: the changed words of a rewritten line, highlighted. Every
 // piece of model text below goes into the tree as a React text child (React
 // escapes it); the panel never injects raw HTML.
@@ -148,13 +111,16 @@ function LineControls({ line, onChoose, busy, onSaveWording = null, saved = null
   const reason = line.kind === "rewritten" ? reasonLabel(line.reason) : "";
   const fallback = line.origin === "fallback" && line.kind === "copy" && line.alternative && line.alternative.kind === "rewritten";
   const lost = fallback ? lostLabels(line.alternative) : [];
-  if (actions.length === 0 && !reason && !fallback && !line.edited) {
+  // 0.1.11 (SPEC 4.3): a line a model reworded can only be the tailoring of 0.1.10's (0.1.11 rewords nothing).
+  const oldTailor = line.kind === "rewritten" && line.origin === "model";
+  if (actions.length === 0 && !reason && !fallback && !line.edited && !oldTailor) {
     return null;
   }
   return (
     <div className="md-line line-controls" data-line-id={line.id || undefined}>
       <span className="prov blank">·</span>
       <span className="src-list">
+        {oldTailor && <span className="src-item muted" data-role="old-tailor">reworded by the old tailor</span>}
         {reason && <span className="src-item muted" data-role="reason">{reason}</span>}
         {fallback && (
           <span className="src-item muted" data-role="kept-original">
@@ -229,7 +195,7 @@ function PreviewLine({ line, index, open, onToggle, promptFor, showChanges, onCh
       }}
     >
       {copied ? (
-        <span className="prov resume" title="Copied verbatim from the resume">
+        <span className="prov resume" title="Copied word for word">
           R
         </span>
       ) : line.edited ? (
@@ -237,7 +203,7 @@ function PreviewLine({ line, index, open, onToggle, promptFor, showChanges, onCh
           E
         </span>
       ) : (
-        <span className="prov rewritten" title="Rewritten; click for sources">
+        <span className="prov rewritten" title="Reworded; click for sources">
           ✎
         </span>
       )}
@@ -270,9 +236,11 @@ function PreviewLine({ line, index, open, onToggle, promptFor, showChanges, onCh
   );
 }
 
-export function Preview({ response, profileLabel, promptFor, initialView = "changes", onChooseLine = null, choiceBusy = false, choiceError = null, onLength = null, onSaveWording = null, wordingSaved = null }) {
+// `provenance` is JobResumePanel's one line ("Picked by the assessment from your master (revision 5) · 27 lines ·
+// 2 pages"); `initialView` is "clean" (the resume as it will print) unless the caller has changed lines to show.
+export function Preview({ response, provenance = null, promptFor, initialView = "changes", onChooseLine = null, choiceBusy = false, choiceError = null, onLength = null, onSaveWording = null, wordingSaved = null }) {
   const [open, setOpen] = useState(() => new Set());
-  const [view, setView] = useState(initialView); // "changes" (default) | "clean"
+  const [view, setView] = useState(initialView); // "changes" | "clean"
   const lines = previewLines(response.result);
   const stats = previewStats(lines);
   // 0110-10-05 C: what was left out for length, and the way back.
@@ -289,11 +257,15 @@ export function Preview({ response, profileLabel, promptFor, initialView = "chan
     });
   }, []);
   // 0110-10-10 item 3: what the stored resume records it was made from (the master, or the profile's own resume).
-  const from = madeFrom(response, profileLabel);
+  const basis = recordedBasis(response);
+  const source = basis === "master" ? "your master" : "the resume";
   return (
     <>
-      <div className="tailor-meta" title={response.updated_at || undefined} data-basis={from.basis}>
-        Tailored {dateTimeLabel(response.updated_at) || "just now"} · <span data-role="made-from">{from.lead} <strong>{from.name}</strong></span>
+      <div className="tailor-meta" title={response.updated_at || undefined} data-basis={basis}>
+        <span data-role="provenance" data-origin={provenance ? provenance.origin || undefined : undefined} data-picked-by={provenance ? provenance.pickedBy || undefined : undefined}>
+          {provenance ? provenance.text : "Stored resume"}
+        </span>{" "}
+        · stored {dateTimeLabel(response.updated_at) || "just now"}
         {editedLine(response) && <span data-role="edited-by"> · {editedLine(response)}</span>}
       </div>
       <div className="resume-change-bar">
@@ -301,10 +273,10 @@ export function Preview({ response, profileLabel, promptFor, initialView = "chan
           {changeSummary(stats)}
         </div>
         <div className="view-toggle" role="group" aria-label="Resume view">
-          <button type="button" className={`button small ${view === "changes" ? "" : "secondary"}`} aria-pressed={view === "changes"} onClick={() => setView("changes")}>
+          <button type="button" data-action="view-changes" className={`button small ${view === "changes" ? "" : "secondary"}`} aria-pressed={view === "changes"} onClick={() => setView("changes")}>
             Show changes
           </button>
-          <button type="button" className={`button small ${view === "clean" ? "" : "secondary"}`} aria-pressed={view === "clean"} onClick={() => setView("clean")}>
+          <button type="button" data-action="view-clean" className={`button small ${view === "clean" ? "" : "secondary"}`} aria-pressed={view === "clean"} onClick={() => setView("clean")}>
             Clean copy
           </button>
         </div>
@@ -322,11 +294,13 @@ export function Preview({ response, profileLabel, promptFor, initialView = "chan
       {view === "changes" && (
       <div className="resume-legend">
         <span>
-          <span className="prov resume">R</span> copied verbatim from the resume
+          <span className="prov resume">R</span> copied word for word from {source}
         </span>
-        <span>
-          <span className="prov rewritten">✎</span> rewritten from the resume lines / answers it cites
-        </span>
+        {stats.rewritten > 0 && (
+          <span>
+            <span className="prov rewritten">✎</span> reworded, from the lines and answers it cites
+          </span>
+        )}
         {(stats.edited || 0) > 0 && (
           <span>
             <span className="prov rewritten edited">E</span> edited: your own text, no source cited
@@ -353,266 +327,5 @@ export function Preview({ response, profileLabel, promptFor, initialView = "chan
       )}
       <div className="resume-stats">{statsLine(stats)}</div>
     </>
-  );
-}
-
-// The panel's state, shared with the "Tailor resume" action.
-export function useTailoredResume({ jobIdentity, jobUrl, profileId }) {
-  const [stored, setStored] = useState(null);
-  const [loadingStored, setLoadingStored] = useState(true);
-  const [tailoring, setTailoring] = useState(false);
-  const [elapsed, setElapsed] = useState(0);
-  const [error, setError] = useState(null);
-  const [outcome, setOutcome] = useState(null); // uat-bug-043: "done" | "error" after a run, for the status by the button
-  const [changes, setChanges] = useState(0); // resumes made or edited on THIS page: the pipeline takes each up, so the job page reads its timeline again
-  const requestKey = useRef(0);
-  const replaceStored = useCallback((response) => {
-    setStored(response);
-    setChanges((count) => count + 1);
-  }, []);
-
-  useEffect(() => {
-    const key = ++requestKey.current;
-    setStored(null);
-    setError(null);
-    setOutcome(null);
-    setTailoring(false);
-    setLoadingStored(true);
-    if (!jobIdentity || !profileId) {
-      setLoadingStored(false);
-      return undefined;
-    }
-    getTailoredResumes({ profileId, jobIdentity })
-      .then((response) => {
-        if (requestKey.current === key) {
-          setStored(latestStored(response.items));
-          setLoadingStored(false);
-        }
-      })
-      .catch(() => {
-        if (requestKey.current === key) {
-          setLoadingStored(false); // an unreachable list just means "nothing stored to show"
-        }
-      });
-    return () => {
-      requestKey.current += 1;
-    };
-  }, [jobIdentity, profileId]);
-
-  useEffect(() => {
-    if (!tailoring) {
-      return undefined;
-    }
-    const startedAt = Date.now();
-    setElapsed(0);
-    const timer = setInterval(() => setElapsed(Math.round((Date.now() - startedAt) / 1000)), 1000);
-    return () => clearInterval(timer);
-  }, [tailoring]);
-
-  const tailor = useCallback(() => {
-    if (!jobUrl || !profileId) {
-      return;
-    }
-    const key = requestKey.current;
-    setTailoring(true);
-    setError(null);
-    setOutcome(null);
-    postTailoredResume({ job: { job_url: jobUrl }, resume: { profile_id: profileId } })
-      .then((response) => {
-        if (requestKey.current !== key) {
-          return;
-        }
-        replaceStored(response);
-        setOutcome("done");
-        setTailoring(false);
-      })
-      .catch((err) => {
-        if (requestKey.current !== key) {
-          return;
-        }
-        setTailoring(false);
-        setOutcome("error");
-        setError(err instanceof ApiError ? err : { message: err.message || String(err) });
-      });
-  }, [jobUrl, profileId, replaceStored]);
-
-  // The background pipeline stored a resume for this job (the timeline says
-  // its tailor step finished): read it again, quietly. What the page shows
-  // stays until the answer arrives, and `changes` does not move, so the
-  // timeline that reported it is not read again for it.
-  const reload = useCallback(() => {
-    if (!jobIdentity || !profileId) {
-      return;
-    }
-    const key = requestKey.current;
-    getTailoredResumes({ profileId, jobIdentity })
-      .then((response) => requestKey.current === key && setStored((held) => newerStored(held, latestStored(response.items))))
-      .catch(() => {}); // what is shown stays; the next finished tailor step, or opening the job again, reads it
-  }, [jobIdentity, profileId]);
-
-  return { stored, setStored: replaceStored, changes, reload, loadingStored, tailoring, elapsed, error, outcome, tailor, jobIdentity, profileId, visible: Boolean(stored || tailoring || error) };
-}
-
-export default function TailoredResumePanel({ state, profileLabel, questionPrompts }) {
-  const promptFor = (id) => (questionPrompts && questionPrompts.get(id)) || null;
-  const { stored, tailoring, elapsed, error } = state;
-  const panel = useRef(null);
-  // 0110-046: the Generate PDF form, open on request. Closing it drops what
-  // was typed (the form's state goes with it).
-  const [pdfOpen, setPdfOpen] = useState(false);
-  const [choosing, setChoosing] = useState(false);
-  const [choiceError, setChoiceError] = useState(null);
-  // 0110-10-05 A: where this job's markdown is in the resumes folder; asked
-  // again when the stored resume changes (a line choice rewrites the file).
-  const [folderFile, setFolderFile] = useState("");
-  const storedStamp = stored ? `${stored.updated_at}|${stored.markdown ? stored.markdown.length : 0}` : "";
-  useEffect(() => {
-    let current = true;
-    setFolderFile("");
-    if (!storedStamp || !state.profileId || !state.jobIdentity) {
-      return undefined;
-    }
-    getResumesFolder({ profileId: state.profileId, jobIdentity: state.jobIdentity })
-      .then((response) => current && setFolderFile(folderFilePath(response)))
-      .catch(() => {}); // the folder line is extra: the panel works without it
-    return () => {
-      current = false;
-    };
-  }, [storedStamp, state.profileId, state.jobIdentity]);
-
-  const renderPdf = useCallback(
-    (header) => postTailoredResumePdf({ profileId: state.profileId, jobIdentity: state.jobIdentity, header }),
-    [state.profileId, state.jobIdentity],
-  );
-
-  // 0110-006: PUT one line's choice; the response replaces `stored`, so the
-  // clean copy and the PDF follow. A 409 means a newer tailoring replaced this
-  // one: reload the stored resume and say so.
-  const chooseLine = useCallback(
-    (lineId, use) => {
-      setChoosing(true);
-      setChoiceError(null);
-      putTailoredResumeLine({ profileId: state.profileId, jobIdentity: state.jobIdentity, updatedAt: stored.updated_at, lineId, use })
-        .then((response) => state.setStored(response))
-        .catch((err) => {
-          setChoiceError(err.detail || err.message || String(err));
-          if (err.code === "tailored_resume_changed") {
-            getTailoredResumes({ profileId: state.profileId, jobIdentity: state.jobIdentity })
-              .then((response) => state.setStored(latestStored(response.items)))
-              .catch(() => {});
-          }
-        })
-        .finally(() => setChoosing(false));
-    },
-    [stored, state],
-  );
-
-  // 0110-10-05 C: Restore / Cut for length again. The response replaces
-  // `stored`, like a line choice; a 409 reloads the stored resume.
-  const changeLength = useCallback(
-    (use) => {
-      setChoosing(true);
-      setChoiceError(null);
-      putTailoredResumeLength({ profileId: state.profileId, jobIdentity: state.jobIdentity, updatedAt: stored.updated_at, use })
-        .then((response) => state.setStored(response))
-        .catch((err) => {
-          setChoiceError(err.detail || err.message || String(err));
-          if (err.code === "tailored_resume_changed") {
-            getTailoredResumes({ profileId: state.profileId, jobIdentity: state.jobIdentity })
-              .then((response) => state.setStored(latestStored(response.items)))
-              .catch(() => {});
-          }
-        })
-        .finally(() => setChoosing(false));
-    },
-    [stored, state],
-  );
-
-  // 0.1.10.9 master P5: "Save this wording to your master". The master is
-  // read for its revision, then the line is written on top of it; when the
-  // agent wrote the master in between, the write is refused and says so.
-  const [wordingSaved, setWordingSaved] = useState(null);
-  const saveWording = useCallback((lineId, wording) => {
-    setChoosing(true);
-    setChoiceError(null);
-    setWordingSaved(null);
-    getMaster()
-      .then((body) => {
-        if (!body.master) {
-          throw new Error("There is no master resume to save it to.");
-        }
-        return putMasterLine({ revision: body.master.revision, id: wording.id, use: "edit", text: wording.text });
-      })
-      .then((response) =>
-        setWordingSaved({
-          lineId,
-          text: response.status === "unchanged" ? "Your master already says this." : `Saved to your master (revision ${response.master.revision}). Other jobs and profiles use it from now on.`,
-        }),
-      )
-      .catch((err) => {
-        const conflict = conflictOf(err);
-        setChoiceError(conflict ? "Not saved: your master changed a moment ago. Try again." : err.detail || err.message || String(err));
-      })
-      .finally(() => setChoosing(false));
-  }, []);
-
-  // uat-bug-043: the action sits above the requirement table and its status
-  // sits by the button; when a run finishes (result or error) bring the panel
-  // into view.
-  const wasTailoring = useRef(false);
-  useEffect(() => {
-    if (wasTailoring.current && !tailoring && panel.current && typeof panel.current.scrollIntoView === "function") {
-      panel.current.scrollIntoView({ block: "start", behavior: "smooth" });
-    }
-    wasTailoring.current = tailoring;
-  }, [tailoring]);
-
-  if (!state.visible) {
-    return null;
-  }
-
-  return (
-    <section className="panel tailored-resume" id="tailored-resume" ref={panel} data-state={tailoring ? "tailoring" : stored ? "stored" : "idle"}>
-      <div className="resume-toolbar">
-        <h3>Tailored resume</h3>
-        {stored && !tailoring && (
-          <button type="button" className="button small secondary" aria-expanded={pdfOpen} data-role="open-generate-pdf" onClick={() => setPdfOpen((open) => !open)}>
-            {pdfOpen ? "Close" : "Generate PDF"}
-          </button>
-        )}
-      </div>
-      {stored && !tailoring && (
-        <p className="muted small" data-role="tailored-wording">
-          {TAILORED_WORDING}
-        </p>
-      )}
-      {stored && !tailoring && folderFile && (
-        <p className="muted small" data-testid="resumes-folder-file">
-          In your resumes folder: <code>{folderFile}</code>
-        </p>
-      )}
-      {stored && !tailoring && pdfOpen && <GeneratePdfForm render={renderPdf} />}
-      {error && (
-        <div className="callout danger tailor-error" role="alert">
-          <strong>{errorView(error).heading}.</strong> {errorView(error).body}
-          {errorView(error).hint && <div className="muted" style={{ marginTop: 4, fontSize: "0.82rem" }}>{errorView(error).hint}</div>}
-        </div>
-      )}
-      {stored && !tailoring && <PickedLeftOut stored={stored} state={state} />}
-      {stored && (
-        <Preview
-          key={stored.updated_at || stored.stored_path}
-          response={stored}
-          profileLabel={profileLabel}
-          promptFor={promptFor}
-          onChooseLine={chooseLine}
-          choiceBusy={choosing}
-          choiceError={choiceError}
-          onLength={changeLength}
-          onSaveWording={stored.selection ? saveWording : null}
-          wordingSaved={wordingSaved}
-        />
-      )}
-    </section>
   );
 }

@@ -1,7 +1,7 @@
 import { dateLabel } from "../jobModel.js";
 import { isApplicationState, stateLabel } from "../jobStateModel.js";
 
-// uat-bug-018: a job's state past its verdict, in words: "Resume tailored",
+// uat-bug-018: a job's state past its verdict, in words: "Resume ready",
 // "Applied", "Interview scheduled", "Offer received", "Rejected",
 // "Withdrawn". The verdict states (not assessed, needs your answers,
 // matched, not a match) are the verdict chip's, so this draws nothing for

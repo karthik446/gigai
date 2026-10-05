@@ -8,8 +8,9 @@ Pinned:
 * in that layout the questions section precedes the requirement table, the
   table sits in a plain, always-visible section (no ``<details>``, no toggle;
   uat-bug-045) and carries no answer boxes, and no questions section renders without open questions;
-* answering is unchanged: the same drafts controller, one Re-assess/Tailor
-  ``RequirementActions``, no new API call;
+* answering is unchanged: the same drafts controller, one Re-assess
+  ``RequirementActions`` (0.1.11: the Tailor action went with the tailor
+  call), no new API call;
 * ``ui/dist`` carries the new layout and ``index.html`` names bundles that exist.
 """
 
@@ -86,24 +87,18 @@ def test_no_other_disclosure_wraps_the_job_page_requirements() -> None:
     assert "requirements-details" not in (UI_SRC / "styles.css").read_text(encoding="utf-8")
 
 
-def test_tailoring_status_sits_next_to_the_button_uat_bug_043() -> None:
+def test_the_tailoring_status_went_with_the_tailor_call() -> None:
+    """uat-bug-043 put the tailoring status next to the Tailor button. 0.1.11 has neither: no model writes a resume."""
+
     actions = _code(UI_SRC / "components" / "RequirementActions.jsx")
-    buttons = actions[actions.index('className="req-actions-buttons"') : actions.index('<ul className="action-help">')]
-    # inside the button row, after the Tailor button: a role=status with a spinner
-    assert buttons.index('name="tailor"') < buttons.index("<TailorStatus")
-    status = actions[actions.index("function TailorStatus") : actions.index("function Help")]
-    assert 'role="status"' in status and 'className="spinner"' in status and "status.text" in status
-    assert 'data-action="tailor-jump"' in status  # the jump link once it finished
-
+    assert "TailorStatus" not in actions and 'name="tailor"' not in actions and "tailor-jump" not in actions
+    assert actions.count("<Action ") == 1 and 'name="reassess"' in actions  # ONE action
     page = _code(UI_SRC / "views" / "JobPage.jsx")
-    fn = page[page.index("function tailorStatusFor") : page.index("export default function JobPage")]
-    assert "`Tailoring ${who}… ${tailored.elapsed}s`" in fn and "with ${modelName}" in fn  # "Tailoring with Codex… 12s"
-    assert 'tailored.outcome === "done"' in fn and 'tailored.outcome === "error"' in fn
-    assert "getElementById(\"tailored-resume\")" in fn and "scrollIntoView" in fn
-    assert "status: tailorStatus" in page and "default_model_target" in page and "20" not in fn.replace("2026", "")
-
-    panel = _code(UI_SRC / "components" / "TailoredResumePanel.jsx")
-    assert 'id="tailored-resume"' in panel and "tailor-progress" not in panel  # one status, by the button
-    assert 'setOutcome("done")' in panel and 'setOutcome("error")' in panel
-    # scrolls into view when a run FINISHES (was: when it started, off the button)
-    assert "wasTailoring.current && !tailoring" in panel and "scrollIntoView" in panel
+    assert "tailorStatusFor" not in page and "tailorGate" not in page and "postTailoredResume(" not in page
+    assert "<JobResumePanel" in page and "<ApplyPanel" in page and "<SuggestionsPanel" in page
+    panel = _code(UI_SRC / "components" / "JobResumePanel.jsx")
+    assert 'id="job-resume"' in panel and "postTailoredResume(" not in panel
+    # Every refresh is a button that says what it costs; none runs by itself.
+    model = (UI_SRC / "jobResumeModel.js").read_text(encoding="utf-8")
+    assert 'export const REPICK_LABEL = "Re-pick · no model call";' in model and 'export const REASSESS_LABEL = "Re-assess · 1 model call";' in model
+    assert "postTailoredResume" not in (UI_SRC / "api.js").read_text(encoding="utf-8").replace("postTailoredResumePdf", "")

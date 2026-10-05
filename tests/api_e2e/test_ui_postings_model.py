@@ -260,7 +260,7 @@ def test_the_row_chips_say_the_state_the_scout_label_stale_and_removed(out: dict
         ("label", "Scout label: recommended", "ok", "scout-label-chip"), ("ats", "Scout ATS 84", "plain", "ats-chip"),
     ]
     assert chips["attention"] == [
-        ("state", "Resume tailored", "ok", None), ("assessed", "Assessed", "plain", None),
+        ("state", "Resume ready", "ok", None), ("assessed", "Assessed", "plain", None),
         ("label", "Scout label: needs attention", "warn", "scout-label-chip"), ("ats", "Scout ATS 61", "plain", "ats-chip"),
         # 0110-10-12: the server's words. This row's score column does not say it (no `score_text` with the label), so the chip does.
         ("stale", "Old assessment: posting changed", "warn", "stale-chip"),

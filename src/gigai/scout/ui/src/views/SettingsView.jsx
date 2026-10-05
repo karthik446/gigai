@@ -107,8 +107,8 @@ export default function SettingsView({
       <section className="panel" id="settings-master-resume">
         <h2>Master resume</h2>
         <p className="muted">
-          One resume with every role, bullet, project and skill you have. Each profile shows a selection of it, and a resume tailored for a job
-          picks from all of it.
+          One resume with every role, bullet, project and skill you have. Each profile shows a selection of it, and the resume for a job
+          is picked from all of it.
         </p>
         <a className="button secondary" data-action="open-master-resume" href={MASTER_HASH}>
           Open master resume

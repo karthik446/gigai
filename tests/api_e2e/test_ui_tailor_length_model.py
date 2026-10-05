@@ -139,7 +139,8 @@ def test_the_panel_shows_the_line_with_restore_and_nothing_when_the_resume_fits(
 def test_the_panel_sends_the_action_to_the_length_route() -> None:
     api, panel = API_JS.read_text(encoding="utf-8"), PANEL_JSX.read_text(encoding="utf-8")
     assert 'request("PUT", "/api/tailored-resumes/length"' in api
-    assert "putTailoredResumeLength" in panel and "onLength={changeLength}" in panel and "lengthNote(response)" in panel
+    owner = (PANEL_JSX.parent / "JobResumePanel.jsx").read_text(encoding="utf-8")  # 0.1.11: the panel around the preview
+    assert "putTailoredResumeLength" in owner and "onLength={changeLength}" in owner and "lengthNote(response)" in panel
 
 
 # --- 0.1.10.9 master P5: "older" is said only of old roles' bullets --------------------------------

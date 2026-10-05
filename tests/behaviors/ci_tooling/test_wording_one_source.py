@@ -93,7 +93,7 @@ def test_the_ui_copies_equal_the_constants_and_live_in_one_file() -> None:
             assert LINES[key] not in text and _flat(LINES[key]) not in text, f"{key} is spelled out in {path.name}"
     # Each copy is shown beside its thing.
     assert "VERDICT_WORDING" in (UI_SRC / "views" / "JobPage.jsx").read_text(encoding="utf-8")
-    assert "TAILORED_WORDING" in (UI_SRC / "components" / "TailoredResumePanel.jsx").read_text(encoding="utf-8")
+    assert "TAILORED_WORDING" in (UI_SRC / "components" / "JobResumePanel.jsx").read_text(encoding="utf-8")  # 0.1.11: the suggested resume's panel
     assert "TAILORED_WORDING" in (UI_SRC / "views" / "PdfView.jsx").read_text(encoding="utf-8")
     form = (UI_SRC / "components" / "GeneratePdfForm.jsx").read_text(encoding="utf-8")
     assert "<strong>{PRIVACY_PROMISE}</strong> {PRIVACY_PDF_LINE}" in form

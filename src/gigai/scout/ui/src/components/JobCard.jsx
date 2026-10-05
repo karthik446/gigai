@@ -39,7 +39,7 @@ import { assessmentHash, jobHash } from "../routing.js";
 // and the page's back link stay on Assessments. An on-demand assessment
 // has no rank tile unless a run's card lends it one.
 //
-// uat-bug-018: a job that has a tailored resume, or is applied or beyond,
+// uat-bug-018: a job that has a stored resume, or is applied or beyond,
 // says so in a second chip beside its verdict (StateChip; the verdict
 // states are the verdict chip itself).
 //

@@ -120,8 +120,8 @@ async function request(method, path, body, options) {
     const detail = errorBody && typeof errorBody.message === "string" ? errorBody.message : undefined;
     const { code: _code, message: _message, ...extra } = errorBody || {};
     // Q4b-ui: `detail` is the server's own message verbatim, for callers
-    // that render it (the tailored-resume panel: model_output_invalid names
-    // the line that failed a guard) instead of the per-status text above.
+    // that render it (the job resume panel: a refused change names the
+    // line) instead of the per-status text above.
     throw new ApiError(response.status, messageForStatus(path, response.status, code, detail), code, { ...extra, detail });
   }
 
@@ -486,16 +486,13 @@ export function postApplication(fields) {
   return request("POST", "/api/applications", fields);
 }
 
-// Q3/Q4b-ui: one tailored resume for one posting (find_jobs/api/
-// tailored_resumes.py). POST is synchronous (~20-30 s: one model call, one
-// retry on a rejected draft); its errors are 422 (bad request), 502
-// model_output_invalid (the draft failed a guard; the message names the
-// line), 504 tailor_timeout. GET lists the stored ones, newest first,
-// optionally filtered by profile_id and/or job_identity.
-export function postTailoredResume(request_) {
-  return request("POST", "/api/tailored-resumes", request_);
-}
-
+// The job resume store (find_jobs/api/tailored_resumes.py). 0.1.11: no model
+// writes a resume. The resume for a job is picked from the master when the
+// job is assessed; the store, its files and these routes keep the paths they
+// had ("renaming seven routes buys nothing in a patch release", SPEC 4.4).
+// GET lists the stored ones, newest first, optionally filtered by profile_id
+// and/or job_identity. POST /api/tailored-resumes (the tailor call) is gone
+// from the UI: the server answers it 410 tailoring_removed.
 export function getTailoredResumes(params) {
   const query = new URLSearchParams();
   if (params && params.profileId) {
@@ -508,9 +505,9 @@ export function getTailoredResumes(params) {
   return request("GET", `/api/tailored-resumes${qs ? `?${qs}` : ""}`);
 }
 
-// 0110-006: show the original or the rewrite of one line (PUT
+// 0110-006: show the original or the changed wording of one line (PUT
 // /api/tailored-resumes/lines). `updatedAt` is the updated_at of the resume
-// the caller is looking at; a newer tailoring answers 409
+// the caller is looking at; a newer stored resume answers 409
 // tailored_resume_changed. Answers the updated TailorResponse.
 export function putTailoredResumeLine({ profileId, jobIdentity, updatedAt, lineId, use }) {
   return request("PUT", "/api/tailored-resumes/lines", {
@@ -522,7 +519,7 @@ export function putTailoredResumeLine({ profileId, jobIdentity, updatedAt, lineI
   });
 }
 
-// 0110-10-05 C: put back what a tailored resume left out for length (use:
+// 0110-10-05 C: put back what a job's resume left out for length (use:
 // "restore"), or leave it out again (use: "cut"): PUT
 // /api/tailored-resumes/length. Same revision check as a line choice.
 // Answers the updated TailorResponse.
@@ -535,8 +532,8 @@ export function putTailoredResumeLength({ profileId, jobIdentity, updatedAt, use
   });
 }
 
-// 0.1.10.9 master P5: Add or Remove one master line on a job's tailored
-// resume (PUT /api/tailored-resumes/selection). `fit` answers an Add that
+// 0.1.10.9 master P5: Add or Remove one master line on a job's resume
+// (PUT /api/tailored-resumes/selection). `fit` answers an Add that
 // pushes the resume over 2 pages: "ask" (the default) stores nothing and
 // names what would be cut, "cut" makes room, "keep" keeps both. Answers the
 // TailorResponse plus `selection_change`.
@@ -549,6 +546,39 @@ export function putTailoredResumeSelection({ profileId, jobIdentity, updatedAt, 
     item_id: itemId,
     ...(fit ? { fit } : {}),
   });
+}
+
+// 0.1.11 N6: the suggestions of one job, the code-only pick and the agent's brief (find_jobs/api/suggestions.py,
+// N5; SPEC 2.1, 2.4, 4.4). Opening a job recomputes nothing and writes nothing.
+//
+//   GET  /api/jobs/suggestions?url=&profile_id=   {gate: {decision, ready, reasons}, counts, suggestions: [...]}.
+//        404 suggestions_not_found for a job assessed before 0.1.11 (it has no record): the page asks only for a job
+//        whose stored assessment carries a `resume_gate` (`expect`), so a legacy job asks nothing
+//   POST /api/jobs/suggestions {job_url, profile_id, action: "resolve" | "dismiss" | "add", suggestion_id, how, ...}
+//   POST /api/job-resumes/pick {job_url, profile_id, action: "refresh" | "draft" | "use_proposed" | "dismiss_proposed"}
+//        ALWAYS needs an action, and every action is a step: there is no read-only form. The answer is the job's stored
+//        view after it: {gate, stale: [...], resume, picked, conflicts, proposed, selection_error}. No model call
+//   GET  /api/jobs/brief?url=&part=yours|posting&profile_id=   the agent's brief, two parts, never one response
+export function getJobSuggestions({ jobIdentity, profileId, expect = false }) {
+  if (!expect) {
+    return Promise.resolve(null);
+  }
+  const query = new URLSearchParams({ url: jobIdentity, profile_id: profileId });
+  return request("GET", `/api/jobs/suggestions?${query}`);
+}
+
+// Done (`action: "resolve"`, with `how`), Dismiss (`action: "dismiss"`). Written as the operator: this is the page.
+export function postJobSuggestion({ jobUrl, profileId, action, id, how }) {
+  return request("POST", "/api/jobs/suggestions", { job_url: jobUrl, profile_id: profileId, actor: "operator", action, suggestion_id: id, ...(how ? { how } : {}) });
+}
+
+export function postJobResumePick({ jobUrl, profileId, action }) {
+  return request("POST", "/api/job-resumes/pick", { job_url: jobUrl, profile_id: profileId, action });
+}
+
+export function getJobBrief({ jobUrl, profileId, part }) {
+  const query = new URLSearchParams({ url: jobUrl, part, ...(profileId ? { profile_id: profileId } : {}) });
+  return request("GET", `/api/jobs/brief?${query}`);
 }
 
 // 0.1.10.9 master P5: the master resume (find_jobs/api/master.py). The reads
@@ -567,17 +597,21 @@ export function postMasterLine({ revision, entryId, section, text, force }) {
   return request("POST", "/api/master/lines", { revision, text, ...(entryId ? { entry_id: entryId } : { section }), ...(force ? { force: true } : {}) });
 }
 
-// use: "edit" (with text), "retire" or "restore".
-export function putMasterLine({ revision, id, use = "edit", text }) {
-  return request("PUT", "/api/master/lines", { revision, id, use, ...(use === "edit" ? { text } : {}) });
+// use: "edit" (with text and/or note), "retire" or "restore". 0.1.11 (SPEC
+// 5.4): `note` is the line's note, guidance for choosing lines and never text
+// of a resume; "" removes it. An edit sends only what it changes.
+export function putMasterLine({ revision, id, use = "edit", text, note }) {
+  const fields = use === "edit" ? { ...(text === undefined ? {} : { text }), ...(note === undefined ? {} : { note }) } : {};
+  return request("PUT", "/api/master/lines", { revision, id, use, ...fields });
 }
 
 export function postMasterEntry({ revision, section, heading, sublines }) {
   return request("POST", "/api/master/entries", { revision, section, heading, sublines });
 }
 
-export function putMasterEntry({ revision, id, use = "edit", heading, sublines }) {
-  return request("PUT", "/api/master/entries", { revision, id, use, ...(use === "edit" ? { heading, sublines } : {}) });
+export function putMasterEntry({ revision, id, use = "edit", heading, sublines, note }) {
+  const fields = use === "edit" ? { ...(heading === undefined ? {} : { heading, sublines }), ...(note === undefined ? {} : { note }) } : {};
+  return request("PUT", "/api/master/entries", { revision, id, use, ...fields });
 }
 
 export function getMasterMigration() {
@@ -792,8 +826,7 @@ export function postAssessThese(body) {
 // 0.1.10.7 M4b: the background pipeline (find_jobs/api/pipeline.py).
 // GET /api/pipeline is its status (lanes, today's counters against their
 // caps, approvals, last errors); GET /api/pipeline/job one job's steps with
-// their numbers, the requirements met before and after tailoring, the Scout
-// ATS breakdown and the Scout label. An approval is decided with
+// their numbers, the Scout ATS breakdown and the Scout label. An approval is decided with
 // {approve: true|false}; "process now" queues one assessed job and never
 // waits for a model (202).
 export function getPipeline() {
