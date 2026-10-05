@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { getMaster, getTailoredResumes, putTailoredResumeSelection } from "../api.js";
-import { changeLine, errorText, pickedByLine, pickedLeftOut, roomQuestion } from "../masterModel.js";
+import { changeLine, errorText, pickedByLine, pickedLeftOut, recordedBasis, roomQuestion } from "../masterModel.js";
 import { latestStored } from "../tailoredResumeModel.js";
 
 // 0.1.10.9 master P5: Picked / Left out, on the job page's Tailored resume
@@ -112,7 +112,7 @@ export default function PickedLeftOut({ stored, state }) {
   return (
     <div className="picked-left-out" data-testid="picked-left-out" data-picked-by={view.pickedBy}>
       <div className="resume-change-bar">
-        <div className="resume-summary" data-role="picked-by">
+        <div className="resume-summary" data-role="picked-by" data-basis={recordedBasis(stored)}>
           {pickedByLine(view)}
         </div>
         <div className="view-toggle" role="group" aria-label="Picked and left out">

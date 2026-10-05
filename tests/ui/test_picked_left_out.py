@@ -6,6 +6,8 @@ and "Left out (m)" beside the resume, by role, each line with its reason:
 
 - the counts and every line are the stored selection's; a left-out line's text is the master's (ONE `GET /api/master`,
   when a list is first opened, never before);
+- the header over the resume says "from your master resume (revision n), picked for profile ...", the same basis as the
+  line under it ("GigAI picked the candidate lines from your whole master"), never "from resume <profile>" (0110-10-10 item 3);
 - Add puts a left-out line on this job's resume in ONE request (`use: add`, the `updated_at` the page read): the
   resume's preview shows it under its role, and Picked lists it as "you added it to this resume";
 - Remove takes it off again in one request (`use: remove`): the preview loses it and it is listed under Left out as
@@ -102,6 +104,12 @@ def test_picked_and_left_out_are_shown_with_reasons_and_a_line_is_removed_added_
     ui.step("shown")
     assert counts(ui) == [f"Picked ({len(selection['picked'])})", f"Left out ({len(selection['left_out'])})"]
     assert ui.page.locator(VIEW).get_attribute("data-picked-by") == selection["picked_by"]
+    # 0110-10-10 item 3: the header and the line under it name the same basis, the one the stored resume records.
+    header = ui.page.locator(f"{PANEL} .tailor-meta")
+    under = ui.page.locator(f'{VIEW} [data-role="picked-by"]')
+    assert "from your whole master" in (under.text_content() or "")
+    assert f"· from your master resume (revision {stored['sources']['master']['revision']}), picked for profile " in (header.text_content() or ""), header.text_content()
+    assert header.get_attribute("data-basis") == under.get_attribute("data-basis") == "master"
     ui.settle()
     # Closed, the lists ask the server nothing: the master is read when one is opened.
     assert ui.requests_after("start", "/api/master") == 0 and ui.writes_after("start") == []

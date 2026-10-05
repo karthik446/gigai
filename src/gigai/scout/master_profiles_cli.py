@@ -239,13 +239,17 @@ def selection_status_command(profile_id: str | None, target_value: Path | None, 
         name = f"  {status.label} ({status.profile_id})"
         selection = status.selection
         if selection is None:
-            click.echo(f"{name}: no selection yet; its resume is its own. Make one: {_REFRESH} --profile {status.profile_id}")
+            click.echo(f"{name}: no selection yet; its resume is its own. {status.tailoring_basis_line} Make one: {_REFRESH} --profile {status.profile_id}")
             continue
         made = f"revision {status.made_from_revision}" if status.made_from_revision is not None else "an earlier master"
         click.echo(f"{name}: {_n(len(selection.item_ids), 'entry and line', 'entries and lines')}, {_n(len(selection.skills), 'skill')}, made from {made} ({selection.source}).")
         if not status.attached:
-            click.echo(f"    Its resume was replaced after this selection was made, so it no longer shows it. Select from the master again: {_REFRESH} --profile {status.profile_id}")
+            click.echo(
+                f"    Its resume was replaced after this selection was made, so it no longer shows it. {status.tailoring_basis_line} "
+                f"Select from the master again: {_REFRESH} --profile {status.profile_id}"
+            )
             continue
+        click.echo(f"    {status.tailoring_basis_line}")
         if status.stale:
             click.echo(
                 f"    The master changed under it ({_n(len(status.changed), 'shown line')} edited, {len(status.retired) + len(status.skills_retired)} retired): "

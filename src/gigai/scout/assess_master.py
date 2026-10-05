@@ -148,9 +148,9 @@ class AssessInput:
 def reads_evidence(home_root: Path, profile: object) -> bool:
     """Whether an assessment of this profile reads the evidence view when a master is stored (the switch, and not detached)."""
 
-    from .tailor_master import detached
+    from .tailor_master import BASIS_MASTER, tailoring_basis
 
-    return ASSESS_INPUT == INPUT_EVIDENCE and not detached(home_root, profile)
+    return ASSESS_INPUT == INPUT_EVIDENCE and tailoring_basis(home_root, profile, master_stored=True) == BASIS_MASTER
 
 
 def _evidence_master(home_root: Path, target: Path, profile: object | None, resolved: object | None) -> object | None:

@@ -193,6 +193,17 @@ class SelectionStatus:
     changed: tuple[str, ...] = ()
     retired: tuple[str, ...] = ()
     skills_retired: tuple[str, ...] = ()
+    #: What a resume for a job is made from for this profile now (``tailor_master.tailoring_basis``, the one rule):
+    #: ``master`` also for a profile with no selection; ``profile_resume`` for one whose resume was replaced by hand.
+    tailoring_basis: str = "master"
+
+    @property
+    def tailoring_basis_line(self) -> str:
+        """``tailoring_basis`` as the one sentence every status shows (``tailor_master.basis_line``)."""
+
+        from .tailor_master import basis_line
+
+        return basis_line(self.tailoring_basis)
 
     @property
     def stale(self) -> bool:
@@ -220,6 +231,7 @@ class SelectionStatus:
             "master_revision": self.current_revision, "made_from_revision": self.made_from_revision,
             "new_lines": list(self.new_lines), "changed": list(self.changed), "retired": list(self.retired),
             "skills_retired": list(self.skills_retired), "stale": self.stale, "offer": self.offer,
+            "tailoring_basis": self.tailoring_basis, "tailoring_basis_line": self.tailoring_basis_line,
         }
 
 
@@ -262,10 +274,14 @@ def _attached(home_root: Path, profile: ProfileRecord) -> bool:
 
 
 def _status(home_root: Path, masters: _Masters, profile: ProfileRecord) -> SelectionStatus:
+    from .tailor_master import tailoring_basis
+
     selection = profile.master_selection
     current = masters.current
+    # The one rule for what a resume for a job is made from; a status is only made with a master stored.
+    basis = tailoring_basis(home_root, profile, master_stored=True)
     if selection is None:
-        return SelectionStatus(profile.profile_id, profile.label, profile.state, None, None, current.revision.revision, None)
+        return SelectionStatus(profile.profile_id, profile.label, profile.state, None, None, current.revision.revision, None, tailoring_basis=basis)
     now = _facts(current.master)
     made_from = masters.at(selection.master_revision_id)
     synced = masters.at(selection.synced_revision_id)
@@ -285,6 +301,7 @@ def _status(home_root: Path, masters: _Masters, profile: ProfileRecord) -> Selec
         changed=tuple(item_id for item_id in selection.item_ids if item_id in now and item_id in before and now[item_id] != before[item_id]),
         retired=tuple(item_id for item_id in selection.item_ids if item_id not in now),
         skills_retired=tuple(name for name in selection.skills if name.casefold() not in listed),
+        tailoring_basis=basis,
     )
 
 
