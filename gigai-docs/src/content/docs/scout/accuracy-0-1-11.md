@@ -33,7 +33,7 @@ others).
 - no unnecessary question, and no missing question;
 - every must-have row is right: its class and its status;
 - the resume carries the evidence of every must-have the key calls met, every line is verbatim from
-  the master, it fits two pages, and all skills are kept.
+  the master, it respects the page limit, and all skills are kept.
 
 **And one rule outside the count: zero invented facts.** A skill, tool, employer, title, date, outcome
 or number the master does not state fails the run, whatever the count. A sentence GigAI writes about the
@@ -44,7 +44,7 @@ shown below.
 
 Before any run, an answer key is written for the postings, blind to every result: two independent
 passes by a model, then a reconcile, then a ruling on each disputed point under the reasonable-reader
-standard above. A script, not a person, scores every result against that key (verdict, gate, location,
+standard above. The key and the judges are also model-built: no person wrote the key. A script, not a person, scores every result against that key (verdict, gate, location,
 each question, each requirement row, the resume checks). Two things need a reader, so a judge model
 reads them: whether a resume would be sent as it is, and whether any sentence GigAI wrote states
 something the master does not. The judge is never the model that produced the answer.
@@ -82,12 +82,12 @@ Each row is 15 postings, 16 calls (one posting was retried once by the product).
 | Resumes checked | 11 | 11 | 7 |
 | Resume covers every must-have | 11/11 | 11/11 | 7/7 |
 | Resume lines verbatim from the master | 11/11 | 11/11 | 7/7 |
-| Resume within two pages, skills kept | 11/11 | 11/11 | 7/7 |
+| Resume within the page limit, skills kept | 11/11 | 11/11 | 7/7 |
 | Resume keeps the lines the model picked | 11/11 | 11/11 | 7/7 |
 | Wrong citation, must-have rows | 0 | 1 | 0 |
 | Wrong citation, nice-to-have rows | not measurable | not measurable | not measurable |
 | Wording: invented | 0 | 0 | 0 |
-| Wording: stretched | 0 (1 ambiguous) | 1 defect, seen in 11 results | 0 |
+| Wording: stretched | 0 (1 ambiguous) | 0 | 0 |
 | Send-as-is (judge, advisory) | 10 as is, 1 after a fix, 3 held | 8 as is, 3 after a fix, 3 held | 7 of 7 resumes as is |
 | Verdicts | 11 matched, 3 held | 11 matched, 3 held | 7 matched, 8 held |
 
@@ -113,9 +113,12 @@ the key and the master; the send-as-is line is a judge's opinion and is not in t
   it. The re-run after the fix is a separate check and is not in the table.
 
 **Claude default (Sonnet 5.5), 12 of 15.** Four unnecessary questions. One must-have row cited lines that
-did not prove it (a wrong citation). One wording defect, counted once though it appeared in 11 results:
-the sentence about location evidence, which the model wrote itself. The location sentence in the other
-rows is GigAI's own wording, fixed separately.
+did not prove it (a wrong citation). No wording stretch.
+
+**The location sentence, on every row.** On every row the model wrote the location row's evidence as a
+restatement of the person's search settings; one judge counted that as a finding on one row (11
+results) and not on the others, though the sentences are the same kind; it is not counted as a stretch
+on any row; from 0.1.11 code writes that sentence from the settings.
 
 **Codex default, 10 of 15.** Nine unnecessary questions, no missing ones. Most of the shortfall is
 questions asked about things the master already states. It had no failed call.
@@ -130,7 +133,7 @@ Per assessment, fourth set:
 | Claude default (Sonnet 5.5) | 24.1 (50.7) | 4,008 | 23,796 |
 | Codex default | 38.5 (68.5) | 1,605 | 20,249 |
 
-The Claude rows ran on a pinned model; the resolved model was recorded on every call. The Codex CLI's
+Only the Opus row was pinned; the Sonnet row is Claude Code's own default, resolved and recorded per call. The Codex CLI's
 event stream does not say which model answered: its configured default at the time was `gpt-6-astra`
 at medium effort.
 
@@ -142,14 +145,14 @@ fourth set cannot show (below). Fully correct, out of 10, by the final key:
 
 | Stack | Claude Code | Codex CLI |
 | --- | --- | --- |
-| Baseline (before 0.1.11 changes) | 4 | 6 |
-| Arm 0 | 6 | 5 |
-| Arm 0B | 6 | 8 |
-| Arm 2B (Opus 5.5 pinned) | 8 (0 over-asks, 0 under-asks) | not run |
+| Prompt v9.1, default models | 4 | 6 |
+| Plus code checks and prompt v9.2 | 6 | 5 |
+| The released stack, default models | 6 | 8 |
+| The released stack, Claude on Opus 5.5 | 8 (0 over-asks, 0 under-asks) | not run |
 | Sol (Codex pinned to a Sol model; two pins tried) | not run | 5 of 10 on one pin (2 calls timed out), 7 of 10 on the other |
 
-Over-asks and under-asks of the same runs, in order of the rows above: Claude 2 and 4 (baseline), 1 and 4
-(arm 0), 0 and 5 (arm 0B), 0 and 0 (arm 2B); Codex 6 and 1, 8 and 0, 1 and 0; the two Sol pins 1 and 1
+Over-asks and under-asks of the same runs, in order of the rows above: Claude 2 and 4 (prompt v9.1), 1 and 4
+(plus code checks and prompt v9.2), 0 and 5 (the released stack, default models), 0 and 0 (the released stack, Claude on Opus 5.5); Codex 6 and 1, 8 and 0, 1 and 0; the two Sol pins 1 and 1
 (8 results read), 2 and 0.
 
 ## What is not proven
@@ -165,15 +168,20 @@ Over-asks and under-asks of the same runs, in order of the rows above: Claude 2 
 - **The wrong-citation column for nice-to-have rows could not be measured.** The key records no lines
   for them, so 28 to 31 such rows per run were unchecked. Only must-have rows are checked.
 - **The judges are models.** Judge variance was seen: one judge model found 26 stretches on one row and
-  none on another before every row was judged again with one ruler. A person read every finding. The
-  ruler: a row's status is not the judge's to rule on; it reports only a sentence GigAI wrote that the
-  master or the answers do not state. Under that ruler the count was 0 invented and 0 stretched on
-  Opus and Codex, and the one Sonnet defect above.
+  none on another before every row was judged again with one ruler. Every finding was then read
+  against the result files by the model that coordinates the project, which ruled on it under the
+  standard above; the person whose resume this is set that standard. The ruler: a row's status is not
+  the judge's to rule on; it reports only a sentence GigAI wrote that the master or the answers do not
+  state. Under that ruler the count was 0 invented and 0 stretched on all three rows. On every row the
+  model wrote the location row's evidence as a restatement of the person's search settings; one judge
+  counted that as a finding on one row (11 results) and not on the others, though the sentences are the
+  same kind; it is not counted as a stretch on any row; from 0.1.11 code writes that sentence from the
+  settings.
 - **The key is ruled by a standard.** It was built blind by two passes and a reconcile, and ruled under
   the reasonable-reader standard above. A stricter reader would call some met rows questions.
 - **The Codex model is not reported** by the adapter. The row is measured on the configured default.
-- **The Claude rows ran on a pinned model.** Opus is asked for by default; a run on another model is a
-  different measurement.
+- **Only the Opus row was pinned.** The Sonnet row is Claude Code's own default, resolved and recorded
+  per call; a run on another model is a different measurement.
 - **One master.** One person's resume, one set of stored answers and preferences.
 - **A real agent session** through the brief and the hand-back is a separate test and is not in these
   numbers.
