@@ -768,6 +768,38 @@ def test_ashby_structured_secondary_locations_add_to_country_field() -> None:
     assert rows[0].countries == ("NL", "US")
 
 
+def _ashby_rows_for(job: dict[str, object]) -> tuple:
+    with _client(lambda request: httpx.Response(200, json={"jobs": [job]})) as client:
+        return list_ashby_board(client, "orbit", _config(("platform engineer",)))
+
+
+_ASHBY_HTML = "<p>Build the platform.</p><h3>Requirements</h3><ul><li>5+ years of Python in production</li><li>Kubernetes</li></ul>"
+
+
+def test_ashby_posting_with_only_description_html_has_its_text() -> None:
+    # 0.1.10.11: a board that sends no descriptionPlain; the whole posting (with its requirements) is in descriptionHtml.
+    job = _ashby_job(descriptionHtml=_ASHBY_HTML)
+    del job["descriptionPlain"]
+    row = _ashby_rows_for(job)[0]
+    assert row.text == html_to_text(_ASHBY_HTML)
+    assert row.text is not None and "<" not in row.text and "5+ years of Python in production" in row.text and "Kubernetes" in row.text
+    assert row.content_sha256 == content_hash(("Platform Engineer\n" + row.text).encode("utf-8"))
+    # An empty, blank or null descriptionPlain is no plain text either.
+    for plain in ("", " \n ", None):
+        assert _ashby_rows_for(_ashby_job(descriptionPlain=plain, descriptionHtml=_ASHBY_HTML))[0].text == row.text
+
+
+def test_ashby_posting_with_plain_text_keeps_it_and_one_with_neither_has_none() -> None:
+    # descriptionPlain is still the text when it is there: every such posting keeps its content digest.
+    row = _ashby_rows_for(_ashby_job(descriptionHtml=_ASHBY_HTML))[0]
+    assert row.text == "Build the platform. Remote within the US. $200k."
+    assert row.content_sha256 == content_hash(("Platform Engineer\n" + row.text).encode("utf-8"))
+    neither = _ashby_job()
+    del neither["descriptionPlain"]
+    assert _ashby_rows_for(neither)[0].text is None
+    assert _ashby_rows_for(_ashby_job(descriptionPlain="", descriptionHtml=7))[0].text is None
+
+
 def test_ashby_url_parses_via_contracts() -> None:
     assert parse_board_url("https://jobs.ashbyhq.com/orbit/303") == ("ashby", "orbit")
 
