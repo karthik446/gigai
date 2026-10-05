@@ -66,8 +66,9 @@ from .find_jobs.contracts import (
 )
 from .find_jobs.work_mode import in_person_modes
 from .question_ids import normalize_question_id
-from .requirement_weights import bound_rows, settled_verdict
-from .requirements_list import ListedRequirement, check_listed, fold
+from .requirement_weights import bound_rows, cap_list_item_questions, settled_verdict
+from .requirements_list import ListedRequirement, check_listed, extracted, fold
+from .resume_gate import HOLD_QUESTION, gate, unasked_message, unasked_rows, uses_v9_rules
 from .resume_privacy import model_resume
 from .untrusted_text import fence_untrusted_posting
 
@@ -401,6 +402,11 @@ class AssessAttempt:
     # (:class:`AssessExtras`: the pick, the structured suggestions, what the boundary dropped). ``None`` for a
     # failed attempt and for ``invoke_json_once``. The run path ignores it; ``quick_assess`` merges it into the body.
     extras: "AssessExtras | None" = None
+    # 0.1.11 N3b (orchestrator #14): the questions on ``list_item`` rows the boundary dropped past the cap
+    # (``requirement_weights.MAX_LIST_ITEM_QUESTIONS``), counted like ``dropped_questions``: the SUCCESSFUL
+    # attempt's only, 0 and none by default. Kept apart from that count, which is the not_a_match strip's.
+    capped_questions: int = 0
+    capped_question_ids: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if self.ok and (self.parsed is None or self.not_assessed_reason is not None):
@@ -579,12 +585,28 @@ def assess_once(
     stripped inside that normalization (``_strip_not_a_match_questions``);
     the returned attempt records how many, for the successful attempt only
     (a rejected first attempt's count is overwritten by the retry's).
+
+    0.1.11 N3b (decision #11): a v9 answer with an unclear must-have row no
+    question is on spends the retry (the error names the row); when the
+    retry's answer still asks nothing the attempt is NOT failed: code asks
+    the row's own question (``_normalize_and_strip``,
+    ``AssessExtras.asked_by_code``) and the verdict is pending.
     """
 
     dropped: tuple[str, ...] = ()
     dropped_count = 0
     # 0.1.11 N3 (v9): what THIS prompt offered: the ids a row's sources may name, the requirement list it carried.
-    boundary = Boundary(source_ids=offered_sources(ctx), listed=ctx.requirements)
+    from .assessment_basis import posting_sha256  # that module imports this one
+
+    boundary = Boundary(source_ids=offered_sources(ctx), listed=ctx.requirements, posting_sha256=posting_sha256(job.title, job.posting_text))
+    prompts = 0
+
+    def render(validation_error: str | None) -> str:
+        # N3b: the second prompt is the one retry, and no attempt follows its answer (``Boundary.retry``).
+        nonlocal prompts
+        prompts += 1
+        boundary.retry = prompts > 1
+        return render_assess_prompt(job, ctx, validation_error)
 
     def parse_normalized(decoded: Mapping[str, object]) -> object:
         nonlocal dropped, dropped_count
@@ -593,15 +615,12 @@ def assess_once(
         normalized, dropped, dropped_count = _normalize_and_strip(decoded, boundary=boundary)
         return parse(normalized)
 
-    attempt = invoke_json_once(
-        binding,
-        lambda validation_error: render_assess_prompt(job, ctx, validation_error),
-        parse_normalized,
-    )
+    attempt = invoke_json_once(binding, render, parse_normalized)
     if attempt.ok and dropped_count:
         attempt = replace(attempt, dropped_questions=dropped_count, dropped_question_ids=dropped)
     if attempt.ok and boundary.extras is not None:
-        attempt = replace(attempt, extras=boundary.extras)
+        capped = boundary.extras.capped_questions
+        attempt = replace(attempt, extras=boundary.extras, capped_questions=len(capped), capped_question_ids=capped)
     if attempt.ok and posting_looks_incomplete(job.posting_text, attempt.parsed):
         # Never Matched on a posting whose requirements look cut off: the
         # answer is withheld and the posting stays not assessed.
@@ -923,6 +942,11 @@ class AssessExtras:
     structured suggestions a ``not_a_match`` or pending verdict does not keep.
     ``unknown_sources``: ``(the row's requirement words, the source)`` for
     every source the prompt did not offer (dropped from the row).
+    ``asked_by_code`` (N3b): the id of every question code asked for an
+    unclear must-have row the retry's answer still asked nothing about
+    (:func:`row_question`). ``capped_questions`` (orchestrator #14): the id
+    of every question on a ``list_item`` row dropped past the cap
+    (``requirement_weights.cap_list_item_questions``).
     """
 
     pick: AssessmentPick | None = None
@@ -930,6 +954,8 @@ class AssessExtras:
     dropped_pick: bool = False
     dropped_suggestions: int = 0
     unknown_sources: tuple[tuple[str, str], ...] = ()
+    asked_by_code: tuple[str, ...] = ()
+    capped_questions: tuple[str, ...] = ()
 
 
 @dataclass
@@ -940,11 +966,23 @@ class Boundary:
     or ``None`` when the RESUME block showed no ids (sources and a pick are
     then dropped). ``listed``: the requirement list the prompt carried
     (empty: none; the matrix is then not checked against a list).
+
+    N3b (decision #11), for a v9 answer with an unclear must-have row no
+    question is on (``resume_gate.unasked_rows``). ``retry``: ``False`` for
+    the answer to the first prompt (refused, naming the row: the one retry is
+    spent on it), ``True`` for the retry's answer (no attempt follows it:
+    code asks the row's own question, :func:`row_question`), ``None`` outside
+    ``assess_once`` (the answer is left as it came; the validator refuses
+    it). ``posting_sha256``: the posting's digest, from which a first
+    assessment's rows get their ids (``requirements_list``), so the row is
+    named, and its question is identified, by the id the stored row carries.
     """
 
     source_ids: frozenset[str] | None = None
     listed: tuple[ListedRequirement, ...] = ()
     extras: AssessExtras | None = None
+    retry: bool | None = None
+    posting_sha256: str | None = None
 
 
 def offered_sources(ctx: AssessContext) -> frozenset[str] | None:
@@ -1012,8 +1050,15 @@ def _master_id(value: object) -> str | None:
     return text if text and len(text) <= MAX_MASTER_ID_CHARS and not any(char.isspace() for char in text) else None
 
 
-def _structured_suggestions(value: object) -> list[AssessmentSuggestion]:
-    """The well-formed suggestion objects of a v9 answer, at most ``MAX_STRUCTURED_SUGGESTIONS``; a bare string is not one."""
+def _structured_suggestions(value: object, row_ids: Mapping[str, str]) -> list[AssessmentSuggestion]:
+    """The well-formed suggestion objects of a v9 answer, at most ``MAX_STRUCTURED_SUGGESTIONS``; a bare string is not one.
+
+    A suggestion names its requirement by the row's id or (orchestrator #14)
+    by the row's words: on a first assessment the rows have no id yet, so
+    ``row_ids`` (the folded words of each row -> the id it carries or is
+    given) turns the words into the id, as a question's are turned into its
+    row's. Words that are no row's name nothing.
+    """
 
     out: list[AssessmentSuggestion] = []
     for item in value if isinstance(value, list) else ():
@@ -1023,8 +1068,8 @@ def _structured_suggestions(value: object) -> list[AssessmentSuggestion]:
         kind = kind.strip().lower() if isinstance(kind, str) else None
         why = " ".join(item["why"].split()) if isinstance(item.get("why"), str) else ""
         line = _master_id(item.get("line"))
-        requirement = item.get("requirement")
-        requirement = requirement.strip() if isinstance(requirement, str) and is_row_id(requirement.strip()) else None
+        named = item["requirement"].strip() if isinstance(item.get("requirement"), str) else ""
+        requirement = named if is_row_id(named) else row_ids.get(fold(named)) if named else None
         if kind not in SUGGESTION_KINDS or not why or (line is None and requirement is None):
             continue
         phrase = " ".join(item["posting_phrase"].split()) if isinstance(item.get("posting_phrase"), str) else ""
@@ -1059,6 +1104,69 @@ def _lenient_pick(value: object) -> AssessmentPick | None:
     return AssessmentPick(summary=_master_id(value.get("summary")), section_order=tuple(order), lines=tuple(lines[:MAX_PICK_LINES]))
 
 
+# --- 0.1.11 N3b (orchestrator decision #11): an unclear must-have row always carries its question ---------------------
+#
+# The accepted gate table says an unresolved must-have HOLDS and asks. On v9 rows the gate holds for a ``hard`` or
+# ``askable`` row that is ``unclear`` whether or not the model asked about it (``resume_gate.unasked_rows``), and a
+# hold with nothing to answer is a dead end, so: the first answer with such a row is a validation error that names
+# the row (the one retry); when the retry's answer still asks nothing the assessment is NOT failed: code asks the
+# row's own question, from the row's requirement words. An optional row is never asked for, nor any v8 row.
+
+#: The category of a question code asks for a row. The answers store takes any ``<category>:<value>`` id
+#: (``question_ids.is_valid_question_id``); this one says the question is about one requirement row of one posting.
+ROW_QUESTION_CATEGORY = "requirement"
+_ROW_QUESTION = "The posting asks for: {requirement}. Do you have this? Say where."
+_MAX_ROW_QUESTION_REQUIREMENT = 600  # a question is at most 700 characters (``proposals._MAX_QUESTION``)
+
+
+def row_question_id(row_id: str) -> str:
+    """The id of the question code asks for the row ``row_id``: ``requirement:req.3fa91c`` for ``req-3fa91c``.
+
+    Derived from the row id alone, so it is the same id every time the row
+    is asked about (the answer given once is found again). The ``-`` of a
+    row id is written ``.``: ``normalize_question_id`` splits a value on
+    ``-`` and sorts the parts, and this id must be what it normalizes to.
+    """
+
+    return f"{ROW_QUESTION_CATEGORY}:{row_id.replace('-', '.')}"
+
+
+def row_question(row_id: str, requirement: str) -> dict[str, object]:
+    """The structured question code asks for an unclear must-have row: the row's own, from its requirement words."""
+
+    words = " ".join(requirement.split()).rstrip(". ")
+    if len(words) > _MAX_ROW_QUESTION_REQUIREMENT:
+        words = words[:_MAX_ROW_QUESTION_REQUIREMENT].rstrip() + " [...]"
+    return {"question_id": row_question_id(row_id), "question": _ROW_QUESTION.format(requirement=words), "requirement": requirement}
+
+
+def _unasked(matrix: list[Mapping[str, object]], questions: list[object], verdict: object, boundary: Boundary) -> list[tuple[str, Mapping[str, object]]]:
+    """``(id, row)`` for each unclear must-have row of a v9 ``matrix`` that holds the verdict with no question on it.
+
+    Empty beside a hard gap or a ``not_a_match`` verdict (the gate's first
+    rule: such an answer keeps no question). A row is named by its own id
+    (a listed row's, an ``elig-`` one) or, on a first assessment, by the id
+    ``requirements_list.extracted`` gives it: the id its stored row carries.
+    """
+
+    unasked = [row for row in unasked_rows(matrix, questions) if isinstance(row.get("requirement"), str) and row["requirement"].strip()]  # type: ignore[union-attr]
+    if not unasked or gate(matrix, questions, verdict).decision != HOLD_QUESTION:
+        return []
+    ids = _row_ids(matrix, boundary.posting_sha256 or "")
+    return [(ids[index], row) for index, row in enumerate(matrix) if any(row is item for item in unasked)]
+
+
+def _row_ids(matrix: list[Mapping[str, object]], posting_sha256: str) -> list[str]:
+    """The id of each row of ``matrix``: its own (a listed row's, an ``elig-`` one), else the one a first assessment's row is given.
+
+    ``requirements_list.extracted`` is what gives a first assessment's
+    stored rows their ids, so this is the id the stored row carries.
+    """
+
+    derived = extracted(posting_sha256, matrix, extracted_at="")[1]
+    return [str(row["id"]) if is_row_id(row.get("id")) else derived[index] for index, row in enumerate(matrix)]
+
+
 def _normalize_and_strip(decoded: Mapping[str, object], *, boundary: Boundary | None = None) -> tuple[dict[str, object], tuple[str, ...], int]:
     """``_normalize_assessment_payload`` plus what the not_a_match strip removed.
 
@@ -1078,6 +1186,24 @@ def _normalize_and_strip(decoded: Mapping[str, object], *, boundary: Boundary | 
     ``boundary.extras`` (:class:`AssessExtras`), with what was dropped. Each
     kept suggestion's ``why`` joins the plain ``suggestions`` list, so a
     reader that knows only strings still shows something.
+
+    0.1.11 N3b (decision #11), v9 rows only. An unclear must-have row with
+    no question on it (``_unasked``): the first answer is refused, naming the
+    row (raises: the one retry); the retry's answer gets the row's own
+    question from code (:func:`row_question`), in both question lists, BEFORE
+    the verdict is settled, so the verdict is ``pending_user_answers``.
+    ``boundary.retry`` says which answer this is; with no boundary the
+    answer is left as it came.
+
+    0.1.11 N3b (orchestrator #14), v9 rows only. (1) A structured suggestion
+    may name its requirement by the row's words (a first assessment's rows
+    have no id yet): they become the row's id (``_structured_suggestions``),
+    so a ``gap`` suggestion that names no line is kept. (2) At most
+    ``requirement_weights.MAX_LIST_ITEM_QUESTIONS`` questions on ``list_item``
+    rows are kept, those of the rows first in the matrix; the rest are
+    dropped here, from both question lists, with no retry
+    (``AssessExtras.capped_questions``). A ``not_a_match`` answer keeps no
+    question at all, as before, and its count is the strip's.
     """
     boundary = boundary if boundary is not None else Boundary()
     unknown_sources: list[tuple[str, str]] = []
@@ -1107,21 +1233,37 @@ def _normalize_and_strip(decoded: Mapping[str, object], *, boundary: Boundary | 
     all_rows = isinstance(normalized_matrix, list) and all(isinstance(row, Mapping) for row in normalized_matrix)
     # v9: a question may name its row by id, or in the model's words for a row whose words are the list's now.
     renamed: dict[str, object] = {}
+    named_rows: dict[str, object] = {}  # the model's words for a row -> the row
     if all_rows:
         asked_as = {fold(str(row.get("requirement") or "")): index for index, row in enumerate(normalized_matrix)}  # type: ignore[union-attr]
         if boundary.listed:
             normalized_matrix = check_listed(normalized_matrix, boundary.listed)  # type: ignore[arg-type]
         for words, index in asked_as.items():
             renamed[words] = normalized_matrix[index].get("requirement")  # type: ignore[union-attr]
+            named_rows[words] = normalized_matrix[index]
         renamed.update({str(row["id"]): row.get("requirement") for row in normalized_matrix if row.get("id")})  # type: ignore[union-attr]
     # 0110-10-03: must-haves first; past the bound the rest are counted ("+N not shown"), never an error.
     rows_not_shown = 0
     if all_rows:
         normalized_matrix, rows_not_shown = bound_rows(normalized_matrix)  # type: ignore[arg-type]
+    is_v9 = all_rows and uses_v9_rules(normalized_matrix)  # type: ignore[arg-type]
+    # Orchestrator #14: the words of each kept row of a v9 matrix -> its id (its own, or the one a first assessment's
+    # row is given: that needs the posting's digest, so outside ``assess_once`` only a row's own id is known).
+    row_ids: dict[str, str] = {}
+    if is_v9:
+        ids: list[object] = (
+            _row_ids(normalized_matrix, boundary.posting_sha256) if boundary.posting_sha256 is not None  # type: ignore[arg-type]
+            else [row.get("id") for row in normalized_matrix]  # type: ignore[union-attr]
+        )
+        by_row = {id(row): row_id for row, row_id in zip(normalized_matrix, ids) if is_row_id(row_id)}
+        for row in normalized_matrix:
+            named_rows.setdefault(fold(str(row.get("requirement") or "")), row)  # type: ignore[union-attr]
+        row_ids = {words: by_row[id(row)] for words, row in named_rows.items() if words and id(row) in by_row}
 
     raw_questions = _normalize_string_list(decoded.get("questions"))
     plain_questions: list[str] = []
     structured_questions: list[object] = []
+    plain_at: dict[int, int] = {}  # a structured question -> where its words are in the plain list
     for item in raw_questions:
         if isinstance(item, str):
             plain_questions.append(item)
@@ -1135,10 +1277,38 @@ def _normalize_and_strip(decoded: Mapping[str, object], *, boundary: Boundary | 
             if isinstance(known, str) and known != named:
                 normalized_item["requirement"] = known  # type: ignore[index]
         structured_questions.append(normalized_item)
+        plain_at[id(normalized_item)] = len(plain_questions)
         plain_questions.append(normalized_item["question"])
 
+    said = _normalize_verdict(decoded.get("verdict")) if "verdict" in decoded else None
+    # Orchestrator #14: at most three questions on one-of-a-list rows, those of the rows first in the matrix; the rest
+    # are dropped here (no retry) and their rows read as minor gaps. A not_a_match answer keeps none at all (below).
+    capped: list[str] = []
+    if is_v9 and said != "not_a_match":
+        structured_questions, over = cap_list_item_questions(normalized_matrix, structured_questions)  # type: ignore[arg-type]
+        capped = [str(item["question_id"]) for item in over]  # type: ignore[index]
+        gone = {plain_at[id(item)] for item in over}
+        plain_questions = [text for index, text in enumerate(plain_questions) if index not in gone]
+
+    # 0.1.11 N3b (decision #11): an unclear must-have row of a v9 answer holds for its answer, so it carries a question.
+    asked_by_code: list[str] = []
+    if all_rows and boundary.retry is not None and said in ("matched_above_threshold", "pending_user_answers"):
+        unasked = _unasked(normalized_matrix, structured_questions, said, boundary)  # type: ignore[arg-type]
+        if unasked and not boundary.retry:
+            raise FindJobsContractError("invalid_value", unasked_message([row_id for row_id, _row in unasked]))
+        for row_id, row in unasked:
+            asked = row_question(row_id, str(row["requirement"]))
+            # A question that already carries the row's own id (an answer was given under it once) is the row's question.
+            mine = next((item for item in structured_questions if isinstance(item, dict) and item.get("question_id") == asked["question_id"]), None)
+            if mine is not None:
+                mine["requirement"] = row["requirement"]
+                continue
+            structured_questions.append(asked)
+            plain_questions.append(str(asked["question"]))
+            asked_by_code.append(str(asked["question_id"]))
+
     raw_suggestions = _normalize_string_list(decoded.get("suggestions"))
-    suggested = _structured_suggestions(raw_suggestions)
+    suggested = _structured_suggestions(raw_suggestions, row_ids)
     result: dict[str, object] = {
         "matrix": normalized_matrix,
         "suggestions": [item for item in raw_suggestions if isinstance(item, str)],
@@ -1180,6 +1350,8 @@ def _normalize_and_strip(decoded: Mapping[str, object], *, boundary: Boundary | 
         dropped_pick=pick is not None and not keeps_pick,
         dropped_suggestions=len(suggested) - len(kept),
         unknown_sources=tuple(unknown_sources),
+        asked_by_code=tuple(asked_by_code),
+        capped_questions=tuple(capped),
     )
     # Drop any other unknown keys (e.g. a model echoing "posting" back, or
     # inventing extra fields): the frozen contract is a closed object, and
@@ -1203,6 +1375,7 @@ __all__ = [
     "PLACEHOLDER_PICK_LINES",
     "PLACEHOLDER_REQUIREMENTS",
     "REQUIREMENTS_BLOCK_HEADER",
+    "ROW_QUESTION_CATEGORY",
     "BankAnswer",
     "INSTRUCTIONS_DIGEST",
     "POSTING_INCOMPLETE_MESSAGE",
@@ -1218,5 +1391,7 @@ __all__ = [
     "offered_sources",
     "prompt_reads_ids",
     "render_assess_prompt",
+    "row_question",
+    "row_question_id",
     "template_takes",
 ]

@@ -11,6 +11,9 @@ the v8 file; this packet does not touch it.  So:
   shows ids, the model's pick is settled, the next assessment must return exactly the listed ids, and a stored
   assessment is stale for its resume by its SOURCES, not by shared words;
 - OD1: a must-have confirmed unmet holds the resume and the job reads ``has_gap`` (job state and posting read model);
+- N3b (decision #11): a must-have the model leaves ``unclear`` and never asks about is stored pending, with the row's
+  own question (asked by code after the one retry), and the job reads "needs your answers";
+- N3b (orchestrator #14): a first assessment's ``gap`` suggestion that names its row by words is stored with the row's id;
 - A6: a job resume the user changed is never replaced; the new selection waits as ``proposed``;
 - opening a job (the stale list) writes nothing.
 """
@@ -28,6 +31,7 @@ from click.testing import CliRunner
 from gigai.canonical import parse_json_bytes
 from gigai.scout import assessment_core, postings, requirements_list, suggestions
 from gigai.scout.assessment_basis import BasisCheck
+from gigai.scout.experience_answers import read_answers, record_answer
 from gigai.scout.find_jobs import job_state
 from gigai.scout.find_jobs.assess_contracts import AssessJobInput, AssessRequest, AssessResponse, AssessResumeInput
 from gigai.scout.find_jobs.contracts import normalize_url
@@ -309,6 +313,59 @@ def test_an_unmet_askable_row_holds_the_resume_and_the_job_reads_has_gap(fx: Pos
         assert [row.state for row in store.postings(live=False) if row.profile_id == fx.default_profile_id and row.job == _JOB] == ["has_gap"]
     finally:
         store.close()
+
+
+# --- N3b (decision #11): an unresolved must-have holds and asks ---------------------------------------------------------------
+
+
+def test_an_unclear_must_have_the_model_never_asks_about_is_stored_pending_with_the_rows_own_question(fx: PostingsFixture, caplog: pytest.LogCaptureFixture) -> None:
+    # Kubernetes (askable) is unclear and the only question is Helm's (one of a list); the model says matched, both times.
+    stored, _prompt = _assess(fx, _v9_answer(fx, kubernetes="unclear", said="matched_above_threshold"))
+    assert not caplog.records, caplog.text
+    kubernetes = stored.result.matrix[1]
+    assert kubernetes.requirement == "Kubernetes" and kubernetes.status.value == "unclear" and kubernetes.requirement_class.value == "askable"
+    # Stored: pending, the gate holds for the answer, and the row's own question is there, as a structured question.
+    question_id = f"requirement:{kubernetes.id.replace('-', '.')}"
+    asked = "The posting asks for: Kubernetes. Do you have this? Say where."
+    assert (stored.result.verdict.value, stored.resume_gate.decision) == ("pending_user_answers", "hold_question")
+    assert stored.resume_gate.to_json() == {"decision": "hold_question", "reasons": [{"code": "question_open", "requirement": kubernetes.id}]}
+    assert stored.result.pick is None
+    # The one retry was spent, naming the row by the id its stored row carries; the assessment is NOT failed.
+    prompts = fx.base.model.assess_prompts
+    assert len(prompts) == 2 and f"unclear mandatory row {kubernetes.id} has no question" in prompts[1] and "has no question" not in prompts[0]
+    assert [question.to_json() for question in stored.result.structured_questions] == [
+        HELM_QUESTION, {"question_id": question_id, "question": asked, "requirement": "Kubernetes"},
+    ]
+    assert stored.result.questions == (HELM_QUESTION["question"], asked)
+    reread = AssessResponse.from_json(parse_json_bytes(_assessment_path(fx).read_bytes()))
+    assert reread.result == stored.result and reread.resume_gate == stored.resume_gate
+    # No resume is made under the hold; the record says why; the job reads "needs your answers".
+    assert not _resume_path(fx).exists()
+    record = _record(fx)
+    assert record.selection is None and record.gate == {"decision": "hold_question", "ready": False, "reasons": [{"code": "question_open", "requirement": kubernetes.id}]}
+    sources = job_state.JobStateSources(home_root=fx.home_root, target=fx.target, resolved=fx.base.gig.resolved)
+    assert sources.state_for(_JOB, profile_id=fx.default_profile_id).state == "needs_answers"
+    # The answers store takes the id as it is, and the answer is found under it again.
+    record_answer(home_root=fx.home_root, requested_target=fx.target, question_id=question_id, prompt=asked, answer="Three years running EKS clusters at Acme.")
+    assert read_answers(home_root=fx.home_root, requested_target=fx.target)[question_id].answer == "Three years running EKS clusters at Acme."
+    # Assessed again: the same row, the same question id.
+    again, _prompt = _assess(fx, _v9_answer(fx, kubernetes="unclear", said="matched_above_threshold"))
+    assert again.result.matrix[1].id == kubernetes.id and [question.question_id for question in again.result.structured_questions] == ["tooling:helm", question_id]
+    # An optional row left unclear with no question (Helm, were its question dropped) is never asked about and never holds: test_resume_gate.
+
+
+def test_a_first_assessments_gap_suggestion_that_names_its_row_by_words_is_stored_with_the_rows_id(fx: PostingsFixture, caplog: pytest.LogCaptureFixture) -> None:
+    # Orchestrator #14: the rows of a first assessment have no id when the model answers; it names the row by its words.
+    answer = json.loads(_v9_answer(fx))
+    answer["suggestions"].append({"kind": "gap", "requirement": REQUIREMENTS[3], "why": "No line says you wrote Helm charts."})
+    stored, _prompt = _assess(fx, json.dumps(answer))
+    assert not caplog.records, caplog.text
+    helm = stored.result.matrix[3]
+    assert helm.requirement == REQUIREMENTS[3] and helm.id is not None
+    # Kept (it names no line), with the id the stored row carries; in the assessment and in the job's suggestion record.
+    assert [(item.kind, item.line, item.requirement) for item in stored.result.structured_suggestions][-1] == ("gap", None, helm.id)
+    assert [(item.kind, item.requirement, item.why) for item in _record(fx).suggestions][-1] == ("gap", helm.id, "No line says you wrote Helm charts.")
+    assert stored.result.suggestions[-1] == "No line says you wrote Helm charts."
 
 
 # --- A6: the user's resume is never replaced ---------------------------------------------------------------------------------
