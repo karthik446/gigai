@@ -10,13 +10,11 @@
 from __future__ import annotations
 
 import json
-import os
 from pathlib import Path
 
 import pytest
 
 from gigai.adapters.codex_cli import CodexCLIAdapter
-from gigai.adapters.factory import resolve_model_adapter
 from gigai.adapters.port import InvocationRequest
 from gigai.scout import evaluated_models as table
 from gigai.scout import quick_assess
@@ -41,46 +39,64 @@ def _scored(monkeypatch: pytest.MonkeyPatch, *, opus: int, sonnet: int, astra: i
         (
             ModelResult("claude_cli", OPUS, opus),
             ModelResult("claude_cli", SONNET, sonnet),
-            ModelResult("codex_cli", "gpt-6-astra", astra),
+            ModelResult("codex_cli", "gpt-6-astra", astra, "mostly from unnecessary questions"),
         ),
     )
 
 
-# --- the table --------------------------------------------------------------------------------------------------
+# --- the table (the notice rule: no threshold for the reference, both numbers for any other measured model) -----------
 
 
-def test_the_three_states_with_the_counts_filled_in(monkeypatch: pytest.MonkeyPatch) -> None:
-    _scored(monkeypatch, opus=14, sonnet=11, astra=14)
+def test_the_reference_carries_no_notice_and_another_measured_model_carries_both_numbers() -> None:
+    assert model_notice("claude_cli", OPUS) is None  # the reference
+    sonnet = model_notice("claude_cli", SONNET)
+    assert sonnet is not None
+    assert sonnet.text == f"Assessed with {SONNET}: accurate on 12 of 15 jobs in GigAI's accuracy run; {OPUS} reached 14 of 15."
+    assert sonnet.to_json()["accurate"] == 12 and sonnet.to_json()["reference_accurate"] == 14 and sonnet.to_json()["of"] == 15
+    assert model_state("claude_cli", SONNET) == MEETS  # the bar is 12: the notice does not depend on it
+    # not measured: today's plain notice; an operator-named model that is not in the table is the same
+    for named in ("claude-haiku-4-5", "claude-my-own-5"):
+        assert model_state("claude_cli", named) == NOT_MEASURED
+        assert model_notice("claude_cli", named).text == NOTICE.format(used=named, evaluated=OPUS)  # type: ignore[union-attr]
+    # nobody named: nothing is claimed (the fallback case is in the guard-retry test below)
+    assert model_notice("claude_cli", None) is None and model_notice("claude_cli", "default") is None
 
-    assert model_state("claude_cli", OPUS) == MEETS and model_notice("claude_cli", OPUS) is None
-    assert model_state("codex_cli", "gpt-6-astra") == MEETS and model_notice("codex_cli", "gpt-6-astra") is None
-    assert model_state("claude_cli", SONNET) == BELOW
-    below = model_notice("claude_cli", SONNET)
-    assert below is not None
-    assert below.text == (
-        f"Assessed with {SONNET}. On GigAI's accuracy run it was accurate on 11 of 15 jobs; {OPUS} reached 14 of 15. "
-        "This assessment may be less accurate."
+
+def test_codex_carries_its_notice_with_the_cause_from_the_table() -> None:
+    expected = (
+        "Assessed with the Codex CLI (model not reported; measured with gpt-6-astra: accurate on 10 of 15 jobs, mostly from "
+        f"unnecessary questions). Claude Code with {OPUS} reached 14 of 15."
     )
-    assert below.to_json()["accurate"] == 11 and below.to_json()["bar_accurate"] == 14 and below.to_json()["of"] == 15
-    # a model nobody measured keeps the plain notice
-    assert model_state("claude_cli", "claude-haiku-4-5") == NOT_MEASURED
-    assert model_notice("claude_cli", "claude-haiku-4-5").text == NOTICE.format(used="claude-haiku-4-5", evaluated=OPUS)  # type: ignore[union-attr]
+    assert model_notice("codex_cli", "default").text == expected  # type: ignore[union-attr]
+    assert model_state("codex_cli", "gpt-6-astra") == BELOW
+    assert model_notice("codex_cli", "gpt-6-astra").to_json()["kind"] == "below"  # type: ignore[union-attr]
 
 
-def test_codex_below_the_bar_carries_the_numbers(monkeypatch: pytest.MonkeyPatch) -> None:
-    _scored(monkeypatch, opus=14, sonnet=14, astra=9)
+def test_the_cause_is_a_row_of_the_table_not_the_function(monkeypatch: pytest.MonkeyPatch) -> None:
+    _scored(monkeypatch, opus=14, sonnet=12, astra=10)
+    assert "mostly from unnecessary questions" in model_notice("codex_cli", "default").text  # type: ignore[union-attr]
+    monkeypatch.setattr(table, "RESULTS", tuple(ModelResult(r.target, r.model, r.accurate, "") for r in table.RESULTS))
+    assert model_notice("codex_cli", "default").text == (  # type: ignore[union-attr]
+        f"Assessed with the Codex CLI (model not reported; measured with gpt-6-astra: accurate on 10 of 15 jobs). Claude Code with {OPUS} reached 14 of 15."
+    )
 
-    notice = model_notice("codex_cli", "gpt-6-astra")
-    assert notice is not None and "accurate on 9 of 15 jobs" in notice.text and f"{OPUS} reached 14 of 15" in notice.text
+
+def test_a_reference_below_the_bar_carries_a_notice_and_one_at_the_bar_does_not(monkeypatch: pytest.MonkeyPatch) -> None:
+    _scored(monkeypatch, opus=11, sonnet=9, astra=14)
+    below = model_notice("claude_cli", OPUS)
+    assert below is not None and below.text == f"Assessed with {OPUS}: accurate on 11 of 15 jobs in GigAI's accuracy run, below the bar of 12 of 15. The Codex CLI with gpt-6-astra reached 14 of 15."
+    assert model_notice("claude_cli", SONNET).text.endswith(f"{OPUS} reached 11 of 15.")  # type: ignore[union-attr]
+    _scored(monkeypatch, opus=11, sonnet=9, astra=8)
+    assert model_notice("claude_cli", OPUS).text.endswith("below the bar of 12 of 15.")  # type: ignore[union-attr]
+    _scored(monkeypatch, opus=14, sonnet=12, astra=14)
+    assert model_notice("claude_cli", OPUS) is None and model_notice("codex_cli", "gpt-6-astra") is None
 
 
-def test_the_results_page_rows_come_from_the_table(monkeypatch: pytest.MonkeyPatch) -> None:
-    assert [(r["target"], r["model"], r["accurate"], r["state"]) for r in results_rows()] == [
-        ("claude_cli", OPUS, None, "not_scored"), ("claude_cli", SONNET, None, "not_scored"), ("codex_cli", "gpt-6-astra", None, "not_scored"),
-    ]
-    _scored(monkeypatch, opus=14, sonnet=11, astra=14)
-    assert [(r["model"], r["accurate"], r["of"], r["state"]) for r in results_rows()] == [
-        (OPUS, 14, 15, MEETS), (SONNET, 11, 15, BELOW), ("gpt-6-astra", 14, 15, MEETS),
+def test_the_results_page_rows_come_from_the_table() -> None:
+    assert [(r["target"], r["model"], r["accurate"], r["of"], r["state"], r["reference"], r["why"]) for r in results_rows()] == [
+        ("claude_cli", OPUS, 14, 15, MEETS, True, ""),
+        ("claude_cli", SONNET, 12, 15, MEETS, False, ""),
+        ("codex_cli", "gpt-6-astra", 10, 15, BELOW, True, "mostly from unnecessary questions"),
     ]
 
 
@@ -132,7 +148,7 @@ def test_codex_that_reports_its_model_is_recorded_and_judged_by_name(tmp_path: P
 def test_codex_session_header_model_is_recorded(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     resolved = _codex_model(tmp_path, monkeypatch, [{"id": "0", "msg": {"type": "session_configured", "model": "gpt-6-astra"}}, _ANSWER, _USAGE])
 
-    assert resolved == "gpt-6-astra" and model_notice("codex_cli", resolved) is None
+    assert resolved == "gpt-6-astra" and "accurate on 10 of 15 jobs" in model_notice("codex_cli", resolved).text  # type: ignore[union-attr]
 
 
 def test_codex_that_does_not_report_its_model_says_so(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -140,8 +156,7 @@ def test_codex_that_does_not_report_its_model_says_so(tmp_path: Path, monkeypatc
 
     assert resolved == "default"
     notice = model_notice("codex_cli", resolved)
-    assert notice is not None
-    assert notice.text == "Assessed with the Codex CLI's configured model (not reported). GigAI's results for Codex are for gpt-6-astra."
+    assert notice is not None and notice.text.startswith("Assessed with the Codex CLI (model not reported; measured with gpt-6-astra")
     assert notice.to_json()["kind"] == "unreported"
 
 

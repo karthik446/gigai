@@ -43,6 +43,11 @@ from tests.support.fake_claude import FAKE_CLAUDE_MODEL, calls, write_fake_claud
 from tests.support.posting_fixtures import PostingsFixture
 
 OPUS = "claude-opus-5-5"
+CODEX_NOTICE = (
+    "Assessed with the Codex CLI (model not reported; measured with gpt-6-astra: accurate on 10 of 15 jobs, mostly from unnecessary "
+    "questions). Claude Code with claude-opus-5-5 reached 14 of 15."
+)
+SONNET_NOTICE = "Assessed with claude-sonnet-5-5: accurate on 12 of 15 jobs in GigAI's accuracy run; claude-opus-5-5 reached 14 of 15."
 NOTICE = "Assessed with {used}. GigAI's accuracy results are for {evaluated}; this assessment may be less accurate."
 
 
@@ -102,7 +107,8 @@ def _calls_counted(fx: PostingsFixture) -> tuple[int, int]:  # noqa: F811
 def test_one_table_decides_evaluated_or_not() -> None:
     assert evaluated_models.EVALUATED_MODELS == {"claude_cli": (OPUS,), "codex_cli": ("gpt-6-astra",)}
     assert model_notice("claude_cli", OPUS) is None
-    assert model_notice("claude_cli", "claude-sonnet-5-5").text == NOTICE.format(used="claude-sonnet-5-5", evaluated=OPUS)  # type: ignore[union-attr]
+    assert model_notice("claude_cli", "claude-sonnet-5-5").text == SONNET_NOTICE  # type: ignore[union-attr]
+    assert model_notice("claude_cli", "claude-haiku-4-5").text == NOTICE.format(used="claude-haiku-4-5", evaluated=OPUS)  # type: ignore[union-attr]
     # a model nobody named is not claimed to be anything; a target with no results has no notice
     assert model_notice("claude_cli", None) is None and model_notice("claude_cli", "default") is None
     assert model_notice("ollama_local", "llama3.1:8b") is None
@@ -112,8 +118,9 @@ def test_codex_keeps_its_default_and_the_same_rule_applies() -> None:
     # the Codex CLI does not report the model its default resolves to: never claimed to be the evaluated one
     unreported = model_notice("codex_cli", "default")
     assert unreported is not None
-    assert unreported.text == "Assessed with the Codex CLI's configured model (not reported). GigAI's results for Codex are for gpt-6-astra."
-    assert model_notice("codex_cli", "gpt-6-astra") is None
+    assert unreported.text == CODEX_NOTICE
+    # the reference itself, named, is below the bar too: it carries the notice
+    assert "accurate on 10 of 15 jobs" in model_notice("codex_cli", "gpt-6-astra").text  # type: ignore[union-attr]
     other = model_notice("codex_cli", "gpt-5.1-codex")
     assert other is not None
     assert other.text == NOTICE.format(used="gpt-5.1-codex", evaluated="gpt-6-astra")
@@ -172,7 +179,7 @@ def test_a_model_set_in_the_configuration_is_asked_as_set_and_the_same_table_dec
 
     assert _model_flags(record) == ["claude-sonnet-5-5"]
     assert (response.model, response.model_asked, response.model_fallback) == ("claude-sonnet-5-5", "claude-sonnet-5-5", False)
-    assert _served(fx, response)["model_notice"]["text"] == NOTICE.format(used="claude-sonnet-5-5", evaluated=OPUS)
+    assert _served(fx, response)["model_notice"]["text"] == SONNET_NOTICE
 
 
 def test_the_evaluated_model_set_by_hand_carries_no_notice(fx: PostingsFixture, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:  # noqa: F811

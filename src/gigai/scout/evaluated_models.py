@@ -1,14 +1,14 @@
 """0.1.11 MODELPIN: the models GigAI's accuracy results are for, and the one notice any other model's assessment carries.
 
 ONE table says which model(s) each model target was measured with (:data:`EVALUATED_MODELS`) and what each measured
-model scored (:data:`RESULTS`); ONE function (:func:`model_notice`) decides from it. Three states per (target, model):
-:data:`MEETS` the bar (no notice), :data:`BELOW` the bar (a notice with both numbers) and :data:`NOT_MEASURED` (the
-plain notice). The results page is rendered from :func:`results_rows`. The assessment API bodies, ``scout jobs assess``, the
+model scored (:data:`RESULTS`, with a short ``why`` per row); ONE function (:func:`model_notice`) decides from it. The
+notice has no threshold in it: a target's :data:`REFERENCE` model (its best measured) carries none unless it is itself
+below the :data:`BAR`; any other measured model carries both numbers; a model nobody measured, the plain notice. The results page is rendered from :func:`results_rows`. The assessment API bodies, ``scout jobs assess``, the
 agent brief and ``gigai doctor`` all ask that function, and the results page (``scout/accuracy-0-1-11``) is generated
 from the same table, so no model name is written anywhere else.
 
 ``codex_cli`` keeps the model the Codex CLI picks. Its ``exec --json`` stream does not name the model, so the adapter
-reports ``default`` unless an event does, and a ``default`` assessment carries the unreported notice. ``claude_cli`` is asked for :data:`ASKED_BY_DEFAULT` unless the target's
+reports ``default`` unless an event does, and a ``default`` assessment carries the unreported notice with its reference's numbers. ``claude_cli`` is asked for :data:`ASKED_BY_DEFAULT` unless the target's
 configured model says otherwise (``assess_model``).
 """
 
@@ -35,71 +35,91 @@ DEFAULT_MODEL = "default"
 #: The fourth set's size: every count below is "accurate on N of this many jobs".
 RESULT_JOBS = 15
 
-#: THE PLACEHOLDER. ``True`` until the fourth set's result files are scored and the counts in :data:`RESULTS` are
-#: filled in, once, here. While it is ``True`` the counts are ``None``, a measured model keeps today's rule (a model in
-#: :data:`EVALUATED_MODELS` meets the bar, any other gets the not-measured notice) and the release-gate test
-#: (``tests/behaviors/ci_tooling/test_model_results_filled.py``) fails. Set it ``False`` with the numbers.
+#: THE PLACEHOLDER. ``True`` while the counts in :data:`RESULTS` and :data:`BAR` are PROVISIONAL (the orchestrator's
+#: working numbers, not yet confirmed from the fourth set's scored result files). The release-gate test
+#: (``tests/behaviors/ci_tooling/test_model_results_filled.py``) fails while it is ``True``. Confirm the numbers, then set
+#: it ``False``, once, here.
 RESULTS_PLACEHOLDER = True
 
 
 @dataclass(frozen=True)
 class ModelResult:
-    """One measured (target, model) and how many of :data:`RESULT_JOBS` jobs it got fully right (``None``: not scored yet)."""
+    """One measured (target, model): how many of :data:`RESULT_JOBS` jobs it got fully right, and why when it fell short."""
 
     target: str
     model: str
     accurate: int | None = None
+    #: A short cause for a shortfall, written into the notice ("mostly from unnecessary questions"); ``""`` for none.
+    why: str = ""
 
 
-#: The models the accuracy run measures (page B of the model policy). The bar is :data:`BAR`'s count: a model with
-#: fewer accurate jobs is MEASURED BELOW it. Fill the ``accurate`` counts from the fourth set's result files.
+#: What each measured model scored on the fourth set. PROVISIONAL (:data:`RESULTS_PLACEHOLDER`): 14 / 12 / 10.
 RESULTS: tuple[ModelResult, ...] = (
-    ModelResult("claude_cli", "claude-opus-5-5"),
-    ModelResult("claude_cli", "claude-sonnet-5-5"),
-    ModelResult("codex_cli", "gpt-6-astra"),
+    ModelResult("claude_cli", "claude-opus-5-5", 14),
+    ModelResult("claude_cli", "claude-sonnet-5-5", 12),
+    ModelResult("codex_cli", "gpt-6-astra", 10, "mostly from unnecessary questions"),
 )
 
-#: The model whose count is the bar: the accurate one.
-BAR = ("claude_cli", "claude-opus-5-5")
+#: Per target, the model with the best measured result: its assessment carries no notice (unless it is itself below :data:`BAR`).
+REFERENCE: Mapping[str, str] = {"claude_cli": "claude-opus-5-5", "codex_cli": "gpt-6-astra"}
 
-#: The states of a (target, model).
+#: The bar: a model accurate on at least this many of :data:`RESULT_JOBS` jobs meets it (PROVISIONAL).
+BAR = 12
+
+#: What each target is called in the sentence that names another target's reference.
+TARGET_LABELS: Mapping[str, str] = {"claude_cli": "Claude Code", "codex_cli": "the Codex CLI"}
+
+#: The states of a (target, model) against the bar, for the results page.
 MEETS = "meets"
 BELOW = "below"
 NOT_MEASURED = "not_measured"
-#: ``codex exec --json`` does not report the model its default resolves to: such an assessment says so.
+#: The kinds of notice: a measured model that is not its target's reference, the Codex CLI's unreported model.
+MEASURED = "measured"
 UNREPORTED = "unreported"
 
 
 @dataclass(frozen=True)
 class ModelNotice:
-    """The one plain notice of an assessment a non-evaluated model made.
+    """The one plain notice of an assessment whose model needs one.
 
-    ``kind`` is :data:`NOT_MEASURED`, :data:`BELOW` (``accurate`` and ``bar_accurate`` carry the counts) or
-    :data:`UNREPORTED` (the CLI did not say which model answered).
+    ``kind``: :data:`NOT_MEASURED` (no result), :data:`MEASURED` (a result, not the target's reference), :data:`BELOW`
+    (the target's own reference, itself below the bar) or :data:`UNREPORTED` (the CLI did not say which model answered; the
+    counts are its reference's). ``accurate`` is the count of the model the numbers are about, ``reference`` the better
+    model to name (and its count ``reference_accurate``, ``reference_target`` its CLI) when it is another model.
     """
 
     model: str
     evaluated: tuple[str, ...]
     kind: str = NOT_MEASURED
     accurate: int | None = None
-    bar_accurate: int | None = None
+    reference: str | None = None
+    reference_accurate: int | None = None
+    reference_target: str | None = None
+    measured_with: str | None = None
+    why: str = ""
 
     @property
     def text(self) -> str:
+        if self.kind == NOT_MEASURED:
+            return (
+                f"Assessed with {self.model}. GigAI's accuracy results are for {' or '.join(self.evaluated)}; "
+                "this assessment may be less accurate."
+            )
+        count = f"accurate on {self.accurate} of {RESULT_JOBS} jobs"
+        why = f", {self.why}" if self.why else ""
         if self.kind == UNREPORTED:
-            return (
-                "Assessed with the Codex CLI's configured model (not reported). "
-                f"GigAI's results for Codex are for {' or '.join(self.evaluated)}."
-            )
-        if self.kind == BELOW:
-            return (
-                f"Assessed with {self.model}. On GigAI's accuracy run it was accurate on {self.accurate} of {RESULT_JOBS} jobs; "
-                f"{BAR[1]} reached {self.bar_accurate} of {RESULT_JOBS}. This assessment may be less accurate."
-            )
-        return (
-            f"Assessed with {self.model}. GigAI's accuracy results are for {' or '.join(self.evaluated)}; "
-            "this assessment may be less accurate."
-        )
+            text = f"Assessed with the Codex CLI (model not reported; measured with {self.measured_with}: {count}{why})."
+        elif self.kind == BELOW:
+            text = f"Assessed with {self.model}: {count} in GigAI's accuracy run{why}, below the bar of {BAR} of {RESULT_JOBS}."
+        else:
+            text = f"Assessed with {self.model}: {count} in GigAI's accuracy run{why}"
+            text += f"; {self.reference} reached {self.reference_accurate} of {RESULT_JOBS}." if self.reference else "."
+            return text
+        if self.reference:
+            who = TARGET_LABELS.get(self.reference_target or "", "")
+            named = f"{who} with {self.reference}" if who else self.reference
+            text += f" {named[0].upper()}{named[1:]} reached {self.reference_accurate} of {RESULT_JOBS}."
+        return text
 
     @property
     def line(self) -> str:
@@ -113,8 +133,9 @@ class ModelNotice:
         }
         if self.kind != NOT_MEASURED:
             value["kind"] = self.kind
-        if self.kind == BELOW:
-            value["accurate"], value["bar_accurate"], value["of"] = self.accurate, self.bar_accurate, RESULT_JOBS
+            value["accurate"], value["of"] = self.accurate, RESULT_JOBS
+            if self.reference:
+                value["reference"], value["reference_accurate"] = self.reference, self.reference_accurate
         return value
 
 
@@ -124,59 +145,74 @@ def evaluated_for(target: str | None) -> tuple[str, ...]:
     return EVALUATED_MODELS.get(target or "", ())
 
 
-def _result(target: str | None, model: str) -> ModelResult | None:
+def _result(target: str | None, model: str | None) -> ModelResult | None:
     return next((row for row in RESULTS if row.target == target and row.model == model), None)
 
 
-def _bar_count() -> int | None:
-    row = _result(*BAR)
-    return None if row is None else row.accurate
+def _best_elsewhere(target: str, accurate: int) -> ModelResult | None:
+    """The best measured reference of ANOTHER target when it beat ``accurate`` (what a below-the-bar target is compared with)."""
+
+    others = [row for t, m in REFERENCE.items() if t != target and (row := _result(t, m)) is not None and row.accurate is not None]
+    best = max(others, key=lambda row: row.accurate or 0, default=None)
+    return best if best is not None and (best.accurate or 0) > accurate else None
 
 
 def model_state(target: str | None, model: str | None) -> str | None:
-    """``MEETS``, ``BELOW`` or ``NOT_MEASURED`` for ``model`` on ``target``; ``None`` when nothing is claimed.
+    """``MEETS``, ``BELOW`` or ``NOT_MEASURED`` against the bar; ``None`` when nothing is claimed.
 
-    Nothing is claimed for a target with no results, or for a model nobody named (``None``; ``default`` on
-    ``claude_cli``). With the counts filled in, a measured model meets the bar when its count is not below the bar's.
-    While they are not (:data:`RESULTS_PLACEHOLDER`), a model in :data:`EVALUATED_MODELS` meets it.
+    Nothing is claimed for a target with no results, or for a model nobody named (``None``; ``default`` on ``claude_cli``).
     """
 
-    evaluated = evaluated_for(target)
-    if not evaluated or model is None or model == DEFAULT_MODEL:
+    if not evaluated_for(target) or model is None or model == DEFAULT_MODEL:
         return None
-    row, bar = _result(target, model), _bar_count()
-    if row is None or row.accurate is None or bar is None:
-        return MEETS if model in evaluated else NOT_MEASURED
-    return MEETS if row.accurate >= bar else BELOW
+    row = _result(target, model)
+    if row is None or row.accurate is None:
+        return NOT_MEASURED
+    return MEETS if row.accurate >= BAR else BELOW
 
 
 def model_notice(target: str | None, model: str | None) -> ModelNotice | None:
     """The notice for an assessment ``target`` answered with ``model``; ``None`` when no notice is due.
 
-    No notice: the model meets the bar, the target has no row in the table, or the model is not known. A model
-    nobody named (``None``, or ``default`` on ``claude_cli``) is not claimed to be anything. ``codex_cli``'s
-    ``default`` is NOT claimed to be the model the accuracy run measured: the Codex CLI does not report the model its
-    default resolves to, so that assessment says so (:data:`UNREPORTED`).
+    The rule has no threshold in it: the target's reference model (its best measured) carries no notice, EXCEPT a
+    reference that is itself below :data:`BAR`; any other measured model carries both numbers; a model nobody measured
+    the plain notice. A target with no results, or a model nobody named (``None``, or ``default`` on ``claude_cli``), is
+    not claimed to be anything. ``codex_cli``'s ``default`` is the Codex CLI's own model, which it does not report: the
+    notice gives its reference's numbers as measured with that model, never "evaluated".
     """
 
     evaluated = evaluated_for(target)
-    if target == "codex_cli" and model == DEFAULT_MODEL:
-        return ModelNotice(model, evaluated, UNREPORTED)
-    state = model_state(target, model)
-    if state is None or state == MEETS:
+    if not evaluated or target is None or model is None:
         return None
-    assert model is not None
-    if state == BELOW:
-        row = _result(target, model)
-        assert row is not None
-        return ModelNotice(model, evaluated, BELOW, row.accurate, _bar_count())
-    return ModelNotice(model, evaluated)
+    reference = REFERENCE.get(target)
+    unreported = model == DEFAULT_MODEL and target == "codex_cli"
+    if model == DEFAULT_MODEL and not unreported:
+        return None
+    row = _result(target, reference if unreported else model)
+    if row is None or row.accurate is None:
+        return ModelNotice(model, evaluated)
+    if row.model == reference:
+        if row.accurate >= BAR and not unreported:
+            return None
+        elsewhere = _best_elsewhere(target, row.accurate) if row.accurate < BAR else None
+        kind = UNREPORTED if unreported else BELOW
+        if unreported and row.accurate >= BAR:
+            elsewhere = None
+        return ModelNotice(
+            model, evaluated, kind, row.accurate, None if elsewhere is None else elsewhere.model,
+            None if elsewhere is None else elsewhere.accurate, None if elsewhere is None else elsewhere.target,
+            row.model, row.why,
+        )
+    best = _result(target, reference)
+    return ModelNotice(
+        model, evaluated, MEASURED, row.accurate, reference, None if best is None else best.accurate, target, row.model, row.why
+    )
 
 
 def results_rows() -> list[dict[str, object]]:
     """The results page's table rows, one per measured model: ``target``, ``model``, ``accurate``, ``of``, ``state``.
 
-    ``accurate`` is ``None`` and ``state`` ``not_scored`` while :data:`RESULTS_PLACEHOLDER` holds. The page
+    ``reference`` marks the target's reference model; ``why`` is the row's short cause. The page
     (``scout/accuracy-0-1-11``) is generated from these rows, never typed by hand.
     """
 
@@ -187,6 +223,8 @@ def results_rows() -> list[dict[str, object]]:
             "accurate": row.accurate,
             "of": RESULT_JOBS,
             "state": "not_scored" if row.accurate is None else model_state(row.target, row.model),
+            "reference": REFERENCE.get(row.target) == row.model,
+            "why": row.why,
         }
         for row in RESULTS
     ]
@@ -209,7 +247,9 @@ def asked_model(target: str | None, configured: str) -> str:
 __all__ = [
     "BAR",
     "BELOW",
+    "MEASURED",
     "MEETS",
+    "REFERENCE",
     "NOT_MEASURED",
     "RESULTS",
     "RESULTS_PLACEHOLDER",
