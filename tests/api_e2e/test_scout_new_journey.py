@@ -23,6 +23,11 @@ transport (``bindings._test_model_handler``), so no live model call is made.
 8. ``gigai scout new --json`` / ``--yours --json`` print the same objects;
    the documented examples have the responses' keys.
 9. A recruiter's address in the posting passes (public); nothing was removed.
+
+0.1.10.11 NA, its own journey: the API's ask (``GET /api/new``) is a preview.
+Asked twice it shows the same postings; ``POST /api/new`` has no asking form
+(``assess`` is required), and its no (``{"assess": false}``) is an answer: it
+moves the mark.
 """
 
 from __future__ import annotations
@@ -221,6 +226,44 @@ def test_scout_new_journey(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> N
 
         # 9. The posting's own contact line is public and passes; nothing in these responses was contact-shaped.
         assert _RECRUITER in scored["description"] and "_redactions" not in answered and "_redactions" not in nothing
+    finally:
+        stop_server(server)
+    assert_clean_and_healthy(workpad, home)
+
+
+def test_the_api_ask_is_a_preview_and_the_no_moves_the_mark(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    home, target = setup_and_init(tmp_path)
+    add_resume(home, target, tmp_path)
+    write_offline_find_jobs_config(target)
+    _seed_index(home, target)
+    server = start_server(home, target, monkeypatch=monkeypatch)
+    try:
+        client = server.client
+        workpad = resolve_workpad_path(home, target)
+
+        # The ask, and a second ask: the same posting, the same window, the same question. Nothing moved.
+        first, second = client.get("/api/new").json(), client.get("/api/new").json()
+        for ask in (first, second):
+            assert (ask["status"], ask["since_source"], ask["counts"]["new"], ask["counts"]["to_assess"]) == ("ask", "first_use_7_days", 1, 1)
+            assert ask["anchor"] == {"last_checked_at": None, "advances": False}
+            assert [row["job_identity"] for row in ask["postings"]["rows"]] == [_JOB]
+        assert first["question"]["text"] == second["question"]["text"]
+        # POST /api/new cannot ask: without the answer it is refused, and it has changed nothing.
+        assert client.post("/api/new", json={}).status_code == 422
+        assert client.get("/api/new").json()["status"] == "ask"
+
+        # The no the question names ("Not now"): an answer, so the mark moves; no model was called.
+        no = second["question"]["no"]["api"]
+        assert (no["method"], no["path"], no["body"]) == ("POST", "/api/new", {"assess": False, "since": second["since"]})
+        declined = client.post(no["path"], json=no["body"])
+        assert declined.status_code == 200, declined.text
+        answered = declined.json()
+        assert (answered["status"], answered["question"], answered["assessed"]) == ("new", None, None)
+        assert [row["job_identity"] for row in answered["postings"]["rows"]] == [_JOB]
+        assert answered["anchor"] == {"last_checked_at": None, "advances": True}
+        after = client.get("/api/new").json()
+        assert (after["status"], after["since_source"], after["since"], after["counts"]["new"]) == ("nothing_new", "anchor", answered["checked_at"], 0)
+        assert client.get("/api/metrics").json()["aggregates"] == []
     finally:
         stop_server(server)
     assert_clean_and_healthy(workpad, home)

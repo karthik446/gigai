@@ -87,7 +87,16 @@ things still take more than a second (see "Still slower than one second"): the n
   word with the requirement. The pick for that job now keeps one of those lines for every requirement
   the assessment found evidence for, the required ones first, before any line chosen by shared words.
   A job with no assessment is picked by words, as before.
-- **After you upgrade:** the rule that picks lines has a new version (`sel-3`). A profile's stored
+- **A job's resume keeps the project or role its title is about.** A posting's title says what the
+  job is about (`... Agent Platform`). The pick did not read it: a project whose own heading says the
+  same could be dropped whole, while older roles kept lines about nothing the posting asks for,
+  because none of the project's lines was one the assessment pointed to and none stated a number. A
+  role or project the title names (its heading or its own title holds a word of the posting's title,
+  or half of its lines do) now always keeps its best line; it goes only when nothing but required
+  lines and pins fit, and then `conflicts` says so (`title_entry`). What is left of the page after
+  every requirement has its line goes to lines about the posting before lines that are only stronger
+  or more recent. No required line and no skill is cut for it.
+- **After you upgrade:** the rule that picks lines has a new version (`sel-4`). A profile's stored
   selection stays as it is until you refresh it. Tailored resumes the background pipeline made from
   your master are out of date under the new rule and are made again when the pipeline next works on
   each job; a resume you edited or attached yourself is never replaced.
@@ -171,6 +180,11 @@ things still take more than a second (see "Still slower than one second"): the n
   "nothing new since" the run you had left. The time now moves when the run has done its work (every
   question answered, or none asked): leave at a question and the next run shows the same postings as
   new.
+- **`gigai scout new --json` that asks is a preview; the yes after it assesses.** An asking call
+  (status `ask`: `gigai scout new --json`, or any call without a terminal) moved the "new since" time,
+  so the next step, `gigai scout new --yes --json`, said "Nothing new" and assessed nothing. An asking
+  call now moves nothing: ask again and you get the same postings, and a plain `--yes` assesses them.
+  The time moves with the answer: `--yes`, or `--no-assess` for a no.
 - **"Nothing new" says what it counts.** `gigai scout new` could say "Nothing new since your last
   check" right after a sources update that stored hundreds of new postings. Both were right, and
   nothing said why: "new" counts the postings your profiles match that Scout first stored after your
@@ -250,6 +264,25 @@ things still take more than a second (see "Still slower than one second"): the n
 - **`gigai scout resume clean` keeps a title that is a link.** `**[Dispatch Optimizer](https://...)** *(Python, Kafka)*` came out as `**[Dispatch Optimizer]( *(Python, Kafka)*`, the check called that clean, and the broken line reached the master resume and the PDF. The link goes and the words stay, as `gigai scout resume add` already did; the cleaned copy is now what `resume add` stores. A heading that is only a link is refused by line number, as `resume add` refuses it.
 - **`gigai models` prints a CLI's version as `v0.160.0`,** not `vcodex-cli 0.160.0`.
 - **"~1 call", not "~1 calls",** in the questions of `gigai scout new` and `gigai scout jobs assess`.
+- **An Ashby posting whose description is only HTML can be assessed.** Some Ashby boards send a
+  posting's description as HTML only, with no plain-text copy. Scout read only the plain-text copy, so
+  such a posting had no text at all: assessing it failed every time with `job_text_unavailable`
+  (reason `no_text`), and a keyword search never found it. Scout now reads the HTML description, turned
+  into text the same way as for the other boards, when there is no plain-text one. A posting that has a
+  plain-text description is read exactly as before.
+  After you upgrade: such a posting that is already in your list can be assessed at once (its text is
+  read from the company's stored list; nothing is fetched again). Your next `gigai scout sources update`
+  (or "Update sources") finishes it: it reads each Ashby company's list once more with the request it
+  makes anyway (no extra request; a company whose list did not change is read again from what is
+  stored), and a posting that gets its text this way is found by a keyword search and counts once as
+  changed in a search's "new or changed since the last search". No other Ashby posting is marked new or
+  changed by this, and nothing needs to be done.
+  This is not a fix for an assessment that failed with `posting_requirements_unreadable`: that posting
+  had its text, and the answer now says which rule refused (see "For agents").
+- **`gigai scout run` never stops the Scout of another GigAI home.** It stopped whatever Scout held the
+  port, also one that another home (`--home`) had started. Now only a Scout of the same home is stopped:
+  another home's keeps running, and the command ends with one line that names the port and that home
+  and says to pass `--port`.
 
 #### For agents
 

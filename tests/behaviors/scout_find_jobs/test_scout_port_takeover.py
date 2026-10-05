@@ -515,7 +515,10 @@ def test_a_command_line_that_changes_before_the_signal_is_not_signalled(
 ) -> None:
     home, _, project_b = projects
     port = _free_port()
-    stranger = _spawn_listener(port, argv_tail=("-m", "gigai.scout.find_jobs.present_api"))
+    # The supervised shape, naming this home: the same-home rule (0.1.10.11 NC) lets it through to the re-check.
+    stranger = _spawn_listener(
+        port, argv_tail=("-m", "gigai.scout.find_jobs.present_api", "--home", str(home), "--target", str(project_b))
+    )
     real = run_supervisor._command_line_for_pid
     reads: list[int] = []
 
@@ -531,7 +534,7 @@ def test_a_command_line_that_changes_before_the_signal_is_not_signalled(
             patched.setattr(run_supervisor, "_answers_scout_identity", lambda _port, **_kw: True)
             patched.setattr(run_supervisor.os, "kill", lambda pid, sig: signals.append((pid, sig)))
             with pytest.raises(run_supervisor.ScoutRunError):
-                run_supervisor._stop_verified_older_scout(port)
+                run_supervisor._stop_verified_older_scout(port, home_root=home.resolve())
         assert len(reads) >= 2, "the command line must be re-read before signalling"
         assert signals == []
         assert stranger.poll() is None
@@ -583,3 +586,185 @@ def test_identity_accepts_the_0110_index_or_the_legacy_0191_answer(routes, expec
     finally:
         server.shutdown()
         server.server_close()
+
+
+# --- 0.1.10.11 NC: `run` stops only a Scout of the SAME home ----------------
+#
+# The holder of the port can be a real Scout server that ANOTHER GigAI home
+# started (a scratch home beside the operator's own). `run` never signals it:
+# it refuses in one line. These tests use two scratch homes under ``tmp_path``
+# and a free port in the 18xxx range.
+
+
+def _free_port_18xxx() -> int:
+    import random
+
+    first = random.randrange(18100, 18900)
+    for port in [*range(first, 19000), *range(18100, first)]:
+        if run_supervisor._port_is_free(port):
+            return port
+    raise AssertionError("no free port between 18100 and 18999")
+
+
+def _scratch_env(user_home: Path) -> dict[str, str]:
+    """The environment of a real ``gigai`` process whose user home is a scratch folder."""
+
+    env = {name: value for name, value in os.environ.items() if not name.startswith("GIGAI_HOME")}
+    env["HOME"] = str(user_home)
+    return env
+
+
+def _gigai_process(user_home: Path, *args: str) -> subprocess.CompletedProcess[str]:
+    """A real ``gigai ...`` process (not the in-process runner): its exit code and stderr as a terminal gets them."""
+
+    return subprocess.run(
+        [sys.executable, "-c", "from gigai.cli import cli; cli(prog_name='gigai')", *args],
+        cwd=user_home,
+        env=_scratch_env(user_home),
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        text=True,
+        timeout=latency_bound(60.0),
+        check=False,
+    )
+
+
+@pytest.fixture
+def two_homes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """Two scratch GigAI homes, each under its own scratch user home, both as new as a first ``gigai scout run``
+    finds them (no ``gigai setup``, no ``gigai init``): A's Scout is the one already running."""
+
+    user_a = tmp_path / "user-a"
+    user_b = tmp_path / "user-b"
+    user_a.mkdir()
+    user_b.mkdir()
+    monkeypatch.delenv("GIGAI_HOME", raising=False)
+    monkeypatch.setenv("HOME", str(user_a))
+    yield user_a / ".gigai", user_b / ".gigai", user_b
+    # Found by command line (the server module AND a --home inside this test's tmp_path), then stopped by pid.
+    stop_test_servers(scout_test_servers(under=tmp_path))
+
+
+def _bare(home: Path, command: str, *args: str) -> Result:
+    """``gigai scout <command>`` with only --home: no --target, the way the starter prompt writes ``run``."""
+
+    return CliRunner().invoke(cli, ["scout", command, *args, "--home", str(home)])
+
+
+def _bare_json(home: Path, command: str, *args: str) -> dict[str, object]:
+    result = _bare(home, command, *args, "--json")
+    assert result.exit_code == 0, result.output
+    return json.loads(result.output)
+
+
+def test_run_never_signals_another_homes_scout_and_refuses_in_one_line(two_homes) -> None:
+    """Home A's Scout holds port P; a bare ``gigai scout run --port P`` of home B leaves it alone."""
+
+    home_a, home_b, user_b = two_homes
+    port = _free_port_18xxx()
+    first = _bare_json(home_a, "run", "--port", str(port), "--no-browser")
+    pid_a = int(first["pid"])  # type: ignore[arg-type]
+    state_a = _state_path(home_a, home_a / "scout")
+    assert state_a.is_file()
+
+    # A real second process, as the starter prompt writes it (no --target), from the other home.
+    done = _gigai_process(user_b, "scout", "run", "--no-browser", "--port", str(port), "--home", str(home_b))
+
+    # run_supervisor's check, not os.kill(pid, 0) alone: A's server is this test process's child, and a stopped
+    # child that nobody has waited for still "exists".
+    assert run_supervisor._process_is_alive(pid_a), f"home B's run stopped home A's Scout (pid {pid_a}):\n{done.stderr}"
+    assert run_supervisor._listening_pids(port) == [pid_a], "the port is still home A's"
+    assert httpx.get(f"http://127.0.0.1:{port}/api/health", timeout=latency_bound(5.0)).status_code == 200
+    assert state_a.is_file(), "home A's run state is home A's"
+    assert done.returncode == 1, (done.stdout, done.stderr)
+    assert "Scout is running" not in done.stdout  # stdout: only the new home's own setup lines
+    assert done.stderr.splitlines() == [
+        f"Error: port {port} is held by the Scout of another GigAI home ({home_a}, pid {pid_a}), "
+        "which `gigai scout run` never stops; pass --port to choose a different one"
+    ]
+    assert "Stopped" not in done.stderr
+    assert not list((home_b / "run" / "scout").glob("*.json")), "home B started nothing"
+
+    # --json: the same refusal as the error object, same code as every other "port in use".
+    raw = _bare(home_b, "run", "--port", str(port), "--no-browser", "--json")
+    assert raw.exit_code == 1, raw.output
+    error = json.loads(raw.output)
+    assert error["status"] == "error"
+    assert error["error"]["code"] == "scout_run_port_in_use"
+    assert error["error"]["message"] == done.stderr.strip().removeprefix("Error: ")
+    assert run_supervisor._process_is_alive(pid_a)
+
+    # What the line says to do works, and both homes' Scouts then run side by side.
+    other_port = _free_port_18xxx()
+    second = _bare_json(home_b, "run", "--port", str(other_port), "--no-browser")
+    assert second["stopped_server"] is None and second["stopped_other"] is None
+    assert run_supervisor._process_is_alive(pid_a)
+    assert run_supervisor._process_is_alive(int(second["pid"]))  # type: ignore[arg-type]
+    assert run_supervisor._listening_pids(port) == [pid_a]
+    assert _bare_json(home_a, "status")["state"] == "running"
+
+
+def test_a_scout_whose_command_line_does_not_say_its_home_is_never_signalled(projects, tmp_path: Path) -> None:
+    """Unknown home is never "the same home": a Scout started by hand, without --home, is left running."""
+
+    home, project_a, project_b = projects
+    port = _free_port_18xxx()
+    run_supervisor.ensure_scout_ready(home_root=home, requested_target=project_a)
+    by_hand = subprocess.Popen(
+        [sys.executable, "-m", "gigai.scout.find_jobs.present_api", "--target", str(project_a), "--port", str(port)],
+        env=_scratch_env(home.parent),  # no --home: the server takes <scratch user home>/.gigai
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    try:
+        deadline = time.monotonic() + latency_bound(15.0)
+        while not run_supervisor._answers_scout_identity(port) and time.monotonic() < deadline:
+            assert by_hand.poll() is None, "the hand-started Scout exited"
+            time.sleep(0.1)
+        assert run_supervisor._answers_scout_identity(port)
+
+        result = _scout(home, project_b, "run", "--port", str(port), "--no-browser")
+
+        assert by_hand.poll() is None, result.output
+        assert result.exit_code == 1, result.output
+        assert result.output.splitlines() == [
+            f"Error: port {port} is held by a Scout server (pid {by_hand.pid}) whose command line does not say "
+            "which GigAI home it serves, so `gigai scout run` does not stop it; stop it yourself or pass --port "
+            "to choose a different one"
+        ]
+    finally:
+        by_hand.kill()
+        by_hand.wait(timeout=5.0)
+
+
+@pytest.mark.parametrize(
+    ("command_line", "expected"),
+    [
+        ("python -m gigai.scout.find_jobs.present_api --home /h/.gigai --target /h/scout --port 18765", "/h/.gigai"),
+        # A path with spaces is read whole (the process list joins argv with spaces).
+        ("py -m gigai.scout.find_jobs.present_api --home /h/My Home/.gigai --target /t --port 1", "/h/My Home/.gigai"),
+        ("py -m gigai.scout.find_jobs.present_api --home /h/.gigai copy --target /t --port 1", "/h/.gigai copy"),
+        # Not the shape the supervisor starts: the home is unknown.
+        ("python -m gigai.scout.find_jobs.present_api --port 18765", None),
+        ("python -m gigai.scout.find_jobs.present_api --target /h/scout --port 18765", None),
+        ("python -m gigai.scout.find_jobs.present_api --home /h/.gigai --port 18765", None),
+        ("gigai scout run --foreground --home /h/.gigai --target /h/scout", None),
+    ],
+)
+def test_the_home_of_a_server_is_read_from_the_supervised_command_line(command_line: str, expected: str | None) -> None:
+    assert run_supervisor._server_home(command_line) == expected
+
+
+def test_same_home_means_the_same_folder_never_a_name_that_starts_alike(tmp_path: Path) -> None:
+    home = (tmp_path / "user" / ".gigai").resolve()
+    home.mkdir(parents=True)
+    (tmp_path / "link").symlink_to(home, target_is_directory=True)
+
+    assert run_supervisor._is_same_home(str(home), home)
+    assert run_supervisor._is_same_home(str(tmp_path / "link"), home), "a path that resolves to this home is this home"
+    assert not run_supervisor._is_same_home(f"{home} copy", home)
+    assert not run_supervisor._is_same_home(str(home.parent), home)
+    assert not run_supervisor._is_same_home(str(home / "scout"), home)
+    assert not run_supervisor._is_same_home(".gigai", home), "a relative path says nothing about whose home it is"
+    assert not run_supervisor._is_same_home(None, home)

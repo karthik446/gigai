@@ -1,7 +1,7 @@
 """0110-10-15: the pick eval's hard tests (``run_pick_eval.py``), on the FINAL selection of three code paths.
 
-Deterministic, no model, synthetic fixtures only (``fixtures/pick``).  5 postings x 3 master sizes x 9 master
-variations x 3 paths = 405 final selections, each checked on separate checks against a labelled requirement set:
+Deterministic, no model, synthetic fixtures only (``fixtures/pick``).  6 postings x 3 master sizes x 9 master
+variations x 3 paths = 486 final selections, each checked on separate checks against a labelled requirement set:
 
 - H1 no mandatory requirement the master can support is left without a supporting line, in any cell;
 - H2 adding lines to a master never lowers mandatory coverage, evidence strength or the must-keep lines shown;
@@ -11,13 +11,21 @@ variations x 3 paths = 405 final selections, each checked on separate checks aga
 Regression protection on these cases, not a proof.  The baseline (``sel-1``, 0.1.10.10) fails all four: the worker's
 report holds the table (``python -m tests.evals.run_pick_eval --baseline <a git archive of v0.1.10.10>``).
 
-WITH AN ASSESSMENT (the real-data gate of 0.1.10.11): the same 405 selections again, every posting carrying its
+WITH AN ASSESSMENT (the real-data gate of 0.1.10.11): the same 486 selections again, every posting carrying its
 synthetic assessment (``assessments.json``), whose rows cite master lines BY MEANING.  H1-H4 hold there too, and
 
 - H5 no met mandatory row of the assessment loses every line it cites unless a conflict is reported.
 
 ``sel-2`` (which matched by words alone) fails H5 in 90 of those cells: ``python -m tests.evals.run_pick_eval
 --assessed --baseline <a git archive of ddd5a58a>``.
+
+A TITLE THAT NAMES AN ENTRY (0.1.10.11 PICK v5), with and without an assessment:
+
+- H6 no role or project the posting's title names is dropped whole unless a conflict is reported.
+
+The posting ``titlematch`` is the case (its title names the agent-runtime projects; its assessment cites lines of the
+roles only).  ``sel-3`` fails H6 in all 162 of its cells: ``python -m tests.evals.run_pick_eval --posting titlematch
+[--assessed] --baseline <a git archive of 567bd940>``.
 """
 
 from __future__ import annotations
@@ -31,7 +39,7 @@ from gigai.scout.master_resume import parse_master
 from gigai.scout.master_selection import is_old_role
 from tests.evals import run_pick_eval as ev
 
-POSTINGS = ("agentic", "backend", "leadership", "sre", "weakfit")
+POSTINGS = ("agentic", "backend", "leadership", "sre", "titlematch", "weakfit")
 _RESULTS: dict[tuple[str, bool], dict[tuple[str, str, str, str], ev.Checks]] = {}
 
 
@@ -48,7 +56,9 @@ def test_the_fixtures_are_synthetic_and_every_label_names_a_line_the_master_hold
     assert "SYNTHETIC" in (ev.FIXTURES / "master.md").read_text(encoding="utf-8").splitlines()[0]
     assert all("SYNTHETIC" in spec["note"] for spec in (expected, sizes, variations)) and "TO BE REVIEWED by a person" in expected["note"]
     assert tuple(sorted(expected["postings"])) == POSTINGS == tuple(sorted(ev.postings()))
-    assert {spec["type"] for spec in expected["postings"].values()} == {"agentic / AI platform", "backend platform", "SRE / infra", "leadership-heavy", "weak fit"}
+    assert {spec["type"] for spec in expected["postings"].values()} == {
+        "agentic / AI platform", "backend platform", "SRE / infra", "leadership-heavy", "weak fit", "the title names a project",
+    }
     for name, spec in expected["postings"].items():
         text = ev.postings()[name]["text"]
         requirement_ids = [requirement["id"] for requirement in spec["requirements"]]
@@ -58,6 +68,8 @@ def test_the_fixtures_are_synthetic_and_every_label_names_a_line_the_master_hold
             assert set(requirement["strong"]) | set(requirement["support"]) <= set(large.items), (name, requirement["id"])
             assert not set(requirement["strong"]) & set(requirement["support"])
         assert spec["must_keep"] and all(set(group) <= set(large.items) for group in spec["must_keep"])
+        # The entries a reviewer says the title names are roles or projects of the master.
+        assert all(large.entries[entry].section in ("experience", "projects") for entry in spec["title_entries"]), name
         # The case the ticket asks for: an OLDER role holds the only labelled evidence of a mandatory requirement.
         for requirement_id in spec.get("older_role_only", ()):
             requirement = next(item for item in spec["requirements"] if item["id"] == requirement_id)
@@ -148,7 +160,7 @@ def test_the_same_probe_runs_in_another_checkout_s_tree() -> None:
     request = ev.payload(["weakfit"], ["small"], ["base"], ["select"])
     here = ev.pick_probe.probe(request)
     there = ev.pick_probe.run_in_tree(request, ev.REPO)
-    assert there == json.loads(json.dumps(here)) and there["selector_version"] == "sel-3"
+    assert there == json.loads(json.dumps(here)) and there["selector_version"] == "sel-4"
     with pytest.raises(ValueError, match="holds no src/gigai"):
         ev.pick_probe.run_in_tree(request, ev.FIXTURES)
 
@@ -247,3 +259,59 @@ def test_a_selector_that_does_not_read_citations_fails_the_cited_check() -> None
     assert len(checks.cited_lost) == 2 and checks.cited_silent == checks.cited_lost
     failures = ev.hard_failures({("leadership", "large", "base", "select"): checks})
     assert len(failures["H5 a met mandatory row lost every line it cites, with no conflict reported"]) == 1
+
+
+# --- a title that names an entry: the entry keeps its best line (0.1.10.11 PICK v5) ---------------------------
+
+
+def test_the_title_match_case_is_a_posting_whose_title_names_projects_that_no_row_of_its_assessment_cites() -> None:
+    spec = json.loads((ev.FIXTURES / "expected.json").read_text(encoding="utf-8"))["postings"]["titlematch"]
+    posting = ev.postings()["titlematch"]
+    case = ev.master_case("large", "base")
+    large = parse_master(case.markdown)
+    subject = ms._title_subject(posting["title"])  # noqa: SLF001 - the selector's own reading of a title
+    assert subject == {"backend", "agent", "runtim"} and spec["title_entries"] == ["p-loom", "p-relay"] == list(ev.title_entries("titlematch", case))
+    for entry in spec["title_entries"]:
+        # The entry's own heading says what the title says ...
+        assert len(subject & ms._title_subject(large.entries[entry].heading)) == 2, entry  # noqa: SLF001
+        # ... no row of the assessment cites a line of it (every cited line is a line of a role) ...
+        assert not any(set(row["lines"]) & set(large.entries[entry].bullets) for row in ev.cited("titlematch", case)), entry  # type: ignore[arg-type]
+        # ... and no must-keep group names a line of it: the eval's check 3 does not ask for it either.
+        assert not any(set(group) & set(large.entries[entry].bullets) for group in spec["must_keep"]), entry
+    cited = {line for row in ev.cited("titlematch", case) for line in row["lines"]}  # type: ignore[union-attr]
+    assert all(large.items[line].entry_id in ("r-hal", "r-qui", "r-bra") for line in cited)
+    # "Two roles that fill the page with cited lines": the two most recent roles are cited whole.
+    assert set(large.entries["r-hal"].bullets) | set(large.entries["r-qui"].bullets) <= cited
+    # The medium master holds the first project only, the small one too.
+    assert ev.title_entries("titlematch", ev.master_case("medium", "base")) == ("p-loom",) == ev.title_entries("titlematch", ev.master_case("small", "base"))
+
+
+@pytest.mark.parametrize("assessed", [False, True])
+def test_an_entry_the_posting_s_title_names_keeps_a_line_in_every_cell_and_no_conflict_is_needed(assessed: bool) -> None:
+    results = _results("titlematch", assessed=assessed)
+    assert len(results) == 81
+    for (_posting, size, variation, path), checks in results.items():
+        assert checks.title_entries and not checks.title_dropped and checks.conflicts == 0, (size, variation, path)
+        # The first project's best line is the one that says what the title says (a copy of it, where the master holds a better twin).
+        assert {"loom-01", "near-06"} & checks.shown, (size, variation, path)
+        # It costs no requirement its line: the checks the grid already had hold beside it.
+        assert (checks.lost, checks.weak, checks.omitted, checks.cited_lost) == ((), (), (), ()), (size, variation, path)
+    # The agentic posting's title names the same projects; they were shown before and still are.
+    assert not any(checks.title_dropped for checks in _results("agentic", assessed=assessed).values())
+
+
+def test_a_selection_that_drops_the_entry_the_title_names_fails_the_title_check_unless_a_conflict_names_it() -> None:
+    """The check itself, on a final selection edited by hand: the project gone, with and without the conflict."""
+
+    case = ev.master_case("medium", "base")
+    final = ev.pick_probe.probe(ev.payload(["titlematch"], ["medium"], ["base"], ["select"]))["results"][ev.cell_key("titlematch", "medium", "base")]["select"]
+    assert final["entries"]["p-loom"] and ev.check("titlematch", case, final).title_dropped == ()
+    dropped = {**final, "entries": {entry: bullets for entry, bullets in final["entries"].items() if entry != "p-loom"}}  # type: ignore[union-attr]
+    checks = ev.check("titlematch", case, dropped)
+    assert checks.title_dropped == checks.title_silent == ("p-loom",) and "p-loom" in checks.zero_entries
+    failures = ev.hard_failures({("titlematch", "medium", "base", "select"): checks})
+    assert failures["H6 an entry the posting's title names shows no line, with no conflict reported"] == ["titlematch/medium/base/select: p-loom"]
+    reported = {**dropped, "conflicts": [{"kind": "title_entry", "ids": ["p-loom", "loom-01"], "reason": "does not fit"}]}
+    checks = ev.check("titlematch", case, reported)
+    assert checks.title_dropped == ("p-loom",) and checks.title_silent == ()
+    assert not ev.hard_failures({("titlematch", "medium", "base", "select"): checks})["H6 an entry the posting's title names shows no line, with no conflict reported"]

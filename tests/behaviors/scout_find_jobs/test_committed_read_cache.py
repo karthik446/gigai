@@ -301,22 +301,28 @@ def test_an_unrelated_write_leaves_a_kept_snapshot_in_use_and_it_is_the_fresh_on
         _resolve(gig)
         first = _profiles_snapshot(gig)
         _answer(gig, 1)
+        after_one = _git(gig, "rev-parse", "HEAD")
         _answer(gig, 2)
         head = _git(gig, "rev-parse", "HEAD")
-        assert head != first.head
+        assert len({first.head, after_one, head}) == 3
 
         spawns.clear()
         assert _resolve(gig) == gig.resolved
         kept = _profiles_snapshot(gig)
         # One question per head a kept read was made at, never one per kept item: what did the commits since touch?
-        # Measured on 0.1.10.11 (after a save stopped rebuilding the projection): two kept reads sit at two different
-        # heads, so two questions. Not proven here which read it is; the bound is what matters (never one per item).
-        assert 1 <= len(spawns) <= 2 and all("log" in spawn and spawn[-1].endswith(f"..{head}") for spawn in spawns), spawns
-        assert any(f"{first.head}..{head}" in spawn for spawn in spawns), spawns
+        # Two kept reads sit at two different heads here, so exactly two questions, once each:
+        # 1. the workpad check (``_validated_repositories``), kept at ``after_one``: the second answer's own first
+        #    resolve moved it there (asking ``first.head..after_one``), and nothing in a save reads after its commit;
+        # 2. the profiles snapshot (``journal._snapshot_cache``), kept at ``first.head``: no answer reads the profiles.
+        # Until 0.1.10.11 (0110-10-16) the save rebuilt the projection after its commit, and that read asked
+        # ``after_one..head`` inside the write; the resolve here was answered from ``_committed_between`` and only the
+        # second question was counted. The question was not added, it moved from the write to the first read after it.
+        question = ["log", "-z", "--format=%x01%H %P", "--name-only"]  # after the git binary, "-C" and the workpad
+        assert [spawn[3:] for spawn in spawns] == [[*question, f"{after_one}..{head}"], [*question, f"{first.head}..{head}"]], spawns
         assert (kept.head, kept.artifacts) == (head, first.artifacts)
 
         spawns.clear()
-        assert _profiles_snapshot(gig) == kept and spawns == []  # and then nothing at all
+        assert _resolve(gig) == gig.resolved and _profiles_snapshot(gig) == kept and spawns == []  # and then nothing at all
     assert _profiles_snapshot(gig) == kept  # what a read with nothing kept returns at this head
 
 

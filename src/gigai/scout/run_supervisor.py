@@ -443,8 +443,9 @@ class ScoutRunResult:
     # Set when another project's live Scout server held the requested port
     # and was stopped so this one could start (uat-bug-019).
     stopped_other: OtherScoutServer | None = None
-    # Set when a verified Scout server NOT recorded in this home held the port
-    # and was stopped (0.1.10 item 3).
+    # Set when a verified Scout server of this home that no run state records
+    # held the port and was stopped (0.1.10 item 3; 0.1.10.11 NC: never a
+    # Scout of another home).
     stopped_server: "StoppedOlderServer | None" = None
 
 
@@ -552,11 +553,17 @@ def _stop_other_server_on_port(
 
 
 # 0.1.10 item 3: the holder of the port is not recorded in the current home
-# (the home was moved or deleted while its server kept running). Stop it only
+# (its run state was lost, or the home was deleted and made again, while its
+# server kept running). Stop it only
 # when it is verifiably a Scout server: its listening pid, a `-m
 # gigai.scout.find_jobs.present_api` command line, AND the Scout identity
 # answer on loopback (GET /api returning Scout's "scout-api-index:1" index, or, for 0.1.9.x, GET /api/secrets/status;
 # /api/health alone is a generic {"status": "ok"}). Anything else is message-only.
+#
+# 0.1.10.11 NC: and only when it is a Scout of THIS home. The supervisor of every release starts the server as
+# `-m ...present_api --home <home> --target <target> --port <port>`, so the verified command line says whose it is.
+# A Scout of another home (a scratch home beside the operator's own) is never signalled, and neither is one whose
+# command line does not say its home (started by hand): unknown is not "the same". `run` refuses in one line.
 _OLDER_SERVER_CMD = re.compile(r"(?:^|\s)-m\s+" + re.escape(_SERVER_MODULE_MARKER) + r"(?:\s|$)")
 _SCOUT_API_INDEX_SCHEMA = "scout-api-index:"
 _SCOUT_LEGACY_SCHEMA = "scout-secrets-status:"
@@ -618,8 +625,32 @@ def _flag_value(command_line: str, flag: str) -> str | None:
     return values[-1] if values else None
 
 
-def _stop_verified_older_scout(port: int) -> StoppedOlderServer | None:
-    """Stop the Scout server holding ``port`` if verifiably Scout; raise if the holder is not.
+def _server_home(command_line: str) -> str | None:
+    """The ``--home`` a supervised Scout server was started with; ``None`` when its command line does not say.
+
+    Only the shape the supervisor starts counts (``-m ...present_api --home <home> --target ...``). The process list
+    joins the arguments with spaces, so the home is everything up to `` --target ``: a path with a space in it is
+    read whole, and ``/x/.gigai copy`` is never read as ``/x/.gigai``.
+    """
+
+    _, found, rest = command_line.partition(f"-m {_SERVER_MODULE_MARKER} --home ")
+    home, target, _ = rest.partition(" --target ")
+    return home if found and target and home else None
+
+
+def _is_same_home(server_home: str | None, home_root: Path) -> bool:
+    """Whether the home a server was started with is ``home_root`` (already resolved): the same folder."""
+
+    if server_home is None or not Path(server_home).is_absolute():
+        return False
+    try:
+        return Path(server_home).resolve(strict=False) == home_root
+    except (OSError, RuntimeError):
+        return False
+
+
+def _stop_verified_older_scout(port: int, *, home_root: Path) -> StoppedOlderServer | None:
+    """Stop the Scout server holding ``port`` if verifiably a Scout of ``home_root``; raise if the holder is not.
 
     ``None`` means the holder could not be resolved (nothing was touched).
     """
@@ -639,6 +670,20 @@ def _stop_verified_older_scout(port: int) -> StoppedOlderServer | None:
             "scout_run_port_in_use",
             f"port {port} is in use by pid {pid} ({command_line or 'command unknown'}), "
             "which is not a Scout server; stop it or pass --port",
+        )
+    server_home = _server_home(command_line)
+    if server_home is None:
+        raise ScoutRunError(
+            "scout_run_port_in_use",
+            f"port {port} is held by a Scout server (pid {pid}) whose command line does not say which GigAI home "
+            "it serves, so `gigai scout run` does not stop it; stop it yourself or pass --port to choose a "
+            "different one",
+        )
+    if not _is_same_home(server_home, home_root):
+        raise ScoutRunError(
+            "scout_run_port_in_use",
+            f"port {port} is held by the Scout of another GigAI home ({server_home}, pid {pid}), which "
+            "`gigai scout run` never stops; pass --port to choose a different one",
         )
 
     def _still_it() -> bool:
@@ -742,7 +787,7 @@ def start(
         if stopped_other is not None and on_stopped_other is not None:
             on_stopped_other(stopped_other)
         if stopped_other is None:
-            older = _stop_verified_older_scout(requested_port)
+            older = _stop_verified_older_scout(requested_port, home_root=home_root)
         if (stopped_other is None and older is None) or not _port_is_released(requested_port):
             raise ScoutRunError(
                 "scout_run_port_in_use",

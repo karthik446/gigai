@@ -1,5 +1,5 @@
 {
- "note": "SYNTHETIC labels for the pick eval (0110-10-15), written by the worker by reading every master line against every posting line; TO BE REVIEWED by a person (the report says how each was derived). Per posting: the requirement list (a posting line each; a years-of-experience line is not listed: role dates evidence it and every selection prints them), and for each requirement the master lines that support it: 'strong' (the strongest evidence: any ONE of them shown is the strongest evidence kept) and 'support' (weaker evidence that still covers the requirement). 'must_keep': groups of lines a reviewer would not accept this resume without; a group is satisfied by any one of its lines. A line that a master size does not hold is ignored for that size; a requirement with no line left is not supportable there and is not counted.",
+ "note": "SYNTHETIC labels for the pick eval (0110-10-15), written by the worker by reading every master line against every posting line; TO BE REVIEWED by a person (the report says how each was derived). Per posting: the requirement list (a posting line each; a years-of-experience line is not listed: role dates evidence it and every selection prints them), and for each requirement the master lines that support it: 'strong' (the strongest evidence: any ONE of them shown is the strongest evidence kept) and 'support' (weaker evidence that still covers the requirement). 'must_keep': groups of lines a reviewer would not accept this resume without; a group is satisfied by any one of its lines. A line that a master size does not hold is ignored for that size; a requirement with no line left is not supportable there and is not counted. 'title_entries' (0.1.10.11 PICK v5): the roles and projects a reviewer says the posting's TITLE names (the entry's own heading says what the title says); a resume for that posting that shows no line of one of them has dropped what the job is about. An entry a master size does not hold is ignored there.",
  "postings": {
   "agentic": {
    "type": "agentic / AI platform",
@@ -189,6 +189,10 @@
     [
      "relay-02"
     ]
+   ],
+   "title_entries": [
+    "p-loom",
+    "p-relay"
    ]
   },
   "backend": {
@@ -346,7 +350,8 @@
    ],
    "older_role_only": [
     "B6"
-   ]
+   ],
+   "title_entries": []
   },
   "sre": {
    "type": "SRE / infra",
@@ -480,7 +485,8 @@
    "older_role_only": [
     "S5",
     "S6"
-   ]
+   ],
+   "title_entries": []
   },
   "leadership": {
    "type": "leadership-heavy",
@@ -604,7 +610,8 @@
     [
      "o-talk"
     ]
-   ]
+   ],
+   "title_entries": []
   },
   "weakfit": {
    "type": "weak fit",
@@ -704,6 +711,181 @@
    "older_role_only": [
     "W3",
     "W4"
+   ],
+   "title_entries": []
+  },
+  "titlematch": {
+   "type": "the title names a project",
+   "summary": [
+    "sum-backend"
+   ],
+   "requirements": [
+    {
+     "id": "T1",
+     "text": "Design and operate the agent runtime our product teams build on, in production.",
+     "mandatory": true,
+     "strong": [
+      "hal-01",
+      "hal-06"
+     ],
+     "support": [
+      "loom-01",
+      "relay-02"
+     ]
+    },
+    {
+     "id": "T2",
+     "text": "Build backend services in Go and Python on Kubernetes that stay available under heavy load.",
+     "mandatory": true,
+     "strong": [
+      "qui-01"
+     ],
+     "support": [
+      "hal-06",
+      "pgq-01",
+      "ost-01"
+     ]
+    },
+    {
+     "id": "T3",
+     "text": "Own the event backbone on Kafka that carries every booking.",
+     "mandatory": true,
+     "strong": [
+      "qui-02"
+     ],
+     "support": [
+      "pel-11"
+     ]
+    },
+    {
+     "id": "T4",
+     "text": "Define SLOs with the teams on the platform and reduce customer-visible incidents.",
+     "mandatory": true,
+     "strong": [
+      "qui-03"
+     ],
+     "support": [
+      "hal-06"
+     ]
+    },
+    {
+     "id": "T5",
+     "text": "Manage infrastructure as code with Terraform across clouds and regions.",
+     "mandatory": true,
+     "strong": [
+      "qui-04"
+     ],
+     "support": [
+      "pgq-04",
+      "o-tf"
+     ]
+    },
+    {
+     "id": "T6",
+     "text": "Model data on PostgreSQL, including the retrieval workloads behind the assistants.",
+     "mandatory": true,
+     "strong": [
+      "hal-04",
+      "bra-01"
+     ],
+     "support": [
+      "relay-02",
+      "pgq-01"
+     ]
+    },
+    {
+     "id": "T7",
+     "text": "Gate every prompt change on an evaluation suite before release.",
+     "mandatory": true,
+     "strong": [
+      "hal-03"
+     ],
+     "support": [
+      "loom-04",
+      "eval-01"
+     ]
+    },
+    {
+     "id": "T8",
+     "text": "Control LLM spend across model providers.",
+     "mandatory": true,
+     "strong": [
+      "hal-05",
+      "relay-06"
+     ],
+     "support": [
+      "loom-05",
+      "trail-04"
+     ]
+    },
+    {
+     "id": "T9",
+     "text": "A record of leading a team and mentoring senior engineers.",
+     "mandatory": true,
+     "strong": [
+      "hal-02",
+      "hal-07"
+     ],
+     "support": [
+      "bra-03"
+     ]
+    },
+    {
+     "id": "T10",
+     "text": "Experience designing public APIs that are safe to retry.",
+     "mandatory": true,
+     "strong": [
+      "bra-02"
+     ],
+     "support": [
+      "relay-03",
+      "ost-07"
+     ]
+    },
+    {
+     "id": "T11",
+     "text": "Payments or ledger experience.",
+     "mandatory": false,
+     "strong": [
+      "bra-01"
+     ],
+     "support": [
+      "bra-02",
+      "bra-03"
+     ]
+    },
+    {
+     "id": "T12",
+     "text": "Experience running Kafka clusters.",
+     "mandatory": false,
+     "strong": [
+      "pel-11"
+     ],
+     "support": [
+      "qui-02"
+     ]
+    }
+   ],
+   "must_keep": [
+    [
+     "hal-01"
+    ],
+    [
+     "hal-03"
+    ],
+    [
+     "qui-01"
+    ],
+    [
+     "qui-02"
+    ],
+    [
+     "bra-02"
+    ]
+   ],
+   "title_entries": [
+    "p-loom",
+    "p-relay"
    ]
   }
  }

@@ -2745,6 +2745,11 @@ def new_command(
     leave at a question (Ctrl-C) changes nothing, and the next run shows
     the same postings as new. --no-assess never asks.
 
+    Without a terminal (--json, a pipe) a reply that asks is a PREVIEW: it
+    moves nothing, so asking again shows the same postings and a plain
+    --yes after it assesses them. The time moves with the answer: --yes,
+    or --no-assess for a no.
+
     A yes assesses only postings ranked 50 or more (the fit.assess_min_rank
     setting). The low-ranked ones are counted and asked about separately;
     --include-low-rank beside --yes assesses them too. A posting that waits
@@ -2770,7 +2775,7 @@ def new_command(
     from .data_labels import LabelError
     from .outbound_check import redact_payload
     from .pipeline.store import PipelineStoreError
-    from .scout_new import STATUS_ASK, PostingModelError, ScoutNewError, render, scout_new, scout_new_yours, settle_anchor
+    from .scout_new import PostingModelError, ScoutNewError, is_preview, render, scout_new, scout_new_yours, settle_anchor
 
     home_root = home_value or default_home_root()
     errors = (ScoutTargetError, WorkpadError, ScoutNewError, PostingModelError, PipelineStoreError, LabelError, OSError, ValueError)
@@ -2804,15 +2809,16 @@ def new_command(
         else:
             assess = True if yes else False if no_assess else None
             # 0110-10-11: a run that may ask holds the "new since" anchor until it has done its work (settle_anchor,
-            # below): left at a prompt (Ctrl-C, end of input), it has consumed nothing. A run that asks nothing moves
-            # the anchor itself, as before.
+            # below): left at a prompt (Ctrl-C, end of input), it has consumed nothing. A run that puts no prompt
+            # (--json, --no-assess, no terminal) leaves the anchor to scout_new: it moves unless the reply is a preview
+            # (0.1.10.11 NA, scout_new.is_preview: a reply that asks moves nothing; the --yes or --no-assess after it does).
             response = scout_new(
                 home_root, target, profile_id=profile_id, peek=peek, assess=assess, since=since, process=process,
                 reassess_stale=reassess_stale, progress=progress, build_progress=build_progress,
                 include_low_rank=include_low_rank, advance=not asking,
             )
         first = response
-        if response["status"] == STATUS_ASK and asking:
+        if is_preview(response) and asking:
             sentence = response["question"]["text"]  # type: ignore[index]
             if click.confirm(str(sentence).rstrip("?"), default=False):
                 click.echo("Assessing (one model call per posting; this can take a few minutes)...")
