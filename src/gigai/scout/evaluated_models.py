@@ -19,6 +19,8 @@ from dataclasses import dataclass
 
 #: The accuracy results page, in the form the docs use (a path, never a URL).
 RESULTS_PAGE = "scout/accuracy-0-1-11"
+#: The words the UI shows for the results link (the notice text excludes the link; the CLI and brief lines append ``Results: <path>``).
+RESULTS_LINK_LABEL = "GigAI's accuracy results"
 
 #: ``{model target (the adapter kind): the model(s) its accuracy results are for}``.
 EVALUATED_MODELS: Mapping[str, tuple[str, ...]] = {
@@ -129,7 +131,7 @@ class ModelNotice:
 
     def to_json(self) -> dict[str, object]:
         value: dict[str, object] = {
-            "text": self.text, "link": RESULTS_PAGE, "model": self.model, "evaluated": list(self.evaluated)
+            "text": self.text, "link": {"label": RESULTS_LINK_LABEL, "path": RESULTS_PAGE}, "model": self.model, "evaluated": list(self.evaluated)
         }
         if self.kind != NOT_MEASURED:
             value["kind"] = self.kind
@@ -233,7 +235,7 @@ def results_rows() -> list[dict[str, object]]:
 def notice_lines(batch: Mapping[str, object]) -> list[str]:
     """The plain notice of an assessed batch (``model_notices``), one line per model GigAI's results are not for."""
 
-    return [f"{item['text']} Results: {item['link']}" for item in batch.get("model_notices") or ()]  # type: ignore[union-attr]
+    return [f"{item['text']} Results: {item['link']['path']}" for item in batch.get("model_notices") or ()]  # type: ignore[union-attr]
 
 
 def asked_model(target: str | None, configured: str) -> str:
@@ -259,6 +261,7 @@ __all__ = [
     "ASKED_BY_DEFAULT",
     "DEFAULT_MODEL",
     "EVALUATED_MODELS",
+    "RESULTS_LINK_LABEL",
     "RESULTS_PAGE",
     "ModelNotice",
     "asked_model",

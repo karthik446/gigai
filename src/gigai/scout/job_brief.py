@@ -442,7 +442,7 @@ def _render_yours(part: Mapping[str, object]) -> str:
         out.append(str(state["requirements_note"]))
     notice = state.get("model_notice")
     if isinstance(notice, Mapping):
-        out.append(f"{notice['text']} Results: {notice['link']}")
+        out.append(f"{notice['text']} Results: {notice['link']['path']}")
     gate = state["gate"]
     if isinstance(gate, Mapping):
         ready = {True: "yes", False: "no"}.get(gate.get("ready"), "(not checked)")  # type: ignore[arg-type]
