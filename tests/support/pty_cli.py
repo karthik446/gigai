@@ -19,6 +19,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 import os
 import select
+import signal
 import sys
 import time
 
@@ -65,6 +66,9 @@ def run_cli_in_pty(
     pid, master = pty.fork()
     if pid == 0:  # the child: its 0, 1 and 2 are the pty, and the pty is its controlling terminal
         try:
+            # A parent that ignores SIGINT (a CI runner, a job started in the background) hands that on through exec, and Python
+            # then never turns Ctrl-C into KeyboardInterrupt: the run would sit at its prompt. Start from the default.
+            signal.signal(signal.SIGINT, signal.SIG_DFL)
             os.execve(sys.executable, [sys.executable, "-c", _CLI, *args], dict(os.environ if env is None else env))
         finally:
             os._exit(127)
