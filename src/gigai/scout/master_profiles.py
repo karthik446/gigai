@@ -61,7 +61,7 @@ from ..workpad import ResolvedWorkpad, committed_read_cache, resolve_workpad
 from . import profile_records
 from .find_jobs.contracts import FindJobsContractError, PinnedResume
 from .master_migration import MigrationPlan, MigrationResumeError, SourceResume, plan_migration
-from .master_resume import KIND_SKILLS, Master
+from .master_resume import KIND_SKILLS, Master, MasterResumeError
 from .master_selection import SELECTOR_VERSION, Measure, Selected, SelectionPosting, SelectionProfile, render_selection, select
 from .master_store import ACTORS, MASTER_FILE_NAME, MasterImport, MasterStoreError, StoredMaster, import_master, load_master, master_revisions, strip_contact
 from .posting_keywords import extract_keywords
@@ -560,8 +560,18 @@ def _resume_sources(
             text = None
         if text is None:
             raise MasterProfileError("migration_resume_unreadable", f"the resume of profile {', '.join(labels)} cannot be read as text")
-        clean, gone = strip_contact(text)
+        try:
+            clean, gone = strip_contact(text)
+        except MasterResumeError as exc:
+            # A heading that is only a link (0.1.10.11): by line number, as every resume that does not read.
+            raise MasterProfileError(
+                "migration_resume_unreadable",
+                f"the resume of profile {', '.join(labels)} does not read as a resume ({exc}). Fix the file and add it again with "
+                "`gigai scout resume add FILE --profile ID`, or store a master you wrote with `master init --from FILE`",
+            ) from exc
         removed += [(labels[0], kind, line) for kind, line in gone.lines]
+        # A link taken out of a heading that is kept (a resume stored before the import took them): the link was not imported.
+        removed += [(labels[0], "link", line) for line, _words, _under in gone.headings]
         found.append((str(stored.get("created_at", "")), SourceResume(digest, clean, labels, tuple(sorted({line for _kind, line in gone.lines})))))
     found.sort(key=lambda item: (item[0], item[1].key), reverse=True)
     return [source for _created, source in found], removed

@@ -21,7 +21,10 @@ change to the stored master through the same last step, ``_store``):
    (``resume_pii.contact_findings``: the name line, contact lines, and any
    line holding an email, a phone number, a link, an address). A flagged
    line is not imported; it is reported by kind and line number, never by
-   value, and never stored;
+   value, and never stored. 0.1.10.11: a link in a heading is taken out
+   first and the heading keeps its words (``resume_privacy.heading_links``,
+   the rule every resume import shares); a heading that is only a link is
+   refused by line number;
 3. the text is read as a master and every line without an id gets one (a
    line whose id comment was deleted gets its id back when the previous
    revision has the same text);
@@ -71,6 +74,7 @@ from .master_resume import (
 )
 from .resume_import import RESUME_MEDIA_TYPE_MESSAGE, RESUME_SUFFIXES
 from .resume_pii import REMOVED_MESSAGE, contact_findings
+from .resume_privacy import HeadingOnlyLink, heading_link_message, heading_links, heading_words
 
 #: The reference kind the master's content is sealed under (see the module docstring: not ``resume``).
 MASTER_REFERENCE_KIND = "role_history"
@@ -125,7 +129,11 @@ class StoredMaster:
 class ContactRemoved:
     """What the import's privacy strip took out: kinds and file line numbers, never a value."""
 
+    #: The lines that were not imported at all.
     lines: tuple[tuple[str, int], ...] = ()
+    #: 0.1.10.11: a link taken out of a heading that is KEPT (``resume_privacy.heading_links``): ``(file line, the
+    #: heading's words, whether the link stood on a line under the heading)``; never the address.
+    headings: tuple[tuple[int, str, bool], ...] = ()
 
     @property
     def counts(self) -> dict[str, int]:
@@ -134,10 +142,24 @@ class ContactRemoved:
             counts[kind] = counts.get(kind, 0) + 1
         return counts
 
+    def heading_rows(self) -> list[dict[str, object]]:
+        """One row per link taken out of a kept heading: its line, the heading's words and the sentence that says it."""
+
+        return [
+            {"kind": "link", "line": line, "heading": words, "where": "line_under_heading" if under else "heading", "message": heading_link_message(words, under)}
+            for line, words, under in self.headings
+        ]
+
     def to_json(self) -> dict[str, object] | None:
-        if not self.lines:
+        if not self.lines and not self.headings:
             return None
-        return {"removed": self.counts, "lines": [{"kind": kind, "line": line} for kind, line in self.lines], "message": REMOVED_MESSAGE}
+        removed: dict[str, object] = {
+            "removed": self.counts, "lines": [{"kind": kind, "line": line} for kind, line in self.lines],
+            "message": REMOVED_MESSAGE if self.lines else None,
+        }
+        if self.headings:
+            removed["headings"] = self.heading_rows()
+        return removed
 
 
 @dataclass(frozen=True)
@@ -298,14 +320,19 @@ def _read_source(source: Path) -> str:
         raise MasterStoreError("master_file_binary", f"{source} is not UTF-8 text") from None
 
 
-def strip_contact(text: str) -> tuple[str, ContactRemoved]:
+def strip_contact(text: str, *, headings: bool = True) -> tuple[str, ContactRemoved]:
     """``text`` with every line that looks like contact data blanked, and what went (kinds and line numbers).
 
     The detector is the resume import's own (``resume_pii.contact_findings``: what its strip removes, plus
     the heads-up shapes). A flagged line is not imported at all: blanking it keeps the file's line numbers,
     so a later format error still names the line the person sees. A leading ``<!-- gigai-master:1 -->``
     line is set aside while the detector runs, so a name line right under it is the first line it sees, as
-    in a resume."""
+    in a resume.
+
+    0.1.10.11, ``headings`` (every import; not a change to the stored master, which refuses a link as it did):
+    a link in a line that names an entry is taken out first and the line keeps its words
+    (``resume_privacy.heading_links``); ``ContactRemoved.headings`` says where. A heading that is only a link
+    is ``MasterResumeError`` by line number (``refused_line`` carries the number, never the text)."""
 
     lines = text.splitlines()
     marker: tuple[int, str] | None = None
@@ -314,6 +341,19 @@ def strip_contact(text: str) -> tuple[str, ContactRemoved]:
             if line.strip().startswith("<!--") and line.strip().endswith("-->") and "gigai-master:" in line:
                 marker, lines[index] = (index, line), ""
             break
+    links = ()
+    if headings:
+        try:
+            joined = "\n".join(lines)
+            rewritten, links = heading_links(joined)
+        except HeadingOnlyLink as exc:
+            error = MasterResumeError("master_markdown_invalid", str(exc))
+            error.refused_line = (exc.line, "")  # type: ignore[attr-defined]
+            raise error from None
+        rewrote = rewritten != joined
+        lines = rewritten.split("\n") if rewrote else lines
+    else:
+        rewrote = False
     removed: set[tuple[str, int]] = set()
     for _ in range(_STRIP_PASSES):
         findings = contact_findings("\n".join(lines))
@@ -329,11 +369,18 @@ def strip_contact(text: str) -> tuple[str, ContactRemoved]:
                 "master_contact_data",
                 "the file still holds what looks like contact data on line " + ", ".join(str(finding.line) for finding in left) + "; remove it and import again",
             )
-    if not removed:
+    if not removed and not rewrote:
         return text, ContactRemoved()
+    blanked = {line for _kind, line in removed}
+    said: list[tuple[int, str, bool]] = []
+    for link in links:
+        if link.line in blanked:
+            removed.add(("link", link.line))  # the line went whole after all (an email, a phone number, the name stood on it too)
+        else:
+            said.append((link.line, heading_words(lines[link.head - 1]), link.under))
     if marker is not None:
         lines[marker[0]] = marker[1]
-    return "\n".join(lines) + "\n", ContactRemoved(tuple(sorted(removed, key=lambda item: (item[1], item[0]))))
+    return "\n".join(lines) + "\n", ContactRemoved(tuple(sorted(removed, key=lambda item: (item[1], item[0]))), tuple(said))
 
 
 def _still_contact(master: Master) -> None:
@@ -403,7 +450,8 @@ def import_master(
 
     P8, for ``master sync``: with ``refuse_contact`` a line the privacy strip flags is not dropped but refuses the
     whole import (``master_contact_data``, the lines by number and kind), unless the stored master's own text is
-    flagged the same; ``visible_sha256`` is the digest ``source`` must have when it is the resumes folder's
+    flagged the same (a link in a heading is not such a line: the heading keeps its words, as in every import,
+    and ``contact_removed.headings`` says so); ``visible_sha256`` is the digest ``source`` must have when it is the resumes folder's
     ``master.md`` (``master_file_changed`` when the file was saved again meanwhile), and lets the new revision be
     written over that file."""
 
@@ -422,7 +470,7 @@ def import_master(
     current = chain[-1] if chain else None
     previous = _read_master(home_root, target, resolved, current) if current is not None else None
     if refuse_contact and removed.lines:
-        before = strip_contact(previous.markdown())[1].counts if previous is not None else {}
+        before = strip_contact(previous.markdown(), headings=False)[1].counts if previous is not None else {}
         if any(count > before.get(kind, 0) for kind, count in removed.counts.items()):
             where = ", ".join(f"line {line}: {kind.replace('_', ' ')}" for kind, line in removed.lines)
             raise MasterStoreError(
@@ -549,9 +597,10 @@ def revise_master(
         )
     previous = _read_master(home_root, target, resolved, current)
     master = change(StoredMaster(master_record_id(resolved), current, len(chain), previous))
-    found = strip_contact(master.markdown())[1].counts
+    # A change to the stored master is not an import: a link in a heading is refused like any other, as it was.
+    found = strip_contact(master.markdown(), headings=False)[1].counts
     # Only what this change brought: a line the import accepted is not held against a later change.
-    before = strip_contact(previous.markdown())[1].counts if found else {}
+    before = strip_contact(previous.markdown(), headings=False)[1].counts if found else {}
     flagged = sorted(kind for kind, count in found.items() if count > before.get(kind, 0))
     if flagged:
         raise MasterStoreError(

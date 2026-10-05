@@ -503,29 +503,29 @@ def test_a_file_in_gigais_own_format_is_held_to_it_and_any_other_file_is_a_resum
     assert build_master(lenient).to_json() == build_master(strict).to_json()
 
 
-def test_contact_data_is_removed_as_before_and_what_stood_under_a_removed_heading_is_kept() -> None:
-    """The privacy strip is the import's own and takes a whole line: also a heading that holds a link (a known limit, said in the count)."""
+def test_contact_data_is_removed_as_before_and_a_heading_keeps_its_name_without_its_link() -> None:
+    """The privacy strip is the import's own and takes a whole line; in a heading only the link goes (0.1.10.11 LK: ``resume_privacy.heading_links``)."""
 
     text = (
         "Jordan Example\njordan.example@example.test | (555) 010-0142\n\n"
         "## Projects\n\n### Kubelint\n- Lints manifests.\n\n"
         "### [Driftwatch](https://github.com/example-org/driftwatch)\n- Finds drift in 4 minutes.\n\n"
-        "## Education\n\n### [Example Tech](https://example.test/cs)\n- B.S. Computer Science, 2014\n"
+        "## Education\n\n### [Northfield Tech](https://example.test/cs)\n- B.S. Computer Science, 2014\n"
     )
     master, lines = _read(text)
     (resume,) = lines["resumes"]  # type: ignore[misc]
-    # The name, the contact line and the two headings with a link: not imported, each counted by line number.
-    assert {row["reason"]: row["lines"] for row in resume["left_out"]} == {"contact": [1, 2, 9, 14]}
+    # The name and the contact line: not imported, each counted by line number. The two headings with a link are kept
+    # (0110-10-09 removed them whole: the project lost its name and its bullet went to the entry above).
+    assert {row["reason"]: row["lines"] for row in resume["left_out"]} == {"contact": [1, 2]}
+    assert strip_contact(text)[1].headings == ((9, "Driftwatch", False), (14, "Northfield Tech", False))
     stored = master.markdown(ids=False)
-    assert not [value for value in (*CONTACT, "github.com", "https://", "Driftwatch", "Example Tech") if value in stored]
-    # Nothing under them is lost: a bullet after another entry is a line of that entry (as it always was), and a
-    # list with no entry above it is an entry of its own, which is said.
+    assert not [value for value in (*CONTACT, "github.com", "https://", "](") if value in stored]
     assert _entries(master) == [
-        ("projects", "Kubelint", (), None, None, False, 2), ("education", "B.S. Computer Science", ("2014",), 2014, 2014, False, 0),
+        ("projects", "Kubelint", (), None, None, False, 1), ("projects", "Driftwatch", (), None, None, False, 1),
+        ("education", "Northfield Tech", (), None, None, False, 1),
     ]
-    assert [item.text for item in master.items.values()] == ["Lints manifests.", "Finds drift in 4 minutes."]
-    assert {row["how"]: row["lines"] for row in resume["read_as"]} == {"listed_entry": [15]}
-    assert lines["in"] == lines["kept"] + lines["left_out"] == 10  # type: ignore[operator]
+    assert [item.text for item in master.items.values()] == ["Lints manifests.", "Finds drift in 4 minutes.", "B.S. Computer Science, 2014"]
+    assert resume["read_as"] == [] and lines["in"] == lines["kept"] + lines["left_out"] == 10  # type: ignore[operator]
 
 
 # --- the real CLI on a scratch home --------------------------------------------------------------

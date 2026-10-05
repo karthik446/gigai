@@ -103,6 +103,16 @@ things still take more than a second (see "Still slower than one second"): the n
   writes nothing. A file whose first line is `` is still held to GigAI's own
   format, and contact lines are removed as before. A refusal names the line number and the rule; on
   the terminal it now also shows that line.
+- **A heading that is a link keeps its name.** A project or employer written as a link
+  (`### [Driftwatch](https://github.com/...)`) lost its whole line when you made the master from a
+  file or imported `master.md`, so the project had no name and its bullets went to the entry above;
+  `gigai scout resume add` stored `### [Driftwatch](`. Now the link goes and the words stay, in an
+  entry's heading, a bold title line and a role line right under one: the entry is "Driftwatch", with
+  its bullets. The command says which heading lost a link, by line number ("link removed from the
+  heading Driftwatch"); `--dry-run` shows it. A heading that is only a link is refused by line number
+  ("this heading is only a link: give the project a name") instead of being dropped. Nothing else
+  changes: GigAI still stores no links, a link in a bullet or a paragraph, an email or a phone number
+  in a heading, and your name and contact lines are handled as before.
 
 #### For agents
 

@@ -35,6 +35,7 @@ from .master_cli import master_group
 from .resume_gate_cli import resume_check_command, resume_clean_command
 from .resume_import import import_resume_file
 from .resume_pii import REMOVED_MESSAGE, RESUME_WARNING, removed_summary
+from .resume_privacy import heading_link_message
 from .target_resolution import ScoutTargetError, _display_path, resolve_scout_target
 from .template import ScoutInstallError, install_scout
 
@@ -367,6 +368,12 @@ def resume_add_command(
         # 0110-046: what the import removed and discarded (counts only), or null.
         "contact_removed": {"removed": resume.contact_removed, "message": REMOVED_MESSAGE} if resume.contact_removed else None,
     }
+    if resume.heading_links:
+        # 0.1.10.11: a link in a heading went and the heading is kept: by line number and the heading's words, never the address.
+        payload["contact_removed"]["headings"] = [  # type: ignore[index]
+            {"kind": "link", "line": line, "heading": words, "where": "line_under_heading" if under else "heading", "message": heading_link_message(words, under)}
+            for line, words, under in resume.heading_links
+        ]
     if as_json:
         _emit(payload, True, "")
         return
@@ -380,6 +387,8 @@ def resume_add_command(
         click.echo(f"Attached to profile {attached_profile.label} ({attached_profile.profile_id})")
     if resume.contact_removed:
         click.echo(f"{REMOVED_MESSAGE} (removed: {removed_summary(resume.contact_removed)})")
+    if resume.heading_links:
+        click.echo("Kept without its link: " + "; ".join(f"line {line}: {heading_link_message(words, under)}" for line, words, under in resume.heading_links) + ".")
     click.echo(f"Warning: {RESUME_WARNING}")
 
 

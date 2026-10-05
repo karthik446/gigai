@@ -117,6 +117,19 @@ def echo_reading(resume: dict[str, object], of: str) -> None:
         click.echo(f"  In {of}: line {', '.join(str(line) for line in row['lines'])}: {row['why']}.")
 
 
+def echo_contact_removed(removed) -> None:  # noqa: ANN001 - a master_store.ContactRemoved
+    """What an import's privacy strip did, for the person at the terminal: kinds, line numbers, a kept heading's words; never a value."""
+
+    from .resume_pii import REMOVED_MESSAGE
+
+    if removed.lines:
+        where = ", ".join(f"line {line}: {kind.replace('_', ' ')}" for kind, line in removed.lines)
+        click.echo(f"{REMOVED_MESSAGE} Not imported: {where}.")
+    if removed.headings:
+        # A link in a heading goes and the heading stays (GigAI stores no links): said by the heading's own words.
+        click.echo("Kept without its link: " + "; ".join(f"line {row['line']}: {row['message']}" for row in removed.heading_rows()) + ".")
+
+
 def _echo_file_lines(lines: dict[str, object], name: str) -> None:
     """What became of every line of FILE (``master init --from FILE``): kept or left out, by line number and reason; never the text."""
 
@@ -272,7 +285,9 @@ def master_init_command(
     <!-- gigai-master:1 --> is in GigAI's own format (## Summary,
     ## Experience with ### entries and - bullets, ## Skills, ## Education,
     ## Projects, ## Other) and is held to it. Contact lines are removed and a
-    line without an id gets one. With a master already stored, pass
+    line without an id gets one. A link in a heading goes and the heading
+    keeps its words; a heading that is only a link is refused by line
+    number (give the project a name). With a master already stored, pass
     --revision N (the revision you read): the result becomes revision N+1.
 
     --dry-run (both forms) shows what would be stored and writes nothing.
@@ -337,7 +352,8 @@ def master_init_command(
         "ids_assigned": result.ids_assigned,
         "ids_restored": result.ids_restored,
         "changes": result.change.to_json(),
-        # What the privacy strip took out (kinds and line numbers, never a value), or null.
+        # What the privacy strip took out (kinds and line numbers, never a value), or null. `headings` (when any):
+        # a link taken out of a heading that is kept, by line number and the heading's words.
         "contact_removed": removed,
         "source_lines": lines,
         "profiles": profiles,
@@ -358,9 +374,7 @@ def master_init_command(
         click.echo(f"Master resume stored as revision {number}: {_size(counts)}; {changed}.")
     if lines is not None:
         _echo_file_lines(lines, source.name)
-    if removed is not None:
-        where = ", ".join(f"line {line}: {kind.replace('_', ' ')}" for kind, line in result.contact_removed.lines)
-        click.echo(f"{removed['message']} Not imported: {where}.")
+    echo_contact_removed(result.contact_removed)
     said = write_line(result.file)
     if said:
         click.echo(said)

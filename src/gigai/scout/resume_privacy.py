@@ -505,11 +505,281 @@ def model_resume(resume_text: str) -> ModelResume:
     return ModelResume(text=text, lines=tuple(kept), withheld=frozenset(withheld))
 
 
+# --- a link in a heading (0.1.10.11) ---------------------------------------------------
+#
+# The strip above takes a link out of a line it keeps and leaves what stood around it:
+# ``### [Driftwatch](https://github.com/x/driftwatch)`` became ``### [Driftwatch](``, and
+# where a flagged line is not imported at all (the master) the project lost its name and
+# its bullets went to the entry above. ``heading_links`` runs BEFORE the strip, on the
+# lines that name an entry, and takes only the link: the words stay. What it leaves goes
+# through the unchanged strip, so an email, a phone number or the name's words in a
+# heading are handled exactly as they were, and no link is stored either way.
+
+#: A heading's words are said back at most this long.
+HEADING_WORDS_SHOWN = 80
+#: At most this many plain lines right under a heading are its role lines (``tailored_resume.MAX_HEADING_LINES`` less the heading).
+_ROLE_LINES = 3
+#: A longer line is not a heading: it is left to the strip as it is.
+_TITLE_MAX_CHARS = 2000
+_TITLE_HEADING = re.compile(r"#{2,6}[ \t]+(?=\S)")
+_TITLE_BULLET = re.compile(r"(?:[-*+•▪▫◦‣⁃○●■□◆◇►▸➢➤✓✔→–—·>]|\d{1,2}[.)])\s")
+#: A line that opens in bold or italics (``**Driftwatch** — a drift detector``, ``*Staff Engineer* | 2021``, ``[**Driftwatch**](...)``).
+_TITLE_EMPHASIS = re.compile(r"\[?(\*\*|__|\*|_)(?=[^\s*_])")
+_CONTACT_SECTION = re.compile(r"contact(?:\s+(?:info|information|details))?|references", re.I)
+#: ``[Words](target)`` and ``![alt](target)``: the words hold no bracket, the target no space or bracket; a quoted title may follow it.
+_MD_LINK = re.compile(r"(!?)\[([^\[\]]*)\]\(\s*<?([^()\s<>]*)>?(?:\s+(?:\"[^\"]*\"|'[^']*'))?\s*\)")
+#: What an import before 0.1.10.11 left of a link in a line it kept: the words, and a bracket where the address was.
+_MD_LINK_LEFT = re.compile(r"\[([^\[\]]*)\]\((?:\s*\))?(?=[\s)|,;:.]|\Z)")
+#: A link whose words are contact data like its address: a mail or phone link, a person's profile page.
+_CONTACT_TARGET = re.compile(r"(?:mailto|tel|sms):|(?:[a-z][a-z0-9+.-]*://)?(?:[\w-]+\.)*(?:linkedin\.com/(?:in|pub)/|lnkd\.in/)", re.I)
+_TARGET_SCHEME = re.compile(r"[a-z][a-z0-9+.-]*://", re.I)
+#: The closers and the punctuation that follow an address in a sentence or in markup are not part of it.
+_AFTER_URL = ")]}>*_.,;:!?'\""
+
+
+class HeadingOnlyLink(ValueError):
+    """An entry heading that holds nothing but a link: there is no name to keep. ``line`` is its 1-based file line.
+
+    The message names the line and never holds its text."""
+
+    def __init__(self, line: int) -> None:
+        super().__init__(f"line {line}: this heading is only a link: give the project a name")
+        self.line = line
+
+
+@dataclass(frozen=True)
+class HeadingLink:
+    """A link ``heading_links`` took out of a line it kept (never the address)."""
+
+    #: The 1-based file line the link stood on.
+    line: int
+    #: The file line of the entry's heading: ``line`` itself, or the heading the line stands under.
+    head: int
+
+    @property
+    def under(self) -> bool:
+        """The link stood on a line under the heading (a role line), not in the heading."""
+
+        return self.head != self.line
+
+
+def heading_words(line: str) -> str:
+    """The words of a heading line as they are said back: no ``#``, no emphasis marks, no trailing comment."""
+
+    core = _split_title(line.strip())[1]
+    words = re.sub(r"\*+|(?<![^\W_])_+|_+(?![^\W_])", "", core)
+    return " ".join(words.split())[:HEADING_WORDS_SHOWN].rstrip()
+
+
+def heading_link_message(words: str, under: bool = False) -> str:
+    """What a report says about one ``HeadingLink``: the heading's words, never the address."""
+
+    where = "a line under the heading" if under else "the heading"
+    return f"link removed from {where} {words}" if words else f"link removed from {'a line under a heading' if under else 'a heading'}"
+
+
+def _split_title(line: str) -> tuple[str, str, str]:
+    """``(the '#' marks, the text, the trailing comments)`` of a stripped line."""
+
+    end = len(line)
+    while line[:end].rstrip().endswith("-->"):
+        start = line.rfind("<!--", 0, end)
+        if start < 0:
+            break
+        end = start
+    body = line[:end]
+    marks = _TITLE_HEADING.match(body)
+    lead = marks.end() if marks else 0
+    return body[:lead], body[lead:].rstrip(), line[len(body.rstrip()):]
+
+
+def _is_label_line(line: str, mark: str) -> bool:
+    """``**Languages:** Go`` and ``**Languages**: Go``: a labelled line, not a title."""
+
+    close = line.find(mark, len(mark) + (1 if line.startswith("[") else 0))
+    if close < 0:
+        return True  # an emphasis mark that is never closed: not a title either
+    return line[:close].rstrip().endswith(":") or line[close + len(mark):].lstrip()[:1] == ":"
+
+
+def _link_address(target: str) -> tuple[str, list[str]]:
+    """``(host, path segments)`` of a link's target, lower case, without scheme, ``www.``, query or fragment."""
+
+    scheme = _TARGET_SCHEME.match(target)
+    rest = target[scheme.end():] if scheme else target
+    rest = re.split(r"[?#]", rest, maxsplit=1)[0].casefold()
+    host, _slash, path = rest.partition("/")
+    return host.removeprefix("www."), [segment for segment in path.split("/") if segment]
+
+
+def _kept_words(found: "re.Match[str]") -> str:
+    """What stays of one markdown link: its words, or nothing when the words are the link itself.
+
+    Nothing stays of an image, of a mail or phone link, of a link to a person's profile page, of a link
+    whose words are its own address, and of a handle (``[jordan-example](github.com/jordan-example)``:
+    the words are the one path segment)."""
+
+    image, words, target = found.group(1), found.group(2), found.group(3)
+    if image or _CONTACT_TARGET.match(target):
+        return ""
+    said = re.sub(r"[*_`\s]+", "", words).casefold().lstrip("@")
+    host, path = _link_address(target)
+    said_host, said_path = _link_address(said)
+    if (said_host, said_path) == (host, path) or (len(path) == 1 and said == path[0]):
+        return ""
+    return words
+
+
+def _without_links(core: str) -> tuple[str, list[str]]:
+    """``core`` without its links: a markdown link keeps its words, a bare address goes. ``(text, the addresses that went)``."""
+
+    text = core
+    addresses: list[str] = []
+
+    def kept(found: "re.Match[str]") -> str:
+        addresses.append(found.group(3))
+        return _kept_words(found)
+
+    for _ in range(3):  # a link around an image is found once the image went
+        text, count = _MD_LINK.subn(kept, text)
+        if not count:
+            break
+    parts: list[str] = []
+    position = 0
+    for found in _BODY_URL.finditer(text):
+        end = found.end()
+        opened = "(" in found.group(0)
+        while end > found.start() and text[end - 1] in _AFTER_URL and not (text[end - 1] == ")" and opened):
+            end -= 1
+        if end > found.start():
+            parts.append(text[position:found.start()])
+            addresses.append(text[found.start():end])
+            position = end
+    if parts:
+        text = "".join(parts) + text[position:]
+    text = _MD_LINK_LEFT.sub(lambda found: found.group(1), text)
+    if text == core:
+        return core, []
+    # Tidy what stood around a link: empty brackets, two separators in a row, a separator the line now ends with.
+    text = re.sub(r"[ \t]+", " ", text)
+    for _ in range(2):
+        text = re.sub(r"\( ?\)|\[ ?\]|< ?>|(\*\*|__) ?\1", "", text)
+    text = re.sub(r" ?([|·•])(?: ?[|·•])+ ?", r" \1 ", text)
+    text = re.sub(r"\( ", "(", re.sub(r" ([),;])", r"\1", re.sub(r" {2,}", " ", text)))
+    closing = len(text) - len(re.sub(r"(?:\*\*|__|\*|_)\Z", "", text))
+    text = text[: len(text) - closing].rstrip(" |·•,;:([–—-") + text[len(text) - closing:]
+    return re.sub(r"\A((?:\*\*|__|\*|_)?)[ |·•,;:–—]+", r"\1", text).strip(), addresses
+
+
+def _only_a_link(marks: str, core: str, went: bool) -> bool:
+    """A link stood on the line and nothing but a link is left: no letter and no digit, or a line the strip takes whole for its link alone.
+
+    ``went``: the rule took a link out. A dotted name alone (``driftwatch.ai``) is the other case: the strip
+    takes such a line whole, so there is no name to keep either. A line with no link at all is never this."""
+
+    line = marks + core
+    if not re.search(r"[^\W_]", core):
+        return went
+    if not (went or _URL.search(line)):
+        return False
+    return _is_contact_only(line) and not any(pattern.search(line) for pattern in (_EMAIL, _PHONE, _STREET, _PO_BOX, _ZIP_LINE))
+
+
+def heading_links(text: str) -> tuple[str, tuple[HeadingLink, ...]]:
+    """``text`` with the links taken out of its headings, the words kept, and where they stood.
+
+    THE rule for a link in a line that names an entry, for every resume import (``resume add``,
+    ``master init`` from the profiles' resumes or from a file, ``master sync``):
+
+    * WHERE: from the first section heading on (``Summary``, ``## Experience``, ...; the name and
+      contact lines above it are the strip's, as they were), outside a Contact or References
+      section, and only in a TITLE line: a ``##`` to ``######`` heading, a line that opens in bold
+      or italics (not ``**Label:** value``), and up to ``_ROLE_LINES`` plain lines right under
+      one of those (its role lines). Never a bullet, never a paragraph.
+    * WHAT: ``[Words](address)`` keeps ``Words``; an address written out (``scheme://``,
+      ``www.``, the known hosts of ``_LINK_HOSTS``) goes and the rest of the line stays. Any other
+      dotted name (``driftwatch.ai``) is not touched here: it is a project's name as often as a
+      link. The words of a mail or phone link, of a person's profile page and a handle go with
+      the link (``_kept_words``).
+    * NOTHING LEFT: a ``#`` heading, or a bold title right above bullets, that is only a link
+      raises ``HeadingOnlyLink`` (its bullets would have no entry): no word is left, or only what
+      the strip takes whole (a dotted name alone, ``### driftwatch.ai``; a contact word alone,
+      ``### [GitHub](...)``). A role line that is only a link is the strip's: it goes whole, as
+      before, and is counted by the strip as a link.
+
+    Line numbers are kept (a line is rewritten in place). Text with no such link comes back as it is.
+    """
+
+    lines = text.splitlines()
+    start = next((index for index, line in enumerate(lines) if _is_resume_section(line)), None)
+    if start is None:
+        return text, ()
+    out = list(lines)
+    found: list[HeadingLink] = []
+    head: int | None = None  # the heading the line above belongs to, while role lines may follow
+    below = 0
+    contact_section = False
+
+    def heads_bullets(index: int) -> bool:
+        later = next((lines[at].strip() for at in range(index + 1, len(lines)) if lines[at].strip()), "")
+        return _TITLE_BULLET.match(later) is not None
+
+    for index in range(start, len(lines)):
+        line = lines[index].strip()
+        if _is_resume_section(line):
+            contact_section, head = _CONTACT_SECTION.fullmatch(line.strip("#*_-:= ").strip()) is not None, None
+            continue
+        if not line or contact_section or len(line) > _TITLE_MAX_CHARS or _TITLE_BULLET.match(line):
+            head = None
+            continue
+        emphasis = _TITLE_EMPHASIS.match(line)
+        if _TITLE_HEADING.match(line):
+            kind = "heading"
+        elif emphasis and not _is_label_line(line, emphasis.group(1)):
+            kind = "role" if head is not None else "title"
+        elif head is not None and below < _ROLE_LINES and not line.startswith("#"):
+            kind = "role"
+        else:
+            head = None
+            continue
+        marks, core, comments = _split_title(line)
+        rewritten, addresses = _without_links(core)
+        if _only_a_link(marks, rewritten, bool(addresses)):
+            if kind == "heading" or (kind == "title" and heads_bullets(index)):
+                raise HeadingOnlyLink(index + 1)
+            alone = " ".join(addresses)
+            if addresses and _is_contact_only(alone):
+                # A role line that is only a link: the strip gets the address alone and takes the line whole, as it
+                # takes a line that is only an address (nothing of the link's own words is left behind).
+                out[index] = alone
+            below += kind == "role"
+            continue
+        if kind == "role":
+            below += 1
+        else:
+            head, below = index, 0
+        if addresses or rewritten != core:
+            indent = lines[index][: len(lines[index]) - len(lines[index].lstrip())]
+            out[index] = f"{indent}{marks}{rewritten}{comments}"
+            if addresses:
+                found.append(HeadingLink(index + 1, (head if head is not None else index) + 1))
+    if out == lines:
+        return text, ()
+    ends = [kept[len(line):] for kept, line in zip(text.splitlines(keepends=True), lines)]
+    return "".join(line + end for line, end in zip(out, ends)), tuple(found)
+
+
 __all__ = [
     "HEADER_MAX_LINES",
+    "HEADING_WORDS_SHOWN",
+    "HeadingLink",
+    "HeadingOnlyLink",
     "ModelResume",
     "guard_name",
     "guard_private",
+    "heading_link_message",
+    "heading_links",
+    "heading_words",
     "is_name_line",
     "model_resume",
     "redact_inline",

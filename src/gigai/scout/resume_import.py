@@ -31,6 +31,12 @@ removed lines are discarded. ``ImportedResume.contact_removed`` counts what
 went, by kind (never a value), for the message the CLI, the API and the UI
 show (``resume_pii.REMOVED_MESSAGE``). A file name that holds the removed
 name's words is stored as ``resume<suffix>``.
+
+0.1.10.11: a link in a heading (``### [Driftwatch](https://...)``) goes and
+the heading keeps its words (``resume_privacy.heading_links``, the one rule;
+``ImportedResume.heading_links`` says where, by line number and the
+heading's words). A heading that is only a link is refused by line number
+(``resume_heading_only_link``): nothing is imported.
 """
 
 from __future__ import annotations
@@ -44,6 +50,7 @@ import tempfile
 from ..canonical import digest_imported_bytes
 from ..private_records import create_record, import_reference
 from .resume_pii import ContactStrip, strip_contact_lines
+from .resume_privacy import HeadingOnlyLink
 
 #: ``private_records.import_reference``'s own size limit for a reference.
 RESUME_MAX_BYTES = 1_048_576
@@ -84,6 +91,8 @@ class ImportedResume:
     label: str
     #: 0110-046: what the import removed, by kind (``{}`` when nothing): counts only.
     contact_removed: dict[str, int] = field(default_factory=dict)
+    #: 0.1.10.11: the links taken out of a heading that is kept (``ContactStrip.headings``): the file line, the heading's words, never the address.
+    heading_links: tuple[tuple[int, str, bool], ...] = ()
 
     @property
     def created(self) -> bool:
@@ -91,7 +100,9 @@ class ImportedResume:
 
 
 def _strip(data: bytes) -> ContactStrip | None:
-    """The import's strip of ``data``; ``None`` when it is too large or not UTF-8 (``import_reference`` refuses both)."""
+    """The import's strip of ``data``; ``None`` when it is too large or not UTF-8 (``import_reference`` refuses both).
+
+    ``ResumeImportError`` (``resume_heading_only_link``) for a heading that is only a link: by line number, never its text."""
 
     if len(data) > RESUME_MAX_BYTES:
         return None
@@ -99,7 +110,10 @@ def _strip(data: bytes) -> ContactStrip | None:
         text = data.decode("utf-8", errors="strict")
     except UnicodeDecodeError:
         return None
-    return strip_contact_lines(text)
+    try:
+        return strip_contact_lines(text, headings=True)
+    except HeadingOnlyLink as exc:
+        raise ResumeImportError("resume_heading_only_link", f"{exc}, then add the resume again. Nothing was imported.") from None
 
 
 def _stored_name(file_name: str, name_words: frozenset[str]) -> str:
@@ -133,7 +147,7 @@ def import_resume_file(
         imported = _import_file(home_root=home_root, requested_target=requested_target, source=clean, gig_id=gig_id)
     finally:
         shutil.rmtree(directory, ignore_errors=True)
-    return ImportedResume(**{**imported.__dict__, "contact_removed": dict(stripped.removed)})
+    return ImportedResume(**{**imported.__dict__, "contact_removed": dict(stripped.removed), "heading_links": stripped.headings})
 
 
 def _import_file(*, home_root: Path, requested_target: Path | None, source: Path, gig_id: str | None) -> ImportedResume:

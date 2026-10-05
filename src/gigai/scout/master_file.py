@@ -23,7 +23,11 @@ nothing and the error names the line. Two things are stricter than ``init
 
 * **contact data is refused**, not dropped: a name line, an email, a phone
   number, a link or an address in the file refuses the whole import by line
-  number and kind, so nothing leaves the file silently;
+  number and kind, so nothing leaves the file silently. One thing is not
+  refused (0.1.10.11, the rule of every resume import,
+  ``resume_privacy.heading_links``): a link in an entry's heading goes, the
+  heading keeps its words, and the import says so (``contact_removed``); a
+  heading that is only a link is refused by line number;
 * **the revision check**: the file is imported on top of the revision GigAI
   wrote it from. When the master changed in Scout (or through the agent)
   since, the import is refused with ``revision_conflict`` and the current
@@ -51,7 +55,7 @@ from pathlib import Path
 
 from . import resumes_folder
 from .master_resume import Master, MasterChange
-from .master_store import ACTORS, MasterStoreError, StoredMaster, import_master, load_master, write_file
+from .master_store import ACTORS, ContactRemoved, MasterStoreError, StoredMaster, import_master, load_master, write_file
 
 MASTER_FILE_SCHEMA = "scout-master-file:1"
 SYNC_COMMAND = "gigai scout resume master sync"
@@ -162,6 +166,8 @@ class MasterSync:
     ids_restored: int = 0
     #: What ``after_master_write`` did; ``None`` when no revision was written.
     profiles: Mapping[str, object] | None = None
+    #: 0.1.10.11: the links the import took out of headings it kept (contact data in any other line refuses the import).
+    contact_removed: ContactRemoved = ContactRemoved()
 
     @property
     def written(self) -> bool:
@@ -177,6 +183,8 @@ class MasterSync:
             "ids": {"kept": self.ids_kept, "assigned": self.ids_assigned, "restored": self.ids_restored},
             "file": dict(self.file),
             "profiles": dict(self.profiles) if self.profiles is not None else {"synced": [], "offers": []},
+            # A link taken out of a heading that is kept (line number and the heading's words, never the address), or null.
+            "contact_removed": self.contact_removed.to_json(),
         }
 
 
@@ -260,6 +268,7 @@ def sync(*, home_root: Path, target: Path, actor: str = "operator", revision: in
         ids_kept=sum(item_id in before for item_id in after), ids_assigned=written.ids_assigned, ids_restored=written.ids_restored,
         # A profile that shows an edited or retired line gets its resume printed again; new lines are only offered.
         profiles=after_master_write(home_root, target) if wrote else None,
+        contact_removed=written.contact_removed,
     )
 
 
