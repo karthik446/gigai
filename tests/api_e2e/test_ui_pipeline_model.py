@@ -6,17 +6,24 @@ system ``node`` over what the SERVER makes on a synthetic home
 and asserts on the JSON the script prints. LOUD skip without ``node``. What
 lives in JSX is pinned by reading the source.
 
-Pinned: the timeline is always tailor -> reassess + Scout ATS -> Scout label,
-with each step's state and the model, tokens and time of its last attempt;
-"N -> M after tailoring" is the backend's requirements_met numbers; the Scout
-ATS chip's breakdown and the Scout label chip, each with the wording the
-SERVER sends (the UI writes none of its own); "process now"; the job page
-reads the stored tailored resume again when a read of the timeline says the
-tailor step finished since the read before it, never for the first read, and
-the timeline is not read again for that resume (0.1.10.9); the daily caps
-with the rank counter's warning state past 60 and its stop at 100; the lanes;
-the approvals with the Approve / Deny body; the settings form's patch; the
-last errors as codes.
+0.1.11 N6 (SPEC 4.2, section 6): the timeline is FOUR rows, Assessed -> Resume
+picked -> Scout ATS -> Scout label, always all four; the "N -> M after
+tailoring" line is gone. The server of this tree still runs the 0.1.10
+pipeline (tailor -> reassess + ats -> label; packet N4 replaces it), so what
+it serves is also the LEGACY case the page must read: its ``tailor`` step is
+shown in the "Resume picked" row, ``reassess`` has no row, the label says
+"made on 0.1.10's tailored resume" and the button "Check again". The rows a
+0.1.11 server serves are pinned on hand-made details beside it.
+
+Also pinned: each step's state and the model, tokens and time of its last
+attempt; the Scout ATS chip's breakdown and the Scout label chip, each with
+the wording the SERVER sends (the UI writes none of its own); "process now";
+the job page reads the stored job resume again when a read of the timeline
+says the pick step finished since the read before it, never for the first
+read, and the timeline is not read again for that resume (0.1.10.9); the
+daily caps with the rank counter's warning state past 60 and its stop at
+100; the lanes; the approvals with the Approve / Deny body; the settings
+form's patch (ONE model step, ``assess``); the last errors as codes.
 """
 
 from __future__ import annotations
@@ -58,26 +65,32 @@ const out = {};
 const flat = (stages) => stages.map((steps) => steps.map((step) => [step.name, step.state]));
 
 // The job page's timeline.
-out.done = { stages: m.stepTimeline(data.done), variant: m.variantLine(data.done), ats: m.atsChip(data.done), label: m.labelChip(data.done), live: m.pipelineLive(data.done) };
-out.waiting = { stages: flat(m.stepTimeline(data.waiting)), variant: m.variantLine(data.waiting), ats: m.atsChip(data.waiting), label: m.labelChip(data.waiting) };
+out.done = { stages: m.stepTimeline(data.done), legacy: m.isLegacyPipeline(data.done), variantLine: typeof m.variantLine, ats: m.atsChip(data.done), label: m.labelChip(data.done), live: m.pipelineLive(data.done) };
+out.waiting = { stages: flat(m.stepTimeline(data.waiting)), ats: m.atsChip(data.waiting), label: m.labelChip(data.waiting) };
 out.never = { stages: m.stepTimeline(data.never), flat: flat(m.stepTimeline(null)), live: m.pipelineLive(data.never) };
+// A 0.1.11 server's rows (hand-made: this tree's server has no `assess` / `pick` step yet).
+const run = { outcome: "error", model: null, input_tokens: null, output_tokens: null, cached_tokens: null, seconds: 120, started_at: "2026-10-03T09:10:00Z" };
 out.failed = m.stepTimeline({ steps: [
-  { name: "tailor", state: "failed", model_target: "codex_cli", attempts: 3, error_code: "assess_timeout", waiting: null, last_run: { outcome: "error", model: null, input_tokens: null, output_tokens: null, seconds: 120.4 } },
-  { name: "reassess", state: "ready", model_target: "claude_cli", attempts: 0, error_code: "daily_cap_reached", waiting: "daily_cap_reached", last_run: null },
+  { name: "assess", state: "failed", model_target: "codex_cli", attempts: 3, error_code: "assess_timeout", waiting: null, last_run: run },
+  { name: "pick", state: "blocked", model_target: null, attempts: 0, error_code: null, waiting: null, last_run: null },
 ] });
-out.variants = [
-  m.variantLine({ requirements_met: { base: { met: 8, total: 11, percent: 73 }, tailored: { met: 10, total: 11, percent: 91 } } }),
-  m.variantLine({ requirements_met: { base: { met: 8, total: 11, percent: 73 }, tailored: null } }),
-  m.variantLine({ requirements_met: { base: { met: 9, total: 11, percent: 82 }, tailored: { met: 9, total: 11, percent: 82 } } }),
-];
+out.capped = m.stepTimeline({ steps: [{ name: "assess", state: "ready", model_target: "claude_cli", attempts: 0, error_code: "daily_cap_reached", waiting: "daily_cap_reached", last_run: null }] });
+const now = ["assess", "pick", "ats", "label"].map((name) => ({ name, state: "done", model_target: null, attempts: 1, error_code: null, waiting: null, updated_at: "2026-10-05T10:00:00Z", last_run: null }));
+out.fresh = { stages: flat(m.stepTimeline({ steps: now })), legacy: m.isLegacyPipeline({ steps: now, label: { label: "recommended", reasons: [] } }), titles: m.stepTimeline({ steps: now }).map((stage) => stage[0].title) };
+// A job the upgrade left: its step rows are gone, its score and label records stay.
+const left = { state: null, enabled: true, steps: [], ats: { score: 80 }, label: { name: "Scout label", label: "recommended", reasons: [], wording: "L" } };
+out.left = { stages: flat(m.stepTimeline(left)), legacy: m.isLegacyPipeline(left), label: m.labelChip(left, { assessedAt: "2030-01-01T00:00:00Z" }) };
+out.ruled = [m.isLegacyPipeline({ steps: [], label: { label: "recommended", rule_version: "scout-label:2" } }), m.isLegacyPipeline({ steps: now, label: { label: "recommended", rule_version: "scout-label:1" } }), m.isLegacyPipeline(null)];
 out.atsFull = m.atsChip({ ats: { score: 84, line: "Scout ATS 84: parses cleanly", parts: { fidelity: 38.5, coverage: 31, format: 20 }, key_skills: "9/11", missing: ["Terraform", "SOC 2"], failed_rules: ["single column"], wording: "W" } });
 out.labels = [
-  m.labelChip({ label: { name: "Scout label", label: "needs_attention", reasons: ["open_questions", "ats_below_minimum"], min_ats: 70, wording: "L" } }),
-  m.labelChip({ label: { label: "ready_to_apply", reasons: [] } }),
+  m.labelChip({ steps: now, label: { name: "Scout label", label: "needs_attention", reasons: ["open_questions", "ats_below_minimum"], min_ats: 70, wording: "L" } }),
+  m.labelChip({ steps: now, label: { label: "ready_to_apply", reasons: [] } }),
 ];
 const ids = { jobIdentity: data.done.job_identity, profileId: data.done.profile_id };
 out.actions = {
   done: m.processAction(data.done, { assessed: true, ...ids }),
+  fresh: m.processAction({ state: "done", enabled: true, steps: now }, { assessed: true, ...ids }),
+  left: m.processAction(left, { assessed: true, ...ids }),
   never: m.processAction(data.never, { assessed: true, ...ids }),
   notAssessed: m.processAction(data.never, { assessed: false, ...ids }),
   running: m.processAction({ state: "running", enabled: true }, { assessed: true, ...ids }),
@@ -87,23 +100,23 @@ out.actions = {
 out.results = [m.processResultLine({ result: "enqueued", runner: true }), m.processResultLine({ result: "noop_unchanged", runner: false }), m.processResultLine(null)];
 out.liveStates = ["running", "waiting", "done", "failed", "awaiting_approval", null].map((state) => m.pipelineLive({ state }));
 
-// The job page follows the tailor step: its stamp, a read against the read before it, and the resume it keeps.
-const doneStamp = m.tailorDoneStamp(data.done);
-out.tailor = {
-  stamps: [doneStamp, m.tailorDoneStamp(data.waiting), m.tailorDoneStamp(data.never), m.tailorDoneStamp(null), m.tailorDoneStamp({ steps: [{ name: "tailor", state: "done" }] })],
+// The job page follows the pick step (a 0.1.10 server's tailor step): its stamp, a read against the read before it, and the resume it keeps.
+const doneStamp = m.pickDoneStamp(data.done);
+out.pick = {
+  stamps: [doneStamp, m.pickDoneStamp(data.waiting), m.pickDoneStamp(data.never), m.pickDoneStamp(null), m.pickDoneStamp({ steps: [{ name: "pick", state: "done" }] }), m.pickDoneStamp({ steps: now })],
   finished: {
-    first: m.tailorFinished(undefined, doneStamp),
-    polled: m.tailorFinished("", doneStamp),
-    same: m.tailorFinished(doneStamp, doneStamp),
-    again: m.tailorFinished(doneStamp, "2030-01-01T00:00:00+00:00"),
-    running: m.tailorFinished(doneStamp, ""),
-    never: m.tailorFinished("", ""),
+    first: m.pickFinished(undefined, doneStamp),
+    polled: m.pickFinished("", doneStamp),
+    same: m.pickFinished(doneStamp, doneStamp),
+    again: m.pickFinished(doneStamp, "2030-01-01T00:00:00+00:00"),
+    running: m.pickFinished(doneStamp, ""),
+    never: m.pickFinished("", ""),
   },
 };
 const older = { stored_path: "older", updated_at: "2026-10-04T10:00:00+00:00" };
 const newer = { stored_path: "newer", updated_at: "2026-10-04T10:05:00+00:00" };
 const path = (item) => (item ? item.stored_path : null);
-out.tailor.kept = [
+out.pick.kept = [
   path(newerStored(null, older)), path(newerStored(older, null)), path(newerStored(null, null)),
   path(newerStored(older, newer)), path(newerStored(newer, older)), newerStored(older, { ...older }) === older,
 ];
@@ -122,7 +135,7 @@ out.status = [
 out.approvals = m.approvalRows(data.overview);
 out.approvalTokens = m.approvalRows({ approvals: { items: [{ id: "apv_1", jobs: 3, waiting_jobs: 1, est_calls: 2, est_tokens: 61000, trigger: "profile_changed", created_at: "t" }] } });
 out.decisions = [m.decisionBody(true), m.decisionBody(false)];
-out.errors = m.errorRows({ errors: [{ profile_id: "p1", job_identity: "https://x.test/1", step: "tailor", error_code: "assess_timeout", attempt: 2, at: "2026-10-03T09:12:00Z" }, { step: "ats", error_code: null, attempt: 1, at: "t" }] });
+out.errors = m.errorRows({ errors: [{ profile_id: "p1", job_identity: "https://x.test/1", step: "assess", error_code: "assess_timeout", attempt: 2, at: "2026-10-03T09:12:00Z" }, { step: "ats", error_code: null, attempt: 1, at: "t" }] });
 out.noErrors = m.errorRows(data.overview);
 
 // Settings: the form.
@@ -134,8 +147,9 @@ out.patches = {
   off: m.pipelinePatch({ ...draft, enabled: false }, data.settings),
   caps: m.pipelinePatch({ ...draft, jobsPerTrigger: "5", callsPerDay: "20", labelMinAts: "70" }, data.settings),
   rank: m.pipelinePatch({ ...draft, rankCallsPerDay: "80", rankWarnAt: "40" }, data.settings),
-  models: m.pipelinePatch({ ...draft, tailorModel: "claude_cli", reassessModel: "codex_cli" }, data.settings),
-  modelBack: m.pipelinePatch({ ...m.pipelineDraft(data.settingsWithModel), tailorModel: "" }, data.settingsWithModel),
+  models: m.pipelinePatch({ ...draft, assessModel: "claude_cli" }, data.settings),
+  modelBack: m.pipelinePatch({ ...m.pipelineDraft(data.settingsWithAssess), assessModel: "" }, data.settingsWithAssess),
+  retired: [m.pipelineDraft(data.settingsWithModel), m.pipelinePatch(m.pipelineDraft(data.settingsWithModel), data.settingsWithModel)],
 };
 out.errorsForm = [
   m.pipelineFormError(draft),
@@ -209,6 +223,8 @@ def out(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict:
     }
     path.write_text(json.dumps({"schema_version": "scout-settings:1", "pipeline": {"models": {"tailor": "codex_cli"}}}), encoding="utf-8")
     data["settingsWithModel"] = background_settings.background_settings(fx.home_root, fx.target)
+    # What a 0.1.11 server answers for a file that names the one model step (hand-made: this tree's settings know no `assess`).
+    data["settingsWithAssess"] = {"settings": {"pipeline": {**data["settings"]["settings"]["pipeline"], "models": {"assess": "codex_cli"}}, "rank": data["settings"]["settings"]["rank"]}}
     script = SCRIPT.replace("MODEL_URL", json.dumps((UI_SRC / "pipelineModel.js").resolve().as_uri())).replace("DATA", json.dumps(data))
     script = script.replace("TAILORED_URL", json.dumps((UI_SRC / "tailoredResumeModel.js").resolve().as_uri()))
     completed = subprocess.run([node, "--input-type=module", "-e", script], capture_output=True, text=True, timeout=60, check=False)
@@ -219,48 +235,57 @@ def out(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict:
     return result
 
 
-def test_the_timeline_is_tailor_then_reassess_and_ats_then_the_label(out: dict) -> None:
+def test_the_timeline_is_four_rows_assessed_picked_ats_label(out: dict) -> None:
+    # A 0.1.11 server's four steps, one row each, in order.
+    assert out["fresh"] == {"stages": [[["assess", "done"]], [["pick", "done"]], [["ats", "done"]], [["label", "done"]]], "legacy": False, "titles": ["Assessed", "Resume picked", "Scout ATS", "Scout label"]}
+    # What THIS tree's server serves (the 0.1.10 pipeline): still four rows; its tailor step, the one that stores the
+    # job's resume, is in the "Resume picked" row, and its re-assessment of the tailored resume has no row.
     done = out["done"]
-    assert [[step["name"] for step in stage] for stage in done["stages"]] == [["tailor"], ["reassess", "ats"], ["label"]]
-    steps_by_name = {step["name"]: step for stage in done["stages"] for step in stage}
-    assert {step["state"] for step in steps_by_name.values()} == {"done"} and {step["tone"] for step in steps_by_name.values()} == {"ok"}
-    assert [steps_by_name[name]["title"] for name in ("tailor", "reassess", "ats", "label")] == [
-        "Tailor resume", "Assess the tailored resume", "Scout ATS", "Scout label",
-    ]
-    # The model steps name their model target and the time of their last attempt (the metrics); the local steps no model.
     served = {step["name"]: step for step in out["data"]["done"]["steps"]}
-    for name in ("tailor", "reassess"):
-        assert steps_by_name[name]["model"] and steps_by_name[name]["seconds"] is not None, name
-        assert served[name]["last_run"]["outcome"] == "ok"
-        assert steps_by_name[name]["model"].startswith(served[name]["model_target"].split("_")[0]), "the model target's short name, then the model id"
+    assert set(served) == {"tailor", "reassess", "ats", "label"}, "this tree's pipeline: update this test with packet N4"
+    assert [[step["name"] for step in stage] for stage in done["stages"]] == [["assess"], ["pick"], ["ats"], ["label"]]
+    steps_by_name = {step["name"]: step for stage in done["stages"] for step in stage}
+    assert [steps_by_name[name]["title"] for name in ("assess", "pick", "ats", "label")] == ["Assessed", "Resume picked", "Scout ATS", "Scout label"]
+    assert [steps_by_name[name]["state"] for name in ("assess", "pick", "ats", "label")] == ["not_started", "done", "done", "done"]
+    assert done["legacy"] is True and done["live"] is False
+    # The step in the "Resume picked" row carries the numbers of ITS last attempt (the metrics); the local steps no model.
+    assert steps_by_name["pick"]["model"] and steps_by_name["pick"]["seconds"] is not None
+    assert steps_by_name["pick"]["model"].startswith(served["tailor"]["model_target"].split("_")[0]), "the model target's short name, then the model id"
     assert steps_by_name["ats"]["model"] is None and steps_by_name["label"]["model"] is None
-    assert done["live"] is False
-    # A job waiting for an approval: its first step says so, the rest wait behind it; nothing is made up.
-    assert out["waiting"]["stages"] == [[["tailor", "awaiting_approval"]], [["reassess", "blocked"], ["ats", "blocked"]], [["label", "blocked"]]]
-    assert (out["waiting"]["variant"], out["waiting"]["ats"], out["waiting"]["label"]) == (None, None, None)
-    # A job that never entered the pipeline still shows the four steps, not started.
-    assert out["never"]["flat"] == [[["tailor", "not_started"]], [["reassess", "not_started"], ["ats", "not_started"]], [["label", "not_started"]]]
+    # A job waiting for an approval: its step says so, the rest wait behind it; nothing is made up.
+    assert out["waiting"]["stages"] == [[["assess", "not_started"]], [["pick", "awaiting_approval"]], [["ats", "blocked"]], [["label", "blocked"]]]
+    assert (out["waiting"]["ats"], out["waiting"]["label"]) == (None, None)
+    # A job that never entered the pipeline still shows the four rows, not started.
+    assert out["never"]["flat"] == [[["assess", "not_started"]], [["pick", "not_started"]], [["ats", "not_started"]], [["label", "not_started"]]]
     assert {step["stateLabel"] for stage in out["never"]["stages"] for step in stage} == {"Not started"} and out["never"]["live"] is False
-    tailor, reassess = out["failed"][0][0], out["failed"][1][0]
-    assert (tailor["state"], tailor["tone"], tailor["error"], tailor["attempts"], tailor["seconds"], tailor["tokens"]) == ("failed", "danger", "assess_timeout", 3, "2 min", None)
-    assert (reassess["stateLabel"], reassess["waiting"], reassess["error"]) == ("Queued", "the daily cap of model calls is reached", None)
-    assert out["failed"][1][1]["state"] == "not_started"
+    assess, pick = out["failed"][0][0], out["failed"][1][0]
+    assert (assess["state"], assess["tone"], assess["error"], assess["attempts"], assess["seconds"], assess["tokens"]) == ("failed", "danger", "assess_timeout", 3, "2 min", None)
+    assert (pick["state"], pick["stateLabel"]) == ("blocked", "Waiting for the step before") and out["failed"][2][0]["state"] == "not_started"
+    capped = out["capped"][0][0]
+    assert (capped["stateLabel"], capped["waiting"], capped["error"]) == ("Queued", "the daily cap of model calls is reached", None)
     assert out["liveStates"] == [True, True, False, False, False, False]
 
 
-def test_the_variant_reads_n_to_m_after_tailoring_from_the_backends_numbers(out: dict) -> None:
-    served = out["data"]["done"]["requirements_met"]
-    base, tailored = served["base"], served["tailored"]
-    assert out["done"]["variant"] == {
-        "text": f"{base['percent']} → {tailored['percent']} after tailoring",
-        "detail": f"Requirements met: {base['met']} of {base['total']} → {tailored['met']} of {tailored['total']}",
-        "improved": tailored["percent"] > base["percent"],
-    }
-    assert out["variants"] == [
-        {"text": "73 → 91 after tailoring", "detail": "Requirements met: 8 of 11 → 10 of 11", "improved": True},
-        None,
-        {"text": "82 · no change after tailoring", "detail": "Requirements met: 9 of 11 → 9 of 11", "improved": False},
-    ]
+def test_the_before_and_after_tailoring_line_is_gone(out: dict) -> None:
+    # 0.1.11 (SPEC 4.2): one assessment and no tailored variant: "73 -> 91 after tailoring" has nothing to print.
+    assert out["done"]["variantLine"] == "undefined"
+    assert out["data"]["done"]["requirements_met"]["tailored"] is not None, "this tree's server still serves the pair; the page shows no line for it"
+    timeline = (UI_SRC / "components" / "PipelineTimeline.jsx").read_text(encoding="utf-8")
+    assert "tailored-variant" not in timeline and "variantLine" not in timeline and "after tailoring" not in timeline.split("export default function")[1]
+
+
+def test_a_job_the_0_1_10_pipeline_processed_keeps_its_label_and_says_so(out: dict) -> None:
+    # After the upgrade a finished job has no step rows; its score and label records stay and keep showing.
+    left = out["left"]
+    assert left["legacy"] is True and left["stages"] == [[["assess", "not_started"]], [["pick", "not_started"]], [["ats", "not_started"]], [["label", "not_started"]]]
+    label = left["label"]
+    assert label["label"] == "Scout label: recommended (made on 0.1.10's tailored resume)" and label["legacy"] is True and label["tone"] == "plain"
+    assert label["older"] is False, "it says the stronger thing once: made by 0.1.10"
+    assert label["note"].startswith("This label was made by GigAI 0.1.10") and "Check again" in label["note"]
+    ids = {"job_identity": out["data"]["done"]["job_identity"], "profile_id": out["data"]["done"]["profile_id"]}
+    assert out["actions"]["left"] == {"enabled": True, "label": "Check again", "reason": "", "body": ids}
+    # A label's own rule version says it when the server sends one; nothing held is not legacy.
+    assert out["ruled"] == [False, True, False]
 
 
 def test_the_ats_chip_and_the_label_chip_carry_only_the_servers_wording(out: dict) -> None:
@@ -268,7 +293,8 @@ def test_the_ats_chip_and_the_label_chip_carry_only_the_servers_wording(out: dic
     ats, label = out["done"]["ats"], out["done"]["label"]
     assert ats["label"] == f"Scout ATS {served['ats']['score']}" and ats["line"] == served["ats"]["line"]
     assert ats["wording"] == ats_score.ATS_WORDING and label["wording"] == steps.LABEL_WORDING
-    assert label["label"] == f"{steps.LABEL_NAME}: {served['label']['label'].replace('_', ' ')}" and label["minAts"] == 10
+    # This tree's server ran the 0.1.10 pipeline for this job: its label says so (test above).
+    assert label["label"] == f"{steps.LABEL_NAME}: {served['label']['label'].replace('_', ' ')} (made on 0.1.10's tailored resume)" and label["minAts"] == 10
     assert out["atsFull"] == {
         "label": "Scout ATS 84", "score": 84, "line": "Scout ATS 84: parses cleanly",
         "rows": [
@@ -282,7 +308,7 @@ def test_the_ats_chip_and_the_label_chip_carry_only_the_servers_wording(out: dic
         "label": "Scout label: needs attention", "code": "needs_attention", "tone": "warn",
         "reasons": ["open questions", "ats below minimum"], "minAts": 70, "wording": "L",
         # 0110-10-12: not older than the assessment shown (none was named): no suffix, no note.
-        "older": False, "note": None, "at": None,
+        "older": False, "legacy": False, "note": None, "at": None,
     }
     assert unknown is None, "a label code the backend does not have is never shown"
     # The UI's own files hold neither sentence: both arrive in the response.
@@ -296,7 +322,8 @@ def test_process_now(out: dict) -> None:
     actions = out["actions"]
     ids = {"job_identity": out["data"]["done"]["job_identity"], "profile_id": out["data"]["done"]["profile_id"]}
     assert actions["never"] == {"enabled": True, "label": "Process now", "reason": "", "body": ids}
-    assert actions["done"] == {"enabled": True, "label": "Process again", "reason": "", "body": {**ids, "force": True}}
+    assert actions["fresh"] == {"enabled": True, "label": "Process again", "reason": "", "body": {**ids, "force": True}}
+    assert actions["done"] == {"enabled": True, "label": "Check again", "reason": "", "body": {**ids, "force": True}}, "this tree's finished job is a 0.1.10 one"
     assert (actions["notAssessed"]["enabled"], actions["notAssessed"]["reason"]) == (False, "Assess this posting first.")
     assert (actions["running"]["enabled"], actions["running"]["label"]) == (False, "Processing…")
     assert actions["off"]["enabled"] is False and "off" in actions["off"]["reason"]
@@ -304,28 +331,29 @@ def test_process_now(out: dict) -> None:
     assert out["results"] == ["enqueued", "noop unchanged; this server runs no pipeline (run: gigai scout pipeline run --once)", None]
 
 
-def test_the_job_page_reads_the_stored_resume_again_when_the_tailor_step_finishes(out: dict) -> None:
-    """0.1.10.9 (found by the U3 browser flow): the panel, "Tailor again" and "Resume tailored" needed a reload."""
+def test_the_job_page_reads_the_stored_resume_again_when_the_pick_step_finishes(out: dict) -> None:
+    """0.1.10.9 (found by the U3 browser flow): the panel and the job's state needed a reload."""
 
     served = {step["name"]: step for step in out["data"]["done"]["steps"]}
-    tailor = out["tailor"]
-    # The stamp is the tailor step's own `updated_at` once it is done; a step that waits, or never started, has none.
+    pick = out["pick"]
+    # The stamp is the `updated_at` of the step that stores the resume once it is done (`pick`; this tree's `tailor`);
+    # a step that waits, or never started, has none.
     assert served["tailor"]["state"] == "done" and isinstance(served["tailor"]["updated_at"], str) and served["tailor"]["updated_at"]
-    assert tailor["stamps"] == [served["tailor"]["updated_at"], "", "", "", "done"]
+    assert pick["stamps"] == [served["tailor"]["updated_at"], "", "", "", "done", "2026-10-05T10:00:00Z"]
     # The first read of a job tells nothing new (the page read the stored resume at the same moment); a read that
     # finds the step done after one that did not, or done again later, does; a step that runs again does not, yet.
-    assert tailor["finished"] == {"first": False, "polled": True, "same": False, "again": True, "running": False, "never": False}
+    assert pick["finished"] == {"first": False, "polled": True, "same": False, "again": True, "running": False, "never": False}
     # The quiet re-read never puts an older resume, or nothing, over what the page holds; the same one changes nothing.
-    assert tailor["kept"] == ["older", "older", None, "newer", "newer", True]
+    assert pick["kept"] == ["older", "older", None, "newer", "newer", True]
     # The wiring: the timeline reports it, the page reads again, and its timeline is not read again for that resume.
     timeline = (UI_SRC / "components" / "PipelineTimeline.jsx").read_text(encoding="utf-8")
-    assert "tailorFinished(before, stamp)" in timeline and "tailorDone.current();" in timeline
-    hook = (UI_SRC / "components" / "TailoredResumePanel.jsx").read_text(encoding="utf-8")
+    assert "pickFinished(before, stamp)" in timeline and "pickDone.current();" in timeline
+    hook = (UI_SRC / "components" / "JobResumePanel.jsx").read_text(encoding="utf-8")
     assert "setStored((held) => newerStored(held, latestStored(response.items)))" in hook
     page = (UI_SRC / "views" / "JobPage.jsx").read_text(encoding="utf-8")
-    assert "onTailorDone={tailored.reload}" in page
-    assert 'refreshKey={`${assessment ? assessment.verdict || "assessed" : "none"}:${tailored.changes}`}' in page
-    assert "tailored.stored.updated_at" not in page, "the timeline's refreshKey follows the stored resume again: it resets itself"
+    assert "onPickDone={resume.reload}" in page
+    assert 'refreshKey={`${assessment ? assessment.verdict || "assessed" : "none"}:${resume.changes}`}' in page
+    assert "resume.stored.updated_at" not in page, "the timeline's refreshKey follows the stored resume again: it resets itself"
 
 
 def test_the_caps_warn_past_60_rank_calls_and_stop_at_100(out: dict) -> None:
@@ -361,14 +389,14 @@ def test_the_lanes_the_status_line_the_approvals_and_the_errors(out: dict) -> No
     assert out["approvalTokens"][0]["text"] == "1 job · ~2 model calls · ~61k tokens"
     assert out["decisions"] == [{"approve": True, "actor": "operator"}, {"approve": False, "actor": "operator"}]
     first, second = out["errors"]
-    assert (first["step"], first["code"], first["attempt"], first["job"], first["profileId"]) == ("Tailor resume", "assess_timeout", 2, "https://x.test/1", "p1")
+    assert (first["step"], first["code"], first["attempt"], first["job"], first["profileId"]) == ("Assessed", "assess_timeout", 2, "https://x.test/1", "p1")
     assert (second["step"], second["code"]) == ("Scout ATS", "unknown") and out["noErrors"] == []
 
 
 def test_the_settings_form_sends_only_what_changed(out: dict) -> None:
     assert out["draft"] == {
         "enabled": True, "jobsPerTrigger": "1", "callsPerDay": "40", "labelMinAts": "10", "rankCallsPerDay": "100", "rankWarnAt": "60",
-        "tailorModel": "", "reassessModel": "",
+        "assessModel": "",
     }
     assert out["shown"] == [True, False, False]
     assert out["patches"] == {
@@ -376,9 +404,13 @@ def test_the_settings_form_sends_only_what_changed(out: dict) -> None:
         "off": {"pipeline": {"enabled": False}},
         "caps": {"pipeline": {"auto_jobs_per_trigger": 5, "max_model_calls_per_day": 20, "label_min_ats": 70}},
         "rank": {"rank": {"max_calls_per_day": 80, "warn_calls_per_day": 40}},
-        "models": {"pipeline": {"models": {"tailor": "claude_cli", "reassess": "codex_cli"}}},
-        "modelBack": {"pipeline": {"models": {"tailor": None}}},
+        # 0.1.11: ONE model step. The two settings of 0.1.10 are neither shown nor sent: what the file holds stays.
+        "models": {"pipeline": {"models": {"assess": "claude_cli"}}},
+        "modelBack": {"pipeline": {"models": {"assess": None}}},
+        "retired": out["patches"]["retired"],
     }
+    retired_draft, retired_patch = out["patches"]["retired"]
+    assert retired_draft["assessModel"] == "" and "tailorModel" not in retired_draft and retired_patch is None, "a 0.1.10 file's tailor model is neither shown nor sent"
     ok, too_many, over_100, negative, empty, warn_over = out["errorsForm"]
     assert ok == "" and "0 to 1000" in too_many and "0 to 100." in over_100 and negative and empty
     assert warn_over == "Rank warning level: not above the rank calls a day."
@@ -388,9 +420,19 @@ def test_the_settings_form_sends_only_what_changed(out: dict) -> None:
 def test_the_server_takes_the_patches_the_form_makes(out: dict) -> None:
     """Every patch the model builds is one the settings route accepts (the server's own validation)."""
 
-    for name in ("off", "caps", "rank", "models", "modelBack"):
+    for name in ("off", "caps", "rank"):
         checked = background_settings.validate_patch(out["patches"][name])
         assert set(checked) == set(out["patches"][name]), name
+    # `pipeline.models.assess` is 0.1.11's one model step (SPEC 4.2). The server knows it from packet N4; until
+    # then this tree's server refuses the name, and says so (nothing is written).
+    from gigai.scout.pipeline import settings as pipeline_settings
+
+    for name in ("models", "modelBack"):
+        if "assess" in pipeline_settings.MODEL_STEPS:
+            assert set(background_settings.validate_patch(out["patches"][name])) == set(out["patches"][name]), name
+        else:
+            with pytest.raises(background_settings.SettingsError):
+                background_settings.validate_patch(out["patches"][name])
     with pytest.raises(background_settings.SettingsError):  # and what the form refuses, the server refuses too
         background_settings.validate_patch({"rank": {"max_calls_per_day": 50, "warn_calls_per_day": 60}})
 
@@ -416,5 +458,6 @@ def test_the_job_page_and_settings_wiring_and_test_ids() -> None:
 
 def test_the_built_bundle_has_the_timeline_and_the_panel() -> None:
     bundle = "".join(path.read_text(encoding="utf-8") for path in (UI / "dist" / "assets").glob("index-*.js"))
-    for needle in ("/api/pipeline/job?", "/api/pipeline/process", "/api/pipeline/approvals/", "step-timeline", "ats-chip", "scout-label-chip", "background-panel", "approvals-list", "after tailoring"):
+    for needle in ("/api/pipeline/job?", "/api/pipeline/process", "/api/pipeline/approvals/", "step-timeline", "ats-chip", "scout-label-chip", "background-panel", "approvals-list", "Resume picked", "Check again"):
         assert needle in bundle, needle
+    assert "after tailoring" not in bundle and "Tailor again" not in bundle, "0.1.11: the bundle offers no tailoring"

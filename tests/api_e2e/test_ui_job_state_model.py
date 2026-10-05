@@ -176,7 +176,7 @@ def _fixture() -> dict:
     ]
     return {
         "now": NOW,
-        "states": list(job_state.JOB_STATES),
+        "states": sorted({*job_state.JOB_STATES, *getattr(job_state, "GATE_STATES", ()), "has_gap"}),  # has_gap: 0.1.11, see _backend_states
         "eventKinds": sorted(EVENT_KINDS - {"saved"}),
         "build": {"rows": rows, "rankScores": [], "quickItems": quick_items, "runCreatedAt": "2026-09-24T00:00:00Z"},
         "applications": applications,
@@ -211,6 +211,17 @@ def _by_id(jobs: list[dict], identity: str) -> dict:
 # --- words, never ids --------------------------------------------------------------------
 
 
+def _backend_states() -> set[str]:
+    """Every state the backend can serve, plus ``has_gap`` (0.1.11, OD1).
+
+    ``has_gap`` is the gate's state ("matched by verdict, held by the gate"). The UI has its words from packet N6; the
+    backend serves it from packet N3 (``job_state.GATE_STATES``, then ``JOB_STATES``). Until N3 is in the tree the UI
+    knows one state more than ``JOB_STATES`` lists, on purpose.
+    """
+
+    return {*job_state.JOB_STATES, *getattr(job_state, "GATE_STATES", ()), "has_gap"}
+
+
 def test_every_state_the_backend_serves_has_words(out: dict) -> None:
     assert out["labels"] == {
         "not_assessed": "Not assessed",
@@ -218,15 +229,16 @@ def test_every_state_the_backend_serves_has_words(out: dict) -> None:
         "needs_answers": "Needs your answers",
         "weak_fit": "Weak fit",
         "matched": "Matched",
+        "has_gap": "Has a gap",
         "not_a_match": "Not a match",
-        "tailored": "Resume tailored",
+        "tailored": "Resume ready",
         "applied": "Applied",
         "interview_scheduled": "Interview scheduled",
         "offer_received": "Offer received",
         "rejected": "Rejected",
         "withdrawn": "Withdrawn",
     }
-    assert set(out["labels"]) == set(job_state.JOB_STATES)
+    assert set(out["labels"]) == _backend_states()
     for state, label in out["labels"].items():
         assert "_" not in label and label != state and label[0].isupper()
     # A state this page has never heard of is still words.
@@ -247,7 +259,7 @@ def test_every_event_a_job_accepts_next_has_a_button(out: dict) -> None:
 
 
 def test_the_ui_knows_the_same_states_as_the_backend(out: dict) -> None:
-    assert sorted(out["order"]) == sorted(job_state.JOB_STATES)
+    assert sorted(out["order"]) == sorted(_backend_states())
     assert out["applicationStates"] == list(job_state.APPLICATION_STATES)
     assert out["isApplication"] == list(job_state.APPLICATION_STATES)
 
@@ -297,7 +309,7 @@ def test_the_chips_count_the_jobs_in_each_state(out: dict) -> None:
         {"value": "all", "label": "All", "count": 6},
         {"value": "needs_answers", "label": "Needs your answers", "count": 1},
         {"value": "matched", "label": "Matched", "count": 1},
-        {"value": "tailored", "label": "Resume tailored", "count": 2},
+        {"value": "tailored", "label": "Resume ready", "count": 2},
         {"value": "interview_scheduled", "label": "Interview scheduled", "count": 1},
         {"value": "rejected", "label": "Rejected", "count": 1},
     ]
@@ -389,7 +401,7 @@ def test_jobs_and_assessments_share_the_state_chips() -> None:
 
 def test_the_job_page_shows_the_state_and_records_the_next_events() -> None:
     page = _source("views", "JobPage.jsx")
-    assert "<JobStateActions jobId={job.id} state={state} pasted={pasted} tailoredBefore={tailoredBefore} onRecorded={handleApplicationRecorded} />" in page
+    assert "<JobStateActions jobId={job.id} state={state} pasted={pasted} onRecorded={handleApplicationRecorded} />" in page
     assert "<StateChip state={state} always showSince />" in page
     assert "state.nextEvents.map((eventKind) => (" in page
     assert "postApplication({ job_identity: jobId, event_kind: eventKind })" in page

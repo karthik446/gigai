@@ -37,7 +37,7 @@ from gigai.scout.find_jobs.api import static as static_module
 UI_SRC = Path(static_module.__file__).resolve().parents[2] / "ui" / "src"
 
 NODE_SCRIPT = """
-const [state, answers, postings, jobs, pipeline] = await Promise.all(__URLS__.map((url) => import(url)));
+const [state, answers, postings, jobs, pipeline, resume] = await Promise.all(__URLS__.map((url) => import(url)));
 const input = JSON.parse(process.argv[1]);
 const now = Date.parse(input.now);
 // A rule this fix added answers null on a tree from before it, so the run says what the page did then, not "no such function".
@@ -62,7 +62,7 @@ process.stdout.write(JSON.stringify({
   rowScores: input.rows.map((row) => postings.scoreText(row)),
   staleWords: Object.fromEntries(Object.keys(input.serverWords).map((code) => [code, call(postings.staleWords, code)])),
   assessedAt: input.dated.map((job) => jobs.assessedAt(job)),
-  tailoredBefore: input.tailored.map(([stored, at]) => call(jobs.tailoredBeforeAssessment, stored, at)),
+  tailoredBefore: input.tailored.map(([stored, at]) => resume.staleItems(resume.staleCodes({ stored, assessedAt: at })).map((item) => [item.code, item.label, item.action])),
   gapLines: input.assessments.map((assessment) => call(jobs.minorGapLine, assessment)),
   labels: input.labels.map(([detail, assessedAt]) => pipeline.labelChip(detail, { assessedAt })),
   labelPlain: pipeline.labelChip(input.labels[0][0]),
@@ -122,6 +122,9 @@ ASSESSMENTS = [
     {"verdict": "not_a_match", "matrix": _GAPS},
 ]
 _LABEL = {"label": {"name": "Scout label", "label": "recommended", "reasons": [], "min_ats": 0, "wording": "L", "updated_at": "2026-10-03T12:00:10.000000Z"}}
+# 0.1.11: a job whose pipeline is the four steps of 0.1.11 (a label with none of them is the 0.1.10 pipeline's, and
+# says THAT instead: tests/api_e2e/test_ui_pipeline_model.py).
+_LABEL = {**_LABEL, "steps": [{"name": name, "state": "done"} for name in ("assess", "pick", "ats", "label")]}
 LABELS = [
     [_LABEL, "2026-10-05T03:36:00.000000Z"],  # made before the assessment shown
     [_LABEL, "2026-10-03T11:00:00.000000Z"],  # made after it
@@ -144,7 +147,7 @@ def out() -> dict:
     node = shutil.which("node")
     if node is None:
         pytest.skip("LOUD SKIP: node is not on PATH; the UI model cannot run")
-    urls = [(UI_SRC / name).as_uri() for name in ("jobStateModel.js", "answersModel.js", "postingsModel.js", "jobModel.js", "pipelineModel.js")]
+    urls = [(UI_SRC / name).as_uri() for name in ("jobStateModel.js", "answersModel.js", "postingsModel.js", "jobModel.js", "pipelineModel.js", "jobResumeModel.js")]
     payload = json.dumps({
         "jobs": JOBS, "rows": ROWS, "dated": DATED, "tailored": TAILORED_CASES, "assessments": ASSESSMENTS, "labels": LABELS,
         "dates": DATES, "ago": AGO, "now": NOW, "serverWords": scout_new._STALE_WORDS,
@@ -211,9 +214,10 @@ def test_what_was_made_before_the_assessment_shown_says_so(out: dict) -> None:
     assert older["note"].startswith("This label was made before the latest assessment")
     for label in (newer, unknown, out["labelPlain"]):
         assert (label["older"], label["label"], label["tone"], label["note"]) == (False, "Scout label: recommended", "ok", None)
-    before, *others = out["tailoredBefore"]
-    assert before.startswith("The resume was tailored ") and "before the latest assessment" in before and before.endswith("Tailor again to make it from the assessment shown.")
-    assert others == [None, None, None, "The resume was tailored before the latest assessment. Tailor again to make it from the assessment shown."]
+    # 0.1.11: a stored resume made before the assessment shown is a stale code of the resume panel
+    # (`assessment_newer`), never a "Tailor again": nothing refreshes it but a pick the user asks for.
+    older_resume = [["assessment_newer", "this resume was made before the latest assessment", "compare"]]
+    assert out["tailoredBefore"] == [older_resume, [], [], [], older_resume]
     # "minor gaps" is a match's wording: under "Needs your answers" the same rows are what the job waits on.
     assert out["gapLines"] == ["2 minor gaps: Cassandra, ClickHouse", None, None]
 

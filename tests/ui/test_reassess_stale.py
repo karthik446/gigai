@@ -23,7 +23,7 @@ Pinned:
 - Re-assess is ONE `POST /api/assess` for this job, and no answer is written;
 - then, without a reload: the note is gone, the assessment's date is the NEW one (`updated_at`, not the first
   assessment's `created_at`), Re-assess is off again (a current assessment, no open question); the Scout label and the
-  tailored resume, both made before the new assessment, say so instead of reading as its own;
+  stored resume, both made before the new assessment, say so instead of reading as its own;
 - the server agrees, the Jobs row no longer says "old assessment", and a reload shows the same.
 
 MEASURED (14-core laptop, 2026-10-04, three runs): the re-assessment 0.3 to 0.6 s wall on the fixture model, 0.2 to 0.4
@@ -57,7 +57,7 @@ REASSESS = f'{PAGE} [data-action="reassess"]'
 HELP = f'{PAGE} [data-help="reassess"]'
 ASSESSED_AT = f'{PAGE} [data-role="assessed-at"]'
 LABEL = f"{PAGE} {tid('step-timeline')} {tid('scout-label-chip')}"
-TAILORED_BEFORE = f'{PAGE} [data-role="tailored-before"]'
+RESUME_STALE = f'{PAGE} #job-resume [data-role="resume-stale"]'
 SETTLED_TIMELINE = f"{PAGE} {tid('step-timeline')}" + "".join(f':not([data-state="{state}"])' for state in ("not_started", "running", "waiting"))
 
 
@@ -154,7 +154,14 @@ def test_re_assess_an_old_assessment_from_its_job_page(ui) -> None:
         said = ui.page.locator(HELP).text_content() or ""
         assert f"old ({REASON})" in said and "one model call" in said, said
         assert ui.page.locator(NOTE).count() == 1 and ui.page.locator(NOTE).get_attribute("data-reason") == REASON
-        assert REASON in (ui.page.locator(NOTE).text_content() or "")
+        # 0.1.11: the stale label sits beside the header's chip, in the Jobs row's words.
+        assert (ui.page.locator(NOTE).text_content() or "").strip() == f"old assessment: {REASON}"
+        # The resume panel says the same, and offers the ONE refresh that is allowed for an old assessment, with its
+        # cost in the button: never a re-pick (a new selection never sits beside scores made on other evidence).
+        stale = ui.page.locator(RESUME_STALE)
+        assert stale.locator("li").first.get_attribute("data-stale") == f"assessment_stale:{REASON.replace(' ', '_')}"
+        assert f"old assessment: {REASON}" in (stale.text_content() or "")
+        assert [(button.get_attribute("data-action"), (button.text_content() or "").strip()) for button in stale.locator("button").all()] == [("reassess-stale", "Re-assess · 1 model call")]
         assert ui.page.locator(ASSESSED_AT).get_attribute("data-at") == old_at
         ui.settle()
         assert ui.writes_after("start") == [], "the page only read so far"
@@ -185,10 +192,19 @@ def test_re_assess_an_old_assessment_from_its_job_page(ui) -> None:
         pipeline = ui.server_json(f"/api/pipeline/job?job_identity={quote(job['job_identity'], safe='')}&profile_id={job['profile_id']}")
         assert pipeline["label"]["updated_at"] < new_at, "the small home's label was made before this re-assessment"
         label = ui.page.locator(LABEL)
-        assert label.count() == 1 and label.get_attribute("data-older") == "true", "a label made before the new assessment reads as its own"
-        assert "from before the latest assessment" in (label.text_content() or "")
+        assert label.count() == 1
+        if not any(step["name"] in ("assess", "pick") for step in pipeline["steps"]):
+            # This tree's server still runs the 0.1.10 pipeline (until packet N4: none of its steps is one of the
+            # four of 0.1.11): its label says THAT, which is the stronger statement of the same thing (it is not the
+            # assessment shown's), and offers "Check again".
+            assert label.get_attribute("data-legacy") == "true" and "made on 0.1.10's tailored resume" in (label.text_content() or "")
+        else:
+            assert label.get_attribute("data-older") == "true", "a label made before the new assessment reads as its own"
+            assert "from before the latest assessment" in (label.text_content() or "")
         tailored_at = max(item["updated_at"] for item in after["tailored"])
-        assert tailored_at < new_at and ui.page.locator(TAILORED_BEFORE).count() == 1
+        stale = ui.page.locator(RESUME_STALE)
+        assert tailored_at < new_at and stale.locator('li[data-stale="assessment_newer"]').count() == 1
+        assert "this resume was made before the latest assessment" in (stale.text_content() or "")
 
         # The server agrees, and the Jobs row no longer says "old".
         assert (after["assessment"]["updated_at"], after["assessment"]["basis_stale"]) == (new_at, False)
@@ -203,6 +219,8 @@ def test_re_assess_an_old_assessment_from_its_job_page(ui) -> None:
         ui.settle()
         assert ui.page.locator(ASSESSED_AT).get_attribute("data-at") == new_at
         assert ui.page.locator(NOTE).count() == 0 and ui.page.locator(REASSESS).is_disabled()
-        assert ui.page.locator(LABEL).get_attribute("data-older") == "true" and ui.page.locator(TAILORED_BEFORE).count() == 1
+        legacy = not any(step["name"] in ("assess", "pick") for step in pipeline["steps"])  # as above: this tree's pipeline is the 0.1.10 one
+        assert ui.page.locator(LABEL).get_attribute("data-legacy" if legacy else "data-older") == "true"
+        assert ui.page.locator(f'{RESUME_STALE} li[data-stale="assessment_newer"]').count() == 1
         assert ui.writes_after("reassessed") == []
         ui.assert_clean()  # zero console errors, page errors, HTTP >= 400, failed requests

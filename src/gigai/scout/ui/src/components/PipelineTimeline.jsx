@@ -1,16 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { getPipelineJob, postPipelineProcess } from "../api.js";
 import HelpLink from "./HelpLink.jsx";
-import { atsChip, labelChip, pipelineLive, processAction, processResultLine, stepTimeline, tailorDoneStamp, tailorFinished, variantLine } from "../pipelineModel.js";
+import { atsChip, isLegacyPipeline, labelChip, pickDoneStamp, pickFinished, pipelineLive, processAction, processResultLine, stepTimeline } from "../pipelineModel.js";
 
 const POLL_MS = 3000;
 
 // A chip whose click opens its breakdown: a <details>, so it needs no
 // script to open, close or reach by keyboard.
-function ChipPopover({ label, tone, testId, older, children }) {
+function ChipPopover({ label, tone, testId, older, legacy, children }) {
   return (
     <details className="chip-popover">
-      <summary className={`state-pill tone-${tone}`} data-testid={testId} data-older={older ? "true" : undefined}>
+      <summary className={`state-pill tone-${tone}`} data-testid={testId} data-older={older ? "true" : undefined} data-legacy={legacy ? "true" : undefined}>
         {label}
       </summary>
       <div className="chip-popover-body">{children}</div>
@@ -19,30 +19,34 @@ function ChipPopover({ label, tone, testId, older, children }) {
 }
 
 // 0.1.10.7 M4b: the job page's pipeline step timeline, over GET
-// /api/pipeline/job: tailor -> reassess + Scout ATS -> Scout label. Each
-// step says its state and, once it ran, the model, tokens and time of its
-// last attempt. "N -> M after tailoring" is the backend's requirements_met
-// numbers. The Scout ATS chip opens its breakdown and the Scout label chip
-// its reasons; the sentence under each is the server's own wording.
+// /api/pipeline/job. 0.1.11 (SPEC 4.2, section 6): FOUR rows, Assessed ->
+// Resume picked -> Scout ATS -> Scout label. Each step says its state and,
+// once it ran, the model, tokens and time of its last attempt (only
+// "Assessed" can call a model, and only for an old assessment). The "before
+// -> after tailoring" line is gone with the tailoring. The Scout ATS chip
+// opens its breakdown and the Scout label chip its reasons; the sentence
+// under each is the server's own wording. A job the 0.1.10 pipeline
+// processed keeps its label, marked "made on 0.1.10's tailored resume", and
+// offers "Check again".
 // "Process now" queues the job (POST /api/pipeline/process, 202: it never
 // waits for a model) and the timeline is read again while it moves.
-// `onTailorDone` is called when a read says the tailor step finished since
-// the read before it (pipelineModel.tailorFinished): the pipeline stored a
-// resume, and the job page reads it again.
+// `onPickDone` is called when a read says the pick step finished since the
+// read before it (pipelineModel.pickFinished): the pipeline stored a resume,
+// and the job page reads it again.
 // 0110-10-12: `assessedAt` is when the assessment the page shows was made. A
 // Scout label made before it (a re-assessment does not make the label again)
 // says so on its chip and in its popover, instead of reading as the new
 // assessment's (pipelineModel.labelChip).
-export default function PipelineTimeline({ jobIdentity, profileId, assessed, assessedAt, refreshKey, onTailorDone }) {
+export default function PipelineTimeline({ jobIdentity, profileId, assessed, assessedAt, refreshKey, onPickDone }) {
   const [detail, setDetail] = useState(null);
   const [error, setError] = useState(null);
   const [posting, setPosting] = useState(false);
   const [result, setResult] = useState(null);
   const timer = useRef(null);
   const current = useRef(null);
-  const tailorSeen = useRef({ key: null, stamp: "" }); // the tailor step at the last read; it outlives a refreshKey reset
-  const tailorDone = useRef(onTailorDone);
-  tailorDone.current = onTailorDone;
+  const pickSeen = useRef({ key: null, stamp: "" }); // the pick step at the last read; it outlives a refreshKey reset
+  const pickDone = useRef(onPickDone);
+  pickDone.current = onPickDone;
 
   const read = useCallback(() => {
     if (!jobIdentity || !profileId) {
@@ -61,11 +65,11 @@ export default function PipelineTimeline({ jobIdentity, profileId, assessed, ass
         }
         setDetail(loaded);
         setError(null);
-        const stamp = tailorDoneStamp(loaded);
-        const before = tailorSeen.current.key === key ? tailorSeen.current.stamp : undefined;
-        tailorSeen.current = { key, stamp };
-        if (tailorDone.current && tailorFinished(before, stamp)) {
-          tailorDone.current();
+        const stamp = pickDoneStamp(loaded);
+        const before = pickSeen.current.key === key ? pickSeen.current.stamp : undefined;
+        pickSeen.current = { key, stamp };
+        if (pickDone.current && pickFinished(before, stamp)) {
+          pickDone.current();
         }
         if (pipelineLive(loaded)) {
           timer.current = setTimeout(read, POLL_MS);
@@ -106,12 +110,12 @@ export default function PipelineTimeline({ jobIdentity, profileId, assessed, ass
   };
 
   const stages = stepTimeline(detail);
-  const variant = variantLine(detail);
+  const legacy = isLegacyPipeline(detail);
   const ats = atsChip(detail);
   const label = labelChip(detail, { assessedAt });
 
   return (
-    <section className="panel" data-testid="step-timeline" data-state={detail && detail.state ? detail.state : "not_started"}>
+    <section className="panel" data-testid="step-timeline" data-state={detail && detail.state ? detail.state : "not_started"} data-legacy={legacy ? "true" : undefined}>
       <div className="timeline-head">
         <h3>Background pipeline</h3>
         <div className="timeline-actions">
@@ -148,13 +152,8 @@ export default function PipelineTimeline({ jobIdentity, profileId, assessed, ass
           </li>
         ))}
       </ol>
-      {(variant || ats || label) && (
+      {(ats || label) && (
         <div className="timeline-results">
-          {variant && (
-            <span className={`state-pill tone-${variant.improved ? "ok" : "plain"}`} data-role="tailored-variant" title={variant.detail}>
-              {variant.text}
-            </span>
-          )}
           {ats && (
             <ChipPopover label={ats.label} tone="plain" testId="ats-chip">
               {ats.line && <div className="chip-popover-line">{ats.line}</div>}
@@ -168,9 +167,9 @@ export default function PipelineTimeline({ jobIdentity, profileId, assessed, ass
           )}
           {ats && <HelpLink topic="ats" />}
           {label && (
-            <ChipPopover label={label.label} tone={label.tone} testId="scout-label-chip" older={label.older}>
+            <ChipPopover label={label.label} tone={label.tone} testId="scout-label-chip" older={label.older} legacy={label.legacy}>
               {label.note && (
-                <div className="chip-popover-line" data-role="label-older">
+                <div className="chip-popover-line" data-role={label.legacy ? "label-legacy" : "label-older"}>
                   {label.note}
                 </div>
               )}
@@ -187,7 +186,6 @@ export default function PipelineTimeline({ jobIdentity, profileId, assessed, ass
             </ChipPopover>
           )}
           {label && <HelpLink topic="scout-label" />}
-          {variant && <span className="muted">{variant.detail}</span>}
         </div>
       )}
     </section>

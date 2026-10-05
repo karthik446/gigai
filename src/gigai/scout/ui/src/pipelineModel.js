@@ -3,9 +3,12 @@
 //
 // Two readers:
 //   the job page's step timeline   GET /api/pipeline/job (scout-pipeline-job:1):
-//       tailor -> reassess + Scout ATS -> Scout label, each step with its
-//       state and the numbers of its last attempt, the requirements met
-//       before and after tailoring, the Scout ATS breakdown, the Scout label
+//       0.1.11 (SPEC 4.2): four rows, Assessed -> Resume picked -> Scout ATS
+//       -> Scout label, each step with its state and the numbers of its last
+//       attempt, the Scout ATS breakdown, the Scout label. Only `assess` can
+//       call a model, and only when the stored assessment is old. A job the
+//       0.1.10 pipeline processed keeps its label, marked "made on 0.1.10's
+//       tailored resume", with "Check again"
 //   Settings' Background pipeline  GET /api/pipeline (scout-pipeline:1) and
 //       the `pipeline` / `rank` blocks of GET / PUT /api/settings/background:
 //       lanes, today's calls against their caps, approvals, settings, errors
@@ -18,15 +21,43 @@ import { secondsText, targetName, tokensText } from "./metricsModel.js";
 import { MODEL_TARGETS, MODEL_TARGET_LABELS } from "./modelTargets.js";
 import { LABEL_WORDS, SCOUT_ATS_NAME, SCOUT_LABEL_NAME } from "./postingsModel.js";
 
-export const STEP_ORDER = ["tailor", "reassess", "ats", "label"];
+export const STEP_ORDER = ["assess", "pick", "ats", "label"];
 export const STEP_TITLES = {
-  tailor: "Tailor resume",
-  reassess: "Assess the tailored resume",
+  assess: "Assessed",
+  pick: "Resume picked",
   ats: SCOUT_ATS_NAME,
   label: SCOUT_LABEL_NAME,
 };
-// The timeline's columns: the re-assessment and the Scout ATS score both read the tailored resume.
-export const STEP_STAGES = [["tailor"], ["reassess", "ats"], ["label"]];
+// The timeline's rows: four, one step each, in order (the pipeline is linear).
+export const STEP_STAGES = STEP_ORDER.map((name) => [name]);
+
+// 0.1.11 N6: the ONE adapter line for a server that still runs the 0.1.10 pipeline (tailor -> reassess + ats ->
+// label; N4 replaces it). Its `tailor` step is the one that stored the job's resume, so it is shown in the
+// "Resume picked" row; its `reassess` step has no row. Deleted with N4.
+const LEGACY_STEP_ROWS = { tailor: "pick" };
+const LEGACY_STEPS = ["tailor", "reassess"];
+const LABEL_RULE_NOW = "scout-label:2";
+
+// True when what the server holds for this job was made by the 0.1.10 pipeline: it serves one of that pipeline's
+// steps, or its label says an older rule, or it has a score or a label and none of the four steps of 0.1.11 (the
+// upgrade removes a finished job's step rows and keeps its records).
+export function isLegacyPipeline(detail) {
+  if (!detail) {
+    return false;
+  }
+  const names = ((detail && detail.steps) || []).map((step) => step.name);
+  if (names.some((name) => LEGACY_STEPS.includes(name))) {
+    return true;
+  }
+  const label = detail.label && typeof detail.label === "object" ? detail.label : null;
+  if (label && typeof label.rule_version === "string") {
+    return label.rule_version !== LABEL_RULE_NOW;
+  }
+  return Boolean(label || detail.ats) && !names.includes("assess") && !names.includes("pick");
+}
+
+export const LEGACY_LABEL_SUFFIX = "made on 0.1.10's tailored resume";
+export const LEGACY_LABEL_NOTE = "This label was made by GigAI 0.1.10, on the resume its tailoring wrote. Check again to make it from the assessment and the resume shown.";
 
 const STATE_WORDS = {
   not_started: "Not started",
@@ -86,28 +117,18 @@ function stepRow(name, step) {
   };
 }
 
-// The timeline: the four steps in their three stages, always all four (a
-// job that never entered the pipeline shows each as not started).
+// The timeline: the four steps, one row each, always all four (a job that
+// never entered the pipeline shows each as not started). A row's own step
+// wins over a 0.1.10 step shown in its place.
 export function stepTimeline(detail) {
-  const byName = new Map(((detail && detail.steps) || []).map((step) => [step.name, step]));
+  const byName = new Map();
+  ((detail && detail.steps) || []).forEach((step) => {
+    const row = STEP_ORDER.includes(step.name) ? step.name : LEGACY_STEP_ROWS[step.name];
+    if (row && (!byName.has(row) || row === step.name)) {
+      byName.set(row, step);
+    }
+  });
   return STEP_STAGES.map((names) => names.map((name) => stepRow(name, byName.get(name))));
-}
-
-// "73 -> 91 after tailoring" from the backend's requirements_met numbers,
-// with the counts behind it; null until both assessments exist.
-export function variantLine(detail) {
-  const met = detail && detail.requirements_met;
-  const base = met && met.base;
-  const tailored = met && met.tailored;
-  if (!base || !tailored || typeof base.percent !== "number" || typeof tailored.percent !== "number") {
-    return null;
-  }
-  const unchanged = base.percent === tailored.percent && base.met === tailored.met && base.total === tailored.total;
-  return {
-    text: unchanged ? `${base.percent} · no change after tailoring` : `${base.percent} → ${tailored.percent} after tailoring`,
-    detail: `Requirements met: ${base.met} of ${base.total} → ${tailored.met} of ${tailored.total}`,
-    improved: tailored.percent > base.percent,
-  };
 }
 
 // The Scout ATS chip and its breakdown popover; null until the score exists.
@@ -143,21 +164,26 @@ export const OLDER_LABEL_NOTE = "This label was made before the latest assessmen
 
 // The Scout label chip; null until the label step is done. `assessedAt` (optional) is when the assessment the page
 // shows was made: a label older than it says so (`older`, the suffix in its words, a plain tone and `note`).
+// 0.1.11: a label the 0.1.10 pipeline made says so (`legacy`, its own suffix and note, a plain tone); that wins
+// over "from before the latest assessment", which is also true of it.
 export function labelChip(detail, { assessedAt = null } = {}) {
   const label = detail && detail.label;
   if (!label || !LABEL_WORDS[label.label]) {
     return null;
   }
-  const older = labelIsOlder(detail, assessedAt);
+  const legacy = isLegacyPipeline(detail);
+  const older = !legacy && labelIsOlder(detail, assessedAt);
+  const suffix = legacy ? LEGACY_LABEL_SUFFIX : older ? OLDER_LABEL_SUFFIX : "";
   return {
-    label: `${label.name || SCOUT_LABEL_NAME}: ${LABEL_WORDS[label.label]}${older ? ` (${OLDER_LABEL_SUFFIX})` : ""}`,
+    label: `${label.name || SCOUT_LABEL_NAME}: ${LABEL_WORDS[label.label]}${suffix ? ` (${suffix})` : ""}`,
     code: label.label,
-    tone: older ? "plain" : label.label === "recommended" ? "ok" : "warn",
+    tone: older || legacy ? "plain" : label.label === "recommended" ? "ok" : "warn",
     reasons: (label.reasons || []).map(words),
     minAts: typeof label.min_ats === "number" ? label.min_ats : null,
     wording: label.wording || null,
     older,
-    note: older ? OLDER_LABEL_NOTE : null,
+    legacy,
+    note: legacy ? LEGACY_LABEL_NOTE : older ? OLDER_LABEL_NOTE : null,
     at: typeof label.updated_at === "string" ? label.updated_at : null,
   };
 }
@@ -169,27 +195,32 @@ export function pipelineLive(detail) {
   return Boolean(detail) && LIVE_STATES.has(detail.state);
 }
 
-// The tailor step as one value: its `updated_at` once it is done, "" until then.
-export function tailorDoneStamp(detail) {
-  const step = ((detail && detail.steps) || []).find((item) => item.name === "tailor");
+// The step that stores the job's resume (`pick`; a 0.1.10 server's `tailor`) as one value: its `updated_at` once
+// it is done, "" until then.
+export function pickDoneStamp(detail) {
+  const steps = (detail && detail.steps) || [];
+  const step = steps.find((item) => item.name === "pick") || steps.find((item) => LEGACY_STEP_ROWS[item.name] === "pick");
   return step && step.state === "done" ? String(step.updated_at || "done") : "";
 }
 
-// The job page reads the stored tailored resume when the job opens; the
-// pipeline stores one in the background, later. True when this read of the
-// timeline says the tailor step finished since the read before it: the page
-// reads the stored resume again. `before` is the stamp of the previous read
-// of this job, undefined on the first read (which tells nothing new: the
-// page read the stored resume at the same moment).
-export function tailorFinished(before, stamp) {
+// The job page reads the stored job resume when the job opens; the pipeline
+// stores one in the background, later. True when this read of the timeline
+// says the pick step finished since the read before it: the page reads the
+// stored resume again. `before` is the stamp of the previous read of this
+// job, undefined on the first read (which tells nothing new: the page read
+// the stored resume at the same moment).
+export function pickFinished(before, stamp) {
   return Boolean(stamp) && before !== undefined && before !== stamp;
 }
 
 // The "process now" button: {enabled, label, reason, body}. A job enters the
 // pipeline only once it is assessed; a finished one is processed again with `force`.
+// 0.1.11: a job the 0.1.10 pipeline processed offers "Check again" (the same request): its label is made again
+// from the assessment and the stored resume.
 export function processAction(detail, { assessed, jobIdentity, profileId }) {
   const state = detail ? detail.state : null;
   const body = { job_identity: jobIdentity, profile_id: profileId };
+  const legacy = isLegacyPipeline(detail);
   if (!jobIdentity || !profileId) {
     return { enabled: false, label: "Process now", reason: "No profile is selected.", body };
   }
@@ -201,6 +232,9 @@ export function processAction(detail, { assessed, jobIdentity, profileId }) {
   }
   if (state === "running") {
     return { enabled: false, label: "Processing…", reason: "", body };
+  }
+  if (legacy) {
+    return { enabled: true, label: "Check again", reason: "", body: state === null ? body : { ...body, force: true } };
   }
   if (state === "done" || state === "failed" || state === "cancelled") {
     return { enabled: true, label: "Process again", reason: "", body: { ...body, force: true } };
@@ -316,7 +350,7 @@ export function decisionBody(approve) {
 export function errorRows(overview) {
   return ((overview && overview.errors) || []).map((item, index) => ({
     key: `${index}:${item.at}:${item.step}`,
-    step: STEP_TITLES[item.step] || words(item.step),
+    step: STEP_TITLES[item.step] || STEP_TITLES[LEGACY_STEP_ROWS[item.step]] || words(item.step),
     code: item.error_code || "unknown",
     attempt: item.attempt,
     at: item.at,
@@ -328,8 +362,12 @@ export function errorRows(overview) {
 // --- Settings: the pipeline's settings form ---------------------------------------------------
 
 export const MAX_CAP = 1000;
-export const MODEL_STEPS = ["tailor", "reassess"];
 const PROJECT_MODEL = "";
+
+// 0.1.11 (SPEC 4.2): the pipeline has ONE model step, `assess` (`pipeline.models.assess`), and it calls a model
+// only for an assessment that is old. The two settings of 0.1.10 (`models.tailor`, `models.reassess`) name steps
+// that no longer exist: the form does not show them and never sends them, so what the file holds for them stays.
+export const MODEL_STEPS = ["assess"];
 
 function block(value) {
   return value && typeof value === "object" ? value : {};
@@ -349,8 +387,7 @@ export function pipelineDraft(response) {
     labelMinAts: number(pipeline.label_min_ats),
     rankCallsPerDay: number(rank.max_calls_per_day),
     rankWarnAt: number(rank.warn_calls_per_day),
-    tailorModel: typeof models.tailor === "string" ? models.tailor : PROJECT_MODEL,
-    reassessModel: typeof models.reassess === "string" ? models.reassess : PROJECT_MODEL,
+    assessModel: typeof models.assess === "string" ? models.assess : PROJECT_MODEL,
   };
 }
 
@@ -413,11 +450,8 @@ export function pipelinePatch(draft, response) {
   count("rankCallsPerDay", rank, "max_calls_per_day");
   count("rankWarnAt", rank, "warn_calls_per_day");
   const models = {};
-  if (draft.tailorModel !== loaded.tailorModel) {
-    models.tailor = draft.tailorModel === PROJECT_MODEL ? null : draft.tailorModel;
-  }
-  if (draft.reassessModel !== loaded.reassessModel) {
-    models.reassess = draft.reassessModel === PROJECT_MODEL ? null : draft.reassessModel;
+  if (draft.assessModel !== loaded.assessModel) {
+    models.assess = draft.assessModel === PROJECT_MODEL ? null : draft.assessModel;
   }
   if (Object.keys(models).length) {
     pipeline.models = models;

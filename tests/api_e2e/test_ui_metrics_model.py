@@ -112,7 +112,7 @@ def test_the_settings_table_has_one_row_per_kind_and_model(out: dict) -> None:
         {"key": "assess:codex_cli", "kind": "Assess", "model": "codex", "models": "gpt-5.1-codex", "calls": 5, "tokens": "19.5k", "seconds": "11 s", "cost": "-", "failed": "20%"},
         {"key": "extract:codex_cli", "kind": "Read resume", "model": "codex", "models": "", "calls": 1, "tokens": "-", "seconds": "-", "cost": "-", "failed": "100%"},
         {"key": "rank:codex_cli", "kind": "Rank", "model": "codex", "models": "gpt-5.1-codex", "calls": 1, "tokens": "850", "seconds": "8 s", "cost": "-", "failed": "0%"},
-        {"key": "tailor:codex_cli", "kind": "Tailor resume", "model": "codex", "models": "gpt-5.1-codex", "calls": 1, "tokens": "34k", "seconds": "2.5 min", "cost": "-", "failed": "0%"},
+        {"key": "tailor:codex_cli", "kind": "Tailor resume (before 0.1.11)", "model": "codex", "models": "gpt-5.1-codex", "calls": 1, "tokens": "34k", "seconds": "2.5 min", "cost": "-", "failed": "0%"},
     ]
 
 

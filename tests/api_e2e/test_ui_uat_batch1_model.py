@@ -17,9 +17,10 @@ What is pinned, by UAT item:
 * N5  each open question is placed in the requirement row it settles; one
   Re-assess is N ``POST /api/answers`` bodies with ``reassess`` on the LAST
   one only.
-* N7  Re-assess is off until a box is filled; Tailor is on when the verdict
-  is matched or every open question has an answer; an action that is off
-  always has a reason.
+* N7  Re-assess is off until a box is filled; an action that is off always
+  has a reason. (0.1.11: Re-assess is the ONE action. "Tailor resume" and its
+  gate went with the tailor call: the resume is picked when the job is
+  assessed.)
 * N4  the job description is a short excerpt.
 * N8  ``Must-have: Met`` / ``Can ask: Unclear`` / ``Bonus: Met``.
 * N9  ``Sponsorship not stated · N H-1B approvals (FY2026)``, plain
@@ -77,9 +78,8 @@ const gating = input.gating.map((item) => {
     name: item.name,
     states,
     reassess: answers.reassessGate({ assessed: item.assessed, states }),
-    tailor: answers.tailorGate({ assessed: item.assessed, verdict: item.verdict, states, hasUrl: item.hasUrl, hasProfile: item.hasProfile }),
     requests: answers.answerRequests(states, item.jobIdentity),
-    unsaved: answers.unsavedAnswerRequests(states),
+    gone: [typeof answers.tailorGate, typeof answers.unsavedAnswerRequests],
   };
 });
 const placed = answers.placeQuestions(input.placement.matrix, input.placement.questions);
@@ -351,35 +351,26 @@ def test_reassess_is_off_until_an_answer_is_typed(out: dict) -> None:
     recorded = _gate(out, "recorded answer fills an untouched box")
     assert recorded["states"] == [{"question_id": "cloud:gcp", "value": "Yes, on record", "recorded": "Yes, on record", "filled": True, "isNew": False}]
     assert recorded["reassess"]["enabled"] is True
-    assert recorded["unsaved"] == []
     cleared = _gate(out, "recorded answer cleared by the operator")
-    assert cleared["reassess"]["enabled"] is False and cleared["tailor"]["enabled"] is False
+    assert cleared["reassess"]["enabled"] is False
 
 
-def test_tailor_needs_a_match_or_every_question_answered(out: dict) -> None:
-    assert _gate(out, "matched, no questions")["tailor"]["enabled"] is True
-    assert _gate(out, "matched, a question left open")["tailor"]["enabled"] is True
-    assert _gate(out, "nothing typed")["tailor"]["enabled"] is False
-    one = _gate(out, "one of two typed")["tailor"]
-    assert one["enabled"] is False and "1 left" in one["reason"]
-    both = _gate(out, "both typed")
-    assert both["tailor"]["enabled"] is True
-    # Typed answers are saved before tailoring, never re-assessing.
-    assert both["unsaved"] == [
-        {"question_id": "cloud:gcp", "answer": "Yes", "reassess": None},
-        {"question_id": "team:lead", "answer": "A team of four", "reassess": None},
-    ]
-    assert _gate(out, "not a match, no questions")["tailor"]["enabled"] is True
-    assert _gate(out, "not assessed")["tailor"]["enabled"] is False
-    assert _gate(out, "no url")["tailor"]["enabled"] is False
-    assert _gate(out, "no profile")["tailor"]["enabled"] is False
+def test_the_tailor_action_and_its_gate_are_gone(out: dict) -> None:
+    # 0.1.11 (SPEC section 6, item 2): ONE action. No gate for a second one, and no "save the typed answers
+    # before tailoring" step.
+    assert all(item["gone"] == ["undefined", "undefined"] for item in out["gating"])
+    actions = (UI_SRC / "components" / "RequirementActions.jsx").read_text(encoding="utf-8")
+    code = "\n".join(line for line in actions.splitlines() if not line.lstrip().startswith("//"))
+    assert code.count("<Action ") == 1 and 'name="reassess"' in code and "tailor" not in code.lower()
+    page = (UI_SRC / "views" / "JobPage.jsx").read_text(encoding="utf-8")
+    assert "reassessLabel={REASSESS_LABEL}" in page and "alwaysActions" in page
+    assert 'export const REASSESS_LABEL = "Re-assess · 1 model call";' in (UI_SRC / "jobResumeModel.js").read_text(encoding="utf-8")
 
 
 def test_an_action_that_is_off_says_why(out: dict) -> None:
     for item in out["gating"]:
-        for action in ("reassess", "tailor"):
-            gate = item[action]
-            assert isinstance(gate["reason"], str) and len(gate["reason"]) > 10, (item["name"], action, gate)
+        gate = item["reassess"]
+        assert isinstance(gate["reason"], str) and len(gate["reason"]) > 10, (item["name"], gate)
 
 
 # --- N4 / N8 / N9 ----------------------------------------------------------------
@@ -565,7 +556,7 @@ def test_the_job_page_is_one_column() -> None:
     assert "← Jobs" in code and "Breadcrumb" not in code  # N3
     assert "Show full description" not in code and "jdExcerpt(" in code  # N4
     assert "two-col" not in code and "VerdictHistory" not in code  # N6
-    assert "tailorGate(" in code and "useAnswerDrafts(" in code  # N5 / N7
+    assert "tailorGate(" not in code and "useAnswerDrafts(" in code  # N5 / N7 (0.1.11: no tailor action to gate)
     body = (UI_SRC / "components" / "AssessmentBody.jsx").read_text(encoding="utf-8")
     assert "Save and re-assess" not in body and "<RequirementActions" in body
     actions = (UI_SRC / "components" / "RequirementActions.jsx").read_text(encoding="utf-8")

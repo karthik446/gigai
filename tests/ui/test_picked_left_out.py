@@ -1,4 +1,4 @@
-"""0.1.10.9 master P5: Picked / Left out on the job page, for a resume tailored from the master resume. Small home, real server.
+"""0.1.10.9 master P5: Picked / Left out on the job page, for a resume made from the master resume. Small home, real server.
 
 The hero job's resume is tailored again once a master is stored (`POST /api/tailored-resumes`, the fixture model; the
 tailoring then reads the job's candidate lines of the whole master and stores `selection`). The page shows "Picked (n)"
@@ -41,7 +41,7 @@ from tests.ui.test_master_page import ensure_master
 pytestmark = pytest.mark.ui
 UI_ORDER = 40  # changes the shared home (a master, the hero job's tailored resume, a master line): after the Master page flows
 
-PANEL = "#tailored-resume"
+PANEL = "#job-resume"
 VIEW = f"{PANEL} {tid('picked-left-out')}"
 JOB_PAGE_WALL_SECONDS = FIRST_LOAD_WALL_SECONDS
 JOB_PAGE_CPU_SECONDS = 5.0  # 1.0 to 1.4 measured idle (the pipeline's steps for the resume just tailored share the process)
@@ -86,7 +86,9 @@ def counts(ui) -> list[str]:
 
 
 def preview_text(ui) -> str:
-    return " ".join(ui.page.locator(f"{PANEL} .md-preview .md-line").all_text_contents())
+    """The resume as the panel shows it, in whichever of its two views is on (as it will print, or with its sources)."""
+
+    return " ".join(ui.page.locator(f"{PANEL} .md-preview, {PANEL} .clean-wrap").all_inner_texts())
 
 
 def test_picked_and_left_out_are_shown_with_reasons_and_a_line_is_removed_added_and_saved_to_the_master(ui, scout_server) -> None:
@@ -105,10 +107,12 @@ def test_picked_and_left_out_are_shown_with_reasons_and_a_line_is_removed_added_
     assert counts(ui) == [f"Picked ({len(selection['picked'])})", f"Left out ({len(selection['left_out'])})"]
     assert ui.page.locator(VIEW).get_attribute("data-picked-by") == selection["picked_by"]
     # 0110-10-10 item 3: the header and the line under it name the same basis, the one the stored resume records.
+    # 0.1.11: the header's ONE provenance line says who made the resume. This tree's server still tailors, so the
+    # resume of this flow is the old tailor's and says so (a resume picked by the assessment: test_job_page_matched.py).
     header = ui.page.locator(f"{PANEL} .tailor-meta")
     under = ui.page.locator(f'{VIEW} [data-role="picked-by"]')
     assert "from your whole master" in (under.text_content() or "")
-    assert f"· from your master resume (revision {stored['sources']['master']['revision']}), picked for profile " in (header.text_content() or ""), header.text_content()
+    assert (header.locator('[data-role="provenance"]').text_content() or "").startswith("Made by the tailoring of 0.1.10"), header.text_content()
     assert header.get_attribute("data-basis") == under.get_attribute("data-basis") == "master"
     ui.settle()
     # Closed, the lists ask the server nothing: the master is read when one is opened.

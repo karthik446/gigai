@@ -112,7 +112,7 @@ def _assessed(fx: PipelineFixture, suggested: list[AssessmentSuggestion], *, now
     with sg.record_write_lock(path):
         record = sg.merged(
             sg.read_record(path), profile_id=fx.profile_id, job_identity=JOB, stored_path=str(path), now=now, basis={},
-            gate={"decision": "suggest", "ready": False, "reasons": []}, requirements=rows, suggested=suggested, selection=dict(SELECTION), **more,  # type: ignore[arg-type]
+            gate={"decision": "suggest", "ready": False, "reasons": []}, requirements=rows, suggested=suggested, **{"selection": dict(SELECTION), **more},  # type: ignore[arg-type]
         )
         sg.save_record(record)
     return record
@@ -288,15 +288,55 @@ def test_store_resolves_the_named_suggestions_and_checks_the_evidence_again(fx: 
     assert {"id": "sg-1", "posting_phrase": "own Python inference services", "why": "The line says who it serves and not what it runs on."} in posting["suggestions"]
 
 
+def _conflicted(fx: PipelineFixture) -> None:
+    """A record whose selection recorded that the page limit cut the only line behind a must-have (SPEC 3.3)."""
+
+    ids = _ids(fx)
+    conflict = {"code": "mandatory_evidence_does_not_fit", "requirement": REQ_PYTHON, "lines": [ids[OWN]], "cut": True}
+    _assessed(fx, [], selection={**SELECTION, "conflicts": [conflict]})
+
+
+def test_the_check_is_recomputed_from_the_stored_resume_a_fixed_hand_back_reads_ready_again(fx: PipelineFixture, tmp_path: Path) -> None:
+    _conflicted(fx)
+    ids = _ids(fx)
+    store = ("resume", "store", "--job-url", JOB, "--as", "agent")
+    lost = _ok(fx, *store, "--in", _file(tmp_path, MASTER.replace(f"- {OWN}\n", "")))
+    reasons = lost["suggestions"]["gate"]["reasons"]
+    assert lost["suggestions"]["gate"]["ready"] is False and {item["code"] for item in reasons} == {"lost_mandatory_evidence", "selection_conflict"}
+    assert len(_ok(fx, "resume", "pick", "--job-url", JOB)["conflicts"]) == 1
+
+    # The hand-back brings the line back (reworded, citing it): the conflict is gone, the gate reads ready.
+    back = _ok(fx, *store, "--in", _file(tmp_path, MASTER.replace(f"- {OWN}", f"- {REWORDED} <!-- src: {ids[OWN]} -->")))
+    assert back["suggestions"]["gate"] == {"decision": "suggest", "ready": True, "reasons": []}
+    view = _ok(fx, "resume", "pick", "--job-url", JOB)
+    assert view["gate"]["ready"] is True and view["conflicts"] == []
+    assert sg.read_record(_path(fx)).selection["conflicts"] == []
+
+
+def test_use_proposed_recomputes_the_check_from_the_stored_resume_too(fx: PipelineFixture, tmp_path: Path) -> None:
+    _seed(fx)
+    _ok(fx, "resume", "store", "--job-url", JOB, "--as", "agent", "--in", _file(tmp_path, MASTER))
+    (stored,) = _stored(fx)
+    ids = _ids(fx)
+    # The waiting selection recorded a conflict about a line the stored resume prints: taking it leaves no conflict.
+    sibling = sg.proposed_resume_path(_path(fx))
+    conflict = {"code": "mandatory_evidence_does_not_fit", "requirement": REQ_PYTHON, "lines": [ids[OWN]], "cut": True}
+    proposed = {**SELECTION, "conflicts": [conflict], "resume": {"stored_path": str(sibling), "markdown_sha256": "sha256:" + "0" * 64, "origin": "pick"}}
+    _assessed(fx, [], now=LATER, proposed=proposed)
+    sibling.write_text(json.dumps(stored.to_json(), indent=2, sort_keys=True), encoding="utf-8")
+    taken = _ok(fx, "resume", "pick", "--job-url", JOB, "--use-proposed")
+    assert taken["conflicts"] == [] and taken["gate"]["ready"] is True
+
+
 # --- a proposal beside a resume the user edited ----------------------------------------------------------------------
 
 
-def _propose(fx: PipelineFixture) -> Path:
+def _propose(fx: PipelineFixture, **more: object) -> Path:
     """A new selection waiting beside the stored resume, as a re-assessment leaves it for a resume that is the user's."""
 
     (stored,) = _stored(fx)
     sibling = sg.proposed_resume_path(_path(fx))
-    record = _assessed(fx, [], now=LATER, proposed={**SELECTION, "picked_by": "code", "fallback": "no_pick", "made_at": LATER, "resume": {"stored_path": str(sibling), "markdown_sha256": "sha256:" + "0" * 64, "origin": "pick"}})
+    record = _assessed(fx, [], now=LATER, proposed={**SELECTION, "picked_by": "code", "fallback": "no_pick", "made_at": LATER, "resume": {"stored_path": str(sibling), "markdown_sha256": "sha256:" + "0" * 64, "origin": "pick"}}, **more)
     sibling.write_text(json.dumps(stored.to_json(), indent=2, sort_keys=True), encoding="utf-8")
     assert record.proposed is not None
     return sibling
@@ -329,3 +369,35 @@ def test_pick_drops_or_takes_the_proposed_resume_and_nothing_else_replaces_an_ed
     (now_stored,) = _stored(fx)
     assert now_stored.updated_at != edited.updated_at and now_stored.markdown == edited.markdown
     assert fx.model.calls == calls, "no pick step calls a model"
+
+
+# --- the OPEN read: what the page reads, from the stored records, writing nothing ---------------------------------------
+
+
+def _store_snapshot(fx: PipelineFixture) -> dict[str, bytes]:
+    return {str(path.relative_to(fx.home_root)): path.read_bytes() for path in sorted(fx.home_root.rglob("*")) if path.is_file() and ".git" not in path.parts and "cache" not in path.parts}
+
+
+def test_opening_a_job_serves_stale_pages_conflicts_proposed_and_rows_and_writes_nothing(fx: PipelineFixture, tmp_path: Path) -> None:
+    _conflicted(fx)
+    ids = _ids(fx)
+    _ok(fx, "resume", "store", "--job-url", JOB, "--as", "agent", "--in", _file(tmp_path, MASTER.replace(f"- {OWN}\n", "")))
+    conflict = {"code": "mandatory_evidence_does_not_fit", "requirement": REQ_PYTHON, "lines": [ids[OWN]], "cut": True}
+    sibling = _propose(fx, selection={**SELECTION, "conflicts": [conflict]})
+    _list(fx)  # one read first: a scratch cache may be written by the first read of a home
+    before, calls = _store_snapshot(fx), fx.model.calls
+
+    body = _list(fx)
+    pick = _ok(fx, "resume", "pick", "--job-url", JOB)
+    assert _store_snapshot(fx) == before and fx.model.calls == calls, "opening writes nothing and calls no model"
+
+    for view in (body, pick):
+        assert view["picked"]["pages"] == 1 and view["picked"]["max_pages"] == 2 and view["picked"]["picked_by"] == "model"
+        assert view["conflicts"][0]["code"] == "mandatory_evidence_does_not_fit" and view["conflicts"][0]["lines"] == [ids[OWN]]
+        assert isinstance(view["stale"], list)
+        assert view["proposed"]["picked_by"] == "code" and view["proposed"]["pages"] == 1 and view["proposed"]["lines"] == []
+        assert isinstance(view["selected_lines"], list)
+        rows = {row["id"]: row for row in view["requirements"]}
+        assert set(rows) == {REQ_PYTHON, REQ_TERRAFORM, REQ_GCP}
+        assert set(rows[REQ_PYTHON]) == {"id", "class", "status", "sources", "in_resume", "coverage"} and rows[REQ_PYTHON]["class"] == "hard"
+    assert sibling.exists()

@@ -565,6 +565,27 @@ class StoredJob:
     record: Mapping[str, object] | None = None
 
 
+def _one_profile_with_a_resume(home_root: Path, target: Path, identity: str) -> None:
+    """Refuse (``profile_ambiguous``) when two profiles each hold a resume for the job and none was named.
+
+    The default is the profile of the job's newest assessment; with two stored resumes that default would let a
+    ``--resolves`` be checked against one profile and applied to another, so the caller must say which.
+    """
+
+    from .find_jobs.api.agent_routes import job_tailored_resumes
+    from .tailored_resume import TailorError
+
+    try:
+        profiles = sorted({str(item.resume.profile_id) for item in job_tailored_resumes(home_root, target, identity) if item.resume.profile_id})
+    except TailorError as exc:
+        raise BriefError(exc.code, str(exc)) from exc
+    if len(profiles) > 1:
+        raise BriefError(
+            "profile_ambiguous",
+            f"profiles {' and '.join(profiles)} both have a resume for this job: name one with `--profile ID` (the API: `profile_id`)",
+        )
+
+
 def stored_job(home_root: Path, target: Path, job_url: str, profile_id: str | None = None) -> StoredJob:
     """The stored assessment the brief is about. ``profile_id`` ``None``: the profile whose assessment of the job is newest.
 
@@ -586,6 +607,7 @@ def stored_job(home_root: Path, target: Path, job_url: str, profile_id: str | No
             assessment = read_quick_assessment(Path(home_root), Path(target), profile_id, identity)
         else:
             assessment = next((item for item in job_quick_assessments(Path(home_root), Path(target), identity) if item.resume.profile_id), None)
+            _one_profile_with_a_resume(Path(home_root), Path(target), identity)
     except QuickAssessError as exc:
         raise BriefError(exc.code, str(exc)) from exc
     if assessment is None:

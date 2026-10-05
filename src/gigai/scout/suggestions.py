@@ -273,6 +273,25 @@ def check_selection(requirements: Iterable[RequirementRow], printed: Iterable[st
     return SelectionCheck(tuple(rows), not reasons, tuple(reasons))
 
 
+def live_selection(selection: Mapping[str, object] | None, printed: Iterable[str]) -> tuple[Mapping[str, object] | None, tuple[CheckReason, ...]]:
+    """``selection`` with the conflicts the resume STILL has, and those as check reasons (SPEC 2.3, 10.2 item 5). Pure.
+
+    A conflict names the master lines the page limit kept out; it is gone once every one of them prints again (a
+    hand-back that brought the line back).  A conflict with no lines (``skills_do_not_fit``) cannot be read off the
+    printed ids and stays until a re-pick: never resolved silently.
+    """
+
+    if selection is None:
+        return None, ()
+    shown = set(printed)
+    kept = [
+        item for item in selection.get("conflicts", ())  # type: ignore[union-attr]
+        if isinstance(item, Mapping) and (not item.get("lines") or any(line not in shown for line in item["lines"]))  # type: ignore[union-attr]
+    ]
+    reasons = tuple(CheckReason(REASON_CONFLICT, item.get("requirement")) for item in kept)
+    return {**selection, "conflicts": kept}, reasons
+
+
 # --- a suggestion ----------------------------------------------------------------------------------------------
 
 
@@ -906,8 +925,9 @@ def use_proposed(home_root: Path, target: Path, profile_id: str | None, job_iden
         taken = dict(record.proposed)
         taken["resume"] = {"stored_path": os.fspath(resume_path), "markdown_sha256": _markdown_digest(response.markdown), "origin": "pick"}
         rows = [RequirementRow(row.id, row.requirement_class, row.status, row.sources) for row in record.requirements]
-        conflicts = [CheckReason(REASON_CONFLICT, item.get("requirement")) for item in taken.get("conflicts", ()) if isinstance(item, Mapping)]  # type: ignore[union-attr, arg-type]
-        check = check_selection(rows, printed_ids(response.result), conflicts=conflicts)
+        printed = printed_ids(response.result)
+        taken, conflicts = live_selection(taken, printed)  # type: ignore[assignment]
+        check = check_selection(rows, printed, conflicts=conflicts)
         record = with_selection(record, now=now, check=check, selection=taken, proposed=None)
         save_record(record)
         sibling.unlink(missing_ok=True)
@@ -963,6 +983,7 @@ __all__ = [
     "is_answer_source",
     "is_replaceable",
     "job_resume",
+    "live_selection",
     "marks_json",
     "merged",
     "printed_ids",

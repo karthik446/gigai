@@ -1,13 +1,13 @@
 // uat-batch1 (N5/N7): the rules behind the job page's answer boxes and its
-// two actions, as pure functions (no React) so the node-backed static test
-// can pin them.
+// action, as pure functions (no React) so the node-backed static test can
+// pin them.
 //
 //   N5  every open question sits in the requirement row it settles
 //       (AssessmentQuestion.requirement == RequirementMatrixRow.requirement);
 //       ONE "Re-assess" saves every filled box and re-assesses once.
-//   N7  Re-assess is enabled once at least one box is filled; Tailor resume
-//       is enabled when the verdict is matched, or when every open question
-//       has an answer. A disabled action always carries its reason.
+//   N7  Re-assess is enabled once at least one box is filled. A disabled
+//       action always carries its reason. (0.1.11: Re-assess is the ONE
+//       action; "Tailor resume" and its gate went with the tailor call.)
 //   0110-10-12  an OLD assessment (older prompt, settings changed, answers
 //       changed, resume changed, posting changed) is itself a reason to
 //       re-assess: Re-assess is on with no question open and no box filled,
@@ -111,16 +111,6 @@ export function answerRequests(states, jobIdentity) {
   }));
 }
 
-// The bodies "Tailor resume" sends first: only the answers the record does
-// not hold yet, never re-assessing (tailoring reads the recorded answers).
-export function unsavedAnswerRequests(states) {
-  return (states || [])
-    .filter((state) => state.isNew)
-    .map((state) => ({ question_id: state.question_id, answer: state.value, reassess: null, ...bankFields(state) }));
-}
-
-const plural = (count, word) => `${count} ${word}${count === 1 ? "" : "s"}`;
-
 // `stale` is why the assessment shown is old, in words ("older prompt"), or null for a current one; `canAssess` says the
 // page can assess the posting again by its link (a pasted posting has none: its text is never stored).
 export function reassessGate({ assessed, states, stale = null, canAssess = true }) {
@@ -204,32 +194,4 @@ export function reassessErrorText(err) {
     return "The model timed out assessing this posting. Try again, or a faster model target.";
   }
   return (err && err.message) || String(err);
-}
-
-export function tailorGate({ assessed, verdict, states, hasUrl, hasProfile }) {
-  if (!hasUrl) {
-    return { enabled: false, reason: "This posting has no stored URL, so a resume cannot be tailored from here." };
-  }
-  if (!hasProfile) {
-    return { enabled: false, reason: "Select a profile first." };
-  }
-  if (!assessed) {
-    return { enabled: false, reason: "Assess this posting first." };
-  }
-  if (verdict === "matched_above_threshold") {
-    return { enabled: true, reason: "This posting is a match." };
-  }
-  const open = (states || []).length;
-  const missing = (states || []).filter((state) => !state.filled).length;
-  if (missing > 0) {
-    return {
-      enabled: false,
-      reason: `Answer ${open === 1 ? "the open question" : `all ${open} open questions`} first (${missing} left), or re-assess to a match.`,
-    };
-  }
-  const unsaved = (states || []).filter((state) => state.isNew).length;
-  if (unsaved > 0) {
-    return { enabled: true, reason: `Every open question has an answer. Tailoring saves ${plural(unsaved, "new answer")} first.` };
-  }
-  return { enabled: true, reason: open > 0 ? "Every open question has an answer." : "There are no open questions." };
 }

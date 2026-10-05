@@ -3,18 +3,21 @@
 Real server, nothing stubbed, on the fixture model. The small home has postings that wait for the user's answer
 (assessed before the GCP answer existed). The flow opens one from the "Needs your answers" chip, answers its
 question in the box and re-assesses; the answer is saved, the assessment comes back with every requirement met, and
-the background pipeline takes the job by itself (the home lets one job of a trigger run without an approval): tailor,
-assess the tailored resume, Scout ATS, Scout label.
+the background pipeline takes the job by itself (the home lets one job of a trigger run without an approval). The page
+shows it in the FOUR rows of 0.1.11: Assessed, Resume picked, Scout ATS, Scout label. (The server of this tree still
+runs the 0.1.10 steps until packet N4 lands: its `tailor` step is the one that stores the job's resume and is shown in
+the "Resume picked" row, and "Assessed" has no step of its own yet. With N4 all four rows are the server's own.)
 
-This flow CHANGES the shared home (an answer, an assessment, a tailored resume), so it runs late (`UI_ORDER`).
+This flow CHANGES the shared home (an answer, an assessment, a stored resume), so it runs late (`UI_ORDER`).
 
 Pinned: the page is the job (title, state "Needs your answers", the questions section with the server's question and
 the requirement it is about); Re-assess is ONE `POST /api/answers` carrying the typed answer and this job; after it
 the questions section is gone and the state leaves "Needs your answers", without a reload; the timeline reaches
-"done" with the Scout label and Scout ATS chips by the page's own polling; the page then shows the tailored resume
-the pipeline stored, its resumes-folder line, "Tailor again" and the state "Resume tailored", WITHOUT a reload (the
-0.1.10.9 U3 flow found it shown only after one): ONE `GET /api/tailored-resumes` when the timeline says the tailor
-step finished, and the timeline is not read again for it; the server holds the typed answer as the user's ("Written
+"done" with the Scout label and Scout ATS chips by the page's own polling; the page then shows the resume the
+pipeline stored, its resumes-folder line, the ONE "Apply: get the PDF" button and the state "Resume ready", WITHOUT a
+reload (the 0.1.10.9 U3 flow found it shown only after one): the stored resume is read once for the new assessment (the
+pick comes with it) and ONCE more when the timeline says the pick step finished, and the timeline is not read again for
+it; no action on the page tailors anything; the server holds the typed answer as the user's ("Written
 by you"), and its row for the job agrees; a reload shows the same. Zero console errors.
 
 A second flow (first in the file: it writes nothing) holds `GET /api/answers` until the box is filled: the answers
@@ -150,23 +153,29 @@ def test_answer_a_question_on_the_job_page_and_the_pipeline_runs(ui) -> None:
     timeline = ui.page.locator(f".job-page {tid('step-timeline')}")
     ui.page.locator(f".job-page {tid('step-timeline')}[data-state='done']").wait_for(timeout=PIPELINE_PATIENCE_MS)
     ui.step("pipeline-done")
-    assert timeline.locator("[data-step]").evaluate_all("(steps) => steps.map((step) => [step.dataset.step, step.dataset.state])") == [
-        ["tailor", "done"], ["reassess", "done"], ["ats", "done"], ["label", "done"],
-    ]
+    rows = timeline.locator("[data-step]").evaluate_all("(steps) => steps.map((step) => [step.dataset.step, step.dataset.state])")
+    assert [name for name, _state in rows] == ["assess", "pick", "ats", "label"], "the pipeline panel shows four rows"
+    assert rows[1:] == [["pick", "done"], ["ats", "done"], ["label", "done"]]
+    # "Assessed" is `done` once the server runs the four steps of 0.1.11 (N4); this tree's pipeline has no such step yet.
+    assert rows[0][1] in ("done", "not_started")
+    assert timeline.locator('[data-role="tailored-variant"]').count() == 0, 'the "before -> after tailoring" line is gone'
     assert timeline.locator(tid("scout-label-chip")).count() == 1 and timeline.locator(tid("ats-chip")).count() == 1
     assert ui.writes_after("reassessed") == [], "the pipeline ran by itself: the page asked for nothing"
     ui.wall_budget("the background pipeline finishes the job (fixture model)", PIPELINE_WALL_SECONDS, "reassessed", "pipeline-done")
 
-    # The page shows the resume the pipeline stored: the panel, its folder line, "Tailor again", "Resume tailored".
-    # No reload: one read of the stored resume when the tailor step finished, and the timeline stays as it is.
-    panel = ui.page.locator('#tailored-resume[data-state="stored"]')
+    # The page shows the resume the pipeline stored: the panel, its folder line, the one Apply button, "Resume ready".
+    # No reload: the stored resume is read for the new assessment and when the pick step finished, and the timeline
+    # stays as it is. Nothing on the page tailors.
+    panel = ui.page.locator('#job-resume[data-state="stored"]')
     tailored_state = ui.page.locator('.job-page [data-role="job-state"][data-state="tailored"]')
     panel.wait_for()
-    ui.page.locator(f"#tailored-resume {tid('resumes-folder-file')}").wait_for()
+    ui.page.locator(f"#job-resume {tid('resumes-folder-file')}").wait_for()
     tailored_state.wait_for()
-    assert ui.page.locator('.job-page [data-action="tailor"]').text_content() == "Tailor again"
+    assert "Resume ready" in (tailored_state.text_content() or "")
+    assert ui.page.locator('.job-page [data-action="tailor"]').count() == 0
+    assert (ui.page.locator('.job-page [data-action="apply"]').text_content() or "").strip() == "Apply: get the PDF"
     ui.settle()
-    assert ui.requests_after("reassessed", "/api/tailored-resumes") == 1
+    assert ui.requests_after("typed", "/api/tailored-resumes") == 2
     assert ui.requests_after("pipeline-done", "/api/pipeline/job") == 0, "the timeline was read again for the resume the pipeline stored"
     assert timeline.get_attribute("data-state") == "done"
     assert ui.writes_after("reassessed") == []
@@ -184,6 +193,6 @@ def test_answer_a_question_on_the_job_page_and_the_pipeline_runs(ui) -> None:
     ui.reload()
     ui.wait_for_job_page()
     panel.wait_for()
-    ui.page.locator(f"#tailored-resume {tid('resumes-folder-file')}").wait_for()
+    ui.page.locator(f"#job-resume {tid('resumes-folder-file')}").wait_for()
     tailored_state.wait_for()
     ui.assert_clean()  # zero console errors, page errors, HTTP >= 400, failed requests

@@ -244,8 +244,9 @@ const ROW_STATE_WORDS = {
   not_assessed: "Not assessed",
   needs_answers: "Needs your answers",
   matched: "Matched",
+  has_gap: "Has a gap", // 0.1.11 (OD1): matched by verdict, held by the gate: a must-have is confirmed unmet
   not_a_match: "Not a match",
-  tailored: "Resume tailored",
+  tailored: "Resume ready",
   weak_fit: "Weak fit",
 };
 
@@ -272,7 +273,7 @@ export function rowChips(row) {
   } else if (state === WEAK_FIT) {
     chips.push({ kind: "state", label: ROW_STATE_WORDS.weak_fit, tone: "plain", testId: "weak-fit-chip", title: "Few requirements met and a low rank: no questions are asked for it." });
   } else if (assessed) {
-    chips.push({ kind: "state", label: ROW_STATE_WORDS[state] || humanCode(state), tone: state === "not_a_match" ? "danger" : "ok" });
+    chips.push({ kind: "state", label: ROW_STATE_WORDS[state] || humanCode(state), tone: state === "not_a_match" ? "danger" : state === "has_gap" ? "warn" : "ok" });
   }
   chips.push(assessed ? { kind: "assessed", label: "Assessed", tone: "plain" } : { kind: "state", label: ROW_STATE_WORDS.not_assessed, tone: "plain" });
   if (row.label === "recommended" || row.label === "needs_attention") {

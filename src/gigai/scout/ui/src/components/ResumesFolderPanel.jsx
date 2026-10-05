@@ -3,7 +3,7 @@ import { getResumesFolder, putResumesFolder } from "../api.js";
 import { folderChanged, folderLine, folderRequest } from "../resumesFolderModel.js";
 
 // 0110-10-05 A: the resumes folder (GET/PUT /api/resumes-folder): the one
-// visible place a job's tailored markdown and the PDFs made without a header
+// visible place a job's resume markdown and the PDFs made without a header
 // are kept, named <company>-<role>-<date>. Save sends the typed path; "Use
 // the default" sends an empty one. Files already written are not moved.
 export default function ResumesFolderPanel() {
@@ -39,7 +39,7 @@ export default function ResumesFolderPanel() {
     <section className="panel" id="settings-resumes-folder">
       <h2>Resumes folder</h2>
       <p className="muted">
-        Each job's tailored resume (markdown) and the PDFs made without a header are saved in this folder, named for the company, the role and
+        Each job's resume (markdown) and the PDFs made without a header are saved in this folder, named for the company, the role and
         the date. A file you change there stays yours: a newer one gets a new name.
       </p>
       {folder && (
