@@ -195,6 +195,8 @@ class _Selection:
         model_wait: float | None = None,
     ) -> None:
         refreshed = postings.refresh(home_root, target, store=store, now=moment, wait=model_wait)
+        #: Rows read as stored while a build runs (``postings.BUILD_STALE``), for a caller that acts on them.
+        self.as_stored = postings.BUILD_STALE in refreshed.builds.values()
         self.views: tuple[ProfileView, ...] = refreshed.profiles
         self.resolved = refreshed.resolved
         active = {view.profile_id for view in self.views}
@@ -410,6 +412,25 @@ def _renewing(store: PipelineStore, stop: threading.Event, holder: str) -> None:
             continue
 
 
+def _half_applied(selection: "_Selection", store: PipelineStore, named: Sequence[str] | None, home_root: Path, target: Path) -> bool:
+    """Whether a selection read as stored while a build runs holds a row that build wrote, or lacks a named posting.
+
+    A running build's rows carry its stamp (``postings.building_stamp``); the rows an interrupted build left are newer
+    than their profile's build record. Every row of a selected posting counts, not only the profile it is shown for:
+    which profile that is depends on all of them.
+    """
+
+    found = {row.job for _group, row in selection.shown}
+    if named is not None and any(job not in found for job in named):
+        return True
+    running = postings.building_stamp(home_root, target)
+    built = {profile_id: build.built_at for profile_id, build in store.posting_builds().items()}
+    return any(
+        row.updated_at == running or row.updated_at > built.get(row.profile_id, "")
+        for group, _row in selection.shown for row in group
+    )
+
+
 def assess_these(
     home_root: Path,
     target: Path,
@@ -425,6 +446,7 @@ def assess_these(
     now: datetime | None = None,
     config: object | None = None,
     include_low_rank: bool = False,
+    model_wait: float | None = None,
 ) -> dict[str, object]:
     """"Assess these": ask first (count and estimate), assess on approval. The ``scout-postings-assess:1`` response.
 
@@ -435,6 +457,15 @@ def assess_these(
     unless ``approve`` is true. 0110-10-02: a posting whose rank score is
     below the assess threshold is left out and counted (``low_rank``) unless
     ``include_low_rank``.
+
+    ``model_wait`` (0.1.10.11, the server's POST): as for :func:`search_postings`,
+    the postings are selected from the rows as stored when a large build of the
+    read model runs (the rows the Jobs list showed), instead of after it. Only
+    rows of FINISHED builds are acted on: when a selected row was written by the
+    build still running (its facts and its best-profile order are not final), or
+    a named posting is not among the stored rows (the build may be adding it),
+    the build is waited for, as before, and the selection is made from what it
+    stored. The read of the RESULTS, after a batch, waits for the build too.
     """
 
     from ..workpad import committed_read_cache
@@ -462,8 +493,13 @@ def assess_these(
         try:
             selection = _Selection(
                 home_root, target, store, profile_ids=(profile_id,) if profile_id else (), query=query, states=wanted_states,
-                window=window, removed=False, jobs=named, moment=moment,
+                window=window, removed=False, jobs=named, moment=moment, model_wait=model_wait,
             )
+            if selection.as_stored and _half_applied(selection, store, named, home_root, target):
+                selection = _Selection(
+                    home_root, target, store, profile_ids=(profile_id,) if profile_id else (), query=query, states=wanted_states,
+                    window=window, removed=False, jobs=named, moment=moment,
+                )
             if selection.hidden_profiles:
                 raise PostingSearchError("profile_not_found", "no active Scout profile has this id")
             found = {row.job for _group, row in selection.shown}

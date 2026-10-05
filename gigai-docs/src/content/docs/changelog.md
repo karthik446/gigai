@@ -27,6 +27,24 @@ operator-visible capability and must link to the relevant release or evidence.
 Speed: saves and the first Jobs load of a day on a store with a lot of finished work. Work in progress;
 the notes are written as the changes land.
 
+- **Faster: the first Jobs load of a day.** Every watched company used to be matched again the first
+  time you opened Jobs, ran `gigai scout new` or clicked "Assess these" after midnight UTC (9 to 13
+  seconds with 10,000 companies, every day). Now only the postings that just became older than your
+  "posted within" window are looked at, and no company is matched again for it: with the app running,
+  that first load is as fast as any other (0.1 to 0.3 seconds). The window itself works as before: a
+  posting leaves the list on the first load of the day after it becomes too old. The first load after
+  you install this version matches everything once more; the list you had is shown meanwhile.
+- **Faster: the job page, the pipeline status, and assessing or tailoring a job.** The job page, the
+  lists of assessments and answers, the pipeline status, "Assess", "Assess these", "Tailor resume" and
+  "Process now" checked your store again and again within one request. They now check it once. On a
+  large store the time GigAI itself spends on one of them (the model's own time is extra) went from
+  0.3 to 2.2 seconds down to 0.05 to 0.4 seconds. A batch (`gigai scout new`, "Assess these") saves the
+  same on every posting it assesses. The job page also reads only its own job's assessment and
+  tailored resume, not every one you have stored.
+- **"Assess these" no longer waits for the Jobs list to refresh.** While the list is being matched
+  again in the background, the question is answered from the list you see. A posting the refresh is
+  still working on is assessed when the refresh is done, as before.
+
 ### 0.1.10.10
 
 A fix for 0.1.10.9: `gigai scout new` stopped with an error on the first run after an update when

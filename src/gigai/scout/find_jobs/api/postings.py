@@ -26,6 +26,11 @@ there are none yet (the first build, once after an upgrade), with ``202``
 and the ``scout-postings-status:1`` object (``status: "preparing"`` and the
 percent); the build runs once, in its own thread, for every request.
 
+0.1.10.11 (C8): ``POST /api/postings/assess`` selects its postings from the
+same stored rows while a large build runs (they are the rows the list
+showed). With no stored rows yet it waits for the first build, as before:
+only a GET answers ``202``.
+
 No response mixes: these hold posting text (public-untrusted) and nothing
 the user wrote.
 """
@@ -165,13 +170,23 @@ class PostingsRoutesMixin:
         if target is None:
             return
         home_root = self._backend.home_root
-        self._postings_answer(
-            lambda: assess_these(
+
+        def answer(model_wait: float | None) -> dict[str, object]:
+            return assess_these(
                 home_root, target, jobs=jobs, profile_id=texts["profile_id"], query=texts["query"], states=states,
                 window=texts["window"], approve=approve, again=again, decided_by=texts["actor"] or "operator",
-                include_low_rank=include_low_rank,
+                include_low_rank=include_low_rank, model_wait=model_wait,
             )
-        )
+
+        def build() -> dict[str, object]:
+            # 0.1.10.11 (C8): from the rows as stored while a large build runs, as the GET that listed them. With no
+            # stored rows yet (the first build) a POST waits for the build, as it always did: only a GET answers 202.
+            try:
+                return answer(model_wait_seconds())
+            except PostingModelPreparing:
+                return answer(None)
+
+        self._postings_answer(build)
 
     def _handle_post_runs_import(self) -> None:
         body = self._read_json_body()
