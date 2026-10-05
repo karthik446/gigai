@@ -20,9 +20,24 @@ Every source's lines are recorded by the id they got in the master
 ``read_resume`` reads a resume that is not in GigAI's own format where the
 shape is plain: section names a resume commonly uses (``Work Experience``,
 ``Technical Skills``, ``Certifications``), sections as ``#`` / ``##``
-headings, bold lines or lines in capitals, entries as deeper headings, bold
-lines or plain lines, and bullets with other markers. What it cannot read is
-refused by line number and rule, never by text. Three rules of it:
+headings, underlined lines, bold lines or lines in capitals, entries as
+deeper headings, bold lines, plain lines or list items, and bullets with
+other markers. What it cannot read is refused by line number and rule, never
+by text. Its rules:
+
+* A HORIZONTAL RULE (``---``, ``***``, ``___``, ``===``) is a blank line:
+  it ends a paragraph and holds no text. Right under a line that names a
+  section, ``===`` and ``---`` underline it: the line is a section heading;
+* A SECTION HEADING THAT IS NOT ONE OF THE SIX is read as the closest of
+  them: by its name (``_SECTION_NAMES``), else by a word in it
+  (``_CLOSEST``: ``Agentic AI Projects`` is Projects), else as Other. Each
+  such heading is SAID (``ResumeReading.sections``: the line, the heading's
+  words, the section, how it was found);
+* TEXT THAT HAS NO PLACE IN ITS SECTION IS KEPT, never refused, and said
+  (``READ_AS``): plain text under an entry that is not a role line is a line
+  of that entry; a list item in Education or Projects with no entry above it
+  is an entry of its own; text or a list in an entry section with no entry
+  above it is a line of Other;
 
 * ABOVE THE FIRST SECTION a paragraph is the summary: a run of lines with no
   blank line in it that reads as a sentence (8 words or more, no ``|``
@@ -38,6 +53,11 @@ refused by line number and rule, never by text. Three rules of it:
   master, folded into a line the master holds, or named as left out by line
   number and reason (``ResumeReading``, ``SourceLines``,
   ``LEFT_OUT_REASONS``), never by its text.
+
+``read_file`` is the same reader for ONE file that is to be stored as the
+master (``master init --from FILE``): a file in GigAI's own format (its first
+line names it, ``<!-- gigai-master:1 -->``) is read strictly, as it always
+was; any other file is a resume and is read as above, with the same count.
 
 This module is pure: no file, no journal, no model.
 """
@@ -95,9 +115,29 @@ _SECTION_NAMES = {
     "memberships": "other", "affiliations": "other", "volunteer experience": "other", "volunteer work": "other", "community": "other",
     "references": "other",
 }
+#: A heading no row above names is the section a word in it names (the word's start; the first row that matches).
+_CLOSEST: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("projects", ("project", "open source", "open-source", "portfolio", "hackathon")),
+    ("education", ("education", "academic", "degree", "coursework")),
+    ("skills", ("skill", "technolog", "tool", "stack", "competenc", "expertise", "proficienc", "programming")),
+    ("summary", ("summary", "profile", "about", "objective", "overview")),
+    ("experience", ("experience", "employment", "career", "work history", "positions")),
+)
+#: How a heading that is not one of the six was read: by its name, by a word in it, or as the safe default.
+SECTION_HOW: dict[str, str] = {
+    "name": "a name this section commonly has",
+    "closest": "the closest section, by a word of the heading",
+    "default": "not a section GigAI has: its lines are kept in Other",
+}
 _HEADING = re.compile(r"\A(#{1,6})\s+(.*?)\s*#*\s*\Z")
 _BOLD_LEAD = re.compile(r"\A(\*\*|__)(.+?)\1\s*(.*)\Z")
-_OTHER_BULLET = re.compile(r"\A(?:[–—·>]|\d{1,2}[.)])\s+(.*)\Z")
+_OTHER_BULLET = re.compile(r"\A(?:[–—·>+▪▫◦‣⁃○●■□◆◇►▸➢➤✓✔→]|\d{1,2}[.)])\s+(.*)\Z")
+#: A horizontal rule: a mark between two parts of a resume, no text.
+_RULE = re.compile(r"\A(?:(?:-[ \t]*){3,}|(?:\*[ \t]*){3,}|(?:_[ \t]*){3,}|={3,}|[—–─━]{3,})\Z")
+#: Right under a line that stands alone and names a section, these marks make that line a section heading.
+_UNDERLINE = re.compile(r"\A(?:={3,}|-{3,})\Z")
+#: A hard line break a markdown file may end a line with.
+_BREAK = re.compile(r"(?:\\|<br\s*/?>)\s*\Z", re.IGNORECASE)
 _BULLET = re.compile(r"\A[-*•]\s+")
 _COMMENT = re.compile(r"\s*<!--.*?-->\s*\Z")
 _EMPHASIS = re.compile(r"(?<![\w*])(\*\*|__|\*|_)(?=\S)(.+?)(?<=\S)\1(?![\w*])")
@@ -108,10 +148,18 @@ _FIELDS = re.compile(r"\s[|·•]\s|\t")
 _SKILLS_LINE = re.compile(r"\A[^:,;|]{1,40}:\s*\S")
 #: A plain line this long that has a plain line right under it is taken as wrapped.
 _WRAP_WIDTH = 60
-_POINT = r"(?:(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+|\d{1,2}/)?(?:19[5-9]\d|20\d\d)"
+#: A heading's words are said back at most this long, and a refused line at most this long.
+_HEADING_SHOWN = 80
+_LINE_SHOWN = 160
+#: A point in time as a resume writes it: ``2021``, ``Jun 2019``, ``Sept. 2019``, ``06/2015``, ``06.2015``, ``2015-06``, ``Summer 2009``, ``Q3 2020``.
+_POINT = (
+    r"(?:(?:(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?|spring|summer|fall|autumn|winter|q[1-4]),?\s+|\d{1,2}[/.])?"
+    r"(?:19[5-9]\d|20\d\d)(?:[/.-]\d{1,2}(?!\d))?"
+)
 #: The dates an entry heading ends with: ``(2021 - Present)``, ``, Jun 2019 - Jan 2023``, ``| 2016``.
 _HEADING_DATES = re.compile(
-    rf"(?:\s|[,;:|(–—-])+\(?(?P<dates>{_POINT}(?:\s*(?:-|–|—|to|until)\s*(?:{_POINT}|present|current|now))?)\)?\s*\Z", re.IGNORECASE,
+    rf"(?:\s|[,;:|(–—-])+\(?(?P<dates>{_POINT}(?:\s*(?:-|–|—|to|until|through|thru)\s*(?:{_POINT}|present|current|now|today|ongoing))?)\)?\s*\Z",
+    re.IGNORECASE,
 )
 
 #: Why a content line of a resume is not in the master: the reason -> what it says, in the order a report lists them.
@@ -121,7 +169,14 @@ LEFT_OUT_REASONS: dict[str, str] = {
     "title_heading": "a title heading above the section headings",
     "unknown_section": "a section heading this reader does not know: its lines are in Other, its own words are not kept",
     "empty_section": "a section heading with nothing under it",
+    "section_in_other": "a section heading whose lines are all kept in Other: its own words are not kept",
     "unread": "not read",
+}
+#: How a content line was read that has no place of its own in its section: kept, and said by line number.
+READ_AS: dict[str, str] = {
+    "entry_line": "plain text under an entry that is not a role line: kept as a line of that entry",
+    "listed_entry": "a list item with no entry above it: read as an entry of its own",
+    "kept_in_other": "in Experience, Projects or Education with no entry above it: kept as a line of Other",
 }
 #: Why a content line that was read is not a line of its own in the master: the master holds it already.
 FOLDED_REASONS: tuple[str, ...] = ("exact_duplicate", "near_duplicate", "conflict", "same_entry", "role_line", "skills_joined")
@@ -135,10 +190,26 @@ def _same(a: str, b: str) -> bool:
     return _flat(a).casefold() == _flat(b).casefold()
 
 
+def _section_key(text: str) -> str:
+    return _flat(text.strip().strip("*_").rstrip(":").casefold().replace("&", " and "))
+
+
 def _section_of(text: str) -> str | None:
     """The section a heading's words name, or ``None``."""
 
-    return _SECTION_NAMES.get(_flat(text.strip().strip("*_").rstrip(":")).casefold())
+    return _SECTION_NAMES.get(_section_key(text))
+
+
+def _named(text: str, *, default: bool = False) -> tuple[str, str] | None:
+    """``(section, how)`` for a heading's words: by its name, else by a word in it, else Other when ``default``; ``how`` is a ``SECTION_HOW``."""
+
+    key = _section_key(text)
+    if key in _SECTION_NAMES:
+        return _SECTION_NAMES[key], "name"
+    for section, stems in _CLOSEST:
+        if any(re.search(rf"(?<![a-z]){re.escape(stem)}", key) for stem in stems):
+            return section, "closest"
+    return ("other", "default") if default else None
 
 
 def _hex(text: str) -> str:
@@ -164,10 +235,11 @@ def _numbers(text: str) -> frozenset[str]:
 class ResumeReading:
     """One resume read as a master draft, and what became of every content line of the file.
 
-    A content line is a line that is not blank and not only a comment. Each
-    one is a section heading of the draft (``section_lines``), part of an
-    entry or a line of the draft (``spans``: the element -> its file lines),
-    or left out and named in ``left_out`` with the reason. Nothing else:
+    A content line is a line that is not blank, not only a comment and not
+    only a horizontal rule. Each one is a section heading of the draft
+    (``section_lines``), part of an entry or a line of the draft (``spans``:
+    the element -> its file lines), or left out and named in ``left_out``
+    with the reason. Nothing else:
     ``lines == section_lines + sum(spans.values()) + len(left_out)``.
     """
 
@@ -178,6 +250,10 @@ class ResumeReading:
     spans: dict[int, int]
     #: ``(reason, 1-based file line)`` in the file's order; the reasons are ``LEFT_OUT_REASONS``.
     left_out: tuple[tuple[str, int], ...]
+    #: ``(file line, the heading's words, the section, how)`` for every section heading that is not the section's own name (``SECTION_HOW``).
+    sections: tuple[tuple[int, str, str, str], ...] = ()
+    #: ``(how, file line)`` for every kept line that has no place of its own in its section (``READ_AS``).
+    read_as: tuple[tuple[str, int], ...] = ()
 
 
 @dataclass
@@ -190,8 +266,16 @@ class _Normalized:
     left: dict[int, str] = field(default_factory=dict)
     #: The paragraphs above the first section that are the summary: ``(the indexes of its lines, its text)``.
     summary: list[tuple[list[int], str]] = field(default_factory=list)
-    #: Index of a '### ' line the reader made from a bold title under an employer that already has bullets -> that employer.
+    #: Index of a '### ' line the reader made from a title under an employer that already has bullets -> that employer.
     employers: dict[int, str] = field(default_factory=dict)
+    #: ``(index, the heading's words, the section, how)`` for a section heading that is not the section's own name.
+    sections: list[tuple[int, str, str, str]] = field(default_factory=list)
+    #: Lines of an entry section with no entry above them, kept as lines of Other: ``(the indexes of its lines, its text)``.
+    other: list[tuple[list[int], str]] = field(default_factory=list)
+    #: Index of a content line whose words are part of another line (a wrap, a label) -> that line's index.
+    carried: dict[int, int] = field(default_factory=dict)
+    #: Index -> how the line there was read (``READ_AS``).
+    read_as: dict[int, str] = field(default_factory=dict)
 
 
 def _dated(text: str) -> bool:
@@ -205,9 +289,26 @@ def _plain(text: str) -> str:
 
 
 def _wraps(above: str, line: str) -> bool:
-    """A plain line of Skills or Other right under a plain line: the same line, wrapped, rather than the next one of a list."""
+    """A plain line right under a plain line: the same line, wrapped, rather than the next one of a list."""
 
     return above.endswith(",") or len(above) >= _WRAP_WIDTH or line[:1].islower()
+
+
+def _skills_words(text: str) -> str:
+    """A Skills line without its marks: ``**Languages:** Go`` and ``**Languages** - Go`` are ``Languages: Go``."""
+
+    found = _BOLD_LEAD.match(text)
+    if found:
+        label, rest = found.group(2).strip(), found.group(3).strip()
+        if label.endswith(":"):
+            label = label[:-1].rstrip()
+        elif rest[:1] == ":" or (rest[:1] in "–—-" and rest[1:2] == " "):
+            rest = rest[1:].lstrip()
+        else:
+            label = ""
+        if label and rest:
+            return _plain(f"{label}: {rest}")
+    return _plain(text)
 
 
 def _above_first_section(result: _Normalized, kinds: list[tuple[str, str]], first: int, contact: set[int]) -> None:
@@ -242,14 +343,28 @@ def _normalized_lines(text: str) -> _Normalized:
     """``text`` line for line (numbers kept) in GigAI's resume format where its own shape is plain; see the module docstring."""
 
     raw = text.splitlines()
-    stripped = [_COMMENT.sub("", line).strip() for line in raw]
-    levels = [len(found.group(1)) for line in stripped if (found := _HEADING.match(line)) and _section_of(found.group(2)) is not None]
+    stripped = [_BREAK.sub("", _COMMENT.sub("", line)).strip().strip("﻿​").strip() for line in raw]
+    indent = [len(line.expandtabs(4)) - len(line.expandtabs(4).lstrip()) for line in raw]
+    for index, line in enumerate(stripped):
+        if not _RULE.match(line):
+            continue
+        # A rule holds no text. Right under a line that stands alone and names a section it is that line's underline:
+        # the line is a section heading ('===' and '---' alike). Under any other line it is a rule, so a paragraph, a
+        # title or a Skills line with a rule under it stays what it was.
+        above = stripped[index - 1] if index else ""
+        alone = bool(above) and (index == 1 or not stripped[index - 2]) and not (_HEADING.match(above) or _BULLET.match(above) or _OTHER_BULLET.match(above))
+        if alone and _UNDERLINE.match(line) and _named(above) is not None:
+            stripped[index - 1] = f"## {above}"
+        stripped[index] = ""
+    headings = [(len(found.group(1)), found.group(2)) for line in stripped if (found := _HEADING.match(line))]
+    levels = [level for level, words in headings if _section_of(words) is not None] or [level for level, words in headings if _named(words) is not None]
     section_level = min(levels) if levels else 0  # 0: no markdown heading names a section
     result = _Normalized([], {index: line for index, line in enumerate(stripped) if line})
     out = result.lines
     section: str | None = None
     explicit_entries: dict[int, bool] = {}  # section start index -> it has '###' / bold entry headings
     depth: dict[int, int] = {}  # the index of a heading below the section headings -> its level
+    named: dict[int, tuple[str, str, str]] = {}  # the index of a section heading -> (the section, how it was found, its words)
 
     def classify(index: int) -> tuple[str, str]:
         """``(kind, text)``: section | entry | bold | bullet | text | blank | drop."""
@@ -262,19 +377,26 @@ def _normalized_lines(text: str) -> _Normalized:
             level, words = len(heading.group(1)), heading.group(2)
             if section_level and level < section_level:
                 return "drop", ""  # a title above the sections
-            if (section_level and level == section_level) or (not section_level and _section_of(words) is not None):
-                return "section", _section_of(words) or ""
+            found = _named(words, default=bool(section_level)) if not section_level or level == section_level else None
+            if found is not None:
+                named[index] = (*found, _plain(words).rstrip(":").rstrip())
+                return "section", found[0]
             depth[index] = level
             return "entry", _plain(words)
         bold = _BOLD_LEAD.match(line)
-        if bold and not bold.group(3) and _section_of(bold.group(2)) is not None and not section_level:
-            return "section", _section_of(bold.group(2)) or ""
+        blank_before = index == 0 or not stripped[index - 1]
+        if not section_level:
+            # No markdown heading names a section: a bold line or a plain line that stands alone does, by its name,
+            # or by a word in it when it is written as a heading is (in capitals, or ending in a colon).
+            words = bold.group(2) if bold and not bold.group(3) else line if not bold and blank_before else ""
+            loud = words.isupper() or words.endswith(":")
+            found = _named(words) if words else None
+            if found is not None and (bold or loud or _flat(words).istitle()) and (found[1] == "name" or loud):
+                named[index] = (*found, _plain(words).rstrip(":").rstrip())
+                return "section", found[0]
         if bold:
             rest = bold.group(3)
-            return "bold", _flat(f"{bold.group(2)}{'' if rest[:1] in ':,;.' else ' '}{rest}")
-        blank_before = index == 0 or not stripped[index - 1]
-        if not section_level and blank_before and _section_of(line) is not None and (line.isupper() or line.endswith(":") or _flat(line).istitle()):
-            return "section", _section_of(line) or ""
+            return "bold", _plain(f"{bold.group(2)}{'' if rest[:1] in ':,;.' else ' '}{rest}")
         other = _OTHER_BULLET.match(line)
         if other:
             return "bullet", other.group(1)
@@ -295,12 +417,48 @@ def _normalized_lines(text: str) -> _Normalized:
             explicit_entries[start] = False
         elif kind in ("entry", "bold") and start >= 0:
             explicit_entries[start] = True
-    # The entry that is open: how it was opened (heading | bold | plain), its heading, its role lines, whether it names a year.
-    start, opened, employer, level, role_lines, dated, bullets_in_entry = -1, "", "", 0, 0, False, False
+    comments = [raw[index][len(_COMMENT.sub("", raw[index])):].strip() for index in range(len(raw))]
+
+    def following(index: int) -> int | None:
+        """The next content line after ``index``, or ``None``."""
+
+        return next((later for later in range(index + 1, len(kinds)) if kinds[later][0] != "blank"), None)
+
+    def later_bullet(index: int) -> bool:
+        later = following(index)
+        return later is not None and kinds[later][0] == "bullet"
+
+    def labelled(index: int, label: str) -> bool:
+        """A Skills label on a line of its own (``### Languages``): the lines under it become ONE line, ``Languages: Go, Python``."""
+
+        head = following(index)
+        if comments[index] or head is None or kinds[head][0] not in ("bullet", "text"):
+            return False
+        group = [head]
+        while True:
+            later = group[-1] + 1
+            if kinds[head][0] == "bullet":
+                later = following(group[-1]) or len(kinds)
+            if later >= len(kinds) or kinds[later][0] != kinds[head][0]:
+                break
+            group.append(later)
+        if any(comments[item] or _SKILLS_LINE.match(_skills_words(kinds[item][1])) for item in group):
+            return False
+        listed = kinds[head][0] == "bullet"  # a list: a skill each; plain lines: one line, wrapped
+        joined = (", " if listed else " ").join(_skills_words(kinds[item][1]).rstrip("," if listed else "") for item in group)
+        preset[head] = f"- {label}: {joined}"
+        preset.update({item: "" for item in group[1:]})
+        result.carried.update({item: head for item in (index, *group[1:])})
+        return True
+
+    # The entry that is open: how it was opened (heading | bold | plain | listed), its heading, its role lines, whether it names a year.
+    start, opened, employer, level, role_lines, dated, bullets_in_entry, entry_at = -1, "", "", 0, 0, False, False, -1
     above = ""  # in Summary, Skills and Other: what the line right above is part of (marked: a bullet; plain: a plain line)
+    preset: dict[int, str] = {}  # index -> the line to pass on there, set by a line above it
 
     def open_entry(how: str, words: str, tail: str, *, of_employer: str = "") -> None:
-        nonlocal opened, employer, level, role_lines, dated, bullets_in_entry
+        nonlocal opened, employer, level, role_lines, dated, bullets_in_entry, entry_at
+        entry_at = len(out)
         if of_employer:
             result.employers[len(out)] = of_employer
             opened, role_lines, dated, bullets_in_entry = "heading", 1, True, False
@@ -308,23 +466,53 @@ def _normalized_lines(text: str) -> _Normalized:
             opened, employer, level, role_lines, dated, bullets_in_entry = how, words, depth.get(len(out), 0), 0, _dated(words), False
         out.append(f"### {words}{tail}")
 
+    def join(at: int, index: int, words: str, tail: str) -> None:
+        """The file's line ``index`` is the rest of the line at ``at`` (a wrap): its words go there."""
+
+        comment = _COMMENT.search(out[at])
+        body, kept = (out[at][: comment.start()], out[at][comment.start():]) if comment else (out[at], "")
+        out[at] = f"{body} {words}{kept}{tail}"
+        out.append("")
+        result.carried[index] = at
+
+    def to_other(index: int, words: str, *, wrap: bool = False) -> None:
+        """The file's line ``index`` has no entry to belong to: it is kept as a line of Other."""
+
+        if wrap:
+            result.other[-1] = ([*result.other[-1][0], index], f"{result.other[-1][1]} {words}")
+        else:
+            result.other.append(([index], words))
+            result.read_as[index] = "kept_in_other"
+        out.append("")
+
     for index, (kind, words) in enumerate(kinds):
-        comment = raw[index][len(_COMMENT.sub("", raw[index])):].strip()
-        tail = f" {comment}" if comment else ""
-        blank_before = index == 0 or not stripped[index - 1]
-        if index < first or kind in ("blank", "drop"):
+        tail = f" {comments[index]}" if comments[index] else ""
+        # A line that is not passed on (a rule, a title, a line kept in Other) stands as a blank line for what
+        # follows; a line whose words went into the line above it (a wrap) does not.
+        blank_before = index == 0 or (not out[index - 1] and index - 1 not in result.carried)
+        if index in preset:
+            out.append(preset[index])
+            above = "marked"
+        elif index < first or kind in ("blank", "drop"):
             if kind == "drop" and index > first:
                 result.left[index] = "title_heading"
             out.append("")
             above = above if kind == "drop" else ""
         elif kind == "section":
-            if not words:
+            name, how, heading = named[index]
+            if how == "default":
                 result.left[index] = "unknown_section"
-            section, start, opened, above = words or "other", index, "", ""
+            if heading.casefold() != name:
+                result.sections.append((index, heading, name, how))
+            section, start, opened, above = name, index, "", ""
             out.append(f"## {section.capitalize()}")
         elif section not in ENTRY_SECTIONS:
+            if section == "skills":
+                words = _skills_words(stripped[index] if kind == "bold" else words)
             listed = section in ("skills", "other") and above == "plain" and not _wraps(stripped[index - 1], words)
-            if kind != "text":
+            if section == "skills" and kind in ("entry", "bold") and not _SKILLS_LINE.match(words) and labelled(index, words.rstrip(":")):
+                out.append("")
+            elif kind != "text":
                 out.append(f"- {words}{tail}")  # a bold line or a deeper heading in Summary, Skills or Other is a line of it
                 above = "marked"
             elif listed or (section == "skills" and _SKILLS_LINE.match(words)):
@@ -346,17 +534,54 @@ def _normalized_lines(text: str) -> _Normalized:
             else:
                 open_entry("heading" if kind == "entry" else "bold", words, tail)
         elif kind == "bullet":
-            bullets_in_entry = True
-            out.append(f"- {words}{tail}")
+            later = following(index)
+            nested = later is not None and kinds[later][0] == "bullet" and indent[later] > indent[index]
+            if opened == "listed" and indent[index] > indent[entry_at]:
+                bullets_in_entry = True
+                out.append(f"- {words}{tail}")  # a list item's own list: its bullets
+            elif opened in ("", "listed") and (opened or nested or section != "experience"):
+                # A list of schools or projects, and a list whose items have a list of their own: an entry each.
+                result.read_as[index] = "listed_entry"
+                open_entry("listed", _plain(words), tail)
+            elif not opened:
+                to_other(index, words)  # a list in Experience with no employer or title above it
+            else:
+                bullets_in_entry = True
+                out.append(f"- {words}{tail}")
+        elif result.other and result.other[-1][0][-1] == index - 1 and not opened:
+            to_other(index, words, wrap=True)
+        elif opened == "listed" and not blank_before and not bullets_in_entry and not role_lines:
+            employer, dated = f"{employer} {_plain(words)}", dated or _dated(words)
+            join(entry_at, index, _plain(words), tail)  # a list item that is an entry, wrapped
         elif not explicit_entries.get(start, False) and (not opened or (blank_before and (bullets_in_entry or dated))):
             # A section whose entries are plain lines: the first line, and a line after a blank line once the
             # entry above has its bullets or its dates, opens an entry.
             open_entry("plain", _plain(words), tail)
-        elif opened and not bullets_in_entry:
-            role_lines, dated = role_lines + 1, dated or _dated(words)
-            out.append(f"{_plain(words)}{tail}")
+        elif not opened:
+            to_other(index, words)  # text above the first entry of its section
+        elif not bullets_in_entry:
+            if role_lines and not blank_before and index - 1 not in depth and kinds[index - 1][0] == "text" and _wraps(stripped[index - 1], words):
+                join(index - 1 if index - 1 not in result.carried else result.carried[index - 1], index, _plain(words), tail)  # a role line, wrapped
+                dated = dated or _dated(words)
+            elif role_lines + 1 < MAX_HEADING_LINES:
+                role_lines, dated = role_lines + 1, dated or _dated(words)
+                out.append(f"{_plain(words)}{tail}")
+            else:
+                # More text than an entry's heading holds: a line of the entry, never a refusal.
+                bullets_in_entry, result.read_as[index] = True, "entry_line"
+                out.append(f"- {words}{tail}")
+        elif not blank_before:
+            out.append(f"{words}{tail}")  # the line above, wrapped
+        elif later_bullet(index) and _dated(words) and opened in ("heading", "bold"):
+            # A dated title after an entry's bullets, with bullets of its own: the next role at the same employer,
+            # or an entry of its own when the heading above carries its own dates.
+            if _dated(employer):
+                open_entry("plain", _plain(words), tail)
+            else:
+                open_entry("heading", _plain(words), tail, of_employer=employer)
         else:
-            out.append(f"{words}{tail}")
+            result.read_as[index] = "entry_line"
+            out.append(f"- {words}{tail}")  # text after an entry's bullets: a line of that entry
     return result
 
 
@@ -381,6 +606,18 @@ def _dates_to_role_line(entry: DraftEntry) -> None:
         entry.sublines.insert(0, found.group("dates"))
 
 
+def _checked(indexes: list[int], words: str) -> None:
+    """The rules ``draft_master`` holds a line to, for a line this reader puts in the draft itself."""
+
+    for rule, broken in (
+        (f"a line has at most {MASTER_MAX_ITEM_CHARS} characters", len(words) > MASTER_MAX_ITEM_CHARS),
+        ("control characters are not allowed", bool(_CONTROL.search(words))),
+        ("a comment belongs at the end of the line", "<!--" in words or "-->" in words),
+    ):
+        if broken:
+            raise MasterResumeError("master_markdown_invalid", f"line {indexes[0] + 1}: {rule}")
+
+
 def read_resume_lines(text: str) -> ResumeReading:
     """``text`` read as a master draft (ids optional), with every content line accounted for.
 
@@ -396,13 +633,7 @@ def read_resume_lines(text: str) -> ResumeReading:
     if starts and normal.summary:
         summary = merged.setdefault("summary", DraftSection("summary"))
         for indexes, words in normal.summary:
-            for rule, broken in (
-                (f"a line has at most {MASTER_MAX_ITEM_CHARS} characters", len(words) > MASTER_MAX_ITEM_CHARS),
-                ("control characters are not allowed", bool(_CONTROL.search(words))),
-                ("a comment belongs at the end of the line", "<!--" in words or "-->" in words),
-            ):
-                if broken:
-                    raise MasterResumeError("master_markdown_invalid", f"line {indexes[0] + 1}: {rule}")
+            _checked(indexes, words)
             item = DraftItem(indexes[0] + 1, "summary", words)
             summary.items.append(item)
             spans[id(item)] = len(indexes)
@@ -411,7 +642,9 @@ def read_resume_lines(text: str) -> ResumeReading:
         end = starts[position + 1] if position + 1 < len(starts) else len(lines)
         body = [index for index in range(start + 1, end) if lines[index]]
         if not body:
-            normal.left[start] = "empty_section"
+            moved = any(start < indexes[0] < end for indexes, _words in normal.other)
+            normal.left[start] = "section_in_other" if moved else "empty_section"
+            normal.sections[:] = [found for found in normal.sections if found[0] != start or moved]
             continue
         # Blank lines stand in for everything above, so a refusal names the line of the file.
         chunk = draft_master("\n".join([""] * start + lines[start:end]))
@@ -424,17 +657,28 @@ def read_resume_lines(text: str) -> ResumeReading:
             owners = sorted(
                 [*section.entries, *(bullet for entry in section.entries for bullet in entry.bullets), *section.items], key=lambda item: item.line,
             )
-            for index in body:
-                owner = next((item for item in reversed(owners) if item.line <= index + 1), None)
+            # A line whose words went into another line (a wrap, a label) is counted with the line that holds them.
+            for index in sorted([*body, *(index for index in normal.carried if start < index < end)]):
+                at = normal.carried.get(index, index)
+                owner = next((item for item in reversed(owners) if item.line <= at + 1), None)
                 if owner is not None:
                     spans[id(owner)] = spans.get(id(owner), 0) + 1
                     read.add(index)
             for entry in section.entries:
                 if entry.line - 1 in normal.employers:
                     entry.heading, entry.sublines = normal.employers[entry.line - 1], [entry.heading, *entry.sublines]
-                _dates_to_role_line(entry)
+                if entry.id is None:  # an entry that carries an id is a master's own: its heading stays as it is written
+                    _dates_to_role_line(entry)
             kept.entries += section.entries
             kept.items += section.items
+    if starts and normal.other:
+        other = merged.setdefault("other", DraftSection("other"))
+        for indexes, words in normal.other:
+            _checked(indexes, words)
+            item = DraftItem(indexes[0] + 1, "other", _flat(words))
+            other.items.append(item)
+            spans[id(item)] = len(indexes)
+            read.update(indexes)
     if not merged:
         raise MasterResumeError(
             "master_markdown_invalid",
@@ -443,13 +687,52 @@ def read_resume_lines(text: str) -> ResumeReading:
     draft = MasterDraft(list(merged.values()))
     # Never silent: a content line that is in nothing above is named too.
     left = {index: normal.left.get(index, "unread") for index in normal.content if index not in read}
-    return ResumeReading(draft, len(normal.content), section_lines, spans, tuple((left[index], index + 1) for index in sorted(left)))
+    return ResumeReading(
+        draft, len(normal.content), section_lines, spans, tuple((left[index], index + 1) for index in sorted(left)),
+        tuple((index + 1, heading[:_HEADING_SHOWN], section, how) for index, heading, section, how in normal.sections),
+        tuple((how, index + 1) for index, how in sorted(normal.read_as.items())),
+    )
 
 
 def read_resume(text: str) -> MasterDraft:
     """``text`` read as a master draft (ids optional); ``MasterResumeError`` names a line of ``text`` and the rule."""
 
     return read_resume_lines(text).draft
+
+
+def is_master_file(text: str) -> bool:
+    """``text`` says it is in GigAI's own format: its first line that is not blank is the marker (``<!-- gigai-master:1 -->``)."""
+
+    first = next((line.strip() for line in text.splitlines() if line.strip()), "")
+    return first.startswith("<!--") and first.endswith("-->") and "gigai-master:" in first
+
+
+def read_file(text: str) -> tuple[MasterDraft, ResumeReading | None]:
+    """ONE file that is to be stored as the master (``master init --from FILE``): its draft, and how it was read.
+
+    A file in GigAI's own format is read strictly (``draft_master``: a line that
+    breaks the format is refused by line number and rule) and there is nothing
+    to say about how; any other file is a resume and is read by
+    ``read_resume_lines``, with every content line accounted for."""
+
+    if is_master_file(text):
+        return draft_master(text), None
+    reading = read_resume_lines(text)
+    return reading.draft, reading
+
+
+def refused_line(error: Exception, text: str) -> tuple[int, str] | None:
+    """``(line number, that line of text)`` for a refusal that names a line (``line 12: ...``), or ``None``.
+
+    The message itself never holds the line's text; a command that runs on the
+    person's own machine may show it next to the message (``text`` is what was
+    read: the privacy strip has already blanked what looks like contact data)."""
+
+    found = re.match(r"line (\d+):", str(error))
+    lines = text.splitlines()
+    if found is None or not 1 <= int(found.group(1)) <= len(lines):
+        return None
+    return int(found.group(1)), _flat(lines[int(found.group(1)) - 1])[:_LINE_SHOWN]
 
 
 # --- the merge -------------------------------------------------------------------------------
@@ -527,12 +810,13 @@ class SourceLines:
     lines: int = 0
     kept: int = 0
     folded: tuple[tuple[str, int], ...] = ()
-    #: ``(the source's key, its profiles, its content lines, ((reason, file line), ...))`` per resume, in the sources' order.
-    resumes: tuple[tuple[str, tuple[str, ...], int, tuple[tuple[str, int], ...]], ...] = ()
+    #: ``(the source's key, its profiles, its content lines, ((reason, file line), ...), the section headings read as
+    #: another section, the lines kept where they had no place)`` per resume, in the sources' order (``ResumeReading``).
+    resumes: tuple[tuple[str, tuple[str, ...], int, tuple[tuple[str, int], ...], tuple[tuple[int, str, str, str], ...], tuple[tuple[str, int], ...]], ...] = ()
 
     @property
     def left_out(self) -> dict[str, int]:
-        found = [reason for _key, _profiles, _lines, left in self.resumes for reason, _line in left]
+        found = [reason for _key, _profiles, _lines, left, _sections, _read_as in self.resumes for reason, _line in left]
         return {reason: found.count(reason) for reason in LEFT_OUT_REASONS}
 
     def to_json(self) -> dict[str, object]:
@@ -548,8 +832,18 @@ class SourceLines:
                         {"reason": reason, "why": LEFT_OUT_REASONS[reason], "lines": [line for found, line in left if found == reason]}
                         for reason in LEFT_OUT_REASONS if any(found == reason for found, _line in left)
                     ],
+                    # What was read in a way worth saying: a heading that is not one of the six sections (its own words,
+                    # the section it was read as, how), and the lines kept where they had no place of their own.
+                    "sections": [
+                        {"line": line, "heading": heading, "section": section, "how": how, "why": SECTION_HOW[how]}
+                        for line, heading, section, how in sections
+                    ],
+                    "read_as": [
+                        {"how": how, "why": READ_AS[how], "lines": [line for found, line in read_as if found == how]}
+                        for how in READ_AS if any(found == how for found, _line in read_as)
+                    ],
                 }
-                for _key, profiles, lines, left in self.resumes
+                for _key, profiles, lines, left, sections, read_as in self.resumes
             ],
         }
 
@@ -586,11 +880,15 @@ class MigrationPlan:
 
 
 class MigrationResumeError(MasterResumeError):
-    """A source resume that does not read as a resume; ``key`` names the source."""
+    """A source resume that does not read as a resume; ``key`` names the source.
 
-    def __init__(self, key: str, error: MasterResumeError) -> None:
+    ``refused_line`` is ``(line number, that line of the resume as it is stored)`` when the refusal names a line: for a
+    command on the person's own machine to show beside the message, which itself never holds the text."""
+
+    def __init__(self, key: str, error: MasterResumeError, text: str = "") -> None:
         super().__init__("migration_resume_unreadable", str(error))
         self.key = key
+        self.refused_line = refused_line(error, text)
 
 
 @dataclass
@@ -754,17 +1052,17 @@ def plan_migration(sources: list[SourceResume], *, base: Master | None = None, a
     if base is not None:
         take(draft_master(base.markdown()), "")
     merge.lines_in = merge.exact = 0  # the base master's own lines are not lines coming in
-    read: list[tuple[str, tuple[str, ...], int, tuple[tuple[str, int], ...]]] = []
+    read: list[tuple[str, tuple[str, ...], int, tuple[tuple[str, int], ...], tuple[tuple[int, str, str, str], ...], tuple[tuple[str, int], ...]]] = []
     for source in sources:
         try:
             reading = read_resume_lines(source.text)
         except MasterResumeError as exc:
-            raise MigrationResumeError(source.key, exc) from exc
+            raise MigrationResumeError(source.key, exc, source.text) from exc
         merge.spans = dict(reading.spans)
         merge.kept += reading.section_lines
         take(reading.draft, source.key)
         left = sorted([*reading.left_out, *(("contact", line) for line in source.contact_lines)], key=lambda item: item[1])
-        read.append((source.key, source.profiles, reading.lines + len(source.contact_lines), tuple(left)))
+        read.append((source.key, source.profiles, reading.lines + len(source.contact_lines), tuple(left), reading.sections, reading.read_as))
     unknown = sorted(set(merge.answers) - {question.question_id for question in merge.questions})
     if unknown:
         raise MasterResumeError("migration_answer_unknown", "no question has the id " + ", ".join(unknown) + "; run it again without --answer to read the questions")
@@ -787,14 +1085,24 @@ def plan_migration(sources: list[SourceResume], *, base: Master | None = None, a
         lines_in=merge.lines_in,
         exact_duplicates=merge.exact,
         ids_assigned=assignment.assigned,
-        source_lines=SourceLines(sum(lines for _key, _profiles, lines, _left in read), merge.kept, tuple(sorted(merge.folded.items())), tuple(read)),
+        source_lines=SourceLines(sum(item[2] for item in read), merge.kept, tuple(sorted(merge.folded.items())), tuple(read)),
     )
+
+
+def file_source_lines(reading: ResumeReading, contact_lines: tuple[int, ...] = ()) -> SourceLines:
+    """The count for ONE file read by ``read_file``: nothing is folded; ``contact_lines`` are the lines the caller's privacy strip blanked."""
+
+    left = sorted([*reading.left_out, *(("contact", line) for line in contact_lines)], key=lambda item: item[1])
+    lines = reading.lines + len(contact_lines)
+    return SourceLines(lines, reading.lines - len(reading.left_out), (), (("", (), lines, tuple(left), reading.sections, reading.read_as),))
 
 
 __all__ = [
     "CHOICES",
     "FOLDED_REASONS",
     "LEFT_OUT_REASONS",
+    "READ_AS",
+    "SECTION_HOW",
     "MigrationPlan",
     "MigrationQuestion",
     "MigrationResumeError",
@@ -804,8 +1112,12 @@ __all__ = [
     "SourceLines",
     "SourceResume",
     "SourceSelection",
+    "file_source_lines",
+    "is_master_file",
     "near_duplicate",
     "plan_migration",
+    "read_file",
     "read_resume",
     "read_resume_lines",
+    "refused_line",
 ]

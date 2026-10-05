@@ -61,6 +61,7 @@ from .master_resume import (
     IdAssignment,
     Master,
     MasterChange,
+    MasterDraft,
     MasterResumeError,
     assign_ids,
     build_master,
@@ -150,6 +151,8 @@ class MasterImport:
     contact_removed: ContactRemoved = field(default_factory=ContactRemoved)
     #: P8: where the revision went in the resumes folder (``write_file``); ``None`` when nothing was written.
     file: Mapping[str, object] | None = None
+    #: ``import_master(dry_run=True)``: nothing was written; ``status`` and ``stored`` say what a write would store.
+    dry_run: bool = False
 
 
 def master_record_id(resolved: ResolvedWorkpad) -> str:
@@ -388,8 +391,15 @@ def import_master(
     gig_id: str | None = None,
     refuse_contact: bool = False,
     visible_sha256: str | None = None,
+    reader: Callable[[str], MasterDraft] | None = None,
+    dry_run: bool = False,
 ) -> MasterImport:
     """Store ``source`` as the master: the first revision, or a new one on top of ``revision``.
+
+    0.1.10.11: ``reader`` reads the stripped text as a draft instead of ``draft_master`` (``master init --from`` passes
+    the resume reader, ``master_migration.read_file``); ``dry_run`` goes through every check and then writes NOTHING
+    (no revision, no reference, no file in the resumes folder): the result says what a write would store, its
+    ``stored.revision`` is the revision it would be, with no id and no time. Both default to what this always did.
 
     P8, for ``master sync``: with ``refuse_contact`` a line the privacy strip flags is not dropped but refuses the
     whole import (``master_contact_data``, the lines by number and kind), unless the stored master's own text is
@@ -406,8 +416,9 @@ def import_master(
     if visible_sha256 is None and _is_visible_file(home_root, source):
         visible_sha256 = read_sha256  # `init --from <the folder's master.md>`: the same explicit import
     text, removed = strip_contact(raw)
-    resolved = _resolve(home_root, target, gig_id)
-    chain = _chain(resolved)
+    # A dry run on a home where Scout is not installed yet reads no master and installs nothing.
+    resolved = _resolve_for_read(home_root, target, gig_id) if dry_run else _resolve(home_root, target, gig_id)
+    chain = _chain(resolved) if resolved is not None else []
     current = chain[-1] if chain else None
     previous = _read_master(home_root, target, resolved, current) if current is not None else None
     if refuse_contact and removed.lines:
@@ -420,19 +431,20 @@ def import_master(
                 "remove those lines from the file, then import it again. Nothing was imported.",
             )
 
-    draft = draft_master(text)
+    draft = (reader or draft_master)(text)
     assignment = assign_ids(draft, previous)
-    return _store(home_root, target, resolved, chain, previous, build_master(draft), actor, revision, assignment, removed, visible_sha256)
+    return _store(home_root, target, resolved, chain, previous, build_master(draft), actor, revision, assignment, removed, visible_sha256, dry_run)
 
 
 def _store(
-    home_root: Path, target: Path | None, resolved: ResolvedWorkpad, chain: list[MasterRevision], previous: Master | None,
+    home_root: Path, target: Path | None, resolved: ResolvedWorkpad | None, chain: list[MasterRevision], previous: Master | None,
     master: Master, actor: str, revision: int | None, assignment: IdAssignment, removed: ContactRemoved,
-    visible_sha256: str | None = None,
+    visible_sha256: str | None = None, dry_run: bool = False,
 ) -> MasterImport:
     """``master`` as the next revision on top of ``chain`` (``previous`` is its last revision, parsed): the one write.
 
-    A revision that was written also goes to the resumes folder (``write_file``), whoever the caller is."""
+    A revision that was written also goes to the resumes folder (``write_file``), whoever the caller is. With
+    ``dry_run`` every check runs and nothing is written (``resolved`` is then ``None`` where Scout is not installed)."""
 
     current = chain[-1] if chain else None
     _still_contact(master)
@@ -441,12 +453,12 @@ def _store(
     if len(encoded) > MASTER_MAX_BYTES:
         raise MasterResumeError("master_too_large", f"the master is larger than {MASTER_MAX_BYTES} bytes")
     change = compare(previous, master)
-    record_id = master_record_id(resolved)
+    record_id = master_record_id(resolved) if resolved is not None else ""
     if current is not None and previous is not None and previous.markdown() == markdown:
         same = StoredMaster(record_id, current, len(chain), previous)
         # An imported master.md that says what is stored in other bytes (spacing, a lost id comment) is written again in the stored form.
-        file = write_file(home_root, same, imported=visible_sha256) if visible_sha256 is not None else None
-        return MasterImport("unchanged", same, change, 0, assignment.restored, removed, file=file)
+        file = write_file(home_root, same, imported=visible_sha256) if visible_sha256 is not None and not dry_run else None
+        return MasterImport("unchanged", same, change, 0, assignment.restored, removed, file=file, dry_run=dry_run)
     if current is None and revision not in (None, 0):
         raise MasterStoreError("revision_conflict", f"there is no master yet, so there is no revision {revision}")
     if current is not None and revision is None:
@@ -463,6 +475,13 @@ def _store(
         )
 
     content_hex = digest_imported_bytes(encoded)[len("sha256:"):]
+    if dry_run or resolved is None:
+        # Every check above ran; this is where a write would start.
+        would = MasterRevision(len(chain) + 1, "", current.revision_id if current is not None else None, actor, "", f"sha256:{content_hex}")
+        return MasterImport(
+            "created" if current is None else "revised", StoredMaster(record_id, would, len(chain) + 1, master), change,
+            assignment.assigned, assignment.restored, removed, dry_run=True,
+        )
     # Resolved: the import refuses a source below a redirected (symlinked) parent, and the
     # system temp directory is one on macOS (/var).
     directory = Path(tempfile.mkdtemp(prefix="gigai-master-")).resolve()

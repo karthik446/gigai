@@ -79,6 +79,21 @@ things still take more than a second (see "Still slower than one second"): the n
   Settings reads, looked up the project once for every job it lists (up to 200); it now looks it up
   once.
 
+#### Fixed
+
+- **`gigai scout resume master init` reads the resumes people have.** It refused a resume with a
+  `---` rule between two roles ("text after an entry's bullets"), and `--from FILE` refused section
+  headings such as `## WORK EXPERIENCE` or `## AGENTIC AI PROJECTS` and a project written as a bold
+  title with a tagline. Both forms now read them: a rule is skipped; a heading that is not one of the
+  six sections is read as the closest one (Technical Skills is Skills, Selected Projects and Open
+  Source are Projects, Publications, Awards and Certifications are Other lines, anything unknown is
+  Other); text with no place of its own in its section is kept, never refused. The command says which
+  heading it read as which section and which lines it left out, by line number, with a count that adds
+  up. New: `gigai scout resume master init --from FILE --dry-run` shows what would be stored and
+  writes nothing. A file whose first line is `<!-- gigai-master:1 -->` is still held to GigAI's own
+  format, and contact lines are removed as before. A refusal names the line number and the rule; on
+  the terminal it now also shows that line.
+
 #### Still slower than one second
 
 Measured on a store of 290,000 postings from 10,000 companies with finished background work. These
