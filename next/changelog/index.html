@@ -237,6 +237,11 @@ time before it asked its first question. If you pressed Ctrl-C at the question, 
 “nothing new since” the run you had left. The time now moves when the run has done its work (every
 question answered, or none asked): leave at a question and the next run shows the same postings as
 new.</li>
+<li><strong><code dir="auto">gigai scout new --json</code> that asks is a preview; the yes after it assesses.</strong> An asking call
+(status <code dir="auto">ask</code>: <code dir="auto">gigai scout new --json</code>, or any call without a terminal) moved the “new since” time,
+so the next step, <code dir="auto">gigai scout new --yes --json</code>, said “Nothing new” and assessed nothing. An asking
+call now moves nothing: ask again and you get the same postings, and a plain <code dir="auto">--yes</code> assesses them.
+The time moves with the answer: <code dir="auto">--yes</code>, or <code dir="auto">--no-assess</code> for a no.</li>
 <li><strong>“Nothing new” says what it counts.</strong> <code dir="auto">gigai scout new</code> could say “Nothing new since your last
 check” right after a sources update that stored hundreds of new postings. Both were right, and
 nothing said why: “new” counts the postings your profiles match that Scout first stored after your
@@ -327,6 +332,10 @@ changed in a search’s “new or changed since the last search”. No other Ash
 changed by this, and nothing needs to be done.
 This is not a fix for an assessment that failed with <code dir="auto">posting_requirements_unreadable</code>: that posting
 had its text, and the answer now says which rule refused (see “For agents”).</li>
+<li><strong><code dir="auto">gigai scout run</code> never stops the Scout of another GigAI home.</strong> It stopped whatever Scout held the
+port, also one that another home (<code dir="auto">--home</code>) had started. Now only a Scout of the same home is stopped:
+another home’s keeps running, and the command ends with one line that names the port and that home
+and says to pass <code dir="auto">--port</code>.</li>
 </ul>
 <div class="sl-heading-wrapper level-h4"><h4 id="for-agents">For agents</h4><a class="sl-anchor-link" href="#for-agents"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “For agents”</span></a></div>
 <ul>
