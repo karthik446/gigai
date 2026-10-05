@@ -247,19 +247,20 @@ def _location_answer(**more: object) -> dict[str, object]:
     return _answer(rows, verdict=NOT_A_MATCH, not_a_match_reason="The role is in Poland.", **more)
 
 
-def test_an_unmet_location_with_a_worldwide_body_is_unclear_with_one_question_and_not_a_no() -> None:
+def test_an_unmet_location_with_a_worldwide_body_is_met_with_no_question_and_not_a_no() -> None:
     attempt = _assess(_location_answer(), job=AssessJob("Staff Engineer", "Acme", "Poland", WORLDWIDE_BODY))
     body = attempt.parsed
     location = next(row for row in body.matrix if row.id == "elig-location")
-    assert location.status.value == "unclear" and body.verdict.value == PENDING
-    assert [question.requirement for question in body.structured_questions] == ["Based in Poland"] and len(body.questions) == 1
-    assert body.not_a_match_reason is None
+    assert location.status.value == "met" and body.verdict.value == MATCHED
+    assert not body.structured_questions and not body.questions and body.not_a_match_reason is None
 
 
-def test_the_models_own_location_question_is_the_one_question() -> None:
+def test_the_models_own_location_question_is_dropped_and_an_unclear_row_is_met() -> None:
     own = {"question_id": "eligible:location", "question": "Where are you based?", "requirement": "Based in Poland"}
-    attempt = _assess(_location_answer(questions=[own, {**own, "question_id": "eligible:other", "question": "And where?"}]), job=AssessJob("Staff Engineer", "Acme", "Poland", WORLDWIDE_BODY))
-    assert [question.question_id for question in attempt.parsed.structured_questions] == ["eligible:location"]
+    answer = _location_answer(questions=[own])
+    answer["matrix"][1] = {**LOCATION_ROW, "status": "unclear"}  # type: ignore[index]
+    attempt = _assess(answer, job=AssessJob("Staff Engineer", "Acme", "Poland", WORLDWIDE_BODY))
+    assert not attempt.parsed.structured_questions and next(row for row in attempt.parsed.matrix if row.id == "elig-location").status.value == "met"
 
 
 def test_without_a_worldwide_statement_the_unmet_location_stays_not_a_match() -> None:
@@ -306,8 +307,50 @@ def test_boilerplate_and_remote_first_keep_the_country_mismatch_a_no(body: str) 
 
 
 @pytest.mark.parametrize("body", ["Location: Poland.\nWe work from anywhere in the world.", "Location: Poland.\nJoin a globally distributed team."])
-def test_the_real_shapes_become_one_location_question(body: str) -> None:
+def test_the_real_shapes_are_met_with_no_question(body: str) -> None:
     attempt = _assess(_location_answer(), job=AssessJob("Staff Engineer", "Acme", "Poland", body))
+    assert attempt.parsed.verdict.value == MATCHED and not attempt.parsed.structured_questions
+
+
+ELIGIBLE = ("US", "GB")
+
+
+def _with_countries(body: str, countries: tuple[str, ...]):
+    return _assess(_location_answer(), job=AssessJob("Staff Engineer", "Acme", "Poland", body), ctx=_ctx(countries=countries))
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        "Location: Poland.\nWe are remote-first. The pay band for this role is $150k-$180k for Seattle, United States.",
+        "Location: Poland.\nThis role is remote. Our office is in London, UK.",
+        "Location: Poland.\nRemote-first team. Hired through our US entity.",
+    ],
+)
+def test_a_pay_band_office_or_entity_in_an_eligible_country_with_remote_is_met(body: str) -> None:
+    attempt = _with_countries(body, ELIGIBLE)
+    assert attempt.parsed.verdict.value == MATCHED and not attempt.parsed.structured_questions
+
+
+@pytest.mark.parametrize(
+    ("body", "countries"),
+    [
+        ("Location: Poland.\nWe are remote-first. Salary range $120k-$150k.", ELIGIBLE),
+        ("Location: Poland.\nWe are remote-first. The pay band is listed for Seattle, United States.", ("CA",)),
+        ("Location: Poland.\nPay band for our United States office.", ELIGIBLE),  # no remote statement
+        ("Location: Poland.\nWe are remote-first. Pay band for the United States.", ()),
+    ],
+)
+def test_without_an_eligible_country_pay_band_beside_remote_the_country_mismatch_stays_a_no(body: str, countries: tuple[str, ...]) -> None:
+    attempt = _with_countries(body, countries)
+    assert attempt.parsed.verdict.value == NOT_A_MATCH and not attempt.parsed.structured_questions
+
+
+def test_a_state_limited_posting_still_asks() -> None:
+    region = {"id": "elig-region", "requirement": "Remote in CA, NY or TX", "class": "hard", "class_basis": "Remote in CA, NY or TX", "status": "unclear", "resume_evidence": [], "sources": []}
+    ask = {"question_id": "location:us_region", "question": "Which state do you live in?", "requirement": "Remote in CA, NY or TX"}
+    answer = _answer([_row("Go services", "met", ["b-000003"], ["z"], "hard"), region], verdict=PENDING, questions=[ask])
+    attempt = _assess(answer, job=AssessJob("Staff Engineer", "Acme", "United States", "Remote in CA, NY or TX. We are a globally distributed team."), ctx=_ctx(countries=ELIGIBLE))
     assert attempt.parsed.verdict.value == PENDING and len(attempt.parsed.structured_questions) == 1
 
 

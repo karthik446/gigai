@@ -62,10 +62,10 @@ PROMPT_SHA256_V8 = {
 }
 #: sha256 of the prompt each work mode renders for ``_JOB`` / ``_ctx`` now (assess-prompt-v9, 9.2 wording).
 PROMPT_SHA256 = {
-    "": "37e2b0128b0fc3f56812b94aa09f14f007eecf1dc31f7fca6d6e17e8c1109eb8",
-    "remote": "55d46e355549793ffcebc50c69138019ba0cd6289ef99aade349c6f7d4c5ce38",
-    "onsite": "7ce4dd92cbdb3664dab31c61c2293d42d221a7e16146a1c5021893e06df4b7bd",
-    "hybrid": "1e67170d5e80c4e81bd41e4e3cbdd3d7cbeadebc0ce06e1969469e1d88fe3c9f",
+    "": "6482ba3d4a2e5a03320d4db6208b5335ca5ea0cd8d24e0e091fdf1621aef4d52",
+    "remote": "eaee20945ce46efb350db0934ad4b6a63e21f63a1d795fa40653ed1619e83a35",
+    "onsite": "71d3de4b950843acbd537256efda0eff8c7bf579c8adff7f5559aa4189a734b3",
+    "hybrid": "f7fd4b7d461d1297a336d50b3dda7b28ec2eac9735dc33b2c497e433c7fafab0",
 }
 #: The same under assess-prompt-v7: the fenced prompt, before the requirement weights (0110-10-03).
 PROMPT_SHA256_V7 = {
@@ -212,3 +212,4 @@ def test_a_run_assesses_an_unchanged_posting_again_when_its_assessment_is_from_t
     assert third is not None and third.prompt_version == V9
     assert len(binding.port.prompts) == 2
     assert FENCE_OPEN in binding.port.prompts[-1] and UNTRUSTED_POSTING_RULE in binding.port.prompts[-1]
+

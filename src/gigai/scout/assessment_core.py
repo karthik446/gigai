@@ -610,6 +610,7 @@ def assess_once(
 
     boundary = Boundary(
         source_ids=offered_sources(ctx), listed=ctx.requirements, posting_sha256=posting_sha256(job.title, job.posting_text), posting_text=job.posting_text,
+        countries=tuple(item.strip().upper() for item in ctx.countries if item and item.strip()),
         lines=parse_master_lines(ctx.resume_text) if ctx.resume_ids else {},
         answers={item.question_id.lower(): item.answer for item in ctx.prior_answers},
         stories={item.question_id.lower(): item.summary for item in ctx.bank_answers},
@@ -1004,6 +1005,8 @@ class Boundary:
     posting_sha256: str | None = None
     #: 0.1.11 C4: the posting's text (what a location the header names may be contradicted by), ``None`` outside ``assess_once``.
     posting_text: str | None = None
+    #: 0.1.11 C4b: the candidate's eligible countries (upper-case codes; empty: none stated), from the setup.
+    countries: tuple[str, ...] = ()
     #: 0.1.11 C2/C3: the master lines the prompt showed by id (``suggestion_check.parse_master_lines``), the answers
     #: (``question_id`` -> text) and the stories (``question_id`` -> summary) it listed. Empty: no check, no verbatim evidence.
     lines: Mapping[str, MasterLine] = field(default_factory=dict)
@@ -1193,13 +1196,14 @@ def _row_ids(matrix: list[Mapping[str, object]], posting_sha256: str) -> list[st
     return [str(row["id"]) if is_row_id(row.get("id")) else derived[index] for index, row in enumerate(matrix)]
 
 
-# --- 0.1.11 C4 (orchestrator #51): a country a header names is not a verdict when the body says "anywhere" ----------------
+# --- 0.1.11 C4 / C4b (orchestrator decision B): the location requirement is MET when the posting says "anywhere" --------
 #
-# A location row that is ``unmet`` decides ``not_a_match`` only when the posting text carries no worldwide or
-# remote-anywhere statement. With one ("work from anywhere in the world", "a globally distributed team", "remote-first"
-# beside another country's pay band or office) the header and the body disagree: code reads the row as ``unclear`` and
-# asks ONE location question (the model's own when it asked one, else the row's code-made one), and the verdict is
-# read again from the other rows. The prompt says the same; two live runs showed the prompt alone does not hold it.
+# A location row that is ``unmet`` or ``unclear`` is read as ``met`` (and its question dropped: no row unclear, no
+# question, no hold) when the posting text (1) carries a worldwide or remote-anywhere statement ("work from anywhere in
+# the world", "a globally distributed team"), or (2) shows a pay band, office or hiring entity in one of the candidate's
+# eligible countries next to a remote statement. Location questions remain only for what rule 4 names (state or
+# province limits: ``elig-region``; a named city with no work mode). The prompt says the same (rule 4); two live runs
+# showed the prompt alone does not hold it.
 
 LOCATION_ROW_ID = "elig-location"
 _WORLDWIDE = re.compile(
@@ -1209,6 +1213,18 @@ _WORLDWIDE = re.compile(
     re.IGNORECASE,
 )
 _DENIES = re.compile(r"\b(?:not|cannot|can't|unable|except|excluding|only)\b|n't\b", re.IGNORECASE)
+_REMOTE = re.compile(r"\bremote(?:ly|-first)?\b|\bwork\s+from\s+home\b", re.IGNORECASE)
+_PAY_OFFICE_ENTITY = re.compile(
+    r"pay\s+(?:band|range)|salary|compensation|office|offices|headquarter\w*|hiring\s+(?:entity|through|via)|hired\s+(?:through|via|by)|employer\s+of\s+record|\bEOR\b|"
+    r"\bentity\b|employed\s+(?:by|through)",
+    re.IGNORECASE,
+)
+#: Names a posting writes for the countries a candidate may list as a code (the code itself is matched as a word, upper case).
+_COUNTRY_NAMES: Mapping[str, tuple[str, ...]] = {
+    "US": ("united states", "usa", "u.s."), "GB": ("united kingdom", "uk", "u.k.", "england", "great britain"), "CA": ("canada",),
+    "DE": ("germany",), "FR": ("france",), "NL": ("netherlands",), "ES": ("spain",), "IE": ("ireland",), "AU": ("australia",),
+    "IN": ("india",), "PL": ("poland",), "PT": ("portugal",), "IT": ("italy",), "SE": ("sweden",), "CH": ("switzerland",),
+}
 _LOCATION_QUESTION = "The posting names {where} and also says the role is open more widely. Where are you able to work from?"
 
 
@@ -1224,37 +1240,59 @@ def says_worldwide(posting_text: str) -> bool:
     return False
 
 
-def _location_unclear(decoded: Mapping[str, object], boundary: Boundary) -> Mapping[str, object]:
-    """``decoded`` of a v9 answer with an ``unmet`` ``elig-location`` row read as ``unclear`` when the posting says worldwide. Pure.
+def _names_country(sentence: str, code: str) -> bool:
+    names = _COUNTRY_NAMES.get(code, ())
+    lowered = sentence.lower()
+    return any(re.search(rf"(?<![\w.]){re.escape(name)}(?![\w])", lowered) for name in names) or re.search(rf"(?<![\w]){re.escape(code)}(?![\w])", sentence) is not None
 
-    One location question is on the row afterwards (the model's first on it, else :data:`_LOCATION_QUESTION`), a
-    ``not_a_match`` that rested on the row alone becomes ``pending_user_answers``, and the model's reason for it is
-    dropped. Anything else is returned untouched.
+
+def says_eligible_pay_office_or_entity(posting_text: str, countries: tuple[str, ...]) -> bool:
+    """Whether the posting shows a pay band, office or hiring entity in an eligible country and says the work is remote. Pure.
+
+    Needs a remote statement anywhere in the text and, in one sentence (or one line) that is not a denial, a pay, office or
+    entity word next to the name or code of an eligible country. With no eligible country stated it is never true.
+    """
+
+    codes = [code for code in countries if code and code != "ANY"]
+    if not codes or not _REMOTE.search(posting_text):
+        return False
+    for sentence in re.split(r"(?<=[.!?])\s+|\n+", posting_text):
+        if _DENIES.search(sentence) or not _PAY_OFFICE_ENTITY.search(sentence):
+            continue
+        if any(_names_country(sentence, code) for code in codes):
+            return True
+    return False
+
+
+def _location_unclear(decoded: Mapping[str, object], boundary: Boundary) -> Mapping[str, object]:
+    """``decoded`` of a v9 answer with an ``unmet`` or ``unclear`` ``elig-location`` row read as ``met`` when the posting says it can be done from anywhere. Pure.
+
+    The row's questions (the model's) are dropped; a ``not_a_match`` that rested on the row alone is read again from
+    the remaining rows (``pending_user_answers`` when a must-have question is still open, else matched), and the
+    model's reason for it is dropped. Anything else is returned untouched.
     """
 
     matrix = decoded.get("matrix")
     if not boundary.posting_text or not isinstance(matrix, list) or not all(isinstance(row, Mapping) for row in matrix) or not uses_v9_rules(matrix):
         return decoded
-    rows = [row for row in matrix if row.get("id") == LOCATION_ROW_ID and row.get("status") == "unmet"]
-    if not rows or not says_worldwide(boundary.posting_text):
+    rows = [row for row in matrix if row.get("id") == LOCATION_ROW_ID and row.get("status") in ("unmet", "unclear")]
+    if not rows or not (says_worldwide(boundary.posting_text) or says_eligible_pay_office_or_entity(boundary.posting_text, boundary.countries)):
         return decoded
     out = dict(decoded)
-    out["matrix"] = [{**row, "status": "unclear"} if any(row is hit for hit in rows) else row for row in matrix]
-    requirement = str(rows[0].get("requirement") or "the location")
+    out["matrix"] = [{**row, "status": "met"} if any(row is hit for hit in rows) else row for row in matrix]
+    named = {fold(str(row.get("requirement") or "")) for row in rows} | {LOCATION_ROW_ID, row_question_id(LOCATION_ROW_ID)}
     raw = decoded.get("questions")
-    questions = list(raw) if isinstance(raw, list) else []
-    named = {fold(str(row.get("requirement") or "")) for row in rows} | {LOCATION_ROW_ID}
-    on_row = [item for item in questions if isinstance(item, Mapping) and (fold(str(item.get("requirement") or "")) in named or str(item.get("requirement") or "") in named)]
-    others = [item for item in questions if not any(item is hit for hit in on_row)]
-    if on_row:
-        asked = on_row[0]
-    else:
-        asked = {"question_id": row_question_id(LOCATION_ROW_ID), "question": _LOCATION_QUESTION.format(where=requirement.rstrip(". ")), "requirement": requirement}
-    out["questions"] = [*others, asked]
+    if isinstance(raw, list):
+        out["questions"] = [
+            item for item in raw
+            if not (isinstance(item, Mapping) and (fold(str(item.get("requirement") or "")) in named or str(item.get("requirement") or "") in named or str(item.get("question_id") or "") in named))
+        ]
     kept_unmet = any(row.get("status") == "unmet" and row.get("class") in (None, "hard") for row in out["matrix"])  # type: ignore[union-attr]
-    if _normalize_verdict(decoded.get("verdict")) == "not_a_match" and not kept_unmet:
-        out["verdict"] = "pending_user_answers"
-        out["not_a_match_reason"] = None
+    said = _normalize_verdict(decoded.get("verdict"))
+    if not kept_unmet and said in ("not_a_match", "pending_user_answers"):
+        out["verdict"] = "matched_above_threshold"
+        if said == "not_a_match":
+            out["not_a_match_reason"] = None
     return out
 
 
