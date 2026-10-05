@@ -155,9 +155,19 @@ def test_the_readme_says_exa_is_optional_and_off_for_a_new_setup() -> None:
     text = _flat(_page("scout/quickstart.md") + _page("scout/configuration.md"))
     # uat-bug-035 (operator decision): one model target is required, Codex or Claude.
     assert (
-        "You need one model target to start: Codex (`codex_cli`) or Claude (`claude_cli`); "
-        "`ollama_local` and `openrouter_api` are optional alternatives."
+        "You need one model target to start: Codex (`codex_cli`) or Claude (`claude_cli`), with that CLI installed."
     ) in text
+    # 0.1.10.11 NF2: Ollama or OpenRouter alone is not "also works": what a start with only those takes, and what is not verified.
+    # The quickstart has no setup step (uat-bug-050), so it sends the reader to Install for the command.
+    for page, way_in in (
+        ("scout/quickstart.md", "[Install](../../install/#requirements) says what that takes today"),
+        ("scout/configuration.md", "`gigai setup --non-interactive`"),
+        ("install.md", "`gigai setup --non-interactive`"),
+    ):
+        said = _flat(_page(page))
+        assert "does not start without one of the two installed" in said or "with that CLI installed" in said, page
+        assert way_in in said and "assessing through them is not verified" in said, page
+        assert "also work" not in said and "optional alternatives" not in said and "work as the model too" not in said, page
     assert "Exa is an optional extra, off for a new setup" in text
     assert "Also search the open web with Exa (needs an Exa key)" in text
     assert "gigai secrets add exa" in text

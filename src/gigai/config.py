@@ -199,12 +199,19 @@ def render_config(config: GigAIConfig) -> bytes:
     return canonicalize_owned_text("\n".join(lines))
 
 
+def _missing_message(path: Path) -> str:
+    # 0.1.10.11 NF2: `gigai scout status` and `gigai doctor` print this to someone who never ran
+    # setup (a refused first `gigai scout run`), so it names that command and what it needs.
+    return (
+        f"configuration is missing at {path}; run 'gigai scout run' once "
+        "(it needs Codex or Claude Code installed) or run 'gigai setup'"
+    )
+
+
 def load_config(home_root: Path) -> GigAIConfig:
     path = config_path(home_root)
     if not path.is_file():
-        raise MissingConfigurationError(
-            f"configuration is missing at {path}; run 'gigai setup'"
-        )
+        raise MissingConfigurationError(_missing_message(path))
     payload = _read_payload(path)
     version = _schema_version(payload, source=path)
     if version == PREVIOUS_CONFIG_SCHEMA_VERSION:
@@ -225,9 +232,7 @@ def migrate_config(home_root: Path) -> tuple[GigAIConfig, bool]:
 
     path = config_path(home_root)
     if not path.is_file():
-        raise MissingConfigurationError(
-            f"configuration is missing at {path}; run 'gigai setup'"
-        )
+        raise MissingConfigurationError(_missing_message(path))
     payload = _read_payload(path)
     version = _schema_version(payload, source=path)
     if version == CONFIG_SCHEMA_VERSION:

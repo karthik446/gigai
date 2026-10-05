@@ -55,7 +55,9 @@ the UI as the run progresses.
 ## Exa search
 
 You need one model target to start: Codex (`codex_cli`) or Claude
-(`claude_cli`); `ollama_local` and `openrouter_api` are optional alternatives.
+(`claude_cli`), with that CLI installed. A start with only `ollama_local` or
+`openrouter_api` needs a `gigai setup --non-interactive` first (see
+[Install](../../install/#requirements)), and assessing through them is not verified.
 Exa is an optional extra, off for a new setup.
 To turn it on, store a key with the command below, then tick **Also search the
 open web with Exa (needs an Exa key)** in Settings.
