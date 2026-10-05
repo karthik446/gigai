@@ -52,6 +52,16 @@ things still take more than a second (see "Still slower than one second"): the n
   (no extra request; a company whose list did not change is read again from what is stored). Until
   then a Greenhouse posting that is older than your window can still be listed. No posting is marked new
   or changed by this, and nothing needs to be done.
+- **Old assessments: the re-assess offer is 50 at a time, and it says the size.** This version makes no
+  assessment old. But if you came from 0.1.10.8 or earlier, 0.1.10.9 marked every assessment made before
+  it "old assessment: older prompt", and `gigai scout new` offers to re-assess them. On a large store
+  that is a big number: one store had 574 marked old, 422 of them ranked 50 or more, and re-assessing
+  all 422 was quoted at about 422 model calls, 9.9 million tokens and 4.9 hours. The offer now acts on
+  the newest 50 at a time and never more, and says the real total, the 50 and what the 50 cost:
+  "422 have only an old assessment; re-assess the newest 50 of 422? ~50 calls, ~1170k tokens (372 more
+  after these 50)". For that store, 50 are about 1.2 million tokens and 35 minutes. Nothing is
+  re-assessed unless you say yes. An old assessment stays readable, the same command again takes the
+  next 50, and a job page re-assesses its own job in one call.
 - **Nothing else changes.** Which jobs are checked again after a change, and the limits on them, are
   what they were; no assessment, ranking or tailored resume becomes out of date.
 
@@ -97,8 +107,39 @@ things still take more than a second (see "Still slower than one second"): the n
   bookmark does too. `GET /api/postings?sort=newest_posted` is the same order for an agent (`sort=fit`
   is the default).
 
+#### Changed
+
+- **50 at a time.** Every offer and every command that assesses many postings now acts on the newest
+  50 and never more in one go: the "assess the new ones" question of `gigai scout new` (and `--yes`),
+  its low-ranked question (`--include-low-rank`), the old-assessments question (`--reassess-stale`),
+  "Assess these" on Jobs and `gigai scout jobs assess`, "Assess all new" on a run, and
+  `gigai scout new --process` (at most 50 waiting steps a call). "Newest" is the day the posting went
+  up on its board, or the day Scout first stored it when the board gives none. Each question says the
+  real total, the 50 and what the 50 cost, for example "Assess the newest 50 of 120 postings? ~50
+  calls (70 more after these 50)", and after a batch the output says how many are left and how to take
+  the next 50 (the same command or click again). 50 or fewer: nothing changes.
+
 #### Fixed
 
+- **`gigai scout new --no-assess` never waits for an answer.** In a terminal it stopped at "N have
+  only an old assessment; re-assess? [y/N]" and waited, although `--no-assess` means "do not ask and do
+  not assess". It now prints the offers with their counts and ends, in a terminal and without one.
+- **A run you leave at a question does not use up "new".** `gigai scout new` moved its "new since"
+  time before it asked its first question. If you pressed Ctrl-C at the question, the next run said
+  "nothing new since" the run you had left. The time now moves when the run has done its work (every
+  question answered, or none asked): leave at a question and the next run shows the same postings as
+  new.
+- **"Nothing new" says what it counts.** `gigai scout new` could say "Nothing new since your last
+  check" right after a sources update that stored hundreds of new postings. Both were right, and
+  nothing said why: "new" counts the postings your profiles match that Scout first stored after your
+  last check, and an update counts every new posting on every board, whatever its title. The message
+  and the update's summary now say so. ("First stored" is the time Scout first read the posting, never
+  a date of the board's; a posting that changes later is not new again.)
+- **`gigai scout sources update` says how many companies it checked out of all of them.** It said
+  "3859 boards" while `gigai scout sources status` said 10,349 stored companies. An update asks only
+  the companies that are due; the ones checked within the last day are left alone. The line now reads
+  "Checked 3,859 of 10,349 companies this run (...). The other 6,490 were checked within the last day
+  and were not asked again."
 - **A Greenhouse posting's date is the day it was posted, not the day it last changed.** Scout stored a
   Greenhouse posting's last change as its date. A posting that had been up for two months and was edited
   three days ago counted as three days old: it passed the 7 days and 30 days filters and your "posted
@@ -160,6 +201,15 @@ things still take more than a second (see "Still slower than one second"): the n
   `model_denied`, `model_unavailable`, `assess_timeout`, `model_output_invalid` and
   `assessment_not_stored`, the CLI's JSON, the API's error and the job page now also say whether a model
   call started, whether it may have used tokens, that no new assessment was stored, and the next action.
+- **"Could not read this posting's requirements" says which rule refused.** `posting_requirements_unreadable`
+  is one code for two rules (the model said "Matched" on fewer than three requirements for a long
+  posting; or the text has no requirement wording and the model found none). A batch's failure, the
+  terminal line and the API's error now carry a `reason` (`matched_on_too_few_requirements` or
+  `no_requirements_in_text`). The model answered in both cases and nothing is stored.
+- **Batches are 50: the questions carry the numbers.** Each question of `gigai scout new --json` and of
+  `gigai scout jobs assess --json` (and `GET /api/new`, `POST /api/postings/assess`) has the total, `batch`
+  (what a yes acts on, at most 50) and `more_after`; the estimate is the batch's. After a yes that left
+  some, `assessed` / `reassessed` name the call for the next 50 (`next`).
 - **`gigai scout status` no longer says "stopped" from inside a sandbox.** It checks the process and the
   API apart. A running Scout whose address cannot be reached from where the command ran is reported as
   `process: running (pid N); API: not reachable from here` (state `unreachable`), and the JSON has a

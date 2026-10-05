@@ -131,6 +131,25 @@ out.estimate = [
   m.estimateLine({ calls: 1, tokens: null, seconds: null }),
 ];
 out.noDialog = [m.approvalDialog(nothing, profiles), m.approvalDialog(null, profiles), m.approvalDialog({ status: "assessed", question: null }, profiles)];
+// 0110-10-11: 50 at a time. The server's question says the total (120), the batch (50) and what is left (70).
+{
+  const capped = {
+    status: "ask",
+    question: { ...ask.question, to_assess: 120, batch: 50, more_after: 70, estimate: { calls: 50, tokens: 1170000, seconds: 1750, basis_calls: 9 } },
+    low_rank: { skipped: 112, batch: 50, more_after: 62, min_rank: 50, estimate: { calls: 50 }, yes: { api: { body: { jobs: ["x"] } } } },
+  };
+  const dialog = m.approvalDialog(capped, profiles);
+  out.capped = {
+    numbers: [dialog.count, dialog.total, dialog.moreAfter, dialog.calls, dialog.lowRank.count, dialog.lowRank.batch, dialog.lowRank.moreAfter],
+    title: [m.approvalTitle(dialog), m.approvalTitle(out.dialog), m.approvalTitle({ count: 1, moreAfter: 0 }), m.approvalTitle({ count: 0, moreAfter: 0, lowRank: {} })],
+    batch: [m.approvalBatchLine(dialog), m.approvalBatchLine(out.dialog), m.approvalBatchLine({ count: 50, moreAfter: 3 })],
+    low: m.lowRankLine(dialog.lowRank),
+    outcome: [
+      m.assessOutcomeLine({ status: "assessed", assessed: { requested: 50, assessed: 50, failed: [] }, counts: { more_after: 70 } }),
+      m.assessOutcomeLine({ status: "assessed", assessed: { requested: 3, assessed: 3, failed: [] }, counts: { more_after: 0 } }),
+    ],
+  };
+}
 out.outcome = [
   m.assessOutcomeLine(ask),
   m.assessOutcomeLine(nothing),
@@ -307,6 +326,30 @@ def test_assess_these_asks_first_and_approve_sends_the_servers_own_body(out: dic
         "Assessed 2 of 3. Not assessed: assess_timeout.",
         "Assessed 2 of 2.",
     ]
+
+
+def test_the_approval_says_the_newest_50_the_total_and_what_is_left(out: dict) -> None:
+    """0110-10-11 (the operator's rule): one approval is the newest 50, never more; the dialog states the total and the 50."""
+
+    capped = out["capped"]
+    assert capped["numbers"] == [50, 120, 70, 50, 112, 50, 62]
+    assert capped["title"] == [
+        "Assess the newest 50 of 120 postings?", "Assess 2 postings?", "Assess 1 posting?", "Only low-ranked postings are selected",
+    ]
+    assert capped["batch"] == [
+        'the newest 50 now, never more in one go. 70 more after these 50: "Assess these" again takes the next 50.',
+        None,
+        'the newest 50 now, never more in one go. 3 more after these 50: "Assess these" again takes the next 3.',
+    ]
+    assert capped["low"] == (
+        "112 low-ranked ones are skipped (rank below 50). Assess the newest 50 of those too? ~50 model calls (62 more after these 50)"
+    )
+    assert capped["outcome"] == [
+        'Assessed 50 of 50. 70 more not assessed yet: 50 at a time, "Assess these" again takes the next.',
+        "Assessed 3 of 3.",
+    ]
+    dialog = (UI_SRC / "components" / "AssessApprovalDialog.jsx").read_text(encoding="utf-8")
+    assert "approvalTitle(dialog)" in dialog and 'data-role="approval-batch"' in dialog and "approvalBatchLine(dialog)" in dialog
 
 
 def test_a_postings_markup_stays_text_and_nothing_in_the_ui_renders_raw_html(out: dict) -> None:

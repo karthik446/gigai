@@ -26,6 +26,12 @@ safe 409 rather than a 500.
 (always false) and ``next_action``. ``POST /api/answers`` with ``reassess``
 answers the same body for a failed re-assessment.
 
+0110-10-11: ``posting_requirements_unreadable`` is raised by two rules; the
+error body carries ``reason`` saying which
+(``matched_on_too_few_requirements``: the model said Matched on fewer than
+three requirement rows for a long posting; ``no_requirements_in_text``: the
+text has no requirement wording and the model found none).
+
 uat-bug-018: each ``GET /api/assessments`` item carries an additive
 ``job_state`` ``{state, since, next_events}`` (``job_state.py``): the job's
 state for the resume the item was assessed with, where the item itself is
@@ -100,6 +106,9 @@ def write_assess_error(handler, status: HTTPStatus, exc: QuickAssessError) -> No
     started, whether it may have used tokens, that no fresh assessment was stored, and the next action."""
 
     extra = cause_fields(exc.code)
+    if exc.reason is not None:
+        # 0110-10-11: which rule refused, for a code two rules share (``posting_requirements_unreadable``).
+        extra = {**extra, "reason": exc.reason}
     if extra:
         handler._error_with_extra(status, exc.code, str(exc), extra)
     else:

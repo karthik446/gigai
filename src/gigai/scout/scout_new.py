@@ -51,6 +51,18 @@ THE FLOW
   batch starts and lines as it goes ("assessed 120 of 333 · ~25 min left"),
   the time left from the recorded average per call until the batch has a
   pace of its own.
+- 50 AT A TIME (0110-10-11, the operator's rule): every yes acts on the NEWEST
+  50 and never more (:data:`BATCH_LIMIT`, :func:`newest_batch`: by the day
+  the posting went up, else by when Scout first saw it). Each question says
+  the real total and the 50 ("re-assess the newest 50 of 422? ~50 calls ...
+  (372 more after these 50)"), its estimate is the batch's, and it carries
+  ``batch`` and ``more_after`` beside the total. After a yes that left some,
+  ``assessed`` / ``reassessed`` also carry ``more_after`` and ``next`` (the
+  call for the next 50; neither key is there when the batch was all of them).
+  One call with both yeses (``assess`` and ``reassess_stale``) still makes
+  at most 50 model calls: the new postings first, the old assessments in
+  what is left of the 50. ``--process`` runs at most 50 pipeline steps a
+  call (the offer then also carries ``steps`` and ``batch``).
 - Waiting pipeline work is offered with its command (``pipeline``: the jobs
   that wait, how many of them need an approval first, the model calls they
   would make). Nothing is started by a plain call. ``process=True``
@@ -63,9 +75,18 @@ THE FLOW
 
 THE ANCHOR (DESIGN 11): one per install, the time of the last plain call.
 "New" is ``first_seen > anchor``; before the first call it is the last 7
-days. A plain call moves the anchor to the time it read the postings, AFTER
+days. ``first_seen`` is Scout's OWN first sighting (0110-10-11, checked): the
+time the sources update that first read the posting wrote its company's index
+file (``company_index.observe_company``), never a date of the board's; a later
+change to the posting, or a description filled in later, keeps it. And "new"
+counts only the postings an active profile matches NOW, while an update's
+"N new" counts every posting on every board: so "nothing new" after an update
+that stored hundreds is what the design gives, and the message says so. A plain call moves the anchor to the time it read the postings, AFTER
 the response is built and checked: a call that fails leaves it where it was.
-``peek``, a ``profile_id`` call and the ``yours`` call never move it. ``since``
+``peek``, a ``profile_id`` call and the ``yours`` call never move it; nor does a
+call made with ``advance=False`` (0110-10-11: the terminal's prompts. The CLI
+holds the anchor while it asks and moves it with :func:`settle_anchor` once
+the run has done its work, so a run abandoned at a prompt consumes nothing). ``since``
 selects a window again (the yes, or the ``yours`` call, after a call that
 already moved the anchor). ``mark_all_seen`` moves the same anchor.
 
@@ -119,10 +140,15 @@ FIRST_USE_DAYS = 7
 ATTENTION_LIMIT = 10
 #: New postings listed in one response, in the grid's order; ``counts.new`` is all of them and the question counts all of them.
 NEW_ROWS_LIMIT = 50
+#: 0110-10-11 (the operator's rule): every batch offer and every batch command acts on the NEWEST 50 at a time, never more.
+BATCH_LIMIT = 50
 UNMET_SHOWN = 4
 EVIDENCE_SHOWN = 3
 DESCRIPTION_CHARS = 400
 PIPELINE_COMMAND = "gigai scout new --process"
+#: 0110-10-11: what "nothing new" means, and why it can follow an update that stored hundreds of new postings.
+NOTHING_NEW_MEANS = "no posting that matches your profiles was first stored by Scout"
+UPDATE_COUNTS_ALL = "(A sources update counts every new posting on every board, whatever its title.)"
 WEAK_FIT_COMMAND = "gigai scout jobs list --state weak_fit"
 
 #: States that still want something from the user (a posting Scout labelled recommended is left out by the query).
@@ -457,7 +483,9 @@ def _assess(
     0110-8-02: a posting with NO stored description is fetched on demand, ONE request for that posting alone
     (``job_input.fetch_missing_description``: public board API, the existing body cap, paced like the board clients), before it is
     given up on. ``fetched_on_demand`` counts the descriptions that way; a posting whose text cannot be had stays
-    ``job_text_unavailable`` (or ``job_fetch_failed``) with a named ``reason``.
+    ``job_text_unavailable`` (or ``job_fetch_failed``) with a named ``reason``. 0110-10-11: a posting the model
+    answered for and a guard refused (``posting_requirements_unreadable``) carries the guard as its ``reason``
+    (``quick_assess.POSTING_UNREADABLE_REASONS``).
 
     ``live``: the caller already marked the batch live (``pipeline.busy``,
     "assess these") and this keeps its marker fresh; without it the batch is
@@ -540,7 +568,7 @@ def _assess(
         except QuickAssessError as exc:
             if exc.code in FATAL_CODES:
                 stop.append(exc.code)  # no model, no profile, no resume: the next call would fail the same way
-            return (exc.code, None)
+            return (exc.code, exc.reason)  # 0110-10-11: which rule refused, for a code two rules share
         # 0110-8-09: "assessed" means a record the grid will read, under THIS job and profile; anything else is a named failure.
         if stored.job.job_identity != job or stored.resume.profile_id != profile_id or not Path(stored.stored_path or "").is_file():
             return (ERROR_NOT_STORED, None)
@@ -678,13 +706,17 @@ def _pipeline_offer(store: PipelineStore) -> dict[str, object] | None:
     approvals = sorted({step.approval_id for step in waiting if step.state == _AWAITING_APPROVAL and step.approval_id})
     calls = sum(1 for step in waiting if step.name in MODEL_STEPS)
     need = f" ({len(gated)} need your approval)" if gated else ""
+    # 0110-10-11: one --process runs at most 50 steps; the offer says so when more than that wait.
+    capped = len(waiting) > BATCH_LIMIT
+    ask = f"process the next {BATCH_LIMIT} of {len(waiting)} steps now? ~{calls} calls in all, at most {BATCH_LIMIT} a run" if capped else f"process now? ~{calls} calls"
     return {
         "waiting": jobs,
         "awaiting_approval": len(gated),
         "approvals": approvals,
         "est_calls": calls,
+        **({"steps": len(waiting), "batch": BATCH_LIMIT} if capped else {}),
         "command": PIPELINE_COMMAND,
-        "text": f"{jobs} waiting{need}, process now? ~{calls} calls",
+        "text": f"{jobs} waiting{need}, {ask}",
     }
 
 
@@ -694,14 +726,16 @@ def process_waiting(home_root: Path, target: Path, *, config: object | None = No
     ``{approved: [{id, jobs}], drain: scout-pipeline-drain:1}``: ids, codes
     and counts. The drain is the pipeline's own (``run_once``): switched off,
     or yielding to live work, it runs nothing and says so; the daily cap of
-    model calls holds, so a job over it waits for the next day.
+    model calls holds, so a job over it waits for the next day. 0110-10-11: one
+    call runs at most :data:`BATCH_LIMIT` steps; the rest wait for the next call
+    (or the background runner, under the same daily cap).
     """
 
     from .pipeline.runner import run_once
     from .pipeline.triggers import approve_all
 
     approved = approve_all(home_root, target, decided_by=decided_by)
-    drain = run_once(home_root, target, config=config)
+    drain = run_once(home_root, target, config=config, max_steps=BATCH_LIMIT)
     return {
         "approved": [{"id": item["id"], "jobs": item["decided_jobs"]} for item in approved],
         "drain": drain.to_json(),
@@ -765,21 +799,30 @@ def _question(
     ``low_rank`` (0110-10-02): how many new postings the assess threshold holds back; they are their own question.
     """
 
-    model, found = _estimate(len(pairs), home_root=home_root, target=target)
+    size = min(len(pairs), BATCH_LIMIT)  # 0110-10-11: a yes assesses the newest 50, never more
+    model, found = _estimate(size, home_root=home_root, target=target)
     by_profile = _by_profile(pairs, views)
     labels = {view.profile_id: view.label for view in views}
     named = ", ".join(f"{labels[item['profile_id']]} {item['count']}" for item in by_profile)  # type: ignore[index]
     plural = "s" if new_count != 1 else ""
     across = f" across {len(by_profile)} profiles ({named})" if len(by_profile) > 1 else (f" ({named})" if named else "")
-    if low_rank:
-        ask = f"Assess {len(pairs)} of them ({low_rank} low-ranked {'one is' if low_rank == 1 else 'ones are'} a separate question)?"
+    separate = f"{low_rank} low-ranked {'one is' if low_rank == 1 else 'ones are'} a separate question"
+    if size < len(pairs):
+        ask = f"Assess {_newest_words(size, len(pairs))} not assessed yet{f' ({separate})' if low_rank else ''}?"
+    elif low_rank:
+        ask = f"Assess {len(pairs)} of them ({separate})?"
     else:
         ask = "Assess them?" if len(pairs) == new_count else f"Assess the {len(pairs)} not assessed yet?"
-    sentence = f"{new_count} new posting{plural}{across}. {ask} ~{found['calls']} calls{_tokens(found['tokens'])}"
+    sentence = (
+        f"{new_count} new posting{plural}{across}. {ask} ~{found['calls']} calls{_tokens(found['tokens'])}"
+        f"{_more_words(size, len(pairs))}"
+    )
     question = {
         "kind": "assess_new",
         "new": new_count,
         "to_assess": len(pairs),
+        "batch": size,
+        "more_after": len(pairs) - size,
         "low_rank_skipped": low_rank,
         "by_profile": by_profile,
         "model_target": model,
@@ -802,12 +845,15 @@ def _stale_question(
     """
 
     asked = pairs or low
-    model, found = _estimate(len(asked), home_root=home_root, target=target)
+    size = min(len(asked), BATCH_LIMIT)  # 0110-10-11: a yes re-assesses the newest 50, never more
+    model, found = _estimate(size, home_root=home_root, target=target)
     have = "has" if len(asked) == 1 else "have"
     those = "that one" if len(asked) == 1 else "those"
+    newest = _newest_words(size, len(asked))
+    cost = f"~{found['calls']} calls{_tokens(found['tokens'])}{_more_words(size, len(asked))}"
     if pairs:
         flag, body = "--reassess-stale", {"assess": False, "reassess_stale": True}
-        text = f"{len(pairs)} {have} only an old assessment; re-assess? ~{found['calls']} calls{_tokens(found['tokens'])}"
+        text = f"{len(pairs)} {have} only an old assessment; re-assess{' ' + newest if newest else ''}? {cost}"
         if low:
             more = "is" if len(low) == 1 else "are"
             text += f" ({len(low)} more {more} low-ranked, rank below {min_rank}, and left out; add --include-low-rank to include them)"
@@ -815,11 +861,13 @@ def _stale_question(
         flag, body = "--reassess-stale --include-low-rank", {"assess": False, "reassess_stale": True, "include_low_rank": True}
         text = (
             f"{len(low)} low-ranked (rank below {min_rank}) {have} only an old assessment and {'is' if len(low) == 1 else 'are'} left out; "
-            f"re-assess {those} too? ~{found['calls']} calls{_tokens(found['tokens'])}"
+            f"re-assess {f'the newest {size} of ' if size < len(low) else ''}{those} too? {cost}"
         )
     return {
         "kind": "reassess_stale",
         "to_reassess": len(pairs),
+        "batch": size,
+        "more_after": len(asked) - size,
         "low_rank_skipped": len(low),
         "by_profile": _by_profile(asked, views),
         "model_target": model,
@@ -835,11 +883,14 @@ def _low_rank_question(
 ) -> dict[str, object]:
     """0110-10-02: the new postings below the assess threshold, as their own question. Never answered by a plain yes."""
 
-    model, found = _estimate(len(low), home_root=home_root, target=target)
+    size = min(len(low), BATCH_LIMIT)  # 0110-10-11: its batch is the newest 50 too
+    model, found = _estimate(size, home_root=home_root, target=target)
     one = len(low) == 1
     return {
         "kind": "assess_low_rank",
         "skipped": len(low),
+        "batch": size,
+        "more_after": len(low) - size,
         "min_rank": setting.assess_min_rank,
         "by_profile": _by_profile(low, views),
         "model_target": model,
@@ -847,7 +898,8 @@ def _low_rank_question(
         "yes": _answers(since, profile_id, flag="--yes --include-low-rank", body={"assess": True, "include_low_rank": True}),
         "text": (
             f"{len(low)} low-ranked {'one is' if one else 'ones are'} skipped (rank below {setting.assess_min_rank}); "
-            f"assess {'that' if one else 'those'} too? ~{found['calls']} calls{_tokens(found['tokens'])}"
+            f"assess {f'the newest {size} of ' if size < len(low) else ''}{'that' if one else 'those'} too? ~{found['calls']} calls{_tokens(found['tokens'])}"
+            f"{_more_words(size, len(low))}"
         ),
     }
 
@@ -863,6 +915,37 @@ def split_low_rank(
     keep = [pair for pair in pairs if not fit_rules.is_low_rank(ranks.get(pair), setting)]
     low = [pair for pair in pairs if fit_rules.is_low_rank(ranks.get(pair), setting)]
     return keep, low
+
+
+def batch_date(row: PostingRecord) -> str:
+    """What "newest" means for a batch: the day the posting went up; for a board that gives none, when Scout first saw it."""
+
+    return row.published_at or row.first_seen
+
+
+def newest_batch(
+    pairs: Sequence[tuple[str, str]], dates: Mapping[tuple[str, str], str], *, limit: int | None = None,
+) -> tuple[list[tuple[str, str]], int]:
+    """0110-10-11: ``(the newest ``limit`` of ``pairs``, how many are left for later)``. ``dates`` is :func:`batch_date` per pair.
+
+    ``limit`` is :data:`BATCH_LIMIT` unless given. The newest first; postings of one instant in the order of their
+    URL, so the same call picks the same batch.
+    """
+
+    limit = BATCH_LIMIT if limit is None else limit
+    ordered = sorted(pairs)
+    ordered.sort(key=lambda pair: dates.get(pair, ""), reverse=True)  # stable
+    return ordered[:limit], max(0, len(ordered) - limit)
+
+
+def _newest_words(size: int, total: int) -> str:
+    """"the newest 50 of 422" when a batch is less than all of them; ``""`` when it is all."""
+
+    return f"the newest {size} of {total}" if size < total else ""
+
+
+def _more_words(size: int, total: int) -> str:
+    return f" ({total - size} more after these {size})" if size < total else ""
 
 
 def _current(row: PostingRecord) -> bool:
@@ -937,8 +1020,14 @@ def scout_new(
     model_wait: float | None = None,
     build_progress: Callable[[str, int, int], None] | None = None,
     include_low_rank: bool = False,
+    advance: bool = True,
 ) -> dict[str, object]:
     """What is new since the last check, as the ``scout-new:1`` response. See the module docstring.
+
+    ``advance=False`` (0110-10-11): this call does not move the anchor,
+    whatever else it is (``anchor.advances`` is false). For a caller that asks
+    the user something before the run is done; it moves the anchor itself
+    with :func:`settle_anchor` when the run has done its work.
 
     ``model_wait`` (0110-9-01, the server's GET): how long to wait for a build
     of the posting read model (``postings.refresh(wait=...)``); past it the
@@ -960,7 +1049,8 @@ def scout_new(
     (``stale_question``): assess again the live postings that have only an
     old assessment. ``assess=True`` alone never does that. Either yes leaves
     out the postings below the assess threshold (``fit.assess_min_rank``)
-    unless ``include_low_rank``. ``progress`` gets
+    unless ``include_low_rank``, and acts on the newest :data:`BATCH_LIMIT`
+    (50) of them, never more. ``progress`` gets
     the progress lines of a batch (and how far the background rank is).
     Raises :class:`ScoutNewError` / ``PostingModelError`` /
     ``PipelineStoreError``.
@@ -973,7 +1063,7 @@ def scout_new(
             Path(home_root), Path(target), profile_id=profile_id, peek=peek, assess=assess, since=since, now=now, config=config,
             yours=yours, process=process and not yours, decided_by=decided_by, reassess_stale=reassess_stale and not yours,
             progress=progress, model_wait=model_wait, build_progress=build_progress,
-            include_low_rank=include_low_rank and not yours,
+            include_low_rank=include_low_rank and not yours, advance=advance,
         )
 
 
@@ -996,7 +1086,7 @@ def _scout_new(
     home_root: Path, target: Path, *, profile_id: str | None, peek: bool, assess: bool | None, since: str | None,
     now: datetime | None, config: object | None, yours: bool, process: bool = False, decided_by: str = "operator",
     reassess_stale: bool = False, progress: Callable[[str], None] | None = None, model_wait: float | None = None,
-    build_progress: Callable[[str, int, int], None] | None = None, include_low_rank: bool = False,
+    build_progress: Callable[[str, int, int], None] | None = None, include_low_rank: bool = False, advance: bool = True,
 ) -> dict[str, object]:
     # Before anything is read: what the steps store (a Scout label, a tailored resume) is in the rows below.
     processed = process_waiting(home_root, target, config=config, decided_by=decided_by) if process else None
@@ -1038,8 +1128,13 @@ def _scout_new(
             old = _stale_rows(store, profile_id)
             old_ranks = {(row.job, row.profile_id): row.rank_score for row in old}
             old_keep, old_low = split_low_rank(list(old_ranks), old_ranks, setting, include=include_low_rank)
+            # 0110-10-11: what "newest" is read from, for the batch of 50 a yes acts on.
+            dates.clear()
+            dates.update({(row.job, row.profile_id): batch_date(row) for group in groups.values() for row in group})
+            dates.update({(row.job, row.profile_id): batch_date(row) for row in old})
             return new_keep, new_low, old_keep, old_low
 
+        dates: dict[tuple[str, str], str] = {}
         groups = read_new()
         pairs, low_pairs, stale_pairs, low_stale = to_assess()
         new_count = len(groups)
@@ -1065,19 +1160,35 @@ def _scout_new(
             return _assess(todo, postings.posting_texts(home_root, rows), home_root=home_root, target=target, config=config, progress=lines)
 
         approved_new = bool(pairs) and assess is True
-        approved_stale = bool(stale_pairs) and reassess_stale
+        # 0110-10-11: a yes acts on the newest 50, never more; what is left is said with the call for the next 50.
+        # One call that carries BOTH yeses still makes at most 50 model calls: the new postings first, the old
+        # assessments in what is left of the 50 (none left: the stale question stays, with its own call).
+        new_batch, new_later = newest_batch(pairs, dates)
+        room = BATCH_LIMIT - len(new_batch) if approved_new else BATCH_LIMIT
+        stale_batch, stale_later = newest_batch(stale_pairs, dates, limit=room)
+        approved_stale = bool(stale_batch) and reassess_stale
+        low_flag = " --include-low-rank" if include_low_rank else ""
+        low_body = {"include_low_rank": True} if include_low_rank else {}
         if progress is not None and (approved_new or approved_stale):
             # A long batch is never silent, and a moving count is explained: how far the background rank is.
             progress(f"ranking: {_ranking_line(_ranking(store, views, home_root, target), labels)}")
         if approved_new:
-            assessed = batch(pairs, [group[0] for group in groups.values()], done_word="assessed", doing_word="assessing")
+            assessed = batch(new_batch, [group[0] for group in groups.values()], done_word="assessed", doing_word="assessing")
+            if new_later:  # only then: a batch that was all of them answers what it always did
+                assessed["more_after"] = new_later
+                assessed["next"] = _answers(since_at, profile_id, flag=f"--yes{low_flag}", body={"assess": True, **low_body})
         elif pairs and assess is None:
             status = STATUS_ASK
         if approved_stale:
             # 0110-8-08: only on its own yes. Each posting for the profile whose old assessment it has.
             reassessed = batch(
-                stale_pairs, store.postings(jobs={job for job, _owner in stale_pairs}), done_word="re-assessed", doing_word="re-assessing"
+                stale_batch, store.postings(jobs={job for job, _owner in stale_batch}), done_word="re-assessed", doing_word="re-assessing"
             )
+            if stale_later:
+                reassessed["more_after"] = stale_later
+                reassessed["next"] = _answers(
+                    since_at, profile_id, flag=f"--reassess-stale{low_flag}", body={"assess": False, "reassess_stale": True, **low_body},
+                )
         if assessed is not None or reassessed is not None:
             postings.refresh(home_root, target, store=store, now=moment)
             groups = read_new()
@@ -1121,10 +1232,12 @@ def _scout_new(
             ][:ATTENTION_LIMIT]
             tags = _grouped(store.postings(jobs={row.job for row in best}))
             shown = [(tags.get(row.job, [row]), row) for row in best]
+            # 0110-10-11: what "new" counts is said, so "nothing new" after an update that stored hundreds of postings
+            # is not a riddle: new is a posting your profiles MATCH that Scout first stored after the time named.
             if source == SINCE_FIRST_USE:
-                message = f"Nothing new in the last {FIRST_USE_DAYS} days."
+                message = f"Nothing new in the last {FIRST_USE_DAYS} days: {NOTHING_NEW_MEANS} in them. {UPDATE_COUNTS_ALL}"
             else:
-                message = f"Nothing new since your last check ({_when(since_at)})."
+                message = f"Nothing new since your last check ({_when(since_at)}): {NOTHING_NEW_MEANS} after it. {UPDATE_COUNTS_ALL}"
             if shown:
                 message += f" Top {len(shown)} that still need your attention:"
 
@@ -1163,7 +1276,7 @@ def _scout_new(
         for group in groups.values():
             for row in group:
                 per_profile[row.profile_id] = per_profile.get(row.profile_id, 0) + 1
-        advances = not peek and profile_id is None and not process
+        advances = advance and not peek and profile_id is None and not process
         response: dict[str, object] = {
             "schema_version": SCHEMA_VERSION,
             "status": status,
@@ -1222,6 +1335,25 @@ def _scout_new(
         store.close()
 
 
+def settle_anchor(home_root: Path, target: Path, checked_at: str) -> str:
+    """0110-10-11: move the anchor to ``checked_at``, the time a call made with ``advance=False`` read the postings.
+
+    What the terminal does once its run has done its work (every question
+    answered and acted on). A run that is abandoned at a prompt never gets
+    here, so the next run still measures "new" from the anchor it found. The
+    anchor never moves back. Returns the anchor as it is now.
+    """
+
+    at = postings.stamp(checked_at)
+    if at is None:
+        raise ScoutNewError("invalid_value", "checked_at must be the checked_at of a scout new response")
+    store = PipelineStore(pipeline_path(Path(home_root), Path(target)))
+    try:
+        return store.advance_anchor(at, set_by="scout_new").last_checked_at
+    finally:
+        store.close()
+
+
 def mark_all_seen(home_root: Path, target: Path, *, now: datetime | None = None) -> dict[str, object]:
     """"Mark all seen": move the one anchor to now. What ``POST /api/new/seen`` answers."""
 
@@ -1269,6 +1401,15 @@ def _fetched_note(batch: Mapping[str, object]) -> str:
     return f" Fetched {batch['fetched_on_demand']} missing description(s) first." if batch.get("fetched_on_demand") else ""
 
 
+def _next_lines(batch: Mapping[str, object], what: str) -> list[str]:
+    """0110-10-11: after a batch of 50 that left some: how many, and the call for the next 50."""
+
+    following = batch.get("next")
+    if not batch.get("more_after") or not isinstance(following, Mapping):
+        return []
+    return [f"{batch['more_after']} more {what}: 50 at a time. Next: {following['cli']}"]
+
+
 def _failure_code(item: Mapping[str, object]) -> str:
     return f"{item['error_code']}{': ' + str(item['reason']) if item.get('reason') else ''}"
 
@@ -1288,12 +1429,14 @@ def render(response: Mapping[str, object]) -> str:
         for item in assessed["failed"]:  # type: ignore[union-attr]
             lines.append(f"  not assessed ({_failure_code(item)}): {item['job_identity']}")
         lines.extend(failure_lines(assessed["failed"]))  # 0110-10-13
+        lines.extend(_next_lines(assessed, "not assessed yet"))
     reassessed = response.get("reassessed")
     if isinstance(reassessed, Mapping):
         lines.append(f"Re-assessed {reassessed['assessed']} of {reassessed['requested']}." + _fetched_note(reassessed))
         for item in reassessed["failed"]:  # type: ignore[union-attr]
             lines.append(f"  not re-assessed ({_failure_code(item)}): {item['job_identity']}")
         lines.extend(failure_lines(reassessed["failed"]))
+        lines.extend(_next_lines(reassessed, "with only an old assessment"))
     question = response.get("question")
     if isinstance(question, Mapping):
         lines.append(str(question["text"]))
@@ -1391,6 +1534,7 @@ def _render_yours(response: Mapping[str, object]) -> str:
 
 __all__ = [
     "ATTENTION_LIMIT",
+    "BATCH_LIMIT",
     "BatchProgress",
     "GROUP_CURRENT",
     "GROUP_NOT_ASSESSED",
@@ -1413,6 +1557,8 @@ __all__ = [
     "fit_of",
     "in_order",
     "mark_all_seen",
+    "newest_batch",
+    "batch_date",
     "order_key",
     "posted_text",
     "posting_dates",
@@ -1422,6 +1568,7 @@ __all__ = [
     "score_text",
     "scout_new",
     "scout_new_yours",
+    "settle_anchor",
     "sort_group",
     "split_low_rank",
     "stale_label",

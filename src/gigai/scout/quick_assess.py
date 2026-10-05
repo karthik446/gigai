@@ -117,11 +117,17 @@ _TIMEOUT_TYPES: tuple[type[BaseException], ...] = (TimeoutError, subprocess.Time
 
 
 class QuickAssessError(ValueError):
-    """A quick assessment could not run; ``code`` is the API/CLI error code."""
+    """A quick assessment could not run; ``code`` is the API/CLI error code.
 
-    def __init__(self, code: str, message: str) -> None:
+    ``reason`` (0110-10-11) names WHICH rule refused, for a code two rules share:
+    ``posting_requirements_unreadable`` is :data:`REASON_TOO_FEW_REQUIREMENTS` or
+    :data:`REASON_NO_REQUIREMENTS`. ``None`` for every other code.
+    """
+
+    def __init__(self, code: str, message: str, *, reason: str | None = None) -> None:
         super().__init__(message)
         self.code = code
+        self.reason = reason
 
 
 def _now() -> str:
@@ -403,6 +409,15 @@ def _has_requirement_cue(text: str) -> bool:
 #: 0110-8-09: why a model call that answered left no stored assessment (the ``QuickAssessError`` code and the call's ``error_code``).
 ERROR_POSTING_UNREADABLE = "posting_requirements_unreadable"
 ERROR_NOT_STORED = "assessment_not_stored"
+#: 0110-10-11: the two rules behind ``posting_requirements_unreadable`` (``QuickAssessError.reason``, a batch failure's
+#: ``reason``). The model answered in both; nothing is stored. Until now a batch said only the shared code, so a posting
+#: refused by one rule could not be told from one refused by the other.
+#: - the model said "Matched" on fewer than three requirement rows for a posting of 1,200+ characters
+#:   (``assessment_core.posting_looks_incomplete``, uat-bug-046: the text looks cut off);
+REASON_TOO_FEW_REQUIREMENTS = "matched_on_too_few_requirements"
+#: - the text has no requirement wording at all AND the model found no requirement (:func:`posting_requirements_unreadable`, uat-bug-029).
+REASON_NO_REQUIREMENTS = "no_requirements_in_text"
+POSTING_UNREADABLE_REASONS: tuple[str, ...] = (REASON_TOO_FEW_REQUIREMENTS, REASON_NO_REQUIREMENTS)
 
 
 def _has_real_requirement(body: AssessmentBody) -> bool:
@@ -753,7 +768,7 @@ def run_quick_assessment(
         if attempt.incomplete_posting:
             # uat-bug-046: nothing is stored; the job stays "not assessed".
             meter.unused(ERROR_POSTING_UNREADABLE)  # 0110-8-09: the call answered, its answer is not kept
-            raise QuickAssessError(ERROR_POSTING_UNREADABLE, POSTING_INCOMPLETE_MESSAGE)
+            raise QuickAssessError(ERROR_POSTING_UNREADABLE, POSTING_INCOMPLETE_MESSAGE, reason=REASON_TOO_FEW_REQUIREMENTS)
         reason = attempt.not_assessed_reason
         if reason is NotAssessedReason.MODEL_OUTPUT_INVALID:
             detail = attempt.validation_error or "the model's answer did not match the assessment schema"
@@ -769,7 +784,7 @@ def run_quick_assessment(
     if posting_requirements_unreadable(job.text, body):
         # Nothing is stored: the job stays "not assessed", never Matched.
         meter.unused(ERROR_POSTING_UNREADABLE)  # 0110-8-09
-        raise QuickAssessError(ERROR_POSTING_UNREADABLE, POSTING_UNREADABLE_MESSAGE)
+        raise QuickAssessError(ERROR_POSTING_UNREADABLE, POSTING_UNREADABLE_MESSAGE, reason=REASON_NO_REQUIREMENTS)
     from .proposal_execution import _usage_block
 
     usage = _usage_block([attempt.usage] if attempt.usage is not None else [], UsageBlock)
@@ -831,6 +846,9 @@ __all__ = [
     "EPHEMERAL_RESUME_KEY",
     "ERROR_NOT_STORED",
     "ERROR_POSTING_UNREADABLE",
+    "POSTING_UNREADABLE_REASONS",
+    "REASON_NO_REQUIREMENTS",
+    "REASON_TOO_FEW_REQUIREMENTS",
     "TAILORED_VARIANT_DIR",
     "TRIGGER_ANSWER_PREFIX",
     "TRIGGER_ASSESS",

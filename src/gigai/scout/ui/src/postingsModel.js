@@ -429,14 +429,18 @@ export function assessAskBody({ selectedIds = [], filter = EMPTY_FILTER, rows = 
 
 // What the approval dialog shows, from the ASK's answer. Null unless the
 // server asked (`status: "ask"`): nothing is assessed before the Approve.
-//   count           postings that would be assessed
+//   count           postings Approve assesses: 0110-10-11, the newest 50 at a time and never more
+//                   (`question.batch`; an older server has no cap and gives none: then all of them)
+//   total           all the postings that are not assessed (`question.to_assess`)
+//   moreAfter       how many are left after this batch; "Assess these" again takes the next 50
 //   alreadyCurrent  selected postings whose assessment is current (left out)
 //   byProfile       [{label, count}]
 //   calls / tokens / seconds   the estimate from the recorded model calls
 //                   (tokens and seconds null when the history cannot say)
 //   approveBody     the body the server names for the yes, sent as it is
 //   lowRank         0110-10-02: the postings ranked below the assess threshold, left out of `count`:
-//                   {count, minRank, calls, tokens, seconds, approveBody} (the body that assesses them too), or null
+//                   {count, batch, moreAfter, minRank, calls, tokens, seconds, approveBody} (the body that assesses
+//                   them too; `batch` of them at a time), or null
 export function approvalDialog(response, profiles) {
   const question = response && response.status === "ask" ? response.question : null;
   if (!question) {
@@ -448,11 +452,15 @@ export function approvalDialog(response, profiles) {
   const low = response.low_rank && typeof response.low_rank === "object" ? response.low_rank : null;
   const lowYes = low && low.yes && low.yes.api && low.yes.api.body;
   const lowEstimate = (low && low.estimate) || {};
+  const whole = (value, fallback) => (Number.isInteger(value) && value >= 0 ? value : fallback);
+  const batch = whole(question.batch, question.to_assess);
   return {
     lowRank:
       low && low.skipped > 0
         ? {
             count: low.skipped,
+            batch: whole(low.batch, low.skipped),
+            moreAfter: whole(low.more_after, 0),
             minRank: typeof low.min_rank === "number" ? low.min_rank : null,
             calls: typeof lowEstimate.calls === "number" ? lowEstimate.calls : low.skipped,
             tokens: tokensText(lowEstimate.tokens),
@@ -460,11 +468,13 @@ export function approvalDialog(response, profiles) {
             approveBody: lowYes && typeof lowYes === "object" ? { ...lowYes, approve: true, include_low_rank: true } : null,
           }
         : null,
-    count: question.to_assess,
+    count: batch,
+    total: question.to_assess,
+    moreAfter: whole(question.more_after, 0),
     alreadyCurrent: question.already_current || 0,
     byProfile: (question.by_profile || []).map((item) => ({ label: labels.get(item.profile_id) || item.profile_id, count: item.count })),
     modelTarget: question.model_target || null,
-    calls: typeof estimate.calls === "number" ? estimate.calls : question.to_assess,
+    calls: typeof estimate.calls === "number" ? estimate.calls : batch,
     tokens: tokensText(estimate.tokens),
     seconds: secondsText(estimate.seconds),
     basisCalls: typeof estimate.basis_calls === "number" ? estimate.basis_calls : 0,
@@ -491,7 +501,31 @@ export function lowRankLine(lowRank) {
   }
   const one = lowRank.count === 1;
   const below = lowRank.minRank === null ? "" : ` (rank below ${lowRank.minRank})`;
-  return `${lowRank.count} low-ranked ${one ? "one is" : "ones are"} skipped${below}. Assess ${one ? "that" : "those"} too? ${estimateLine(lowRank)}`;
+  // 0110-10-11: its batch is the newest 50 too.
+  const more = lowRank.moreAfter > 0;
+  const which = more ? `the newest ${lowRank.batch} of those` : one ? "that" : "those";
+  const after = more ? ` (${lowRank.moreAfter} more after these ${lowRank.batch})` : "";
+  return `${lowRank.count} low-ranked ${one ? "one is" : "ones are"} skipped${below}. Assess ${which} too? ${estimateLine(lowRank)}${after}`;
+}
+
+// 0110-10-11: the dialog's title. "Assess the newest 50 of 120 postings?" when a batch is less than all of them.
+export function approvalTitle(dialog) {
+  if (dialog.count === 0 && dialog.lowRank) {
+    return "Only low-ranked postings are selected";
+  }
+  if (dialog.moreAfter > 0) {
+    return `Assess the newest ${dialog.count} of ${dialog.total} postings?`;
+  }
+  return `Assess ${dialog.count} posting${dialog.count === 1 ? "" : "s"}?`;
+}
+
+// 0110-10-11: "50 at a time: 70 more after these 50. Assess these again takes the next 50." Null when the batch is all of them.
+export function approvalBatchLine(dialog) {
+  if (!dialog || !(dialog.moreAfter > 0)) {
+    return null;
+  }
+  const next = Math.min(dialog.count, dialog.moreAfter);
+  return `the newest ${dialog.count} now, never more in one go. ${dialog.moreAfter} more after these ${dialog.count}: "Assess these" again takes the next ${next}.`;
 }
 
 // "~12 model calls, ~230k tokens, ~4.5 min" (the parts the history can say).
@@ -519,7 +553,10 @@ export function assessOutcomeLine(response) {
   const assessed = response.assessed || {};
   const failed = Array.isArray(assessed.failed) ? assessed.failed : [];
   const codes = [...new Set(failed.map((item) => item.error_code).filter(Boolean))];
-  return `Assessed ${assessed.assessed ?? 0} of ${assessed.requested ?? 0}.${codes.length ? ` Not assessed: ${codes.join(", ")}.` : ""}${skipped}`;
+  // 0110-10-11: a batch is the newest 50; what is left is said with how to go on.
+  const left = response.counts && Number.isInteger(response.counts.more_after) ? response.counts.more_after : 0;
+  const more = left > 0 ? ` ${left} more not assessed yet: 50 at a time, "Assess these" again takes the next.` : "";
+  return `Assessed ${assessed.assessed ?? 0} of ${assessed.requested ?? 0}.${codes.length ? ` Not assessed: ${codes.join(", ")}.` : ""}${skipped}${more}`;
 }
 
 // --- the summary and the count line -----------------------------------------------------------

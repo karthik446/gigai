@@ -66,9 +66,18 @@ export function staleCount(plan) {
   return plan && Number.isInteger(plan.stale_count) && plan.stale_count > 0 ? plan.stale_count : 0;
 }
 
+// 0110-10-11: one click assesses the NEWEST 50 and never more. `plan.count` is then the 50, `plan.total` all of
+// them and `plan.more_after` what is left (neither is there when the queue is 50 or fewer).
+export function moreAfter(plan) {
+  return plan && Number.isInteger(plan.more_after) && plan.more_after > 0 ? plan.more_after : 0;
+}
+
 export function assessAllButtonLabel(plan) {
   const count = plan && Number.isInteger(plan.count) ? plan.count : 0;
   const stale = staleCount(plan);
+  if (moreAfter(plan) > 0) {
+    return `Assess the newest ${count} of ${plan.total}`;
+  }
   if (stale === 0) {
     return `Assess all new (${count})`;
   }
@@ -95,7 +104,8 @@ export function planLine(plan) {
   const noun = count === 1 ? "posting" : "postings";
   const k = plan.concurrency || ASSESS_CONCURRENCY;
   const pace = Number.isInteger(plan.estimate_minutes) ? `about ${plan.estimate_minutes} min at ${k} at a time` : `${k} at a time`;
-  return `${count} ${noun}, one ${modelShortLabel(plan.model_target)} call each, ${pace}.`;
+  const later = moreAfter(plan) > 0 ? ` 50 at a time: ${moreAfter(plan)} more after these ${count}; click again for the next.` : "";
+  return `${count} ${noun}, one ${modelShortLabel(plan.model_target)} call each, ${pace}.${later}`;
 }
 
 // Where the minute figure came from (or that there is none).

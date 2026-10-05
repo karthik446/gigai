@@ -320,7 +320,8 @@ _NEW_EXAMPLE: dict[str, object] = {
     },
     "message": "1 new posting since Thu 01 Oct 14:02.",
     "question": {
-        "kind": "assess_new", "new": 1, "to_assess": 1, "low_rank_skipped": 0, "by_profile": [{"profile_id": "prof_1", "count": 1}],
+        "kind": "assess_new", "new": 1, "to_assess": 1, "batch": 1, "more_after": 0, "low_rank_skipped": 0,
+        "by_profile": [{"profile_id": "prof_1", "count": 1}],
         "model_target": "codex_cli",
         "estimate": {"calls": 1, "tokens": 19500, "seconds": 11.2, "cost": None, "basis_calls": 12},
         "yes": {
@@ -334,7 +335,8 @@ _NEW_EXAMPLE: dict[str, object] = {
         "text": "1 new posting (Staff Engineer 1). Assess them? ~1 calls, ~20k tokens",
     },
     "stale_question": {
-        "kind": "reassess_stale", "to_reassess": 2, "low_rank_skipped": 0, "by_profile": [{"profile_id": "prof_1", "count": 2}],
+        "kind": "reassess_stale", "to_reassess": 2, "batch": 2, "more_after": 0, "low_rank_skipped": 0,
+        "by_profile": [{"profile_id": "prof_1", "count": 2}],
         "model_target": "codex_cli",
         "estimate": {"calls": 2, "tokens": 39000, "seconds": 22.4, "cost": None, "basis_calls": 12},
         "yes": {
@@ -401,7 +403,7 @@ _POSTINGS_EXAMPLE: dict[str, object] = {
 _POSTINGS_ASSESS_EXAMPLE: dict[str, object] = {
     "schema_version": "scout-postings-assess:1", "status": "ask", "checked_at": "2026-10-03T09:30:00.000000Z",
     "question": {
-        "kind": "assess_these", "selected": 1, "to_assess": 1, "already_current": 0, "low_rank_skipped": 0,
+        "kind": "assess_these", "selected": 1, "to_assess": 1, "already_current": 0, "low_rank_skipped": 0, "batch": 1, "more_after": 0,
         "by_profile": [{"profile_id": "prof_1", "count": 1}],
         "model_target": "codex_cli", "estimate": {"calls": 1, "tokens": 19500, "seconds": 11.2, "cost": None, "basis_calls": 12},
         "text": "Assess 1 posting (Staff Engineer 1)? ~1 calls, ~20k tokens",
@@ -416,7 +418,7 @@ _POSTINGS_ASSESS_EXAMPLE: dict[str, object] = {
         "answers_used": True, "answers_saved": 12, "stories_used": True, "stories_saved": 3,
         "public_fetch_needed": False, "public_fetch_postings": 0,
     },
-    "counts": {"selected": 1, "to_assess": 1, "already_current": 0, "not_found": 0, "low_rank_skipped": 0},
+    "counts": {"selected": 1, "to_assess": 1, "already_current": 0, "not_found": 0, "low_rank_skipped": 0, "batch": 1, "more_after": 0},
     "low_rank": None,
     "not_found": [], "approval": None, "assessed": None,
     "postings": _POSTINGS_EXAMPLE["postings"],
@@ -474,7 +476,12 @@ _NEW_NOTE = (
     "listed: `counts.weak_fit` counts them and GET /api/postings?state=weak_fit lists them. A yes assesses only postings "
     "whose rank score is at least `fit.assess_min_rank` (50; one not ranked yet is assessed): the ones below are "
     "`counts.low_rank_skipped` and their own question, `low_rank_question` (count, estimate, the yes), answered by "
-    "`include_low_rank: true` beside `assess: true`. `fit` at the top level is the three numbers in force (the `fit` block "
+    "`include_low_rank: true` beside `assess: true`. 50 AT A TIME: every yes (`assess`, `reassess_stale`, with or without "
+    "`include_low_rank`) acts on the NEWEST 50 postings and never more (by `published_at`, else `first_seen_at`). Each question "
+    "carries the total (`to_assess` / `to_reassess` / `skipped`), `batch` (what its yes acts on, at most 50) and `more_after`; "
+    "its `estimate` and `text` are the batch's (\"re-assess the newest 50 of 422? ~50 calls ... (372 more after these 50)\"). "
+    "After a yes that left some, `assessed` / `reassessed` also carry `more_after` and `next` (`{cli, api}`: the call for the "
+    "next 50); neither key is there when the batch was all of them. `fit` at the top level is the three numbers in force (the `fit` block "
     "of the project's settings file; each 0 to 100, 0 switches that rule off). Each posting is listed "
     "once, for its best profile (`profile_id`: the profile that tailored a resume for it, else one with a current "
     "assessment, else one with a stale one, else the highest rank score), with every active profile it matches in "
@@ -833,7 +840,10 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
             "`{}` reads the plan and starts nothing. The queue is the run's new postings not assessed yet, plus every posting of "
             "the run whose stored assessment for the selected profile was made with older settings (see `basis_stale` on "
             "GET /api/assessments): `plan.count` = `plan.new_count` + `plan.stale_count`. A current stored assessment is "
-            "skipped. Only `{\"start\": true}` calls a model."
+            "skipped. Only `{\"start\": true}` calls a model. 50 AT A TIME: one start assesses the NEWEST 50 of the queue and "
+            "never more (by the day the posting went up); `plan.count` is then the 50, and `plan.total` / `plan.more_after` say "
+            "how many there are in all and how many are left (neither key is there when the queue is 50 or fewer). The next "
+            "start takes the next 50."
         ),
     ),
     RouteSpec(
@@ -845,7 +855,8 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
         request_example={"days": 30}, errors=(_INVALID, _WRONG_TYPE, _UNKNOWN_KEY, _NOT_FOUND),
         description=(
             "No board is downloaded: the search reads the company index and board cache on this machine. No run is created. "
-            "Only the added postings are ranked and assessed (at most the run's assess cap); existing assessments and answers are untouched."
+            "Only the added postings are ranked and assessed (at most the run's assess cap, and never more than the newest 50 at a "
+            "time); existing assessments and answers are untouched."
         ),
     ),
     # --- discovery -------------------------------------------------------------------
@@ -1779,7 +1790,10 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
             "description fetched first, ONE request for that posting alone (`assessed.fetched_on_demand` counts them); the calls are "
             "recorded like every model call (GET /api/metrics). `assessed.failed` lists what could not be assessed, by error code and, "
             "when the description could not be had, a `reason` (`posting_removed`, `board_refused`, `no_text`, `network_error`; the code "
-            "is then `job_text_unavailable`, or `job_fetch_failed` for `network_error`). The call waits for the model: allow a minute per four "
+            "is then `job_text_unavailable`, or `job_fetch_failed` for `network_error`). `posting_requirements_unreadable` (the "
+            "model answered and a guard refused the answer; nothing is stored) carries the guard as its `reason`: "
+            "`matched_on_too_few_requirements` (a Matched on fewer than three requirement rows for a long posting) or "
+            "`no_requirements_in_text`. One call assesses the newest 50 and never more. The call waits for the model: allow a minute per four "
             "postings. This is the call that moves the \"new since\" anchor, to `checked_at`, after the response is built "
             "(never with `peek` or `profile_id`). " + _NEW_NOTE
         ),
@@ -2055,6 +2069,10 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
             "not ranked yet is not) is left out of the batch and counted (`counts.low_rank_skipped`); `low_rank` is then the "
             "separate question for those (`{kind, skipped, min_rank, estimate, text, yes}`; its `yes.api` body carries "
             "`include_low_rank: true`), and when only low-ranked postings are selected the status is `ask` with `question.to_assess` 0. "
+            "50 AT A TIME: one approval assesses the NEWEST 50 of them and never more (by the day the posting went up, else by when "
+            "Scout first stored it). `question.to_assess` and `counts.to_assess` are all of them, `batch` what this approval "
+            "assesses (at most 50) and `more_after` what is left; the estimate and the text are the batch's (\"Assess the newest 50 "
+            "of 120 postings? ~50 calls ... (70 more after these 50)\"), and the same call again assesses the next 50. "
             "The call waits for the model: allow a minute per four postings. "
             "No response mixes: posting text only, nothing the user wrote."
         ),
