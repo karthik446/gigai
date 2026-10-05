@@ -22,7 +22,7 @@ from pathlib import Path
 import click
 
 from ..setup import default_home_root
-from .master_cli import _emit, _errors, _fail, _n, _options, _size, _target, selection_group
+from .master_cli import _emit, _errors, _fail, _n, _options, _size, _target, echo_reading, selection_group
 
 _REFRESH = "gigai scout resume master selection refresh"
 
@@ -88,6 +88,7 @@ def _echo_source_lines(plan) -> None:  # noqa: ANN001 - a master_migration.Migra
             if row["reason"] != "contact":  # named below, by kind
                 numbers = ", ".join(str(line) for line in row["lines"])
                 click.echo(f"  Left out of the resume of {', '.join(resume['profiles'])}: line {numbers}: {row['why']}.")
+        echo_reading(resume, f"the resume of {', '.join(resume['profiles'])}")  # 0.1.10.11: the headings read as another section
 
 
 def _answers(values: tuple[str, ...]) -> dict[str, str]:

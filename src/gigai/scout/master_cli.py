@@ -1,5 +1,8 @@
 """0.1.10.9 master P1: ``gigai scout resume master show | init --from FILE | history``.
 
+0.1.10.11: ``init --from FILE`` reads a resume as a person has it (``master_migration.read_file``: rules, other
+section names, bold or plain entries) and says what it mapped and left out; ``--dry-run`` works with ``--from`` too.
+
 The master resume is the one document that holds every role, bullet,
 project and skill, with an id on every line and no contact data
 (``master_resume`` is the format, ``master_store`` the journal record and
@@ -52,18 +55,25 @@ def _options(function):
     return function
 
 
-def _fail(exc: Exception, *, as_json: bool, fallback: str = "scout_master_failed") -> None:
-    """Report a refusal; a stale or blocked write also carries the revision the master is at now."""
+def _fail(exc: Exception, *, as_json: bool, fallback: str = "scout_master_failed", refused: tuple[int, str] | None = None) -> None:
+    """Report a refusal; a stale or blocked write also carries the revision the master is at now.
+
+    A refusal that names a line of a resume (``refused``, or what a ``MigrationResumeError`` carries): the text
+    output shows that line under the message, for the person at the terminal; ``--json`` carries its number only.
+    The message itself never holds a line's text."""
 
     code = getattr(exc, "code", fallback)
     current = getattr(exc, "current", None)
+    refused = refused or getattr(exc, "refused_line", None) or getattr(exc.__cause__, "refused_line", None)
     if as_json:
         error: dict[str, object] = {"code": code, "message": str(exc)}
         if current is not None:
             error["current"] = current.to_json()
+        if refused is not None:
+            error["line"] = refused[0]
         click.echo(json.dumps({"status": "error", "error": error}, sort_keys=True, separators=(",", ":")))
         raise click.exceptions.Exit(1)
-    raise click.ClickException(str(exc))
+    raise click.ClickException(str(exc) + (f"\n  Line {refused[0]} reads: {refused[1]}" if refused is not None and refused[1] else ""))
 
 
 def _errors() -> tuple[type[Exception], ...]:
@@ -91,6 +101,35 @@ def _size(counts: dict[str, object]) -> str:
 
 def _emit(payload: dict[str, object]) -> None:
     click.echo(json.dumps(payload, sort_keys=True, separators=(",", ":")))
+
+
+def echo_reading(resume: dict[str, object], of: str) -> None:
+    """How one resume was read where that is worth saying (``source_lines.resumes[]``): the headings read as another section, the lines kept where they had no place."""
+
+    sections = [
+        f"line {row['line']} \"{row['heading']}\" as {str(row['section']).capitalize()}"
+        + {"closest": " (the closest section)", "default": " (not a section GigAI has)"}.get(str(row["how"]), "")
+        for row in resume.get("sections", ())  # type: ignore[union-attr]
+    ]
+    if sections:
+        click.echo(f"  Section headings of {of}: " + "; ".join(sections) + ".")
+    for row in resume.get("read_as", ()):  # type: ignore[union-attr]
+        click.echo(f"  In {of}: line {', '.join(str(line) for line in row['lines'])}: {row['why']}.")
+
+
+def _echo_file_lines(lines: dict[str, object], name: str) -> None:
+    """What became of every line of FILE (``master init --from FILE``): kept or left out, by line number and reason; never the text."""
+
+    left = ", ".join(f"{count} {reason.replace('_', ' ')}" for reason, count in lines["left_out_by_reason"].items() if count)  # type: ignore[union-attr]
+    click.echo(
+        f"Of {_n(lines['in'], 'line')} of {name} (headings, role lines and wrapped lines counted): {lines['kept']} kept, "
+        f"{lines['left_out']} left out" + (f" ({left})." if left else ".")
+    )
+    for resume in lines["resumes"]:  # type: ignore[union-attr]
+        for row in resume["left_out"]:
+            if row["reason"] != "contact":  # named below, by kind
+                click.echo(f"  Left out of {name}: line {', '.join(str(line) for line in row['lines'])}: {row['why']}.")
+        echo_reading(resume, name)
 
 
 @click.group("master")
@@ -193,7 +232,10 @@ def master_show_command(
 
 
 @master_group.command("init")
-@click.option("--from", "source", type=click.Path(path_type=Path, dir_okay=False), help="The resume markdown to store as the master (.md, .markdown, .txt).")
+@click.option(
+    "--from", "source", type=click.Path(path_type=Path, dir_okay=False),
+    help="The resume to store as the master (.md, .markdown, .txt): a resume as you have it, or a file in GigAI's own format.",
+)
 @click.option(
     "--revision", "revision", type=click.IntRange(min=0),
     help="The revision you read (show --json): needed to replace an existing master; refused with revision_conflict when it changed since.",
@@ -206,7 +248,7 @@ def master_show_command(
     "--answer", "answers", multiple=True,
     help="Without --from: the answer to one question of the merge, QUESTION_ID=a, =b or =both (repeatable).",
 )
-@click.option("--dry-run", "dry_run", is_flag=True, help="Without --from: show what the merge would store; write nothing.")
+@click.option("--dry-run", "dry_run", is_flag=True, help="Show what would be stored and which lines would be left out; write nothing.")
 @_options
 def master_init_command(
     source: Path | None, revision: int | None, actor: str, answers: tuple[str, ...], dry_run: bool,
@@ -221,17 +263,26 @@ def master_init_command(
     Every profile's first selection is its own resume, which is not
     rewritten, so nothing already assessed or tailored goes stale.
 
-    With --from FILE: FILE is stored as the master. It is resume markdown in
-    GigAI's format (## Summary, ## Experience with ### entries and - bullets,
-    ## Skills, ## Education, ## Projects, ## Other); contact lines are
-    removed and a line without an id gets one. With a master already
-    stored, pass --revision N (the revision you read): the result becomes
-    revision N+1.
+    With --from FILE: FILE is stored as the master. A resume as you have it
+    is read where its shape is plain: horizontal rules are skipped, a section
+    GigAI does not have is read as the closest of its six (Technical Skills
+    is Skills, Selected Projects is Projects, anything else is Other), a bold
+    line or a plain line can be an entry. Every heading read that way and
+    every line left out is said, by line number. A file whose first line is
+    <!-- gigai-master:1 --> is in GigAI's own format (## Summary,
+    ## Experience with ### entries and - bullets, ## Skills, ## Education,
+    ## Projects, ## Other) and is held to it. Contact lines are removed and a
+    line without an id gets one. With a master already stored, pass
+    --revision N (the revision you read): the result becomes revision N+1.
+
+    --dry-run (both forms) shows what would be stored and writes nothing.
     """
 
     from . import scout_cli
     from .master_file import write_line
+    from .master_migration import file_source_lines, read_file, refused_line
     from .master_profiles_cli import after_master_write, echo_after_master_write, run_migration
+    from .master_resume import MasterResumeError
     from .master_store import MasterStoreError, import_master
 
     if source is None:
@@ -240,33 +291,55 @@ def master_init_command(
         )
         return
     home_root = home_value or default_home_root()
-    # As `resume add`: works as the very first command on a fresh home.
-    scout_cli._ensure_gigai_settings(home_root, as_json=as_json)
+    if not dry_run:
+        # As `resume add`: works as the very first command on a fresh home. A dry run sets nothing up.
+        scout_cli._ensure_gigai_settings(home_root, as_json=as_json)
+    read: dict[str, object] = {"text": "", "reading": None}
+
+    def reader(text: str):  # noqa: ANN202 - a MasterDraft
+        # What the import hands over is the file after its privacy strip: the line numbers are the file's.
+        read["text"] = text
+        draft, read["reading"] = read_file(text)
+        return draft
+
+    installed = None
     try:
         target = _target(target_value, home_root, as_json=as_json)
-        if answers or dry_run:
-            raise MasterStoreError("master_option_invalid", "--answer and --dry-run belong to `master init` without --from (the merge of your profiles' resumes)")
-        installed = scout_cli.install_scout(home_root=home_root, requested_target=target)
-        scout_cli.write_starter_find_jobs_config(target)
-        result = import_master(home_root=home_root, target=target, source=source, actor=actor, revision=revision)
+        if answers:
+            raise MasterStoreError("master_option_invalid", "--answer belongs to `master init` without --from (the merge of your profiles' resumes)")
+        if not dry_run:
+            installed = scout_cli.install_scout(home_root=home_root, requested_target=target)
+            scout_cli.write_starter_find_jobs_config(target)
+        result = import_master(home_root=home_root, target=target, source=source, actor=actor, revision=revision, reader=reader, dry_run=dry_run)
     except _errors() as exc:
-        _fail(exc, as_json=as_json)
+        _fail(exc, as_json=as_json, refused=refused_line(exc, str(read["text"])) if isinstance(exc, MasterResumeError) else None)
         return
     master = result.stored.master
     counts = master.counts()
     removed = result.contact_removed.to_json()
+    reading = read["reading"]
+    # Every content line of FILE: kept, or left out by line number and reason (null for a file in GigAI's own format, which is held to it).
+    lines = file_source_lines(reading, tuple(sorted({line for _kind, line in result.contact_removed.lines}))).to_json() if reading is not None else None  # type: ignore[arg-type]
     # P3: a profile that shows an edited or retired line gets its resume printed again; new lines are only offered.
-    profiles = after_master_write(home_root, target) if result.status != "unchanged" else {"synced": [], "offers": []}
+    profiles = after_master_write(home_root, target) if result.status != "unchanged" and not dry_run else {"synced": [], "offers": []}
+    stored = {**result.stored.revision.to_json(), "record_id": result.stored.record_id, "counts": counts}
+    if dry_run and result.status != "unchanged":
+        # What would be stored has no id and no time yet.
+        stored.update({"revision_id": None, "updated_at": None, "record_id": result.stored.record_id or None})
     payload = {
         "ok": True,
-        "status": result.status,
-        "scout_installed": installed.bound or installed.approved or installed.activated,
-        "master": {**result.stored.revision.to_json(), "record_id": result.stored.record_id, "counts": counts},
+        # With --dry-run: dry_run, and `would` says what a write would do (created, revised or unchanged).
+        "status": "dry_run" if dry_run else result.status,
+        "written": not dry_run,
+        "would": result.status if dry_run else None,
+        "scout_installed": bool(installed is not None and (installed.bound or installed.approved or installed.activated)),
+        "master": stored,
         "ids_assigned": result.ids_assigned,
         "ids_restored": result.ids_restored,
         "changes": result.change.to_json(),
         # What the privacy strip took out (kinds and line numbers, never a value), or null.
         "contact_removed": removed,
+        "source_lines": lines,
         "profiles": profiles,
         # P8: where the revision went in the resumes folder (null when nothing was written).
         "file": dict(result.file) if result.file is not None else None,
@@ -275,13 +348,16 @@ def master_init_command(
         _emit(payload)
         return
     number = result.stored.revision.revision
+    changed = f"{_n(result.ids_assigned, 'new id')}, {result.change.added} added, {result.change.removed} removed, {result.change.changed} changed"
     if result.status == "unchanged":
-        click.echo(f"The master resume is unchanged (revision {number}): the file holds what is stored.")
+        would = "would be unchanged" if dry_run else "is unchanged"
+        click.echo(f"The master resume {would} (revision {number}): the file holds what is stored." + (" Nothing was written." if dry_run else ""))
+    elif dry_run:
+        click.echo(f"Would store {source.name} as revision {number} of the master resume: {_size(counts)}; {changed}. Nothing was written.")
     else:
-        click.echo(
-            f"Master resume stored as revision {number}: {_size(counts)}; "
-            f"{_n(result.ids_assigned, 'new id')}, {result.change.added} added, {result.change.removed} removed, {result.change.changed} changed."
-        )
+        click.echo(f"Master resume stored as revision {number}: {_size(counts)}; {changed}.")
+    if lines is not None:
+        _echo_file_lines(lines, source.name)
     if removed is not None:
         where = ", ".join(f"line {line}: {kind.replace('_', ' ')}" for kind, line in result.contact_removed.lines)
         click.echo(f"{removed['message']} Not imported: {where}.")
@@ -289,7 +365,11 @@ def master_init_command(
     if said:
         click.echo(said)
     echo_after_master_write(profiles)
-    click.echo("Next: `gigai scout resume master show`.")
+    if dry_run:
+        again = f" --revision {number - 1}" if result.status == "revised" else ""
+        click.echo(f"To store it: `gigai scout resume master init --from {source}{again}`.")
+    else:
+        click.echo("Next: `gigai scout resume master show`.")
 
 
 @master_group.command("history")

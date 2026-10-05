@@ -601,7 +601,8 @@ def test_refresh_refuses_what_it_cannot_do(two: _Home) -> None:
     assert _master(two.home, "selection", "refresh", "--profile", "profile_00000000-0000-4000-8000-000000000000", ok=False)["error"]["code"] == "profile_not_found"
     assert _master(two.home, "selection", "refresh", "--all", "--profile", two.ai_id, ok=False)["error"]["code"] == "profile_input_invalid"
     assert _master(two.home, "selection", "refresh", "--sync", "--dry-run", ok=False)["error"]["code"] == "selection_input_invalid"
-    assert _master(two.home, "init", "--from", str(AI_RESUME), "--dry-run", ok=False)["error"]["code"] == "master_option_invalid"
+    # 0.1.10.11: --dry-run works with --from too (test_master_init_real_resumes.py); --answer still belongs to the merge.
+    assert _master(two.home, "init", "--from", str(AI_RESUME), "--answer", "mq-000000000000=a", ok=False)["error"]["code"] == "master_option_invalid"
     # --sync with nothing stale writes nothing.
     assert _master(two.home, "selection", "refresh", "--all", "--sync")["profiles"] == []
 
@@ -857,7 +858,8 @@ def test_a_resume_in_another_shape_is_read_where_the_shape_is_plain() -> None:
 def test_a_resume_that_cannot_be_read_is_refused_by_line_number_never_by_text() -> None:
     secret = "ZZ-private-sentence-ZZ"
     for text, line in (
-        (f"## Experience\n\n### Acme\n- Built it.\n\n{secret}\n", "line 6"),
+        # 0.1.10.11: text after an entry's bullets is read (a line of that entry), no longer refused; a line that is too long still is.
+        (f"## Experience\n\n### Acme\n- Built it.\n\n- {secret} {'too long ' * 250}\n", "line 6"),
         (f"just one paragraph of prose, {secret}\n", "no resume sections"),
     ):
         with pytest.raises(mm.MigrationResumeError) as refused:
