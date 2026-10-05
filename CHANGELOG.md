@@ -292,6 +292,7 @@ things still take more than a second (see "Still slower than one second"): the n
   port, also one that another home (`--home`) had started. Now only a Scout of the same home is stopped:
   another home's keeps running, and the command ends with one line that names the port and that home
   and says to pass `--port`.
+- **The Scout server no longer grows by about 12 MB per tailoring.** Every time Scout measured how many pages a resume takes (a tailoring from a master resume measures a dozen times or more), memory was left behind that was never given back: a Scout left running through many tailorings could grow by gigabytes. Its memory now stays level.
 
 #### For agents
 

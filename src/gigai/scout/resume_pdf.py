@@ -18,6 +18,7 @@ the form's values live only in this call's arguments.  A PDF's file name is
 
 from __future__ import annotations
 
+import itertools
 import json
 import re
 from contextlib import ExitStack
@@ -171,11 +172,43 @@ def _end(template: bytes, directory: str, data: dict[str, object], scale: float)
     """(last page, fill of that page 0..1) where the content ends at ``scale``: Typst's own layout, via query."""
     import typst
 
-    found = json.loads(typst.query(
-        template, "<fit-end>", field="value", one=True, font_paths=[directory], ignore_system_fonts=True,
-        sys_inputs={"data": json.dumps(data, ensure_ascii=False), "scale": repr(scale)},
-    ))
+    try:
+        found = json.loads(typst.query(
+            template, "<fit-end>", field="value", one=True, font_paths=[directory], ignore_system_fonts=True,
+            sys_inputs={"data": json.dumps(data, ensure_ascii=False), "scale": repr(scale)},
+        ))
+    finally:
+        if next(_queries) % QUERIES_PER_EVICTION == 0:
+            _evict_layout_cache()
     return int(found["page"]), float(found["fill"])
+
+
+#: One layout query in this many is followed by an eviction (``_evict_layout_cache``).  Measured (0.1.10.11 TY, a
+#: 2-page pick from a large master, one process per rate, macOS): never = 7.0 ms a layout and +1.7 MB a layout for
+#: good; every query = 9.1 ms; every 2nd = 8.4 ms; every 3rd = 8.1 ms; every 5th = 7.9 ms.  What stays is what the
+#: queries of the last 10 evictions left (the engine drops what 10 evictions in a row did not use), so it is a level,
+#: not a slope: the same after 2,000 layouts as after 1,000, and it grows with this number (the worst loop measured,
+#: 1,000 layouts of one large document: +35 MB at 1, +70 MB at 2, +105 MB at 3).
+QUERIES_PER_EVICTION = 2
+#: Layout queries made by this process (``next`` of a count is one step under the interpreter's lock; a count that
+#: slipped by one between two threads would only move an eviction by one query).
+_queries = itertools.count(1)
+
+
+def _evict_layout_cache() -> None:
+    """Age out what the layout engine remembers of the queries before this one (0.1.10.11 TY).
+
+    Typst keeps every layout's intermediate results in a cache of the whole process, and only a COMPILE ages it
+    out: ``typst.query`` never does (typst 0.15.0), so each query left 1 to 3 MB behind for good: a server that
+    picks from a master resume grew by 12 to 30 MB per tailoring.  Compiling an EMPTY document (about 2 ms) is
+    that eviction; nothing of the resume is in it and nothing is written.  The ``_with_warnings`` form, so that
+    ``typst.compile`` stays "one PDF was made"."""
+    import typst
+
+    try:
+        typst.compile_with_warnings(b"", format="pdf", ignore_system_fonts=True)
+    except typst.TypstError:
+        pass  # the measurement stands; the next eviction, or the next PDF, ages the cache out
 
 
 def fit_scale(measure: Callable[[float], tuple[int, float]]) -> float:
