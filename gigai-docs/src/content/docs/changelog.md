@@ -24,8 +24,9 @@ operator-visible capability and must link to the relevant release or evidence.
 
 ### 0.1.10.10
 
-Speed: nothing you wait for in the local app should take more than a second, also on a very large
-store of postings. Work in progress; the notes are written as the changes land.
+A fix for 0.1.10.9: `gigai scout new` stopped with an error on the first run after an update when
+your store of postings is large. Nothing to do after you upgrade: install this version and run it
+again. The docs screenshots are current again too.
 
 - **Fixed: `gigai scout new` crashed on a large store.** On the first run after an update, with 500 or
   more companies to match again, `gigai scout new` stopped with `NameError: name 'time' is not defined`
