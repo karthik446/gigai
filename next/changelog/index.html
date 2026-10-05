@@ -303,6 +303,21 @@ written, the refused read too) ends in one line that names the command with your
 after the files were written, plain <code dir="auto">gigai doctor</code> also fails on <code dir="auto">journal.index</code> with the command in
 its remediation (<code dir="auto">--json</code>). The command checks that each workpad’s ownership markers name the folder
 it is in, and refuses one where they do not, saying which marker differs.</li>
+<li><strong>An Ashby posting whose description is only HTML can be assessed.</strong> Some Ashby boards send a
+posting’s description as HTML only, with no plain-text copy. Scout read only the plain-text copy, so
+such a posting had no text at all: assessing it failed every time with <code dir="auto">job_text_unavailable</code>
+(reason <code dir="auto">no_text</code>), and a keyword search never found it. Scout now reads the HTML description, turned
+into text the same way as for the other boards, when there is no plain-text one. A posting that has a
+plain-text description is read exactly as before.
+After you upgrade: such a posting that is already in your list can be assessed at once (its text is
+read from the company’s stored list; nothing is fetched again). Your next <code dir="auto">gigai scout sources update</code>
+(or “Update sources”) finishes it: it reads each Ashby company’s list once more with the request it
+makes anyway (no extra request; a company whose list did not change is read again from what is
+stored), and a posting that gets its text this way is found by a keyword search and counts once as
+changed in a search’s “new or changed since the last search”. No other Ashby posting is marked new or
+changed by this, and nothing needs to be done.
+This is not a fix for an assessment that failed with <code dir="auto">posting_requirements_unreadable</code>: that posting
+had its text, and the answer now says which rule refused (see “For agents”).</li>
 </ul>
 <div class="sl-heading-wrapper level-h4"><h4 id="for-agents">For agents</h4><a class="sl-anchor-link" href="#for-agents"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “For agents”</span></a></div>
 <ul>
