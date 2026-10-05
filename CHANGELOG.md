@@ -111,8 +111,19 @@ Read "After you upgrade" and "Not proven".
 #### Not proven
 
 - **Accuracy on real postings is the point of this release and is reported separately:**
-  [ACCURACY TABLE]
-  Read the method and what the test cannot show on the accuracy page of the docs.
+  15 unseen real postings of one person, fully correct by an answer key built blind (fourth set):
+
+  | Model | Fully correct | Unnecessary questions | Seconds per call (mean) |
+  | --- | --- | --- | --- |
+  | Claude Code, `claude-opus-5-5` (pinned, the default) | 14 of 15 | 0 | 37.0 |
+  | Claude Code, `claude-sonnet-5-5` | 12 of 15 | 4 | 24.1 |
+  | Codex CLI, default (`gpt-6-astra`; the adapter does not report the model) | 10 of 15 | 9 | 38.5 |
+
+  No invented facts in any row. One call failed on each Claude row (a correct answer the "too few
+  requirements" guard refused; fixed, and still counted as a failure here). One person's master; the ask
+  side is thin on this set. An assessment made with a model other than the Claude reference says so.
+  Read the standard, the method, the per-point columns and what the test cannot show on the
+  [accuracy page](https://karthik446.github.io/gigai/scout/accuracy-0-1-11/) of the docs.
 - A real agent session through the brief and the hand-back, on Claude Code and on Codex, was not run
   when this was written. The Codex sandbox on this flow is untested.
 - The hand-back check's refusals of true lines were measured on synthetic text only.
