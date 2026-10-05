@@ -243,11 +243,12 @@ def test_the_row_chips_say_the_state_the_scout_label_stale_and_removed(out: dict
     assert chips["attention"] == [
         ("state", "Resume tailored", "ok", None), ("assessed", "Assessed", "plain", None),
         ("label", "Scout label: needs attention", "warn", "scout-label-chip"), ("ats", "Scout ATS 61", "plain", "ats-chip"),
-        ("stale", "Stale: posting changed", "warn", None),
+        # 0110-10-12: the server's words. This row's score column does not say it (no `score_text` with the label), so the chip does.
+        ("stale", "Old assessment: posting changed", "warn", "stale-chip"),
     ]
     assert chips["removed"] == [
         ("state", "Not a match", "danger", None), ("assessed", "Assessed", "plain", None),
-        ("stale", "Stale: older settings", "warn", None), ("removed", "Removed", "danger", None),
+        ("stale", "Old assessment: settings changed", "warn", "stale-chip"), ("removed", "Removed", "danger", None),
     ]
     assert [kind for kind, *_rest in chips["unknownLabel"]] == ["state", "assessed"], "a label code the backend does not have is never shown"
     assert out["scores"] == ["not ranked yet · not assessed", "73% of requirements met", "rank 81"]
@@ -315,7 +316,7 @@ def test_a_postings_markup_stays_text_and_nothing_in_the_ui_renders_raw_html(out
         code = "\n".join(line for line in path.read_text(encoding="utf-8").splitlines() if not line.lstrip().startswith(("//", "*", "/*")))
         assert "dangerouslySetInnerHTML" not in code and ".innerHTML" not in code and "insertAdjacentHTML" not in code, path.name
     view = (UI_SRC / "views" / "JobsView.jsx").read_text(encoding="utf-8")
-    assert '{row.title || "(untitled posting)"}' in view and "{details && <div className=\"posting-detail\">{details}</div>}" in view
+    assert '{row.title || "(untitled posting)"}' in view and '<div className="posting-detail">' in view and "{details}" in view and "{posted.text}" in view
     job = out["job"]
     assert (job["id"], job["status"], job["fromPostings"], job["verdict"], job["row"]) == (out["data"]["bothUrl"], "posting", True, "not_assessed", None)
     assert job["posting"]["normalized_url"] == out["data"]["bothUrl"] and job["posting"]["text"].startswith("Posting 1:")

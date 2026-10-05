@@ -86,4 +86,4 @@ def test_the_card_marker_says_resume_changed(out: dict) -> None:
 
 def test_the_grid_row_says_resume_changed(out: dict) -> None:
     stale = [chip for chip in out["rows"][0] if chip["kind"] == "stale"]
-    assert [(chip["label"], chip["title"]) for chip in stale] == [("Stale: resume changed", "resume_changed")]
+    assert [(chip["label"], chip["title"]) for chip in stale] == [("Old assessment: resume changed", "resume_changed")]

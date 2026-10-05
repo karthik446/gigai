@@ -199,6 +199,10 @@ _STALE_WORDS = {
     "resume_changed": "resume changed",
 }
 _RECOMMENDED = "recommended"
+#: 0110-10-14: what a board means by the date stored as ``published_at`` (``ats_board_clients``). Lever's ``createdAt``
+#: and Ashby's ``publishedAt`` are the day the posting went up; Greenhouse's list gives ``updated_at``, the posting's
+#: last change. Served beside the date (``published_kind``) so an update is never shown as "posted".
+PUBLISHED_KINDS = {"lever": "posted", "ashby": "posted", "greenhouse": "updated"}
 
 
 def sort_group(row: PostingRecord) -> str:
@@ -251,6 +255,28 @@ def stale_label(row: PostingRecord) -> str | None:
     if row.state == _NOT_ASSESSED or row.stale_code is None:
         return None
     return f"old assessment: {_STALE_WORDS.get(row.stale_code, row.stale_code.replace('_', ' '))}"
+
+
+def posting_dates(row: PostingRecord) -> dict[str, object]:
+    """A posting's two dates, each under its own name (0110-10-14).
+
+    ``published_at`` is the BOARD's date, the one the 7 / 30 days window judges (``None`` when the board gives none),
+    and ``published_kind`` what the board means by it (:data:`PUBLISHED_KINDS`; a board kind this table does not know
+    is ``updated``, the weaker claim). ``first_seen_at`` is when Scout first stored the posting: what "new since" judges.
+    """
+
+    kind = None if row.published_at is None else PUBLISHED_KINDS.get(row.board.partition(":")[0], "updated")
+    return {"published_at": row.published_at, "published_kind": kind, "first_seen_at": row.first_seen}
+
+
+def posted_text(row: Mapping[str, object]) -> str:
+    """A served row's date as a line of the terminal says it: "posted 2026-09-24", "updated 2026-09-24" (the board's last
+    change) or, when the board gives no date, "first seen 2026-10-01" (by Scout). ``""`` for a row with no date at all."""
+
+    published, seen = row.get("published_at"), row.get("first_seen_at") or row.get("first_seen")
+    if isinstance(published, str) and published:
+        return f"{'updated' if row.get('published_kind') == 'updated' else 'posted'} {published[:10]}"
+    return f"first seen {seen[:10]}" if isinstance(seen, str) and seen else ""
 
 
 def score_text(row: PostingRecord) -> str:
@@ -364,6 +390,7 @@ def _row_json(
         "salary": text.salary if text is not None else None,
         "description": _excerpt(text.text) if text is not None else None,
         "first_seen": row.first_seen,
+        **posting_dates(row),  # 0110-10-14: published_at (the board's date), published_kind, first_seen_at
         "removed_at": row.removed_at,
         "profile_id": row.profile_id,
         "profiles": [
@@ -1284,6 +1311,8 @@ def render(response: Mapping[str, object]) -> str:
             details = [f"{row['company_name'] or '?'}: {row['title'] or row['job_identity']}", str(row["work_mode"])]
             if row["salary"]:
                 details.append(str(row["salary"]))
+            if posted_text(row):
+                details.append(posted_text(row))  # 0110-10-14
             details.append(f"[{tags}]")
             if row.get("tag_pending"):
                 details.append("tag pending")  # 0110-8-05: matched by a generic title's words; its function tag is not known yet
@@ -1367,6 +1396,7 @@ __all__ = [
     "YOURS_LABELS",
     "YOURS_SCHEMA_VERSION",
     "PostingModelError",
+    "PUBLISHED_KINDS",
     "PostingModelPreparing",
     "ScoutNewError",
     "check_response",
@@ -1374,6 +1404,8 @@ __all__ = [
     "in_order",
     "mark_all_seen",
     "order_key",
+    "posted_text",
+    "posting_dates",
     "process_waiting",
     "render",
     "response_labels",

@@ -112,6 +112,13 @@ export function minorGapText(assessment) {
   return `${gaps.length} minor gap${gaps.length === 1 ? "" : "s"}: ${named}`;
 }
 
+// 0110-10-12: "minor gaps" is the wording of a match (they never block one). Under "Needs your answers" or "Not a
+// match" the same rows are what the job still waits on or lacks, and the table says them: no line then (the Jobs row's
+// rule, postingsModel.scoreText).
+export function minorGapLine(assessment) {
+  return effectiveVerdict(assessment) === "matched_above_threshold" ? minorGapText(assessment) : null;
+}
+
 // "Requirements (16)" / "Requirements (40, +5 not shown)": rows past the
 // server's bound are counted, never dropped in silence.
 export function requirementsHeading(assessment) {
@@ -557,6 +564,20 @@ export function assessmentJobs(quickItems, jobs, pastedItems, runPostingIds) {
 // When a job was last assessed on demand ("" when it never was).
 export function assessedAt(job) {
   return job && job.quick ? assessmentTime(job.quick) : "";
+}
+
+// 0110-10-12: a stored tailored resume made BEFORE the assessment the page shows (a re-assessment does not tailor
+// again): the line that says so, with the two days when they differ; null when it is not older, or either is unknown.
+// Both are the server's fixed-width UTC stamps, so they compare as strings.
+export function tailoredBeforeAssessment(stored, assessedTime) {
+  const at = stored && typeof stored.updated_at === "string" ? stored.updated_at : "";
+  if (!at || !assessedTime || !(at < assessedTime)) {
+    return null;
+  }
+  const tailored = dateLabel(at);
+  const assessed = dateLabel(assessedTime);
+  const when = tailored === assessed ? "The resume was tailored before the latest assessment." : `The resume was tailored ${tailored}, before the latest assessment (${assessed}).`;
+  return `${when} Tailor again to make it from the assessment shown.`;
 }
 
 export function sortByAssessedAt(jobs) {

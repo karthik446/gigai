@@ -8,6 +8,12 @@
 //   N7  Re-assess is enabled once at least one box is filled; Tailor resume
 //       is enabled when the verdict is matched, or when every open question
 //       has an answer. A disabled action always carries its reason.
+//   0110-10-12  an OLD assessment (older prompt, settings changed, answers
+//       changed, resume changed, posting changed) is itself a reason to
+//       re-assess: Re-assess is on with no question open and no box filled,
+//       and says why and what it costs (one model call). After an upgrade
+//       every assessment is old; the gate looked at the boxes alone and the
+//       page could not renew what it marked old.
 //
 // POST /api/answers records ONE answer per call and re-assesses only when
 // `reassess` names the job (find_jobs/api/answers.py), so N answers are N
@@ -115,15 +121,23 @@ export function unsavedAnswerRequests(states) {
 
 const plural = (count, word) => `${count} ${word}${count === 1 ? "" : "s"}`;
 
-export function reassessGate({ assessed, states }) {
+// `stale` is why the assessment shown is old, in words ("older prompt"), or null for a current one; `canAssess` says the
+// page can assess the posting again by its link (a pasted posting has none: its text is never stored).
+export function reassessGate({ assessed, states, stale = null, canAssess = true }) {
   if (!assessed) {
     return { enabled: false, reason: "This posting is not assessed yet, so there is nothing to re-assess." };
   }
   const open = (states || []).length;
+  const filled = (states || []).filter((state) => state.filled).length;
+  if (stale && filled === 0) {
+    if (!canAssess) {
+      return { enabled: false, stale: true, reason: `This assessment is old (${stale}), but this posting has no stored link to assess it from again.` };
+    }
+    return { enabled: true, stale: true, reason: `This assessment is old (${stale}). Re-assessing it is one model call.` };
+  }
   if (open === 0) {
     return { enabled: false, reason: "There are no open questions, so there is nothing new to re-assess with." };
   }
-  const filled = states.filter((state) => state.filled).length;
   if (filled === 0) {
     return {
       enabled: false,
@@ -131,6 +145,18 @@ export function reassessGate({ assessed, states }) {
     };
   }
   return { enabled: true, reason: `Saves ${filled === 1 ? "your answer" : `your ${filled} answers`} and re-assesses this posting once.` };
+}
+
+// What a failed re-assessment of an old assessment says. The assessment shown stays: nothing was replaced.
+export function reassessErrorText(err) {
+  const code = err && err.code;
+  if (code === "posting_requirements_unreadable") {
+    return "The posting's requirements could not be read, so it was not assessed again. The assessment shown stays.";
+  }
+  if (err && err.status === 504) {
+    return "The model timed out assessing this posting. Try again, or a faster model target.";
+  }
+  return (err && err.message) || String(err);
 }
 
 export function tailorGate({ assessed, verdict, states, hasUrl, hasProfile }) {

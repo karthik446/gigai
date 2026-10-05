@@ -1,6 +1,8 @@
 // uat-batch1 (N6/N7): the two actions at the top of Requirements.
 //
-//   Re-assess       saves every filled answer box, then re-assesses once
+//   Re-assess       saves every filled answer box, then re-assesses once.
+//                   0110-10-12: an OLD assessment is re-assessed as it is
+//                   when no box is filled (`reassess.plain`)
 //   Tailor resume   (job page only) opens the tailored-resume panel below
 //
 // 0.1.10.7 E: `reassess.average` shows what an assessment has taken on
@@ -68,7 +70,7 @@ export default function RequirementActions({ reassess, tailor, busy, error }) {
         {tailor && tailor.status && <TailorStatus status={tailor.status} />}
         {reassess.busy && (
           <span className="reassess-progress" role="status">
-            <span className="spinner" aria-hidden="true" /> Re-assessing with your answers…
+            <span className="spinner" aria-hidden="true" /> {reassess.plain ? "Re-assessing…" : "Re-assessing with your answers…"}
           </span>
         )}
       </div>

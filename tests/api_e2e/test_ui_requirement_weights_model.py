@@ -84,6 +84,7 @@ def test_the_grid_score_line_says_the_gap(out: dict) -> None:
 
 def test_the_assessment_body_draws_both_from_the_model() -> None:
     body = (SRC / "components" / "AssessmentBody.jsx").read_text(encoding="utf-8")
-    assert "minorGapText(assessment)" in body and 'data-role="minor-gaps"' in body
+    # 0110-10-12: minorGapLine is minorGapText for a match and nothing under any other verdict.
+    assert "minorGapLine(assessment)" in body and 'data-role="minor-gaps"' in body
     assert "<h3>{requirementsHeading(assessment)}</h3>" in body
     assert "assessment.matrix.length" not in body

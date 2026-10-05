@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ApiError, getAnswers, getConfig, getRunPosting, postApplication, postAssess } from "../api.js";
+import { ApiError, getAnswers, getConfig, getJob, getRunPosting, postApplication, postAssess } from "../api.js";
 import { REQUIREMENTS_UNREADABLE_TEXT, isRequirementsUnreadable } from "../rankModel.js";
 import AssessmentBody from "../components/AssessmentBody.jsx";
 import RequirementActions from "../components/RequirementActions.jsx";
@@ -16,11 +16,13 @@ import TailoredResumePanel, { useTailoredResume } from "../components/TailoredRe
 import PipelineTimeline from "../components/PipelineTimeline.jsx";
 import { useAnswerDrafts } from "../answerDrafts.js";
 import { reassessGate, tailorGate } from "../answersModel.js";
+import { postedLine, postingDate } from "../postingsModel.js";
 import { displayCompanyName, notAssessedReasonDetail, unchangedSinceLabel } from "../display.js";
 import {
   ORIGIN_JOB_PAGE,
   ageLabel,
   assessOriginFor,
+  assessedAt,
   dateLabel,
   jdExcerpt,
   notAssessedLine,
@@ -28,9 +30,10 @@ import {
   questionPromptIndex,
   showQuickAssessChip,
   storedOrigin,
+  tailoredBeforeAssessment,
   workModeLabel,
 } from "../jobModel.js";
-import { eventActionLabel, jobStateFor, staleAssessmentNote } from "../jobStateModel.js";
+import { eventActionLabel, jobStateFor, staleAssessmentNote, staleReasonWords } from "../jobStateModel.js";
 import { modelTargetLabel } from "../modelTargets.js";
 import { ASSESSMENTS_HASH, JOBS_HASH } from "../routing.js";
 
@@ -100,9 +103,27 @@ import { ASSESSMENTS_HASH, JOBS_HASH } from "../routing.js";
 //               refreshKey) for a new verdict and for a resume made or
 //               edited on this page, not for one the pipeline stored
 //
+//
+// 0110-10-12 (an old assessment, and what a re-assessment leaves behind):
+//   Re-assess   is ON for an old assessment (older prompt, settings changed,
+//               answers / resume / posting changed) with no question open:
+//               the header says the one reason, in the Jobs row's words, and
+//               the ONE Re-assess says what it costs (answersModel
+//               .reassessGate). The reason is the stored item's own
+//               `basis_stale`, which a "Resume tailored" job's state does
+//               not carry (jobStateModel.assessmentStaleFor)
+//   the date    "assessed ... <date>" is when the assessment shown was MADE
+//               (`updated_at`), not when the first one was (`created_at`)
+//   the label   a Scout label made before the assessment shown says so
+//               (PipelineTimeline `assessedAt`), and so does a resume
+//               tailored before it: neither is the new assessment's
+// 0110-10-14: the posting's date in the header: "posted 10 days ago (Sep 24,
+// 2026)", "updated ..." or "first seen ..." (postingsModel.postedLine), from
+// the Jobs row the page was opened from, else ONE GET /api/jobs?url=.
+//
 // Q4b: work_mode / pay (posting) and h1b (the row, via job.h1b) render only
 // when present -- no placeholder chips (operator answer 3).
-function JobStateActions({ jobId, state, pasted, onRecorded }) {
+function JobStateActions({ jobId, state, pasted, tailoredBefore, onRecorded }) {
   const [saving, setSaving] = useState(null); // the event kind being recorded
   const [error, setError] = useState(null);
 
@@ -147,6 +168,11 @@ function JobStateActions({ jobId, state, pasted, onRecorded }) {
         <div className="field-error" data-role="job-state-error">
           {error}
         </div>
+      )}
+      {tailoredBefore && (
+        <p className="muted small job-state-note" data-role="tailored-before">
+          {tailoredBefore}
+        </p>
       )}
       {pasted && (
         <p className="muted small job-state-note">
@@ -287,6 +313,7 @@ export default function JobPage({
   profileLabel,
   visaRequired,
   loading,
+  listedRow,
   onQuickUpdated,
   onApplicationsChanged,
   onTailored,
@@ -340,6 +367,25 @@ export default function JobPage({
     window.scrollTo(0, 0);
   }, [jobId]);
 
+  // 0110-10-14: the posting's dates. The Jobs row the page was opened from has them; opened by its link (a reload,
+  // Assessments), the page asks for the job once. A past run's row keeps its own line (below).
+  const rowDated = Boolean(listedRow && postingDate(listedRow));
+  const askDates = Boolean(job) && !rowDated && !job.row && /^https?:\/\//.test(job.id || "");
+  const [servedDates, setServedDates] = useState(null);
+  useEffect(() => {
+    setServedDates(null);
+    if (!askDates) {
+      return undefined;
+    }
+    let current = true;
+    getJob(jobId)
+      .then((response) => current && setServedDates(response && response.posting ? response.posting : null))
+      .catch(() => {});
+    return () => {
+      current = false;
+    };
+  }, [jobId, askDates]);
+
   const posting = useMemo(
     () => (job && postingText && !job.posting.text ? { ...job.posting, text: postingText } : job ? job.posting : null),
     [job, postingText],
@@ -357,6 +403,7 @@ export default function JobPage({
     priorAnswers,
     onAnswered: onQuickUpdated,
     onReassessUnavailable: jobUrl ? assessByUrl : undefined,
+    stale: staleReasonWords(job),
   });
   const tailored = useTailoredResume({ jobIdentity: job ? job.id : null, jobUrl, profileId });
 
@@ -426,6 +473,11 @@ export default function JobPage({
   const actionsBusy = Boolean(answerDrafts.busy) || tailored.tailoring;
   const pasted = Boolean(job.quick && job.quick.job && job.quick.job.fetch_kind === "pasted" && job.status === "on_demand");
   const state = job.state || jobStateFor(job, null, tailoredJobId ? [tailoredJobId] : null);
+  const posted = postedLine(rowDated ? listedRow : servedDates);
+  // When the assessment shown was made (a re-assessment keeps the first one's `created_at`).
+  const assessedTime = job.assessmentSource === "quick" ? assessedAt(job) : "";
+  const staleNote = assessment ? staleAssessmentNote(job) : null;
+  const tailoredBefore = state.state === "tailored" ? tailoredBeforeAssessment(tailored.stored, assessedTime) : null;
 
   return (
     <div className="job-page">
@@ -439,16 +491,21 @@ export default function JobPage({
               <strong style={{ color: "var(--text)" }}>{displayCompanyName(posting.company)}</strong>
               {posting.location && <span>{posting.location}</span>}
               {showQuickAssessChip(job) ? <QuickAssessChip fetchKind={job.quick && job.quick.job && job.quick.job.fetch_kind} /> : <ProviderBadge posting={posting} />}
-              {job.status === "on_demand" ? (
-                <span title={job.quick && job.quick.created_at ? job.quick.created_at : undefined}>
-                  {storedOrigin(job.quick) === ORIGIN_JOB_PAGE ? "assessed from its job page" : "assessed on demand"}
-                  {job.quick && job.quick.created_at ? ` ${dateLabel(job.quick.created_at)}` : ""}
-                  {job.pastedResume ? " against a pasted resume" : ""}
+              {posted ? (
+                <span data-role="posted" data-kind={posted.kind} data-at={posted.at} title={posted.title}>
+                  {posted.text} ({posted.date})
                 </span>
-              ) : job.fromPostings ? null : (
+              ) : job.status === "on_demand" || job.fromPostings ? null : (
                 <span title={posting.published_at || undefined}>
                   posted {ageLabel(posting.published_at)}
                   {posting.published_at ? ` (${dateLabel(posting.published_at)})` : ""}
+                </span>
+              )}
+              {job.status === "on_demand" && (
+                <span data-role="assessed-at" data-at={assessedAt(job) || undefined} title={assessedAt(job) || undefined}>
+                  {storedOrigin(job.quick) === ORIGIN_JOB_PAGE ? "assessed from its job page" : "assessed on demand"}
+                  {assessedAt(job) ? ` ${dateLabel(assessedAt(job))}` : ""}
+                  {job.pastedResume ? " against a pasted resume" : ""}
                 </span>
               )}
             </div>
@@ -465,10 +522,9 @@ export default function JobPage({
                 {VERDICT_WORDING}
               </p>
             )}
-            {assessment && staleAssessmentNote(job) && (
-              <p className="muted small" data-role="assessment-stale">
-                {staleAssessmentNote(job)}
-                <AssessNow posting={posting} origin={assessOrigin} onAssessed={onQuickUpdated} label="Re-assess" />
+            {staleNote && (
+              <p className="muted small" data-role="assessment-stale" data-reason={staleReasonWords(job) || undefined}>
+                {staleNote}
               </p>
             )}
             {assessment && assessment.not_a_match_reason && (
@@ -494,7 +550,7 @@ export default function JobPage({
             </a>
           )}
         </div>
-        <JobStateActions jobId={job.id} state={state} pasted={pasted} onRecorded={handleApplicationRecorded} />
+        <JobStateActions jobId={job.id} state={state} pasted={pasted} tailoredBefore={tailoredBefore} onRecorded={handleApplicationRecorded} />
       </section>
 
       <JobDescription posting={posting} pasted={pasted} />
@@ -525,6 +581,7 @@ export default function JobPage({
         jobIdentity={job.id}
         profileId={profileId}
         assessed={Boolean(assessment)}
+        assessedAt={assessedTime || null}
         refreshKey={`${assessment ? assessment.verdict || "assessed" : "none"}:${tailored.changes}`}
         onTailorDone={tailored.reload}
       />

@@ -195,13 +195,33 @@ export function scoreText(row) {
   return row.score_kind === "assessment" ? `${row.score}% of requirements met` : `rank ${row.score}`;
 }
 
-const STALE_WORDS = {
+// 0110-10-12: why an assessment is old, in the SERVER's words (scout_new._STALE_WORDS): the row, the job page and the
+// terminal say the same reason. The row used to say two ("old assessment: older prompt" and "Stale: older settings").
+export const STALE_WORDS = {
   posting_changed: "posting changed",
-  older_prompt: "older settings",
-  settings_changed: "older settings",
+  older_prompt: "older prompt",
+  settings_changed: "settings changed",
   story_bank_changed: "answers changed",
   resume_changed: "resume changed",
 };
+
+export function staleWords(reason) {
+  return STALE_WORDS[reason] || humanCode(reason);
+}
+
+// "old assessment: older prompt": the server's `stale_label` when the row has one, else the same words from the code.
+export function staleLabel(row) {
+  if (!row || !row.stale_reason) {
+    return null;
+  }
+  return typeof row.stale_label === "string" && row.stale_label.trim() ? row.stale_label.trim() : `old assessment: ${staleWords(row.stale_reason)}`;
+}
+
+// True when the score column already says the row's assessment is old (the server writes it into `score_text`).
+function scoreSaysStale(row) {
+  const label = staleLabel(row);
+  return Boolean(label) && typeof row.score_text === "string" && row.score_text.includes(label);
+}
 
 const ROW_STATE_WORDS = {
   not_assessed: "Not assessed",
@@ -221,7 +241,9 @@ function humanCode(code) {
 //   assessed  beside any assessed state, so "assessed" always reads the same
 //   label     the Scout label (recommended | needs_attention)
 //   ats       the Scout ATS score
-//   stale     the assessment was made on older inputs (the reason's code in words)
+//   stale     the assessment was made on older inputs. 0110-10-12: ONE label per row. The score column says it in the
+//             server's words ("Matched (old assessment: older prompt) · ..."), so this chip is drawn only for a row
+//             whose score column does not (an older server), with the same words
 //   removed   the board no longer lists the posting
 export function rowChips(row) {
   const chips = [];
@@ -247,8 +269,9 @@ export function rowChips(row) {
   if (typeof row.ats_score === "number") {
     chips.push({ kind: "ats", label: `${SCOUT_ATS_NAME} ${row.ats_score}`, tone: "plain", testId: "ats-chip" });
   }
-  if (assessed && row.stale_reason) {
-    chips.push({ kind: "stale", label: `Stale: ${STALE_WORDS[row.stale_reason] || humanCode(row.stale_reason)}`, tone: "warn", title: row.stale_reason });
+  if (assessed && row.stale_reason && !scoreSaysStale(row)) {
+    const label = staleLabel(row);
+    chips.push({ kind: "stale", label: `${label.charAt(0).toUpperCase()}${label.slice(1)}`, tone: "warn", testId: "stale-chip", title: row.stale_reason });
   }
   if (row.removed_at) {
     chips.push({ kind: "removed", label: "Removed", tone: "danger", title: row.removed_at });
@@ -261,6 +284,78 @@ const MODE_WORDS = { remote: "Remote", hybrid: "Hybrid", onsite: "On-site", on_s
 // "Acme · Denver, CO · Hybrid · $180k-$220k": only what the posting states.
 export function detailLine(row) {
   return [row.company ? displayCompanyName(row.company) : null, row.location, MODE_WORDS[row.work_mode] || null, row.salary].filter((part) => typeof part === "string" && part.trim()).join(" · ");
+}
+
+// --- the posting's date (0110-10-14) -----------------------------------------------------------
+
+// A posting has two dates and they are different facts (scout_new.posting_dates):
+//   published_at   the BOARD's own date, the one the 7 / 30 days chips judge. `published_kind` says what the board
+//                  means by it: "posted" (Lever, Ashby: the day the posting went up) or "updated" (Greenhouse: the
+//                  posting's last change; its list gives no posting day)
+//   first_seen_at  when Scout first stored the posting: what "New since last check" judges (`first_seen`, its older name)
+// The row shows ONE of them with its own word, never one as the other: "posted 10 days ago", "updated 3 days ago",
+// or, when the board gives no date, "first seen 3 days ago". Null when the row has no date at all.
+const DATE_WORDS = { posted: "posted", updated: "updated", first_seen: "first seen" };
+
+export function postingDate(row) {
+  if (!row) {
+    return null;
+  }
+  const valid = (value) => typeof value === "string" && value && !Number.isNaN(new Date(value).getTime());
+  const seen = valid(row.first_seen_at) ? row.first_seen_at : valid(row.first_seen) ? row.first_seen : null;
+  if (valid(row.published_at)) {
+    return { kind: row.published_kind === "updated" ? "updated" : "posted", at: row.published_at, firstSeenAt: seen };
+  }
+  return seen ? { kind: "first_seen", at: seen, firstSeenAt: seen } : null;
+}
+
+// Whole calendar days between two instants, in the reader's own time zone (a posting of yesterday evening is "yesterday").
+function calendarDays(iso, now) {
+  const day = (value) => {
+    const date = new Date(value);
+    return Date.UTC(date.getFullYear(), date.getMonth(), date.getDate());
+  };
+  return Math.round((day(now) - day(iso)) / 86400000);
+}
+
+// "today", "yesterday", "10 days ago", "3 months ago", "2 years ago".
+export function agoText(iso, now = Date.now()) {
+  const days = calendarDays(iso, now);
+  if (days <= 0) {
+    return "today";
+  }
+  if (days === 1) {
+    return "yesterday";
+  }
+  if (days < 60) {
+    return `${days} days ago`;
+  }
+  if (days < 365) {
+    return `${Math.floor(days / 30)} months ago`;
+  }
+  const years = Math.floor(days / 365);
+  return `${years} year${years === 1 ? "" : "s"} ago`;
+}
+
+function exactDate(iso) {
+  return new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+}
+
+// {kind, at, text, date, title}: `text` is the line ("posted 10 days ago"), `date` the exact day ("Sep 24, 2026"),
+// `title` the hover, which says what the date is and, when there is a board date, when Scout first saw the posting.
+export function postedLine(row, now = Date.now()) {
+  const found = postingDate(row);
+  if (!found) {
+    return null;
+  }
+  const date = exactDate(found.at);
+  const seen = found.firstSeenAt ? `First seen by Scout ${exactDate(found.firstSeenAt)}.` : "";
+  const titles = {
+    posted: `Posted ${date} (the board's date). ${seen}`,
+    updated: `The board last changed this posting ${date}; it gives no posting day. ${seen}`,
+    first_seen: `First seen by Scout ${date}. The board gives no date for this posting.`,
+  };
+  return { kind: found.kind, at: found.at, text: `${DATE_WORDS[found.kind]} ${agoText(found.at, now)}`, date, title: titles[found.kind].trim() };
 }
 
 // The matching profiles a row is NOT shown for: the "Assess as <profile>" actions.

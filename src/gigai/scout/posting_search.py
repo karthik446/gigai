@@ -81,6 +81,7 @@ from .scout_new import (
     _shown,
     check_response,
     in_order,
+    posted_text,
     split_low_rank,
 )
 
@@ -654,7 +655,8 @@ def render(response: Mapping[str, object]) -> str:
         tags = ", ".join(str(labels.get(item["profile_id"], item["profile_id"])) for item in row["profiles"])
         gap = f" · {row['minor_gap_text']}" if row.get("minor_gap_text") else ""  # 0110-10-03
         lines.append(f"{row['company_name'] or row['company'] or '?'}: {row['title'] or row['job_identity']} [{tags}] {row['score_text']}{gap}")
-        lines.append(f"  {row['job_identity']}")
+        posted = posted_text(row)  # 0110-10-14: "posted 2026-09-24" | "updated ..." | "first seen ..."
+        lines.append(f"  {posted + ' · ' if posted else ''}{row['job_identity']}")
     history = response.get("history")
     if isinstance(history, Mapping):
         lines.append(f"From old runs: {len(history['rows'])} assessment(s) of {history['runs_imported']} run(s); {history['hidden']} hidden.")  # type: ignore[arg-type]

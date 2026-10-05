@@ -27,11 +27,17 @@
 // `onReassessUnavailable`: an identity neither the quick-assess store nor a
 // run knows answers 404 reassess_not_found AFTER recording the answer; the
 // job page passes a fallback that runs POST /api/assess {job_url} instead.
+//
+// 0110-10-12: `stale` is why the assessment shown is old, in words ("older
+// prompt"), or null. With no box filled, Re-assess then assesses the posting
+// again as it is (`onReassessUnavailable`, the same POST /api/assess: ONE
+// model call, no answer written). With a box filled it is what it always
+// was: the answers are saved and the last one re-assesses.
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ApiError, getAnswerMatch, postAnswer } from "./api.js";
-import { answerRequests, answerStates, reassessGate, unsavedAnswerRequests } from "./answersModel.js";
+import { answerRequests, answerStates, reassessErrorText, reassessGate, unsavedAnswerRequests } from "./answersModel.js";
 
-export function useAnswerDrafts({ assessment, jobIdentity, priorAnswers, onAnswered, onReassessUnavailable }) {
+export function useAnswerDrafts({ assessment, jobIdentity, priorAnswers, onAnswered, onReassessUnavailable, stale = null }) {
   const [drafts, setDrafts] = useState({});
   const [saved, setSaved] = useState({});
   const [suggestions, setSuggestions] = useState(() => new Map());
@@ -80,7 +86,8 @@ export function useAnswerDrafts({ assessment, jobIdentity, priorAnswers, onAnswe
   }, [openKey]);
 
   const states = useMemo(() => answerStates(questions, drafts, recorded, { suggestions, used }), [questions, drafts, recorded, suggestions, used]);
-  const gate = useMemo(() => reassessGate({ assessed: Boolean(assessment), states }), [assessment, states]);
+  const canAssess = Boolean(onReassessUnavailable);
+  const gate = useMemo(() => reassessGate({ assessed: Boolean(assessment), states, stale, canAssess }), [assessment, states, stale, canAssess]);
 
   const setDraft = useCallback((id, value) => setDrafts((current) => ({ ...current, [id]: value })), []);
   const suggestionFor = useCallback((id) => (states.find((state) => state.question_id === id) || {}).suggestion || null, [states]);
@@ -107,7 +114,26 @@ export function useAnswerDrafts({ assessment, jobIdentity, priorAnswers, onAnswe
 
   const reassess = useCallback(async () => {
     const requests = answerRequests(states, jobIdentity);
-    if (requests.length === 0 || busy) {
+    if (busy) {
+      return;
+    }
+    if (requests.length === 0) {
+      // 0110-10-12: an old assessment and no answer to save: assess the posting again as it is.
+      if (!stale || !onReassessUnavailable) {
+        return;
+      }
+      setBusy("reassess");
+      setError(null);
+      try {
+        const reassessed = await onReassessUnavailable();
+        if (reassessed && onAnswered) {
+          onAnswered(reassessed);
+        }
+      } catch (err) {
+        setError(reassessErrorText(err));
+      } finally {
+        setBusy(null);
+      }
       return;
     }
     setBusy("reassess");
@@ -142,7 +168,7 @@ export function useAnswerDrafts({ assessment, jobIdentity, priorAnswers, onAnswe
     } finally {
       setBusy(null);
     }
-  }, [states, jobIdentity, busy, onAnswered, onReassessUnavailable]);
+  }, [states, jobIdentity, busy, onAnswered, onReassessUnavailable, stale]);
 
   // Rejects when a save fails, so the caller does not go on to tailor with
   // an answer missing.

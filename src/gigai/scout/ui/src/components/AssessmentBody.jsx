@@ -2,7 +2,7 @@ import MatrixBadge from "./MatrixBadge.jsx";
 import RequirementActions from "./RequirementActions.jsx";
 import { useAnswerDrafts } from "../answerDrafts.js";
 import { placeQuestions } from "../answersModel.js";
-import { minorGapText, requirementStatusLabel, requirementsHeading, sortMatrixRows } from "../jobModel.js";
+import { minorGapLine, requirementStatusLabel, requirementsHeading, sortMatrixRows } from "../jobModel.js";
 import { suggestionNotice } from "../answersStoriesModel.js";
 
 // One open question, inside the requirement row it settles (uat-batch1 N5):
@@ -113,7 +113,8 @@ export default function AssessmentBody({
   const hasQuestions = answers.questions.length > 0;
   const busy = Boolean(answers.busy);
   // 0110-10-03: a bonus or one-of-a-list row that is not met never blocks a match; it is said beside the verdict.
-  const gapText = minorGapText(assessment);
+  // 0110-10-12: only beside a match ("minor gaps" under "Needs your answers" read as if the job were one).
+  const gapText = minorGapLine(assessment);
   const gaps = gapText && (
     <p className="muted small" data-role="minor-gaps">
       {gapText}
@@ -197,6 +198,8 @@ export default function AssessmentBody({
         label: jobIdentity ? "Re-assess" : "Save answers",
         average: Boolean(jobIdentity),
         busy: answers.busy === "reassess",
+        // 0110-10-12: an old assessment is re-assessed as it is when no answer box is filled.
+        plain: Boolean(answers.gate.stale),
         onClick: answers.reassess,
       }}
       tailor={tailor}

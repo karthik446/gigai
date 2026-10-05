@@ -71,6 +71,27 @@ things still take more than a second (see "Still slower than one second"): the n
   Settings reads, looked up the project once for every job it lists (up to 200); it now looks it up
   once.
 
+#### Fixed
+
+- **Re-assess works on an old assessment.** A job whose assessment was marked old (made with an older
+  prompt, or before you changed a setting, an answer or your resume) could not be re-assessed from its
+  job page when it had no open question: the button was off. It is now on, says why the assessment is
+  old and that re-assessing is one model call. This also covers a job with a tailored resume, whose page
+  did not say the assessment was old at all.
+- **One "old assessment" label, one reason.** A Jobs row said "old assessment: older prompt" and, beside
+  it, "Stale: older settings". It now says it once, and the job page gives the same reason in the same
+  words.
+- **After a re-assessment the job page shows the new assessment.** "Assessed ..." showed the day of the
+  job's first assessment; it now shows the day of the one on the page. A Scout label or a tailored
+  resume made before the new assessment says so ("from before the latest assessment"), with what to
+  click to make it again. "Minor gaps" is said beside a match only, not under "Needs your answers".
+- **A posting's date is shown.** Jobs rows and the job page say "posted 10 days ago" (the exact day on
+  hover), from the board's own date. Some boards give only the day a posting last changed: those say
+  "updated 3 days ago". When a board gives no date, the page says "first seen 3 days ago", which is the
+  day Scout first stored the posting. `gigai scout jobs list` and `gigai scout new` say the same with
+  the day ("posted 2026-09-24"), and their JSON and the API rows carry both dates under their own names
+  (`published_at` with `published_kind`, and `first_seen_at`).
+
 #### Still slower than one second
 
 Measured on a store of 290,000 postings from 10,000 companies with finished background work. These

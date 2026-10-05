@@ -369,6 +369,13 @@ export function postAssess(request_) {
   return request("POST", "/api/assess", request_);
 }
 
+// 0110-10-14: one job by its link (GET /api/jobs?url=): everything the server holds for it. The job page reads it
+// for the posting's dates (`posting.published_at`, `published_kind`, `first_seen_at`) when it was not opened from the
+// Jobs list, whose row carries them. A read: no model call, nothing written.
+export function getJob(url) {
+  return request("GET", `/api/jobs?url=${encodeURIComponent(url)}`);
+}
+
 export function getAssessments(params) {
   const query = new URLSearchParams();
   if (params && params.profileId) {

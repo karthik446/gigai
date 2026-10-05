@@ -389,7 +389,7 @@ def test_jobs_and_assessments_share_the_state_chips() -> None:
 
 def test_the_job_page_shows_the_state_and_records_the_next_events() -> None:
     page = _source("views", "JobPage.jsx")
-    assert "<JobStateActions jobId={job.id} state={state} pasted={pasted} onRecorded={handleApplicationRecorded} />" in page
+    assert "<JobStateActions jobId={job.id} state={state} pasted={pasted} tailoredBefore={tailoredBefore} onRecorded={handleApplicationRecorded} />" in page
     assert "<StateChip state={state} always showSince />" in page
     assert "state.nextEvents.map((eventKind) => (" in page
     assert "postApplication({ job_identity: jobId, event_kind: eventKind })" in page
