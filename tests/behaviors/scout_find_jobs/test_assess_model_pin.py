@@ -124,7 +124,8 @@ def test_codex_keeps_its_default_and_the_same_rule_applies() -> None:
     other = model_notice("codex_cli", "gpt-5.1-codex")
     assert other is not None
     assert other.text == NOTICE.format(used="gpt-5.1-codex", evaluated="gpt-6-astra")
-    assert other.to_json()["link"] == RESULTS_PAGE == "scout/accuracy-0-1-11"
+    assert other.to_json()["link"] == {"label": "GigAI's accuracy results", "path": RESULTS_PAGE}
+    assert RESULTS_PAGE == "scout/accuracy-0-1-11"
 
 
 # --- the assessment call ---------------------------------------------------------------------------------------
@@ -154,7 +155,7 @@ def test_a_refused_opus_costs_exactly_one_fallback_call_and_says_so(fx: Postings
     assert (stored["model"], stored["model_asked"], stored["model_fallback"]) == (FAKE_CLAUDE_MODEL, OPUS, True)
     notice = _served(fx, response)["model_notice"]
     assert notice["text"] == NOTICE.format(used=FAKE_CLAUDE_MODEL, evaluated=OPUS)
-    assert notice["link"] == RESULTS_PAGE
+    assert notice["link"] == {"label": "GigAI's accuracy results", "path": RESULTS_PAGE}
     assert _calls_counted(fx) == (2, 1)  # the call meter counts both
 
 
