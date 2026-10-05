@@ -32,6 +32,12 @@ WHAT IT ASSERTS
    process takes under 3 s.
 7. A client that closes early is one ``client closed the connection`` info
    line; the server log has no "unhandled exception", no traceback, no 500.
+8. THE CLI BUILDS IT ITSELF (0110-10-08): with the server stopped and the
+   read model cold again, ``gigai scout new --no-assess --json`` in a fresh
+   process exits 0, stdout is the response alone (valid JSON) and the
+   progress lines ("preparing your postings: N% ...") are on stderr. 0.1.10.9
+   crashed here with a NameError: steps 1 to 7 only ever ran the CLI on a
+   model the server had built. The time is reported; the ceiling is generous.
 
 Counts (builds, boards matched) and the server's own CPU time are what the
 load of the machine cannot move; the wall-clock bounds are scaled by
@@ -40,12 +46,13 @@ load of the machine cannot move; the wall-clock bounds are scaled by
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 import json
 import os
 from pathlib import Path
 import resource
+import shutil
 import socket
 import statistics
 import struct
@@ -78,6 +85,8 @@ FIRST_ANSWER_SECONDS = 20.0
 BUILD_SECONDS = 180.0
 #: The server's own CPU for the whole first build (measured 9 to 11 s on the full home; 0.1.10.8: about 40 s for ONE build).
 BUILD_CPU_SECONDS = 60.0
+#: `gigai scout new --no-assess` doing the whole first build itself, in its own process (measured 10.7 s wall, 8.6 s CPU on the full home, 14 cores).
+COLD_CLI_SECONDS = 180.0
 WARM_SAMPLES = 15
 LIGHT_ROUTES = ("/api/health", "/api/profiles", "/api/runs", "/api/config", "/api/pipeline")
 
@@ -95,6 +104,26 @@ def home(tmp_path_factory: pytest.TempPathFactory) -> Iterator[operator_home.Ope
         os.environ.update(kept)
     print(f"\noperator-sized home: {built.postings} postings x {built.companies} companies built in {built.build_seconds} s")
     yield built
+
+
+@pytest.fixture(scope="module")
+def cold_model(home: operator_home.OperatorHome, tmp_path_factory: pytest.TempPathFactory) -> Callable[[], None]:
+    """Kept now, before any process reads the home: the pipeline file as built (no posting rows). Calling it puts that back."""
+
+    from gigai.scout.pipeline.store import pipeline_path
+
+    store_file = pipeline_path(home.home_root, Path(home.target))
+    kept = tmp_path_factory.mktemp("cold-model")
+    for found in store_file.parent.glob(store_file.name + "*"):
+        shutil.copy2(found, kept / found.name)
+
+    def restore() -> None:
+        for found in store_file.parent.glob(store_file.name + "*"):
+            found.unlink()
+        for found in kept.iterdir():
+            shutil.copy2(found, store_file.parent / found.name)
+
+    return restore
 
 
 class _Server:
@@ -241,7 +270,9 @@ def _update_one_board(home: operator_home.OperatorHome, board: int) -> None:
     refresh_company(CompanyIndex.for_home(home.home_root), cache, ats="lever", slug=slug, observed_at=index_stamp(operator_home.NOW))
 
 
-def test_the_operator_sized_home_loads_one_build_fast_reads_bounded_memory(home: operator_home.OperatorHome, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+def test_the_operator_sized_home_loads_one_build_fast_reads_bounded_memory(
+    home: operator_home.OperatorHome, cold_model: Callable[[], None], tmp_path: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
     report: list[str] = [f"OPERATOR-SIZED GATE ({'FULL' if FULL else 'scaled 1/10'}): {home.postings} postings x {home.companies} companies, 2 profiles"]
 
     with _server(home, tmp_path, "cold") as served:
@@ -361,6 +392,30 @@ def test_the_operator_sized_home_loads_one_build_fast_reads_bounded_memory(home:
     report.append(f"  fresh process `gigai scout new --peek --json`: wall {min(walls):.2f} s, CPU {min(cpus):.2f} s (bound {CLI_SECONDS} s)")
     assert min(cpus) < CLI_SECONDS, cpus
     assert min(walls) < latency_bound(CLI_SECONDS), walls
+
+    # 8. 0110-10-08: no server, a cold read model: the CLI process does the whole first build itself.
+    cold_model()
+    before = resource.getrusage(resource.RUSAGE_CHILDREN)
+    started = time.monotonic()
+    cold_cli = subprocess.run(
+        [sys.executable, "-c", "from gigai.cli import cli; cli()", "scout", "new", "--no-assess", "--json", "--home", home.home, "--target", home.target],
+        capture_output=True, text=True, env=dict(os.environ, **operator_home.SEAM_ENV), check=False,
+    )
+    cold_wall = time.monotonic() - started
+    after_cold = resource.getrusage(resource.RUSAGE_CHILDREN)
+    cold_cpu = (after_cold.ru_utime - before.ru_utime) + (after_cold.ru_stime - before.ru_stime)
+    assert cold_cli.returncode == 0, cold_cli.stderr[-2000:]
+    assert "Traceback" not in cold_cli.stderr, cold_cli.stderr[-2000:]
+    assert json.loads(cold_cli.stdout)["schema_version"] == "scout-new:1"  # stdout is the response alone
+    said = [line for line in cold_cli.stderr.splitlines() if line.startswith("preparing your postings: ")]
+    # It matched every company again (the model was cold), and said so on stderr from the first report to the last.
+    assert said and said[0] == f"preparing your postings: 0% (0 of {home.companies} companies)", cold_cli.stderr[-2000:]
+    assert said[-1] == f"preparing your postings: 100% ({home.companies} of {home.companies} companies)", cold_cli.stderr[-2000:]
+    report.append(
+        f"  server stopped, cold model, fresh process `gigai scout new --no-assess --json`: wall {cold_wall:.2f} s, CPU {cold_cpu:.2f} s "
+        f"(ceiling {COLD_CLI_SECONDS:.0f} s); exit 0, stdout valid JSON, {len(said)} progress line(s) on stderr"
+    )
+    assert cold_wall < latency_bound(COLD_CLI_SECONDS), cold_wall
 
     with capsys.disabled():
         print("\n" + "\n".join(report))

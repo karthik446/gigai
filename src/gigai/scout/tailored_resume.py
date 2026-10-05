@@ -99,7 +99,7 @@ import json
 import os
 from pathlib import Path
 import re
-from typing import ClassVar
+from typing import TYPE_CHECKING, ClassVar
 
 from ..canonical import digest_imported_bytes, parse_json_bytes
 from ..config import GigAIConfig, load_config
@@ -140,6 +140,11 @@ from .quick_assess import (
     find_quick_assessment_by_job_identity,
     resume_key,
 )
+
+if TYPE_CHECKING:
+    # Annotations only: both modules import this one, so at run time they are imported where they are used.
+    from .tailor_length import LengthFit
+    from .tailor_master import MasterSource, TailorSelection
 
 _INSTRUCTIONS_RESOURCE = "scout/data/instructions/tailor.md"
 
