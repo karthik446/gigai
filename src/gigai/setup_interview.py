@@ -138,7 +138,7 @@ class SetupHTTPServer:
                     draft = SetupDraft(
                         home_root=_required_text(payload, "home_root"),
                         workpad_root=_required_text(payload, "workpad_root"),
-                        editor=_required_text(payload, "editor"),
+                        editor=_optional_text(payload, "editor"),
                         open_with_target=payload.get("open_with_target") is True,
                         selected_model_target=_required_text(payload, "selected_model_target"),
                         openai_api_env=_optional_text(payload, "openai_api_env"),
@@ -333,7 +333,7 @@ class SetupHTTPServer:
             + "<section class='setup-step active' data-step='workspace'><div class='question-grid'><div><div class='screen-kicker'>Question 1 of 5 · Workspace</div><h2>Where should GigAI keep its private data?</h2><p class='muted'>Choose one local folder. GigAI derives its private workpads underneath it.</p><div class='folder-choice'><button id='choose-folder' type='button'>Choose folder</button></div>"
             + f"<label class='field'>GigAI home<input name='home_root' type='text' value='{html.escape(self.draft.home_root)}' placeholder='Choose a folder or enter an absolute path' required></label>"
             + f"<label class='field'>Private workpad folder<input name='workpad_root' type='text' value='{html.escape(self.draft.workpad_root)}' placeholder='Derived as <GigAI home>/workpads' required><span class='muted'>Local storage for proposals, journals, and Gig state.</span></label>"
-            + f"<label class='field'>Editor executable<input name='editor' type='text' value='{html.escape(self.draft.editor)}' required><span class='muted'>Used only to open a workpad later.</span></label><div class='setup-actions'><button type='button' data-next='access'>Continue</button></div></div><aside class='context-panel'><strong>Gig definition</strong><p>A repeatable unit of work with stable Goals, changing inputs, and reviewable results.</p><p>Setup chooses how GigAI helps define that work; it does not define the Gig itself.</p></aside></div></section>"
+            + f"<label class='field'>Editor executable<input name='editor' type='text' value='{html.escape(self.draft.editor)}'><span class='muted'>Optional. Used only to open a workpad later.</span></label><div class='setup-actions'><button type='button' data-next='access'>Continue</button></div></div><aside class='context-panel'><strong>Gig definition</strong><p>A repeatable unit of work with stable Goals, changing inputs, and reviewable results.</p><p>Setup chooses how GigAI helps define that work; it does not define the Gig itself.</p></aside></div></section>"
             + "<section class='setup-step' data-step='access'><div class='question-grid'><div><div class='screen-kicker'>Question 2 of 5 · Access boundary</div><h2>How should GigAI reach models?</h2><p class='muted'>Choose the simplest boundary. This decides which model choices appear next.</p><div class='access-grid'>"
             + access_choices
             + "</div><div class='setup-actions'><button type='button' class='secondary' data-back='workspace'>Back</button><button type='button' data-next='models'>Continue</button></div></div><aside class='context-panel'><strong>Why this matters</strong><p>CLI tools keep authentication with the installed tool. APIs use a configured environment reference.</p><p>You can change this setup later without changing a Gig's definition.</p></aside></div></section>"
