@@ -103,6 +103,16 @@ company: the update reads each Greenhouse company’s list once more with the re
 (no extra request; a company whose list did not change is read again from what is stored). Until
 then a Greenhouse posting that is older than your window can still be listed. No posting is marked new
 or changed by this, and nothing needs to be done.</li>
+<li><strong>Old assessments: the re-assess offer is 50 at a time, and it says the size.</strong> This version makes no
+assessment old. But if you came from 0.1.10.8 or earlier, 0.1.10.9 marked every assessment made before
+it “old assessment: older prompt”, and <code dir="auto">gigai scout new</code> offers to re-assess them. On a large store
+that is a big number: one store had 574 marked old, 422 of them ranked 50 or more, and re-assessing
+all 422 was quoted at about 422 model calls, 9.9 million tokens and 4.9 hours. The offer now acts on
+the newest 50 at a time and never more, and says the real total, the 50 and what the 50 cost:
+“422 have only an old assessment; re-assess the newest 50 of 422? ~50 calls, ~1170k tokens (372 more
+after these 50)”. For that store, 50 are about 1.2 million tokens and 35 minutes. Nothing is
+re-assessed unless you say yes. An old assessment stays readable, the same command again takes the
+next 50, and a job page re-assesses its own job in one call.</li>
 <li><strong>Nothing else changes.</strong> Which jobs are checked again after a change, and the limits on them, are
 what they were; no assessment, ranking or tailored resume becomes out of date.</li>
 </ul>
@@ -148,8 +158,39 @@ saw it). Off, the order is what it was: the best fit first. The address keeps it
 bookmark does too. <code dir="auto">GET /api/postings?sort=newest_posted</code> is the same order for an agent (<code dir="auto">sort=fit</code>
 is the default).</li>
 </ul>
+<div class="sl-heading-wrapper level-h4"><h4 id="changed">Changed</h4><a class="sl-anchor-link" href="#changed"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “Changed”</span></a></div>
+<ul>
+<li><strong>50 at a time.</strong> Every offer and every command that assesses many postings now acts on the newest
+50 and never more in one go: the “assess the new ones” question of <code dir="auto">gigai scout new</code> (and <code dir="auto">--yes</code>),
+its low-ranked question (<code dir="auto">--include-low-rank</code>), the old-assessments question (<code dir="auto">--reassess-stale</code>),
+“Assess these” on Jobs and <code dir="auto">gigai scout jobs assess</code>, “Assess all new” on a run, and
+<code dir="auto">gigai scout new --process</code> (at most 50 waiting steps a call). “Newest” is the day the posting went
+up on its board, or the day Scout first stored it when the board gives none. Each question says the
+real total, the 50 and what the 50 cost, for example “Assess the newest 50 of 120 postings? ~50
+calls (70 more after these 50)”, and after a batch the output says how many are left and how to take
+the next 50 (the same command or click again). 50 or fewer: nothing changes.</li>
+</ul>
 <div class="sl-heading-wrapper level-h4"><h4 id="fixed">Fixed</h4><a class="sl-anchor-link" href="#fixed"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “Fixed”</span></a></div>
 <ul>
+<li><strong><code dir="auto">gigai scout new --no-assess</code> never waits for an answer.</strong> In a terminal it stopped at “N have
+only an old assessment; re-assess? [y/N]” and waited, although <code dir="auto">--no-assess</code> means “do not ask and do
+not assess”. It now prints the offers with their counts and ends, in a terminal and without one.</li>
+<li><strong>A run you leave at a question does not use up “new”.</strong> <code dir="auto">gigai scout new</code> moved its “new since”
+time before it asked its first question. If you pressed Ctrl-C at the question, the next run said
+“nothing new since” the run you had left. The time now moves when the run has done its work (every
+question answered, or none asked): leave at a question and the next run shows the same postings as
+new.</li>
+<li><strong>“Nothing new” says what it counts.</strong> <code dir="auto">gigai scout new</code> could say “Nothing new since your last
+check” right after a sources update that stored hundreds of new postings. Both were right, and
+nothing said why: “new” counts the postings your profiles match that Scout first stored after your
+last check, and an update counts every new posting on every board, whatever its title. The message
+and the update’s summary now say so. (“First stored” is the time Scout first read the posting, never
+a date of the board’s; a posting that changes later is not new again.)</li>
+<li><strong><code dir="auto">gigai scout sources update</code> says how many companies it checked out of all of them.</strong> It said
+“3859 boards” while <code dir="auto">gigai scout sources status</code> said 10,349 stored companies. An update asks only
+the companies that are due; the ones checked within the last day are left alone. The line now reads
+“Checked 3,859 of 10,349 companies this run (…). The other 6,490 were checked within the last day
+and were not asked again.”</li>
 <li><strong>A Greenhouse posting’s date is the day it was posted, not the day it last changed.</strong> Scout stored a
 Greenhouse posting’s last change as its date. A posting that had been up for two months and was edited
 three days ago counted as three days old: it passed the 7 days and 30 days filters and your “posted
@@ -211,6 +252,15 @@ a line of your resume or answers. In a terminal the same facts are printed above
 <code dir="auto">model_denied</code>, <code dir="auto">model_unavailable</code>, <code dir="auto">assess_timeout</code>, <code dir="auto">model_output_invalid</code> and
 <code dir="auto">assessment_not_stored</code>, the CLI’s JSON, the API’s error and the job page now also say whether a model
 call started, whether it may have used tokens, that no new assessment was stored, and the next action.</li>
+<li><strong>“Could not read this posting’s requirements” says which rule refused.</strong> <code dir="auto">posting_requirements_unreadable</code>
+is one code for two rules (the model said “Matched” on fewer than three requirements for a long
+posting; or the text has no requirement wording and the model found none). A batch’s failure, the
+terminal line and the API’s error now carry a <code dir="auto">reason</code> (<code dir="auto">matched_on_too_few_requirements</code> or
+<code dir="auto">no_requirements_in_text</code>). The model answered in both cases and nothing is stored.</li>
+<li><strong>Batches are 50: the questions carry the numbers.</strong> Each question of <code dir="auto">gigai scout new --json</code> and of
+<code dir="auto">gigai scout jobs assess --json</code> (and <code dir="auto">GET /api/new</code>, <code dir="auto">POST /api/postings/assess</code>) has the total, <code dir="auto">batch</code>
+(what a yes acts on, at most 50) and <code dir="auto">more_after</code>; the estimate is the batch’s. After a yes that left
+some, <code dir="auto">assessed</code> / <code dir="auto">reassessed</code> name the call for the next 50 (<code dir="auto">next</code>).</li>
 <li><strong><code dir="auto">gigai scout status</code> no longer says “stopped” from inside a sandbox.</strong> It checks the process and the
 API apart. A running Scout whose address cannot be reached from where the command ran is reported as
 <code dir="auto">process: running (pid N); API: not reachable from here</code> (state <code dir="auto">unreachable</code>), and the JSON has a
@@ -375,7 +425,7 @@ resume or of a profile’s selection read and checked every file of the watched-
 home of 290,000 postings and 10,350 boards, adding a line to the master went from about 6.9 s to
 about 4.5 s, an edit of a line that two profiles show from about 18.6 s to about 12.1 s, and <code dir="auto">gigai scout resume add</code> from about 7.7 s to about 5.3 s. Saving an answer is not changed by this.</li>
 </ul>
-<div class="sl-heading-wrapper level-h4"><h4 id="changed">Changed</h4><a class="sl-anchor-link" href="#changed"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “Changed”</span></a></div>
+<div class="sl-heading-wrapper level-h4"><h4 id="changed-1">Changed</h4><a class="sl-anchor-link" href="#changed-1"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “Changed”</span></a></div>
 <ul>
 <li><strong>Weak fits no longer sit in “Needs your answers”.</strong> A posting that waits on your answers while
 few of its requirements are met and its rank is low (fit below 40% and rank below 50) is now a
@@ -593,7 +643,7 @@ output is unchanged.</li>
 as “Staff Engineer” on its own matches every posting with those words. The command says how
 many, so you can add a more specific title.</li>
 </ul>
-<div class="sl-heading-wrapper level-h4"><h4 id="changed-1">Changed</h4><a class="sl-anchor-link" href="#changed-1"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “Changed”</span></a></div>
+<div class="sl-heading-wrapper level-h4"><h4 id="changed-2">Changed</h4><a class="sl-anchor-link" href="#changed-2"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “Changed”</span></a></div>
 <ul>
 <li><strong>The order of the grid.</strong> Postings with a current assessment come first, then ones whose only
 assessment is old, then ones not assessed. Inside each group: Scout’s “recommended” label,
@@ -706,7 +756,7 @@ verdict, Scout label and Scout ATS score, and a “?” beside each of them on t
 are hidden. The default profile can never be deleted, and neither can your only active one.</li>
 <li><strong>A Generate PDF form.</strong> See Security.</li>
 </ul>
-<div class="sl-heading-wrapper level-h4"><h4 id="changed-2">Changed</h4><a class="sl-anchor-link" href="#changed-2"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “Changed”</span></a></div>
+<div class="sl-heading-wrapper level-h4"><h4 id="changed-3">Changed</h4><a class="sl-anchor-link" href="#changed-3"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “Changed”</span></a></div>
 <ul>
 <li><strong>The Jobs page lists postings, not a run.</strong> It shows the stored postings that match your
 profiles, live, with a tag for each profile a posting matches. The profile switcher became a
@@ -799,7 +849,7 @@ open question it answers.</li>
 <li><strong>Check times setting.</strong> Settings &gt; Background updates lets you change when the background check
 runs.</li>
 </ul>
-<div class="sl-heading-wrapper level-h4"><h4 id="changed-3">Changed</h4><a class="sl-anchor-link" href="#changed-3"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “Changed”</span></a></div>
+<div class="sl-heading-wrapper level-h4"><h4 id="changed-4">Changed</h4><a class="sl-anchor-link" href="#changed-4"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “Changed”</span></a></div>
 <ul>
 <li><strong>Background checks run 8 times a day in work hours, at a moderate pace.</strong> On weekdays at 03:00 and
 every two hours from 07:00 to 19:00, on weekend days at 09:00 and 18:00 (your local time), busy
@@ -866,7 +916,7 @@ published is quiet; turn it off in Background updates. <code dir="auto">gigai sc
 (“10+ years … 2+ years managing” is 10; a range is its lower bound). Cached ranks are refreshed
 once.</li>
 </ul>
-<div class="sl-heading-wrapper level-h4"><h4 id="changed-4">Changed</h4><a class="sl-anchor-link" href="#changed-4"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “Changed”</span></a></div>
+<div class="sl-heading-wrapper level-h4"><h4 id="changed-5">Changed</h4><a class="sl-anchor-link" href="#changed-5"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “Changed”</span></a></div>
 <ul>
 <li><strong>Converting a PDF or DOCX resume now needs nothing beyond <code dir="auto">uv</code>.</strong> The
 Quickstart, the Resume page and the <code dir="auto">scout resume add</code> error use
@@ -875,7 +925,7 @@ Quickstart, the Resume page and the <code dir="auto">scout resume add</code> err
 <code dir="auto">pandoc</code> and <code dir="auto">textutil</code> still work if you already have them.</li>
 </ul>
 <div class="sl-heading-wrapper level-h3"><h3 id="01103">0.1.10.3</h3><a class="sl-anchor-link" href="#01103"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “0.1.10.3”</span></a></div>
-<div class="sl-heading-wrapper level-h4"><h4 id="changed-5">Changed</h4><a class="sl-anchor-link" href="#changed-5"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “Changed”</span></a></div>
+<div class="sl-heading-wrapper level-h4"><h4 id="changed-6">Changed</h4><a class="sl-anchor-link" href="#changed-6"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “Changed”</span></a></div>
 <ul>
 <li><strong>The resume PDF no longer leaves large gaps.</strong> It uses a tighter type scale
 (a lighter body weight) and even spacing between every block.</li>
@@ -946,7 +996,7 @@ prints the CLI manual (<code dir="auto">--json</code> for the machine-readable f
 concepts, CLI and API reference, changelog), and a short README that links
 to it.</li>
 </ul>
-<div class="sl-heading-wrapper level-h4"><h4 id="changed-6">Changed</h4><a class="sl-anchor-link" href="#changed-6"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “Changed”</span></a></div>
+<div class="sl-heading-wrapper level-h4"><h4 id="changed-7">Changed</h4><a class="sl-anchor-link" href="#changed-7"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “Changed”</span></a></div>
 <ul>
 <li><strong>Tailoring keeps your lines as written.</strong> It copies your resume lines
 verbatim by default. A rewrite needs a stated reason and must keep every
@@ -984,7 +1034,7 @@ Assessments paste, Settings &gt; Profiles and <code dir="auto">gigai scout resum
 local heads-up when the text contains an email address, phone number, link
 or street address.</li>
 </ul>
-<div class="sl-heading-wrapper level-h4"><h4 id="changed-7">Changed</h4><a class="sl-anchor-link" href="#changed-7"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “Changed”</span></a></div>
+<div class="sl-heading-wrapper level-h4"><h4 id="changed-8">Changed</h4><a class="sl-anchor-link" href="#changed-8"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “Changed”</span></a></div>
 <ul>
 <li><strong>Codex and Claude CLI calls run locked down.</strong> Codex runs with its shell
 tool and memories disabled; Claude runs with its settings, MCP servers and
@@ -1066,7 +1116,7 @@ platforms” for the source’s “Kubernetes platform”) was reviewed as a wor
 difference, not a new fact; each run had 1 minor precision flag (0.6% and
 0.66% of lines).</li>
 </ul>
-<div class="sl-heading-wrapper level-h4"><h4 id="changed-8">Changed</h4><a class="sl-anchor-link" href="#changed-8"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “Changed”</span></a></div>
+<div class="sl-heading-wrapper level-h4"><h4 id="changed-9">Changed</h4><a class="sl-anchor-link" href="#changed-9"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “Changed”</span></a></div>
 <ul>
 <li><strong>A clearer README.</strong> A numbered Quickstart (requirements, a resume with your
 personal info removed, install, run), a Roadmap / TODO with known
