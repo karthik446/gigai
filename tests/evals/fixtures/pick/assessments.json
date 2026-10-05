@@ -1,5 +1,5 @@
 {
- "note": "SYNTHETIC assessments for the pick eval (0110-10-15, the real-data gate fix), written by the worker: for each posting the requirement rows a stored assessment would hold (the posting's own lines), each with its status, its class and its evidence QUOTES. A quote is words of a line of the synthetic master (master.md, or a line variations.json adds), or a rewording of one; the eval traces it to master line ids with the product's own rule (assess_master.cited_requirements), so a quote of a line a master size does not hold cites nothing there. 'shapes' names the cases the gate found missing: a cited line that shares no word with its requirement, a cited line in an older role that is the only evidence, two lines that carry the same words of which one is cited, a cited line that is long, one line cited for four rows.",
+ "note": "SYNTHETIC assessments for the pick eval (0110-10-15, the real-data gate fix), written by the worker: for each posting the requirement rows a stored assessment would hold (the posting's own lines), each with its status, its class and its evidence QUOTES. A quote is words of a line of the synthetic master (master.md, or a line variations.json adds), or a rewording of one; the eval traces it to master line ids with the product's own rule (assess_master.cited_requirements), so a quote of a line a master size does not hold cites nothing there. 'shapes' names the cases the gate found missing: a cited line that shares no word with its requirement, a cited line in an older role that is the only evidence, two lines that carry the same words of which one is cited, a cited line that is long, one line cited for four rows. The posting 'titlematch' (0.1.10.11 PICK v5) is the case where the posting's TITLE names what a project is about and NO row cites a line of that project: every row cites lines of the roles (the two most recent ones are cited whole), as an assessment that quotes job history does.",
  "postings": {
   "agentic": [
    {
@@ -494,6 +494,114 @@
     "class": "nice_to_have",
     "evidence": [
      "Staff engineer with 17 years of experience building backend platforms and, since 2021, LLM"
+    ]
+   }
+  ],
+  "titlematch": [
+   {
+    "requirement": "8+ years building backend systems, with several years at staff level.",
+    "status": "met",
+    "class": "hard",
+    "evidence": []
+   },
+   {
+    "requirement": "Design and operate the agent runtime our product teams build on, in production.",
+    "status": "met",
+    "class": "hard",
+    "evidence": [
+     "Architected the agent runtime that executes 400,000 tool-calling LLM tasks per day for 60",
+     "Ran model serving and the agent runtime on Kubernetes across AWS and GCP at 99.95%"
+    ]
+   },
+   {
+    "requirement": "Build backend services in Go and Python on Kubernetes that stay available under heavy load.",
+    "status": "met",
+    "class": "hard",
+    "evidence": [
+     "Owned the scheduling platform's control plane in Go: 30 microservices on Kubernetes across AWS",
+     "Ran model serving and the agent runtime on Kubernetes across AWS and GCP at 99.95%"
+    ]
+   },
+   {
+    "requirement": "Own the event backbone on Kafka that carries every booking.",
+    "status": "met",
+    "class": "hard",
+    "evidence": [
+     "Designed the appointment event backbone on Kafka carrying 150 million messages a day with"
+    ]
+   },
+   {
+    "requirement": "Define SLOs with the teams on the platform and reduce customer-visible incidents.",
+    "status": "met",
+    "class": "hard",
+    "evidence": [
+     "Defined SLOs for 18 services and built burn-rate alerting on Prometheus and Grafana, reducing"
+    ]
+   },
+   {
+    "requirement": "Manage infrastructure as code with Terraform across clouds and regions.",
+    "status": "met",
+    "class": "hard",
+    "evidence": [
+     "Managed infrastructure as code with Terraform across 2 clouds and 9 regions, with policy"
+    ]
+   },
+   {
+    "requirement": "Model data on PostgreSQL, including the retrieval workloads behind the assistants.",
+    "status": "met",
+    "class": "hard",
+    "evidence": [
+     "Designed a retrieval pipeline on PostgreSQL with pgvector serving 12 million embedded passages",
+     "Built the ledger service in Java on PostgreSQL that records 20 million payment events a day"
+    ]
+   },
+   {
+    "requirement": "Gate every prompt change on an evaluation suite before release.",
+    "status": "met",
+    "class": "hard",
+    "evidence": [
+     "Built an evaluation harness in Python that scores every prompt change against 2,200 labelled"
+    ]
+   },
+   {
+    "requirement": "Control LLM spend across model providers.",
+    "status": "met",
+    "class": "hard",
+    "evidence": [
+     "Cut LLM spend 38% through prompt caching and routing easy requests to smaller models"
+    ]
+   },
+   {
+    "requirement": "A record of leading a team and mentoring senior engineers.",
+    "status": "met",
+    "class": "hard",
+    "evidence": [
+     "Led a 7-engineer AI platform team and owned its roadmap end to end, from design review to the",
+     "Mentored 3 senior engineers to staff-level scope through weekly design reviews and shared"
+    ]
+   },
+   {
+    "requirement": "Experience designing public APIs that are safe to retry.",
+    "status": "met",
+    "class": "hard",
+    "evidence": [
+     "Designed idempotent payment APIs (REST and gRPC) used by 250 merchants, removing duplicate"
+    ]
+   },
+   {
+    "requirement": "Payments or ledger experience.",
+    "status": "met",
+    "class": "nice_to_have",
+    "evidence": [
+     "Built the ledger service in Java on PostgreSQL that records 20 million payment events a day"
+    ]
+   },
+   {
+    "requirement": "Experience running Kafka clusters.",
+    "status": "met",
+    "class": "nice_to_have",
+    "evidence": [
+     "Designed the appointment event backbone on Kafka carrying 150 million messages a day with"
     ]
    }
   ]

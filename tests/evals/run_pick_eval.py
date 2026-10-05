@@ -1,7 +1,7 @@
 """The pick eval (0110-10-15): does the selector's FINAL selection keep what a posting needs as the master grows?
 
 Deterministic, no model, synthetic fixtures only (``fixtures/pick``: an invented person).  For every posting
-(5 job types) x master size (small, medium, large) x master variation, the final selection of three code paths
+(5 job types and the title-match case) x master size (small, medium, large) x master variation, the final selection of three code paths
 (``tools/pick_probe.py``: ``select``, ``fallback``, ``tailor_copy``) is scored against a labelled set
 (``expected.json``: per posting a requirement list with the master lines that support each one) on SEPARATE
 checks.  There is no blended score: a lost requirement is never offset by more skills or bullets.
@@ -15,7 +15,8 @@ The checks, per cell:
 3. ``must_keep``: the reviewer's must-keep groups with no line shown (``omitted``).
 4. ``page_fit``: at most 2 pages, no role or project printed without a bullet, roles in date order.
 
-Reported beside them, never part of a verdict on 1-3: the skill groups shown and the conflicts the result reports.
+Reported beside them, never part of a verdict on 1-3: the skill groups shown, the conflicts the result reports and
+the roles and projects of the master shown with NO line (``zero_entries``; most are irrelevant ones, as they should be).
 
 The variations of a master (``variations.json``): ``irrelevant``, ``duplicates``, ``near_duplicates``, ``long``
 and ``useful`` ADD lines; ``permuted-*`` is the same master in another order; ``regrouped`` is the same skills
@@ -43,6 +44,19 @@ check, per cell:
 The cases (``shapes`` in ``assessments.json``): a cited line that shares no word with its requirement; a cited line
 in an older role that is the only evidence; two lines carrying the same words of which one is cited; a cited line
 that is long; one line cited for four rows.
+
+A TITLE THAT NAMES AN ENTRY (0.1.10.11 PICK v5; ``title_entries`` in ``expected.json``).  A posting's title says
+what the job is about, and a role or project whose own heading says the same is the last thing a resume for it should
+lose.  One more check, per cell, with and without an assessment:
+
+6. ``title``: every entry the labels say the posting's title names, that this master holds, shows at least one line.
+   ``title_dropped`` names the ones that show none, ``title_silent`` those of them no ``title_entry`` conflict names.
+
+- H6 no entry the title names is dropped whole unless a conflict is reported.
+
+The posting ``titlematch`` is the case: its title names the agent-runtime projects, its assessment cites lines of the
+roles only (the two most recent roles are cited whole), and the projects' lines state no number.  ``sel-3`` shows no
+line of them in any size; 0.1.10.10 showed three.
 
 This is regression protection on these cases, not a proof that every pick is right.
 
@@ -253,6 +267,8 @@ class MasterCase:
     ids: frozenset[str]
     #: Lines an adding variation added, by id (their ``like`` and ``labels``).
     added: dict[str, dict]
+    #: The ids of its roles and projects.
+    entries: tuple[str, ...] = ()
 
 
 _CASES: dict[tuple[str, str], MasterCase] = {}
@@ -271,7 +287,8 @@ def master_case(size: str, variation: str) -> MasterCase:
             _regroup(doc)
         elif variation != "base":
             raise ValueError(f"unknown variation {variation}")
-        _CASES[key] = MasterCase(size, variation, doc.markdown(), frozenset(doc.ids()), added)
+        entries = tuple(entry.id for section in ("experience", "projects") for entry in doc.entries.get(section, ()))
+        _CASES[key] = MasterCase(size, variation, doc.markdown(), frozenset(doc.ids()), added, entries)
     return _CASES[key]
 
 
@@ -364,6 +381,12 @@ def labels(posting: str, case: MasterCase) -> tuple[list[Requirement], dict[str,
     return requirements, {name: group for name, group in groups.items() if group}
 
 
+def title_entries(posting: str, case: MasterCase) -> tuple[str, ...]:
+    """The roles and projects the labels say ``posting``'s title names, of those ``case`` holds."""
+
+    return tuple(entry for entry in _load("expected.json")["postings"][posting].get("title_entries", ()) if entry in case.entries)
+
+
 @dataclass(frozen=True)
 class Checks:
     """One cell's separate checks (see the module text). ``error``: the path raised; every check then fails."""
@@ -395,6 +418,13 @@ class Checks:
     cited_silent: tuple[str, ...] = ()
     #: The other rows that cite a line (unclear, or nice-to-have) with no cited line shown: reported, in no hard test.
     cited_other_lost: tuple[str, ...] = ()
+    #: The roles and projects of this master shown with no line (reported: most are irrelevant ones).
+    zero_entries: tuple[str, ...] = ()
+    #: The entries the labels say the title names (of those this master holds), those shown with no line, and those
+    #: of them that no reported conflict names (the hard test H6).
+    title_entries: tuple[str, ...] = ()
+    title_dropped: tuple[str, ...] = ()
+    title_silent: tuple[str, ...] = ()
 
     @property
     def page_fit(self) -> bool:
@@ -413,17 +443,21 @@ def check(posting: str, case: MasterCase, final: dict[str, object], rows: list[d
     requirements, groups = labels(posting, case)
     rows = rows or []
     met = tuple(str(row["id"]) for row in rows if row["mandatory"] and row["met"])
+    titled = title_entries(posting, case)
     if "error" in final:
         mandatory = tuple(req.id for req in requirements if req.mandatory and req.lines)
         return Checks(
             frozenset(mandatory), frozenset(), mandatory, {}, mandatory, frozenset(), tuple(groups), None, (), False, 0, 0, 0, 0, frozenset(), frozenset(), (),
             error=str(final["error"]), cited_met=met, cited_lost=met, cited_silent=met,
+            zero_entries=case.entries, title_entries=titled, title_dropped=titled, title_silent=titled,
         )
     shown = frozenset([*final["summary"], *(bullet for bullets in final["entries"].values() for bullet in bullets), *final["other"]])  # type: ignore[union-attr]
     # A cited line that a better line repeats is stood for by that line (the selector leaves the copy out).
     twin: dict[str, str] = final.get("duplicates") or {}  # type: ignore[assignment]
     without = [str(row["id"]) for row in rows if not shown & {found for line in row["lines"] for found in (line, twin.get(line, line))}]  # type: ignore[union-attr]
     named = {str(conflict.get("requirement_id") or "") for conflict in final["conflicts"]}  # type: ignore[union-attr]
+    zero = tuple(entry for entry in case.entries if not final["entries"].get(entry))  # type: ignore[union-attr]
+    reported = {str(found) for conflict in final["conflicts"] if conflict.get("kind") == "title_entry" for found in conflict.get("ids") or ()}  # type: ignore[union-attr]
     levels = {req.id: max((level for line_id, level in req.lines.items() if line_id in shown), default=0) for req in requirements if req.lines}
     covered = frozenset(req_id for req_id, level in levels.items() if level > 0)
     mandatory = [req for req in requirements if req.mandatory and req.lines]
@@ -451,6 +485,10 @@ def check(posting: str, case: MasterCase, final: dict[str, object], rows: list[d
         cited_lost=tuple(row for row in without if row in met),
         cited_silent=tuple(row for row in without if row in met and row not in named),
         cited_other_lost=tuple(row for row in without if row not in met),
+        zero_entries=zero,
+        title_entries=titled,
+        title_dropped=tuple(entry for entry in titled if entry in zero),
+        title_silent=tuple(entry for entry in titled if entry in zero and entry not in reported),
     )
 
 
@@ -528,6 +566,7 @@ def hard_failures(results: dict[tuple[str, str, str, str], Checks]) -> dict[str,
     failures: dict[str, list[str]] = {
         "H1 lost mandatory coverage": [], "H2 adding lines lowered a check": [], "H3 order or grouping changed the pick": [], "H4 page constraint": [],
         "H5 a met mandatory row lost every line it cites, with no conflict reported": [],
+        "H6 an entry the posting's title names shows no line, with no conflict reported": [],
     }
     cells = sorted({(posting, size, path) for posting, size, _variation, path in results})
     for (posting, size, variation, path), checks in sorted(results.items()):
@@ -539,6 +578,8 @@ def hard_failures(results: dict[tuple[str, str, str, str], Checks]) -> dict[str,
             failures["H1 lost mandatory coverage"].append(f"{name}: {', '.join(checks.lost)}")
         if checks.cited_silent:
             failures["H5 a met mandatory row lost every line it cites, with no conflict reported"].append(f"{name}: {', '.join(checks.cited_silent)}")
+        if checks.title_silent:
+            failures["H6 an entry the posting's title names shows no line, with no conflict reported"].append(f"{name}: {', '.join(checks.title_silent)}")
         if not checks.page_fit:
             why = [f"{checks.pages} pages"] if (checks.pages or 99) > 2 else []
             why += [f"no bullet under {', '.join(checks.empty)}"] if checks.empty else []
@@ -587,13 +628,15 @@ def _cell(checks: Checks, mandatory: int, groups: int, skill_groups: int) -> str
         f"{mandatory - len(checks.lost)}/{mandatory} | {mandatory - len(checks.weak)}/{mandatory} | {groups - len(checks.omitted)}/{groups} | "
         f"{checks.pages}p {fit} | {checks.lines} | {checks.skills}/{skill_groups} | {checks.conflicts} | "
         + (f"{len(checks.cited_met) - len(checks.cited_lost)}/{len(checks.cited_met)}" if checks.cited_met else "-")
+        + " | " + (f"{len(checks.title_entries) - len(checks.title_dropped)}/{len(checks.title_entries)}" if checks.title_entries else "-")
+        + f" | {len(checks.zero_entries)}"
     )
 
 
 def table(results: dict[tuple[str, str, str, str], Checks], *, path: str, variation: str = "base", title: str = "") -> str:
     """One row per posting x size for one path and one variation."""
 
-    out = [f"### {title or path}: variation `{variation}`", "", "| posting | size | mandatory covered | strongest kept | must-keep kept | pages, fits | lines | skills shown | conflicts | cited rows kept | lost / weak / omitted / cited rows lost |", "|---|---|---|---|---|---|---|---|---|---|---|"]
+    out = [f"### {title or path}: variation `{variation}`", "", "| posting | size | mandatory covered | strongest kept | must-keep kept | pages, fits | lines | skills shown | conflicts | cited rows kept | title entries shown | entries with 0 lines | lost / weak / omitted / cited rows lost / title entries dropped |", "|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
     for posting in sorted({key[0] for key in results}):
         for size in SIZES:
             checks = results.get((posting, size, variation, path))
@@ -608,6 +651,7 @@ def table(results: dict[tuple[str, str, str, str], Checks], *, path: str, variat
                 "omitted " + ",".join(checks.omitted) if checks.omitted else "",
                 "cited lost " + ",".join(checks.cited_lost) if checks.cited_lost else "",
                 "(not met or nice: " + ",".join(checks.cited_other_lost) + ")" if checks.cited_other_lost else "",
+                "title dropped " + ",".join(checks.title_dropped) if checks.title_dropped else "",
             ) if part)
             out.append(f"| {posting} | {size} | {_cell(checks, mandatory, len(groups), skill_groups)} | {detail or '-'} |")
     return "\n".join(out)
@@ -655,6 +699,7 @@ def main(argv: list[str] | None = None) -> int:
                     "lost": checks.lost, "weak": checks.weak, "omitted": checks.omitted, "pages": checks.pages, "page_fit": checks.page_fit, "lines": checks.lines,
                     "skills": checks.skills, "skills_left_out": checks.skills_left_out, "conflicts": checks.conflicts, "shown": sorted(checks.shown), "error": checks.error,
                     "cited_met": checks.cited_met, "cited_lost": checks.cited_lost, "cited_silent": checks.cited_silent, "cited_other_lost": checks.cited_other_lost,
+                    "zero_entries": checks.zero_entries, "title_entries": checks.title_entries, "title_dropped": checks.title_dropped, "title_silent": checks.title_silent,
                 }
                 for key, checks in results.items()
             }

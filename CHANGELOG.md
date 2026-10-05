@@ -95,7 +95,16 @@ things still take more than a second (see "Still slower than one second"): the n
   word with the requirement. The pick for that job now keeps one of those lines for every requirement
   the assessment found evidence for, the required ones first, before any line chosen by shared words.
   A job with no assessment is picked by words, as before.
-- **After you upgrade:** the rule that picks lines has a new version (`sel-3`). A profile's stored
+- **A job's resume keeps the project or role its title is about.** A posting's title says what the
+  job is about (`... Agent Platform`). The pick did not read it: a project whose own heading says the
+  same could be dropped whole, while older roles kept lines about nothing the posting asks for,
+  because none of the project's lines was one the assessment pointed to and none stated a number. A
+  role or project the title names (its heading or its own title holds a word of the posting's title,
+  or half of its lines do) now always keeps its best line; it goes only when nothing but required
+  lines and pins fit, and then `conflicts` says so (`title_entry`). What is left of the page after
+  every requirement has its line goes to lines about the posting before lines that are only stronger
+  or more recent. No required line and no skill is cut for it.
+- **After you upgrade:** the rule that picks lines has a new version (`sel-4`). A profile's stored
   selection stays as it is until you refresh it. Tailored resumes the background pipeline made from
   your master are out of date under the new rule and are made again when the pipeline next works on
   each job; a resume you edited or attached yourself is never replaced.

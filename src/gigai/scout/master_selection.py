@@ -7,7 +7,7 @@ lines most relevant to one posting under a character budget instead (what an
 assessment would read). Nothing here calls a model, reads a file or writes:
 the same master, profile, posting and day give the same ids.
 
-The rules (0110-10-15, the pick's objective; ``SELECTOR_VERSION`` ``sel-3``).  For a posting the
+The rules (0110-10-15, the pick's objective; ``SELECTOR_VERSION`` ``sel-4``).  For a posting the
 selection maximises, in this order, and a lower term never buys back a higher one:
 
 1. MANDATORY REQUIREMENT COVERAGE.  The posting's requirements are its list lines (``Requirement``; a
@@ -33,6 +33,20 @@ first line.  Matching by words (1 above) only ADDS: it supports what the posting
 about (a row the assessment found no line for, a line of the posting it has no row for), and everything when
 there is no assessment.  A posting line or keyword that a cited row is about is not matched by words at all.
 
+WHAT IS LEFT OF THE PAGE (``sel-4``), once every requirement has its line and the pins are in, goes to the lines
+that are ABOUT THE POSTING before the lines that are only strong or recent.  THE POSTING'S TITLE says what the job is
+about (its words without rank, place or level: ``_title_subject``), and it NAMES a role or a project whose heading
+or own title holds one of those words, or ``TITLE_LINES_SHARE`` of whose lines do.  Among the lines that add nothing
+a requirement lacks, in this order: the lines of an entry the title names that hold a word of the title, whatever the
+profile shows; then as before what the profile shows and what is of ordinary length; then, BEFORE strength and
+recency, a line that supports BY WORDS a line of the posting that a cited row has answered (it covers nothing, the
+assessment cited another line; it is still about the job).  Recency still only breaks ties.
+AN ENTRY THE TITLE NAMES KEEPS ITS BEST LINE (``Selected.title_entries``): it is not dropped whole.  Its best line
+is in the pick whatever a cap says and is cut only after every line that is not a requirement's evidence or a pin
+(so every other old role and project goes whole first, and every recent role is down to its one line); when even
+that cannot fit, the result carries a ``title_entry`` conflict.  It never costs a requirement its evidence, and the
+Skills section is not cut for it.
+
 PAGE FIT IS A CONSTRAINT, not a term: ``LENGTH_RULE.max_pages`` pages, measured with the shipped PDF
 template (``measure_markdown``), no role or project printed without a bullet, roles in date order, every
 recent role present (``FLOORS``).  The steps:
@@ -51,12 +65,14 @@ recent role present (``FLOORS``).  The steps:
   profile does not show first, then unusually long ones, the weakest, the oldest), then the Other lines
   that name nothing it asks for; then a third line of a mandatory requirement, a second line of a
   nice-to-have, the first line of one, a second line of a mandatory requirement; then the Other lines
-  that name a keyword or support a requirement.  Cutting the last line of an old role or of a project
-  removes it whole.  SKILLS are cut last, what nothing asks for first, and only when no line is left to cut;
+  that name a keyword or support a requirement; then the best line of an entry the title names (a conflict).
+  Cutting the last line of an old role or of a project removes it whole.  SKILLS are cut last, what nothing
+  asks for first, and only when no line is left to cut;
   except in a master whose Skills section is too long to print whole (more than ``SKILLS_WHOLE`` names),
   where the names past that count that nothing asks for and no picked line names are the first thing cut.  Every cut skill is recorded.  Last of all: pins, then requirements' evidence.
-- CONFLICTS (``Selected.conflicts``): when a requirement's evidence or a pin could not be shown within
-  the page budget the result says which and why.  Nothing mandatory is dropped silently.
+- CONFLICTS (``Selected.conflicts``): when a requirement's evidence, a pin or the one line of an entry the
+  title names could not be shown within the page budget the result says which and why.  Nothing mandatory is
+  dropped silently.
 - FILL: room left on the last page goes back to the best lines cut, then to the best unshown bullets of
   the recent roles (up to ``HARD_CAPS``).
 - Nothing is reworded: every shown line is a master line, by id, and every line of the master, shown or
@@ -85,7 +101,7 @@ from .tailor_no_loss import OWNERSHIP_FAMILIES, normalize
 from .tailored_resume import LENGTH_RULE
 
 #: Names the scoring weights, caps, floors and cut order below; stored with a selection.
-SELECTOR_VERSION = "sel-3"
+SELECTOR_VERSION = "sel-4"
 MAX_PAGES = LENGTH_RULE.max_pages
 #: The page budget is "fits ``MAX_PAGES`` at this spacing or looser" (the renderer's own floor is 0.7).
 FIT_SCALE = 0.9
@@ -125,6 +141,9 @@ NEAR_DUPLICATE = 0.7
 #: what the line says.
 CITED_ABOUT_SHARE = 0.5
 CITED_ANSWERED_SHARE = 0.6
+#: The posting's title NAMES an entry when its heading or a subline (a role's own title) holds a word of the title,
+#: or when this share of its lines do (two lines at least, unless it has one line only).
+TITLE_LINES_SHARE = 0.5
 #: The evidence view's budget: the assess prompt's own cap on resume text.
 EVIDENCE_CAP = 12_000
 
@@ -159,6 +178,8 @@ _IRREGULAR = {"led": "lead", "ran": "run", "wrote": "write", "written": "write",
 #: Rank and filler words of a job title: they say nothing about what kind of engineer it names.
 _GENERIC_TITLE = frozenset({"staff", "senior", "principal", "lead", "engineer", "software", "and", "the", "of", "with"})
 _PRIOR_TITLE_STOP = frozenset({"staff", "principal", "senior", "engineer"})
+#: Words of a job title that name no subject: where the job is, a level.
+_TITLE_PLACE = frozenset({"remote", "hybrid", "onsite", "us", "usa", "uk", "eu", "emea", "apac", "ii", "iii", "iv", "jr", "sr"})
 _OWNERSHIP = tuple(re.compile(pattern) for _name, pattern in OWNERSHIP_FAMILIES)
 _POSTING_BULLET = re.compile(r"\A[-*•]\s+")
 _NICE_HEADING = re.compile(r"\b(?:nice|bonus|preferred|plus|desirable|ideally|good to have)\b", re.IGNORECASE)
@@ -256,6 +277,16 @@ def _title_tokens(text: str) -> set[str]:
     """What a job title is about: its words (two-letter ones such as AI and ML included), minus rank words."""
 
     return {_stem(token) for token in _TITLE_WORD.findall(text.casefold()) if len(token) >= 2 and token not in _GENERIC_TITLE}
+
+
+#: (``_title_tokens`` answers stems: "Remote" is ``remot``, "Engineering" is ``engineer``.)
+_NO_SUBJECT = frozenset(_stem(word) for word in (*_GENERIC_TITLE, *_TITLE_PLACE))
+
+
+def _title_subject(text: str) -> frozenset[str]:
+    """The words of ``text`` that can say what a job is ABOUT: a title's words without rank, place, level or number."""
+
+    return frozenset(token for token in _title_tokens(text) if token not in _NO_SUBJECT and not token.isdigit())
 
 
 def _tag_tokens(tags: Iterable[str]) -> set[str]:
@@ -582,8 +613,9 @@ class Conflict:
     """Something the page budget kept out although the rules say it stays: shown to the user, never silent.
 
     ``kind``: ``mandatory_evidence`` (a mandatory requirement's evidence line is not shown; ``covered`` says
-    whether a weaker line still covers the requirement), ``must_keep`` (a pinned line is not shown) or
-    ``over_budget`` (every cut the rules allow was made and the resume is still over the page limit).
+    whether a weaker line still covers the requirement), ``must_keep`` (a pinned line is not shown),
+    ``title_entry`` (no line is shown of a role or project the posting's title names; ``ids``: the entry and
+    its best line) or ``over_budget`` (every cut the rules allow was made and the resume is still over the page limit).
     """
 
     kind: str
@@ -655,6 +687,8 @@ class Selected:
     conflicts: tuple[Conflict, ...] = ()
     #: A line left out because a better line says the same: id -> that line's id.
     duplicates: dict[str, str] = field(default_factory=dict)
+    #: The roles and projects the posting's title names -> the best line of each (the line that keeps it shown).
+    title_entries: dict[str, str] = field(default_factory=dict)
 
     @property
     def fits(self) -> bool:
@@ -714,6 +748,7 @@ class Selected:
             ],
             "evidence_for": [{"id": item_id, "requirements": list(ids)} for item_id, ids in self.evidence_for.items()],
             "conflicts": [conflict.to_json() for conflict in self.conflicts],
+            "title_entries": [{"id": entry_id, "line": item_id, "shown": entry_id in self.entries} for entry_id, item_id in self.title_entries.items()],
             "keywords": None,
         }
         if self.keywords is not None:
@@ -745,9 +780,10 @@ def _label(text: str) -> str:
 class _Keys:
     """Every selectable bullet and Other line against what the posting asks for: what each supports, and its place.
 
-    ``key`` orders the lines: a larger key stays longer.  ``(tier, class, place)``: the tier is 3 for the
-    evidence of a met mandatory row of the assessment (the line it cites), 2 for the evidence of any other
-    mandatory requirement and 1 for a pin; the class is 5 for those, 4 for a second line of a
+    ``key`` orders the lines: a larger key stays longer.  ``(tier, class, place)``: the tier is 4 for the
+    evidence of a met mandatory row of the assessment (the line it cites), 3 for the evidence of any other
+    mandatory requirement, 2 for a pin and 1 for the best line of an entry the posting's title names
+    (``title_floor``); the class is 5 for evidence and pins, 4 for a second line of a
     mandatory requirement, 3 for the first line of a nice-to-have, 2 for a second line of one, 1 for a line
     that adds no line a requirement lacks but still supports a listed mandatory requirement, 0 for a line
     that supports nothing asked for; the place is its turn in the keep order (``_keys``).  Ties end on the
@@ -762,6 +798,12 @@ class _Keys:
     #: the evidence lines that are the line a met mandatory row of the assessment cites (cut last of all)
     cited_evidence: frozenset[str] = frozenset()
     duplicates: dict[str, str] = field(default_factory=dict)
+    #: a line of an entry the posting's title names -> how many words of the title it holds
+    titled: dict[str, int] = field(default_factory=dict)
+    #: line -> how well it supports BY WORDS the lines of the posting that a cited row has answered (it covers nothing there)
+    wording: dict[str, float] = field(default_factory=dict)
+    #: an entry the posting's title names -> its best line
+    title_floor: dict[str, str] = field(default_factory=dict)
     key: dict[str, tuple] = field(default_factory=dict)
     rank: dict[str, int] = field(default_factory=dict)
 
@@ -804,7 +846,7 @@ def _near_duplicates(items: list[MasterItem], words: dict[str, frozenset[str]], 
 
 def _keys(
     master: Master, terms: _JobTerms | None, scores: _Scores, recency: Callable[[MasterItem], float], pins: Iterable[str],
-    cited: tuple[CitedRequirement, ...] = (), summary_id: str | None = None,
+    cited: tuple[CitedRequirement, ...] = (), summary_id: str | None = None, title: str = "",
 ) -> _Keys:
     lines = [item for item in master.items.values() if item.kind in (KIND_BULLET, KIND_OTHER)]
     words = {item.id: _words(item.text) for item in lines}
@@ -875,8 +917,6 @@ def _keys(
     # keywords: a keyword's evidence is a line that is evidence already when one names it, else the line most about
     # what the posting lists.
     for asked in sorted(terms.asked if terms is not None else (), key=lambda asked: not asked.words):
-        if row_words and answered(asked):
-            continue
         found: dict[str, float] = {}
         if asked.words:
             total = len(asked.words) + TERM_WEIGHT * len(asked.terms)
@@ -886,6 +926,13 @@ def _keys(
                 share = (shared + TERM_WEIGHT * named) / total
                 if share >= SUPPORT_SHARE and (named or shared >= SUPPORT_WORDS):
                     found[item.id] = share
+        if row_words and answered(asked):
+            # A cited row has answered this line of the posting: a line that supports it by words covers nothing
+            # (the assessment cited another one) and is still ABOUT the posting.
+            for item_id, value in found.items():
+                out.wording[item_id] = round(out.wording.get(item_id, 0.0) + (value if asked.mandatory else value / 2), 6)
+            continue
+        if asked.words:
             # "Well" is measured against the best line of ordinary length: a very long line shares more words with
             # any requirement only because it holds more words.
             best = max((value for item_id, value in found.items() if brief[item_id]), default=max(found.values(), default=0.0))
@@ -981,13 +1028,44 @@ def _keys(
 
         return round(topic.get(item.id, 0.0), 6)
 
+    # WHAT THE POSTING'S TITLE NAMES (the module text): the roles and projects, and the lines of them that hold a
+    # word of the title. Only the entry and the title are read, so a line added elsewhere changes neither.
+    subject = _title_subject(title)
+    named: set[str] = set()
+    for entry in master.entries.values() if subject else ():
+        if entry.section not in ("experience", "projects") or not entry.bullets:
+            continue
+        naming_lines = sum(1 for bullet in entry.bullets if subject & _title_subject(master.items[bullet].text))
+        by_lines = naming_lines >= TITLE_LINES_SHARE * len(entry.bullets) and (naming_lines >= 2 or len(entry.bullets) == 1)
+        if subject & _title_subject(" ".join((entry.heading, *entry.sublines))) or by_lines:
+            named.add(entry.id)
+    # (A word of the title in a line of any OTHER entry counts for nothing: "40 support agents" is not agent work.)
+    out.titled = {item.id: count for item in lines if item.entry_id in named and (count := len(subject & _title_subject(item.text)))}
+
     # What is left adds no line a requirement lacks. A line that still supports a listed mandatory requirement
-    # (a third line for it) stays longer than one that supports none, however recent that one is.
-    rest = sorted((item for item in lines if item.id not in klass), key=lambda item: (on_topic(item) > 0, *static(item)[:2], on_topic(item), *static(item)[2:]), reverse=True)
+    # (a third line for it) stays longer than one that supports none, however recent that one is. Then the lines
+    # of an entry the title names that hold a word of the title (the more of its words the longer), whatever the
+    # profile shows. Then as the profile shows and by length; and BEFORE strength and recency, how well a line
+    # supports by words a line of the posting that a cited row has answered.
+    rest = sorted(
+        (item for item in lines if item.id not in klass),
+        key=lambda item: (on_topic(item) > 0, out.titled.get(item.id, 0), *static(item)[:2], on_topic(item), out.wording.get(item.id, 0.0), *static(item)[2:]),
+        reverse=True,
+    )
     for item in rest:
         klass[item.id] = 1 if on_topic(item) > 0 else 0
         order.append(item.id)
-    tier = {item_id: (3 if item_id in cited_evidence else (2 if item_id in out.evidence else (1 if item_id in pinned else 0))) for item_id in order}
+    tier = {item_id: (4 if item_id in cited_evidence else (3 if item_id in out.evidence else (2 if item_id in pinned else 0))) for item_id in order}
+    # AN ENTRY THE TITLE NAMES KEEPS ITS BEST LINE (the module text). An entry whose best line is evidence or a pin
+    # is kept by that line already.
+    turn = {item_id: place for place, item_id in enumerate(order)}
+    for entry in master.entries.values():
+        held = [bullet for bullet in entry.bullets if bullet in tier]
+        if entry.id not in named or not held:
+            continue
+        best = max(held, key=lambda item_id: (tier[item_id], klass[item_id], -turn[item_id]))
+        out.title_floor[entry.id] = best
+        tier[best] = max(tier[best], 1)
     for place, item_id in enumerate(order):
         # (the tier the fit reads, the class, the place in the keep order): a larger key stays longer.
         out.key[item_id] = (tier[item_id], klass[item_id], len(order) - place)
@@ -1028,12 +1106,17 @@ def select(
     pins = tuple(item_id for item_id in profile.pins if item_id in master.items and master.items[item_id].kind in (KIND_BULLET, KIND_OTHER))
     # The summary first: a row of the assessment that cites the summary shown is covered by it.
     summary = _summary_choice(master, scores, posting)
-    keys = _keys(master, terms, scores, recency, pins, posting.cited if posting is not None else (), summary.id if summary is not None else None)
+    keys = _keys(
+        master, terms, scores, recency, pins, posting.cited if posting is not None else (), summary.id if summary is not None else None,
+        posting.title if posting is not None else "",
+    )
     cited_rows = {requirement.id for requirement in keys.requirements if requirement.cited}
     key = keys.key
     requirement_text = {requirement.id: requirement.text for requirement in keys.requirements}
-    #: In the pick whatever a cap says: a requirement's evidence (mandatory or nice-to-have), and a pin.
-    forced = set(keys.evidence) | set(keys.nice_evidence) | {item_id for item_id in pins if item_id in key}
+    #: In the pick whatever a cap says: a requirement's evidence (mandatory or nice-to-have), a pin, and the best
+    #: line of an entry the posting's title names.
+    title_lines = set(keys.title_floor.values())
+    forced = set(keys.evidence) | set(keys.nice_evidence) | {item_id for item_id in pins if item_id in key} | title_lines
     pick = _Pick()
     out: dict[str, tuple[str, str]] = {}  # a left-out line's (code, reason)
     for item_id, twin in keys.duplicates.items():
@@ -1049,13 +1132,17 @@ def select(
             return "requirement_evidence", f"{what}: {_label(first)}" + (f" (and {len(more)} more)" if more else "")
         if item.id in pins:
             return "pinned", "pinned on this profile"
+        if item.id in title_lines:
+            return "title_entry", "the best line of a role or project the posting's title names"
         if item.id in keys.nice_evidence:
             return "posting_wording", f"the best line for: {_label(requirement_text[keys.nice_evidence[item.id][0]])}"
         hits = scores.hits.get(item.id, {})
         if hits:
             return "names_keywords", "names " + _names(sorted(hits, key=lambda term: (-hits[term], term)))
-        if keys.supports.get(item.id):
+        if keys.supports.get(item.id) or keys.wording.get(item.id):
             return "posting_wording", "matches the posting's wording"
+        if keys.titled.get(item.id):
+            return "posting_title", "names what the posting's title names"
         if scores.prior.get(item.id, 0.0) >= 0.5:
             return "profile_focus", "fits this profile"
         if posting is None:
@@ -1187,7 +1274,7 @@ def select(
             cuts.append(_Cut("bullet", item_id, forced_cut))
 
     cuttable = [*(bullet for entry_id, bullets in pick.entries.items() if master.entries[entry_id].section != "education" for bullet in bullets), *pick.other]
-    kept_for_last = set(keys.evidence) | set(pins)
+    kept_for_last = set(keys.evidence) | set(pins) | title_lines
     # What adds nothing the posting asks for goes first: bullets, then the Other lines that name nothing it asks
     # for. Then the rest by value; an Other line that names a keyword or supports a requirement (a certification
     # the posting asks for, a talk on its subject: one short line each) goes after the bullets.
@@ -1202,6 +1289,8 @@ def select(
     cut_lines((item_id for item_id in free if master.items[item_id].kind == KIND_OTHER and item_id not in other_about), forced_cut=False)
     cut_lines((item_id for item_id in free if keys.klass(item_id) > 0 and master.items[item_id].kind == KIND_BULLET), forced_cut=False)
     cut_lines(other_about, forced_cut=False)
+    # Then the one line of an entry the posting's title names: every line that is not evidence or a pin went first.
+    cut_lines((item_id for item_id in cuttable if item_id in title_lines and item_id not in keys.evidence and item_id not in pins), forced_cut=True)
     gone = set(surplus)
     # The rest of the Skills section only when no line is left to cut: what nothing asks for and no picked line
     # names first, what the posting asks for last.
@@ -1363,6 +1452,12 @@ def select(
             why = "the line the assessment cites for this requirement does not fit the page limit beside the other requirements' evidence" + (
                 "; another line it cites is shown" if covered else "; no line it cites is shown now")
         conflicts.append(Conflict("mandatory_evidence", (requirement.supporters[0],), why, requirement.id, requirement.text, covered))
+    for entry_id, item_id in keys.title_floor.items():
+        if entry_id not in final.entries:
+            conflicts.append(Conflict(
+                "title_entry", (entry_id, item_id),
+                "the posting's title names this role or project, and its best line does not fit the page limit beside the requirements' evidence",
+            ))
     missing_pins = tuple(item_id for item_id in pins if item_id in key and item_id not in shown_ids)
     if missing_pins:
         conflicts.append(Conflict("must_keep", missing_pins, "these pinned lines do not fit the page limit beside the requirements' evidence"))
@@ -1409,6 +1504,7 @@ def select(
         evidence_for={item_id: ids for item_id, ids in keys.evidence.items() if item_id in shown_ids},
         conflicts=tuple(conflicts),
         duplicates=dict(keys.duplicates),
+        title_entries=dict(keys.title_floor),
     )
 
 
@@ -1720,6 +1816,7 @@ __all__ = [
     "SelectionPosting",
     "SelectionProfile",
     "SkillReason",
+    "TITLE_LINES_SHARE",
     "UNMEASURED_PAGES",
     "check_selection",
     "compare_selections",

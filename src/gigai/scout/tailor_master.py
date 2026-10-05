@@ -52,8 +52,10 @@ order they may be applied (``cut_order``), the fewest that fit taken
    before a third line for a requirement, before a second one).  A recent
    role keeps its best line (``master_selection.FLOORS``) and a project one
    line; the cut that would empty an old role removes the role whole;
-2. only when that is not enough: the profile's pins, then requirements'
-   evidence.  Those cuts are a CONFLICT and are reported, never silent.
+2. only when that is not enough: the best shown line of a role the posting's
+   title names (``Selected.title_entries``), then the profile's pins, then
+   requirements' evidence.  Those cuts are a CONFLICT and are reported, never
+   silent.
 
 THE EVIDENCE OF A REQUIREMENT, among the lines the tailoring shows, is the
 best shown line that supports it: step 1 never cuts it, wherever its role
@@ -68,8 +70,9 @@ WHAT WAS PICKED (``selection_record``): the stored tailored resume carries
 left out, each with the selector's reason (``master_selection.LineReason``) or
 the fit's, the skills the same way, who made the pick (``model``, or
 ``code`` for the fallback), and ``conflicts``: a mandatory requirement the
-master supports that the final resume shows no line for, and a pin it does
-not show.  Ids, codes, reasons and the posting's own requirement words only:
+master supports that the final resume shows no line for, a pin it does
+not show, and a role or project the posting's title names of which it
+shows no line.  Ids, codes, reasons and the posting's own requirement words only:
 a line's text is in the result (picked) or in the master revision
 ``sources.master`` names.
 
@@ -466,15 +469,25 @@ def cut_order(result: TailoredResume, candidates: JobCandidates, master: Master,
             if not (role is not None and item_id not in supported):
                 refill.add(line.id)  # type: ignore[arg-type]
 
+    # An entry the posting's title names keeps its best shown line while any other line can go (the selector's rule).
+    title_lines: set[str] = set()
+    for _heading, entry in shown:
+        if _entry_id(entry) in selected.title_entries:
+            held = [line for line in entry.bullets if line.id in home and line_item_id(line) is not None]
+            if held:
+                title_lines.add(max(held, key=value).id)  # type: ignore[arg-type]
+
     def kept_for_last(line: TailoredLine) -> int:
         item_id = line_item_id(line)
-        return 2 if item_id in evidence else (1 if item_id in pins else 0)
+        return 3 if item_id in evidence else (2 if item_id in pins else (1 if line.id in title_lines else 0))
 
     cuttable = [line for line in lines if line.id in home and line_item_id(line) is not None]
     cut([line for line in cuttable if kept_for_last(line) == 0])
-    # Only when nothing else can go (a conflict, reported by ``selection_record``): pins, then requirements' evidence.
+    # Only when nothing else can go (a conflict, reported by ``selection_record``): the one line of an entry the
+    # title names, then pins, then requirements' evidence.
     cut([line for line in cuttable if kept_for_last(line) == 1])
     cut([line for line in cuttable if kept_for_last(line) == 2])
+    cut([line for line in cuttable if kept_for_last(line) == 3])
     return cuts, frozenset(refill)
 
 
@@ -603,8 +616,8 @@ def _items(value: object, name: str) -> list[object]:
 def _conflict(obj: object) -> Conflict:
     value = _object_with_optional(obj, ("kind", "ids", "reason"), ("requirement_id", "requirement", "covered"), "tailor_response.selection conflict")
     kind = _string(value["kind"], "selection conflict kind")
-    if kind not in ("mandatory_evidence", "must_keep", "over_budget"):
-        _fail("bad_enum", "tailor_response.selection conflict kind must be mandatory_evidence, must_keep or over_budget")
+    if kind not in ("mandatory_evidence", "must_keep", "title_entry", "over_budget"):
+        _fail("bad_enum", "tailor_response.selection conflict kind must be mandatory_evidence, must_keep, title_entry or over_budget")
     ids = value["ids"]
     if type(ids) is not list or any(type(item) is not str or not item for item in ids):
         _fail("wrong_type", "tailor_response.selection conflict ids must be an array of non-empty strings")
@@ -796,6 +809,14 @@ def selection_record(
             "no line that supports this requirement is shown: " + ("the page limit left no room for one" if was_cut else "the tailoring did not show one"),
             requirement.id, requirement.text, False,
         ))
+    shown_entries = {master.items[item_id].entry_id for item_id in final}
+    for entry_id, item_id in candidates.selected.title_entries.items():
+        if entry_id not in shown_entries:
+            was_cut = any(bullet in cut for bullet in master.entries[entry_id].bullets)
+            conflicts.append(Conflict(
+                "title_entry", (entry_id, item_id),
+                "the posting's title names this role or project and no line of it is shown: " + ("the page limit left no room for one" if was_cut else "the tailoring did not show one"),
+            ))
     missing_pins = tuple(item_id for item_id in (pins or candidates.profile.pins) if item_id in master.items and item_id not in final)
     if missing_pins:
         conflicts.append(Conflict("must_keep", missing_pins, "these pinned lines are not shown"))
