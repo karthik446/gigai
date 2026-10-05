@@ -151,6 +151,11 @@ Everything GigAI stores goes under <code dir="auto">~/.gigai</code> on this comp
 for the user: each job’s tailored resume (markdown) and the PDFs without a header go to the
 resumes folder, <code dir="auto">~/Documents/GigAI/resumes</code> unless the user chose another (<code dir="auto">gigai scout status</code>
 shows it). That folder never holds a name or contact details.</p>
+<p><code dir="auto">--no-browser</code> is a choice, not a requirement: without it Scout opens the browser itself. When
+the user wants to look at something, give them the address the command printed, or one job’s
+page: that address plus <code dir="auto">#/jobs/</code> and the posting’s URL percent-encoded. Inside a restricted
+sandbox <code dir="auto">gigai scout status</code> may answer <code dir="auto">unreachable</code> (<code dir="auto">process: running (pid N); API: not reachable from here</code>). That is the sandbox blocking localhost, not Scout stopping: do not
+restart it; check from outside the sandbox or ask the user to reload the page.</p>
 <div class="sl-heading-wrapper level-h2"><h2 id="5-the-resume-check-first-read-second">5. The resume: check first, read second</h2><a class="sl-anchor-link" href="#5-the-resume-check-first-read-second"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “5. The resume: check first, read second”</span></a></div>
 <p><strong>Before you read the user’s resume, run GigAI’s contact-details check on the file.</strong></p>
 <ol>

@@ -163,6 +163,28 @@ writes nothing. A file whose first line is `` is still held to GigAI’s own
 format, and contact lines are removed as before. A refusal names the line number and the rule; on
 the terminal it now also shows that line.</li>
 </ul>
+<div class="sl-heading-wrapper level-h4"><h4 id="for-agents">For agents</h4><a class="sl-anchor-link" href="#for-agents"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “For agents”</span></a></div>
+<ul>
+<li><strong>The assess preview says what would be sent.</strong> <code dir="auto">gigai scout jobs assess URL --json</code> without <code dir="auto">--yes</code>
+(and <code dir="auto">POST /api/postings/assess</code> without <code dir="auto">approve</code>) still makes no model call. Its reply now carries
+<code dir="auto">model_input_summary</code>: the profile (id and label), where the resume comes from (<code dir="auto">profile_view</code> or
+<code dir="auto">master_evidence</code>), whether your answers and stories go with it, the model target and where it runs,
+and whether a posting is fetched from its public board first. It holds ids, labels and counts, never
+a line of your resume or answers. In a terminal the same facts are printed above the y/n question.</li>
+<li><strong>A failed assessment says what happened and what to do.</strong> For <code dir="auto">model_target_unavailable</code>,
+<code dir="auto">model_denied</code>, <code dir="auto">model_unavailable</code>, <code dir="auto">assess_timeout</code>, <code dir="auto">model_output_invalid</code> and
+<code dir="auto">assessment_not_stored</code>, the CLI’s JSON, the API’s error and the job page now also say whether a model
+call started, whether it may have used tokens, that no new assessment was stored, and the next action.</li>
+<li><strong><code dir="auto">gigai scout status</code> no longer says “stopped” from inside a sandbox.</strong> It checks the process and the
+API apart. A running Scout whose address cannot be reached from where the command ran is reported as
+<code dir="auto">process: running (pid N); API: not reachable from here</code> (state <code dir="auto">unreachable</code>), and the JSON has a
+<code dir="auto">process</code> and an <code dir="auto">api</code> block. It says “running” only when the API answers, and it no longer forgets a
+running Scout whose process it could not identify.</li>
+<li><strong>The agent guide names three separate approvals</strong> (your choice to assess, Scout’s own <code dir="auto">--yes</code>, and
+your agent runtime’s own approval), says what one assessment sends, what to check after an
+interruption before retrying, and gives the address of a job’s page. <code dir="auto">gigai agent-skill</code> prints the
+updated instructions: install them again to get them.</li>
+</ul>
 <div class="sl-heading-wrapper level-h4"><h4 id="still-slower-than-one-second">Still slower than one second</h4><a class="sl-anchor-link" href="#still-slower-than-one-second"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “Still slower than one second”</span></a></div>
 <p>Measured on a store of 290,000 postings from 10,000 companies with finished background work. These
 are next in line, not done in this version:</p>
