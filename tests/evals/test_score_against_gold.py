@@ -321,7 +321,30 @@ def test_a_met_row_citing_none_of_the_keys_settling_lines_is_a_wrong_citation_an
     for row in result["result"]["matrix"]:
         row["sources"] = rows.get(row["id"], [])
     out = gold.score_result(key, result, lines)
-    assert [(item["item"], item["cited"]) for item in out["wrong_citation"]] == [("Kubernetes", ["b-zzz"]), (None, ["b-zzz"])]
+    assert [(item["group"], item["item"], item["cited"]) for item in out["wrong_citation"]] == [("must", "Kubernetes", ["b-zzz"]), ("must", None, ["b-zzz"])]
     assert out["wrong_citation"][1]["line"] == 6 and out["fully_correct"]  # advisory: the verdict still stands
     unclear = gold.score_result(key, answer(status={"req-k8s": "unclear"}, ask=()), lines)  # an unclear row is not a met row with a wrong citation
     assert all(item["item"] != "Kubernetes" for item in unclear["wrong_citation"])
+
+
+def test_a_met_nice_to_have_row_is_a_wrong_citation_only_against_key_lines_and_counted_apart_when_the_key_has_none(lines: list[dict[str, Any]]) -> None:
+    key = build_key(lines, cloud="met")["postings"]["01"]
+
+    def rust(sources: list[str], status: str = "met") -> dict[str, Any]:
+        result = answer(status={"req-rust": status}, ask=())
+        for row in result["result"]["matrix"]:
+            row["sources"] = sources if row["id"] == "req-rust" else []
+        return result
+
+    out = gold.score_result(key, rust(["b-zzz"]), lines)  # the key records no lines for the row
+    assert out["wrong_citation"] == [] and [item["cited"] for item in out["no_key_lines"]] == [["b-zzz"]]
+    assert gold.score_result(key, rust([]), lines)["no_key_lines"] == []  # no source cited: nothing to judge
+    assert gold.score_result(key, rust(["b-zzz"], "unclear"), lines)["no_key_lines"] == []  # not met
+    for line in key["lines"]:
+        for entry in line["rows"]:
+            if entry["class"] == "nice_to_have":
+                entry["supporting"] = ["b-aaa"]  # the key records lines for the row
+    wrong = gold.score_result(key, rust(["b-zzz"]), lines)
+    assert [(item["group"], item["item"], item["cited"]) for item in wrong["wrong_citation"]] == [("nice", None, ["b-zzz"])] and wrong["no_key_lines"] == []
+    right = gold.score_result(key, rust(["b-aaa", "b-zzz"]), lines)
+    assert right["wrong_citation"] == [] and right["fully_correct"] == wrong["fully_correct"]  # advisory only
