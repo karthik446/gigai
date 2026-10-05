@@ -63,6 +63,8 @@ GET_REQUESTS: dict[str, str] = {
     "/api/openapi.json": "/api/openapi.json",
     "/llms.txt": "/llms.txt",
     "/api/jobs": f"/api/jobs?url={_q(JOB)}",
+    "/api/jobs/suggestions": f"/api/jobs/suggestions?url={_q(JOB)}",
+    "/api/jobs/brief": f"/api/jobs/brief?url={_q(JOB)}",
     "/api/health": "/api/health",
     "/api/config": "/api/config",
     "/api/setup": "/api/setup",

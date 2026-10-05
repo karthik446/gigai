@@ -12,7 +12,7 @@ posting URL (raw or normalized; a pasted job's ``text:sha256:...`` identity work
 * ``open_questions``: the questions those assessments ask that no stored answer covers yet;
 * the stored tailored resumes (ids and links, not their text);
 * ``job_state`` with the events it accepts next, and the job's application events;
-* ``links``: the calls that act on the job (assess, tailor, PDF, mark applied).
+* ``links``: the calls that act on the job (assess, pick, the agent's brief, suggestions, PDF, mark applied).
 
 0110-039: each ``source: "quick"`` assessment carries ``basis_stale`` (true | false) and, when
 true, ``basis_stale_reason``: whether it was made with what its profile would be assessed with
@@ -410,7 +410,11 @@ class AgentRoutesMixin:
         links: dict[str, object] = {
             "self": _link("GET", f"/api/jobs?url={quote(identity, safe='')}"),
             "assess": _link("POST", "/api/assess", {"job": assess_job}),
-            "tailor": _link("POST", "/api/tailored-resumes", {"job": assess_job}),
+            # 0.1.11 N5 (SPEC 4.4): no model rewrites a resume. The job's resume is picked; an agent reads the brief (two parts) and the suggestions.
+            "pick": _link("POST", "/api/job-resumes/pick", {"job_url": identity, "action": "refresh"}),
+            "brief": _link("GET", f"/api/jobs/brief?url={quote(identity, safe='')}&part=yours"),
+            "brief_posting": _link("GET", f"/api/jobs/brief?url={quote(identity, safe='')}&part=posting"),
+            "suggestions": _link("GET", f"/api/jobs/suggestions?url={quote(identity, safe='')}"),
             "pdf": tailored[0]["links"]["pdf"] if tailored else None,  # type: ignore[index]
             "mark_applied": _link("POST", "/api/applications", {"normalized_url" if source_url else "job_identity": identity, "event_kind": "applied"})
             if "applied" in next_events

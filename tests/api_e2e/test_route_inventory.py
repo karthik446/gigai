@@ -94,6 +94,11 @@ JOURNEYS: dict[Route, str] = {
     Route("POST", "/api/master/selection"): "test_master_api_journey.py",
     Route("PUT", "/api/tailored-resumes/lines"): "test_tailored_resume_line_choice_journey.py",
     Route("PUT", "/api/tailored-resumes"): "test_edited_tailored_resume_journey.py",
+    # 0.1.11 N5: the job routes of the chat step.
+    Route("GET", "/api/jobs/suggestions"): "test_job_suggestions_journey.py",
+    Route("POST", "/api/jobs/suggestions"): "test_job_suggestions_journey.py",
+    Route("POST", "/api/job-resumes/pick"): "test_job_suggestions_journey.py",
+    Route("GET", "/api/jobs/brief"): "test_job_suggestions_journey.py",
     Route("GET", "/api/resumes-folder"): "test_edited_tailored_resume_journey.py",
     Route("PUT", "/api/resumes-folder"): "test_edited_tailored_resume_journey.py",
     Route("GET", "/api/resume-display"): "test_resume_display_journey.py",
