@@ -250,7 +250,7 @@ def test_the_prompt_teaches_the_list_item_class_and_has_no_row_cap() -> None:
 
     assert '"class": "hard|askable|list_item|nice_to_have"' in prompt
     assert "LIST_ITEM: one tool of a list of three or more" in prompt
-    assert "or questions on two or more LIST_ITEM rows -> \"pending_user_answers\"" in prompt
+    assert "Open questions on LIST_ITEM rows, however many, do not change this (rule 7)" in prompt
     assert "one row for every requirement the posting states" in prompt
     assert "1 to 12 rows" not in prompt and "drop NICE_TO_HAVE rows first" not in load_assess_instructions()
     retry = render_assess_prompt(AssessJob("Staff AI Engineer", "Harborlight", "Remote", _POSTING), AssessContext(resume_text="ten years", visa_sponsorship_required=False), "questions has 44 items; at most 40 allowed")

@@ -495,13 +495,14 @@ def test_a_question_may_name_its_row_by_id() -> None:
     assert attempt.ok and attempt.parsed.structured_questions[0].requirement == "Kubernetes (EKS or GKE)"
 
 
-# --- the prompt: nothing of v9 is sent while the shipped file is v8 --------------------------------------------
+# --- the prompt: the shipped v9 template and what a plain context leaves of it ----------------------------------
 
 
-def test_the_v8_prompt_is_the_same_bytes_whatever_the_v9_context_says() -> None:
-    plain = build_assess_context(resume_text="- Built Go services")
-    assert not assessment_core.prompt_reads_ids() and not assessment_core.template_takes(assessment_core.PLACEHOLDER_REQUIREMENTS)
-    assert assessment_core.render_assess_prompt(JOB, _ctx(requirements=LISTED)) == assessment_core.render_assess_prompt(JOB, plain)
+def test_the_shipped_v9_template_takes_the_placeholders_and_a_plain_context_leaves_none_of_them() -> None:
+    plain = assessment_core.render_assess_prompt(JOB, build_assess_context(resume_text="- Built Go services"))
+    assert assessment_core.prompt_reads_ids() and assessment_core.template_takes(assessment_core.PLACEHOLDER_REQUIREMENTS)
+    assert "{{" not in plain and assessment_core.REQUIREMENTS_BLOCK_HEADER not in plain
+    assert assessment_core.REQUIREMENTS_BLOCK_HEADER in assessment_core.render_assess_prompt(JOB, _ctx(requirements=LISTED))
 
 
 V9_PARAGRAPHS = (
@@ -514,13 +515,15 @@ V9_PARAGRAPHS = (
 
 def test_a_template_that_carries_the_v9_placeholders_gets_each_paragraph_only_with_something_to_say(monkeypatch: pytest.MonkeyPatch) -> None:
     shipped = assessment_core.load_assess_instructions()
+    for name in ("id_example", "note_example", "pick_lines", "requirements"):
+        shipped = shipped.replace("{{" + name + "}}", "x")  # the shipped v9 prose, without its own placeholders
     monkeypatch.setattr(assessment_core, "load_assess_instructions", lambda: shipped + V9_PARAGRAPHS)
     assert assessment_core.prompt_reads_ids() and assessment_core.template_takes(assessment_core.PLACEHOLDER_REQUIREMENTS)
     plain = assessment_core.render_assess_prompt(JOB, build_assess_context(resume_text="- Built Go services"))
-    assert all(word not in plain for word in ("IDS:", "NOTES:", "PICK:", "REQUIREMENTS (", "{{id_example}}", "{{pick_lines}}", "{{requirements}}"))
+    assert all(word not in plain for word in ("\n\nIDS:", "\n\nNOTES:", "\n\nPICK:", "REQUIREMENTS (", "{{id_example}}", "{{pick_lines}}", "{{requirements}}"))
     with_ids = assessment_core.render_assess_prompt(JOB, _ctx())
     assert "like <!-- id:b-aaaaaa -->" in with_ids and "PICK: return 20 line ids" in with_ids
-    assert "NOTES:" not in with_ids and "REQUIREMENTS (" not in with_ids
+    assert "\n\nNOTES:" not in with_ids and "REQUIREMENTS (" not in with_ids
     noted = assessment_core.render_assess_prompt(JOB, build_assess_context(resume_text="x", resume_ids=IDS, resume_notes=True, pick_lines=20, requirements=LISTED))
     assert "NOTES: a line may carry <!-- private note: ... -->" in noted
     block = noted.split(assessment_core.REQUIREMENTS_BLOCK_HEADER, 1)[1]

@@ -90,7 +90,7 @@ JOBS = [
     _item("older_prompt", {**MATCHED, "assessment_stale": {"reason": "older_prompt"}}),  # 4 the state says it too: one reason
     _item(None, TAILORED),  # 5 current
     # 6: re-assessed on this page: the response replaced job.quick (no job_state, basis_stale false).
-    {"quick": {"basis_stale": False, "prompt_version": "assess-prompt-v8"}, "assessmentSource": "quick"},
+    {"quick": {"basis_stale": False, "prompt_version": "assess-prompt-v9"}, "assessmentSource": "quick"},
     # 7: the run's own assessment is the one shown (newer than the stored item): the item's flag is not about it.
     {"quick": {"job_state": TAILORED, "basis_stale": True, "basis_stale_reason": "older_prompt"}, "assessmentSource": "run", "row": {"jobState": MATCHED}},
 ]
