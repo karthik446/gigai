@@ -141,18 +141,21 @@ def _pipeline_fired(pending: object, payload: dict[str, object] | None = None, *
         click.echo(fired.line())
 
 
-def _fail(exc: Exception, *, as_json: bool, fallback: str) -> None:
+def _fail(exc: Exception, *, as_json: bool, fallback: str, assess: bool = False) -> None:
     code = getattr(exc, "code", fallback)
+    # 0110-10-13: a failed ASSESSMENT also says whether a model call started, may have used tokens, and what to do next.
+    from .assess_causes import cause_fields, cause_lines
+
     if as_json:
         click.echo(
             json.dumps(
-                {"status": "error", "error": {"code": code, "message": str(exc)}},
+                {"status": "error", "error": {"code": code, "message": str(exc), **(cause_fields(code) if assess else {})}},
                 sort_keys=True,
                 separators=(",", ":"),
             )
         )
         raise click.exceptions.Exit(1)
-    raise click.ClickException(str(exc))
+    raise click.ClickException("\n".join([str(exc), *(cause_lines(code) if assess else ())]))
 
 
 def _ensure_gigai_settings(home_root: Path, *, as_json: bool) -> None:
@@ -852,7 +855,8 @@ def resume_pdf_command(
     if target is not None:
         try:
             current = run_supervisor.status(home_root=home_root, requested_target=target)
-            if current.state == "running" and current.url:
+            # 0110-10-13: a live process whose API did not answer from here (a sandbox) still has its own address.
+            if current.state in ("running", run_supervisor.STATE_UNREACHABLE) and current.url:
                 base, running = current.url, True
         except Exception:  # noqa: BLE001 - no bound project or no state: the default local address
             pass
@@ -1045,7 +1049,13 @@ def stop_command(target_value: Path | None, home_value: Path | None, as_json: bo
 @click.option("--json", "as_json", is_flag=True)
 @_reads_committed
 def status_command(target_value: Path | None, home_value: Path | None, as_json: bool) -> None:
-    """Show whether this project's Scout instance is running, stopped, or crashed."""
+    """Show whether this project's Scout instance is running, stopped, crashed, or not reachable from here.
+
+    The process (the recorded pid) and the API (does it answer from here) are
+    checked apart. A live process whose API did not answer is "unreachable",
+    never "running" and never "stopped": inside an agent sandbox a localhost
+    check can fail while Scout is fine.
+    """
 
     from . import run_supervisor
 
@@ -1076,6 +1086,10 @@ def status_command(target_value: Path | None, home_value: Path | None, as_json: 
             f"crashed: last known pid {current.pid} is no longer running "
             f"(log: {current.log_path}). Run `gigai scout run` to restart it."
         )
+    elif current.state == run_supervisor.STATE_UNREACHABLE:
+        # 0110-10-13: process evidence and API reachability, each said as what it is.
+        for line in _unreachable_lines(current):
+            click.echo(line)
     else:
         click.echo("stopped")
     click.echo(f"Resumes folder: {folder.shown}")
@@ -1086,6 +1100,30 @@ def status_command(target_value: Path | None, home_value: Path | None, as_json: 
             f"The Scout server for {_other_server_label(other)} is running at {other.url} "
             f"(pid {other.pid}); `gigai scout run` stops it when it holds the port this one needs."
         )
+
+
+_API_ERROR_WORDS = {
+    "not_permitted": "the connection was not permitted: this sandbox blocks localhost",
+    "refused": "connection refused",
+    "timeout": "no answer in time",
+    "failed": "the health check failed",
+}
+
+
+def _unreachable_lines(current: object) -> list[str]:
+    """`gigai scout status` for a live process whose API did not answer from here (0110-10-13)."""
+
+    process = (
+        f"process: running (pid {current.pid})"  # type: ignore[attr-defined]
+        if current.process_identity == "scout"  # type: ignore[attr-defined]
+        else f"process: pid {current.pid} is alive (could not confirm it is Scout: its command line is not readable from here)"  # type: ignore[attr-defined]
+    )
+    why = _API_ERROR_WORDS.get(str(current.api_error), str(current.api_error))  # type: ignore[attr-defined]
+    return [
+        f"{process}; API: not reachable from here ({why}) at {current.url}",  # type: ignore[attr-defined]
+        "Inside an agent sandbox a localhost check can fail while Scout is fine. Check from outside the sandbox "
+        f"(or reload the page) before you restart anything. Log: {current.log_path}",  # type: ignore[attr-defined]
+    ]
 
 
 def _contact_cleanup(home_root: Path, target: Path | None) -> dict[str, object]:
@@ -1437,7 +1475,7 @@ def assess_command(
     try:
         response = run_quick_assessment(request, home_root=home_root, target=target)
     except QuickAssessError as exc:
-        _fail(exc, as_json=as_json, fallback="scout_assess_failed")
+        _fail(exc, as_json=as_json, fallback="scout_assess_failed", assess=True)
         return
 
     if as_json:
@@ -1601,7 +1639,7 @@ def answer_command(
             response = run_quick_assessment(request, home_root=home_root, target=target)
         except (QuickAssessError, FindJobsContractError) as exc:
             asked.fire()  # the answer is saved: the jobs that asked are queued whether or not the re-assessment worked
-            _fail(exc, as_json=as_json, fallback="scout_answer_failed")
+            _fail(exc, as_json=as_json, fallback="scout_answer_failed", assess=True)
             return
         reassessed_payload = response.to_json()
 
@@ -2852,6 +2890,7 @@ def jobs_assess_command(
     import sys
 
     from .outbound_check import redact_payload
+    from .assess_preview import summary_lines
     from .posting_search import STATUS_ASK, assess_these, render
 
     home_root = home_value or default_home_root()
@@ -2867,12 +2906,17 @@ def jobs_assess_command(
         response = call(yes)
         asking = not as_json and sys.stdin.isatty()
         if response["status"] == STATUS_ASK and asking and response["counts"]["to_assess"]:  # type: ignore[index]
+            # 0110-10-13: what would be sent and where, before the y/n.
+            click.echo("\n".join(summary_lines(response["model_input_summary"])))  # type: ignore[arg-type]
             if click.confirm(str(response["question"]["text"]).rstrip("?"), default=False):  # type: ignore[index]
                 click.echo("Assessing (one model call per posting; this can take a few minutes)...")
                 response = call(True)
         low = response.get("low_rank")
         if isinstance(low, dict) and asking:
             # 0110-10-02: its own question, default no.
+            if response["status"] != STATUS_ASK and isinstance(response.get("model_input_summary"), dict):
+                # Only the low-ranked ones are asked about: what THEY would send, before this y/n (0110-10-13).
+                click.echo("\n".join(summary_lines(response["model_input_summary"])))  # type: ignore[arg-type]
             if click.confirm(str(low["text"]).rstrip("?"), default=False):
                 click.echo("Assessing (one model call per posting; this can take a few minutes)...")
                 response = call(True, True)

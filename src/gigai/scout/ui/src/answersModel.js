@@ -147,9 +147,56 @@ export function reassessGate({ assessed, states, stale = null, canAssess = true 
   return { enabled: true, reason: `Saves ${filled === 1 ? "your answer" : `your ${filled} answers`} and re-assesses this posting once.` };
 }
 
+// 0110-10-13: a failed assessment with a typed cause (assess_causes.py) carries its own facts and next action:
+// the server's message, whether a model call started and may have used tokens, and what to do next. null for
+// any other error.
+export function assessCauseText(err) {
+  if (!err || typeof err.next_action !== "string") {
+    return null;
+  }
+  const facts = err.model_call_started
+    ? "A model call started and may have used tokens."
+    : "No model call was made and no tokens were used.";
+  const said = String(err.detail || err.message || err.code || "The assessment failed").replace(/\.$/, "");
+  return `${said.charAt(0).toUpperCase()}${said.slice(1)}. ${facts} No new assessment was stored. Next: ${err.next_action}`;
+}
+
+// 0110-10-13: what one assessment sends, said beside the Assess / Re-assess actions (the agent guide's "What one
+// assessment sends"). `target` is the config's default_model_target, `label` its display name.
+const OWN_LOGIN_TARGETS = new Set(["codex_cli", "claude_cli"]);
+export function assessSendsLine(target, label) {
+  const where = target ? ` (${label || target}${OWN_LOGIN_TARGETS.has(target) ? ", your own login" : ""})` : "";
+  return (
+    `What one assessment sends to your model target${where}: the stored posting, your resume with its contact lines removed by pattern ` +
+    "(which can miss an unusual name or contact format), your search preferences, your saved answers and the stories that match."
+  );
+}
+
+// The no-call preview's `model_input_summary` (POST /api/postings/assess without approve) as short lines.
+const RESUME_SOURCE_WORDS = {
+  master_evidence: "the lines of your master resume picked for this posting",
+  profile_view: "this profile's own resume",
+};
+export function assessSummaryLines(summary) {
+  if (!summary || !Array.isArray(summary.profiles)) {
+    return [];
+  }
+  return [
+    ...summary.profiles.map((item) => `Profile ${item.label}: ${RESUME_SOURCE_WORDS[item.resume_source] || item.resume_source}.`),
+    `Saved answers: ${summary.answers_used ? summary.answers_saved : "none"}. Saved stories that can match: ${summary.stories_used ? summary.stories_saved : "none"}.`,
+    summary.public_fetch_needed
+      ? "The posting's text is not stored: it is fetched from its public board first."
+      : "The posting's text is stored: nothing is fetched.",
+  ];
+}
+
 // What a failed re-assessment of an old assessment says. The assessment shown stays: nothing was replaced.
 export function reassessErrorText(err) {
   const code = err && err.code;
+  const typed = assessCauseText(err);
+  if (typed) {
+    return typed;
+  }
   if (code === "posting_requirements_unreadable") {
     return "The posting's requirements could not be read, so it was not assessed again. The assessment shown stays.";
   }

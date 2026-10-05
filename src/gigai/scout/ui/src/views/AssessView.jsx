@@ -1,6 +1,7 @@
 import ResumeWarning from "../components/ResumeWarning.jsx";
 import { useEffect, useState } from "react";
 import { ApiError, postAssess } from "../api.js";
+import { assessCauseText } from "../answersModel.js";
 import Breadcrumb from "../components/Breadcrumb.jsx";
 import { assessPrivacyNote, assessResume, assessingAgainst, canAssess, otherProfiles } from "../assessModel.js";
 import { REQUIREMENTS_UNREADABLE_TEXT, isRequirementsUnreadable } from "../rankModel.js";
@@ -75,6 +76,8 @@ export default function AssessView({ profiles, selectedProfileId, config, config
     } catch (err) {
       if (isRequirementsUnreadable(err)) {
         setUnreadable(true);
+      } else if (assessCauseText(err)) {
+        setError(assessCauseText(err)); // 0110-10-13: a typed cause says its facts and next action
       } else if (err instanceof ApiError && err.status === 504) {
         setError("The model timed out assessing this posting. Try again, or a smaller/faster model target.");
       } else {

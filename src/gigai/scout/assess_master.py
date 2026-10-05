@@ -87,6 +87,10 @@ ASSESS_INPUTS: tuple[str, ...] = (INPUT_VIEW, INPUT_EVIDENCE)
 #: verdict, 6 open questions against 63. ``INPUT_VIEW`` puts every assessment back on the profile's own resume.
 ASSESS_INPUT = INPUT_EVIDENCE
 
+#: 0110-10-13: the names an assessment preview (``assess_preview``) gives the two inputs.
+SOURCE_PROFILE_VIEW = "profile_view"
+SOURCE_MASTER_EVIDENCE = "master_evidence"
+
 CHANGE_LINE = "line_changed"
 CHANGE_NEW_LINE = "new_line"
 #: Evidence drew on a line when they share at least this many words ...
@@ -139,6 +143,28 @@ def reads_evidence(home_root: Path, profile: object) -> bool:
     return ASSESS_INPUT == INPUT_EVIDENCE and not detached(home_root, profile)
 
 
+def _evidence_master(home_root: Path, target: Path, profile: object | None, resolved: object | None) -> object | None:
+    """The stored master an assessment of ``profile`` reads the evidence view of, or ``None``: it reads the profile's resume."""
+
+    if ASSESS_INPUT != INPUT_EVIDENCE or profile is None:
+        return None
+    from .tailor_master import stored_master
+
+    stored = stored_master(home_root, target, resolved=resolved)
+    return stored if stored is not None and reads_evidence(home_root, profile) else None
+
+
+def resume_source(*, home_root: Path, target: Path, profile: object | None, resolved: object | None = None) -> str:
+    """What the prompt's RESUME is for an assessment of ``profile``, by name, without building it (0110-10-13).
+
+    ``master_evidence``: the evidence view of the master resume, picked per
+    posting. ``profile_view``: the profile's own resume. The same gate as
+    :func:`assess_input`, so the no-call preview names what the call reads.
+    """
+
+    return SOURCE_MASTER_EVIDENCE if _evidence_master(home_root, target, profile, resolved) is not None else SOURCE_PROFILE_VIEW
+
+
 def assess_input(
     *, home_root: Path, target: Path, profile: object | None, title: str, posting_text: str, company: str = "", location: str = "",
     resolved: object | None = None, today: date | None = None,
@@ -151,12 +177,8 @@ def assess_input(
     its selection shows, else its titles.
     """
 
-    if ASSESS_INPUT != INPUT_EVIDENCE or profile is None:
-        return None
-    from .tailor_master import stored_master
-
-    stored = stored_master(home_root, target, resolved=resolved)
-    if stored is None or not reads_evidence(home_root, profile):
+    stored = _evidence_master(home_root, target, profile, resolved)
+    if stored is None:
         return None
     selection = getattr(profile, "master_selection", None)
     prior = profile_prior(
@@ -495,6 +517,8 @@ __all__ = [
     "ResumeChange",
     "ResumeCheck",
     "ResumeLines",
+    "SOURCE_MASTER_EVIDENCE",
+    "SOURCE_PROFILE_VIEW",
     "assess_input",
     "evidence_text",
     "master_lines",
@@ -502,4 +526,5 @@ __all__ = [
     "reads_evidence",
     "resume_changes",
     "resume_lines",
+    "resume_source",
 ]

@@ -406,6 +406,15 @@ _POSTINGS_ASSESS_EXAMPLE: dict[str, object] = {
         "text": "Assess 1 posting (Staff Engineer 1)? ~1 calls, ~20k tokens",
         "yes": {"api": {"method": "POST", "path": "/api/postings/assess", "body": {"approve": True, "jobs": [_JOB_URL]}}},
     },
+    # 0110-10-13: what the postings asked about would send, by category; never a line of the user's text.
+    "model_input_summary": {
+        "schema_version": "scout-assess-input:1", "postings": 1, "model_calls": 1, "model_target": "codex_cli", "model_target_runs": "own_login",
+        "profiles": [{"profile_id": "prof_1", "label": "Staff Engineer", "postings": 1, "resume_source": "master_evidence"}],
+        "sends": ["stored_posting", "resume", "search_preferences", "answers", "stories"],
+        "search_preferences": ["sponsorship", "countries", "location", "titles", "work_mode"], "contact_lines": "removed_by_pattern",
+        "answers_used": True, "answers_saved": 12, "stories_used": True, "stories_saved": 3,
+        "public_fetch_needed": False, "public_fetch_postings": 0,
+    },
     "counts": {"selected": 1, "to_assess": 1, "already_current": 0, "not_found": 0, "low_rank_skipped": 0},
     "low_rank": None,
     "not_found": [], "approval": None, "assessed": None,
@@ -894,7 +903,13 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
         schema_version="scout-assess-response:1", params=(*_JOB_INPUT, _b("preferences", "object", "Override the effective preferences."), _b("origin", "string", "quick_assess | job_page.")),
         request_example={"job": {"job_url": _JOB_URL}},
         errors=(*_ROW_ERRORS, (422, "job_input_invalid"), (502, "job_fetch_failed"), (504, "assess_timeout"), *_MODEL_ERRORS, (500, "assessment_not_stored"), _NO_TARGET),
-        description="Synchronous: blocks for the model call (and a public fetch for job_url). Stores the assessment; read it back with GET /api/jobs?url=. " + _WEIGHTS_NOTE + " " + _BASIS_NOTE,
+        description=(
+            "Synchronous: blocks for the model call (and a public fetch for job_url). Stores the assessment; read it back with GET /api/jobs?url=. "
+            "An error whose code is model_target_unavailable, model_denied, model_unavailable, assess_timeout, model_output_invalid or "
+            "assessment_not_stored also carries `model_call_started`, `may_have_used_tokens`, `fresh_assessment_stored` (always false) and "
+            "`next_action`. This route does not ask first: POST /api/postings/assess without `approve` is the no-call preview of what an "
+            "assessment sends. " + _WEIGHTS_NOTE + " " + _BASIS_NOTE
+        ),
     ),
     RouteSpec(
         "GET", "/api/assessments", "Stored quick assessments, newest first, each with its job_state.", "read", "none",
@@ -2009,13 +2024,21 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
         description=(
             "What a run's assess step did, without a run. Nothing is assessed without approval: with no `approve: true` the answer "
             "is `status: \"ask\"` with `question` (how many would be assessed, per profile, and the estimate from the recorded model "
-            "calls; `question.yes.api` is the call that approves) and no model call is made. With `approve: true` the batch is "
+            "calls; `question.yes.api` is the call that approves) and no model call is made. `model_input_summary` then says what "
+            "the postings asked about would send and where: per profile its id, label and `resume_source` (`profile_view` | "
+            "`master_evidence`), whether saved answers and stories go with it, the `model_target` and where it runs, and whether a "
+            "posting is fetched from its public board first; ids, labels and counts, never a line of the user's text (null once a "
+            "batch ran). `approve: true` is Scout's own approval: it does not replace the user's choice, or an agent runtime's own "
+            "approval of the call. With `approve: true` the batch is "
             "recorded as approved (`approval`: its id, who approved, how many), runs as live work (the pipeline and the rank lane "
             "start nothing meanwhile; a second batch answers 409 assess_batch_running) and each posting is assessed for its best "
             "profile through the job page's own path, from the posting text already stored (a posting with none has its description "
             "fetched first: one request for it alone, counted in `assessed.fetched_on_demand`). The results are "
             "stored like any assessment, so GET /api/postings, GET /api/new and GET /api/jobs show them. `status` is then "
-            "`assessed`; `assessed.failed` lists what could not be assessed, by error code and, for a missing description, a `reason`. A posting whose assessment is current "
+            "`assessed`; `assessed.failed` lists what could not be assessed, by error code and, for a missing description, a `reason`; "
+            "a typed cause (model_target_unavailable, model_denied, model_unavailable, assess_timeout, model_output_invalid, "
+            "assessment_not_stored) also carries `model_call_started`, `may_have_used_tokens`, `fresh_assessment_stored` and "
+            "`next_action`. A posting whose assessment is current "
             "is left out (`counts.already_current`) unless `again`; `not_found` lists named postings that are not in the stored "
             "postings. `nothing_to_assess` when nothing is left. A posting whose rank score is below `fit.assess_min_rank` (50; one "
             "not ranked yet is not) is left out of the batch and counted (`counts.low_rank_skipped`); `low_rank` is then the "

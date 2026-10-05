@@ -103,6 +103,13 @@ for the user: each job's tailored resume (markdown) and the PDFs without a heade
 resumes folder, `~/Documents/GigAI/resumes` unless the user chose another (`gigai scout status`
 shows it). That folder never holds a name or contact details.
 
+`--no-browser` is a choice, not a requirement: without it Scout opens the browser itself. When
+the user wants to look at something, give them the address the command printed, or one job's
+page: that address plus `#/jobs/` and the posting's URL percent-encoded. Inside a restricted
+sandbox `gigai scout status` may answer `unreachable` (`process: running (pid N); API: not
+reachable from here`). That is the sandbox blocking localhost, not Scout stopping: do not
+restart it; check from outside the sandbox or ask the user to reload the page.
+
 ## 5. The resume: check first, read second
 
 **Before you read the user's resume, run GigAI's contact-details check on the file.**

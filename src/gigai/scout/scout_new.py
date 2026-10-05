@@ -96,6 +96,7 @@ import time
 from ..canonical import digest_imported_bytes
 from . import fit as fit_rules
 from . import postings
+from .assess_causes import cause_fields, failure_lines
 from .data_labels import ENVELOPE_KEY, PUBLIC_UNTRUSTED, UNTRUSTED_TEXT_RULE, USER_PRIVATE, assert_not_mixed, labels_envelope
 from .pipeline.busy import LiveBatch, assess_batch
 from .pipeline.store import MODEL_STEPS, PipelineStore, PipelineStoreError, PostingRecord, pipeline_path
@@ -555,6 +556,7 @@ def _assess(
             failure: dict[str, object] = {"job_identity": job, "profile_id": profile_id, "error_code": code}
             if reason is not None:
                 failure["reason"] = reason
+            failure.update(cause_fields(code))  # 0110-10-13: did a model call start, may it have used tokens, what next
             failed.append(failure)
     return {
         "requested": len(pairs), "assessed": len(pairs) - len(failed), "failed": failed, "stopped": stop[0] if stop else None,
@@ -1279,11 +1281,13 @@ def render(response: Mapping[str, object]) -> str:
         lines.append(f"Assessed {assessed['assessed']} of {assessed['requested']}." + _fetched_note(assessed))
         for item in assessed["failed"]:  # type: ignore[union-attr]
             lines.append(f"  not assessed ({_failure_code(item)}): {item['job_identity']}")
+        lines.extend(failure_lines(assessed["failed"]))  # 0110-10-13
     reassessed = response.get("reassessed")
     if isinstance(reassessed, Mapping):
         lines.append(f"Re-assessed {reassessed['assessed']} of {reassessed['requested']}." + _fetched_note(reassessed))
         for item in reassessed["failed"]:  # type: ignore[union-attr]
             lines.append(f"  not re-assessed ({_failure_code(item)}): {item['job_identity']}")
+        lines.extend(failure_lines(reassessed["failed"]))
     question = response.get("question")
     if isinstance(question, Mapping):
         lines.append(str(question["text"]))

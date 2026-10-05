@@ -314,8 +314,10 @@ def _pid_is_our_server(pid: int) -> bool:
     if not _process_is_alive(pid):
         return False
     command_line = _command_line_for_pid(pid)
-    if command_line is None:
-        return False
+    return command_line is not None and _is_server_command_line(command_line)
+
+
+def _is_server_command_line(command_line: str) -> bool:
     if _SERVER_MODULE_MARKER in command_line:
         return True
     return all(marker in command_line for marker in _FOREGROUND_MARKERS)
@@ -354,6 +356,31 @@ def _health_ok(port: int, *, timeout: float = 1.0) -> bool:
             return response.status == 200
     except (URLError, OSError, TimeoutError):
         return False
+
+
+#: 0110-10-13: why the health check of ``status`` got no answer. ``not_permitted`` is what a sandbox that blocks
+#: localhost answers (EPERM on connect); ``refused`` is no listener on the port as seen from here.
+API_NOT_PERMITTED = "not_permitted"
+API_REFUSED = "refused"
+API_TIMEOUT = "timeout"
+API_FAILED = "failed"
+
+
+def _health_probe(port: int, *, timeout: float = 1.0) -> str | None:
+    """``None`` when ``/api/health`` answers 200 on ``port``; else why not, as one of the ``API_*`` names."""
+
+    try:
+        with urlopen(f"http://127.0.0.1:{port}/api/health", timeout=timeout) as response:
+            return None if response.status == 200 else API_FAILED
+    except (URLError, OSError, TimeoutError) as exc:
+        reason = exc.reason if isinstance(exc, URLError) and isinstance(exc.reason, BaseException) else exc
+        if isinstance(reason, ConnectionRefusedError):
+            return API_REFUSED
+        if isinstance(reason, PermissionError):
+            return API_NOT_PERMITTED
+        if isinstance(reason, TimeoutError):
+            return API_TIMEOUT
+        return API_FAILED
 
 
 def _port_is_free(port: int) -> bool:
@@ -882,9 +909,30 @@ def stop(*, home_root: Path, requested_target: Path | None) -> bool:
     return is_ours
 
 
+#: 0110-10-13: who the recorded pid is. ``unknown``: alive, but its command line cannot be read from here (a sandbox
+#: that hides the process list), so it is neither confirmed as Scout nor shown to be something else.
+IDENTITY_SCOUT = "scout"
+IDENTITY_UNKNOWN = "unknown"
+STATE_RUNNING = "running"
+STATE_STOPPED = "stopped"
+STATE_CRASHED = "crashed"
+#: The recorded process is alive and its API did not answer from here. Never "running": a pid and a run-state file
+#: do not prove a healthy server. Never "stopped": not reaching the socket does not prove there is none.
+STATE_UNREACHABLE = "unreachable"
+
+
 @dataclass(frozen=True)
 class ScoutStatus:
-    state: str  # "running" | "stopped" | "crashed"
+    """What ``gigai scout status`` knows, with the two kinds of evidence kept apart (0110-10-13).
+
+    PROCESS evidence is the run-state file (``recorded``), whether its pid is
+    alive and whether that pid is Scout. API evidence is whether
+    ``/api/health`` answered on the recorded port from HERE. ``state`` is
+    ``running`` only when both hold; a live process whose API did not answer
+    is ``unreachable``, with ``api_error`` saying how the check failed.
+    """
+
+    state: str  # "running" | "stopped" | "crashed" | "unreachable"
     project_id: str
     url: str | None = None
     pid: int | None = None
@@ -897,6 +945,11 @@ class ScoutStatus:
     # Live Scout servers recorded for other projects (uat-bug-019). Reported
     # only: ``status`` never stops anything.
     other_servers: tuple[OtherScoutServer, ...] = ()
+    # 0110-10-13: process evidence, apart from API reachability. ``None``: not known / not checked.
+    process_alive: bool | None = None
+    process_identity: str | None = None
+    api_reachable: bool | None = None
+    api_error: str | None = None
 
     def to_json(self) -> dict[str, object]:
         return {
@@ -908,6 +961,10 @@ class ScoutStatus:
             "started_at": self.started_at,
             "outdated": self.outdated,
             "other_servers": [other.to_json() for other in self.other_servers],
+            "process": {
+                "recorded": self.pid is not None, "pid": self.pid, "alive": self.process_alive, "identity": self.process_identity,
+            },
+            "api": {"checked": self.api_reachable is not None, "reachable": self.api_reachable, "url": self.url, "error": self.api_error},
         }
 
 
@@ -918,25 +975,31 @@ def status(*, home_root: Path, requested_target: Path | None) -> ScoutStatus:
     other_servers = tuple(other for _path, other in _other_live_servers(home_root, project_id))
     saved = _read_state(home_root, project_id)
     if saved is None:
-        return ScoutStatus(state="stopped", project_id=project_id, other_servers=other_servers)
+        return ScoutStatus(state=STATE_STOPPED, project_id=project_id, other_servers=other_servers)
     if not _process_is_alive(saved.pid):
         return ScoutStatus(
-            state="crashed",
+            state=STATE_CRASHED,
             project_id=project_id,
             url=saved.url,
             pid=saved.pid,
             log_path=saved.log_path,
             started_at=saved.started_at,
             other_servers=other_servers,
+            process_alive=False,
         )
-    if not _pid_is_our_server(saved.pid):
+    command_line = _command_line_for_pid(saved.pid)
+    if command_line is not None and not _is_server_command_line(command_line):
         # The pid is alive but isn't our server -- the OS reused it for an
         # unrelated process since we last held it. Clean up the stale state
         # rather than reporting "running" (P1 #9, pr37-review-findings.md).
         _remove_state(home_root, project_id)
-        return ScoutStatus(state="stopped", project_id=project_id, other_servers=other_servers)
+        return ScoutStatus(state=STATE_STOPPED, project_id=project_id, other_servers=other_servers)
+    # 0110-10-13: a pid whose command line cannot be read from here (a sandbox that hides the process list) is NOT
+    # shown to be a stranger: the run state stays, and what is known is said. Whether the server is healthy is the
+    # API's to say, and that is checked apart from the process.
+    api_error = _health_probe(saved.port)
     return ScoutStatus(
-        state="running",
+        state=STATE_RUNNING if api_error is None else STATE_UNREACHABLE,
         project_id=project_id,
         url=saved.url,
         pid=saved.pid,
@@ -945,6 +1008,10 @@ def status(*, home_root: Path, requested_target: Path | None) -> ScoutStatus:
         outdated=saved.is_outdated(),
         outdated_version=saved.gigai_version,
         other_servers=other_servers,
+        process_alive=True,
+        process_identity=IDENTITY_SCOUT if command_line is not None else IDENTITY_UNKNOWN,
+        api_reachable=api_error is None,
+        api_error=api_error,
     )
 
 

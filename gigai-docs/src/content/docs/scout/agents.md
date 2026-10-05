@@ -85,6 +85,92 @@ requirements are met, and the rank, for example `Matched · 9 of 11 requirements
 A plain `gigai scout new` moves the "new since" mark to now. `--peek` and `--profile ID` look
 without moving it.
 
+### Assess one posting, or the ones you pick
+
+`gigai scout new` assesses what is new. For one posting, or the ones a filter selects, use
+`gigai scout jobs assess`. It asks first too:
+
+```sh
+gigai scout jobs assess URL --json                              # no model call: the question, the estimate, what would be sent
+gigai scout jobs assess URL --yes --actor agent --json          # after your yes: one model call per posting
+gigai scout jobs assess URL --again --yes --actor agent --json  # again, although its assessment is current
+```
+
+> **What one assessment sends.** One assessment sends to your model target: the stored posting;
+> your resume (the lines of your master resume picked for the posting, or the profile's own
+> resume) with its contact lines removed by pattern; your search preferences (sponsorship,
+> countries, location, titles, work mode); your saved answers; and the saved stories that match
+> the posting. Pattern removal can miss an unusual name or contact format, so it is not a
+> guarantee. A profile id is not contact data. With codex_cli or claude_cli the model target is
+> your own login.
+
+**The preview says it exactly.** Without `--yes` the reply is `status: "ask"`: no model call was
+made, and `model_input_summary` says what the postings asked about would send and where. For
+each profile: its id and label, and `resume_source` (`master_evidence`: the lines of your master
+resume picked for the posting; `profile_view`: that profile's own resume). Then `answers_used`
+and `stories_used`, the `model_target` and where it runs (`model_target_runs`: `local`,
+`own_login` or `api_key`), and `public_fetch_needed` (a posting with no stored text is fetched
+from its public board first). It holds ids, labels and counts, never a line of your resume or
+answers. The agent shows you that summary and the estimate, and waits for your word. Over the
+API the same reply comes from `POST /api/postings/assess` without `approve`.
+
+**Three approvals, kept apart.** Three approvals are separate: the user's choice to assess; Scout's
+own --yes (approve: true over the API); and the agent runtime's own sandbox or model-provider
+approval. --yes does not bypass the runtime's policy, and an API or UI route is not a workaround: an
+agent whose runtime refuses the command quotes the refusal and asks the user for the exact missing
+authorisation.
+
+The third one is the one Scout cannot see. Claude Code, Codex and other agent runtimes have
+their own rules for what a command may send and where, and they can refuse
+`gigai scout jobs assess ... --yes` before `gigai` even starts. Scout returns no error then,
+because it never ran. The agent should not stop silently and should not try another route. It
+tells you what its runtime said, word for word, and asks for exactly what is missing, for
+example: "My runtime did not let me run `gigai scout jobs assess URL --again --yes`: it sends
+the stored posting and your resume's evidence view to `codex_cli`, your own Codex login. Do you
+authorise that?" Your yes there is the runtime's approval; `--yes` is Scout's.
+
+**When an assessment fails.** A failure Scout controls has a typed cause. In the JSON, beside
+the code (`error.code` for `gigai scout assess`, `error_code` on an item of `assessed.failed`
+for a batch, `error.code` over the API), four fields say what happened: `model_call_started`,
+`may_have_used_tokens`, `fresh_assessment_stored` (always `false`: the assessment shown, if
+any, is the earlier one) and `next_action`.
+
+| Cause | Model call started | May have used tokens | Next action |
+| --- | --- | --- | --- |
+| `model_target_unavailable` | no | no | Fix the model target, then assess again: `gigai models` shows what is configured and `gigai setup` changes it (a codex_cli or claude_cli target needs that command on PATH and logged in). |
+| `model_denied` | no | no | GigAI's own settings refused this call before anything was sent. Ask the user to allow the model target in `gigai setup` or to pick another one; do not retry unchanged. |
+| `model_unavailable` | yes | yes | The model target did not answer. Check that it is running and logged in (`gigai models`), then assess again; that is one more model call. |
+| `assess_timeout` | yes | yes | The model call ran out of time. Check `assessed_at` for this job first; if it is unchanged, assess again (one more model call) or pick a faster model target. |
+| `model_output_invalid` | yes | yes | The model answered twice with something that is not an assessment. Assess again (one more model call) or pick another model target. |
+| `assessment_not_stored` | yes | yes | The model answered but the result could not be written. Check free disk space and that the GigAI home is writable, then assess again; that is one more model call. |
+
+`assess_timeout` is the timeout. Any other code (a bad URL, a missing profile) has no model
+call behind it, and its message says what is wrong.
+
+**After an interruption, look before you retry.** A timeout, a killed command or a lost
+connection does not say whether the assessment finished. Read the posting's row:
+
+```sh
+gigai scout jobs list --query "WORDS" --json     # the row: assessment.assessed_at and stale_reason
+```
+
+A newer `assessment.assessed_at` with `stale_reason` null means it finished: report the
+verdict, and do not assess again (that would be a second model call). An unchanged
+`assessed_at`, or a `stale_reason` that is still there, means it did not: say so, never "done",
+and assess again only on your yes.
+
+**The browser, and a sandbox.** `gigai scout run` starts Scout and opens the browser; it prints
+the address, `http://127.0.0.1:8765` unless you gave another port. One job's page is that
+address plus `#/jobs/` and the posting's URL percent-encoded, for example
+`http://127.0.0.1:8765/#/jobs/https%3A%2F%2Fjobs.lever.co%2Fnorthwind%2F1a2b3c`: give the user
+that link when they want to look at a job. `--no-browser` is a choice (an agent session with no
+display), not a requirement. Inside a restricted agent sandbox a check of localhost can fail
+while Scout is running, and the process list can be hidden. `gigai scout status` keeps the two
+apart: it says `process: running (pid N); API: not reachable from here` (state `unreachable`),
+never just "stopped" or "running". Do not restart Scout on that alone, and do not read a "port
+in use" from a sandboxed `gigai scout run` as a second server: check from outside the sandbox,
+or ask the user to reload the page.
+
 ### 2. Public and private are separate calls
 
 `gigai scout new` never mixes text written by strangers with text about you. The default reply
@@ -865,7 +951,7 @@ See [Configuration](../configuration/) for the starter `find-jobs.json` and wher
 
 ```bash
 gigai scout run --json     # installs/activates if needed, starts the API + UI, opens a browser tab
-gigai scout status --json  # running / stopped / crashed, with url/pid/log path
+gigai scout status --json  # running / stopped / crashed / unreachable, with url/pid/log path
 gigai scout stop --json    # stop it; safe to rerun
 ```
 
