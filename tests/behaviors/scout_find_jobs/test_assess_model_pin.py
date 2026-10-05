@@ -47,7 +47,7 @@ CODEX_NOTICE = (
     "Assessed with the Codex CLI (model not reported; measured with gpt-6-astra: accurate on 10 of 15 jobs, mostly from unnecessary "
     "questions). Claude Code with claude-opus-5-5 reached 14 of 15."
 )
-SONNET_NOTICE = "Assessed with claude-sonnet-5-5: accurate on 12 of 15 jobs in GigAI's accuracy run; claude-opus-5-5 reached 14 of 15."
+SONNET_NOTICE = "Assessed with claude-sonnet-5-5: accurate on 12 of 15 jobs in GigAI's accuracy run, mostly from unnecessary questions; claude-opus-5-5 reached 14 of 15."
 NOTICE = "Assessed with {used}. GigAI's accuracy results are for {evaluated}; this assessment may be less accurate."
 
 

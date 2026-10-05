@@ -38,7 +38,7 @@ def _scored(monkeypatch: pytest.MonkeyPatch, *, opus: int, sonnet: int, astra: i
         "RESULTS",
         (
             ModelResult("claude_cli", OPUS, opus),
-            ModelResult("claude_cli", SONNET, sonnet),
+            ModelResult("claude_cli", SONNET, sonnet, "mostly from unnecessary questions"),
             ModelResult("codex_cli", "gpt-6-astra", astra, "mostly from unnecessary questions"),
         ),
     )
@@ -51,7 +51,7 @@ def test_the_reference_carries_no_notice_and_another_measured_model_carries_both
     assert model_notice("claude_cli", OPUS) is None  # the reference
     sonnet = model_notice("claude_cli", SONNET)
     assert sonnet is not None
-    assert sonnet.text == f"Assessed with {SONNET}: accurate on 12 of 15 jobs in GigAI's accuracy run; {OPUS} reached 14 of 15."
+    assert sonnet.text == f"Assessed with {SONNET}: accurate on 12 of 15 jobs in GigAI's accuracy run, mostly from unnecessary questions; {OPUS} reached 14 of 15."
     assert sonnet.to_json()["accurate"] == 12 and sonnet.to_json()["reference_accurate"] == 14 and sonnet.to_json()["of"] == 15
     assert model_state("claude_cli", SONNET) == MEETS  # the bar is 12: the notice does not depend on it
     # not measured: today's plain notice; an operator-named model that is not in the table is the same
@@ -95,7 +95,7 @@ def test_a_reference_below_the_bar_carries_a_notice_and_one_at_the_bar_does_not(
 def test_the_results_page_rows_come_from_the_table() -> None:
     assert [(r["target"], r["model"], r["accurate"], r["of"], r["state"], r["reference"], r["why"]) for r in results_rows()] == [
         ("claude_cli", OPUS, 14, 15, MEETS, True, ""),
-        ("claude_cli", SONNET, 12, 15, MEETS, False, ""),
+        ("claude_cli", SONNET, 12, 15, MEETS, False, "mostly from unnecessary questions"),
         ("codex_cli", "gpt-6-astra", 10, 15, BELOW, True, "mostly from unnecessary questions"),
     ]
 

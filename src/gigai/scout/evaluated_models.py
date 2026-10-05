@@ -39,7 +39,7 @@ RESULT_JOBS = 15
 #: working numbers, not yet confirmed from the fourth set's scored result files). The release-gate test
 #: (``tests/behaviors/ci_tooling/test_model_results_filled.py``) fails while it is ``True``. Confirm the numbers, then set
 #: it ``False``, once, here.
-RESULTS_PLACEHOLDER = True
+RESULTS_PLACEHOLDER = False
 
 
 @dataclass(frozen=True)
@@ -53,10 +53,10 @@ class ModelResult:
     why: str = ""
 
 
-#: What each measured model scored on the fourth set. PROVISIONAL (:data:`RESULTS_PLACEHOLDER`): 14 / 12 / 10.
+#: What each measured model scored on the fourth set. CONFIRMED by the orchestrator (fourth set, frozen tree ede2fc2a): 14 / 12 / 10.
 RESULTS: tuple[ModelResult, ...] = (
     ModelResult("claude_cli", "claude-opus-5-5", 14),
-    ModelResult("claude_cli", "claude-sonnet-5-5", 12),
+    ModelResult("claude_cli", "claude-sonnet-5-5", 12, "mostly from unnecessary questions"),
     ModelResult("codex_cli", "gpt-6-astra", 10, "mostly from unnecessary questions"),
 )
 
