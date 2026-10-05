@@ -4,7 +4,8 @@ The master resume is also a file in the resumes folder (``master.md``),
 written again after every change of the master. The user may edit that file;
 GigAI never reads it by itself. This command is the explicit import
 (``master_file.sync``): the file becomes the master's next revision, ids are
-kept, contact data is refused, and a master that changed in Scout since the
+kept, contact data is refused (a link in a heading goes and the heading
+keeps its words, which is said), and a master that changed in Scout since the
 file was written is not overwritten without ``--revision``. Local: no model,
 no network.
 """
@@ -16,7 +17,7 @@ from pathlib import Path
 import click
 
 from ..setup import default_home_root
-from .master_cli import _emit, _errors, _fail, _n, _options, _target, master_group
+from .master_cli import _emit, _errors, _fail, _n, _options, _target, echo_contact_removed, master_group
 
 _RESTORE = "gigai scout resume master add --restore"
 #: How many changed lines the text output lists per kind before it says how many more there are (--json lists all).
@@ -58,6 +59,10 @@ def master_sync_command(revision: int | None, actor: str, target_value: Path | N
     changed in Scout or through your agent since the file was written
     (revision_conflict), unless you pass --revision N to import the file as
     it is. When master.md is missing, this writes it.
+
+    A link in a heading is not refused: the link goes, the heading keeps its
+    words, and this says so. A heading that is only a link is refused (give
+    the project a name).
     """
 
     from .master_file import SYNC_IMPORTED, SYNC_WRITTEN, sync, write_line
@@ -101,6 +106,7 @@ def master_sync_command(revision: int | None, actor: str, target_value: Path | N
     _echo_lines("Added", result.added)
     _echo_lines("Changed", result.changed)
     _echo_lines("Retired", result.retired, restore=True)
+    echo_contact_removed(result.contact_removed)
     if file.get("error") or file.get("not_imported"):
         click.echo(write_line(file))
     elif file.get("written"):

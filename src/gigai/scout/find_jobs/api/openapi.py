@@ -1361,6 +1361,7 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
             "ids": {"kept": 3, "assigned": 1, "restored": 0},
             "file": {**_MASTER_FILE_WRITTEN, "revision": 4},
             "profiles": {"synced": [], "offers": []},
+            "contact_removed": None,
             "master": {**_MASTER_EXAMPLE, "revision": 4, "revisions": 4},
         },
         schema_version="scout-master:1",
@@ -1381,7 +1382,9 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
             "holds), or written (master.md was missing or held an earlier revision untouched: it was written, nothing was imported). A line the file no "
             "longer holds is retired and can be restored (PUT /api/master/lines {id, use: \"restore\"}). Nothing is imported, and the file is left as it "
             "is, when: it does not read as a master (422 master_markdown_invalid names the line, never its text); it holds a name line, an email, a phone "
-            "number, a link or an address (422 personal_info_refused, by line number and kind: GigAI stores no contact details); the master changed "
+            "number, a link or an address (422 personal_info_refused, by line number and kind: GigAI stores no contact details; a link in an entry's "
+            "heading or title line is not refused: the link goes, the heading keeps its words, and `contact_removed.headings` lists it as "
+            "{kind: link, line, heading, where, message}, never the address; a heading that is only a link is 422 master_markdown_invalid); the master changed "
             "since GigAI wrote the file (409 revision_conflict with `error.current`: importing would retire what was added since; send `revision` = "
             "the current revision to import the file as it is); or GigAI never wrote this master.md (422 revision_required with `error.current`: the "
             "same `revision` imports it). After an import master.md is written again with every id, unless it was saved again meanwhile. `profiles` is "

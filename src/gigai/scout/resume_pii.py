@@ -11,6 +11,10 @@ withholds from a model (the name line, the header's contact lines, contact-only 
 emails, phone numbers and links inside other lines), so the stored text is the text a model
 may see, and counts what it removed by kind (counts only, never a value). It cannot catch
 everything (a name inside a sentence, an unusual layout): the README says so.
+
+0.1.10.11: an import (``headings=True``) first takes the links out of the lines that name an
+entry and keeps their words (``resume_privacy.heading_links``, the one rule for a link in a
+heading); the strip then runs on what is left, unchanged.
 """
 
 from __future__ import annotations
@@ -74,6 +78,9 @@ class ContactStrip:
     #: The removed name's words, lowercased: in memory only (the import keeps a file name holding
     #: them out of the stored label); never stored, logged or returned.
     name_words: frozenset[str] = frozenset()
+    #: 0.1.10.11: a link taken out of a heading that is KEPT: ``(file line, the heading's words as they are
+    #: stored, whether the link stood on a line under the heading)``; never the address.
+    headings: tuple[tuple[int, str, bool], ...] = ()
 
     @property
     def changed(self) -> bool:
@@ -97,27 +104,47 @@ def _kinds(text: str) -> list[str]:
     return found
 
 
-def strip_contact_lines(text: str) -> ContactStrip:
+def strip_contact_lines(text: str, *, headings: bool = False) -> ContactStrip:
     """``text`` without the name and contact details ``model_resume`` withholds; unchanged text when none.
 
     Pure: no I/O, no model, never logs.  ``removed`` maps a kind (``REMOVED_KINDS``) to the number
     of lines that lost one: the name line, each withheld contact line, each kept line that had an
-    email, phone number or link taken out."""
+    email, phone number or link taken out.
 
-    from .resume_privacy import _name_then_headline, _name_tokens_of, is_name_line, model_resume
+    ``headings`` (0.1.10.11, what an import passes): a link in a line that names an entry goes and the
+    line's words stay (``resume_privacy.heading_links``; ``ContactStrip.headings`` says where), before
+    the strip runs on the rest. ``resume_privacy.HeadingOnlyLink`` when a heading is only a link."""
 
+    from .resume_privacy import _name_then_headline, _name_tokens_of, heading_links, heading_words, is_name_line, model_resume
+
+    links = ()
+    if headings:
+        text, links = heading_links(text)
     stripped = model_resume(text)
-    if stripped.text == text:
+    if stripped.text == text and not links:
         return ContactStrip(text)
     removed: dict[str, int] = {}
-    for _number, kind in _removed_lines(text, stripped):
+    lost_a_link: set[int] = set()
+    for number, kind in _removed_lines(text, stripped):
         removed[kind] = removed.get(kind, 0) + 1
-    ordered = {kind: removed[kind] for kind in REMOVED_KINDS if kind in removed}
+        if kind == "links":
+            lost_a_link.add(number)
     numbered = [line.strip() for line in text.splitlines() if line.strip()]
+    said: list[tuple[int, str, bool]] = []
+    if links:
+        number_of = {index: number for number, index in enumerate((index for index, line in enumerate(text.splitlines(), 1) if line.strip()), 1)}
+        kept = dict(stripped.lines)
+        for link in links:
+            if number_of[link.line] not in lost_a_link:
+                removed["links"] = removed.get("links", 0) + 1  # the line lost a link, as it always counted
+            if number_of[link.line] in kept:
+                # The words as they are stored: what the strip took from the heading (an email, the name's words) is not said.
+                said.append((link.line, heading_words(kept.get(number_of[link.head], "")), link.under))
+    ordered = {kind: removed[kind] for kind in REMOVED_KINDS if kind in removed}
     first = numbered[0] if numbered else ""
     split = _name_then_headline(first) if first else None
     words = _name_tokens_of(first) if first and is_name_line(first) else (_name_tokens_of(split[0]) if split else set())
-    return ContactStrip(stripped.text, ordered or {"other": 1}, frozenset(words))
+    return ContactStrip(stripped.text, ordered or {"other": 1}, frozenset(words), tuple(said))
 
 
 def _removed_lines(text: str, stripped) -> list[tuple[int, str]]:  # noqa: ANN001 - a ModelResume, imported lazily
