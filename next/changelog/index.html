@@ -145,7 +145,16 @@ your master back each requirement, and it reads them by meaning: the line it poi
 word with the requirement. The pick for that job now keeps one of those lines for every requirement
 the assessment found evidence for, the required ones first, before any line chosen by shared words.
 A job with no assessment is picked by words, as before.</li>
-<li><strong>After you upgrade:</strong> the rule that picks lines has a new version (<code dir="auto">sel-3</code>). A profile’s stored
+<li><strong>A job’s resume keeps the project or role its title is about.</strong> A posting’s title says what the
+job is about (<code dir="auto">... Agent Platform</code>). The pick did not read it: a project whose own heading says the
+same could be dropped whole, while older roles kept lines about nothing the posting asks for,
+because none of the project’s lines was one the assessment pointed to and none stated a number. A
+role or project the title names (its heading or its own title holds a word of the posting’s title,
+or half of its lines do) now always keeps its best line; it goes only when nothing but required
+lines and pins fit, and then <code dir="auto">conflicts</code> says so (<code dir="auto">title_entry</code>). What is left of the page after
+every requirement has its line goes to lines about the posting before lines that are only stronger
+or more recent. No required line and no skill is cut for it.</li>
+<li><strong>After you upgrade:</strong> the rule that picks lines has a new version (<code dir="auto">sel-4</code>). A profile’s stored
 selection stays as it is until you refresh it. Tailored resumes the background pipeline made from
 your master are out of date under the new rule and are made again when the pipeline next works on
 each job; a resume you edited or attached yourself is never replaced.</li>
