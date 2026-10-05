@@ -162,6 +162,8 @@ class JournalError(RuntimeError):
 
 class JournalConflictError(JournalError):
     code = "journal_conflict"
+    #: RJ2: the command to run, on the one refusal an interrupted write explains (:func:`_extra_working_evidence`); else ``None``.
+    next_action: str | None = None
 
 
 #: 0110-10-17: the command that runs :func:`reconcile_journal` over every managed workpad of a home
@@ -185,6 +187,31 @@ def _interrupted_write(found: str) -> JournalReconciliationRequired:
     )
     refusal.next_action = JOURNAL_REPAIR_COMMAND
     return refusal
+
+
+def _extra_working_evidence(root: Path, head: str) -> JournalConflictError:
+    """RJ2: the refusal of a read that met a file no commit holds; it says so when an interrupted write left that file.
+
+    A write killed after it replaced its files and before its commit leaves them uncommitted, with its
+    transaction in ``scratch/``: every later save AND read ends here, not at :func:`_interrupted_write`'s
+    sites. When the transaction :func:`reconcile_journal` would finish is there (the next sequence's), the
+    refusal carries :func:`_interrupted_write`'s sentence and ``next_action`` (it stays a
+    ``JournalConflictError``: its callers catch that); a stray file with no such transaction is refused in
+    the words it always was. Asked only here, on the refusal: a read that is not refused looks at nothing
+    more, and a refusal with no transaction file in ``scratch/`` asks git nothing.
+    """
+
+    found = "journal working evidence is extra or redirected"
+    try:
+        if any(name.startswith(TRANSACTION_PREFIX) for name in os.listdir(root / TRANSACTION_DIRECTORY)):
+            pending = _transaction_path(root, _next_sequence(root, head)[0])
+            if pending.exists() or pending.is_symlink():
+                refusal = JournalConflictError(str(_interrupted_write(found)))
+                refusal.next_action = JOURNAL_REPAIR_COMMAND
+                return refusal
+    except (JournalError, OSError):
+        pass  # what is there cannot be read as an interrupted write: the refusal names nothing more
+    return JournalConflictError(found + INTERRUPTED_WRITE_HINT)
 
 
 class JournalUnbornError(JournalReconciliationRequired):
@@ -2228,7 +2255,7 @@ def _capture_snapshot(
                 if candidate.is_symlink():
                     raise JournalConflictError("journal working evidence is extra or redirected")
                 if relative not in artifacts and not _is_run_local_artifact(relative):
-                    raise JournalConflictError("journal working evidence is extra or redirected" + INTERRUPTED_WRITE_HINT)
+                    raise _extra_working_evidence(root, head)
     return JournalSnapshot(head, artifacts)
 
 

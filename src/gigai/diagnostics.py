@@ -20,6 +20,7 @@ except ImportError:  # pragma: no cover - v1 rejects non-POSIX before mutation
     fcntl = None  # type: ignore[assignment]
 
 from .adapters import AdapterFactoryError, ModelInvocationError, resolve_model_adapter
+from .canonical import EntityPrefix, InvalidIdentifierError, validate_entity_id
 from .config import ConfigurationError, GigAIConfig, load_config
 from .credentials import CredentialReferenceError, reference_is_available
 from .index import JournalIndexError, read_index
@@ -27,6 +28,8 @@ from .model_targets import ModelTargetResolutionError
 
 
 DIAGNOSTIC_SCHEMA_VERSION = "1.0"
+#: RJ2: how far :func:`journal_repair_refusal` follows an error's causes when it looks for the journal's refusal.
+_CAUSE_CHAIN_LINKS = 16
 
 
 @dataclass(frozen=True)
@@ -126,7 +129,7 @@ def run_journal_repair(home_root: Path) -> DoctorReport:
     """
 
     # ``journal`` imports this module (the mount probes), so it is imported here.
-    from .journal import JournalError, reconcile_journal
+    from .journal import JournalConflictError, JournalError, reconcile_journal
 
     checks: list[DiagnosticCheck] = []
     config = _checked_config(home_root, checks)
@@ -140,10 +143,17 @@ def run_journal_repair(home_root: Path) -> DoctorReport:
         try:
             if workpad.is_symlink() or not workpad.is_dir():
                 raise JournalIndexError("managed workpad is unavailable or redirected")
-            project = _git_config(workpad, "gigai.project-id")
-            gig = _git_config(workpad, "gigai.gig-id")
-            if project is None or gig is None:
-                raise JournalIndexError("managed workpad lacks Git ownership markers")
+            # RJ2: the path says whose workpad this is (projects/<project id>/gigs/<gig id>). The ids used to be
+            # read from the workpad's own Git markers, which reconcile_journal then compared with themselves.
+            project, gig = workpad.parent.parent.name, workpad.name
+            for key, named, prefix in (("gigai.project-id", project, EntityPrefix.PROJECT), ("gigai.gig-id", gig, EntityPrefix.GIG)):
+                marker = _git_config(workpad, key)
+                if marker is None:
+                    raise JournalIndexError("managed workpad lacks Git ownership markers")
+                if marker != named:
+                    raise JournalConflictError(
+                        f"ownership markers differ from the workpad's path: {key} is {_id_or_not(marker, prefix)}, the directory is {named}"
+                    )
             result = reconcile_journal(workpad=workpad, project_id=project, gig_id=gig)
         except (JournalError, JournalIndexError, OSError) as exc:
             failed.append(f"failed_gig={workpad.name} code={getattr(exc, 'code', type(exc).__name__)} reason={exc}")
@@ -182,19 +192,32 @@ def journal_repair_refusal(exc: BaseException, home_root: Path | None) -> tuple[
 
     The journal's refusal names ``gigai doctor --repair-journal``. Here the command gets ``--home`` when the
     home is not the default one, so it can be run as written.
+
+    RJ2: the refusal may be the cause of what reached the boundary (a caller that catches a
+    ``JournalConflictError`` raises its own error from it), so it is looked for along the chain a traceback
+    would print: at most ``_CAUSE_CHAIN_LINKS`` links, and no link twice. Only a journal error whose raise
+    site set ``next_action`` counts, wherever it is in the chain.
     """
 
     # ``journal`` and ``setup`` import this module, so they are imported here.
-    from .journal import JournalReconciliationRequired
+    from .journal import JournalError
     from .setup import default_home_root
 
-    command = getattr(exc, "next_action", None)
-    if not isinstance(exc, JournalReconciliationRequired) or not command:
+    refusal: BaseException | None = exc
+    command: str | None = None
+    seen: set[int] = set()
+    while refusal is not None and id(refusal) not in seen and len(seen) < _CAUSE_CHAIN_LINKS:
+        seen.add(id(refusal))
+        command = getattr(refusal, "next_action", None) if isinstance(refusal, JournalError) else None
+        if command:
+            break
+        refusal = refusal.__cause__ or (None if refusal.__suppress_context__ else refusal.__context__)
+    if not command:
         return None
     for_home = command
     if home_root is not None and home_root.expanduser().resolve(strict=False) != default_home_root().expanduser().resolve(strict=False):
         for_home = f"{command} --home {shlex.quote(os.fspath(home_root))}"
-    return str(exc).replace(command, for_home), for_home
+    return str(refusal).replace(command, for_home), for_home
 
 
 def run_live_doctor(home_root: Path, model_target: str) -> DoctorReport:
@@ -359,6 +382,15 @@ def _journal_index_checks(config: GigAIConfig) -> tuple[DiagnosticCheck, ...]:
             started,
         ),
     )
+
+
+def _id_or_not(marker: str, prefix: EntityPrefix) -> str:
+    """A Git ownership marker as a refusal may print it: the id it holds, and nothing else it might hold."""
+
+    try:
+        return validate_entity_id(marker, expected_prefix=prefix)
+    except InvalidIdentifierError:
+        return f"not a {prefix.value} id"
 
 
 def _git_config(workpad: Path, key: str) -> str | None:

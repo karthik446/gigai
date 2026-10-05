@@ -166,18 +166,25 @@ class InvocationGroup(click.Group):
 
         No command catches that refusal, so it used to end in a traceback. Only a refusal whose raise site
         set ``next_action`` is taken here; every other error passes as before.
+
+        RJ2: a save or a read refused because an interrupted write left its files uncommitted is a
+        ``JournalConflictError`` with ``next_action``, sometimes inside a caller's own error, so any error no
+        command answered is asked of ``journal_repair_refusal`` (it follows the causes) and answered the same
+        way, with the same code. An answer a command gave itself (a Click error, an exit) is not touched.
         """
 
         try:
             return super().invoke(ctx)
-        except JournalReconciliationRequired as exc:
+        except (click.ClickException, click.exceptions.Exit, click.Abort):
+            raise
+        except Exception as exc:  # noqa: BLE001 - raised again as it came unless it carries the journal's refusal
             argv = tuple(ctx.meta.get("invocation_argv", ()))
             refusal = journal_repair_refusal(exc, _invocation_home(argv))
             if refusal is None:
                 raise
             message, command = refusal
             if "--json" in argv:
-                error = {"code": exc.code, "message": message, "next_action": command}
+                error = {"code": JournalReconciliationRequired.code, "message": message, "next_action": command}
                 click.echo(json.dumps({"status": "error", "error": error}, sort_keys=True, separators=(",", ":")))
                 raise click.exceptions.Exit(1) from exc
             raise click.ClickException(message) from exc
