@@ -114,7 +114,9 @@ _BASIS_NOTE = (
     "of one of its open questions. Such an item carries `basis_stale_resume`: each `{change: \"line_changed\", requirement}` or "
     "`{change: \"new_line\", question_id, question?}` (the assessment's own words, never a resume line). An assessment that read "
     "the evidence view of the master carries `resume_basis`: `{input: \"evidence\", master_revision_id, master_revision, "
-    "selector_version}`."
+    "selector_version}`. An assessment whose answer read fewer than three requirements from a posting of 1,200+ characters (after "
+    "one retry) is stored as the model gave it and carries `requirements_note`: \"Only N requirements were read from this posting. "
+    "Open the posting to check.\" (omitted otherwise)."
 )
 
 

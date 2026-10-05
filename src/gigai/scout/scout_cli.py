@@ -1511,6 +1511,8 @@ def assess_command(
 
     gap_text = minor_gap_text(minor_gaps(result.matrix))  # 0110-10-03: "matched_above_threshold, 1 minor gap: Helm"
     click.echo(f"  Verdict: {result.verdict.value if result.verdict is not None else 'none returned'}" + (f", {gap_text}" if gap_text else ""))
+    if response.requirements_note:
+        click.echo(f"  Note: {response.requirements_note}")  # GUARDFIX: the posting's requirements were thinly read
     if result.not_a_match_reason:
         click.echo(f"  Reason: {result.not_a_match_reason}")
     if result.sponsorship is not None:

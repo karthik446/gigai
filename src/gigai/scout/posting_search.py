@@ -701,6 +701,9 @@ def render(response: Mapping[str, object]) -> str:
             for item in assessed["failed"]:  # type: ignore[union-attr]
                 lines.append(f"  not assessed ({item['error_code']}{': ' + str(item['reason']) if item.get('reason') else ''}): {item['job_identity']}")
             lines.extend(failure_lines(assessed["failed"]))  # 0110-10-13: each typed cause once, with its facts and next action
+            from .quick_assess import requirements_note_lines
+
+            lines.extend(requirements_note_lines(assessed))  # GUARDFIX
             if counts.get("more_after"):  # 0110-10-11
                 lines.append(f"{counts['more_after']} more not assessed yet: 50 at a time. Run the same command again for the next 50.")
         elif not isinstance(response.get("low_rank"), Mapping):

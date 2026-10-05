@@ -516,6 +516,7 @@ def _assess(
     failed: list[dict[str, object]] = []
     stop: list[str] = []
     fetched: list[str] = []
+    thin: dict[str, dict[str, object]] = {}  # GUARDFIX: the assessments stored with a requirements note, by job
     pace = threading.Lock()
     clients: list[object] = []
     next_request = [0.0]
@@ -584,6 +585,8 @@ def _assess(
         # 0110-8-09: "assessed" means a record the grid will read, under THIS job and profile; anything else is a named failure.
         if stored.job.job_identity != job or stored.resume.profile_id != profile_id or not Path(stored.stored_path or "").is_file():
             return (ERROR_NOT_STORED, None)
+        if stored.requirements_note is not None:
+            thin[job] = {"job_identity": job, "profile_id": profile_id, "text": stored.requirements_note}
         return None
 
     # PL5: the batch is live work the pipeline's runner yields to (DESIGN 7), like an "assess all" batch.
@@ -604,10 +607,13 @@ def _assess(
                 failure["reason"] = reason
             failure.update(cause_fields(code))  # 0110-10-13: did a model call start, may it have used tokens, what next
             failed.append(failure)
-    return {
+    batch: dict[str, object] = {
         "requested": len(pairs), "assessed": len(pairs) - len(failed), "failed": failed, "stopped": stop[0] if stop else None,
         "fetched_on_demand": len(fetched),
     }
+    if thin:
+        batch["requirements_notes"] = [thin[job] for job in sorted(thin)]  # omitted when every answer read enough requirements
+    return batch
 
 
 # --- progress (0110-8-14) -------------------------------------------------------------------
@@ -1452,6 +1458,12 @@ def _failure_code(item: Mapping[str, object]) -> str:
     return f"{item['error_code']}{': ' + str(item['reason']) if item.get('reason') else ''}"
 
 
+def _note_lines(batch: Mapping[str, object]) -> list[str]:
+    from .quick_assess import requirements_note_lines
+
+    return requirements_note_lines(batch)
+
+
 def render(response: Mapping[str, object]) -> str:
     """The response as the terminal shows it: the message, the question, the 4-column grid, the pipeline offer."""
 
@@ -1467,6 +1479,7 @@ def render(response: Mapping[str, object]) -> str:
         for item in assessed["failed"]:  # type: ignore[union-attr]
             lines.append(f"  not assessed ({_failure_code(item)}): {item['job_identity']}")
         lines.extend(failure_lines(assessed["failed"]))  # 0110-10-13
+        lines.extend(_note_lines(assessed))  # GUARDFIX
         lines.extend(_next_lines(assessed, "not assessed yet"))
     reassessed = response.get("reassessed")
     if isinstance(reassessed, Mapping):
@@ -1474,6 +1487,7 @@ def render(response: Mapping[str, object]) -> str:
         for item in reassessed["failed"]:  # type: ignore[union-attr]
             lines.append(f"  not re-assessed ({_failure_code(item)}): {item['job_identity']}")
         lines.extend(failure_lines(reassessed["failed"]))
+        lines.extend(_note_lines(reassessed))  # GUARDFIX
         lines.extend(_next_lines(reassessed, "with only an old assessment"))
     question = response.get("question")
     if isinstance(question, Mapping):

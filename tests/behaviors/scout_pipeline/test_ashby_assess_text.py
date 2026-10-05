@@ -142,20 +142,28 @@ def test_each_guard_behind_posting_requirements_unreadable_names_itself(tmp_path
     seed_ashby(fx, ashby_job())
     assert len(_description_plain()) >= 1200
 
-    # Rule 1: the model says Matched on two requirement rows for this long posting (the fixture's default answer).
-    thin = _assess(fx)
+    # Rule 1 (0.1.11 GUARDFIX): two requirement rows for this long posting are STORED with a note, after the one retry.
+    stored = _assess(fx)
 
-    assert thin["assessed"]["assessed"] == 0  # type: ignore[index]
-    failure = thin["assessed"]["failed"][0]  # type: ignore[index]
+    assert stored["assessed"]["assessed"] == 1 and stored["assessed"]["failed"] == []  # type: ignore[index]
+    [note] = stored["assessed"]["requirements_notes"]  # type: ignore[index]
+    assert note["text"] == "Only 2 requirements were read from this posting. Open the posting to check."
+    assert f"  {note['text']} {URL}" in posting_search.render(stored)
+    kept = read_quick_assessment(fx.home_root, fx.target, fx.default_profile_id, URL)
+    assert kept is not None and kept.requirements_note == note["text"]
+
+    # Rule 1 still refuses an answer with no requirement row at all (only a remote/location row).
+    fx.base.model.assessed = matrix_answer([("May work remotely anywhere in the US", "hard", "met")])
+    refused = posting_search.assess_these(fx.home_root, fx.target, jobs=[URL], approve=True, again=True, now=NOW)
+    failure = refused["assessed"]["failed"][0]  # type: ignore[index]
     assert (failure["job_identity"], failure["error_code"], failure["reason"]) == (
         URL, "posting_requirements_unreadable", "matched_on_too_few_requirements",
     )
-    assert read_quick_assessment(fx.home_root, fx.target, fx.default_profile_id, URL) is None  # nothing is stored
-    assert f"  not assessed (posting_requirements_unreadable: matched_on_too_few_requirements): {URL}" in posting_search.render(thin)
+    assert f"  not assessed (posting_requirements_unreadable: matched_on_too_few_requirements): {URL}" in posting_search.render(refused)
 
     # The same posting, the same text, a full answer: assessed. The text was never the problem.
     fx.base.model.assessed = _full_answer()
-    assert _assess(fx)["assessed"]["assessed"] == 1  # type: ignore[index]
+    assert posting_search.assess_these(fx.home_root, fx.target, jobs=[URL], approve=True, again=True, now=NOW)["assessed"]["assessed"] == 1  # type: ignore[index]
 
     from gigai.scout import quick_assess
 
