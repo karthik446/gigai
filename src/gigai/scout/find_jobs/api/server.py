@@ -1617,6 +1617,7 @@ def _make_handler(
     from .sources import SourcesRoutesMixin
     from .static import StaticRoutesMixin
     from .story_bank import StoryBankRoutesMixin
+    from .suggestions import JobSuggestionsRoutesMixin
     from .tailored_resumes import TailoredResumesRoutesMixin
     from .watchlist import WatchlistRoutesMixin
 
@@ -1646,6 +1647,7 @@ def _make_handler(
         PipelineRoutesMixin,
         PostingsRoutesMixin,
         StoryBankRoutesMixin,
+        JobSuggestionsRoutesMixin,
         TailoredResumesRoutesMixin,
         WatchlistRoutesMixin,
         SourcesRoutesMixin,
@@ -1880,6 +1882,12 @@ def _make_handler(
                     if path == "/api/jobs":
                         self._handle_get_job()
                         return
+                    if path == "/api/jobs/suggestions":
+                        self._handle_get_job_suggestions()
+                        return
+                    if path == "/api/jobs/brief":
+                        self._handle_get_job_brief()
+                        return
                     if path == "/api/health":
                         self._write_json(HTTPStatus.OK, {"status": "ok"})
                         return
@@ -2065,6 +2073,12 @@ def _make_handler(
                     return
                 if path == "/api/tailored-resumes/pdf":
                     self._handle_post_tailored_resume_pdf()
+                    return
+                if path == "/api/jobs/suggestions":
+                    self._handle_post_job_suggestions()
+                    return
+                if path == "/api/job-resumes/pick":
+                    self._handle_post_job_resume_pick()
                     return
                 if path == "/api/answers":
                     self._handle_post_answers()

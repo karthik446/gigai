@@ -71,6 +71,10 @@ _READER_ALLOWLIST: dict[tuple[str, str, str], str] = {
     ("gigai.scout.tailored_resume", "resolve_tailor_resume", "resume_for_profile"): "returned to its callers (allowlisted here)",
     ("gigai.scout.tailored_resume", "run_tailored_resume", "resolve_tailor_resume"): "tailored_resume.tailor_context (model_resume)",
     ("gigai.scout.tailored_resume_edit", "attach_edited_resume", "resolve_tailor_resume"): "tailored_resume.tailor_context (model_resume); local validation of the edited markdown, no model call",
+    # 0.1.11 N5: the agent's brief offers the stories that match the posting (tailored_resume.tailor_sources). The resume is read
+    # for ONE thing, as the hand-back reads it: its name line, whose words are kept out of every story line offered
+    # (story_bank.assess_bank). No line of it is printed in the brief; no model is called; nothing is stored.
+    ("gigai.scout.job_brief", "_resume_text", "resume_for_profile"): "name-line words removed from the story lines the brief offers (story_bank.assess_bank); never printed, never sent, never stored",
 }
 
 #: (module, function) -> the strip calls its body must make.
