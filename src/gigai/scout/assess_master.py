@@ -58,7 +58,14 @@ question).  An assessment made on a profile's resume before the master was
 read is compared by its resume alone: a master line added later is seen by
 the assessments made since.
 
-Pure except ``assess_input`` / ``ResumeCheck`` (committed journal reads: the
+WHICH MASTER LINES AN ASSESSMENT CITES (``MasterCitations``, ``cited_requirements``; 0110-10-15).  A row's
+evidence quotes are traced to the lines of the master AS IT IS NOW by the same two rules: word for word (a piece
+of the quote of at least ``CITED_QUOTE_CHARS`` characters is in the line), else as a paraphrase (the shared-word
+rule above).  The selector reads the result (``master_selection.SelectionPosting.cited``): a requirement the
+assessment met with a line keeps that line in the resume, whatever words the two share.  A quote that traces to
+no line now (the line was retired or reworded since) cites nothing, and a row that cites nothing is not passed.
+
+Pure except ``assess_input`` / ``ResumeCheck`` / ``stored_citations`` (committed journal reads: the
 stored master, kept per journal head by ``tailor_master.stored_master``; an
 earlier revision of the master or of a resume, read once per process, since a
 revision never changes).  No model call here.
@@ -75,8 +82,8 @@ import re
 import threading
 
 from .find_jobs.assess_contracts import RESUME_INPUT_EVIDENCE, ResumeBasis
-from .master_resume import Master, skill_names
-from .master_selection import EVIDENCE_CAP, EvidenceView, SelectionPosting, SelectionProfile, evidence_view
+from .master_resume import KIND_SKILLS, Master, skill_names
+from .master_selection import EVIDENCE_CAP, CitedRequirement, EvidenceView, SelectionPosting, SelectionProfile, evidence_view
 
 INPUT_VIEW = "view"
 INPUT_EVIDENCE = RESUME_INPUT_EVIDENCE
@@ -97,6 +104,9 @@ CHANGE_NEW_LINE = "new_line"
 _SHARED_WORDS = 3
 #: ... and those are at least this share of the evidence's words (a model often joins two lines in one sentence).
 _SHARED_SHARE = 0.4
+#: A piece of an evidence quote names a master line word for word only when it is at least this long (a shorter
+#: piece is in many lines).
+CITED_QUOTE_CHARS = 16
 #: Question categories no line of a resume answers (the candidate's settings do): never a ``new_line``.
 _NOT_A_RESUME_QUESTION = frozenset({"location", "sponsorship", "visa", "authorization", "work_authorization", "eligibility", "compensation", "salary"})
 _UNREAD = object()
@@ -329,6 +339,92 @@ def master_lines(master: Master) -> ResumeLines:
     return resume_lines(master.markdown(ids=False))
 
 
+# --- which master lines an assessment cites -----------------------------------------------------------
+
+
+class MasterCitations:
+    """The lines of one master, kept flat, so the evidence quotes of many assessment rows are traced to them.
+
+    Every line but the Skills lines can be cited (a summary, a bullet, a line under a degree, an Other line).
+    """
+
+    def __init__(self, master: Master) -> None:
+        self._lines = [(item.id, _flat(item.text), _words(item.text)) for item in master.items.values() if item.kind != KIND_SKILLS]
+        self._skills = [(name, _flat(name)) for name in master.skills()]
+
+    def quote(self, quote: str) -> tuple[frozenset[str], frozenset[str]]:
+        """``(master line ids, skill names)`` one evidence quote cites.
+
+        Word for word first; else as a paraphrase by shared words; a skill name only when no line is cited.
+        """
+
+        pieces = [piece for piece in _pieces(quote) if len(piece) >= CITED_QUOTE_CHARS]
+        found = {item_id for item_id, flat, _line_words in self._lines if any(piece in flat for piece in pieces)}
+        words = _words(quote)
+        if not found and words:
+            for item_id, _flat_line, line_words in self._lines:
+                shared = words & line_words
+                if len(shared) >= _SHARED_WORDS and len(shared) / len(words) >= _SHARED_SHARE:
+                    found.add(item_id)
+        if found:
+            return frozenset(found), frozenset()
+        flat_quote = _flat(quote)
+        return frozenset(), frozenset(name for name, flat in self._skills if flat and flat in flat_quote)
+
+    def row(self, evidence: Iterable[str]) -> tuple[tuple[str, ...], tuple[str, ...]]:
+        """``(line ids, skill names)`` all the evidence of one row cites; the skills only when it cites no line."""
+
+        lines: set[str] = set()
+        skills: set[str] = set()
+        for quote in evidence:
+            found, named = self.quote(quote)
+            lines |= found
+            skills |= named
+        return tuple(sorted(lines)), (() if lines else tuple(sorted(skills)))
+
+
+def cited_requirements(master: Master, matrix: Iterable[object], *, citations: MasterCitations | None = None) -> tuple[CitedRequirement, ...]:
+    """The rows of an assessment's matrix that cite master lines, as the selector reads them. Pure.
+
+    ``matrix``: ``RequirementMatrixRow`` items (``requirement``, ``resume_evidence``, ``status``,
+    ``requirement_class``).  A row's id is its place in the matrix (``r<n>``, from 1); it is mandatory unless
+    its class is ``nice_to_have``, and met when its status is ``met``.  A row that cites no line is left out.
+    """
+
+    from .find_jobs.contracts import MatrixStatus, RequirementClass
+
+    citations = citations or MasterCitations(master)
+    out: list[CitedRequirement] = []
+    for place, row in enumerate(matrix, 1):
+        lines, _skills = citations.row(row.resume_evidence)  # type: ignore[attr-defined]
+        if lines:
+            out.append(CitedRequirement(
+                f"r{place}", row.requirement, row.requirement_class != RequirementClass.NICE_TO_HAVE, lines,  # type: ignore[attr-defined]
+                met=row.status == MatrixStatus.MET,  # type: ignore[attr-defined]
+            ))
+    return tuple(out)
+
+
+def stored_citations(home_root: Path, target: Path, master: Master, profile_id: str | None, job_identity: str | None) -> tuple[CitedRequirement, ...]:
+    """What the stored (base) assessment of ``job_identity`` for ``profile_id`` cites of ``master``; ``()`` without one.
+
+    One small file read (``quick_assess.read_quick_assessment``), no journal read and no model.  An assessment
+    that cannot be read is no assessment: the selection is then made by words, as before.
+    """
+
+    if profile_id is None or not job_identity:
+        return ()
+    from .quick_assess import read_quick_assessment
+
+    try:
+        stored = read_quick_assessment(home_root, target, profile_id, job_identity)
+    except (OSError, ValueError, RuntimeError):
+        return ()  # no project is bound here: there is no assessment either
+    if stored is None:
+        return ()
+    return cited_requirements(master, stored.result.matrix)
+
+
 # --- the targeted stale rule -------------------------------------------------------------------------
 
 
@@ -511,15 +607,18 @@ __all__ = [
     "ASSESS_INPUTS",
     "CHANGE_LINE",
     "CHANGE_NEW_LINE",
+    "CITED_QUOTE_CHARS",
     "INPUT_EVIDENCE",
     "INPUT_VIEW",
     "AssessInput",
+    "MasterCitations",
     "ResumeChange",
     "ResumeCheck",
     "ResumeLines",
     "SOURCE_MASTER_EVIDENCE",
     "SOURCE_PROFILE_VIEW",
     "assess_input",
+    "cited_requirements",
     "evidence_text",
     "master_lines",
     "profile_prior",
@@ -527,4 +626,5 @@ __all__ = [
     "resume_changes",
     "resume_lines",
     "resume_source",
+    "stored_citations",
 ]

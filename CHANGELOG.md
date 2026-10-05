@@ -65,6 +65,43 @@ things still take more than a second (see "Still slower than one second"): the n
 - **Nothing else changes.** Which jobs are checked again after a change, and the limits on them, are
   what they were; no assessment, ranking or tailored resume becomes out of date.
 
+#### Master resume: the lines picked for a job
+
+- **A resume made from your master resume no longer gets worse when the master gets better.** Adding
+  strong lines to your master could push other strong lines out of the resume for a job and leave
+  older, general ones in: for length the oldest roles went first and then lines were cut by a score
+  that favoured what your profile already showed, with a fixed minimum of lines for every recent
+  role. Now the lines are picked for what the posting asks: every requirement of the posting that
+  your master can support keeps a line, and it keeps the strongest one (a line backed by a story or
+  an answer, then one that states a number). How recent a role is only breaks a tie: an older role's
+  line stays when it is the only evidence for a requirement, while recent lines that support nothing
+  the posting asks for are cut first. No role is printed without a line, and every recent role keeps
+  at least its best one.
+- **Your Skills section is kept whole.** A job's resume showed only the skills the posting or a shown
+  line named, and a group written as `Python/Go/TypeScript` counted as one name that no posting ever
+  asked for. Skills are now matched inside a group, the ones the posting asks for come first, and the
+  whole section is shown. A skill is cut for length only when no line is left to cut (a master that
+  lists more than 40 skill names gives up the ones nothing asks for first), and every cut is listed.
+- **When something required cannot fit, you are told.** If the strongest line for a requirement, or a
+  line you pinned, cannot be shown within 2 pages, `gigai scout resume master selection show` and the
+  stored tailored resume say which and why (`conflicts`). Nothing required is dropped silently.
+- **A refresh does not replace a profile's selection with a worse one.** `gigai scout resume master
+  selection refresh` compares the selection a profile holds with the new one, check by check, against
+  the master as it is now. The new one is stored when it is no worse on any check; the one held is
+  kept when it is still valid and the new one is worse on a check; when neither can stand, nothing is
+  stored and the command says what is unresolved.
+- **A job you assessed keeps the lines its assessment pointed to.** An assessment says which lines of
+  your master back each requirement, and it reads them by meaning: the line it points to may share no
+  word with the requirement. The pick for that job now keeps one of those lines for every requirement
+  the assessment found evidence for, the required ones first, before any line chosen by shared words.
+  A job with no assessment is picked by words, as before.
+- **After you upgrade:** the rule that picks lines has a new version (`sel-3`). A profile's stored
+  selection stays as it is until you refresh it. Tailored resumes the background pipeline made from
+  your master are out of date under the new rule and are made again when the pipeline next works on
+  each job; a resume you edited or attached yourself is never replaced.
+- The same lines in another order in your master give the same resume, and a line that repeats
+  another line is shown once.
+
 #### Faster
 
 - **Faster: the first Jobs load of a day.** Every watched company used to be matched again the first

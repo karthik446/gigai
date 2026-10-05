@@ -248,7 +248,7 @@ def test_each_profiles_first_selection_is_its_own_resume_and_the_resume_is_not_r
         # The profile keeps its resume, its revision and its content digest: one more write, nothing a reader sees.
         assert (new.resume_ref, new.revision, new.content_digest, new.titles, new.queries) == (old.resume_ref, old.revision, old.content_digest, old.titles, old.queries)
         assert new.seq == old.seq + 1 and two.resume_text(profile_id) == texts[profile_id]
-        assert (selection.source, selection.selector_version, selection.pins, selection.excludes) == ("migration", "sel-1", (), ())
+        assert (selection.source, selection.selector_version, selection.pins, selection.excludes) == ("migration", "sel-3", (), ())
         assert selection.master_revision_id == selection.synced_revision_id == master.revision.revision_id
         assert selection.resume_revision_id == old.resume_ref.revision_id
         # The selection is the old resume in the master's ids: every one of its lines, in its own order.
@@ -607,6 +607,50 @@ def test_refresh_refuses_what_it_cannot_do(two: _Home) -> None:
     assert _master(two.home, "selection", "refresh", "--all", "--sync")["profiles"] == []
 
 
+# --- the re-make rule (0110-10-15): a refresh never replaces a selection with one that regresses, silently ---
+
+
+def test_a_refresh_keeps_the_selection_held_when_the_new_one_regresses_and_says_when_neither_stands(two: _Home, monkeypatch: pytest.MonkeyPatch) -> None:
+    from dataclasses import replace
+
+    from gigai.scout import master_selection as ms
+
+    two.migrate("a")
+    posting = ms.SelectionPosting("Staff Software Engineer", "Requirements:\n- Kubernetes in production.\n- PostgreSQL at scale.\n- Kafka.\n")
+    monkeypatch.setattr(mp, "index_stand_in", lambda *_args, **_kwargs: (posting, 3))
+    done = _master(two.home, "selection", "refresh", "--profile", two.swe_id)["profiles"][0]
+    # The profile held its migrated selection: the two were compared on the same current sources, and the new one stood.
+    assert (done["action"], done["written"]) == ("refreshed", True) and done["remake"]["decision"] == "new"
+    assert done["remake"]["regressions"] == [] and done["remake"]["new"]["lost"] == [] and done["remake"]["new"]["fits"] is True
+    held, head = two.profile(two.swe_id), two.journal_head()
+
+    # Now the selector makes a selection that lost a mandatory requirement's evidence (it is given a page nothing fits).
+    real = mp.select
+    monkeypatch.setattr(mp, "select", lambda *args, **kwargs: real(*args, **{**kwargs, "measure": lambda _markdown: (3, 0.5)}))
+    kept = _master(two.home, "selection", "refresh", "--profile", two.swe_id)["profiles"][0]
+    assert (kept["action"], kept["written"], kept["added"], kept["removed"]) == ("kept", False, [], [])
+    assert kept["remake"]["decision"] == "previous" and any(text.startswith("mandatory coverage") for text in kept["remake"]["regressions"])
+    assert kept["remake"]["previous"]["valid"] is True and kept["remake"]["previous"]["lost"] == [] and kept["remake"]["new"]["lost"]
+    assert kept["resume_ref"] == held.resume_ref.to_json() and kept["shown"] == len(held.master_selection.item_ids)
+    # Nothing was written: the profile, its resume and the journal are what they were.
+    assert two.profile(two.swe_id) == held and two.journal_head() == head
+
+    # The selection held shows a line the master has corrected since (not yet brought up to date): it cannot be kept
+    # either. Neither is chosen: nothing is written, and the change names what is unresolved.
+    status = mp._status
+    corrected = held.master_selection.item_ids[3]
+    monkeypatch.setattr(mp, "_status", lambda *args, **kwargs: replace(status(*args, **kwargs), changed=(corrected,)))
+    stuck = mp.refresh_selection(home_root=two.home, target=two.scout, profile_id=two.swe_id)
+    assert (stuck.action, stuck.written, stuck.resume_ref, stuck.record) == ("unresolved", False, None, None)
+    assert stuck.remake is not None and stuck.remake.decision == "unresolved" and corrected in stuck.remake.problems[0] and stuck.remake.regressions
+    assert two.profile(two.swe_id) == held and two.journal_head() == head
+    assert stuck.to_json()["remake"]["problems"] == list(stuck.remake.problems)
+    # The user saw it and takes the new one all the same: that is stored.
+    taken = mp.refresh_selection(home_root=two.home, target=two.scout, profile_id=two.swe_id, accept=True)
+    assert (taken.action, taken.written) == ("refreshed", True) and taken.remake is not None and taken.remake.decision == "unresolved"
+    assert two.profile(two.swe_id).master_selection.item_ids != held.master_selection.item_ids and two.journal_head() != head
+
+
 # --- a new profile's first selection: from the local index, no model ---------------------------
 
 _AI_POSTING = (
@@ -644,7 +688,7 @@ def test_a_new_profiles_first_selection_comes_from_the_postings_its_titles_match
     made = mp.first_selection(home_root=home, target=target, profile_id=created.profile_id)
     assert made is not None and made.resume_ref != default.resume_ref and made.resume_ref.record_id == mp.view_record_id(resolved, created.profile_id)
     selection = made.master_selection
-    assert (selection.source, selection.selector_version) == ("index", "sel-1")
+    assert (selection.source, selection.selector_version) == ("index", "sel-3")
     # The selection IS the job selection against the stand-in posting, for this profile's titles.
     expected = select(master, SelectionProfile(titles=created.titles, profile_id=created.profile_id, label="AI"), posting)
     assert selection.item_ids == mp.selection_ids(expected) and selection.skills == expected.skills

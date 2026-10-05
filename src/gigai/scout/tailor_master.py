@@ -16,7 +16,7 @@ tailoring uses, settled by the P4 live eval):
 
 - ``view``: the selector's 2-page selection for the posting.
 - ``shortlist``: the selector's pick BEFORE its page fit (about twice what
-  fits), so the tailor call's order decides which lines stay.
+  fits), so the tailor call orders and words more lines than the page holds.
 - ``evidence``: the bullets of the evidence view (the lines most relevant to
   the posting, up to the assess prompt's character cap) for every role and
   for the shortlist's projects, under the shortlist's summary, skills and
@@ -25,43 +25,57 @@ tailoring uses, settled by the P4 live eval):
 It is rendered as resume markdown in GigAI's format and numbered ``R<n>`` like
 any resume; every numbered line keeps its master id (``JobCandidates.line_ids``)
 and a ref to it carries that id (``SourceRef.item_id``), so each line of a
-tailored resume traces to the master.  THE SKILLS LINE is assembled by code
-(the posting's must-haves the master lists, its nice-to-haves, then what the
-candidate lines name; ``master_selection.MAX_SKILLS`` at most) and the model
-copies it: the master's whole Skills list is never forced onto a resume.
-``ensure_skills_line`` shows it when the model left it out.
+tailored resume traces to the master.  THE SKILLS LINE is assembled by code:
+the master's whole Skills section, what the posting asks for first (matched
+inside a group), then what the candidate lines name, then the rest.  The model
+copies it; ``ensure_skills_line`` shows it when the model left it out.
 
-DECISION 2 in a wider set (``_stand_ins``): when only an old role's candidate
-line names a posting must-have, a recent role's line that names it is added to
-the candidates, so the old line can be cut for length without losing the
-evidence.  When the master has no such line the old line is the only evidence
-and the fit keeps it.
+A REQUIREMENT'S EVIDENCE is always a candidate: the selector puts the
+strongest line for every mandatory requirement of the posting in its pick
+whatever a cap says (``master_selection``), from an old role too.  WHEN THE
+JOB HAS A STORED ASSESSMENT for the profile (``master_tailoring`` reads it:
+one small file), the requirements are its rows and each row's evidence is a
+line the assessment CITES (``assess_master.stored_citations``,
+``SelectionPosting.cited``): the candidate set, the fit and the conflicts
+all follow the citations, so a cited line is never cut because another line
+shares the requirement's words.
 
-THE FIT (``fit_selected``; the operator's decision 1: recent roles always
-appear, for length the oldest roles go first, inside the budget lines are
-picked by relevance).  The cuts, in the one order they may be applied
-(``cut_order``), the fewest that fit taken (``tailor_length.fit_by_cuts``):
+THE FIT (``fit_selected``; 0110-10-15, the selector's objective).  The page
+limit is a constraint: at most ``LENGTH_RULE.max_pages`` pages, no role
+printed without a bullet, every recent role present.  The cuts, in the one
+order they may be applied (``cut_order``), the fewest that fit taken
+(``tailor_length.fit_by_cuts``):
 
-1. the oldest role's bullets from the END of the list the tailor call
-   ordered, then that role; then the next oldest role;
-2. then, among the recent roles and the projects that are above their floors
-   (``master_selection.FLOORS``; a project keeps one line), the LAST line of
-   the list whose last line is worth least for the posting (the selector's
-   value), again and again.
+1. the shown bullets of roles and projects, lowest value for the posting
+   first (the selector's keep order: a line that supports nothing the posting
+   asks for, the ones the profile does not show first and the oldest first,
+   before a third line for a requirement, before a second one).  A recent
+   role keeps its best line (``master_selection.FLOORS``) and a project one
+   line; the cut that would empty an old role removes the role whole;
+2. only when that is not enough: the profile's pins, then requirements'
+   evidence.  Those cuts are a CONFLICT and are reported, never silent.
 
-A line that is the last shown line naming a posting must-have is never cut,
-and a recent role's or a project's line comes back when the last cut left
-room for it.  What was cut is recorded on the result exactly as the 0110-10-05 length rule
-records it (``TailoredResume.length``), so it is shown and one Restore puts it
-back.  The pages are measured at ``master_selection.FIT_SCALE``, the
-selector's own budget.
+THE EVIDENCE OF A REQUIREMENT, among the lines the tailoring shows, is the
+best shown line that supports it: step 1 never cuts it, wherever its role
+stands in time.  A line comes back when the last cut left room for it (not an
+old role's line that supports nothing).  What was cut is recorded on the
+result exactly as the 0110-10-05 length rule records it
+(``TailoredResume.length``), so it is shown and one Restore puts it back.  The
+pages are measured at ``master_selection.FIT_SCALE``, the selector's own budget.
 
 WHAT WAS PICKED (``selection_record``): the stored tailored resume carries
 ``selection``: every line of the master except its Skills lines, picked or
 left out, each with the selector's reason (``master_selection.LineReason``) or
-the fit's, the skills the same way, and who made the pick (``model``, or
-``code`` for the fallback).  Ids, codes and reasons only: a line's text is in
-the result (picked) or in the master revision ``sources.master`` names.
+the fit's, the skills the same way, who made the pick (``model``, or
+``code`` for the fallback), and ``conflicts``: a mandatory requirement the
+master supports that the final resume shows no line for, and a pin it does
+not show.  Ids, codes, reasons and the posting's own requirement words only:
+a line's text is in the result (picked) or in the master revision
+``sources.master`` names.
+
+RE-MAKING A TAILORING (``compare_tailorings``): the stored selection and the
+new one are checked against the same current master and requirements on
+separate checks (``master_selection.compare_selections``).
 
 Pure except ``stored_master`` / ``master_tailoring`` (a committed journal
 read, kept per journal head) and the page measurement.  No model call here.
@@ -82,8 +96,14 @@ from .master_selection import (
     FIT_SCALE,
     FLOORS,
     MAX_PAGES,
+    REMAKE_NEW,
+    REMAKE_PREVIOUS,
+    REMAKE_UNRESOLVED,
     SELECTOR_VERSION,
+    Conflict,
+    Remake,
     Selected,
+    check_selection,
     SelectionPosting,
     SelectionProfile,
     evidence_view,
@@ -91,7 +111,6 @@ from .master_selection import (
     render_selection,
     select,
 )
-from .posting_keywords import mentions
 from .tailor_length import STATUS_CUT, Measure, fit_by_cuts
 from .tailored_resume import (
     ENTRY_SECTIONS,
@@ -121,7 +140,7 @@ CANDIDATE_MODES: tuple[str, ...] = (MODE_VIEW, MODE_SHORTLIST, MODE_EVIDENCE)
 CANDIDATES = MODE_SHORTLIST
 #: Names the candidate rules and the fit's cut order above; the pipeline's tailor digest holds it beside
 #: ``SELECTOR_VERSION`` and ``CANDIDATES``, so changing one is a deliberate re-open of the stored tailorings.
-CANDIDATES_VERSION = "job-candidates:1"
+CANDIDATES_VERSION = "job-candidates:2"
 
 PICKED_BY_MODEL = "model"
 PICKED_BY_CODE = "code"
@@ -169,8 +188,10 @@ class JobCandidates:
     other: tuple[str, ...]
     markdown: str
     lines: tuple[CandidateLine, ...]
-    #: A recent role's line added so an old role's line is not the only evidence of a must-have: id -> (the old line, the must-haves).
+    #: ``job-candidates:1`` only, always empty now: a requirement's evidence is in the selector's pick itself.
     stand_ins: Mapping[str, tuple[str, tuple[str, ...]]] = field(default_factory=dict)
+    #: Every skill of the master, offered (``skills``) or cut for length, with its reason: the 2-page selection's.
+    skill_reasons: tuple = ()
 
     @property
     def line_ids(self) -> dict[int, str]:
@@ -247,47 +268,6 @@ def _newest_first(entry: MasterEntry) -> tuple[int, int, int]:
     return (-(9999 if entry.ongoing else (entry.end or 0)), -(entry.start or 0), entry.order)
 
 
-def _stand_ins(master: Master, selected: Selected, entries: Mapping[str, Sequence[str]], today: date) -> dict[str, tuple[str, tuple[str, ...]]]:
-    """Recent roles' lines to add so that no old role's candidate line is the only one naming a posting must-have.
-
-    The operator's decision 2, made before the tailor call: a line can only
-    be shown when it is in the candidate set.  For each must-have that only
-    old roles' candidate lines name, the best unshown line of a recent role
-    naming it; nothing for a must-have no recent role's line names.
-    """
-
-    if selected.keywords is None:
-        return {}
-    must = selected.keywords.must
-    roles = sorted(master.entries_in("experience"), key=_newest_first)
-    old = {entry.id for entry in roles if is_old_role(entry, today)}
-    shown = {bullet for bullets in entries.values() for bullet in bullets}
-    named: dict[str, tuple[str, ...]] = {}
-
-    def names(item_id: str) -> tuple[str, ...]:
-        if item_id not in named:
-            named[item_id] = tuple(term for term in must if mentions(master.items[item_id].text, term))
-        return named[item_id]
-
-    covered = {term for bullet in shown if master.items[bullet].entry_id not in old for term in names(bullet)}
-    pool = [master.items[bullet] for entry in roles if entry.id not in old for bullet in entry.bullets if bullet not in shown]
-    out: dict[str, tuple[str, tuple[str, ...]]] = {}
-    for entry in reversed(roles):  # oldest first
-        if entry.id not in old:
-            continue
-        for bullet in entries.get(entry.id, ()):
-            left = {term for term in names(bullet) if term not in covered}
-            while left:
-                naming = [item for item in pool if item.id not in out and left & set(names(item.id))]
-                if not naming:
-                    break  # the master has no recent line for these: the old line stays the only evidence
-                best = max(naming, key=lambda item: (len(left & set(names(item.id))), selected.values.get(item.id, 0.0), -item.order))
-                out[best.id] = (bullet, tuple(term for term in names(best.id) if term in left))
-                covered |= set(names(best.id))
-                left -= set(names(best.id))
-    return out
-
-
 def job_candidates(
     master: Master,
     profile: SelectionProfile,
@@ -301,14 +281,20 @@ def job_candidates(
     if mode not in CANDIDATE_MODES:
         raise ValueError(f"mode must be one of {', '.join(CANDIDATE_MODES)}")
     today = today or date.today()
-    stand_ins: dict[str, tuple[str, tuple[str, ...]]] = {}
     if mode == MODE_VIEW:
         selected = select(master, profile, posting, today=today)
         entries = {entry_id: list(bullets) for entry_id, bullets in selected.entries.items()}
+        other, skills, skill_reasons = tuple(selected.other), tuple(selected.skills), selected.skill_reasons
     else:
         # The selector's pick before its page fit: with no page limit nothing is cut, and no layout is run.
         selected = select(master, profile, posting, today=today, measure=lambda _markdown: (1, 0.0), max_pages=_UNFITTED, fill=False)
         entries = {entry_id: list(bullets) for entry_id, bullets in selected.entries.items()}
+        # The fit below shortens roles and projects and removes an old role whole; it cannot remove a project, an
+        # Other line or a skill. So those offered are the ones the selector's own 2-page selection shows: a
+        # project, an Other line or a skill that supports nothing never holds a bullet's place.
+        fitted = select(master, profile, posting, today=today)
+        other, skills, skill_reasons = tuple(fitted.other), tuple(fitted.skills), fitted.skill_reasons
+        entries = {entry_id: bullets for entry_id, bullets in entries.items() if master.entries[entry_id].section != "projects" or entry_id in fitted.entries}
         if mode == MODE_EVIDENCE:
             view = evidence_view(master, profile, posting, today=today)
             # Every role and degree with the view's bullets (a role's best first, as the selector prints them),
@@ -317,21 +303,24 @@ def job_candidates(
                 entry_id: sorted(bullets, key=lambda bullet: (-selected.values.get(bullet, 0.0), master.items[bullet].order))
                 if master.entries[entry_id].section == "experience" else list(bullets)
                 for entry_id, bullets in view.entries.items()
-                if master.entries[entry_id].section != "projects" or entry_id in selected.entries
+                if master.entries[entry_id].section != "projects" or entry_id in fitted.entries
             }
-        stand_ins = _stand_ins(master, selected, entries, today)
-        for added in stand_ins:
-            entries.setdefault(master.items[added].entry_id or "", []).append(added)
-    item_ids = [*selected.summary, *(item for entry_id, bullets in entries.items() for item in (entry_id, *bullets)), *selected.other]
-    markdown = render_selection(master, item_ids, selected.skills)
-    lines = _numbered(render_selection(master, item_ids, selected.skills, ids=True))
+            # A requirement's evidence is a candidate whatever the evidence view's character cap left out.
+            offered = {bullet for bullets in entries.values() for bullet in bullets}
+            for entry_id, bullets in selected.entries.items():
+                entries.setdefault(entry_id, []).extend(bullet for bullet in bullets if bullet in selected.evidence_for and bullet not in offered)
+            # No role is offered as a heading alone: the fit could only print it without a bullet.
+            entries = {entry_id: bullets for entry_id, bullets in entries.items() if bullets or master.entries[entry_id].section == "education"}
+    item_ids = [*selected.summary, *(item for entry_id, bullets in entries.items() for item in (entry_id, *bullets)), *other]
+    markdown = render_selection(master, item_ids, skills)
+    lines = _numbered(render_selection(master, item_ids, skills, ids=True))
     if len(lines) != len(resume_lines(markdown)):  # the two renders differ only in the id comments
         raise ValueError("the candidate set's lines do not number as its markdown does")
     printed = [line.item_id for line in lines if line.kind == "entry" and line.item_id is not None]
     return JobCandidates(
         mode=mode, profile=profile, posting=posting, selected=selected, summary=tuple(selected.summary),
         entries={entry_id: tuple(entries[entry_id]) for entry_id in printed},
-        skills=tuple(selected.skills), other=tuple(selected.other), markdown=markdown, lines=lines, stand_ins=stand_ins,
+        skills=skills, other=other, markdown=markdown, lines=lines, skill_reasons=skill_reasons,
     )
 
 
@@ -391,94 +380,102 @@ def _entry_id(entry: TailoredEntry) -> str | None:
     return line_item_id(entry.heading[0]) if entry.heading else None
 
 
+def shown_evidence(shown_ids: Sequence[str], selected: Selected) -> dict[str, tuple[str, ...]]:
+    """``line -> the mandatory requirements it is the evidence of`` among the lines a tailoring shows.
+
+    A requirement's evidence is the best line that supports it (``Requirement.supporters``, strongest
+    first) among the ones shown: when the tailoring left the strongest out, the next one shown is.
+    """
+
+    shown = set(shown_ids)
+    found: dict[str, list[str]] = {}
+    for requirement in selected.requirements:
+        if not requirement.mandatory:
+            continue
+        best = next((item_id for item_id in requirement.supporters if item_id in shown), None)
+        if best is not None:
+            found.setdefault(best, []).append(requirement.id)
+    return {item_id: tuple(ids) for item_id, ids in found.items()}
+
+
 def cut_order(result: TailoredResume, candidates: JobCandidates, master: Master, *, today: date) -> tuple[list[tuple[str, str]], frozenset[str]]:
     """The cuts the fit may make on ``result``, in the one order it may make them (the module text's rules).
 
     ``(cuts, refill)``: each cut is ``("bullet", <line id>)`` or ``("role", <the id of the role's first
-    heading line>)``; ``refill`` names the bullet cuts of the recent roles and the projects, which come back
-    when the last cut left room (an old role's line never does: the oldest roles go first).
+    heading line>)``; ``refill`` names the bullet cuts that come back when the last cut left room (never an
+    old role's line that supports nothing the posting asks for).
     """
 
-    keywords = candidates.selected.keywords
-    must = keywords.must if keywords is not None else ()
-    values = candidates.selected.values
+    selected = candidates.selected
+    values = selected.values
     roles = sorted(master.entries_in("experience"), key=_newest_first)
     rank = {entry.id: index for index, entry in enumerate(roles)}
     old = {entry.id for entry in roles if is_old_role(entry, today)}
-    named: dict[str, tuple[str, ...]] = {}
-
-    def names(line: TailoredLine) -> tuple[str, ...]:
-        key = line.id or ""
-        if key not in named:
-            named[key] = tuple(term for term in must if mentions(line.text, term))
-        return named[key]
-
     shown = [(section.heading, entry) for section in result.sections if section.heading in ENTRY_SECTIONS for entry in section.entries]
-    evidence: dict[str, int] = {}
-    for _heading, entry in shown:
-        for line in entry.bullets:
-            for term in names(line):
-                evidence[term] = evidence.get(term, 0) + 1
-
-    def only_evidence(line: TailoredLine) -> bool:
-        return any(evidence.get(term, 0) <= 1 for term in names(line))
-
-    def release(line: TailoredLine) -> None:
-        for term in names(line):
-            evidence[term] -= 1
+    lines = [line for _heading, entry in shown for line in entry.bullets]
+    evidence = shown_evidence([item for line in lines if (item := line_item_id(line)) is not None], selected)
+    pins = set(candidates.profile.pins)
+    supported = {item_id for requirement in selected.requirements for item_id in requirement.supporters}
 
     def is_old(entry: TailoredEntry) -> bool:
         entry_id = _entry_id(entry)
         return entry_id in old if entry_id in rank else _is_old_role(entry.heading, today)
 
-    cuts: list[tuple[str, str]] = []
-    experience = [entry for heading, entry in shown if heading == "experience" and entry.heading and entry.heading[0].id is not None]
-    # 1. The old roles, oldest first: bullets from the end of the tailoring's order, then the role.
-    olds = [entry for entry in experience if is_old(entry)]
-    for entry in sorted(olds, key=lambda item: (-rank.get(_entry_id(item) or "", -1), -experience.index(item))):
-        kept = 0
-        for line in reversed(entry.bullets):
-            if line.id is None or only_evidence(line):
-                kept += 1
-                continue
-            release(line)
-            cuts.append(("bullet", line.id))
-        if not kept:
-            cuts.append(("role", entry.heading[0].id))  # type: ignore[arg-type]
-    # 2. The recent roles and the projects: the last line of the list whose last line is worth least, above the floors.
-    lists: list[tuple[int, int, list[TailoredLine]]] = []  # (the floor, the place on the page, the lines still shown)
-    for place, (heading, entry) in enumerate(shown):
-        if heading == "experience" and not is_old(entry) and entry in experience:
-            floor = FLOORS[min(rank.get(_entry_id(entry) or "", len(FLOORS) - 1), len(FLOORS) - 1)]
-            lists.append((floor, place, list(entry.bullets)))
+    # Every shown list the fit may shorten: (the least it keeps, whether the cut that would empty it removes the role, its lines).
+    lists: list[tuple[int, str | None, list[TailoredLine]]] = []
+    home: dict[str, int] = {}
+    for heading, entry in shown:
+        if not entry.heading or entry.heading[0].id is None:
+            continue  # a role with no line id cannot be named for the way back: nothing of it is cut
+        if heading == "experience":
+            if is_old(entry):
+                lists.append((0, entry.heading[0].id, list(entry.bullets)))
+            else:
+                lists.append((FLOORS[min(rank.get(_entry_id(entry) or "", len(FLOORS) - 1), len(FLOORS) - 1)], None, list(entry.bullets)))
         elif heading == "projects":
-            lists.append((_PROJECT_FLOOR, place, list(entry.bullets)))
-    kept_lines: set[str] = set()
+            lists.append((_PROJECT_FLOOR, None, list(entry.bullets)))
+        else:
+            continue
+        for line in entry.bullets:
+            if line.id is not None:
+                home[line.id] = len(lists) - 1
+
+    def value(line: TailoredLine) -> tuple[float, str]:
+        return (values.get(line_item_id(line) or "", 0.0), line.id or "")
+
+    cuts: list[tuple[str, str]] = []
     refill: set[str] = set()
-    while True:
-        best: tuple[float, int, int] | None = None  # (the value, minus the place, the list)
-        for index, (floor, place, lines) in enumerate(lists):
-            if len(lines) <= floor:
+    left = [len(bullets) for _floor, _role, bullets in lists]
+    kept_whole: set[int] = set()  # lists that hold a line the fit never cuts (an answer's line)
+    for line in lines:
+        if line.id in home and line_item_id(line) is None:
+            kept_whole.add(home[line.id])
+
+    def cut(candidates_: list[TailoredLine]) -> None:
+        for line in sorted(candidates_, key=value):
+            index = home[line.id]  # type: ignore[index]
+            floor, role, _bullets = lists[index]
+            if left[index] <= floor:
+                continue  # a recent role keeps its best line; a project one line
+            left[index] -= 1
+            if left[index] == 0 and role is not None and index not in kept_whole:
+                cuts.append(("role", role))  # the cut that would leave an old role without a bullet removes the role
                 continue
-            for line in reversed(lines):
-                if line.id is None or line.id in kept_lines:
-                    continue
-                item_id = line_item_id(line)
-                if item_id is None or only_evidence(line):
-                    kept_lines.add(line.id)  # an answer's line, or the only evidence of a must-have: never cut
-                    continue
-                key = (values.get(item_id, 0.0), -place, index)
-                if best is None or key < best:
-                    best = key
-                break
-        if best is None:
-            return cuts, frozenset(refill)
-        lines = lists[best[2]][2]
-        line = next(line for line in reversed(lines) if line.id is not None and line.id not in kept_lines)
-        release(line)
-        lines.remove(line)
-        cuts.append(("bullet", line.id))  # type: ignore[arg-type]
-        refill.add(line.id)  # type: ignore[arg-type]
+            cuts.append(("bullet", line.id))  # type: ignore[arg-type]
+            item_id = line_item_id(line)
+            if not (role is not None and item_id not in supported):
+                refill.add(line.id)  # type: ignore[arg-type]
+
+    def kept_for_last(line: TailoredLine) -> int:
+        item_id = line_item_id(line)
+        return 2 if item_id in evidence else (1 if item_id in pins else 0)
+
+    cuttable = [line for line in lines if line.id in home and line_item_id(line) is not None]
+    cut([line for line in cuttable if kept_for_last(line) == 0])
+    # Only when nothing else can go (a conflict, reported by ``selection_record``): pins, then requirements' evidence.
+    cut([line for line in cuttable if kept_for_last(line) == 1])
+    cut([line for line in cuttable if kept_for_last(line) == 2])
+    return cuts, frozenset(refill)
 
 
 def fit_selected(
@@ -603,6 +600,24 @@ def _items(value: object, name: str) -> list[object]:
     return value  # type: ignore[return-value]
 
 
+def _conflict(obj: object) -> Conflict:
+    value = _object_with_optional(obj, ("kind", "ids", "reason"), ("requirement_id", "requirement", "covered"), "tailor_response.selection conflict")
+    kind = _string(value["kind"], "selection conflict kind")
+    if kind not in ("mandatory_evidence", "must_keep", "over_budget"):
+        _fail("bad_enum", "tailor_response.selection conflict kind must be mandatory_evidence, must_keep or over_budget")
+    ids = value["ids"]
+    if type(ids) is not list or any(type(item) is not str or not item for item in ids):
+        _fail("wrong_type", "tailor_response.selection conflict ids must be an array of non-empty strings")
+    covered = value.get("covered", False)
+    if type(covered) is not bool:
+        _fail("wrong_type", "tailor_response.selection conflict covered must be a boolean")
+    return Conflict(
+        kind, tuple(ids), _string(value["reason"], "selection conflict reason"),  # type: ignore[arg-type]
+        _string(value.get("requirement_id", ""), "selection conflict requirement_id", nonempty=False),
+        _string(value.get("requirement", ""), "selection conflict requirement", nonempty=False), covered,
+    )
+
+
 @dataclass(frozen=True)
 class TailorSelection:
     """Picked / Left out for one tailored resume, as it was when the resume was tailored (``TailorResponse.selection``).
@@ -628,8 +643,18 @@ class TailorSelection:
     cut_for_length: tuple[SelectionCut, ...]
     pins: tuple[str, ...] = ()
     excludes: tuple[str, ...] = ()
+    #: What the final resume does not show although the rules say it stays (``master_selection.Conflict``):
+    #: a mandatory requirement the master supports with no line shown, a pin not shown, a resume over the page
+    #: limit.  Omitted from the JSON when empty, so a record without one is stored byte for byte as before.
+    conflicts: tuple[Conflict, ...] = ()
 
     def to_json(self) -> dict[str, object]:
+        value = self._json()
+        if self.conflicts:
+            value["conflicts"] = [conflict.to_json() for conflict in self.conflicts]
+        return value
+
+    def _json(self) -> dict[str, object]:
         return {
             "selector_version": self.selector_version,
             "candidates_version": self.candidates_version,
@@ -650,7 +675,7 @@ class TailorSelection:
         value = _object_with_optional(
             obj,
             ("selector_version", "candidates_version", "candidates", "picked_by", "fallback", "picked", "left_out", "skills", "cut_for_length", "pins", "excludes"),
-            ("counts",),
+            ("counts", "conflicts"),
             "tailor_response.selection",
         )
         candidates = _string(value["candidates"], "tailor_response.selection.candidates")
@@ -676,12 +701,13 @@ class TailorSelection:
             cut_for_length=tuple(SelectionCut.from_json(item) for item in _items(value["cut_for_length"], "cut_for_length")),
             pins=_strings(value["pins"], "pins"),
             excludes=_strings(value["excludes"], "excludes"),
+            conflicts=tuple(_conflict(item) for item in _items(value.get("conflicts", []), "conflicts")),
         )
 
 
-_CUT_ROLE = ("cut_oldest_role_dropped", "cut for length: oldest role dropped")
-_CUT_OLD = ("cut_oldest_role_shortened", "cut for length: oldest role shortened")
+_CUT_ROLE = ("cut_role_dropped", "cut for length: no line of this older role is evidence for this posting")
 _CUT_VALUE = ("cut_lowest_value", "cut for length: lowest value for this posting")
+_CUT_CONFLICT = ("cut_conflict", "cut for length although the rules say it stays: it does not fit the page limit (see conflicts)")
 _NOT_SHOWN = ("left_out_by_tailoring", "offered to the tailoring, which did not show it")
 _NOT_OFFERED = ("not_offered", "scores lower for this posting than the lines offered to the tailoring")
 _OFFERED = ("offered", "among the lines of the master most relevant to this posting")
@@ -695,17 +721,23 @@ def selection_record(
 
     today = today or date.today()
     reasons = {line.id: line for line in candidates.selected.lines}
-    old = {entry.id for entry in master.entries_in("experience") if is_old_role(entry, today)}
     shown: list[str] = []
     for section in result.sections:
         for line in section.body_lines():
             item_id = line_item_id(line)
             if item_id in master.items and item_id not in shown:
                 shown.append(item_id)  # type: ignore[arg-type]
+    # The lines the fit cuts only in a conflict: the evidence of a mandatory requirement among everything the
+    # tailoring showed before the fit (shown now, or cut), and the profile's pins.
+    before_fit = list(shown)
+    length = result.length
+    if length is not None and length.status == STATUS_CUT:
+        before_fit += [item for role in length.cut for line in role.entry.bullets if (item := line_item_id(line)) is not None]
+        before_fit += [item for trimmed in length.trimmed for line in trimmed.bullets if (item := line_item_id(line)) is not None]
+    kept_for_last = set(shown_evidence(before_fit, candidates.selected)) | set(pins or candidates.profile.pins)
     # What the fit left out, by master id: a whole role's lines, and single lines (the old-role trim included).
     cut: dict[str, tuple[str, str]] = {}
     cuts: list[SelectionCut] = []
-    length = result.length
     if length is not None and length.status == STATUS_CUT:
         gone_roles = {_entry_id(role.entry) for role in length.cut}
         for role in length.cut:
@@ -722,10 +754,10 @@ def selection_record(
         }
         for trimmed in length.trimmed:
             entry_id = headings.get(trimmed.heading)
-            why = _CUT_ROLE if entry_id in gone_roles else (_CUT_OLD if entry_id in old else _CUT_VALUE)
             for line in trimmed.bullets:
                 item_id = line_item_id(line)
                 if item_id is not None:
+                    why = _CUT_ROLE if entry_id in gone_roles else (_CUT_CONFLICT if item_id in kept_for_last else _CUT_VALUE)
                     cut[item_id] = why
                     cuts.append(SelectionCut(item_id, "bullet", *why))
     offered = candidates.item_ids()
@@ -733,10 +765,7 @@ def selection_record(
     picked: list[SelectedLine] = []
     for item_id in shown:
         known = reasons.get(item_id)
-        if item_id in candidates.stand_ins:
-            _old_line, terms = candidates.stand_ins[item_id]
-            picked.append(SelectedLine(item_id, "shown_instead", f"names {', '.join(terms)}; offered in place of an older role's line"))
-        elif known is not None and known.picked:
+        if known is not None and known.picked:
             picked.append(SelectedLine(item_id, known.code, known.reason))
         else:
             picked.append(SelectedLine(item_id, *_OFFERED))
@@ -754,7 +783,24 @@ def selection_record(
             left.append(SelectedLine(item.id, known.code, known.reason))
         else:
             left.append(SelectedLine(item.id, *_NOT_OFFERED))
-    skills = candidates.selected.skill_reasons
+    skills = candidates.skill_reasons or candidates.selected.skill_reasons
+    # What the final resume does not show although the rules say it stays: reported, never silent.
+    conflicts: list[Conflict] = []
+    final = set(shown)
+    for requirement in candidates.selected.requirements:
+        if not requirement.mandatory or not requirement.supporters or final & set(requirement.supporters):
+            continue
+        was_cut = any(item_id in cut for item_id in requirement.supporters)
+        conflicts.append(Conflict(
+            "mandatory_evidence", tuple(requirement.supporters[:3]),
+            "no line that supports this requirement is shown: " + ("the page limit left no room for one" if was_cut else "the tailoring did not show one"),
+            requirement.id, requirement.text, False,
+        ))
+    missing_pins = tuple(item_id for item_id in (pins or candidates.profile.pins) if item_id in master.items and item_id not in final)
+    if missing_pins:
+        conflicts.append(Conflict("must_keep", missing_pins, "these pinned lines are not shown"))
+    if length is not None and length.over():
+        conflicts.append(Conflict("over_budget", (), f"{length.shown_pages()} pages; the limit is {length.max_pages}"))
     return TailorSelection(
         selector_version=candidates.selected.selector_version,
         candidates_version=CANDIDATES_VERSION,
@@ -768,7 +814,58 @@ def selection_record(
         cut_for_length=tuple(cuts),
         pins=tuple(pins),
         excludes=tuple(excludes),
+        conflicts=tuple(conflicts),
     )
+
+
+def compare_tailorings(
+    master: Master, candidates: JobCandidates, previous: TailorSelection, new: TailorSelection, *, stale: Sequence[str] = (),
+    measure=None,
+) -> Remake:
+    """The re-make rule for a job's tailoring (0110-10-15): the stored selection beside the one just made.
+
+    Both are checked against the same current sources: the master as it is, the requirements the selector
+    reads from the posting NOW (``candidates.selected.requirements``) and the page limit, on the separate
+    checks of ``master_selection.SelectionChecks`` (lost mandatory coverage is never offset by more lines or
+    skills).  ``previous`` is kept only when it shows no line the master retired and none in ``stale`` (ids
+    corrected since it was made, or lines an outdated answer backed: the caller knows both), still meets the
+    page limit, AND ``new`` regresses on a check; ``unresolved`` when ``new`` regresses and ``previous``
+    cannot be kept.  The pages of each are those of its picked master lines and skills as the master words
+    them now (a tailoring's own wording can print a line longer or shorter).  Pure: nothing is stored here.
+    """
+
+    requirements = candidates.selected.requirements
+    pins = candidates.profile.pins
+
+    def checks(selection: TailorSelection, gone: Sequence[str]):
+        ids = [line.id for line in selection.picked]
+        entries = [master.items[item_id].entry_id for item_id in ids if item_id in master.items and master.items[item_id].entry_id]
+        return check_selection(
+            master, requirements, [*dict.fromkeys(item for item in entries if item), *ids], [skill.name for skill in selection.skills_picked],
+            stale=gone, pins=pins, measure=measure,
+        )
+
+    was, now = checks(previous, stale), checks(new, ())
+    regressions: list[str] = []
+    gone = [req for req in was.covered if req not in now.covered]
+    if gone:
+        regressions.append(f"mandatory coverage: {len(gone)} requirement(s) with no line now ({', '.join(gone)})")
+    weaker = [req for req in was.strongest if req not in now.strongest and req not in gone]
+    if weaker:
+        regressions.append(f"evidence strength: the strongest line is no longer shown for {', '.join(weaker)}")
+    unpinned = [item_id for item_id in was.pins_shown if item_id not in now.pins_shown]
+    if unpinned:
+        regressions.append("must-keep lines no longer shown: " + ", ".join(unpinned))
+    if was.fits and not now.fits:
+        regressions.append(f"page fit: {now.pages} pages")
+    if not regressions:
+        return Remake(REMAKE_NEW, was, now)
+    problems: list[str] = []
+    if was.invalid:
+        problems.append("the stored tailoring shows lines the master has retired or corrected: " + ", ".join(was.invalid))
+    if not was.fits:
+        problems.append(f"the stored tailoring no longer meets the page limit ({was.pages} pages)")
+    return Remake(REMAKE_UNRESOLVED if problems else REMAKE_PREVIOUS, was, now, tuple(regressions), tuple(problems))
 
 
 # --- one tailoring from the stored master ---------------------------------------------------------
@@ -876,13 +973,16 @@ class MasterTailoring:
 
 def master_tailoring(
     *, home_root: Path, target: Path, profile: object | None, job: TailorJob, today: date | None = None, resolved: object | None = None,
+    job_identity: str | None = None,
 ) -> MasterTailoring | None:
     """How one tailoring reads the master, or ``None`` when it does not (see the module text).
 
     ``None``: no master is stored, the resume is not a profile's (pasted
     text), or the profile's resume was replaced by hand after its selection
     (``detached``).  The profile's prior is the lines its selection shows,
-    else its titles.
+    else its titles.  ``job_identity``: the job, so that its stored
+    assessment for this profile (when there is one) says which master lines
+    evidence each requirement; without it the posting is matched by words.
     """
 
     if profile is None:
@@ -896,8 +996,12 @@ def master_tailoring(
         base_ids=tuple(selection.item_ids) if selection is not None else None,
         profile_id=profile.profile_id,  # type: ignore[attr-defined]
         label=profile.label,  # type: ignore[attr-defined]
+        pins=tuple(selection.pins) if selection is not None else (),
     )
-    candidates = job_candidates(stored.master, prior, SelectionPosting(job.title, job.posting_text, job.company, job.location), today=today)
+    from .assess_master import stored_citations
+
+    cited = stored_citations(home_root, target, stored.master, profile.profile_id, job_identity)  # type: ignore[attr-defined]
+    candidates = job_candidates(stored.master, prior, SelectionPosting(job.title, job.posting_text, job.company, job.location, cited), today=today)
     return MasterTailoring(
         master=stored.master,
         source=MasterSource(stored.revision.revision_id, stored.revision.revision, stored.revision.content_sha256),
@@ -908,7 +1012,9 @@ def master_tailoring(
     )
 
 
-def tailoring_for_resume(resume: object, job: TailorJob, *, home_root: Path, target: Path, today: date | None = None) -> MasterTailoring | None:
+def tailoring_for_resume(
+    resume: object, job: TailorJob, *, home_root: Path, target: Path, today: date | None = None, job_identity: str | None = None,
+) -> MasterTailoring | None:
     """``master_tailoring`` for the resume one tailoring resolved (``ResolvedResume``); ``None`` for a pasted resume.
 
     Nothing but the master is read until one is found: without a master
@@ -928,7 +1034,7 @@ def tailoring_for_resume(resume: object, job: TailorJob, *, home_root: Path, tar
         profile = next((record for record in profile_records.list_profiles(resolved) if record.profile_id == profile_id and record.state != "deleted"), None)
     except (WorkpadError, profile_records.ProfileRecordError):
         return None
-    return master_tailoring(home_root=home_root, target=target, profile=profile, job=job, today=today, resolved=resolved)
+    return master_tailoring(home_root=home_root, target=target, profile=profile, job=job, today=today, resolved=resolved, job_identity=job_identity)
 
 
 __all__ = [
@@ -950,6 +1056,7 @@ __all__ = [
     "SelectionCut",
     "TailorSelection",
     "code_only",
+    "compare_tailorings",
     "cut_order",
     "detached",
     "digest_parts",
@@ -960,6 +1067,7 @@ __all__ = [
     "master_tailoring",
     "measure_pages",
     "selection_record",
+    "shown_evidence",
     "stored_master",
     "tailoring_for_resume",
 ]

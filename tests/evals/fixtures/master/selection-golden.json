@@ -1,6 +1,6 @@
 {
- "note": "SYNTHETIC. What the code selector (SELECTOR_VERSION sel-1) picks from master.md for profiles.json x postings/, on 2026-10-03. Regenerate only with a deliberate selector change.",
- "selector_version": "sel-1",
+ "note": "SYNTHETIC. What the code selector (SELECTOR_VERSION sel-3; no posting here has an assessment, so every pick is what sel-2 made) picks from master.md for profiles.json x postings/, on 2026-10-03. Regenerate only with a deliberate selector change.",
+ "selector_version": "sel-3",
  "today": "2026-10-03",
  "cases": {
   "profile-ai/base": {
@@ -14,97 +14,161 @@
      "b-lum-01",
      "b-lum-03",
      "b-lum-04",
-     "b-lum-21",
      "b-lum-10",
+     "b-lum-21",
+     "b-lum-05",
+     "b-lum-06",
      "b-lum-07",
-     "b-lum-14",
-     "b-lum-15",
-     "b-lum-20"
+     "b-lum-08",
+     "b-lum-11",
+     "b-lum-12"
     ],
     "r-kes": [
-     "b-kes-03",
-     "b-kes-01"
+     "b-kes-01",
+     "b-kes-03"
     ],
     "r-hex": [
-     "b-hex-01",
-     "b-hex-02"
+     "b-hex-01"
     ],
     "r-fin": [
-     "b-fin-12",
-     "b-fin-04"
+     "b-fin-04",
+     "b-fin-23"
     ],
-    "p-task": [
-     "b-task-04"
+    "r-cas": [
+     "b-cas-03"
     ],
     "p-eval": [
      "b-eval-01",
      "b-eval-02",
      "b-eval-03"
     ],
-    "p-pgq": [
-     "b-pgq-01"
-    ],
     "e-ms": [],
     "e-bs": []
    },
    "other": [
-    "o-cert-aws",
     "o-cert-gcp",
     "o-talk-evals",
-    "o-vol"
+    "o-vol",
+    "o-award"
    ],
    "skills": [
-    "Python",
-    "Go",
-    "LLM",
     "agents",
+    "Agile",
+    "Airflow",
+    "Ansible",
+    "architecture reviews",
+    "ArgoCD",
+    "AWS",
+    "Azure",
+    "Bash",
+    "Bazel",
+    "C++",
+    "chaos testing",
+    "CI/CD",
+    "consensus protocols",
+    "Elasticsearch",
+    "GCP",
+    "Go",
+    "Grafana",
+    "Helm",
+    "HIPAA",
+    "Java",
+    "JavaScript",
+    "Kafka",
+    "Kubernetes",
+    "Linux",
+    "LLM",
     "LLM evaluation",
-    "PyTorch",
     "Machine Learning",
+    "Microservices",
+    "Model Context Protocol",
+    "MySQL",
     "pgvector",
     "PostgreSQL",
+    "Prometheus",
+    "prompt caching",
+    "Python",
+    "PyTorch",
+    "Redis",
+    "Ruby",
+    "scikit-learn",
+    "SLOs",
     "Spark",
-    "Airflow",
     "SQLite",
-    "Kubernetes",
-    "AWS",
-    "GCP",
-    "CI/CD"
+    "Terraform",
+    "TypeScript"
    ],
    "cut_for_length": [
+    "technical direction across teams",
+    "SRE",
+    "SQL",
+    "SOC 2",
+    "Snowflake",
+    "Scala",
+    "Rust",
+    "retrieval-augmented generation",
+    "REST",
+    "release gates",
+    "React",
+    "property-based testing",
+    "PCI DSS",
+    "OpenTelemetry",
+    "Observability",
+    "Node.js",
+    "mentoring",
+    "Kotlin",
+    "ISO 27001",
+    "incident response",
+    "idempotent APIs",
+    "hiring",
+    "gRPC",
+    "GraphQL",
+    "Git",
+    "GDPR",
+    "fine-tuning",
+    "feature stores",
+    "event-driven systems",
+    "embeddings",
+    "Docker",
+    "dbt",
+    "Datadog",
+    "contract testing",
     "b-tes-02",
+    "b-kes-06",
+    "b-kce-03",
+    "b-kce-01",
     "b-tes-03",
     "b-tes-01",
     "r-tes",
-    "b-bri-04",
+    "b-bri-02",
     "b-bri-01",
-    "b-bri-06",
-    "r-bri",
-    "b-cas-16",
-    "b-cas-03",
-    "b-cas-02",
-    "r-cas",
-    "b-kes-06",
-    "b-pgq-04",
-    "b-pgq-02",
     "b-fin-01",
+    "b-kes-04",
+    "b-kes-02",
+    "b-kce-02",
     "b-hex-06",
     "b-hex-05",
     "b-hex-04",
     "b-hex-03",
+    "b-hex-02",
     "b-kes-05",
-    "b-kes-04",
-    "b-kes-02",
     "b-task-01",
-    "b-task-03",
-    "b-fin-23",
-    "b-fin-05"
+    "b-fin-12",
+    "b-fin-05",
+    "b-cas-16",
+    "b-cas-02",
+    "b-bri-06",
+    "r-bri",
+    "b-task-04",
+    "b-task-03"
    ],
-   "added_to_fill": [],
-   "only_evidence": {},
-   "shown_instead": {},
+   "added_to_fill": [
+    "b-lum-11",
+    "b-lum-12"
+   ],
+   "evidence_for": {},
+   "conflicts": [],
    "roles_dropped": [
-    "r-cas",
     "r-bri",
     "r-tes"
    ]
@@ -117,15 +181,18 @@
    ],
    "entries": {
     "r-lum": [
-     "b-lum-08",
-     "b-lum-05",
      "b-lum-07",
-     "b-lum-12",
-     "b-lum-01",
      "b-lum-03",
      "b-lum-04",
+     "b-lum-05",
+     "b-lum-01",
+     "b-lum-08",
+     "b-lum-12",
      "b-lum-09",
-     "b-lum-18",
+     "b-lum-24",
+     "b-lum-16",
+     "b-lum-13",
+     "b-lum-22",
      "b-lum-10"
     ],
     "r-kes": [
@@ -133,28 +200,22 @@
      "b-kes-03"
     ],
     "r-hex": [
-     "b-hex-02",
-     "b-hex-21"
+     "b-hex-07",
+     "b-hex-16",
+     "b-hex-14",
+     "b-hex-19"
     ],
     "r-fin": [
-     "b-fin-12",
-     "b-fin-03"
+     "b-fin-10",
+     "b-fin-12"
     ],
-    "p-task": [
-     "b-task-01"
-    ],
-    "p-eval": [
-     "b-eval-01"
-    ],
-    "p-trace": [
-     "b-trace-01"
+    "p-kce": [
+     "b-kce-01"
     ],
     "e-ms": [],
     "e-bs": []
    },
    "other": [
-    "o-cert-cka",
-    "o-cert-gcp",
     "o-talk-evals",
     "o-blog"
    ],
@@ -179,49 +240,148 @@
     "Rust",
     "Model Context Protocol",
     "SOC 2",
+    "Agile",
+    "Airflow",
+    "Ansible",
+    "ArgoCD",
+    "AWS",
+    "C++",
+    "Elasticsearch",
+    "GCP",
+    "Grafana",
+    "Helm",
+    "HIPAA",
+    "incident response",
+    "ISO 27001",
+    "JavaScript",
     "Machine Learning",
     "pgvector",
+    "React",
+    "Redis",
+    "Ruby",
+    "scikit-learn",
     "Spark",
-    "Airflow",
-    "Grafana",
-    "SLOs"
+    "SQLite",
+    "Terraform"
    ],
    "cut_for_length": [
+    "technical direction across teams",
+    "SRE",
+    "SQL",
+    "Snowflake",
+    "SLOs",
+    "Scala",
+    "REST",
+    "release gates",
+    "property-based testing",
+    "PCI DSS",
+    "Node.js",
+    "MySQL",
+    "Microservices",
+    "mentoring",
+    "Linux",
+    "Kotlin",
+    "Kafka",
+    "Java",
+    "idempotent APIs",
+    "hiring",
+    "gRPC",
+    "GraphQL",
+    "Git",
+    "GDPR",
+    "feature stores",
+    "event-driven systems",
+    "Docker",
+    "dbt",
+    "Datadog",
+    "contract testing",
+    "consensus protocols",
+    "chaos testing",
+    "Bazel",
+    "Bash",
+    "Azure",
+    "architecture reviews",
+    "b-kes-06",
+    "b-kce-03",
     "b-tes-03",
     "b-tes-01",
-    "b-tes-02",
-    "r-tes",
-    "b-bri-04",
+    "b-bri-02",
     "b-bri-01",
+    "b-kes-04",
+    "b-kes-02",
+    "b-kce-02",
+    "b-hex-01",
+    "b-kes-05",
+    "b-eval-02",
+    "b-cas-02",
     "b-bri-06",
     "r-bri",
-    "b-cas-03",
-    "b-cas-16",
-    "b-cas-02",
-    "r-cas",
-    "b-kes-06",
-    "b-trace-03",
-    "b-kes-02",
-    "b-kes-05",
-    "b-kes-04",
+    "b-fin-23",
+    "b-fin-04",
     "b-task-04",
     "b-task-03",
-    "b-eval-02",
+    "b-cas-03",
     "b-eval-03",
-    "b-hex-16",
-    "b-fin-06",
-    "b-fin-16",
+    "o-vol",
+    "o-cert-gcp",
     "b-fin-18",
-    "b-trace-02",
-    "b-hex-27",
-    "b-hex-10",
-    "b-hex-01"
+    "b-tes-02",
+    "r-tes",
+    "b-cas-04",
+    "r-cas",
+    "b-hex-21",
+    "b-task-01",
+    "b-eval-01"
    ],
-   "added_to_fill": [
-    "b-lum-10"
-   ],
-   "only_evidence": {},
-   "shown_instead": {},
+   "added_to_fill": [],
+   "evidence_for": {
+    "b-lum-01": [
+     "q1"
+    ],
+    "b-lum-12": [
+     "q2"
+    ],
+    "b-lum-05": [
+     "q4",
+     "k20"
+    ],
+    "b-lum-07": [
+     "q5",
+     "k16",
+     "k21"
+    ],
+    "b-fin-10": [
+     "q6"
+    ],
+    "o-blog": [
+     "q7",
+     "k17",
+     "k18"
+    ],
+    "b-lum-03": [
+     "q8",
+     "k22"
+    ],
+    "b-kce-01": [
+     "q9",
+     "k24",
+     "k25"
+    ],
+    "b-lum-04": [
+     "q10",
+     "k28"
+    ],
+    "b-hex-07": [
+     "q11"
+    ],
+    "b-lum-08": [
+     "k23"
+    ],
+    "b-lum-09": [
+     "k27"
+    ]
+   },
+   "conflicts": [],
    "roles_dropped": [
     "r-cas",
     "r-bri",
@@ -229,7 +389,7 @@
    ]
   },
   "profile-ai/p2-staff-swe-core-infrastructure": {
-   "pages_before_fit": 3,
+   "pages_before_fit": 4,
    "pages": 2,
    "summary": [
     "sum-mlplat"
@@ -237,35 +397,38 @@
    "entries": {
     "r-lum": [
      "b-lum-17",
+     "b-lum-04",
+     "b-lum-02",
      "b-lum-18",
-     "b-lum-03"
+     "b-lum-16"
     ],
     "r-kes": [
-     "b-kes-01",
-     "b-kes-03"
+     "b-kes-01"
     ],
     "r-hex": [
      "b-hex-05",
      "b-hex-03",
-     "b-hex-02",
-     "b-hex-01",
      "b-hex-07",
-     "b-hex-28"
+     "b-hex-01",
+     "b-hex-09",
+     "b-hex-12",
+     "b-hex-14",
+     "b-hex-21",
+     "b-hex-16"
     ],
     "r-fin": [
-     "b-fin-12",
-     "b-fin-09"
+     "b-fin-12"
+    ],
+    "r-cas": [
+     "b-cas-05"
     ],
     "p-eval": [
      "b-eval-01"
     ],
     "p-kce": [
-     "b-kce-01",
-     "b-kce-02",
      "b-kce-03"
     ],
     "p-pgq": [
-     "b-pgq-01",
      "b-pgq-03"
     ],
     "e-ms": [],
@@ -273,9 +436,7 @@
    },
    "other": [
     "o-cert-aws",
-    "o-cert-gcp",
-    "o-cert-tf",
-    "o-blog"
+    "o-award"
    ],
    "skills": [
     "ArgoCD",
@@ -296,61 +457,154 @@
     "Rust",
     "SOC 2",
     "ISO 27001",
+    "agents",
+    "Agile",
+    "Airflow",
+    "Ansible",
+    "architecture reviews",
+    "Azure",
+    "Bash",
+    "Bazel",
+    "C++",
+    "chaos testing",
+    "CI/CD",
+    "consensus protocols",
+    "contract testing",
+    "Datadog",
+    "dbt",
+    "Docker",
+    "GCP",
+    "HIPAA",
+    "JavaScript",
     "LLM",
     "LLM evaluation",
     "Machine Learning",
+    "mentoring",
     "Microservices",
-    "Spark",
-    "Airflow",
-    "GCP"
+    "pgvector",
+    "Ruby",
+    "scikit-learn",
+    "Spark"
    ],
    "cut_for_length": [
-    "b-tes-01",
-    "b-tes-03",
-    "b-tes-02",
-    "r-tes",
-    "b-bri-01",
-    "b-bri-03",
-    "b-bri-06",
-    "r-bri",
-    "b-cas-02",
-    "b-cas-07",
-    "b-cas-05",
-    "r-cas",
+    "TypeScript",
+    "technical direction across teams",
+    "SRE",
+    "SQLite",
+    "SQL",
+    "Snowflake",
+    "Scala",
+    "retrieval-augmented generation",
+    "REST",
+    "release gates",
+    "Redis",
+    "React",
+    "PyTorch",
+    "property-based testing",
+    "prompt caching",
+    "PCI DSS",
+    "OpenTelemetry",
+    "Node.js",
+    "MySQL",
+    "Model Context Protocol",
+    "Kotlin",
+    "Java",
+    "idempotent APIs",
+    "hiring",
+    "gRPC",
+    "GraphQL",
+    "Git",
+    "GDPR",
+    "fine-tuning",
+    "feature stores",
+    "event-driven systems",
+    "embeddings",
+    "Elasticsearch",
     "b-kes-06",
-    "b-kes-02",
+    "b-kce-01",
+    "b-tes-03",
+    "b-tes-01",
+    "b-bri-02",
+    "b-bri-01",
     "b-pgq-02",
+    "b-kes-04",
+    "b-kes-02",
+    "b-kce-02",
     "b-kes-05",
     "b-eval-02",
-    "b-kes-04",
+    "b-bri-06",
+    "r-bri",
     "b-fin-04",
+    "b-cas-03",
+    "b-kes-03",
     "b-eval-03",
-    "b-lum-20",
-    "b-lum-22",
-    "b-fin-06",
+    "b-lum-01",
+    "o-talk-evals",
+    "o-cert-gcp",
+    "b-tes-02",
+    "r-tes",
+    "b-cas-04",
+    "b-fin-13",
+    "b-fin-09",
     "b-fin-03",
-    "b-hex-06",
+    "b-lum-03",
     "b-lum-26",
-    "b-lum-11",
-    "b-lum-05",
-    "b-lum-04"
+    "b-lum-13",
+    "b-pgq-01"
    ],
    "added_to_fill": [],
-   "only_evidence": {
+   "evidence_for": {
+    "b-hex-09": [
+     "q2"
+    ],
+    "b-hex-03": [
+     "q3",
+     "k17",
+     "k18"
+    ],
+    "b-hex-05": [
+     "q4",
+     "q11",
+     "k19",
+     "k28",
+     "k29"
+    ],
+    "b-cas-05": [
+     "q5",
+     "k20"
+    ],
+    "b-hex-14": [
+     "q6"
+    ],
+    "b-lum-02": [
+     "q7"
+    ],
+    "b-lum-17": [
+     "q8",
+     "k21",
+     "k22",
+     "k27"
+    ],
+    "b-lum-04": [
+     "q10",
+     "k26"
+    ],
     "b-hex-07": [
-     "incident response"
+     "q12",
+     "k31"
+    ],
+    "b-hex-01": [
+     "k23"
+    ],
+    "b-kce-03": [
+     "k24"
+    ],
+    "b-hex-12": [
+     "k25"
     ]
    },
-   "shown_instead": {
-    "b-hex-28": [
-     "b-cas-07",
-     [
-      "Linux"
-     ]
-    ]
-   },
+   "conflicts": [],
    "roles_dropped": [
-    "r-cas",
     "r-bri",
     "r-tes"
    ]
@@ -364,45 +618,45 @@
    "entries": {
     "r-lum": [
      "b-lum-17",
+     "b-lum-11",
+     "b-lum-14",
      "b-lum-15",
-     "b-lum-03",
-     "b-lum-11"
+     "b-lum-27",
+     "b-lum-02",
+     "b-lum-01",
+     "b-lum-10"
     ],
     "r-kes": [
      "b-kes-01",
-     "b-kes-02"
+     "b-kes-02",
+     "b-kes-05",
+     "b-kes-04"
     ],
     "r-hex": [
+     "b-hex-14",
      "b-hex-01",
-     "b-hex-18",
-     "b-hex-02",
-     "b-hex-26"
+     "b-hex-18"
     ],
     "r-fin": [
-     "b-fin-09",
+     "b-fin-01",
      "b-fin-12",
-     "b-fin-01"
+     "b-fin-04",
+     "b-fin-23"
     ],
     "r-cas": [
-     "b-cas-08"
-    ],
-    "p-task": [
-     "b-task-01"
+     "b-cas-08",
+     "b-cas-09"
     ],
     "p-eval": [
      "b-eval-01"
-    ],
-    "p-kce": [
-     "b-kce-01"
     ],
     "e-ms": [],
     "e-bs": []
    },
    "other": [
-    "o-cert-aws",
+    "o-cert-cka",
     "o-cert-gcp",
-    "o-talk-evals",
-    "o-blog"
+    "o-talk-evals"
    ],
    "skills": [
     "Kubernetes",
@@ -425,58 +679,148 @@
     "AWS",
     "GCP",
     "agents",
+    "Agile",
+    "Ansible",
+    "architecture reviews",
+    "ArgoCD",
+    "Azure",
+    "Bash",
+    "Bazel",
+    "C++",
+    "chaos testing",
+    "CI/CD",
+    "consensus protocols",
+    "Datadog",
+    "Docker",
+    "Grafana",
+    "Helm",
+    "JavaScript",
     "Machine Learning",
+    "Microservices",
     "PostgreSQL",
-    "Prometheus"
+    "Prometheus",
+    "prompt caching",
+    "React",
+    "Redis",
+    "Ruby",
+    "SOC 2",
+    "SQLite",
+    "Terraform"
    ],
    "cut_for_length": [
-    "b-tes-01",
-    "b-tes-03",
+    "TypeScript",
+    "technical direction across teams",
+    "SRE",
+    "SLOs",
+    "scikit-learn",
+    "Scala",
+    "Rust",
+    "retrieval-augmented generation",
+    "REST",
+    "release gates",
+    "property-based testing",
+    "pgvector",
+    "PCI DSS",
+    "OpenTelemetry",
+    "Observability",
+    "Node.js",
+    "MySQL",
+    "Model Context Protocol",
+    "Linux",
+    "Kotlin",
+    "ISO 27001",
+    "incident response",
+    "idempotent APIs",
+    "gRPC",
+    "GraphQL",
+    "Git",
+    "GDPR",
+    "fine-tuning",
+    "event-driven systems",
+    "embeddings",
+    "Elasticsearch",
+    "contract testing",
     "b-tes-02",
+    "b-kes-06",
+    "b-kce-03",
+    "b-tes-03",
+    "b-tes-01",
     "r-tes",
-    "b-bri-03",
+    "b-bri-02",
     "b-bri-01",
+    "b-kce-02",
+    "b-hex-03",
+    "b-hex-02",
+    "b-task-01",
+    "b-eval-02",
     "b-bri-06",
     "r-bri",
-    "b-cas-13",
-    "b-cas-01",
-    "b-kes-06",
-    "b-kce-02",
-    "b-kes-04",
-    "b-task-03",
     "b-task-04",
-    "b-kes-05",
-    "b-eval-02",
-    "b-hex-14",
-    "b-fin-04",
-    "b-fin-05",
-    "b-eval-03",
+    "b-task-03",
     "b-kes-03",
-    "b-lum-20",
-    "b-lum-04",
-    "b-lum-12",
-    "b-kce-03",
-    "b-lum-10",
-    "b-lum-01",
-    "b-hex-21"
+    "b-eval-03",
+    "o-vol",
+    "b-kce-01",
+    "b-lum-13",
+    "b-fin-06",
+    "b-hex-26",
+    "b-fin-05",
+    "b-cas-16",
+    "b-lum-05"
    ],
    "added_to_fill": [],
-   "only_evidence": {
+   "evidence_for": {
+    "b-lum-11": [
+     "q1"
+    ],
+    "b-lum-15": [
+     "q2"
+    ],
+    "b-kes-05": [
+     "q3"
+    ],
+    "b-kes-02": [
+     "q4",
+     "k18"
+    ],
+    "b-hex-14": [
+     "q5"
+    ],
+    "b-lum-02": [
+     "q6"
+    ],
+    "b-lum-17": [
+     "q7",
+     "k20",
+     "k22"
+    ],
+    "b-kes-01": [
+     "q8",
+     "k15",
+     "k16",
+     "k17"
+    ],
+    "b-lum-27": [
+     "q9"
+    ],
+    "b-lum-14": [
+     "q11"
+    ],
     "b-cas-08": [
-     "SQL"
+     "k21"
     ],
     "b-fin-01": [
-     "Java"
+     "k23"
     ]
    },
-   "shown_instead": {},
+   "conflicts": [],
    "roles_dropped": [
     "r-bri",
     "r-tes"
    ]
   },
   "profile-swe/base": {
-   "pages_before_fit": 3,
+   "pages_before_fit": 4,
    "pages": 2,
    "summary": [
     "sum-backend"
@@ -485,12 +829,10 @@
     "r-lum": [
      "b-lum-17",
      "b-lum-18",
-     "b-lum-24",
-     "b-lum-23"
+     "b-lum-24"
     ],
     "r-kes": [
-     "b-kes-06",
-     "b-kes-02"
+     "b-kes-06"
     ],
     "r-hex": [
      "b-hex-01",
@@ -498,18 +840,17 @@
      "b-hex-03",
      "b-hex-05",
      "b-hex-06",
-     "b-hex-09",
-     "b-hex-23",
-     "b-hex-26"
+     "b-hex-08"
     ],
     "r-fin": [
-     "b-fin-11",
      "b-fin-06",
-     "b-fin-24",
-     "b-fin-08"
+     "b-fin-11",
+     "b-fin-24"
+    ],
+    "r-bri": [
+     "b-bri-01"
     ],
     "p-task": [
-     "b-task-02",
      "b-task-09"
     ],
     "p-kce": [
@@ -522,69 +863,128 @@
     "e-bs": []
    },
    "other": [
-    "o-cert-aws",
     "o-talk-recon",
     "o-patent",
-    "o-paper"
+    "o-paper",
+    "o-award"
    ],
    "skills": [
-    "Python",
-    "Go",
-    "Microservices",
-    "Kafka",
-    "Redis",
-    "PostgreSQL",
-    "Kubernetes",
-    "Docker",
-    "Terraform",
-    "Helm",
+    "agents",
+    "Agile",
+    "Airflow",
+    "Ansible",
+    "architecture reviews",
     "ArgoCD",
     "AWS",
+    "Azure",
+    "Bash",
+    "Bazel",
+    "C++",
+    "chaos testing",
+    "CI/CD",
+    "consensus protocols",
+    "contract testing",
+    "Datadog",
+    "dbt",
+    "Docker",
+    "Elasticsearch",
+    "embeddings",
+    "event-driven systems",
+    "feature stores",
+    "fine-tuning",
     "GCP",
-    "Prometheus",
-    "Grafana",
-    "SLOs",
+    "GDPR",
     "Git",
-    "HIPAA"
+    "Go",
+    "Grafana",
+    "GraphQL",
+    "gRPC",
+    "Helm",
+    "HIPAA",
+    "hiring",
+    "Java",
+    "JavaScript",
+    "Kafka",
+    "Kotlin",
+    "Kubernetes",
+    "Linux",
+    "LLM",
+    "Machine Learning",
+    "Microservices",
+    "MySQL",
+    "OpenTelemetry",
+    "PostgreSQL",
+    "Prometheus",
+    "Python",
+    "Redis",
+    "REST",
+    "Ruby",
+    "Rust",
+    "SLOs",
+    "Spark",
+    "Terraform"
    ],
    "cut_for_length": [
+    "TypeScript",
+    "technical direction across teams",
+    "SRE",
+    "SQLite",
+    "SQL",
+    "SOC 2",
+    "Snowflake",
+    "scikit-learn",
+    "Scala",
+    "retrieval-augmented generation",
+    "release gates",
+    "React",
+    "PyTorch",
+    "property-based testing",
+    "prompt caching",
+    "pgvector",
+    "PCI DSS",
+    "Observability",
+    "Node.js",
+    "Model Context Protocol",
+    "mentoring",
+    "LLM evaluation",
+    "ISO 27001",
+    "incident response",
+    "idempotent APIs",
     "b-tes-02",
+    "b-kes-05",
+    "b-kce-01",
     "b-tes-03",
     "b-tes-01",
     "r-tes",
-    "b-bri-05",
-    "b-bri-09",
-    "b-bri-01",
-    "r-bri",
-    "b-cas-15",
-    "b-cas-12",
-    "b-cas-04",
-    "r-cas",
-    "b-kes-05",
-    "b-kce-01",
-    "b-kes-01",
     "b-kes-04",
     "b-kes-03",
-    "b-lum-09",
+    "b-kes-02",
+    "b-kes-01",
     "b-lum-25",
-    "b-pgq-01",
-    "b-task-05",
+    "b-lum-09",
+    "b-pgq-03",
+    "b-kce-03",
+    "b-cas-11",
+    "b-cas-07",
+    "b-cas-05",
+    "r-cas",
+    "b-bri-03",
+    "b-bri-02",
+    "b-fin-02",
     "b-fin-01",
+    "b-task-05",
+    "b-task-03",
+    "b-pgq-01",
+    "b-lum-23",
     "b-lum-22",
     "b-lum-11",
-    "b-lum-06",
-    "b-pgq-03",
-    "b-kce-03"
+    "b-lum-06"
    ],
-   "added_to_fill": [
-    "b-hex-23",
-    "b-hex-26"
-   ],
-   "only_evidence": {},
-   "shown_instead": {},
+   "added_to_fill": [],
+   "evidence_for": {},
+   "conflicts": [],
    "roles_dropped": [
     "r-cas",
-    "r-bri",
     "r-tes"
    ]
   },
@@ -596,42 +996,40 @@
    ],
    "entries": {
     "r-lum": [
-     "b-lum-08",
-     "b-lum-05",
      "b-lum-07",
+     "b-lum-03",
+     "b-lum-04",
+     "b-lum-05",
+     "b-lum-09",
+     "b-lum-01",
+     "b-lum-08",
      "b-lum-12",
-     "b-lum-17",
-     "b-lum-18",
-     "b-lum-01"
+     "b-lum-24",
+     "b-lum-16",
+     "b-lum-13",
+     "b-lum-22",
+     "b-lum-10"
     ],
     "r-kes": [
-     "b-kes-01",
-     "b-kes-03"
+     "b-kes-06"
     ],
     "r-hex": [
-     "b-hex-02",
-     "b-hex-21"
+     "b-hex-07",
+     "b-hex-16",
+     "b-hex-21",
+     "b-hex-14"
     ],
     "r-fin": [
-     "b-fin-06",
-     "b-fin-16"
+     "b-fin-10"
     ],
-    "p-task": [
-     "b-task-01"
-    ],
-    "p-pgq": [
-     "b-pgq-01"
-    ],
-    "p-trace": [
-     "b-trace-01"
+    "p-kce": [
+     "b-kce-01"
     ],
     "e-ms": [],
     "e-bs": []
    },
    "other": [
-    "o-cert-cka",
     "o-talk-evals",
-    "o-paper",
     "o-blog"
    ],
    "skills": [
@@ -655,50 +1053,150 @@
     "Rust",
     "Model Context Protocol",
     "SOC 2",
-    "Machine Learning",
-    "Kafka",
-    "Spark",
+    "Agile",
     "Airflow",
+    "Ansible",
+    "architecture reviews",
+    "AWS",
+    "C++",
     "Docker",
+    "GCP",
     "Grafana",
-    "SLOs"
+    "Helm",
+    "HIPAA",
+    "incident response",
+    "ISO 27001",
+    "JavaScript",
+    "Linux",
+    "Machine Learning",
+    "MySQL",
+    "pgvector",
+    "React",
+    "Redis",
+    "Ruby",
+    "Spark",
+    "Terraform"
    ],
    "cut_for_length": [
+    "technical direction across teams",
+    "SRE",
+    "SQLite",
+    "SQL",
+    "Snowflake",
+    "SLOs",
+    "scikit-learn",
+    "Scala",
+    "REST",
+    "release gates",
+    "property-based testing",
+    "PCI DSS",
+    "Node.js",
+    "Microservices",
+    "mentoring",
+    "Kotlin",
+    "Kafka",
+    "Java",
+    "idempotent APIs",
+    "hiring",
+    "gRPC",
+    "GraphQL",
+    "Git",
+    "GDPR",
+    "feature stores",
+    "event-driven systems",
+    "Elasticsearch",
+    "dbt",
+    "Datadog",
+    "contract testing",
+    "consensus protocols",
+    "chaos testing",
+    "Bazel",
+    "Bash",
+    "Azure",
+    "ArgoCD",
+    "b-kes-05",
     "b-tes-03",
     "b-tes-01",
-    "b-tes-02",
-    "r-tes",
-    "b-bri-07",
-    "b-bri-09",
+    "b-kes-04",
+    "b-kes-03",
+    "b-kes-02",
+    "b-kes-01",
+    "b-eval-04",
+    "b-eval-03",
+    "b-kce-03",
+    "b-cas-07",
+    "b-cas-05",
+    "b-bri-03",
+    "b-bri-02",
+    "b-task-03",
     "b-bri-01",
     "r-bri",
-    "b-cas-02",
-    "b-cas-15",
-    "b-cas-04",
-    "r-cas",
-    "b-kes-05",
-    "b-kes-02",
-    "b-kes-04",
-    "b-kes-06",
-    "b-trace-03",
-    "b-pgq-02",
-    "b-task-03",
-    "b-fin-18",
-    "b-trace-02",
-    "b-fin-13",
-    "b-fin-03",
-    "b-task-06",
-    "b-pgq-03",
-    "b-hex-05",
-    "b-hex-26",
-    "b-hex-08",
+    "b-fin-11",
+    "b-fin-06",
+    "b-task-09",
+    "b-kce-02",
     "b-hex-01",
-    "b-lum-09",
-    "b-lum-03"
+    "o-patent",
+    "o-paper",
+    "b-fin-18",
+    "b-tes-02",
+    "r-tes",
+    "b-fin-12",
+    "b-hex-19",
+    "b-task-01",
+    "b-eval-01",
+    "b-cas-04",
+    "r-cas"
    ],
    "added_to_fill": [],
-   "only_evidence": {},
-   "shown_instead": {},
+   "evidence_for": {
+    "b-lum-01": [
+     "q1"
+    ],
+    "b-lum-12": [
+     "q2"
+    ],
+    "b-lum-05": [
+     "q4",
+     "k20"
+    ],
+    "b-lum-07": [
+     "q5",
+     "k16",
+     "k21"
+    ],
+    "b-fin-10": [
+     "q6"
+    ],
+    "o-blog": [
+     "q7",
+     "k17",
+     "k18"
+    ],
+    "b-lum-03": [
+     "q8",
+     "k22"
+    ],
+    "b-kce-01": [
+     "q9",
+     "k24",
+     "k25"
+    ],
+    "b-lum-04": [
+     "q10",
+     "k28"
+    ],
+    "b-hex-07": [
+     "q11"
+    ],
+    "b-lum-08": [
+     "k23"
+    ],
+    "b-lum-09": [
+     "k27"
+    ]
+   },
+   "conflicts": [],
    "roles_dropped": [
     "r-cas",
     "r-bri",
@@ -714,33 +1212,37 @@
    "entries": {
     "r-lum": [
      "b-lum-17",
+     "b-lum-04",
+     "b-lum-02",
      "b-lum-18",
-     "b-lum-11"
+     "b-lum-16"
     ],
     "r-kes": [
-     "b-kes-01",
      "b-kes-06"
     ],
     "r-hex": [
      "b-hex-05",
      "b-hex-03",
-     "b-hex-02",
-     "b-hex-25",
      "b-hex-07",
-     "b-hex-28"
+     "b-hex-01",
+     "b-hex-09",
+     "b-hex-12",
+     "b-hex-14",
+     "b-hex-21",
+     "b-hex-16"
     ],
     "r-fin": [
-     "b-fin-06",
-     "b-fin-09"
+     "b-fin-09",
+     "b-fin-13"
     ],
-    "p-task": [
-     "b-task-01"
+    "r-cas": [
+     "b-cas-05"
     ],
     "p-kce": [
-     "b-kce-01",
      "b-kce-03"
     ],
     "p-pgq": [
+     "b-pgq-01",
      "b-pgq-03"
     ],
     "e-ms": [],
@@ -748,9 +1250,7 @@
    },
    "other": [
     "o-cert-aws",
-    "o-cert-tf",
-    "o-award",
-    "o-blog"
+    "o-award"
    ],
    "skills": [
     "ArgoCD",
@@ -771,70 +1271,153 @@
     "Rust",
     "SOC 2",
     "ISO 27001",
-    "LLM",
     "agents",
+    "Agile",
+    "Airflow",
+    "Ansible",
+    "architecture reviews",
+    "Azure",
+    "Bash",
+    "Bazel",
+    "C++",
+    "chaos testing",
+    "CI/CD",
+    "consensus protocols",
+    "contract testing",
+    "Datadog",
+    "dbt",
+    "Docker",
+    "GCP",
+    "HIPAA",
+    "JavaScript",
+    "LLM",
+    "LLM evaluation",
     "Machine Learning",
     "Microservices",
+    "MySQL",
+    "pgvector",
+    "Redis",
+    "Ruby",
     "Spark",
-    "Airflow",
-    "Docker",
-    "GCP"
+    "SQL"
    ],
    "cut_for_length": [
-    "b-tes-01",
-    "b-tes-03",
-    "b-tes-02",
-    "r-tes",
-    "b-bri-09",
-    "b-bri-10",
-    "b-bri-01",
-    "r-bri",
-    "b-cas-07",
-    "b-cas-05",
-    "b-cas-04",
-    "r-cas",
+    "TypeScript",
+    "technical direction across teams",
+    "SRE",
+    "SQLite",
+    "Snowflake",
+    "scikit-learn",
+    "Scala",
+    "retrieval-augmented generation",
+    "REST",
+    "release gates",
+    "React",
+    "PyTorch",
+    "property-based testing",
+    "prompt caching",
+    "PCI DSS",
+    "OpenTelemetry",
+    "Node.js",
+    "Model Context Protocol",
+    "mentoring",
+    "Kotlin",
+    "Java",
+    "idempotent APIs",
+    "hiring",
+    "gRPC",
+    "GraphQL",
+    "Git",
+    "GDPR",
+    "fine-tuning",
+    "feature stores",
+    "event-driven systems",
+    "embeddings",
+    "Elasticsearch",
     "b-kes-05",
+    "b-kce-01",
+    "b-tes-03",
+    "b-tes-01",
+    "b-kes-04",
     "b-kes-03",
     "b-kes-02",
-    "b-kes-04",
-    "b-task-02",
-    "b-fin-11",
+    "b-kes-01",
+    "b-eval-04",
+    "b-eval-03",
+    "b-cas-07",
+    "b-bri-03",
+    "b-bri-02",
+    "b-lum-24",
+    "b-bri-01",
+    "r-bri",
+    "b-fin-06",
     "b-pgq-02",
-    "b-lum-23",
-    "b-task-09",
-    "b-lum-13",
-    "b-lum-22",
-    "b-fin-12",
-    "b-fin-03",
-    "b-lum-04",
-    "b-lum-03",
-    "b-lum-05",
-    "b-hex-06",
-    "b-pgq-01",
     "b-kce-02",
-    "b-hex-01"
+    "o-patent",
+    "o-paper",
+    "b-tes-02",
+    "r-tes",
+    "b-fin-12",
+    "b-lum-03",
+    "b-lum-26",
+    "b-fin-03",
+    "b-cas-04",
+    "b-lum-13",
+    "b-eval-01"
    ],
-   "added_to_fill": [
-    "b-hex-25"
-   ],
-   "only_evidence": {
+   "added_to_fill": [],
+   "evidence_for": {
+    "b-hex-09": [
+     "q2"
+    ],
+    "b-hex-03": [
+     "q3",
+     "k17",
+     "k18"
+    ],
+    "b-hex-05": [
+     "q4",
+     "q11",
+     "k19",
+     "k28",
+     "k29"
+    ],
+    "b-cas-05": [
+     "q5",
+     "k20"
+    ],
+    "b-hex-14": [
+     "q6"
+    ],
+    "b-lum-02": [
+     "q7"
+    ],
+    "b-lum-17": [
+     "q8",
+     "k21",
+     "k22",
+     "k27"
+    ],
+    "b-lum-04": [
+     "q10",
+     "k26"
+    ],
     "b-hex-07": [
-     "incident response"
+     "q12",
+     "k31"
+    ],
+    "b-hex-01": [
+     "k23"
     ],
     "b-kce-03": [
-     "Terraform"
+     "k24"
+    ],
+    "b-hex-12": [
+     "k25"
     ]
    },
-   "shown_instead": {
-    "b-hex-28": [
-     "b-cas-07",
-     [
-      "Linux"
-     ]
-    ]
-   },
+   "conflicts": [],
    "roles_dropped": [
-    "r-cas",
     "r-bri",
     "r-tes"
    ]
@@ -848,46 +1431,45 @@
    "entries": {
     "r-lum": [
      "b-lum-17",
-     "b-lum-15",
      "b-lum-11",
-     "b-lum-03"
+     "b-lum-02",
+     "b-lum-14",
+     "b-lum-15",
+     "b-lum-27",
+     "b-lum-01",
+     "b-lum-10",
+     "b-lum-05"
     ],
     "r-kes": [
      "b-kes-01",
-     "b-kes-02"
+     "b-kes-02",
+     "b-kes-05",
+     "b-kes-04"
     ],
     "r-hex": [
+     "b-hex-14",
      "b-hex-01",
      "b-hex-18",
-     "b-hex-02",
      "b-hex-26"
     ],
     "r-fin": [
-     "b-fin-09",
+     "b-fin-01",
      "b-fin-06",
-     "b-fin-01"
+     "b-fin-09",
+     "b-fin-12",
+     "b-fin-17"
     ],
     "r-cas": [
-     "b-cas-08"
-    ],
-    "p-task": [
-     "b-task-01"
-    ],
-    "p-kce": [
-     "b-kce-01",
-     "b-kce-03"
-    ],
-    "p-pgq": [
-     "b-pgq-01"
+     "b-cas-08",
+     "b-cas-09",
+     "b-cas-01"
     ],
     "e-ms": [],
     "e-bs": []
    },
    "other": [
-    "o-cert-aws",
-    "o-cert-gcp",
-    "o-talk-evals",
-    "o-blog"
+    "o-cert-cka",
+    "o-cert-gcp"
    ],
    "skills": [
     "Kubernetes",
@@ -910,52 +1492,139 @@
     "AWS",
     "GCP",
     "agents",
-    "Machine Learning",
-    "PostgreSQL",
+    "Agile",
+    "Ansible",
+    "architecture reviews",
+    "ArgoCD",
+    "Azure",
+    "Bash",
+    "Bazel",
+    "C++",
+    "chaos testing",
+    "CI/CD",
+    "consensus protocols",
     "Docker",
-    "Terraform",
-    "Prometheus"
+    "Grafana",
+    "Helm",
+    "JavaScript",
+    "Machine Learning",
+    "Microservices",
+    "MySQL",
+    "PostgreSQL",
+    "Prometheus",
+    "prompt caching",
+    "React",
+    "Redis",
+    "Ruby",
+    "Scala",
+    "SOC 2",
+    "Terraform"
    ],
    "cut_for_length": [
-    "b-tes-01",
-    "b-tes-03",
+    "TypeScript",
+    "technical direction across teams",
+    "SRE",
+    "SQLite",
+    "SLOs",
+    "scikit-learn",
+    "Rust",
+    "retrieval-augmented generation",
+    "REST",
+    "release gates",
+    "property-based testing",
+    "pgvector",
+    "PCI DSS",
+    "OpenTelemetry",
+    "Observability",
+    "Node.js",
+    "Model Context Protocol",
+    "Linux",
+    "Kotlin",
+    "ISO 27001",
+    "incident response",
+    "idempotent APIs",
+    "gRPC",
+    "GraphQL",
+    "Git",
+    "GDPR",
+    "fine-tuning",
+    "event-driven systems",
+    "embeddings",
+    "Elasticsearch",
+    "Datadog",
+    "contract testing",
     "b-tes-02",
+    "b-tes-03",
+    "b-tes-01",
     "r-tes",
-    "b-bri-10",
-    "b-bri-09",
-    "b-bri-01",
-    "r-bri",
-    "b-cas-05",
-    "b-cas-04",
-    "b-kes-05",
-    "b-kes-04",
     "b-kes-03",
     "b-pgq-03",
-    "b-task-02",
     "b-kes-06",
-    "b-kce-02",
-    "b-fin-11",
-    "b-pgq-02",
+    "b-kce-03",
+    "b-bri-03",
+    "b-bri-02",
+    "b-task-05",
+    "b-task-03",
+    "b-pgq-01",
+    "b-bri-01",
+    "r-bri",
     "b-task-09",
-    "b-lum-18",
-    "b-lum-24",
-    "b-hex-06",
-    "b-lum-10",
-    "b-lum-05",
-    "b-lum-12",
-    "b-fin-12",
-    "b-hex-21"
+    "b-pgq-02",
+    "b-kce-02",
+    "b-hex-03",
+    "b-hex-02",
+    "o-patent",
+    "o-paper",
+    "b-kce-01",
+    "b-fin-04",
+    "b-lum-13"
    ],
    "added_to_fill": [],
-   "only_evidence": {
+   "evidence_for": {
+    "b-lum-11": [
+     "q1"
+    ],
+    "b-lum-15": [
+     "q2"
+    ],
+    "b-kes-05": [
+     "q3"
+    ],
+    "b-kes-02": [
+     "q4",
+     "k18"
+    ],
+    "b-hex-14": [
+     "q5"
+    ],
+    "b-lum-02": [
+     "q6"
+    ],
+    "b-lum-17": [
+     "q7",
+     "k20",
+     "k22"
+    ],
+    "b-kes-01": [
+     "q8",
+     "k15",
+     "k16",
+     "k17"
+    ],
+    "b-lum-27": [
+     "q9"
+    ],
+    "b-lum-14": [
+     "q11"
+    ],
     "b-cas-08": [
-     "SQL"
+     "k21"
     ],
     "b-fin-01": [
-     "Java"
+     "k23"
     ]
    },
-   "shown_instead": {},
+   "conflicts": [],
    "roles_dropped": [
     "r-bri",
     "r-tes"

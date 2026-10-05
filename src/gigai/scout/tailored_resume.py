@@ -2602,7 +2602,7 @@ def run_tailored_resume(
     # master; ``plan`` is ``None`` without one, and everything below is then what it was.
     from .tailor_master import tailoring_for_resume
 
-    plan = tailoring_for_resume(resume, tailor_job, home_root=home_root, target=target)
+    plan = tailoring_for_resume(resume, tailor_job, home_root=home_root, target=target, job_identity=job.job_identity)
     ctx = tailor_context(resume.text, answers=answers, matrix=matrix) if plan is None else plan.context(answers=answers, matrix=matrix)
     attempt: AssessAttempt | None = None
     failure: TailorError | None = None
