@@ -253,6 +253,10 @@ things still take more than a second (see "Still slower than one second"): the n
   after the files were written, plain `gigai doctor` also fails on `journal.index` with the command in
   its remediation (`--json`). The command checks that each workpad's ownership markers name the folder
   it is in, and refuses one where they do not, saying which marker differs.
+- **`gigai scout run` never stops the Scout of another GigAI home.** It stopped whatever Scout held the
+  port, also one that another home (`--home`) had started. Now only a Scout of the same home is stopped:
+  another home's keeps running, and the command ends with one line that names the port and that home
+  and says to pass `--port`.
 
 #### For agents
 

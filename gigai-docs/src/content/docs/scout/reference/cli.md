@@ -780,7 +780,7 @@ Install/activate Scout if needed, then start (or reuse) its local API + UI.
 
 `gigai scout run [OPTIONS]`
 
-effect: `write` · external: `none` · output: Human-readable text; --json emits one JSON object, including "stopped_server": {pid, home, target} for a verified older Scout server that was stopped to free the port, else null.
+effect: `write` · external: `none` · output: Human-readable text; --json emits one JSON object, including "stopped_server": {pid, home, target} for a verified older Scout server of this GigAI home that was stopped to free the port, else null.
 
 Example:
 
@@ -788,7 +788,7 @@ Example:
 gigai scout run --no-browser
 ```
 
-Serves on localhost only. Once running, GET /api describes the HTTP API.
+Serves on localhost only. Once running, GET /api describes the HTTP API. When the port is taken, run stops only a Scout server of the SAME GigAI home (--home): another project's, or one that no run state records any more. A Scout server of another GigAI home that holds the port is never stopped: the command fails (exit code 1, scout_run_port_in_use) with one line that names the port, that home and the pid, and says to pass --port. A Scout server whose command line does not say its home (one started by hand) and a process that is not Scout are left running the same way.
 
 ## `gigai scout snapshot export`
 
