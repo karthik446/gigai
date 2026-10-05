@@ -162,13 +162,14 @@
     },
     "doctor": {
       "summary": "Run offline, zero-token installation and configured-mount checks.",
-      "effect": "read",
+      "effect": "write",
       "external": "model",
       "output": "Human-readable text; --json emits one JSON object.",
       "examples": [
-        "gigai doctor --json"
+        "gigai doctor --json",
+        "gigai doctor --repair-journal"
       ],
-      "notes": "Default is offline and zero-token. --live with --model-target makes one budget-bounded provider call (external=model)."
+      "notes": "Default is offline, zero-token and read only. --live with --model-target makes one budget-bounded provider call (external=model). --repair-journal is the only option that writes (effect=write), and it runs instead of the checks. When a process died in the middle of a save (a crash, a power loss), later saves are refused until this has run: with journal_reconciliation_required, which names this command (next_action in --json and in the API error), or, when the process died after the save's files were written, with 'journal working evidence is extra or redirected' on saves and reads (a traceback whose last line names this command; plain doctor then fails journal.index and its remediation names it). It finishes that interrupted write in every managed workpad of the home and reports what it finished: the journal.repair check lists finished_gig=<gig id> sequence=<n> commit=<sha> per finished write and failed_gig=<gig id> code=<code> reason=<why> per journal it could not reconcile (overall FAIL, exit code 1). The interrupted save is completed, not dropped; retry the refused save afterwards. On a healthy home it reports nothing to repair and changes no file. Safe to run again, and beside a running Scout server. Never run automatically. Pass the same --home the refused command used."
     },
     "external cancel": {
       "summary": "Record cancellation of an externally performed invocation under an approved Gig.",

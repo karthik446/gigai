@@ -163,8 +163,27 @@ class JournalConflictError(JournalError):
     code = "journal_conflict"
 
 
+#: 0110-10-17: the command that runs :func:`reconcile_journal` over every managed workpad of a home
+#: (``gigai.diagnostics.run_journal_repair``). A write refused behind an interrupted one names it.
+JOURNAL_REPAIR_COMMAND = "gigai doctor --repair-journal"
+#: What a read adds when it meets a file no commit holds: an interrupted write leaves such files too (not only it).
+INTERRUPTED_WRITE_HINT = f": if a save was interrupted, run '{JOURNAL_REPAIR_COMMAND}' to finish it, then retry"
+
+
 class JournalReconciliationRequired(JournalError):
     code = "journal_reconciliation_required"
+    #: The command to run when :func:`reconcile_journal` is what lets the refused write through; else ``None``.
+    next_action: str | None = None
+
+
+def _interrupted_write(found: str) -> JournalReconciliationRequired:
+    """The refusal of a write that met an earlier, interrupted one: it names the command that finishes it."""
+
+    refusal = JournalReconciliationRequired(
+        f"{found}: an earlier write was interrupted; run '{JOURNAL_REPAIR_COMMAND}' to finish it, then retry"
+    )
+    refusal.next_action = JOURNAL_REPAIR_COMMAND
+    return refusal
 
 
 class JournalUnbornError(JournalReconciliationRequired):
@@ -472,9 +491,7 @@ def _record_transition_locked(
     handoffs.mkdir(mode=0o700, exist_ok=True)
     destination = handoffs / f"{sequence:012d}-{entry.transition.replace('_', '-')}.txt"
     if destination.exists() or destination.is_symlink():
-        raise JournalReconciliationRequired(
-            "next handoff path is already present and uncommitted"
-        )
+        raise _interrupted_write("next handoff path is already present and uncommitted")
     # Every committed artifact must be addressable through the closed
     # publication metadata.  Older callers often supplied richer semantic
     # front matter but omitted these mechanical refs; fill them from the
@@ -1050,7 +1067,7 @@ def _write_transaction_manifest(
         raise JournalConflictError("journal transaction directory is invalid")
     path = _transaction_path(root, sequence)
     if path.exists() or path.is_symlink():
-        raise JournalReconciliationRequired("journal transaction state already exists")
+        raise _interrupted_write("journal transaction state already exists")
     payload = {
         "schema_version": "1.0",
         "sequence": sequence,
@@ -2205,7 +2222,7 @@ def _capture_snapshot(
                 if candidate.is_symlink():
                     raise JournalConflictError("journal working evidence is extra or redirected")
                 if relative not in artifacts and not _is_run_local_artifact(relative):
-                    raise JournalConflictError("journal working evidence is extra or redirected")
+                    raise JournalConflictError("journal working evidence is extra or redirected" + INTERRUPTED_WRITE_HINT)
     return JournalSnapshot(head, artifacts)
 
 
@@ -2650,6 +2667,8 @@ __all__ = [
     "JournalConflictError",
     "JournalEntry",
     "JournalError",
+    "INTERRUPTED_WRITE_HINT",
+    "JOURNAL_REPAIR_COMMAND",
     "JournalReconciliationRequired",
     "JournalUnbornError",
     "JournalTransition",

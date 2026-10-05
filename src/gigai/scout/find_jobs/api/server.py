@@ -41,6 +41,7 @@ from typing import Callable, Protocol
 from urllib.parse import urlsplit
 
 from ....canonical import canonical_json_bytes, parse_json_bytes
+from ....diagnostics import journal_repair_refusal
 from ....http_server import NoLookupThreadingHTTPServer
 from ....run import ResumeDetails, RunError
 from ....workpad import committed_read_cache
@@ -1729,6 +1730,22 @@ def _make_handler(
         def _error(self, status: int, code: str, message: str) -> None:
             self._write_json(status, _error_body(code, message))
 
+        def _unhandled(self, method: str, path: str, exc: Exception) -> None:
+            """The last-resort answer of every method: a 500, so the connection never just drops.
+
+            0110-10-17: a write refused behind an interrupted journal write answers with the journal's own code
+            and message and ``next_action``, the command that finishes that write, instead of ``internal_error``.
+            """
+
+            refusal = journal_repair_refusal(exc, getattr(backend, "home_root", None))
+            if refusal is not None:
+                message, command = refusal
+                _logger.warning("%s %s refused: %s", method, path, message)
+                self._error_with_extra(HTTPStatus.INTERNAL_SERVER_ERROR, "journal_reconciliation_required", message, {"next_action": command})
+                return
+            _logger.error("unhandled exception in %s %s", method, path, exc_info=exc)
+            self._error(HTTPStatus.INTERNAL_SERVER_ERROR, "internal_error", "an internal error occurred")
+
         def _error_with_extra(self, status: int, code: str, message: str, extra: dict[str, object]) -> None:
             body = _error_body(code, message)
             body["error"] = {**body["error"], **extra}  # type: ignore[dict-item]
@@ -1998,9 +2015,8 @@ def _make_handler(
                 self._handle_get_static(path)
             except CLIENT_GONE:
                 self._client_closed()
-            except Exception:  # noqa: BLE001 - last-resort boundary so the connection never just drops
-                _logger.exception("unhandled exception in GET %s", path)
-                self._error(HTTPStatus.INTERNAL_SERVER_ERROR, "internal_error", "an internal error occurred")
+            except Exception as exc:  # noqa: BLE001 - last-resort boundary so the connection never just drops
+                self._unhandled("GET", path, exc)
 
         @_in_read_scope("POST")  # 0.1.10.11 S4: the four POST routes that write no journal (``READ_SCOPE_POST_ROUTES``)
         def do_POST(self) -> None:  # noqa: N802
@@ -2111,9 +2127,8 @@ def _make_handler(
                 self._error(HTTPStatus.NOT_FOUND, "not_found", "no such route")
             except CLIENT_GONE:
                 self._client_closed()
-            except Exception:  # noqa: BLE001 - same last-resort boundary as do_GET
-                _logger.exception("unhandled exception in POST %s", path)
-                self._error(HTTPStatus.INTERNAL_SERVER_ERROR, "internal_error", "an internal error occurred")
+            except Exception as exc:  # noqa: BLE001 - same last-resort boundary as do_GET
+                self._unhandled("POST", path, exc)
 
         def do_PUT(self) -> None:  # noqa: N802
             if not self._check_loopback():
@@ -2173,9 +2188,8 @@ def _make_handler(
                 self._error(HTTPStatus.NOT_FOUND, "not_found", "no such route")
             except CLIENT_GONE:
                 self._client_closed()
-            except Exception:  # noqa: BLE001 - same last-resort boundary as do_GET
-                _logger.exception("unhandled exception in PUT %s", path)
-                self._error(HTTPStatus.INTERNAL_SERVER_ERROR, "internal_error", "an internal error occurred")
+            except Exception as exc:  # noqa: BLE001 - same last-resort boundary as do_GET
+                self._unhandled("PUT", path, exc)
 
         def do_DELETE(self) -> None:  # noqa: N802
             if not self._check_loopback():
@@ -2199,9 +2213,8 @@ def _make_handler(
                 self._error(HTTPStatus.NOT_FOUND, "not_found", "no such route")
             except CLIENT_GONE:
                 self._client_closed()
-            except Exception:  # noqa: BLE001 - same last-resort boundary as do_GET
-                _logger.exception("unhandled exception in DELETE %s", path)
-                self._error(HTTPStatus.INTERNAL_SERVER_ERROR, "internal_error", "an internal error occurred")
+            except Exception as exc:  # noqa: BLE001 - same last-resort boundary as do_GET
+                self._unhandled("DELETE", path, exc)
 
     return Handler
 
