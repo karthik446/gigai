@@ -17,9 +17,11 @@ changes not imported yet" (``file_status``: the CLI's ``scout status`` and
 revision with the rules of ``master init --from FILE``: a line without an id
 gets one, a line whose id comment was deleted gets its id back when its text
 is unchanged, a line the file no longer holds is retired (the revision before
-still holds it; it can be restored). A file that does not parse changes
-nothing and the error names the line. Two things are stricter than ``init
---from``:
+still holds it; it can be restored). A line's note (0.1.11: a second trailing
+comment, ``<!-- note: ... -->``) is written into the file and read back from
+it: a note typed, changed or deleted there is a change of that line. A file
+that does not parse changes nothing and the error names the line. Two things
+are stricter than ``init --from``:
 
 * **contact data is refused**, not dropped: a name line, an email, a phone
   number, a link or an address in the file refuses the whole import by line
@@ -191,8 +193,8 @@ class MasterSync:
 def _facts(master: Master) -> dict[str, tuple[object, ...]]:
     """What ``master_resume.compare`` compares, by id."""
 
-    out: dict[str, tuple[object, ...]] = {entry.id: ("entry", entry.section, entry.heading, entry.sublines) for entry in master.entries.values()}
-    out.update({item.id: ("item", item.section, item.entry_id, item.text, item.tags, item.backed) for item in master.items.values()})
+    out: dict[str, tuple[object, ...]] = {entry.id: ("entry", entry.section, entry.heading, entry.sublines, entry.note) for entry in master.entries.values()}
+    out.update({item.id: ("item", item.section, item.entry_id, item.text, item.tags, item.backed, item.note) for item in master.items.values()})
     return out
 
 

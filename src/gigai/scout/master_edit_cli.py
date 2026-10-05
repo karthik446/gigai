@@ -8,7 +8,9 @@ chat, one line, entry or skill at a time (``master_edit``):
   master already has in other words is ASKED about (``status:
   near_duplicate``; nothing is written) unless ``--force``.
 * ``edit ID``: the text, tags or evidence of a line, the heading of an entry.
-  The id stays.
+  The id stays. ``--note`` / ``--clear-note`` (0.1.11) set or remove the note
+  of a line or an entry: guidance for a model and an agent on which lines to
+  choose, never printed in a resume.
 * ``remove ID``: the line is retired. No resume selects it any more; the
   revision before still holds it (``master show --retired``).
 
@@ -88,11 +90,12 @@ def _payload(result, home_root: Path, target: Path, profiles: dict[str, object])
     }
 
 
-def _finish(result, home_root: Path, target: Path, *, as_json: bool) -> None:  # noqa: ANN001 - a MasterEdit
+def _finish(result, home_root: Path, target: Path, *, as_json: bool, note_cleared: bool = False) -> None:  # noqa: ANN001 - a MasterEdit
     """Print what happened, and what the write did to the profiles (``master_edit`` ends every write with them)."""
 
     from .master_file import write_line
     from .master_profiles_cli import echo_after_master_write
+    from .master_resume import note_of
 
     profiles = dict(result.profiles) if result.profiles is not None else {"synced": [], "offers": []}
     payload = _payload(result, home_root, target, profiles)
@@ -122,6 +125,11 @@ def _finish(result, home_root: Path, target: Path, *, as_json: bool) -> None:  #
         else:
             item = master.items[item_id]
             click.echo(f"{verb} {item_id}{' under ' + item.entry_id if item.entry_id else ''}: {item.text}")
+        note = note_of(master.entries[item_id] if item_id in master.entries else master.items[item_id])
+        if note:
+            click.echo(f"  Its note (never printed in a resume): {note}")
+        elif note_cleared:
+            click.echo("  Its note was removed.")
     if result.written and result.skills_removed:
         click.echo(f"Removed from the Skills: {', '.join(result.skills_removed)}.")
     if result.written and result.already_listed:
@@ -240,6 +248,11 @@ def master_add_command(
 @click.option("--tag", "tags", multiple=True, help="A line's tags, replacing the ones it has (repeatable); one empty value removes them all.")
 @click.option("--heading", "heading", help="An entry's new heading.")
 @click.option("--role", "sublines", multiple=True, help="An entry's lines under its heading, replacing the ones it has (repeatable).")
+@click.option(
+    "--note", "note",
+    help="A note on the line or entry: when to use it, in one line of at most 300 characters (\"agentic roles: lead with this\"). Read by the assessment and your agent; never printed in a resume.",
+)
+@click.option("--clear-note", "clear_note", is_flag=True, help="Remove the note of the line or entry.")
 @_STORY
 @_ANSWER
 @click.option(
@@ -250,8 +263,9 @@ def master_add_command(
 @_ACTOR
 @_options
 def master_edit_command(
-    item_id: str, text: str | None, tags: tuple[str, ...], heading: str | None, sublines: tuple[str, ...], story_id: str | None,
-    question_id: str | None, revision: int | None, source: str | None, actor: str, target_value: Path | None, home_value: Path | None, as_json: bool,
+    item_id: str, text: str | None, tags: tuple[str, ...], heading: str | None, sublines: tuple[str, ...], note: str | None, clear_note: bool,
+    story_id: str | None, question_id: str | None, revision: int | None, source: str | None, actor: str, target_value: Path | None,
+    home_value: Path | None, as_json: bool,
 ) -> None:
     """Change a line or an entry of the master by its id; the id never changes.
 
@@ -259,6 +273,10 @@ def master_edit_command(
     --role for an entry. --from-story / --from-answer link the line to its
     evidence; --source alone says where the evidence came from. A profile
     whose resume shows the line gets the new wording.
+
+    --note says when a line or an entry is the one to use; --clear-note
+    removes it. A note guides which lines are chosen and in what order. It
+    is never printed in a resume and cannot make a line true.
     """
 
     from . import master_edit
@@ -269,11 +287,12 @@ def master_edit_command(
         result = master_edit.edit(
             home_root=home_root, target=target, item_id=item_id, revision=revision, text=text, tags=tags or None, heading=heading,
             sublines=sublines or None, evidence=_evidence(home_root, target, story_id, question_id), actor=actor, source=source,
+            note=note, clear_note=clear_note,
         )
     except _errors() as exc:
         _fail(_missing(exc), as_json=as_json)
         return
-    _finish(result, home_root, target, as_json=as_json)
+    _finish(result, home_root, target, as_json=as_json, note_cleared=clear_note)
 
 
 @master_group.command("remove")

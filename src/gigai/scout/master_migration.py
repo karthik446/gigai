@@ -969,7 +969,7 @@ class _Merge:
         else:
             best = None
         if best is None:
-            best = DraftItem(0, line.section, line.text, line.id, line.tags, line.backed)
+            best = DraftItem(0, line.section, line.text, line.id, line.tags, line.backed, line.note)
             existing.append(best)
             self._keep(best, self._lines(line))
         self.held_by.setdefault(id(best), []).append(source)
@@ -997,7 +997,7 @@ class _Merge:
                 self._fold("same_entry", min(1, lines))
                 self.held_by.setdefault(id(candidate), []).append(source)
                 return candidate
-        made = DraftEntry(0, section.name, entry.heading, entry.id, list(entry.sublines))
+        made = DraftEntry(0, section.name, entry.heading, entry.id, list(entry.sublines), note=entry.note)
         section.entries.append(made)
         self.held_by[id(made)] = [source]
         self._keep(made, self._lines(entry))
@@ -1016,7 +1016,7 @@ class _Merge:
                     candidate.text = (f"{kept_label}: " if kept_label else "") + ", ".join(joined)
                 self._fold("skills_joined", self._lines(line))
                 return names
-        made = DraftItem(0, line.section, line.text, line.id, line.tags, line.backed)
+        made = DraftItem(0, line.section, line.text, line.id, line.tags, line.backed, line.note)
         section.items.append(made)
         self._keep(made, self._lines(line))
         return names

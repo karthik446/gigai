@@ -19,7 +19,10 @@ call the functions ``gigai scout resume master add | edit | remove`` call
 (``master_edit``), so the rules are the same for the page and for the agent:
 a line the master already has in other words is asked about before anything
 is written (``status: near_duplicate``; ``force`` adds it), a removed line is
-retired and can be restored, and who wrote a line is kept.  This module
+retired and can be restored, and who wrote a line is kept.  The two PUT
+routes also take ``note`` (0.1.11): the note of a line or an entry, a string
+to set it and ``""`` to remove it; it is returned with every line and entry
+and never printed in a resume.  This module
 checks the shape of a body (``wrong_type``, ``invalid_value``) and maps the
 refusals to a status.  The master belongs to the
 user, not to a profile.  The reads return the user's text, so ``do_GET``
@@ -72,9 +75,9 @@ SELECTION_USES: tuple[str, ...] = ("refresh", "sync")
 _GET_KEYS = frozenset({"revision"})
 _SELECTION_GET_KEYS = frozenset({"profile_id"})
 _LINE_POST_KEYS = frozenset({"revision", "actor", "text", "entry_id", "section", "tags", "backed", "force"})
-_LINE_PUT_KEYS = frozenset({"revision", "actor", "id", "use", "text", "tags", "backed"})
+_LINE_PUT_KEYS = frozenset({"revision", "actor", "id", "use", "text", "tags", "backed", "note"})
 _ENTRY_POST_KEYS = frozenset({"revision", "actor", "section", "heading", "sublines"})
-_ENTRY_PUT_KEYS = frozenset({"revision", "actor", "id", "use", "heading", "sublines"})
+_ENTRY_PUT_KEYS = frozenset({"revision", "actor", "id", "use", "heading", "sublines", "note"})
 _MIGRATION_POST_KEYS = frozenset({"answers", "revision", "actor"})
 _SYNC_POST_KEYS = frozenset({"revision", "actor"})
 _SELECTION_POST_KEYS = frozenset({"profile_id", "use", "dry_run"})
@@ -97,6 +100,7 @@ ERROR_STATUS: dict[str, HTTPStatus] = {
     "master_text_invalid": HTTPStatus.UNPROCESSABLE_ENTITY,
     "master_tag_invalid": HTTPStatus.UNPROCESSABLE_ENTITY,
     "master_backed_invalid": HTTPStatus.UNPROCESSABLE_ENTITY,
+    "master_note_invalid": HTTPStatus.UNPROCESSABLE_ENTITY,
     "master_place_invalid": HTTPStatus.UNPROCESSABLE_ENTITY,
     "master_edit_empty": HTTPStatus.UNPROCESSABLE_ENTITY,
     "master_edit_invalid": HTTPStatus.UNPROCESSABLE_ENTITY,
@@ -483,7 +487,12 @@ class MasterRoutesMixin:
             item_id, use = self._master_use(body)
             common = {"home_root": home_root, "target": target, "revision": _revision(body.get("revision")), "actor": self._story_bank_actor(body.get("actor"))}
             if use == "edit":
-                given = {key: _string(body, key) if key in ("text", "heading") else _strings(body, key) for key in fields}
+                given: dict[str, object] = {key: _string(body, key) if key in ("text", "heading", "note") else _strings(body, key) for key in fields}
+                note = given.pop("note")
+                if isinstance(note, str) and not note.strip():
+                    given["clear_note"] = True  # "" removes the note, as an empty tags array removes the tags
+                else:
+                    given["note"] = note
                 write = master_edit.edit(item_id=item_id, **given, **common)  # type: ignore[arg-type]
             elif any(body.get(key) is not None for key in fields):
                 raise master_edit.MasterEditError("invalid_value", f"use {use} takes no {', '.join(fields[:-1])} or {fields[-1]}")
@@ -497,7 +506,7 @@ class MasterRoutesMixin:
         self._master_write(write, paths)
 
     def _handle_put_master_lines(self) -> None:
-        self._master_put(_LINE_PUT_KEYS, ("text", "tags", "backed"))
+        self._master_put(_LINE_PUT_KEYS, ("text", "tags", "backed", "note"))
 
     def _handle_post_master_entries(self) -> None:
         paths = self._story_bank_paths()
@@ -517,7 +526,7 @@ class MasterRoutesMixin:
         self._master_write(write, paths, created=True)
 
     def _handle_put_master_entries(self) -> None:
-        self._master_put(_ENTRY_PUT_KEYS, ("heading", "sublines"))
+        self._master_put(_ENTRY_PUT_KEYS, ("heading", "sublines", "note"))
 
     # --- the profiles' selections ------------------------------------------------------------------
 
