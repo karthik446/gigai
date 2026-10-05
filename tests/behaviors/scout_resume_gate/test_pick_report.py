@@ -101,13 +101,16 @@ def test_the_report_reads_a_home_prints_counts_and_ids_only_and_leaves_every_fil
 
     assert alone.returncode == 0 and beside.returncode == 0, (alone.stderr[-800:], beside.stderr[-800:])
     for out in (alone.stdout, beside.stdout):
-        assert out.startswith("Pick report: master revision 1 (") and "selector sel-3" in out
+        assert out.startswith("Pick report: master revision 1 (") and "selector sel-4" in out
         assert "Nothing was written, no model was called, no request was made." in out
         assert "Each posting was selected WITH the rows its stored assessment cites" in out
         assert out.count("## Profile profile_") == 2, "the newest assessed postings of EACH profile"
         assert "requirement rows cite master lines" in out and "by role: r-" in out and "skills " in out and "conflicts 0" in out
         assert "requirement rows: cited line in " in out and "cited line cut but another shown line supports it " in out and "REAL LOSS 0 (mandatory: in " in out
         assert "## Totals: requirement rows by what the final selection shows for them" in out
+        # The roles and projects shown with no line are counted per posting and in the totals (0.1.10.11 PICK v5).
+        assert "roles and projects with no line shown: " in out and "## Totals: roles and projects shown with no line" in out
+        assert " with no line over " in out and "| the title names " in out
         # How the SQLite files were opened is the last line: read-only every one, and the pipeline's file not at all.
         last = out.rstrip().splitlines()[-1]
         assert last.startswith("SQLite files opened, every one read-only (URI mode=ro): ") and "registry.sqlite x" in last and last.endswith("pipeline.sqlite was not opened.")
@@ -180,6 +183,40 @@ def test_each_check_gets_its_own_verdict_and_a_real_loss_on_a_mandatory_row_is_w
     assert (better["mandatory coverage"], better["overall"]) == (pick_report.BETTER, pick_report.BETTER)
     over = pick_report.verdicts(posting, old, _checked(covered=("r1", "r2", "r3"), skills=6, pages=3))
     assert (over["page fit"], over["overall"]) == (pick_report.WORSE, pick_report.WORSE)
+
+
+def test_a_role_or_project_the_title_names_that_shows_no_line_is_counted_and_has_its_own_verdict() -> None:
+    """0.1.10.11 PICK v5: the report says, per posting, which entries the title names and whether each shows a line."""
+
+    from gigai.scout.master_resume import parse_master
+
+    master = parse_master((REPO / "tests" / "evals" / "fixtures" / "pick" / "master.md").read_text(encoding="utf-8"))
+    row = pick_report.Row("r1", "Design and operate the agent runtime in production", "met", True, ("hal-01",), ())
+    posting = pick_report.Posting("p|1", "Staff Backend Engineer, Agent Runtime", "Acme", "2026-10-01", (row,), 0)
+
+    def final(**entries: list[str]) -> dict[str, object]:
+        return {
+            "summary": [], "entries": {name.replace("_", "-"): bullets for name, bullets in entries.items()}, "other": [], "skills": [], "pages": 2,
+            "empty_entries": [], "date_order": True, "conflicts": [],
+        }
+
+    titled = ("p-loom", "p-relay", "p-gone")  # an id the master does not hold is not counted
+    dropped = pick_report.check(master, posting, (), final(r_hal=["hal-01"], r_qui=["qui-01"]), titled)
+    kept = pick_report.check(master, posting, (), final(r_hal=["hal-01"], p_loom=["loom-01"], p_relay=["relay-02"]), titled)
+    assert dropped.titled == kept.titled == ("p-loom", "p-relay")
+    assert dropped.titled_dropped == ("p-loom", "p-relay") and kept.titled_dropped == ()
+    # Twelve roles and projects hold lines: two show a line in the first selection, three in the second.
+    assert (len(dropped.zero_entries), len(kept.zero_entries)) == (10, 9) and "r-qui" in kept.zero_entries
+    line = pick_report._line("select", kept)  # noqa: SLF001 - the one printed line of a selection
+    assert "roles and projects with no line shown: 9 | the title names: p-loom 1/8, p-relay 1/8" in line
+    assert "the title names: p-loom 0/8, p-relay 0/8" in pick_report._line("select", dropped)  # noqa: SLF001
+    # The verdict is its own check: better when an entry the title names shows a line it did not, WORSE the other way;
+    # it never touches mandatory coverage.
+    better = pick_report.verdicts(posting, dropped, kept)
+    assert (better["title entry kept"], better["mandatory coverage"], better["overall"]) == (pick_report.BETTER, pick_report.SAME, pick_report.BETTER)
+    worse = pick_report.verdicts(posting, kept, dropped)
+    assert (worse["title entry kept"], worse["mandatory coverage"], worse["overall"]) == (pick_report.WORSE, pick_report.SAME, pick_report.WORSE)
+    assert pick_report.verdicts(posting, kept, kept)["title entry kept"] == pick_report.SAME
 
 
 def test_a_row_is_in_or_supported_by_another_shown_line_which_is_named_or_a_real_loss() -> None:
@@ -442,3 +479,9 @@ def test_the_probe_answers_with_ids_and_never_a_line_of_text() -> None:
     assert set(answer["results"]["k"]) == set(pick_report.pick_probe.PATHS) and all("error" not in final for final in answer["results"]["k"].values())
     lines = [line.split(" <!--")[0][2:] for line in master.splitlines() if line.startswith("- ") and " · " not in line]
     assert len(lines) > 60 and not [line for line in lines if line in text]
+    # The roles and projects the selector says the title names, by id (none here: "Staff Engineer" names no subject).
+    assert all(final["title_entries"] == {} for final in answer["results"]["k"].values())
+    titled = pick_report.pick_probe.probe({"today": "2026-10-03", "paths": ["select", "fallback"], "cases": [{
+        "key": "k", "master": master, "profile": {"titles": ["Staff Engineer"], "base_ids": None}, "posting": {**posting, "title": "Staff Backend Engineer, Agent Runtime"},
+    }]})["results"]["k"]
+    assert all(set(final["title_entries"]) == {"p-loom", "p-relay", "p-trail"} and final["entries"]["p-loom"] for final in titled.values())

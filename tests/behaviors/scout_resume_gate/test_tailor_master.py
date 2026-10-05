@@ -10,6 +10,7 @@ whole tailoring is in ``test_master_tailor_outcomes.py``.
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import date
 import json
 from pathlib import Path
@@ -341,6 +342,46 @@ def test_the_cut_order_on_a_small_master_lowest_value_first_the_evidence_last_an
     # No renderer: nothing is cut on a guess.
     unmeasured = tm.fit_selected(settled, candidates, master, today=TODAY, measure=lambda _result: None)
     assert unmeasured.length is not None and unmeasured.length.status == "unmeasured" and _shown_ids(unmeasured) == _shown_ids(settled)
+
+
+def test_a_role_the_posting_s_title_names_keeps_its_best_shown_line_through_the_fit_and_the_record_says_when_it_cannot() -> None:
+    """0.1.10.11 PICK v5 (``sel-4``): the fit cuts the one line of an entry the title names only after every line
+    that is not a pin or a requirement's evidence, and a tailoring that shows no line of it carries the conflict."""
+
+    master = parse_master(SMALL.replace("Junior Engineer | Jan 2006", "Support Engineer | Jan 2006"))
+    posting = ms.SelectionPosting("Staff Platform Engineer, Support Tooling", SMALL_POSTING.text, "Acme")
+    candidates = tm.job_candidates(master, ms.SelectionProfile(titles=("Staff Platform Engineer",)), posting, mode=tm.MODE_SHORTLIST, today=TODAY)
+    # The oldest role's own title holds a word of the posting's title; nothing the posting asks for is in it.
+    assert candidates.selected.title_entries == {"r-older": "b-p1"}
+    settled, _ctx = _copied(candidates)
+    ids = {line.id: tm.line_item_id(line) for section in settled.sections for line in section.all_lines()}
+    cuts, _refill = tm.cut_order(settled, candidates, master, today=TODAY)
+    named = [(kind, ids[target]) for kind, target in cuts]
+    # The role is no longer the first to go whole (``sel-3``: its two lines were cuts 1 and 7 of 10): the cut that
+    # removes it comes after every other line that is not evidence, and before the evidence.
+    assert named == [
+        ("bullet", "b-o3"), ("bullet", "b-o2"), ("bullet", "b-m3"), ("bullet", "b-n4"), ("bullet", "b-n3"), ("bullet", "b-p2"),
+        ("bullet", "b-m1"), ("bullet", "b-n2"), ("role", "r-older"), ("role", "r-old"),
+    ]
+    # Room for four bullets: each recent role its one line, the evidence in its old role, and the role the title names.
+    four = tm.fit_selected(settled, candidates, master, today=TODAY, measure=_by_bullets(4))
+    assert _roles(four) == {"r-new": ["b-n1"], "r-mid": ["b-m2"], "r-old": ["b-o1"], "r-older": ["b-p1"]}
+    assert tm.selection_record(master, candidates, four, today=TODAY).conflicts == ()
+    # Room for three: the role goes before any evidence does, and the record names it.
+    three = tm.fit_selected(settled, candidates, master, today=TODAY, measure=_by_bullets(3))
+    assert _roles(three) == {"r-new": ["b-n1"], "r-mid": ["b-m2"], "r-old": ["b-o1"]}
+    record = tm.selection_record(master, candidates, three, today=TODAY)
+    (conflict,) = record.conflicts
+    assert (conflict.kind, conflict.ids) == ("title_entry", ("r-older", "b-p1")) and conflict.reason.endswith("the page limit left no room for one")
+    stored = record.to_json()
+    assert stored["conflicts"] == [conflict.to_json()] and tm.TailorSelection.from_json(stored) == record
+    # A tailoring that did not show the role at all says so too (the model's choice, not the page's).
+    without = TailoredResume(settled.header, tuple(
+        replace(section, entries=tuple(entry for entry in section.entries if not (entry.heading and tm.line_item_id(entry.heading[0]) == "r-older")))
+        for section in settled.sections
+    ))
+    left = tm.selection_record(master, candidates, tm.fit_selected(without, candidates, master, today=TODAY, measure=_by_bullets(9)), today=TODAY)
+    assert [(found.kind, found.ids) for found in left.conflicts] == [("title_entry", ("r-older", "b-p1"))] and left.conflicts[0].reason.endswith("the tailoring did not show one")
 
 
 def test_a_tailoring_that_leaves_out_a_requirements_evidence_keeps_the_next_best_line_and_the_record_says_what_is_missing() -> None:

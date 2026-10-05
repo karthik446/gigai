@@ -7,8 +7,9 @@ postings) and nothing calls a model: the one model-shaped thing, a stored assess
 made with the scripted test transport. Every CLI test runs against a temp ``--home``.
 
 The golden cases pin ``today`` to 2026-10-03 (which roles are "old" depends on the year); what they
-expect is ``selection-golden.json``, written for ``SELECTOR_VERSION`` ``sel-3`` (0110-10-15: requirement
-coverage, then evidence strength, then pins, recency only as the tie-break; the Skills section kept whole).
+expect is ``selection-golden.json``, written for ``SELECTOR_VERSION`` ``sel-4`` (0110-10-15: requirement
+coverage, then evidence strength, then pins, recency only as the tie-break; the Skills section kept whole;
+a role or project the posting's title names keeps its best line).
 The labelled eval of that rule is ``tests/evals/run_pick_eval.py`` (``test_pick_eval.py``).
 """
 
@@ -347,7 +348,7 @@ def test_every_line_of_the_master_is_picked_or_left_out_with_a_reason(master: Ma
     assert "not_picked" not in {line.code for line in selected.lines}
     assert {line.code for line in selected.lines if line.picked} <= {
         "requirement_evidence", "names_keywords", "posting_wording", "profile_focus", "strongest_remaining", "general", "room_left",
-        "summary_variant", "pinned",
+        "summary_variant", "pinned", "title_entry", "posting_title",
     }
     # Every skill of the master is accounted for too, once: shown, or cut for length and said so.
     assert sorted(skill.name for skill in selected.skill_reasons) == sorted(master.skills())
@@ -535,7 +536,7 @@ def test_a_line_the_assessment_cites_is_kept_whatever_words_it_shares_and_report
     # that shares none with "Kubernetes in production": each is the only evidence of its row.
     cited = (_cited("r1", "Kubernetes in production.", "b-old-2"), _cited("r2", "On-call experience.", "b-new-3"))
     assessed = ms.select(small, profile, ms.SelectionPosting("Staff Engineer", text, cited=cited), today=TODAY, measure=tight, fill=False)
-    assert assessed.selector_version == "sel-3" and assessed.fits and assessed.conflicts == ()
+    assert assessed.selector_version == "sel-4" and assessed.fits and assessed.conflicts == ()
     # The requirements ARE the assessment's rows, each supported by exactly the line it cites: the posting's two lines
     # and its Kubernetes keyword are not matched by words at all, so no other line is "the evidence" in their place.
     assert [(requirement.id, requirement.cited, requirement.supporters) for requirement in assessed.requirements] == [("r1", True, ("b-old-2",)), ("r2", True, ("b-new-3",))]
@@ -651,6 +652,151 @@ def test_an_assessment_s_evidence_quotes_trace_to_master_lines_word_for_word_or_
     traced = assess_master.MasterCitations(small)
     assert traced.row(("Languages: Python",)) == ((), ("Python",)) and traced.row(("nothing the master says",)) == ((), ())
     assert traced.row(("Cut deploy time from 40 minutes to 6", "Languages: Python")) == (("b-new-1",), ())
+
+
+# --- a role or project the posting's title names keeps its best line (0.1.10.11 PICK v5, sel-4) ----------
+
+_TITLED = """<!-- gigai-master:1 -->
+
+## Summary
+
+- Backend engineer who runs platforms. <!-- id:sum-one -->
+
+## Experience
+
+### Newco <!-- id:r-new -->
+Staff Engineer | Jun 2021 - Present
+- Cut deploy time from 40 minutes to 6 with a staged pipeline on Kubernetes. <!-- id:n-1 -->
+- Ran the on-call rotation for 4 teams. <!-- id:n-2 -->
+- Moved 30 services to a shared build cache. <!-- id:n-3 -->
+
+### Midco <!-- id:r-mid -->
+Senior Engineer | Feb 2018 - May 2021
+- Built the billing export that 200 merchants download every night. <!-- id:m-1 -->
+- Halved the nightly batch from 6 hours to 3. <!-- id:m-2 -->
+
+### Oldco <!-- id:r-old -->
+Engineer | Jan 2010 - Dec 2013
+- Wrote the solver that prices 2 million contracts a night. <!-- id:o-1 -->
+- Trained 40 support agents on the new console. <!-- id:o-2 -->
+
+## Projects
+
+### Loomhand: an agent runtime <!-- id:p-loom -->
+- Published the tool as open source. <!-- id:l-1 -->
+- Added checkpoints so a long agent run survives a restart. <!-- id:l-2 -->
+- Built a local agent runtime in which a coordinator plans work and hands it to workers. <!-- id:l-3 -->
+
+### Plotwise: a garden planner <!-- id:p-plot -->
+- Drew 300 planting plans from soil and frost data. <!-- id:g-1 -->
+- Added a watering calendar. <!-- id:g-2 -->
+
+## Skills
+
+- Languages: Python, Kubernetes <!-- id:s-lang -->
+"""
+_TITLED_TEXT = "Requirements:\n- Kubernetes in production.\n- On-call experience.\n"
+
+
+def test_a_project_the_posting_s_title_names_keeps_its_best_line_while_lines_that_cover_nothing_go() -> None:
+    master = parse_master(_TITLED)
+    profile = ms.SelectionProfile(titles=("Staff Backend Engineer",))
+    untitled = ms.SelectionPosting("Staff Backend Engineer", _TITLED_TEXT)
+    titled = ms.SelectionPosting("Staff Backend Engineer, Agent Runtime", _TITLED_TEXT)
+    tight = _by_bullets(3)  # 12 bullet lines in the first pick: 4 pages
+
+    # A TITLE THAT NAMES NO ENTRY: the project's lines cover nothing and state no number, so they are the first three
+    # cuts (strength before recency), and the project goes whole. (This is every pick ``sel-3`` made, title or not.)
+    before = ms.select(master, profile, untitled, today=TODAY, measure=tight, fill=False)
+    assert before.title_entries == {} and [cut.id for cut in before.cut_for_length][:3] == ["l-3", "l-2", "l-1"]
+    assert "p-loom" not in before.entries and before.conflicts == () and before.fits
+
+    # THE TITLE NAMES THE PROJECT (its heading holds "agent" and "runtime"): its best line stays, the one that
+    # holds most of the title's words, while every line that is not a requirement's evidence goes.
+    after = ms.select(master, profile, titled, today=TODAY, measure=tight, fill=False)
+    assert after.title_entries == {"p-loom": "l-3"} and after.entries["p-loom"] == ("l-3",)
+    assert after.fits and after.conflicts == () and after.evidence_for.keys() == {"n-1", "n-2"}
+    assert next(line for line in after.lines if line.id == "l-3").code == "title_entry"
+    # What went instead: the other project and the old role whole, and the recent roles down to their evidence or
+    # their one line. Neither that project nor that role is named by the title ("40 support agents" is one line of two).
+    assert set(after.entries) == {"r-new", "r-mid", "p-loom"} and after.entries["r-new"] == ("n-1", "n-2") and len(after.entries["r-mid"]) == ms.FLOORS[1]
+    assert "p-loom" not in after.roles_dropped and after.roles_dropped == ("r-old",)
+    # The keep order: evidence, then the entry's one line, then the project's other line that holds a word of the
+    # title (before the quantified lines of every role), then the rest as before. A title word in a line of an entry
+    # the title does not name counts for nothing (o-2).
+    rank = after.values
+    assert sorted(rank, key=rank.__getitem__, reverse=True) == ["n-1", "n-2", "l-3", "l-2", "n-3", "g-1", "m-1", "m-2", "o-1", "o-2", "g-2", "l-1"]
+    assert next(line for line in ms.select(master, profile, titled, today=TODAY, measure=_by_bullets(40), fill=False).lines if line.id == "l-2").code == "posting_title"
+    as_json = after.to_json(master)
+    assert as_json["title_entries"] == [{"id": "p-loom", "line": "l-3", "shown": True}]
+
+    # A profile's standing pick has no posting, so no title: nothing changes there.
+    assert ms.select(master, profile, None, today=TODAY, measure=tight, fill=False).title_entries == {}
+
+
+def test_the_one_line_of_an_entry_the_title_names_goes_before_any_evidence_and_the_result_says_so() -> None:
+    master = parse_master(_TITLED)
+    profile = ms.SelectionProfile(titles=("Staff Backend Engineer",), pins=("m-2",))
+    titled = ms.SelectionPosting("Staff Backend Engineer, Agent Runtime", _TITLED_TEXT, cited=(_cited("r1", "Kubernetes in production.", "o-1"),))
+
+    # No page takes the project's best line: it is cut after every line that is not evidence or a pin, BEFORE the pin
+    # and before the line the assessment cites, and the result carries the conflict. Nothing cited is dropped for it.
+    none = ms.select(master, profile, titled, today=TODAY, measure=lambda markdown: (3 if "Built a local agent runtime" in markdown else 2, 0.5), fill=False)
+    assert none.fits and "p-loom" not in none.entries and none.title_entries == {"p-loom": "l-3"}
+    (conflict,) = none.conflicts
+    assert (conflict.kind, conflict.ids, conflict.requirement_id) == ("title_entry", ("p-loom", "l-3"), "")
+    assert conflict.reason.startswith("the posting's title names this role or project")
+    assert {"o-1", "m-2"} <= set(none.item_ids()) and none.evidence_for["o-1"] == ("r1",)
+    cut = [cut for cut in none.cut_for_length if cut.id == "l-3"]
+    assert [(item.kind, item.code) for item in cut] == [("bullet", "cut_conflict")] and none.cut_for_length[-1].id == "l-3"
+    assert next(line for line in none.lines if line.id == "l-3").code == "cut_conflict"
+    # In the keep order it stands below the cited line and the pin, above everything else.
+    rank = none.values
+    assert rank["o-1"] > rank["m-2"] > rank["l-3"] > max(value for item, value in rank.items() if item not in ("o-1", "m-2", "l-3", "n-2"))
+
+
+def test_the_title_names_a_role_by_its_own_title_and_an_entry_by_half_its_lines() -> None:
+    # A ROLE, and an old one: its own title ("Agent Platform Engineer") holds a word of the posting's title.
+    roles = _TITLED.replace("Engineer | Jan 2010 - Dec 2013", "Agent Platform Engineer | Jan 2010 - Dec 2013").replace("### Loomhand: an agent runtime", "### Loomhand")
+    master = parse_master(roles)
+    profile = ms.SelectionProfile(titles=("Staff Backend Engineer",))
+    posting = ms.SelectionPosting("Staff Backend Engineer, Agent Runtime (Remote, US)", _TITLED_TEXT)
+    kept = ms.select(master, profile, posting, today=TODAY, measure=_by_bullets(4), fill=False)
+    # The project has a bare name now, and two of its three lines hold a word of the title: it is named by its lines.
+    assert kept.title_entries == {"r-old": "o-2", "p-loom": "l-3"}
+    # Both keep a line, the old role too (it would have gone whole), while the garden project goes whole and the
+    # recent roles lose the lines that cover nothing.
+    assert kept.entries["r-old"] == ("o-2",) and "l-3" in kept.entries["p-loom"] and "p-plot" not in kept.entries
+    assert kept.roles_dropped == () and kept.fits and kept.conflicts == ()
+    assert {cut.id for cut in kept.cut_for_length} == {"l-1", "g-1", "g-2", "o-1", "m-2", "n-3"}
+    # One line less of room: the entries' lines go last of what is not evidence, the one lower in the keep order
+    # first, and the result names the entry it could not show.
+    tighter = ms.select(master, profile, posting, today=TODAY, measure=_by_bullets(3), fill=False)
+    assert tighter.entries["p-loom"] == ("l-3",) and "r-old" not in tighter.entries and tighter.fits
+    assert [(conflict.kind, conflict.ids) for conflict in tighter.conflicts] == [("title_entry", ("r-old", "o-2"))]
+    # What a title is ABOUT: no rank word, no place, no level ("Remote" and "US" name nothing).
+    assert ms._title_subject("Staff Backend Engineer, Agent Runtime (Remote, US)") == {"backend", "agent", "runtim"}  # noqa: SLF001
+    assert ms._title_subject("Senior Software Engineering Lead II") == set()  # noqa: SLF001
+
+    # ONE line of several that happens to hold the word names nothing: "support agents" in one line of two.
+    assert "r-old" not in ms.select(parse_master(_TITLED), profile, posting, today=TODAY, measure=_by_bullets(3), fill=False).title_entries
+
+
+def test_a_line_that_supports_by_words_what_a_cited_row_answered_stays_before_a_stronger_or_more_recent_one() -> None:
+    master = parse_master(_TITLED.replace("- Added a watering calendar. <!-- id:g-2 -->", "- Wrote the on-call guide for the garden club. <!-- id:g-2 -->"))
+    profile = ms.SelectionProfile(titles=("Staff Backend Engineer",))
+    cited = (_cited("r1", "Kubernetes in production.", "n-1"), _cited("r2", "On-call experience.", "n-2"))
+    assessed = ms.select(master, profile, ms.SelectionPosting("Staff Backend Engineer", _TITLED_TEXT, cited=cited), today=TODAY, measure=_by_bullets(40), fill=False)
+    # The assessment answered "On-call experience" with n-2. g-2 shares the requirement's words: it covers nothing
+    # (it is no requirement's supporter), and it is still about the posting, so among the lines that cover nothing
+    # it stays before the lines that state a number and before the more recent ones.
+    assert [(requirement.id, requirement.supporters) for requirement in assessed.requirements] == [("r1", ("n-1",)), ("r2", ("n-2",))]
+    rank = assessed.values
+    rest = [item for item in sorted(rank, key=rank.__getitem__, reverse=True) if item not in ("n-1", "n-2")]
+    assert rest[0] == "g-2" and next(line for line in assessed.lines if line.id == "g-2").code == "posting_wording"
+    # Without the assessment the same line is a second line for that requirement, as it always was.
+    plain = ms.select(master, profile, ms.SelectionPosting("Staff Backend Engineer", _TITLED_TEXT), today=TODAY, measure=_by_bullets(40), fill=False)
+    assert "g-2" in next(requirement for requirement in plain.requirements if requirement.text == "On-call experience.").supporters
 
 
 def test_a_line_that_says_what_a_better_line_says_is_left_out() -> None:
@@ -839,7 +985,7 @@ def test_selection_show_for_a_job_lists_picked_and_left_out_with_reasons(tmp_pat
     out = _show(home, *_AI, "--job-text", str(posting), "--title", title, "--company", company)
 
     selection = out["selection"]
-    assert out["ok"] is True and selection["selector_version"] == "sel-3"
+    assert out["ok"] is True and selection["selector_version"] == "sel-4"
     assert selection["fits"] is True and selection["pages"] == 2 and selection["pages_before_fit"] > 2 and selection["max_pages"] == 2
     assert render_markdown_pdf(selection["markdown"], None, timestamp=STAMP).pages == 2
     assert selection["master"]["revision"] == 1 and selection["master"]["content_sha256"].startswith("sha256:")
@@ -868,7 +1014,7 @@ def test_selection_show_for_a_job_lists_picked_and_left_out_with_reasons(tmp_pat
     ])
     assert plain.exit_code == 0, plain.output
     assert plain.output.startswith(f"Selection for {title} at {company}, profile Staff AI Engineer: 2 pages (")
-    assert "Picked " in plain.output and "left out " in plain.output and "Selector sel-3, master revision 1." in plain.output
+    assert "Picked " in plain.output and "left out " in plain.output and "Selector sel-4, master revision 1." in plain.output
     assert "    + sum-ai  Staff engineer with 16 years" in plain.output
     assert "    - sum-backend  " in plain.output and "another summary fits this posting better" in plain.output
     assert "r-tes  Tessel Robotics" in plain.output and ": not shown" in plain.output

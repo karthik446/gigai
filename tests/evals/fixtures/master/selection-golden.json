@@ -1,6 +1,6 @@
 {
- "note": "SYNTHETIC. What the code selector (SELECTOR_VERSION sel-3; no posting here has an assessment, so every pick is what sel-2 made) picks from master.md for profiles.json x postings/, on 2026-10-03. Regenerate only with a deliberate selector change.",
- "selector_version": "sel-3",
+ "note": "SYNTHETIC. What the code selector (SELECTOR_VERSION sel-4; no posting here has an assessment) picks from master.md for profiles.json x postings/, on 2026-10-03. Regenerate only with a deliberate selector change.",
+ "selector_version": "sel-4",
  "today": "2026-10-03",
  "cases": {
   "profile-ai/base": {
@@ -196,18 +196,19 @@
      "b-lum-10"
     ],
     "r-kes": [
-     "b-kes-01",
-     "b-kes-03"
+     "b-kes-01"
     ],
     "r-hex": [
-     "b-hex-07",
-     "b-hex-16",
-     "b-hex-14",
-     "b-hex-19"
+     "b-hex-07"
     ],
     "r-fin": [
-     "b-fin-10",
-     "b-fin-12"
+     "b-fin-10"
+    ],
+    "p-task": [
+     "b-task-01"
+    ],
+    "p-eval": [
+     "b-eval-01"
     ],
     "p-kce": [
      "b-kce-01"
@@ -243,11 +244,11 @@
     "Agile",
     "Airflow",
     "Ansible",
-    "ArgoCD",
     "AWS",
     "C++",
     "Elasticsearch",
     "GCP",
+    "Git",
     "Grafana",
     "Helm",
     "HIPAA",
@@ -287,7 +288,6 @@
     "hiring",
     "gRPC",
     "GraphQL",
-    "Git",
     "GDPR",
     "feature stores",
     "event-driven systems",
@@ -300,6 +300,7 @@
     "Bazel",
     "Bash",
     "Azure",
+    "ArgoCD",
     "architecture reviews",
     "b-kes-06",
     "b-kce-03",
@@ -318,10 +319,11 @@
     "r-bri",
     "b-fin-23",
     "b-fin-04",
-    "b-task-04",
-    "b-task-03",
     "b-cas-03",
+    "b-kes-03",
     "b-eval-03",
+    "b-task-02",
+    "b-task-04",
     "o-vol",
     "o-cert-gcp",
     "b-fin-18",
@@ -330,8 +332,10 @@
     "b-cas-04",
     "r-cas",
     "b-hex-21",
-    "b-task-01",
-    "b-eval-01"
+    "b-hex-19",
+    "b-hex-14",
+    "b-fin-12",
+    "b-hex-16"
    ],
    "added_to_fill": [],
    "evidence_for": {
@@ -1015,12 +1019,17 @@
     ],
     "r-hex": [
      "b-hex-07",
-     "b-hex-16",
-     "b-hex-21",
      "b-hex-14"
     ],
     "r-fin": [
-     "b-fin-10"
+     "b-fin-10",
+     "b-fin-12"
+    ],
+    "r-cas": [
+     "b-cas-04"
+    ],
+    "p-task": [
+     "b-task-01"
     ],
     "p-kce": [
      "b-kce-01"
@@ -1053,14 +1062,13 @@
     "Rust",
     "Model Context Protocol",
     "SOC 2",
-    "Agile",
     "Airflow",
     "Ansible",
-    "architecture reviews",
     "AWS",
     "C++",
     "Docker",
     "GCP",
+    "Git",
     "Grafana",
     "Helm",
     "HIPAA",
@@ -1070,17 +1078,18 @@
     "Linux",
     "Machine Learning",
     "MySQL",
+    "Node.js",
     "pgvector",
     "React",
     "Redis",
     "Ruby",
     "Spark",
+    "SQLite",
     "Terraform"
    ],
    "cut_for_length": [
     "technical direction across teams",
     "SRE",
-    "SQLite",
     "SQL",
     "Snowflake",
     "SLOs",
@@ -1090,7 +1099,6 @@
     "release gates",
     "property-based testing",
     "PCI DSS",
-    "Node.js",
     "Microservices",
     "mentoring",
     "Kotlin",
@@ -1100,7 +1108,6 @@
     "hiring",
     "gRPC",
     "GraphQL",
-    "Git",
     "GDPR",
     "feature stores",
     "event-driven systems",
@@ -1114,6 +1121,8 @@
     "Bash",
     "Azure",
     "ArgoCD",
+    "architecture reviews",
+    "Agile",
     "b-kes-05",
     "b-tes-03",
     "b-tes-01",
@@ -1128,25 +1137,23 @@
     "b-cas-05",
     "b-bri-03",
     "b-bri-02",
-    "b-task-03",
     "b-bri-01",
     "r-bri",
     "b-fin-11",
     "b-fin-06",
-    "b-task-09",
     "b-kce-02",
     "b-hex-01",
+    "b-task-04",
+    "b-task-02",
     "o-patent",
     "o-paper",
     "b-fin-18",
     "b-tes-02",
     "r-tes",
-    "b-fin-12",
     "b-hex-19",
-    "b-task-01",
     "b-eval-01",
-    "b-cas-04",
-    "r-cas"
+    "b-hex-21",
+    "b-hex-16"
    ],
    "added_to_fill": [],
    "evidence_for": {
@@ -1198,7 +1205,6 @@
    },
    "conflicts": [],
    "roles_dropped": [
-    "r-cas",
     "r-bri",
     "r-tes"
    ]

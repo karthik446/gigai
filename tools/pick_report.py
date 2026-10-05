@@ -4,7 +4,8 @@ READ-ONLY.  For the newest ``--limit`` assessed postings of each profile of ``--
 code makes today (``tools/pick_probe.py``: ``select`` and the ``fallback`` tailoring; ``--path`` names others) and
 prints, per posting, COUNTS AND CHECKS ONLY:
 
-- the lines picked and left out, by role id;
+- the lines picked and left out, by role id; how many roles and projects are shown with NO line; and the roles and
+  projects the selector says the posting's TITLE names (``sel-4`` on), each with its lines shown of those it holds;
 - the stored assessment's requirement rows whose cited evidence is in the master, each with the master line ids it
   cites and which of them the final selection shows.  A row is one of THREE things, never merged:
   ``in`` (a line it cites is shown); ``cited line cut, supported by <ids>`` (no line it cites is shown, but a shown
@@ -23,7 +24,9 @@ tree's selector on the same inputs and printed beside it, with one verdict per c
 ``WORSE``.  The checks are separate and never added up.  ``mandatory coverage`` is judged on REAL LOSSES: a
 mandatory row that the old selection covered (a cited line, or another supporting line) and the new one leaves with
 nothing is ``WORSE`` whatever else improved, and the exit code is then 1.  ``cited line kept`` is the stricter
-check beside it (a cited line shown before and none now, whatever else supports the row).
+check beside it (a cited line shown before and none now, whatever else supports the row).  ``title entry kept``
+(0.1.10.11 PICK v5): a role or project the posting's title names showed a line before and shows none now is
+``WORSE``, the reverse ``better``; it is not in the exit code.
 
 WHAT IT PRINTS OF A HOME: ids, counts, a posting's title and company, and the assessment's own requirement text
 (the posting's words).  NEVER a line of a resume, an answer or a path under the home.
@@ -340,6 +343,18 @@ class Checked:
     skills: int = 0
     skills_total: int = 0
     conflicts: tuple[dict[str, object], ...] = ()
+    #: The roles and projects the posting's title names (by the NEW selector's reading, for both sides).
+    titled: tuple[str, ...] = ()
+
+    @property
+    def zero_entries(self) -> tuple[str, ...]:
+        """The roles and projects that hold lines and show none."""
+
+        return tuple(entry_id for entry_id, (shown, held) in self.by_entry.items() if held and not shown)
+
+    @property
+    def titled_dropped(self) -> tuple[str, ...]:
+        return tuple(entry_id for entry_id in self.titled if entry_id in self.zero_entries)
 
     @property
     def fits(self) -> bool:
@@ -353,12 +368,14 @@ class Checked:
         return sum(1 for row in rows if mandatory is None or (row in self.mandatory) == mandatory)
 
 
-def check(master, posting: Posting, pins: tuple[str, ...], final: dict[str, object]) -> Checked:
+def check(master, posting: Posting, pins: tuple[str, ...], final: dict[str, object], titled: tuple[str, ...] = ()) -> Checked:
+    """``titled``: the roles and projects the posting's title names (the new selector's ``title_entries``)."""
+
     from gigai.scout.master_resume import KIND_SKILLS
 
     mandatory = frozenset(row.id for row in posting.rows if row.mandatory)
     if "error" in final:
-        return Checked(error=str(final["error"]), lost=tuple(row.id for row in posting.rows), mandatory=mandatory)
+        return Checked(error=str(final["error"]), lost=tuple(row.id for row in posting.rows), mandatory=mandatory, titled=titled)
     entries: dict[str, list[str]] = final["entries"]  # type: ignore[assignment]
     shown = {*final["summary"], *(bullet for bullets in entries.values() for bullet in bullets), *final["other"]}  # type: ignore[misc]
     skills = {str(name).casefold() for name in final["skills"]}  # type: ignore[union-attr]
@@ -394,10 +411,13 @@ def check(master, posting: Posting, pins: tuple[str, ...], final: dict[str, obje
         pages=final["pages"], max_pages=int(final.get("max_pages") or 2), empty=tuple(final["empty_entries"]), date_order=bool(final["date_order"]),  # type: ignore[arg-type]
         picked=len(shown), left_out=total - len(shown), by_entry=by_entry, skills=len(final["skills"]), skills_total=len(master.skills()),  # type: ignore[arg-type]
         conflicts=tuple(final.get("conflicts") or ()),  # type: ignore[arg-type]
+        titled=tuple(entry_id for entry_id in titled if entry_id in by_entry),
     )
 
 
-CHECKS: tuple[str, ...] = ("mandatory coverage", "cited line kept", "other coverage", "evidence strength", "must-keep", "page fit", "skills kept", "overall")
+CHECKS: tuple[str, ...] = (
+    "mandatory coverage", "cited line kept", "other coverage", "evidence strength", "must-keep", "page fit", "skills kept", "title entry kept", "overall",
+)
 
 
 def verdicts(posting: Posting, old: Checked, new: Checked) -> dict[str, str]:
@@ -406,7 +426,8 @@ def verdicts(posting: Posting, old: Checked, new: Checked) -> dict[str, str]:
     ``mandatory coverage`` is judged on REAL LOSSES: a mandatory row is covered when a line it cites is shown or
     another shown line supports it, and it is ``WORSE`` only when a row covered before has nothing now (it is
     ``WORSE`` whatever else improved).  ``cited line kept`` is the stricter check beside it: a mandatory row whose
-    cited line was shown before and is not now, whatever else supports it.
+    cited line was shown before and is not now, whatever else supports it.  ``title entry kept``: a role or project
+    the posting's title names that showed a line before and shows none now is ``WORSE``, the reverse ``better``.
     """
 
     mandatory = {row.id for row in posting.rows if row.mandatory}
@@ -428,6 +449,9 @@ def verdicts(posting: Posting, old: Checked, new: Checked) -> dict[str, str]:
     out["must-keep"] = WORSE if set(new.pins_missing) - set(old.pins_missing) else (BETTER if set(old.pins_missing) - set(new.pins_missing) else SAME)
     out["page fit"] = WORSE if old.fits and not new.fits else (BETTER if new.fits and not old.fits else SAME)
     out["skills kept"] = WORSE if new.skills < old.skills else (BETTER if new.skills > old.skills else SAME)
+    gone = set(new.titled_dropped) - set(old.titled_dropped)
+    back = set(old.titled_dropped) - set(new.titled_dropped)
+    out["title entry kept"] = WORSE if gone else (BETTER if back else SAME)
     out["overall"] = WORSE if WORSE in (out["mandatory coverage"], out["page fit"], out["must-keep"]) else (
         WORSE if WORSE in out.values() else (BETTER if BETTER in out.values() else SAME)
     )
@@ -455,6 +479,8 @@ def _line(name: str, checked: Checked) -> str:
         f"skills {checked.skills}/{checked.skills_total} | conflicts {len(checked.conflicts)}"
         + (f" | pins missing {len(checked.pins_missing)}" if checked.pins_missing else "")
         + f"\n      by role: {roles}"
+        + f"\n      roles and projects with no line shown: {len(checked.zero_entries)}"
+        + (" | the title names: " + ", ".join(f"{entry_id} {checked.by_entry[entry_id][0]}/{checked.by_entry[entry_id][1]}" for entry_id in checked.titled) if checked.titled else "")
     )
 
 
@@ -496,8 +522,17 @@ def report(
     regressed = False
     totals: dict[tuple[str, str], dict[str, int]] = {}
     row_totals: dict[tuple[str, str, str], dict[str, int]] = {}
+    entry_totals: dict[tuple[str, str, str], dict[str, int]] = {}
 
     def add_rows(profile: str, path: str, side: str, checked: Checked) -> None:
+        entries = entry_totals.setdefault((profile, path, side), {"postings": 0, "zero": 0, "titled postings": 0, "titled": 0, "titled dropped": 0, "titled dropped postings": 0})
+        if checked.error is None:
+            entries["postings"] += 1
+            entries["zero"] += len(checked.zero_entries)
+            entries["titled postings"] += bool(checked.titled)
+            entries["titled"] += len(checked.titled)
+            entries["titled dropped"] += len(checked.titled_dropped)
+            entries["titled dropped postings"] += bool(checked.titled_dropped)
         tally = row_totals.setdefault((profile, path, side), {})
         for state in (IN, SUPPORTED, LOST):
             for mandatory in (True, False):
@@ -509,12 +544,14 @@ def report(
             out.append(f"\n  [{place}] {posting.title} at {posting.company or '?'} (assessed {posting.assessed_at[:10]}): "
                        f"{len(posting.rows)} requirement rows cite master lines, {posting.rows_without_evidence} cite none")
             for path in paths:
-                now = check(master, posting, case.pins, new["results"][posting.key][path])
+                # The roles and projects the posting's title names, as THIS checkout's selector reads it (ids only).
+                titled = tuple(new["results"][posting.key][path].get("title_entries") or ())  # type: ignore[union-attr]
+                now = check(master, posting, case.pins, new["results"][posting.key][path], titled)
                 add_rows(case.profile_id, path, "new", now)
                 out.append(_line(f"{path} NEW" if old is not None else path, now))
                 for conflict in now.conflicts:
                     out.append(f"      conflict ({conflict.get('kind')}): {_clip(str(conflict.get('requirement') or ''))} {', '.join(conflict.get('ids') or ())}".rstrip())  # type: ignore[arg-type]
-                before = check(master, posting, case.pins, old["results"][posting.key][path]) if old is not None else None
+                before = check(master, posting, case.pins, old["results"][posting.key][path], titled) if old is not None else None
                 if before is not None:
                     add_rows(case.profile_id, path, "old", before)
                     out.append(_line(f"{path} OLD", before))
@@ -536,6 +573,13 @@ def report(
         out.append(
             f"  {profile} / {path} / {side}: mandatory rows: in {tally.get('in:mandatory', 0)}, supported {tally.get('supported:mandatory', 0)}, "
             f"REAL LOSS {tally.get('lost:mandatory', 0)} | other rows: in {tally.get('in:other', 0)}, supported {tally.get('supported:other', 0)}, REAL LOSS {tally.get('lost:other', 0)}"
+        )
+    out.append("\n## Totals: roles and projects shown with no line")
+    out.append("  (most are roles and projects a posting has no use for; 'the title names' counts the ones this checkout's selector says the posting's title names)")
+    for (profile, path, side), tally in sorted(entry_totals.items()):
+        out.append(
+            f"  {profile} / {path} / {side}: {tally['zero']} with no line over {tally['postings']} postings | the title names {tally['titled']} "
+            f"in {tally['titled postings']} postings: {tally['titled dropped']} of them with no line, in {tally['titled dropped postings']} postings"
         )
     if old is not None:
         out.append("\n## Totals, new against old (postings per verdict)")

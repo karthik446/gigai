@@ -18,7 +18,8 @@ The paths (each is deterministic code, after the length cuts):
 
 A posting may carry ``cited``: the rows of its stored assessment that cite master lines (``{"id", "text",
 "mandatory", "met", "lines"}``).  A tree whose selector reads citations (``sel-3`` on) selects from them; an older
-tree ignores them.
+tree ignores them.  Each answer names the roles and projects the selector says the posting's title names
+(``title_entries``: entry id -> its best line; ``sel-4`` on, an older tree answers none).
 
 The answer never holds a line's text: ids, skill names, counts and codes only.
 """
@@ -62,6 +63,12 @@ def _duplicates(selected) -> dict[str, str]:
     return dict(getattr(selected, "duplicates", None) or {}) if selected is not None else {}
 
 
+def _title_entries(selected) -> dict[str, str]:
+    """``role or project the posting's title names -> its best line`` (a tree without the rule, ``sel-3`` and older: none)."""
+
+    return dict(getattr(selected, "title_entries", None) or {}) if selected is not None else {}
+
+
 def _keywords(selected) -> dict[str, list[str]]:
     keywords = selected.keywords
     return {"must": list(keywords.must), "nice": list(keywords.nice)} if keywords is not None else {"must": [], "nice": []}
@@ -84,6 +91,7 @@ def _from_selected(master, selected) -> dict[str, object]:
         "conflicts": _conflicts(selected),
         "keywords": _keywords(selected),
         "duplicates": _duplicates(selected),
+        "title_entries": _title_entries(selected),
     }
 
 
@@ -121,6 +129,7 @@ def _from_result(master, result, record=None, selected=None) -> dict[str, object
         "conflicts": _conflicts(record) if record is not None else [],
         "keywords": _keywords(selected) if selected is not None else {"must": [], "nice": []},
         "duplicates": _duplicates(selected),
+        "title_entries": _title_entries(selected),
     }
 
 
