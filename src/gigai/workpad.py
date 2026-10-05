@@ -787,6 +787,21 @@ def _validate_workpad_repository(
     # with this exact fingerprint is not asked again (12 git subprocesses);
     # readers arriving together ask once.
     cache_key = (os.fspath(root), project_id, gig_id, allow_journal, allow_semantic_state)
+    # 0110-11 STORE2: inside ``one_operation()`` (and no read), a pass this
+    # same operation made, with the configuration proven by the one listing,
+    # is not asked of git again while the fingerprint says nothing these
+    # checks read has changed. Anything else is the whole check, as before.
+    passed = None if committed_read_cache_active() else getattr(_OPERATION, "passed", None)
+    asked_at = _operation_fingerprint(root) if passed is not None else None
+    if passed is not None and asked_at is not None:
+        held = passed.pop(cache_key, None)
+        if held is not None and read_still_holds(root, held, asked_at, layout_paths_touched):
+            passed[cache_key] = asked_at
+            return
+        proven = _check_workpad_repository(root, project_id, gig_id, allow_journal=allow_journal, allow_semantic_state=allow_semantic_state)
+        if proven and _operation_fingerprint(root) == asked_at:
+            passed[cache_key] = asked_at
+        return
     checked_at = workpad_fingerprint(root) if committed_read_cache_active() else None
     if checked_at is None:
         _check_workpad_repository(root, project_id, gig_id, allow_journal=allow_journal, allow_semantic_state=allow_semantic_state)
@@ -809,8 +824,13 @@ def _check_workpad_repository(
     *,
     allow_journal: bool = False,
     allow_semantic_state: bool = False,
-) -> None:
-    """The checks of :func:`_validate_workpad_repository`, asked of git every time."""
+) -> bool:
+    """The checks of :func:`_validate_workpad_repository`, asked of git every time.
+
+    Returns whether the configuration was proven by the one listing
+    (:func:`ownership_config_proven`); ``False`` when the five old questions
+    answered instead. Either way the workpad passed.
+    """
 
     entries = {path.name for path in root.iterdir()}
     allowed = {".git", ".gitignore"}
@@ -862,29 +882,203 @@ def _check_workpad_repository(
     expected_ignore = WORKPAD_V2_GITIGNORE if layout_version == 2 else WORKPAD_GITIGNORE
     if ignore.is_symlink() or ignore.read_bytes() != expected_ignore:
         raise WorkpadConflictError("workpad ignore rules differ from the declared layout contract")
-    inside = _git(root, "rev-parse", "--is-inside-work-tree", check=False)
-    if inside.returncode != 0 or inside.stdout.strip() != "true":
-        raise WorkpadConflictError("workpad is not a local Git repository")
-    git_dir = _git(root, "rev-parse", "--absolute-git-dir").stdout.strip()
+    git_dir = _work_tree_git_dir(root)
     if Path(git_dir).resolve(strict=True) != (root / ".git").resolve(strict=True):
         raise WorkpadConflictError("workpad uses an unexpected Git directory")
-    expected_config = {
-        "user.name": WORKPAD_GIT_USER_NAME,
-        "user.email": WORKPAD_GIT_USER_EMAIL,
-        "gigai.project-id": project_id,
-        "gigai.gig-id": gig_id,
-    }
-    for key, expected in expected_config.items():
-        value = _git(root, "config", "--local", "--get", key, check=False)
-        if value.returncode != 0 or value.stdout.rstrip("\n") != expected:
-            raise WorkpadConflictError(f"workpad Git ownership marker {key} mismatches")
-    if _git(root, "remote").stdout.strip():
-        raise WorkpadConflictError("workpad must not configure a Git remote")
+    proven = ownership_config_proven(root, project_id, gig_id)
+    if not proven:
+        expected_config = {
+            "user.name": WORKPAD_GIT_USER_NAME,
+            "user.email": WORKPAD_GIT_USER_EMAIL,
+            "gigai.project-id": project_id,
+            "gigai.gig-id": gig_id,
+        }
+        for key, expected in expected_config.items():
+            value = _git(root, "config", "--local", "--get", key, check=False)
+            if value.returncode != 0 or value.stdout.rstrip("\n") != expected:
+                raise WorkpadConflictError(f"workpad Git ownership marker {key} mismatches")
+        if _git(root, "remote").stdout.strip():
+            raise WorkpadConflictError("workpad must not configure a Git remote")
     if (
         not allow_journal
         and _git(root, "rev-parse", "--verify", "HEAD", check=False).returncode == 0
     ):
         raise WorkpadConflictError("G05 workpad must remain unborn without a commit")
+    return proven
+
+
+# --- 0110-11 STORE2: the workpad checks' git questions, asked once ------------
+#
+# A workpad check asked git five questions about the configuration (four
+# ``git config --local --get`` and ``git remote``), each a process, and the
+# repository check two more about the work tree. Every question stays. When
+# ONE process can prove all the old answers it is the only one started; when
+# it cannot, the old questions are asked, unchanged, and every refusal (and
+# its text) is theirs. Nothing is kept between two checks.
+
+
+def _work_tree_git_dir(root: Path) -> str:
+    """The Git directory of the work tree ``root`` is in; refuses what is not a work tree.
+
+    ``rev-parse --is-inside-work-tree`` and ``--absolute-git-dir`` in one
+    process: git answers them in the order asked, a line each. Anything but
+    "true" and a directory is settled by the two processes this replaced.
+    """
+
+    both = _git(root, "rev-parse", "--is-inside-work-tree", "--absolute-git-dir", check=False)
+    inside_work_tree, newline, git_dir = both.stdout.partition("\n")
+    if both.returncode == 0 and inside_work_tree.strip() == "true" and newline and git_dir.strip():
+        return git_dir.strip()
+    inside = _git(root, "rev-parse", "--is-inside-work-tree", check=False)
+    if inside.returncode != 0 or inside.stdout.strip() != "true":
+        raise WorkpadConflictError("workpad is not a local Git repository")
+    return _git(root, "rev-parse", "--absolute-git-dir").stdout.strip()
+
+
+# What ``git init`` writes into a new work tree's own configuration, with the
+# values it writes (the file mode, symlink, case and Unicode probes depend on
+# the file system). ``_initialize_workpad_repository`` adds the four markers.
+_GIT_INIT_CONFIG: dict[bytes, tuple[bytes, ...]] = {
+    b"core.repositoryformatversion": (b"0",),
+    b"core.filemode": (b"true", b"false"),
+    b"core.bare": (b"false",),
+    b"core.logallrefupdates": (b"true",),
+    b"core.symlinks": (b"false",),
+    b"core.ignorecase": (b"true",),
+    b"core.precomposeunicode": (b"true", b"false"),
+}
+# Entries the ENVIRONMENT gives git (``GIT_CONFIG_COUNT``; an agent's shell
+# sets ``credential.interactive``) in sections neither ``git config --get``
+# nor ``git remote`` reads: git consults them only when it asks for a login.
+_UNREAD_COMMAND_SECTIONS = (b"credential.",)
+
+
+def ownership_config_proven(root: Path, project_id: str, gig_id: str) -> bool:
+    """Whether ONE git process proves the four ownership markers and that no remote is configured.
+
+    ``git config --list -z --show-scope`` lists every entry git itself reads
+    for this repository (every scope, includes followed), each with its
+    scope. ``True`` only when:
+
+    * every entry of the repository (scope ``local``) is one ``git init``
+      writes, with a value it writes, or one of the four markers with exactly
+      the expected value;
+    * every other entry comes from the environment (scope ``command``), in a
+      section the old questions never read;
+    * all four markers are there.
+
+    Then no include directive exists in any scope (it would be an entry), so
+    every ``local`` entry is in ``.git/config`` itself, the file ``git config
+    --local --get`` reads: each marker's every value is the expected one. And
+    nothing git reads names a remote, in a configuration that is otherwise a
+    new repository's: ``git remote`` prints nothing.
+
+    ``False`` proves nothing and refuses nothing (another key or value, a
+    worktree, global or system entry, a listing that fails or does not parse,
+    a git older than ``--show-scope``, no git): the caller asks the old
+    questions.
+    """
+
+    executable = shutil.which("git")
+    if executable is None:
+        return False
+    listed = subprocess.run(
+        [executable, "-C", os.fspath(root), "config", "--list", "-z", "--show-scope"],
+        env={
+            **os.environ,
+            "GIT_CONFIG_GLOBAL": "/dev/null",
+            "GIT_CONFIG_NOSYSTEM": "1",
+            "GIT_OPTIONAL_LOCKS": "0",
+        },
+        capture_output=True,
+        check=False,
+        shell=False,
+    )
+    fields = listed.stdout.split(b"\0")
+    # Each entry is ``<scope> NUL <key> LF <value> NUL``.
+    if listed.returncode != 0 or fields.pop() != b"" or len(fields) % 2:
+        return False
+    markers = {
+        b"user.name": WORKPAD_GIT_USER_NAME.encode("utf-8"),
+        b"user.email": WORKPAD_GIT_USER_EMAIL.encode("utf-8"),
+        b"gigai.project-id": project_id.encode("utf-8"),
+        b"gigai.gig-id": gig_id.encode("utf-8"),
+    }
+    proven: set[bytes] = set()
+    for scope, entry in zip(fields[0::2], fields[1::2]):
+        key, has_value, value = entry.partition(b"\n")
+        if scope == b"command":
+            if not key.startswith(_UNREAD_COMMAND_SECTIONS):
+                return False
+        elif scope != b"local" or not has_value:
+            return False
+        elif key in markers:
+            if value != markers[key]:
+                return False
+            proven.add(key)
+        elif value not in _GIT_INIT_CONFIG.get(key, ()):
+            return False
+    return len(proven) == len(markers)
+
+
+# One save resolved its workpad 5 to 10 times (the store functions each
+# resolve again what their caller resolved), and every resolution ran the
+# repository check. ``one_operation()`` marks one operation on one thread.
+# Inside it a repeated resolution still loads the configuration, asks the
+# registry, checks the authority paths and asks git about the target; only
+# the repository check's git processes are not started again, and only when
+#
+# * this same operation already passed that check for the same workpad, ids
+#   and flags, with the configuration proven by the one listing (so no file
+#   but ``.git/config`` holds configuration the check read), and
+# * the fingerprint taken now is the one taken then (the read scope's:
+#   journal head, top-level names, the identity of ``.git``, ``tools`` and
+#   ``handoffs``, the identity, size and times of ``.git/config``,
+#   ``.gitignore`` and the layout marker; here also when each of those three
+#   inodes last changed), or only the head moved, along a straight line of
+#   commits none of which touched the layout marker or the ignore rules.
+#
+# Nothing is kept past the operation, in another thread, or by time. A pass
+# is kept only when the fingerprint was the same before and after the check.
+# The journal does not look at this scope: every journal read and write makes
+# its own workpad check, as before.
+
+_OPERATION = threading.local()
+
+
+@contextmanager
+def one_operation() -> Iterator[None]:
+    """One operation on this thread: its workpad's repository check is asked of git once while nothing it reads changes.
+
+    Also a decorator (``@one_operation()``). Inside another one it adds
+    nothing and ends nothing: the outer operation goes on.
+    """
+
+    if getattr(_OPERATION, "passed", None) is not None:
+        yield
+        return
+    passed: dict[tuple[object, ...], tuple[object, ...]] = {}
+    _OPERATION.passed = passed
+    try:
+        yield
+    finally:
+        if getattr(_OPERATION, "passed", None) is passed:
+            _OPERATION.passed = None
+
+
+def _operation_fingerprint(root: Path) -> tuple[object, ...] | None:
+    """:func:`workpad_fingerprint`, and when the inode of each file it holds by size and time last changed."""
+
+    fingerprint = workpad_fingerprint(root)
+    if fingerprint is None:
+        return None
+    changed: list[int | None] = []
+    for name in (".git/config", ".gitignore", WORKPAD_LAYOUT_PATH):
+        try:
+            changed.append(os.lstat(root / name).st_ctime_ns)
+        except OSError:
+            changed.append(None)
+    return (*fingerprint, *changed)
 
 
 def workpad_layout_version(root: Path, *, project_id: str, gig_id: str) -> int:
@@ -1482,7 +1676,9 @@ __all__ = [
     "ensure_run_local_artifact_excludes",
     "journal_head",
     "layout_paths_touched",
+    "one_operation",
     "open_locations",
+    "ownership_config_proven",
     "paths_committed_between",
     "provision_workpad",
     "read_cache_key_lock",

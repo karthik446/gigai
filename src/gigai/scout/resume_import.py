@@ -49,6 +49,7 @@ import tempfile
 
 from ..canonical import digest_imported_bytes
 from ..private_records import create_record, import_reference
+from ..workpad import one_operation
 from .resume_pii import ContactStrip, strip_contact_lines
 from .resume_privacy import HeadingOnlyLink
 
@@ -125,6 +126,7 @@ def _stored_name(file_name: str, name_words: frozenset[str]) -> str:
     return f"resume{Path(file_name).suffix.lower()}" if stem_words & name_words else file_name
 
 
+@one_operation()
 def import_resume_file(
     *,
     home_root: Path,

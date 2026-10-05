@@ -896,7 +896,8 @@ def _run(gig: SimpleNamespace, *words: str) -> str:
 def _ownership_checks(spawns: list[list[str]]) -> int:
     """How many times the workpad's ownership markers were asked of git (once per check of the workpad)."""
 
-    return len([call for call in spawns if _words(call)[:4] == ["config", "--local", "--get", "gigai.gig-id"]])
+    # 0110-11 STORE2: the four markers and the remote are one listing (it was five processes, one of them this marker's).
+    return len([call for call in spawns if _words(call)[:4] == ["config", "--list", "-z", "--show-scope"]])
 
 
 COMMANDS = {
