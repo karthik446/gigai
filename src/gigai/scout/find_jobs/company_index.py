@@ -136,7 +136,8 @@ def body_digest(body: bytes) -> str:
 #: uat-bug-046: bump when a provider's parsed posting text changes for the SAME
 #: cached body, so an indexed company is re-read once instead of being skipped
 #: as "untouched" (its stored ``body_sha256`` no longer matches).
-_TEXT_REVISION = {"lever": "lever-text-2"}
+# 0.1.10.11: ``ashby-text-2`` is the text read from ``descriptionHtml`` when a posting has no ``descriptionPlain``.
+_TEXT_REVISION = {"lever": "lever-text-2", "ashby": "ashby-text-2"}
 
 
 def indexed_body_digest(ats: str, body_sha256: str) -> str:

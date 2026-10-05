@@ -253,6 +253,21 @@ things still take more than a second (see "Still slower than one second"): the n
   after the files were written, plain `gigai doctor` also fails on `journal.index` with the command in
   its remediation (`--json`). The command checks that each workpad's ownership markers name the folder
   it is in, and refuses one where they do not, saying which marker differs.
+- **An Ashby posting whose description is only HTML can be assessed.** Some Ashby boards send a
+  posting's description as HTML only, with no plain-text copy. Scout read only the plain-text copy, so
+  such a posting had no text at all: assessing it failed every time with `job_text_unavailable`
+  (reason `no_text`), and a keyword search never found it. Scout now reads the HTML description, turned
+  into text the same way as for the other boards, when there is no plain-text one. A posting that has a
+  plain-text description is read exactly as before.
+  After you upgrade: such a posting that is already in your list can be assessed at once (its text is
+  read from the company's stored list; nothing is fetched again). Your next `gigai scout sources update`
+  (or "Update sources") finishes it: it reads each Ashby company's list once more with the request it
+  makes anyway (no extra request; a company whose list did not change is read again from what is
+  stored), and a posting that gets its text this way is found by a keyword search and counts once as
+  changed in a search's "new or changed since the last search". No other Ashby posting is marked new or
+  changed by this, and nothing needs to be done.
+  This is not a fix for an assessment that failed with `posting_requirements_unreadable`: that posting
+  had its text, and the answer now says which rule refused (see "For agents").
 
 #### For agents
 

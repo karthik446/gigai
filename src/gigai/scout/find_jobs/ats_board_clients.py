@@ -17,7 +17,8 @@ change its response shape without notice, so failures are treated as
   "createdAt" (epoch ms), "descriptionPlain"}]``.
 * Ashby ``GET https://api.ashbyhq.com/posting-api/job-board/{token}``
   -> ``{"jobs": [{"id", "title", "location", "jobUrl", "publishedAt",
-  "descriptionPlain"}]}``.
+  "descriptionPlain", "descriptionHtml"}]}`` (the HTML one is read only when
+  there is no plain one).
 
 Q2 (acquire at scale) adds a second entry point next to ``list_board``:
 ``ATSBoardClients.fetch_board`` returns the same ``PostingRow`` tuple plus a
@@ -826,6 +827,9 @@ def _ashby_rows(jobs: list, board_token: str, config: FindJobsConfig, stats: "Bo
         location_name = location if type(location) is str else ""
         countries = _ashby_countries(job)
         description = job.get("descriptionPlain")
+        if type(description) is not str or not description.strip():
+            # Some boards send no plain text at all: the whole posting is in descriptionHtml.
+            description = job.get("descriptionHtml")
         text = html_to_text(description if type(description) is str else None)
         rows.append(
             PostingRow(
