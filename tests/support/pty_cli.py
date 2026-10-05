@@ -66,9 +66,10 @@ def run_cli_in_pty(
     pid, master = pty.fork()
     if pid == 0:  # the child: its 0, 1 and 2 are the pty, and the pty is its controlling terminal
         try:
-            # A parent that ignores SIGINT (a CI runner, a job started in the background) hands that on through exec, and Python
+            # A parent that ignores or blocks SIGINT (a CI runner, a job started in the background, an xdist worker) hands that on through exec, and Python
             # then never turns Ctrl-C into KeyboardInterrupt: the run would sit at its prompt. Start from the default.
             signal.signal(signal.SIGINT, signal.SIG_DFL)
+            signal.pthread_sigmask(signal.SIG_SETMASK, ())  # a blocked SIGINT is inherited too (an xdist worker thread)
             os.execve(sys.executable, [sys.executable, "-c", _CLI, *args], dict(os.environ if env is None else env))
         finally:
             os._exit(127)
