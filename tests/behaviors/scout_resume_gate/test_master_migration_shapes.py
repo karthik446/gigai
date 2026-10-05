@@ -31,6 +31,7 @@ from gigai.scout.master_resume import Master, parse_master, skill_names
 from gigai.scout.master_store import strip_contact
 from gigai.scout.target_resolution import home_scout_target
 
+from tests.support.contact_scan import contact_values_in
 from tests.support.scout_profile_fixtures import default_find_jobs_config
 from tests.support.setup_home import setup_home
 from tools.media import persona
@@ -404,4 +405,11 @@ def test_master_init_keeps_the_summary_and_the_role_lines_and_says_what_it_left_
         ("Pendle Works", ["Senior Software Engineer | Jun 2015 - Dec 2017"], 2015, 2017, False, 2),
         ("Northfield State University", ["B.S. Computer Science | 2010 - 2014"], 2010, 2014, False, 0),
     ]
-    assert not [value for value in CONTACT if value in json.dumps(shown)]
+    # No contact data in the master as it is shown. Its record id, revision id and updated_at are new on every run and
+    # hold "555" on about one run in 80, so they are not read as text (0.1.10.10 FK); said here on every run.
+    assert contact_values_in(shown, CONTACT) == []
+    by_chance = {**shown, "revision_id": "revision_2e315558-53d0-4925-be4a-d01b35ba0555", "updated_at": "2026-10-04T23:22:40.555208Z"}
+    assert "555" in json.dumps(by_chance) and contact_values_in(by_chance, CONTACT) == []
+    summary = next(item for item in shown["items"] if item["kind"] == "summary")
+    leaked = {**shown, "items": [{**summary, "text": summary["text"] + " Call (555) 010-0142."}]}
+    assert contact_values_in(leaked, CONTACT) == ["555"]

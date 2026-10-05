@@ -17,7 +17,9 @@ PHONE = "(555) 010-0142"
 STREET = "42 Fictional Street"
 LINK = "linkedin.com/in/jordan-testwell"
 INLINE_EMAIL = "reviewer.contact@example.test"
-PLANTED = (NAME, EMAIL, PHONE, STREET, LINK, INLINE_EMAIL, "555")
+#: The phone number's pieces as the file writes them, not a bare "555": what a command prints names a file under pytest's
+#: temporary folder, and "555" is in that path on some runs (``pytest-555/``; 0.1.10.10 FK).
+PLANTED = (NAME, EMAIL, PHONE, STREET, LINK, INLINE_EMAIL, "(555)", "010-0142")
 
 RESUME = f"""{NAME}
 {EMAIL} | {PHONE}
@@ -92,6 +94,7 @@ def test_clean_writes_a_copy_that_passes_check_and_leaves_the_input(resume: Path
     assert resume.read_bytes() == before
     cleaned = out.read_text(encoding="utf-8")
     _assert_no_values(cleaned)
+    assert "555" not in cleaned, "the cleaned file holds no path, so no piece of the phone number at all"
     assert "Backend engineer who cut CI time by 60%." in cleaned
     assert _run("check", str(out)).exit_code == 0
     human = _run("clean", str(resume), "--out", str(tmp_path / "again.md"))
