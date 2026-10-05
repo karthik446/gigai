@@ -150,6 +150,18 @@ hover), from the board’s own date. Some boards give only the day a posting las
 day Scout first stored the posting. <code dir="auto">gigai scout jobs list</code> and <code dir="auto">gigai scout new</code> say the same with
 the day (“posted 2026-09-24”), and their JSON and the API rows carry both dates under their own names
 (<code dir="auto">published_at</code> with <code dir="auto">published_kind</code>, and <code dir="auto">first_seen_at</code>).</li>
+<li><strong><code dir="auto">gigai scout resume master init</code> reads the resumes people have.</strong> It refused a resume with a
+<code dir="auto">---</code> rule between two roles (“text after an entry’s bullets”), and <code dir="auto">--from FILE</code> refused section
+headings such as <code dir="auto">## WORK EXPERIENCE</code> or <code dir="auto">## AGENTIC AI PROJECTS</code> and a project written as a bold
+title with a tagline. Both forms now read them: a rule is skipped; a heading that is not one of the
+six sections is read as the closest one (Technical Skills is Skills, Selected Projects and Open
+Source are Projects, Publications, Awards and Certifications are Other lines, anything unknown is
+Other); text with no place of its own in its section is kept, never refused. The command says which
+heading it read as which section and which lines it left out, by line number, with a count that adds
+up. New: <code dir="auto">gigai scout resume master init --from FILE --dry-run</code> shows what would be stored and
+writes nothing. A file whose first line is `` is still held to GigAI’s own
+format, and contact lines are removed as before. A refusal names the line number and the rule; on
+the terminal it now also shows that line.</li>
 </ul>
 <div class="sl-heading-wrapper level-h4"><h4 id="still-slower-than-one-second">Still slower than one second</h4><a class="sl-anchor-link" href="#still-slower-than-one-second"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “Still slower than one second”</span></a></div>
 <p>Measured on a store of 290,000 postings from 10,000 companies with finished background work. These
