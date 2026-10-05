@@ -75,13 +75,25 @@ def run_cli_in_pty(
             os._exit(127)
     shown = b""
     pending = list(steps)
+    sent = b""
+    resent_at = 0.0
+    resends = 0
     deadline = time.monotonic() + timeout
     exit_code: int | None = None
     timed_out = False
     try:
         while True:
             if pending and pending[0][0].encode("utf-8") in shown:
-                os.write(master, pending.pop(0)[1])
+                sent = pending.pop(0)[1]
+                os.write(master, sent)
+                resent_at = time.monotonic()
+                resends = 0
+            elif sent in (CTRL_C, CTRL_D) and not pending and resends < 5 and time.monotonic() - resent_at > 3.0:
+                # A Ctrl-C or Ctrl-D that reaches the process while it is still setting its terminal up is lost (seen on
+                # Linux CI, never on macOS): a person presses it again when nothing happens.
+                os.write(master, sent)
+                resent_at = time.monotonic()
+                resends += 1
             left = deadline - time.monotonic()
             if left <= 0:
                 timed_out = True
