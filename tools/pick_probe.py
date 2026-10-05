@@ -15,6 +15,12 @@ The paths (each is deterministic code, after the length cuts):
   selection put through the validator, the no-loss pass, the Skills rules and the fit).
 - ``tailor_copy``: the tailor path with a model that copies every candidate line in the order listed
   (``job_candidates`` -> settled -> ``fit_selected``): the fit alone decides what stays.
+- ``settle`` (0.1.11, asked for by name: a tree before 0.1.11 has no such function and answers an error):
+  ``pick.settle``, the ONE function the product makes a job's selection with.  The posting's cited rows are the
+  assessment's rows with their ``sources``.  The pick is the case's own (``posting.pick``: line ids, best first)
+  or, for a posting that carries cited rows and no pick, a stand-in: every line of the selector's pick before its
+  page fit, in the selector's own order of worth (a model that ranks as the code does).  With no cited rows and no
+  pick there is no pick: ``settle`` answers the code selector's selection (``no_pick``).
 
 A posting may carry ``cited``: the rows of its stored assessment that cite master lines (``{"id", "text",
 "mandatory", "met", "lines"}``).  A tree whose selector reads citations (``sel-3`` on) selects from them; an older
@@ -34,6 +40,8 @@ import subprocess
 import sys
 
 PATHS: tuple[str, ...] = ("select", "fallback", "tailor_copy")
+#: 0.1.11: the product's own entry (``pick.settle``). Not in ``PATHS``: a baseline tree before 0.1.11 cannot answer it.
+SETTLE = "settle"
 PROBE_TIMEOUT_SECONDS = 1800
 
 
@@ -133,12 +141,44 @@ def _from_result(master, result, record=None, selected=None) -> dict[str, object
     }
 
 
-def _one(master, profile, posting, path: str, today: date) -> dict[str, object]:
+def _settle(master, profile, posting, today: date, lines: list[str] | None) -> dict[str, object]:
+    """``pick.settle`` for one case (the module text): the final selection, and what the validation and the fit recorded."""
+
+    from gigai.scout import master_selection as ms
+    from gigai.scout import pick as pick_rules
+    from gigai.scout.find_jobs.assess_contracts import MAX_PICK_LINES, AssessmentBody, AssessmentPick
+    from gigai.scout.find_jobs.contracts import MatrixStatus, RequirementClass, RequirementMatrixRow, Verdict
+
+    rows = tuple(
+        RequirementMatrixRow(
+            row.text, (), MatrixStatus.MET if row.met else MatrixStatus.UNCLEAR, RequirementClass.HARD if row.mandatory else RequirementClass.NICE_TO_HAVE,
+            id=row.id, sources=tuple(row.lines),
+        )
+        for row in posting.cited
+    )
+    if lines is None and rows:
+        before_fit = ms.select(master, profile, posting, today=today, measure=lambda _markdown: (1, 0.0), max_pages=10**6, fill=False)
+        offered = [*(bullet for entry_id, bullets in before_fit.entries.items() if master.entries[entry_id].section != "education" for bullet in bullets), *before_fit.other]
+        lines = sorted(offered, key=lambda item_id: -before_fit.values.get(item_id, 0.0))[:MAX_PICK_LINES]
+    chosen = None if lines is None else AssessmentPick(None, ("experience", "projects"), tuple(lines))
+    body = AssessmentBody(rows, (), (), verdict=Verdict.MATCHED_ABOVE_THRESHOLD, pick=chosen)
+    settled = pick_rules.settle(master, body, None, today, profile=profile, posting=posting)
+    return {
+        **_from_result(master, settled.result, settled.record, settled.candidates.selected),
+        "picked_by": settled.picked_by, "fallback": settled.fallback, "problems": [problem.to_json() for problem in settled.problems],
+        "added_by_code": [item.to_json() for item in settled.added_by_code], "pick_conflicts": [conflict.to_json() for conflict in settled.conflicts],
+        "ready": settled.check.ready, "layouts": settled.layouts,
+    }
+
+
+def _one(master, profile, posting, path: str, today: date, lines: list[str] | None = None) -> dict[str, object]:
     from gigai.scout import master_selection as ms
     from gigai.scout import tailor_master as tm
     from gigai.scout.tailor_skills import finish_tailoring
     from gigai.scout.tailored_resume import TailorJob, apply_no_loss, validate_tailored_output
 
+    if path == SETTLE:
+        return _settle(master, profile, posting, today, lines)
     if path == "select":
         return _from_selected(master, ms.select(master, profile, posting, today=today))
     job = TailorJob(posting.title, posting.company, posting.location, posting.text)
@@ -159,7 +199,7 @@ def probe(payload: dict[str, object]) -> dict[str, object]:
     """The final selections for ``payload``: ``{"cases": [{"key", "master", "profile", "posting"}], "paths", "today"}``.
 
     ``master`` is master markdown (ids on every line); ``profile`` is ``{"titles", "base_ids" | null, "pins"?}``;
-    ``posting`` is ``{"title", "text", "company"?, "location"?}``.  The answer is ``{"results": {key: {path: ...}}}``;
+    ``posting`` is ``{"title", "text", "company"?, "location"?, "cited"?, "pick"?}``.  The answer is ``{"results": {key: {path: ...}}}``;
     a path that raises answers ``{"error": <the exception's type>}`` (never its message: it could quote a line).
     """
 
@@ -192,9 +232,10 @@ def probe(payload: dict[str, object]) -> dict[str, object]:
                 for row in post["cited"]
             ))
         out: dict[str, object] = {}
+        lines = [str(item) for item in post["pick"]] if post.get("pick") is not None else None
         for path in paths:
             try:
-                out[path] = _one(master, profile, posting, path, today)
+                out[path] = _one(master, profile, posting, path, today, lines)
             except Exception as exc:  # noqa: BLE001 - a report on any home must finish; the type alone is reported
                 out[path] = {"error": type(exc).__name__}
         results[str(case["key"])] = out

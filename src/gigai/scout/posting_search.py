@@ -124,7 +124,8 @@ SORTS = (SORT_FIT, SORT_NEWEST_POSTED)
 #: The state filters. ``assessed`` is any posting with an assessment; ``recommended`` the Scout label.
 STATE_ASSESSED = "assessed"
 STATE_RECOMMENDED = "recommended"
-_ROW_STATES = frozenset({"not_assessed", "needs_answers", "matched", "not_a_match", "tailored", fit_rules.WEAK_FIT})
+# ``has_gap`` (0.1.11 N3, OD1): matched by verdict, held by the gate (``job_state.HAS_GAP``).
+_ROW_STATES = frozenset({"not_assessed", "needs_answers", "matched", "has_gap", "not_a_match", "tailored", fit_rules.WEAK_FIT})
 STATES = frozenset(_ROW_STATES | {STATE_ASSESSED, STATE_RECOMMENDED})
 
 DEFAULT_LIMIT = 50

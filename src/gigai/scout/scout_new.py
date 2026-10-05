@@ -228,6 +228,7 @@ _GROUP_ORDER = {GROUP_CURRENT: 0, GROUP_STALE: 1, GROUP_NOT_ASSESSED: 2}
 _VERDICT_ORDER = {"matched": 0, "needs_answers": 1, fit_rules.WEAK_FIT: 3, "not_a_match": 4}
 _VERDICT_WORDS = {
     "matched": "Matched", "needs_answers": "Needs your answers", fit_rules.WEAK_FIT: "Weak fit", "not_a_match": "Not a match",
+    "has_gap": "Has a gap",  # 0.1.11 N3 (OD1): sorted with "anything else", after Needs your answers
 }
 _STALE_WORDS = {
     "posting_changed": "posting changed",

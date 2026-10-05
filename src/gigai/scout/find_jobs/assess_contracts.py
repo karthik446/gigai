@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 from typing import ClassVar
 
 from .contracts import (
+    ELIGIBILITY_ROW_IDS,
     AssessmentQuestion,
     ModelTarget,
     PinnedResume,
@@ -40,6 +41,7 @@ from .contracts import (
     _optional_string,
     _string,
     _strings,
+    is_row_id,
     rows_not_shown_count,
 )
 from .rank_contracts import RankScore
@@ -322,6 +324,220 @@ def text_identity(text_sha256: str) -> str:
 # --- P5: the assess API/CLI request and response DTOs --------------------------------
 
 
+# --- 0.1.11 N3 (assessment v9, SPEC 1.2-1.5): the suggestion, the pick, the list reference, the gate -----
+
+#: ``AssessmentSuggestion.kind``: what would make this resume fit the job better. Never a rewritten line.
+SUGGESTION_KINDS: tuple[str, ...] = ("reword", "keyword", "order", "gap", "master_line")
+#: The kinds kept on a ``pending_user_answers`` assessment: the other three are about a resume that does not exist yet.
+SUGGESTION_KINDS_WITHOUT_RESUME: tuple[str, ...] = ("gap", "master_line")
+MAX_STRUCTURED_SUGGESTIONS = 8
+MAX_SUGGESTION_WHY_CHARS = 300
+MAX_SUGGESTION_PHRASE_CHARS = 60
+#: A master line id as a suggestion or a pick names it (``master_resume``'s own id shape).
+MAX_MASTER_ID_CHARS = 64
+#: The two sections the model orders.
+PICK_SECTIONS: tuple[str, ...] = ("experience", "projects")
+MAX_PICK_LINES = 60
+
+#: ``RequirementsRef.list``: the rows are the posting's STORED requirement list, or this assessment's own
+#: (it lost the race of two first assessments, ``requirements_list``).
+REQUIREMENTS_LIST_STORED = "stored"
+REQUIREMENTS_LIST_OWN = "own"
+REQUIREMENTS_LISTS: tuple[str, ...] = (REQUIREMENTS_LIST_STORED, REQUIREMENTS_LIST_OWN)
+
+#: ``GateRecord.decision`` (``resume_gate``).
+GATE_SUGGEST = "suggest"
+GATE_HOLD_QUESTION = "hold_question"
+GATE_HOLD_UNMET = "hold_unmet"
+GATE_NOT_A_MATCH = "not_a_match"
+GATE_DECISIONS: tuple[str, ...] = (GATE_SUGGEST, GATE_HOLD_QUESTION, GATE_HOLD_UNMET, GATE_NOT_A_MATCH)
+#: ``GateReason.code``: why the gate holds.
+GATE_REASON_HARD_UNMET = "hard_unmet"
+GATE_REASON_QUESTION_OPEN = "question_open"
+GATE_REASON_ASKABLE_UNMET = "askable_unmet"
+GATE_REASONS: tuple[str, ...] = (GATE_REASON_HARD_UNMET, GATE_REASON_QUESTION_OPEN, GATE_REASON_ASKABLE_UNMET)
+
+
+def _master_id(value: object, name: str) -> str:
+    text = _string(value, name)
+    if len(text) > MAX_MASTER_ID_CHARS or any(char.isspace() for char in text):
+        _fail("invalid_value", f"{name} must be a master line id")
+    return text
+
+
+@dataclass(frozen=True)
+class AssessmentSuggestion(_Contract):
+    """One structured suggestion of a v9 assessment: what would help, and why. Never a rewritten line.
+
+    ``line`` (a master line id) and ``requirement`` (a row id) are both
+    optional; at least one is given. ``posting_phrase`` is at most
+    :data:`MAX_SUGGESTION_PHRASE_CHARS` characters of the posting. Each
+    optional key is omitted from JSON when ``None``.
+    """
+
+    kind: str
+    why: str
+    line: str | None = None
+    requirement: str | None = None
+    posting_phrase: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.kind not in SUGGESTION_KINDS:
+            _fail("bad_enum", "assessment_suggestion.kind has an unsupported value")
+        if not self.why.strip() or len(self.why) > MAX_SUGGESTION_WHY_CHARS:
+            _fail("invalid_value", f"assessment_suggestion.why must be 1 to {MAX_SUGGESTION_WHY_CHARS} characters")
+        if self.line is None and self.requirement is None:
+            _fail("invalid_value", "assessment_suggestion names a line or a requirement")
+        if self.requirement is not None and not is_row_id(self.requirement):
+            _fail("invalid_value", "assessment_suggestion.requirement must be a requirement row id")
+        if self.posting_phrase is not None and len(self.posting_phrase) > MAX_SUGGESTION_PHRASE_CHARS:
+            _fail("invalid_value", f"assessment_suggestion.posting_phrase must be at most {MAX_SUGGESTION_PHRASE_CHARS} characters")
+
+    def to_json(self) -> dict[str, object]:
+        value: dict[str, object] = {"kind": self.kind, "why": self.why}
+        if self.line is not None:
+            value["line"] = self.line
+        if self.requirement is not None:
+            value["requirement"] = self.requirement
+        if self.posting_phrase is not None:
+            value["posting_phrase"] = self.posting_phrase
+        return value
+
+    @classmethod
+    def from_json(cls, obj: object) -> "AssessmentSuggestion":
+        value = _object_with_optional(obj, ("kind", "why"), ("line", "requirement", "posting_phrase"), "assessment_suggestion")
+        return cls(
+            kind=_string(value["kind"], "assessment_suggestion.kind"),
+            why=_string(value["why"], "assessment_suggestion.why"),
+            line=None if value.get("line") is None else _master_id(value["line"], "assessment_suggestion.line"),
+            requirement=_optional_string(value.get("requirement"), "assessment_suggestion.requirement"),
+            posting_phrase=_optional_string(value.get("posting_phrase"), "assessment_suggestion.posting_phrase"),
+        )
+
+
+@dataclass(frozen=True)
+class AssessmentPick(_Contract):
+    """The model's pick exactly as it returned it, ids only, kept for provenance (SPEC 1.2).
+
+    Parsed leniently at the model boundary and validated later (``pick.settle``):
+    an id here may name no line of the master. The SELECTION code makes of it
+    is not here; it is on the job resume and in the suggestion record.
+    """
+
+    summary: str | None
+    section_order: tuple[str, ...]
+    lines: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        if len(self.lines) > MAX_PICK_LINES:
+            _fail("invalid_value", f"assessment_pick.lines has {len(self.lines)} ids; at most {MAX_PICK_LINES} allowed")
+        if any(section not in PICK_SECTIONS for section in self.section_order) or len(set(self.section_order)) != len(self.section_order):
+            _fail("invalid_value", "assessment_pick.section_order holds experience and projects, each at most once")
+
+    def to_json(self) -> dict[str, object]:
+        return {"summary": self.summary, "section_order": list(self.section_order), "lines": list(self.lines)}
+
+    @classmethod
+    def from_json(cls, obj: object) -> "AssessmentPick":
+        value = _object(obj, ("summary", "section_order", "lines"), "assessment_pick")
+        section_order = _strings(value["section_order"], "assessment_pick.section_order", allow_empty=True)
+        if type(value["lines"]) is not list:
+            _fail("wrong_type", "assessment_pick.lines must be an array")
+        return cls(
+            summary=None if value["summary"] is None else _master_id(value["summary"], "assessment_pick.summary"),
+            section_order=section_order,
+            lines=tuple(_master_id(item, f"assessment_pick.lines[{index}]") for index, item in enumerate(value["lines"])),
+        )
+
+
+@dataclass(frozen=True)
+class RequirementsRef(_Contract):
+    """Which requirement list one assessment's rows are (SPEC 1.4): digests and a count, never a requirement.
+
+    JSON: ``{posting_sha256, rules_version, digest, rows, list}``. Two
+    assessments are compared row by row only when their ``digest`` values
+    (``rows_digest`` here) are equal. ``rows`` counts the list's rows (the
+    ``elig-`` rows of the assessment are not in a list). ``kind`` (JSON
+    ``list``) is one of :data:`REQUIREMENTS_LISTS`.
+    """
+
+    posting_sha256: str
+    rules_version: str
+    rows_digest: str
+    rows: int
+    kind: str
+
+    def __post_init__(self) -> None:
+        if self.kind not in REQUIREMENTS_LISTS:
+            _fail("bad_enum", "requirements_ref.list has an unsupported value")
+
+    def to_json(self) -> dict[str, object]:
+        return {
+            "posting_sha256": self.posting_sha256, "rules_version": self.rules_version, "digest": self.rows_digest,
+            "rows": self.rows, "list": self.kind,
+        }
+
+    @classmethod
+    def from_json(cls, obj: object) -> "RequirementsRef":
+        value = _object(obj, ("posting_sha256", "rules_version", "digest", "rows", "list"), "requirements_ref")
+        return cls(
+            posting_sha256=_digest_value(value["posting_sha256"], "requirements_ref.posting_sha256"),
+            rules_version=_string(value["rules_version"], "requirements_ref.rules_version"),
+            rows_digest=_digest_value(value["digest"], "requirements_ref.digest"),
+            rows=_integer(value["rows"], "requirements_ref.rows", minimum=0),
+            kind=_string(value["list"], "requirements_ref.list"),
+        )
+
+
+@dataclass(frozen=True)
+class GateReason(_Contract):
+    """One row behind a gate decision: a code and the row's id (``None`` for a row without one)."""
+
+    code: str
+    requirement: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.code not in GATE_REASONS:
+            _fail("bad_enum", "resume_gate reason code has an unsupported value")
+        if self.requirement is not None and not is_row_id(self.requirement):
+            _fail("invalid_value", "resume_gate reason requirement must be a requirement row id")
+
+    def to_json(self) -> dict[str, object]:
+        return {"code": self.code, "requirement": self.requirement}
+
+    @classmethod
+    def from_json(cls, obj: object) -> "GateReason":
+        value = _object(obj, ("code", "requirement"), "resume_gate reason")
+        return cls(_string(value["code"], "resume_gate reason code"), _optional_string(value["requirement"], "resume_gate reason requirement"))
+
+
+@dataclass(frozen=True)
+class GateRecord(_Contract):
+    """The gate decision stored with a v9 assessment (SPEC 1.5): whether a resume is suggested, and the rows that say no.
+
+    Computed by ``resume_gate.gate`` from the rows, the questions and the
+    verdict, the function the verdict itself is settled by. Every reader uses
+    this decision; the model's verdict stays stored as it came.
+    """
+
+    decision: str
+    reasons: tuple[GateReason, ...] = ()
+
+    def __post_init__(self) -> None:
+        if self.decision not in GATE_DECISIONS:
+            _fail("bad_enum", "resume_gate.decision has an unsupported value")
+
+    def to_json(self) -> dict[str, object]:
+        return {"decision": self.decision, "reasons": [reason.to_json() for reason in self.reasons]}
+
+    @classmethod
+    def from_json(cls, obj: object) -> "GateRecord":
+        value = _object(obj, ("decision", "reasons"), "resume_gate")
+        if type(value["reasons"]) is not list:
+            _fail("wrong_type", "resume_gate.reasons must be an array")
+        return cls(_string(value["decision"], "resume_gate.decision"), tuple(GateReason.from_json(item) for item in value["reasons"]))
+
+
 @dataclass(frozen=True)
 class AssessmentBody(_Contract):
     """``AssessmentResult`` minus the run-bound ``posting``/``proposal_revision_ref``.
@@ -344,6 +560,13 @@ class AssessmentBody(_Contract):
     not_a_match_reason: str | None = None
     # 0110-10-03: as on ``AssessmentResult``: rows past the matrix bound ("+N not shown"); omitted at 0.
     rows_not_shown: int = 0
+    # 0.1.11 N3 (assessment v9, additive; each omitted from JSON at its default, so a v8 body is byte for byte
+    # what it was). ``structured_suggestions``: the pattern ``structured_questions`` set: the plain
+    # ``suggestions`` list above also holds each one's ``why``, so a reader that knows only strings still shows
+    # something. ``pick``: the model's pick as returned (:class:`AssessmentPick`); only on a Matched assessment
+    # whose prompt showed master line ids.
+    structured_suggestions: tuple[AssessmentSuggestion, ...] = ()
+    pick: AssessmentPick | None = None
 
     def to_json(self) -> dict[str, object]:
         value: dict[str, object] = {
@@ -361,6 +584,10 @@ class AssessmentBody(_Contract):
             value["not_a_match_reason"] = self.not_a_match_reason
         if self.rows_not_shown:
             value["rows_not_shown"] = self.rows_not_shown
+        if self.structured_suggestions:
+            value["structured_suggestions"] = [item.to_json() for item in self.structured_suggestions]
+        if self.pick is not None:
+            value["pick"] = self.pick.to_json()
         return value
 
     @classmethod
@@ -368,7 +595,7 @@ class AssessmentBody(_Contract):
         value = _object_with_optional(
             obj,
             ("matrix", "suggestions", "questions"),
-            ("sponsorship", "verdict", "structured_questions", "not_a_match_reason", "rows_not_shown"),
+            ("sponsorship", "verdict", "structured_questions", "not_a_match_reason", "rows_not_shown", "structured_suggestions", "pick"),
             "assessment_body",
         )
         if type(value["matrix"]) is not list:
@@ -381,6 +608,13 @@ class AssessmentBody(_Contract):
                 _fail("wrong_type", "assessment_body.structured_questions must be an array")
             structured_questions = tuple(AssessmentQuestion.from_json(item) for item in value["structured_questions"])
         not_a_match_reason = None if "not_a_match_reason" not in value else _optional_string(value["not_a_match_reason"], "assessment_body.not_a_match_reason")
+        structured_suggestions: tuple[AssessmentSuggestion, ...] = ()
+        if "structured_suggestions" in value:
+            if type(value["structured_suggestions"]) is not list:
+                _fail("wrong_type", "assessment_body.structured_suggestions must be an array")
+            if len(value["structured_suggestions"]) > MAX_STRUCTURED_SUGGESTIONS:
+                _fail("invalid_value", f"assessment_body.structured_suggestions holds at most {MAX_STRUCTURED_SUGGESTIONS}")
+            structured_suggestions = tuple(AssessmentSuggestion.from_json(item) for item in value["structured_suggestions"])
         return cls(
             tuple(RequirementMatrixRow.from_json(item) for item in value["matrix"]),
             _strings(value["suggestions"], "suggestions", allow_empty=True),
@@ -390,6 +624,8 @@ class AssessmentBody(_Contract):
             structured_questions,
             not_a_match_reason,
             rows_not_shown_count(value, "assessment_body"),
+            structured_suggestions,
+            AssessmentPick.from_json(value["pick"]) if "pick" in value else None,
         )
 
 
@@ -619,6 +855,13 @@ class AssessResponse(_Contract):
     # such a record's bytes are what they were.
     # ``assessment_basis`` reads it for the ``resume_changed`` stale reason.
     resume_basis: ResumeBasis | None = None
+    # 0.1.11 N3 (assessment v9, additive): set only on an assessment whose rows carry v9 fields
+    # (``requirement_weights.uses_v9_rules``); ``None`` for every other one and for a file written before these
+    # fields, each omitted from JSON when ``None``. ``requirements_ref``: which requirement list the rows are
+    # (:class:`RequirementsRef`, ``requirements_list``). ``resume_gate``: whether a resume is suggested
+    # (:class:`GateRecord`, ``resume_gate.gate``).
+    requirements_ref: RequirementsRef | None = None
+    resume_gate: GateRecord | None = None
 
     def __post_init__(self) -> None:
         if (
@@ -677,6 +920,10 @@ class AssessResponse(_Contract):
             value["model"] = self.model
         if self.resume_basis is not None:
             value["resume_basis"] = self.resume_basis.to_json()
+        if self.requirements_ref is not None:
+            value["requirements_ref"] = self.requirements_ref.to_json()
+        if self.resume_gate is not None:
+            value["resume_gate"] = self.resume_gate.to_json()
         return value
 
     @classmethod
@@ -690,6 +937,7 @@ class AssessResponse(_Contract):
             (
                 "updated_at", "history", "posting_text", "rank_score", "rank_skip_reason", "origin",
                 "prompt_version", "constraints_digest", "story_bank", "profile_ref", "posting_sha256", "model", "resume_basis",
+                "requirements_ref", "resume_gate",
             ),
             "assess_response",
         )
@@ -749,6 +997,8 @@ class AssessResponse(_Contract):
             ),
             model=_string(value["model"], "assess_response.model") if "model" in value else None,
             resume_basis=ResumeBasis.from_json(value["resume_basis"]) if "resume_basis" in value else None,
+            requirements_ref=RequirementsRef.from_json(value["requirements_ref"]) if "requirements_ref" in value else None,
+            resume_gate=GateRecord.from_json(value["resume_gate"]) if "resume_gate" in value else None,
         )
 
 
@@ -774,7 +1024,28 @@ class AssessmentsListResponse(_Contract):
 
 __all__ = [
     "ASSESS_ORIGINS",
+    "ELIGIBILITY_ROW_IDS",
     "FETCH_KINDS",
+    "GATE_DECISIONS",
+    "GATE_HOLD_QUESTION",
+    "GATE_HOLD_UNMET",
+    "GATE_NOT_A_MATCH",
+    "GATE_REASONS",
+    "GATE_REASON_ASKABLE_UNMET",
+    "GATE_REASON_HARD_UNMET",
+    "GATE_REASON_QUESTION_OPEN",
+    "GATE_SUGGEST",
+    "MAX_MASTER_ID_CHARS",
+    "MAX_PICK_LINES",
+    "MAX_STRUCTURED_SUGGESTIONS",
+    "MAX_SUGGESTION_PHRASE_CHARS",
+    "MAX_SUGGESTION_WHY_CHARS",
+    "PICK_SECTIONS",
+    "REQUIREMENTS_LISTS",
+    "REQUIREMENTS_LIST_OWN",
+    "REQUIREMENTS_LIST_STORED",
+    "SUGGESTION_KINDS",
+    "SUGGESTION_KINDS_WITHOUT_RESUME",
     "ORIGIN_JOB_PAGE",
     "ORIGIN_QUICK_ASSESS",
     "RANK_SKIP_REASONS",
@@ -786,7 +1057,12 @@ __all__ = [
     "AssessResponse",
     "AssessResumeInput",
     "AssessmentBody",
+    "AssessmentPick",
+    "AssessmentSuggestion",
     "AssessmentsListResponse",
+    "GateReason",
+    "GateRecord",
+    "RequirementsRef",
     "ResolvedJob",
     "ResolvedResume",
     "ResumeBasis",
