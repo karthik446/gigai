@@ -72,8 +72,9 @@ from ..config import GigAIConfig, load_config
 from ..model_targets import ModelTargetResolutionError
 from .assessment_basis import posting_sha256
 from .call_metrics import KIND_ASSESS, CallMeter
-from .assessment_core import INSTRUCTIONS_DIGEST, AssessJob, build_assess_context
+from .assessment_core import INSTRUCTIONS_DIGEST, PLACEHOLDER_REQUIREMENTS, AssessExtras, AssessJob, build_assess_context
 from .assessment_core import POSTING_INCOMPLETE_MESSAGE, assess_once, assess_prompt_version, constraints_digest
+from .assessment_core import prompt_reads_ids, template_takes
 from . import story_bank
 from .find_jobs.assess_contracts import (
     ORIGIN_QUICK_ASSESS,
@@ -474,6 +475,84 @@ def _parse_body(raw: Mapping[str, object]) -> AssessmentBody:
     return AssessmentBody.from_json(dict(raw))
 
 
+# --- 0.1.11 N3 (assessment v9, SPEC 1.7): what follows a v9 answer -------------------------------------
+#
+# Everything here runs only for an answer whose rows carry v9 fields (``resume_gate.uses_v9_rules``). An answer
+# in the v8 shape (every answer of the shipped v8 prompt) is stored exactly as before and nothing below runs.
+
+
+def _v9_body(body: AssessmentBody, extras: AssessExtras | None, row_ids: tuple[str, ...] | None) -> AssessmentBody:
+    """The v9 answer as it is stored: every row with its id, the structured suggestions, and the pick only when a resume is suggested.
+
+    ``extras``: what the boundary returned beside the payload (``assess_once``).
+    ``row_ids``: the ids code gives the rows of a FIRST assessment
+    (``requirements_list.extracted``); ``None`` when the prompt carried the
+    list and the rows have its ids already.
+    """
+
+    from .resume_gate import SUGGEST, gate
+
+    matrix = body.matrix if row_ids is None else tuple(replace(row, id=row_id) for row, row_id in zip(body.matrix, row_ids))
+    decided = gate(matrix, body.structured_questions, body.verdict)
+    return replace(
+        body, matrix=matrix,
+        structured_suggestions=() if extras is None else extras.structured_suggestions,
+        # OD1: under a hold no pick is kept (the model's verdict stays as it came; the gate is what every reader uses).
+        pick=extras.pick if extras is not None and decided.decision == SUGGEST else None,
+    )
+
+
+def _settle_and_record(
+    response: AssessResponse, *, job: ResolvedJob, master_input: object | None, profile: object | None, home_root: Path, target: Path, now: str,
+) -> None:
+    """SPEC 1.7 step 4: settle the pick when the gate suggests a resume, and write the suggestion record.
+
+    The assessment is stored already and nothing here undoes that: a
+    selection that cannot be made (no renderer to measure pages with) is
+    recorded as ``selection: null`` with its error code, and the record
+    itself failing to write is logged, never raised.  No model is called.
+    """
+
+    from . import suggestions
+    from .resume_gate import SUGGEST
+
+    gate_record = response.resume_gate
+    settled = None
+    error: str | None = None
+    source = None
+    answers = None
+    stored = getattr(master_input, "stored", None)
+    try:
+        if gate_record is not None and gate_record.decision == SUGGEST and stored is not None and profile is not None:
+            from . import pick
+            from .tailor_master import MasterSource
+            from .tailored_resume import tailor_sources
+
+            revision = stored.revision
+            source = MasterSource(revision.revision_id, revision.revision, revision.content_sha256)
+            selection = getattr(profile, "master_selection", None)
+            prior = replace(master_input.prior, pins=tuple(selection.pins) if selection is not None else ())  # type: ignore[union-attr]
+            answers = tailor_sources(
+                home_root=home_root, target=target, profile_id=response.resume.profile_id, resume_text=response.resume.text, title=job.title,
+                posting_text=job.text,
+            )
+            try:
+                settled = pick.settle(
+                    stored.master, response, None, None, profile=prior, answers=answers,
+                    posting=pick.SelectionPosting(job.title, job.text, job.company, job.location),
+                    excludes=tuple(selection.excludes) if selection is not None else (),
+                )
+            except pick.PickError as exc:
+                error = exc.code
+        suggestions.store_assessed(
+            home_root, target, assessment=response, job=job, resume=response.resume, gate_record=gate_record, now=now,
+            suggested=response.result.structured_suggestions, settled=settled, selection_error=error,
+            master_source=source, answers=answers,
+        )
+    except Exception:  # noqa: BLE001 - the assessment is stored and stays: a selection or a record that fails is made again later (the pick step, resume pick)
+        _logger.warning("the suggestion record of an assessment could not be written", exc_info=True)
+
+
 def _config_location(target: Path) -> str:
     """``find-jobs.json``'s ``location`` (the operator's own "Denver, CO"),
     tolerantly: missing/unreadable/starter/null -> ``""`` (rendered
@@ -729,14 +808,22 @@ def run_quick_assessment(
     #     the master for THIS posting (``assess_master``), not the profile's 2 pages. ``None`` (no master, a pasted
     #     resume, a resume replaced by hand, the tailored variant, or the switch on the profile's view): the
     #     profile's resume, exactly as before. ``resume`` stays the identity the assessment is stored under.
+    #     0.1.11 N3: with ids on its lines when the shipped prompt explains them (the v8 file does not: nothing changes).
     master_input = None
     if variant is None and profile is not None:
         from .assess_master import assess_input
 
         master_input = assess_input(
             home_root=home_root, target=target, profile=profile, title=job.title, posting_text=job.text, company=job.company,
-            location=job.location, resolved=resolved,
+            location=job.location, resolved=resolved, ids=prompt_reads_ids(),
         )
+    # 4d. 0.1.11 N3 (SPEC 1.4): the posting's stored requirement list, when the shipped prompt has a place for it.
+    #     The answer must then hold exactly its rows, by id.
+    listed = None
+    if variant is None and template_takes(PLACEHOLDER_REQUIREMENTS):
+        from .requirements_list import read_list
+
+        listed = read_list(home_root, target, posting_digest)
 
     # 5. Model target -> adapter (C1/C11), then the shared core (P1).
     model_target = request.model_target or _default_model_target(target)
@@ -758,6 +845,10 @@ def run_quick_assessment(
                 location=candidate_location,
                 bank=job_bank,
                 work_mode=candidate_work_mode,
+                resume_ids=() if master_input is None else master_input.resume_ids,
+                resume_notes=master_input is not None and master_input.resume_notes,
+                pick_lines=0 if master_input is None else master_input.pick_lines,
+                requirements=() if listed is None else listed.rows,
             ),
             parse=_parse_body,
         )
@@ -792,6 +883,27 @@ def run_quick_assessment(
         _PRODUCER_CALLABLE, _PRODUCER_VERSION, _PRODUCER_ACTOR, model_target, binding.port.name or model_target.value
     )
     assessed_at = _now()
+    # 0.1.11 N3 (SPEC 1.7): a v9 answer (its rows carry v9 fields) gets its row ids, its gate and, below, its
+    # requirement list, selection and suggestion record. A v8 answer is stored as it always was.
+    from .resume_gate import gate, uses_v9_rules
+
+    is_v9 = variant is None and uses_v9_rules(body.matrix)
+    extracted_list = None
+    requirements_ref = None
+    resume_gate = None
+    if is_v9:
+        row_ids = None
+        if listed is not None:
+            requirements_ref = listed.ref()
+        else:
+            from .requirements_list import extracted
+
+            extracted_list, row_ids = extracted(
+                posting_digest, body.matrix, extracted_at=assessed_at, prompt_version=assess_prompt_version(candidate_work_mode),
+                model=_model_id(getattr(binding.port, "resolved_model", None)), profile_id=resume.profile_id,
+            )
+        body = _v9_body(body, attempt.extras, row_ids)
+        resume_gate = gate(body.matrix, body.structured_questions, body.verdict).record()
     if trigger is None:
         trigger = TRIGGER_ASSESS if previous is None else TRIGGER_REASSESS
     history = _history_with(previous, VerdictHistoryEntry(at=assessed_at, verdict=body.verdict, trigger=trigger))
@@ -825,13 +937,30 @@ def run_quick_assessment(
         posting_sha256=posting_digest,
         model=_model_id(getattr(binding.port, "resolved_model", None)),
         resume_basis=None if master_input is None else master_input.basis,
+        requirements_ref=requirements_ref,
+        resume_gate=resume_gate,
     )
+    # 1. Store the assessment (0110-8-09: a call is ok only when its answer was stored).
     try:
         atomic_write(path, json.dumps(response.to_json(), indent=2, sort_keys=True).encode("utf-8"))
     except OSError as exc:
         # 0110-8-09: the model answered and the answer could not be written: a named failure, never a silent success.
         meter.unused(ERROR_NOT_STORED)
         raise QuickAssessError(ERROR_NOT_STORED, f"the assessment could not be stored ({type(exc).__name__}); nothing was saved") from exc
+    if is_v9:
+        # 2. The requirement list: a first assessment's own rows become the posting's list unless one is stored
+        #    already (the first to write wins); the assessment then says which list its rows are. A list that
+        #    cannot be written leaves the assessment stored, without a reference.
+        if extracted_list is not None:
+            from .requirements_list import settle_first
+
+            try:
+                response = replace(response, requirements_ref=settle_first(home_root, target, extracted_list))
+                atomic_write(path, json.dumps(response.to_json(), indent=2, sort_keys=True).encode("utf-8"))
+            except OSError:
+                _logger.warning("the requirement list of a posting could not be stored", exc_info=True)
+        # 3. The gate is stored with the assessment above. 4. The selection and the suggestion record (no model call).
+        _settle_and_record(response, job=job, master_input=master_input, profile=profile, home_root=home_root, target=target, now=assessed_at)
     if (bank.entries or bank.stories) and variant is None:
         # Which answers and stories this assessment cited ("Story bank <id>: ...").
         story_bank.record_reuse(

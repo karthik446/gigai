@@ -86,6 +86,69 @@ function LineForm({ label, initial = "", submit, busy, onDone, onCancel, placeho
   );
 }
 
+// 0.1.11 N6 (SPEC 5.4, N1b's routes): a NOTE on a line or an entry, shown under it and edited in place. A note is
+// the user's guidance for choosing lines ("agentic roles: lead with this"): it goes to the assessment and to the
+// agent's brief, never into a resume, and it is never evidence. One line, at most 300 characters (the server's
+// rule; its refusal is shown as it says it). Saving "" removes the note. `save(note)` is ONE PUT that sends the
+// note alone.
+const NOTE_MAX = 300;
+
+function Note({ note, save, busy, what }) {
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState(note || "");
+  const typed = value.trim();
+  if (!editing) {
+    return (
+      <div className="muted small master-note" data-role="note" data-has-note={note ? "true" : "false"}>
+        {note && (
+          <span data-role="note-text" title="Your guidance for choosing lines. Never printed on a resume.">
+            Note: {note}{" "}
+          </span>
+        )}
+        <button
+          className="link-button"
+          data-action="edit-note"
+          disabled={busy}
+          onClick={() => {
+            setValue(note || "");
+            setEditing(true);
+          }}
+        >
+          {note ? "Edit note" : "Add a note"}
+        </button>
+      </div>
+    );
+  }
+  return (
+    <form
+      className="master-form master-note"
+      data-role="note-form"
+      onSubmit={(event) => {
+        event.preventDefault();
+        if (typed && typed !== (note || "")) {
+          save(typed).then((ok) => ok && setEditing(false));
+        }
+      }}
+    >
+      <input aria-label={`A note on this ${what}`} value={value} maxLength={NOTE_MAX} placeholder="Guidance for choosing this line, e.g. agentic roles: lead with this" onChange={(event) => setValue(event.target.value)} disabled={busy} />
+      <div className="card-actions">
+        <button type="submit" className="button small" data-action="save-note" disabled={busy || !typed || typed === (note || "")}>
+          {busy ? "Saving…" : "Save note"}
+        </button>
+        {note && (
+          <button type="button" className="button small secondary" data-action="remove-note" disabled={busy} onClick={() => save("").then((ok) => ok && setEditing(false))}>
+            Remove note
+          </button>
+        )}
+        <button type="button" className="button small secondary" data-action="cancel-note" onClick={() => setEditing(false)} disabled={busy}>
+          Cancel
+        </button>
+        <span className="muted small">Never printed on a resume. A note is not evidence.</span>
+      </div>
+    </form>
+  );
+}
+
 function Line({ item, shownBy, write, busy }) {
   const [editing, setEditing] = useState(false);
   const strength = strengthMark(item);
@@ -115,6 +178,7 @@ function Line({ item, shownBy, write, busy }) {
           ))}
           {shownBy && <span data-role="shown-by">{shownBy}</span>}
         </div>
+        {!editing && <Note note={item.note || null} what="line" busy={busy} save={(note) => write((revision) => putMasterLine({ revision, id: item.id, use: "edit", note }))} />}
       </div>
       {!editing && (
         <span className="master-line-actions">
@@ -228,6 +292,7 @@ function Entry({ group, body, write, busy }) {
           </span>
         </div>
       )}
+      {!editing && <Note note={entry.note || null} what="entry" busy={busy} save={(note) => write((revision) => putMasterEntry({ revision, id: entry.id, use: "edit", note }))} />}
       <ul className="master-lines">
         {lines.map((item) => (
           <Line key={item.id} item={item} shownBy={shownByLabel(item.id, body.shown_by, body.profiles)} write={write} busy={busy} />
@@ -516,7 +581,7 @@ export default function MasterView({ reloadProfiles = null }) {
       <section className="panel">
         <h2>Master resume</h2>
         <p className="muted">
-          Everything you have done, once: every role, bullet, project and skill. A profile shows a selection of it; a resume tailored for a job picks
+          Everything you have done, once: every role, bullet, project and skill. A profile shows a selection of it; the resume for a job is picked
           from all of it. Only your own facts go here, and never a name or contact details. Kept on this machine.
         </p>
         <p data-role="master-revision">{revisionLine(master)}</p>

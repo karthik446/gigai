@@ -1468,6 +1468,36 @@ class AcquireOutput(_Contract):
         )
 
 
+#: 0.1.11 N3 (assessment v9): a requirement row's stable id. ``req-`` plus hex (``requirements_list``: derived from the
+#: posting's digest and the requirement's text), or one of the four fixed ids of a row about the CANDIDATE, not the job.
+ELIGIBILITY_ROW_IDS: tuple[str, ...] = ("elig-location", "elig-region", "elig-work-mode", "elig-sponsorship")
+_ROW_ID = re.compile(r"\Areq-[0-9a-f]{6,64}\Z")
+#: Bounds of the v9 row keys (``proposals.validate_assessment_bounds`` checks an answer against the same numbers).
+MAX_CLASS_BASIS_CHARS = 200
+MAX_ROW_SOURCES = 12
+MAX_SOURCE_CHARS = 80
+MAX_ROW_ALTERNATIVES = 6
+MAX_ALTERNATIVE_CHARS = 80
+#: ``RequirementMatrixRow.class_from``: the class is the candidate's own facts' (a disclaimed ``askable`` row read ``hard``), not the stored list's.
+CLASS_FROM_DISCLAIMER = "disclaimer"
+CLASS_FROM: tuple[str, ...] = (CLASS_FROM_DISCLAIMER,)
+
+
+def is_row_id(value: object) -> bool:
+    """Whether ``value`` is a requirement row id: ``req-<hex>`` or one of :data:`ELIGIBILITY_ROW_IDS`."""
+
+    return type(value) is str and (value in ELIGIBILITY_ROW_IDS or _ROW_ID.fullmatch(value) is not None)
+
+
+def _bounded_strings(value: object, name: str, *, most: int, chars: int) -> tuple[str, ...]:
+    items = _strings(value, name, allow_empty=True)
+    if len(items) > most:
+        _fail("invalid_value", f"{name} has {len(items)} items; at most {most} allowed")
+    if any(len(item) > chars for item in items):
+        _fail("invalid_value", f"{name} items must be at most {chars} characters")
+    return items
+
+
 @dataclass(frozen=True)
 class RequirementMatrixRow(_Contract):
     requirement: str
@@ -1476,18 +1506,62 @@ class RequirementMatrixRow(_Contract):
     # P2 (v0.1.9): additive, JSON key "class" (a reserved word); omitted
     # when None so an old serialized matrix row is byte-identical to before.
     requirement_class: RequirementClass | None = None
+    # 0.1.11 N3 (assessment v9, additive; each omitted from JSON at its default, so a v8 row is byte for byte
+    # what it was). ``id``: the row's stable id (:func:`is_row_id`). ``class_basis``: the posting's own wording
+    # behind the class. ``alternatives``: the row is met by any ONE of them. ``sources``: what a ``met`` row
+    # relied on: master line ids, ``A <question_id>`` for an answer, ``A story:<slug>`` for a story.
+    # ``class_from``: set when the class is not the stored requirement list's (:data:`CLASS_FROM`).
+    # The run path's ``AssessmentResult`` shares this type; its prompt offers no ids.
+    id: str | None = None
+    class_basis: str | None = None
+    alternatives: tuple[str, ...] = ()
+    sources: tuple[str, ...] = ()
+    class_from: str | None = None
 
     def to_json(self) -> dict[str, object]:
         value: dict[str, object] = {"requirement": self.requirement, "resume_evidence": _json_strings(self.resume_evidence), "status": _json_enum(self.status)}
         if self.requirement_class is not None:
             value["class"] = _json_enum(self.requirement_class)
+        if self.id is not None:
+            value["id"] = self.id
+        if self.class_basis is not None:
+            value["class_basis"] = self.class_basis
+        if self.alternatives:
+            value["alternatives"] = _json_strings(self.alternatives)
+        if self.sources:
+            value["sources"] = _json_strings(self.sources)
+        if self.class_from is not None:
+            value["class_from"] = self.class_from
         return value
 
     @classmethod
     def from_json(cls, obj: object) -> "RequirementMatrixRow":
-        value = _object_with_optional(obj, ("requirement", "resume_evidence", "status"), ("class",), "matrix_row")
+        value = _object_with_optional(
+            obj, ("requirement", "resume_evidence", "status"), ("class", "id", "class_basis", "alternatives", "sources", "class_from"), "matrix_row"
+        )
         requirement_class = None if "class" not in value else _enum(value["class"], RequirementClass, "matrix_row.class")
-        return cls(_string(value["requirement"], "requirement"), _strings(value["resume_evidence"], "resume_evidence", allow_empty=True), _enum(value["status"], MatrixStatus, "status"), requirement_class)
+        row_id = None
+        if "id" in value:
+            row_id = _string(value["id"], "matrix_row.id")
+            if not is_row_id(row_id):
+                _fail("invalid_value", "matrix_row.id must be req-<hex> or one of the elig- ids")
+        class_basis = None
+        if "class_basis" in value:
+            class_basis = _string(value["class_basis"], "matrix_row.class_basis")
+            if len(class_basis) > MAX_CLASS_BASIS_CHARS:
+                _fail("invalid_value", f"matrix_row.class_basis must be at most {MAX_CLASS_BASIS_CHARS} characters")
+        class_from = None
+        if "class_from" in value:
+            class_from = _string(value["class_from"], "matrix_row.class_from")
+            if class_from not in CLASS_FROM:
+                _fail("bad_enum", "matrix_row.class_from has an unsupported value")
+        return cls(
+            _string(value["requirement"], "requirement"), _strings(value["resume_evidence"], "resume_evidence", allow_empty=True),
+            _enum(value["status"], MatrixStatus, "status"), requirement_class, row_id, class_basis,
+            () if "alternatives" not in value else _bounded_strings(value["alternatives"], "matrix_row.alternatives", most=MAX_ROW_ALTERNATIVES, chars=MAX_ALTERNATIVE_CHARS),
+            () if "sources" not in value else _bounded_strings(value["sources"], "matrix_row.sources", most=MAX_ROW_SOURCES, chars=MAX_SOURCE_CHARS),
+            class_from,
+        )
 
 
 def posting_identity(posting: PostingRow) -> PostingRow:
@@ -2644,6 +2718,8 @@ __all__ = [
     "NodeFailure", "NodeReceipt", "NodeReceiptFixture", "NodeReceiptStatus", "NodeStatus", "NodeCallable", "NormalizedPostingRow", "NormalizedPublicPostingRow", "NotAssessedReason",
     "NotAssessedRow", "PRESENT_CAPABILITY", "PRESENT_CAPABILITY_ID", "PRESENT_DECLARED_EFFECTS", "PRESENT_EFFECTS", "PresentInput",
     "PayPeriod", "PresentNodeCallable", "PresentOutput", "PresentPayload", "PinnedResume", "PostingPay", "PostingRow", "PostingRowResult", "Producer", "ProfileRef", "ROUTES",
+    "CLASS_FROM", "CLASS_FROM_DISCLAIMER", "ELIGIBILITY_ROW_IDS", "MAX_ALTERNATIVE_CHARS", "MAX_CLASS_BASIS_CHARS", "MAX_ROW_ALTERNATIVES",
+    "MAX_ROW_SOURCES", "MAX_SOURCE_CHARS", "is_row_id",
     "ProgressStatus", "RequirementClass", "RequirementMatrixRow", "RowOutcome", "RouteSpec", "RunLookupRequest", "RunRequest", "RunResponse", "RunResultsResponse", "RunStatusResponse",
     "SelectedPosting", "SelectionReason", "SelectionReasonCode", "SelectionRule", "SourceKind", "SourceToggles", "StoryBankStamp", "SponsorshipStatus", "UIConsentEnvelope", "URLChangeDetectionClient", "URLObservation", "URLSetDiff", "Verdict",
     "UsageBlock", "WatchlistClient", "WatchlistEntry", "WatchlistFixture", "WatchlistFirstSeen", "WorkMode", "WorkModePreference", "aggregate_status", "content_hash",

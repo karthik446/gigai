@@ -94,7 +94,7 @@ on the job's page and press **Re-assess**.
 Ask your agent for the PDF of one job. It runs:
 
 ```sh
-gigai scout resume pdf --tailored --job-url <job-url> --json
+gigai scout resume pdf --job-url <job-url> --json
 ```
 
 and gives you an **open in Scout** link. The agent's own PDF has no name and no contact

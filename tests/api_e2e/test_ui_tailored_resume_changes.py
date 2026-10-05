@@ -263,4 +263,5 @@ def test_the_panel_puts_the_choice_and_reloads_on_a_409() -> None:
     assert 'request("PUT", "/api/tailored-resumes/lines"' in api
     for key in ("profile_id: profileId", "job_identity: jobIdentity", "updated_at: updatedAt", "line_id: lineId", "use,"):
         assert key in api
+    panel = (PANEL_JSX.parent / "JobResumePanel.jsx").read_text(encoding="utf-8")  # 0.1.11: the panel around the preview
     assert "putTailoredResumeLine" in panel and 'err.code === "tailored_resume_changed"' in panel

@@ -24,6 +24,7 @@ States::
 
     not_assessed
     needs_answers | matched | not_a_match | assessed   (the latest verdict)
+    has_gap                                            (0.1.11, below)
     weak_fit                                           (0110-10-02, below)
     tailored
     applied -> interview_scheduled -> offer_received | rejected | withdrawn
@@ -31,6 +32,13 @@ States::
 ``assessed`` is an assessment whose result carries no verdict (a result
 shape from before the verdict existed); it is never produced by a current
 assessment.
+
+``has_gap`` (0.1.11 N3, OD1; ``scout/resume_gate.py``) is ``matched`` for a job
+whose v9 assessment has a must-have that is confirmed unmet and does not
+disqualify (an ``askable`` row ``unmet``): the stored gate decision is
+``hold_unmet``. The model's verdict stays stored as it came; no resume is
+suggested until the user asks for a draft. Only an assessment that stores a
+gate can say it, so a job assessed before 0.1.11 never reads ``has_gap``.
 
 ``weak_fit`` (0110-10-02, ``scout/fit.py``) is ``needs_answers`` for a job
 whose stored assessment has few requirements met AND whose rank score is
@@ -74,6 +82,8 @@ ASSESSED = "assessed"
 NEEDS_ANSWERS = "needs_answers"
 WEAK_FIT = "weak_fit"
 MATCHED = "matched"
+#: 0.1.11 N3 (OD1): matched by verdict, held by the gate: a must-have is confirmed unmet ("Has a gap").
+HAS_GAP = "has_gap"
 NOT_A_MATCH = "not_a_match"
 TAILORED = "tailored"
 APPLIED = "applied"
@@ -98,6 +108,10 @@ JOB_STATES: tuple[str, ...] = (
     WITHDRAWN,
 )
 
+#: 0.1.11 N3: states only a v9 assessment can put a job in. Served and accepted like any other
+#: (``derive_job_state``, ``next_events``); kept beside ``JOB_STATES`` until the page has their words.
+GATE_STATES: tuple[str, ...] = (HAS_GAP,)
+
 #: "Applied and beyond": the states an application event puts a job in. Each
 #: is named after the event kind that causes it.
 APPLICATION_STATES: tuple[str, ...] = (APPLIED, INTERVIEW_SCHEDULED, OFFER_RECEIVED, REJECTED, WITHDRAWN)
@@ -115,7 +129,7 @@ _VERDICT_STATES: dict[str, str] = {
 # A job that has not been applied to accepts ``applied`` only (no interview
 # before applied); ``rejected`` and ``withdrawn`` end the pipeline.
 _NEXT_EVENTS: dict[str, tuple[str, ...]] = {
-    **{state: (APPLIED,) for state in JOB_STATES if state not in APPLICATION_STATES},
+    **{state: (APPLIED,) for state in (*JOB_STATES, *GATE_STATES) if state not in APPLICATION_STATES},
     APPLIED: (INTERVIEW_SCHEDULED, OFFER_RECEIVED, REJECTED, WITHDRAWN),
     INTERVIEW_SCHEDULED: (OFFER_RECEIVED, REJECTED, WITHDRAWN),
     OFFER_RECEIVED: (REJECTED, WITHDRAWN),
@@ -124,6 +138,8 @@ _NEXT_EVENTS: dict[str, tuple[str, ...]] = {
 }
 
 _TEXT_IDENTITY = re.compile(r"\Atext:sha256:[0-9a-f]{64}\Z")
+#: ``GateRecord.decision`` behind :data:`HAS_GAP` (``assess_contracts.GATE_HOLD_UNMET``).
+_GATE_HOLD_UNMET = "hold_unmet"
 _EVENTS_PREFIX = "records/applications/events/"
 
 
@@ -186,6 +202,8 @@ class AssessmentFact:
     content_sha256: str | None = None
     #: 0110-039: why its basis is not the profile's now (``assessment_basis``); ``None`` when current or unknown.
     basis_stale: str | None = None
+    #: 0.1.11 N3: the gate decision stored with a v9 assessment (``resume_gate``); ``None`` for every other one.
+    gate: str | None = None
 
 
 def next_events(state: str) -> tuple[str, ...]:
@@ -289,6 +307,8 @@ def derive_job_state(
     if assessment is None:
         return JobState(NOT_ASSESSED, None, next_events(NOT_ASSESSED))
     state = ASSESSED if assessment.verdict is None else _VERDICT_STATES.get(str(assessment.verdict), ASSESSED)
+    if state == MATCHED and assessment.gate == _GATE_HOLD_UNMET:
+        state = HAS_GAP  # 0.1.11 N3 (OD1): the gate, not the verdict, is what every reader uses
     stale = None
     if (
         current_content_sha256
@@ -417,7 +437,8 @@ def quick_assessment_fact(item: AssessResponse, *, basis_stale: str | None = Non
     content = None
     if item.job.fetch_kind == "ats_board" and item.posting_text:
         content = posting_content_digest(item.job.title, item.posting_text)
-    return AssessmentFact(at=at, verdict=verdict, since=since, content_sha256=content, basis_stale=basis_stale)
+    gate = None if item.resume_gate is None else item.resume_gate.decision
+    return AssessmentFact(at=at, verdict=verdict, since=since, content_sha256=content, basis_stale=basis_stale, gate=gate)
 
 
 # --- reading the stores ----------------------------------------------------------------
@@ -615,6 +636,8 @@ class JobStateSources:
 
 __all__ = [
     "APPLICATION_STATES",
+    "GATE_STATES",
+    "HAS_GAP",
     "JOB_STATES",
     "AssessmentFact",
     "JobState",

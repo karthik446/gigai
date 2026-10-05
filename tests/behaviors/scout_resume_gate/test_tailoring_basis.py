@@ -291,6 +291,7 @@ def test_the_rule_is_asked_in_one_place() -> None:
         assert "tailoring_basis(" in Path(reader.__code__.co_filename).read_text(encoding="utf-8").split(f"def {reader.__name__}(", 1)[1].split("\ndef ", 1)[0], reader.__name__
     # The page: the header is the model's (the stored record), and the status line is the server's sentence.
     panel = PANEL_JSX.read_text(encoding="utf-8")
-    assert "madeFrom(response, profileLabel)" in panel and "from resume <strong>" not in panel
+    # 0.1.11: the header's one provenance line is JobResumePanel's; the basis it marks is still the stored record's.
+    assert "recordedBasis(response)" in panel and "from resume <strong>" not in panel
     model = MODEL_JS.read_text(encoding="utf-8")
     assert "tailoring_basis_line" in model and tailor_master.BASIS_LINES[tailor_master.BASIS_MASTER] not in model, "the sentence has one home: the server"

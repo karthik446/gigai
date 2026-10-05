@@ -73,8 +73,10 @@ def detect_editor_argv() -> tuple[str, ...] | None:
 def resolve_editor_argv(
     editor: str | None, editor_args: tuple[str, ...] = ()
 ) -> tuple[str, ...]:
-    if editor is not None:
+    if editor is not None and editor.strip():
         base_argv = (editor,)
+    elif editor is not None:
+        base_argv = ()
     else:
         configured = os.environ.get("VISUAL") or os.environ.get("EDITOR")
         try:
@@ -83,7 +85,8 @@ def resolve_editor_argv(
             raise ValueError(f"configured editor environment is malformed: {exc}") from exc
     if not base_argv:
         raise ValueError(
-            "no editor is configured; pass --editor or set VISUAL or EDITOR"
+            "no editor is configured: set EDITOR, or pass --editor <program>; "
+            "any program works, e.g. true"
         )
     argv = (*base_argv, *editor_args)
     if any(not item or "\0" in item for item in argv):
@@ -91,6 +94,25 @@ def resolve_editor_argv(
     if shutil.which(argv[0]) is None:
         raise ValueError(f"editor executable {argv[0]!r} cannot be resolved")
     return argv
+
+
+def resolve_optional_editor_argv(
+    editor: str | None, editor_args: tuple[str, ...] = ()
+) -> tuple[str, ...]:
+    """Like `resolve_editor_argv`, but finding no editor is valid and returns ().
+
+    A named editor (an argument or the existing config) must still resolve. One taken only from
+    VISUAL/EDITOR that cannot be used is treated as unset: no command here needs it.
+    """
+
+    if editor is not None:
+        if not editor.strip():
+            return ()
+        return resolve_editor_argv(editor, editor_args)
+    try:
+        return resolve_editor_argv(None, editor_args)
+    except ValueError:
+        return ()
 
 
 def build_config(
@@ -215,5 +237,6 @@ __all__ = [
     "default_home_root",
     "default_workpad_root",
     "resolve_editor_argv",
+    "resolve_optional_editor_argv",
     "run_setup",
 ]

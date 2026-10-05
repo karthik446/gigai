@@ -10,7 +10,7 @@ import { TAILORED_WORDING } from "../wording.js";
 // finished. `gigai scout resume pdf` and the two PDF routes render without a
 // header (GigAI stores no name or contact details) and point here:
 //
-//   #/pdf/<profile_id>/<job identity>  the stored tailored resume for that job
+//   #/pdf/<profile_id>/<job identity>  the stored resume for that job
 //   #/pdf                              resume markdown the user picks or pastes
 //
 // The user types their details in the form; they go in the one render
@@ -37,7 +37,7 @@ export default function PdfView({ target }) {
         if (latest) {
           setStored(latest);
         } else {
-          setLoadError("No tailored resume is stored for this job yet.");
+          setLoadError("No resume is stored for this job yet.");
         }
       })
       .catch((err) => live && setLoadError(err.message || String(err)));
@@ -68,7 +68,7 @@ export default function PdfView({ target }) {
           {stored && (
             <>
               <p data-role="pdf-source">
-                Tailored resume for <strong>{(job && job.title) || "this job"}</strong>
+                Resume for <strong>{(job && job.title) || "this job"}</strong>
                 {atCompany(job && job.company)}.
               </p>
               <p className="muted small" data-role="tailored-wording">

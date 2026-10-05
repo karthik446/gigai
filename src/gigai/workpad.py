@@ -353,6 +353,10 @@ class EditorInvocationError(WorkpadError):
     code = "editor_invocation_failed"
 
 
+class EditorNotSetError(WorkpadError):
+    code = "editor_not_set"
+
+
 @dataclass(frozen=True)
 class BoundProject:
     project_id: str
@@ -588,6 +592,10 @@ def open_locations(
     if target_only and gig_id is not None:
         raise WorkpadConflictError("--target cannot be combined with a Gig ID")
     home, config = _load_owned_config(home_root)
+    if not config.editor_argv:
+        raise EditorNotSetError(
+            "gigai open needs an editor and none is set: gigai setup --editor PROGRAM"
+        )
     bound = _resolve_bound_project(home, requested_target, cwd=cwd)
     opened_workpad = not target_only
     if target_only:

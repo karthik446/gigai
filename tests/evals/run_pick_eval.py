@@ -64,6 +64,15 @@ This is regression protection on these cases, not a proof that every pick is rig
     uv run --extra test python -m tests.evals.run_pick_eval --assessed      # the same with each posting's assessment
     uv run --extra test python -m tests.evals.run_pick_eval --baseline OLD  # the same for an older checkout (side by side)
     uv run --extra test python -m tests.evals.run_pick_eval --json out.json --posting agentic --path select
+    uv run --extra test python -m tests.evals.run_pick_eval --assessed --path settle   # 0.1.11: pick.settle, the product's own entry
+
+THE PRODUCT'S OWN ENTRY (0.1.11 N3; ``--path settle``, ``SETTLE``).  ``pick.settle`` is the one function a job's
+selection is made by (the assessment, the pipeline's pick step, the re-pick action), so the eval calls it and nothing
+else for that path (``tools/pick_probe.py``).  With an assessment the pick is a stand-in that ranks every line as the
+code selector does; coverage is then the ASSESSMENT's (check 5): a requirement the labels know and no row of the
+assessment names is not protected by ``settle``, by design, so check 1 is reported for this path and H1 is not a
+hard test of it (``test_pick_eval_settle.py`` says which tests are).  Without an assessment there is no pick and the
+path is the code selector's selection, through the same function.
 """
 
 from __future__ import annotations
@@ -89,6 +98,9 @@ PERMUTED: tuple[str, ...] = ("permuted-1", "permuted-2")
 REGROUPED = "regrouped"
 VARIATIONS: tuple[str, ...] = ("base", *ADDING, *PERMUTED, REGROUPED)
 PATHS = pick_probe.PATHS
+#: 0.1.11: ``pick.settle``, the product's one entry, asked for by name (``--path settle``): the model's pick validated
+#: and fitted, with every posting's assessment (``--assessed``) and a stand-in pick that ranks as the code does.
+SETTLE = pick_probe.SETTLE
 LEVELS = {"strong": 2, "support": 1}
 
 _ID = re.compile(r"\s*<!-- id:(\S+) -->\s*\Z")
@@ -698,7 +710,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--posting", action="append", choices=sorted(postings()), help="only these postings")
     parser.add_argument("--size", action="append", choices=SIZES)
     parser.add_argument("--variation", action="append", choices=VARIATIONS)
-    parser.add_argument("--path", action="append", choices=PATHS)
+    parser.add_argument("--path", action="append", choices=(*PATHS, SETTLE))
     parser.add_argument("--only-baseline", action="store_true", help="run only the baseline tree")
     parser.add_argument("--assessed", action="store_true", help="every posting with its synthetic assessment: coverage from the lines it cites (check 5, H5)")
     parser.add_argument("--json", type=Path, help="write every cell's checks here")

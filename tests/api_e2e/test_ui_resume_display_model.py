@@ -103,8 +103,9 @@ def test_the_note_and_the_download_file_name() -> None:
 
 
 def test_the_panel_generates_the_pdf_from_the_form_and_has_no_md_link() -> None:
-    panel = (UI_SRC / "components" / "TailoredResumePanel.jsx").read_text(encoding="utf-8")
-    assert "<GeneratePdfForm" in panel and "postTailoredResumePdf" in panel and "Generate PDF" in panel
+    # 0.1.11 (SPEC section 6, item 7): Apply is the ONE button that opens the Generate PDF form.
+    panel = (UI_SRC / "components" / "ApplyPanel.jsx").read_text(encoding="utf-8") + (UI_SRC / "components" / "JobResumePanel.jsx").read_text(encoding="utf-8")
+    assert panel.count("<GeneratePdfForm") == 1 and "postTailoredResumePdf" in panel and "Generate PDF" in panel
     assert "Download .md" not in panel and "saveMarkdown" not in panel and "text/markdown" not in panel
     # 0110-046: no saved header line, no "Add your contact line" link, no read of the display settings
     for gone in ("getResumeDisplay", "Add your contact line", "PDF header:", "savedHeaderLine", "hasContactLine"):

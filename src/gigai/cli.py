@@ -15,6 +15,7 @@ import click
 import questionary
 
 from .config import (
+    NO_EDITOR_NOTICE,
     ConfigurationError,
     CredentialReference,
     Endpoint,
@@ -107,7 +108,7 @@ from .setup import (
     detect_editor_argv,
     default_home_root,
     default_workpad_root,
-    resolve_editor_argv,
+    resolve_optional_editor_argv,
     run_setup,
 )
 from .setup_interview import SetupDraft, SetupHTTPServer
@@ -1131,8 +1132,8 @@ def _run_terminal_setup(
             existing.workpad_root if existing else default_workpad_root(requested_home)
         )
         try:
-            resolved_editor = resolve_editor_argv(
-                editor or (existing.editor_argv[0] if existing else None),
+            resolved_editor = resolve_optional_editor_argv(
+                editor or (existing.editor_argv[0] if existing and existing.editor_argv else None),
                 (
                     editor_arg
                     if editor is not None or editor_arg
@@ -1188,17 +1189,13 @@ def _run_terminal_setup(
             .expanduser()
             .resolve(strict=False)
         )
-        default_editor = editor or (existing.editor_argv[0] if existing else None)
+        default_editor = editor or (
+            existing.editor_argv[0] if existing and existing.editor_argv else None
+        )
         environment_editor_args: tuple[str, ...] = ()
         if default_editor is None:
-            configured_environment_editor = os.environ.get("VISUAL") or os.environ.get(
-                "EDITOR"
-            )
-            if configured_environment_editor:
-                try:
-                    environment_editor = resolve_editor_argv(None)
-                except ValueError as exc:
-                    _raise_cli_error(str(exc), as_json=as_json, code="setup_editor_invalid")
+            environment_editor = resolve_optional_editor_argv(None)
+            if environment_editor:
                 default_editor = environment_editor[0]
                 environment_editor_args = environment_editor[1:]
         if default_editor is None:
@@ -1206,9 +1203,9 @@ def _run_terminal_setup(
             if detected_editor is not None:
                 default_editor = detected_editor[0]
         try:
-            resolved_editor = resolve_editor_argv(
+            resolved_editor = resolve_optional_editor_argv(
                 prompt_text(
-                    "Editor program (used to open workpads)",
+                    "Editor program (optional; used to open workpads)",
                     default=default_editor or "",
                 ),
                 (
@@ -1231,6 +1228,10 @@ def _run_terminal_setup(
                 else False
             ),
         )
+
+    if not resolved_editor:
+        # One line; stderr under --json so the single JSON document on stdout stays parseable.
+        click.echo(NO_EDITOR_NOTICE, err=as_json)
 
     discovery_snapshot = discover_runtime_snapshot(refresh_reason="setup")
     try:
@@ -1464,7 +1465,11 @@ def _run_terminal_setup(
                 + click.style(_display_local_path(resolved_workpad), fg="bright_black")
             )
             click.echo(
-                "  Editor: " + click.style(resolved_editor[0], fg="bright_black")
+                "  Editor: "
+                + click.style(
+                    resolved_editor[0] if resolved_editor else "not set",
+                    fg="bright_black",
+                )
             )
             selected_option = next(
                 item for item in runtime_options if item[0] == selected_create_target
@@ -1540,7 +1545,7 @@ def _run_browser_setup(
                 _raise_cli_error(str(exc), as_json=as_json, code="setup_configuration_invalid")
 
     detected_editor = detect_editor_argv()
-    existing_editor = existing.editor_argv[0] if existing else None
+    existing_editor = existing.editor_argv[0] if existing and existing.editor_argv else None
     editor_value = editor or existing_editor or (detected_editor[0] if detected_editor else "")
     resolved_workpad = workpad_root or (
         existing.workpad_root if existing else default_workpad_root(requested_home)
@@ -1549,7 +1554,7 @@ def _run_browser_setup(
         preview = build_config(
             home_root=requested_home,
             workpad_root=resolved_workpad,
-            editor_argv=(editor_value or "/usr/bin/true",),
+            editor_argv=(editor_value,) if editor_value else (),
             open_with_target=open_with_target if open_with_target is not None else False,
         )
     else:
@@ -1620,7 +1625,7 @@ def _run_browser_setup(
         return probe_target_readiness(probe_config, target_name).__dict__
 
     def apply_setup(draft: SetupDraft) -> Mapping[str, object]:
-        resolved_editor = resolve_editor_argv(
+        resolved_editor = resolve_optional_editor_argv(
             draft.editor,
             existing.editor_argv[1:] if existing is not None else (),
         )

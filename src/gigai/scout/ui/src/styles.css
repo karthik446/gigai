@@ -1693,7 +1693,7 @@ table.data-table th {
 .timeline-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
 .timeline-head h3 { margin: 0; }
 .timeline-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 0.86rem; }
-.step-timeline { list-style: none; margin: 14px 0 0; padding: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 28px; }
+.step-timeline { list-style: none; margin: 14px 0 0; padding: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 28px; }
 .step-stage { display: flex; flex-direction: column; gap: 8px; position: relative; }
 .step-stage + .step-stage::before { content: "→"; position: absolute; left: -21px; top: 14px; color: var(--muted); }
 .step-card { border: 1px solid var(--border); border-left: 4px solid var(--step-inactive); border-radius: 6px; padding: 8px 10px; background: var(--panel); }
@@ -1791,3 +1791,15 @@ table.data-table th {
 .master-form { display: flex; flex-direction: column; gap: 6px; margin: 6px 0; }
 .master-form textarea, .master-form input { width: 100%; box-sizing: border-box; font: inherit; padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--panel); color: inherit; }
 .picked-left-out { margin: 8px 0 12px; }
+
+/* 0.1.11 N6: the job page without tailoring (SPEC section 6). */
+.verdict-chip.fit-has_gap { background: var(--warn-bg); color: var(--warn); }
+.verdict-chip.fit-weak_fit { background: var(--chip-bg); color: var(--muted); }
+.state-chip.state-has_gap { background: var(--warn-bg); color: var(--warn); }
+.stale-label { margin-left: 2px; }
+.row-coverage .link-button { margin-left: 6px; }
+.job-resume .callout ul { margin: 4px 0; padding-left: 18px; }
+.job-resume .callout .link-button { margin-left: 6px; }
+.master-line.focused { outline: 2px solid var(--info); outline-offset: 2px; }
+.master-note { margin-top: 2px; }
+[data-role="brief-command"] { display: inline-block; word-break: break-all; }

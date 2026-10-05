@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import socket
 import subprocess
 import sys
@@ -656,6 +657,9 @@ def two_homes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     )
     stub.chmod(0o755)
     monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}")
+    # The fixture's own words: a machine with an editor set (a minimal container has neither).
+    monkeypatch.setenv("EDITOR", "true")
+    monkeypatch.setenv("VISUAL", "true")
     yield user_a / ".gigai", user_b / ".gigai", user_b
     # Found by command line (the server module AND a --home inside this test's tmp_path), then stopped by pid.
     stop_test_servers(scout_test_servers(under=tmp_path))
@@ -718,6 +722,29 @@ def test_run_never_signals_another_homes_scout_and_refuses_in_one_line(two_homes
     assert run_supervisor._process_is_alive(int(second["pid"]))  # type: ignore[arg-type]
     assert run_supervisor._listening_pids(port) == [pid_a]
     assert _bare_json(home_a, "status")["state"] == "running"
+
+
+def test_first_run_without_an_editor_starts_and_says_so_once(two_homes, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """No EDITOR, no VISUAL and no editor program on PATH: the first run still starts Scout (ED2), with one line."""
+
+    home_a, _, _ = two_homes
+    monkeypatch.delenv("EDITOR")
+    monkeypatch.delenv("VISUAL")
+    full_path = os.environ["PATH"]
+    for tool in ("git", "ps"):  # /usr/bin itself has vim; only what a first run and the test's cleanup need
+        found = shutil.which(tool)
+        assert found is not None
+        (tmp_path / "bin" / tool).symlink_to(found)
+    monkeypatch.setenv("PATH", str(tmp_path / "bin"))  # the codex stand-in, git, ps: no editor program
+    try:
+        raw = _bare(home_a, "run", "--port", str(_free_port_18xxx()), "--no-browser", "--json")
+        assert raw.exit_code == 0, raw.output
+        assert json.loads(raw.stdout)["pid"]
+        assert raw.stderr.splitlines() == [
+            "no editor set; GigAI will ask for one only if a command needs to open a file: gigai setup --editor PROGRAM"
+        ]
+    finally:
+        monkeypatch.setenv("PATH", full_path)
 
 
 def test_a_scout_whose_command_line_does_not_say_its_home_is_never_signalled(projects, tmp_path: Path) -> None:

@@ -37,7 +37,7 @@ from tests.ui.support import FIRST_LOAD_WALL_SECONDS, INTERACTIVE_WALL_SECONDS, 
 
 pytestmark = pytest.mark.ui
 
-PANEL = "#tailored-resume"
+PANEL = "#job-resume"
 JOB_PAGE_WALL_SECONDS = FIRST_LOAD_WALL_SECONDS
 JOB_PAGE_CPU_SECONDS = 3.0  # 0.42 to 0.45 measured idle (the app's first load included), up to 0.63 with every core busy
 LENGTH_WALL_SECONDS = INTERACTIVE_WALL_SECONDS

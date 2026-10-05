@@ -524,23 +524,50 @@ class _Pick:
         return _Pick(list(self.summary), {key: list(value) for key, value in self.entries.items()}, list(self.skills), list(self.other))
 
 
-def _render(master: Master, pick: _Pick, *, ids: bool) -> str:
-    """Resume markdown in GigAI's format for a pick; ``ids`` keeps each line's master id in a trailing comment."""
+#: 0.1.11 N3: how a master line's note reaches the assess prompt's RESUME block, and nothing else: a line of its own,
+#: labelled, under the line (or the entry heading) it belongs to. A comment, so no renderer would ever print it.
+NOTE_LABEL = "private note"
+
+
+def _note(master: Master, item_id: str) -> str | None:
+    """The note of a line or an entry (0.1.11 N1b's ``MasterItem.note`` / ``MasterEntry.note``, what ``master_resume.note_of``
+    answers); ``None`` without one, and for a master read by a tree that has no notes yet."""
+
+    target = master.items.get(item_id) or master.entries.get(item_id)
+    note = getattr(target, "note", None)
+    return " ".join(str(note).split()) or None if note else None
+
+
+def _render(master: Master, pick: _Pick, *, ids: bool, notes: bool = False) -> str:
+    """Resume markdown in GigAI's format for a pick; ``ids`` keeps each line's master id in a trailing comment.
+
+    ``notes`` (0.1.11 N3; the assess prompt's RESUME block ONLY, ``evidence_view(ids=True)``): a line or an entry
+    that has a note is followed by a line of its own, ``<!-- private note: ... -->``. A note is the user's private
+    guidance for choosing lines: it is never in a resume, a PDF, a candidate set or a stored selection, which are all
+    rendered without ``notes``.
+    """
 
     def mark(item_id: str) -> str:
         return f" <!-- id:{item_id} -->" if ids else ""
+
+    def noted(item_id: str) -> list[str]:
+        note = _note(master, item_id) if notes else None
+        return [f"<!-- {NOTE_LABEL}: {note} -->"] if note else []
+
+    def line(item_id: str) -> list[str]:
+        return [f"- {master.items[item_id].text}{mark(item_id)}", *noted(item_id)]
 
     def entries(section: str) -> list[str]:
         out: list[str] = []
         for entry in sorted(master.entries_in(section), key=_entry_sort_key):
             if entry.id in pick.entries:
-                out += [f"### {entry.heading}{mark(entry.id)}", *entry.sublines, ""]
-                out += [f"- {master.items[i].text}{mark(i)}" for i in pick.entries[entry.id]] + [""]
+                out += [f"### {entry.heading}{mark(entry.id)}", *entry.sublines, *noted(entry.id), ""]
+                out += [text for i in pick.entries[entry.id] for text in line(i)] + [""]
         return out
 
     out: list[str] = []
     if pick.summary:
-        out += ["## Summary", ""] + [f"- {master.items[i].text}{mark(i)}" for i in pick.summary] + [""]
+        out += ["## Summary", ""] + [text for i in pick.summary for text in line(i)] + [""]
     for section in ("experience", "projects"):
         shown = entries(section)
         if shown:
@@ -551,7 +578,7 @@ def _render(master: Master, pick: _Pick, *, ids: bool) -> str:
     if education:
         out += ["## Education", "", *education]
     if pick.other:
-        out += ["## Other", ""] + [f"- {master.items[i].text}{mark(i)}" for i in pick.other] + [""]
+        out += ["## Other", ""] + [text for i in pick.other for text in line(i)] + [""]
     return "\n".join(out).rstrip("\n") + "\n"
 
 
@@ -1719,6 +1746,10 @@ class EvidenceView:
     #: Bullets shown, and how many the master has.
     bullets: int
     bullets_total: int
+    #: 0.1.11 N3: ``markdown`` carries each line's and each entry's master id in a trailing comment, and each note on a labelled line.
+    ids: bool = False
+    #: How many of the lines and entries shown are followed by a private note line (only with ``ids``).
+    notes: int = 0
 
     @property
     def chars(self) -> int:
@@ -1742,12 +1773,19 @@ class EvidenceView:
 
 def evidence_view(
     master: Master, profile: SelectionProfile, posting: SelectionPosting, *, today: date | None = None, cap: int = EVIDENCE_CAP,
+    ids: bool = False,
 ) -> EvidenceView:
     """What an assessment of ``posting`` would read of the master, within ``cap`` characters.
 
     Every role and degree heading, one summary (chosen as ``select`` chooses it), every skill and every
     Other line, then bullets by their value for the posting until the next one would pass ``cap``. No page
     fit: this view is for a model to read, not to print. Bullets print in the master's order.
+
+    ``ids`` (0.1.11 N3, SPEC 1.1): each selectable line and each entry carries its master id in the trailing
+    comment the master itself uses (``<!-- id:b-23b6dc -->``): a model cannot pick ids it does not see. A line or
+    entry that has a note is followed by a line of its own, labelled (``<!-- private note: ... -->``, ``_render``):
+    this view, for the assess prompt, is the only text a note is ever rendered into. The cap is then measured on
+    that text, so a view with ids shows the same lines or fewer, never more than ``cap`` characters.
     """
 
     today = today or date.today()
@@ -1766,7 +1804,7 @@ def evidence_view(
     for item in ranked:
         trial = pick.copy()
         trial.entries.setdefault(item.entry_id or "", []).append(item.id)
-        if len(_render(master, trial, ids=False)) > cap:
+        if len(_render(master, trial, ids=ids, notes=ids)) > cap:
             break
         pick = trial
     for entry_id in pick.entries:
@@ -1778,10 +1816,12 @@ def evidence_view(
         entries={entry.id: tuple(pick.entries[entry.id]) for entry in printed if entry.id in pick.entries},
         skills=tuple(pick.skills),
         other=tuple(pick.other),
-        markdown=_render(master, pick, ids=False),
+        markdown=_render(master, pick, ids=ids, notes=ids),
         cap=cap,
         bullets=len(pick.bullet_ids()),
         bullets_total=len(bullets),
+        ids=ids,
+        notes=sum(1 for item_id in (*pick.summary, *pick.entries, *pick.bullet_ids(), *pick.other) if _note(master, item_id)) if ids else 0,
     )
 
 
@@ -1801,6 +1841,7 @@ __all__ = [
     "MAX_PAGES",
     "MAX_PROJECTS",
     "Measure",
+    "NOTE_LABEL",
     "PICK_CAPS",
     "PROJECT_BULLETS",
     "PROJECT_HARD_BULLETS",

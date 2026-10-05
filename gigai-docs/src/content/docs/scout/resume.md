@@ -76,13 +76,23 @@ A line can also carry your own wording: an agent (or a script) sets it with `PUT
 **Use rewrite**) brings back the line it replaced. A text that looks like a name line or
 a contact detail is refused: GigAI stores none of those.
 
-`gigai scout resume pdf` renders a PDF without the UI: `--tailored --job-url <url>`
-for a stored tailored resume, or `--in resume.md` for resume markdown of your own
+`gigai scout resume pdf` renders a PDF without the UI: `--job-url <url>`
+for a job's stored resume (`--tailored --job-url <url>` is the older spelling of the same), or `--in resume.md` for resume markdown of your own
 (`POST /api/resume/pdf` over the API). Both run on this computer only, with no model
 call. A PDF made this way has no name and no contact details. The command prints an
 "Open in Scout" link: open it, fill the Generate PDF form in your browser, and download
 the finished PDF. [For agents](../agents/#change-a-resume-and-render-a-new-pdf) has a
 worked example and the markdown format.
+
+**Working on one job's resume with your agent.** GigAI does not reword a resume. Your agent
+reads the job's brief (`gigai scout resume brief --job-url <url>`, and `--posting` for the
+posting, a separate call), changes the wording with you, ends each changed line with the master
+lines and answers it comes from, and hands the resume back
+(`gigai scout resume store --in edited.md --job-url <url> --as agent`). GigAI checks it in code
+against your master resume, your answers and your stories, and stores it or refuses it line by
+line. This check is a guard on numbers, names, ownership, entries and sources. It does not prove
+that a reworded line is true: read every changed line before you send the resume.
+[For agents](../agents/#5-tailor-and-the-pdf) has the five steps.
 
 ## The master resume
 

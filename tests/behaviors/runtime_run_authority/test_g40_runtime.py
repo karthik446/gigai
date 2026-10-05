@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 import json
+import shutil
 from pathlib import Path
 from types import SimpleNamespace
 import subprocess
@@ -408,22 +409,33 @@ def test_login_shell_hydration_classifies_timeout(
     assert reason == "shell_timeout"
 
 
-def test_setup_clean_environment_returns_structured_error_without_traceback(
+def test_setup_clean_environment_sets_no_editor_without_traceback(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.delenv("VISUAL", raising=False)
     monkeypatch.delenv("EDITOR", raising=False)
+    # A machine with a model CLI (a stand-in: a runner has none) and no editor program.
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    stub = bin_dir / "codex"
+    stub.write_text(
+        '#!/bin/sh\ncase "$1" in\n  --version) echo "codex-cli 0.0.0-test-stub"; exit 0;;\n'
+        '  login) if [ "$2" = status ]; then echo "Logged in (test stub)"; exit 0; fi;;\nesac\nexit 97\n'
+    )
+    stub.chmod(0o755)
+    git = shutil.which("git")
+    assert git is not None
+    (bin_dir / "git").symlink_to(git)
+    monkeypatch.setenv("PATH", str(bin_dir))
 
     result = CliRunner().invoke(
         cli,
         ["setup", "--non-interactive", "--home", str(tmp_path / "home"), "--json"],
     )
 
-    assert result.exit_code != 0
-    payload = json.loads(result.output)
-    assert payload["status"] == "error"
-    assert payload["error"]["code"] == "setup_editor_invalid"
-    assert "no editor is configured" in payload["error"]["message"]
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.stdout)["home_root"] == str(tmp_path / "home")
+    assert "no editor set;" in result.stderr
     assert "Traceback" not in result.output
 
 

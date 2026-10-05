@@ -9,16 +9,21 @@
 //   GET /api/applications        applications[].job_state, from the events
 //                                alone (null for a job that was only saved)
 //
-// Precedence, the server's: application events > tailored resume > latest
+// Precedence, the server's: application events > the job's resume > latest
 // verdict > not assessed. This module applies the same order to what the
 // page holds NOW, so a card is right the moment something changes and
 // before any list is read again:
 //   1. the job's application state, from the applications list (re-read
 //      after every recorded event);
-//   2. tailored, when the served state says so or a tailored resume was
-//      made on this page since (`tailoredIds`);
+//   2. tailored ("Resume ready": the state id is the store's, kept), when
+//      the served state says so or a resume was stored for the job on this
+//      page since (`tailoredIds`);
 //   3. the verdict of the job's latest assessment (jobModel.buildJobs' own
 //      latest-of rule, which a re-assessment updates in place).
+//
+// 0.1.11 N6 (SPEC 1.5, OD1): `has_gap` is `matched` held by the gate: a
+// must-have is confirmed unmet (`resume_gate.decision` is `hold_unmet`). The
+// model's verdict stays stored as it came; every reader uses the gate.
 //
 // A state id is never shown: STATE_LABELS has the words, and an id this
 // table does not know is humanized.
@@ -31,8 +36,9 @@ export const STATE_LABELS = {
   needs_answers: "Needs your answers",
   weak_fit: "Weak fit",
   matched: "Matched",
+  has_gap: "Has a gap",
   not_a_match: "Not a match",
-  tailored: "Resume tailored",
+  tailored: "Resume ready",
   applied: "Applied",
   interview_scheduled: "Interview scheduled",
   offer_received: "Offer received",
@@ -46,6 +52,7 @@ export const STATE_ORDER = [
   "needs_answers",
   "weak_fit",
   "matched",
+  "has_gap",
   "assessed",
   "not_a_match",
   "tailored",
@@ -129,9 +136,43 @@ function idSet(value) {
   return new Set(value || []);
 }
 
+// 0.1.11 N6: the ONE adapter line for `has_gap`. The server derives it (find_jobs/job_state.py, N3) and serves it
+// as the job's state; a state read before that, or made on this page by a re-assessment, is derived here from the
+// same stored field: the assessment item's `resume_gate.decision`.
+export const HAS_GAP = "has_gap";
+const GATE_HOLD_UNMET = "hold_unmet";
+
+function heldByGate(job, candidates) {
+  if (job.assessmentSource === "run") {
+    return false; // a run's own assessment stores no gate
+  }
+  const gate = job.quick && job.quick.resume_gate;
+  if (gate && typeof gate === "object") {
+    return gate.decision === GATE_HOLD_UNMET;
+  }
+  return candidates.some((candidate) => candidate.state === HAS_GAP);
+}
+
+// The job's state by its ASSESSMENT alone (never the resume's or an application's), as the gate reads it:
+// not_assessed | assessed | needs_answers | weak_fit | matched | has_gap | not_a_match. The header's chip.
+export function fitStateFor(job) {
+  if (!job) {
+    return "not_assessed";
+  }
+  const candidates = [served(job.quick && job.quick.job_state), served(job.row && job.row.jobState)].filter(Boolean);
+  const state = VERDICT_STATES[job.verdict] || "assessed";
+  if (state === "matched" && heldByGate(job, candidates)) {
+    return HAS_GAP;
+  }
+  if (state === "needs_answers" && candidates.some((candidate) => candidate.state === "weak_fit")) {
+    return "weak_fit";
+  }
+  return state;
+}
+
 // One job's state: {state, since, nextEvents}. `job` is jobModel's job
 // shape; `states` is applicationStates(); `tailoredIds` names the jobs a
-// tailored resume was made for on this page since the lists were read.
+// resume was stored for on this page since the lists were read.
 export function jobStateFor(job, states, tailoredIds) {
   const applied = states instanceof Map ? states.get(job.id) : null;
   if (applied) {
@@ -145,7 +186,8 @@ export function jobStateFor(job, states, tailoredIds) {
   if (idSet(tailoredIds).has(job.id)) {
     return { state: "tailored", since: null, nextEvents: ["applied"] };
   }
-  const state = VERDICT_STATES[job.verdict] || "assessed";
+  const verdict = VERDICT_STATES[job.verdict] || "assessed";
+  const state = verdict === "matched" && heldByGate(job, candidates) ? HAS_GAP : verdict;
   const same = candidates.find((candidate) => candidate.state === state);
   return { state, since: same ? same.since : null, nextEvents: ["applied"] };
 }
@@ -233,7 +275,7 @@ function quickIsCurrent(quick) {
 }
 
 // 0110-10-12: the stored item says it itself (`basis_stale: true`, `basis_stale_reason`). The served `job_state` carries
-// the marker only while the state is the VERDICT's: for a job whose state is "Resume tailored" or "Applied" it has
+// the marker only while the state is the VERDICT's: for a job whose state is "Resume ready" or "Applied" it has
 // none, and the page showed an old assessment as current and kept Re-assess off. Read only when the item is the
 // assessment shown (not when a run's own, newer one is).
 function basisStaleReason(job) {

@@ -577,7 +577,9 @@ def resume_tailor_command(
                 as_json=as_json, fallback="invalid_value",
             )
             return
-        _attach_edited_resume(in_file, job_url, profile_id, actor, source, out_file, home_root, target, as_json)
+        from .resume_job_cli import store_resume  # 0.1.11 N5: the old spelling of `gigai scout resume store`
+
+        store_resume(in_file, job_url, profile_id, actor, source, out_file, home_root, target, as_json, renamed_from="gigai scout resume tailor --in")
         return
     if sum(1 for item in (profile_id, resume_file, resume_text) if item) > 1:
         _fail(ValueError("pass at most one of --profile, --resume or --resume-text"), as_json=as_json, fallback="resume_input_invalid")
@@ -742,6 +744,12 @@ def _attach_edited_resume(
             click.echo("  " + line)
 
 
+# 0.1.11 N5: `gigai scout resume brief | store | pick` and `gigai scout suggestions` (resume_job_cli).
+from .resume_job_cli import register as _register_resume_job_commands  # noqa: E402
+
+_register_resume_job_commands(scout_group, resume_group)
+
+
 @resume_group.command("pdf")
 @click.option("--in", "in_file", help="Resume markdown FILE in GigAI's resume format (or - for stdin).")
 @click.option("--tailored", "tailored", is_flag=True, help="Render the STORED tailored resume for --job-url instead of a markdown file.")
@@ -794,6 +802,7 @@ def resume_pdf_command(
     from .target_resolution import home_scout_target
 
     home_root = home_value or default_home_root()
+    tailored = tailored or bool(job_url and not in_file)  # 0.1.11 (SPEC 4.4): --job-url alone is the stored job resume; --tailored stays an accepted spelling
     if bool(in_file) == bool(tailored):
         _fail(ValueError("pass exactly one of --in FILE or --tailored --job-url URL"), as_json=as_json, fallback="invalid_value")
         return
@@ -2880,7 +2889,7 @@ def _jobs_errors() -> tuple[type[BaseException], ...]:
 @jobs_group.command("list")
 @click.option("--profile", "profile_ids", multiple=True, help="Only postings this active profile matches (repeatable). With one profile, its own row is shown.")
 @click.option("--query", "query", help="Words that must all be in the title, company or location.")
-@click.option("--state", "states", multiple=True, help="Keep this state (repeatable): not_assessed, needs_answers, matched, not_a_match, tailored, assessed, recommended, weak_fit. A weak fit (waits on answers, few requirements met, low rank) is listed only with --state weak_fit.")
+@click.option("--state", "states", multiple=True, help="Keep this state (repeatable): not_assessed, needs_answers, matched, has_gap, not_a_match, tailored, assessed, recommended, weak_fit. A weak fit (waits on answers, few requirements met, low rank) is listed only with --state weak_fit.")
 @click.option("--window", "window", type=click.Choice(["new", "7d", "30d"]), help="new: first seen since your last check. 7d / 30d: published in the last 7 or 30 days.")
 @click.option("--removed", "removed", is_flag=True, help="The postings the board no longer lists, instead of the live ones.")
 @click.option("--history", "history", is_flag=True, help="Also what old find-jobs runs assessed, with each run's provenance.")
