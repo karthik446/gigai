@@ -12,6 +12,13 @@ time, never more. The offer says the real total and the 50.
     "Assess all new" queue and ``--process`` have the same cap.
 (3) A run left at a prompt (Ctrl-C, or the end of input) does not consume
     "new": the next run measures from the anchor it found.
+(4) 0.1.10.11 NA (the NEWUSER blocker): an asking call WITHOUT a terminal
+    (``gigai scout new --json``, or no terminal at all) is a PREVIEW too. It
+    used to move the "new since" mark as soon as its reply was built, so the
+    documented next step, a bare ``gigai scout new --yes --json``, found
+    "Nothing new" and assessed nothing. The mark moves when the question is
+    answered: the yes, the no (``--no-assess``, what ``question.no`` names),
+    never the ask.
 """
 
 from __future__ import annotations
@@ -24,7 +31,9 @@ import sys
 from types import SimpleNamespace
 
 import pytest
+from click.testing import CliRunner
 
+from gigai.cli import cli
 from gigai.scout import posting_search, scout_new
 from gigai.scout.find_jobs.api import assess_all as assess_all_api
 from gigai.scout.pipeline.store import PipelineStore, pipeline_path
@@ -152,6 +161,172 @@ def test_a_call_that_holds_the_anchor_moves_nothing_until_it_is_settled(tmp_path
     # A plain call still moves it by itself, as before.
     plain = _new(fx, now=NOW + timedelta(hours=2))
     assert plain["anchor"]["advances"] is True and _anchor(fx) == plain["checked_at"]  # type: ignore[index]
+
+
+# --- (4) an asking call without a terminal is a preview (0.1.10.11 NA) -------------------------
+
+
+def _cli_json(fx: PostingsFixture, *args: str) -> dict[str, object]:
+    """``gigai scout new ARGS --json`` with no terminal: what an agent runs. The real clock, like every CLI process."""
+
+    result = CliRunner().invoke(cli, [*fx.cli(*args), "--json"])
+    assert result.exit_code == 0, result.output
+    return json.loads(result.stdout)
+
+
+def _jobs(response: dict[str, object]) -> list[str]:
+    return sorted(row["job_identity"] for row in response["postings"]["rows"])  # type: ignore[index]
+
+
+def _options(command: object) -> list[str]:
+    """The options of a command a reply names (``gigai scout new --yes --since ...``), to run it as written."""
+
+    words = str(command).split()
+    assert words[:3] == ["gigai", "scout", "new"], command
+    return words[3:]
+
+
+def _assessed_jobs(fx: PostingsFixture, slug: str, numbers: tuple[int, ...]) -> list[str]:
+    urls = [job_url(slug, n) for n in numbers]
+    return sorted(url for url in urls if read_quick_assessment(fx.home_root, fx.target, fx.default_profile_id, url) is not None)
+
+
+@pytest.mark.parametrize("scene", ["first_run", "after_an_earlier_check"])
+def test_a_bare_yes_after_an_asking_call_assesses_exactly_what_the_ask_showed(
+    scene: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fx = build_postings_fixture(tmp_path, monkeypatch, deleted=False)
+    if scene == "first_run":
+        # The NEWUSER run: no check was ever made, so "new" is the last 7 days.
+        now = datetime.now(UTC)
+        fx.seed("fresh", [lever_job("fresh", n, created=now - timedelta(days=1)) for n in (1, 2)], seen_at=now - timedelta(days=1))
+        original, source = None, "first_use_7_days"
+    else:
+        _now, original = _terminal_scene(fx)  # and three postings with only an old assessment: never the plain yes's
+        source = "anchor"
+    fresh = [job_url("fresh", 1), job_url("fresh", 2)]
+    calls = fx.base.model.calls
+
+    asked = _cli_json(fx)
+
+    assert (asked["status"], asked["since_source"], asked["counts"]["to_assess"]) == ("ask", source, 2)  # type: ignore[index]
+    assert _jobs(asked) == fresh and asked["question"]["text"].startswith("2 new postings")  # type: ignore[index]
+    assert fx.base.model.calls == calls  # asking calls no model
+
+    # The next step as start.md and the shipped agent skill write it: a BARE --yes, no --since.
+    yes = _cli_json(fx, "--yes")
+
+    assert yes["status"] == "new" and yes["question"] is None, yes["message"]
+    assert yes["assessed"] is not None, yes["message"]
+    assert (yes["assessed"]["requested"], yes["assessed"]["assessed"], yes["assessed"]["failed"]) == (2, 2, [])  # type: ignore[index]
+    assert fx.base.model.calls == calls + 2
+    assert _jobs(yes) == _jobs(asked) and yes["since_source"] == source
+    if original is not None:
+        assert yes["since"] == asked["since"] == original  # measured from the mark the ask left where it was
+    assert _assessed_jobs(fx, "fresh", (1, 2)) == fresh
+    assert all(row["state"] != "not_assessed" for row in yes["postings"]["rows"])  # type: ignore[index]
+    # The yes answered the question: now the mark moves, and the same call again has nothing left to ask.
+    assert yes["anchor"]["advances"] is True and _anchor(fx) == yes["checked_at"]  # type: ignore[index]
+    after = _cli_json(fx)
+    assert (after["status"], after["question"], after["counts"]["new"]) == ("nothing_new", None, 0)  # type: ignore[index]
+    assert fx.base.model.calls == calls + 2
+
+
+def test_an_asking_call_is_a_preview_asked_twice_it_shows_the_same_postings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    fx = build_postings_fixture(tmp_path, monkeypatch, deleted=False)
+    _now, original = _terminal_scene(fx)
+
+    first = _cli_json(fx)
+    text = CliRunner().invoke(cli, fx.cli())  # no terminal and no --json: the same preview, as text
+    second = _cli_json(fx)
+
+    assert text.exit_code == 0 and "2 new postings since " in text.output and "Assess them?" in text.output, text.output
+    for reply in (first, second):
+        assert (reply["status"], reply["since"], reply["since_source"]) == ("ask", original, "anchor")
+        assert (reply["counts"]["new"], reply["counts"]["to_assess"]) == (2, 2)  # type: ignore[index]
+        assert reply["anchor"] == {"last_checked_at": original, "advances": False}  # the reply says so itself
+    assert _jobs(first) == _jobs(second) == [job_url("fresh", 1), job_url("fresh", 2)]
+    assert first["question"] == second["question"]
+    assert _anchor(fx) == original
+
+
+def test_no_assess_is_an_answer_it_moves_the_mark(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    fx = build_postings_fixture(tmp_path, monkeypatch, deleted=False)
+    _now, original = _terminal_scene(fx)
+    calls = fx.base.model.calls
+
+    looked = _cli_json(fx, "--no-assess")  # the user chose to just look
+
+    assert (looked["status"], looked["question"], looked["counts"]["new"]) == ("new", None, 2)  # type: ignore[index]
+    assert looked["anchor"] == {"last_checked_at": original, "advances": True}
+    assert _anchor(fx) == looked["checked_at"] and str(looked["checked_at"]) > original
+    after = _cli_json(fx)
+    assert (after["status"], after["since"], after["counts"]["new"]) == ("nothing_new", looked["checked_at"], 0)  # type: ignore[index]
+    assert fx.base.model.calls == calls
+
+
+def test_the_explicit_no_of_an_asking_call_moves_the_mark_and_the_ask_before_it_did_not(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fx = build_postings_fixture(tmp_path, monkeypatch, deleted=False)
+    _now, original = _terminal_scene(fx)
+    calls = fx.base.model.calls
+
+    asked = _cli_json(fx)
+
+    # The explicit no, as the reply names it: --no-assess for the same window (the API: {"assess": false, "since": ...}).
+    no = asked["question"]["no"]  # type: ignore[index]
+    assert no["cli"] == f"gigai scout new --no-assess --since {original}"
+    assert no["api"] == {"method": "POST", "path": "/api/new", "body": {"assess": False, "since": original}}
+    assert _anchor(fx) == original  # the question is still open: nothing moved
+
+    declined = _cli_json(fx, *_options(no["cli"]))
+
+    assert (declined["status"], declined["question"], declined["assessed"]) == ("new", None, None)
+    assert _jobs(declined) == _jobs(asked) and declined["anchor"]["advances"] is True  # type: ignore[index]
+    assert _anchor(fx) == declined["checked_at"]
+    after = _cli_json(fx)
+    assert (after["status"], after["counts"]["new"]) == ("nothing_new", 0)  # type: ignore[index]
+    assert fx.base.model.calls == calls and _assessed_jobs(fx, "fresh", (1, 2)) == []
+
+
+def test_the_yes_command_an_asking_call_names_still_assesses_them(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    fx = build_postings_fixture(tmp_path, monkeypatch, deleted=False)
+    _now, original = _terminal_scene(fx)
+    calls = fx.base.model.calls
+
+    asked = _cli_json(fx)
+    command = asked["question"]["yes"]["cli"]  # type: ignore[index]
+    assert command == f"gigai scout new --yes --since {original}"
+
+    yes = _cli_json(fx, *_options(command))
+
+    assert (yes["assessed"]["requested"], yes["assessed"]["assessed"], yes["assessed"]["failed"]) == (2, 2, [])  # type: ignore[index]
+    assert fx.base.model.calls == calls + 2 and _jobs(yes) == _jobs(asked)
+    assert _anchor(fx) == yes["checked_at"]
+    assert _cli_json(fx)["status"] == "nothing_new"
+
+
+def test_only_the_assess_new_question_makes_a_reply_a_preview(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    fx = build_postings_fixture(tmp_path, monkeypatch, deleted=False)
+    fx.seed("fresh", [lever_job("fresh", n) for n in (1, 2)], seen_at=days_ago(1))
+    original = scout_new.mark_all_seen(fx.home_root, fx.target, now=days_ago(2))["last_checked_at"]
+
+    # The one definition: a reply that carries the question (status "ask") is a preview; any other reply is not.
+    assert scout_new.is_preview({"status": "ask"}) is True
+    assert [scout_new.is_preview({"status": status}) for status in ("new", "nothing_new")] == [False, False]
+
+    asked = _new(fx)
+    assert scout_new.is_preview(asked) and asked["anchor"]["advances"] is False and _anchor(fx) == original  # type: ignore[index]
+    # Never moved by --peek, --profile or --process either, asked or not (as before).
+    for kwargs in ({"peek": True}, {"profile_id": fx.default_profile_id}, {"peek": True, "assess": False}):
+        assert _new(fx, **kwargs)["anchor"]["advances"] is False and _anchor(fx) == original  # type: ignore[index]
+    # A reply with nothing to ask moves it, as before: here every new posting is assessed already.
+    _new(fx, peek=True, assess=True)
+    plain = _new(fx, now=NOW + timedelta(hours=1))
+    assert (plain["status"], plain["question"], plain["counts"]["new"]) == ("new", None, 2)  # type: ignore[index]
+    assert not scout_new.is_preview(plain) and plain["anchor"]["advances"] is True  # type: ignore[index]
+    assert _anchor(fx) == plain["checked_at"]
 
 
 # --- (2) the newest 50 at a time --------------------------------------------------------------

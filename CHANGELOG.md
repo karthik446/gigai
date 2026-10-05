@@ -178,6 +178,11 @@ things still take more than a second (see "Still slower than one second"): the n
   "nothing new since" the run you had left. The time now moves when the run has done its work (every
   question answered, or none asked): leave at a question and the next run shows the same postings as
   new.
+- **`gigai scout new --json` that asks is a preview; the yes after it assesses.** An asking call
+  (status `ask`: `gigai scout new --json`, or any call without a terminal) moved the "new since" time,
+  so the next step, `gigai scout new --yes --json`, said "Nothing new" and assessed nothing. An asking
+  call now moves nothing: ask again and you get the same postings, and a plain `--yes` assesses them.
+  The time moves with the answer: `--yes`, or `--no-assess` for a no.
 - **"Nothing new" says what it counts.** `gigai scout new` could say "Nothing new since your last
   check" right after a sources update that stored hundreds of new postings. Both were right, and
   nothing said why: "new" counts the postings your profiles match that Scout first stored after your
