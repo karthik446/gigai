@@ -150,7 +150,7 @@ def test_no_retry_anywhere_in_the_browser_jobs() -> None:
 
 def test_a_step_that_reaches_its_limit_leaves_the_job_time_to_upload() -> None:
     text = _workflow()
-    for name, expected in (("ui", [10]), ("operator-home", [5, 10, 5])):
+    for name, expected in (("ui", [10]), ("operator-home", [5, 10, 5, 20])):  # 0110-10-hf2: + the core-flow smoke, 20
         job = _code(_job(text, name))
         (limit,) = (int(value) for value in re.findall(r"^    timeout-minutes: (\d+)$", job, flags=re.MULTILINE))
         steps = [int(value) for value in re.findall(r"^        timeout-minutes: (\d+)$", job, flags=re.MULTILINE)]

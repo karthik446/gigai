@@ -438,6 +438,25 @@ def test_a_truncated_download_and_a_foreign_manifest_are_refused(day1: _Release,
     assert _index_files(home) == {}
 
 
+def test_a_manifest_larger_than_one_mebibyte_is_refused(day1: _Release, tmp_path: Path) -> None:
+    """0110-10-hf2: the manifest's size limit (``snapshot._MANIFEST_LIMIT``), with a manifest one byte over it: no test had one."""
+
+    assert snapshot._MANIFEST_LIMIT == 1 << 20
+    home = tmp_path / "home"
+    manifest = day1.directory / "manifest.json"
+    document = json.loads(manifest.read_text())
+    padded = json.dumps({**document, "padding": ""})
+    manifest.write_text(json.dumps({**document, "padding": "x" * ((1 << 20) + 1 - len(padded))}))
+    assert manifest.stat().st_size == (1 << 20) + 1
+
+    result = day1.run(home)
+
+    assert (result.status, result.reason) == ("refused", "manifest_foreign") and _index_files(home) == {}
+    # Exactly at the limit it is read (and this one, valid apart from its padding, is imported).
+    manifest.write_text(json.dumps({**document, "padding": "x" * ((1 << 20) - len(padded))}))
+    assert manifest.stat().st_size == 1 << 20 and day1.run(home).status != "refused"
+
+
 def test_a_plain_http_address_is_refused_without_a_request(day1: _Release, tmp_path: Path) -> None:
     result = day1.run(tmp_path / "home", source="http://releases.example/manifest.json")
     assert (result.status, result.reason, day1.requests) == ("refused", "insecure_url", [])

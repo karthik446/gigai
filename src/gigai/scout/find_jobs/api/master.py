@@ -52,7 +52,6 @@ from http import HTTPStatus
 from pathlib import Path
 import subprocess
 import threading
-from urllib.parse import parse_qs, urlsplit
 
 from ....private_records import PrivateRecordError
 from ....workpad import WorkpadError, resolve_workpad

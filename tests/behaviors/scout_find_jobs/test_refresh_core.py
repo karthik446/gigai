@@ -122,6 +122,24 @@ def test_the_failed_board_list_is_capped_but_the_histogram_counts_all(tmp_path: 
     assert len(snapshot["failures"]["boards"]) == 2
 
 
+def test_the_failed_board_list_stops_at_50_and_the_histogram_counts_all_60(tmp_path: Path) -> None:
+    """0110-10-hf2: the real limit, with more failed boards than it (the test above lowers the limit to 2 instead)."""
+
+    assert sources_update.FAILED_BOARDS_LISTED == 50
+    watchlist = [_board(ATSProvider.LEVER, f"limited{n:02d}", catalog=True) for n in range(60)] + [_board(ATSProvider.LEVER, "fine", catalog=True)]
+
+    with httpx.Client(transport=httpx.MockTransport(_pushback)) as client:
+        snapshot = update_sources(
+            watchlist, cache=board_cache_for_home(tmp_path), index=CompanyIndex.for_home(tmp_path), client=client, config=_config(), limits=_limits(concurrency=1)
+        ).to_json()
+
+    assert snapshot["status"] == "succeeded" and snapshot["boards"]["failed"] == 60 and snapshot["boards"]["checked"] == 61
+    assert snapshot["failures"]["codes"] == {"http_429": 60} and snapshot["failures"]["total"] == 60
+    listed = snapshot["failures"]["boards"]
+    assert len(listed) == 50 and len({item["board"] for item in listed}) == 50 and {item["code"] for item in listed} == {"http_429"}
+    assert read_status(tmp_path)["update"]["failures"] == snapshot["failures"]  # the stored snapshot holds the same 50
+
+
 # --- R2: spread pacing (fake clock) -----------------------------------------------
 
 

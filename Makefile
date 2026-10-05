@@ -6,16 +6,18 @@ TEST_XDIST_WORKERS ?= auto
 TEST_XDIST_MAX_WORKERS ?= 14
 TEST_XDIST_DIST ?= worksteal
 
-.PHONY: test test-macos-smoke test-operator-home test-source test-behavior test-wheel test-installed test-live test-debian-offline unit-tests api-e2e eval-live lint
+.PHONY: test test-macos-smoke test-operator-home test-core-flow test-source test-behavior test-wheel test-installed test-live test-debian-offline unit-tests api-e2e eval-live lint
 
-# 0110-10-08: names the package uses and never defines (ruff F821 undefined name, F823 local read before it is
-# assigned). 0.1.10.9 shipped `time.monotonic()` in a module with no `import time`, on a line only a large store
-# reaches: no test ran it, and nothing read the code for it. Every PR runs this (the `lint` job of
-# pull_request.yaml). ruff is not a project dependency (uv.lock does not hold it): `uv tool run` fetches the one
-# version pinned here. Only these two rules, on purpose: the other F rules have findings that are not errors.
+# 0110-10-08: names the package uses and never defines. 0.1.10.9 shipped `time.monotonic()` in a module with no
+# `import time`, on a line only a large store reaches: no test ran it, and nothing read the code for it. Every PR
+# runs this (the `lint` job of pull_request.yaml). ruff is not a project dependency (uv.lock does not hold it):
+# `uv tool run` fetches the one version pinned here.
+# 0110-10-hf2: every pyflakes rule (ruff `F`), not only undefined names (F821, F823): also imports and variables
+# nothing uses (F401, F841) and a name defined twice (F811). An import kept for other modules to import from
+# there (a re-export) or for what importing it does says so on its line: `# noqa: F401 - <reason>`.
 RUFF_VERSION ?= 0.16.10
 lint:
-	$(UV) tool run ruff@$(RUFF_VERSION) check --select F821,F823 --no-fix src/gigai
+	$(UV) tool run ruff@$(RUFF_VERSION) check --select F --no-fix src/gigai
 
 # Complete portable offline coverage: one source discovery pass, the existing
 # deterministic behavior evaluation, and a fresh wheel plus every installed
@@ -87,6 +89,20 @@ test-macos-smoke:
 test-operator-home:
 	GIGAI_OPERATOR_GATE=1 $(UV) run --locked --extra test python -m pytest -n 0 -q -s \
 		tests/behaviors/scout_pipeline/test_operator_sized_home.py
+
+# 0110-10-hf2, a standing release rule: `gigai scout new` and the commands around it must run to the end before a
+# release is called ready (REQUIRED in the release pre-check: the `operator-home` job of pull_request.yaml).
+# tools/core_flow.py builds the wheel, installs it with uv into a clean environment, and runs the INSTALLED `gigai`
+# command on the operator-sized synthetic home (290,000 postings, 10,350 companies, 2 profiles; with
+# GIGAI_OPERATOR_HOME_PREBUILT a fresh copy of the home built once), first with no server and a read model that was
+# never built, then again with the server running: resume add, sources update (local fixture boards, 600 boards
+# changed each time), new --no-assess, new --yes, jobs list, assess, resume tailor, resume master init --dry-run,
+# master init, master selection refresh, status. No network, no model (the fixture model target). A step fails on a
+# non-zero exit, a traceback or "Error" on stderr, stdout that is not JSON, or its own check. About 6 minutes on a
+# laptop. The table to paste into the "ready" message: $(CORE_FLOW_OUT)/table.md; each step's output: $(CORE_FLOW_OUT)/logs/.
+CORE_FLOW_OUT ?= build/core-flow
+test-core-flow:
+	$(UV) run --locked python tools/core_flow.py --out "$(CORE_FLOW_OUT)"
 
 # G28's deterministic evaluator is not a pytest test and therefore remains an
 # explicit offline phase in the aggregate command.

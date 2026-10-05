@@ -103,7 +103,6 @@ import json
 import os
 from pathlib import Path
 import sys
-from typing import Any
 
 _STEPS_FILENAME = "steps.json"
 _ACQUIRE_FILENAME = "acquire.jsonl"

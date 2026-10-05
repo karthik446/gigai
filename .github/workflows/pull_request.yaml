@@ -71,14 +71,15 @@ jobs:
           WORKFLOW_FILE: pull_request.yaml
         run: python3 tools/ci_changes.py
 
-  # 0110-10-08: names the package uses and never defines (`make lint`: ruff F821 and
-  # F823 over src/gigai, the ruff version pinned in the Makefile). 0.1.10.9 shipped
+  # 0110-10-08: names the package uses and never defines (`make lint`: ruff over
+  # src/gigai, the ruff version pinned in the Makefile). 0.1.10.9 shipped
   # `time.monotonic()` in a module with no `import time`, on a line only a large store
   # reaches. It does not wait for `changes` and has no condition: every PR, every
   # profile, a few seconds. A finding fails the run, so a release pre-check with one is
-  # not green.
+  # not green. 0110-10-hf2: every pyflakes rule (`--select F`): undefined names, and
+  # imports, variables and redefinitions nothing uses.
   lint:
-    name: Lint (undefined names)
+    name: Lint (pyflakes, undefined names and unused imports)
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
@@ -459,12 +460,24 @@ jobs:
   # the browser flows 61 s -> 5. The gate took 42 s on the prebuilt home (-> 5 by the
   # same rule) and gets 10: it is the blocking gate that had no limit of its own, and a
   # limit that is too tight would fail a release for nothing. NOT measured on a runner yet.
+  # 0110-10-hf2: the same job then runs the CORE-FLOW SMOKE (`make test-core-flow`,
+  # tools/core_flow.py) on a third fresh copy of that home: the wheel is built and
+  # installed with uv into a clean environment, and the installed `gigai` command runs
+  # the daily flow to its end, first with no server and a read model never built, then
+  # again with the server running (resume add, sources update against local fixture
+  # boards, new --no-assess, new --yes, jobs list, assess, resume tailor, master init,
+  # master selection refresh, status). A non-zero exit, a traceback or "Error" on stderr,
+  # or stdout that is not JSON fails the step, and so the pre-check. Its table goes to
+  # the job summary and into the every-run artifact; each step's output is under
+  # build/ui-artifacts/core-flow/logs/, so a failed run uploads it with the rest. Step
+  # limit by the same rule: 6 min on a laptop on 2026-10-04 -> 20. The job's limit is
+  # the steps' limits plus 10 minutes for the setup and the uploads.
   operator-home:
     needs: changes
     if: needs.changes.outputs.code_changed == 'true' && inputs.profile == 'release'
-    name: Operator-sized home timing gate and browser flows (290k postings)
+    name: Operator-sized home timing gate, browser flows and core-flow smoke (290k postings)
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 50
     env:
       GIGAI_TEST_LATENCY_SCALE: "3"
       GIGAI_UI_BUDGETS: report
@@ -515,10 +528,20 @@ jobs:
         if: ${{ !cancelled() && steps.home.outcome == 'success' }}
         timeout-minutes: 5
         run: make ui-test-operator
+      # 0110-10-hf2: the core-flow smoke (see the comment above the job). It takes its own
+      # fresh copy of the prebuilt home, and runs whatever the gate and the browser did.
+      - name: Core-flow smoke (the wheel's gigai command on the operator-sized home, cold then warm)
+        id: core_flow
+        if: ${{ !cancelled() && steps.home.outcome == 'success' }}
+        timeout-minutes: 20
+        run: make test-core-flow CORE_FLOW_OUT=build/ui-artifacts/core-flow
+      - name: Core-flow table in the job summary
+        if: ${{ !cancelled() && steps.home.outcome == 'success' }}
+        run: cat build/ui-artifacts/core-flow/table.md >> "${GITHUB_STEP_SUMMARY}"
       - name: Budgets in the job summary
         if: ${{ !cancelled() && steps.home.outcome == 'success' }}
         run: python3 tools/ui_budgets_summary.py build/ui-artifacts/budgets.json --title "operator-sized home (make ui-test-operator)" >> "${GITHUB_STEP_SUMMARY}"
-      - name: Upload budgets.json and the flow's numbers (every run)
+      - name: Upload budgets.json, the flow's numbers and the core-flow table (every run)
         if: ${{ !cancelled() && steps.home.outcome == 'success' }}
         uses: actions/upload-artifact@v4
         with:
@@ -526,9 +549,10 @@ jobs:
           path: |
             build/ui-artifacts/budgets.json
             build/ui-artifacts/operator-sized-jobs.json
+            build/ui-artifacts/core-flow/table.md
           if-no-files-found: warn
           retention-days: 30
-      - name: Upload the failure artifacts (screenshot, trace, requests, console, server log, timeout.txt)
+      - name: Upload the failure artifacts (screenshot, trace, requests, console, server log, timeout.txt; the core-flow steps' output)
         if: ${{ failure() }}
         uses: actions/upload-artifact@v4
         with:

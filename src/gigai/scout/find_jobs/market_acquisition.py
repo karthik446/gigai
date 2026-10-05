@@ -35,7 +35,6 @@ from ..acquisition_records import (
 from .ats_board_clients import BoardCache, BoardFetchIndex, BoardFetchStats
 from .contracts import (
     ATSBoardClient,
-    ATSProvider,
     AcquireInput,
     AcquireOutput,
     AssessmentResult,
@@ -60,7 +59,6 @@ from .contracts import (
     WatchlistClient,
     diff_url_sets,
     normalize_url,
-    parse_board_url,
 )
 from .filters import exclusion_reason, location_mismatch_detail
 from .work_mode import work_mode_fit

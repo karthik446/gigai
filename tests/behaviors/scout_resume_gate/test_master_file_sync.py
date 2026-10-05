@@ -253,6 +253,28 @@ def test_sync_imports_the_file_keeps_every_id_and_says_what_changed(home: Path) 
     assert file.read_text(encoding="utf-8") == _stored(home)
 
 
+def test_sync_lists_20_added_lines_and_counts_the_rest(home: Path) -> None:
+    """0110-10-hf2: more changed lines than the text output lists (``master_file_cli._SHOWN``, 20): none was synced that large."""
+
+    from gigai.scout import master_file_cli
+
+    assert master_file_cli._SHOWN == 20
+    file = _file(home)
+    typed = [f"Ran the migration of service group {letter} to the new cluster." for letter in "ABCDEFGHIJKLMNOPQRSTUVW"]  # 23 new lines
+    text = file.read_text(encoding="utf-8")
+    file.write_text(text.replace(ONCALL, ONCALL + "".join(f"\n- {line}" for line in typed)), encoding="utf-8")
+
+    said = _plain(home, "sync")
+
+    assert "Imported master.md as revision 2 of the master: 23 added, 0 changed, 0 retired; 9 ids kept, 23 new ids, 0 restored." in said
+    listed = [line for line in said.splitlines() if line.startswith("  Added ")]
+    assert len(listed) == 20 and all(any(line.endswith(": " + text) for text in typed) for line in listed)
+    assert "  ... and 3 more (added); --json lists them all." in said
+    # All 23 were imported, not only the 20 the output names.
+    stored = {item["text"] for item in _master(home, "show")["master"]["items"]}
+    assert set(typed) <= stored and file.read_text(encoding="utf-8") == _stored(home)
+
+
 def test_a_profile_that_shows_an_edited_line_follows_the_import(tmp_path: Path) -> None:
     made = _Home(tmp_path)
     made.migrate()
