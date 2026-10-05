@@ -35,6 +35,10 @@ THE RULES, the same for every write and for both callers:
   ``master_profiles_cli.after_master_write``: a profile that shows an edited
   or retired line gets its resume printed again, and lines the master gained
   are offered to the profiles (``MasterEdit.profiles``).
+* **A note is guidance, never text** (0.1.11). ``edit`` sets or clears the
+  note of a line or an entry (``clean_note``: one line, at most 300
+  characters, the contact check). A note edit is a new revision; the line's
+  ``mark`` stays, so no resume is printed again and no assessment goes stale.
 
 EVIDENCE.  The master holds claims; answers and stories are their evidence.
 ``evidence_for`` reads a story or an answer and gives the ``backed`` link
@@ -381,6 +385,24 @@ def clean_source(source: object) -> str | None:
         raise MasterEditError(exc.code if exc.code == "personal_info_refused" else "master_source_invalid", str(exc)) from None
 
 
+def clean_note(note: object) -> str:
+    """A note as the master stores it: one line of free text by the format's own rule (``master_resume.note_rule``),
+    checked for contact data like every other text of the master."""
+
+    if not isinstance(note, str):
+        raise MasterEditError("master_note_invalid", "the note must be text")
+    if _CONTROL.search(note):
+        raise MasterEditError("master_note_invalid", "the note must be one line, without control characters")
+    text = " ".join(note.split())
+    if not text:
+        raise MasterEditError("master_note_invalid", "the note is empty; a note is removed with --clear-note")
+    rule = master_resume.note_rule(text)
+    if rule is not None:
+        raise MasterEditError("master_note_invalid", rule)
+    _refuse_contact(text, "the note")
+    return text
+
+
 # --- evidence: a story or an answer becomes a line ----------------------------------------------
 
 
@@ -436,9 +458,12 @@ def _draft(master: Master) -> MasterDraft:
         for entry in master.entries_in(name):
             section.entries.append(DraftEntry(
                 0, name, entry.heading, entry.id, list(entry.sublines),
-                [DraftItem(0, name, master.items[i].text, i, master.items[i].tags, master.items[i].backed) for i in entry.bullets],
+                [DraftItem(0, name, master.items[i].text, i, master.items[i].tags, master.items[i].backed, master.items[i].note) for i in entry.bullets],
+                entry.note,
             ))
-        section.items = [DraftItem(0, name, item.text, item.id, item.tags, item.backed) for item in master.in_section(name) if item.entry_id is None]
+        section.items = [
+            DraftItem(0, name, item.text, item.id, item.tags, item.backed, item.note) for item in master.in_section(name) if item.entry_id is None
+        ]
         draft.sections.append(section)
     return draft
 
@@ -886,11 +911,13 @@ def edit(
     *, home_root: Path, target: Path, item_id: str, revision: int | None, text: str | None = None, tags: Iterable[str] | None = None,
     backed: Iterable[str] | None = None, heading: str | None = None, sublines: Iterable[str] | None = None,
     evidence: tuple[Evidence, ...] = (), actor: str = "operator", source: str | None = None,
+    note: str | None = None, clear_note: bool = False,
 ) -> MasterEdit:
     """Change a line (its text, its tags, its evidence) or an entry (its heading, the lines under it). The id stays.
 
     Only what is given changes. ``backed`` replaces the line's links; ``evidence`` adds one. ``source`` alone says
-    where the line's evidence came from without changing the line."""
+    where the line's evidence came from without changing the line. ``note`` sets the note of a line or an entry
+    and ``clear_note`` removes it (0.1.11): a new revision, and the line's mark stays."""
 
     _required(revision, home_root, target)
     # The longest a line of any kind may be; the line's own kind is known once the master is read (``_fits``).
@@ -900,18 +927,31 @@ def edit(
     clean_heading = _clean(heading, what="the heading", limit=MAX_HEADING_CHARS) if heading is not None else None
     lines = [_clean(line, what="a heading line", limit=MAX_HEADING_CHARS) for line in sublines] if sublines is not None else None
     kept_source = clean_source(source)
-    if clean is None and wanted_tags is None and wanted_backed is None and clean_heading is None and lines is None and not evidence and kept_source is None:
-        raise MasterEditError("master_edit_empty", "nothing to change: pass --text, --tag, --heading, --role, --from-story, --from-answer or --source")
+    if note is not None and clear_note:
+        raise MasterEditError("master_edit_invalid", "pass --note or --clear-note, not both")
+    wanted_note = clean_note(note) if note is not None else None
+    noted = wanted_note is not None or clear_note
+    if (
+        clean is None and wanted_tags is None and wanted_backed is None and clean_heading is None and lines is None and not evidence
+        and kept_source is None and not noted
+    ):
+        raise MasterEditError(
+            "master_edit_empty",
+            "nothing to change: pass --text, --tag, --heading, --role, --note, --clear-note, --from-story, --from-answer or --source",
+        )
 
     def apply(stored: StoredMaster, draft: MasterDraft) -> _Plan:
         entry = _entry(draft, item_id)
         if entry is not None:
             if clean is not None or wanted_tags is not None or wanted_backed is not None or evidence:
-                raise MasterEditError("master_edit_invalid", f"{item_id} is an entry: it takes --heading and --role; text, tags and evidence belong to its lines")
+                raise MasterEditError(
+                    "master_edit_invalid", f"{item_id} is an entry: it takes --heading, --role and --note; text, tags and evidence belong to its lines",
+                )
             if lines is not None and len(lines) >= MAX_HEADING_LINES:
                 raise MasterEditError("master_text_invalid", f"an entry has at most {MAX_HEADING_LINES - 1} lines under its heading")
             entry.heading = clean_heading if clean_heading is not None else entry.heading
             entry.sublines = lines if lines is not None else entry.sublines
+            entry.note = wanted_note if noted else entry.note
             return _Plan([entry], [])
         item = _item(draft, item_id)
         if item is None:
@@ -920,8 +960,9 @@ def edit(
                 f"the master has no line or entry {item_id!r} (see `gigai scout resume master show`; a retired one: `gigai scout resume master show --retired`)",
             )
         if clean_heading is not None or lines is not None:
-            raise MasterEditError("master_edit_invalid", f"{item_id} is a line: it takes --text, --tag and evidence; --heading and --role belong to an entry")
+            raise MasterEditError("master_edit_invalid", f"{item_id} is a line: it takes --text, --tag, --note and evidence; --heading and --role belong to an entry")
         plan = _Plan([item], [])
+        item.note = wanted_note if noted else item.note
         if clean is not None:
             _fits(clean, master_resume._kind(item.section))  # noqa: SLF001 - the format's own rule for what a line of a section is
             if item.section == "skills":
@@ -1102,7 +1143,7 @@ def _place(sequence: list, old_ids: tuple[str, ...], item_id: str, new) -> None:
 
 
 def restore(*, home_root: Path, target: Path, item_id: str, actor: str = "operator", revision: int | None = None) -> MasterEdit:
-    """Put a retired line or entry back, under its own id, with the text, tags and evidence it had.
+    """Put a retired line or entry back, under its own id, with the text, tags, evidence and note it had.
 
     An entry comes back with the lines it had that the master does not hold. A bullet needs its entry: restore that first."""
 
@@ -1116,13 +1157,14 @@ def restore(*, home_root: Path, target: Path, item_id: str, actor: str = "operat
         if item_id in old.entries:
             was = old.entries[item_id]
             bullets = [
-                DraftItem(0, was.section, old.items[i].text, i, old.items[i].tags, old.items[i].backed) for i in was.bullets if i not in live.items
+                DraftItem(0, was.section, old.items[i].text, i, old.items[i].tags, old.items[i].backed, old.items[i].note)
+                for i in was.bullets if i not in live.items
             ]
-            entry = DraftEntry(0, was.section, was.heading, was.id, list(was.sublines), bullets)
+            entry = DraftEntry(0, was.section, was.heading, was.id, list(was.sublines), bullets, was.note)
             _place(_section(draft, was.section, create=True).entries, tuple(e.id for e in old.entries_in(was.section)), item_id, entry)  # type: ignore[union-attr]
             return _Plan([entry, *bullets], [])
         item = old.items[item_id]
-        back = DraftItem(0, item.section, item.text, item.id, item.tags, item.backed)
+        back = DraftItem(0, item.section, item.text, item.id, item.tags, item.backed, item.note)
         if item.entry_id is not None:
             entry = _entry(draft, item.entry_id)
             if entry is None:
@@ -1156,6 +1198,7 @@ __all__ = [
     "add_line",
     "add_skills",
     "clean_backed",
+    "clean_note",
     "clean_source",
     "clean_tags",
     "edit",

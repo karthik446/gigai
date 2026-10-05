@@ -520,12 +520,12 @@ _MASTER_REVISION: dict[str, object] = {
 _MASTER_LINE: dict[str, object] = {
     "id": "b-hex-03", "section": "experience", "kind": "bullet", "text": "Led the migration of 40 services to Helm charts released through ArgoCD.",
     "tags": ["delivery"], "backed": [], "entry_id": "r-hex", "order": 4, "strength": "quantified", "mark": "5d0c2a4b9e1f7a36",
-    "written_by": "agent", "source": "from the user's chat on 3 Oct",
+    "note": "agentic roles: lead with this", "written_by": "agent", "source": "from the user's chat on 3 Oct",
 }
 _MASTER_EXAMPLE: dict[str, object] = {
     **_MASTER_REVISION, "format": 1, "sections": ["summary", "experience", "skills"],
     "counts": {"ids": 4, "items": 3, "entries": 1, "by_kind": {"summary": 1, "bullet": 1, "skills": 1, "other": 0}, "by_strength": {"backed": 0, "quantified": 1, "stated": 2}, "skills": 3},
-    "entries": [{"id": "r-hex", "section": "experience", "heading": "Hexa Cloud", "sublines": ["Staff Software Engineer | Jun 2019 - Jan 2023"], "start": 2019, "end": 2023, "ongoing": False, "bullets": ["b-hex-03"], "order": 3, "written_by": None, "source": None}],
+    "entries": [{"id": "r-hex", "section": "experience", "heading": "Hexa Cloud", "sublines": ["Staff Software Engineer | Jun 2019 - Jan 2023"], "start": 2019, "end": 2023, "ongoing": False, "bullets": ["b-hex-03"], "order": 3, "note": None, "written_by": None, "source": None}],
     "items": [_MASTER_LINE],
 }
 # 0.1.10.9 master P8: the master is also a file in the resumes folder (master.md), written after every change.
@@ -557,11 +557,18 @@ _MASTER_NOTE = (
     "The master resume is the user's one document of every role, bullet, project and skill, with a stable id on every line and no contact data; a "
     "profile shows a selection of it and a tailoring for one job picks from all of it. `master` is null when there is none yet (build it with "
     "POST /api/master/migration, or `gigai scout resume master init`). Each entry: `{id, section, heading, sublines, start, end, ongoing, bullets, "
-    "order}`. Each line: `{id, section, kind: summary | bullet | skills | other, text, tags, backed, entry_id, order, strength: backed | quantified | "
-    "stated, mark, written_by, source}` (a Skills line also `label`, `skills` and `skill_sources`). `strength` is derived: backed when a story or an "
-    "answer is linked, quantified when the line states a number. `written_by` (operator | agent) and `source` say who wrote the line's text through "
+    "order, note}`. Each line: `{id, section, kind: summary | bullet | skills | other, text, tags, backed, entry_id, order, strength: backed | quantified | "
+    "stated, mark, note, written_by, source}` (a Skills line also `label`, `skills` and `skill_sources`). `strength` is derived: backed when a story or an "
+    "answer is linked, quantified when the line states a number. `note` (null when there is none) is one line of free text that says when a line or an "
+    "entry is the one to use; it guides which lines are chosen, is never printed in a resume and is not part of `mark`. `written_by` (operator | agent) and `source` say who wrote the line's text through "
     "these routes or `gigai scout resume master add | edit`, and where its evidence came from; both are null for a line that came with a file. "
     "`revision` is the number a write sends back."
+)
+# 0.1.11: a note on a line or an entry (PUT /api/master/lines and /entries).
+_MASTER_NOTE_RULE = (
+    "`note` is one line of at most 300 characters; one that holds a comment mark (`<!--`, `-->`) or a word that starts with `id:`, `tags:`, "
+    "`backed:` or `gigai-master:` is 422 master_note_invalid, and one that looks like contact data is 422 personal_info_refused. A note edit is "
+    "one revision; the line's `mark` stays, so no resume is printed again and no assessment goes stale."
 )
 _MASTER_WRITE_NOTE = (
     "One new revision of the master. Send the `revision` you read: when the master changed since, the reply is 409 revision_conflict with "
@@ -576,6 +583,11 @@ _MASTER_WRITE_NOTE = (
     "file beside it (master-2.md) when master.md holds changes the user has not imported, which GigAI never replaces. Local only: no model call."
 )
 _MASTER_REVISION_PARAM = _b("revision", "integer", "The revision of the master you read; when it changed since, the reply is 409.", required=True)
+_MASTER_NOTE_PARAM = _b(
+    "note", "string",
+    "With use edit: the note, one line of at most 300 characters that says when this is the one to use (`\"\"` removes it). Read by the assessment "
+    "and the user's agent; never printed in a resume.",
+)
 _MASTER_WRITE_ERRORS = (
     _UNKNOWN_KEY, _WRONG_TYPE, _INVALID, (422, "personal_info_refused"), (422, "master_text_invalid"), (422, "master_markdown_invalid"), _REVISION_CONFLICT,
     (404, "master_not_found"), _NO_TARGET,
@@ -1309,19 +1321,21 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
         params=(
             _MASTER_REVISION_PARAM,
             _b("id", "string", "The line's id.", required=True),
-            _b("use", "string", "edit (the default) changes text, tags and/or backed; retire takes the line out of the master; restore puts a retired one back.", enum=("edit", "retire", "restore")),
+            _b("use", "string", "edit (the default) changes text, tags, backed and/or note; retire takes the line out of the master; restore puts a retired one back.", enum=("edit", "retire", "restore")),
             _b("text", "string", "With use edit: the new wording (one line; the id stays)."),
             _b("tags", "array", "With use edit: the tags, whole (an empty array removes them)."),
             _b("backed", "array", "With use edit: the evidence, whole."),
+            _MASTER_NOTE_PARAM,
             _ACTOR_PARAM,
         ),
         request_example={"revision": 3, "id": "b-hex-03", "text": "Led the migration of 40 services to Helm charts released through ArgoCD, in 5 months.", "actor": "agent"},
         errors=(
             *_MASTER_WRITE_ERRORS, (422, "master_edit_empty"), (422, "master_edit_invalid"), (422, "master_tag_invalid"), (422, "master_backed_invalid"),
-            (404, "master_item_not_found"), (404, "master_entry_not_found"), (409, "master_line_exists"), (409, "master_empty"),
+            (422, "master_note_invalid"), (404, "master_item_not_found"), (404, "master_entry_not_found"), (409, "master_line_exists"), (409, "master_empty"),
         ),
         description=(
-            "use edit needs at least one of text, tags, backed (422 master_edit_empty; an entry's id is 422 master_edit_invalid). use retire: the line "
+            "use edit needs at least one of text, tags, backed, note (422 master_edit_empty; an entry's id with text, tags or backed is 422 "
+            "master_edit_invalid). " + _MASTER_NOTE_RULE + " use retire: the line "
             "is never selected again; it stays in the earlier revisions and is listed by GET /api/master/history (the last line of the master cannot "
             "go: 409 master_empty). use restore: the line comes back under its own id, as the last revision that held it had it, where it stood; a "
             "line that is in the master is 409 master_line_exists, and a line whose role is retired too is 404 master_entry_not_found: restore the "
@@ -1357,12 +1371,16 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
             _b("use", "string", "edit (the default) changes the heading and/or the lines under it; retire takes the entry and its lines out; restore puts a retired one back with its lines.", enum=("edit", "retire", "restore")),
             _b("heading", "string", "With use edit: the heading."),
             _b("sublines", "array", "With use edit: the lines under the heading, whole."),
+            _MASTER_NOTE_PARAM,
             _ACTOR_PARAM,
         ),
         request_example={"revision": 3, "id": "r-hex", "sublines": ["Staff Software Engineer | Jun 2019 - Feb 2023"]},
-        errors=(*_MASTER_WRITE_ERRORS, (422, "master_edit_empty"), (422, "master_edit_invalid"), (404, "master_item_not_found"), (409, "master_line_exists"), (409, "master_empty")),
+        errors=(
+            *_MASTER_WRITE_ERRORS, (422, "master_edit_empty"), (422, "master_edit_invalid"), (422, "master_note_invalid"), (404, "master_item_not_found"),
+            (409, "master_line_exists"), (409, "master_empty"),
+        ),
         description=(
-            "The entry's id and its lines stay on an edit. use retire takes the entry out with its lines (`retired` lists them); use restore puts it "
+            "The entry's id and its lines stay on an edit. " + _MASTER_NOTE_RULE + " use retire takes the entry out with its lines (`retired` lists them); use restore puts it "
             "back where it stood, with the lines it had that the master does not hold. " + _MASTER_WRITE_NOTE
         ),
     ),

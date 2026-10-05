@@ -38,26 +38,70 @@ pipeline's own file: ``pipeline.steps._users_resume``).  ``queue_recheck`` then 
 through the pipeline: the tailor step keeps the edited resume and the re-assessment, the Scout
 ATS score and the Scout label run against it.  Lines above the first ``## `` section (a name, a
 contact line) are never stored.
+
+0.1.11 N2 (SPEC 5.3): WHEN THE MASTER IS THE BASIS, THE CHECK READS THE MASTER.  Everything above
+is the check of a profile with no master, or detached from it (``tailor_master.tailoring_basis``);
+it is unchanged.  For a profile whose resumes are made from the master, the markdown is a HAND-BACK
+(``handback_result``): the rules are ``handback_check``'s, read against every line of the master by
+id plus the answers and the matching stories, never against the profile's own 2-page resume (which
+refused 16 of 16 sound hand-backs in the spike: master roles and the master's own Skills lines).
+
+- a line of the job's stored resume, unchanged and where the stored resume has it, stays that line;
+- a master line, word for word, is a ``copy`` of it (its ref carries the master id);
+- an entry heading and its title/dates line are copies of the master's;
+- any other line cites its sources (``<!-- src: b-23b6dc, A tooling:temporal -->``) and is stored in
+  the shape of a 0.1.10 rewrite: ``kind: rewritten``, its cited refs (each master ref with
+  ``item_id``), ``origin: user``, and the master line it rewords as its ``alternative``.  So the
+  page's per-line choice shows the original and ``apply_line_choice`` puts it back: Restore per line.
+  A Skills line needs no citation: code finds the master Skills lines and the answers that state it.
+
+A refusal (``HandbackRefused``) lists EVERY problem as ``{line, code, what, fix}``, by line number
+and the one word or number, never the line's text; its text is built here, not by the CLI.  The
+resume must also print on ``LENGTH_RULE.max_pages`` pages at the tightest spacing the PDF may choose
+(``over_page_limit``, with the count); when no renderer can count them, the length is not checked.
+
+THE CHECK IS A GUARD, NOT PROOF: numbers, names, ownership, entries and sources.  It does not prove
+that a reworded line is true (``handback_check.WHAT_THE_CHECK_IS``).
 """
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, replace
 import os
 from pathlib import Path
 
 from .find_jobs.assess_contracts import AssessJobInput, AssessResumeInput
 from .find_jobs.contracts import FindJobsContractError, Producer
+from .handback_check import (
+    MASTER,
+    STORED,
+    HandbackEntry,
+    HandbackLine,
+    HandbackSection,
+    LineSource,
+    MasterLines,
+    Problem,
+    check_handback,
+    cited_ids,
+    master_lines,
+    over_page_limit,
+    place_of,
+    refusal_text,
+)
+from .master_resume import Master
 from .quick_assess import _default_model_target
 from .resume_pdf import _BULLET, _COMMENT, _HASHES, ResumeMarkdownError, parse_resume_markdown
 from .resume_pii import detect_contact_details
 from .tailor_no_loss import _FUNCTION_WORDS, _skill_items
 from .tailored_resume import (
     ENTRY_SECTIONS,
+    LENGTH_RULE,
     MAX_ENTRIES_PER_SECTION,
     MAX_TOTAL_LINES,
     TAILOR_INSTRUCTIONS_DIGEST,
+    AnswerSource,
+    LineAlternative,
     SourceRef,
     TailorContext,
     TailoredEntry,
@@ -108,25 +152,11 @@ RECHECK_SCHEMA = "scout-tailored-recheck:1"
 RECHECK_NOT_QUEUED = "not_queued"
 
 
-@dataclass(frozen=True)
-class _Text:
-    """One logical line of the markdown: where it starts and what it says (no marker, no comment)."""
-
-    number: int
-    text: str
-
-
-@dataclass(frozen=True)
-class _Entry:
-    heading: tuple[_Text, ...]
-    bullets: tuple[_Text, ...]
-
-
-@dataclass(frozen=True)
-class _Section:
-    heading: str
-    lines: tuple[_Text, ...] = ()
-    entries: tuple[_Entry, ...] = ()
+#: One logical line of the markdown: where it starts, what it says (no marker, no comment), and the sources its
+#: trailing ``<!-- src: ... -->`` comment cites (read by the hand-back check only).
+_Text = HandbackLine
+_Entry = HandbackEntry
+_Section = HandbackSection
 
 
 def _sections(markdown: str) -> list[_Section]:
@@ -144,8 +174,13 @@ def _sections(markdown: str) -> list[_Section]:
 
     for number, raw in enumerate(markdown.splitlines(), 1):
         line = raw
-        while _COMMENT.search(line):
-            line = _COMMENT.sub("", line)
+        trailing = ""
+        while True:
+            comment = _COMMENT.search(line)
+            if comment is None:
+                break
+            line, trailing = line[: comment.start()], comment.group(0) + trailing
+        cited = cited_ids(trailing)
         line = line.strip()
         if not line:
             after_blank = True
@@ -168,16 +203,18 @@ def _sections(markdown: str) -> list[_Section]:
         if heading in ENTRY_SECTIONS:
             head, bullets = entries[-1]
             if bullet:
-                bullets.append(_Text(number, text))
+                bullets.append(_Text(number, text, cited))
             elif not bullets:
                 head.append(_Text(number, " ".join(_display(line).split())))
             else:
-                bullets[-1] = _Text(bullets[-1].number, f"{bullets[-1].text} {text}")  # a hard wrap
+                last = bullets[-1]
+                bullets[-1] = _Text(last.number, f"{last.text} {text}", tuple(dict.fromkeys((*last.cited, *cited))))  # a hard wrap
             continue
         if not bullet and lines and not blank_before:
-            lines[-1] = _Text(lines[-1].number, f"{lines[-1].text} {text}")  # a hard wrap, or the same paragraph
+            last = lines[-1]
+            lines[-1] = _Text(last.number, f"{last.text} {text}", tuple(dict.fromkeys((*last.cited, *cited))))  # a hard wrap, or the same paragraph
         else:
-            lines.append(_Text(number, text))
+            lines.append(_Text(number, text, cited))
     close()
     return sections
 
@@ -373,6 +410,215 @@ def edited_result(
     return result
 
 
+# --- 0.1.11 N2: the hand-back, checked against the master (SPEC 5.3) ---------------------------------
+
+
+class HandbackRefused(TailorError):
+    """A hand-back the master check refused: EVERY problem, as ``{line, code, what, fix}`` (``handback_check.Problem``).
+
+    ``code`` is ``edited_resume_unsupported`` (``personal_info_refused`` when that is the only rule broken), the
+    codes a refused edit always had; each problem carries its own rule's code.  The message is
+    ``handback_check.refusal_text``: line numbers and the one word or number, never a line's text.
+    """
+
+    def __init__(self, problems: Iterable[Problem]) -> None:
+        self.problems: tuple[Problem, ...] = tuple(problems)
+        codes = {item.code for item in self.problems}
+        super().__init__("personal_info_refused" if codes == {"personal_info_refused"} else "edited_resume_unsupported", refusal_text(self.problems))
+
+
+class _Stored:
+    """The job's stored resume as a hand-back keeps it: its body lines by where they stand and what they show, its headings by text.
+
+    A ``custom`` line (the 0.1.10 edit: text with no source) is not kept: it is checked like a new line, and
+    needs a citation like one.
+    """
+
+    def __init__(self, previous: TailoredResume | None) -> None:
+        self._body: dict[tuple[str, str], list[TailoredLine]] = {}
+        self._heading: dict[str, list[TailoredLine]] = {}
+        for section in previous.sections if previous is not None else ():
+            for line in section.lines:
+                self._add(place_of(section.heading), line)
+            for entry in section.entries:
+                place = place_of(section.heading, _shown(entry.heading[0].text) if entry.heading else "")
+                for line in entry.heading:
+                    self._heading.setdefault(_shown(line.text), []).append(line)
+                for line in entry.bullets:
+                    self._add(place, line)
+
+    def _add(self, place: str, line: TailoredLine) -> None:
+        if line.kind != "custom":
+            self._body.setdefault((place, " ".join(shown_text(line).split())), []).append(line)
+
+    def places(self) -> frozenset[tuple[str, str]]:
+        return frozenset(self._body)
+
+    def body(self, place: str, text: str) -> TailoredLine | None:
+        return _Known._take(self._body.get((place, text)))
+
+    def heading(self, text: str) -> TailoredLine | None:
+        return _Known._take(self._heading.get(text))
+
+
+def _master_ref(lines: MasterLines, item_id: str) -> SourceRef:
+    number = lines.items[item_id]
+    return SourceRef("resume", number, None, lines.text(number), (), item_id)
+
+
+def _reworded(text: str, source: LineSource, lines: MasterLines, answers: Mapping[str, AnswerSource], *, skills: bool) -> TailoredLine:
+    """A reworded line in the stored shape of a 0.1.10 rewrite: its cited refs, ``origin: user``, the master line as alternative."""
+
+    master_refs = tuple(_master_ref(lines, item_id) for item_id in source.master_ids)
+    refs = master_refs + tuple(SourceRef("answer", None, key, answers[key].guard_text) for key in source.answer_ids)
+    if not refs:  # a Skills line that lists nothing (a label alone): the writer's own text, no source claimed
+        return TailoredLine("custom", text, (), None, None, "user", None, None)
+    original: LineAlternative | None = None
+    if len(master_refs) == 1:
+        original = LineAlternative("copy", master_refs[0].text, master_refs)
+    elif master_refs and not skills:
+        # Several lines of one entry reworded into one: the original is those lines, one after the other (the 0.1.10 shape).
+        original = LineAlternative("copy", " ".join(_shown(ref.text) for ref in master_refs), master_refs)
+    return TailoredLine("rewritten", text, refs, None, None, "user", original)
+
+
+def handback_result(
+    markdown: str,
+    *,
+    master: Master,
+    answers: Mapping[str, AnswerSource],
+    previous: TailoredResume | None = None,
+    pages: int | None = None,
+) -> TailoredResume:
+    """The validated structure of a hand-back, checked against the MASTER (see the module text).  Pure: no I/O.
+
+    A guard, not proof: it does not prove that a reworded line is true (``handback_check``).
+
+    ``answers``: the user's answers and the stories that match the posting (``tailor_sources``).  ``previous``:
+    the job's stored resume, whose unchanged lines keep their sources.  ``pages``: the pages the markdown
+    prints on, counted by the caller, or ``None`` when no renderer could count them.
+
+    Raises ``HandbackRefused`` (every problem at once) or ``TailorError``: ``resume_markdown_invalid`` /
+    ``resume_markdown_too_large`` (the format, a bound), ``personal_info_refused``.
+    """
+
+    if not isinstance(markdown, str):
+        raise TailorError("wrong_type", "markdown must be a string (resume markdown in GigAI's format)")
+    try:
+        parse_resume_markdown(markdown)
+    except ResumeMarkdownError as exc:
+        raise TailorError(exc.code, str(exc)) from exc
+
+    parsed = _sections(markdown)
+    stored = _Stored(previous)
+    numbered = master_lines(master)
+    checked = check_handback(parsed, master, answers, stored=stored.places())
+    problems = list(checked.problems)
+    if pages is not None and pages > LENGTH_RULE.max_pages:
+        problems.append(over_page_limit(pages))
+    invalid: list[str] = []
+
+    def heading(item: _Text) -> TailoredLine | None:
+        found = checked.headings.get(item.number)
+        if found is None:
+            return None
+        kept = stored.heading(item.text)
+        if kept is not None:
+            return replace(kept, id=None)
+        entry_id, index = found
+        number = numbered.entries[entry_id][index]
+        raw = numbered.text(number)
+        return TailoredLine("copy", raw, (SourceRef("resume", number, None, raw, (), entry_id),), origin="user")
+
+    def body(item: _Text, place: str, section: str) -> list[TailoredLine]:
+        source = checked.lines.get(item.number)
+        if source is None:
+            return []
+        if source.kind == STORED:
+            kept = stored.body(place, item.text)
+            assert kept is not None
+            return [replace(kept, id=None)]
+        if source.kind == MASTER:  # one master line, or a paragraph of several: a copy of each
+            refs = [_master_ref(numbered, item_id) for item_id in source.master_ids]
+            return [TailoredLine("copy", ref.text, (ref,), origin="user") for ref in refs]
+        try:
+            clean = custom_line_text(item.text)
+        except TailorError as exc:  # the length and control-character bounds of a line someone typed
+            if exc.code != "personal_info_refused":
+                invalid.append(f"line {item.number}: {exc}")
+                return []
+            # The bounds held (they are checked first) and the check already read the line for personal info: what is
+            # left is a Skills line shaped like a name that lists known skills ("Model Context Protocol").
+            clean = item.text
+        return [_reworded(clean, source, numbered, answers, skills=section == "skills")]
+
+    sections: list[TailoredSection] = []
+    total = 0
+    for section in parsed:
+        if section.heading in ENTRY_SECTIONS:
+            if len(section.entries) > MAX_ENTRIES_PER_SECTION:
+                invalid.append(f"the {section.heading.capitalize()} section has more than {MAX_ENTRIES_PER_SECTION} entries")
+            entries: list[TailoredEntry] = []
+            for entry in section.entries:
+                place = place_of(section.heading, entry.heading[0].text if entry.heading else "")
+                head = [line for line in (heading(item) for item in entry.heading) if line is not None]
+                bullets = [line for item in entry.bullets for line in body(item, place, section.heading)]
+                total += len(entry.heading) + len(entry.bullets)
+                entries.append(TailoredEntry(tuple(head), tuple(bullets)))
+            sections.append(TailoredSection(section.heading, (), tuple(entries)))
+        else:
+            place = place_of(section.heading)
+            lines = [line for item in section.lines for line in body(item, place, section.heading)]
+            total += len(section.lines)
+            sections.append(TailoredSection(section.heading, tuple(lines), ()))
+    if total > MAX_TOTAL_LINES:
+        invalid.append(f"the resume has {total} lines; at most {MAX_TOTAL_LINES} allowed")
+
+    if invalid:
+        _refuse("resume_markdown_invalid", "this markdown cannot be stored as a tailored resume", invalid)
+    if problems:
+        raise HandbackRefused(problems)
+    result = _with_ids(TailoredResume((), tuple(sections)))
+    if detect_contact_details(render_markdown(result)):
+        raise TailorError("personal_info_refused", "the resume holds a contact detail; GigAI stores no name or contact details")
+    return result
+
+
+def _master_basis(home_root: Path, target: Path, profile_id: str | None):
+    """The stored master (``master_store.StoredMaster``) when this profile's resumes are made from it, else ``None``.
+
+    ``tailor_master.tailoring_basis`` decides, as for a tailoring: a master is stored and can be read, the resume
+    is a profile's, and the profile is not detached.  ``None`` keeps the 0.1.10 check against the profile's own resume.
+    """
+
+    if profile_id is None:
+        return None
+    from ..workpad import WorkpadError, resolve_workpad
+    from . import profile_records
+    from .tailor_master import BASIS_MASTER, stored_master, tailoring_basis
+
+    try:
+        resolved = resolve_workpad(home_root=home_root, requested_target=target, gig_id=None, allow_semantic_state=True)
+        stored = stored_master(home_root, target, resolved=resolved)
+        if stored is None:
+            return None
+        profile = next((record for record in profile_records.list_profiles(resolved) if record.profile_id == profile_id and record.state != "deleted"), None)
+    except (WorkpadError, profile_records.ProfileRecordError):
+        return None
+    return stored if tailoring_basis(home_root, profile, master_stored=True) == BASIS_MASTER else None
+
+
+def _pages(markdown: str) -> int | None:
+    """The fewest pages the markdown prints on (the tightest spacing the PDF may choose); ``None`` when that cannot be counted."""
+
+    try:
+        from .resume_pdf import SPACING_MIN, measure_markdown
+
+        return measure_markdown(markdown, spacing_scale=SPACING_MIN)[0]
+    except Exception:  # noqa: BLE001 - no renderer (Typst missing or failing) or markdown the format check refuses next: the length is not checked, never guessed
+        return None
+
+
 @dataclass(frozen=True)
 class AttachedResume:
     """What an attach did: the stored resume, whether it changed anything, and the file in the resumes folder."""
@@ -430,10 +676,13 @@ def attach_edited_resume(
 ) -> AttachedResume:
     """Store ``markdown`` as the tailored resume of the job at ``job_url`` for one profile (default: the selected one).
 
-    Validated by ``edited_result``; stored where a tailoring is stored, marked ``edited``, and its
-    markdown written to the resumes folder.  Attaching what is already stored changes nothing
-    (``changed`` false).  Raises ``TailorError`` with ``edited_result``'s codes or the tailoring's
-    input codes (``job_input_invalid``, ``job_fetch_failed``, ``profile_not_found`` ...).
+    Validated by ``handback_result`` against the MASTER when this profile's resumes are made from it
+    (0.1.11 N2; the stored resume then names the master revision it was checked against), else by
+    ``edited_result`` against the profile's own resume, as before.  Stored where a tailoring is
+    stored, marked ``edited``, and its markdown written to the resumes folder.  Attaching what is
+    already stored changes nothing (``changed`` false).  Raises ``TailorError`` with the check's
+    codes (``HandbackRefused`` lists every problem) or the tailoring's input codes
+    (``job_input_invalid``, ``job_fetch_failed``, ``profile_not_found`` ...).
     """
 
     home_root, target = Path(home_root), Path(target)
@@ -457,10 +706,26 @@ def attach_edited_resume(
     matrix, assessment_path = _stored_matrix(home_root, target, job.job_identity)
     ctx = tailor_context(resume.text, answers=answers, matrix=matrix)
     tailor_job = TailorJob(title=job.title, company=job.company, location=job.location, posting_text=job.text)
+    # 0.1.11 N2: a profile whose resumes are made from the master is checked against the master, every line by id.
+    basis = _master_basis(home_root, target, resume.profile_id)
+    master_source = None
+    line_count = len(resume_lines(resume.text))
+    pages = None
+    if basis is not None:
+        from .tailor_master import MasterSource
+
+        master_source = MasterSource(basis.revision.revision_id, basis.revision.revision, basis.revision.content_sha256)
+        line_count = len(master_lines(basis.master).lines)
+        pages = _pages(markdown) if isinstance(markdown, str) else None
     # The stored resume is read and replaced under the store's write lock: no model call is out, only local work.
     with tailored_resume_write_lock(path):
         previous = read_tailored_resume(path)
-        result = edited_result(markdown, ctx=ctx, job=tailor_job, previous=previous)
+        if basis is None:
+            result = edited_result(markdown, ctx=ctx, job=tailor_job, previous=previous)
+        else:
+            result = handback_result(
+                markdown, master=basis.master, answers=answers, previous=None if previous is None else previous.result, pages=pages,
+            )
         if previous is not None and previous.result == result:
             return AttachedResume(previous, False)
         response = TailorResponse(
@@ -468,9 +733,10 @@ def attach_edited_resume(
             resume=resume,
             sources=TailorSources(
                 resume_content_sha256=resume.content_sha256,
-                resume_line_count=len(resume_lines(resume.text)),
+                resume_line_count=line_count,
                 answers={key: item.revision_id for key, item in answers.items()},
                 assessment_stored_path=assessment_path,
+                master=master_source,
             ),
             result=result,
             markdown=render_markdown(result),
@@ -524,8 +790,10 @@ __all__ = [
     "RECHECK_NOT_QUEUED",
     "RECHECK_SCHEMA",
     "AttachedResume",
+    "HandbackRefused",
     "attach_edited_resume",
     "edit_mark",
     "edited_result",
+    "handback_result",
     "queue_recheck",
 ]
