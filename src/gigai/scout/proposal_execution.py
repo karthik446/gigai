@@ -192,12 +192,9 @@ def _assess_node_body(
     from .find_jobs.contracts import (
         AssessOutput,
         is_assess_all,
-        AssessmentResult,
-        MatrixStatus,
         NotAssessedReason,
         NotAssessedRow,
         Producer,
-        RequirementMatrixRow,
         RowOutcome,
         SelectionRule,
         PostingRowResult,
@@ -232,7 +229,7 @@ def _assess_node_body(
     root = Path(target) if isinstance(target, Path) else Path(context.workpad_path)
     resume = _read_pinned_resume(home_root, root, context.gig_id, input.pinned_resume)
     acquire_rows = _read_acquire_rows(root, input.acquire_batch_ref)
-    policy = assess_invocation_policy(model_target, input)
+    assess_invocation_policy(model_target, input)  # refuses an unsupported model target; each call builds its own policy
     # 0110-035: where this run's sealed input and the earlier runs' outputs
     # are. A launched run has them in the WORKPAD while ``root`` is the
     # target folder; reading ``root`` there found nothing, so a launched

@@ -30,7 +30,6 @@ from .config import _prefs_prefill_from_config
 from .server import (
     ConfigMissingError,
     DiscoveryUnavailableError,
-    SetupPrefsMissingError,
     SetupValidationError,
     _logger,
 )

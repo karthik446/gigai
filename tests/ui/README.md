@@ -363,7 +363,7 @@ To go back for one run, set `report` in the job again. There is no per-test swit
 | Job | When | Runs | Step limit |
 |---|---|---|---|
 | `ui` (Browser tests, small home) | every PR, every release pre-check; not the post-release sweep | `make ui-test` | 10 min (the job: 20) |
-| `operator-home` (timing gate and browser flows) | the release pre-check only (profile `release`) | the home built once, `make test-operator-home`, then `make ui-test-operator` | 5, 10 and 5 min (the job: 30) |
+| `operator-home` (timing gate, browser flows, core-flow smoke) | the release pre-check only (profile `release`) | the home built once, `make test-operator-home`, then `make ui-test-operator`, then `make test-core-flow` (0110-10-hf2: the wheel's `gigai` command on that home, cold then warm; tools/core_flow.py) | 5, 10, 5 and 20 min (the job: 50) |
 
 - Both set `GIGAI_UI_BUDGETS: report`. A failed structural or console check fails the job.
 - The step limits are the smallest multiple of 5 minutes that is at least 3 times the time on a

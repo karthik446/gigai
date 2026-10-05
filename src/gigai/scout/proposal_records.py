@@ -477,7 +477,7 @@ def save_assessment_revision(*, home_root, target, posting: SelectedPosting, res
     data = canonical_json_bytes(record)
     operation_key = "assessment-" + digest_imported_bytes(data)
     def operation(writer: JournalWriter) -> str:
-        entry = writer.record(JournalTransition(
+        writer.record(JournalTransition(
             f"handoff_{uuid.uuid4()}", "private_record_revised", "Immutable Scout find-jobs assessment revision recorded.",
             (JournalArtifact(path, data),),
             {"project_id": resolved.project_id, "gig_id": resolved.gig_id, "domain": "scout-proposal", "operation_key": operation_key, "source": "scout-proposal-records", "actor": {"kind": "gigai", "id": "scout-proposal-records"}, "outcome": "COMMITTED", "artifact_refs": [_handoff_ref(path, data)]},

@@ -40,29 +40,24 @@ import os
 import sys
 from pathlib import Path
 
-from .api.common import RUN_START_TIMEOUT_SECONDS
+from .api.common import RUN_START_TIMEOUT_SECONDS  # noqa: F401 - re-export: tests import it from this shim
 from .api.server import (
     API_BIND,
     Backend,
-    ConfigMissingError,
-    DiscoveryConflictError,
-    DiscoveryUnavailableError,
-    LOGGER_NAME,
-    NotWiredBackend,
+    ConfigMissingError,  # noqa: F401 - re-export: tests import it from this shim
+    DiscoveryConflictError,  # noqa: F401 - re-export: tests import it from this shim
+    DiscoveryUnavailableError,  # noqa: F401 - re-export: tests import it from this shim
+    LOGGER_NAME,  # noqa: F401 - re-export: tests import it from this shim
+    NotWiredBackend,  # noqa: F401 - re-export: tests import it from this shim
     ScoutFindJobsBackend,
-    SetupPrefsMissingError,
-    SetupValidationError,
-    _RunBoundaryError,
-    _atomic_write_json,
-    _configure_logging,
-    _gigai_version,
+    SetupPrefsMissingError,  # noqa: F401 - re-export: tests import it from this shim
+    SetupValidationError,  # noqa: F401 - re-export: tests import it from this shim
     _logger,
-    _make_handler,
+    _make_handler,  # noqa: F401 - re-export: tests import it from this shim
     serve,
 )
-from .api.config import _prefs_prefill_from_config
-from .api.setup import _validate_setup_body
-from .api.static import _UI_DIST_RELATIVE_PARTS
+from .api.setup import _validate_setup_body  # noqa: F401 - re-export: tests import it from this shim
+from .api.static import _UI_DIST_RELATIVE_PARTS  # noqa: F401 - re-export: api/static.py reads it here, tests patch it here
 
 _TEST_HTTP_ENV = "GIGAI_SCOUT_FIND_JOBS_TEST_HTTP"
 _TEST_MODEL_ENV = "GIGAI_SCOUT_FIND_JOBS_TEST_MODEL"
@@ -136,7 +131,6 @@ def _start_contact_cleanup(home_root: Path, target: Path) -> None:
     import threading
 
     from ..contact_cleanup import run_cleanup
-    from .api.server import _logger
 
     def work() -> None:
         report = run_cleanup(home_root=home_root, target=target if target.is_dir() else None)

@@ -39,7 +39,6 @@ from urllib.parse import parse_qs, quote, urlsplit
 
 from ....canonical import parse_json_bytes
 from ... import story_bank
-from ...experience_answers import read_answers
 from ...question_ids import normalize_question_id
 from ...quick_assess import QuickAssessError, list_quick_assessments
 from ...requirement_weights import minor_gap_text, minor_gaps

@@ -134,7 +134,6 @@ from .quick_assess import (
     QuickAssessError,
     _apply_job_overrides,
     _default_model_target,
-    _read_stored as _read_stored_assessment,
     _resolve_binding,
     _resolve_workpad,
     find_quick_assessment_by_job_identity,
