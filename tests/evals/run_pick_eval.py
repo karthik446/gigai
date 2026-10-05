@@ -513,11 +513,34 @@ def payload(posting_ids: list[str], sizes: list[str], variations: list[str], pat
     return {"today": _load("sizes.json")["today"], "paths": paths, "cases": cases}
 
 
+#: The cases (posting x size x variation) one child process computes.  The layout engine under the page measure
+#: (``typst.query``) keeps NATIVE memory for every layout, which the process that made the call never gives back
+#: (freeing the Python results does not release it): a posting's 27 cases (81 selections) leave about 3.7 GB in it.
+#: A child that computes 3 cases peaks near 0.6 GB and takes it all with it when it exits; a child costs about
+#: 0.3 s to start (measured on macOS, Python 3.11 and 3.13).
+CASES_PER_CHILD = 3
+
+
+def in_children(request: dict[str, object], tree: Path) -> dict[str, object]:
+    """``pick_probe.probe(request)`` by ``tree``'s selector, ``CASES_PER_CHILD`` cases to a short-lived child process."""
+
+    cases: list[dict[str, object]] = request["cases"]  # type: ignore[assignment]
+    answer: dict[str, object] = {"selector_version": "", "results": {}}
+    for start in range(0, len(cases), CASES_PER_CHILD):
+        part = pick_probe.run_in_tree({**request, "cases": cases[start:start + CASES_PER_CHILD]}, tree)
+        answer = {**part, "results": {**answer["results"], **part["results"]}}  # type: ignore[dict-item]
+    return answer
+
+
 def run(
     posting_ids: list[str] | None = None, sizes: list[str] | None = None, variations: list[str] | None = None, paths: list[str] | None = None,
     *, tree: Path | None = None, assessed: bool = False,
 ) -> dict[tuple[str, str, str, str], Checks]:
     """``(posting, size, variation, path) -> Checks`` for the grid, by this checkout's selector or by ``tree``'s.
+
+    ``tree``: the selections are made in short-lived child processes (``in_children``), and what the layout engine
+    keeps dies with them; ``tree=REPO`` is this checkout that way.  Without it they are made in THIS process, which
+    keeps that memory until it exits: for a few cells only.
 
     ``assessed``: every posting with its synthetic assessment (the module text). A tree whose selector does not read
     citations selects as it does without them; the ``cited`` check is made on its final selection all the same.
@@ -526,7 +549,7 @@ def run(
     posting_ids = posting_ids or sorted(postings())
     sizes, variations, paths = sizes or list(SIZES), variations or list(VARIATIONS), paths or list(PATHS)
     request = payload(posting_ids, sizes, variations, paths, assessed=assessed)
-    answer = pick_probe.run_in_tree(request, tree) if tree is not None else pick_probe.probe(request)
+    answer = in_children(request, tree) if tree is not None else pick_probe.probe(request)
     out: dict[tuple[str, str, str, str], Checks] = {}
     for posting in posting_ids:
         for size in sizes:
@@ -684,7 +707,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.baseline is not None:
         runs.append((f"BASELINE ({args.baseline.name})", run(args.posting, args.size, args.variation, args.path, tree=args.baseline, assessed=args.assessed)))
     if not args.only_baseline:
-        runs.append(("THIS CHECKOUT", run(args.posting, args.size, args.variation, args.path, assessed=args.assessed)))
+        runs.append(("THIS CHECKOUT", run(args.posting, args.size, args.variation, args.path, tree=REPO, assessed=args.assessed)))
     for name, results in runs:
         print(f"\n## {name}{' (every posting with its assessment)' if args.assessed else ''}\n")
         for path in args.path or PATHS:

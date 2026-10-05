@@ -26,11 +26,17 @@ A TITLE THAT NAMES AN ENTRY (0.1.10.11 PICK v5), with and without an assessment:
 The posting ``titlematch`` is the case (its title names the agent-runtime projects; its assessment cites lines of the
 roles only).  ``sel-3`` fails H6 in all 162 of its cells: ``python -m tests.evals.run_pick_eval --posting titlematch
 [--assessed] --baseline <a git archive of 567bd940>``.
+
+WHERE THE SELECTIONS ARE MADE (0.1.10.11 TE): in short-lived child processes, 3 cases to a child (``_results``;
+``ev.CASES_PER_CHILD`` says why), never in the pytest process.  Only the checks of each cell are kept between tests.
 """
 
 from __future__ import annotations
 
 import json
+import resource
+import subprocess
+import sys
 
 import pytest
 
@@ -40,13 +46,33 @@ from gigai.scout.master_selection import is_old_role
 from tests.evals import run_pick_eval as ev
 
 POSTINGS = ("agentic", "backend", "leadership", "sre", "titlematch", "weakfit")
-_RESULTS: dict[tuple[str, bool], dict[tuple[str, str, str, str], ev.Checks]] = {}
+#: The highest resident size one child may reach, and how much this process may grow while a child works, in MB.
+CHILD_BUDGET_MB, OWN_GROWTH_MB = 1500, 100
+#: ``(posting, assessed, size, variation) -> its checks by path``: small tables of ids, all that is kept between tests.
+_CELLS: dict[tuple[str, bool, str, str], dict[str, ev.Checks]] = {}
 
 
-def _results(posting: str, *, assessed: bool = False) -> dict[tuple[str, str, str, str], ev.Checks]:
-    if (posting, assessed) not in _RESULTS:
-        _RESULTS[(posting, assessed)] = ev.run([posting], assessed=assessed)
-    return _RESULTS[(posting, assessed)]
+def _results(
+    posting: str, *, assessed: bool = False, sizes: tuple[str, ...] = ev.SIZES, variations: tuple[str, ...] = ev.VARIATIONS,
+) -> dict[tuple[str, str, str, str], ev.Checks]:
+    """The checks of ``posting``'s cells (all 81 unless narrowed), the selections made in short-lived child processes.
+
+    Never in this process: the layout engine keeps native memory per layout that only the end of the process gives
+    back (``ev.CASES_PER_CHILD``), and one posting's grid made here left about 3.7 GB in the pytest worker.
+    """
+
+    for size in sizes:
+        missing = [variation for variation in variations if (posting, assessed, size, variation) not in _CELLS]
+        if missing:
+            for (_posting, _size, variation, path), checks in ev.run([posting], [size], missing, tree=ev.REPO, assessed=assessed).items():
+                _CELLS.setdefault((posting, assessed, size, variation), {})[path] = checks
+    return {(posting, size, variation, path): checks for size in sizes for variation in variations for path, checks in _CELLS[(posting, assessed, size, variation)].items()}
+
+
+def _peak_mb(who: int) -> float:
+    """The highest resident size so far of this process (``RUSAGE_SELF``) or of any child it has waited for, in MB."""
+
+    return resource.getrusage(who).ru_maxrss / (2**20 if sys.platform == "darwin" else 2**10)
 
 
 def test_the_fixtures_are_synthetic_and_every_label_names_a_line_the_master_holds() -> None:
@@ -113,6 +139,33 @@ def test_every_variation_is_the_master_it_says_it_is() -> None:
     assert next(requirement for requirement in requirements if requirement.id == "S5").lines == {}
 
 
+def test_a_grid_is_made_in_short_lived_children_and_leaves_this_process_s_memory_alone(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The memory fix (0.1.10.11 TE). Made in the pytest process, every grid of this file left about 3.7 GB in it
+    (the layout engine's native memory, ``ev.CASES_PER_CHILD``) and the 16 GB CI runner was killed. One size of one
+    posting, made again: this process does not grow, no child passes the budget, and every child is given 3 cases."""
+
+    given: list[int] = []
+    real = subprocess.run
+
+    def counted(command: list[str], **options: object) -> object:
+        if str(command[-1]).endswith("pick_probe.py"):
+            given.append(len(json.loads(str(options["input"]))["cases"]))
+        return real(command, **options)  # type: ignore[call-overload]
+
+    monkeypatch.setattr(subprocess, "run", counted)
+    for variation in ev.VARIATIONS:
+        _CELLS.pop(("weakfit", False, "large", variation), None)
+    own, children = _peak_mb(resource.RUSAGE_SELF), _peak_mb(resource.RUSAGE_CHILDREN)
+    results = _results("weakfit", sizes=("large",))
+    assert len(results) == 27 and not any(checks.error for checks in results.values())
+    grew = _peak_mb(resource.RUSAGE_SELF) - own
+    assert grew < OWN_GROWTH_MB, f"the test process grew by {grew:.0f} MB while 27 selections were made"
+    # ``max``: a larger child of another test in this worker is not this file's to answer for.
+    largest = _peak_mb(resource.RUSAGE_CHILDREN)
+    assert largest <= max(children, CHILD_BUDGET_MB), f"a child reached {largest:.0f} MB"
+    assert given == [ev.CASES_PER_CHILD] * 3 == [3, 3, 3], "9 cases: 3 children of 3 cases each"
+
+
 @pytest.mark.parametrize("posting", POSTINGS)
 def test_the_hard_tests_hold_in_every_cell_of_a_posting(posting: str) -> None:
     results = _results(posting)
@@ -130,7 +183,7 @@ def test_the_hard_tests_hold_in_every_cell_of_a_posting(posting: str) -> None:
     ("weakfit", "W4", "ost-07", ("large",)),
 ])
 def test_an_older_role_that_holds_the_only_evidence_keeps_that_line(posting: str, requirement: str, line: str, sizes: tuple[str, ...]) -> None:
-    results = _results(posting)
+    results = _results(posting, sizes=sizes, variations=("base",))
     for size in sizes:
         for path in ev.PATHS:
             checks = results[(posting, size, "base", path)]
@@ -146,7 +199,7 @@ def test_the_agentic_posting_does_not_get_worse_as_the_master_grows() -> None:
     every mandatory requirement keeps its strongest line, and the new project's multi-agent and durable-runtime
     lines are shown."""
 
-    results = _results("agentic")
+    results = _results("agentic", sizes=("medium", "large"), variations=("base",))
     for path in ev.PATHS:
         medium, large = results[("agentic", "medium", "base", path)], results[("agentic", "large", "base", path)]
         assert (medium.lost, medium.weak, medium.omitted) == ((), (), ()) == (large.lost, large.weak, large.omitted), path
@@ -236,7 +289,7 @@ def test_each_of_the_five_cases_keeps_its_cited_line_on_every_path() -> None:
     checked = 0
     for name, cases in spec["shapes"].items():
         for case in cases:
-            results = _results(case["posting"], assessed=True)
+            results = _results(case["posting"], assessed=True, sizes=tuple(case["sizes"]), variations=(case["variation"],))
             for size in case["sizes"]:
                 for path in ev.PATHS:
                     assert case["line"] in results[(case["posting"], size, case["variation"], path)].shown, (name, size, path)
@@ -246,7 +299,7 @@ def test_each_of_the_five_cases_keeps_its_cited_line_on_every_path() -> None:
     # words cuts them), in the largest master of each case.
     for name, cases in spec["shapes"].items():
         for case in cases:
-            plain = _results(case["posting"])[(case["posting"], case["sizes"][-1], case["variation"], "select")]
+            plain = _results(case["posting"], sizes=(case["sizes"][-1],), variations=(case["variation"],))[(case["posting"], case["sizes"][-1], case["variation"], "select")]
             assert case["line"] not in plain.shown, (name, "the case would pass without the fix")
 
 
