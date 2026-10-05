@@ -276,14 +276,18 @@ def test_the_question_says_k_tokens_when_enough_postings_wait_to_reach_1000(tmp_
     assert under["status"] == "ask" and under["question"]["estimate"]["tokens"] == 33 * 30 == 990  # type: ignore[index]
     assert str(under["question"]["text"]).endswith("? ~33 calls")  # type: ignore[index]  # under 1,000 tokens: no cost is said
 
-    fx.seed("more", [lever_job("more", n) for n in range(21)], seen_at=days_ago(1))  # 54 postings to assess: 1,620 tokens
+    # 54 postings to assess. 0110-10-11: a yes is the newest 50 at a time, so the cost said is the 50's: 1,500 tokens.
+    fx.seed("more", [lever_job("more", n) for n in range(21)], seen_at=days_ago(1))
     over = posting_search.assess_these(fx.home_root, fx.target, now=NOW)
-    assert over["question"]["estimate"]["tokens"] == 54 * 30 == 1620  # type: ignore[index]
-    assert str(over["question"]["text"]).endswith("? ~54 calls, ~2k tokens")  # type: ignore[index]
+    assert (over["question"]["to_assess"], over["question"]["batch"]) == (54, 50)  # type: ignore[index]
+    assert over["question"]["estimate"]["tokens"] == 50 * 30 == 1500  # type: ignore[index]
+    assert str(over["question"]["text"]).endswith("? ~50 calls, ~2k tokens (4 more after these 50)")  # type: ignore[index]
 
     asked = scout_new.scout_new(fx.home_root, fx.target, now=NOW)
-    assert asked["status"] == "ask" and asked["question"]["estimate"]["tokens"] == 1620  # type: ignore[index]
-    assert str(asked["question"]["text"]).endswith("Assess them? ~54 calls, ~2k tokens")  # type: ignore[index]
+    assert asked["status"] == "ask" and asked["question"]["estimate"]["tokens"] == 1500  # type: ignore[index]
+    assert str(asked["question"]["text"]).endswith(  # type: ignore[index]
+        "Assess the newest 50 of 54 not assessed yet? ~50 calls, ~2k tokens (4 more after these 50)"
+    )
     assert (scout_new._tokens(999), scout_new._tokens(1000)) == (", ~999 tokens", ", ~1k tokens")
     assert fx.base.model.calls == calls  # the questions called no model
 
@@ -321,7 +325,7 @@ def test_a_rank_run_over_6000_postings_is_capped_at_180_calls() -> None:
 # ---------------------------------------------------------------------------- the pages: counted in full, listed up to the limit
 
 
-def test_assess_these_counts_205_postings_and_lists_200(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_assess_these_counts_205_postings_and_lists_the_50_a_yes_would_assess(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     assert posting_search.MAX_LIMIT == 200
     fx = build_postings_fixture(tmp_path, monkeypatch, deleted=False)
     fx.seed("wide", [lever_job("wide", n) for n in range(205)], seen_at=days_ago(1))
@@ -329,8 +333,10 @@ def test_assess_these_counts_205_postings_and_lists_200(tmp_path: Path, monkeypa
     ask = posting_search.assess_these(fx.home_root, fx.target, now=NOW)
 
     assert ask["status"] == "ask" and ask["counts"]["to_assess"] == 205 and ask["question"]["to_assess"] == 205  # type: ignore[index]
+    # 0110-10-11: all 205 are counted; the approval is the newest 50, and those are the rows listed (it listed 200 before).
+    assert (ask["counts"]["batch"], ask["counts"]["more_after"], ask["question"]["batch"]) == (50, 155, 50)  # type: ignore[index]
     rows = ask["postings"]["rows"]  # type: ignore[index]
-    assert len(rows) == 200 and len({row["job_identity"] for row in rows}) == 200
+    assert len(rows) == 50 and len({row["job_identity"] for row in rows}) == 50
     assert fx.base.model.calls == 0
 
 

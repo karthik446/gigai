@@ -49,7 +49,14 @@ store, so the read model shows them at once. 0110-10-02: a posting whose rank
 score is below the assess threshold (``fit.assess_min_rank``, 50) is left out
 of the batch and counted; ``low_rank`` in the response is the separate
 question for those ("3 low-ranked ones are skipped; assess those too? ~3
-calls"), and ``include_low_rank`` assesses them with the rest.
+calls"), and ``include_low_rank`` assesses them with the rest. 0110-10-11 (the
+operator's rule, ``scout_new.BATCH_LIMIT``): one approval assesses the NEWEST
+50 of them and never more (by the day the posting went up, else by when Scout
+first saw it). The question says the real total and the 50 ("Assess the
+newest 50 of 120 postings? ~50 calls ... (70 more after these 50)"), its
+estimate is the batch's, ``question.batch`` / ``more_after`` and
+``counts.batch`` / ``more_after`` say the same in numbers, and the same call
+again assesses the next 50.
 
 LABELS (data_labels, P4): like ``scout new``, no response mixes. A response
 holds posting text and what a model derived from it (``public-untrusted``)
@@ -88,8 +95,10 @@ from .scout_new import (
     _row_json,
     _score,
     _shown,
+    batch_date,
     check_response,
     in_order,
+    newest_batch,
     posted_text,
     split_low_rank,
 )
@@ -542,7 +551,11 @@ def assess_these(
             # 0110-10-02: only a rank score of the threshold or more is assessed by default; the rest is its own question.
             setting = fit_rules.fit_setting(home_root, target)
             ranks = {(row.job, row.profile_id): row.rank_score for _group, row in selection.shown}
-            pairs, low = split_low_rank(candidates, ranks, setting, include=include_low_rank)
+            wanted, low = split_low_rank(candidates, ranks, setting, include=include_low_rank)
+            # 0110-10-11: one approval assesses the newest 50, never more; ``wanted`` is all of them, ``pairs`` the batch.
+            dates = {(row.job, row.profile_id): batch_date(row) for _group, row in selection.shown}
+            pairs, later = newest_batch(wanted, dates)
+            low_batch, low_later = newest_batch(low, dates)
             model, estimate = _estimate(pairs, home_root, target)
             per_profile: dict[str, int] = {}
             for _job, owner in pairs:
@@ -553,8 +566,9 @@ def assess_these(
             tokens = estimate["tokens"]
             cost = f", ~{tokens / 1000:.0f}k tokens" if isinstance(tokens, (int, float)) and tokens >= 1000 else ""
             sentence = (
-                f"Assess {len(pairs)} posting{'s' if len(pairs) != 1 else ''}"
+                (f"Assess the newest {len(pairs)} of {len(wanted)} postings" if later else f"Assess {len(pairs)} posting{'s' if len(pairs) != 1 else ''}")
                 + (f" ({named_profiles})" if named_profiles else "") + f"? ~{estimate['calls']} calls{cost}"
+                + (f" ({later} more after these {len(pairs)})" if later else "")
             )
             body: dict[str, object] = {"approve": True}
             if named is not None:
@@ -568,21 +582,23 @@ def assess_these(
                 body["include_low_rank"] = True
             low_rank: dict[str, object] | None = None
             if low:
-                low_estimate = _estimate(low, home_root, target)[1]
+                low_estimate = _estimate(low_batch, home_root, target)[1]
                 low_tokens = low_estimate["tokens"]
                 low_cost = f", ~{low_tokens / 1000:.0f}k tokens" if isinstance(low_tokens, (int, float)) and low_tokens >= 1000 else ""
                 one = len(low) == 1
                 low_rank = {
                     "kind": "assess_low_rank", "skipped": len(low), "min_rank": setting.assess_min_rank, "estimate": low_estimate,
+                    "batch": len(low_batch), "more_after": low_later,
                     "text": (
                         f"{len(low)} low-ranked {'one is' if one else 'ones are'} skipped (rank below {setting.assess_min_rank}); "
-                        f"assess {'that' if one else 'those'} too? ~{low_estimate['calls']} calls{low_cost}"
+                        f"assess {f'the newest {len(low_batch)} of ' if low_later else ''}{'that' if one else 'those'} too? "
+                        f"~{low_estimate['calls']} calls{low_cost}" + (f" ({low_later} more after these {len(low_batch)})" if low_later else "")
                     ),
                     "yes": {"api": {"method": "POST", "path": "/api/postings/assess", "body": {**body, "include_low_rank": True}}},
                 }
             question = {
-                "kind": "assess_these", "selected": len(selection.shown), "to_assess": len(pairs), "already_current": current,
-                "low_rank_skipped": len(low),
+                "kind": "assess_these", "selected": len(selection.shown), "to_assess": len(wanted), "already_current": current,
+                "low_rank_skipped": len(low), "batch": len(pairs), "more_after": later,
                 "by_profile": by_profile, "model_target": model, "estimate": estimate, "text": sentence,
                 "yes": {"api": {"method": "POST", "path": "/api/postings/assess", "body": body}},
             }
@@ -627,7 +643,7 @@ def assess_these(
             # 0110-10-13: what the question's postings would send, by category (ids, labels, counts; no text). Only while
             # nothing was assessed: the low-ranked ones when only their question is left.
             summary: dict[str, object] | None = None
-            asked = pairs or low
+            asked = pairs or low_batch
             if status != STATUS_ASSESSED and asked:
                 stored_text = {(row.job, row.profile_id): row.listing_known for _group, row in selection.shown}
                 summary = model_input_summary(
@@ -643,8 +659,8 @@ def assess_these(
                 "question": question if status == STATUS_ASK else None,
                 "model_input_summary": summary,
                 "counts": {
-                    "selected": len(found), "to_assess": len(pairs), "already_current": current, "not_found": len(not_found),
-                    "low_rank_skipped": len(low),
+                    "selected": len(found), "to_assess": len(wanted), "already_current": current, "not_found": len(not_found),
+                    "low_rank_skipped": len(low), "batch": len(pairs), "more_after": later,
                 },
                 "low_rank": low_rank,
                 "not_found": not_found,
@@ -683,6 +699,8 @@ def render(response: Mapping[str, object]) -> str:
             for item in assessed["failed"]:  # type: ignore[union-attr]
                 lines.append(f"  not assessed ({item['error_code']}{': ' + str(item['reason']) if item.get('reason') else ''}): {item['job_identity']}")
             lines.extend(failure_lines(assessed["failed"]))  # 0110-10-13: each typed cause once, with its facts and next action
+            if counts.get("more_after"):  # 0110-10-11
+                lines.append(f"{counts['more_after']} more not assessed yet: 50 at a time. Run the same command again for the next 50.")
         elif not isinstance(response.get("low_rank"), Mapping):
             lines.append("Nothing to assess: every selected posting has a current assessment.")
         low = response.get("low_rank")

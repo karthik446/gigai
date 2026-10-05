@@ -2491,10 +2491,35 @@ def _sources_progress_line(snapshot: dict[str, object]) -> str:
     boards = boards if isinstance(boards, dict) else {}
     postings = postings if isinstance(postings, dict) else {}
     failed = f", {boards.get('failed')} failed" if boards.get("failed") else ""
+    # 0110-10-11: ``total`` is the boards DUE this run, not every stored company: the line says which, and how many
+    # were checked recently and are left alone (``up_to_date``).
+    fresh = boards.get("up_to_date")
+    left = f" ({fresh:,} more were checked recently and are not asked again)" if isinstance(fresh, int) and fresh > 0 else ""
     return (
-        f"Boards {boards.get('checked', 0)} of {boards.get('total', 0)}{failed}: "
+        f"Boards due this run: {boards.get('checked', 0):,} of {boards.get('total', 0):,} checked{failed}{left}: "
         f"{postings.get('new', 0)} new, {postings.get('changed', 0)} changed, {postings.get('removed', 0)} removed"
     )
+
+
+def _sources_checked_line(boards: dict[str, object], elapsed: float) -> str:
+    """0110-10-11: what one update checked, out of ALL the watched companies, and why the rest were not asked.
+
+    ``boards.total`` is the boards that were due (never checked, or checked more than a day ago); ``up_to_date`` the
+    ones checked within the last day, which an update leaves alone. Their sum is every watched company: the number
+    ``gigai scout sources status`` gives as stored companies, give or take a company whose board never answered.
+    """
+
+    checked, due = int(boards["checked"]), int(boards["total"])  # type: ignore[call-overload]
+    fresh = boards.get("up_to_date")
+    fresh = fresh if isinstance(fresh, int) and fresh > 0 else 0
+    line = (
+        f"Checked {checked:,} of {due + fresh:,} companies this run "
+        f"({boards['cached']} unchanged, {boards['failed']} did not answer) in {elapsed:.0f}s."
+    )
+    if fresh:
+        was = "was" if fresh == 1 else "were"
+        line += f" The other {fresh:,} {was} checked within the last day and {was} not asked again."
+    return line
 
 
 @sources_group.command("update")
@@ -2581,10 +2606,9 @@ def sources_update_command(
         boards = snapshot["boards"]
         assert isinstance(boards, dict)
         click.echo(result.summary)
-        click.echo(
-            f"Checked {boards['checked']} of {boards['total']} boards "
-            f"({boards['cached']} unchanged, {boards['failed']} did not answer) in {snapshot['elapsed_seconds']:.0f}s."
-        )
+        click.echo(_sources_checked_line(boards, float(snapshot["elapsed_seconds"])))  # type: ignore[arg-type]
+        # 0110-10-11: "new" here is every posting on every board; `gigai scout new` counts only what a profile matches.
+        click.echo("New, changed and removed count every posting on every board, whatever its title; `gigai scout new` lists the new ones your profiles match.")
         asked = snapshot.get("requests_by_board")
         if isinstance(asked, dict) and asked:
             named = ", ".join(f"{board} {count}" for board, count in asked.items())
@@ -2674,13 +2698,13 @@ def metrics_command(
 
 @scout_group.command("new")
 @click.option("--profile", "profile_id", help="Only this active profile's postings. A filtered call does not move the \"new since\" anchor.")
-@click.option("--yes", "yes", is_flag=True, help="Assess the new postings no profile has assessed, without asking (one model call each). Never the old assessments: that is --reassess-stale.")
-@click.option("--reassess-stale", "reassess_stale", is_flag=True, help="The yes to the other question: assess again the postings that have only an old assessment (one model call each). Can be combined with --yes.")
+@click.option("--yes", "yes", is_flag=True, help="Assess the new postings no profile has assessed, without asking (one model call each): the newest 50, never more in one call. Never the old assessments: that is --reassess-stale.")
+@click.option("--reassess-stale", "reassess_stale", is_flag=True, help="The yes to the other question: assess again the postings that have only an old assessment (one model call each): the newest 50, never more in one call. Can be combined with --yes.")
 @click.option("--include-low-rank", "include_low_rank", is_flag=True, help="With --yes or --reassess-stale: also the low-ranked postings (rank below fit.assess_min_rank, 50), which a yes leaves out by default.")
-@click.option("--no-assess", "no_assess", is_flag=True, help="Do not ask and do not assess: show the new postings ranked only.")
+@click.option("--no-assess", "no_assess", is_flag=True, help="Do not ask and do not assess: show the new postings ranked only. Never waits for an answer, in a terminal or without one: the offers are printed with their counts.")
 @click.option("--yours", "yours", is_flag=True, help="The separate call: what matches, from your own resume and answers. Never shown next to posting text; never moves the anchor.")
 @click.option("--peek", "peek", is_flag=True, help="Look without moving the \"new since\" anchor.")
-@click.option("--process", "process", is_flag=True, help="The yes to the pipeline offer: approve what waits for an approval and run the waiting pipeline steps now (model calls, within the daily cap). Does not move the anchor.")
+@click.option("--process", "process", is_flag=True, help="The yes to the pipeline offer: approve what waits for an approval and run the waiting pipeline steps now (model calls, within the daily cap; at most 50 steps in one call). Does not move the anchor.")
 @click.option("--since", "since", help="Measure \"new\" from this time: the since of the response that asked.")
 @click.option("--home", "home_value", type=click.Path(path_type=Path, file_okay=False))
 @click.option("--target", "target_value", type=click.Path(path_type=Path, file_okay=False))
@@ -2699,6 +2723,16 @@ def new_command(
     Postings that have only an OLD assessment (made by an old run, an older
     prompt or other settings) are a separate question with its own count and
     cost. --yes never answers it; --reassess-stale does.
+
+    50 at a time: every yes (--yes, --reassess-stale, an answer at a prompt)
+    acts on the newest 50 postings and never more. Each question says the
+    real total, the 50 and what the 50 cost ("re-assess the newest 50 of
+    422? ~50 calls ... (372 more after these 50)"); the same command again
+    does the next 50.
+
+    The "new since" time moves when the run has done its work: a run you
+    leave at a question (Ctrl-C) changes nothing, and the next run shows
+    the same postings as new. --no-assess never asks.
 
     A yes assesses only postings ranked 50 or more (the fit.assess_min_rank
     setting). The low-ranked ones are counted and asked about separately;
@@ -2725,7 +2759,7 @@ def new_command(
     from .data_labels import LabelError
     from .outbound_check import redact_payload
     from .pipeline.store import PipelineStoreError
-    from .scout_new import STATUS_ASK, PostingModelError, ScoutNewError, render, scout_new, scout_new_yours
+    from .scout_new import STATUS_ASK, PostingModelError, ScoutNewError, render, scout_new, scout_new_yours, settle_anchor
 
     home_root = home_value or default_home_root()
     errors = (ScoutTargetError, WorkpadError, ScoutNewError, PostingModelError, PipelineStoreError, LabelError, OSError, ValueError)
@@ -2750,48 +2784,58 @@ def new_command(
             said[0] = time.monotonic()
             click.echo(f"preparing your postings: {int(100 * done / total)}% ({done} of {total} companies)", err=True)
 
+    # 0110-10-11: --no-assess never asks ("does not ask and does not assess"), in a terminal or without one.
+    asking = not as_json and not yours and not no_assess and sys.stdin.isatty()
     try:
         target = _pipeline_target(target_value, home_root, as_json=as_json)
         if yours:
             response = scout_new_yours(home_root, target, profile_id=profile_id, since=since)
         else:
             assess = True if yes else False if no_assess else None
+            # 0110-10-11: a run that may ask holds the "new since" anchor until it has done its work (settle_anchor,
+            # below): left at a prompt (Ctrl-C, end of input), it has consumed nothing. A run that asks nothing moves
+            # the anchor itself, as before.
             response = scout_new(
                 home_root, target, profile_id=profile_id, peek=peek, assess=assess, since=since, process=process,
                 reassess_stale=reassess_stale, progress=progress, build_progress=build_progress,
-                include_low_rank=include_low_rank,
+                include_low_rank=include_low_rank, advance=not asking,
             )
-        if response["status"] == STATUS_ASK and not as_json and not yours and sys.stdin.isatty():
+        first = response
+        if response["status"] == STATUS_ASK and asking:
             sentence = response["question"]["text"]  # type: ignore[index]
             if click.confirm(str(sentence).rstrip("?"), default=False):
                 click.echo("Assessing (one model call per posting; this can take a few minutes)...")
-                # The first call already moved the anchor: the yes measures from the same since.
+                # The yes measures from the same since; the anchor moves when the run is done.
                 response = scout_new(
-                    home_root, target, profile_id=profile_id, peek=peek, assess=True, since=str(response["since"]), progress=progress
+                    home_root, target, profile_id=profile_id, peek=peek, assess=True, since=str(response["since"]), progress=progress,
+                    advance=False,
                 )
         low = response.get("low_rank_question")
-        if isinstance(low, dict) and not as_json and not yours and sys.stdin.isatty():
+        if isinstance(low, dict) and asking:
             # 0110-10-02: its own question, default no: a plain yes never assesses the low-ranked ones.
             if click.confirm(str(low["text"]).rstrip("?"), default=False):
                 response = scout_new(
                     home_root, target, profile_id=profile_id, peek=peek, assess=True, since=str(response["since"]),
-                    include_low_rank=True, progress=progress,
+                    include_low_rank=True, progress=progress, advance=False,
                 )
         old = response.get("stale_question")
-        if isinstance(old, dict) and not as_json and not yours and sys.stdin.isatty():
+        if isinstance(old, dict) and asking:
             # Its own question, default no: the yes above never answers it.
             if click.confirm(str(old["text"]).rstrip("?"), default=False):
                 response = scout_new(
                     home_root, target, profile_id=profile_id, peek=peek, assess=False, since=str(response["since"]),
-                    reassess_stale=True, progress=progress,
+                    reassess_stale=True, progress=progress, advance=False,
                 )
         offer = response.get("pipeline")
-        if isinstance(offer, dict) and not process and not as_json and not yours and sys.stdin.isatty():
+        if isinstance(offer, dict) and not process and asking:
             if click.confirm("Pipeline: " + str(offer["text"]).rstrip("?"), default=False):
                 click.echo("Processing (the waiting pipeline steps; this can take a few minutes)...")
                 response = scout_new(
                     home_root, target, profile_id=profile_id, peek=True, assess=False, since=str(response["since"]), process=True
                 )
+        if asking and not peek and profile_id is None and not process:
+            # Every question is answered and acted on: now the anchor moves, to the time the FIRST call read the postings.
+            settle_anchor(home_root, target, str(first["checked_at"]))
     except errors as exc:
         _fail(exc, as_json=as_json, fallback="scout_new_failed")
         return

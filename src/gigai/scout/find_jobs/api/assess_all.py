@@ -34,6 +34,14 @@ assessment is skipped. A read (``{}``) still starts nothing and calls no
 model: a stale assessment is re-assessed by the click, never by a read. A
 stale stored assessment the run itself assessed LATER is not counted (the
 run's verdict is the one shown).
+
+0110-10-11 (the operator's rule, ``scout_new.BATCH_LIMIT``): one click
+assesses the NEWEST 50 of the queue and never more (:func:`newest_queue`: by
+the day the posting went up; a posting with no date comes after the dated
+ones). ``plan.count`` is then the 50, and ``plan.total`` / ``plan.more_after``
+say how many there are in all and how many are left (neither key is there
+when the queue is 50 or fewer). The next click takes the next 50: what was
+assessed is no longer in the queue.
 """
 
 from __future__ import annotations
@@ -128,6 +136,22 @@ def live_counts(evidence, quick: dict[str, str | None], events, added_urls=()) -
     return {"assessed": assessed, "matched": matched, "needs_answers": needs_answers}
 
 
+def newest_queue(queue, published: dict[str, str | None]) -> tuple[list, int]:
+    """0110-10-11: ``(the newest 50 of the queue, in the queue's own order; how many are left)``.
+
+    ``published`` is each posting's ``published_at``. The newest first; a posting with no date after the dated
+    ones; equal dates keep the queue's order (the grid's: likely fits first).
+    """
+
+    from ... import scout_new
+
+    limit = scout_new.BATCH_LIMIT
+    if len(queue) <= limit:
+        return list(queue), 0
+    newest = sorted(range(len(queue)), key=lambda index: published.get(queue[index].normalized_url) or "", reverse=True)[:limit]
+    return [queue[index] for index in sorted(newest)], len(queue) - limit
+
+
 def assess_all_request(
     backend, run_id: str, *, start: bool = False, cancel: bool = False, only=None, limit: int | None = None
 ) -> dict[str, object]:
@@ -184,6 +208,9 @@ def assess_all_request(
     )
     if only is not None:
         queue = [item for item in queue if item.normalized_url in only][:limit]
+    # 0110-10-11: 50 at a time, the newest first; the plan says the total and what is left.
+    total = len(queue)
+    queue, later = newest_queue(queue, {row.posting.normalized_url: getattr(row.posting, "published_at", None) for row in view.rows})
     model_target = run_input.model_target.value
     concurrency = assess_all.assess_concurrency()
     body["plan"] = assess_all.plan(
@@ -194,6 +221,8 @@ def assess_all_request(
         run_seconds=assess_all.run_call_seconds(Path(resolved.path) / "runs" / run_id),
         stale_count=sum(1 for item in queue if item.normalized_url in stale),
     )
+    if later:
+        body["plan"].update({"total": total, "more_after": later})  # type: ignore[union-attr]
     if start and not cancel:
         if not evidence.terminal:
             body["skip_reason"] = "run_not_finished"
@@ -257,4 +286,4 @@ def wait_for_assess_all(*, timeout: float | None = None) -> bool:
     return assess_all.wait_for_jobs(timeout=timeout)
 
 
-__all__ = ["AssessAllRoutesMixin", "RESPONSE_SCHEMA", "assess_all_request", "live_counts", "stale_stored", "wait_for_assess_all"]
+__all__ = ["AssessAllRoutesMixin", "RESPONSE_SCHEMA", "assess_all_request", "live_counts", "newest_queue", "stale_stored", "wait_for_assess_all"]

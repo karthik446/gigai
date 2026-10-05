@@ -53,6 +53,9 @@ out.defaults = [
 out.valid = ["all", 1, 50, 0, 51, "ALL", 2.5, null].map(m.capValid);
 out.help = [m.fullAssessmentsHelp("all", "codex_cli"), m.fullAssessmentsHelp(10, "codex_cli")];
 out.button = [m.assessAllButtonLabel(measured), m.assessAllButtonLabel(null)];
+// 0110-10-11: 50 at a time. The plan is the newest 50 (`count`), all of them (`total`) and what is left (`more_after`).
+const capped = { ...measured, count: 50, total: 406, more_after: 356, estimate_minutes: 9 };
+out.capped = [m.assessAllButtonLabel(capped), m.planLine(capped), m.moreAfter(capped), m.moreAfter(measured)];
 out.jobs = [
   m.jobLine({ status: "running", text: "12 of 406 assessed, 1 failed", concurrency: 4 }),
   m.jobLine({ status: "cancelled", text: "3 of 9 assessed" }),
@@ -164,6 +167,13 @@ def test_all_new_is_the_default_for_local_targets_and_a_number_for_openrouter(ou
 
 def test_the_button_and_the_progress_lines(out: dict) -> None:
     assert out["button"] == ["Assess all new (406)", "Assess all new (0)"]
+    # 0110-10-11 (the operator's rule): one click is the newest 50, never more; the label and the line say the total.
+    assert out["capped"] == [
+        "Assess the newest 50 of 406",
+        "50 postings, one Codex call each, about 9 min at 4 at a time. 50 at a time: 356 more after these 50; click again for the next.",
+        356,
+        0,
+    ]
     assert out["jobs"] == [
         "Assessing: 12 of 406 assessed, 1 failed (4 at a time)",
         "Cancelled: 3 of 9 assessed. What finished is kept; Assess all new picks up the rest.",

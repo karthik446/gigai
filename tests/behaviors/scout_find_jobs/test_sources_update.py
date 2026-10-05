@@ -484,7 +484,10 @@ def test_cli_sources_update_refreshes_the_watchlist_and_prints_the_summary(tmp_p
     assert first.exit_code == 0, first.output
     lines = first.stdout.strip().splitlines()
     assert "2 companies with new postings: 4 new, 0 changed, 0 removed" in lines
-    assert any(line.startswith("Checked 2 of 2 boards (0 unchanged, 0 did not answer)") for line in lines)
+    # 0110-10-11: the line counts out of ALL the watched companies and says what "new" counts.
+    assert any(line.startswith("Checked 2 of 2 companies this run (0 unchanged, 0 did not answer) in ") for line in lines)
+    assert not any("checked within the last day" in line for line in lines)  # every company was due
+    assert "New, changed and removed count every posting on every board, whatever its title; `gigai scout new` lists the new ones your profiles match." in lines
     assert sorted(CompanyIndex.for_home(home).keys()) == [("greenhouse", "acme"), ("lever", "initech")]
     # The index is a cache under the home; the journaled workpad stays clean.
     assert_managed_workpad_clean(_workpad(home, target))
@@ -506,6 +509,17 @@ def test_cli_sources_update_refreshes_the_watchlist_and_prints_the_summary(tmp_p
     status = CliRunner().invoke(cli, ["scout", "sources", "status", "--home", str(home)])
     assert status.exit_code == 0, status.output
     assert "Last update succeeded" in status.output and "Stored companies: 2 (ready)." in status.output
+
+    # 0110-10-11 (UAT finding 10: "Boards 3859" beside "10,349 stored companies"): an update asks only the companies
+    # that are DUE. With one new company beside two checked seconds ago, the line says 1 of 3 and where the other 2 are.
+    _add(home, target, "https://boards.greenhouse.io/globex")
+    third = CliRunner().invoke(cli, ["scout", "sources", "update", "--home", str(home), "--target", str(target)])
+    assert third.exit_code == 0, third.output
+    checked = next(line for line in third.stdout.splitlines() if line.startswith("Checked "))
+    assert checked.startswith("Checked 1 of 3 companies this run (0 unchanged, 0 did not answer) in ")
+    assert checked.endswith("s. The other 2 were checked within the last day and were not asked again.")
+    after = CliRunner().invoke(cli, ["scout", "sources", "status", "--home", str(home)])
+    assert "Stored companies: 3 (ready)." in after.output  # the same total the update line counts out of
     as_json = CliRunner().invoke(cli, ["scout", "sources", "status", "--home", str(home), "--json"])
     assert json.loads(as_json.stdout)["index"]["needs_update"] is False
 
