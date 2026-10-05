@@ -45,7 +45,7 @@ def settle_stored() -> Callable[..., object]:
         raise NotBuilt(
             "pick_not_available",
             f"this GigAI cannot pick a job's resume again yet (scout.pick.{SETTLE_STORED} is not part of it); "
-            "re-assess the job to get a new pick: `gigai scout jobs assess URL --again`",
+            "re-assess the job to get a new pick: `gigai scout jobs assess URL --again` (a job assessed by its URL: `gigai scout assess --job-url URL`)",
         )
     return action
 

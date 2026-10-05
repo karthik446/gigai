@@ -154,7 +154,7 @@ def _record_path(home_root: Path, target: Path, job: job_brief.StoredJob) -> Pat
 def _missing(job: job_brief.StoredJob) -> JobActionError:
     return JobActionError(
         "suggestions_not_found",
-        "this job has no suggestion record yet: it is written when the job is assessed (`gigai scout jobs assess URL --again`, one model call, on the user's yes)",
+        "this job has no suggestion record yet: it is written when the job is assessed (`gigai scout jobs assess URL --again`, or `gigai scout assess --job-url URL` for a job assessed by its URL; one model call, on the user's yes)",
     )
 
 
@@ -421,7 +421,7 @@ def pick_action(home_root: Path, target: Path, job_url: str, action: str, *, pro
             raise JobActionError(
                 "assessment_stale",
                 f"this job's assessment is old ({stale[0]}): a new pick would sit beside scores made on other evidence. Re-assess it instead "
-                "(`gigai scout jobs assess URL --again`, one model call, on the user's yes)",
+                "(`gigai scout jobs assess URL --again`, or `gigai scout assess --job-url URL` for a job assessed by its URL; one model call, on the user's yes)",
             )
         if action == ACTION_DRAFT and decision == _GATE_SUGGEST:
             raise JobActionError("draft_not_needed", "a resume is suggested for this job already; a draft is for a job that is held. Pick again with --refresh")
