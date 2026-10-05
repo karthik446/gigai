@@ -390,7 +390,9 @@ def test_the_operator_sized_home_loads_one_build_fast_reads_bounded_memory(
         assert done_cli.returncode == 0, done_cli.stderr[-800:]
         assert json.loads(done_cli.stdout)["schema_version"] == "scout-new:1"
     report.append(f"  fresh process `gigai scout new --peek --json`: wall {min(walls):.2f} s, CPU {min(cpus):.2f} s (bound {CLI_SECONDS} s)")
-    assert min(cpus) < CLI_SECONDS, cpus
+    # CPU seconds slow down with the machine like wall seconds do: the Debian container job sets GIGAI_TEST_LATENCY_SCALE, and a flat
+    # 3.0 s bound failed there at 3.32 s (two runs: 3.324 and 3.330) while the wall bound beside it was already scaled.
+    assert min(cpus) < latency_bound(CLI_SECONDS), cpus
     assert min(walls) < latency_bound(CLI_SECONDS), walls
 
     # 8. 0110-10-08: no server, a cold read model: the CLI process does the whole first build itself.
