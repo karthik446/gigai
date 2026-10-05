@@ -47,9 +47,9 @@ INVALIDATION, per profile, by two digests kept in ``posting_build``:
 
 - ``match_digest``: the profile's settings digest, the index files' stamps
   (name, mtime, size), the title-tag store's, the watched boards and the UTC
-  day (the posted window moves with it). When it differs, the profile is
-  matched again from the index, so a posting whose content changed gets its
-  new ``listing_digest``.
+  day (the posted window moves with it). When it differs, the profile's
+  boards are looked at again (below: only the ones that differ are matched),
+  so a posting whose content changed gets its new ``listing_digest``.
 - ``facts_digest``: the profile's resume digest, the rank model, and the
   stamps of the stores a row's facts come from (assessments, tailored
   resumes, Scout labels, the rank score cache, and what a stale check reads).
@@ -72,10 +72,23 @@ match, so:
   (:func:`model_status` says the same without reading anything).
 - INCREMENTAL, per board: ``posting_board`` keeps what each board's rows of
   a profile were matched from (the profile's settings, the tag store, the
-  day, the board's index file stamp). Only a board whose stamp differs is
-  matched again, a few boards at a time (one transaction each, so a build
-  that is interrupted goes on where it stopped), and no more of the index
-  is held in memory than those few boards.
+  board's index file stamp). Only a board whose stamp differs is matched
+  again, a few boards at a time (one transaction each, so a build that is
+  interrupted goes on where it stopped), and no more of the index is held
+  in memory than those few boards.
+- THE POSTED WINDOW, once a UTC day (0.1.10.11, cause C8): the day is in the
+  profile's ``match_digest`` and NOT in a board's stamp. Time only moves a
+  posting out of the window, never into it, so the first read of a new day
+  looks at the listed rows the window has moved past (a row's stored
+  ``published_at``, the date the window judged, is before
+  ``now - max_age_days``) and nothing else. When the day is ALL that moved
+  (the common case), each such row is put to the search's own rule on its
+  board's index entry and dropped when the rule says too old: no board is
+  matched and the watched boards are not read from the journal (4 s of a
+  fresh process on the operator-sized home). When more than the day moved,
+  the boards holding such a row are matched again with the ones whose stamp
+  differs. A day that moves no posting past the edge reads nothing. (A clock
+  that went BACK a day matches every board, as every new day did before.)
 - A title is decided once per build, however many postings carry it; the
   tag store is compared by what it holds (``TagStore.stamp``), never by its
   ``-wal`` file, which comes and goes with every reader's connection.
@@ -110,7 +123,9 @@ from .pipeline.store import PipelineStore, PostingBuild, PostingRecord, RunAsses
 # One above every side of the 0.1.10.8 merge, so stored rows rebuild once whichever build wrote them:
 # :2 was 0110-8-06 (one digest rule), :3 was 0110-8-05 (a known function tag vetoes a generic title).
 # :5 is 0110-9-01: rows are matched and stamped per board (``posting_board``).
-MATCH_VERSION = "posting-match:5"
+# :6 is 0.1.10.11 (C8): a board's stamp no longer holds the UTC day, and a row's ``published_at`` is the date the posted
+# window judged (the index's). One build of every board after the upgrade; the stored rows are served meanwhile.
+MATCH_VERSION = "posting-match:6"
 # :3 is 0110-10-02: a row carries its fit number, and a weak fit has its own state.
 FACTS_VERSION = "posting-facts:3"
 
@@ -137,8 +152,9 @@ CHUNK_BOARDS = 400
 #: (the first build of a large index) is answered at once from what is stored, or with ``PostingModelPreparing``.
 SMALL_BUILD_BOARDS = 500
 #: A build of EVERY board the server would start for a change that is not the user's own (the tag store while titles
-#: are being tagged, the day) is not started sooner than this after the last one ended; the rows are served as stored
-#: meanwhile. A company's update is never held back: only its own board is matched again.
+#: are being tagged) is not started sooner than this after the last one ended; the rows are served as stored
+#: meanwhile. A company's update is never held back: only its own board is matched again. (A new UTC day is no longer
+#: such a build: it drops the rows that left the posted window and matches no board for it, 0.1.10.11.)
 REBUILD_MIN_SECONDS = 60.0
 
 _logger = logging.getLogger("gigai.scout.server")
@@ -625,9 +641,12 @@ def _board_records(
             if first_seen is None or not fits("job", row.normalized_url) or not fits("board", key):  # type: ignore[attr-defined]
                 continue  # not a shape the file holds: the posting is left out rather than stored as text
             seen.add(row.normalized_url)  # type: ignore[attr-defined]
+            # The date the posted window judged is the INDEX's (``index_search._keep``); the cached row's is the same
+            # date unless its body dropped it. Kept so a new day knows which boards hold a posting the window left.
+            published_at = stamp(posting.published_at) or stamp(row.published_at)  # type: ignore[attr-defined]
             found[row.normalized_url] = PostingRecord(  # type: ignore[attr-defined]
                 job=row.normalized_url, profile_id=view.profile_id, board=key, first_seen=first_seen,  # type: ignore[attr-defined]
-                published_at=stamp(row.published_at), removed_at=None, listing_digest=content_digest(row),  # type: ignore[attr-defined,arg-type]
+                published_at=published_at, removed_at=None, listing_digest=content_digest(row),  # type: ignore[attr-defined,arg-type]
                 listing_known=bool(row.content_sha256 and row.text), rank_score=None, match_rank=1, state="not_assessed",  # type: ignore[attr-defined]
                 stale_code=None, assessed_at=None, reqs_met=None, reqs_total=None, open_questions=0, tailored=False,
                 label=None, ats_score=None, pinned_digest=view.resume_digest, settings_digest=view.settings_digest,
@@ -871,6 +890,8 @@ class _Plan:
     #: Served by the request's own wait, whatever ran last: a profile with no build yet, or whose settings the user changed.
     urgent: bool = False
     matched: dict[str, bool] = field(default_factory=dict)
+    #: The profiles whose match differs by the UTC day alone (a later day): the posted window is all there is to apply.
+    window_only: frozenset[str] = frozenset()
 
     @property
     def match_needed(self) -> bool:
@@ -898,6 +919,7 @@ def _plan(
     master = _master_stamp(home_root, target, resolved)
     digests: dict[str, tuple[str, str]] = {}
     kinds: dict[str, str] = {}
+    window_only: set[str] = set()
     urgent = force
     for view in views:
         previous = builds.get(view.profile_id)
@@ -915,6 +937,11 @@ def _plan(
         if force or previous is None or previous.match_digest != match_digest:
             kinds[view.profile_id] = BUILD_FULL
             urgent = urgent or previous is None or previous.settings_digest != view.settings_digest
+            if not force and previous is not None and previous.built_at[:10] < day:
+                # The same settings, index, tags and boards as the last build, on a later day: only the day moved.
+                before = _digest(MATCH_VERSION, view.settings_digest, index_stamp, boards.digest, previous.built_at[:10])
+                if before == previous.match_digest:
+                    window_only.add(view.profile_id)
         elif previous.facts_digest != facts_digest:
             kinds[view.profile_id] = BUILD_FACTS
         else:
@@ -923,10 +950,82 @@ def _plan(
         home_root=home_root, target=target, moment=moment, built_at=built_at, resolved=resolved, views=views, files=files,
         tags=tags, boards=boards, rank_model=rank_model, day=day, history=history, previous=builds, digests=digests,
         kinds=kinds, drop_profiles=bool(set(builds) - {view.profile_id for view in views}), force=force, urgent=urgent,
+        window_only=frozenset(window_only),
     )
 
 
 Progress = Callable[[str, int, int], None]
+
+
+def _window_cutoff(view: ProfileView, moment: datetime) -> str | None:
+    """The search's own cutoff at ``moment`` (``filters.published_cutoff``: ``now - max_age_days``, or the fixed
+    ``published_after``, which never moves) as a stamp; ``None`` when the config's fixed date does not parse (the
+    match itself says so, for the boards it reads)."""
+
+    from .find_jobs.filters import published_cutoff
+
+    try:
+        return stamp(published_cutoff(view.config, now=moment))  # type: ignore[arg-type]
+    except ValueError:
+        return None
+
+
+def _past_window(rows: Sequence[PostingRecord], cutoff: str) -> list[PostingRecord]:
+    """The listed rows whose date is before the cutoff. A row with no date is never dropped by the window."""
+
+    return [row for row in rows if row.removed_at is None and row.published_at is not None and row.published_at < cutoff]
+
+
+def _left_window(view: ProfileView, rows: Mapping[str, Sequence[PostingRecord]], moment: datetime) -> set[str]:
+    """The boards holding a listed posting of this profile that the posted window has moved past at ``moment``."""
+
+    cutoff = _window_cutoff(view, moment)
+    return set() if cutoff is None else {board for board, held in rows.items() if _past_window(held, cutoff)}
+
+
+def _apply_window(
+    plan: _Plan, store: PipelineStore, view: ProfileView, rows: dict[str, list[PostingRecord]], stamps: Mapping[str, str]
+) -> set[str]:
+    """Only the day moved: drop this profile's listed rows that the posted window has left. No board is matched.
+
+    Each row past the cutoff is put to the search's own rule (``filters.published_too_old`` on the board's index
+    entry, what ``index_search`` asks) and dropped when the rule says too old; the board's other rows and its stamp
+    stay as they are, which is what a match of the board would store: nothing else of it moved. Returns the boards
+    this could not settle (no index entry, or a row the entry does not list): those are matched the long way.
+    """
+
+    from .find_jobs.company_index import CompanyIndex
+    from .find_jobs.contracts import FindJobsContractError, normalize_url
+    from .find_jobs.filters import published_too_old
+    from .find_jobs.index_search import _indexed_row
+
+    cutoff = _window_cutoff(view, plan.moment)
+    if cutoff is None:
+        return set()
+    index = CompanyIndex.for_home(plan.home_root)
+    unsettled: set[str] = set()
+    for board, held in sorted(rows.items()):
+        past = _past_window(held, cutoff)
+        if not past:
+            continue
+        entry = index.read(*split_board(board))
+        if entry is None or board not in stamps:
+            unsettled.add(board)
+            continue
+        listed: dict[str, object] = {}
+        for posting in entry.live():
+            try:
+                listed[normalize_url(posting.url)] = posting
+            except FindJobsContractError:
+                continue
+        if any(row.job not in listed for row in past):
+            unsettled.add(board)
+            continue
+        leaving = {row.job for row in past if published_too_old(_indexed_row(entry, listed[row.job]), view.config, now=plan.moment)}  # type: ignore[arg-type]
+        if leaving:
+            rows[board] = [row for row in held if row.job not in leaving]
+            store.replace_board_postings(view.profile_id, {board: stamps[board]}, rows[board])
+    return unsettled
 
 
 def _match(plan: _Plan, store: PipelineStore, views: Sequence[ProfileView], facts_of: Callable[[ProfileView], _Facts], progress: Progress | None) -> None:
@@ -938,20 +1037,49 @@ def _match(plan: _Plan, store: PipelineStore, views: Sequence[ProfileView], fact
     from .find_jobs.title_query import open_tag_store
 
     home_root = plan.home_root
-    watched = {board_key(board.provider.value, board.board_token): board for board in plan.boards.list()}  # type: ignore[attr-defined]
     want: dict[str, dict[str, str]] = {}
     stale: dict[str, set[str]] = {}
     previous: dict[str, dict[str, list[PostingRecord]]] = {}
+    stored: dict[str, dict[str, str]] = {}
+    unsettled: dict[str, set[str]] = {}
     for view in views:
-        rule = _digest(MATCH_VERSION, view.settings_digest, plan.day, plan.tags)
-        want[view.profile_id] = {key: _digest(rule, plan.files.get(f"{key}.json")) for key in watched}
-        stored = store.posting_board_stamps(view.profile_id)
+        stored[view.profile_id] = store.posting_board_stamps(view.profile_id)
         had: dict[str, list[PostingRecord]] = {}
         for row in store.postings(profile_id=view.profile_id, live=False):
             had.setdefault(row.board, []).append(row)
         previous[view.profile_id] = had
-        stale[view.profile_id] = {key for key, value in want[view.profile_id].items() if plan.force or stored.get(key) != value}
-        gone = (set(stored) | set(had)) - set(watched)
+        if view.profile_id in plan.window_only:
+            # 0.1.10.11 (C8): only the day moved. The rows the window left are dropped; no board is matched for it.
+            unsettled[view.profile_id] = _apply_window(plan, store, view, had, stored[view.profile_id])
+    # Boards are matched for a profile unless the day was all that moved and the window settled it. The watched boards
+    # are read (from the journal, in a fresh process) only then.
+    matching = {view.profile_id for view in views if unsettled.get(view.profile_id, True)}
+    watched = (
+        {board_key(board.provider.value, board.board_token): board for board in plan.boards.list()}  # type: ignore[attr-defined]
+        if matching else {}
+    )
+    for view in views:
+        had = previous[view.profile_id]
+        if view.profile_id not in matching:
+            stale[view.profile_id] = set()
+            plan.matched[view.profile_id] = False
+            continue
+        # The day is not in a board's stamp (0.1.10.11, C8): a new day matches the boards whose posting left the window.
+        rule = _digest(MATCH_VERSION, view.settings_digest, plan.tags)
+        want[view.profile_id] = {key: _digest(rule, plan.files.get(f"{key}.json")) for key in watched}
+        built = plan.previous.get(view.profile_id)
+        # Time moves a posting out of the window only. A clock behind the day of the last build could move one back in.
+        every = plan.force or (built is not None and plan.day < built.built_at[:10])
+        if every:
+            left: set[str] = set()
+        elif view.profile_id in unsettled:
+            left = unsettled[view.profile_id]
+        else:
+            left = _left_window(view, had, plan.moment)
+        stale[view.profile_id] = {
+            key for key, value in want[view.profile_id].items() if every or stored[view.profile_id].get(key) != value or key in left
+        }
+        gone = (set(stored[view.profile_id]) | set(had)) - set(watched)
         if gone:
             store.replace_board_postings(view.profile_id, {key: None for key in gone}, [])
         plan.matched[view.profile_id] = len(stale[view.profile_id]) == len(watched)
@@ -1063,8 +1191,10 @@ class _Flight:
         self.builds = 0
         #: How many boards the last finished build matched (one, after one company's update).
         self.last_boards = 0
-        #: The tag store and the day the last build matched with: when they differ, every board is matched again.
-        self.rule: tuple[object, str] | None = None
+        #: The tag store the last build matched with: when it differs, every board is matched again.
+        self.rule: tuple[object] | None = None
+        #: ``updated_at`` of the rows the RUNNING build writes (:func:`building_stamp`); ``None`` when none runs.
+        self.built_at: str | None = None
         self.views: tuple[ProfileView, ...] = ()
         self.resolved: object = None
         #: Every active profile has stored rows a caller can be served while a build runs.
@@ -1098,6 +1228,7 @@ class _Flight:
             self.builds += 1
             self.phase, self.done, self.total, self.counted = PHASE_MATCHING, 0, 0, False
             self.views, self.resolved = plan.views, plan.resolved
+            self.built_at = plan.built_at
             self.ready = all(view.profile_id in plan.previous for view in plan.views)
 
     def seen(self, plan: _Plan) -> None:
@@ -1109,10 +1240,10 @@ class _Flight:
     def end(self, plan: _Plan | None, error: BaseException | None = None) -> None:
         with self.cond:
             self.building, self.finished, self.error = False, time.monotonic(), error
-            self.phase = PHASE_IDLE
+            self.phase, self.built_at = PHASE_IDLE, None
             if plan is not None and error is None:
                 self.last_boards = self.total
-                self.rule = (plan.tags, plan.day)
+                self.rule = (plan.tags,)
                 self.views, self.resolved, self.ready, self.known = plan.views, plan.resolved, True, True
             self.cond.notify_all()
 
@@ -1140,6 +1271,20 @@ def model_status(home_root: Path, target: Path) -> dict[str, object]:
     """
 
     return _flight(Path(home_root), Path(target)).status()
+
+
+def building_stamp(home_root: Path, target: Path) -> str | None:
+    """The ``updated_at`` the rows of the build RUNNING in this process carry; ``None`` when none runs.
+
+    A build writes its rows a few boards at a time, and each profile's place among a posting's profiles
+    (``match_rank``) only when it ends. A caller served the rows as stored (``refresh(wait=...)``, ``builds``:
+    ``stale``) that is about to ACT on rows, not show them, leaves the rows with this stamp alone: they are not
+    final. (After a build that was interrupted, such rows are the ones newer than their profile's ``posting_build``.)
+    """
+
+    flight = _flight(Path(home_root), Path(target))
+    with flight.cond:
+        return flight.built_at if flight.building else None
 
 
 def refresh(
@@ -1208,9 +1353,9 @@ def _refresh(
                     flight.seen(plan)
                     return result
                 recent = flight.finished and time.monotonic() - flight.finished < REBUILD_MIN_SECONDS
-                every_board = flight.rule is not None and flight.rule != (plan.tags, plan.day)
+                every_board = flight.rule is not None and flight.rule != (plan.tags,)
                 if wait is not None and recent and every_board and not plan.urgent and flight.error is None:
-                    # The tags or the day moved again right after a build: the rows as stored (their facts current).
+                    # The tags moved again right after a build: the rows as stored (their facts current).
                     served = {profile_id: BUILD_STALE if kind == BUILD_FULL else kind for profile_id, kind in plan.kinds.items()}
                     for view in plan.views:
                         if plan.kinds[view.profile_id] == BUILD_FULL:
@@ -1418,6 +1563,7 @@ __all__ = [
     "TagPending",
     "active_profiles",
     "board_key",
+    "building_stamp",
     "model_status",
     "open_store",
     "posting_rows",

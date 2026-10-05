@@ -433,6 +433,7 @@ def _assess(
     from .find_jobs import job_input
     from .find_jobs.assess_all import FATAL_CODES, assess_concurrency
     from .find_jobs.assess_contracts import ORIGIN_JOB_PAGE, AssessJobInput, AssessRequest, AssessResumeInput, ResolvedJob
+    from ..workpad import committed_read_cache
     from .find_jobs.market_acquisition import AcquireLimits
     from .quick_assess import ERROR_NOT_STORED, QuickAssessError, run_quick_assessment
 
@@ -497,7 +498,11 @@ def _assess(
             job=AssessJobInput(job_url=text.url), resume=AssessResumeInput(profile_id=profile_id), origin=ORIGIN_JOB_PAGE
         )
         try:
-            stored = run_quick_assessment(request, home_root=home_root, target=target, config=config, resolved_job=resolved_job)  # type: ignore[arg-type]
+            # 0.1.10.11 S4: the read scope is per thread, and this runs on the batch's own threads. The call is the job
+            # page's Assess (it reads the journal and writes a file in the home, never a journal transition): 87 git
+            # processes a posting without the scope, 6 with it.
+            with committed_read_cache():
+                stored = run_quick_assessment(request, home_root=home_root, target=target, config=config, resolved_job=resolved_job)  # type: ignore[arg-type]
         except QuickAssessError as exc:
             if exc.code in FATAL_CODES:
                 stop.append(exc.code)  # no model, no profile, no resume: the next call would fail the same way

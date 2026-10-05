@@ -23,6 +23,7 @@ R0-present-api-split's report).
 
 from __future__ import annotations
 
+import functools
 import json
 import logging
 import os
@@ -42,6 +43,7 @@ from urllib.parse import urlsplit
 from ....canonical import canonical_json_bytes, parse_json_bytes
 from ....http_server import NoLookupThreadingHTTPServer
 from ....run import ResumeDetails, RunError
+from ....workpad import committed_read_cache
 from ...data_labels import LABELS_HEADER
 from ...outbound_check import redact_payload
 from ..company_names import with_company_names
@@ -1488,6 +1490,100 @@ class ScoutFindJobsBackend:
         return self._discovery_running
 
 
+# --- 0.1.10.11 S4 (causes C2, C7): which requests run inside the read scope ----------------------------------
+#
+# ``workpad.committed_read_cache()``: on the request's thread, a workpad check that already passed and a committed
+# journal read already made are reused while the workpad is unchanged. Seven GET handlers used it (0110-033); every
+# other route resolved the workpad 7 to 12 times a request, about 10 git processes each (the job page: 52 processes
+# a call on the operator-sized home, an assess 135, ``GET /api/pipeline`` 215).
+#
+# The scope is for requests that write NO journal. A journal writer must make every check itself, so:
+# * every ``GET /api/...`` is inside it, except the routes in ``GET_ROUTES_OUTSIDE_READ_SCOPE``;
+# * of the writes, only the POST routes in ``READ_SCOPE_POST_ROUTES``: they read the journal and write files in the
+#   home (an assessment, a tailored resume, a pipeline job), never a journal transition.
+# ``tests/behaviors/scout_find_jobs/test_read_scope_routes.py`` holds the rule: a request this puts inside the scope
+# takes the journal's writer lock never and leaves the journal head where it was, on a settled home and as the first
+# request on a home whose default profile was never migrated; a route missing from that test fails it.
+#
+# THE ONE WRITE A READ CAN CAUSE: the first profile-aware read of a home migrates its default profile
+# (``profile_records.ensure_default_profile``, one journal commit, once in a home's life). So that it is never made
+# inside this scope: the GET that can be that read and had no scope of its own stays outside
+# (``GET_ROUTES_OUTSIDE_READ_SCOPE``), and before one of the four POST routes enters the scope the migration is asked
+# for OUTSIDE it (``_settle_first_read``: once per process and home; afterwards a set lookup).
+
+#: ``GET`` routes that can write a journal (so this does NOT put them inside the scope).
+#: ``/api/master/migration``: the first profile-aware read of a home migrates its default profile (one journal write),
+#: and the migration preview is such a read with no read scope of its own. (The six other GET routes that can be that
+#: first read, ``/api/profiles``, ``/api/config``, ``/api/setup``, ``/api/postings``, ``/api/new`` and
+#: ``/api/new/yours``, have had their own scope around it since 0110-033 and 0110-9-01: nothing changes for them here.)
+GET_ROUTES_OUTSIDE_READ_SCOPE = frozenset({"/api/master/migration"})
+#: The ``POST`` routes that write no journal.
+READ_SCOPE_POST_ROUTES = frozenset({"/api/assess", "/api/tailored-resumes", "/api/pipeline/process", "/api/postings/assess"})
+
+
+_SETTLED_LOCK = threading.Lock()
+#: ``(home, target)`` of the homes whose default profile is known to exist: it is never migrated again.
+_settled_first_read: set[tuple[str, str]] = set()
+
+
+def _settle_first_read(backend: object) -> None:
+    """Migrate the home's default profile, when that is still to do, before a request enters the read scope.
+
+    A home keeps its migrated default profile for good, so the answer "it has one" is kept for the process. A home
+    with nothing to migrate yet (no gig, no saved search, no resume) is asked again by the next such request.
+    """
+
+    home_root, target = getattr(backend, "home_root", None), getattr(backend, "target", None)
+    if home_root is None or target is None:
+        return
+    key = (os.fspath(home_root), os.fspath(target))
+    with _SETTLED_LOCK:
+        if key in _settled_first_read:
+            return
+    from ....workpad import resolve_workpad
+    from ... import profile_records
+
+    try:
+        resolved = resolve_workpad(home_root=Path(home_root), requested_target=Path(target), gig_id=None, allow_semantic_state=True)
+        migrated = profile_records.ensure_default_profile(resolved, home_root=Path(home_root), target=Path(target))
+    except Exception:  # noqa: BLE001 - no gig or an unreadable one: nothing to migrate here; the route itself says what is wrong
+        return
+    if migrated is not None:
+        with _SETTLED_LOCK:
+            _settled_first_read.add(key)
+
+
+def read_scope_covers(method: str, path: str) -> bool:
+    """Whether a ``method`` request for ``path`` (no query) runs inside ``committed_read_cache()``."""
+
+    if method == "GET":
+        return path.startswith("/api/") and path not in GET_ROUTES_OUTSIDE_READ_SCOPE
+    return method == "POST" and path in READ_SCOPE_POST_ROUTES
+
+
+def _in_read_scope(method: str):
+    """A ``do_<METHOD>`` that runs the requests :func:`read_scope_covers` names inside the read scope."""
+
+    def decorate(handle):
+        @functools.wraps(handle)
+        def wrapper(self) -> None:
+            if read_scope_covers(method, urlsplit(self.path).path):
+                if method != "GET":
+                    # The request's guards first (``handle`` asks them again, they only read headers): the migration
+                    # below is a write, and nothing is written for a request they refuse.
+                    if not (self._check_loopback() and self._check_csrf()):
+                        return
+                    _settle_first_read(self._backend)
+                with committed_read_cache():
+                    handle(self)
+            else:
+                handle(self)
+
+        return wrapper
+
+    return decorate
+
+
 def _make_handler(
     backend: Backend,
     *,
@@ -1742,6 +1838,7 @@ def _make_handler(
                 self._error(HTTPStatus.UNPROCESSABLE_ENTITY, "wrong_type", "request body is not valid JSON")
                 return None
 
+        @_in_read_scope("GET")  # 0.1.10.11 S4: every read-only GET (``read_scope_covers``)
         def do_GET(self) -> None:  # noqa: N802
             if not self._check_loopback():
                 return
@@ -1905,6 +2002,7 @@ def _make_handler(
                 _logger.exception("unhandled exception in GET %s", path)
                 self._error(HTTPStatus.INTERNAL_SERVER_ERROR, "internal_error", "an internal error occurred")
 
+        @_in_read_scope("POST")  # 0.1.10.11 S4: the four POST routes that write no journal (``READ_SCOPE_POST_ROUTES``)
         def do_POST(self) -> None:  # noqa: N802
             if not self._check_loopback():
                 return
