@@ -449,6 +449,157 @@ def _assess_some(home: Path, target: Path, plan: list[tuple[int, int, int]], mat
     return int(result["assessed"])  # type: ignore[call-overload]
 
 
+# --- the write gate's content (0.1.10.10 S1: report sections 1.1 and 7.1) ----------------------------------------
+#
+# An OPTION, never part of ``build``: the read gate and the browser flows take the home exactly as ``build`` leaves it.
+# What made the operator's saves take minutes was not in that home: a stored master with both profiles attached to
+# their selections, pipeline jobs that FINISHED (a save's pipeline trigger looks at every one of them), and a question
+# that many assessed jobs asked. ``add_write_content`` adds those through the product's own code (the fixture model).
+
+#: Finished pipeline jobs per profile (S1: 100 a profile; the operator's home has more).
+WRITE_PIPELINE_JOBS = 100
+#: Assessed per profile and NOT sent through the pipeline (the job page and the Assess button need some).
+WRITE_ASSESSED_ONLY = 40
+#: What ``add_write_content`` did, beside ``operator-home.json``.
+WRITE_CONTENT_RECORD = "write-content.json"
+#: The fixture model leaves this question open on every assessment: the "question many jobs asked".
+COMMON_QUESTION_ID = "cloud:gcp"
+COMMON_QUESTION = "Which platform would you like to highlight?"
+_MASTER_RESUMES = Path(__file__).resolve().parents[1] / "evals" / "fixtures" / "master"
+
+
+def matched_postings(built: OperatorHome, match_every: int = MATCH_EVERY) -> dict[str, list[tuple[str, object]]]:
+    """Every matched posting of the home, by profile id: ``(job url, its PostingText)``, in board order."""
+
+    from gigai.scout.postings import PostingText
+
+    default, second = built.profiles[DEFAULT_LABEL], built.profiles[SECOND_LABEL]
+    found: dict[str, list[tuple[str, object]]] = {default: [], second: []}
+    number = 0
+    for board, size in enumerate(board_sizes(built.postings, built.companies)):
+        first_number, number = number, number + size
+        first = -(-first_number // match_every) * match_every
+        for matched in range(first, first_number + size, match_every):
+            title = title_of(matched, match_every)
+            head = title.split(",")[0]
+            profile = second if ("Platform" in head or "Backend" in head) else default
+            slug = slug_of(board)
+            job = _job(slug, matched - first_number, matched, _seen_at(board), match_every)
+            url = str(job["hostedUrl"])
+            found[profile].append((url, PostingText(title, slug, "Remote - United States", url, str(job["descriptionPlain"]), "remote", None)))
+    return found
+
+
+def add_write_content(
+    built: OperatorHome, *, pipeline_jobs: int = WRITE_PIPELINE_JOBS, assessed_only: int = WRITE_ASSESSED_ONLY, log=lambda _line: None,
+) -> dict[str, object]:
+    """The S1 fixture content, added to a built home in place; returns (and writes to ``write-content.json``) what it did.
+
+    * each profile gets its own resume (``gigai scout resume add --profile``), then the master is stored by the
+      migration (``resume master init``): both profiles end attached to their selections;
+    * ``pipeline_jobs + assessed_only`` matched postings per profile are assessed (fewer when the home has fewer
+      matched postings for a profile: the scaled home), spread over the boards; the fixture model leaves
+      ``COMMON_QUESTION_ID`` open on every one;
+    * the first ``pipeline_jobs`` of each profile go through the whole pipeline (tailor, re-assess, ATS, label) and
+      must all FINISH (raises otherwise).
+
+    ``HOME`` must already point under the synthetic root, as ``main`` sets it (nothing under the real home is ever a
+    default of the commands run here): refused otherwise. Slow before the pipeline's own speed fix (0.1.10.10 S1,
+    cause C1): 5 to 7 s a pipeline job on a busy laptop, 2026-10-04.
+    """
+
+    root = Path(built.root)
+    assert_synthetic_root(root)
+    if not Path(os.environ.get("HOME", "")).resolve().is_relative_to(root.resolve()):
+        raise OperatorHomeError("add_write_content: set HOME under the synthetic root first (nothing under the real home may be a default)")
+    started = time.monotonic()
+    os.environ.update(SEAM_ENV)
+
+    from click.testing import CliRunner
+
+    from gigai.cli import cli
+    from gigai.scout.find_jobs.refresh_tick import settings_path
+    from gigai.scout.pipeline import triggers
+    from gigai.scout.pipeline.runner import run_once
+    from gigai.scout.pipeline.store import STATE_DONE, STEPS, PipelineStore, pipeline_path
+    from gigai.scout.scout_new import _assess
+
+    home, target = built.home_root, built.target_path
+    default, second = built.profiles[DEFAULT_LABEL], built.profiles[SECOND_LABEL]
+    runner = CliRunner()
+
+    def gigai(*args: str) -> dict[str, object]:
+        result = runner.invoke(cli, [*args, "--home", str(home), "--target", str(target), "--json"])
+        if result.exit_code != 0:
+            raise OperatorHomeError(f"gigai {' '.join(args[:4])} failed: {result.output[-800:]}")
+        text = result.output.strip()
+        return json.loads(text[text.index("{"):])
+
+    gigai("scout", "resume", "add", str(_MASTER_RESUMES / "legacy-ai.md"), "--profile", default)
+    gigai("scout", "resume", "add", str(_MASTER_RESUMES / "legacy-swe.md"), "--profile", second)
+    made = gigai("scout", "resume", "master", "init")
+    if made.get("status") == "needs_answers":
+        flags = [part for question in made["questions"] for part in ("--answer", f"{question['question_id']}=a")]  # type: ignore[union-attr]
+        made = gigai("scout", "resume", "master", "init", *flags)
+    log(f"two resumes and the master ({made.get('status')}): {time.monotonic() - started:.1f} s")
+
+    matched = matched_postings(built)
+    chosen: dict[str, list[str]] = {}
+    texts: dict[str, object] = {}
+    for profile in (default, second):
+        wanted = pipeline_jobs + assessed_only
+        step = max(1, len(matched[profile]) // wanted)  # every k-th: spread over the boards
+        taken = matched[profile][::step][:wanted]
+        chosen[profile] = [url for url, _text in taken]
+        texts.update(taken)
+    pairs = [(url, profile) for profile in (default, second) for url in chosen[profile]]
+    result = _assess(pairs, texts, home_root=home, target=target, config=None)  # type: ignore[arg-type]
+    if int(result["assessed"]) != len(pairs):  # type: ignore[call-overload]
+        raise OperatorHomeError(f"assessed {result['assessed']} of {len(pairs)}: {str(result.get('failed'))[:400]}")
+    log(f"{len(pairs)} assessed ({len(chosen[default])} + {len(chosen[second])}): {time.monotonic() - started:.1f} s")
+
+    # The pipeline, with its daily and per-trigger caps raised for the build and put back after (as a user's).
+    settings = settings_path(home, target)
+    current: dict[str, object] = json.loads(settings.read_text(encoding="utf-8")) if settings.is_file() else {"schema_version": "scout-settings:1"}
+    kept = current.get("pipeline")
+    current["pipeline"] = {"enabled": True, "max_model_calls_per_day": 100000, "auto_jobs_per_trigger": 100000}
+    settings.parent.mkdir(parents=True, exist_ok=True)
+    settings.write_text(json.dumps(current), encoding="utf-8")
+    piped = {profile: chosen[profile][:pipeline_jobs] for profile in (default, second)}
+    try:
+        for profile in (default, second):
+            for url in piped[profile]:
+                triggers.process_now(home, target, profile, url)
+        log(f"{sum(len(urls) for urls in piped.values())} pipeline jobs queued: {time.monotonic() - started:.1f} s")
+        drained = run_once(home, target, force_enabled=True)
+    finally:
+        if kept is None:
+            current.pop("pipeline", None)
+        else:
+            current["pipeline"] = kept
+        settings.write_text(json.dumps(current), encoding="utf-8")
+    store = PipelineStore(pipeline_path(home, target))
+    try:
+        unfinished = [
+            (profile, url, name) for profile in (default, second) for url in piped[profile] for name in STEPS
+            if (found := store.step(profile, url, name)) is None or found.state != STATE_DONE
+        ]
+    finally:
+        store.close()
+    if unfinished:
+        raise OperatorHomeError(f"{len(unfinished)} pipeline steps did not finish ({drained.to_json()}); first: {unfinished[:3]}")
+    log(f"pipeline drained, every job finished: {time.monotonic() - started:.1f} s")
+
+    record: dict[str, object] = {
+        "default": default, "second": second, "pipeline_jobs": piped,
+        "assessed_only": {profile: chosen[profile][pipeline_jobs:] for profile in (default, second)},
+        "common_question": {"question_id": COMMON_QUESTION_ID, "question": COMMON_QUESTION, "asked_by": len(pairs)},
+        "seconds": round(time.monotonic() - started, 1),
+    }
+    (root / WRITE_CONTENT_RECORD).write_text(json.dumps(record, indent=1), encoding="utf-8")
+    return record
+
+
 def main(argv: list[str] | None = None) -> int:
     import argparse
 
@@ -459,6 +610,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--assessed", type=int, default=ASSESSED)
     parser.add_argument("--workers", type=int, default=None)
     parser.add_argument("--pristine", action="store_true", help=f"move the built home aside to <root>{PRISTINE_SUFFIX}; each taker gets a fresh copy at <root> ({PREBUILT_ENV}=<root>)")
+    parser.add_argument(
+        "--write-content", action="store_true",
+        help="also add the write gate's content (a stored master, finished pipeline jobs for both profiles, a question many jobs asked); not what the read gate or the browser flows run on",
+    )
+    parser.add_argument("--pipeline-jobs", type=int, default=WRITE_PIPELINE_JOBS, help="with --write-content: finished pipeline jobs per profile")
     args = parser.parse_args(argv)
     assert_synthetic_root(args.root)
     os.environ["HOME"] = str(args.root)  # nothing under the real home is ever the default
@@ -467,6 +623,8 @@ def main(argv: list[str] | None = None) -> int:
         log=lambda line: print(line, file=sys.stderr),
     )
     (args.root / "operator-home.json").write_text(json.dumps(built.to_json(), indent=2), encoding="utf-8")
+    if args.write_content:
+        add_write_content(built, pipeline_jobs=args.pipeline_jobs, log=lambda line: print(line, file=sys.stderr))
     if args.pristine:
         args.root.rename(args.root.with_name(args.root.name + PRISTINE_SUFFIX))
     print(json.dumps(built.to_json(), indent=2))
