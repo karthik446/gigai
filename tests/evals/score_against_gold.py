@@ -40,6 +40,27 @@ with ``status_either`` is accepted with any of those statuses, asked or not.
 Alternatives are not compared; a must-have "A or B" line is one row, so a
 second row on it is an extra row.
 
+SOFT ASKS (key version 2 of the fourth set, third-set ``either`` rows).  A must row
+the key reads MET as a close call carries ``soft_ask: true`` (and is listed in
+``questions_allowed.soft``).  A question on it is a SOFT over-ask: its own
+column (``soft_asks``), never ``over_asks``, so it does not fail ``fully_correct``;
+the result's ``unclear`` status on that row is not a ``status_wrong``; and when
+only soft rows (or rows open either way) could hold the job, the verdict and gate
+are accepted as matched OR pending, a pending one reported ``soft: true`` in
+``verdict``/``gate``.  A firm unclear row next to a soft row still pins the
+verdict to pending.  A question on a row with ``status_either`` (the third set's
+EITHER rows, and fourth-set ``matched or pending`` rows such as 11 L18) is ``either``
+and lands in the same ``soft_asks`` column; the row is right asked or settled and
+both verdicts are accepted.  A question on an ``either`` LINE with no key row is
+``optional`` (or an over-ask when the row is held as a must-have).
+
+C1 (resume) is read on the STORED job resume (``suggestions.selection.resume.stored_path``
+-> ``selection.picked`` / ``cut_for_length``), not on code-selection.json; see
+:func:`c1_check`: a violation is only (i) a room-fill line (not in the model's pick,
+not pinned, not recent_role_present) printed while a picked line is cut, or (ii) a
+recent_role_present line printed while a picked line a met row rests on is cut and
+that row has no line left on the page.  No stored resume: ``c1`` is None.
+
 WHAT IS REPORTED, per result: verdict and gate right or wrong; the location
 answer; every question as ``right`` (on a row the key leaves unclear),
 ``over`` (on a row the key settles, on a soft line, on a nice-to-have, about
@@ -208,14 +229,15 @@ def match_rows(mapped: Sequence[tuple[int | None, Mapping[str, Any]]], key_rows:
 def key_view(key: Mapping[str, Any]) -> dict[str, Any]:
     """One posting's key with the verdicts and gates it accepts, computed from its must-have rows. Pure.
 
-    A row whose status is open either way (``status_either``) holds nothing by
-    itself, so when only such rows are open both ``matched`` and ``pending`` are
-    accepted.
+    A row whose status is open either way (``status_either``) or that the key
+    reads met as a close call (``soft_ask``) holds nothing by itself, so when
+    only such rows could hold the job both ``matched`` and ``pending`` are
+    accepted (a pending one that rests on soft rows alone is reported ``soft``).
     """
 
     musts = list(key["musts"])
     firm_open = [row for row in musts if row["status"] == "unclear" and not row.get("status_either")]
-    loose_open = [row for row in musts if row.get("status_either")]
+    loose_open = [row for row in musts if row.get("status_either") or (row.get("soft_ask") and row["status"] == "met")]
     if any(row["class"] == "hard" and row["status"] == "unmet" for row in musts):
         verdicts = ["not_a_match"]
     elif firm_open:
@@ -284,7 +306,7 @@ def score_result(key: Mapping[str, Any], whole: object, lines: Sequence[Mapping[
         if key_row["kind"] != "must" or row is None:
             continue
         got = str(row.get("status"))
-        if got != key_row["status"] and got not in (key_row.get("status_either") or ()):
+        if got != key_row["status"] and got not in (key_row.get("status_either") or ()) and not (key_row.get("soft_ask") and got == "unclear"):
             status_wrong.append({"line": key_row["line"], "item": key_row.get("item"), "key": key_row["status"], "got": got})
 
     # the questions
@@ -316,7 +338,7 @@ def score_result(key: Mapping[str, Any], whole: object, lines: Sequence[Mapping[
         elif key_row.get("status_either"):
             entry.update({"call": "either", "why": "the key accepts this row asked or settled"})
             asked_loose.add(spot)
-        elif key_row["status"] == "met" and key_row.get("close_call"):
+        elif key_row["status"] == "met" and key_row.get("soft_ask"):
             entry.update({"call": "soft", "why": "a close call the key reads met (both readings defensible): a soft over-ask, not a failure"})
         elif key_row["status"] != "unclear":
             entry.update({"call": "over", "why": f"the key settles this row: {key_row['status']}"})
@@ -338,10 +360,11 @@ def score_result(key: Mapping[str, Any], whole: object, lines: Sequence[Mapping[
     location_asked = any(entry["question_id"].startswith("location:") or entry["line"] == 0 for entry in questions)
     location_status = next((str(row.get("status")) for row in location_rows if str(row.get("status")) in ("unclear", "unmet")), "met")
     verdict, gate = str(answer.get("verdict")), result_gate(answer, whole)
+    soft_hold = bool(verdict == "pending_user_answers" and view["verdicts"][0] == "matched_above_threshold" and any(row.get("soft_ask") and row["status"] == "met" for row in view["musts"]))
     score = {
         "ok": True,
-        "verdict": {"key": view["verdicts"], "got": verdict, "right": verdict in view["verdicts"]},
-        "gate": {"key": view["gates"], "got": gate, "right": gate in view["gates"]},
+        "verdict": {"key": view["verdicts"], "got": verdict, "right": verdict in view["verdicts"], "soft": soft_hold},
+        "gate": {"key": view["gates"], "got": gate, "right": gate in view["gates"], "soft": soft_hold},
         "location": {"key_status": key["location"]["status"], "got_status": location_status, "key_ask": bool(key["location"]["ask"]), "got_ask": location_asked,
                      "right": location_status == key["location"]["status"] and location_asked == bool(key["location"]["ask"])},
         "sponsorship": {"key": key.get("sponsorship"), "got": answer.get("sponsorship"), "row": any(str(row.get("id") or "") == "elig-sponsorship" for row in rows)},
@@ -409,7 +432,48 @@ def master_parts(master_text: str) -> dict[str, Any]:
     return {"lines": lines, "skills": skills}
 
 
-def resume_check(key: Mapping[str, Any], suggestions: Mapping[str, Any], printed: Mapping[str, Any], selection_md: str, master_text: str) -> dict[str, Any]:
+def c1_check(key: Mapping[str, Any], suggestions: Mapping[str, Any], stored: Mapping[str, Any] | None) -> dict[str, Any]:
+    """C1 on the STORED resume's selection (the job resume the user gets), not on code-selection.json. Pure.
+
+    ``stored`` is the ``selection`` of the stored job resume: ``picked`` ([{id,
+    code}]: what is on the resume) and ``cut_for_length`` ([{id, code, kind}]: the
+    lines of the pick the page limit took off).  Printed = picked; a picked line
+    is cut = a ``cut_for_length`` bullet.  The
+    MODEL'S pick is ``suggestions.selection.model_pick.lines``; ``pins`` and the
+    summary are never room-fill.  A violation is ONLY:
+
+    (i) a room-fill / coverage-added line (printed, not in the model's pick, not
+        pinned, not in the current role, not ``recent_role_present``) while a picked
+        line is cut; or
+    (ii) a ``recent_role_present`` line printed while a picked line that a met
+        key row rests on is cut: the row (``settled_by``) has NO line left on the
+        page and the cut line is one of its lines.
+
+    A recent-role line printed while only lines no met row rests on are cut is
+    exempt (the recent role always shows a line).  ``stored`` None: ``c1`` is None
+    (not checkable), never a pass.
+    """
+
+    if stored is None:
+        return {"c1": None, "c1_checked": False, "c1_roomfill_printed": [], "c1_recent_printed": [], "c1_picked_cut": [], "c1_settling_cut": []}
+    pick = suggestions.get("selection") or {}
+    model = {str(item) for item in (pick.get("model_pick") or {}).get("lines", ())}
+    pinned = {str(item) for item in stored.get("pins") or ()} | {str(item) for item in pick.get("pins") or ()}
+    cut = {str(item["id"]) for item in stored.get("cut_for_length") or () if item.get("kind", "bullet") == "bullet"}
+    picked = [item for item in stored.get("picked") or () if str(item.get("id", "")).startswith("b-")]
+    printed = picked
+    picked_cut = sorted(cut - {str(item["id"]) for item in picked})
+    on_page = {str(item["id"]) for item in printed}
+    losing = [{str(line) for line in row["settled_by"]} for row in key["musts"] if row["status"] == "met" and row.get("settled_by") and not {str(line) for line in row["settled_by"]} & on_page]
+    settling_cut = [item for item in picked_cut if any(item in ids for ids in losing)]
+    exempt_codes = {"recent_role_present", "current_role", "pinned", "title_entry", "summary_variant"}
+    roomfill = sorted(str(item["id"]) for item in printed if str(item["id"]) not in model and str(item["id"]) not in pinned and item.get("code") not in exempt_codes)
+    recent = sorted(str(item["id"]) for item in printed if item.get("code") == "recent_role_present" and str(item["id"]) not in model)
+    violation = bool((roomfill and picked_cut) or (recent and settling_cut))
+    return {"c1": not violation, "c1_checked": True, "c1_roomfill_printed": roomfill, "c1_recent_printed": recent, "c1_picked_cut": picked_cut, "c1_settling_cut": settling_cut}
+
+
+def resume_check(key: Mapping[str, Any], suggestions: Mapping[str, Any], printed: Mapping[str, Any], selection_md: str, master_text: str, stored: Mapping[str, Any] | None = None) -> dict[str, Any]:
     """The four things code can check of a resume (orchestrator #82 B). Pure.
 
     1. covers: every must-have row the key calls met (and not open either way)
@@ -417,7 +481,8 @@ def resume_check(key: Mapping[str, Any], suggestions: Mapping[str, Any], printed
        bullet id, an entry id; a skills id counts when skills are printed);
     2. verbatim: every printed line is a line of the master (skills: a token);
     3. pages_ok / skills_kept: within the page limit, and every master skill kept;
-    4. c1: no line printed that the model did not pick while a picked one is cut.
+    4. c1: see :func:`c1_check` (the stored resume's selection; a room-fill line printed
+       while a picked one is cut, or a recent-role line printed while a picked line a met row rests on is cut).
     """
 
     selection = suggestions.get("selection") or {}
@@ -443,16 +508,13 @@ def resume_check(key: Mapping[str, Any], suggestions: Mapping[str, Any], printed
         if text and not in_skills and text not in master["lines"]:
             bad.append(text[:60])
     bad += [token[:60] for token in skills if token not in master["skills"]]
-    picked = {str(item) for item in (selection.get("model_pick") or {}).get("lines", ())} | {str(item) for item in [(selection.get("model_pick") or {}).get("summary")] if item}
-    added = {str(item) for item in selection.get("added_by_code") or ()}
-    on_page = (bullets | summary) - {item for item in bullets if not item.startswith("b-")}
-    extra_printed, cut = sorted(on_page - picked - added), sorted(picked - on_page)
+    c1 = c1_check(key, suggestions, stored)
     pages, limit = selection.get("pages"), selection.get("max_pages")
     pages_ok = isinstance(pages, int) and isinstance(limit, int) and pages <= limit
     kept = sorted(set(master["skills"]) - set(skills))
     return {"covers": not uncovered, "uncovered": uncovered, "verbatim": not bad, "not_verbatim": bad, "pages": pages, "max_pages": limit, "pages_ok": pages_ok,
-            "skills_kept": not kept, "skills_cut": kept[:5], "c1": not (extra_printed and cut), "c1_printed_unpicked": extra_printed, "c1_picked_cut": cut,
-            "bar": bool(not uncovered and not bad and pages_ok and not kept and not (extra_printed and cut))}
+            "skills_kept": not kept, "skills_cut": kept[:5], **c1,
+            "bar": bool(not uncovered and not bad and pages_ok and not kept and c1["c1"] is not False)}
 
 
 # --- a results folder --------------------------------------------------------------------------------------
@@ -477,6 +539,17 @@ def posting_lines(postings: Path, posting_id: str, key: Mapping[str, Any]) -> li
     return lines
 
 
+def stored_selection(suggestions: Mapping[str, Any]) -> dict[str, Any] | None:
+    """The ``selection`` of the stored job resume that ``suggestions.selection.resume.stored_path`` names, or None when it is gone."""
+
+    path = ((suggestions.get("selection") or {}).get("resume") or {}).get("stored_path")
+    try:
+        found = json.loads(Path(str(path)).read_text(encoding="utf-8")).get("selection") if path else None
+    except (OSError, ValueError):
+        return None
+    return found if isinstance(found, dict) else None
+
+
 def score_folder(key: Mapping[str, Any], results: Path, postings: Path, master: Path | None = None) -> dict[str, Any]:
     """Every ``<NN-slug>/<cli>/assessment.json`` under ``results`` against the key."""
 
@@ -495,8 +568,9 @@ def score_folder(key: Mapping[str, Any], results: Path, postings: Path, master: 
         scored = score_result(posting_key, whole, posting_lines(postings, posting_id, posting_key))
         files = [path.parent / name for name in ("suggestions.json", "code-selection.json", "selection.md")]
         if master is not None and master.exists() and scored["ok"] and all(file.exists() for file in files):
-            scored["resume"] = resume_check(posting_key, json.loads(files[0].read_text(encoding="utf-8")), json.loads(files[1].read_text(encoding="utf-8")),
-                                            files[2].read_text(encoding="utf-8"), master.read_text(encoding="utf-8"))
+            suggestions = json.loads(files[0].read_text(encoding="utf-8"))
+            scored["resume"] = resume_check(posting_key, suggestions, json.loads(files[1].read_text(encoding="utf-8")), files[2].read_text(encoding="utf-8"),
+                                            master.read_text(encoding="utf-8"), stored_selection(suggestions))
         out.append({**entry, **scored})
     by_cli: dict[str, dict[str, int]] = {}
     for row in out:
@@ -526,7 +600,7 @@ def score_folder(key: Mapping[str, Any], results: Path, postings: Path, master: 
             total["resume_covers"] += int(resume["covers"])
             total["resume_verbatim"] += int(resume["verbatim"])
             total["resume_pages_skills"] += int(resume["pages_ok"] and resume["skills_kept"])
-            total["resume_c1"] += int(resume["c1"])
+            total["resume_c1"] += int(resume["c1"] is True)
             total["resume_bar"] += int(resume["bar"])
     return {"schema_version": SCORE_SCHEMA, "key_set": key.get("set"), "results_label": results.name, "by_cli": by_cli, "results": out}
 

@@ -100,7 +100,7 @@ def test_lines_are_the_non_empty_body_lines_numbered_from_one(lines: list[dict[s
 
 def test_a_result_that_agrees_with_the_key_is_fully_correct(lines: list[dict[str, Any]]) -> None:
     out = score(lines, answer())
-    assert out["fully_correct"] and out["verdict"]["right"] and out["gate"] == {"key": ["held"], "got": "held", "right": True}
+    assert out["fully_correct"] and out["verdict"]["right"] and out["gate"] == {"key": ["held"], "got": "held", "right": True, "soft": False}
     assert (out["questions"]["right"], out["questions"]["over_asks"], out["questions"]["under_asks"]) == (2, 0, 0)
     assert out["list"]["exact"] and out["list"]["line_coverage"] == {"required_lines": 4, "covered": 4, "must_lines": 3, "must_covered": 3}
 
@@ -209,7 +209,7 @@ SELECTION_MD = "## Summary\n\n- Builder of example systems. <!-- R1 -->\n\n## Ex
 
 def resume(**changes: Any) -> dict[str, Any]:
     args = {"key": RESUME_KEY, "suggestions": SUGGESTIONS, "printed": PRINTED, "selection_md": SELECTION_MD, "master_text": MASTER} | changes
-    return gold.resume_check(args["key"], args["suggestions"], args["printed"], args["selection_md"], args["master_text"])
+    return gold.resume_check(args["key"], args["suggestions"], args["printed"], args["selection_md"], args["master_text"], args.get("stored"))
 
 
 def test_a_resume_that_prints_a_settling_line_of_every_met_row_verbatim_within_limits_meets_the_bar() -> None:
@@ -228,8 +228,83 @@ def test_a_printed_line_not_in_the_master_a_cut_skill_or_too_many_pages_fails() 
     assert resume(suggestions={"selection": {**SUGGESTIONS["selection"], "pages": 3}})["pages_ok"] is False
 
 
-def test_c1_fails_only_when_an_unpicked_line_is_printed_while_a_picked_one_is_cut() -> None:
-    picked = {"selection": {**SUGGESTIONS["selection"], "model_pick": {"summary": "sum-1", "lines": ["b-1", "b-2", "b-3"]}}}
-    both = resume(suggestions=picked, printed={**PRINTED, "entries": {"r-1": ["b-1", "b-9"]}})
-    assert both["c1"] is False and both["c1_printed_unpicked"] == ["b-9"] and both["c1_picked_cut"] == ["b-2", "b-3"]
-    assert resume(suggestions=picked)["c1"] is True  # picked lines cut and nothing unpicked printed: the fit cut, not C1
+STORED = {"picked": [{"id": "sum-1", "code": "summary_variant"}, {"id": "b-1", "code": "supports_requirement"}, {"id": "b-2", "code": "picked_by_assessment"}],
+          "cut_for_length": [{"id": "b-3", "code": "cut_lowest_value", "kind": "bullet"}, {"id": "r-9", "code": "cut_role_dropped", "kind": "role"}], "pins": []}
+
+
+def stored(*extra: tuple[str, str], cut: tuple[str, ...] = ("b-3",), drop: tuple[str, ...] = ()) -> dict[str, Any]:
+    return {**STORED, "picked": [item for item in STORED["picked"] if item["id"] not in drop] + [{"id": i, "code": c} for i, c in extra],
+            "cut_for_length": [{"id": i, "code": "cut_lowest_value", "kind": "bullet"} for i in cut]}
+
+
+def test_c1_reads_the_stored_resume_a_room_fill_line_printed_while_a_picked_line_is_cut_fails() -> None:
+    assert resume()["c1"] is None and resume()["c1_checked"] is False  # no stored resume: not checkable, never a pass
+    assert resume(stored=stored())["c1"] is True  # a picked line cut and nothing unpicked printed: the fit cut, not C1
+    out = resume(stored=stored(("b-9", "requirement_evidence")))
+    assert out["c1"] is False and out["c1_roomfill_printed"] == ["b-9"] and out["c1_picked_cut"] == ["b-3"] and out["bar"] is False
+    assert resume(stored=stored(("b-9", "requirement_evidence"), cut=()))["c1"] is True  # nothing cut: no violation
+    assert resume(stored={**stored(("b-9", "requirement_evidence")), "pins": ["b-9"]})["c1"] is True  # pinned lines are not room-fill
+
+
+def test_c1_a_recent_role_line_fails_only_when_a_cut_line_leaves_a_met_row_with_nothing_on_the_page() -> None:
+    recent = ("b-8", "recent_role_present")
+    assert resume(stored=stored(recent))["c1"] is True  # b-3 settles only the open row 3: exempt
+    key = {"musts": [*RESUME_KEY["musts"], {"line": 4, "item": None, "class": "askable", "status": "met", "settled_by": ["b-3", "b-4"]}]}
+    out = resume(key=key, stored=stored(recent, cut=("b-3", "b-4")))
+    assert out["c1"] is False and out["c1_settling_cut"] == ["b-3", "b-4"] and out["c1_recent_printed"] == ["b-8"]
+    picked_b4 = {"selection": {**SUGGESTIONS["selection"], "model_pick": {"summary": "sum-1", "lines": ["b-1", "b-2", "b-4"]}}}
+    assert resume(key=key, suggestions=picked_b4, stored=stored(recent, ("b-4", "supports_requirement"), cut=("b-3",)))["c1"] is True  # row 4 keeps b-4 on the page
+    assert resume(key=key, stored=stored(cut=("b-3", "b-4")))["c1"] is True  # no recent-role line printed: a plain fit cut
+
+
+def test_the_stored_selection_is_read_from_the_path_the_suggestions_name(tmp_path: Path) -> None:
+    path = tmp_path / "resume.json"
+    path.write_text(json.dumps({"selection": STORED}), encoding="utf-8")
+    assert gold.stored_selection({"selection": {"resume": {"stored_path": str(path)}}}) == STORED
+    assert gold.stored_selection({"selection": {"resume": {"stored_path": str(tmp_path / "gone.json")}}}) is None and gold.stored_selection({}) is None
+
+
+def soft_key(lines: list[dict[str, Any]], **row: Any) -> dict[str, Any]:
+    key = build_key(lines, cloud="met")["postings"]["01"]
+    for must in key["musts"]:
+        if must["line"] == 6:
+            must.update(row)
+    key["musts"] = [must for must in key["musts"] if must["item"] != "Kubernetes"]  # one open row only: the soft one
+    return key
+
+
+def test_a_question_on_a_soft_ask_row_is_a_soft_over_ask_not_a_failure(lines: list[dict[str, Any]]) -> None:
+    key = soft_key(lines, soft_ask=True)
+    key["questions_allowed"]["soft"] = [{"line": 6, "item": None}]
+    asked = answer(verdict="pending_user_answers", drop=("req-k8s",), status={"req-cloud": "unclear"}, ask=(("cloud:aws", "req-cloud"),))
+    out = gold.score_result(key, asked, lines)
+    assert out["fully_correct"] and out["questions"]["over_asks"] == 0 and out["questions"]["soft_asks"] == 1 and out["questions"]["each"][0]["call"] == "soft"
+    assert out["status"]["wrong"] == [] and out["verdict"]["right"] and out["verdict"]["soft"] is True and out["gate"]["soft"] is True
+    settled = answer(verdict="matched_above_threshold", drop=("req-k8s",), status={"req-cloud": "met"}, ask=())
+    out = gold.score_result(key, settled, lines)
+    assert out["fully_correct"] and out["questions"]["soft_asks"] == 0 and out["verdict"]["soft"] is False
+    plain = soft_key(lines)  # without the marker the same question is an over-ask, a wrong status and a wrong verdict
+    out = gold.score_result(plain, asked, lines)
+    assert (out["questions"]["over_asks"], len(out["status"]["wrong"]), out["verdict"]["right"]) == (1, 1, False) and not out["fully_correct"]
+
+
+def test_a_soft_ask_does_not_hide_a_firm_open_row_and_a_third_set_either_question_stays_a_soft_over_ask(lines: list[dict[str, Any]]) -> None:
+    key = build_key(lines, cloud="met")["postings"]["01"]
+    key["musts"][-1].update(soft_ask=True)  # the cloud row (soft) next to the firm open Kubernetes row
+    out = gold.score_result(key, answer(verdict="matched_above_threshold", status={"req-cloud": "met", "req-k8s": "met"}, ask=()), lines)
+    assert not out["verdict"]["right"] and out["verdict"]["key"] == ["pending_user_answers"] and out["questions"]["under_asks"] == 1
+    held = gold.score_result(key, answer(status={"req-cloud": "unclear"}, ask=(("tool:kubernetes", "req-k8s"), ("cloud:aws", "req-cloud"))), lines)
+    assert held["fully_correct"] and held["questions"]["soft_asks"] == 1 and held["questions"]["over_asks"] == 0
+    either = build_key(lines, cloud="met", years_either=True)["postings"]["01"]
+    either["musts"][0]["status_either"] = ["met", "unclear"]
+    out = gold.score_result(either, answer(status={"req-years": "unclear", "req-cloud": "met"}, ask=(("tool:kubernetes", "req-k8s"), ("years:backend", "req-years"))), lines)
+    assert out["questions"]["soft_asks"] == 1 and out["questions"]["over_asks"] == 0 and out["questions"]["each"][1]["call"] == "either"
+
+
+def test_a_row_the_key_calls_matched_or_pending_accepts_both_verdicts_with_a_hard_row_open_either_way(lines: list[dict[str, Any]]) -> None:
+    key = build_key(lines, cloud="met", years_either=True)["postings"]["01"]
+    for must in key["musts"]:
+        must["status"] = "met"
+    for result in (answer(verdict="matched_above_threshold", status={"req-k8s": "met"}, ask=()), answer(status={"req-k8s": "met", "req-years": "unclear"}, ask=(("years:backend", "req-years"),))):
+        assert gold.score_result(key, result, lines)["verdict"]["right"]
+    assert gold.key_view(key)["verdicts"] == ["matched_above_threshold", "pending_user_answers"]
