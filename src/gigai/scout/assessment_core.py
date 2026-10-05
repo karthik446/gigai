@@ -33,7 +33,7 @@ pins the golden strings).
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from importlib import resources
 import json
 import re
@@ -68,6 +68,7 @@ from .find_jobs.work_mode import in_person_modes
 from .question_ids import normalize_question_id
 from .requirement_weights import bound_rows, cap_list_item_questions, cap_mandatory_questions, settled_verdict
 from .requirements_list import ListedRequirement, check_listed, extracted, fold
+from .suggestion_check import MasterLine, check_suggestions, parse_master_lines, with_verbatim_evidence
 from .resume_gate import (
     HOLD_QUESTION,
     gate,
@@ -607,7 +608,12 @@ def assess_once(
     # 0.1.11 N3 (v9): what THIS prompt offered: the ids a row's sources may name, the requirement list it carried.
     from .assessment_basis import posting_sha256  # that module imports this one
 
-    boundary = Boundary(source_ids=offered_sources(ctx), listed=ctx.requirements, posting_sha256=posting_sha256(job.title, job.posting_text))
+    boundary = Boundary(
+        source_ids=offered_sources(ctx), listed=ctx.requirements, posting_sha256=posting_sha256(job.title, job.posting_text), posting_text=job.posting_text,
+        lines=parse_master_lines(ctx.resume_text) if ctx.resume_ids else {},
+        answers={item.question_id.lower(): item.answer for item in ctx.prior_answers},
+        stories={item.question_id.lower(): item.summary for item in ctx.bank_answers},
+    )
     prompts = 0
 
     def render(validation_error: str | None) -> str:
@@ -967,6 +973,8 @@ class AssessExtras:
     capped_questions: tuple[str, ...] = ()
     #: 0.1.11 (orchestrator #39): the questions on must-have rows dropped past ``MAX_MANDATORY_QUESTIONS`` (their rows hold, unasked).
     capped_mandatory_questions: tuple[str, ...] = ()
+    #: 0.1.11 C3: ``(kind, reason)`` of every structured suggestion the code check dropped (``suggestion_check``); a suggestion turned into a gap is counted as ``master_line_to_gap``.
+    checked_suggestions: tuple[tuple[str, str], ...] = ()
 
 
 @dataclass
@@ -994,6 +1002,13 @@ class Boundary:
     extras: AssessExtras | None = None
     retry: bool | None = None
     posting_sha256: str | None = None
+    #: 0.1.11 C4: the posting's text (what a location the header names may be contradicted by), ``None`` outside ``assess_once``.
+    posting_text: str | None = None
+    #: 0.1.11 C2/C3: the master lines the prompt showed by id (``suggestion_check.parse_master_lines``), the answers
+    #: (``question_id`` -> text) and the stories (``question_id`` -> summary) it listed. Empty: no check, no verbatim evidence.
+    lines: Mapping[str, MasterLine] = field(default_factory=dict)
+    answers: Mapping[str, str] = field(default_factory=dict)
+    stories: Mapping[str, str] = field(default_factory=dict)
 
 
 def offered_sources(ctx: AssessContext) -> frozenset[str] | None:
@@ -1178,6 +1193,71 @@ def _row_ids(matrix: list[Mapping[str, object]], posting_sha256: str) -> list[st
     return [str(row["id"]) if is_row_id(row.get("id")) else derived[index] for index, row in enumerate(matrix)]
 
 
+# --- 0.1.11 C4 (orchestrator #51): a country a header names is not a verdict when the body says "anywhere" ----------------
+#
+# A location row that is ``unmet`` decides ``not_a_match`` only when the posting text carries no worldwide or
+# remote-anywhere statement. With one ("work from anywhere in the world", "a globally distributed team", "remote-first"
+# beside another country's pay band or office) the header and the body disagree: code reads the row as ``unclear`` and
+# asks ONE location question (the model's own when it asked one, else the row's code-made one), and the verdict is
+# read again from the other rows. The prompt says the same; two live runs showed the prompt alone does not hold it.
+
+LOCATION_ROW_ID = "elig-location"
+_WORLDWIDE = re.compile(
+    r"anywhere\s+in\s+the\s+world|globally\s+(?:distributed|remote)|global\s+remote|"
+    r"(?:work|working)\s+(?:remotely\s+)?from\s+anywhere|remote\s+anywhere|anywhere\s+remote|"
+    r"hire\s+in\s+any\s+countr(?:y|ies)|distributed\s+(?:team\s+)?(?:across|around)\s+the\s+(?:world|globe)",
+    re.IGNORECASE,
+)
+_DENIES = re.compile(r"\b(?:not|cannot|can't|unable|except|excluding|only)\b|n't\b", re.IGNORECASE)
+_LOCATION_QUESTION = "The posting names {where} and also says the role is open more widely. Where are you able to work from?"
+
+
+def says_worldwide(posting_text: str) -> bool:
+    """Whether the posting text says the role can be done from anywhere (and does not take it back in the same sentence). Pure."""
+
+    sentences = re.split(r"(?<=[.!?])\s+|\n+", posting_text)
+    for sentence in sentences:
+        if _DENIES.search(sentence):
+            continue
+        if _WORLDWIDE.search(sentence):
+            return True
+    return False
+
+
+def _location_unclear(decoded: Mapping[str, object], boundary: Boundary) -> Mapping[str, object]:
+    """``decoded`` of a v9 answer with an ``unmet`` ``elig-location`` row read as ``unclear`` when the posting says worldwide. Pure.
+
+    One location question is on the row afterwards (the model's first on it, else :data:`_LOCATION_QUESTION`), a
+    ``not_a_match`` that rested on the row alone becomes ``pending_user_answers``, and the model's reason for it is
+    dropped. Anything else is returned untouched.
+    """
+
+    matrix = decoded.get("matrix")
+    if not boundary.posting_text or not isinstance(matrix, list) or not all(isinstance(row, Mapping) for row in matrix) or not uses_v9_rules(matrix):
+        return decoded
+    rows = [row for row in matrix if row.get("id") == LOCATION_ROW_ID and row.get("status") == "unmet"]
+    if not rows or not says_worldwide(boundary.posting_text):
+        return decoded
+    out = dict(decoded)
+    out["matrix"] = [{**row, "status": "unclear"} if any(row is hit for hit in rows) else row for row in matrix]
+    requirement = str(rows[0].get("requirement") or "the location")
+    raw = decoded.get("questions")
+    questions = list(raw) if isinstance(raw, list) else []
+    named = {fold(str(row.get("requirement") or "")) for row in rows} | {LOCATION_ROW_ID}
+    on_row = [item for item in questions if isinstance(item, Mapping) and (fold(str(item.get("requirement") or "")) in named or str(item.get("requirement") or "") in named)]
+    others = [item for item in questions if not any(item is hit for hit in on_row)]
+    if on_row:
+        asked = on_row[0]
+    else:
+        asked = {"question_id": row_question_id(LOCATION_ROW_ID), "question": _LOCATION_QUESTION.format(where=requirement.rstrip(". ")), "requirement": requirement}
+    out["questions"] = [*others, asked]
+    kept_unmet = any(row.get("status") == "unmet" and row.get("class") in (None, "hard") for row in out["matrix"])  # type: ignore[union-attr]
+    if _normalize_verdict(decoded.get("verdict")) == "not_a_match" and not kept_unmet:
+        out["verdict"] = "pending_user_answers"
+        out["not_a_match_reason"] = None
+    return out
+
+
 def _without_authorization(decoded: Mapping[str, object]) -> Mapping[str, object]:
     """``decoded`` of a v9 answer without the rows and questions about sponsorship or work authorization (0.1.11, orchestrator #45).
 
@@ -1255,6 +1335,7 @@ def _normalize_and_strip(decoded: Mapping[str, object], *, boundary: Boundary | 
     """
     boundary = boundary if boundary is not None else Boundary()
     decoded = _without_authorization(decoded)
+    decoded = _location_unclear(decoded, boundary)
     unknown_sources: list[tuple[str, str]] = []
     matrix = decoded.get("matrix")
     normalized_matrix: list[object] = []
@@ -1296,15 +1377,20 @@ def _normalize_and_strip(decoded: Mapping[str, object], *, boundary: Boundary | 
     if all_rows:
         normalized_matrix, rows_not_shown = bound_rows(normalized_matrix)  # type: ignore[arg-type]
     is_v9 = all_rows and uses_v9_rules(normalized_matrix)  # type: ignore[arg-type]
+    if is_v9 and boundary.lines:
+        # 0.1.11 C2: a met row's evidence is the cited master line(s) by id, never the model's paraphrase of them.
+        with_verbatim_evidence(normalized_matrix, boundary.lines, boundary.answers, boundary.stories)  # type: ignore[arg-type]
     # Orchestrator #14: the words of each kept row of a v9 matrix -> its id (its own, or the one a first assessment's
     # row is given: that needs the posting's digest, so outside ``assess_once`` only a row's own id is known).
     row_ids: dict[str, str] = {}
+    id_of_row: dict[int, str] = {}  # a kept row (by identity) -> its id, its own or the one a first assessment gives it
     if is_v9:
         ids: list[object] = (
             _row_ids(normalized_matrix, boundary.posting_sha256) if boundary.posting_sha256 is not None  # type: ignore[arg-type]
             else [row.get("id") for row in normalized_matrix]  # type: ignore[union-attr]
         )
         by_row = {id(row): row_id for row, row_id in zip(normalized_matrix, ids) if is_row_id(row_id)}
+        id_of_row = by_row  # type: ignore[assignment]
         for row in normalized_matrix:
             named_rows.setdefault(fold(str(row.get("requirement") or "")), row)  # type: ignore[union-attr]
         row_ids = {words: by_row[id(row)] for words, row in named_rows.items() if words and id(row) in by_row}
@@ -1367,6 +1453,12 @@ def _normalize_and_strip(decoded: Mapping[str, object], *, boundary: Boundary | 
 
     raw_suggestions = _normalize_string_list(decoded.get("suggestions"))
     suggested = _structured_suggestions(raw_suggestions, row_ids)
+    checked: list[tuple[str, str]] = []
+    if is_v9 and boundary.lines:
+        # 0.1.11 C3: a suggestion whose premises the matrix and the master do not hold is dropped (or becomes a gap).
+        with_ids = [{**row, "id": id_of_row[id(row)]} if id(row) in id_of_row else row for row in normalized_matrix]  # type: ignore[union-attr]
+        suggested, refused = check_suggestions(suggested, with_ids, boundary.lines, boundary.answers)  # type: ignore[arg-type]
+        checked = [(item.kind, why) for item, why in refused]
     result: dict[str, object] = {
         "matrix": normalized_matrix,
         "suggestions": [item for item in raw_suggestions if isinstance(item, str)],
@@ -1406,11 +1498,12 @@ def _normalize_and_strip(decoded: Mapping[str, object], *, boundary: Boundary | 
         pick=pick if keeps_pick else None,
         structured_suggestions=tuple(kept),
         dropped_pick=pick is not None and not keeps_pick,
-        dropped_suggestions=len(suggested) - len(kept),
+        dropped_suggestions=len(checked) + len(suggested) - len(kept),
         unknown_sources=tuple(unknown_sources),
         asked_by_code=tuple(asked_by_code),
         capped_questions=tuple(capped),
         capped_mandatory_questions=tuple(capped_mandatory),
+        checked_suggestions=tuple(checked),
     )
     # Drop any other unknown keys (e.g. a model echoing "posting" back, or
     # inventing extra fields): the frozen contract is a closed object, and

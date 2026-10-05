@@ -165,7 +165,7 @@ def _v9_answer(fx: PostingsFixture, *, kubernetes: str = "met", row_ids: tuple[s
         if row_ids is not None:
             row["id"] = row_ids[index]
     suggested = [
-        {"kind": "reword", "line": ids[PYTHON_LINE], "posting_phrase": "own Python inference services", "why": "Lead with what the posting calls inference services."},
+        {"kind": "reword", "line": ids[OWN_LINE], "posting_phrase": "own Python inference services", "why": "Lead with what the posting calls inference services."},
         {"kind": "gap", "requirement": "elig-location", "why": "Only an answer can say where you may work."},
     ]
     chosen = {"summary": None, "section_order": ["experience", "projects"], "lines": [ids[OWN_LINE], ids[TERRAFORM_LINE], ids[PYTHON_LINE], ids[KUBERNETES_LINE]]}
