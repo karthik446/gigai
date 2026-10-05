@@ -866,6 +866,11 @@ class AssessResponse(_Contract):
     # the incomplete-posting guard accepts, after its one retry ("Only N requirements were read from this posting. Open
     # the posting to check."). Omitted from JSON when ``None``, so every stored file round-trips as it was.
     requirements_note: str | None = None
+    # 0.1.11 MODELPIN (additive): the model the call ASKED for (``model`` above is the one that answered) and whether
+    # the CLI refused it and the default answered (one fallback call). ``None`` / ``False`` for a file written before
+    # these fields and for a target with no evaluated model; each is omitted from JSON then.
+    model_asked: str | None = None
+    model_fallback: bool = False
 
     def __post_init__(self) -> None:
         if (
@@ -930,6 +935,10 @@ class AssessResponse(_Contract):
             value["resume_gate"] = self.resume_gate.to_json()
         if self.requirements_note is not None:
             value["requirements_note"] = self.requirements_note
+        if self.model_asked is not None:
+            value["model_asked"] = self.model_asked
+        if self.model_fallback:
+            value["model_fallback"] = True
         return value
 
     @classmethod
@@ -943,7 +952,7 @@ class AssessResponse(_Contract):
             (
                 "updated_at", "history", "posting_text", "rank_score", "rank_skip_reason", "origin",
                 "prompt_version", "constraints_digest", "story_bank", "profile_ref", "posting_sha256", "model", "resume_basis",
-                "requirements_ref", "resume_gate", "requirements_note",
+                "requirements_ref", "resume_gate", "requirements_note", "model_asked", "model_fallback",
             ),
             "assess_response",
         )
@@ -1008,6 +1017,8 @@ class AssessResponse(_Contract):
             requirements_note=(
                 _string(value["requirements_note"], "assess_response.requirements_note") if "requirements_note" in value else None
             ),
+            model_asked=_string(value["model_asked"], "assess_response.model_asked") if "model_asked" in value else None,
+            model_fallback=_bool(value["model_fallback"], "assess_response.model_fallback") if "model_fallback" in value else False,
         )
 
 

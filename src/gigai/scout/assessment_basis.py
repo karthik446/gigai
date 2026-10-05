@@ -91,6 +91,7 @@ from pathlib import Path
 import threading
 
 from .assessment_core import CURRENT_ASSESS_PROMPT_VERSIONS, assess_prompt_version, constraints_digest, normalize_work_mode
+from .evaluated_models import ModelNotice, model_notice
 from .find_jobs.assess_contracts import AssessResponse
 
 #: ``basis_stale_reason`` / ``job_state.assessment_stale.reason`` values.
@@ -413,14 +414,24 @@ class BasisCheck:
         """
 
         found = self.staleness(item)
-        if found is None:
-            return {"basis_stale": False}
-        served: dict[str, object] = {"basis_stale": True, "basis_stale_reason": found.reason}
-        if found.bank:
-            served["basis_stale_bank"] = [match.to_json() for match in found.bank]  # type: ignore[attr-defined]
-        if found.resume:
-            served["basis_stale_resume"] = [change.to_json() for change in found.resume]  # type: ignore[attr-defined]
+        served: dict[str, object] = {"basis_stale": False}
+        if found is not None:
+            served = {"basis_stale": True, "basis_stale_reason": found.reason}
+            if found.bank:
+                served["basis_stale_bank"] = [match.to_json() for match in found.bank]  # type: ignore[attr-defined]
+            if found.resume:
+                served["basis_stale_resume"] = [change.to_json() for change in found.resume]  # type: ignore[attr-defined]
+        # 0.1.11 MODELPIN: one notice when a model GigAI's accuracy results are not for made this assessment.
+        notice = assessment_notice(item)
+        if notice is not None:
+            served["model_notice"] = notice.to_json()
         return served
+
+
+def assessment_notice(item: AssessResponse) -> ModelNotice | None:
+    """The notice of a stored assessment (``evaluated_models.model_notice``): its target and the model that answered."""
+
+    return model_notice(item.producer.model_target.value, item.model)
 
 
 __all__ = [
@@ -432,6 +443,7 @@ __all__ = [
     "BasisCheck",
     "CurrentBasis",
     "Staleness",
+    "assessment_notice",
     "posting_sha256",
     "stale_reason",
     "staleness",

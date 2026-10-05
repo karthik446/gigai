@@ -74,6 +74,7 @@ import uuid
 from . import fit as fit_rules
 from . import postings, run_history
 from .assess_causes import failure_lines
+from .evaluated_models import notice_lines
 from .assess_preview import model_input_summary, summary_lines
 from .data_labels import ENVELOPE_KEY, UNTRUSTED_TEXT_RULE, labels_envelope
 from .pipeline.busy import assess_batch
@@ -704,6 +705,7 @@ def render(response: Mapping[str, object]) -> str:
             from .quick_assess import requirements_note_lines
 
             lines.extend(requirements_note_lines(assessed))  # GUARDFIX
+            lines.extend(notice_lines(assessed))  # MODELPIN
             if counts.get("more_after"):  # 0110-10-11
                 lines.append(f"{counts['more_after']} more not assessed yet: 50 at a time. Run the same command again for the next 50.")
         elif not isinstance(response.get("low_rank"), Mapping):

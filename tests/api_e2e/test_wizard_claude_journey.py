@@ -175,14 +175,14 @@ def test_the_wizard_chooses_claude_extracts_through_it_and_finishes(tmp_path: Pa
         saved_config = json.loads((target / "find-jobs.json").read_text(encoding="utf-8"))
         assert saved_config["default_model_target"] == "claude_cli"
 
-        # A quick assessment with Claude goes through the same CLI, plan mode.
+        # A quick assessment with Claude goes through the same CLI, plan mode, asking for the evaluated model (MODELPIN).
         assessed = client.post(
             "/api/assess", json={"job": {"job_text": POSTING}, "model_target": "claude_cli", "origin": "quick_assess"}
         )
         assert assessed.status_code == 200, assessed.text
         assert assessed.json()["result"]["verdict"] == "pending_user_answers"
         assess_call = calls(record)[-1]
-        assert assess_call["kind"] == "assess" and assess_call["argv"] == PLAN_ARGV
+        assert assess_call["kind"] == "assess" and assess_call["argv"] == [*PLAN_ARGV, "--model", "claude-opus-5-5"]
 
         # ... and a run started the way the run dialog starts one (its select
         # opens on the config's default target) uses it: sealed and ranked.

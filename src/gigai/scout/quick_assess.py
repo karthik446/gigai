@@ -75,7 +75,7 @@ from .call_metrics import KIND_ASSESS, CallMeter
 from .assessment_core import INSTRUCTIONS_DIGEST, PLACEHOLDER_REQUIREMENTS, AssessExtras, AssessJob, build_assess_context
 from .assessment_core import POSTING_INCOMPLETE_MESSAGE, assess_once, assess_prompt_version, constraints_digest
 from .assessment_core import prompt_reads_ids, template_takes
-from . import story_bank
+from . import assess_model, story_bank
 from .find_jobs.assess_contracts import (
     ORIGIN_QUICK_ASSESS,
     AssessmentBody,
@@ -868,8 +868,12 @@ def run_quick_assessment(
     # (the guard below refuses to store it) gets ONE more call before the user sees an error. The refused call is
     # recorded as unused (0110-8-09); ``GUARD_RETRIES`` counts how often this happened, for the eval's report.
     guard_retries = 0
+    # 0.1.11 MODELPIN: ONE model-policy state per assessment, not per binding: a guard retry builds a new binding, and a
+    # refused evaluated model is asked (and refused) once, the default model answers the rest (outside the meter: all counted).
+    policy = assess_model.PolicyState()
     while True:
         binding = meter.bind(_resolve_binding(active, model_target, home_root=home_root))
+        assess_model.apply(binding, model_target.value, policy)
         try:
             attempt = assess_once(
                 binding,
@@ -980,6 +984,8 @@ def run_quick_assessment(
         requirements_ref=requirements_ref,
         resume_gate=resume_gate,
         requirements_note=requirements_note,
+        model_asked=_model_id(policy.asked),
+        model_fallback=policy.fallback,
     )
     # 1. Store the assessment (0110-8-09: a call is ok only when its answer was stored).
     try:

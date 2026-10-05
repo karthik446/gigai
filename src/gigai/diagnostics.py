@@ -115,6 +115,7 @@ def run_doctor(home_root: Path) -> DoctorReport:
     checks.append(_editor_check(config))
     checks.extend(run_mount_probes(config.workpad_root))
     checks.extend(_journal_index_checks(config))
+    checks.extend(_assessment_model_checks(config))
     return _report(checks)
 
 
@@ -510,6 +511,46 @@ def _credential_checks(config: GigAIConfig) -> tuple[DiagnosticCheck, ...]:
                 )
             )
     return tuple(checks)
+
+
+def _assessment_model_checks(config: GigAIConfig) -> list[DiagnosticCheck]:
+    """0.1.11 MODELPIN: which model assessments use, one check per enabled CLI target (none when there is none).
+
+    A ``default`` model on ``claude_cli`` asks for the evaluated model (one fallback call on the CLI's default when it
+    refuses); a model set in the target's configuration is asked as set. ``evaluated_models`` decides the rest.
+    """
+
+    from .scout.evaluated_models import ASKED_BY_DEFAULT, RESULTS_PAGE, asked_model, evaluated_for, model_notice
+
+    endpoints = {endpoint.name: endpoint.adapter for endpoint in config.endpoints}
+    found: list[DiagnosticCheck] = []
+    for target in config.model_targets:
+        adapter = endpoints.get(target.endpoint)
+        if not target.enabled or adapter not in ("claude_cli", "codex_cli"):
+            continue
+        started = time.monotonic_ns()
+        asks = asked_model(adapter, target.model)
+        measured = evaluated_for(adapter)
+        notice = model_notice(adapter, asks)
+        summary = f"assessments on {target.name} use {asks if asks != 'default' else 'the CLI default model'}"
+        if notice is not None:
+            summary += f"; GigAI's accuracy results are for {' or '.join(measured)}, so these carry a notice ({RESULTS_PAGE})"
+        elif asks == target.model and target.model != "default":
+            summary += " (set in the target's configuration)"
+        if adapter in ASKED_BY_DEFAULT and target.model == "default":
+            summary += "; one fallback call on the CLI default if the CLI refuses it"
+        found.append(
+            _check(
+                f"assessment.model.{target.name}",
+                "assessment model",
+                "PASS",
+                summary,
+                (f"target={target.name}", f"asks={asks}", f"evaluated={','.join(measured)}", f"notice={'yes' if notice else 'no'}"),
+                None,
+                started,
+            )
+        )
+    return found
 
 
 def _editor_check(config: GigAIConfig) -> DiagnosticCheck:

@@ -129,6 +129,7 @@ from ..canonical import digest_imported_bytes
 from . import fit as fit_rules
 from . import postings
 from .assess_causes import cause_fields, failure_lines
+from .evaluated_models import notice_lines
 from .data_labels import ENVELOPE_KEY, PUBLIC_UNTRUSTED, UNTRUSTED_TEXT_RULE, USER_PRIVATE, assert_not_mixed, labels_envelope
 from .pipeline.busy import LiveBatch, assess_batch
 from .pipeline.store import MODEL_STEPS, PipelineStore, PipelineStoreError, PostingRecord, pipeline_path
@@ -509,6 +510,7 @@ def _assess(
     from .find_jobs.assess_contracts import ORIGIN_JOB_PAGE, AssessJobInput, AssessRequest, AssessResumeInput, ResolvedJob
     from ..workpad import committed_read_cache
     from .find_jobs.market_acquisition import AcquireLimits
+    from .assessment_basis import assessment_notice
     from .quick_assess import ERROR_NOT_STORED, QuickAssessError, run_quick_assessment
 
     marked = nullcontext(live) if live is not None else assess_batch(home_root, target)
@@ -517,6 +519,7 @@ def _assess(
     stop: list[str] = []
     fetched: list[str] = []
     thin: dict[str, dict[str, object]] = {}  # GUARDFIX: the assessments stored with a requirements note, by job
+    notices: dict[str, dict[str, object]] = {}  # MODELPIN: one per model that is not an evaluated one, by model
     pace = threading.Lock()
     clients: list[object] = []
     next_request = [0.0]
@@ -587,6 +590,9 @@ def _assess(
             return (ERROR_NOT_STORED, None)
         if stored.requirements_note is not None:
             thin[job] = {"job_identity": job, "profile_id": profile_id, "text": stored.requirements_note}
+        notice = assessment_notice(stored)
+        if notice is not None:
+            notices[notice.model] = notice.to_json()
         return None
 
     # PL5: the batch is live work the pipeline's runner yields to (DESIGN 7), like an "assess all" batch.
@@ -613,6 +619,8 @@ def _assess(
     }
     if thin:
         batch["requirements_notes"] = [thin[job] for job in sorted(thin)]  # omitted when every answer read enough requirements
+    if notices:
+        batch["model_notices"] = [notices[model] for model in sorted(notices)]  # omitted when every assessment was by an evaluated model
     return batch
 
 
@@ -1480,6 +1488,7 @@ def render(response: Mapping[str, object]) -> str:
             lines.append(f"  not assessed ({_failure_code(item)}): {item['job_identity']}")
         lines.extend(failure_lines(assessed["failed"]))  # 0110-10-13
         lines.extend(_note_lines(assessed))  # GUARDFIX
+        lines.extend(notice_lines(assessed))
         lines.extend(_next_lines(assessed, "not assessed yet"))
     reassessed = response.get("reassessed")
     if isinstance(reassessed, Mapping):
@@ -1488,6 +1497,7 @@ def render(response: Mapping[str, object]) -> str:
             lines.append(f"  not re-assessed ({_failure_code(item)}): {item['job_identity']}")
         lines.extend(failure_lines(reassessed["failed"]))
         lines.extend(_note_lines(reassessed))  # GUARDFIX
+        lines.extend(notice_lines(reassessed))
         lines.extend(_next_lines(reassessed, "with only an old assessment"))
     question = response.get("question")
     if isinstance(question, Mapping):
