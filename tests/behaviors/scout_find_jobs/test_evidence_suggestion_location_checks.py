@@ -275,9 +275,14 @@ def test_without_a_worldwide_statement_the_unmet_location_stays_not_a_match() ->
     [
         ("Work from anywhere in the world.", True),
         ("A globally distributed team.", True),
-        ("We hire worldwide.", True),
-        ("We are remote-first. Pay band: $150k for our Seattle office.", True),
-        ("We are remote-first.", False),  # alone it says nothing about another country
+        ("We can hire in any country.", True),
+        ("We work from anywhere in the world.", True),
+        ("We are a distributed team around the globe.", True),
+        ("We hire worldwide.", False),  # company boilerplate, not where the work can be
+        ("Our customers around the world love us.", False),
+        ("We have offices across the globe.", False),
+        ("A worldwide leader in widgets.", False),
+        ("We are remote-first. Pay band: $150k for our Seattle office.", False),
         ("We do not hire worldwide.", False),
         ("Candidates must be based in Poland.", False),
         ("The role is not open to work from anywhere in the world.", False),
@@ -285,6 +290,25 @@ def test_without_a_worldwide_statement_the_unmet_location_stays_not_a_match() ->
 )
 def test_what_counts_as_a_worldwide_statement(text: str, worldwide: bool) -> None:
     assert says_worldwide(text) is worldwide
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        "Location: Poland.\nOur customers around the world rely on us. Apply in Poland.",
+        "Location: Poland.\nWe have offices across the globe and are a worldwide leader.",
+        "Location: Poland.\nWe are remote-first. Salary range $120k-$150k.",
+    ],
+)
+def test_boilerplate_and_remote_first_keep_the_country_mismatch_a_no(body: str) -> None:
+    attempt = _assess(_location_answer(), job=AssessJob("Staff Engineer", "Acme", "Poland", body))
+    assert attempt.parsed.verdict.value == NOT_A_MATCH and not attempt.parsed.structured_questions
+
+
+@pytest.mark.parametrize("body", ["Location: Poland.\nWe work from anywhere in the world.", "Location: Poland.\nJoin a globally distributed team."])
+def test_the_real_shapes_become_one_location_question(body: str) -> None:
+    attempt = _assess(_location_answer(), job=AssessJob("Staff Engineer", "Acme", "Poland", body))
+    assert attempt.parsed.verdict.value == PENDING and len(attempt.parsed.structured_questions) == 1
 
 
 def test_another_unmet_hard_row_keeps_the_no_and_a_met_location_is_untouched() -> None:

@@ -1203,13 +1203,11 @@ def _row_ids(matrix: list[Mapping[str, object]], posting_sha256: str) -> list[st
 
 LOCATION_ROW_ID = "elig-location"
 _WORLDWIDE = re.compile(
-    r"anywhere\s+in\s+the\s+world|(?:around|across)\s+the\s+(?:world|globe)|world-?wide|globally\s+(?:distributed|remote)|"
-    r"(?:work|working)\s+(?:remotely\s+)?from\s+anywhere|remote\s+anywhere|anywhere\s+remote|global(?:ly)?\s+remote|"
-    r"(?:any|all)\s+countr(?:y|ies)|distributed\s+(?:team\s+)?(?:across|around)\s+the\s+(?:world|globe)",
+    r"anywhere\s+in\s+the\s+world|globally\s+(?:distributed|remote)|global\s+remote|"
+    r"(?:work|working)\s+(?:remotely\s+)?from\s+anywhere|remote\s+anywhere|anywhere\s+remote|"
+    r"hire\s+in\s+any\s+countr(?:y|ies)|distributed\s+(?:team\s+)?(?:across|around)\s+the\s+(?:world|globe)",
     re.IGNORECASE,
 )
-_REMOTE_FIRST = re.compile(r"remote-?\s*first", re.IGNORECASE)
-_ANOTHER_PLACE = re.compile(r"pay\s+(?:band|range|scale)|salary\s+(?:band|range)|\boffices?\s+in\b|\bheadquarter|\bhq\b|\bcompensation\s+range", re.IGNORECASE)
 _DENIES = re.compile(r"\b(?:not|cannot|can't|unable|except|excluding|only)\b|n't\b", re.IGNORECASE)
 _LOCATION_QUESTION = "The posting names {where} and also says the role is open more widely. Where are you able to work from?"
 
@@ -1223,9 +1221,7 @@ def says_worldwide(posting_text: str) -> bool:
             continue
         if _WORLDWIDE.search(sentence):
             return True
-    return bool(_REMOTE_FIRST.search(posting_text) and _ANOTHER_PLACE.search(posting_text) and not any(
-        _DENIES.search(sentence) for sentence in sentences if _REMOTE_FIRST.search(sentence)
-    ))
+    return False
 
 
 def _location_unclear(decoded: Mapping[str, object], boundary: Boundary) -> Mapping[str, object]:
