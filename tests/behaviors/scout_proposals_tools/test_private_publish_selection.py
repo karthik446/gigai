@@ -149,7 +149,7 @@ def test_a_private_write_reads_no_file_of_another_family_under_records(tmp_path:
     outside = [path for path in read if path.startswith(OTHER_FAMILY)]
     assert outside == [], f"a private write read {len(outside)} files of {OTHER_FAMILY}"
     assert all("records/" not in prefixes for prefixes, _paths in captures), "a publish asked for all of records/"
-    # Five writes, each a publish and a projection rebuild: none of them the size of the other family.
+    # Five writes, each one publish (0110-10-16: no projection rebuild after it): none the size of the other family.
     assert max(len(paths) for _prefixes, paths in captures) < 40
     assert max(blobs) < OTHER_FILES // 2, f"one read asked git for {max(blobs)} blobs"
     # What a publish does consult is in what it captured: the receipts, the references, the record's revisions.
@@ -241,17 +241,21 @@ def test_a_crash_between_the_steps_of_a_write_is_recovered_by_the_same_calls(tmp
     assert (again.created, again.item_id, record.created) == (False, reference.item_id, True)
     assert pad.revisions(record.record_id) == [record.revision_id]
 
-    # 2. The process dies after the commit, before the projection: the write is sealed and says the projection is
-    #    pending; the same call again returns the same receipt and rebuilds it.
-    real_rebuild = private_records.rebuild_scout_projection
-    with monkeypatch.context() as patched:
-        patched.setattr(private_records, "rebuild_scout_projection", lambda **_kwargs: (_ for _ in ()).throw(OSError("projection unavailable")))
-        other = pad.reference("the resume, changed\n", "crash-ref-2")
-        sealed = pad.record(other.item_id, "crash-record-2", record_id=record.record_id, parent_revision=record.revision_id)
+    # 2. The process dies after the commit, before the projection. Since 0110-10-16 that is every write: a save
+    #    never rebuilds the projection. The write is sealed and says the projection is pending; the same call
+    #    again returns the same receipt and still rebuilds nothing; the catch-up brings the index to the head,
+    #    and the call then says it is not pending.
+    private_records.catch_up_scout_projection(resolved=private_records._resolved(**pad.scope))  # type: ignore[arg-type]
+    other = pad.reference("the resume, changed\n", "crash-ref-2")
+    sealed = pad.record(other.item_id, "crash-record-2", record_id=record.record_id, parent_revision=record.revision_id)
     assert sealed.created is True and sealed.projection_pending is True and sealed.rebuild_action == "rebuild_index"
     context = json.loads((pad.workpad / "indexes" / "context.json").read_bytes())
     assert sealed.revision_id not in json.dumps(context)  # the derived index is behind
-    assert private_records.rebuild_scout_projection is real_rebuild
+    replay = pad.record(other.item_id, "crash-record-2", record_id=record.record_id, parent_revision=record.revision_id)
+    assert (replay.created, replay.revision_id, replay.receipt, replay.projection_pending) == (False, sealed.revision_id, sealed.receipt, True)
+    assert sealed.revision_id not in (pad.workpad / "indexes" / "context.json").read_text(encoding="utf-8")  # the retry rebuilt nothing
+    rebuilt = private_records.catch_up_scout_projection(resolved=private_records._resolved(**pad.scope))  # type: ignore[arg-type]
+    assert rebuilt is not None and rebuilt.journal_head == pad.head()
     replay = pad.record(other.item_id, "crash-record-2", record_id=record.record_id, parent_revision=record.revision_id)
     assert (replay.created, replay.revision_id, replay.receipt, replay.projection_pending) == (False, sealed.revision_id, sealed.receipt, False)
     context = json.loads((pad.workpad / "indexes" / "context.json").read_bytes())

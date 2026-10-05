@@ -7,12 +7,15 @@ that publishes immutable artifacts and an operation receipt together.
 
 from __future__ import annotations
 
+from collections import Counter
 from dataclasses import dataclass
 from datetime import UTC, datetime
+import logging
 import os
 from pathlib import Path
 import sqlite3
 import tempfile
+import threading
 import uuid
 from typing import Callable, Iterable, Mapping
 
@@ -27,13 +30,14 @@ from .journal import (
     JournalConflictError,
     JournalSnapshot,
     JournalTransition,
+    committed_head,
     read_committed_artifact,
     read_committed_snapshot,
     record_transition,
     run_with_journal_writer,
 )
 from .validators import validate_serialized_contract
-from .workpad import WORKPAD_LAYOUT_PATH, WORKPAD_V2_GITIGNORE, ResolvedWorkpad, resolve_workpad, workpad_layout_version
+from .workpad import WORKPAD_LAYOUT_PATH, WORKPAD_V2_GITIGNORE, ResolvedWorkpad, WorkpadError, resolve_workpad, workpad_head_without_git, workpad_layout_version
 
 
 class PrivateRecordError(RuntimeError):
@@ -63,6 +67,17 @@ class RevisionResult:
     receipt: dict[str, object] | None
     projection_pending: bool = False
     rebuild_action: str | None = None
+
+
+@dataclass(frozen=True)
+class ProjectionRebuild:
+    """What one rebuild wrote, and the receipts it left to the modules that own them."""
+
+    journal_head: str | None
+    records: int
+    operations: int
+    #: Receipts under ``records/operations/`` of a kind this projection does not own, by kind: counted, never read.
+    skipped_receipts: Mapping[str, int]
 
 
 def _now() -> str:
@@ -203,6 +218,18 @@ RECORD_DIRECTORY_PATTERN = (
 #: The whole families a publish captures under the writer lock (with ``records/record_<uuid>/`` beside them).
 PUBLISH_PREFIXES: tuple[str, ...] = ("references/", "run-inputs/", "records/operations/")
 
+#: The operations whose receipts this module and ``native_records`` publish: the five the receipt schema
+#: admits. ``records/operations/`` is shared: the watchlist, the application events and the interview
+#: records keep their own receipts there, in their own shapes (a watchlist seed's has one artifact ref per
+#: board). A receipt's kind is the operation in its file name (``<operation>-<digest>.json``), so it is
+#: known without reading the file, and a receipt of an owned kind that does not read is still an error.
+OWNED_OPERATIONS: frozenset[str] = frozenset({"reference_add", "run_input_add", "record_create", "record_update", "record_archive"})
+
+
+def _receipt_kind(path: str) -> str:
+    stem = path.removeprefix("records/operations/").removesuffix(".json")
+    return stem.rpartition("-")[0] or stem
+
 
 def _read_snapshot(resolved: ResolvedWorkpad, *, prefixes: tuple[str, ...] = (), records: bool = False) -> JournalSnapshot:
     """Committed private evidence, read without the journal writer lock."""
@@ -258,6 +285,11 @@ def _existing_receipt(resolved: ResolvedWorkpad, operation: str, key: str, paylo
 
 def _receipt_for_artifact(resolved: ResolvedWorkpad, operation: str, artifact_path: str, snapshot: JournalSnapshot) -> dict[str, object] | None:
     for path in sorted(item for item in snapshot.artifacts if item.startswith("records/operations/") and item.endswith(".json")):
+        # A receipt another module keeps in this folder (``OWNED_OPERATIONS`` says whose) is not this lookup's
+        # to read: it never met the private receipt contract, and reading it refused every equivalent import
+        # on a home that had one. A receipt of an owned kind that does not read still refuses, as before.
+        if _receipt_kind(path) not in OWNED_OPERATIONS:
+            continue
         receipt = _committed_json(resolved, path, code="private_operation_conflict", schema="scout-operation-receipt.schema.json", snapshot=snapshot)
         if receipt.get("operation") != operation:
             continue
@@ -269,12 +301,14 @@ def _receipt_for_artifact(resolved: ResolvedWorkpad, operation: str, artifact_pa
 
 def _publish(*, resolved: ResolvedWorkpad, operation: str, key: str, payload: dict[str, object], artifacts: tuple[JournalArtifact, ...], transition: str, uuid_factory: callable, parent_record_id: str | None = None, parent_revision: str | None = None, equivalent_artifact_path: Callable[[JournalSnapshot], str | None] | None = None) -> tuple[dict[str, object], bool, bool]:
     payload_sha = digest_imported_bytes(canonical_json_bytes(payload))
+    heads: list[str | None] = []
     def publish(writer: object) -> tuple[dict[str, object], bool]:
         # What a publish consults, and no more: the receipts, the references and Run inputs (an equivalent
         # import), and the records' own revisions (the parent check). Not all of ``records/``: other
         # families live there too (a watchlist of 10,000 boards is 10,000 files), and capturing them cost
         # every private write seconds on a large home. The same selection ``_private_snapshot`` reads.
         snapshot = writer.snapshot(PUBLISH_PREFIXES, child_prefixes=(("records/", RECORD_DIRECTORY_PATTERN),))  # type: ignore[attr-defined]
+        heads.append(snapshot.head)
         existing = _existing_receipt(resolved, operation, key, payload_sha, snapshot)
         if existing is not None:
             return existing, False
@@ -314,22 +348,11 @@ def _publish(*, resolved: ResolvedWorkpad, operation: str, key: str, payload: di
         receipt, created = run_with_journal_writer(workpad=resolved.path, project_id=resolved.project_id, gig_id=resolved.gig_id, operation=publish)
     except JournalConflictError as exc:
         raise PrivateRecordError("private_record_not_authenticated", str(exc)) from exc
-    if not created:
-        # Retrying an already committed request is also the bounded recovery
-        # path for a previous projection failure; it never appends authority.
-        try:
-            rebuild_scout_projection(resolved=resolved)
-        except Exception:
-            return receipt, False, True
-        return receipt, False, False
-    try:
-        rebuild_scout_projection(resolved=resolved)
-    except Exception:
-        # Authority is already sealed.  The retry path above returns the same
-        # receipt and callers get an explicit rebuild action rather than an
-        # invented failure or a duplicate application event.
-        return receipt, True, True
-    return receipt, True, False
+    # 0110-10-16: a save never rebuilds the projection, and neither does its retry. Authority is sealed by
+    # the commit above; the projection is derived from it and is now behind, which is what the result says
+    # (``projection_pending`` with its rebuild action). ``catch_up_scout_projection`` brings it to the head.
+    # A retry that committed nothing says whether the projection is at the head it read under the lock.
+    return receipt, created, created or scout_projection_behind(resolved, journal_head=heads[-1])
 
 
 def import_reference(*, home_root: Path, requested_target: Path | None, kind: str, source: Path, label: str | None = None, gig_id: str | None = None, operation_key: str | None = None, uuid_factory: callable = uuid.uuid4) -> ImportResult:
@@ -549,8 +572,83 @@ def read_record(*, home_root: Path, requested_target: Path | None, record_id: st
     return {**safe, "content": authenticated_bytes}
 
 
-def rebuild_scout_projection(*, resolved: ResolvedWorkpad) -> None:
-    """Rebuild only SCOUT-owned tables and redacted context from committed files."""
+def _projection_cursor(workpad: Path) -> str | None:
+    """The journal head the projection was last rebuilt at; ``None`` when it never was or does not read."""
+    path = workpad / "state.sqlite"
+    if path.is_symlink() or not path.exists():
+        return None
+    try:
+        connection = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+        try:
+            row = connection.execute("SELECT payload FROM scout_meta WHERE key = 'cursor'").fetchone()
+        finally:
+            connection.close()
+        value = parse_json_bytes(bytes(row[0])) if row is not None else None
+    except (sqlite3.Error, TypeError, ValueError):
+        return None
+    head = value.get("journal_head") if isinstance(value, dict) else None
+    return head if isinstance(head, str) else None
+
+
+def scout_projection_behind(resolved: ResolvedWorkpad, *, journal_head: str | None) -> bool:
+    """Whether the projection is not at ``journal_head``. One read of ``state.sqlite``; no git process."""
+    return journal_head is not None and _projection_cursor(resolved.path) != journal_head
+
+
+def catch_up_scout_projection(*, resolved: ResolvedWorkpad) -> ProjectionRebuild | None:
+    """Rebuild the projection when its cursor is not the journal head; ``None`` when it already is there."""
+    # The head of the workpad the caller has just resolved, from its ``.git`` files (no git process when
+    # there is nothing to do); asked of the journal only when the files do not say.
+    head = workpad_head_without_git(resolved.path)
+    if head is None:
+        try:
+            head = committed_head(workpad=resolved.path, project_id=resolved.project_id, gig_id=resolved.gig_id)
+        except JournalConflictError as exc:
+            raise PrivateRecordError("private_record_not_authenticated", str(exc)) from exc
+    if not scout_projection_behind(resolved, journal_head=head):
+        return None
+    return rebuild_scout_projection(resolved=resolved)
+
+
+def start_scout_projection_catch_up(*, home_root: Path, requested_target: Path | None, gig_id: str | None = None, logger: logging.Logger | None = None) -> threading.Thread:
+    """Start ONE daemon thread that brings the projection to the journal head when it is behind (0110-10-16).
+
+    A save never rebuilds the projection, so it is behind after every save, and on a home that seeded a
+    watchlist before 0.1.10.11 it has been behind since the seed. The server calls this once when it
+    starts. The thread takes the state database's own lock and never the journal writer's, so no save
+    waits for it, and it never raises: the projection is derived, and a home that cannot rebuild it
+    today (no Scout project yet, a damaged receipt) is told so in one log line with no record text.
+    """
+    log = logger or logging.getLogger(__name__)
+
+    def run() -> None:
+        try:
+            resolved = _resolved(home_root=Path(home_root), requested_target=Path(requested_target) if requested_target is not None else None, gig_id=gig_id)
+            rebuilt = catch_up_scout_projection(resolved=resolved)
+        except Exception as exc:  # noqa: BLE001 - a background catch-up of derived tables: never the server's failure; the next start tries again
+            # A home with no workpad yet has nothing to bring up to date: said, not warned about.
+            level = logging.INFO if isinstance(exc, WorkpadError) else logging.WARNING
+            log.log(level, "scout projection catch-up did not finish: %s %s", type(exc).__name__, getattr(exc, "code", ""))
+            return
+        if rebuilt is not None:
+            log.info(
+                "scout projection caught up: head=%s records=%d operations=%d receipts_of_other_kinds_skipped=%d",
+                (rebuilt.journal_head or "-")[:12], rebuilt.records, rebuilt.operations, sum(rebuilt.skipped_receipts.values()),
+            )
+
+    thread = threading.Thread(target=run, name="scout-projection-catch-up", daemon=True)
+    thread.start()
+    return thread
+
+
+def rebuild_scout_projection(*, resolved: ResolvedWorkpad) -> ProjectionRebuild:
+    """Rebuild only SCOUT-owned tables and redacted context from committed files.
+
+    Never called by a save (0110-10-16): ``catch_up_scout_projection`` calls it when the cursor is behind.
+    Of ``records/operations/`` it reads the receipts of ``OWNED_OPERATIONS`` and no other: those are
+    counted in the result and left to their own modules. A receipt of an owned kind that does not meet
+    the receipt contract, or names another operation than its file does, still refuses the rebuild.
+    """
     selected = _private_snapshot(resolved, operations=True)
     journal_head = selected.head
     records: list[dict[str, object]] = []
@@ -563,16 +661,20 @@ def rebuild_scout_projection(*, resolved: ResolvedWorkpad) -> None:
         revisions = list_revisions(resolved=resolved, record_id=record_id, snapshot=selected)
         if revisions:
             records.append(revisions[-1])
-    operations = [
-        (
-            path,
-            _committed_json(
-                resolved, path, code="private_operation_conflict",
-                schema="scout-operation-receipt.schema.json", snapshot=selected,
-            ),
+    operations: list[tuple[str, dict[str, object]]] = []
+    skipped: Counter[str] = Counter()
+    for path in sorted(item for item in selected.artifacts if item.startswith("records/operations/") and item.endswith(".json")):
+        kind = _receipt_kind(path)
+        if kind not in OWNED_OPERATIONS:
+            skipped[kind] += 1
+            continue
+        receipt = _committed_json(
+            resolved, path, code="private_operation_conflict",
+            schema="scout-operation-receipt.schema.json", snapshot=selected,
         )
-        for path in sorted(item for item in selected.artifacts if item.startswith("records/operations/") and item.endswith(".json"))
-    ]
+        if receipt.get("operation") != kind:
+            raise PrivateRecordError("private_operation_conflict", "operation receipt identity differs from its path")
+        operations.append((path, receipt))
     context = {"schema_version":"1.0","project_id":resolved.project_id,"gig_id":resolved.gig_id,"journal_head":journal_head,"records":[{"record_id":item["record_id"],"revision_id":item["revision_id"],"kind":item["kind"],"state":item["state"],"location":f"records/{item['record_id']}/revisions/{item['revision_id']}.json","outstanding_questions":[]} for item in records]}
     with database_lock(resolved.path):
         validate_state_database(resolved.path / "state.sqlite")
@@ -587,7 +689,9 @@ def rebuild_scout_projection(*, resolved: ResolvedWorkpad) -> None:
                 "INSERT INTO scout_operations(key,payload) VALUES (?,?)",
                 [(path, canonical_json_bytes(item)) for path, item in operations],
             )
-            connection.execute("DELETE FROM scout_meta")
+            # Only this projection's two rows: ``scout_meta`` also keeps Scout's own read-model row
+            # (``report_projection``, ``scout/projection.py``), which is not this function's to delete.
+            connection.execute("DELETE FROM scout_meta WHERE key IN ('context', 'cursor')")
             connection.executemany(
                 "INSERT INTO scout_meta(key,payload) VALUES (?,?)",
                 (("context", canonical_json_bytes(context)), ("cursor", canonical_json_bytes({"schema_version": "1.0", "journal_head": journal_head}))),
@@ -609,6 +713,7 @@ def rebuild_scout_projection(*, resolved: ResolvedWorkpad) -> None:
             os.replace(temporary, index_path / "context.json")
         finally:
             temporary.unlink(missing_ok=True)
+    return ProjectionRebuild(journal_head, len(records), len(operations), dict(sorted(skipped.items())))
 
 
 def select_exact_inputs(*, home_root: Path, requested_target: Path | None, record_refs: Iterable[tuple[str, str | None]], gig_id: str | None = None) -> list[dict[str, object]]:
@@ -630,4 +735,4 @@ def select_exact_inputs(*, home_root: Path, requested_target: Path | None, recor
     return selected
 
 
-__all__ = ["ImportResult", "PrivateRecordError", "RevisionResult", "create_record", "import_reference", "import_run_input", "list_imports", "migrate_workpad_layout", "read_import", "read_record", "rebuild_scout_projection", "select_exact_inputs"]
+__all__ = ["ImportResult", "PrivateRecordError", "ProjectionRebuild", "RevisionResult", "catch_up_scout_projection", "create_record", "import_reference", "import_run_input", "list_imports", "migrate_workpad_layout", "read_import", "read_record", "rebuild_scout_projection", "scout_projection_behind", "select_exact_inputs", "start_scout_projection_catch_up"]

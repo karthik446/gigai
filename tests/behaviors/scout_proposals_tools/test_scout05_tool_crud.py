@@ -166,7 +166,8 @@ def test_fresh_wrapper_executes_approved_create_update_archive_with_cas_and_repl
     assert updated.returncode == 0, updated.stderr
     second = update_payload["result"]["result"]  # type: ignore[index]
     assert second["record_id"] == record_id  # type: ignore[index]
-    assert second["projection_pending"] is False  # type: ignore[index]
+    # 0110-10-16: a write never rebuilds the projection, so it says the projection is pending (it is: behind the head).
+    assert second["projection_pending"] is True  # type: ignore[index]
 
     replay = _run(wrapper, home, target, *update_args)
     replay_payload = _payload(replay)

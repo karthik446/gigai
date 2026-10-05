@@ -119,13 +119,17 @@ def test_extra_uncommitted_private_evidence_refuses_publication(private_gig):
 
 def test_post_commit_runtime_failure_returns_pending_result(private_gig, monkeypatch):
     _created, options, _arguments, _imported = private_gig
+    attempts = []
 
     def unavailable(**_kwargs):
+        attempts.append(1)
         raise RuntimeError("projection unavailable")
 
+    # 0110-10-16: a save never calls the rebuild, so a projection that cannot be rebuilt cannot cost it anything.
     monkeypatch.setattr(records, "rebuild_scout_projection", unavailable)
     result = records.import_run_input(**options, data=b"Job posting", operation_key="pending")
-    assert result.created and result.projection_pending
+    assert result.created and result.projection_pending and result.rebuild_action == "rebuild_index"
+    assert attempts == []
     assert result.receipt is not None
     assert "projection_pending" not in result.receipt
     assert "rebuild_action" not in result.receipt
@@ -136,6 +140,7 @@ def test_context_staging_never_follows_preexisting_symlink(private_gig, tmp_path
     outside = tmp_path / "unrelated.txt"
     outside.write_bytes(b"keep this unchanged")
     temporary = created.workpad / "indexes" / ".context.tmp"
+    temporary.parent.mkdir(mode=0o700, exist_ok=True)  # 0110-10-16: no save has rebuilt the projection, so the folder is not there yet
     temporary.symlink_to(outside)
     try:
         records.rebuild_scout_projection(resolved=records._resolved(**options))
@@ -147,6 +152,7 @@ def test_context_staging_never_follows_preexisting_symlink(private_gig, tmp_path
 def test_projection_rejects_trigger_without_destroying_trace(private_gig):
     created, options, arguments, _imported = private_gig
     records.create_record(**arguments)
+    records.rebuild_scout_projection(resolved=records._resolved(**options))  # 0110-10-16: the tables exist once a rebuild has run
     database = created.workpad / "state.sqlite"
     with sqlite3.connect(database) as connection:
         connection.execute(
