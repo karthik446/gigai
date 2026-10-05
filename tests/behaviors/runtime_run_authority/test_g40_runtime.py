@@ -408,7 +408,7 @@ def test_login_shell_hydration_classifies_timeout(
     assert reason == "shell_timeout"
 
 
-def test_setup_clean_environment_returns_structured_error_without_traceback(
+def test_setup_clean_environment_sets_no_editor_without_traceback(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.delenv("VISUAL", raising=False)
@@ -419,11 +419,9 @@ def test_setup_clean_environment_returns_structured_error_without_traceback(
         ["setup", "--non-interactive", "--home", str(tmp_path / "home"), "--json"],
     )
 
-    assert result.exit_code != 0
-    payload = json.loads(result.output)
-    assert payload["status"] == "error"
-    assert payload["error"]["code"] == "setup_editor_invalid"
-    assert "no editor is configured" in payload["error"]["message"]
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.stdout)["home_root"] == str(tmp_path / "home")
+    assert "no editor set;" in result.stderr
     assert "Traceback" not in result.output
 
 

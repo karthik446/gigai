@@ -23,6 +23,12 @@ _CAPABILITY = re.compile(r"[a-z][a-z0-9_-]*\Z")
 _REASONING_EFFORTS = frozenset({"none", "low", "medium", "high", "xhigh", "max"})
 
 
+NO_EDITOR_NOTICE = (
+    "no editor set; GigAI will ask for one only if a command needs to open a file: "
+    "gigai setup --editor PROGRAM"
+)
+
+
 class ConfigurationError(ValueError):
     """A configuration cannot be read without guessing or migration."""
 
@@ -394,8 +400,7 @@ def parse_config(payload: object, *, source: Path | None = None) -> GigAIConfig:
     editor = _table(root.get("editor"), "editor", where)
     _exact_keys(editor, {"argv", "open_with_target"}, "editor", where)
     editor_argv = _string_array(editor, "argv", "editor", where)
-    if not editor_argv:
-        raise MalformedConfigurationError(f"editor.argv{where} must not be empty")
+    # An empty argv is valid: no editor is set (0.1.11); only `gigai open` needs one.
     open_with_target = editor.get("open_with_target")
     if type(open_with_target) is not bool:
         raise MalformedConfigurationError(

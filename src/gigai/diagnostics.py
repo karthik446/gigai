@@ -514,6 +514,16 @@ def _credential_checks(config: GigAIConfig) -> tuple[DiagnosticCheck, ...]:
 
 def _editor_check(config: GigAIConfig) -> DiagnosticCheck:
     started = time.monotonic_ns()
+    if not config.editor_argv:
+        return _check(
+            "editor.resolved",
+            "configured editor",
+            "PASS",
+            "editor: not set",
+            ("argv_structured=true", "editor_set=false"),
+            None,
+            started,
+        )
     executable = config.editor_argv[0]
     resolved = shutil.which(executable)
     if resolved is None:

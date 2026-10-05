@@ -96,6 +96,25 @@ def resolve_editor_argv(
     return argv
 
 
+def resolve_optional_editor_argv(
+    editor: str | None, editor_args: tuple[str, ...] = ()
+) -> tuple[str, ...]:
+    """Like `resolve_editor_argv`, but finding no editor is valid and returns ().
+
+    A named editor (an argument or the existing config) must still resolve. One taken only from
+    VISUAL/EDITOR that cannot be used is treated as unset: no command here needs it.
+    """
+
+    if editor is not None:
+        if not editor.strip():
+            return ()
+        return resolve_editor_argv(editor, editor_args)
+    try:
+        return resolve_editor_argv(None, editor_args)
+    except ValueError:
+        return ()
+
+
 def build_config(
     *,
     home_root: Path,
@@ -218,5 +237,6 @@ __all__ = [
     "default_home_root",
     "default_workpad_root",
     "resolve_editor_argv",
+    "resolve_optional_editor_argv",
     "run_setup",
 ]
