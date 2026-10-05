@@ -53,7 +53,7 @@ def test_the_pre_change_column_is_the_same_candidate_with_no_work_mode() -> None
     for case in payload["cases"]:
         after = rules.render_prompt(payload, case, rules.SHIPPED)
         before = rules.render_prompt(payload, case, rules.BEFORE)
-        assert "CANDIDATE WORK MODE" not in before
+        assert not any(block.startswith("CANDIDATE WORK MODE") for block in before.split("\n\n"))  # rule 5 names the paragraph
         if payload["candidates"][case["candidate"]]["work_mode"]:
             paragraph = next(block for block in after.split("\n\n") if block.startswith("CANDIDATE WORK MODE"))
             assert after.replace("\n\n" + paragraph, "") == before
