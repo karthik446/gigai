@@ -79,7 +79,10 @@ def _code(path: Path) -> str:
 
 
 def test_no_other_disclosure_wraps_the_job_page_requirements() -> None:
-    assert "<details" not in _code(UI_SRC / "views" / "JobPage.jsx")
+    page = _code(UI_SRC / "views" / "JobPage.jsx")
+    # 0110-10-13: the one disclosure the page may have is the short "what one assessment sends" note under the Assess action;
+    # nothing else (above all nothing around the requirements) is collapsible.
+    assert page.count("<details") == page.count('data-role="assess-sends"'), "a disclosure other than the assess-sends note"
     assert "requirements-details" not in (UI_SRC / "styles.css").read_text(encoding="utf-8")
 
 
