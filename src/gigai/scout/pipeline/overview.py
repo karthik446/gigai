@@ -79,10 +79,10 @@ def job_state(states: Mapping[str, str]) -> str:
     return JOB_CANCELLED if STATE_CANCELLED in values else JOB_WAITING
 
 
-def _label(home_root: Path, target: Path, profile_id: str, job: str) -> dict[str, object] | None:
-    """The stored Scout label of a job, as codes and numbers only."""
+def _label(home_root: Path, target: Path, profile_id: str, job: str, *, scout_root: Path | None = None) -> dict[str, object] | None:
+    """The stored Scout label of a job, as codes and numbers only. ``scout_root``: ``steps.read_label``'s."""
 
-    record = steps_module.read_label(home_root, target, profile_id, job)
+    record = steps_module.read_label(home_root, target, profile_id, job, scout_root=scout_root)
     if record is None:
         return None
     label, reasons, score = record.get("label"), record.get("reasons"), record.get("ats_score")
@@ -197,9 +197,10 @@ def overview(
             per_state[str(item["state"])] = per_state.get(str(item["state"]), 0) + 1
         answer["counts"] = {"steps": store.counts(), "jobs": per_state, "jobs_total": len(listed)}
         shown = listed[:JOBS_LIMIT]
+        scout_root = path.parent.parent  # 0.1.10.11 S2: the project's Scout folder, found once for the 200 labels
         for index, item in enumerate(listed):
             if item.pop("_labelled") and index < JOBS_LIMIT:
-                item["label"] = _label(home_root, target, str(item["profile_id"]), str(item["job_identity"]))
+                item["label"] = _label(home_root, target, str(item["profile_id"]), str(item["job_identity"]), scout_root=scout_root)
         answer["jobs"] = shown
         pending = approvals_of(store, state=APPROVAL_PENDING)
         answer["approvals"] = {"pending": len(pending), "items": pending}

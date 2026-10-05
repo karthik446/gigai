@@ -65,9 +65,11 @@ from __future__ import annotations
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import datetime
+import functools
 import logging
 from pathlib import Path
 
+from ...workpad import committed_read_cache
 from ..call_metrics import lane_for
 from . import steps
 from .settings import SOURCE_UNREADABLE, PipelineSetting, pipeline_setting
@@ -110,6 +112,28 @@ _QUEUED_STATES = frozenset({STATE_BLOCKED, STATE_READY, STATE_RUNNING, STATE_AWA
 _logger = logging.getLogger("gigai.scout.pipeline")
 
 Pair = tuple[str, str]  # (profile_id, job identity)
+
+
+def _reads_journal(trigger):
+    """0.1.10.11 S2: a trigger runs inside ``workpad.committed_read_cache``, whoever calls it.
+
+    A trigger only READS the journal (the profiles, the answers and stories,
+    the master) and writes the queue (``pipeline.sqlite``), which is not in
+    it. It runs inside a save, after the save's own journal write, and looks
+    at every job of a profile: outside the scope each job's digest resolved
+    and checked the workpad again and read the same committed files again
+    (about 98 git processes a digest; a rename of a profile with 100 finished
+    jobs was 22,599 processes and 166 s). Inside it a check that passed and a
+    read that was made hold for as long as the workpad is unchanged, so the
+    save's write is seen (the head moved) and the jobs share what they read.
+    """
+
+    @functools.wraps(trigger)
+    def wrapper(*args, **kwargs):
+        with committed_read_cache():
+            return trigger(*args, **kwargs)
+
+    return wrapper
 
 
 # --- what a trigger did ---------------------------------------------------------------------
@@ -279,6 +303,7 @@ def _skip(pair: Pair, exc: BaseException) -> dict[str, object]:
     return {"profile_id": pair[0], "job_identity": pair[1], "error_code": steps.error_code(exc)}
 
 
+@_reads_journal
 def enqueue_pairs(
     home_root: Path,
     target: Path,
@@ -307,9 +332,10 @@ def enqueue_pairs(
     lanes = {"reassess": (lane_for(reassess_model), reassess_model)}
     items: list[_Item] = []
     skipped: list[dict[str, object]] = []
+    shared = steps.SharedInputs(ctx)  # 0.1.10.11 S2: what the pairs read alike is read once
     for pair in wanted:
         try:
-            digest = steps.tailor_digest(ctx, pair[0], pair[1], tailor_model)
+            digest = steps.tailor_digest(ctx, pair[0], pair[1], tailor_model, shared=shared)
         except Exception as exc:  # noqa: BLE001 - a pair whose inputs cannot be read is skipped with a bounded code, the others go on
             skipped.append(_skip(pair, exc))
             continue
@@ -327,6 +353,7 @@ def enqueue_pairs(
 # --- process now ----------------------------------------------------------------------------
 
 
+@_reads_journal
 def process_now(
     home_root: Path,
     target: Path,
@@ -377,6 +404,7 @@ class Pending:
     pairs: tuple[Pair, ...] = ()
     fired: TriggerResult | None = field(default=None, repr=False)
 
+    @_reads_journal
     def fire(self) -> TriggerResult:
         """Queue the pairs (once). Never raises: a failure is logged by its type and queues nothing."""
 
@@ -458,6 +486,7 @@ def _asking_pairs(home_root: Path, target: Path, answers: Callable[[str, str], b
     return tuple(pair for _later, pair in found if pair[0] in active)
 
 
+@_reads_journal
 def _pending(home_root: Path, target: Path, trigger: str, answers: Callable[[str, str], bool], first_job: str | None) -> Pending:
     home_root, target = Path(home_root), Path(target)
     try:
@@ -499,12 +528,12 @@ def pending_story(home_root: Path, target: Path, story: object) -> Pending:
 # --- a profile's resume or settings changed -------------------------------------------------
 
 
-def _stale_item(ctx: steps.StepContext, store: PipelineStore, rows: Mapping[str, Step]) -> _Item | None:
+def _stale_item(ctx: steps.StepContext, store: PipelineStore, rows: Mapping[str, Step], shared: steps.SharedInputs) -> _Item | None:
     """The first step of one job that is ``done`` with a digest its inputs no longer give, or ``None``.
 
     Only a finished pipeline is looked at step by step: a step that is
     queued gets its digest when it is claimed, and a failed or cancelled one
-    is the user's to retry.
+    is the user's to retry. ``shared``: what the trigger's jobs read alike.
     """
 
     for name in STEPS:
@@ -512,11 +541,12 @@ def _stale_item(ctx: steps.StepContext, store: PipelineStore, rows: Mapping[str,
         if step is None or step.state != STATE_DONE:
             return None
         if name == "tailor":
-            digest = steps.tailor_digest(ctx, step.profile_id, step.job, step.model_target)
+            digest = steps.tailor_digest(ctx, step.profile_id, step.job, step.model_target, shared=shared)
         else:
             digest = steps.input_digest(
                 ctx, store,
                 Claim(step.profile_id, step.job, name, step.lane, step.model_target, step.input_digest, step.done_digest, step.generation, step.attempts, "", 0.0, 0.0),
+                shared=shared,
             )
         if digest != step.done_digest:
             lanes = {other: (rows[other].lane, rows[other].model_target) for other in _downstream(name) if other in rows}
@@ -524,6 +554,7 @@ def _stale_item(ctx: steps.StepContext, store: PipelineStore, rows: Mapping[str,
     return None
 
 
+@_reads_journal
 def profile_changed(home_root: Path, target: Path, profile_id: str | None = None) -> TriggerResult:
     """Re-open the steps of ``profile_id`` (``None``: every profile) whose inputs changed. Never raises.
 
@@ -551,9 +582,10 @@ def profile_changed(home_root: Path, target: Path, profile_id: str | None = None
                 jobs.setdefault((step.profile_id, step.job), {})[step.name] = step
             items: list[_Item] = []
             skipped: list[dict[str, object]] = []
+            shared = steps.SharedInputs(ctx)  # 0.1.10.11 S2: what the jobs read alike is read once
             for pair, rows in jobs.items():
                 try:
-                    item = _stale_item(ctx, store, rows)
+                    item = _stale_item(ctx, store, rows, shared)
                 except Exception as exc:  # noqa: BLE001 - a job whose inputs cannot be read is skipped with a bounded code, the others go on
                     skipped.append(_skip(pair, exc))
                     continue

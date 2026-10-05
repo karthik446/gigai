@@ -249,8 +249,157 @@ class _Inputs:
     posting_sha256: str
 
 
-def _inputs(ctx: StepContext, profile_id: str, job: str) -> _Inputs:
-    """The profile, its stored (base) assessment of ``job`` and the posting that assessment was made on."""
+class SharedInputs:
+    """0.1.10.11 S2: what every job of ONE trigger reads alike, read once and passed to each job's digest.
+
+    A trigger looks at every finished job of a profile, or at every job that
+    asked a question. Without this each job's digest resolved the workpad and
+    the profile again and read the answers, the stories and the master again
+    (about 98 git processes a digest on the operator-sized home; four digests
+    a job when nothing changed). With it a job costs its own stored
+    assessment (read once for its four digests) and a match in memory.
+
+    It is ONE look: what it read is not read again, so it lives for one
+    trigger and is never kept. Each value is what the per-job path reads,
+    made by the same function with the same arguments, so a digest computed
+    with it is byte for byte the one computed without
+    (``tests/behaviors/scout_pipeline/test_trigger_digests_identical.py``; a
+    different digest would tailor every finished job again). A read that
+    failed is not kept (a profile that is not there, a bank or a master that
+    could not be read, which read as "none"): the next job asks again, as it
+    always did, so one failed read never decides for every job of the trigger.
+    """
+
+    def __init__(self, ctx: StepContext) -> None:
+        self._ctx = ctx
+        self._resolved: object | None = None
+        self._profiles: dict[str, object] = {}
+        self._answer_marks: dict[str, object] | None = None
+        self._banks: dict[str, object] = {}
+        self._master_parts: dict[str, tuple[object, ...]] = {}
+        #: profile id -> the folder its stored assessments are in (``None``: ask ``quick_assess`` for every job).
+        self._base_dirs: dict[str, Path | None] = {}
+        self._job: tuple[tuple[str, str], _Inputs] | None = None
+
+    def resolved(self) -> object:
+        if self._resolved is None:
+            from ..quick_assess import _resolve_workpad
+
+            self._resolved = _resolve_workpad(self._ctx.home_root, self._ctx.target)
+        return self._resolved
+
+    def profile(self, profile_id: str) -> object:
+        if profile_id not in self._profiles:
+            from ..find_jobs.assess_contracts import AssessResumeInput
+            from ..find_jobs.resume_input import resolve_profile
+
+            profile = resolve_profile(
+                AssessResumeInput(profile_id=profile_id), resolved=self.resolved(), home_root=self._ctx.home_root, target=self._ctx.target  # type: ignore[arg-type]
+            )
+            assert profile is not None
+            self._profiles[profile_id] = profile
+        return self._profiles[profile_id]
+
+    def bank(self, profile_id: str) -> object:
+        """``story_bank.assess_bank`` for ``profile_id``: what its tailoring is offered and its re-assessment seals."""
+
+        kept = self._banks.get(profile_id)
+        if kept is None:
+            from .. import story_bank
+
+            kept = story_bank.assess_bank(home_root=self._ctx.home_root, target=self._ctx.target, profile_id=profile_id)
+            if kept.profile_id is not None:  # ``None``: no bank could be read
+                self._banks[profile_id] = kept
+        return kept
+
+    def source_marks(self, profile_id: str, *, title: str, posting_text: str) -> list[tuple[str, object]]:
+        """``(id, revision mark)`` of everything ``tailored_resume.tailor_sources`` offers this job's tailoring, sorted.
+
+        The same answers (every one the user gave) and the same pick of
+        stories (``AssessBank.for_job``: the ones that match THIS posting, an
+        answer with a story's id winning); only the two reads behind them are
+        this trigger's, not this job's.
+        """
+
+        marks = self._answer_marks
+        if marks is None:
+            from ...private_records import PrivateRecordError
+            from .. import story_bank
+
+            try:
+                answers = story_bank.answers_for_reuse(home_root=self._ctx.home_root, target=self._ctx.target, strict=True)
+            except (story_bank.StoryBankError, PrivateRecordError):
+                marks = {}  # what ``answers_for_reuse`` answers for a bank it cannot read
+            else:
+                marks = self._answer_marks = {key: item.revision_id for key, item in answers.items()}
+        marks = dict(marks)
+        job_bank = self.bank(profile_id).for_job(title=title, text=posting_text)  # type: ignore[attr-defined]
+        for line in job_bank.bank_answers:
+            if line.question_id in job_bank.job_stories and line.question_id not in marks:
+                marks[line.question_id] = job_bank.marks.get(line.question_id) or "unmarked"
+        return sorted(marks.items(), key=lambda item: item[0])
+
+    def master_parts(self, profile: object) -> tuple[object, ...]:
+        """``tailor_master.digest_parts`` for ``profile``: the same for every job of it."""
+
+        profile_id = profile.profile_id  # type: ignore[attr-defined]
+        kept = self._master_parts.get(profile_id)
+        if kept is None:
+            from ..tailor_master import digest_parts
+
+            kept = digest_parts(self._ctx.home_root, self._ctx.target, profile, resolved=self.resolved())
+            if kept:  # ``()``: no master, a detached profile, or a master that could not be read
+                self._master_parts[profile_id] = kept
+        return kept
+
+    def basis(self):
+        """An ``assessment_basis.BasisCheck`` on the workpad this trigger resolved.
+
+        One a digest, as before: what a check read is kept by that module for
+        as long as the workpad is unchanged, and what it could not read is
+        not, so nothing is gained by holding one here.
+        """
+
+        from ..assessment_basis import BasisCheck
+
+        return BasisCheck(home_root=self._ctx.home_root, target=self._ctx.target, resolved=self._resolved)
+
+    def base(self, profile_id: str, job: str):
+        """``quick_assess.read_quick_assessment``: the job's own stored assessment, one file.
+
+        Where a profile's assessments are is asked once a trigger (it is one
+        lookup of the bound project, 2 ms, which every job repeated), then a
+        job's file is ``<sha256(job identity)>.json`` in it. Should the store
+        ever name its files otherwise, every job is asked for as before.
+        """
+
+        from ..quick_assess import _read_stored, quick_assess_path
+
+        if profile_id not in self._base_dirs:
+            path = quick_assess_path(self._ctx.home_root, self._ctx.target, profile_id, job)
+            self._base_dirs[profile_id] = path.parent if path.name == f"{_job_key(job)}.json" else None
+            return _read_stored(path)
+        directory = self._base_dirs[profile_id]
+        if directory is None:
+            return _read_stored(quick_assess_path(self._ctx.home_root, self._ctx.target, profile_id, job))
+        return _read_stored(directory / f"{_job_key(job)}.json")
+
+    def job(self, profile_id: str, job: str) -> _Inputs | None:
+        """The inputs last read for this job, so its four digests read its assessment once."""
+
+        if self._job is not None and self._job[0] == (profile_id, job):
+            return self._job[1]
+        return None
+
+    def keep_job(self, profile_id: str, job: str, found: _Inputs) -> None:
+        self._job = ((profile_id, job), found)
+
+
+def _inputs(ctx: StepContext, profile_id: str, job: str, shared: SharedInputs | None = None) -> _Inputs:
+    """The profile, its stored (base) assessment of ``job`` and the posting that assessment was made on.
+
+    ``shared``: a trigger's :class:`SharedInputs` (the workpad and the profile are then read once a trigger).
+    """
 
     from ..assessment_basis import posting_sha256
     from ..find_jobs.assess_contracts import AssessResumeInput
@@ -258,13 +407,20 @@ def _inputs(ctx: StepContext, profile_id: str, job: str) -> _Inputs:
     from ..find_jobs.resume_input import resolve_profile
     from ..quick_assess import QuickAssessError, _resolve_workpad, read_quick_assessment
 
+    if shared is not None:
+        kept = shared.job(profile_id, job)
+        if kept is not None:
+            return kept
     try:
-        resolved = _resolve_workpad(ctx.home_root, ctx.target)
-        profile = resolve_profile(AssessResumeInput(profile_id=profile_id), resolved=resolved, home_root=ctx.home_root, target=ctx.target)
+        if shared is not None:
+            resolved, profile = shared.resolved(), shared.profile(profile_id)
+        else:
+            resolved = _resolve_workpad(ctx.home_root, ctx.target)
+            profile = resolve_profile(AssessResumeInput(profile_id=profile_id), resolved=resolved, home_root=ctx.home_root, target=ctx.target)
     except (QuickAssessError, FindJobsContractError) as exc:
         raise StepError(error_code(exc), "the profile is not available") from exc
     assert profile is not None
-    base = read_quick_assessment(ctx.home_root, ctx.target, profile_id, job)
+    base = shared.base(profile_id, job) if shared is not None else read_quick_assessment(ctx.home_root, ctx.target, profile_id, job)
     if base is None:
         raise StepError(ERROR_ASSESSMENT_MISSING, "this job has no assessment for this profile yet; assess it first")
     if not base.posting_text:
@@ -272,7 +428,10 @@ def _inputs(ctx: StepContext, profile_id: str, job: str) -> _Inputs:
         raise StepError(ERROR_POSTING_TEXT_UNAVAILABLE, "the posting's text is not stored for this job")
     resolved_job = replace(base.job, text=base.posting_text)
     digest = base.posting_sha256 or posting_sha256(resolved_job.title, resolved_job.text)
-    return _Inputs(resolved, profile, base, resolved_job, digest)
+    found = _Inputs(resolved, profile, base, resolved_job, digest)
+    if shared is not None:
+        shared.keep_job(profile_id, job, found)
+    return found
 
 
 def model_for(ctx: StepContext, step: str) -> str:
@@ -283,7 +442,7 @@ def model_for(ctx: StepContext, step: str) -> str:
     return ctx.setting.models.get(step) or _default_model_target(ctx.target).value
 
 
-def _tailor_digest(ctx: StepContext, found: _Inputs, model_target: str | None) -> str:
+def _tailor_digest(ctx: StepContext, found: _Inputs, model_target: str | None, shared: SharedInputs | None = None) -> str:
     from ..tailored_resume import TAILOR_INSTRUCTIONS_DIGEST, tailor_sources
 
     profile = found.profile
@@ -291,32 +450,45 @@ def _tailor_digest(ctx: StepContext, found: _Inputs, model_target: str | None) -
     # revision, label, titles or search settings (a rename must not re-tailor ten jobs).
     # Ids and revision marks only, so the resume itself is not read here: its digest is the profile's pinned one,
     # and which answers and stories a tailoring is offered does not depend on the resume's text.
-    sources = tailor_sources(
-        home_root=ctx.home_root, target=ctx.target, profile_id=profile.profile_id, resume_text="",  # type: ignore[attr-defined]
-        title=found.job.title, posting_text=found.job.text,  # type: ignore[attr-defined]
-    )
     # 0.1.10.9 master P4: a tailoring that reads the master resume is also keyed by the master's revision, the
     # selector's version and the candidate rule (``tailor_master.digest_parts``). Nothing is added without a
     # master, so such a digest is exactly what it was.
-    from ..tailor_master import digest_parts
+    if shared is not None:
+        marks = shared.source_marks(profile.profile_id, title=found.job.title, posting_text=found.job.text)  # type: ignore[attr-defined]
+        master = shared.master_parts(profile)
+    else:
+        from ..tailor_master import digest_parts
 
+        sources = tailor_sources(
+            home_root=ctx.home_root, target=ctx.target, profile_id=profile.profile_id, resume_text="",  # type: ignore[attr-defined]
+            title=found.job.title, posting_text=found.job.text,  # type: ignore[attr-defined]
+        )
+        marks = sorted((key, item.revision_id) for key, item in sources.items())
+        master = digest_parts(ctx.home_root, ctx.target, profile, resolved=found.resolved)
     return _digest(
         "tailor",
         found.posting_sha256,
         profile.profile_id,  # type: ignore[attr-defined]
         profile.resume_ref.content_sha256,  # type: ignore[attr-defined]
-        sorted((key, item.revision_id) for key, item in sources.items()),
+        marks,
         [(row.requirement, row.status.value) for row in found.base.result.matrix],  # type: ignore[attr-defined]
         TAILOR_INSTRUCTIONS_DIGEST,
         model_target,
-        *digest_parts(ctx.home_root, ctx.target, profile, resolved=found.resolved),
+        *master,
     )
 
 
-def tailor_digest(ctx: StepContext, profile_id: str, job: str, model_target: str | None = None) -> str:
-    """The tailor step's input digest for ``(profile_id, job)`` as its inputs are now. Raises :class:`StepError`."""
+def tailor_digest(
+    ctx: StepContext, profile_id: str, job: str, model_target: str | None = None, *, shared: SharedInputs | None = None
+) -> str:
+    """The tailor step's input digest for ``(profile_id, job)`` as its inputs are now. Raises :class:`StepError`.
 
-    return _tailor_digest(ctx, _inputs(ctx, profile_id, job), model_target if model_target is not None else model_for(ctx, "tailor"))
+    ``shared``: a trigger's :class:`SharedInputs`; the digest is the same with and without it.
+    """
+
+    return _tailor_digest(
+        ctx, _inputs(ctx, profile_id, job, shared), model_target if model_target is not None else model_for(ctx, "tailor"), shared
+    )
 
 
 def _upstream(store: PipelineStore, claim: Claim, name: str) -> str:
@@ -326,24 +498,32 @@ def _upstream(store: PipelineStore, claim: Claim, name: str) -> str:
     return step.output_digest
 
 
-def _base_stale_reason(ctx: StepContext, base: object) -> str | None:
+def _base_stale_reason(ctx: StepContext, base: object, shared: SharedInputs | None = None) -> str | None:
     from ..assessment_basis import BasisCheck
 
-    return BasisCheck(home_root=ctx.home_root, target=ctx.target).reason(base)  # type: ignore[arg-type]
+    check = shared.basis() if shared is not None else BasisCheck(home_root=ctx.home_root, target=ctx.target)
+    return check.reason(base)  # type: ignore[arg-type]
 
 
-def input_digest(ctx: StepContext, store: PipelineStore, claim: Claim) -> str:
-    """``claim``'s input digest, from its inputs as they are now and its upstream OUTPUT digests. Raises :class:`StepError`."""
+def input_digest(ctx: StepContext, store: PipelineStore, claim: Claim, *, shared: SharedInputs | None = None) -> str:
+    """``claim``'s input digest, from its inputs as they are now and its upstream OUTPUT digests. Raises :class:`StepError`.
 
-    found = _inputs(ctx, claim.profile_id, claim.job)
+    ``shared``: a trigger's :class:`SharedInputs`; the digest is the same with and without it.
+    """
+
+    found = _inputs(ctx, claim.profile_id, claim.job, shared)
     if claim.name == "tailor":
-        return _tailor_digest(ctx, found, claim.model_target)
+        return _tailor_digest(ctx, found, claim.model_target, shared)
     if claim.name == "reassess":
         from .. import story_bank
         from ..assessment_basis import BasisCheck
 
-        current = BasisCheck(home_root=ctx.home_root, target=ctx.target).current(claim.profile_id)
-        bank = story_bank.assess_bank(home_root=ctx.home_root, target=ctx.target, profile_id=claim.profile_id)
+        if shared is not None:
+            current = shared.basis().current(claim.profile_id)
+            bank = shared.bank(claim.profile_id)
+        else:
+            current = BasisCheck(home_root=ctx.home_root, target=ctx.target).current(claim.profile_id)
+            bank = story_bank.assess_bank(home_root=ctx.home_root, target=ctx.target, profile_id=claim.profile_id)
         return _digest(
             "reassess",
             _upstream(store, claim, "tailor"),
@@ -360,7 +540,7 @@ def input_digest(ctx: StepContext, store: PipelineStore, claim: Claim) -> str:
         _upstream(store, claim, "ats"),
         LABEL_RULE_VERSION,
         ctx.setting.label_min_ats,
-        _base_stale_reason(ctx, found.base),
+        _base_stale_reason(ctx, found.base, shared),
     )
 
 
@@ -691,9 +871,17 @@ def read_ats(home_root: Path, target: Path, profile_id: str, job: str) -> dict[s
     return _read_json(_record_path(StepContext(Path(home_root), Path(target)), ATS_DIR, profile_id, job))
 
 
-def read_label(home_root: Path, target: Path, profile_id: str, job: str) -> dict[str, object] | None:
-    """The stored Scout label record of ``job``, or ``None``."""
+def read_label(
+    home_root: Path, target: Path, profile_id: str, job: str, *, scout_root: Path | None = None
+) -> dict[str, object] | None:
+    """The stored Scout label record of ``job``, or ``None``.
 
+    ``scout_root``: the project's Scout folder (``pipeline_path(...).parent.parent``) when the caller holds it. A
+    caller that lists many jobs passes it, so the bound project is looked up once and not once a job.
+    """
+
+    if scout_root is not None:
+        return _read_json(Path(scout_root) / LABEL_DIR / profile_id / f"{_job_key(job)}.json")
     return _read_json(_record_path(StepContext(Path(home_root), Path(target)), LABEL_DIR, profile_id, job))
 
 
@@ -750,6 +938,7 @@ __all__ = [
     "LABEL_RECOMMENDED",
     "LABEL_RULE_VERSION",
     "LABEL_WORDING",
+    "SharedInputs",
     "TAILOR_DIR",
     "TAILOR_KEPT_USER_EDITS",
     "TAILOR_OUTCOMES",
