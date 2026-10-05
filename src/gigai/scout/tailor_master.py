@@ -32,7 +32,13 @@ copies it; ``ensure_skills_line`` shows it when the model left it out.
 
 A REQUIREMENT'S EVIDENCE is always a candidate: the selector puts the
 strongest line for every mandatory requirement of the posting in its pick
-whatever a cap says (``master_selection``), from an old role too.
+whatever a cap says (``master_selection``), from an old role too.  WHEN THE
+JOB HAS A STORED ASSESSMENT for the profile (``master_tailoring`` reads it:
+one small file), the requirements are its rows and each row's evidence is a
+line the assessment CITES (``assess_master.stored_citations``,
+``SelectionPosting.cited``): the candidate set, the fit and the conflicts
+all follow the citations, so a cited line is never cut because another line
+shares the requirement's words.
 
 THE FIT (``fit_selected``; 0110-10-15, the selector's objective).  The page
 limit is a constraint: at most ``LENGTH_RULE.max_pages`` pages, no role
@@ -967,13 +973,16 @@ class MasterTailoring:
 
 def master_tailoring(
     *, home_root: Path, target: Path, profile: object | None, job: TailorJob, today: date | None = None, resolved: object | None = None,
+    job_identity: str | None = None,
 ) -> MasterTailoring | None:
     """How one tailoring reads the master, or ``None`` when it does not (see the module text).
 
     ``None``: no master is stored, the resume is not a profile's (pasted
     text), or the profile's resume was replaced by hand after its selection
     (``detached``).  The profile's prior is the lines its selection shows,
-    else its titles.
+    else its titles.  ``job_identity``: the job, so that its stored
+    assessment for this profile (when there is one) says which master lines
+    evidence each requirement; without it the posting is matched by words.
     """
 
     if profile is None:
@@ -989,7 +998,10 @@ def master_tailoring(
         label=profile.label,  # type: ignore[attr-defined]
         pins=tuple(selection.pins) if selection is not None else (),
     )
-    candidates = job_candidates(stored.master, prior, SelectionPosting(job.title, job.posting_text, job.company, job.location), today=today)
+    from .assess_master import stored_citations
+
+    cited = stored_citations(home_root, target, stored.master, profile.profile_id, job_identity)  # type: ignore[attr-defined]
+    candidates = job_candidates(stored.master, prior, SelectionPosting(job.title, job.posting_text, job.company, job.location, cited), today=today)
     return MasterTailoring(
         master=stored.master,
         source=MasterSource(stored.revision.revision_id, stored.revision.revision, stored.revision.content_sha256),
@@ -1000,7 +1012,9 @@ def master_tailoring(
     )
 
 
-def tailoring_for_resume(resume: object, job: TailorJob, *, home_root: Path, target: Path, today: date | None = None) -> MasterTailoring | None:
+def tailoring_for_resume(
+    resume: object, job: TailorJob, *, home_root: Path, target: Path, today: date | None = None, job_identity: str | None = None,
+) -> MasterTailoring | None:
     """``master_tailoring`` for the resume one tailoring resolved (``ResolvedResume``); ``None`` for a pasted resume.
 
     Nothing but the master is read until one is found: without a master
@@ -1020,7 +1034,7 @@ def tailoring_for_resume(resume: object, job: TailorJob, *, home_root: Path, tar
         profile = next((record for record in profile_records.list_profiles(resolved) if record.profile_id == profile_id and record.state != "deleted"), None)
     except (WorkpadError, profile_records.ProfileRecordError):
         return None
-    return master_tailoring(home_root=home_root, target=target, profile=profile, job=job, today=today, resolved=resolved)
+    return master_tailoring(home_root=home_root, target=target, profile=profile, job=job, today=today, resolved=resolved, job_identity=job_identity)
 
 
 __all__ = [

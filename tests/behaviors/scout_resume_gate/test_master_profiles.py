@@ -248,7 +248,7 @@ def test_each_profiles_first_selection_is_its_own_resume_and_the_resume_is_not_r
         # The profile keeps its resume, its revision and its content digest: one more write, nothing a reader sees.
         assert (new.resume_ref, new.revision, new.content_digest, new.titles, new.queries) == (old.resume_ref, old.revision, old.content_digest, old.titles, old.queries)
         assert new.seq == old.seq + 1 and two.resume_text(profile_id) == texts[profile_id]
-        assert (selection.source, selection.selector_version, selection.pins, selection.excludes) == ("migration", "sel-2", (), ())
+        assert (selection.source, selection.selector_version, selection.pins, selection.excludes) == ("migration", "sel-3", (), ())
         assert selection.master_revision_id == selection.synced_revision_id == master.revision.revision_id
         assert selection.resume_revision_id == old.resume_ref.revision_id
         # The selection is the old resume in the master's ids: every one of its lines, in its own order.
@@ -687,7 +687,7 @@ def test_a_new_profiles_first_selection_comes_from_the_postings_its_titles_match
     made = mp.first_selection(home_root=home, target=target, profile_id=created.profile_id)
     assert made is not None and made.resume_ref != default.resume_ref and made.resume_ref.record_id == mp.view_record_id(resolved, created.profile_id)
     selection = made.master_selection
-    assert (selection.source, selection.selector_version) == ("index", "sel-2")
+    assert (selection.source, selection.selector_version) == ("index", "sel-3")
     # The selection IS the job selection against the stand-in posting, for this profile's titles.
     expected = select(master, SelectionProfile(titles=created.titles, profile_id=created.profile_id, label="AI"), posting)
     assert selection.item_ids == mp.selection_ids(expected) and selection.skills == expected.skills

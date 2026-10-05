@@ -7,7 +7,7 @@ postings) and nothing calls a model: the one model-shaped thing, a stored assess
 made with the scripted test transport. Every CLI test runs against a temp ``--home``.
 
 The golden cases pin ``today`` to 2026-10-03 (which roles are "old" depends on the year); what they
-expect is ``selection-golden.json``, written for ``SELECTOR_VERSION`` ``sel-2`` (0110-10-15: requirement
+expect is ``selection-golden.json``, written for ``SELECTOR_VERSION`` ``sel-3`` (0110-10-15: requirement
 coverage, then evidence strength, then pins, recency only as the tie-break; the Skills section kept whole).
 The labelled eval of that rule is ``tests/evals/run_pick_eval.py`` (``test_pick_eval.py``).
 """
@@ -513,6 +513,146 @@ def test_a_pin_is_kept_when_everything_else_that_supports_nothing_goes_and_repor
     assert none.evidence_for.keys() == {"b-new-1", "b-new-2"}
 
 
+# --- with a stored assessment: coverage comes from the lines it cites (0110-10-15, the real-data gate) ---
+
+
+def _cited(row_id: str, text: str, *lines: str, mandatory: bool = True, met: bool = True) -> ms.CitedRequirement:
+    return ms.CitedRequirement(row_id, text, mandatory, tuple(lines), met=met)
+
+
+def test_a_line_the_assessment_cites_is_kept_whatever_words_it_shares_and_reported_when_it_cannot_be() -> None:
+    small = parse_master(_SMALL)
+    profile = ms.SelectionProfile(titles=("Staff Backend Engineer",))
+    text = "Requirements:\n- Kubernetes in production.\n- On-call experience.\n"
+    tight = _by_bullets(3)
+
+    # BY WORDS (no assessment): the lines that share the requirements' words are the evidence, and the old role goes.
+    by_words = ms.select(small, profile, ms.SelectionPosting("Staff Engineer", text), today=TODAY, measure=tight, fill=False)
+    assert by_words.evidence_for.keys() == {"b-new-1", "b-new-2"} and by_words.roles_dropped == ("r-old",)
+    assert not {"b-new-3", "b-old-2"} & set(by_words.item_ids()) and not any(requirement.cited for requirement in by_words.requirements)
+
+    # THE ASSESSMENT cites, by meaning, a line that shares NO word with "On-call experience" and an OLD role's line
+    # that shares none with "Kubernetes in production": each is the only evidence of its row.
+    cited = (_cited("r1", "Kubernetes in production.", "b-old-2"), _cited("r2", "On-call experience.", "b-new-3"))
+    assessed = ms.select(small, profile, ms.SelectionPosting("Staff Engineer", text, cited=cited), today=TODAY, measure=tight, fill=False)
+    assert assessed.selector_version == "sel-3" and assessed.fits and assessed.conflicts == ()
+    # The requirements ARE the assessment's rows, each supported by exactly the line it cites: the posting's two lines
+    # and its Kubernetes keyword are not matched by words at all, so no other line is "the evidence" in their place.
+    assert [(requirement.id, requirement.cited, requirement.supporters) for requirement in assessed.requirements] == [("r1", True, ("b-old-2",)), ("r2", True, ("b-new-3",))]
+    assert assessed.evidence_for == {"b-old-2": ("r1",), "b-new-3": ("r2",)}
+    assert {"b-new-3", "b-old-2"} <= set(assessed.item_ids()) and assessed.roles_dropped == ()
+    # What went for length is what the assessment did not cite, the lines that share the words included.
+    cut = {cut.id for cut in assessed.cut_for_length}
+    assert len(cut) == 3 and cut <= {"b-old-1", "b-new-1", "b-new-2", "b-new-4"} and {"b-new-2", "b-old-1"} <= cut
+    reason = next(line for line in assessed.lines if line.id == "b-old-2")
+    assert (reason.picked, reason.code) == (True, "requirement_evidence") and reason.reason == "the line your assessment cites for: Kubernetes in production."
+    as_json = assessed.to_json(small)["requirements"]
+    assert [(row["id"], row["cited"], row["shown"]) for row in as_json] == [("r1", True, ["b-old-2"]), ("r2", True, ["b-new-3"])]
+
+    # When a cited line cannot be shown within the page limit, the result says so; it is never dropped silently.
+    none = ms.select(
+        small, profile, ms.SelectionPosting("Staff Engineer", text, cited=cited), today=TODAY,
+        measure=lambda markdown: (3 if "Kept the build green" in markdown else 2, 0.5), fill=False,
+    )
+    assert "b-old-2" not in none.item_ids() and "b-new-3" in none.item_ids()
+    (conflict,) = none.conflicts
+    assert (conflict.kind, conflict.ids, conflict.requirement_id, conflict.covered) == ("mandatory_evidence", ("b-old-2",), "r1", False)
+    assert conflict.reason.startswith("the line the assessment cites for this requirement does not fit the page limit") and conflict.reason.endswith("no line it cites is shown now")
+
+
+def test_cited_rows_come_first_a_met_mandatory_one_last_to_be_cut_and_words_only_add_what_no_row_is_about() -> None:
+    small = parse_master(_SMALL)
+    profile = ms.SelectionProfile(titles=("Staff Backend Engineer",), pins=("b-new-4",))
+    text = "Requirements:\n- Kubernetes in production.\n- On-call experience.\n- Fortran.\n\nNice to have:\n- Incident reviews.\n"
+    cited = (
+        _cited("r1", "Kubernetes in production.", "b-old-2"),
+        _cited("r2", "On-call experience.", "b-new-3", "b-new-2", met=False),  # unclear: still mandatory
+        _cited("r4", "Incident reviews.", "b-new-3", mandatory=False),
+        _cited("r5", "A line the master no longer holds.", "b-gone"),
+    )
+    selected = ms.select(small, profile, ms.SelectionPosting("Staff Engineer", text, cited=cited), today=TODAY, measure=_by_bullets(40), fill=False)
+
+    by_id = {requirement.id: requirement for requirement in selected.requirements}
+    # The assessment's rows in its order, then what the posting asks for that no cited row is about: Fortran (matched
+    # by words, as before). A row none of whose cited lines the master holds now cites nothing and is not a requirement.
+    assert [requirement.id for requirement in selected.requirements][:3] == ["r1", "r2", "r4"] and "r5" not in by_id
+    words = [requirement for requirement in selected.requirements if not requirement.cited]
+    assert [(requirement.text, requirement.supporters) for requirement in words] == [("Fortran", ("b-old-1",))]
+    # Of the lines a row cites the strongest is its evidence: here the one that states a number.
+    assert by_id["r2"].supporters == ("b-new-2", "b-new-3") and not by_id["r4"].mandatory
+    assert selected.evidence_for == {"b-old-2": ("r1",), "b-new-2": ("r2",), "b-old-1": (by_id[words[0].id].id,)}
+    # The keep order: a met mandatory row's cited line stays longest, then the other requirements' evidence (an
+    # unclear row's, a requirement matched by words), then a pin, then everything else.
+    rank = selected.values
+    assert rank["b-old-2"] > max(rank["b-new-2"], rank["b-old-1"]) > min(rank["b-new-2"], rank["b-old-1"]) > rank["b-new-4"] > max(
+        rank[item] for item in ("b-new-1", "b-new-3", "o-cka")
+    )
+
+
+def test_a_row_the_shown_summary_covers_needs_no_line_and_a_repeated_line_is_stood_for_by_its_better_twin() -> None:
+    twice = _SMALL.replace(
+        "- Ran the on-call rotation for 4 teams. <!-- id:b-new-2 -->",
+        "- Ran the on-call rotation for 4 teams. <!-- id:b-new-2 -->\n- Ran the on-call rotation for all 4 teams. <!-- id:b-new-9 -->",
+    )
+    master = parse_master(twice)
+    profile = ms.SelectionProfile(titles=("Staff Backend Engineer",))
+    text = "Requirements:\n- Payments experience.\n- On-call experience.\n- Pipelines.\n"
+    plain = ms.select(master, profile, ms.SelectionPosting("Platform Engineer", text), today=TODAY, measure=_by_bullets(40), fill=False)
+    assert plain.summary == ("sum-platform",) and plain.duplicates == {"b-new-9": "b-new-2"}
+
+    cited = (
+        _cited("r1", "Payments experience.", "sum-platform", "b-new-4"),  # the summary shown covers it by itself
+        _cited("r2", "On-call experience.", "b-new-9"),  # a line a better line repeats: that line stands for it
+        _cited("r3", "Pipelines.", "sum-data"),  # only a summary this resume does not show
+    )
+    selected = ms.select(master, profile, ms.SelectionPosting("Platform Engineer", text, cited=cited), today=TODAY, measure=_by_bullets(40), fill=False)
+    by_id = {requirement.id: requirement for requirement in selected.requirements}
+    assert selected.summary == ("sum-platform",)
+    assert by_id["r1"].supporters == ("sum-platform", "b-new-4") and "b-new-4" not in selected.evidence_for
+    assert by_id["r2"].supporters == ("b-new-2",) and selected.evidence_for["b-new-2"] == ("r2",)
+    assert by_id["r3"].supporters == ("sum-data",)
+    # The one thing that cannot be shown is said: the assessment cited a summary variant this resume does not print.
+    assert [(conflict.kind, conflict.requirement_id, conflict.ids, conflict.covered) for conflict in selected.conflicts] == [("mandatory_evidence", "r3", ("sum-data",), False)]
+    assert "cites a summary this resume does not show" in selected.conflicts[0].reason
+    # The re-make checks read a cited row like any requirement: covered by the summary, by a line, or lost.
+    shown = (*selected.summary, *(item for entry_id, bullets in selected.entries.items() for item in (entry_id, *bullets)), *selected.other)
+    checks = ms.check_selection(master, selected.requirements, shown, selected.skills, measure=_by_bullets(40))
+    assert set(checks.covered) >= {"r1", "r2"} and checks.lost == ("r3",)
+
+
+def test_the_selector_s_word_rule_for_one_requirement_is_readable_on_its_own() -> None:
+    small = parse_master(_SMALL)
+    assert ms.word_supporters(small, "Kubernetes in production.")[0] == "b-new-1"
+    assert set(ms.word_supporters(small, "Ran an on-call rotation.")) == {"b-new-2"}
+    assert ms.word_supporters(small, "Experience with quantum annealing.") == ()
+
+
+def test_an_assessment_s_evidence_quotes_trace_to_master_lines_word_for_word_or_as_a_paraphrase() -> None:
+    from gigai.scout import assess_master
+    from gigai.scout.find_jobs.contracts import MatrixStatus, RequirementClass, RequirementMatrixRow
+
+    small = parse_master(_SMALL)
+    matrix = (
+        RequirementMatrixRow("Kubernetes in production", ("Cut deploy time from 40 minutes to 6",), MatrixStatus.MET, RequirementClass.HARD),
+        RequirementMatrixRow("Leading people", ("mentored three engineers ... wrote the incident review guide",), MatrixStatus.UNCLEAR, RequirementClass.ASKABLE),
+        RequirementMatrixRow("Numerical code", ("A Fortran solver prices two million contracts each night",), MatrixStatus.MET, RequirementClass.NICE_TO_HAVE),
+        RequirementMatrixRow("Python", ("Languages: Python",), MatrixStatus.MET, RequirementClass.LIST_ITEM),
+        RequirementMatrixRow("Rust", (), MatrixStatus.UNMET, RequirementClass.HARD),
+        RequirementMatrixRow("Payments", ("Platform engineer who runs payment systems",), MatrixStatus.MET, None),
+    )
+    rows = assess_master.cited_requirements(small, matrix)
+    # r<n> is the row's place in the assessment. A row that names only a skill, or quotes nothing, cites no line.
+    assert [(row.id, row.mandatory, row.met, row.lines) for row in rows] == [
+        ("r1", True, True, ("b-new-1",)),  # word for word (a piece of the line)
+        ("r2", True, False, ("b-new-3",)),  # two pieces joined by ...: the one long enough to name a line
+        ("r3", False, True, ("b-old-1",)),  # a paraphrase: the words they share
+        ("r6", True, True, ("sum-platform",)),  # a summary can be cited
+    ]
+    traced = assess_master.MasterCitations(small)
+    assert traced.row(("Languages: Python",)) == ((), ("Python",)) and traced.row(("nothing the master says",)) == ((), ())
+    assert traced.row(("Cut deploy time from 40 minutes to 6", "Languages: Python")) == (("b-new-1",), ())
+
+
 def test_a_line_that_says_what_a_better_line_says_is_left_out() -> None:
     twice = _SMALL.replace(
         "- Ran the on-call rotation for 4 teams. <!-- id:b-new-2 -->",
@@ -699,7 +839,7 @@ def test_selection_show_for_a_job_lists_picked_and_left_out_with_reasons(tmp_pat
     out = _show(home, *_AI, "--job-text", str(posting), "--title", title, "--company", company)
 
     selection = out["selection"]
-    assert out["ok"] is True and selection["selector_version"] == "sel-2"
+    assert out["ok"] is True and selection["selector_version"] == "sel-3"
     assert selection["fits"] is True and selection["pages"] == 2 and selection["pages_before_fit"] > 2 and selection["max_pages"] == 2
     assert render_markdown_pdf(selection["markdown"], None, timestamp=STAMP).pages == 2
     assert selection["master"]["revision"] == 1 and selection["master"]["content_sha256"].startswith("sha256:")
@@ -728,7 +868,7 @@ def test_selection_show_for_a_job_lists_picked_and_left_out_with_reasons(tmp_pat
     ])
     assert plain.exit_code == 0, plain.output
     assert plain.output.startswith(f"Selection for {title} at {company}, profile Staff AI Engineer: 2 pages (")
-    assert "Picked " in plain.output and "left out " in plain.output and "Selector sel-2, master revision 1." in plain.output
+    assert "Picked " in plain.output and "left out " in plain.output and "Selector sel-3, master revision 1." in plain.output
     assert "    + sum-ai  Staff engineer with 16 years" in plain.output
     assert "    - sum-backend  " in plain.output and "another summary fits this posting better" in plain.output
     assert "r-tes  Tessel Robotics" in plain.output and ": not shown" in plain.output
@@ -869,6 +1009,22 @@ def test_selection_show_job_url_reads_the_posting_scout_already_holds(tmp_path: 
     # --title overrides the stored title (it decides the summary).
     assert show("--job-url", _URL, "--title", "Staff AI Engineer, Agent Platform")["summary"] == ["sum-ai"]
     assert asked == [], "selection show made a request"
+
+    # 0110-10-15: the job's stored assessment for the profile says which lines evidence a requirement. Here it cites
+    # nothing of the master (the fixture model quotes the profile's resume), so the pick above was made by words.
+    assert not any(row["cited"] for row in from_index["requirements"])
+    left = next(line for line in from_index["left_out"] if line["kind"] == "bullet" and line["code"] in ("cut_lowest_value", "role_limit", "cut_role_dropped") and len(line["text"]) > 40)
+    path = Path(stored.stored_path)
+    record = json.loads(path.read_text(encoding="utf-8"))
+    record["result"]["matrix"][0].update({"resume_evidence": [left["text"][:40]], "status": "met"})
+    path.write_text(json.dumps(record), encoding="utf-8")
+    monkeypatch.undo()
+    with_assessment = show("--job-url", _URL)
+    row = with_assessment["requirements"][0]
+    assert (row["id"], row["cited"], row["supporters"], row["shown"]) == ("r1", True, [left["id"]], [left["id"]])
+    picked = {line["id"]: line for line in with_assessment["picked"]}
+    assert left["id"] in picked and picked[left["id"]]["code"] == "requirement_evidence" and picked[left["id"]]["reason"].startswith("the line your assessment cites for: ")
+    assert with_assessment["conflicts"] == [] and with_assessment["fits"] is True
 
 
 # --- re-making a pick: the previous selection and the new one on the same current sources (0110-10-15) ---

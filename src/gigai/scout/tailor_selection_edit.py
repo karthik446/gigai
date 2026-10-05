@@ -493,6 +493,7 @@ def change_stored_selection(
                 profile = next((record for record in profile_records.list_profiles(resolved) if record.profile_id == profile_id and record.state != "deleted"), None)
                 tailoring = master_tailoring(
                     home_root=home_root, target=target, profile=profile, job=_held_posting(home_root, target, stored), resolved=resolved,
+                    job_identity=job_identity,
                 )
             except (ValueError, RuntimeError, OSError):
                 tailoring = None  # the cuts then cannot be ordered: an Add that needs room can only keep both

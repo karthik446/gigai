@@ -62,7 +62,12 @@ things still take more than a second (see "Still slower than one second"): the n
   the master as it is now. The new one is stored when it is no worse on any check; the one held is
   kept when it is still valid and the new one is worse on a check; when neither can stand, nothing is
   stored and the command says what is unresolved.
-- **After you upgrade:** the rule that picks lines has a new version (`sel-2`). A profile's stored
+- **A job you assessed keeps the lines its assessment pointed to.** An assessment says which lines of
+  your master back each requirement, and it reads them by meaning: the line it points to may share no
+  word with the requirement. The pick for that job now keeps one of those lines for every requirement
+  the assessment found evidence for, the required ones first, before any line chosen by shared words.
+  A job with no assessment is picked by words, as before.
+- **After you upgrade:** the rule that picks lines has a new version (`sel-3`). A profile's stored
   selection stays as it is until you refresh it. Tailored resumes the background pipeline made from
   your master are out of date under the new rule and are made again when the pipeline next works on
   each job; a resume you edited or attached yourself is never replaced.

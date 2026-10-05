@@ -536,6 +536,13 @@ def selection_show_command(
                 raise _SelectionInputError("job_input_invalid", "--evidence needs a job: pass --job-url or --job-text")
             view = evidence_view(master, profile or SelectionProfile(), posting)
         else:
+            if posting is not None and job is not None and profile is not None and profile.profile_id is not None:
+                # 0110-10-15: the job's stored assessment for this profile says which lines evidence each requirement.
+                from dataclasses import replace
+
+                from .assess_master import stored_citations
+
+                posting = replace(posting, cited=stored_citations(home_root, target, master, profile.profile_id, str(job["job_identity"])))
             selected = select(master, profile or SelectionProfile(), posting)
     except (*_errors(), _SelectionInputError, ProfileRecordError, QuickAssessError, FindJobsContractError) as exc:
         _fail(exc, as_json=as_json)

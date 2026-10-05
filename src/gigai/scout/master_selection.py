@@ -7,7 +7,7 @@ lines most relevant to one posting under a character budget instead (what an
 assessment would read). Nothing here calls a model, reads a file or writes:
 the same master, profile, posting and day give the same ids.
 
-The rules (0110-10-15, the pick's objective; ``SELECTOR_VERSION`` ``sel-2``).  For a posting the
+The rules (0110-10-15, the pick's objective; ``SELECTOR_VERSION`` ``sel-3``).  For a posting the
 selection maximises, in this order, and a lower term never buys back a higher one:
 
 1. MANDATORY REQUIREMENT COVERAGE.  The posting's requirements are its list lines (``Requirement``; a
@@ -20,6 +20,18 @@ selection maximises, in this order, and a lower term never buys back a higher on
 3. MUST-KEEP LINES: the profile's pins (``SelectionProfile.pins``), cut only after everything else.
 4. RECENCY only breaks ties between lines of equal coverage and strength.  An older role's line that is
    the evidence of a requirement stays while recent lines that support nothing are cut.
+
+WHEN THE POSTING HAS BEEN ASSESSED (``SelectionPosting.cited``: the rows of the stored assessment of this
+posting for this profile, each with the master lines its evidence cites, ``assess_master.cited_requirements``),
+COVERAGE COMES FROM THE CITATIONS, not from words.  An assessment maps a requirement to lines BY MEANING: the
+line it cites may share no word with the requirement, and a line that shares its words may not be what was
+cited.  So a row that cites lines is a requirement whose supporters are exactly the lines it cites, the
+strongest first (a line of ordinary length, then strength, then the line more rows cite, then recency); its
+first line is its evidence.  Every row keeps one cited line: a met mandatory row's evidence is the last thing
+any cut reaches (after every other requirement's evidence), a nice-to-have row's is kept like a nice-to-have's
+first line.  Matching by words (1 above) only ADDS: it supports what the posting asks for that no cited row is
+about (a row the assessment found no line for, a line of the posting it has no row for), and everything when
+there is no assessment.  A posting line or keyword that a cited row is about is not matched by words at all.
 
 PAGE FIT IS A CONSTRAINT, not a term: ``LENGTH_RULE.max_pages`` pages, measured with the shipped PDF
 template (``measure_markdown``), no role or project printed without a bullet, roles in date order, every
@@ -73,7 +85,7 @@ from .tailor_no_loss import OWNERSHIP_FAMILIES, normalize
 from .tailored_resume import LENGTH_RULE
 
 #: Names the scoring weights, caps, floors and cut order below; stored with a selection.
-SELECTOR_VERSION = "sel-2"
+SELECTOR_VERSION = "sel-3"
 MAX_PAGES = LENGTH_RULE.max_pages
 #: The page budget is "fits ``MAX_PAGES`` at this spacing or looser" (the renderer's own floor is 0.7).
 FIT_SCALE = 0.9
@@ -108,6 +120,11 @@ EVIDENCE_SHARE = 0.8
 LONG_LINE_CHARS = 400
 #: Two lines are one (the weaker is left out) when this share of their words is common to both.
 NEAR_DUPLICATE = 0.7
+#: A cited row of the assessment is ABOUT a line of the posting when it shares this share of its own words with it,
+#: and the rows about a line ANSWER it (the line is then not matched by words) when together they hold this share of
+#: what the line says.
+CITED_ABOUT_SHARE = 0.5
+CITED_ANSWERED_SHARE = 0.6
 #: The evidence view's budget: the assess prompt's own cap on resume text.
 EVIDENCE_CAP = 12_000
 
@@ -178,13 +195,36 @@ class SelectionProfile:
 
 
 @dataclass(frozen=True)
+class CitedRequirement:
+    """One requirement row of the stored assessment of a posting, and the master lines its evidence cites.
+
+    ``id`` is the row's place in the assessment (``r<n>``), ``text`` the assessment's own requirement words (the
+    posting's), ``lines`` the ids of the master lines its evidence quotes trace to (never empty: a row that cites
+    no line is not passed, it is matched by words as before).  ``met`` is the assessment's status for the row.
+    """
+
+    id: str
+    text: str
+    mandatory: bool
+    lines: tuple[str, ...]
+    met: bool = True
+
+    def to_json(self) -> dict[str, object]:
+        return {"id": self.id, "text": self.text, "mandatory": self.mandatory, "met": self.met, "lines": list(self.lines)}
+
+
+@dataclass(frozen=True)
 class SelectionPosting:
-    """One posting as the selector reads it: public text, written by strangers; only ever matched against."""
+    """One posting as the selector reads it: public text, written by strangers; only ever matched against.
+
+    ``cited``: when this posting has a stored assessment for the profile, its rows that cite master lines
+    (``assess_master.cited_requirements``).  Coverage then comes from those lines (the module text)."""
 
     title: str
     text: str
     company: str = ""
     location: str = ""
+    cited: tuple[CitedRequirement, ...] = ()
 
 
 # --- text features ----------------------------------------------------------------------------
@@ -523,15 +563,18 @@ class Requirement:
 
     ``text`` is the posting's own line (public text) or, for a keyword no list line names, the keyword.
     ``supporters`` is empty when the master cannot support it; its first id is the requirement's EVIDENCE.
+    ``cited``: the requirement is a row of the stored assessment and its supporters are the lines that row
+    cites (found by meaning), not lines found by shared words.
     """
 
     id: str
     text: str
     mandatory: bool
     supporters: tuple[str, ...] = ()
+    cited: bool = False
 
     def to_json(self) -> dict[str, object]:
-        return {"id": self.id, "text": self.text, "mandatory": self.mandatory, "supporters": list(self.supporters)}
+        return {"id": self.id, "text": self.text, "mandatory": self.mandatory, "supporters": list(self.supporters), "cited": self.cited}
 
 
 @dataclass(frozen=True)
@@ -702,8 +745,9 @@ def _label(text: str) -> str:
 class _Keys:
     """Every selectable bullet and Other line against what the posting asks for: what each supports, and its place.
 
-    ``key`` orders the lines: a larger key stays longer.  ``(tier, class, place)``: the tier is 2 for the
-    evidence of a mandatory requirement and 1 for a pin; the class is 5 for those, 4 for a second line of a
+    ``key`` orders the lines: a larger key stays longer.  ``(tier, class, place)``: the tier is 3 for the
+    evidence of a met mandatory row of the assessment (the line it cites), 2 for the evidence of any other
+    mandatory requirement and 1 for a pin; the class is 5 for those, 4 for a second line of a
     mandatory requirement, 3 for the first line of a nice-to-have, 2 for a second line of one, 1 for a line
     that adds no line a requirement lacks but still supports a listed mandatory requirement, 0 for a line
     that supports nothing asked for; the place is its turn in the keep order (``_keys``).  Ties end on the
@@ -715,6 +759,8 @@ class _Keys:
     #: a requirement's evidence line -> the mandatory requirements it is the evidence of
     evidence: dict[str, tuple[str, ...]] = field(default_factory=dict)
     nice_evidence: dict[str, tuple[str, ...]] = field(default_factory=dict)
+    #: the evidence lines that are the line a met mandatory row of the assessment cites (cut last of all)
+    cited_evidence: frozenset[str] = frozenset()
     duplicates: dict[str, str] = field(default_factory=dict)
     key: dict[str, tuple] = field(default_factory=dict)
     rank: dict[str, int] = field(default_factory=dict)
@@ -756,7 +802,10 @@ def _near_duplicates(items: list[MasterItem], words: dict[str, frozenset[str]], 
     return out
 
 
-def _keys(master: Master, terms: _JobTerms | None, scores: _Scores, recency: Callable[[MasterItem], float], pins: Iterable[str]) -> _Keys:
+def _keys(
+    master: Master, terms: _JobTerms | None, scores: _Scores, recency: Callable[[MasterItem], float], pins: Iterable[str],
+    cited: tuple[CitedRequirement, ...] = (), summary_id: str | None = None,
+) -> _Keys:
     lines = [item for item in master.items.values() if item.kind in (KIND_BULLET, KIND_OTHER)]
     words = {item.id: _words(item.text) for item in lines}
     strength = {item.id: _STRENGTH_RANK[item.strength] for item in lines}
@@ -776,9 +825,58 @@ def _keys(master: Master, terms: _JobTerms | None, scores: _Scores, recency: Cal
     requirements: list[Requirement] = []
     listed_evidence: set[str] = set()  # the evidence lines of the mandatory requirements the posting lists
     topic: dict[str, float] = {}  # line -> how well it supports those listed requirements, summed
-    # The listed lines first, then the keywords: a keyword's evidence is a line that is evidence already when
-    # one names it, else the line most about what the posting lists.
+    # THE ASSESSMENT'S ROWS FIRST (the module text): a row that cites lines is supported by exactly those lines.
+    # A cited line that a better line repeats is stood for by that line; one the master no longer holds cites nothing.
+    held: dict[str, tuple[str, ...]] = {}
+    citing: dict[str, int] = {}  # line -> how many rows cite it
+    for row in cited:
+        held[row.id] = tuple(dict.fromkeys(twin for item_id in row.lines if (twin := out.duplicates.get(item_id, item_id)) in by_id))
+        for item_id in held[row.id]:
+            citing[item_id] = citing.get(item_id, 0) + 1
+    cited_evidence: set[str] = set()
+    by_summary: set[str] = set()  # rows the shown summary covers by itself
+    row_words: list[tuple[frozenset[str], str]] = []
+    for row in cited:
+        own = held[row.id]
+        summaries = tuple(dict.fromkeys(item_id for item_id in row.lines if item_id in master.items and master.items[item_id].kind == KIND_SUMMARY))
+        if not own and not summaries:
+            continue  # nothing it cites is a line of this master now: it is matched by words, like a row that cites nothing
+        # The strongest cited line first: a line of ordinary length, its strength, the line more rows cite, recency.
+        ordered = sorted(own, key=lambda item_id: (brief[item_id], strength[item_id], citing[item_id], recency(by_id[item_id]), tie[item_id]), reverse=True)
+        # The summary the resume shows covers the row by itself; another summary variant cannot be shown beside it.
+        shown_summary = tuple(item_id for item_id in summaries if item_id == summary_id)
+        requirements.append(Requirement(row.id, row.text, row.mandatory, (*shown_summary, *ordered, *(item_id for item_id in summaries if item_id != summary_id)), cited=True))
+        row_words.append((_words(row.text), row.text))
+        for item_id in own:
+            out.supports.setdefault(item_id, {})[row.id] = 1.0
+            if row.mandatory:
+                topic[item_id] = topic.get(item_id, 0.0) + 1.0
+        if shown_summary:
+            by_summary.add(row.id)
+        elif row.mandatory and ordered:
+            listed_evidence.add(ordered[0])
+            if row.met:
+                cited_evidence.add(ordered[0])
+    out.cited_evidence = frozenset(cited_evidence)
+
+    def answered(asked: _Asked) -> bool:
+        """A cited row is about this line or keyword of the posting: the assessment has said which lines support it."""
+
+        if not asked.words:
+            return any(mentions(text, asked.terms[0]) for _words_of, text in row_words)
+        said: set[str] = set()
+        for words_of, _text in row_words:
+            shared = words_of & asked.words
+            if shared and len(shared) >= CITED_ABOUT_SHARE * len(words_of):
+                said |= shared
+        return len(said) >= CITED_ANSWERED_SHARE * len(asked.words)
+
+    # Then what the posting asks for that no cited row is about, matched by words. The listed lines first, then the
+    # keywords: a keyword's evidence is a line that is evidence already when one names it, else the line most about
+    # what the posting lists.
     for asked in sorted(terms.asked if terms is not None else (), key=lambda asked: not asked.words):
+        if row_words and answered(asked):
+            continue
         found: dict[str, float] = {}
         if asked.words:
             total = len(asked.words) + TERM_WEIGHT * len(asked.terms)
@@ -812,13 +910,16 @@ def _keys(master: Master, terms: _JobTerms | None, scores: _Scores, recency: Cal
         requirements.append(Requirement(asked.id, asked.text, asked.mandatory, supporters))
         for item_id, value in found.items():
             out.supports.setdefault(item_id, {})[asked.id] = value
-    place = {asked.id: index for index, asked in enumerate(terms.asked)} if terms is not None else {}
+    # The assessment's rows in its order, then the posting's in its own.
+    place = {row.id: index for index, row in enumerate(cited)}
+    place.update({asked.id: len(cited) + index for index, asked in enumerate(terms.asked if terms is not None else ())})
     requirements.sort(key=lambda requirement: place[requirement.id])
     out.requirements = tuple(requirements)
     mandatory = {requirement.id for requirement in requirements if requirement.mandatory}
     evidence: dict[str, list[str]] = {}
     for requirement in requirements:
-        if requirement.mandatory and requirement.supporters:
+        # (A row the shown summary covers has no evidence line: its cited bullets are further lines for it.)
+        if requirement.mandatory and requirement.supporters and requirement.supporters[0] in by_id:
             evidence.setdefault(requirement.supporters[0], []).append(requirement.id)
     out.evidence = {item_id: tuple(ids) for item_id, ids in evidence.items()}
     pinned = set(pins)
@@ -833,7 +934,7 @@ def _keys(master: Master, terms: _JobTerms | None, scores: _Scores, recency: Cal
     # adds most: a SECOND line for a mandatory requirement the posting lists, the first line for a
     # nice-to-have, a second for a listed one. A line that adds nothing more (its requirements have their
     # lines) is worth its ``static`` only.
-    shown: dict[str, int] = {}
+    shown: dict[str, int] = {req: 1 for req in by_summary}
     order: list[str] = []
     klass: dict[str, int] = {}
 
@@ -843,12 +944,12 @@ def _keys(master: Master, terms: _JobTerms | None, scores: _Scores, recency: Cal
         for req in out.supports.get(item_id, {}):
             shown[req] = shown.get(req, 0) + 1
 
-    for item_id in sorted(out.evidence, key=lambda item_id: (len(out.evidence[item_id]), static(by_id[item_id])), reverse=True):
+    for item_id in sorted(out.evidence, key=lambda item_id: (item_id in cited_evidence, len(out.evidence[item_id]), static(by_id[item_id])), reverse=True):
         take(item_id, 5)
     for item_id in sorted((item_id for item_id in pinned if item_id in by_id and item_id not in klass), key=lambda item_id: static(by_id[item_id]), reverse=True):
         take(item_id, 5)
     pool = {item_id for item_id in out.supports if item_id not in klass}
-    listed = {asked.id for asked in (terms.asked if terms is not None else ()) if asked.words}
+    listed = {asked.id for asked in (terms.asked if terms is not None else ()) if asked.words} | {requirement.id for requirement in requirements if requirement.cited}
     nice_evidence: dict[str, list[str]] = {}
     while pool:
         def gain(item_id: str) -> tuple:
@@ -886,7 +987,7 @@ def _keys(master: Master, terms: _JobTerms | None, scores: _Scores, recency: Cal
     for item in rest:
         klass[item.id] = 1 if on_topic(item) > 0 else 0
         order.append(item.id)
-    tier = {item_id: (2 if item_id in out.evidence else (1 if item_id in pinned else 0)) for item_id in order}
+    tier = {item_id: (3 if item_id in cited_evidence else (2 if item_id in out.evidence else (1 if item_id in pinned else 0))) for item_id in order}
     for place, item_id in enumerate(order):
         # (the tier the fit reads, the class, the place in the keep order): a larger key stays longer.
         out.key[item_id] = (tier[item_id], klass[item_id], len(order) - place)
@@ -925,7 +1026,10 @@ def select(
         return role_recency.get(item.entry_id or "", _PROJECT_RECENCY)
 
     pins = tuple(item_id for item_id in profile.pins if item_id in master.items and master.items[item_id].kind in (KIND_BULLET, KIND_OTHER))
-    keys = _keys(master, terms, scores, recency, pins)
+    # The summary first: a row of the assessment that cites the summary shown is covered by it.
+    summary = _summary_choice(master, scores, posting)
+    keys = _keys(master, terms, scores, recency, pins, posting.cited if posting is not None else (), summary.id if summary is not None else None)
+    cited_rows = {requirement.id for requirement in keys.requirements if requirement.cited}
     key = keys.key
     requirement_text = {requirement.id: requirement.text for requirement in keys.requirements}
     #: In the pick whatever a cap says: a requirement's evidence (mandatory or nice-to-have), and a pin.
@@ -941,7 +1045,8 @@ def select(
     def reason_for(item: MasterItem) -> tuple[str, str]:
         if item.id in keys.evidence:
             first, *more = (requirement_text[req] for req in keys.evidence[item.id])
-            return "requirement_evidence", f"the strongest evidence for: {_label(first)}" + (f" (and {len(more)} more)" if more else "")
+            what = "the line your assessment cites for" if keys.evidence[item.id][0] in cited_rows else "the strongest evidence for"
+            return "requirement_evidence", f"{what}: {_label(first)}" + (f" (and {len(more)} more)" if more else "")
         if item.id in pins:
             return "pinned", "pinned on this profile"
         if item.id in keys.nice_evidence:
@@ -958,7 +1063,6 @@ def select(
         return "general", "supports no requirement of this posting; shown because there is room"
 
     # 1. Summary: one variant.
-    summary = _summary_choice(master, scores, posting)
     if summary is not None:
         pick.summary = [summary.id]
         for item in master.in_section("summary"):
@@ -1007,7 +1111,7 @@ def select(
 
     # 4. Education: every degree; a line under it only when it names a posting keyword.
     for entry in master.entries_in("education"):
-        pick.entries[entry.id] = [bullet for bullet in entry.bullets if scores.hits.get(bullet) and bullet in key]
+        pick.entries[entry.id] = [bullet for bullet in entry.bullets if (scores.hits.get(bullet) or bullet in forced) and bullet in key]
         for bullet in entry.bullets:
             if bullet not in pick.entries[entry.id] and bullet not in out:
                 out[bullet] = ("education_detail", "a detail under a degree is shown only when it names something the posting asks for")
@@ -1250,12 +1354,15 @@ def select(
         if not requirement.mandatory or not requirement.supporters or requirement.supporters[0] in shown_ids:
             continue
         covered = any(item_id in shown_ids for item_id in requirement.supporters)
-        conflicts.append(Conflict(
-            "mandatory_evidence", (requirement.supporters[0],),
-            "the strongest evidence for this requirement does not fit the page limit beside the other requirements' evidence"
-            + ("; a weaker line still covers it" if covered else "; no line covers it now"),
-            requirement.id, requirement.text, covered,
-        ))
+        if not requirement.cited:
+            why = "the strongest evidence for this requirement does not fit the page limit beside the other requirements' evidence" + (
+                "; a weaker line still covers it" if covered else "; no line covers it now")
+        elif master.items[requirement.supporters[0]].kind == KIND_SUMMARY:
+            why = "the assessment cites a summary this resume does not show; no line it cites is shown"
+        else:
+            why = "the line the assessment cites for this requirement does not fit the page limit beside the other requirements' evidence" + (
+                "; another line it cites is shown" if covered else "; no line it cites is shown now")
+        conflicts.append(Conflict("mandatory_evidence", (requirement.supporters[0],), why, requirement.id, requirement.text, covered))
     missing_pins = tuple(item_id for item_id in pins if item_id in key and item_id not in shown_ids)
     if missing_pins:
         conflicts.append(Conflict("must_keep", missing_pins, "these pinned lines do not fit the page limit beside the requirements' evidence"))
@@ -1303,6 +1410,20 @@ def select(
         conflicts=tuple(conflicts),
         duplicates=dict(keys.duplicates),
     )
+
+
+def word_supporters(master: Master, requirement: str) -> tuple[str, ...]:
+    """The lines of ``master`` that support one requirement BY WORDS: the selector's own rule, with no citation.
+
+    ``requirement`` is read as a posting that lists that one line, so the answer is what ``select`` counts as
+    its support when no assessment cites a line for it (the line's words and the keywords it names).  Strongest
+    first.  What a report reads to tell a cited line that is not shown with nothing in its place from one whose
+    requirement another shown line supports.  Pure.
+    """
+
+    terms = _job_terms(master, SelectionPosting("", f"Requirements:\n- {requirement}\n"))
+    keys = _keys(master, terms, _score_items(master, terms, SelectionProfile()), lambda _item: 1.0, ())
+    return tuple(dict.fromkeys(item_id for found in keys.requirements for item_id in found.supporters))
 
 
 def render_selection(master: Master, item_ids: Iterable[str], skills: Iterable[str], *, ids: bool = False) -> str:
@@ -1569,6 +1690,9 @@ def evidence_view(
 
 
 __all__ = [
+    "CITED_ABOUT_SHARE",
+    "CITED_ANSWERED_SHARE",
+    "CitedRequirement",
     "Conflict",
     "EVIDENCE_CAP",
     "EvidenceView",
@@ -1604,4 +1728,5 @@ __all__ = [
     "render_selection",
     "select",
     "skill_atoms",
+    "word_supporters",
 ]

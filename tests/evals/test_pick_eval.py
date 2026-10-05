@@ -10,6 +10,14 @@ variations x 3 paths = 405 final selections, each checked on separate checks aga
 
 Regression protection on these cases, not a proof.  The baseline (``sel-1``, 0.1.10.10) fails all four: the worker's
 report holds the table (``python -m tests.evals.run_pick_eval --baseline <a git archive of v0.1.10.10>``).
+
+WITH AN ASSESSMENT (the real-data gate of 0.1.10.11): the same 405 selections again, every posting carrying its
+synthetic assessment (``assessments.json``), whose rows cite master lines BY MEANING.  H1-H4 hold there too, and
+
+- H5 no met mandatory row of the assessment loses every line it cites unless a conflict is reported.
+
+``sel-2`` (which matched by words alone) fails H5 in 90 of those cells: ``python -m tests.evals.run_pick_eval
+--assessed --baseline <a git archive of ddd5a58a>``.
 """
 
 from __future__ import annotations
@@ -18,18 +26,19 @@ import json
 
 import pytest
 
+from gigai.scout import master_selection as ms
 from gigai.scout.master_resume import parse_master
 from gigai.scout.master_selection import is_old_role
 from tests.evals import run_pick_eval as ev
 
 POSTINGS = ("agentic", "backend", "leadership", "sre", "weakfit")
-_RESULTS: dict[str, dict[tuple[str, str, str, str], ev.Checks]] = {}
+_RESULTS: dict[tuple[str, bool], dict[tuple[str, str, str, str], ev.Checks]] = {}
 
 
-def _results(posting: str) -> dict[tuple[str, str, str, str], ev.Checks]:
-    if posting not in _RESULTS:
-        _RESULTS[posting] = ev.run([posting])
-    return _RESULTS[posting]
+def _results(posting: str, *, assessed: bool = False) -> dict[tuple[str, str, str, str], ev.Checks]:
+    if (posting, assessed) not in _RESULTS:
+        _RESULTS[(posting, assessed)] = ev.run([posting], assessed=assessed)
+    return _RESULTS[(posting, assessed)]
 
 
 def test_the_fixtures_are_synthetic_and_every_label_names_a_line_the_master_holds() -> None:
@@ -139,6 +148,102 @@ def test_the_same_probe_runs_in_another_checkout_s_tree() -> None:
     request = ev.payload(["weakfit"], ["small"], ["base"], ["select"])
     here = ev.pick_probe.probe(request)
     there = ev.pick_probe.run_in_tree(request, ev.REPO)
-    assert there == json.loads(json.dumps(here)) and there["selector_version"] == "sel-2"
+    assert there == json.loads(json.dumps(here)) and there["selector_version"] == "sel-3"
     with pytest.raises(ValueError, match="holds no src/gigai"):
         ev.pick_probe.run_in_tree(request, ev.FIXTURES)
+
+
+# --- with an assessment: coverage comes from the lines it cites (the real-data gate of 0.1.10.11) --------------
+
+
+def _row(posting: str, requirement: str, case: ev.MasterCase) -> dict[str, object]:
+    return next(row for row in ev.cited(posting, case) if row["text"] == requirement)
+
+
+def test_the_synthetic_assessments_cite_master_lines_and_hold_the_five_cases_the_gate_found_missing() -> None:
+    spec = json.loads((ev.FIXTURES / "assessments.json").read_text(encoding="utf-8"))
+    assert "SYNTHETIC" in spec["note"] and tuple(sorted(spec["postings"])) == POSTINGS
+    today = ev.date_of(json.loads((ev.FIXTURES / "sizes.json").read_text(encoding="utf-8"))["today"])
+    large = parse_master(ev.master_case("large", "base").markdown)
+    for name, rows in spec["postings"].items():
+        text = ev.postings()[name]["text"]
+        assert all(row["requirement"] in text for row in rows), (name, "a row's requirement is a line of the posting, word for word")
+        traced = ev.cited(name, ev.master_case("large", "base"))
+        # Every row that quotes evidence traces to a line of the master, by the product's own rule; a row with none is left out.
+        assert len(traced) == sum(bool(row["evidence"]) for row in rows) >= 7 and all(set(row["lines"]) <= set(large.items) for row in traced)  # type: ignore[arg-type]
+        assert [row["id"] for row in traced] == [f"r{place}" for place, row in enumerate(rows, 1) if row["evidence"]]
+    assert set(spec["shapes"]) == {"no_shared_words", "older_role_only", "same_word_one_cited", "long_line", "one_line_four_rows"}
+
+    def master_of(case: dict) -> tuple[ev.MasterCase, object]:
+        found = ev.master_case(case["sizes"][-1], case["variation"])
+        return found, parse_master(found.markdown)
+
+    # A cited line that shares NO word with its requirement: the selector's word rule does not see it at all.
+    for case in spec["shapes"]["no_shared_words"]:
+        found, master = master_of(case)
+        row = _row(case["posting"], case["requirement"], found)
+        assert row["lines"] == [case["line"]] and row["mandatory"] and row["met"]
+        assert not ms._words(case["requirement"]) & ms._words(master.items[case["line"]].text)  # noqa: SLF001 - the selector's own words
+        assert case["line"] not in ms.word_supporters(master, case["requirement"])
+    # A cited line in an OLDER role that is the only evidence of its row.
+    for case in spec["shapes"]["older_role_only"]:
+        found, master = master_of(case)
+        row = _row(case["posting"], case["requirement"], found)
+        assert row["lines"] == [case["line"]] and is_old_role(master.entries[master.items[case["line"]].entry_id], today)
+    # Two (here three) lines carry the same words; ONE is cited, and by words the selector prefers another.
+    for case in spec["shapes"]["same_word_one_cited"]:
+        found, master = master_of(case)
+        row = _row(case["posting"], case["requirement"], found)
+        by_words = ms.word_supporters(master, case["requirement"])
+        assert row["lines"] == [case["line"]] and set(case["others"]) <= set(by_words) and by_words[0] != case["line"]
+    # A cited line that is long (the selector counts a line over LONG_LINE_CHARS as costly), the row's only citation.
+    for case in spec["shapes"]["long_line"]:
+        found, master = master_of(case)
+        row = _row(case["posting"], case["requirement"], found)
+        assert row["lines"] == [case["line"]] and len(master.items[case["line"]].text) > ms.LONG_LINE_CHARS
+    # One line cited for four rows.
+    for case in spec["shapes"]["one_line_four_rows"]:
+        found, _master = master_of(case)
+        citing = [row for row in ev.cited(case["posting"], found) if case["line"] in row["lines"]]  # type: ignore[operator]
+        assert len(citing) == case["rows"] == 4 and all(row["mandatory"] and row["met"] for row in citing)
+        assert any(row["lines"] == [case["line"]] for row in citing) and any(len(row["lines"]) > 1 for row in citing)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize("posting", POSTINGS)
+def test_with_an_assessment_no_met_mandatory_row_loses_every_line_it_cites_and_the_four_hard_tests_still_hold(posting: str) -> None:
+    results = _results(posting, assessed=True)
+    assert len(results) == 81 and not any(checks.error for checks in results.values())
+    failures = ev.hard_failures(results)
+    assert failures == {name: [] for name in failures}, "\n".join(item for found in failures.values() for item in found)
+    # Stronger than H5 on this grid: every met mandatory row keeps a cited line in every cell, and no conflict was needed.
+    assert all(checks.cited_met and not checks.cited_lost and checks.conflicts == 0 for checks in results.values())
+
+
+def test_each_of_the_five_cases_keeps_its_cited_line_on_every_path() -> None:
+    spec = json.loads((ev.FIXTURES / "assessments.json").read_text(encoding="utf-8"))
+    checked = 0
+    for name, cases in spec["shapes"].items():
+        for case in cases:
+            results = _results(case["posting"], assessed=True)
+            for size in case["sizes"]:
+                for path in ev.PATHS:
+                    assert case["line"] in results[(case["posting"], size, case["variation"], path)].shown, (name, size, path)
+                    checked += 1
+    assert checked == 39
+    # Without the assessment the same master and posting do NOT show those lines (the cases are real: matching by
+    # words cuts them), in the largest master of each case.
+    for name, cases in spec["shapes"].items():
+        for case in cases:
+            plain = _results(case["posting"])[(case["posting"], case["sizes"][-1], case["variation"], "select")]
+            assert case["line"] not in plain.shown, (name, "the case would pass without the fix")
+
+
+def test_a_selector_that_does_not_read_citations_fails_the_cited_check() -> None:
+    """The check itself: a final selection made by words alone, scored against the assessment's rows, loses rows."""
+
+    case = ev.master_case("large", "base")
+    plain = ev.pick_probe.probe(ev.payload(["leadership"], ["large"], ["base"], ["select"]))["results"][ev.cell_key("leadership", "large", "base")]["select"]
+    checks = ev.check("leadership", case, plain, ev.cited("leadership", case))
+    assert len(checks.cited_lost) == 2 and checks.cited_silent == checks.cited_lost
+    failures = ev.hard_failures({("leadership", "large", "base", "select"): checks})
+    assert len(failures["H5 a met mandatory row lost every line it cites, with no conflict reported"]) == 1

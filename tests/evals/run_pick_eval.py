@@ -28,9 +28,26 @@ grouped differently.  The hard tests (``test_pick_eval.py``):
   line that fits may differ);
 - H4 every cell fits the page constraint.
 
+WITH AN ASSESSMENT (``--assessed``; ``assessments.json``; the real-data gate of 0.1.10.11).  A stored assessment
+maps a requirement to master lines BY MEANING: the line it cites may share no word with the requirement.  In this
+mode every posting carries its synthetic assessment: the rows' evidence quotes are traced to the cell's master with
+the product's own rule (``assess_master.cited_requirements``) and passed to the selector as ``cited``.  One more
+check, per cell:
+
+5. ``cited``: every MET MANDATORY row of the assessment that cites a line of this master keeps at least one of the
+   lines it cites.  ``cited_lost`` names the rows that kept none, ``cited_silent`` those of them no reported
+   conflict names.  Rows that are unclear or nice-to-have are counted beside it (``cited_other_lost``).
+
+- H5 no met mandatory row loses every line it cites unless a conflict is reported; H1-H4 hold in this mode too.
+
+The cases (``shapes`` in ``assessments.json``): a cited line that shares no word with its requirement; a cited line
+in an older role that is the only evidence; two lines carrying the same words of which one is cited; a cited line
+that is long; one line cited for four rows.
+
 This is regression protection on these cases, not a proof that every pick is right.
 
     uv run --extra test python -m tests.evals.run_pick_eval                 # the table for this checkout
+    uv run --extra test python -m tests.evals.run_pick_eval --assessed      # the same with each posting's assessment
     uv run --extra test python -m tests.evals.run_pick_eval --baseline OLD  # the same for an older checkout (side by side)
     uv run --extra test python -m tests.evals.run_pick_eval --json out.json --posting agentic --path select
 """
@@ -266,6 +283,39 @@ def profile(size: str) -> dict[str, object]:
     return {"profile_id": raw["profile_id"], "label": raw["label"], "titles": raw["titles"], "base_ids": [item for item in raw["base_ids"] if item in held]}
 
 
+# --- the assessment of one cell --------------------------------------------------------------------
+
+
+def assessment(posting: str) -> list[dict]:
+    """The synthetic assessment's rows for ``posting`` (``assessments.json``): requirement, status, class, evidence quotes."""
+
+    return list(_load("assessments.json")["postings"][posting])
+
+
+_CITED: dict[tuple[str, str, str], list[dict[str, object]]] = {}
+
+
+def cited(posting: str, case: MasterCase) -> list[dict[str, object]]:
+    """The rows of ``posting``'s assessment that cite lines of ``case``'s master, as the probe takes them.
+
+    Traced by the product's own rule on THIS checkout (``assess_master.cited_requirements``): word for word, else
+    as a paraphrase.  A quote of a line this master does not hold cites nothing here.
+    """
+
+    key = (posting, case.size, case.variation)
+    if key not in _CITED:
+        from gigai.scout import assess_master
+        from gigai.scout.find_jobs.contracts import MatrixStatus, RequirementClass, RequirementMatrixRow
+        from gigai.scout.master_resume import parse_master
+
+        matrix = [
+            RequirementMatrixRow(row["requirement"], tuple(row["evidence"]), MatrixStatus(row["status"]), RequirementClass(row["class"]))
+            for row in assessment(posting)
+        ]
+        _CITED[key] = [row.to_json() for row in assess_master.cited_requirements(parse_master(case.markdown), matrix)]
+    return _CITED[key]
+
+
 # --- the labels of one cell ------------------------------------------------------------------------
 
 
@@ -338,6 +388,13 @@ class Checks:
     summary: tuple[str, ...]
     keywords: tuple[tuple[str, ...], tuple[str, ...]] = ((), ())
     error: str | None = None
+    #: With an assessment: the met mandatory rows that cite a line of this master, those with no cited line shown,
+    #: and those of them that no reported conflict names (the hard test H5).
+    cited_met: tuple[str, ...] = ()
+    cited_lost: tuple[str, ...] = ()
+    cited_silent: tuple[str, ...] = ()
+    #: The other rows that cite a line (unclear, or nice-to-have) with no cited line shown: reported, in no hard test.
+    cited_other_lost: tuple[str, ...] = ()
 
     @property
     def page_fit(self) -> bool:
@@ -350,12 +407,23 @@ def atoms(names: list[str]) -> frozenset[str]:
     return frozenset(part.strip().casefold() for name in names for part in re.split(r"[/()·,]", name) if part.strip())
 
 
-def check(posting: str, case: MasterCase, final: dict[str, object]) -> Checks:
+def check(posting: str, case: MasterCase, final: dict[str, object], rows: list[dict[str, object]] | None = None) -> Checks:
+    """One final selection's checks; ``rows``: the cited rows the selection was made with (the assessed mode)."""
+
     requirements, groups = labels(posting, case)
+    rows = rows or []
+    met = tuple(str(row["id"]) for row in rows if row["mandatory"] and row["met"])
     if "error" in final:
         mandatory = tuple(req.id for req in requirements if req.mandatory and req.lines)
-        return Checks(frozenset(mandatory), frozenset(), mandatory, {}, mandatory, frozenset(), tuple(groups), None, (), False, 0, 0, 0, 0, frozenset(), frozenset(), (), error=str(final["error"]))
+        return Checks(
+            frozenset(mandatory), frozenset(), mandatory, {}, mandatory, frozenset(), tuple(groups), None, (), False, 0, 0, 0, 0, frozenset(), frozenset(), (),
+            error=str(final["error"]), cited_met=met, cited_lost=met, cited_silent=met,
+        )
     shown = frozenset([*final["summary"], *(bullet for bullets in final["entries"].values() for bullet in bullets), *final["other"]])  # type: ignore[union-attr]
+    # A cited line that a better line repeats is stood for by that line (the selector leaves the copy out).
+    twin: dict[str, str] = final.get("duplicates") or {}  # type: ignore[assignment]
+    without = [str(row["id"]) for row in rows if not shown & {found for line in row["lines"] for found in (line, twin.get(line, line))}]  # type: ignore[union-attr]
+    named = {str(conflict.get("requirement_id") or "") for conflict in final["conflicts"]}  # type: ignore[union-attr]
     levels = {req.id: max((level for line_id, level in req.lines.items() if line_id in shown), default=0) for req in requirements if req.lines}
     covered = frozenset(req_id for req_id, level in levels.items() if level > 0)
     mandatory = [req for req in requirements if req.mandatory and req.lines]
@@ -379,6 +447,10 @@ def check(posting: str, case: MasterCase, final: dict[str, object]) -> Checks:
         shown_skills=atoms(list(final["skills"])),  # type: ignore[arg-type]
         summary=tuple(final["summary"]),  # type: ignore[arg-type]
         keywords=(tuple(final.get("keywords", {}).get("must", ())), tuple(final.get("keywords", {}).get("nice", ()))),  # type: ignore[union-attr]
+        cited_met=met,
+        cited_lost=tuple(row for row in without if row in met),
+        cited_silent=tuple(row for row in without if row in met and row not in named),
+        cited_other_lost=tuple(row for row in without if row not in met),
     )
 
 
@@ -389,10 +461,15 @@ def cell_key(posting: str, size: str, variation: str) -> str:
     return f"{posting}|{size}|{variation}"
 
 
-def payload(posting_ids: list[str], sizes: list[str], variations: list[str], paths: list[str]) -> dict[str, object]:
+def payload(posting_ids: list[str], sizes: list[str], variations: list[str], paths: list[str], *, assessed: bool = False) -> dict[str, object]:
+    """The probe's request for the grid; ``assessed``: each posting carries the rows its assessment cites of that master."""
+
     posts = postings()
     cases = [
-        {"key": cell_key(posting, size, variation), "master": master_case(size, variation).markdown, "profile": profile(size), "posting": posts[posting]}
+        {
+            "key": cell_key(posting, size, variation), "master": master_case(size, variation).markdown, "profile": profile(size),
+            "posting": {**posts[posting], "cited": cited(posting, master_case(size, variation))} if assessed else posts[posting],
+        }
         for posting in posting_ids for size in sizes for variation in variations
     ]
     return {"today": _load("sizes.json")["today"], "paths": paths, "cases": cases}
@@ -400,13 +477,17 @@ def payload(posting_ids: list[str], sizes: list[str], variations: list[str], pat
 
 def run(
     posting_ids: list[str] | None = None, sizes: list[str] | None = None, variations: list[str] | None = None, paths: list[str] | None = None,
-    *, tree: Path | None = None,
+    *, tree: Path | None = None, assessed: bool = False,
 ) -> dict[tuple[str, str, str, str], Checks]:
-    """``(posting, size, variation, path) -> Checks`` for the grid, by this checkout's selector or by ``tree``'s."""
+    """``(posting, size, variation, path) -> Checks`` for the grid, by this checkout's selector or by ``tree``'s.
+
+    ``assessed``: every posting with its synthetic assessment (the module text). A tree whose selector does not read
+    citations selects as it does without them; the ``cited`` check is made on its final selection all the same.
+    """
 
     posting_ids = posting_ids or sorted(postings())
     sizes, variations, paths = sizes or list(SIZES), variations or list(VARIATIONS), paths or list(PATHS)
-    request = payload(posting_ids, sizes, variations, paths)
+    request = payload(posting_ids, sizes, variations, paths, assessed=assessed)
     answer = pick_probe.run_in_tree(request, tree) if tree is not None else pick_probe.probe(request)
     out: dict[tuple[str, str, str, str], Checks] = {}
     for posting in posting_ids:
@@ -414,7 +495,8 @@ def run(
             for variation in variations:
                 finals = answer["results"][cell_key(posting, size, variation)]
                 for path in paths:
-                    out[(posting, size, variation, path)] = check(posting, master_case(size, variation), finals[path])
+                    case = master_case(size, variation)
+                    out[(posting, size, variation, path)] = check(posting, case, finals[path], cited(posting, case) if assessed else None)
     return out
 
 
@@ -443,7 +525,10 @@ def _lowered(before: Checks, after: Checks) -> list[str]:
 def hard_failures(results: dict[tuple[str, str, str, str], Checks]) -> dict[str, list[str]]:
     """The failures of each hard test over ``results`` (empty lists: all pass)."""
 
-    failures: dict[str, list[str]] = {"H1 lost mandatory coverage": [], "H2 adding lines lowered a check": [], "H3 order or grouping changed the pick": [], "H4 page constraint": []}
+    failures: dict[str, list[str]] = {
+        "H1 lost mandatory coverage": [], "H2 adding lines lowered a check": [], "H3 order or grouping changed the pick": [], "H4 page constraint": [],
+        "H5 a met mandatory row lost every line it cites, with no conflict reported": [],
+    }
     cells = sorted({(posting, size, path) for posting, size, _variation, path in results})
     for (posting, size, variation, path), checks in sorted(results.items()):
         name = f"{posting}/{size}/{variation}/{path}"
@@ -452,6 +537,8 @@ def hard_failures(results: dict[tuple[str, str, str, str], Checks]) -> dict[str,
             continue
         if checks.lost:
             failures["H1 lost mandatory coverage"].append(f"{name}: {', '.join(checks.lost)}")
+        if checks.cited_silent:
+            failures["H5 a met mandatory row lost every line it cites, with no conflict reported"].append(f"{name}: {', '.join(checks.cited_silent)}")
         if not checks.page_fit:
             why = [f"{checks.pages} pages"] if (checks.pages or 99) > 2 else []
             why += [f"no bullet under {', '.join(checks.empty)}"] if checks.empty else []
@@ -498,14 +585,15 @@ def _cell(checks: Checks, mandatory: int, groups: int, skill_groups: int) -> str
     fit = "yes" if checks.page_fit else "NO"
     return (
         f"{mandatory - len(checks.lost)}/{mandatory} | {mandatory - len(checks.weak)}/{mandatory} | {groups - len(checks.omitted)}/{groups} | "
-        f"{checks.pages}p {fit} | {checks.lines} | {checks.skills}/{skill_groups} | {checks.conflicts}"
+        f"{checks.pages}p {fit} | {checks.lines} | {checks.skills}/{skill_groups} | {checks.conflicts} | "
+        + (f"{len(checks.cited_met) - len(checks.cited_lost)}/{len(checks.cited_met)}" if checks.cited_met else "-")
     )
 
 
 def table(results: dict[tuple[str, str, str, str], Checks], *, path: str, variation: str = "base", title: str = "") -> str:
     """One row per posting x size for one path and one variation."""
 
-    out = [f"### {title or path}: variation `{variation}`", "", "| posting | size | mandatory covered | strongest kept | must-keep kept | pages, fits | lines | skills shown | conflicts | lost / weak / omitted |", "|---|---|---|---|---|---|---|---|---|---|"]
+    out = [f"### {title or path}: variation `{variation}`", "", "| posting | size | mandatory covered | strongest kept | must-keep kept | pages, fits | lines | skills shown | conflicts | cited rows kept | lost / weak / omitted / cited rows lost |", "|---|---|---|---|---|---|---|---|---|---|---|"]
     for posting in sorted({key[0] for key in results}):
         for size in SIZES:
             checks = results.get((posting, size, variation, path))
@@ -518,6 +606,8 @@ def table(results: dict[tuple[str, str, str, str], Checks], *, path: str, variat
             detail = "; ".join(part for part in (
                 "lost " + ",".join(checks.lost) if checks.lost else "", "weak " + ",".join(checks.weak) if checks.weak else "",
                 "omitted " + ",".join(checks.omitted) if checks.omitted else "",
+                "cited lost " + ",".join(checks.cited_lost) if checks.cited_lost else "",
+                "(not met or nice: " + ",".join(checks.cited_other_lost) + ")" if checks.cited_other_lost else "",
             ) if part)
             out.append(f"| {posting} | {size} | {_cell(checks, mandatory, len(groups), skill_groups)} | {detail or '-'} |")
     return "\n".join(out)
@@ -543,18 +633,20 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--variation", action="append", choices=VARIATIONS)
     parser.add_argument("--path", action="append", choices=PATHS)
     parser.add_argument("--only-baseline", action="store_true", help="run only the baseline tree")
+    parser.add_argument("--assessed", action="store_true", help="every posting with its synthetic assessment: coverage from the lines it cites (check 5, H5)")
     parser.add_argument("--json", type=Path, help="write every cell's checks here")
     args = parser.parse_args(argv)
     runs: list[tuple[str, dict[tuple[str, str, str, str], Checks]]] = []
     if args.baseline is not None:
-        runs.append((f"BASELINE ({args.baseline.name})", run(args.posting, args.size, args.variation, args.path, tree=args.baseline)))
+        runs.append((f"BASELINE ({args.baseline.name})", run(args.posting, args.size, args.variation, args.path, tree=args.baseline, assessed=args.assessed)))
     if not args.only_baseline:
-        runs.append(("THIS CHECKOUT", run(args.posting, args.size, args.variation, args.path)))
+        runs.append(("THIS CHECKOUT", run(args.posting, args.size, args.variation, args.path, assessed=args.assessed)))
     for name, results in runs:
-        print(f"\n## {name}\n")
+        print(f"\n## {name}{' (every posting with its assessment)' if args.assessed else ''}\n")
         for path in args.path or PATHS:
-            print(table(results, path=path, title=f"{name}, path `{path}`"))
-            print()
+            for variation in (args.variation or ["base"]):
+                print(table(results, path=path, variation=variation, title=f"{name}, path `{path}`"))
+                print()
         print(summary(results))
     if args.json is not None:
         dump = {
@@ -562,6 +654,7 @@ def main(argv: list[str] | None = None) -> int:
                 "/".join(key): {
                     "lost": checks.lost, "weak": checks.weak, "omitted": checks.omitted, "pages": checks.pages, "page_fit": checks.page_fit, "lines": checks.lines,
                     "skills": checks.skills, "skills_left_out": checks.skills_left_out, "conflicts": checks.conflicts, "shown": sorted(checks.shown), "error": checks.error,
+                    "cited_met": checks.cited_met, "cited_lost": checks.cited_lost, "cited_silent": checks.cited_silent, "cited_other_lost": checks.cited_other_lost,
                 }
                 for key, checks in results.items()
             }

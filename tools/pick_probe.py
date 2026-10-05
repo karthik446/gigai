@@ -16,6 +16,10 @@ The paths (each is deterministic code, after the length cuts):
 - ``tailor_copy``: the tailor path with a model that copies every candidate line in the order listed
   (``job_candidates`` -> settled -> ``fit_selected``): the fit alone decides what stays.
 
+A posting may carry ``cited``: the rows of its stored assessment that cite master lines (``{"id", "text",
+"mandatory", "met", "lines"}``).  A tree whose selector reads citations (``sel-3`` on) selects from them; an older
+tree ignores them.
+
 The answer never holds a line's text: ids, skill names, counts and codes only.
 """
 
@@ -52,6 +56,12 @@ def _conflicts(value: object) -> list[dict[str, object]]:
     return out
 
 
+def _duplicates(selected) -> dict[str, str]:
+    """``line -> the better line that says the same and is shown in its place`` (a tree without the rule: none)."""
+
+    return dict(getattr(selected, "duplicates", None) or {}) if selected is not None else {}
+
+
 def _keywords(selected) -> dict[str, list[str]]:
     keywords = selected.keywords
     return {"must": list(keywords.must), "nice": list(keywords.nice)} if keywords is not None else {"must": [], "nice": []}
@@ -73,6 +83,7 @@ def _from_selected(master, selected) -> dict[str, object]:
         "skills_left_out": [skill.name for skill in selected.skill_reasons if not skill.picked],
         "conflicts": _conflicts(selected),
         "keywords": _keywords(selected),
+        "duplicates": _duplicates(selected),
     }
 
 
@@ -109,6 +120,7 @@ def _from_result(master, result, record=None, selected=None) -> dict[str, object
         "skills_left_out": [name for name in master.skills() if name.casefold() not in listed],
         "conflicts": _conflicts(record) if record is not None else [],
         "keywords": _keywords(selected) if selected is not None else {"must": [], "nice": []},
+        "duplicates": _duplicates(selected),
     }
 
 
@@ -165,6 +177,11 @@ def probe(payload: dict[str, object]) -> dict[str, object]:
         profile = ms.SelectionProfile(**fields)  # type: ignore[arg-type]
         post = case["posting"]
         posting = ms.SelectionPosting(str(post["title"]), str(post["text"]), str(post.get("company") or ""), str(post.get("location") or ""))
+        if post.get("cited") and hasattr(ms, "CitedRequirement"):
+            posting = ms.SelectionPosting(posting.title, posting.text, posting.company, posting.location, tuple(
+                ms.CitedRequirement(str(row["id"]), str(row["text"]), bool(row["mandatory"]), tuple(row["lines"]), met=bool(row.get("met", True)))
+                for row in post["cited"]
+            ))
         out: dict[str, object] = {}
         for path in paths:
             try:

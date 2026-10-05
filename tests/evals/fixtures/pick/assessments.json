@@ -1,0 +1,578 @@
+{
+ "note": "SYNTHETIC assessments for the pick eval (0110-10-15, the real-data gate fix), written by the worker: for each posting the requirement rows a stored assessment would hold (the posting's own lines), each with its status, its class and its evidence QUOTES. A quote is words of a line of the synthetic master (master.md, or a line variations.json adds), or a rewording of one; the eval traces it to master line ids with the product's own rule (assess_master.cited_requirements), so a quote of a line a master size does not hold cites nothing there. 'shapes' names the cases the gate found missing: a cited line that shares no word with its requirement, a cited line in an older role that is the only evidence, two lines that carry the same words of which one is cited, a cited line that is long, one line cited for four rows.",
+ "postings": {
+  "agentic": [
+   {
+    "requirement": "10+ years of software engineering, with 2+ years running LLM agents in production.",
+    "status": "met",
+    "class": "hard",
+    "evidence": [
+     "Staff engineer with 17 years of experience building backend platforms and, since 2021, LLM"
+    ]
+   },
+   {
+    "requirement": "Design and operate the agent runtime in production: tool calling with typed tool contracts, retries and budgets.",
+    "status": "met",
+    "class": "hard",
+    "evidence": [
+     "Architected the agent runtime that executes 400,000 tool-calling LLM tasks per day for 60"
+    ]
+   },
+   {
+    "requirement": "Build multi-agent workflows in which a planner agent hands work to specialist agents and merges their results.",
+    "status": "met",
+    "class": "hard",
+    "evidence": [
+     "Built a multi-agent workflow engine in TypeScript in which a planner agent hands steps to",
+     "Built a local agent runtime in Python in which a coordinator agent plans work and dispatches"
+    ]
+   },
+   {
+    "requirement": "Make long agent runs durable: checkpointed state, so a workflow resumes after a crash or a restart.",
+    "status": "met",
+    "class": "hard",
+    "evidence": [
+     "Designed the durable runtime underneath: every step is checkpointed to PostgreSQL, so a",
+     "Designed durable task state on SQLite so a long agent run survives a restart without repeating"
+    ]
+   },
+   {
+    "requirement": "Own LLM evaluation: regression suites that score every prompt change against labelled cases before release.",
+    "status": "met",
+    "class": "hard",
+    "evidence": [
+     "Built an evaluation harness in Python that scores every prompt change against 2,200 labelled"
+    ]
+   },
+   {
+    "requirement": "Build human checkpoints and approval gates before any irreversible action.",
+    "status": "met",
+    "class": "hard",
+    "evidence": [
+     "Added human checkpoints: an agent stops and asks before any irreversible action, and every"
+    ]
+   },
+   {
+    "requirement": "Build retrieval over customer documents with pgvector or a similar vector store.",
+    "status": "met",
+    "class": "hard",
+    "evidence": [
+     "Designed a retrieval pipeline on PostgreSQL with pgvector serving 12 million embedded passages"
+    ]
+   },
+   {
+    "requirement": "Control LLM cost with prompt caching and model routing.",
+    "status": "met",
+    "class": "hard",
+    "evidence": [
+     "Reduced LLM spend by 38% using prompt caching and by routing easy requests to smaller models"
+    ]
+   },
+   {
+    "requirement": "Strong Python and TypeScript.",
+    "status": "met",
+    "class": "hard",
+    "evidence": [
+     "Built an evaluation harness in Python that scores every prompt change against 2,200 labelled",
+     "Built a multi-agent workflow engine in TypeScript in which a planner agent hands steps to"
+    ]
+   },
+   {
+    "requirement": "Experience operating services on Kubernetes.",
+    "status": "met",
+    "class": "hard",
+    "evidence": [
+     "Ran the platform's production Kubernetes clusters across AWS and GCP through 3 years of"
+    ]
+   },
+   {
+    "requirement": "A record of leading a team and mentoring senior engineers.",
+    "status": "met",
+    "class": "hard",
+    "evidence": [
+     "Led a 7-engineer AI platform team and owned its roadmap end to end, from design review to the",
+     "Mentored 3 senior engineers to staff-level scope through weekly design reviews and shared"
+    ]
+   },
+   {
+    "requirement": "Defending agents against prompt injection and unsafe tool use.",
+    "status": "met",
+    "class": "nice_to_have",
+    "evidence": [
+     "Wrote an injection test suite of 120 cases that checks untrusted tool output cannot steer a"
+    ]
+   },
+   {
+    "requirement": "Tracing and replay for agent runs, with token and cost accounting.",
+    "status": "met",
+    "class": "nice_to_have",
+    "evidence": [
+     "A tracing viewer in TypeScript and React that renders OpenTelemetry traces of agent runs as a",
+     "Built a replay debugger that re-runs any stored workflow step by step with its prompts, tool"
+    ]
+   },
+   {
+    "requirement": "Experience with the Model Context Protocol.",
+    "status": "met",
+    "class": "nice_to_have",
+    "evidence": [
+     "Added a Model Context Protocol server so any MCP client can drive the runtime's tools under"
+    ]
+   },
+   {
+    "requirement": "Open-source work that other developers use.",
+    "status": "met",
+    "class": "nice_to_have",
+    "evidence": [
+     "Documented the engine with 12 worked examples; 600 stars and 25 outside contributors in 5",
+     "Published the tool as open source; used weekly by about 30 developers"
+    ]
+   }
+  ],
+  "backend": [
+   {
+    "requirement": "8+ years building backend systems, with several years at staff level.",
+    "status": "met",
+    "class": "hard",
+    "evidence": [
+     "Staff engineer with 17 years of experience building backend platforms and, since 2021, LLM"
+    ]
+   },
+   {
+    "requirement": "Design and operate distributed backend services in Go or Java that stay available under heavy load.",
+    "status": "met",
+    "class": "hard",
+    "evidence": [
+     "Owned the scheduling platform's control plane in Go: 30 microservices on Kubernetes across AWS",
+     "Built the ledger service in Java on PostgreSQL that records 20 million payment events a day"
+    ]
+   },
+   {
+    "requirement": "Own the event backbone on Kafka, with exactly-once handling where money is involved.",
+    "status": "met",
+    "class": "hard",
+    "evidence": [
+     "Designed the appointment event backbone on Kafka carrying 150 million messages a day with"
+    ]
+   },
+   {
+    "requirement": "Model and tune data on PostgreSQL for write-heavy workloads.",
+    "status": "met",
+    "class": "hard",
+    "evidence": [
+     "Built the ledger service in Java on PostgreSQL that records 20 million payment events a day",
+     "Benchmarked at 9,000 jobs per second on a single node"
+    ]
+   },
+   {
+    "requirement": "Design public APIs over REST and gRPC that are safe to retry.",
+    "status": "met",
+    "class": "hard",
+    "evidence": [
+     "Designed idempotent payment APIs (REST and gRPC) used by 250 merchants, removing duplicate"
+    ]
+   },
+   {
+    "requirement": "Define SLOs with the teams that run on the platform and reduce customer-visible incidents.",
+    "status": "met",
+    "class": "hard",
+    "evidence": [
+     "Defined SLOs for 18 services and built burn-rate alerting on Prometheus and Grafana, reducing"
+    ]
+   },
+   {
+    "requirement": "Production experience with Elasticsearch or another search engine: indexing pipelines at scale.",
+    "status": "met",
+    "class": "hard",
+    "evidence": [
+     "Built the indexing pipeline in Java that ingests 40 million documents a day into Elasticsearch"
+    ]
+   },
+   {
+    "requirement": "A record of leading projects across teams and mentoring engineers.",
+    "status": "met",
+    "class": "hard",
+    "evidence": [
+     "Led a 7-engineer AI platform team and owned its roadmap end to end, from design review to the",
+     "Led a 4-engineer team that delivered PCI DSS scope reduction by tokenizing card data at the"
+    ]
+   },
+   {
+    "requirement": "Payments or ledger experience; PCI DSS.",
+    "status": "met",
+    "class": "nice_to_have",
+    "evidence": [
+     "Built the ledger service in Java on PostgreSQL that records 20 million payment events a day",
+     "Led a 4-engineer team that delivered PCI DSS scope reduction by tokenizing card data at the"
+    ]
+   },
+   {
+    "requirement": "Experience building job queues or workflow engines.",
+    "status": "met",
+    "class": "nice_to_have",
+    "evidence": [
+     "A job queue on PostgreSQL in Go using SKIP LOCKED, with at-least-once delivery, retries and a"
+    ]
+   },
+   {
+    "requirement": "Redis.",
+    "status": "met",
+    "class": "nice_to_have",
+    "evidence": [
+     "Built the leaderboard service on Redis sorted sets serving 5,000 requests per second"
+    ]
+   }
+  ],
+  "leadership": [
+   {
+    "requirement": "12+ years of software engineering, with a record of leading teams.",
+    "status": "met",
+    "class": "hard",
+    "evidence": [
+     "Staff engineer with 17 years of experience building backend platforms and, since 2021, LLM"
+    ]
+   },
+   {
+    "requirement": "Lead a team of engineers and own its roadmap from design review to operations.",
+    "status": "met",
+    "class": "hard",
+    "evidence": [
+     "Led a 7-engineer AI platform team and owned its roadmap end to end, from design review to the",
+     "Wrote the on-call runbooks and trained 10 engineers joining the rotation"
+    ]
+   },
+   {
+    "requirement": "Mentor senior engineers and grow them to staff-level scope.",
+    "status": "met",
+    "class": "hard",
+    "evidence": [
+     "Mentored 3 senior engineers to staff-level scope through weekly design reviews and shared",
+     "Wrote the on-call runbooks and trained 10 engineers joining the rotation"
+    ]
+   },
+   {
+    "requirement": "Experience mentoring engineers at several levels.",
+    "status": "met",
+    "class": "hard",
+    "evidence": [
+     "Wrote the on-call runbooks and trained 10 engineers joining the rotation"
+    ]
+   },
+   {
+    "requirement": "Raise the reliability bar: SLOs, on-call practice and fewer customer-visible incidents.",
+    "status": "met",
+    "class": "hard",
+    "evidence": [
+     "Defined SLOs for 18 services and built burn-rate alerting on Prometheus and Grafana, reducing",
+     "Wrote the on-call runbooks and trained 10 engineers joining the rotation"
+    ]
+   },
+   {
+    "requirement": "Set technical direction for a platform that many internal teams build on.",
+    "status": "met",
+    "class": "hard",
+    "evidence": [
+     "Architected the agent runtime that executes 400,000 tool-calling LLM tasks per day for 60"
+    ]
+   },
+   {
+    "requirement": "Lead cross-team delivery of compliance work with security and legal partners.",
+    "status": "met",
+    "class": "hard",
+    "evidence": [
+     "Led a 4-engineer team that delivered PCI DSS scope reduction by tokenizing card data at the"
+    ]
+   },
+   {
+    "requirement": "Represent engineering in public: conference talks, community and open-source work.",
+    "status": "met",
+    "class": "hard",
+    "evidence": [
+     "Speaker, \"Regression-testing LLM agents before release\", Northlake AI Engineering Summit 2025"
+    ]
+   },
+   {
+    "requirement": "Hands-on background in distributed systems at scale.",
+    "status": "met",
+    "class": "hard",
+    "evidence": [
+     "Built the indexing pipeline in Java that ingests 40 million documents a day into Elasticsearch"
+    ]
+   },
+   {
+    "requirement": "Healthcare or other regulated-industry experience.",
+    "status": "unclear",
+    "class": "nice_to_have",
+    "evidence": [
+     "serving 2,400 clinics through two regional failovers"
+    ]
+   },
+   {
+    "requirement": "Experience introducing AI tooling to engineering teams.",
+    "status": "met",
+    "class": "nice_to_have",
+    "evidence": [
+     "Used by 3 teams at Halcyon Freight before the internal harness replaced it"
+    ]
+   }
+  ],
+  "sre": [
+   {
+    "requirement": "8+ years in infrastructure, SRE or platform engineering.",
+    "status": "met",
+    "class": "hard",
+    "evidence": [
+     "Staff engineer with 17 years of experience building backend platforms and, since 2021, LLM"
+    ]
+   },
+   {
+    "requirement": "Operate Kubernetes clusters across AWS and GCP for services with strict availability targets.",
+    "status": "met",
+    "class": "hard",
+    "evidence": [
+     "Owned the scheduling platform's control plane in Go: 30 microservices on Kubernetes across AWS",
+     "Ran model serving and the agent runtime on Kubernetes across AWS and GCP at 99.95%"
+    ]
+   },
+   {
+    "requirement": "Manage infrastructure as code with Terraform, with policy checks before changes are applied.",
+    "status": "met",
+    "class": "hard",
+    "evidence": [
+     "Managed infrastructure as code with Terraform across 2 clouds and 9 regions, with policy"
+    ]
+   },
+   {
+    "requirement": "Define SLOs and build burn-rate alerting on Prometheus and Grafana.",
+    "status": "met",
+    "class": "hard",
+    "evidence": [
+     "Defined SLOs for 18 services and built burn-rate alerting on Prometheus and Grafana, reducing"
+    ]
+   },
+   {
+    "requirement": "Lead the on-call rotation and incident response, and write the runbooks the rotation uses.",
+    "status": "met",
+    "class": "hard",
+    "evidence": [
+     "Ran model serving and the agent runtime on Kubernetes across AWS and GCP at 99.95%",
+     "Wrote the on-call runbooks and trained 10 engineers joining the rotation"
+    ]
+   },
+   {
+    "requirement": "Build and speed up the CI/CD pipelines that every team deploys through.",
+    "status": "met",
+    "class": "hard",
+    "evidence": [
+     "Cut build times from 25 minutes to 7 by caching dependencies in the CI/CD pipeline",
+     "Introduced contract tests between 12 services in CI/CD, catching breaking changes before"
+    ]
+   },
+   {
+    "requirement": "Run load tests before releases to find capacity limits.",
+    "status": "met",
+    "class": "hard",
+    "evidence": [
+     "Automated load tests that replay recorded traffic before each release"
+    ]
+   },
+   {
+    "requirement": "Deep Kubernetes and Terraform experience in production.",
+    "status": "met",
+    "class": "hard",
+    "evidence": [
+     "Owned the scheduling platform's control plane in Go: 30 microservices on Kubernetes across AWS",
+     "Managed infrastructure as code with Terraform across 2 clouds and 9 regions, with policy"
+    ]
+   },
+   {
+    "requirement": "Experience running an on-call rotation.",
+    "status": "met",
+    "class": "hard",
+    "evidence": [
+     "Mentored 2 junior engineers through their first on-call rotations"
+    ]
+   },
+   {
+    "requirement": "Operating Kafka clusters.",
+    "status": "met",
+    "class": "nice_to_have",
+    "evidence": [
+     "Ran the Kafka clusters for the search group, including upgrades and partition rebalancing with"
+    ]
+   },
+   {
+    "requirement": "Distributed tracing with OpenTelemetry.",
+    "status": "met",
+    "class": "nice_to_have",
+    "evidence": [
+     "A tracing viewer in TypeScript and React that renders OpenTelemetry traces of agent runs as a"
+    ]
+   },
+   {
+    "requirement": "GPU autoscaling for model serving.",
+    "status": "met",
+    "class": "nice_to_have",
+    "evidence": [
+     "Ran model serving and the agent runtime on Kubernetes across AWS and GCP at 99.95%"
+    ]
+   }
+  ],
+  "weakfit": [
+   {
+    "requirement": "Lead the architecture of the iOS app in Swift and SwiftUI.",
+    "status": "unmet",
+    "class": "hard",
+    "evidence": []
+   },
+   {
+    "requirement": "Own app performance: launch time, scroll smoothness and crash-free sessions.",
+    "status": "unclear",
+    "class": "hard",
+    "evidence": [
+     "Loads a 50 MB trace in under 2 seconds using incremental parsing in a web worker"
+    ]
+   },
+   {
+    "requirement": "Build the mobile CI/CD pipeline and speed up builds.",
+    "status": "met",
+    "class": "hard",
+    "evidence": [
+     "Cut build times from 25 minutes to 7 by caching dependencies in the CI/CD pipeline"
+    ]
+   },
+   {
+    "requirement": "Work with backend teams on the REST and gRPC APIs the iOS and Android clients call.",
+    "status": "met",
+    "class": "hard",
+    "evidence": [
+     "Built the REST API behind the iOS and Android game clients, serving 9,000 requests per second",
+     "Designed idempotent payment APIs (REST and gRPC) used by 250 merchants, removing duplicate"
+    ]
+   },
+   {
+    "requirement": "Mentor engineers and set technical direction for mobile.",
+    "status": "met",
+    "class": "hard",
+    "evidence": [
+     "Led a 7-engineer AI platform team and owned its roadmap end to end, from design review to the",
+     "Mentored 3 senior engineers to staff-level scope through weekly design reviews and shared"
+    ]
+   },
+   {
+    "requirement": "8+ years of iOS development; several apps shipped to the App Store.",
+    "status": "unmet",
+    "class": "hard",
+    "evidence": []
+   },
+   {
+    "requirement": "Expert Swift; SwiftUI and UIKit.",
+    "status": "unmet",
+    "class": "hard",
+    "evidence": []
+   },
+   {
+    "requirement": "Experience in payments or banking; PCI DSS awareness.",
+    "status": "met",
+    "class": "hard",
+    "evidence": [
+     "Built the ledger service in Java on PostgreSQL that records 20 million payment events a day",
+     "Led a 4-engineer team that delivered PCI DSS scope reduction by tokenizing card data at the"
+    ]
+   },
+   {
+    "requirement": "Kotlin and Android experience.",
+    "status": "met",
+    "class": "nice_to_have",
+    "evidence": [
+     "Built the anti-cheat rules engine in Kotlin that evaluates 300 rules per match in under 15 ms"
+    ]
+   },
+   {
+    "requirement": "A backend background.",
+    "status": "met",
+    "class": "nice_to_have",
+    "evidence": [
+     "Staff engineer with 17 years of experience building backend platforms and, since 2021, LLM"
+    ]
+   }
+  ]
+ },
+ "shapes": {
+  "no_shared_words": [
+   {
+    "posting": "leadership",
+    "requirement": "Hands-on background in distributed systems at scale.",
+    "line": "pel-01",
+    "sizes": [
+     "small",
+     "medium",
+     "large"
+    ],
+    "variation": "base"
+   }
+  ],
+  "older_role_only": [
+   {
+    "posting": "leadership",
+    "requirement": "Hands-on background in distributed systems at scale.",
+    "line": "pel-01",
+    "sizes": [
+     "small",
+     "medium",
+     "large"
+    ],
+    "variation": "base"
+   },
+   {
+    "posting": "leadership",
+    "requirement": "Experience mentoring engineers at several levels.",
+    "line": "pel-10",
+    "sizes": [
+     "large"
+    ],
+    "variation": "base"
+   }
+  ],
+  "same_word_one_cited": [
+   {
+    "posting": "sre",
+    "requirement": "Experience running an on-call rotation.",
+    "line": "pel-06",
+    "others": [
+     "hal-06",
+     "pel-10"
+    ],
+    "sizes": [
+     "medium",
+     "large"
+    ],
+    "variation": "base"
+   }
+  ],
+  "long_line": [
+   {
+    "posting": "agentic",
+    "requirement": "Experience operating services on Kubernetes.",
+    "line": "long-04",
+    "sizes": [
+     "small",
+     "medium",
+     "large"
+    ],
+    "variation": "long"
+   }
+  ],
+  "one_line_four_rows": [
+   {
+    "posting": "leadership",
+    "line": "pel-10",
+    "rows": 4,
+    "sizes": [
+     "large"
+    ],
+    "variation": "base"
+   }
+  ]
+ }
+}

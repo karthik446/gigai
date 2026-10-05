@@ -1,6 +1,6 @@
 {
- "note": "SYNTHETIC. What the code selector (SELECTOR_VERSION sel-2) picks from master.md for profiles.json x postings/, on 2026-10-03. Regenerate only with a deliberate selector change.",
- "selector_version": "sel-2",
+ "note": "SYNTHETIC. What the code selector (SELECTOR_VERSION sel-3; no posting here has an assessment, so every pick is what sel-2 made) picks from master.md for profiles.json x postings/, on 2026-10-03. Regenerate only with a deliberate selector change.",
+ "selector_version": "sel-3",
  "today": "2026-10-03",
  "cases": {
   "profile-ai/base": {

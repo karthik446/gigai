@@ -303,6 +303,50 @@ def test_the_tailoring_s_order_is_what_prints_and_the_posting_decides_which_line
     assert [role[::-1] for role in turned] == listed
 
 
+# --- a job with a stored assessment: the lines it cites (0110-10-15, the real-data gate) ----------------
+
+
+def test_a_job_with_a_stored_assessment_keeps_the_line_the_assessment_cites_in_the_final_resume(home: _Home, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The END outcome on the tailor path (what the pipeline's tailor step runs): the stored tailored resume.
+
+    By words alone a line is cut for length. When the job's stored assessment for the profile cites that line for a
+    requirement (by meaning: the requirement shares no word with it), the same tailoring shows it."""
+
+    from types import SimpleNamespace
+
+    from gigai.scout import quick_assess
+    from gigai.scout.find_jobs.contracts import MatrixStatus, RequirementClass, RequirementMatrixRow
+
+    home.migrate()
+    _install_model(monkeypatch, copies_what_it_is_shown)
+    response, before = home.tailor(home.swe_id)
+    master = home.master()
+    line = next(cut["id"] for cut in before["selection"]["cut_for_length"] if cut["kind"] == "bullet" and len(master["items"][cut["id"]]) > 40)
+    assert line not in [item["id"] for item in before["selection"]["picked"]]
+
+    asked: list[tuple[str | None, str]] = []
+
+    def stored(_home_root: Path, _target: Path, profile_id: str | None, job_identity: str):
+        asked.append((profile_id, job_identity))
+        row = RequirementMatrixRow("Zymurgy qualifications", (master["items"][line][:40],), MatrixStatus.MET, RequirementClass.HARD)
+        return SimpleNamespace(result=SimpleNamespace(matrix=(row,)))
+
+    monkeypatch.setattr(quick_assess, "read_quick_assessment", stored)
+    _response, after = home.tailor(home.swe_id)
+
+    # The assessment read is the one of THIS profile and THIS job.
+    assert asked and set(asked) == {(home.swe_id, response.job.job_identity)}
+    picked = {item["id"]: item for item in after["selection"]["picked"]}
+    assert line in picked and picked[line]["code"] == "requirement_evidence" and picked[line]["reason"].startswith("the line your assessment cites for: Zymurgy qualifications")
+    shown = [ref["item_id"] for item in _body_lines(after) for ref in item["refs"] if "item_id" in ref]
+    assert line in shown and master["items"][line] in after["markdown"]
+    assert "conflicts" not in after["selection"] and home.pages(home.swe_id) <= 2
+    # The code-only fallback (no model answers) keeps it too.
+    _install_model(monkeypatch, lambda _prompt: "this is not the JSON a tailoring answers with")
+    _response, fallback = home.tailor(home.swe_id)
+    assert fallback["selection"]["picked_by"] == "code" and line in [item["id"] for item in fallback["selection"]["picked"]]
+
+
 # --- Picked / Left out -------------------------------------------------------------------------------
 
 
@@ -313,7 +357,7 @@ def test_the_stored_tailoring_says_what_was_picked_what_was_left_out_and_why(hom
     master = home.master()
 
     selection = on_disk["selection"]
-    assert (selection["picked_by"], selection["fallback"], selection["selector_version"]) == ("model", None, "sel-2")
+    assert (selection["picked_by"], selection["fallback"], selection["selector_version"]) == ("model", None, "sel-3")
     picked = [line["id"] for line in selection["picked"]]
     left = [line["id"] for line in selection["left_out"]]
     # Picked is exactly what the resume shows; with Left out it is every line of the master, each once.
