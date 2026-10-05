@@ -63,7 +63,8 @@ RULES: tuple[str, ...] = (
     "Every claim comes from a master line, an answer or a story below. Never add a skill, tool, employer, title, date, degree, "
     "number or outcome they do not state. A gap is never filled. An answer that says no to a thing does not support that thing.",
     "A line you copy unchanged needs nothing. A line you reword or add ends with its sources: `<!-- src: b-23b6dc, A tooling:temporal -->`.",
-    "Keep every number exactly. Keep ownership as stated: \"worked on\" never becomes \"led\". One role or project per line.",
+    "Keep every number exactly. Keep ownership as stated: \"worked on\" never becomes \"led\". One role or project per line. "
+    "Write a line in resume voice: impersonal, past tense, no \"I\" or \"my\", using only the facts of its source; never paste an answer as it stands.",
     "Entry headings (company, title, dates, school, degree, project name) are copied unchanged. Roles stay in date order, newest first.",
     "Keep the Skills section. Add a skill only when an answer says the user has it, at the level the answer states.",
     "No name and no contact details anywhere.",
@@ -112,6 +113,8 @@ class RowIds:
     sources: tuple[str, ...] = ()
     in_resume: tuple[str, ...] = ()
     coverage: str | None = None
+    #: The id of the OPEN question this row is asked by (``gigai scout answers save THIS``), or ``None``: the row asks nothing.
+    question_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -130,6 +133,8 @@ class YoursInputs:
     picked: Mapping[str, object] | None = None
     proposed: bool = False
     rows: tuple[RowIds, ...] = ()
+    #: Every open question of the assessment: ``{question_id, row}`` (``row`` the requirement row's id, or ``None``). Ids only.
+    open_questions: tuple[Mapping[str, object], ...] = ()
     #: Each ``{id, kind, line, requirement, status, source, why, resolved}``; ``why`` is ``None`` for one the assessment wrote.
     suggestions: tuple[Mapping[str, object], ...] = ()
     master: Master | None = None
@@ -342,9 +347,13 @@ def yours_part(inputs: YoursInputs) -> dict[str, object]:
         "master": None if inputs.master is None else {"revision": inputs.master_revision, "entries": entries, "lines": lines, "skills": skills},
         "sources": _sources(inputs.answers),
         "requirements": [
-            {"id": row.id, "class": row.requirement_class, "status": row.status, "sources": list(row.sources), "in_resume": list(row.in_resume), "coverage": row.coverage}
+            {
+                "id": row.id, "class": row.requirement_class, "status": row.status, "sources": list(row.sources), "in_resume": list(row.in_resume),
+                "coverage": row.coverage, "question_id": row.question_id,
+            }
             for row in inputs.rows
         ],
+        "open_questions": [dict(item) for item in inputs.open_questions],
         "suggestions": [dict(item) for item in inputs.suggestions],
         "sends": {"nothing": SENDS_NOTHING, "assess": SENDS_ASSESS},
     }
@@ -506,9 +515,13 @@ def _render_yours(part: Mapping[str, object]) -> str:
     out += ["", "REQUIREMENTS, BY ID (their words are in the posting part)"]
     rows: Sequence[Mapping[str, object]] = part["requirements"]  # type: ignore[assignment]
     for row in rows:
-        out.append(f"{row['id']}  {row['class'] or '(no class)'}  {row['status']}  sources: {_or_none(row['sources'])}  in the resume: {'yes' if row['in_resume'] else 'no'}")  # type: ignore[arg-type]
+        asked = f"  asked: answers save {row['question_id']}" if row.get("question_id") else ""
+        out.append(f"{row['id']}  {row['class'] or '(no class)'}  {row['status']}  sources: {_or_none(row['sources'])}  in the resume: {'yes' if row['in_resume'] else 'no'}{asked}")  # type: ignore[arg-type]
     if not rows:
         out.append("(none)")
+    unplaced = [item["question_id"] for item in part.get("open_questions", ()) if not item.get("row")]  # type: ignore[union-attr]
+    if unplaced:
+        out.append("Open questions on no row above: " + ", ".join(str(item) for item in unplaced))
     out += ["", "SUGGESTIONS"]
     suggestions: Sequence[Mapping[str, object]] = part["suggestions"]  # type: ignore[assignment]
     for item in suggestions:
@@ -641,13 +654,57 @@ def _row_id(row: object, place: int) -> str:
     return str(getattr(row, "id", None) or f"r{place}")
 
 
-def row_ids(job: StoredJob, shown: frozenset[str]) -> tuple[RowIds, ...]:
-    """The requirement rows by id: the record's (with where each one's support is printed), else the assessment's own."""
+def open_questions(home_root: Path, target: Path, assessment: object) -> tuple[dict[str, object], ...]:
+    """The assessment's open questions as ``{question_id, row}``: ids only, no word of the question (those are the posting's).
 
+    Open = no answer saved under that id. ``row`` is the requirement row the question asks (the row's own question id, or its
+    requirement words), else ``None``. This is the id ``gigai scout answers save`` takes (E2EFIX F3).
+    """
+
+    from . import story_bank
+    from .assessment_core import row_question_id
+    from .question_ids import normalize_question_id
+    from .requirements_list import fold
+
+    asked = tuple(getattr(getattr(assessment, "result", None), "structured_questions", ()) or ())
+    if not asked:
+        return ()
+    try:
+        answered = {entry.question_id for entry in story_bank.read_bank(home_root=Path(home_root), target=Path(target), with_jobs=False)}
+    except Exception:  # noqa: BLE001 - an unreadable bank answers nothing: every question stays open
+        answered = set()
+    matrix = [(_row_id(row, place), row) for place, row in enumerate(_matrix(assessment), 1)]
+    out: list[dict[str, object]] = []
+    for question in asked:
+        question_id = normalize_question_id(str(question.question_id))
+        if question_id in answered or any(item["question_id"] == question_id for item in out):
+            continue
+        words = fold(question.requirement) if question.requirement else None
+        row = next(
+            (
+                row_id for row_id, item in matrix
+                if normalize_question_id(row_question_id(row_id)) == question_id or (words is not None and fold(getattr(item, "requirement", "")) == words)
+            ),
+            None,
+        )
+        out.append({"question_id": question_id, "row": row})
+    return tuple(out)
+
+
+def row_ids(job: StoredJob, shown: frozenset[str], asked: Mapping[str, str] | None = None) -> tuple[RowIds, ...]:
+    """The requirement rows by id: the record's (with where each one's support is printed), else the assessment's own.
+
+    ``asked``: row id -> the id of the open question that row is asked by.
+    """
+
+    asked = asked or {}
     stored = (job.record or {}).get("requirements")
     if isinstance(stored, list) and stored:
         return tuple(
-            RowIds(str(row["id"]), row.get("class"), str(row["status"]), tuple(row.get("sources", ())), tuple(row.get("in_resume", ())), row.get("coverage"))
+            RowIds(
+                str(row["id"]), row.get("class"), str(row["status"]), tuple(row.get("sources", ())), tuple(row.get("in_resume", ())), row.get("coverage"),
+                asked.get(str(row["id"])),
+            )
             for row in stored if isinstance(row, Mapping)
         )
     out: list[RowIds] = []
@@ -655,7 +712,7 @@ def row_ids(job: StoredJob, shown: frozenset[str]) -> tuple[RowIds, ...]:
         sources = tuple(str(source) for source in getattr(row, "sources", ()) or ())
         out.append(RowIds(
             _row_id(row, place), _word(getattr(row, "requirement_class", None)), _word(getattr(row, "status", None)) or "", sources,
-            tuple(source for source in sources if source in shown),
+            tuple(source for source in sources if source in shown), None, asked.get(_row_id(row, place)),
         ))
     return tuple(out)
 
@@ -720,6 +777,7 @@ def load_yours(home_root: Path, target: Path, job_url: str, profile_id: str | No
     selection = record.get("selection") if isinstance(record.get("selection"), Mapping) else None
     reason = BasisCheck(home_root=home_root, target=target, resolved=resolved).reason(assessment)  # type: ignore[arg-type]
     stale = record_store.stale_for(home_root, target, job.profile_id, job.job_identity, assessment_stale=reason, resolved=resolved)
+    questions = open_questions(home_root, target, assessment)
     pages = measure_pages(resume.result) if resume is not None else None
     if pages is None and selection is not None and type(selection.get("pages")) is int:
         pages = selection["pages"]  # type: ignore[assignment]
@@ -732,7 +790,8 @@ def load_yours(home_root: Path, target: Path, job_url: str, profile_id: str | No
         conflicts=tuple(item for item in (selection or {}).get("conflicts", ()) if isinstance(item, Mapping)),  # type: ignore[union-attr]
         picked=None if selection is None else {key: selection.get(key) for key in ("picked_by", "fallback", "draft")},
         proposed=record.get("proposed") is not None,
-        rows=row_ids(job, shown),
+        rows=row_ids(job, shown, {str(item["row"]): str(item["question_id"]) for item in questions if item["row"]}),
+        open_questions=questions,
         suggestions=tuple(_private_suggestion(item) for item in record.get("suggestions", ()) if isinstance(item, Mapping)),  # type: ignore[union-attr]
         master=master,
         master_revision=stored.revision.revision if stored is not None and master is not None else None,  # type: ignore[attr-defined]

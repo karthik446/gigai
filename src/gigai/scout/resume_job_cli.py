@@ -234,10 +234,15 @@ def store_resume(
         except scout_cli._pipeline_errors() as exc:  # the resume is stored: a failed check is reported, never the command's failure
             recheck = {**recheck, "result": "not_run", "error_code": getattr(exc, "code", None) or "scout_pipeline_failed"}
     folder_file = _folder_file(home_root, response)
+    # E2EFIX F5: the resume is stored, but a step of the check that failed (a sandbox with no network: ``model_unavailable``) is said.
+    failed_steps = [
+        {"name": step.get("name"), "error_code": step["error_code"]} for step in (drain or {}).get("steps", ()) if step.get("error_code")  # type: ignore[union-attr]
+    ]
+    recheck_failed = {"error_code": failed_steps[0]["error_code"], "steps": failed_steps} if failed_steps else None
     if as_json:
         payload: dict[str, object] = {
             "ok": True, **response.to_json(), "changed": attached.changed, "out_path": None if out_path is None else str(out_path),
-            "folder_path": folder_file, "recheck": recheck, "drain": drain, "status": status,
+            "folder_path": folder_file, "recheck": recheck, "drain": drain, "status": status, "recheck_failed": recheck_failed,
             "suggestions": record, "suggestions_error": record_error,
         }
         if renamed_from is not None:
@@ -280,6 +285,12 @@ def store_resume(
         click.echo("  " + scout_cli._pipeline_drain_line(drain))
         for line in scout_cli._pipeline_status_lines(status)[1:]:
             click.echo("  " + line)
+    if recheck_failed is not None:
+        codes = ", ".join(dict.fromkeys(str(step["error_code"]) for step in failed_steps))
+        click.echo(
+            f"  WARNING: the resume is stored, but checking it again failed ({codes}). Its scores are NOT updated."
+            + (" Your runtime's sandbox may block the network: do not retry; tell the user what to allow (network access for the model host)." if "model_unavailable" in codes else "")
+        )
 
 
 @click.command("store")
@@ -390,6 +401,9 @@ def _pick_lines(view: dict[str, object]) -> list[str]:
     lines.append("Stale: " + (", ".join(str(code) for code in view["stale"]) or "nothing"))  # type: ignore[union-attr]
     conflicts = [str(item.get("code")) + (f" {item['requirement']}" if item.get("requirement") else "") for item in view["conflicts"]]  # type: ignore[union-attr]
     lines.append("Conflicts: " + (", ".join(conflicts) or "none"))
+    asking = [str(item["question_id"]) for item in view.get("open_questions", ())]  # type: ignore[union-attr]
+    if asking:
+        lines.append("Open questions (answer one with `gigai scout answers save QUESTION_ID`): " + ", ".join(asking))
     if view["proposed"] is not None:
         lines.append(f"A new suggested resume is waiting: gigai scout resume pick --job-url {view['job_identity']} --profile {view['profile_id']} --use-proposed")
     return lines
