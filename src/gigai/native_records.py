@@ -19,7 +19,7 @@ from jsonschema import Draft202012Validator
 
 from .canonical import EntityPrefix, canonical_json_bytes, digest_imported_bytes, parse_json_bytes, validate_entity_id
 from .journal import JournalArtifact, JournalConflictError, JournalSnapshot, JournalTransition, read_committed_snapshot, run_with_journal_writer
-from .private_records import RECORD_DIRECTORY_PATTERN, PrivateRecordError, rebuild_scout_projection
+from .private_records import RECORD_DIRECTORY_PATTERN, PrivateRecordError, scout_projection_behind
 from .validators import validate_serialized_contract
 from .workpad import ResolvedWorkpad, resolve_workpad, workpad_layout_version
 
@@ -27,6 +27,11 @@ from .workpad import ResolvedWorkpad, resolve_workpad, workpad_layout_version
 _SCHEMA_PATH = Path(__file__).with_name("schemas") / "native-record-content.schema.json"
 _TASK_CONTEXT = re.compile(r"^task_context_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$")
 _KIND = frozenset({"profile_preferences", "experience_qa", "imported_reference", "supplied_source", "selected_conversation"})
+_RECORD_DIRECTORY = re.compile(RECORD_DIRECTORY_PATTERN)
+
+#: The whole families a native publish captures under the writer lock, with each ``records/record_<uuid>/``
+#: beside them: ``private_records.PUBLISH_PREFIXES`` and the capability manifests (the tool binding).
+PUBLISH_PREFIXES: tuple[str, ...] = ("records/operations/", "references/", "run-inputs/", "manifests/capabilities/")
 
 
 @dataclass(frozen=True)
@@ -263,7 +268,9 @@ def _authoritative_media_type(snapshot: JournalSnapshot, path: str) -> str:
         source = owner.get("snapshot")
         if parts[2] == "source.txt" and isinstance(source, dict) and source.get("path") == path and isinstance(source.get("media_type"), str):
             return source["media_type"]
-    if len(parts) == 4 and parts[0] == "records" and parts[2] == "blobs" and parts[3].startswith("revision_") and parts[3].endswith(".json"):
+    # Under ``records/`` only a private record's own sidecar has an owner: the directory is a record's by its
+    # ID shape, the shape the publish capture selects by, so nothing citable is outside that capture.
+    if len(parts) == 4 and parts[0] == "records" and _RECORD_DIRECTORY.fullmatch(parts[1]) and parts[2] == "blobs" and parts[3].startswith("revision_") and parts[3].endswith(".json"):
         revision_id = parts[3].removesuffix(".json")
         revision = _snapshot_json(snapshot, f"records/{parts[1]}/revisions/{revision_id}.json", schema="private-record-revision.schema.json")
         content = revision.get("content")
@@ -318,9 +325,16 @@ def _publish(*, resolved: ResolvedWorkpad, operation_name: str, operation_key: s
     if not validate_serialized_contract("private-record-revision.schema.json", revision_bytes).valid:
         raise PrivateRecordError("native_record_invalid", "native revision failed the accepted outer contract")
     payload_sha = digest_imported_bytes(canonical_json_bytes(intent))
+    heads: list[str | None] = []
 
     def transaction(writer: Any) -> tuple[NativeRecordResult, bool]:
-        snapshot = writer.snapshot(("records/", "references/", "run-inputs/", "manifests/capabilities/"))
+        # What a native publish consults, and no more (0.1.10.11 S3, as ``private_records._publish`` since
+        # 0.1.10.9): the receipts, the evidence a sidecar may cite (references, Run inputs, another record's
+        # sidecar), the capability manifests (the tool binding), and every record's revisions and sidecars
+        # (the parent check, the one-override-per-task-context check). Not all of ``records/``: a watchlist
+        # of 10,000 boards is 10,000 files there, and capturing them cost every answer save seconds.
+        snapshot = writer.snapshot(PUBLISH_PREFIXES, child_prefixes=(("records/", RECORD_DIRECTORY_PATTERN),))
+        heads.append(snapshot.head)
         receipt = _existing_receipt(snapshot, operation_name, operation_key, payload_sha)
         if receipt is not None:
             return _from_receipt(resolved, snapshot, receipt), False
@@ -385,9 +399,10 @@ def _publish(*, resolved: ResolvedWorkpad, operation_name: str, operation_key: s
         result, created = run_with_journal_writer(workpad=resolved.path, project_id=resolved.project_id, gig_id=resolved.gig_id, operation=transaction)
     except JournalConflictError as exc:
         raise PrivateRecordError("native_record_not_authenticated", str(exc)) from exc
-    try:
-        rebuild_scout_projection(resolved=resolved)
-    except Exception:
+    # 0110-10-16: a save never rebuilds the projection, and neither does its retry (``private_records._publish``
+    # says why). A write that committed leaves it behind; a retry that committed nothing says whether it is
+    # at the head it read under the lock.
+    if created or scout_projection_behind(resolved, journal_head=heads[-1]):
         return NativeRecordResult(**{**result.__dict__, "projection_pending": True, "rebuild_action": "rebuild_index"})
     return result
 

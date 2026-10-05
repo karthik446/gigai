@@ -58,6 +58,9 @@ def test_private_import_revision_context_and_stale_parent_are_journaled(tmp_path
     posting = import_run_input(home_root=home, requested_target=target, gig_id=created.gig_id, data=b"Job description\n", operation_key="posting-1", uuid_factory=_ids())
     revision = create_record(home_root=home, requested_target=target, gig_id=created.gig_id, kind="imported_reference", content_family="g45_reference", content_id=reference.item_id, actor={"kind":"operator","id":"local-user"}, origin="imported", operation_key="record-1", uuid_factory=_ids())
     assert read_record(home_root=home, requested_target=target, gig_id=created.gig_id, record_id=revision.record_id, content=True)["content"] == b"Jane Example\n"
+    # 0110-10-16: a save does not rebuild the projection; the catch-up does.
+    assert revision.projection_pending is True and not (created.workpad / "indexes" / "context.json").exists()
+    private_records.catch_up_scout_projection(resolved=private_records._resolved(home_root=home, requested_target=target, gig_id=created.gig_id))
     metadata = json.loads((created.workpad / "indexes" / "context.json").read_bytes())
     assert b"Jane Example" not in (created.workpad / "indexes" / "context.json").read_bytes()
     assert metadata["records"][0]["revision_id"] == revision.revision_id
@@ -74,7 +77,7 @@ def test_v1_workpad_refuses_private_import_until_explicit_migration(tmp_path: Pa
         import_reference(home_root=home, requested_target=target, gig_id=created.gig_id, kind="resume", source=source)
 
 
-def test_committed_bytes_parent_chain_and_projection_recovery(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_committed_bytes_parent_chain_and_projection_recovery(tmp_path: Path) -> None:
     home, target = _configured(tmp_path)
     created = create_offline(home_root=home, requested_target=target, name="c1-chain", open_editor=False)
     migrate_workpad_layout(workpad=created.workpad, project_id=created.project_id, gig_id=created.gig_id)
@@ -103,9 +106,13 @@ def test_committed_bytes_parent_chain_and_projection_recovery(tmp_path: Path, mo
     with pytest.raises(PrivateRecordError, match="working evidence differs"):
         read_record(home_root=home, requested_target=target, gig_id=created.gig_id, record_id=record_id, revision_id=first.revision_id, content=True)
     record_path.write_bytes(canonical_json_bytes(reference.record))
-    monkeypatch.setattr(private_records, "rebuild_scout_projection", lambda **_kwargs: (_ for _ in ()).throw(OSError("projection unavailable")))
+    # 0110-10-16: a sealed write says the projection is pending; the catch-up recovers it, and the retry then says so.
     pending = import_run_input(home_root=home, requested_target=target, gig_id=created.gig_id, data=b"posting", operation_key="c1-pending")
-    assert pending.projection_pending is True and pending.receipt is not None
+    assert pending.projection_pending is True and pending.rebuild_action == "rebuild_index" and pending.receipt is not None
+    rebuilt = private_records.catch_up_scout_projection(resolved=private_records._resolved(home_root=home, requested_target=target, gig_id=created.gig_id))
+    assert rebuilt is not None and rebuilt.records == 1
+    replay = import_run_input(home_root=home, requested_target=target, gig_id=created.gig_id, data=b"posting", operation_key="c1-pending")
+    assert (replay.created, replay.receipt, replay.projection_pending, replay.rebuild_action) == (False, pending.receipt, False, None)
 
 
 def test_subprocess_same_parent_has_one_winner(tmp_path: Path) -> None:

@@ -90,6 +90,18 @@ things still take more than a second (see "Still slower than one second"): the n
 - **Faster: the pipeline status.** `GET /api/pipeline`, which the Background pipeline panel in
   Settings reads, looked up the project once for every job it lists (up to 200); it now looks it up
   once.
+- **Faster: saving an answer, a master resume line or a resume.** Two things the store did inside
+  every one of these saves are out of the wait. Saving an answer first read the stored record of every
+  watched company (10,000 files with 10,000 companies); it now reads the answers and what they cite.
+  And every save of an answer, a master resume line or a resume rebuilt an internal index of your
+  records before it replied. On a store with a watchlist that rebuild had been failing every time,
+  after about half a second of work, and was thrown away; the index is now brought up to date in the
+  background when Scout starts, and no save waits for it. Measured on a store of 290,000 postings from
+  10,000 companies with 25 finished jobs per profile, on a machine in use: an answer to a new question
+  takes about 1.7 s where it took 3.8 s, an answer to a question many jobs asked 2.3 to 2.5 s where
+  it took 5.6 s, adding a master resume line 1.3 to 1.6 s where it took 2.5 s, editing a line both
+  profiles show 3.4 to 4.2 s where it took 6.7 s, and `gigai scout resume add` 2.0 to 2.4 s where it
+  took 3.2 s. All of them are still over one second.
 
 #### Added
 
@@ -211,6 +223,11 @@ things still take more than a second (see "Still slower than one second"): the n
   your agent runtime's own approval), says what one assessment sends, what to check after an
   interruption before retrying, and gives the address of a job's page. `gigai agent-skill` prints the
   updated instructions: install them again to get them.
+- **A record write says `projection_pending: true`.** The JSON of `gigai record native create` and
+  `override`, and a record tool's result, used to say `false` after a write.
+  A write no longer rebuilds the internal index of records before it replies (see "Faster"), so it now
+  says `true` with `rebuild_action: rebuild_index`: the record is stored, the index follows when Scout
+  next starts. Nothing reads that index to answer you, and there is nothing to run.
 
 #### Still slower than one second
 

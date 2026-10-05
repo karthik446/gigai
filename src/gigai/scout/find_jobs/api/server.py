@@ -2308,6 +2308,10 @@ def serve(
 
         server.pipeline_runner = PipelineRunner(home_root=home_root, target=project, logger=_logger)
         server.pipeline_runner.start()
+        from ....private_records import start_scout_projection_catch_up
+
+        # 0110-10-16: a save never rebuilds the private-record projection; one thread brings it to the head here.
+        start_scout_projection_catch_up(home_root=home_root, requested_target=project, logger=_logger)
     return server
 
 

@@ -20,7 +20,7 @@ from pathlib import Path
 
 import pytest
 
-from gigai import workpad
+from gigai import private_records, workpad
 from gigai.native_records import list_native_records, read_native_record
 from gigai.private_records import PrivateRecordError
 from gigai.scout import experience_answers
@@ -296,17 +296,19 @@ def test_two_concurrent_answers_appending_at_31_both_land_no_duplicate_no_error(
     _assert_both_landed_in_two_records(opts, outcomes)
 
 
-def test_an_answer_read_during_another_answers_state_database_commit_does_not_conflict(
+def test_an_answer_written_during_the_projection_catch_ups_state_database_commit_does_not_conflict(
     fx: ProfileFixtureGig, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     # uat-bug-034 (CI: WorkpadConflictError "unexpected top-level state:
-    # state.sqlite-journal"). After every publish, native_records rebuilds the
-    # Scout projection cache in state.sqlite under the database lock only;
-    # SQLite's rollback journal exists until that COMMIT. A second answer
-    # resolving the workpad at that moment must not refuse it. Forced: the
-    # cloud:gcp answer pauses on its state.sqlite COMMIT with the journal on
-    # disk; years:python resolves the workpad (the journal is still there)
-    # and only then is cloud:gcp released.
+    # state.sqlite-journal"). The Scout projection cache in state.sqlite is
+    # rebuilt under the database lock only; SQLite's rollback journal exists
+    # until that COMMIT. An answer resolving the workpad at that moment must
+    # not refuse it. Until 0110-10-16 every publish made that rebuild itself;
+    # since then a save never does, and the one that can be mid-COMMIT while
+    # an answer is saved is the background catch-up the server starts.
+    # Forced: cloud:gcp is saved; the catch-up pauses on its state.sqlite
+    # COMMIT with the journal on disk; years:python resolves the workpad (the
+    # journal is still there) and only then is the catch-up released.
     _prefill_to_31(fx)
     opts = _opts(fx)
     journal = fx.resolved.path / "state.sqlite-journal"
@@ -319,7 +321,7 @@ def test_an_answer_read_during_another_answers_state_database_commit_does_not_co
 
     def paused_connect(*args: object, **kwargs: object) -> sqlite3.Connection:
         connection = real_connect(*args, **kwargs)  # type: ignore[arg-type]
-        if threading.current_thread().name == "cloud:gcp" and str(args[0]) == str(fx.resolved.path / "state.sqlite"):
+        if threading.current_thread().name == "scout-projection-catch-up" and str(args[0]) == str(fx.resolved.path / "state.sqlite"):
 
             def trace(statement: str) -> None:
                 if statement.strip().upper() == "COMMIT" and journal.exists() and not journal_open.is_set():
@@ -338,15 +340,18 @@ def test_an_answer_read_during_another_answers_state_database_commit_does_not_co
         finally:
             reader_validated.set()
 
-    monkeypatch.setattr(sqlite3, "connect", paused_connect)
-    monkeypatch.setattr(workpad, "_validate_workpad_repository", observed_validate)
     outcomes: dict[str, object] = {}
     writer = _answer_in_thread(opts, "cloud:gcp", "GCP?", "Yes, two years.", outcomes)
-    reader = _answer_in_thread(opts, "years:python", "Years of Python?", "Six.", outcomes)
     writer.start()
-    assert journal_open.wait(60), "cloud:gcp never reached its state.sqlite COMMIT"
+    writer.join(120)
+    assert not writer.is_alive() and not journal.exists()  # a save itself never opens state.sqlite for writing
+    monkeypatch.setattr(sqlite3, "connect", paused_connect)
+    monkeypatch.setattr(workpad, "_validate_workpad_repository", observed_validate)
+    catch_up = private_records.start_scout_projection_catch_up(home_root=fx.home_root, requested_target=fx.target, gig_id=fx.resolved.gig_id)
+    assert journal_open.wait(60), "the catch-up never reached its state.sqlite COMMIT"
+    reader = _answer_in_thread(opts, "years:python", "Years of Python?", "Six.", outcomes)
     reader.start()
-    for thread in (reader, writer):
+    for thread in (reader, catch_up):
         thread.join(120)
         assert not thread.is_alive()
 
