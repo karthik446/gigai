@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 import json
+import shutil
 from pathlib import Path
 from types import SimpleNamespace
 import subprocess
@@ -413,6 +414,19 @@ def test_setup_clean_environment_sets_no_editor_without_traceback(
 ) -> None:
     monkeypatch.delenv("VISUAL", raising=False)
     monkeypatch.delenv("EDITOR", raising=False)
+    # A machine with a model CLI (a stand-in: a runner has none) and no editor program.
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    stub = bin_dir / "codex"
+    stub.write_text(
+        '#!/bin/sh\ncase "$1" in\n  --version) echo "codex-cli 0.0.0-test-stub"; exit 0;;\n'
+        '  login) if [ "$2" = status ]; then echo "Logged in (test stub)"; exit 0; fi;;\nesac\nexit 97\n'
+    )
+    stub.chmod(0o755)
+    git = shutil.which("git")
+    assert git is not None
+    (bin_dir / "git").symlink_to(git)
+    monkeypatch.setenv("PATH", str(bin_dir))
 
     result = CliRunner().invoke(
         cli,
