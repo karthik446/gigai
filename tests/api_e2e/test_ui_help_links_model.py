@@ -89,7 +89,8 @@ def test_the_question_mark_sits_beside_each_thing() -> None:
     rank = (UI_SRC / "components" / "RankBadge.jsx").read_text(encoding="utf-8")
     assert '{detail && <HelpLink topic="rank" />}' in rank  # the job page's tile, not every row of the list
     job = (UI_SRC / "views" / "JobPage.jsx").read_text(encoding="utf-8")
-    assert job.index("<VerdictChip") < job.index('<HelpLink topic="verdict" />') < job.index('data-role="verdict-wording"')
+    # 0.1.11: the header's ONE chip is the fit as the gate reads it (Matched, Has a gap, ...): the "?" sits beside it.
+    assert job.index('data-role="job-chip"') < job.index('<HelpLink topic="verdict" />') < job.index('data-role="verdict-wording"')
     timeline = (UI_SRC / "components" / "PipelineTimeline.jsx").read_text(encoding="utf-8")
     assert timeline.index('testId="ats-chip"') < timeline.index('<HelpLink topic="ats" />')
     assert timeline.index('testId="scout-label-chip"') < timeline.index('<HelpLink topic="scout-label" />')

@@ -1,0 +1,512 @@
+import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  getJobSuggestions,
+  getMaster,
+  getResumesFolder,
+  getTailoredResumes,
+  postJobResumePick,
+  putMasterLine,
+  putTailoredResumeLength,
+  putTailoredResumeLine,
+} from "../api.js";
+import { folderFilePath } from "../resumesFolderModel.js";
+import { TAILORED_WORDING } from "../wording.js";
+import { latestStored, newerStored } from "../tailoredResumeModel.js";
+import { conflictOf } from "../masterModel.js";
+import {
+  DRAFT_LABEL,
+  NO_MASTER_TEXT,
+  attentionItems,
+  changedLines,
+  gateHolds,
+  hasNoMaster,
+  holdSentence,
+  isUsersResume,
+  proposedChange,
+  provenanceLine,
+  resumeOrigin,
+  staleActions,
+  suggestionsAnswer,
+} from "../jobResumeModel.js";
+import { MASTER_HASH } from "../routing.js";
+import PickedLeftOut from "./PickedLeftOut.jsx";
+import { Preview } from "./TailoredResumePanel.jsx";
+
+// 0.1.11 N6 (SPEC section 6, item 4): the SUGGESTED RESUME of one job. It
+// replaces the "Tailored resume" panel: no model writes a resume any more.
+// The resume is picked from the master when the job is assessed, by the
+// assessment (or by Scout's own rules when its pick cannot be used), and only
+// for a job the gate lets through.
+//
+//   reads    GET /api/tailored-resumes?profile_id=&job_identity=  the stored
+//            job resume (the store kept its path), and GET
+//            /api/jobs/suggestions the job's suggestion record with its
+//            `stale` list. Opening a job recomputes nothing and writes
+//            nothing (SPEC A5)
+//   shows    gate `suggest`: the resume as it will print and ONE provenance
+//            line; a conflict or `ready: false`: a banner above the resume
+//            naming each requirement and line; stale: the label and the
+//            refresh buttons, each with its cost in the button; `proposed`:
+//            "A new suggested resume is available: Compare · Use it ·
+//            Dismiss"; the gate holds: no resume, one sentence, a link to the
+//            questions and "Make a draft anyway"; no master: the profile's
+//            own resume is used as it is
+//   writes   only on a click, and never through a model: POST
+//            /api/job-resumes/pick (re-pick, draft, use / dismiss proposed),
+//            the per-line Restore, the length Restore, Add and Remove
+//
+// The state both this panel and the page's other sections share is
+// useJobResume() below (Requirements shows each row's coverage, Suggestions
+// and Apply read the record and the stale list).
+// `expectRecord`: the stored assessment carries a `resume_gate` (made by 0.1.11), so a suggestion record exists; a
+// legacy job asks the suggestion route nothing (it would answer 404).
+export function useJobResume({ jobIdentity, jobUrl, profileId, expectRecord = false }) {
+  const [stored, setStored] = useState(null);
+  const [loadingStored, setLoadingStored] = useState(true);
+  const [suggested, setSuggested] = useState(null); // GET /api/jobs/suggestions' answer
+  const [view, setView] = useState(null); // the answer of the last POST /api/job-resumes/pick: stale, conflicts, proposed
+  const answer = suggestionsAnswer(suggested, view); // {record, stale, origin}
+  const [picking, setPicking] = useState(null); // the `use` of the pick request in flight
+  const [error, setError] = useState(null);
+  const [changes, setChanges] = useState(0); // resumes stored or edited on THIS page: the pipeline takes each up, so the job page reads its timeline again
+  const [focus, setFocus] = useState(null); // {line, at}: a master line to show under Left out
+  const requestKey = useRef(0);
+
+  const readRecord = useCallback(
+    (key) =>
+      getJobSuggestions({ jobIdentity, profileId, expect: expectRecord })
+        .then((response) => requestKey.current === key && setSuggested(response))
+        .catch(() => {}), // the record is extra: the page shows the stored resume and the assessment without it
+    [jobIdentity, profileId, expectRecord],
+  );
+
+  const replaceStored = useCallback(
+    (response) => {
+      setStored(response);
+      setChanges((count) => count + 1);
+      readRecord(requestKey.current); // what the resume prints changed: the final-selection check is the server's
+    },
+    [readRecord],
+  );
+
+  useEffect(() => {
+    const key = ++requestKey.current;
+    setStored(null);
+    setSuggested(null);
+    setView(null);
+    setError(null);
+    setPicking(null);
+    setFocus(null);
+    setLoadingStored(true);
+    if (!jobIdentity || !profileId) {
+      setLoadingStored(false);
+      return undefined;
+    }
+    getTailoredResumes({ profileId, jobIdentity })
+      .then((response) => {
+        if (requestKey.current === key) {
+          setStored(latestStored(response.items));
+          setLoadingStored(false);
+        }
+      })
+      .catch(() => {
+        if (requestKey.current === key) {
+          setLoadingStored(false); // an unreachable list just means "nothing stored to show"
+        }
+      });
+    readRecord(key);
+    return () => {
+      requestKey.current += 1;
+    };
+  }, [jobIdentity, profileId, readRecord]);
+
+  // The background pipeline stored a resume for this job (the timeline says
+  // its pick step finished), or the job was assessed again on this page: read
+  // both again, quietly. What the page shows stays until the answers arrive,
+  // and `changes` does not move, so the timeline that reported it is not read
+  // again for it.
+  const reload = useCallback(() => {
+    if (!jobIdentity || !profileId) {
+      return Promise.resolve();
+    }
+    const key = requestKey.current;
+    readRecord(key);
+    return getTailoredResumes({ profileId, jobIdentity })
+      .then((response) => requestKey.current === key && setStored((held) => newerStored(held, latestStored(response.items))))
+      .catch(() => {}); // what is shown stays; the next finished pick step, or opening the job again, reads it
+  }, [jobIdentity, profileId, readRecord]);
+
+  // The code-only pick: "refresh" | "draft" | "use_proposed" | "dismiss_proposed". No model call. Whatever the
+  // route answers, the stored resume and the record are read again: the page shows what is stored.
+  const pick = useCallback(
+    (use) => {
+      if (!profileId || (!jobUrl && !jobIdentity)) {
+        return Promise.resolve();
+      }
+      const key = requestKey.current;
+      setPicking(use);
+      setError(null);
+      return postJobResumePick({ jobUrl: jobUrl || jobIdentity, profileId, action: use })
+        .then((viewAfter) => {
+          if (requestKey.current === key) {
+            setView(viewAfter);
+          }
+          return getTailoredResumes({ profileId, jobIdentity });
+        })
+        .then((response) => {
+          if (requestKey.current !== key) {
+            return;
+          }
+          setStored(latestStored(response.items));
+          setChanges((count) => count + 1);
+          return readRecord(key);
+        })
+        .catch((err) => requestKey.current === key && setError(err.detail || err.message || String(err)))
+        .finally(() => requestKey.current === key && setPicking(null));
+    },
+    [jobUrl, jobIdentity, profileId, readRecord],
+  );
+
+  const showLine = useCallback((line) => setFocus({ line, at: Date.now() }), []);
+
+  return {
+    stored,
+    setStored: replaceStored,
+    record: answer.record,
+    stale: answer.stale,
+    origin: resumeOrigin(stored, { served: answer.origin, record: answer.record }),
+    reloadRecord: () => readRecord(requestKey.current),
+    changes,
+    reload,
+    loadingStored,
+    picking,
+    pick,
+    error,
+    focus,
+    showLine,
+    jobIdentity,
+    jobUrl,
+    profileId,
+  };
+}
+
+function Attention({ items, onShowLine }) {
+  if (items.length === 0) {
+    return null;
+  }
+  return (
+    <div className="callout danger" role="alert" data-role="needs-attention">
+      <strong>Needs attention.</strong>
+      <ul>
+        {items.map((item, index) => (
+          <li key={`${item.code}-${item.requirement || index}`} data-code={item.code} data-requirement={item.requirement || undefined}>
+            {item.text}
+            {item.lines.map((line) => (
+              <button key={line} type="button" className="link-button" data-action="show-line" data-line={line} onClick={() => onShowLine(line)}>
+                show {line} under Left out
+              </button>
+            ))}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function Stale({ items, busy, picking, onRepick, onReassess, reassess }) {
+  if (items.length === 0) {
+    return null;
+  }
+  const actions = staleActions(items);
+  const warn = items.some((item) => !item.note);
+  return (
+    <div className={`callout ${warn ? "" : "info"}`} data-role="resume-stale">
+      <ul>
+        {items.map((item) => (
+          <li key={item.code} data-stale={item.code} data-note={item.note ? "true" : undefined}>
+            {item.note ? "Note" : "Stale"}: {item.label}.
+          </li>
+        ))}
+      </ul>
+      {actions.map((action) =>
+        action.use === "repick" ? (
+          <button key="repick" type="button" className="button small secondary" data-action="repick" disabled={busy} onClick={onRepick}>
+            {picking === "refresh" ? "Picking…" : action.label}
+          </button>
+        ) : (
+          <span key="reassess" title={reassess && !reassess.enabled ? reassess.reason : undefined}>
+            <button type="button" className="button small secondary" data-action="reassess-stale" disabled={busy || !reassess || !reassess.enabled} onClick={onReassess}>
+              {action.label}
+            </button>
+          </span>
+        ),
+      )}
+      <span className="muted small"> Nothing refreshes by itself.</span>
+    </div>
+  );
+}
+
+// "A new suggested resume is available: Compare · Use it · Dismiss". Compare lists what it would add and drop, by
+// master line (the texts are the master's, read when Compare is first opened).
+function Proposed({ change, busy, picking, onUse, onDismiss }) {
+  const [open, setOpen] = useState(false);
+  const [master, setMaster] = useState(null);
+  useEffect(() => {
+    if (!open || master) {
+      return undefined;
+    }
+    let current = true;
+    getMaster()
+      .then((response) => current && setMaster(response.master || { items: [] }))
+      .catch(() => current && setMaster({ items: [] }));
+    return () => {
+      current = false;
+    };
+  }, [open, master]);
+  if (!change) {
+    return null;
+  }
+  const texts = new Map(((master && master.items) || []).map((item) => [item.id, item.text]));
+  const lines = (ids, role) => (
+    <ul data-role={role}>
+      {ids.length === 0 && <li className="muted">none</li>}
+      {ids.map((id) => (
+        <li key={id} data-line={id}>
+          {texts.get(id) || id}
+        </li>
+      ))}
+    </ul>
+  );
+  return (
+    <div className="callout info" data-role="proposed">
+      <span>A new suggested resume is available. Yours stays as it is until you take the new one.</span>{" "}
+      <button type="button" className="button small secondary" data-action="compare-proposed" aria-expanded={open} onClick={() => setOpen((shown) => !shown)}>
+        Compare
+      </button>{" "}
+      <button type="button" className="button small" data-action="use-proposed" disabled={busy} onClick={onUse}>
+        {picking === "use_proposed" ? "Replacing…" : "Use it"}
+      </button>{" "}
+      <button type="button" className="button small secondary" data-action="dismiss-proposed" disabled={busy} onClick={onDismiss}>
+        Dismiss
+      </button>
+      {open && (
+        <div data-role="proposed-compare">
+          {change.adds === null ? (
+            <p data-role="proposed-summary">
+              Picked by {change.pickedBy === "code" ? "Scout's own rules" : "the assessment"}
+              {change.draft ? " (a draft)" : ""}
+              {change.pages ? ` · ${change.pages} pages` : ""}
+              {change.conflicts ? ` · ${change.conflicts} conflict${change.conflicts === 1 ? "" : "s"}` : ""}. The server does not list its lines; Use it replaces yours with it.
+            </p>
+          ) : (
+            <>
+              <div className="label">The new one would add ({change.adds.length})</div>
+              {lines(change.adds, "proposed-adds")}
+              <div className="label">and leave out ({change.drops.length})</div>
+              {lines(change.drops, "proposed-drops")}
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function scrollToQuestions() {
+  const section = document.getElementById("job-questions");
+  if (section && typeof section.scrollIntoView === "function") {
+    section.scrollIntoView({ block: "start", behavior: "smooth" });
+  }
+}
+
+// `gate` is jobResumeModel.gateOf(), `items` staleItems(); `reassess` is the page's ONE Re-assess
+// ({enabled, reason, onClick}: the stale label's "Re-assess · 1 model call" is the same action).
+export default function JobResumePanel({ state, assessment, gate, items, reassess, questionPrompts, hasQuestions = false }) {
+  const promptFor = (id) => (questionPrompts && questionPrompts.get(id)) || null;
+  const { stored, record, origin, picking } = state;
+  const [choosing, setChoosing] = useState(false);
+  const [choiceError, setChoiceError] = useState(null);
+  // 0110-10-05 A: where this job's markdown is in the resumes folder; asked
+  // again when the stored resume changes (a line choice rewrites the file).
+  const [folderFile, setFolderFile] = useState("");
+  const storedStamp = stored ? `${stored.updated_at}|${stored.markdown ? stored.markdown.length : 0}` : "";
+  useEffect(() => {
+    let current = true;
+    setFolderFile("");
+    if (!storedStamp || !state.profileId || !state.jobIdentity) {
+      return undefined;
+    }
+    getResumesFolder({ profileId: state.profileId, jobIdentity: state.jobIdentity })
+      .then((response) => current && setFolderFile(folderFilePath(response)))
+      .catch(() => {}); // the folder line is extra: the panel works without it
+    return () => {
+      current = false;
+    };
+  }, [storedStamp, state.profileId, state.jobIdentity]);
+
+  // One write of the stored resume; the response replaces `stored`, so the
+  // clean copy and the PDF follow. A 409 means a newer resume replaced this
+  // one: reload the stored resume and say so.
+  const change = useCallback(
+    (send) => {
+      setChoosing(true);
+      setChoiceError(null);
+      send()
+        .then((response) => state.setStored(response))
+        .catch((err) => {
+          setChoiceError(err.detail || err.message || String(err));
+          if (err.code === "tailored_resume_changed") {
+            getTailoredResumes({ profileId: state.profileId, jobIdentity: state.jobIdentity })
+              .then((response) => state.setStored(latestStored(response.items)))
+              .catch(() => {});
+          }
+        })
+        .finally(() => setChoosing(false));
+    },
+    [state],
+  );
+  // 0110-006: one line's choice (the master line, the changed wording): the per-line Restore is `use: "original"`.
+  const chooseLine = useCallback(
+    (lineId, use) => change(() => putTailoredResumeLine({ profileId: state.profileId, jobIdentity: state.jobIdentity, updatedAt: stored.updated_at, lineId, use })),
+    [change, stored, state],
+  );
+  // 0110-10-05 C: Restore / Cut for length again.
+  const changeLength = useCallback(
+    (use) => change(() => putTailoredResumeLength({ profileId: state.profileId, jobIdentity: state.jobIdentity, updatedAt: stored.updated_at, use })),
+    [change, stored, state],
+  );
+
+  // 0.1.10.9 master P5: "Save this wording to your master". The master is
+  // read for its revision, then the line is written on top of it; when the
+  // agent wrote the master in between, the write is refused and says so.
+  const [wordingSaved, setWordingSaved] = useState(null);
+  const saveWording = useCallback((lineId, wording) => {
+    setChoosing(true);
+    setChoiceError(null);
+    setWordingSaved(null);
+    getMaster()
+      .then((body) => {
+        if (!body.master) {
+          throw new Error("There is no master resume to save it to.");
+        }
+        return putMasterLine({ revision: body.master.revision, id: wording.id, use: "edit", text: wording.text });
+      })
+      .then((response) =>
+        setWordingSaved({
+          lineId,
+          text: response.status === "unchanged" ? "Your master already says this." : `Saved to your master (revision ${response.master.revision}). Other jobs and profiles use it from now on.`,
+        }),
+      )
+      .catch((err) => {
+        const conflict = conflictOf(err);
+        setChoiceError(conflict ? "Not saved: your master changed a moment ago. Try again." : err.detail || err.message || String(err));
+      })
+      .finally(() => setChoosing(false));
+  }, []);
+
+  if (!assessment || state.loadingStored || !state.profileId) {
+    return null; // nothing is suggested for a job that is not assessed; the page says that above
+  }
+
+  const holds = gateHolds(gate);
+  const sentence = holdSentence(gate, assessment);
+  const busy = choosing || picking !== null;
+  const provenance = provenanceLine({ stored, record, origin });
+  const attention = stored ? attentionItems({ record, assessment, stored }) : [];
+  const proposed = stored ? proposedChange(record, stored) : null;
+  const changed = stored ? changedLines(stored) : [];
+  const users = isUsersResume(origin);
+  const heading = stored && users ? "Your resume for this job" : "Suggested resume";
+  const dataState = stored ? "stored" : holds ? "held" : hasNoMaster(record) ? "no-master" : "none";
+
+  return (
+    <section
+      className="panel tailored-resume job-resume"
+      id="job-resume"
+      data-testid="job-resume"
+      data-state={dataState}
+      data-gate={gate ? gate.decision : undefined}
+      data-ready={gate && gate.ready !== null ? String(gate.ready) : undefined}
+      data-origin={origin || undefined}
+      data-draft={provenance && provenance.draft ? "true" : undefined}
+    >
+      <div className="resume-toolbar">
+        <h3>{heading}</h3>
+      </div>
+      {state.error && (
+        <div className="callout danger" role="alert" data-role="pick-error">
+          {state.error}
+        </div>
+      )}
+
+      {holds && (
+        <div className="callout" data-role="resume-held" data-decision={gate.decision}>
+          <span data-role="hold-sentence">
+            {stored ? "This job is held: " : "No resume is suggested for this job: "}
+            {sentence}.
+          </span>{" "}
+          {hasQuestions && (
+            <button type="button" className="link-button" data-action="go-to-questions" onClick={scrollToQuestions}>
+              Go to the questions
+            </button>
+          )}{" "}
+          {!stored && (
+            <button type="button" className="button small secondary" data-action="make-draft" disabled={busy} title="Picked by Scout's own rules from your master. No model call. It is marked as a draft." onClick={() => state.pick("draft")}>
+              {picking === "draft" ? "Making the draft…" : DRAFT_LABEL}
+            </button>
+          )}
+        </div>
+      )}
+
+      {!stored && !holds && hasNoMaster(record) && (
+        <p data-role="no-master">
+          {NO_MASTER_TEXT}: <a href={MASTER_HASH}>open the Master page</a>.
+        </p>
+      )}
+      {!stored && !holds && !hasNoMaster(record) && (
+        <p data-role="no-resume">
+          No resume is stored for this job yet{record && record.selection_error ? ` (it could not be picked: ${String(record.selection_error).replace(/_/g, " ")})` : ""}.{" "}
+          <button type="button" className="button small secondary" data-action="repick" disabled={busy} onClick={() => state.pick("refresh")}>
+            {picking === "refresh" ? "Picking…" : "Pick it now · no model call"}
+          </button>
+        </p>
+      )}
+
+      {stored && (
+        <>
+          <Attention items={attention} onShowLine={state.showLine} />
+          <Stale items={items} busy={busy} picking={picking} onRepick={() => state.pick("refresh")} onReassess={reassess ? reassess.onClick : undefined} reassess={reassess} />
+          <Proposed change={proposed} busy={busy} picking={picking} onUse={() => state.pick("use_proposed")} onDismiss={() => state.pick("dismiss_proposed")} />
+          {provenance && provenance.draft && (
+            <p className="muted small" data-role="draft-note">
+              This is a draft: you asked for it on a job the assessment holds. It is not a suggested resume.
+            </p>
+          )}
+          <p className="muted small" data-role="tailored-wording">
+            {TAILORED_WORDING}
+          </p>
+          {folderFile && (
+            <p className="muted small" data-testid="resumes-folder-file">
+              In your resumes folder: <code>{folderFile}</code>
+            </p>
+          )}
+          <PickedLeftOut stored={stored} state={state} record={record} assessment={assessment} origin={origin} changed={changed} busy={busy} onRestoreLine={(lineId, use) => chooseLine(lineId, use)} />
+          <Preview
+            key={stored.updated_at || stored.stored_path}
+            response={stored}
+            provenance={provenance}
+            promptFor={promptFor}
+            initialView={changed.length > 0 ? "changes" : "clean"}
+            onChooseLine={chooseLine}
+            choiceBusy={busy}
+            choiceError={choiceError}
+            onLength={changeLength}
+            onSaveWording={stored.selection ? saveWording : null}
+            wordingSaved={wordingSaved}
+          />
+        </>
+      )}
+    </section>
+  );
+}
+

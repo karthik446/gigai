@@ -54,7 +54,7 @@ The 11 flows of the UI-testing spike (REPORT.md 5.3), and the flows of the featu
 | 2. Open a job, Back, the list is still there | `test_jobs_open_and_back.py` | `test_operator_sized_jobs.py`; from page 2 in `test_operator_sized_pages.py` |
 | 3. Chips: profile, New / 7 / 30 days, state | `test_jobs_chips.py` | `test_operator_sized_pages.py` |
 | 4. "Assess these": the dialog, approve on the fixture model | `test_jobs_assess_these.py` (changes the home); the low-ranked second question in `test_jobs_weak_fit.py` | - |
-| 5. Job page: questions, answer one, the timeline runs, the tailored resume it stored shows without a reload | `test_job_page_questions.py` (changes the home) | a job page in a second tab WHILE the list is prepared: `test_operator_sized_jobs.py` |
+| 5. Job page: questions, answer one, the timeline's four rows run (Assessed, Resume picked, Scout ATS, Scout label), the resume it stored shows without a reload, with the one Apply button and "Resume ready" | `test_job_page_questions.py` (changes the home) | a job page in a second tab WHILE the list is prepared: `test_operator_sized_jobs.py` |
 | 6. Generate PDF: six fields, a download, nothing stored | `test_generate_pdf.py` | - |
 | 7. Answers and stories | `test_answers_stories.py` | the agent writes one: `test_operator_sized_pages.py` |
 | 8. Settings > Background updates | `test_settings_background.py` | Settings in a second tab WHILE the list is prepared: `test_operator_sized_jobs.py` |
@@ -64,13 +64,20 @@ The 11 flows of the UI-testing spike (REPORT.md 5.3), and the flows of the featu
 | Real pages (0110-10-01) | `test_jobs_pagination.py` (an answered list of 130) | `test_operator_sized_pages.py`: the real list, page 2 = rows 51-100, a job, Back lands on page 2 |
 | Weak-fit chip off by default (0110-10-02) | `test_jobs_weak_fit.py` (an answered list) | the real list: `test_operator_sized_pages.py` |
 | Answers: "Written by your agent" with its source | `test_answers_stories.py` | `test_operator_sized_pages.py` |
-| Tailored resume: "Cut for length" + Restore, the resumes-folder line (0110-10-05) | `test_tailored_resume_panel.py`; the folder in Settings: `test_resumes_folder.py` | - |
+| The job's resume: "Cut for length" + Restore, the resumes-folder line (0110-10-05) | `test_tailored_resume_panel.py`; the folder in Settings: `test_resumes_folder.py` | - |
 | Master resume page: the migration with its question and its count of every resume line (the left-out line listed by number and reason), by role, add / edit / retire / restore, the profiles' "refresh?" offer and Refresh, a near-duplicate asked about and "Add it anyway" (0.1.10.9 master P5, P6) | `test_master_page.py` (changes the home) | - (the routes are timed on the operator-sized home by hand: see the P5 worker report) |
 | Master resume page and the file in the resumes folder: the line about `master.md`, "changes not imported yet" after the user edits the file, **Import the file** (one write), a page write that leaves the edited file alone (0.1.10.9 master P8) | `test_master_file.py` (changes the home) | - (timed on the operator-sized home by hand: see the M8 worker report) |
 | Job page: Picked / Left out with reasons, Add and Remove, the "keep 2 pages" question, "Save this wording to your master" | `test_picked_left_out.py` (changes the home) | - |
 | A posting's date on its Jobs row and its job page: "posted ...", the server's `published_at`, never the day Scout first saw it; from the row when opened from the list, ONE `GET /api/jobs?url=` when opened by its link (0110-10-14) | `test_posting_date.py` | - (the rows are the list's own; `GET /api/jobs?url=` is a row of the write timing gate) |
 | Jobs: the "Newest posted" order chip: off by default (the best fit first); on, ONE list request with `sort=newest_posted`, the rows in the server's order (the day each posting went up, the newest first); the address keeps it over a reload; it selects nothing (the whole list, no "Clear filters") (0110-10-14, the correction) | `test_posting_date.py` | - (reads only: the list's own request) |
-| An old assessment: the Jobs row says it once, in the server's words; the job page's ONE Re-assess is on with no question open, says why and the cost, is one `POST /api/assess`; then the new assessment's date, and a Scout label and a tailored resume from before it say so (0110-10-12) | `test_reassess_stale.py` (changes the home: a setting and one assessment, both put back) | - |
+| An old assessment: the Jobs row says it once, in the server's words; the job page says it beside the header's chip and in the resume panel, whose one refresh is "Re-assess · 1 model call" (never a re-pick); the ONE Re-assess is on with no question open, says why and the cost, is one `POST /api/assess`; then the new assessment's date, and a Scout label and a stored resume from before it say so (0110-10-12; 0.1.11 N6) | `test_reassess_stale.py` (changes the home: a setting and one assessment, both put back) | - |
+| 0.1.11 N6, a **Matched** job without tailoring: ONE chip, ONE action ("Re-assess · 1 model call"), the suggested resume with ONE provenance line, each requirement's class wording, "any one of" and where a met row's evidence is; "needs attention" names the requirement and the line, Add puts it back (the real route); Picked says which requirements a line supports; Changed shows a line changed in chat beside its master line, with Restore (the real route); Suggestions (Done, Dismiss, the two brief commands); **Apply: one button, the PDF, nothing after it** | `test_job_page_matched.py` (changes the home; puts it back) | - |
+| 0.1.11 N6, a **held** job: no resume, ONE sentence, a link to the questions, "Make a draft anyway" (one `POST /api/job-resumes/pick`, the draft marked as a draft); "Has a gap" (matched by verdict, held by the gate) | `test_job_page_resume.py` | the release gate opens a held job with a requested resume: below |
+| 0.1.11 N6, a **stale** job: the label, "Re-pick · no model call" (one request), nothing refreshes by itself; Apply first says the resume is stale ("Re-pick first" or "Use it as it is") | `test_job_page_resume.py` | - |
+| 0.1.11 N6, a **legacy 0.1.10** job: its resume stays ("Made by the tailoring of 0.1.10", "reworded by the old tailor"); the pipeline's four rows with the label "made on 0.1.10's tailored resume" and "Check again"; a new selection waits as "proposed" (Compare · Use it · Dismiss) | `test_job_page_resume.py` (real server: this tree's pipeline IS the 0.1.10 one) | - |
+| 0.1.11 N6, the **release gate of the job page**: open a job from the list, Apply (the PDF), Back: the same rows, no "Loading" | - | `test_operator_sized_job_page.py` (changes that home: one stored resume); with `GIGAI_UI_EVIDENCE=<folder>` it writes its screenshots (for the media privacy gate) and `numbers.json` |
+| 0.1.11 N6, a **note** on a master line and on an entry: shown under it, added, edited and removed in place, each ONE `PUT` that sends the note alone (SPEC 5.4) | `test_master_notes.py` (changes the home; leaves no note) | - |
+| 0.1.11 N6, the job page's rules without a browser (every gate decision, the stale list, coverage, provenance, conflicts, suggestions, Apply): `ui/src/jobResumeModel.js` under node | `test_job_resume_model.py` (not a `ui` test: it runs in every shard) | - |
 
 **Where a test answers for the server.** Everything is the real server unless the test's docstring says otherwise,
 and then only the named requests are answered by the test (the page, its stores and the router stay real):
@@ -81,6 +88,18 @@ pages, and the fixture model writes three lines); `/api/sources/update` of a hom
 runs (`test_past_runs.py`: the small home has none); ONE answer of `PUT /api/tailored-resumes/selection`, an Add that
 needs room (`test_picked_left_out.py`: the small home's resume is half a page; every other request of that flow is
 the real server's). Each of those has the real route proven elsewhere, named in the docstring.
+
+**0.1.11, while its packets build side by side** (`job_resume_fixtures.py`, used by `test_job_page_matched.py` and
+`test_job_page_resume.py`). The job page of 0.1.11 reads what this tree's server does not serve until packets N3, N4
+and N5 are merged: the v9 fields of an assessment (`resume_gate`, each row's `id` / `class_basis` / `alternatives` /
+`sources`, `structured_suggestions`), a job resume made by `scout.pick`, the suggestion record with its `stale` list
+(`GET /api/jobs/suggestions`), the suggestion actions (`POST /api/jobs/suggestions`) and the code-only pick (`POST
+/api/job-resumes/pick`). The fixture lays the first two over the REAL server's answers and answers the three routes
+itself, from a record in the stored shape; every write of the stored resume (Add, Restore, the PDF) stays the real
+server's. The page asks for the suggestion record only behind ONE switch (`ui/src/api.js`,
+`JOB_RESUME_ROUTES_LIVE`), which the fixture turns on for its page. Unlike the cases above, these routes are **not
+proven elsewhere in this tree**: when N5 lands, the switch goes, and these flows should run against the real routes
+(the fixture then shrinks to the data a small home cannot produce).
 
 ## The operator-sized home (`make ui-test-full`)
 

@@ -21,7 +21,7 @@ const KIND_LABELS = {
   assess: "Assess",
   rank: "Rank",
   tag: "Tag titles",
-  tailor: "Tailor resume",
+  tailor: "Tailor resume (before 0.1.11)", // the calls 0.1.10 made: 0.1.11 makes none, and their numbers stay readable
   extract: "Read resume",
   interview: "Interview prep",
 };

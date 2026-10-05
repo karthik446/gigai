@@ -105,14 +105,14 @@ def _open_tailored(page, demo: DemoHome) -> None:
     """The job page with its Tailored resume panel read: the stored resume, its file in the resumes folder, who picked."""
 
     _open_job(page, demo)
-    page.wait_for_selector(f'#tailored-resume[data-state="stored"] {_tid("resumes-folder-file")}', timeout=WAIT_MS)
+    page.wait_for_selector(f'#job-resume[data-state="stored"] {_tid("resumes-folder-file")}', timeout=WAIT_MS)  # 0.1.11 N6: the panel's id
     page.wait_for_selector(_tid("picked-left-out"), timeout=WAIT_MS)
     _settle(page)
 
 
 def _job_resume(page, demo: DemoHome) -> None:
     _open_tailored(page, demo)
-    _top_of(page, "#tailored-resume")
+    _top_of(page, "#job-resume")
 
 
 def _picked_or_left_out(page, demo: DemoHome, which: str) -> None:

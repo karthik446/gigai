@@ -1,8 +1,9 @@
 """0.1.10.7-fix2: four UI defects found while looking at every release screenshot, run under node.
 
 Each asserts the END outcome the user reads: the company name on the Generate
-PDF page, the source chip on a posting assessed from the Jobs list, the
-tailoring chip when tailoring changed nothing, and a posting's line breaks.
+PDF page, the source chip on a posting assessed from the Jobs list, and a
+posting's line breaks. (The fourth, the "73 -> 91 after tailoring" chip, went
+with the tailoring in 0.1.11: the timeline has no such line, pinned below.)
 """
 
 from __future__ import annotations
@@ -22,7 +23,6 @@ SCRIPT = """
 const display = await import(process.argv[1] + "/display.js");
 const job = await import(process.argv[1] + "/jobModel.js");
 const pipe = await import(process.argv[1] + "/pipelineModel.js");
-const met = (base, tailored) => ({ requirements_met: { base, tailored } });
 const posting = "About the role.\\n\\nRequirements:\\n- 5+ years of Python\\n- Postgres  and   SQL\\n\\t- Kubernetes\\r\\n\\nNice to have:\\n- Rust";
 console.log(JSON.stringify({
   at: [display.atCompany("tallgrass-health"), display.atCompany("Customer.io"), display.atCompany(""), display.atCompany(null)],
@@ -32,10 +32,7 @@ console.log(JSON.stringify({
     job.showQuickAssessChip({ status: "on_demand", quick: {} }),
     job.showQuickAssessChip({ status: "posting", quick: null }),
   ],
-  variants: [
-    pipe.variantLine(met({ percent: 100, met: 11, total: 11 }, { percent: 100, met: 11, total: 11 })),
-    pipe.variantLine(met({ percent: 73, met: 8, total: 11 }, { percent: 91, met: 10, total: 11 })),
-  ],
+  variantLine: typeof pipe.variantLine,
   excerpt: job.jdExcerpt(posting, { target: 5000, limit: 5000 }),
 }));
 """
@@ -64,11 +61,11 @@ def test_a_posting_assessed_from_the_jobs_list_is_not_called_a_quick_assess(out:
     assert "showQuickAssessChip(job) ? <QuickAssessChip" in page
 
 
-def test_tailoring_that_changed_nothing_says_so_once(out: dict) -> None:
-    same, better = out["variants"]
-    assert same["text"] == "100 · no change after tailoring" and same["improved"] is False
-    assert "→" not in same["text"]
-    assert better["text"] == "73 → 91 after tailoring" and better["improved"] is True
+def test_the_before_and_after_tailoring_line_is_gone(out: dict) -> None:
+    # 0.1.11 (SPEC 4.2): one assessment, no tailored variant: the line has nothing to print.
+    assert out["variantLine"] == "undefined"
+    timeline = (UI_SRC / "components" / "PipelineTimeline.jsx").read_text(encoding="utf-8")
+    assert "tailored-variant" not in timeline and "variantLine" not in timeline
 
 
 def test_the_job_description_keeps_its_line_breaks_as_text(out: dict) -> None:

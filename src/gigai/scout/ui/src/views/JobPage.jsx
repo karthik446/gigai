@@ -1,10 +1,9 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getAnswers, getConfig, getJob, getRunPosting, postApplication, postAssess, postAssessThese } from "../api.js";
 import { REQUIREMENTS_UNREADABLE_TEXT, isRequirementsUnreadable } from "../rankModel.js";
 import AssessmentBody from "../components/AssessmentBody.jsx";
 import RequirementActions from "../components/RequirementActions.jsx";
 import RankBadge from "../components/RankBadge.jsx";
-import VerdictChip from "../components/VerdictChip.jsx";
 import HelpLink from "../components/HelpLink.jsx";
 import { VERDICT_WORDING } from "../wording.js";
 import SponsorshipBadge from "../components/SponsorshipBadge.jsx";
@@ -12,10 +11,13 @@ import ProviderBadge from "../components/ProviderBadge.jsx";
 import QuickAssessChip from "../components/QuickAssessChip.jsx";
 import StateChip from "../components/StateChip.jsx";
 import PrepPanel from "../components/PrepPanel.jsx";
-import TailoredResumePanel, { useTailoredResume } from "../components/TailoredResumePanel.jsx";
+import JobResumePanel, { useJobResume } from "../components/JobResumePanel.jsx";
+import SuggestionsPanel from "../components/SuggestionsPanel.jsx";
+import ApplyPanel from "../components/ApplyPanel.jsx";
 import PipelineTimeline from "../components/PipelineTimeline.jsx";
 import { useAnswerDrafts } from "../answerDrafts.js";
-import { assessSendsLine, assessSummaryLines, reassessErrorText, reassessGate, tailorGate } from "../answersModel.js";
+import { assessSendsLine, assessSummaryLines, reassessErrorText, reassessGate } from "../answersModel.js";
+import { REASSESS_LABEL, coverageRows, gateOf, headerChip, staleCodes, staleItems } from "../jobResumeModel.js";
 import { postedLine, postingDate } from "../postingsModel.js";
 import { displayCompanyName, notAssessedReasonDetail, unchangedSinceLabel } from "../display.js";
 import {
@@ -30,10 +32,9 @@ import {
   questionPromptIndex,
   showQuickAssessChip,
   storedOrigin,
-  tailoredBeforeAssessment,
   workModeLabel,
 } from "../jobModel.js";
-import { eventActionLabel, jobStateFor, staleAssessmentNote, staleReasonWords } from "../jobStateModel.js";
+import { assessmentStaleFor, eventActionLabel, fitStateFor, jobStateFor, staleAssessmentNote, staleReasonWords } from "../jobStateModel.js";
 import { modelTargetLabel } from "../modelTargets.js";
 import { ASSESSMENTS_HASH, JOBS_HASH } from "../routing.js";
 
@@ -52,11 +53,10 @@ import { ASSESSMENTS_HASH, JOBS_HASH } from "../routing.js";
 //       each open question sat in the requirement row it settles; ONE
 //       "Re-assess" at the top of Requirements saves every filled box
 //       (answerDrafts.js) and re-assesses once
-//   N6  no right-hand column: the verdict history and the tailored-resume
-//       explainer are gone; "Re-assess" and "Tailor resume" are the two
-//       actions at the top of Requirements, and the tailored-resume panel
-//       opens under Requirements
-//   N7  both actions are gated (answersModel.js) and say why when off
+//   N6  no right-hand column: the verdict history and the resume explainer
+//       are gone; "Re-assess" is the action at the top of Requirements, and
+//       the job's resume opens under Requirements
+//   N7  the action is gated (answersModel.js) and says why when off
 //
 // uat-batch2:
 //   uat-bug-016  opened from Assessments (#/assessments/<id>, `from`), the
@@ -91,17 +91,37 @@ import { ASSESSMENTS_HASH, JOBS_HASH } from "../routing.js";
 //               decides what may follow (a 409 says why not, in words).
 //               `job_identity` is the job's id, so a pasted posting can be
 //               applied to as well
-//   tailored    GET/POST /api/tailored-resumes (Q3), see TailoredResumePanel
+//   resume      GET /api/tailored-resumes (the job resume store kept its
+//               path) and GET /api/jobs/suggestions, see JobResumePanel
 //   pipeline    0.1.10.7 M4b: GET /api/pipeline/job, the step timeline
-//               (tailor -> reassess + Scout ATS -> Scout label) with the
-//               Scout ATS chip and the Scout label chip; "Process now" is
-//               POST /api/pipeline/process (PipelineTimeline). When the
-//               pipeline's tailor step finishes, the timeline says so and
-//               the stored resume is read again (useTailoredResume.reload):
-//               the panel, "Tailor again" and the state "Resume tailored"
-//               follow without a reload. The timeline is read again (its
-//               refreshKey) for a new verdict and for a resume made or
-//               edited on this page, not for one the pipeline stored
+//               (0.1.11: four rows, Assessed -> Resume picked -> Scout ATS
+//               -> Scout label) with the Scout ATS chip and the Scout label
+//               chip; "Process now" is POST /api/pipeline/process
+//               (PipelineTimeline). When the pipeline's pick step finishes,
+//               the timeline says so and the stored resume is read again
+//               (useJobResume.reload): the panel and the state "Resume
+//               ready" follow without a reload. The timeline is read again
+//               (its refreshKey) for a new verdict and for a resume stored
+//               or edited on this page, not for one the pipeline stored
+//
+// 0.1.11 N6 (SPEC section 6): no tailor call. Top to bottom:
+//   1. header       title, company, ONE chip for the fit (Matched · Matched ·
+//                   2 minor gaps · Needs your answers · Has a gap · Not a
+//                   match · Weak fit: jobResumeModel.headerChip) and beside
+//                   it the stale label, in the Jobs row's words ("old
+//                   assessment: older prompt")
+//   2. questions    as before: saving an answer re-assesses, and the pick
+//                   comes with that assessment
+//   3. requirements the matrix, each row with the posting wording behind its
+//                   class, "any one of: ..." and, for a met row, where its
+//                   evidence is on the resume. ONE action: "Re-assess · 1
+//                   model call"
+//   4. the suggested resume, with Picked / Left out (JobResumePanel)
+//   5. suggestions  (SuggestionsPanel): no button rewrites with a model
+//   6. Apply        ONE button, the PDF, nothing after it (ApplyPanel)
+//   7. the pipeline's four rows
+// Opening the page recomputes nothing: every refresh is a button that says
+// what it costs ("Re-pick · no model call", "Re-assess · 1 model call").
 //
 //
 // 0110-10-12 (an old assessment, and what a re-assessment leaves behind):
@@ -110,13 +130,14 @@ import { ASSESSMENTS_HASH, JOBS_HASH } from "../routing.js";
 //               the header says the one reason, in the Jobs row's words, and
 //               the ONE Re-assess says what it costs (answersModel
 //               .reassessGate). The reason is the stored item's own
-//               `basis_stale`, which a "Resume tailored" job's state does
+//               `basis_stale`, which a "Resume ready" job's state does
 //               not carry (jobStateModel.assessmentStaleFor)
 //   the date    "assessed ... <date>" is when the assessment shown was MADE
 //               (`updated_at`), not when the first one was (`created_at`)
 //   the label   a Scout label made before the assessment shown says so
 //               (PipelineTimeline `assessedAt`), and so does a resume
-//               tailored before it: neither is the new assessment's
+//               stored before it (the resume panel's stale line): neither
+//               is the new assessment's
 // 0110-10-14: the posting's date in the header: "posted 10 days ago (Sep 24,
 // 2026)", "updated ..." or "first seen ..." (postingsModel.postedLine), from
 // the Jobs row the page was opened from, else ONE GET /api/jobs?url=. When
@@ -125,7 +146,7 @@ import { ASSESSMENTS_HASH, JOBS_HASH } from "../routing.js";
 //
 // Q4b: work_mode / pay (posting) and h1b (the row, via job.h1b) render only
 // when present -- no placeholder chips (operator answer 3).
-function JobStateActions({ jobId, state, pasted, tailoredBefore, onRecorded }) {
+function JobStateActions({ jobId, state, pasted, onRecorded }) {
   const [saving, setSaving] = useState(null); // the event kind being recorded
   const [error, setError] = useState(null);
 
@@ -170,11 +191,6 @@ function JobStateActions({ jobId, state, pasted, tailoredBefore, onRecorded }) {
         <div className="field-error" data-role="job-state-error">
           {error}
         </div>
-      )}
-      {tailoredBefore && (
-        <p className="muted small job-state-note" data-role="tailored-before">
-          {tailoredBefore}
-        </p>
       )}
       {pasted && (
         <p className="muted small job-state-note">
@@ -304,31 +320,6 @@ function BackToList({ from }) {
   );
 }
 
-// uat-bug-043: the tailoring status shown next to the Tailor resume button.
-// No promised duration: Codex tailoring measured mean 24-27 s, p95 30-42 s,
-// max 42 s, and a rejected draft retries once (research/evals/
-// 2026-09-29-tailor-confirm*.md), so "20-30 seconds" was too tight. The
-// model is the config's default target (the tailor route's own default).
-function tailorStatusFor(tailored, modelName) {
-  const jump = () => {
-    const panel = document.getElementById("tailored-resume");
-    if (panel && typeof panel.scrollIntoView === "function") {
-      panel.scrollIntoView({ block: "start", behavior: "smooth" });
-    }
-  };
-  if (tailored.tailoring) {
-    const who = modelName ? `with ${modelName}` : "your resume";
-    return { phase: "running", text: `Tailoring ${who}… ${tailored.elapsed}s` };
-  }
-  if (tailored.outcome === "done") {
-    return { phase: "done", text: "Done: see Tailored resume below.", onJump: jump };
-  }
-  if (tailored.outcome === "error") {
-    return { phase: "error", text: "Tailoring failed: see the message below.", onJump: jump };
-  }
-  return null;
-}
-
 export default function JobPage({
   job,
   jobId,
@@ -344,8 +335,6 @@ export default function JobPage({
   onTailored,
 }) {
   const [answers, setAnswers] = useState([]);
-  const [tailorError, setTailorError] = useState(null);
-  const [modelName, setModelName] = useState(null);
   const [modelTarget, setModelTarget] = useState(null);
   useEffect(() => {
     let current = true;
@@ -353,9 +342,6 @@ export default function JobPage({
       .then((config) => {
         if (!current || !config) {
           return;
-        }
-        if (config.default_model_target) {
-          setModelName(modelTargetLabel(config.default_model_target).replace(/\s*\(.*\)$/, ""));
         }
         // 0110-10-13: GET /api/config holds the settings under `config`.
         setModelTarget((config.config && config.config.default_model_target) || config.default_model_target || null);
@@ -395,7 +381,6 @@ export default function JobPage({
     getAnswers()
       .then((response) => setAnswers(response.answers || []))
       .catch(() => setAnswers([]));
-    setTailorError(null);
   }, [jobId, profileId]);
 
   useEffect(() => {
@@ -440,16 +425,29 @@ export default function JobPage({
     onReassessUnavailable: jobUrl ? assessByUrl : undefined,
     stale: staleReasonWords(job),
   });
-  const tailored = useTailoredResume({ jobIdentity: job ? job.id : null, jobUrl, profileId });
+  const resume = useJobResume({ jobIdentity: job ? job.id : null, jobUrl, profileId, expectRecord: Boolean(job && job.assessmentSource === "quick" && job.quick && job.quick.resume_gate) });
 
-  // uat-bug-018: a tailored resume stored for this job makes its state
-  // "Resume tailored" at once, on this page and on its card.
-  const tailoredJobId = job && tailored.stored ? job.id : null;
+  // uat-bug-018: a resume stored for this job makes its state "Resume
+  // ready" at once, on this page and on its card.
+  const tailoredJobId = job && resume.stored ? job.id : null;
   useEffect(() => {
     if (tailoredJobId && onTailored) {
       onTailored(tailoredJobId);
     }
   }, [tailoredJobId, onTailored]);
+
+  // 0.1.11: the pick comes with the assessment. A new assessment of the job shown (Re-assess, an answer saved)
+  // may have stored a new resume or a `proposed` one: the stored resume and its record are read again, once.
+  const assessedStamp = job && job.assessmentSource === "quick" ? assessedAt(job) : "";
+  const assessedSeen = useRef({ id: null, at: "" });
+  const reloadResume = resume.reload;
+  useEffect(() => {
+    const before = assessedSeen.current;
+    assessedSeen.current = { id: jobId, at: assessedStamp };
+    if (before.id === jobId && before.at && assessedStamp && before.at !== assessedStamp) {
+      reloadResume();
+    }
+  }, [jobId, assessedStamp, reloadResume]);
 
   if (!job) {
     return (
@@ -470,7 +468,7 @@ export default function JobPage({
 
   const mode = workModeLabel(posting);
   const pay = payLabel(posting.pay);
-  // A question is shown by its prompt wherever it appears (the tailored
+  // A question is shown by its prompt wherever it appears (the job
   // resume's answer refs); the id is secondary detail. Prompts come from
   // the recorded answers and the assessments' own questions.
   const questionPrompts = questionPromptIndex({
@@ -479,40 +477,26 @@ export default function JobPage({
     assessments: [job.row && job.row.assessment, job.quick && job.quick.result],
   });
 
-  const gate = tailorGate({
-    assessed: Boolean(assessment),
-    verdict: job.verdict,
-    states: answerDrafts.states,
-    hasUrl: Boolean(jobUrl),
-    hasProfile: Boolean(profileId),
-  });
-  // Tailoring reads the RECORDED answers, so an answer typed but not yet
-  // saved is saved first (no re-assessment); a failed save stops here.
-  const handleTailor = () => {
-    setTailorError(null);
-    answerDrafts
-      .saveUnsaved()
-      .then(() => tailored.tailor())
-      .catch((err) => setTailorError(err.message || String(err)));
-  };
-  const tailorStatus = tailorStatusFor(tailored, modelName);
-  const tailorAction = {
-    status: tailorStatus,
-    ...gate,
-    enabled: gate.enabled && !tailored.loadingStored,
-    label: tailored.tailoring ? "Tailoring…" : tailored.stored ? "Tailor again" : "Tailor resume",
-    helpName: "Tailor resume",
-    busy: tailored.tailoring,
-    onClick: handleTailor,
-  };
-  const actionsBusy = Boolean(answerDrafts.busy) || tailored.tailoring;
   const pasted = Boolean(job.quick && job.quick.job && job.quick.job.fetch_kind === "pasted" && job.status === "on_demand");
   const state = job.state || jobStateFor(job, null, tailoredJobId ? [tailoredJobId] : null);
   const posted = postedLine(rowDated ? listedRow : servedDates);
   // When the assessment shown was made (a re-assessment keeps the first one's `created_at`).
   const assessedTime = job.assessmentSource === "quick" ? assessedAt(job) : "";
-  const staleNote = assessment ? staleAssessmentNote(job) : null;
-  const tailoredBefore = state.state === "tailored" ? tailoredBeforeAssessment(tailored.stored, assessedTime) : null;
+  // The header's stale label, in the Jobs row's words; a reason that names what changed (a story, a resume line, the
+  // posting text) says that in a line under it.
+  const stale = assessment ? assessmentStaleFor(job) : null;
+  const staleWordsNow = stale ? staleReasonWords(job) : null;
+  const staleDetail = stale && ["story_bank_changed", "resume_changed", "posting_changed"].includes(stale.reason) ? staleAssessmentNote(job) : null;
+  // 0.1.11 N6: the gate decides whether a resume is suggested (the record's, else the assessment's, else the verdict);
+  // the stale list is the server's when it sends one. Nothing here recomputes.
+  const fit = fitStateFor(job);
+  const gate = assessment ? gateOf({ record: resume.record, quick: job.assessmentSource === "quick" ? job.quick : null, assessment }) : null;
+  const staleList = staleItems(staleCodes({ served: resume.stale, job, stored: resume.stored, assessedAt: assessedTime }));
+  const chip = headerChip(fit, { assessment, gate });
+  const coverage = coverageRows({ assessment, record: resume.record, stored: resume.stored });
+  // The page's ONE Re-assess, as the stale label and Apply offer it too.
+  const reassess = { enabled: Boolean(assessment) && answerDrafts.gate.enabled && !answerDrafts.busy, reason: answerDrafts.gate.reason, onClick: answerDrafts.reassess };
+  const structured = Boolean(resume.record) || Boolean(assessment && Array.isArray(assessment.structured_suggestions) && assessment.structured_suggestions.length > 0);
 
   return (
     <div className="job-page">
@@ -553,7 +537,14 @@ export default function JobPage({
             <div className="job-facts">
               {mode && <span className="mode-chip">{mode}</span>}
               {pay && <span className="pay">{pay}</span>}
-              <VerdictChip verdict={job.verdict} assessment={assessment} />
+              <span className={`verdict-chip ${job.verdict} fit-${chip.state}`} data-role="job-chip" data-fit={chip.state} title={chip.title || undefined}>
+                {chip.label}
+              </span>
+              {staleWordsNow && (
+                <span className="tag stale-label" data-role="assessment-stale" data-reason={staleWordsNow} title="Re-assess to renew it: one model call">
+                  old assessment: {staleWordsNow}
+                </span>
+              )}
               <HelpLink topic="verdict" />
               {visaRequired && <SponsorshipBadge sponsorship={job.sponsorship} h1b={job.h1b} />}
               {job.status === "carried_forward" && <span className="tag">{unchangedSinceLabel(job.fromRunDate)}</span>}
@@ -563,9 +554,9 @@ export default function JobPage({
                 {VERDICT_WORDING}
               </p>
             )}
-            {staleNote && (
-              <p className="muted small" data-role="assessment-stale" data-reason={staleReasonWords(job) || undefined}>
-                {staleNote}
+            {staleDetail && (
+              <p className="muted small" data-role="assessment-stale-detail">
+                {staleDetail}
               </p>
             )}
             {assessment && assessment.not_a_match_reason && (
@@ -591,7 +582,7 @@ export default function JobPage({
             </a>
           )}
         </div>
-        <JobStateActions jobId={job.id} state={state} pasted={pasted} tailoredBefore={tailoredBefore} onRecorded={handleApplicationRecorded} />
+        <JobStateActions jobId={job.id} state={state} pasted={pasted} onRecorded={handleApplicationRecorded} />
         {!pasted && <AssessSends jobUrl={posting.url} profileId={profileId} target={modelTarget} />}
       </section>
 
@@ -602,33 +593,44 @@ export default function JobPage({
           assessment={assessment}
           jobIdentity={posting.normalized_url}
           controller={answerDrafts}
-          tailor={tailorAction}
           showVerdict={false}
           questionsFirst
+          alwaysActions
+          reassessLabel={REASSESS_LABEL}
+          coverage={coverage}
+          onShowLine={resume.showLine}
+          structuredSuggestions={structured}
         />
       ) : (
         <section className="panel">
           <h3>Requirements</h3>
-          <RequirementActions
-            reassess={{ ...reassessGate({ assessed: false, states: [] }), label: "Re-assess", onClick: () => {} }}
-            tailor={tailorAction}
-            busy={actionsBusy}
-          />
+          <RequirementActions reassess={{ ...reassessGate({ assessed: false, states: [] }), label: REASSESS_LABEL, helpName: "Re-assess", onClick: () => {} }} busy={Boolean(answerDrafts.busy)} />
           <p className="muted">Not assessed yet. The requirement table and its questions appear once the posting is assessed.</p>
         </section>
       )}
-      {tailorError && <div className="field-error">Could not save your answers before tailoring: {tailorError}</div>}
+
+      <JobResumePanel
+        state={resume}
+        assessment={assessment}
+        gate={gate}
+        items={staleList}
+        reassess={reassess}
+        questionPrompts={questionPrompts}
+        hasQuestions={answerDrafts.questions.length > 0}
+      />
+
+      {assessment && <SuggestionsPanel state={resume} assessment={assessment} jobUrl={jobUrl} />}
+
+      <ApplyPanel state={resume} items={staleList} reassess={reassess} />
 
       <PipelineTimeline
         jobIdentity={job.id}
         profileId={profileId}
         assessed={Boolean(assessment)}
         assessedAt={assessedTime || null}
-        refreshKey={`${assessment ? assessment.verdict || "assessed" : "none"}:${tailored.changes}`}
-        onTailorDone={tailored.reload}
+        refreshKey={`${assessment ? assessment.verdict || "assessed" : "none"}:${resume.changes}`}
+        onPickDone={resume.reload}
       />
-
-      <TailoredResumePanel state={tailored} profileLabel={profileLabel} questionPrompts={questionPrompts} />
 
       {assessment && posting.url && <PrepPanel postingUrl={posting.url} profileId={profileId} />}
     </div>
