@@ -417,6 +417,10 @@ class AssessAttempt:
     # attempt's only, 0 and none by default. Kept apart from that count, which is the not_a_match strip's.
     capped_questions: int = 0
     capped_question_ids: tuple[str, ...] = ()
+    # 0.1.11 GUARDFIX (orchestrator #87): set, on a SUCCESSFUL attempt only, when ``assess_once(keep_thin=True)`` kept an
+    # answer the incomplete-posting guard would have withheld: the number of requirement rows it holds (1 or 2). The
+    # caller may retry it once and, if it stays thin, stores it with a note instead of refusing it.
+    thin_requirements: int | None = None
 
     def __post_init__(self) -> None:
         if self.ok and (self.parsed is None or self.not_assessed_reason is not None):
@@ -578,8 +582,13 @@ def assess_once(
     ctx: AssessContext,
     *,
     parse: Callable[[dict[str, object]], object],
+    keep_thin: bool = False,
 ) -> AssessAttempt:
     """Assess one posting against one resume: invoke, extract, normalize, validate, retry once.
+
+    ``keep_thin`` (0.1.11 GUARDFIX): an answer the incomplete-posting guard fires on, but that holds at least one
+    requirement row, is returned as a successful attempt carrying ``thin_requirements`` instead of being withheld; an
+    answer with no requirement row is withheld either way.
 
     ``binding`` is an already-resolved ``ModelAdapterBinding`` (``request`` +
     ``port.invoke``); ``parse`` is the strict contract parser applied to the
@@ -611,6 +620,7 @@ def assess_once(
     boundary = Boundary(
         source_ids=offered_sources(ctx), listed=ctx.requirements, posting_sha256=posting_sha256(job.title, job.posting_text), posting_text=job.posting_text,
         countries=tuple(item.strip().upper() for item in ctx.countries if item and item.strip()),
+        location=ctx.location.strip(), work_mode=ctx.work_mode, visa_required=ctx.visa_sponsorship_required,
         lines=parse_master_lines(ctx.resume_text) if ctx.resume_ids else {},
         answers={item.question_id.lower(): item.answer for item in ctx.prior_answers},
         stories={item.question_id.lower(): item.summary for item in ctx.bank_answers},
@@ -637,6 +647,10 @@ def assess_once(
     if attempt.ok and boundary.extras is not None:
         capped = boundary.extras.capped_questions
         attempt = replace(attempt, extras=boundary.extras, capped_questions=len(capped), capped_question_ids=capped)
+    if attempt.ok and keep_thin and posting_looks_incomplete(job.posting_text, attempt.parsed):
+        rows = requirement_row_count(attempt.parsed)
+        if rows:
+            return replace(attempt, thin_requirements=rows)
     if attempt.ok and posting_looks_incomplete(job.posting_text, attempt.parsed):
         # Never Matched on a posting whose requirements look cut off: the
         # answer is withheld and the posting stays not assessed.
@@ -675,6 +689,12 @@ _NO_STATED_REQUIREMENTS = "no stated requirements"
 def _row_is_requirement(requirement: str) -> bool:
     text = requirement.strip().lower().rstrip(".")
     return bool(text) and text != _NO_STATED_REQUIREMENTS and _ELIGIBILITY_ROW.search(text) is None
+
+
+def requirement_row_count(parsed: object) -> int:
+    """How many matrix rows are about the job (the rows ``posting_looks_incomplete`` counts)."""
+
+    return sum(1 for row in getattr(parsed, "matrix", ()) if _row_is_requirement(str(getattr(row, "requirement", ""))))
 
 
 def posting_looks_incomplete(posting_text: str, parsed: object) -> bool:
@@ -1007,6 +1027,11 @@ class Boundary:
     posting_text: str | None = None
     #: 0.1.11 C4b: the candidate's eligible countries (upper-case codes; empty: none stated), from the setup.
     countries: tuple[str, ...] = ()
+    #: 0.1.11 GUARDFIX (orchestrator #88): the rest of the setup an ``elig-`` row's evidence is written from
+    #: (:func:`setup_evidence`): the candidate's location, work mode and whether they need visa sponsorship.
+    location: str = ""
+    work_mode: str = ""
+    visa_required: bool | None = None
     #: 0.1.11 C2/C3: the master lines the prompt showed by id (``suggestion_check.parse_master_lines``), the answers
     #: (``question_id`` -> text) and the stories (``question_id`` -> summary) it listed. Empty: no check, no verbatim evidence.
     lines: Mapping[str, MasterLine] = field(default_factory=dict)
@@ -1296,6 +1321,34 @@ def _location_unclear(decoded: Mapping[str, object], boundary: Boundary) -> Mapp
     return out
 
 
+def setup_evidence(row_id: str, boundary: Boundary) -> str | None:
+    """The evidence of an ``elig-`` row, in fixed wording from the candidate's setup; ``None`` for any other row id. Pure.
+
+    0.1.11 (orchestrator #88): these rows are facts of the candidate's search settings, never a claim from the model.
+    A model's own sentence on one ("Candidate is eligible to work from the US; ...") was read by a judge as a claim, so
+    code always writes the evidence and the model's is discarded (:func:`_normalize_and_strip`).
+    """
+
+    if row_id == "elig-location":
+        countries = [code for code in boundary.countries if code != "ANY"]
+        if not countries:
+            return "Your search settings do not limit the countries you can work from."
+        return f"Your search settings say you can work from {', '.join(countries)}."
+    if row_id == "elig-region":
+        if not boundary.location:
+            return "Your search settings do not name where you are based."
+        return f"Your search settings say you are based in {boundary.location}."
+    if row_id == "elig-work-mode":
+        if not boundary.work_mode:
+            return "Your search settings do not limit the work mode."
+        return f"Your search settings say you want {boundary.work_mode} roles."
+    if row_id == "elig-sponsorship":
+        if boundary.visa_required is None:
+            return "Your search settings do not say whether you need visa sponsorship."
+        return f"Your search settings say you {'need' if boundary.visa_required else 'do not need'} visa sponsorship."
+    return None
+
+
 def _without_authorization(decoded: Mapping[str, object]) -> Mapping[str, object]:
     """``decoded`` of a v9 answer without the rows and questions about sponsorship or work authorization (0.1.11, orchestrator #45).
 
@@ -1395,6 +1448,9 @@ def _normalize_and_strip(decoded: Mapping[str, object], *, boundary: Boundary | 
                 if requirement_class is not None:
                     normalized_row["class"] = requirement_class
             normalized_row.update(_v9_row_keys(row, boundary, unknown_sources))
+            written = setup_evidence(str(normalized_row.get("id") or ""), boundary)
+            if written is not None:
+                normalized_row["resume_evidence"] = [written]  # the model's own sentence is discarded
             normalized_matrix.append(normalized_row)
     else:
         normalized_matrix = matrix
@@ -1575,6 +1631,8 @@ __all__ = [
     "build_assess_context",
     "constraints_digest",
     "posting_looks_incomplete",
+    "requirement_row_count",
+    "setup_evidence",
     "invoke_json_once",
     "load_assess_instructions",
     "normalize_work_mode",

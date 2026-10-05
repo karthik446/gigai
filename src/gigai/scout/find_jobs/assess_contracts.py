@@ -862,6 +862,10 @@ class AssessResponse(_Contract):
     # (:class:`GateRecord`, ``resume_gate.gate``).
     requirements_ref: RequirementsRef | None = None
     resume_gate: GateRecord | None = None
+    # 0.1.11 GUARDFIX (orchestrator #87): the visible note on an assessment whose answer held fewer requirement rows than
+    # the incomplete-posting guard accepts, after its one retry ("Only N requirements were read from this posting. Open
+    # the posting to check."). Omitted from JSON when ``None``, so every stored file round-trips as it was.
+    requirements_note: str | None = None
 
     def __post_init__(self) -> None:
         if (
@@ -924,6 +928,8 @@ class AssessResponse(_Contract):
             value["requirements_ref"] = self.requirements_ref.to_json()
         if self.resume_gate is not None:
             value["resume_gate"] = self.resume_gate.to_json()
+        if self.requirements_note is not None:
+            value["requirements_note"] = self.requirements_note
         return value
 
     @classmethod
@@ -937,7 +943,7 @@ class AssessResponse(_Contract):
             (
                 "updated_at", "history", "posting_text", "rank_score", "rank_skip_reason", "origin",
                 "prompt_version", "constraints_digest", "story_bank", "profile_ref", "posting_sha256", "model", "resume_basis",
-                "requirements_ref", "resume_gate",
+                "requirements_ref", "resume_gate", "requirements_note",
             ),
             "assess_response",
         )
@@ -999,6 +1005,9 @@ class AssessResponse(_Contract):
             resume_basis=ResumeBasis.from_json(value["resume_basis"]) if "resume_basis" in value else None,
             requirements_ref=RequirementsRef.from_json(value["requirements_ref"]) if "requirements_ref" in value else None,
             resume_gate=GateRecord.from_json(value["resume_gate"]) if "resume_gate" in value else None,
+            requirements_note=(
+                _string(value["requirements_note"], "assess_response.requirements_note") if "requirements_note" in value else None
+            ),
         )
 
 

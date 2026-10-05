@@ -144,6 +144,8 @@ class YoursInputs:
     folder: str | None = None
     #: What a resume for this profile is made from (``tailor_master.BASES``).
     basis: str = "master"
+    #: 0.1.11 GUARDFIX: ``AssessResponse.requirements_note`` when the answer read few requirements from a long posting.
+    requirements_note: str | None = None
 
 
 @dataclass(frozen=True)
@@ -344,6 +346,8 @@ def yours_part(inputs: YoursInputs) -> dict[str, object]:
         "suggestions": [dict(item) for item in inputs.suggestions],
         "sends": {"nothing": SENDS_NOTHING, "assess": SENDS_ASSESS},
     }
+    if inputs.requirements_note is not None:
+        part["state"]["requirements_note"] = inputs.requirements_note  # type: ignore[index]
     part[ENVELOPE_KEY] = labels_envelope({
         "/resume/markdown": USER_PRIVATE, "/resume/folder": USER_PRIVATE, "/master/entries/*/heading": USER_PRIVATE,
         "/master/entries/*/sublines": USER_PRIVATE, "/master/entries/*/note": USER_PRIVATE, "/master/lines/*/text": USER_PRIVATE,
@@ -430,6 +434,8 @@ def _render_yours(part: Mapping[str, object]) -> str:
         "STATE",
         f"verdict: {state['verdict'] or '(none)'}",
     ]
+    if isinstance(state.get("requirements_note"), str):
+        out.append(str(state["requirements_note"]))
     gate = state["gate"]
     if isinstance(gate, Mapping):
         ready = {True: "yes", False: "no"}.get(gate.get("ready"), "(not checked)")  # type: ignore[arg-type]
@@ -732,6 +738,7 @@ def load_yours(home_root: Path, target: Path, job_url: str, profile_id: str | No
         max_pages=LENGTH_RULE.max_pages,
         folder=resumes_folder.resumes_folder(home_root).shown,
         basis=basis,
+        requirements_note=getattr(assessment, "requirements_note", None),
     )
 
 

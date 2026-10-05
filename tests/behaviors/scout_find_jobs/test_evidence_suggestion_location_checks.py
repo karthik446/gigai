@@ -359,3 +359,25 @@ def test_another_unmet_hard_row_keeps_the_no_and_a_met_location_is_untouched() -
     answer["matrix"][0] = {**answer["matrix"][0], "status": "unmet", "sources": [], "resume_evidence": []}  # type: ignore[index]
     attempt = _assess(answer, job=AssessJob("Staff Engineer", "Acme", "Poland", WORLDWIDE_BODY))
     assert attempt.parsed.verdict.value == NOT_A_MATCH  # Go is unmet too: the location row alone did not decide it
+
+
+# --- 0.1.11 GUARDFIX (orchestrator #88): an elig- row's evidence is written by code from the setup ---------
+
+
+def test_a_model_sentence_on_an_elig_row_is_replaced_by_the_setup_wording_and_other_rows_are_untouched() -> None:
+    said = "Candidate is eligible to work from the US; the posting offers remote."
+    rows = [
+        _row("Go services", "met", ["b-000003"], ["six years of Go"], "hard"),
+        {**LOCATION_ROW, "status": "met", "resume_evidence": [said]},
+        {"id": "elig-region", "requirement": "Remote in CA, NY or TX", "class": "hard", "class_basis": "Remote in CA", "status": "met", "resume_evidence": [said], "sources": []},
+        {"id": "elig-work-mode", "requirement": "Remote", "class": "hard", "class_basis": "Remote", "status": "met", "resume_evidence": [said], "sources": []},
+    ]
+    ctx = _ctx(countries=("us",), location="Denver, CO", work_mode="remote")
+    body = _assess(_answer(rows), job=AssessJob("Staff Engineer", "Acme", "Remote", "Remote in the US. Go services."), ctx=ctx).parsed
+    by_id = {row.id: row for row in body.matrix}
+    assert tuple(by_id["elig-location"].resume_evidence) == ("Your search settings say you can work from US.",)
+    assert tuple(by_id["elig-region"].resume_evidence) == ("Your search settings say you are based in Denver, CO.",)
+    assert tuple(by_id["elig-work-mode"].resume_evidence) == ("Your search settings say you want remote roles.",)
+    other = next(row for row in body.matrix if row.requirement == "Go services")
+    assert other.resume_evidence and not any(line.startswith("Your search settings") for line in other.resume_evidence)  # C2/C3's own evidence stands
+    assert all(said not in " ".join(row.resume_evidence) for row in body.matrix)

@@ -184,6 +184,7 @@ def job_tailored_resumes(home_root: Path, target: Path, identity: str) -> list:
 
 
 def _quick_entry(item, basis) -> dict[str, object]:
+    note = {} if item.requirements_note is None else {"requirements_note": item.requirements_note}  # GUARDFIX
     return {
         "source": "quick",
         "run_id": None,
@@ -191,6 +192,7 @@ def _quick_entry(item, basis) -> dict[str, object]:
         "created_at": item.created_at,
         "updated_at": item.updated_at or item.created_at,
         **basis.served(item),
+        **note,
         **item.result.to_json(),
         **_weights(item.result.to_json()),
     }

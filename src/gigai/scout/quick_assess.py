@@ -425,6 +425,21 @@ REASON_NO_REQUIREMENTS = "no_requirements_in_text"
 POSTING_UNREADABLE_REASONS: tuple[str, ...] = (REASON_TOO_FEW_REQUIREMENTS, REASON_NO_REQUIREMENTS)
 
 
+#: 0.1.11 GUARDFIX (orchestrator #87): an answer with fewer than three requirement rows for a posting of 1,200+
+#: characters is stored, after its one retry, with this note (``AssessResponse.requirements_note``).
+REQUIREMENTS_NOTE = "Only {count} requirements were read from this posting. Open the posting to check."
+
+
+def requirements_note_text(count: int) -> str:
+    return REQUIREMENTS_NOTE.format(count=count)
+
+
+def requirements_note_lines(batch: Mapping[str, object]) -> list[str]:
+    """One line per assessment of a batch that was stored with a requirements note (``requirements_notes``)."""
+
+    return [f"  {item['text']} {item['job_identity']}" for item in batch.get("requirements_notes") or ()]  # type: ignore[union-attr]
+
+
 def _has_real_requirement(body: AssessmentBody) -> bool:
     return any(row.requirement.strip().lower().rstrip(".") != _NO_STATED_REQUIREMENTS for row in body.matrix)
 
@@ -861,10 +876,17 @@ def run_quick_assessment(
                 AssessJob(title=job.title, company=job.company, location=job.location, posting_text=job.text),
                 assess_context,
                 parse=_parse_body,
+                keep_thin=True,
             )
         finally:
             binding.close()
-        refused = attempt.incomplete_posting if not attempt.ok else posting_requirements_unreadable(job.text, attempt.parsed)  # type: ignore[arg-type]
+        # GUARDFIX: a thin answer (1-2 requirement rows on a long posting) is retried once like a refused one, but is
+        # stored with a note when the retry is thin too (below); only an answer with no usable row is refused.
+        refused = (
+            attempt.incomplete_posting
+            if not attempt.ok
+            else attempt.thin_requirements is not None or posting_requirements_unreadable(job.text, attempt.parsed)  # type: ignore[arg-type]
+        )
         if refused and guard_retries < GUARD_RETRY_LIMIT:
             meter.unused(ERROR_POSTING_UNREADABLE)
             guard_retries += 1
@@ -893,6 +915,7 @@ def run_quick_assessment(
         # Nothing is stored: the job stays "not assessed", never Matched.
         meter.unused(ERROR_POSTING_UNREADABLE)  # 0110-8-09
         raise QuickAssessError(ERROR_POSTING_UNREADABLE, POSTING_UNREADABLE_MESSAGE, reason=REASON_NO_REQUIREMENTS)
+    requirements_note = None if attempt.thin_requirements is None else requirements_note_text(attempt.thin_requirements)
     from .proposal_execution import _usage_block
 
     usage = _usage_block([attempt.usage] if attempt.usage is not None else [], UsageBlock)
@@ -956,6 +979,7 @@ def run_quick_assessment(
         resume_basis=None if master_input is None else master_input.basis,
         requirements_ref=requirements_ref,
         resume_gate=resume_gate,
+        requirements_note=requirements_note,
     )
     # 1. Store the assessment (0110-8-09: a call is ok only when its answer was stored).
     try:
