@@ -188,6 +188,16 @@ up. New: <code dir="auto">gigai scout resume master init --from FILE --dry-run</
 writes nothing. A file whose first line is `` is still held to GigAI’s own
 format, and contact lines are removed as before. A refusal names the line number and the rule; on
 the terminal it now also shows that line.</li>
+<li><strong>A heading that is a link keeps its name.</strong> A project or employer written as a link
+(<code dir="auto">### [Driftwatch](https://github.com/...)</code>) lost its whole line when you made the master from a
+file or imported <code dir="auto">master.md</code>, so the project had no name and its bullets went to the entry above;
+<code dir="auto">gigai scout resume add</code> stored <code dir="auto">### [Driftwatch](</code>. Now the link goes and the words stay, in an
+entry’s heading, a bold title line and a role line right under one: the entry is “Driftwatch”, with
+its bullets. The command says which heading lost a link, by line number (“link removed from the
+heading Driftwatch”); <code dir="auto">--dry-run</code> shows it. A heading that is only a link is refused by line number
+(“this heading is only a link: give the project a name”) instead of being dropped. Nothing else
+changes: GigAI still stores no links, a link in a bullet or a paragraph, an email or a phone number
+in a heading, and your name and contact lines are handled as before.</li>
 </ul>
 <div class="sl-heading-wrapper level-h4"><h4 id="for-agents">For agents</h4><a class="sl-anchor-link" href="#for-agents"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “For agents”</span></a></div>
 <ul>
