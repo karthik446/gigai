@@ -22,6 +22,11 @@ operator-visible capability and must link to the relevant release or evidence.
 
 ## Released versions
 
+### 0.1.10.11
+
+Speed: saves and the first Jobs load of a day on a store with a lot of finished work. Work in progress;
+the notes are written as the changes land.
+
 ### 0.1.10.10
 
 A fix for 0.1.10.9: `gigai scout new` stopped with an error on the first run after an update when
