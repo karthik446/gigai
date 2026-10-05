@@ -206,9 +206,10 @@ def contact_findings(text: str) -> list[ContactFinding]:
 def clean_contact_text(text: str) -> str:
     """``text`` that ``contact_findings`` finds nothing in: the import strip, then any line it still flags.
 
-    Pure; the strip is ``strip_contact_lines`` (the same one the import runs)."""
+    Pure; the strip is ``strip_contact_lines`` as the import runs it (``headings=True``: a link in a title line
+    goes and its words stay), so ``resume_privacy.HeadingOnlyLink`` for a heading that is only a link."""
 
-    cleaned = strip_contact_lines(text).text
+    cleaned = strip_contact_lines(text, headings=True).text
     for _ in range(3):
         flagged = {finding.line for finding in contact_findings(cleaned)}
         if not flagged:

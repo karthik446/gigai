@@ -155,6 +155,7 @@ things still take more than a second (see "Still slower than one second"): the n
   saw it). Off, the order is what it was: the best fit first. The address keeps it, so a reload or a
   bookmark does too. `GET /api/postings?sort=newest_posted` is the same order for an agent (`sort=fit`
   is the default).
+- **`gigai agent-permissions --port PORT`** prints the permissions snippet for a Scout you started on another port than 8765.
 
 #### Changed
 
@@ -253,6 +254,10 @@ things still take more than a second (see "Still slower than one second"): the n
   after the files were written, plain `gigai doctor` also fails on `journal.index` with the command in
   its remediation (`--json`). The command checks that each workpad's ownership markers name the folder
   it is in, and refuses one where they do not, saying which marker differs.
+- **`gigai scout run` on a machine with no model CLI says what to install.** It used to say "rerun `gigai setup`" to someone who never ran it; now: "no model CLI was found: install Codex or Claude Code, then run `gigai scout run` again", with the way in for an API key or a local Ollama model.
+- **`gigai scout resume clean` keeps a title that is a link.** `**[Dispatch Optimizer](https://...)** *(Python, Kafka)*` came out as `**[Dispatch Optimizer]( *(Python, Kafka)*`, the check called that clean, and the broken line reached the master resume and the PDF. The link goes and the words stay, as `gigai scout resume add` already did; the cleaned copy is now what `resume add` stores. A heading that is only a link is refused by line number, as `resume add` refuses it.
+- **`gigai models` prints a CLI's version as `v0.160.0`,** not `vcodex-cli 0.160.0`.
+- **"~1 call", not "~1 calls",** in the questions of `gigai scout new` and `gigai scout jobs assess`.
 
 #### For agents
 

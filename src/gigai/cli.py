@@ -676,7 +676,7 @@ def models_command(
                 raise click.exceptions.Exit(1)
             return
         for item in payload["detected"]:
-            version = f" · v{item['version']}" if item["version"] else ""
+            version = f" · {_display_runtime_version(item['version'])}" if item["version"] else ""
             click.echo(f"{item['display_label']}{version}: {item['state']}")
         for item in payload["configured"]:
             click.echo(
@@ -1381,6 +1381,15 @@ def _run_terminal_setup(
         )
         selected_create_target = create_model_target or setup_default_target
         if selected_create_target is None:
+            if accept_defaults:
+                # `gigai scout run` / `install` on a machine that never ran setup:
+                # say what to install and the command to type, not "rerun setup".
+                raise ValueError(
+                    "no model CLI was found: install Codex or Claude Code, then run "
+                    "`gigai scout run` again. To use an API key or a local Ollama model "
+                    "instead, add it with `gigai setup` first (`gigai setup --help`: "
+                    "--endpoint, --model-target, --create-model-target)."
+                )
             raise ValueError(
                 "no usable model runtime is configured; install or configure Codex, "
                 "Claude, or an API target, then rerun `gigai setup`"

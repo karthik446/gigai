@@ -708,7 +708,7 @@ def _pipeline_offer(store: PipelineStore) -> dict[str, object] | None:
     need = f" ({len(gated)} need your approval)" if gated else ""
     # 0110-10-11: one --process runs at most 50 steps; the offer says so when more than that wait.
     capped = len(waiting) > BATCH_LIMIT
-    ask = f"process the next {BATCH_LIMIT} of {len(waiting)} steps now? ~{calls} calls in all, at most {BATCH_LIMIT} a run" if capped else f"process now? ~{calls} calls"
+    ask = f"process the next {BATCH_LIMIT} of {len(waiting)} steps now? ~{calls} calls in all, at most {BATCH_LIMIT} a run" if capped else f"process now? {_calls(calls)}"
     return {
         "waiting": jobs,
         "awaiting_approval": len(gated),
@@ -749,6 +749,12 @@ def _when(value: str) -> str:
     """An instant as a person reads it, in the local time zone: ``Tue 14:02``-like, with the date."""
 
     return datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone().strftime("%a %d %b %H:%M")
+
+
+def _calls(count: object) -> str:
+    """``~1 call`` / ``~12 calls``: an estimate's call count as a question says it."""
+
+    return f"~{count} call{'' if count == 1 else 's'}"
 
 
 def _tokens(value: object) -> str:
@@ -814,7 +820,7 @@ def _question(
     else:
         ask = "Assess them?" if len(pairs) == new_count else f"Assess the {len(pairs)} not assessed yet?"
     sentence = (
-        f"{new_count} new posting{plural}{across}. {ask} ~{found['calls']} calls{_tokens(found['tokens'])}"
+        f"{new_count} new posting{plural}{across}. {ask} {_calls(found['calls'])}{_tokens(found['tokens'])}"
         f"{_more_words(size, len(pairs))}"
     )
     question = {
@@ -850,7 +856,7 @@ def _stale_question(
     have = "has" if len(asked) == 1 else "have"
     those = "that one" if len(asked) == 1 else "those"
     newest = _newest_words(size, len(asked))
-    cost = f"~{found['calls']} calls{_tokens(found['tokens'])}{_more_words(size, len(asked))}"
+    cost = f"{_calls(found['calls'])}{_tokens(found['tokens'])}{_more_words(size, len(asked))}"
     if pairs:
         flag, body = "--reassess-stale", {"assess": False, "reassess_stale": True}
         text = f"{len(pairs)} {have} only an old assessment; re-assess{' ' + newest if newest else ''}? {cost}"
@@ -898,7 +904,7 @@ def _low_rank_question(
         "yes": _answers(since, profile_id, flag="--yes --include-low-rank", body={"assess": True, "include_low_rank": True}),
         "text": (
             f"{len(low)} low-ranked {'one is' if one else 'ones are'} skipped (rank below {setting.assess_min_rank}); "
-            f"assess {f'the newest {size} of ' if size < len(low) else ''}{'that' if one else 'those'} too? ~{found['calls']} calls{_tokens(found['tokens'])}"
+            f"assess {f'the newest {size} of ' if size < len(low) else ''}{'that' if one else 'those'} too? {_calls(found['calls'])}{_tokens(found['tokens'])}"
             f"{_more_words(size, len(low))}"
         ),
     }

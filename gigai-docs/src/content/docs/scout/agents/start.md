@@ -84,9 +84,11 @@ gigai --version
 If `gigai` is not found, its folder is not on the `PATH` yet. Run `uv tool update-shell`, then
 open a new shell. Until then, `~/.local/bin/gigai` works.
 
-To assess postings later, the user needs one model CLI installed and logged in: Codex
-(`codex login status` says whether it is) or Claude Code (`claude`, then `/login`). Scout starts
-without one. Do not log in for the user; tell them the command.
+Scout needs one model CLI on this computer **before step 4**: Codex or Claude Code (the last
+command of step 1 shows which is there). With neither installed, `gigai scout run` stops with
+"no model CLI was found" and writes nothing: tell the user to install one, then go on. To assess
+postings the CLI must also be logged in: Codex (`codex login status` says whether it is) or
+Claude Code (`claude`, then `/login`). Do not log in for the user; tell them the command.
 
 ## 4. Start Scout
 
@@ -97,7 +99,8 @@ gigai scout status --json
 
 The first command writes GigAI's default settings on a new machine, starts Scout's local server
 in the background and prints its address (`http://127.0.0.1:8765` unless the port is taken; then
-add `--port`). `--no-browser` keeps it from opening a browser tab from inside an agent session.
+add `--port`). If you started it with `--port`, use your port in the commands below wherever they
+say `8765`. `--no-browser` keeps it from opening a browser tab from inside an agent session.
 Everything GigAI stores goes under `~/.gigai` on this computer, except the resume files it makes
 for the user: each job's tailored resume (markdown) and the PDFs without a header go to the
 resumes folder, `~/Documents/GigAI/resumes` unless the user chose another (`gigai scout status`
@@ -169,7 +172,7 @@ gigai scout profile list --json
 ```
 
 `work_mode` is `remote`, `hybrid` or `onsite`; add `"city": "Denver, CO"` for hybrid or on-site.
-The second command shows the profile that was created, with the resume from step 5 attached. If
+The second command shows the profile that was created: its titles and its search settings. If
 it prints a warning that a title alone matches very many postings (a generic title such as
 "Staff Engineer"), tell the user and offer a more specific title.
 
@@ -206,11 +209,17 @@ gigai scout new --json
 It lists the new postings, ranked, and asks before it assesses: it gives the count and an
 estimate. Tell the user both, and say that **the first run is the expensive one**: it catches up
 on everything that is new, and later days are a few dozen postings at most.
-[Token usage](../../tokens/) has measured numbers. Only on a yes:
+[Token usage](../../tokens/) has measured numbers. Only on a yes, run the command the reply
+gives in `question.yes.cli`. It carries `--since`, so the yes covers exactly the postings the
+user was shown:
 
 ```sh
-gigai scout new --yes --json
+gigai scout new --yes --since 2026-10-05T14:02:00Z --json    # copy it from question.yes.cli; the time is the reply's own
 ```
+
+Add `--json` to it. A bare `gigai scout new --yes --json` right after the question assesses the
+same postings; the command from the reply is the exact form, and it still fits when another
+check ran in between.
 
 Each assessment is one model call. Progress lines go to the error stream while it runs, so the
 JSON on standard output stays clean. Then show the grid. [For agents](../) describes the rest of
@@ -229,7 +238,8 @@ gigai agent-permissions
 ```
 
 The first command writes the skill file and creates the folders. The second prints a
-permissions snippet. Show it to the user: they merge it into `~/.claude/settings.json` (all
+permissions snippet (`gigai agent-permissions --port <port>` if Scout runs on another port than
+8765). Show it to the user: they merge it into `~/.claude/settings.json` (all
 projects) or `.claude/settings.local.json` (this project only). GigAI prints it and never
 applies it, and you must not edit the user's agent settings yourself. Tell the user to start a
 new Claude Code session for the skill to be listed.

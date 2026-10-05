@@ -180,7 +180,7 @@ def test_the_terminal_says_the_same_facts_above_the_question(fx: PostingsFixture
         "  - your saved answers: 1",
         "  - your saved stories that match a posting: of 1 saved",
         "  Public fetch first: none needed; every posting's text is stored.",
-        f"Assess 1 posting ({label} 1)? ~1 calls",
+        f"Assess 1 posting ({label} 1)? ~1 call",
     ]
     assert lines[9] == "  Nothing was assessed. Yes: run the same command with --yes."
 

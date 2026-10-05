@@ -40,9 +40,10 @@ Example:
 ```sh
 gigai agent-permissions
 gigai agent-permissions --agent claude-code
+gigai agent-permissions --port 8766
 ```
 
-Offline. Prints only; GigAI never edits your agent's settings.
+Offline. Prints only; GigAI never edits your agent's settings. The curl rules name Scout's port: pass --port if you started Scout with `gigai scout run --port`.
 
 ## `gigai agent-skill`
 

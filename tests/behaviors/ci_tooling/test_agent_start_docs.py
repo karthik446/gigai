@@ -85,6 +85,11 @@ def test_the_start_page_asks_before_the_network_and_before_model_calls() -> None
     positions = [text.index(step) for step in steps]
     assert positions == sorted(positions), list(zip(steps, positions))
     assert "wait for a yes" in text and "Only on a yes" in text
+    # 0.1.10.11 NF: the yes is the command the asking reply gives (it carries --since); the bare form comes second.
+    assert text.index("gigai scout new --json") < text.index("question.yes.cli") < text.index("gigai scout new --yes --since") < text.index("gigai scout new --yes --json")
+    # ... a model CLI is a prerequisite of step 4, and the page no longer says Scout starts without one.
+    assert "Scout starts without one" not in text
+    assert text.index("Scout needs one model CLI on this computer **before step 4**") < text.index("gigai scout run --no-browser")
     # Prerequisites the plan names: OS detection, Homebrew incl. Intel, Linux, Windows via WSL, no sudo, PATH.
     for fact in ("uname -s", "Apple Silicon or Intel", "brew install uv", "curl -LsSf https://astral.sh/uv/install.sh | sh",
                  "use WSL", "uv tool update-shell", "~/.local/bin"):

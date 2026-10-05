@@ -246,6 +246,15 @@ def test_no_model_runtime_fails_like_setup_and_writes_nothing(
     result = CliRunner().invoke(cli, ["scout", "run", "--no-browser", "--port", "18796"])
 
     assert result.exit_code == 1, result.output
-    assert "no usable model runtime is configured" in result.output
+    # 0.1.10.11 NF: the advice fits someone who never ran setup: what to install, then the command they typed.
+    assert "no model CLI was found: install Codex or Claude Code, then run `gigai scout run` again." in result.output
+    assert "rerun" not in result.output
+    assert "`gigai setup --help`" in result.output  # the other way in: an API key or a local Ollama model
     assert not (fresh_user / ".gigai" / "config.toml").exists()
     assert started == []
+
+    as_json = CliRunner().invoke(cli, ["scout", "run", "--no-browser", "--port", "18796", "--json"])
+    assert as_json.exit_code == 1, as_json.output
+    error = json.loads(as_json.output)["error"]
+    assert error["code"] == "setup_invalid" and error["message"].startswith("no model CLI was found: install Codex or Claude Code")
+    assert not (fresh_user / ".gigai" / "config.toml").exists()

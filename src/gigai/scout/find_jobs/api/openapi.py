@@ -332,7 +332,7 @@ _NEW_EXAMPLE: dict[str, object] = {
             "cli": f"gigai scout new --no-assess --since {_NEW_SINCE}",
             "api": {"method": "POST", "path": "/api/new", "body": {"assess": False, "since": _NEW_SINCE}},
         },
-        "text": "1 new posting (Staff Engineer 1). Assess them? ~1 calls, ~20k tokens",
+        "text": "1 new posting (Staff Engineer 1). Assess them? ~1 call, ~20k tokens",
     },
     "stale_question": {
         "kind": "reassess_stale", "to_reassess": 2, "batch": 2, "more_after": 0, "low_rank_skipped": 0,
@@ -406,7 +406,7 @@ _POSTINGS_ASSESS_EXAMPLE: dict[str, object] = {
         "kind": "assess_these", "selected": 1, "to_assess": 1, "already_current": 0, "low_rank_skipped": 0, "batch": 1, "more_after": 0,
         "by_profile": [{"profile_id": "prof_1", "count": 1}],
         "model_target": "codex_cli", "estimate": {"calls": 1, "tokens": 19500, "seconds": 11.2, "cost": None, "basis_calls": 12},
-        "text": "Assess 1 posting (Staff Engineer 1)? ~1 calls, ~20k tokens",
+        "text": "Assess 1 posting (Staff Engineer 1)? ~1 call, ~20k tokens",
         "yes": {"api": {"method": "POST", "path": "/api/postings/assess", "body": {"approve": True, "jobs": [_JOB_URL]}}},
     },
     # 0110-10-13: what the postings asked about would send, by category; never a line of the user's text.
