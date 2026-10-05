@@ -428,10 +428,11 @@ POSTING_UNREADABLE_REASONS: tuple[str, ...] = (REASON_TOO_FEW_REQUIREMENTS, REAS
 #: 0.1.11 GUARDFIX (orchestrator #87): an answer with fewer than three requirement rows for a posting of 1,200+
 #: characters is stored, after its one retry, with this note (``AssessResponse.requirements_note``).
 REQUIREMENTS_NOTE = "Only {count} requirements were read from this posting. Open the posting to check."
+REQUIREMENTS_NOTE_ONE = "Only 1 requirement was read from this posting. Open the posting to check."  # 0.1.11 (orchestrator #96)
 
 
 def requirements_note_text(count: int) -> str:
-    return REQUIREMENTS_NOTE.format(count=count)
+    return REQUIREMENTS_NOTE_ONE if count == 1 else REQUIREMENTS_NOTE.format(count=count)
 
 
 def requirements_note_lines(batch: Mapping[str, object]) -> list[str]:

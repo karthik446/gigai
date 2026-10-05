@@ -17,3 +17,10 @@ export function modelNoticeLine(item) {
   const linked = link && typeof link.label === "string" && link.label.trim() && typeof link.path === "string" && DOC_PATH.test(link.path);
   return { text: notice.text.trim(), label: linked ? link.label.trim() : null, href: linked ? `${DOCS_URL}${link.path}/` : null };
 }
+
+// 0.1.11 (orchestrator #96): the served item's `requirements_note` (a thin answer stored after one retry), as the one
+// line near the requirements table; null when absent or blank.
+export function requirementsNoteLine(item) {
+  const note = item && item.requirements_note;
+  return typeof note === "string" && note.trim() ? note.trim() : null;
+}

@@ -6,7 +6,7 @@ import RequirementActions from "../components/RequirementActions.jsx";
 import RankBadge from "../components/RankBadge.jsx";
 import HelpLink from "../components/HelpLink.jsx";
 import { VERDICT_WORDING } from "../wording.js";
-import { modelNoticeLine } from "../modelNoticeModel.js";
+import { modelNoticeLine, requirementsNoteLine } from "../modelNoticeModel.js";
 import SponsorshipBadge from "../components/SponsorshipBadge.jsx";
 import ProviderBadge from "../components/ProviderBadge.jsx";
 import QuickAssessChip from "../components/QuickAssessChip.jsx";
@@ -488,6 +488,7 @@ export default function JobPage({
   const stale = assessment ? assessmentStaleFor(job) : null;
   const staleWordsNow = stale ? staleReasonWords(job) : null;
   const modelNotice = assessment && job.assessmentSource === "quick" ? modelNoticeLine(job.quick) : null; // the served item (job.quick) carries it, never a run row's own assessment
+  const requirementsNote = assessment && job.assessmentSource === "quick" ? requirementsNoteLine(job.quick) : null; // same served item as the model notice
   const staleDetail = stale && ["story_bank_changed", "resume_changed", "posting_changed"].includes(stale.reason) ? staleAssessmentNote(job) : null;
   // 0.1.11 N6: the gate decides whether a resume is suggested (the record's, else the assessment's, else the verdict);
   // the stale list is the server's when it sends one. Nothing here recomputes.
@@ -602,6 +603,12 @@ export default function JobPage({
       </section>
 
       <JobDescription posting={posting} pasted={pasted} />
+
+      {requirementsNote && (
+        <p className="muted small" data-role="requirements-note">
+          {requirementsNote}
+        </p>
+      )}
 
       {assessment ? (
         <AssessmentBody

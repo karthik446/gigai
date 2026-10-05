@@ -69,6 +69,16 @@ def test_a_two_bullet_posting_is_stored_matched_with_the_note_after_exactly_one_
     assert AssessResponse.from_json(json.loads(Path(response.stored_path).read_text())).requirements_note == NOTE_2
 
 
+def test_one_row_reads_in_the_singular_and_two_or_more_keep_the_plural(fx, monkeypatch: pytest.MonkeyPatch) -> None:  # noqa: ANN001, F811
+    one = _answer(["5+ years of Python in production"])
+    _install(monkeypatch, [one, one])
+    response = _assess(fx, _two_bullet_posting())
+    assert response.requirements_note == "Only 1 requirement was read from this posting. Open the posting to check."
+    assert quick_assess.requirements_note_text(1) == response.requirements_note
+    assert quick_assess.requirements_note_text(2) == NOTE_2
+    assert quick_assess.requirements_note_text(5) == "Only 5 requirements were read from this posting. Open the posting to check."
+
+
 def test_the_retry_answer_is_the_one_stored(fx, monkeypatch: pytest.MonkeyPatch) -> None:  # noqa: ANN001, F811
     one = _answer(["5+ years of Python in production"])
     _install(monkeypatch, [one, _TWO])

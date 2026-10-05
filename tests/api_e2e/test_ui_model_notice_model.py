@@ -28,6 +28,7 @@ console.log(JSON.stringify({
   none: [m.modelNoticeLine(null), m.modelNoticeLine({}), m.modelNoticeLine({ model_notice: null }), m.modelNoticeLine({ model_notice: { text: "  " } }), m.modelNoticeLine({ model_notice: { text: 5 } })],
   bareString: m.modelNoticeLine({ model_notice: { text: "t", link: "scout/accuracy-0-1-11" } }),
   badPath: [m.modelNoticeLine({ model_notice: { text: "t", link: { label: "L", path: "https://evil.test/x" } } }), m.modelNoticeLine({ model_notice: { text: "t", link: { label: "L", path: "../x" } } })],
+  noteOf: [m.requirementsNoteLine({ requirements_note: " Only 1 requirement was read from this posting. Open the posting to check. " }), m.requirementsNoteLine({ requirements_note: "  " }), m.requirementsNoteLine({ requirements_note: 5 }), m.requirementsNoteLine({}), m.requirementsNoteLine(null)],
   noLabel: m.modelNoticeLine({ model_notice: { text: "t", link: { label: " ", path: link.path } } }),
 }));
 """
@@ -65,3 +66,10 @@ def test_the_job_page_shows_it_under_the_verdict_only_for_a_served_item() -> Non
     page = (UI_SRC / "views" / "JobPage.jsx").read_text(encoding="utf-8")
     assert 'modelNoticeLine(job.quick)' in page and 'job.assessmentSource === "quick"' in page
     assert page.index('data-role="verdict-wording"') < page.index('data-role="model-notice"')
+
+
+def test_the_requirements_note_is_its_text_or_nothing(out: dict) -> None:
+    assert out["noteOf"] == ["Only 1 requirement was read from this posting. Open the posting to check.", None, None, None, None]
+    page = (UI_SRC / "views" / "JobPage.jsx").read_text(encoding="utf-8")
+    assert "requirementsNoteLine(job.quick)" in page
+    assert page.index('data-role="model-notice"') < page.index('data-role="requirements-note"') < page.index("<AssessmentBody")

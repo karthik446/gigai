@@ -25,11 +25,12 @@ from tests.ui.support import INTERACTIVE_WALL_SECONDS
 pytestmark = pytest.mark.ui
 
 PAGE = ".job-page"
+NOTE = f'{PAGE} [data-role="requirements-note"]'
 NOTICE = f'{PAGE} [data-role="model-notice"]'
 LINK = f'{NOTICE} [data-role="model-notice-link"]'
 
 
-def _lay(ui, demo, notice: dict | None) -> None:
+def _lay(ui, demo, notice: dict | None, note: str | None = None) -> None:
     def answer(route) -> None:
         if route.request.method != "GET":
             route.continue_()
@@ -38,6 +39,9 @@ def _lay(ui, demo, notice: dict | None) -> None:
         for item in body.get("items", []):
             if item.get("job", {}).get("job_identity") == demo.hero_job:
                 item.pop("model_notice", None)
+                item.pop("requirements_note", None)
+                if note is not None:
+                    item["requirements_note"] = note
                 if notice is not None:
                     item["model_notice"] = notice
         route.fulfill(status=200, content_type="application/json", body=json.dumps(body))
@@ -86,3 +90,28 @@ def test_the_job_page_shows_the_model_notice_under_the_verdict_and_nothing_witho
     _open(ui, demo)
     assert ui.page.locator(NOTICE).count() == 0 and ui.page.locator(LINK).count() == 0
     assert ui.page.locator(f'{PAGE} [data-role="verdict-wording"]').count() == 1
+
+
+def test_the_job_page_shows_the_requirements_note_by_the_requirements_table_and_nothing_without_one(ui, scout_server) -> None:
+    demo = scout_server.demo
+    note = "Only 1 requirement was read from this posting. Open the posting to check."
+
+    _lay(ui, demo, None, note)
+    _open(ui, demo)
+    ui.step("note")
+    line = ui.page.locator(NOTE)
+    assert line.count() == 1
+    assert (line.get_attribute("class") or "").split() == ["muted", "small"]  # the model notice line's style
+    assert (line.inner_text() or "").strip() == note
+    assert ui.page.locator(NOTICE).count() == 0, "no model notice was served: only the one note shows"
+    before_table = ui.page.evaluate(
+        "() => { const n = document.querySelector('.job-page [data-role=\"requirements-note\"]'); const t = document.querySelector('.job-page .matrix-table');"
+        " return Boolean(t) && Boolean(n.compareDocumentPosition(t) & Node.DOCUMENT_POSITION_FOLLOWING); }"
+    )
+    assert before_table, "the note line sits just above the requirements table"
+    assert ui.writes_after("start") == []
+    shot(ui, evidence_folder(), "uinotice-2-job-page-with-the-requirements-note")
+
+    _lay(ui, demo, None, None)
+    _open(ui, demo)
+    assert ui.page.locator(NOTE).count() == 0

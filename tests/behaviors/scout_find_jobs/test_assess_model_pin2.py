@@ -18,6 +18,7 @@ from gigai.adapters.codex_cli import CodexCLIAdapter
 from gigai.adapters.port import InvocationRequest
 from gigai.scout import evaluated_models as table
 from gigai.scout import quick_assess
+from gigai.scout.assessment_basis import BasisCheck
 from gigai.scout.evaluated_models import BELOW, MEETS, NOT_MEASURED, ModelResult, model_notice, model_state, results_rows
 from gigai.scout.find_jobs.assess_contracts import AssessJobInput, AssessRequest, AssessResumeInput
 from gigai.scout.find_jobs.contracts import ModelTarget
@@ -188,6 +189,37 @@ def test_a_refused_opus_is_asked_once_across_the_guard_retry(fx: PostingsFixture
     [stored] = list_quick_assessments(fx.home_root, fx.target)  # read back from the store
     assert (stored.model, stored.model_asked, stored.model_fallback) == (FAKE_CLAUDE_MODEL, OPUS, True)
     assert _calls_counted(fx) == (3, 2)  # the refused call, the thin answer (unused), the good one
+
+
+def test_a_thin_answer_and_a_refused_opus_store_with_both_the_model_notice_and_the_requirements_note(
+    fx: PostingsFixture, tmp_path: Path, monkeypatch: pytest.MonkeyPatch  # noqa: F811
+) -> None:
+    """MODELPIN x GUARDFIX: one refused Opus call, then the default for the keep-thin retry; the thin answer is stored with both notes."""
+
+    one_row = json.dumps(
+        {
+            "verdict": "matched_above_threshold",
+            "matrix": [{"requirement": "5+ years of Python in production", "class": "hard", "status": "met", "resume_evidence": ["Built Python services for six years"]}],
+            "suggestions": [], "questions": [], "not_a_match_reason": None,
+        }
+    )  # one usable row for a long posting: thin both times
+    record = _fake(tmp_path, monkeypatch, refuse=(OPUS,))
+    write_fake_claude(tmp_path / "fake-bin", record=record, refuse=(OPUS,), answers=(one_row, one_row), echo_model=True)
+
+    response = run_quick_assessment(
+        AssessRequest(job=AssessJobInput(job_text=_LONG_POSTING), resume=AssessResumeInput(profile_id=fx.default_profile_id), model_target=ModelTarget.CLAUDE_CLI),
+        home_root=fx.home_root, target=fx.target, config=_config(fx.home_root),
+    )
+
+    assert _model_flags(record) == [OPUS, None, None]  # exactly one refused call; the retry and nothing else on the default
+    note = "Only 1 requirement was read from this posting. Open the posting to check."
+    assert (response.model, response.model_asked, response.model_fallback) == (FAKE_CLAUDE_MODEL, OPUS, True)
+    assert response.requirements_note == note
+    [stored] = list_quick_assessments(fx.home_root, fx.target)
+    assert (stored.model, stored.model_asked, stored.model_fallback, stored.requirements_note) == (FAKE_CLAUDE_MODEL, OPUS, True, note)
+    served = {**stored.to_json(), **BasisCheck(home_root=fx.home_root, target=fx.target).served(stored)}
+    assert served["requirements_note"] == note
+    assert served["model_notice"]["text"] == NOTICE.format(used=FAKE_CLAUDE_MODEL, evaluated=OPUS)
 
 
 # --- two models in modelUsage -----------------------------------------------------------------------------------
