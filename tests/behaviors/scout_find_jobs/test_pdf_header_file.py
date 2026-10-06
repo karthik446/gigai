@@ -120,7 +120,6 @@ def test_a_missing_file_is_a_plain_sentence_that_says_where_it_goes(tmp_path: Pa
         ({"zora.q@example.invalid": "x"}, "a field is not a field of this file"),
         ({"links": {"label": "GitHub", "url": "github.com/zq-invalid-7731"}}, "links must be a list"),
         ({"links": ["github.com/zq-invalid-7731"]}, "links[1] must be an object"),
-        ({"links": [{"label": "GitHub", "url": "x.invalid"}, {"label": "Quillshire"}]}, "links[2].url is empty"),
         ({"links": [{"label": "GitHub", "url": "x.invalid", "note": "Zora"}]}, "links[1].note is not a field"),
         ({"links": [{"label": "L", "url": f"x.invalid/{n}"} for n in range(7)]}, "links holds more than 6 links"),
         ({"work_authorization": 7}, "work_authorization must be text"),

@@ -2118,6 +2118,9 @@ def _make_handler(
                 if path == "/api/pdf-header":
                     self._handle_post_pdf_header()
                     return
+                if path == "/api/pdf-header/save":
+                    self._handle_post_pdf_header_save()
+                    return
                 if path == "/api/resumes":
                     self._handle_post_resumes()
                     return

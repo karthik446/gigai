@@ -878,10 +878,11 @@ def resume_pdf_command(
                 problem = str(exc)
         if wanted and problem is not None:
             hint = "" if header_value is not None else " (--no-header makes the PDF without a header)"
-            _fail(ValueError(problem + hint), as_json=as_json, fallback="header_file_missing" if found.state == pdf_header_file.STATE_MISSING else "header_file_invalid")
+            _fail(ValueError(problem + hint), as_json=as_json, fallback=pdf_header_file.FAILURE_CODES.get(found.state, "header_file_invalid"))
             return
         if form is not None:
-            header_file, header_note = found.shown, found.warning
+            # 0.1.11.3 item 14: REPLACE: placeholders are skipped, never printed; the note names their fields.
+            header_file, header_note = found.shown, " ".join(note for note in (found.warning, found.notice) if note) or None
         elif found.state != pdf_header_file.STATE_MISSING:
             # The default file is there but this PDF goes to the resumes folder, which never holds contact details.
             header_note = f"Your header file ({found.shown}) was not used: pass --out FILE to make the PDF with your name and contact details."

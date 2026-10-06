@@ -10,6 +10,9 @@ returns a value; nothing on disk).  Here:
   assessment and a tailoring send to the model hold no value of it;
 - NO LOG: with every logger at DEBUG, the prefill (filled, invalid, refused) and the PDF log no value.
 
+0.1.11.3 item 14: the form's Save button is the ONE writer of the file (``pdf_header_save``, called by one route
+handler); its request's values reach no log and no model prompt either.
+
 Synthetic values and tmp homes only.
 """
 
@@ -42,6 +45,9 @@ READERS = {
     "scout/find_jobs/api/pdf_header.py": "_handle_post_pdf_header",  # the Generate PDF form's prefill: Scout's own page only
     "scout/scout_cli.py": "resume_pdf_command",  # `gigai scout resume pdf`: the values go into the one PDF at --out
 }
+#: 0.1.11.3 item 14: the one module that WRITES the file (the form's Save button), and the one function that calls it.
+WRITER = "scout/pdf_header_save.py"
+WRITER_CALLS = {"scout/find_jobs/api/pdf_header.py": "_handle_post_pdf_header_save"}
 RESUME = "## Experience\n### Northwind Health\n- Rebuilt the scheduling service on Python and Postgres.\n\n## Skills\nPython · Postgres\n"
 _JOB = {"job_text": "Acme is hiring a Staff Engineer for scheduling and billing systems. Requirements: Python, Postgres.", "title": "Staff Engineer", "company": "Acme"}
 
@@ -70,7 +76,10 @@ def test_only_the_form_route_and_the_pdf_command_can_read_the_file() -> None:
             else:
                 # A mention in words (a docstring, a help text) is fine; a path built by hand is not.
                 assert "read_header_file" not in source and '"header.json"' not in source, f"{relative} names the header file without the reader"
-    assert sorted(importers) == sorted(READERS), "a new reader of the user's header file needs a privacy review and a row in READERS"
+    assert sorted(importers) == sorted([*READERS, WRITER]), "a new reader of the user's header file needs a privacy review and a row in READERS"
+    # The writer takes the file's rules from the reader and never reads the file itself.
+    assert "read_header_file" not in (SRC / WRITER).read_text(encoding="utf-8")
+    del importers[WRITER]
     for relative, tree in importers.items():
         holders = {
             function.name
@@ -86,6 +95,36 @@ def test_only_the_form_route_and_the_pdf_command_can_read_the_file() -> None:
         }
         assert calls == {READERS[relative]}, f"{relative}: the file is read in {sorted(calls)}"
         assert holders <= {READERS[relative]}, f"{relative}: {sorted(holders)} use the reader module"
+
+
+def test_only_the_save_button_route_can_write_the_file() -> None:
+    """0.1.11.3 item 14: one module writes the header file, one route handler calls it, and the handler logs no value."""
+    name = Path(WRITER).stem
+    callers = {}
+    for path in sorted(SRC.rglob("*.py")):
+        relative = path.relative_to(SRC).as_posix()
+        source = path.read_text(encoding="utf-8")
+        if relative == WRITER or name not in source:
+            continue
+        tree = ast.parse(source)
+        imports = any(isinstance(node, (ast.Import, ast.ImportFrom)) and name in ast.unparse(node) for node in ast.walk(tree))
+        calls = {
+            function.name
+            for function in ast.walk(tree)
+            if isinstance(function, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and any(isinstance(node, ast.Call) and ast.unparse(node.func).endswith("save_header_file") for node in ast.walk(function))
+        }
+        if imports or calls:  # a mention in words (a docstring, a comment) is fine
+            callers[relative] = calls
+    assert callers == {relative: {function} for relative, function in WRITER_CALLS.items()}, callers
+    writer = (SRC / WRITER).read_text(encoding="utf-8")
+    for banned in ("import logging", "getLogger", "print(", "_logger"):
+        assert banned not in writer, f"pdf_header_save must not {banned}"
+    route = (SRC / "scout" / "find_jobs" / "api" / "pdf_header.py").read_text(encoding="utf-8")
+    handler = route[route.index("def _handle_post_pdf_header_save"):]
+    assert handler.index('self.headers.get("Origin")') < handler.index("self._read_json_body()") < handler.index("save_header_file("), "the caller is checked before the body is read"
+    # What the handler says back is built from the save's own answer and fixed sentences: never from the body.
+    assert "saved.to_json()" in handler and "{body" not in handler and "{key" not in handler.replace("{key: value for key, value in body.items()", "")
 
 
 def test_the_prefill_route_is_the_one_json_answer_written_around_the_outbound_check() -> None:
@@ -174,6 +213,16 @@ def test_no_model_prompt_and_no_log_holds_a_value_of_the_file(running) -> None:
     header_file.write_text(json.dumps(FILE), encoding="utf-8")
     assert client.post("/api/pdf-header", json={}, headers=page).json()["state"] == "filled"
 
+    # ... saved from the form (0.1.11.3 item 14: refused without the page's Origin, asked before replacing, then written) ...
+    typed = {"name": "Zora Quillfeather", "email": "zora.q@example.invalid", "phone": "555-0142-ZQ", "location": "Quillshire, ZZ",
+             "links": [{"label": "GitHub", "url": "github.com/zq-invalid-7731"}], "work_authorization": "VISA: H1B (ZQ-7731)"}
+    assert client.post("/api/pdf-header/save", json=typed).status_code == 403
+    assert client.post("/api/pdf-header/save", json=typed, headers=page).json()["state"] == "exists"
+    assert client.post("/api/pdf-header/save", json={**typed, "replace": True}, headers=page).json()["state"] == "saved"
+    assert client.post("/api/pdf-header/save", json={**typed, "phone": ["555-0142-ZQ"]}, headers=page).status_code == 422
+    assert json.loads(header_file.read_text(encoding="utf-8")) == typed
+    header_file.write_text(json.dumps(FILE), encoding="utf-8")
+
     # ... and then the model is called: an assessment and a tailoring.
     assessed = client.post("/api/assess", json={"job": _JOB})
     assert assessed.status_code == 200, assessed.text
@@ -189,5 +238,6 @@ def test_no_model_prompt_and_no_log_holds_a_value_of_the_file(running) -> None:
     logged = log_file.read_text(encoding="utf-8")
     assert "/api/pdf-header" in logged, "the route's requests are in the log (so the scan reads something)"
     assert "forbidden_origin: the header file is read for Scout's own page only" in logged
+    assert "/api/pdf-header/save" in logged and "forbidden_origin: the header file is written for Scout's own page only" in logged
     for marker in MARKERS:
         assert marker not in logged, f"a log line holds {marker!r}"
