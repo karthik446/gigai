@@ -367,12 +367,12 @@ def test_the_stale_offer_is_the_newest_50_of_all_and_a_yes_re_assesses_50_never_
 
     stale = asked["stale_question"]
     assert asked["counts"]["only_stale"] == 53  # type: ignore[index]
-    assert stale["text"] == "53 have only an old assessment; re-assess the newest 50 of 53? ~50 calls, ~2k tokens (3 more after these 50)"  # type: ignore[index]
+    assert stale["text"] == "53 have only an old assessment; re-assess the top 50 by rank of 53? ~50 calls, ~2k tokens (3 more after these 50)"  # type: ignore[index]
     assert (stale["to_reassess"], stale["batch"], stale["more_after"]) == (53, 50, 3)  # type: ignore[index]
     assert stale["estimate"]["calls"] == 50 and stale["estimate"]["tokens"] == 50 * 30  # type: ignore[index]
     assert fx.base.model.calls == calls  # an offer calls no model
     shown = scout_new.render(asked)
-    assert "re-assess the newest 50 of 53? ~50 calls" in shown and "(3 more after these 50)" in shown
+    assert "re-assess the top 50 by rank of 53? ~50 calls" in shown and "(3 more after these 50)" in shown
 
     done = _new(fx, peek=True, assess=False, reassess_stale=True)
 
@@ -408,10 +408,10 @@ def test_the_assess_new_yes_and_its_low_rank_question_are_the_newest_batch(tmp_p
     assert (question["to_assess"], question["batch"], question["more_after"], question["low_rank_skipped"]) == (5, 3, 2, 5)  # type: ignore[index]
     assert question["estimate"]["calls"] == 3  # type: ignore[index]
     assert str(question["text"]).startswith("10 new postings")  # type: ignore[index]
-    assert "Assess the newest 3 of 5 not assessed yet (5 low-ranked ones are a separate question)? ~3 calls" in str(question["text"])  # type: ignore[index]
+    assert "Assess the top 3 by rank of 5 not assessed yet (5 low-ranked ones are a separate question)? ~3 calls" in str(question["text"])  # type: ignore[index]
     assert str(question["text"]).endswith("(2 more after these 3)")  # type: ignore[index]
     assert (low_question["skipped"], low_question["batch"], low_question["more_after"]) == (5, 3, 2)  # type: ignore[index]
-    assert low_question["text"] == "5 low-ranked ones are skipped (rank below 50); assess the newest 3 of those too? ~3 calls (2 more after these 3)"  # type: ignore[index]
+    assert low_question["text"] == "5 low-ranked ones are skipped (rank below 50); assess the top 3 by rank of those too? ~3 calls (2 more after these 3)"  # type: ignore[index]
 
     yes = _new(fx, peek=True, assess=True)
 
@@ -462,7 +462,7 @@ def test_assess_these_is_the_newest_batch_and_says_the_total(tmp_path: Path, mon
     assert asked["status"] == "ask" and fx.base.model.calls == calls
     question = asked["question"]
     assert (question["to_assess"], question["batch"], question["more_after"], question["estimate"]["calls"]) == (5, 3, 2, 3)  # type: ignore[index]
-    assert str(question["text"]).startswith("Assess the newest 3 of 5 postings") and str(question["text"]).endswith("(2 more after these 3)")  # type: ignore[index]
+    assert str(question["text"]).startswith("Assess the top 3 by rank of 5 postings") and str(question["text"]).endswith("(2 more after these 3)")  # type: ignore[index]
     assert (asked["counts"]["to_assess"], asked["counts"]["batch"], asked["counts"]["more_after"]) == (5, 3, 2)  # type: ignore[index]
 
     done = posting_search.assess_these(fx.home_root, fx.target, jobs=jobs, approve=True, now=NOW)

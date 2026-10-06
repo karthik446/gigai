@@ -51,10 +51,11 @@ THE FLOW
   batch starts and lines as it goes ("assessed 120 of 333 · ~25 min left"),
   the time left from the recorded average per call until the batch has a
   pace of its own.
-- 50 AT A TIME (0110-10-11, the operator's rule): every yes acts on the NEWEST
-  50 and never more (:data:`BATCH_LIMIT`, :func:`newest_batch`: by the day
-  the posting went up, else by when Scout first saw it). Each question says
-  the real total and the 50 ("re-assess the newest 50 of 422? ~50 calls ...
+- 50 AT A TIME (0110-10-11, the operator's rule; 0.1.11.2: by rank): every yes
+  acts on the TOP 50 BY RANK and never more (:data:`BATCH_LIMIT`,
+  :func:`top_ranked_batch`: the best rank score first; postings not ranked
+  yet after the ranked ones, the newest first). Each question says
+  the real total and the 50 ("re-assess the top 50 by rank of 422? ~50 calls ...
   (372 more after these 50)"), its estimate is the batch's, and it carries
   ``batch`` and ``more_after`` beside the total. After a yes that left some,
   ``assessed`` / ``reassessed`` also carry ``more_after`` and ``next`` (the
@@ -152,7 +153,7 @@ FIRST_USE_DAYS = 7
 ATTENTION_LIMIT = 10
 #: New postings listed in one response, in the grid's order; ``counts.new`` is all of them and the question counts all of them.
 NEW_ROWS_LIMIT = 50
-#: 0110-10-11 (the operator's rule): every batch offer and every batch command acts on the NEWEST 50 at a time, never more.
+#: 0110-10-11 (the operator's rule): every batch offer and every batch command acts on 50 at a time, never more (0.1.11.2: the top 50 by rank).
 BATCH_LIMIT = 50
 UNMET_SHOWN = 4
 EVIDENCE_SHOWN = 3
@@ -690,23 +691,33 @@ class BatchProgress:
             self._emit(line if left is None else f"{line} · {_about(left)} left")
 
 
-def _ranking(store: PipelineStore, views: Sequence[ProfileView], home_root: Path, target: Path) -> dict[str, object]:
-    """How far the background rank is, per active profile: ``ranked`` of ``total`` live matches."""
+def _ranking(
+    store: PipelineStore, views: Sequence[ProfileView], home_root: Path, target: Path, *, now: datetime | None = None,
+) -> dict[str, object]:
+    """How far the background rank is, per active profile: ``ranked`` of ``total`` live matches the rank lane will rank.
 
-    from .pipeline.rank_lane import rank_status
+    0.1.11.2: the lane ranks only the postings that went up in the last :data:`FIRST_USE_DAYS` days (the rule of
+    ``pipeline.rank_lane._unranked``: :func:`batch_date` after the window's start). An older posting with no score
+    stays "not ranked yet" for good, so it is not counted: ``total`` is the ranked postings plus the unranked ones
+    inside the window, and ``in_progress`` ends when the lane has nothing left to rank.
+    """
 
+    from .pipeline.rank_lane import _unranked, _window_start, rank_status
+
+    since = _window_start((now or datetime.now(UTC)).astimezone(UTC))  # the lane's own window and its own rule
     found = store.posting_rank_progress()
-    by_profile = [
-        {"profile_id": view.profile_id, "ranked": found.get(view.profile_id, (0, 0))[0], "total": found.get(view.profile_id, (0, 0))[1]}
-        for view in views
-    ]
+    by_profile = []
+    for view in views:
+        ranked = found.get(view.profile_id, (0, 0))[0]
+        by_profile.append({"profile_id": view.profile_id, "ranked": ranked, "total": ranked + len(_unranked(store, view.profile_id, since))})
     try:
         enabled = bool(rank_status(home_root, target)["enabled"])
     except (PipelineStoreError, OSError, ValueError):  # a display read: a setting that cannot be read is "not ranking"
         enabled = False
     return {
         "enabled": enabled,
-        "in_progress": enabled and any(item["ranked"] < item["total"] for item in by_profile),  # type: ignore[operator]
+        "in_progress": enabled and any(item["ranked"] < item["total"] for item in by_profile),
+        "window_days": FIRST_USE_DAYS,
         "by_profile": by_profile,
     }
 
@@ -831,7 +842,7 @@ def _question(
     ``low_rank`` (0110-10-02): how many new postings the assess threshold holds back; they are their own question.
     """
 
-    size = min(len(pairs), BATCH_LIMIT)  # 0110-10-11: a yes assesses the newest 50, never more
+    size = min(len(pairs), BATCH_LIMIT)  # 0110-10-11, 0.1.11.2: a yes assesses the top 50 by rank, never more
     model, found = _estimate(size, home_root=home_root, target=target)
     by_profile = _by_profile(pairs, views)
     labels = {view.profile_id: view.label for view in views}
@@ -877,7 +888,7 @@ def _stale_question(
     """
 
     asked = pairs or low
-    size = min(len(asked), BATCH_LIMIT)  # 0110-10-11: a yes re-assesses the newest 50, never more
+    size = min(len(asked), BATCH_LIMIT)  # 0110-10-11, 0.1.11.2: a yes re-assesses the top 50 by rank, never more
     model, found = _estimate(size, home_root=home_root, target=target)
     have = "has" if len(asked) == 1 else "have"
     those = "that one" if len(asked) == 1 else "those"
@@ -893,7 +904,7 @@ def _stale_question(
         flag, body = "--reassess-stale --include-low-rank", {"assess": False, "reassess_stale": True, "include_low_rank": True}
         text = (
             f"{len(low)} low-ranked (rank below {min_rank}) {have} only an old assessment and {'is' if len(low) == 1 else 'are'} left out; "
-            f"re-assess {f'the newest {size} of ' if size < len(low) else ''}{those} too? {cost}"
+            f"re-assess {f'the top {size} by rank of ' if size < len(low) else ''}{those} too? {cost}"
         )
     return {
         "kind": "reassess_stale",
@@ -915,7 +926,7 @@ def _low_rank_question(
 ) -> dict[str, object]:
     """0110-10-02: the new postings below the assess threshold, as their own question. Never answered by a plain yes."""
 
-    size = min(len(low), BATCH_LIMIT)  # 0110-10-11: its batch is the newest 50 too
+    size = min(len(low), BATCH_LIMIT)  # 0110-10-11, 0.1.11.2: its batch is the top 50 by rank too
     model, found = _estimate(size, home_root=home_root, target=target)
     one = len(low) == 1
     return {
@@ -930,7 +941,7 @@ def _low_rank_question(
         "yes": _answers(since, profile_id, flag="--yes --include-low-rank", body={"assess": True, "include_low_rank": True}),
         "text": (
             f"{len(low)} low-ranked {'one is' if one else 'ones are'} skipped (rank below {setting.assess_min_rank}); "
-            f"assess {f'the newest {size} of ' if size < len(low) else ''}{'that' if one else 'those'} too? {_calls(found['calls'])}{_tokens(found['tokens'])}"
+            f"assess {f'the top {size} by rank of ' if size < len(low) else ''}{'that' if one else 'those'} too? {_calls(found['calls'])}{_tokens(found['tokens'])}"
             f"{_more_words(size, len(low))}"
         ),
     }
@@ -970,10 +981,28 @@ def newest_batch(
     return ordered[:limit], max(0, len(ordered) - limit)
 
 
-def _newest_words(size: int, total: int) -> str:
-    """"the newest 50 of 422" when a batch is less than all of them; ``""`` when it is all."""
+def top_ranked_batch(
+    pairs: Sequence[tuple[str, str]], ranks: Mapping[tuple[str, str], int | None], dates: Mapping[tuple[str, str], str], *,
+    limit: int | None = None,
+) -> tuple[list[tuple[str, str]], int]:
+    """0.1.11.2: ``(the top ``limit`` of ``pairs`` BY RANK, how many are left for later)``: what a yes assesses.
 
-    return f"the newest {size} of {total}" if size < total else ""
+    The best rank score first; postings with one score the newest first (:func:`batch_date`), then by URL, so the
+    same call picks the same batch. A posting not ranked yet comes after every ranked one, the newest first: with
+    nothing ranked this is :func:`newest_batch`. ``limit`` is :data:`BATCH_LIMIT` unless given.
+    """
+
+    limit = BATCH_LIMIT if limit is None else limit
+    ordered = sorted(pairs)
+    ordered.sort(key=lambda pair: dates.get(pair, ""), reverse=True)  # stable
+    ordered.sort(key=lambda pair: (0, -score) if (score := ranks.get(pair)) is not None else (1, 0))  # stable
+    return ordered[:limit], max(0, len(ordered) - limit)
+
+
+def _newest_words(size: int, total: int) -> str:
+    """"the top 50 by rank of 422" when a batch is less than all of them; ``""`` when it is all."""
+
+    return f"the top {size} by rank of {total}" if size < total else ""
 
 
 def _more_words(size: int, total: int) -> str:
@@ -1100,8 +1129,8 @@ def scout_new(
     (``stale_question``): assess again the live postings that have only an
     old assessment. ``assess=True`` alone never does that. Either yes leaves
     out the postings below the assess threshold (``fit.assess_min_rank``)
-    unless ``include_low_rank``, and acts on the newest :data:`BATCH_LIMIT`
-    (50) of them, never more. ``progress`` gets
+    unless ``include_low_rank``, and acts on the top :data:`BATCH_LIMIT`
+    (50) of them by rank, never more. ``progress`` gets
     the progress lines of a batch (and how far the background rank is).
     Raises :class:`ScoutNewError` / ``PostingModelError`` /
     ``PipelineStoreError``.
@@ -1179,13 +1208,17 @@ def _scout_new(
             old = _stale_rows(store, profile_id)
             old_ranks = {(row.job, row.profile_id): row.rank_score for row in old}
             old_keep, old_low = split_low_rank(list(old_ranks), old_ranks, setting, include=include_low_rank)
-            # 0110-10-11: what "newest" is read from, for the batch of 50 a yes acts on.
+            # 0110-10-11, 0.1.11.2: what the batch of 50 a yes acts on is ordered by: the rank score, then the newest.
             dates.clear()
             dates.update({(row.job, row.profile_id): batch_date(row) for group in groups.values() for row in group})
             dates.update({(row.job, row.profile_id): batch_date(row) for row in old})
+            batch_ranks.clear()
+            batch_ranks.update(ranks)
+            batch_ranks.update(old_ranks)
             return new_keep, new_low, old_keep, old_low
 
         dates: dict[tuple[str, str], str] = {}
+        batch_ranks: dict[tuple[str, str], int | None] = {}
         groups = read_new()
         pairs, low_pairs, stale_pairs, low_stale = to_assess()
         new_count = len(groups)
@@ -1211,18 +1244,19 @@ def _scout_new(
             return _assess(todo, postings.posting_texts(home_root, rows), home_root=home_root, target=target, config=config, progress=lines)
 
         approved_new = bool(pairs) and assess is True
-        # 0110-10-11: a yes acts on the newest 50, never more; what is left is said with the call for the next 50.
+        # 0110-10-11: a yes acts on 50, never more; what is left is said with the call for the next 50.
+        # 0.1.11.2: the 50 are the TOP 50 BY RANK (:func:`top_ranked_batch`), no longer the newest.
         # One call that carries BOTH yeses still makes at most 50 model calls: the new postings first, the old
         # assessments in what is left of the 50 (none left: the stale question stays, with its own call).
-        new_batch, new_later = newest_batch(pairs, dates)
+        new_batch, new_later = top_ranked_batch(pairs, batch_ranks, dates)
         room = BATCH_LIMIT - len(new_batch) if approved_new else BATCH_LIMIT
-        stale_batch, stale_later = newest_batch(stale_pairs, dates, limit=room)
+        stale_batch, stale_later = top_ranked_batch(stale_pairs, batch_ranks, dates, limit=room)
         approved_stale = bool(stale_batch) and reassess_stale
         low_flag = " --include-low-rank" if include_low_rank else ""
         low_body = {"include_low_rank": True} if include_low_rank else {}
         if progress is not None and (approved_new or approved_stale):
             # A long batch is never silent, and a moving count is explained: how far the background rank is.
-            progress(f"ranking: {_ranking_line(_ranking(store, views, home_root, target), labels)}")
+            progress(f"ranking: {_ranking_line(_ranking(store, views, home_root, target, now=moment), labels)}")
         if approved_new:
             assessed = batch(new_batch, [group[0] for group in groups.values()], done_word="assessed", doing_word="assessing")
             if new_later:  # only then: a batch that was all of them answers what it always did
@@ -1354,7 +1388,7 @@ def _scout_new(
             "fit": setting.to_json(),
             "assessed": assessed,
             "reassessed": reassessed,
-            "ranking": _ranking(store, views, home_root, target),
+            "ranking": _ranking(store, views, home_root, target, now=moment),
             "pipeline": _pipeline_offer(store),
             "processed": processed,
             "postings": {
@@ -1621,6 +1655,7 @@ __all__ = [
     "is_preview",
     "mark_all_seen",
     "newest_batch",
+    "top_ranked_batch",
     "batch_date",
     "order_key",
     "posted_text",

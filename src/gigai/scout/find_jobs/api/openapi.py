@@ -354,7 +354,7 @@ _NEW_EXAMPLE: dict[str, object] = {
     "fit": {"assess_min_rank": 50, "weak_fit_below_percent": 40, "weak_fit_below_rank": 50, "source": "default"},
     "assessed": None,
     "reassessed": None,
-    "ranking": {"enabled": True, "in_progress": True, "by_profile": [{"profile_id": "prof_1", "ranked": 509, "total": 792}]},
+    "ranking": {"enabled": True, "in_progress": True, "window_days": 7, "by_profile": [{"profile_id": "prof_1", "ranked": 509, "total": 792}]},
     "pipeline": {
         "waiting": 3, "awaiting_approval": 2, "approvals": ["apv_0123456789abcdef0123456789abcdef"], "est_calls": 6,
         "command": "gigai scout new --process", "text": "3 waiting (2 need your approval), process now? ~6 calls",
@@ -395,14 +395,15 @@ _POSTINGS_EXAMPLE: dict[str, object] = {
     "schema_version": "scout-postings:1", "checked_at": "2026-10-03T09:30:00.000000Z",
     "filters": {"profile_ids": [], "query": None, "states": [], "window": None, "removed": False, "limit": 50, "offset": 0, "sort": "fit"},
     "anchor": {"last_checked_at": _NEW_SINCE, "since": _NEW_SINCE},
-    "counts": {"matched": 1, "shown": 1, "new": 1, "by_state": {"not_assessed": 1}, "weak_fit": 0},
+    "counts": {"matched": 1, "shown": 1, "new": 1, "by_state": {"not_assessed": 1}, "weak_fit": 0, "ranked_low": 0},
     "postings": {
         "_labels": _NEW_EXAMPLE["postings"]["_labels"],  # type: ignore[index]
         "rule": UNTRUSTED_TEXT_RULE,
-        "rows": [{**_NEW_EXAMPLE["postings"]["rows"][0], "assessment_basis": None}],  # type: ignore[index]
+        "rows": [{**_NEW_EXAMPLE["postings"]["rows"][0], "assessment_basis": None, "ranked_low": False}],  # type: ignore[index]
     },
     "profiles": [{"profile_id": "prof_1", "label": "Staff Engineer", "is_default": True, "matched": 1, "resume": {"record_id": "rec_1", "revision_id": "rev_1"}}],
     "rank": {"enabled": True, "calls_today": {"day": "2026-10-03", "used": 4, "limit": 100, "warn_at": 60, "warning": False, "reached": False}},
+    "ranking": {"enabled": True, "in_progress": True, "window_days": 7, "by_profile": [{"profile_id": "prof_1", "ranked": 509, "total": 792}]},
     "history": None,
 }
 _POSTINGS_ASSESS_EXAMPLE: dict[str, object] = {
@@ -425,6 +426,7 @@ _POSTINGS_ASSESS_EXAMPLE: dict[str, object] = {
     },
     "counts": {"selected": 1, "to_assess": 1, "already_current": 0, "not_found": 0, "low_rank_skipped": 0, "batch": 1, "more_after": 0},
     "low_rank": None,
+    "ranking": {"enabled": True, "in_progress": True, "window_days": 7, "by_profile": [{"profile_id": "prof_1", "ranked": 509, "total": 792}]},
     "not_found": [], "approval": None, "assessed": None,
     "postings": _POSTINGS_EXAMPLE["postings"],
     "profiles": _POSTINGS_EXAMPLE["profiles"],
@@ -448,7 +450,13 @@ _POSTINGS_NOTE = (
     "assessed), then the rank score, then the newest. A posting whose state is `weak_fit` (it waits on answers, its `fit` "
     "is below `fit.weak_fit_below_percent`, 40, AND its rank score is below `fit.weak_fit_below_rank`, 50) is left out "
     "unless `state=weak_fit` asks for it; it asks no question (`open_questions` is empty) and `counts.weak_fit` is how many "
-    "the other filters select, listed or not. `counts.matched` is every posting the filters keep, "
+    "the other filters select, listed or not. RANKED LOW (0.1.11.2): a posting nothing assessed yet whose KNOWN rank score is "
+    "below `fit.weak_fit_below_rank` (50) is left out too, unless `state=ranked_low` asks for it: it is collapsed, never "
+    "filtered away. `counts.ranked_low` is how many the other filters select, and each row says `ranked_low` (true only for "
+    "such a posting). A posting not ranked yet is never ranked low: it is listed after the ranked ones (`score_text` \"not "
+    "ranked yet · not assessed\"); an assessed posting keeps the rules above whatever its rank. `ranking` is how far the "
+    "background rank is (`{enabled, in_progress, window_days, by_profile: [{profile_id, ranked, total}]}`; `total` is the ranked postings plus the unranked ones that went up in the last `window_days` days, the only ones the rank lane ranks): while `in_progress` the order "
+    "is of what is ranked so far. `counts.matched` is every posting the filters keep, "
     "`counts.new` those first seen since the last check (`anchor.since`; the last 7 days before the first check). This call "
     "never moves that anchor. `sort=newest_posted` orders the rows by the day the posting went up instead, the newest first "
     "(a posting the board gives no date for: by when Scout first saw it); `sort=fit`, the default, is the order above. "
@@ -482,9 +490,10 @@ _NEW_NOTE = (
     "whose rank score is at least `fit.assess_min_rank` (50; one not ranked yet is assessed): the ones below are "
     "`counts.low_rank_skipped` and their own question, `low_rank_question` (count, estimate, the yes), answered by "
     "`include_low_rank: true` beside `assess: true`. 50 AT A TIME: every yes (`assess`, `reassess_stale`, with or without "
-    "`include_low_rank`) acts on the NEWEST 50 postings and never more (by `published_at`, else `first_seen_at`). Each question "
+    "`include_low_rank`) acts on the TOP 50 postings BY RANK and never more (0.1.11.2: the best rank score first; a posting "
+    "not ranked yet after the ranked ones, by `published_at`, else `first_seen_at`, the newest first). Each question "
     "carries the total (`to_assess` / `to_reassess` / `skipped`), `batch` (what its yes acts on, at most 50) and `more_after`; "
-    "its `estimate` and `text` are the batch's (\"re-assess the newest 50 of 422? ~50 calls ... (372 more after these 50)\"). "
+    "its `estimate` and `text` are the batch's (\"re-assess the top 50 by rank of 422? ~50 calls ... (372 more after these 50)\"). "
     "After a yes that left some, `assessed` / `reassessed` also carry `more_after` and `next` (`{cli, api}`: the call for the "
     "next 50); neither key is there when the batch was all of them. `fit` at the top level is the three numbers in force (the `fit` block "
     "of the project's settings file; each 0 to 100, 0 switches that rule off). Each posting is listed "
@@ -1973,7 +1982,7 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
             "is then `job_text_unavailable`, or `job_fetch_failed` for `network_error`). `posting_requirements_unreadable` (the "
             "model answered and a guard refused the answer; nothing is stored) carries the guard as its `reason`: "
             "`matched_on_too_few_requirements` (a Matched on fewer than three requirement rows for a long posting) or "
-            "`no_requirements_in_text`. One call assesses the newest 50 and never more. The call waits for the model: allow a minute per four "
+            "`no_requirements_in_text`. One call assesses the top 50 by rank and never more. The call waits for the model: allow a minute per four "
             "postings. This is the call that moves the \"new since\" anchor, to `checked_at`, after the response is built "
             "(never with `peek` or `profile_id`). " + _NEW_NOTE
         ),
@@ -2181,7 +2190,7 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
         params=(
             _q("profile_id", "string", "Only postings this active profile matches; repeat it, or separate ids with commas. One id shows that profile's own row."),
             _q("q", "string", "Words that must all be in the title, company or location."),
-            _q("state", "string", "Keep these states (repeat or separate with commas): not_assessed, needs_answers, matched, has_gap (matched, with a must-have confirmed unmet), not_a_match, tailored, assessed (any assessment), recommended (the Scout label), weak_fit (listed only when asked for)."),
+            _q("state", "string", "Keep these states (repeat or separate with commas): not_assessed, needs_answers, matched, has_gap (matched, with a must-have confirmed unmet), not_a_match, tailored, assessed (any assessment), recommended (the Scout label), weak_fit (listed only when asked for), ranked_low (not assessed and ranked below `fit.weak_fit_below_rank`, 50: listed only when asked for)."),
             _q("window", "string", "new: first seen since the last check. 7d / 30d: posted (the day it went up; else first seen) in the last 7 or 30 days.", enum=("new", "7d", "30d")),
             _q("sort", "string", "fit (the default): the grid's order. newest_posted: the day the posting went up, the newest first.", enum=("fit", "newest_posted")),
             _q("removed", "string", "1: the postings the board no longer lists, instead of the live ones.", enum=("0", "1", "true", "false")),
@@ -2249,9 +2258,11 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
             "not ranked yet is not) is left out of the batch and counted (`counts.low_rank_skipped`); `low_rank` is then the "
             "separate question for those (`{kind, skipped, min_rank, estimate, text, yes}`; its `yes.api` body carries "
             "`include_low_rank: true`), and when only low-ranked postings are selected the status is `ask` with `question.to_assess` 0. "
-            "50 AT A TIME: one approval assesses the NEWEST 50 of them and never more (by the day the posting went up, else by when "
-            "Scout first stored it). `question.to_assess` and `counts.to_assess` are all of them, `batch` what this approval "
-            "assesses (at most 50) and `more_after` what is left; the estimate and the text are the batch's (\"Assess the newest 50 "
+            "50 AT A TIME: one approval assesses the TOP 50 of them BY RANK and never more (0.1.11.2: the best rank score first; a "
+            "posting not ranked yet after the ranked ones, the newest first by the day the posting went up, else by when "
+            "Scout first stored it). `ranking` (`{enabled, in_progress, window_days, by_profile: [{profile_id, ranked, total}]}`, as GET /api/postings) says how far "
+            "the background rank is: while `in_progress`, the 50 are the top of what is ranked so far. `question.to_assess` and `counts.to_assess` are all of them, `batch` what this approval "
+            "assesses (at most 50) and `more_after` what is left; the estimate and the text are the batch's (\"Assess the top 50 by rank "
             "of 120 postings? ~50 calls ... (70 more after these 50)\"), and the same call again assesses the next 50. "
             "The call waits for the model: allow a minute per four postings. "
             "No response mixes: posting text only, nothing the user wrote."

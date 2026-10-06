@@ -22,6 +22,20 @@ operator-visible capability and must link to the relevant release or evidence.
 
 ## Released versions
 
+### 0.1.11.2
+
+- **Jobs are ordered by rank again, and weak fits are collapsed.** The Jobs list (and `gigai scout jobs
+  list`) is ordered best fit first: assessed postings by fit, then the rest by rank, then the newest. A
+  posting that is not assessed yet and ranked below 50 is no longer shown as a candidate: it is collapsed
+  under a count ("12 weak fits, ranked low: show", or `--state ranked_low`). Nothing is filtered away: the
+  count opens the list. A posting that is not ranked yet stays in the list, after the ranked ones, and
+  says "not ranked yet". Sponsorship stays a label and never hides a posting.
+- **Assess the top 50 by rank.** The Jobs page shows "N not assessed" with an "Assess all" button. It
+  asks first, as before: the top 50 by rank, the estimate, the model and how many are left after these
+  50. `gigai scout new`, "Assess these" and the API take the same top 50 by rank instead of the newest
+  50; postings you select or name are still the ones assessed. While ranking is still running, the page
+  and the question say how many postings are ranked so far.
+
 ### 0.1.11.1
 
 CI: one cut-down lane for the PR and the release pre-check (about 5 minutes). The full suite, the browser

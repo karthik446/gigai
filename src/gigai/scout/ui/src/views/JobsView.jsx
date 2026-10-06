@@ -12,6 +12,7 @@ import {
   REMOVED_FILTER,
   approvalDialog,
   approvalBody,
+  assessAllBody,
   assessAskBody,
   assessOutcomeLine,
   countLine,
@@ -21,18 +22,22 @@ import {
   jobsHash,
   keepActiveProfiles,
   needsAnswers,
+  notAssessedLine,
   pageCount,
   pageNumbers,
   parseJobsHash,
   postedLine,
   profileChips,
   profileTags,
+  rankedLowLine,
+  rankingLine,
   rowChips,
   scoreText,
   secondProfiles,
   stateChips,
   timeChips,
   toggleProfile,
+  toggleRankedLow,
   toggleState,
   toggleSort,
   toggleWindow,
@@ -58,6 +63,12 @@ import { sourcesStrip } from "../sourcesStripModel.js";
 //   order chip      0110-10-14: "Newest posted" (off by default: the best
 //                   fit first). On, the server orders by the day the posting
 //                   went up (`sort=newest_posted`); it is not a filter
+//   count lines     0.1.11.2: "N weak fits, ranked low: show" (not-assessed
+//                   postings ranked below 50 are collapsed out of the list;
+//                   the line lists them, it is never a hard filter), "N not
+//                   assessed" with "Assess all" (the same question and
+//                   approval dialog: the top 50 by rank, the estimate, what is
+//                   left), and "Ranking is still running: X of Y ranked"
 //   Assess these    the selected rows, else the filter. The server is asked
 //                   first (count and estimate); nothing is assessed until the
 //                   approval dialog's Approve
@@ -464,6 +475,9 @@ export default function JobsView({ selectedProfileId, onSelectProfile, applicati
   }
   const totals = counts ? (hasFilter(filter) && totalRef.current ? totalRef.current : { matched, needsAnswers: needsAnswers(counts) }) : null;
   const busy = asking || approving;
+  const lowLine = rankedLowLine(counts, filter.states);
+  const waitingAssess = filter.removed ? null : notAssessedLine(counts);
+  const ranking = rankingLine(response && response.ranking);
 
   return (
     <div>
@@ -617,6 +631,35 @@ export default function JobsView({ selectedProfileId, onSelectProfile, applicati
               )}
             </span>
           </div>
+          {/* 0.1.11.2: the collapse (never a hard filter), what waits for an assessment, and how far the rank is. */}
+          {lowLine && (
+            <div className="result-count" data-testid="ranked-low-line" data-active={lowLine.active ? "true" : undefined}>
+              {lowLine.text}:{" "}
+              <button type="button" className="link-button" data-action="toggle-ranked-low" onClick={() => setFilter((current) => ({ ...current, states: toggleRankedLow(current.states) }))}>
+                {lowLine.action}
+              </button>
+            </div>
+          )}
+          {waitingAssess && (
+            <div className="result-count" data-testid="not-assessed-line">
+              <span data-role="not-assessed-count">{waitingAssess}</span>{" "}
+              <button
+                type="button"
+                className="button small"
+                data-testid="assess-all"
+                disabled={busy || loading}
+                title="Asks first: the top 50 by rank, the estimate and how many are left. Nothing is assessed until you approve."
+                onClick={() => ask(assessAllBody({ filter, rows }))}
+              >
+                Assess all
+              </button>
+            </div>
+          )}
+          {ranking && (
+            <div className="result-count muted" data-testid="ranking-line">
+              {ranking}
+            </div>
+          )}
         </div>
       </section>
 

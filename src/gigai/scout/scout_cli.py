@@ -2730,8 +2730,8 @@ def metrics_command(
 
 @scout_group.command("new")
 @click.option("--profile", "profile_id", help="Only this active profile's postings. A filtered call does not move the \"new since\" anchor.")
-@click.option("--yes", "yes", is_flag=True, help="Assess the new postings no profile has assessed, without asking (one model call each): the newest 50, never more in one call. Never the old assessments: that is --reassess-stale.")
-@click.option("--reassess-stale", "reassess_stale", is_flag=True, help="The yes to the other question: assess again the postings that have only an old assessment (one model call each): the newest 50, never more in one call. Can be combined with --yes.")
+@click.option("--yes", "yes", is_flag=True, help="Assess the new postings no profile has assessed, without asking (one model call each): the top 50 by rank, never more in one call. Never the old assessments: that is --reassess-stale.")
+@click.option("--reassess-stale", "reassess_stale", is_flag=True, help="The yes to the other question: assess again the postings that have only an old assessment (one model call each): the top 50 by rank, never more in one call. Can be combined with --yes.")
 @click.option("--include-low-rank", "include_low_rank", is_flag=True, help="With --yes or --reassess-stale: also the low-ranked postings (rank below fit.assess_min_rank, 50), which a yes leaves out by default.")
 @click.option("--no-assess", "no_assess", is_flag=True, help="Do not ask and do not assess: show the new postings ranked only. Never waits for an answer, in a terminal or without one: the offers are printed with their counts.")
 @click.option("--yours", "yours", is_flag=True, help="The separate call: what matches, from your own resume and answers. Never shown next to posting text; never moves the anchor.")
@@ -2757,10 +2757,11 @@ def new_command(
     cost. --yes never answers it; --reassess-stale does.
 
     50 at a time: every yes (--yes, --reassess-stale, an answer at a prompt)
-    acts on the newest 50 postings and never more. Each question says the
-    real total, the 50 and what the 50 cost ("re-assess the newest 50 of
-    422? ~50 calls ... (372 more after these 50)"); the same command again
-    does the next 50.
+    acts on the top 50 postings by rank and never more (a posting not ranked
+    yet comes after the ranked ones, the newest first). Each question says
+    the real total, the 50 and what the 50 cost ("re-assess the top 50 by
+    rank of 422? ~50 calls ... (372 more after these 50)"); the same command
+    again does the next 50.
 
     The "new since" time moves when the run has done its work: a run you
     leave at a question (Ctrl-C) changes nothing, and the next run shows
@@ -2901,7 +2902,7 @@ def _jobs_errors() -> tuple[type[BaseException], ...]:
 @jobs_group.command("list")
 @click.option("--profile", "profile_ids", multiple=True, help="Only postings this active profile matches (repeatable). With one profile, its own row is shown.")
 @click.option("--query", "query", help="Words that must all be in the title, company or location.")
-@click.option("--state", "states", multiple=True, help="Keep this state (repeatable): not_assessed, needs_answers, matched, has_gap, not_a_match, tailored, assessed, recommended, weak_fit. A weak fit (waits on answers, few requirements met, low rank) is listed only with --state weak_fit.")
+@click.option("--state", "states", multiple=True, help="Keep this state (repeatable): not_assessed, needs_answers, matched, has_gap, not_a_match, tailored, assessed, recommended, weak_fit, ranked_low. A weak fit (waits on answers, few requirements met, low rank) is listed only with --state weak_fit; a posting not assessed yet and ranked below 50 only with --state ranked_low.")
 @click.option("--window", "window", type=click.Choice(["new", "7d", "30d"]), help="new: first seen since your last check. 7d / 30d: published in the last 7 or 30 days.")
 @click.option("--removed", "removed", is_flag=True, help="The postings the board no longer lists, instead of the live ones.")
 @click.option("--history", "history", is_flag=True, help="Also what old find-jobs runs assessed, with each run's provenance.")
@@ -2962,7 +2963,8 @@ def jobs_assess_command(
     many would be assessed and what it will cost, and asks (in a terminal) or
     stops there (--json, or no terminal). Each posting is assessed for the
     profile it fits best, from the posting text already stored (a posting with
-    none has its description fetched first, one request for it alone).
+    none has its description fetched first, one request for it alone). One
+    approval assesses the top 50 by rank and never more.
 
     Postings ranked below 50 (the fit.assess_min_rank setting) are left out
     and counted; they are asked about separately, and --include-low-rank

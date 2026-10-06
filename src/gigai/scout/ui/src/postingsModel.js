@@ -126,6 +126,56 @@ export function toggleState(states, value) {
   return current.includes(value) ? current.filter((item) => item !== value) : current.concat(value);
 }
 
+// 0.1.11.2: RANKED LOW. A posting nothing assessed yet whose known rank is below the weak-fit rank (50) is a weak fit by
+// its rank alone: the server leaves it out of the list (`counts.ranked_low` says how many) and lists it only for
+// `state=ranked_low`. A collapse, never a hard filter: the count line opens them. A posting not ranked yet is never
+// ranked low: it stays in the list, after the ranked ones, and its score column says "not ranked yet".
+export const RANKED_LOW = "ranked_low";
+
+export function rankedLowCount(counts) {
+  const value = counts && counts.ranked_low;
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : 0;
+}
+
+// The collapse line: {text, action, active}, or null when there is none to show and the filter is off.
+//   "12 weak fits, ranked low" + "show"; while they are listed: "Listing the 12 weak fits, ranked low" + "back to the list".
+export function rankedLowLine(counts, states) {
+  const count = rankedLowCount(counts);
+  const active = (states || []).includes(RANKED_LOW);
+  if (!count && !active) {
+    return null;
+  }
+  const words = `${count} weak fit${count === 1 ? "" : "s"}, ranked low`;
+  return active ? { text: `Listing the ${words}`, action: "back to the list", active } : { text: words, action: "show", active };
+}
+
+// A click on the collapse line: only the ranked-low postings, or the list as it was without them.
+export function toggleRankedLow(states) {
+  const current = states || [];
+  return current.includes(RANKED_LOW) ? current.filter((item) => item !== RANKED_LOW) : [RANKED_LOW];
+}
+
+// 0.1.11.2: "N not assessed", of the postings the list holds now (`counts.by_state.not_assessed`); null when none.
+export function notAssessedCount(counts) {
+  const value = counts && counts.by_state && counts.by_state.not_assessed;
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : 0;
+}
+
+export function notAssessedLine(counts) {
+  const count = notAssessedCount(counts);
+  return count ? `${count} not assessed` : null;
+}
+
+// 0.1.11.2: while the background rank has postings left (`ranking` of GET /api/postings and of the ASK), the order and
+// a batch are of what is ranked SO FAR. Said, so a click during ranking is not silently the top of a half-ranked list.
+export function rankingLine(ranking) {
+  if (!ranking || !ranking.in_progress || !Array.isArray(ranking.by_profile)) {
+    return null;
+  }
+  const sum = (key) => ranking.by_profile.reduce((total, item) => total + (Number.isInteger(item && item[key]) ? item[key] : 0), 0);
+  return `Ranking is still running: ${sum("ranked")} of ${sum("total")} ranked. The order, and the top 50 by rank, are of what is ranked so far.`;
+}
+
 // 0110-10-14: the list's ORDER, beside the filters. Off (null) is the server's own order (the fit, the rank, the newest
 // seen); on, `sort=newest_posted`: the day the posting went up, the newest first. An order is not a filter: it selects
 // nothing (`hasFilter` does not count it), but it rides with them in the request and in the address.
@@ -276,6 +326,10 @@ export function rowChips(row) {
     chips.push({ kind: "state", label: ROW_STATE_WORDS[state] || humanCode(state), tone: state === "not_a_match" ? "danger" : state === "has_gap" ? "warn" : "ok" });
   }
   chips.push(assessed ? { kind: "assessed", label: "Assessed", tone: "plain" } : { kind: "state", label: ROW_STATE_WORDS.not_assessed, tone: "plain" });
+  if (!assessed && row.ranked_low === true) {
+    // 0.1.11.2: listed only under "weak fits, ranked low"; never a verdict.
+    chips.push({ kind: "rank", label: "Ranked low", tone: "plain", testId: "ranked-low-chip", title: "Not assessed, and its rank is below the weak-fit rank: left out of the main list." });
+  }
   if (row.label === "recommended" || row.label === "needs_attention") {
     chips.push({
       kind: "label",
@@ -428,9 +482,30 @@ export function assessAskBody({ selectedIds = [], filter = EMPTY_FILTER, rows = 
   return body;
 }
 
+// 0.1.11.2: the ASK of "Assess all" (beside "N not assessed"): every not-assessed posting the filter selects, whatever
+// is ticked. The server answers the top 50 by rank, the estimate and how many are left; the low-ranked ones are its
+// second question. On the ranked-low list it asks about those. Several profile chips: the page's rows, as above.
+export function assessAllBody({ filter = EMPTY_FILTER, rows = [] } = {}) {
+  const profiles = filter.profileIds || [];
+  if (profiles.length > 1) {
+    return { jobs: rows.filter((row) => (row.state || "not_assessed") === "not_assessed").map((row) => row.job_identity) };
+  }
+  const body = { states: [(filter.states || []).includes(RANKED_LOW) ? RANKED_LOW : "not_assessed"] };
+  if (profiles.length === 1) {
+    body.profile_id = profiles[0];
+  }
+  if (filter.query && filter.query.trim()) {
+    body.query = filter.query.trim();
+  }
+  if (filter.window) {
+    body.window = filter.window;
+  }
+  return body;
+}
+
 // What the approval dialog shows, from the ASK's answer. Null unless the
 // server asked (`status: "ask"`): nothing is assessed before the Approve.
-//   count           postings Approve assesses: 0110-10-11, the newest 50 at a time and never more
+//   count           postings Approve assesses: 0110-10-11, 50 at a time and never more; 0.1.11.2: the top 50 by rank
 //                   (`question.batch`; an older server has no cap and gives none: then all of them)
 //   total           all the postings that are not assessed (`question.to_assess`)
 //   moreAfter       how many are left after this batch; "Assess these" again takes the next 50
@@ -442,6 +517,7 @@ export function assessAskBody({ selectedIds = [], filter = EMPTY_FILTER, rows = 
 //   lowRank         0110-10-02: the postings ranked below the assess threshold, left out of `count`:
 //                   {count, batch, moreAfter, minRank, calls, tokens, seconds, approveBody} (the body that assesses
 //                   them too; `batch` of them at a time), or null
+//   ranking         0.1.11.2: the "ranking is still running" line (rankingLine), or null
 export function approvalDialog(response, profiles) {
   const question = response && response.status === "ask" ? response.question : null;
   if (!question) {
@@ -480,6 +556,7 @@ export function approvalDialog(response, profiles) {
     seconds: secondsText(estimate.seconds),
     basisCalls: typeof estimate.basis_calls === "number" ? estimate.basis_calls : 0,
     approveBody: yes && typeof yes === "object" ? { ...yes, approve: true } : null,
+    ranking: rankingLine(response.ranking),
   };
 }
 
@@ -502,15 +579,15 @@ export function lowRankLine(lowRank) {
   }
   const one = lowRank.count === 1;
   const below = lowRank.minRank === null ? "" : ` (rank below ${lowRank.minRank})`;
-  // 0110-10-11: its batch is the newest 50 too.
+  // 0110-10-11, 0.1.11.2: its batch is the top 50 by rank too.
   const more = lowRank.moreAfter > 0;
-  const which = more ? `the newest ${lowRank.batch} of those` : one ? "that" : "those";
+  const which = more ? `the top ${lowRank.batch} by rank of those` : one ? "that" : "those";
   const after = more ? ` (${lowRank.moreAfter} more after these ${lowRank.batch})` : "";
   return `${lowRank.count} low-ranked ${one ? "one is" : "ones are"} skipped${below}. Assess ${which} too? ${estimateLine(lowRank)}${after}`;
 }
 
 // 0.1.11.2 (UAT-010): the dialog's line while the approved batch runs: the count is the request's own (`count`, the
-// newest-50 batch the Approve sent); the server streams no progress, so there is no done/total. With the low-ranked box
+// top-50-by-rank batch the Approve sent); the server streams no progress, so there is no done/total. With the low-ranked box
 // ticked the count is not the one shown at the ask, so the line names no number.
 export function assessingLine(dialog, includeLowRank = false) {
   if (includeLowRank && dialog.lowRank) {
@@ -519,13 +596,13 @@ export function assessingLine(dialog, includeLowRank = false) {
   return `Assessing ${dialog.count} posting${dialog.count === 1 ? "" : "s"}… this can take a minute.`;
 }
 
-// 0110-10-11: the dialog's title. "Assess the newest 50 of 120 postings?" when a batch is less than all of them.
+// 0110-10-11, 0.1.11.2: the dialog's title. "Assess the top 50 by rank of 120 postings?" when a batch is less than all of them.
 export function approvalTitle(dialog) {
   if (dialog.count === 0 && dialog.lowRank) {
     return "Only low-ranked postings are selected";
   }
   if (dialog.moreAfter > 0) {
-    return `Assess the newest ${dialog.count} of ${dialog.total} postings?`;
+    return `Assess the top ${dialog.count} by rank of ${dialog.total} postings?`;
   }
   return `Assess ${dialog.count} posting${dialog.count === 1 ? "" : "s"}?`;
 }
@@ -536,7 +613,7 @@ export function approvalBatchLine(dialog) {
     return null;
   }
   const next = Math.min(dialog.count, dialog.moreAfter);
-  return `the newest ${dialog.count} now, never more in one go. ${dialog.moreAfter} more after these ${dialog.count}: "Assess these" again takes the next ${next}.`;
+  return `the top ${dialog.count} by rank now, never more in one go. ${dialog.moreAfter} more after these ${dialog.count}: "Assess these" again takes the next ${next}.`;
 }
 
 // "~12 model calls, ~230k tokens, ~4.5 min" (the parts the history can say).
@@ -564,7 +641,7 @@ export function assessOutcomeLine(response) {
   const assessed = response.assessed || {};
   const failed = Array.isArray(assessed.failed) ? assessed.failed : [];
   const codes = [...new Set(failed.map((item) => item.error_code).filter(Boolean))];
-  // 0110-10-11: a batch is the newest 50; what is left is said with how to go on.
+  // 0110-10-11, 0.1.11.2: a batch is the top 50 by rank; what is left is said with how to go on.
   const left = response.counts && Number.isInteger(response.counts.more_after) ? response.counts.more_after : 0;
   const more = left > 0 ? ` ${left} more not assessed yet: 50 at a time, "Assess these" again takes the next.` : "";
   return `Assessed ${assessed.assessed ?? 0} of ${assessed.requested ?? 0}.${codes.length ? ` Not assessed: ${codes.join(", ")}.` : ""}${skipped}${more}`;
@@ -660,7 +737,7 @@ export function parseJobsHash(hash) {
   const text = typeof hash === "string" ? hash : "";
   const mark = text.indexOf("?");
   const query = new URLSearchParams(mark < 0 ? "" : text.slice(mark + 1));
-  const states = query.getAll("state").filter((value) => STATE_FILTERS.some((option) => option.value === value));
+  const states = query.getAll("state").filter((value) => value === RANKED_LOW || STATE_FILTERS.some((option) => option.value === value));
   const window = query.get("window");
   return {
     filter: {

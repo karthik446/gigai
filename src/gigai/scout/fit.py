@@ -26,6 +26,15 @@ assess only the postings whose rank score is at least ``assess_min_rank``;
 the ones below are counted and offered as their own question. A posting with
 no rank score yet is not low-ranked: nothing says so.
 
+RANKED LOW (:func:`is_ranked_low`, 0.1.11.2). A posting nothing assessed yet
+whose KNOWN rank score is below ``weak_fit_below_rank`` is a weak fit by its
+rank alone: the search leaves it out of the default list, counts it
+(``counts.ranked_low``) and lists it under the ``ranked_low`` filter
+(:data:`RANKED_LOW`). It is a collapse, never a hard filter: the count opens
+the list. A posting not ranked yet is never ranked low (it stays in the list,
+at the bottom, "not ranked yet"), and an assessed posting keeps the rules
+above. The row's stored state stays ``not_assessed``.
+
 TUNING. The defaults are the constants below. A project overrides them in
 the ``fit`` block of its settings file
 (``<home>/scout/<project_id>/settings.json``, beside ``pipeline`` and
@@ -51,6 +60,9 @@ from pathlib import Path
 #: The state of a needs-answers posting that is a weak fit (``posting.state``, the search's ``state`` filter).
 WEAK_FIT = "weak_fit"
 NEEDS_ANSWERS = "needs_answers"
+NOT_ASSESSED = "not_assessed"
+#: 0.1.11.2: the search's filter for the not-assessed postings ranked below ``weak_fit_below_rank`` (never a stored state).
+RANKED_LOW = "ranked_low"
 
 #: Weak fit: the fit number is below this AND the rank score is below :data:`DEFAULT_WEAK_FIT_BELOW_RANK`.
 DEFAULT_WEAK_FIT_BELOW_PERCENT = 40
@@ -220,6 +232,12 @@ def is_low_rank(rank_score: int | None, setting: FitSetting = DEFAULT_SETTING) -
     return rank_score is not None and rank_score < setting.assess_min_rank
 
 
+def is_ranked_low(state: str, rank_score: int | None, setting: FitSetting = DEFAULT_SETTING) -> bool:
+    """0.1.11.2: a NOT-ASSESSED posting with a KNOWN rank score below the weak-fit rank. One not ranked yet is never ranked low."""
+
+    return state == NOT_ASSESSED and rank_score is not None and rank_score < setting.weak_fit_below_rank
+
+
 __all__ = [
     "DEFAULT_ASSESS_MIN_RANK",
     "DEFAULT_SETTING",
@@ -227,12 +245,15 @@ __all__ = [
     "DEFAULT_WEAK_FIT_BELOW_RANK",
     "MUST_HAVE_WEIGHT",
     "NEEDS_ANSWERS",
+    "NOT_ASSESSED",
+    "RANKED_LOW",
     "WEAK_FIT",
     "FitSetting",
     "assessment_is_weak_fit",
     "fit_percent",
     "fit_setting",
     "is_low_rank",
+    "is_ranked_low",
     "is_weak_fit",
     "plain_percent",
     "shown_state",
