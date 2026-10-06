@@ -18,7 +18,7 @@ import PipelineTimeline from "../components/PipelineTimeline.jsx";
 import { useAnswerDrafts } from "../answerDrafts.js";
 import { assessSendsLine, assessSummaryLines, reassessErrorText, reassessGate } from "../answersModel.js";
 import { REASSESS_LABEL, coverageRows, gateOf, headerChip, staleCodes, staleItems } from "../jobResumeModel.js";
-import { postedLine, postingDate } from "../postingsModel.js";
+import { applicationBadge, postedLine, postingDate } from "../postingsModel.js";
 import { displayCompanyName, notAssessedReasonDetail, thinPostingLine, unchangedSinceLabel } from "../display.js";
 import {
   ORIGIN_JOB_PAGE,
@@ -35,7 +35,7 @@ import {
   workModeLabel,
   h1bLabel,
 } from "../jobModel.js";
-import { assessmentStaleFor, eventActionLabel, fitStateFor, jobStateFor, staleAssessmentNote, staleReasonWords } from "../jobStateModel.js";
+import { assessmentStaleFor, eventActionLabel, fitStateFor, isApplicationState, jobStateFor, staleAssessmentNote, staleReasonWords } from "../jobStateModel.js";
 import { modelTargetLabel } from "../modelTargets.js";
 import { ASSESSMENTS_HASH, JOBS_HASH } from "../routing.js";
 
@@ -501,6 +501,7 @@ export default function JobPage({
 
   const pasted = Boolean(job.quick && job.quick.job && job.quick.job.fetch_kind === "pasted" && job.status === "on_demand");
   const state = job.state || jobStateFor(job, null, tailoredJobId ? [tailoredJobId] : null);
+  const applicationLabel = isApplicationState(state.state) ? applicationBadge(state) : null; // 0.1.11.3: "Applied · Oct 6", the latest status
   const posted = postedLine(rowDated ? listedRow : servedDates);
   // When the assessment shown was made (a re-assessment keeps the first one's `created_at`).
   const assessedTime = job.assessmentSource === "quick" ? assessedAt(job) : "";
@@ -574,6 +575,11 @@ export default function JobPage({
               )}
               <HelpLink topic="verdict" />
               {(visaRequired || h1bFigure) && <SponsorshipBadge sponsorship={job.sponsorship} h1b={h1bFigure} />}
+              {applicationLabel && (
+                <span className={`state-pill tone-${applicationLabel.status === "rejected" ? "danger" : applicationLabel.status === "withdrawn" ? "plain" : "ok"}`} data-role="application-badge" data-status={applicationLabel.status} title={applicationLabel.title}>
+                  {applicationLabel.label}
+                </span>
+              )}
               {job.status === "carried_forward" && <span className="tag">{unchangedSinceLabel(job.fromRunDate)}</span>}
             </div>
             {assessment && (

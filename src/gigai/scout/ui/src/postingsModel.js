@@ -99,6 +99,7 @@ export const STATE_FILTERS = [
   { value: "needs_answers", label: "Needs your answers" },
   { value: "assessed", label: "Assessed" },
   { value: "recommended", label: `${SCOUT_LABEL_NAME}: ${LABEL_WORDS.recommended}` },
+  { value: "applied", label: "Applied", title: "Jobs you marked applied, and the ones that moved on from there (interview, offer, rejected, withdrawn)." },
   { value: WEAK_FIT, label: "Weak fit", title: "Jobs that need answers from you, but match few of the requirements and rank low, so they are probably not worth your time. They stay out of the list unless this is on." },
 ];
 export const REMOVED_FILTER = { value: "removed", label: "Removed" };
@@ -304,6 +305,27 @@ const ROW_STATE_WORDS = {
   thin_posting: "Thin posting", // 0.1.11.2: the row's `thin_posting`, or the state of a match on no requirement at all
 };
 
+// 0.1.11.3 (item 12): the application badge, in plain words: "Applied · Oct 6", "Interview · Oct 8", "Offer · ...",
+// "Rejected · ...", "Withdrawn · ...". `application` is the row's {status, since} (or a job state with the same two
+// keys); null for a job with no application. A label only: it never stands for the job's assessment state.
+const APPLICATION_WORDS = {
+  applied: "Applied",
+  interview_scheduled: "Interview",
+  offer_received: "Offer",
+  rejected: "Rejected",
+  withdrawn: "Withdrawn",
+};
+
+export function applicationBadge(application) {
+  const status = application && (application.status || application.state);
+  if (!status || !APPLICATION_WORDS[status]) {
+    return null;
+  }
+  const parsed = application.since ? new Date(application.since) : null;
+  const day = parsed && !Number.isNaN(parsed.getTime()) ? parsed.toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" }) : null;
+  return { status, label: day ? `${APPLICATION_WORDS[status]} · ${day}` : APPLICATION_WORDS[status], title: application.since || undefined };
+}
+
 function humanCode(code) {
   return String(code || "").replace(/_/g, " ");
 }
@@ -321,6 +343,10 @@ export function rowChips(row) {
   const chips = [];
   const state = row.state || "not_assessed";
   const assessed = state !== "not_assessed";
+  const applied = applicationBadge(row.application);
+  if (applied) {
+    chips.push({ kind: "application", label: applied.label, tone: applied.status === "rejected" ? "danger" : applied.status === "withdrawn" ? "plain" : "ok", testId: "application-badge", title: applied.title });
+  }
   if (state === "needs_answers") {
     const open = Array.isArray(row.open_questions) ? row.open_questions.length : 0;
     chips.push({ kind: "state", label: open ? `${ROW_STATE_WORDS.needs_answers} (${open})` : ROW_STATE_WORDS.needs_answers, tone: "warn" });
