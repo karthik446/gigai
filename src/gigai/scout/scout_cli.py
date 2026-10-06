@@ -3224,6 +3224,10 @@ def _pipeline_status_lines(status: dict[str, object]) -> list[str]:
         f"Pipeline: {'on' if setting['enabled'] else 'off'} ({setting['source']}). "
         f"Model calls today: {calls['used']}/{calls['limit']}."
     ]
+    rank = setting.get("rank")
+    if isinstance(rank, dict) and "enabled" in rank:
+        # 0.1.11.2: ranking has its own switch; it runs with the pipeline off.
+        lines.append(f"Ranking: {'on' if rank['enabled'] else 'off'} ({rank['source']}); switched separately from the pipeline.")
     if status["yielding_to"]:
         lines.append(f"Waiting: {str(status['yielding_to']).replace('_', ' ')} is running.")
     for lane in status["lanes"]:  # type: ignore[union-attr]

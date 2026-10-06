@@ -26,8 +26,12 @@ How it is made: your model sees one short line per posting (title, company, loca
 skills) and a compact digest of your resume, in batches. The full posting and the full resume are
 not sent for ranking. [Privacy and security](../privacy/) lists exactly what is sent.
 
-A posting with no rank yet reads "not ranked yet". The background ranks new postings by itself, up
+A posting with no rank yet reads "not ranked yet". The background ranks new postings by itself
+(the ones posted in the last 7 days, or first stored in them when a posting has no date; an
+older one stays "not ranked yet"), up
 to 100 model calls a day for all your profiles together (Settings > Background pipeline).
+Ranking has its own switch (`rank.enabled` in the settings file, on by default): it runs while
+the background pipeline, which tailors, is off.
 
 ## Verdict
 

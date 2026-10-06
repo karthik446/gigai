@@ -56,7 +56,8 @@ DEFAULTS = {
     "snapshot": {"enabled": True, "manifest_url": DEFAULT_URL},
     # 0.1.10.7 PL5: the background pipeline's block and the rank caps (their own journey: test_pipeline_journey.py).
     "pipeline": {"enabled": False, "auto_jobs_per_trigger": 10, "max_model_calls_per_day": 40, "label_min_ats": 0, "models": {}},
-    "rank": {"max_calls_per_day": 100, "warn_calls_per_day": 60},
+    # 0.1.11.2: ranking has its own switch (``rank.enabled``, on by default), with its own ``source`` in ``effective``.
+    "rank": {"enabled": True, "max_calls_per_day": 100, "warn_calls_per_day": 60},
 }
 
 
@@ -90,7 +91,7 @@ def test_background_settings_round_trip_validate_and_keep_what_they_do_not_know(
                 },
                 "tagging": {"model_enabled": False, "backfill_enabled": False, "tag_backfill_model": "configured", "source": "environment"},
                 "snapshot": {"enabled": True, "manifest_url": DEFAULT_URL, "source": "default"},
-                "pipeline": {**DEFAULTS["pipeline"], "source": "default", "rank": DEFAULTS["rank"]},
+                "pipeline": {**DEFAULTS["pipeline"], "source": "default", "rank": {**DEFAULTS["rank"], "source": "default"}},
             },
         }
         assert not path.exists()
