@@ -6,6 +6,7 @@ import BackgroundUpdatesPanel from "../components/BackgroundUpdatesPanel.jsx";
 import ModelMetricsPanel from "../components/ModelMetricsPanel.jsx";
 import PipelinePanel from "../components/PipelinePanel.jsx";
 import ExaSourceToggle from "../components/ExaSourceToggle.jsx";
+import JobsFolderPanel from "../components/JobsFolderPanel.jsx";
 import ResumesFolderPanel from "../components/ResumesFolderPanel.jsx";
 import ProfilesView from "./ProfilesView.jsx";
 import { ANSWERS_HASH, MASTER_HASH } from "../routing.js";
@@ -77,7 +78,10 @@ export default function SettingsView({
 
       {config && <ExaSourceToggle config={config.config} reloadConfig={reloadConfig} />}
 
-      {/* 0110-10-05 A: the one visible folder a job's resume files are kept in. */}
+      {/* 0.1.11.4 J3: the visible folder new picks go to, one folder per job. */}
+      <JobsFolderPanel />
+
+      {/* 0110-10-05 A: the older, flat folder (master.md and PDFs made without a header); legacy for job resumes. */}
       <ResumesFolderPanel />
 
       <div id="settings-profiles">

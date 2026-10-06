@@ -102,10 +102,10 @@ def _job_pipeline(page, demo: DemoHome) -> None:
 
 
 def _open_tailored(page, demo: DemoHome) -> None:
-    """The job page with its Tailored resume panel read: the stored resume, its file in the resumes folder, who picked."""
+    """The job page with its Tailored resume panel read: the stored resume, its file in the jobs folder, who picked."""
 
     _open_job(page, demo)
-    page.wait_for_selector(f'#job-resume[data-state="stored"] {_tid("resumes-folder-file")}', timeout=WAIT_MS)  # 0.1.11 N6: the panel's id
+    page.wait_for_selector(f'#job-resume[data-state="stored"] {_tid("jobs-folder-file")}', timeout=WAIT_MS)  # 0.1.11 N6: the panel's id
     page.wait_for_selector(_tid("picked-left-out"), timeout=WAIT_MS)
     _settle(page)
 
@@ -185,7 +185,7 @@ SHOTS: tuple[Shot, ...] = (
     Shot("approval-dialog", "The approval dialog: Scout says how many postings and what it costs before it assesses anything.", _approval_dialog),
     Shot("job-page", "A job page: the posting, its verdict and the requirements against your resume and answers.", _job_page),
     Shot("job-pipeline", "The same job page further down: the background pipeline's steps, the Scout label and the Scout ATS score, then the tailored resume.", _job_pipeline),
-    Shot("job-resume", "The tailored resume on the job page, with where its file is in your resumes folder.", _job_resume),
+    Shot("job-resume", "The tailored resume on the job page, with where its file is in your jobs folder.", _job_resume),
     Shot("job-picked", "Picked: the lines of your master resume this job's resume shows, each with why.", _job_picked),
     Shot("job-left-out", "Left out: the other lines of your master resume, each with why, and Add to show one on this resume.", _job_left_out),
     Shot("master", "The Master resume page: its revision, the file you can edit in your resumes folder, and each profile's selection of it.", _master),

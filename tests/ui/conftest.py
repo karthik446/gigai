@@ -179,8 +179,16 @@ class ScoutServer:
     demo: object  # tools.media.demo_home.DemoHome
 
     @property
+    def gigai_home(self) -> Path:
+        """The demo's GigAI home, `<temporary HOME>/.gigai` (tools.media.demo_home.demo_gigai_home)."""
+
+        from tools.media import demo_home
+
+        return demo_home.demo_gigai_home(self.root)
+
+    @property
     def target(self) -> Path:
-        return self.root / "home" / "scout"
+        return self.gigai_home / "scout"
 
 
 @pytest.fixture(scope="session")
@@ -199,7 +207,8 @@ def scout_server() -> Iterator[ScoutServer]:
             from tools.media import demo_home
 
             demo = demo_home.build(root, log=lambda line: None)
-            state = run_supervisor.status(home_root=root / "home", requested_target=root / "home" / "scout")
+            gigai_home = demo_home.demo_gigai_home(root)
+            state = run_supervisor.status(home_root=gigai_home, requested_target=gigai_home / "scout")
         if state.state != "running" or state.pid is None:
             raise RuntimeError(f"the Scout server is not running after the home was built: {state.state}")
         _RUN["small_home_build_seconds"] = round(time.monotonic() - started, 1)

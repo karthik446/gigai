@@ -31,6 +31,7 @@ SEAM_ENV = {
     "GIGAI_SCOUT_FIND_JOBS_TEST_HTTP": "1",
     "GIGAI_SCOUT_FIND_JOBS_TEST_MODEL": "1",
     "GIGAI_SCOUT_AUTO_REFRESH": "0",
+    "GIGAI_SCOUT_OPEN_FOLDER_TEST": "1",  # "Open folder" writes <home>/open-folder-test.log instead of opening a window
     "EXA_API_KEY": "demo-key",
 }
 PIPELINE_WAIT_SECONDS = 90
