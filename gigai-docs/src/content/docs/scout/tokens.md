@@ -12,7 +12,7 @@ Every number below says where it comes from and when it was measured. Yours will
 
 Two different things use tokens when you drive Scout from an agent:
 
-- **Scout's own model calls**: ranking, assessing, tagging titles, tailoring. This page is about
+- **Scout's own model calls**: ranking, assessing, tagging titles (and tailoring, which is switched off in 0.1.11). This page is about
   these. Scout records each one on your computer (kind, model, tokens, seconds; no text).
 - **Your agent's own conversation**: the grid it reads, your questions and its replies. That is
   your agent's usage. GigAI does not see or measure it.
@@ -25,8 +25,8 @@ What keeps Scout's side under your control:
 - **`gigai scout metrics` shows the averages** once the first calls are recorded: tokens,
   seconds and error rate per kind of call and per model. A token estimate is shown only after a
   call has been measured.
-- **Daily caps for background work.** The background pipeline (tailor, then assess the tailored
-  resume) makes at most **40** model calls a day. Background ranking makes at most **100** calls
+- **Daily caps for background work.** The background pipeline is off by default in 0.1.11. A home
+  that switched it on explicitly makes at most **40** model calls a day with it. Background ranking makes at most **100** calls
   a day, with a warning past 60. Both are in **Settings > Background pipeline**. A call that
   would go over the cap is not made.
 - **The first run is the expensive one.** The first `gigai scout new --yes` catches up on every
@@ -47,6 +47,8 @@ the provider served from its prompt cache.
 | Re-assess after tailoring | 1 posting, the tailored resume | 11,838 tokens (11,016 in, 3,840 cached; 822 out), 24 s | 12,197 tokens (10,633 in, 531 cached; 1,564 out), 11 s |
 | Scout ATS score | 1 resume | 0 tokens: computed on your computer, no model | 0 tokens: computed on your computer, no model |
 
+The two tailoring rows were measured on 0.1.10. Tailoring and the background pipeline are off by default in 0.1.11, so a default home makes neither call.
+
 Source: GigAI 0.1.10.8 development build, 2026-10-03, codex-cli 0.159.3 and Claude Code
 2.1.288, each CLI's default model, six calls per CLI, read with `gigai scout metrics --json`.
 Of the two Codex first assessments, one had no cached input and one had 3,840 cached tokens.
@@ -59,8 +61,9 @@ How to read it:
 - **Most of an assessment's input is not your text.** Each CLI adds its own instructions to
   every call, and Scout's prompt carries the rules and the answer format. That part repeats on
   every call, which is why a provider can cache it.
-- **A job you answered a question for costs two more calls**: one tailoring and one
-  re-assessment. The Scout ATS score and the Scout label after them are local.
+- **A job you answered a question for costs one more call**: the re-assessment, when you ask for
+  it. The pick of the resume, the Scout ATS score and the Scout label are local. (A home that
+  switched the background pipeline on explicitly also pays for one tailoring call.)
 - **One rank call covers 50 postings**, so ranking is cheap per posting, and a posting is ranked
   once for a given resume and settings.
 - **Six calls are a sample, not an average.** Time per call moves with the provider's load.

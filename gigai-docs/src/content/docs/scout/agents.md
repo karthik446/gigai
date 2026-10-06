@@ -5,8 +5,8 @@ description: Use Scout from your own AI agent. The daily workflow, setup, the se
 
 Scout is built to be driven by your own AI agent (Claude Code, Codex and similar): you ask
 "what are the new jobs?", the agent asks Scout, shows you a grid, asks you the open questions and
-saves what you say. The browser UI is there when you want it: for reading a job, for tailoring
-and for the PDF.
+saves what you say. The browser UI is there when you want it: for reading a job, for the resume
+picked for it and for the PDF.
 
 **Anything GigAI gives your agent is sent to that agent's model provider. Agents get no contact data from GigAI, but an agent with shell access can read local files.**
 
@@ -15,7 +15,8 @@ CLI discovery commands are on [For agents](../../agents/).
 
 New here? [Use it from your agent](#use-it-from-your-agent) says what to install and what to
 type for Claude Code, Codex and other agents. To have the agent do the whole setup, give it
-[Start here](start/).
+[Start here](start/). To throw away stored data and start again from a resume file, see
+[Start fresh](start/#11-start-fresh-reset-the-data-keep-the-master-resume-file).
 
 ## The daily workflow
 
@@ -78,7 +79,7 @@ With nothing new, the reply reads "Nothing new since your last check" and lists 
 that still need your attention.
 
 The grid has four columns: the posting (company, role, work mode, salary if stated, and the
-profiles it matches), its score, whether it needs tailoring (with the requirements not yet met),
+profiles it matches), its score, whether the resume needs more (the "Needs tailoring" column: the requirements not yet met),
 and its open questions. The score column is words, never a bare percent: the verdict, how many
 requirements are met, and the rank, for example `Matched · 9 of 11 requirements · rank 96`,
 `Matched (old assessment: older prompt) · 3 of 3 requirements · rank 95` or
@@ -221,10 +222,15 @@ not recognise a name, so don't put yours in an answer or a story.
 
 ### 4. Process waiting work
 
-Saving an answer puts the jobs that asked that question into the **background pipeline**: tailor
-a resume for the job, assess the tailored resume, compute the Scout ATS score, set the Scout
-label. The pipeline is on by default and works only on jobs you engaged with (you answered one of
-their questions, or you said "process now"). Its limits:
+**The background pipeline is OFF by default in 0.1.11.** Saving an answer starts nothing in the
+background, `gigai scout new` has no waiting work to process, and no resume is tailored: the
+resume for a job is picked from your master at assessment, word for word (step 5). Skip to "An
+answer makes the job's first assessment old" below. The rest of this step describes the pipeline
+as it works in a home whose settings explicitly enable it (`pipeline.enabled` true, or
+`GIGAI_SCOUT_PIPELINE=on`; a home that enabled it on 0.1.10 keeps it): saving an answer puts the
+jobs that asked that question into it: tailor a resume for the job, assess the tailored resume,
+compute the Scout ATS score, set the Scout label. It works only on jobs you engaged with (you
+answered one of their questions, or you said "process now"). Its limits:
 
 - **10 jobs per trigger.** One answer can concern many jobs. The first 10 run; the rest wait for
   your approval.
@@ -233,7 +239,7 @@ their questions, or you said "process now"). Its limits:
 - **First assessments are never automatic.** A posting is assessed for the first time only when
   you say yes (step 1, or **Assess these** on the Jobs page).
 
-While Scout runs, the pipeline works by itself. `gigai scout new` tells you when work waits
+While Scout runs with the pipeline enabled, it works by itself. `gigai scout new` tells you when work waits
 ("3 waiting (2 need your approval), process now? ~6 calls"). On your yes:
 
 ```sh
@@ -267,15 +273,18 @@ gigai scout pipeline process <job-url> --json                          # makes t
 Other jobs that asked the same question keep their old assessment until they are assessed again
 (`gigai scout new` asks about them: "N have only an old assessment; re-assess?").
 
-**A tailored resume you edited is never replaced by the background.** If you tailored a job's
-resume yourself, or changed a line of it, the pipeline keeps it and works with your text. To get a
-new tailoring for that job, tailor it yourself (`gigai scout resume tailor`, or **Tailor resume**
-on the job page).
+**A resume you edited is never replaced by the background.** If you changed a line of a job's
+resume, the pipeline (where enabled) keeps it and works with your text. To get a new pick for that
+job, take the proposed one yourself (`gigai scout resume pick --job-url <job-url> --use-proposed`).
 
-### 5. Tailor and the PDF
+### 5. The picked resume and the PDF
+
+`gigai scout resume tailor` is switched off in 0.1.11: it answers `tailoring_off` (exit 1, no model
+call). The assessment picks the resume for the job from your master, word for word; GigAI checks
+that every line it shows is a line you wrote.
 
 ```sh
-gigai scout resume tailor --job-url <job-url> --json           # one model call
+gigai scout resume pick --job-url <job-url> --json             # the picked resume as stored. No model call
 gigai scout resume pdf --job-url <job-url> --json              # Apply: the PDF. Local, no model call
 ```
 
@@ -293,7 +302,7 @@ and it should not ask you for those details.
 
 Every line comes from your resume, answers or stories. Read it before you send it.
 
-**Where the files are.** Each job's tailored resume (markdown) and the PDFs made without a header
+**Where the files are.** Each job's resume (markdown) and the PDFs made without a header
 are in your resumes folder, `~/Documents/GigAI/resumes`, named `<company>-<role>-<date>.md` and
 `.pdf`. `gigai scout resume pdf` writes there unless you pass `--out`. `gigai scout status` and
 Settings show the folder; `gigai scout resume folder --set PATH` changes it. The folder never
@@ -486,7 +495,7 @@ it" in the prompt. The starter prompt in the
 
 `gigai scout new` asks before it assesses, with the count and an estimate from your own past
 calls. `gigai scout metrics` shows the averages after the first calls. Background work has
-daily caps: 40 pipeline model calls and 100 rank calls. The first run is the expensive one; a
+daily caps: 40 pipeline model calls (only where the pipeline is enabled; it is off by default) and 100 rank calls. The first run is the expensive one; a
 normal day is a few dozen new postings. [Token usage](../tokens/) has measured numbers for
 Codex and Claude Code.
 
@@ -497,7 +506,7 @@ Codex and Claude Code.
 What that means, plainly:
 
 - **Your agent's provider sees what your agent reads.** When Claude Code or Codex reads a job
-  grid, your answers or a tailored resume from Scout, that text goes to Anthropic or OpenAI as
+  grid, your answers or a resume from Scout, that text goes to Anthropic or OpenAI as
   part of the conversation. GigAI can't stop that. The only way to keep everything on your
   computer is to run both Scout and your agent on a local model.
 - **GigAI has no contact data to give.** It never stores your name, email, phone, address or
@@ -575,20 +584,9 @@ gigai scout answer cloud:gcp --question "Do you have GCP experience?" --answer-t
 gigai scout new --peek --json
 ```
 
-> **Agent:** Saved, and both jobs are assessed again with your answers. They now wait in the
-> pipeline: about 4 model calls, inside today's limit of 40. Process them now?
->
-> **Robin:** Go.
-
-```sh
-gigai scout new --process --json
-gigai scout pipeline status --json
-```
-
-> **Agent:** Done. Northwind: requirements met went from 9 to 10 of 11 after tailoring, Scout ATS 88,
-> Scout label: recommended. That label is Scout's own suggestion from your settings, resume and
-> answers, not a prediction of what an employer will decide. Globex still needs attention: the
-> SOC 2 requirement is not met.
+> **Agent:** Saved, and both jobs are assessed again with your answers. Northwind now shows 10 of
+> 11 requirements met; the resume for it is picked from your master, word for word. Globex still
+> does not meet SOC 2.
 >
 > **Robin:** Make me the Northwind PDF.
 
@@ -617,7 +615,7 @@ It asks your open questions, saves your answer, and offers to turn an experience
 
 <a href="../../media/terminal-answer.png"><img src="../../media/terminal-answer.png" alt="The agent asks a question, saves your answer, and offers to make it a story." loading="lazy" /></a>
 
-The same jobs in the Scout UI, with the Scout label and Scout ATS score once the background pipeline has run.
+The same jobs in the Scout UI. (The screenshots below were taken with the pipeline enabled: the Scout label and Scout ATS score appear only in a home that enabled it; it is off by default in 0.1.11.)
 
 <a href="../../media/jobs-dark.png"><img class="light:sl-hidden" src="../../media/jobs-dark.png" alt="The Jobs page: every stored posting your profiles match, with filter chips, profile tags and Scout's chips." loading="lazy" /></a>
 <a href="../../media/jobs-light.png"><img class="dark:sl-hidden" src="../../media/jobs-light.png" alt="The Jobs page: every stored posting your profiles match, with filter chips, profile tags and Scout's chips." loading="lazy" /></a>
@@ -672,13 +670,13 @@ curl -s -G "$B/api/jobs/suggestions" --data-urlencode "url=$J"                  
 curl -s "$B/api/runs"                                  # every run, newest first
 curl -s -X POST "$B/api/assess" -H 'Content-Type: application/json' \
   -d "{\"job\": {\"job_url\": \"$J\"}}"                # assess (model call, blocks until done)
-curl -s -X POST "$B/api/tailored-resumes" -H 'Content-Type: application/json' \
-  -d "{\"job\": {\"job_url\": \"$J\"}}"                # tailor the resume (model call)
+# POST "$B/api/tailored-resumes" (tailor the resume) is switched off in 0.1.11: it answers tailoring_off.
+# The resume for the job is the one the assessment picked; its stored form is listed by GET /api/jobs.
 curl -s -X POST "$B/api/tailored-resumes/pdf" -H 'Content-Type: application/json' \
   -d "{\"profile_id\": \"<profile_id>\", \"job_identity\": \"$J\"}" -o resume.pdf
 ```
 
-The PDF body takes the `profile_id` and `job_identity` of a stored tailored resume; both
+The PDF body takes the `profile_id` and `job_identity` of a job's stored resume (the route and field names keep the old word "tailored"); both
 are in the `tailored_resumes` entries and `links.pdf` of the `GET /api/jobs` response.
 Errors are `{"error": {"code", "message"}}`; an `unknown_key` 422 lists the allowed keys.
 
@@ -699,7 +697,7 @@ PDF form and download the finished PDF. The saved Resume display settings hold o
 under the name and the layout (spacing, auto fit).
 
 A worked example, **an agent changes two bullets and renders a new PDF**, for a job that
-already has a tailored resume:
+already has a stored (picked) resume:
 
 ```sh
 B=http://127.0.0.1:8765; J='https://boards.greenhouse.io/acme/jobs/101'; P='<profile_id>'
@@ -953,14 +951,15 @@ What to know:
 
 ## The background pipeline
 
-The reference for step 4 of the daily workflow. For a job you engaged with, the pipeline runs
+The reference for step 4 of the daily workflow. **Off by default in 0.1.11**; a home whose
+settings explicitly enable it keeps it. Where enabled, for a job you engaged with, the pipeline runs
 four steps: tailor a resume, assess the tailored resume (kept beside the first assessment, never
 in its place), compute the Scout ATS score, set the Scout label.
 [What Scout's numbers and labels mean](../numbers/) explains the last two.
 
 | Setting (Settings > Background pipeline) | Default |
 | --- | --- |
-| Pipeline | on |
+| Pipeline | off (a home that enabled it keeps it on) |
 | Jobs started by one trigger | 10; the rest wait for your approval |
 | Pipeline model calls a day | 40 |
 | Rank model calls a day, all profiles together | 100, with a warning past 60 |
@@ -992,8 +991,8 @@ What to know:
 - **A failed call still counts** toward the day's 40.
 - **It waits for other work.** While a batch of first assessments or a find-jobs run is going,
   the pipeline waits.
-- **A resume that is yours is kept.** A stored tailored resume the pipeline did not write itself
-  (you tailored it, or changed a line) is never replaced, not even with `--force`. The step
+- **A resume that is yours is kept.** A stored resume the pipeline did not write itself
+  (you changed a line) is never replaced, not even with `--force`. The step
   finishes with `tailor_kept_user_edits`, and the assessment, the ATS score and the label use your
   text.
 - **No contact data.** A tailored resume, an ATS line or a keyword that holds a contact shape

@@ -267,5 +267,58 @@ gigai scout run --no-browser
 
 The second command restarts a Scout server that was left running from the older version. If the
 upgrade says there is nothing newer and the user is sure there is, `uv tool install --reinstall
-gigai` installs it again from scratch. Read "After you upgrade" in the
-[Changelog](../../../changelog/) first.
+gigai` installs the program again. It does **not** reset the user's data: the home, the master
+resume and the answers stay as they are (see "Start fresh" below for that). Read "After you
+upgrade" in the [Changelog](../../../changelog/) first.
+
+## 11. Start fresh (reset the data, keep the master resume file)
+
+Use this when the user wants to throw away what GigAI stored (profiles, assessments, answers,
+the master) and start again from a resume file. Reinstalling the program does not do it. Do these
+in order, and move things aside; never delete.
+
+1. **Stop Scout first.** Moving the home under a running server leaves the old server on its port
+   (8765 unless the user chose another) serving the old data.
+
+   ```sh
+   gigai scout stop
+   gigai scout status --json     # confirm it says not running
+   ```
+
+   If it still answers on the port, find the process with `lsof -i :8765` and stop it.
+   `gigai scout stop` stops the server of the project and home it is run for: pass the same
+   `--home` (and `--target`) the server was started with when the user used them.
+
+2. **Move the home aside, with a date.** The home is `~/.gigai`, or the directory in the
+   `GIGAI_HOME` environment variable (or the `--home` the user passed). It holds everything
+   GigAI stored: settings, profiles, postings, assessments, answers, stories and the master.
+
+   ```sh
+   mv ~/.gigai ~/.gigai.before-$(date +%Y-%m-%d)
+   ```
+
+3. **What stays.** The resumes folder is **not** inside the home: the markdown and PDFs GigAI
+   made for the user's jobs stay in `~/Documents/GigAI/resumes` (or the folder the user chose;
+   `gigai scout resume folder` shows it, before step 2 if you need the path). A GigAI home other
+   than `~/.gigai` keeps them in `<home>/resumes` instead, so they move with it. Leave the folder
+   alone, or move it aside the same way (`mv ~/Documents/GigAI/resumes
+   ~/Documents/GigAI/resumes.before-<date>`) when the user wants no old files there. If the
+   operating system refuses the move (`Operation not permitted`), stop and tell the user: do not
+   work around it. The program itself (`uv tool`) and the user's own resume files stay too. A
+   chosen resumes folder was a setting in the old home, so the fresh home uses the default again.
+
+4. **Make the master from the user's resume file.** On the fresh home, the first command writes
+   the default settings; then look before writing (`--dry-run` shows what would be stored and
+   writes nothing), then write:
+
+   ```sh
+   gigai scout run --no-browser
+   gigai scout resume master init --from FILE --dry-run
+   gigai scout resume master init --from FILE
+   ```
+
+   `FILE` is the resume as the user has it (Markdown or text). Contact lines are removed and every
+   line gets an id. [Resume and PDF](../../resume/) has the details.
+
+5. **Continue with "5. The resume" above**: check, set up the profile, update sources and so on.
+   The old home stays in `~/.gigai.before-<date>` until the user deletes it.

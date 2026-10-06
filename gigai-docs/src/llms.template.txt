@@ -1,6 +1,6 @@
 # GigAI
 
-> GigAI runs AI work on the user's own computer: local, no account, through the model CLI they already use (Codex or Claude Code). Scout, its first Gig, is a job search: it stores public job postings, ranks and assesses them against the user's resume, asks the open questions, and drafts a tailored resume PDF. This file tells an AI agent how to set it up.
+> GigAI runs AI work on the user's own computer: local, no account, through the model CLI they already use (Codex or Claude Code). Scout, its first Gig, is a job search: it stores public job postings, ranks and assesses them against the user's resume, asks the open questions, and gets the resume picked from the master, as a PDF. This file tells an AI agent how to set it up.
 
 **Remove your name, email, phone, address and links from your resume before you give it to an agent.**
 

@@ -1,6 +1,6 @@
 ---
 title: Your first 10 minutes
-description: From nothing to your first tailored resume PDF, with your own AI agent doing the typing.
+description: From nothing to your first picked resume PDF, with your own AI agent doing the typing.
 ---
 
 The short path, by hand and with your agent: install, start Scout, set up a profile, ask your
@@ -79,8 +79,9 @@ Answer in your own words. A short fact is saved as an answer and reused for ever
 posting. A longer reply, with a project and an outcome, can become a story, if you agree. Do
 not put your name or contact details in an answer.
 
-Jobs whose questions you answered are tailored and scored in the background, within the daily
-limits (40 pipeline model calls a day).
+The answer is kept and reused for every later posting. Nothing is tailored or scored in the
+background: the background pipeline is off by default in 0.1.11, and GigAI does not rewrite your
+resume for a job. The resume for a job is picked from your master, word for word.
 
 Your answer makes that job's first assessment old: it was made before the answer. Until the job
 is assessed again it still reads "Needs your answers (old assessment: answers changed)", and its
@@ -101,15 +102,18 @@ and gives you an **open in Scout** link. The agent's own PDF has no name and no 
 details, because GigAI has none. Open the link, type your details into the Generate PDF form in
 your browser, and download the finished PDF. GigAI does not keep what you type there.
 
-The PDF exists only after the job was tailored: by the background pipeline, after you answered
-one of its questions (step 4), or with `gigai scout resume tailor --job-url <job-url>` (one model
-call). Before that the command says there is no tailored resume for the job yet.
+The PDF exists once the job has been assessed: the assessment picks the lines of your master,
+word for word, and that picked resume is what the PDF shows. Before the job is assessed the
+command says there is no resume for the job yet. `gigai scout resume pick --job-url <job-url>`
+shows what was picked. (`gigai scout resume tailor` is switched off in 0.1.11 and answers
+`tailoring_off`.)
 
-Every line comes from your resume, answers or stories. Read it before you send it.
+Every line comes from your master resume. Read it before you send it.
 
 ## What next
 
 - [For agents](../agents/): the whole daily loop, the security model, an example session.
+- [Start fresh](../agents/start/#11-start-fresh-reset-the-data-keep-the-master-resume-file): stop Scout, move `~/.gigai` aside and start again from a resume file.
 - [Token usage](../tokens/): what each step costs in tokens and time.
 - [Privacy and security](../privacy/): what is stored, what is sent, and to whom.
 - [What Scout's numbers and labels mean](../numbers/).

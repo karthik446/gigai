@@ -1,6 +1,6 @@
 ---
 title: Scout
-description: The first Gig. Find jobs, assess them against your resume, tailor a resume.
+description: The first Gig. Find jobs, assess them against your resume, get the resume picked from your master.
 ---
 
 **Scout** implements `find-jobs`, a job-search workflow. It ships with GigAI and
@@ -25,10 +25,9 @@ gets no special runtime treatment: it is one Gig among others GigAI can host.
   network traffic is listed in [Privacy and security](privacy/).
 
 Everything Scout writes stays under your configured GigAI home and the bound
-project's workpad. Tailored resumes (`gigai scout resume tailor`, `POST
-/api/tailored-resumes`) are stored under the gig too (`scout/<project>/resumes/`,
+project's workpad. Each job's resume (picked from your master; `gigai scout resume tailor` is switched off in 0.1.11) is stored under the gig too (`scout/<project>/resumes/`,
 ephemeral pasted-resume runs under `ephemeral/`) and contain resume-derived
-text by design. Tailored resumes are drafts: review each line; every line shows its sources.
+text by design. The picked resume is word for word from your master: review each line.
 Two confirming live runs on the release candidate (155 and 151 lines) found no fabricated facts
 once one judge-flagged plural ("Kubernetes platforms" for the source's "Kubernetes platform") was
 reviewed as a wording difference, not a new fact; 1 minor precision flag in each run (0.6% and 0.66% of lines).
@@ -81,7 +80,7 @@ flowchart TB
 - [Your first 10 minutes](first-10-minutes/): install, set up a profile, ask your agent what is new, make a PDF.
 - [Quickstart](quickstart/): from zero to a running Scout.
 - [Privacy and security](privacy/): read this before you add a resume.
-- [Resume and PDF](resume/): preparing a resume, tailoring, the PDF.
+- [Resume and PDF](resume/): preparing a resume, the picked resume, the PDF.
 - [What Scout's numbers and labels mean](numbers/): rank, verdict, Scout label, Scout ATS score.
 - [Update sources](sources/) and [Configuration](configuration/): the company store, `find-jobs.json`, Exa.
 - [For agents](agents/): the daily workflow from your own AI agent, setup, the security model.

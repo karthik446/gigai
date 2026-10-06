@@ -3,7 +3,7 @@ title: Quickstart
 description: From zero to a running Scout, in three steps.
 ---
 
-One path from zero to a running Scout: find jobs, assess them, tailor a resume.
+One path from zero to a running Scout: find jobs, assess them, get the resume picked from your master.
 
 ## 1. Requirements
 
@@ -85,8 +85,8 @@ your roles, location and work mode. Then:
    the list.
 3. **Assess these**: pick postings (or use the filter) and Scout asks first,
    with the count and an estimate; it assesses only when you approve.
-4. **Tailor resume**: on a posting's page, drafts a resume for that posting.
-   Review every line; each shows its sources. **Generate PDF** opens a small
+4. A posting's page shows the resume picked from your master for that posting,
+   word for word (the assessment picks the lines; nothing is rewritten). Review every line. **Generate PDF** opens a small
    form for your name and contact details and saves the PDF; GigAI does not
    keep what you type there. Under Settings > Profiles, **Resume display**
    holds the title under your name and the PDF layout.

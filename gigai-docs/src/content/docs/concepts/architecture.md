@@ -53,6 +53,6 @@ and not as a guarantee.
 | `src/gigai/` | core | setup, config, journal, proposal/approval lifecycle, catalog, package boundary |
 | `src/gigai/scout/` | Scout | `find_jobs/` (acquire, assess, present), goal-graph data, `ui/` |
 | `~/.gigai/config.toml` | core | settings, model targets, credential references (names, never values) |
-| `~/.gigai/scout/` | Scout | the Scout project: `find-jobs.json`, resumes, tailored resumes |
+| `~/.gigai/scout/` | Scout | the Scout project: `find-jobs.json`, resumes, the picked resumes |
 
 Model targets are covered in [Model targets](../model-targets/).
