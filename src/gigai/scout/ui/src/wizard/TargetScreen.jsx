@@ -96,7 +96,7 @@ export default function TargetScreen({ fields, setField, fieldErrors }) {
             aria-pressed={fields.visaSponsorshipRequired}
             onClick={() => setField("visaSponsorshipRequired", true)}
           >
-            Yes (hard filter)
+            Yes
           </button>
           <button
             type="button"
@@ -107,6 +107,9 @@ export default function TargetScreen({ fields, setField, fieldErrors }) {
             No
           </button>
         </div>
+        <small className="muted" data-role="sponsorship-help">
+          Postings are labelled when they say they do not sponsor; nothing is filtered out.
+        </small>
         {errors.visa_sponsorship_required && <div className="field-error">{errors.visa_sponsorship_required}</div>}
       </div>
 

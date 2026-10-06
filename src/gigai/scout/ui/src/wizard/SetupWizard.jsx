@@ -21,24 +21,24 @@ import StepIndicator from "./StepIndicator.jsx";
 import ResumeScreen from "./ResumeScreen.jsx";
 import ResumeDisplayScreen from "./ResumeDisplayScreen.jsx";
 import TargetScreen from "./TargetScreen.jsx";
-import CompaniesScreen from "./CompaniesScreen.jsx";
 import FinishScreen from "./FinishScreen.jsx";
 import "./wizard.css";
 
-const TOTAL_STEPS = 5;
+const TOTAL_STEPS = 4;
 
-// P9b (F2): the 5-screen setup wizard that replaces the one-page interview.
+// P9b (F2): the 4-screen setup wizard that replaces the one-page interview.
 //
 //   1. Resume + profile  -> POST /api/resume/extract (stack / seniority / titles)
 //   2. Resume display    -> the PDF title/layout (0110-013; GET /api/resume-display,
 //      skippable; saved by Finish with PUT /api/resume-display)
 //   3. Target            -> titles (seeded from 1), countries, work mode, visa
-//   4. Companies         -> exclude / always watch (catalog: S26, not in 0.1.9)
-//   5. Review            -> the review table, what is still missing (an
+//   4. Review            -> the review table, what is still missing (an
 //      unset key, Ollama: wizardState.setupHints), then Finish
 //      (wizardFinish.js) stores the resume, saves the profile with it and
 //      the preferences (A2: no discovery cadence or budget is asked;
-//      Discover is hidden in 0.1.9):
+//      Discover is hidden in 0.1.9). 0.1.11.2: there is no Companies step; the
+//      exclude / always-watch lists and add-by-URL live in Settings (CompanyListsPanel,
+//      AddCompanyForm), and a save here passes the saved lists through unchanged:
 //        POST /api/resumes   (pasted text or the uploaded file; uat-bug-020)
 //        POST /api/profiles  (or PUT /api/profiles/{id})
 //        POST /api/profiles/selection (a first profile only)
@@ -291,8 +291,7 @@ export default function SetupWizard({ onDone, onCancel }) {
       )}
       {step === 2 && <ResumeDisplayScreen fields={fields} loadError={displayError} onChange={changeDisplay} onSkip={skipDisplay} />}
       {step === 3 && <TargetScreen fields={fields} setField={setField} fieldErrors={fieldErrors} />}
-      {step === 4 && <CompaniesScreen fields={fields} setField={setField} fieldErrors={fieldErrors} />}
-      {step === 5 && (
+      {step === 4 && (
         <FinishScreen
           fields={fields}
           resumes={resumes}

@@ -83,6 +83,8 @@ process.stdout.write(JSON.stringify({
     oldRemote: wizard.initialWorkMode(null, { config: { remote: true } }),
     oldAny: wizard.initialWorkMode(null, { config: { remote: false } }),
     nothing: wizard.initialWorkMode(null, null),
+    storedAny: wizard.initialWorkMode({ work_mode: "any" }, null),
+    storedAnyConfig: wizard.initialWorkMode(null, { config: { work_mode: "any" } }),
   },
   review: wizard.reviewRows(fields("hybrid", "Denver, CO"), []).find((row) => row[0] === "Work mode")[1],
   hints: wizard.WORK_MODES.map((mode) => [mode.value, mode.hint]),
@@ -144,7 +146,7 @@ def test_the_wizard_saves_every_mode_as_itself(out: dict) -> None:
 def test_the_wizard_starts_from_the_saved_mode_and_never_the_placeholder(out: dict) -> None:
     assert out["placeholderCity"] == ""
     assert out["realCity"] == "Denver, CO"
-    assert out["modes"] == {"prefs": "onsite", "config": "hybrid", "oldRemote": "any", "oldAny": "any", "nothing": "any"}
+    assert out["modes"] == {"prefs": "onsite", "config": "hybrid", "oldRemote": "any", "oldAny": "any", "nothing": "remote", "storedAny": "any", "storedAnyConfig": "any"}
 
 
 def test_the_job_card_renders_the_chip_and_the_line() -> None:

@@ -26,7 +26,10 @@ def _prefs_prefill_from_config(config: FindJobsConfig) -> dict[str, object]:
 
     # uat-bug-028: the stored work mode (or what an older file's `remote`
     # meant); `location` is already None for the starter placeholder.
-    work_mode = config.effective_work_mode.value
+    # 0.1.11.2 (UAT-006): a fresh onboarding (no stored work_mode and no roles: no config, or the starter) opens on
+    # Remote-only; any stored work_mode, and an existing config with roles, keeps what it says.
+    fresh = config.work_mode is None and not config.roles
+    work_mode = "remote" if fresh else config.effective_work_mode.value
     return {
         "roles": list(config.roles),
         "titles_to_avoid": [],

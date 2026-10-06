@@ -1,4 +1,5 @@
 import ConfigPanel from "../components/ConfigPanel.jsx";
+import CompanyListsPanel from "../components/CompanyListsPanel.jsx";
 import AddCompanyForm from "../components/AddCompanyForm.jsx";
 import SourcesUpdatePanel from "../components/SourcesUpdatePanel.jsx";
 import BackgroundUpdatesPanel from "../components/BackgroundUpdatesPanel.jsx";
@@ -17,6 +18,7 @@ export default function SettingsView({
   reloadConfig,
   prefs,
   onEditPreferences,
+  onPrefsSaved,
   profiles,
   selectedProfileId,
   onSelectProfile,
@@ -114,6 +116,9 @@ export default function SettingsView({
           Open master resume
         </a>
       </section>
+
+      {/* 0.1.11.2 (UAT-008): the company lists left onboarding; they are edited here, add-by-URL right under them. */}
+      <CompanyListsPanel prefs={prefs} onSaved={onPrefsSaved} />
 
       <div id="settings-add-company">
         <AddCompanyForm />
