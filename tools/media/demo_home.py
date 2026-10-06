@@ -70,6 +70,19 @@ def assert_synthetic_home(root: Path) -> None:
         raise DemoHomeError("the temporary HOME already has a .gigai folder; use a fresh one")
 
 
+def demo_gigai_home(root: Path) -> Path:
+    """The demo's GigAI home: `<temporary HOME>/.gigai`, the folder a default install has.
+
+    Every path the UI derives from the home then reads as a reader's own: the resumes folder
+    `~/Documents/GigAI/resumes` and the PDF header file `~/Documents/GigAI/header.json` (0.1.11.3's
+    "Filled from <path>" and Save button). A home named `<root>/home` showed `~/demo/home/header.json`,
+    which the privacy gate reads as `/home/header.json` (a home path) and failed the 0.1.11.3 release's
+    screenshots. The gate is not loosened.
+    """
+
+    return root.parent / ".gigai"
+
+
 def media_resumes_folder() -> Path:
     """Where the screenshots' demo home keeps its resume files: `Documents/GigAI/resumes` under the temporary HOME.
 
@@ -127,7 +140,7 @@ def build(root: Path, *, log=print, resumes_folder: Path | None = None, master: 
     from gigai.scout.find_jobs.sources_update import board_cache_for_home, update_sources
     from gigai.scout.find_jobs.watchlist import add_company_from_url
 
-    home = root / "home"
+    home = demo_gigai_home(root)
     target = home / "scout"  # where Scout lives by default, so the terminal frames need no --target
     root.mkdir(parents=True, exist_ok=True)
     target.mkdir(parents=True, exist_ok=True)
@@ -337,4 +350,4 @@ def build(root: Path, *, log=print, resumes_folder: Path | None = None, master: 
 def stop(root: Path) -> None:
     from gigai.scout import run_supervisor
 
-    run_supervisor.stop(home_root=root / "home", requested_target=root / "home" / "scout")
+    run_supervisor.stop(home_root=demo_gigai_home(root), requested_target=demo_gigai_home(root) / "scout")
