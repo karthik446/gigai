@@ -26,6 +26,7 @@ one ships.  No model is called: every answer is scripted.
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -209,6 +210,13 @@ def _resume_block(prompt: str) -> str:
     return prompt.split("RESUME:\n", 1)[1].split("CANDIDATE CONSTRAINTS:", 1)[0]
 
 
+def _strip_ids(block: str) -> str:
+    """The RESUME block without its bookkeeping: the trailing id comments and the private-note lines."""
+
+    lines = [line for line in block.splitlines() if not line.lstrip().startswith("<!-- private note:")]
+    return re.sub(r"[ \t]*<!--\s*id:\S+\s*-->", "", "\n".join(lines)).strip()
+
+
 def _timeless(stored: AssessResponse) -> dict[str, object]:
     value = stored.to_json()
     for key in ("created_at", "updated_at", "history"):
@@ -270,7 +278,15 @@ def test_with_a_master_the_assessment_reads_the_evidence_view_of_the_whole_maste
         master.master, assess_master.profile_prior(titles=tuple(profile.titles), item_ids=None, profile_id=profile.profile_id, label=profile.label),
         title=stored.job.title, posting_text=_POSTING, company=stored.job.company, location=stored.job.location,
     )
-    assert _resume_block(prompt).strip() == model_resume(view.markdown).text.strip()
+    # With the template asking for ids the block carries each line's id comment (and any private-note line): bookkeeping.
+    # So the block WITH ids is the ids=True view, and with the bookkeeping stripped it is the plain view.
+    view_ids = assess_master.evidence_text(
+        master.master, assess_master.profile_prior(titles=tuple(profile.titles), item_ids=None, profile_id=profile.profile_id, label=profile.label),
+        title=stored.job.title, posting_text=_POSTING, company=stored.job.company, location=stored.job.location, ids=True,
+    )
+    block = _resume_block(prompt).strip()
+    assert block == model_resume(view_ids.markdown).text.strip()
+    assert _strip_ids(block) == model_resume(view.markdown).text.strip()
     # (The stored master reads, line for line, as the markdown it was imported from.)
     assert assess_master.master_lines(master.master).keys == assess_master.resume_lines(MASTER).keys
     assert view.within_cap and view.bullets == view.bullets_total == 4
