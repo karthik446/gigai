@@ -96,6 +96,10 @@ _DISPLAY_IMPORTERS: dict[str, frozenset[str]] = {
         # 0110-046: the story bank no longer reads a saved name (GigAI stores none); the one-time
         # cleanup reads and rewrites the display file (counts only, never sent anywhere).
         "gigai.scout.contact_cleanup",
+        # 0.1.11.3 item 13: the user's own header file becomes the Generate PDF form's values (the form's fields and
+        # parser only, never the saved settings); it is read for the form and for one PDF, and no model-bound module
+        # imports it (test_pdf_header_file_privacy.py).
+        "gigai.scout.pdf_header_file",
     }),
     "gigai.scout.find_jobs.api.resume_display": frozenset({
         "gigai.scout.find_jobs.api.server", "gigai.scout.find_jobs.api.tailored_resumes",

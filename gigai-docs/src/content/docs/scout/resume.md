@@ -58,6 +58,46 @@ into that one PDF and are dropped: GigAI does not save them, so you type them
 each time (your browser may offer to autofill them). The file is named
 `<company>-<role>-<date>.pdf`, never after you.
 
+### Your header file
+
+To skip the typing, keep your details in one JSON file that you own. Scout fills the
+Generate PDF form from it each time the form opens: the form says "Filled from
+`~/Documents/GigAI/header.json`", and you can still edit any field before you generate.
+The file goes beside your resumes folder, not inside it (that folder never holds contact
+details): `~/Documents/GigAI/header.json` (a GigAI home other than `~/.gigai`:
+`<home>/header.json`). An example with made-up values:
+
+```json
+{
+  "name": "Jane Example",
+  "email": "jane@example.com",
+  "phone": "555-0100",
+  "location": "Springfield, IL",
+  "links": [
+    {"label": "LinkedIn", "url": "linkedin.com/in/jane-example"},
+    {"label": "GitHub", "url": "github.com/jane-example"}
+  ],
+  "work_authorization": "VISA: H1B"
+}
+```
+
+- Every field is optional (a PDF made from the command line needs the name). Each value is
+  one line of at most 200 characters; `links` holds at most 6 links.
+- A link labelled LinkedIn fills the form's LinkedIn field; every other link gets a field
+  of its own under its label. The PDF prints each link's address in the contact line.
+- `work_authorization` prints as the header's last line, exactly as you wrote it. Leave the
+  key out and the line starts from your profile's sponsorship answer; set it to `""` for no line.
+- What prints is decided in this order: what you edit in the form, then the file, then the
+  profile's sponsorship answer.
+- Scout only reads the file, and only to fill the form or make a PDF with
+  `gigai scout resume pdf`. It is never copied into GigAI's store, a log, a record, a
+  suggestion, a job brief, the resumes folder or a model prompt, and Scout's agent API does
+  not return it.
+- Keep it to yourself: `chmod 600 ~/Documents/GigAI/header.json`. The form and the command
+  say so when other users of the computer can read it.
+- A file that is missing, cannot be read or is not valid is one plain line in the form
+  (what is wrong and where the file goes); you can still type the values.
+
 A skill the posting asks for that your resume does not name, and that one of your
 answers says you have, is added to Skills with that answer as its source. An answer
 that says you do not have it adds nothing.
@@ -88,6 +128,17 @@ call. A PDF made this way has no name and no contact details. The command prints
 "Open in Scout" link: open it, fill the Generate PDF form in your browser, and download
 the finished PDF. [For agents](../agents/#change-a-resume-and-render-a-new-pdf) has a
 worked example and the markdown format.
+
+With [your header file](#your-header-file) the command makes the finished PDF itself, without
+the browser: pass `--out FILE` and the header is filled from `~/Documents/GigAI/header.json`
+(or from `--header FILE`). A PDF with your details is written only to `--out`, never to the
+resumes folder; without `--out` the PDF has no header, as before. `--no-header` makes it
+without one.
+
+```sh
+gigai scout resume pdf --job-url https://boards.greenhouse.io/acme/jobs/1 --out ~/Desktop/acme.pdf
+gigai scout resume pdf --in resume.md --out resume.pdf --header ~/Documents/GigAI/header.json
+```
 
 **Working on one job's resume with your agent.** GigAI does not reword a resume. Your agent
 reads the job's brief (`gigai scout resume brief --job-url <url>`, and `--posting` for the
