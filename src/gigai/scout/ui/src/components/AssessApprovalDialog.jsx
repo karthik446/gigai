@@ -1,4 +1,4 @@
-import { approvalBatchLine, approvalBody, approvalTitle, estimateLine, lowRankLine } from "../postingsModel.js";
+import { approvalBatchLine, approvalBody, assessingLine, approvalTitle, estimateLine, lowRankLine } from "../postingsModel.js";
 import { modelTargetLabel } from "../modelTargets.js";
 
 // 0.1.10.7 M4b: the approval "Assess these" asks for. `dialog` is
@@ -61,9 +61,15 @@ export default function AssessApprovalDialog({ dialog, submitting, error, includ
             {lowRankLine(low)}
           </label>
         )}
-        <p className="muted" data-role="approval-nothing-yet">
-          Nothing has been assessed yet. Assessing starts only when you approve.
-        </p>
+        {submitting ? (
+          <p className="muted" data-role="approval-assessing">
+            {assessingLine(dialog, includeLowRank)}
+          </p>
+        ) : (
+          <p className="muted" data-role="approval-nothing-yet">
+            Nothing has been assessed yet. Assessing starts only when you approve.
+          </p>
+        )}
         {error && <div className="callout danger">{error}</div>}
         <div className="actions">
           <button type="button" className="button secondary" onClick={onCancel} disabled={submitting} data-action="approval-cancel">

@@ -111,7 +111,7 @@ def test_the_review_shows_the_pdf_layout_and_never_a_name(out: dict) -> None:
 
 def test_the_wizard_renders_the_step_with_a_skip_and_loads_the_saved_header() -> None:
     wizard = (WIZARD_SRC / "SetupWizard.jsx").read_text(encoding="utf-8")
-    assert "step === 2 && <ResumeDisplayScreen" in wizard and "const TOTAL_STEPS = 5;" in wizard
+    assert "step === 2 && <ResumeDisplayScreen" in wizard and "const TOTAL_STEPS = 4;" in wizard
     assert "getResumeDisplay(" in wizard and "putResumeDisplay" in wizard and "onSkip={skipDisplay}" in wizard
     screen = (WIZARD_SRC / "ResumeDisplayScreen.jsx").read_text(encoding="utf-8")
     assert "<h2>Resume display</h2>" in screen and 'data-role="skip-resume-display"' in screen

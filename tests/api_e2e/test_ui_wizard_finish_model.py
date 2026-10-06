@@ -157,7 +157,7 @@ const savedPrefs = { cadence_days: 3, budget_usd_per_session: 1.25 };
 const steps = {
   names: state.STEPS,
   review: state.reviewRows(reviewFields, []).map(([key]) => key),
-  complete: [1, 2, 3, 4, 5].map((step) => state.screenIsComplete(step, reviewFields)),
+  complete: [1, 2, 3, 4].map((step) => state.screenIsComplete(step, reviewFields)),
   firstRun: state.setupBody(reviewFields, null),
   edit: state.setupBody({ ...state.initialFields({ prefs: savedPrefs, config: null, selectedProfile: null, resumes: [] }), ...input.finishes.freshPaste.fields }, savedPrefs),
 };
@@ -388,7 +388,7 @@ def test_the_wizard_screens_have_no_command_block() -> None:
     assert 'data-role="setup-hints"' in finish
     # The section is rendered only when a line exists.
     assert "missing.length > 0 &&" in finish
-    for name in ("FinishScreen.jsx", "ResumeScreen.jsx", "SetupWizard.jsx", "TargetScreen.jsx", "CompaniesScreen.jsx"):
+    for name in ("FinishScreen.jsx", "ResumeScreen.jsx", "SetupWizard.jsx", "TargetScreen.jsx"):
         source = (WIZARD_SRC / name).read_text(encoding="utf-8")
         for gone in ("uv tool install", "gigai scout install", "gigai scout run", "resume add", "run this wizard again"):
             assert gone not in source, f"{name} still says {gone!r}"
@@ -536,7 +536,7 @@ def test_with_no_stored_resume_the_wizard_starts_on_paste(out: dict) -> None:
 
 def test_the_steps_and_the_review_have_no_discovery_cadence_or_budget(out: dict) -> None:
     steps = out["steps"]
-    assert steps["names"] == ["Resume", "Resume display", "Target", "Companies", "Review"]
+    assert steps["names"] == ["Resume", "Resume display", "Target", "Review"]
     assert steps["review"] == [
         "Profile",
         "Resume",
@@ -550,17 +550,15 @@ def test_the_steps_and_the_review_have_no_discovery_cadence_or_budget(out: dict)
         "Work mode",
         "Visa sponsorship required",
         "Posting age",
-        "Exclude companies",
-        "Always watch",
     ]
     for name in steps["names"] + steps["review"]:
         lowered = name.lower()
         assert "discover" not in lowered and "cadence" not in lowered and "budget" not in lowered, name
-    assert steps["complete"] == [True, True, True, True, True]
+    assert steps["complete"] == [True, True, True, True]
 
 
 def test_the_screens_ask_for_no_cadence_and_no_budget() -> None:
-    for name in ("FinishScreen.jsx", "SetupWizard.jsx", "StepIndicator.jsx", "ResumeScreen.jsx", "TargetScreen.jsx", "CompaniesScreen.jsx"):
+    for name in ("FinishScreen.jsx", "SetupWizard.jsx", "StepIndicator.jsx", "ResumeScreen.jsx", "TargetScreen.jsx"):
         source = (WIZARD_SRC / name).read_text(encoding="utf-8")
         code = "\n".join(line for line in source.splitlines() if not line.lstrip().startswith("//"))
         for gone in ("Discovery", "cadence", "Cadence", "budget", "Budget", "wz-cadence", "wz-budget"):

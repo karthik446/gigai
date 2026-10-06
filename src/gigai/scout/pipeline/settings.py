@@ -9,7 +9,7 @@ beside ``sources.auto_refresh`` and ``tagging.*``::
                   "max_model_calls_per_day": 40,
                   "label_min_ats": 0,
                   "models": {"tailor": "claude_cli", "reassess": "codex_cli"}},
-     "rank": {"max_calls_per_day": 100, "warn_calls_per_day": 60}}
+     "rank": {"enabled": true, "max_calls_per_day": 100, "warn_calls_per_day": 60}}
 
 Every key is optional; a key left out has its default (the values above,
 ``models`` empty). ``models.<step>`` names the adapter kind a model step runs
@@ -29,6 +29,13 @@ by the runner and the ``rank`` caps by the background rank lane
 (``rank_lane.py``), which takes every call from the one counter,
 ``triggers.spend_rank_calls``: ``cap_counter``, one count each for the whole
 install. ``rank.max_calls_per_day`` 0 switches the rank lane off.
+
+``rank.enabled`` (0.1.11.2) is the rank lane's OWN switch, ON by default: the
+background rank runs with the pipeline (the tailoring) off. A settings file
+that cannot be read turns it OFF like the pipeline. :data:`PIPELINE_ENV` set
+to off turns ranking off too, unless the file says ``rank.enabled`` itself
+(true or false): what the file says explicitly wins for ranking. The
+variable set to on changes nothing for ranking.
 """
 
 from __future__ import annotations
@@ -73,6 +80,9 @@ class PipelineSetting:
     models: Mapping[str, str] = field(default_factory=dict)
     rank_max_calls_per_day: int = DEFAULT_RANK_MAX_CALLS_PER_DAY
     rank_warn_calls_per_day: int = DEFAULT_RANK_WARN_CALLS_PER_DAY
+    #: The rank lane's own switch (``rank.enabled``), and what said so.
+    rank_enabled: bool = True
+    rank_source: str = SOURCE_DEFAULT
 
     def to_json(self) -> dict[str, object]:
         return {
@@ -82,11 +92,14 @@ class PipelineSetting:
             "max_model_calls_per_day": self.max_model_calls_per_day,
             "label_min_ats": self.label_min_ats,
             "models": dict(sorted(self.models.items())),
-            "rank": {"max_calls_per_day": self.rank_max_calls_per_day, "warn_calls_per_day": self.rank_warn_calls_per_day},
+            "rank": {
+                "enabled": self.rank_enabled, "source": self.rank_source,
+                "max_calls_per_day": self.rank_max_calls_per_day, "warn_calls_per_day": self.rank_warn_calls_per_day,
+            },
         }
 
 
-_SETTING_OFF = PipelineSetting(enabled=False, source=SOURCE_UNREADABLE)
+_SETTING_OFF = PipelineSetting(enabled=False, source=SOURCE_UNREADABLE, rank_enabled=False, rank_source=SOURCE_UNREADABLE)
 
 
 def _count(block: Mapping[str, object], key: str, default: int, *, most: int | None = None) -> int | None:
@@ -124,6 +137,9 @@ def pipeline_setting(
     def forced(setting: PipelineSetting) -> PipelineSetting:
         raw = ((os.environ if environ is None else environ).get(PIPELINE_ENV) or "").strip().lower()
         if raw in _OFF:
+            if setting.rank_source == SOURCE_DEFAULT:
+                # The variable turns ranking off with the pipeline, unless the file names ``rank.enabled`` itself.
+                setting = replace(setting, rank_enabled=False, rank_source=SOURCE_ENVIRONMENT)
             return replace(setting, enabled=False, source=SOURCE_ENVIRONMENT)
         if raw in _ON and setting.source != SOURCE_UNREADABLE:
             # An unreadable file stays off: its caps and models are unknown, and they are not guessed.
@@ -156,9 +172,11 @@ def pipeline_setting(
     min_ats = _count(block, "label_min_ats", DEFAULT_LABEL_MIN_ATS, most=100)
     rank_max = _count(rank, "max_calls_per_day", DEFAULT_RANK_MAX_CALLS_PER_DAY)
     rank_warn = _count(rank, "warn_calls_per_day", DEFAULT_RANK_WARN_CALLS_PER_DAY)
+    rank_enabled = rank.get("enabled", True)
     models = block.get("models", {})
     if (
         type(enabled) is not bool
+        or type(rank_enabled) is not bool
         or None in (per_trigger, per_day, min_ats, rank_max, rank_warn)
         or not isinstance(models, dict)
         or any(step not in MODEL_STEPS or type(kind) is not str or kind not in _adapter_kinds() for step, kind in models.items())
@@ -176,6 +194,8 @@ def pipeline_setting(
             models=dict(models),
             rank_max_calls_per_day=rank_max,
             rank_warn_calls_per_day=rank_warn,
+            rank_enabled=rank_enabled,
+            rank_source=SOURCE_SETTING if "enabled" in rank else SOURCE_DEFAULT,
         )
     )
 

@@ -586,6 +586,16 @@ export function lowRankLine(lowRank) {
   return `${lowRank.count} low-ranked ${one ? "one is" : "ones are"} skipped${below}. Assess ${which} too? ${estimateLine(lowRank)}${after}`;
 }
 
+// 0.1.11.2 (UAT-010): the dialog's line while the approved batch runs: the count is the request's own (`count`, the
+// top-50-by-rank batch the Approve sent); the server streams no progress, so there is no done/total. With the low-ranked box
+// ticked the count is not the one shown at the ask, so the line names no number.
+export function assessingLine(dialog, includeLowRank = false) {
+  if (includeLowRank && dialog.lowRank) {
+    return "Assessing postings, the low-ranked ones included… this can take a minute.";
+  }
+  return `Assessing ${dialog.count} posting${dialog.count === 1 ? "" : "s"}… this can take a minute.`;
+}
+
 // 0110-10-11, 0.1.11.2: the dialog's title. "Assess the top 50 by rank of 120 postings?" when a batch is less than all of them.
 export function approvalTitle(dialog) {
   if (dialog.count === 0 && dialog.lowRank) {
@@ -762,6 +772,8 @@ export function postingJob(row) {
     url: row.job_url || row.job_identity,
     normalized_url: row.job_identity,
     text: row.description || null,
+    // The list row's description is a preview: the server ends a cut one with "…".
+    text_cut: typeof row.description === "string" && row.description.endsWith("…"),
     published_at: null,
     provider: null,
     source_kind: "stored postings",

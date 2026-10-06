@@ -211,7 +211,8 @@ function OpenPosting({ url, children }) {
 }
 
 function JobDescription({ posting, pasted }) {
-  const excerpt = jdExcerpt(posting.text);
+  // A job page opened from the Jobs list shows the whole stored text once GET /api/jobs has served it.
+  const excerpt = posting.text_full ? jdExcerpt(posting.text, { target: Infinity, limit: Infinity }) : jdExcerpt(posting.text, { cut: Boolean(posting.text_cut) });
   if (!excerpt) {
     return (
       <section className="panel">
@@ -330,6 +331,7 @@ export default function JobPage({
   profileLabel,
   visaRequired,
   loading,
+  onDemandHref,
   listedRow,
   onQuickUpdated,
   onApplicationsChanged,
@@ -391,7 +393,8 @@ export default function JobPage({
   // 0110-10-14: the posting's dates. The Jobs row the page was opened from has them; opened by its link (a reload,
   // Assessments), the page asks for the job once. A past run's row keeps its own line (below).
   const rowDated = Boolean(listedRow && postingDate(listedRow));
-  const askDates = Boolean(job) && !rowDated && !job.row && /^https?:\/\//.test(job.id || "");
+  const askFullText = Boolean(job && job.fromPostings && /^https?:\/\//.test(job.id || ""));
+  const askDates = askFullText || (Boolean(job) && !rowDated && !job.row && /^https?:\/\//.test(job.id || ""));
   const [servedDates, setServedDates] = useState(null);
   useEffect(() => {
     setServedDates(null);
@@ -407,9 +410,17 @@ export default function JobPage({
     };
   }, [jobId, askDates]);
 
+  const servedText = askFullText && servedDates && typeof servedDates.text === "string" && servedDates.text.trim() ? servedDates.text : null;
   const posting = useMemo(
-    () => (job && postingText && !job.posting.text ? { ...job.posting, text: postingText } : job ? job.posting : null),
-    [job, postingText],
+    () =>
+      job && servedText
+        ? { ...job.posting, text: servedText, text_full: true, text_cut: false }
+        : job && postingText && !job.posting.text
+          ? { ...job.posting, text: postingText }
+          : job
+            ? job.posting
+            : null,
+    [job, postingText, servedText],
   );
   const assessment = job ? job.assessment : null;
   const jobUrl = posting && posting.url ? posting.url : null;
@@ -456,7 +467,12 @@ export default function JobPage({
         <BackToList from={from} />
         <section className="panel">
           <h2>{loading ? (from === "assessments" ? "Loading assessment…" : "Loading job…") : "Job not found"}</h2>
-          {!loading && (
+          {!loading && onDemandHref && (
+            <p className="muted" data-role="on-demand-hint">
+              This job was assessed on demand: <a href={onDemandHref}>open it under Assessments</a>.
+            </p>
+          )}
+          {!loading && !onDemandHref && (
             <p className="muted">
               {from === "assessments" ? "No assessment with this address for this profile: " : "No stored posting with this address for this profile: "}
               <code>{jobId}</code>

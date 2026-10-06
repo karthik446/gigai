@@ -962,6 +962,7 @@ in its place), compute the Scout ATS score, set the Scout label.
 | Pipeline | off (a home that enabled it keeps it on) |
 | Jobs started by one trigger | 10; the rest wait for your approval |
 | Pipeline model calls a day | 40 |
+| Background ranking (`rank.enabled`, its own switch) | on, also with the pipeline off; only postings posted in the last 7 days (first stored in them, for a posting with no date) |
 | Rank model calls a day, all profiles together | 100, with a warning past 60 |
 | Minimum Scout ATS score for "recommended" | 0 (the score is shown, never a gate) |
 

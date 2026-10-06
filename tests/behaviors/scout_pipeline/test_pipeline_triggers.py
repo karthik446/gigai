@@ -481,7 +481,7 @@ def test_g_the_pipeline_settings_round_trip_and_unreadable_settings_keep_the_pip
     assert before["settings"]["pipeline"] == {
         "enabled": True, "auto_jobs_per_trigger": 10, "max_model_calls_per_day": 40, "label_min_ats": 0, "models": {},
     }
-    assert before["settings"]["rank"] == {"max_calls_per_day": 100, "warn_calls_per_day": 60}
+    assert before["settings"]["rank"] == {"enabled": True, "max_calls_per_day": 100, "warn_calls_per_day": 60}
     assert before["effective"]["pipeline"]["source"] == "default" and before["effective"]["pipeline"]["enabled"] is True
 
     patch = background_settings.validate_patch({
@@ -498,7 +498,7 @@ def test_g_the_pipeline_settings_round_trip_and_unreadable_settings_keep_the_pip
         "enabled": False, "auto_jobs_per_trigger": 3, "max_model_calls_per_day": 12, "label_min_ats": 70,
         "models": {"reassess": "codex_cli", "tailor": "claude_cli"},
     }
-    assert after["settings"]["rank"] == {"max_calls_per_day": 50, "warn_calls_per_day": 20}
+    assert after["settings"]["rank"] == {"enabled": True, "max_calls_per_day": 50, "warn_calls_per_day": 20}
     assert after["effective"]["pipeline"] == pipeline_setting(fx.home_root, fx.target, environ={}).to_json()
     assert after["effective"]["pipeline"]["source"] == "setting" and after["readable"] is True
     # The reader the runner uses sees the same file.

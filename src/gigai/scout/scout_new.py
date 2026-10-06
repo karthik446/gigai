@@ -702,15 +702,14 @@ def _ranking(
     inside the window, and ``in_progress`` ends when the lane has nothing left to rank.
     """
 
-    from .pipeline.rank_lane import rank_status
+    from .pipeline.rank_lane import _unranked, _window_start, rank_status
 
-    since = postings.stamp((now or datetime.now(UTC)).astimezone(UTC) - timedelta(days=FIRST_USE_DAYS)) or ""
+    since = _window_start((now or datetime.now(UTC)).astimezone(UTC))  # the lane's own window and its own rule
+    found = store.posting_rank_progress()
     by_profile = []
     for view in views:
-        rows = store.postings(profile_id=view.profile_id)
-        ranked = sum(1 for row in rows if row.rank_score is not None)
-        waiting = sum(1 for row in rows if row.rank_score is None and batch_date(row) > since)
-        by_profile.append({"profile_id": view.profile_id, "ranked": ranked, "total": ranked + waiting})
+        ranked = found.get(view.profile_id, (0, 0))[0]
+        by_profile.append({"profile_id": view.profile_id, "ranked": ranked, "total": ranked + len(_unranked(store, view.profile_id, since))})
     try:
         enabled = bool(rank_status(home_root, target)["enabled"])
     except (PipelineStoreError, OSError, ValueError):  # a display read: a setting that cannot be read is "not ranking"

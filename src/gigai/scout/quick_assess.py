@@ -74,7 +74,7 @@ from .assessment_basis import posting_sha256
 from .call_metrics import KIND_ASSESS, CallMeter
 from .assessment_core import INSTRUCTIONS_DIGEST, PLACEHOLDER_REQUIREMENTS, AssessExtras, AssessJob, build_assess_context
 from .assessment_core import POSTING_INCOMPLETE_MESSAGE, assess_once, assess_prompt_version, constraints_digest
-from .assessment_core import prompt_reads_ids, template_takes
+from .assessment_core import _MAX_PROMPT_POSTING_TEXT, prompt_reads_ids, template_takes
 from . import assess_model, story_bank
 from .find_jobs.assess_contracts import (
     ORIGIN_QUICK_ASSESS,
@@ -435,6 +435,17 @@ POSTING_UNREADABLE_REASONS: tuple[str, ...] = (REASON_TOO_FEW_REQUIREMENTS, REAS
 #: characters is stored, after its one retry, with this note (``AssessResponse.requirements_note``).
 REQUIREMENTS_NOTE = "Only {count} requirements were read from this posting. Open the posting to check."
 REQUIREMENTS_NOTE_ONE = "Only 1 requirement was read from this posting. Open the posting to check."  # 0.1.11 (orchestrator #96)
+
+
+#: 0.1.11.2: the model is sent only the first 12,000 characters of a posting; a longer one says so on the assessment.
+POSTING_CAPPED_NOTE = "Only the first {chars:,} characters of this posting were assessed."
+
+
+def with_posting_capped_note(note: str | None, posting_text: str) -> str | None:
+    if len(posting_text) <= _MAX_PROMPT_POSTING_TEXT:
+        return note
+    capped = POSTING_CAPPED_NOTE.format(chars=_MAX_PROMPT_POSTING_TEXT)
+    return capped if note is None else f"{note} {capped}"
 
 
 def requirements_note_text(count: int) -> str:
@@ -969,6 +980,7 @@ def run_quick_assessment(
         body = replace(body, verdict=Verdict.PENDING_USER_ANSWERS, pick=None, structured_suggestions=())
         requirements_note = PASTED_UNREADABLE_NOTE
         held_unreadable = True
+    requirements_note = with_posting_capped_note(requirements_note, job.text)
     from .proposal_execution import _usage_block
 
     usage = _usage_block([attempt.usage] if attempt.usage is not None else [], UsageBlock)

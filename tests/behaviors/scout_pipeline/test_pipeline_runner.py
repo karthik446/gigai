@@ -216,9 +216,12 @@ def test_the_settings_default_to_on_with_the_caps_and_an_unreadable_file_turns_t
     path = settings_path(fx.home_root, fx.target)
     assert pipeline_setting(fx.home_root, fx.target, environ={}).to_json() == {
         "enabled": True, "source": "default", "auto_jobs_per_trigger": 10, "max_model_calls_per_day": 40, "label_min_ats": 0,
-        "models": {}, "rank": {"max_calls_per_day": 100, "warn_calls_per_day": 60},
+        "models": {}, "rank": {"enabled": True, "source": "default", "max_calls_per_day": 100, "warn_calls_per_day": 60},
     }
-    assert pipeline_setting(fx.home_root, fx.target, environ={PIPELINE_ENV: "off"}) == PipelineSetting(enabled=False, source="environment")
+    # 0.1.11.2: the variable set to off turns ranking off with the pipeline (the file does not name rank.enabled).
+    assert pipeline_setting(fx.home_root, fx.target, environ={PIPELINE_ENV: "off"}) == PipelineSetting(
+        enabled=False, source="environment", rank_enabled=False, rank_source="environment"
+    )
 
     def write(block: object, **more: object) -> None:
         path.write_text(json.dumps({"schema_version": "scout-settings:1", "pipeline": block, **more}), encoding="utf-8")
@@ -245,7 +248,9 @@ def test_the_settings_default_to_on_with_the_caps_and_an_unreadable_file_turns_t
         assert pipeline_setting(fx.home_root, fx.target, environ={}).to_json()["source"] == "settings_unreadable", bad
         assert pipeline_setting(fx.home_root, fx.target, environ={}).enabled is False
     path.write_text("{not json", encoding="utf-8")
-    assert pipeline_setting(fx.home_root, fx.target, environ={}) == PipelineSetting(enabled=False, source="settings_unreadable")
+    assert pipeline_setting(fx.home_root, fx.target, environ={}) == PipelineSetting(
+        enabled=False, source="settings_unreadable", rank_enabled=False, rank_source="settings_unreadable"
+    )
     # Never guessed on, not even by the environment or by an explicit process.
     assert pipeline_setting(fx.home_root, fx.target, environ={PIPELINE_ENV: "1"}).enabled is False
 

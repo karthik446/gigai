@@ -244,7 +244,7 @@ _CHECK_TIMES_EXAMPLE: dict[str, object] = {
 }
 _PIPELINE_SETTING_EXAMPLE: dict[str, object] = {
     "enabled": True, "source": "default", "auto_jobs_per_trigger": 10, "max_model_calls_per_day": 40, "label_min_ats": 0,
-    "models": {}, "rank": {"max_calls_per_day": 100, "warn_calls_per_day": 60},
+    "models": {}, "rank": {"enabled": True, "source": "default", "max_calls_per_day": 100, "warn_calls_per_day": 60},
 }
 _APPROVAL_ID = "apv_0123456789abcdef0123456789abcdef"
 _APPROVAL_EXAMPLE: dict[str, object] = {
@@ -275,7 +275,7 @@ _BACKGROUND_SETTINGS_EXAMPLE: dict[str, object] = {
         "tagging": {"model_enabled": True, "backfill_enabled": False, "tag_backfill_model": "configured"},
         "snapshot": {"enabled": True, "manifest_url": "https://github.com/karthik446/gigai/releases/download/scout-snapshot/manifest.json"},
         "pipeline": {"enabled": True, "auto_jobs_per_trigger": 10, "max_model_calls_per_day": 40, "label_min_ats": 0, "models": {}},
-        "rank": {"max_calls_per_day": 100, "warn_calls_per_day": 60},
+        "rank": {"enabled": True, "max_calls_per_day": 100, "warn_calls_per_day": 60},
     },
     "effective": {
         "sources": {
@@ -306,9 +306,12 @@ _BACKGROUND_SETTINGS_NOTE = (
     "the rest wait for an approval), `max_model_calls_per_day` (for the whole install, every profile together), "
     "`label_min_ats` (the Scout ATS score a job needs for the Scout label recommended; 0 to 100) and `models` (the model "
     "target of the tailor and reassess steps; a step left out runs with the project's model target). `rank` is the background "
-    "rank's daily cap: `max_calls_per_day` and `warn_calls_per_day`. `effective.pipeline` holds all of them with their "
-    "`source`; with settings that cannot be read the pipeline is off (`enabled` false, `source` settings_unreadable): it "
-    "never guesses."
+    "rank, switched SEPARATELY from the pipeline (0.1.11.2): `enabled` (on by default; it ranks with `pipeline.enabled` off, "
+    "and only postings that went up in the last 7 days, or that Scout first stored in them when a posting has no date) and its daily cap, `max_calls_per_day` and "
+    "`warn_calls_per_day`. `effective.pipeline` holds all of them with their `source` (`effective.pipeline.rank` has its "
+    "own `enabled` and `source`); with settings that cannot be read the pipeline and the rank are off (`enabled` false, "
+    "`source` settings_unreadable): they never guess. The environment variable that turns the pipeline off turns the "
+    "rank off too, unless the file names `rank.enabled` itself."
 )
 
 _NEW_SINCE = "2026-10-01T14:02:00.000000Z"
@@ -464,7 +467,7 @@ _POSTINGS_NOTE = (
     "posting up for two months and edited three days ago is two months old) and `first_seen_at` when Scout first stored "
     "the posting, the date `window=new` judges. `assessment_basis` says where a row's assessment came from: `{origin: \"quick_assess\"}`, or for "
     "an old run's `{origin: \"run:<run_id>\", run_id, prompt_version, constraints_digest, story_bank_digest, profile_ref, resume, "
-    "posting_sha256, model_target, model}` (ids and digests). `rank` is the background rank lane: whether it is on and today's "
+    "posting_sha256, model_target, model}` (ids and digests). `rank` is the background rank lane: whether it is on (its own switch, `rank.enabled`, not the pipeline's) and today's "
     "calls against `rank.max_calls_per_day` (100) and the warning level `rank.warn_calls_per_day` (60), counted once for all "
     "profiles. With history=1, `history.rows` lists what old runs assessed (`{job_identity, profile_id, state, met, "
     "requirements, open_questions, assessed_at, hidden, basis}`); rows of a run with no profile (`ephemeral`) or of a profile "
@@ -2347,7 +2350,12 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
                 "100, models: {tailor, reassess: codex_cli|claude_cli|ollama_local|openrouter_api}}. null for a number puts "
                 "its default back; null for a step, or for models, puts the project's model target back.",
             ),
-            _b("rank", "object", "{max_calls_per_day: 0 to 1000, warn_calls_per_day: 0 to 1000, not above max_calls_per_day}. null puts the default back."),
+            _b(
+                "rank", "object",
+                "{enabled: boolean (the background rank's own switch, separate from pipeline.enabled; on by default), "
+                "max_calls_per_day: 0 to 1000, warn_calls_per_day: 0 to 1000, not above max_calls_per_day}. null puts the "
+                "default back.",
+            ),
         ),
         request_example={"sources": {"auto_refresh": False}},
         errors=(_WRONG_TYPE, _UNKNOWN_KEY, _INVALID, (422, "bad_enum"), _NO_TARGET, (409, "settings_unreadable")),

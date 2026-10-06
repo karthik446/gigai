@@ -131,7 +131,8 @@ export function requirementsHeading(assessment) {
 // first paragraph or so; the rest is one click away (Open posting).
 // Paragraphs are taken whole until the excerpt reaches `target` characters;
 // past `limit` it is cut at the last sentence end (or word) before it.
-export function jdExcerpt(text, { target = 280, limit = 600 } = {}) {
+// `cut`: the server already cut the text it gave (a Jobs row's 400-character preview): the start-of-posting line shows.
+export function jdExcerpt(text, { target = 280, limit = 600, cut = false } = {}) {
   if (typeof text !== "string") {
     return null;
   }
@@ -160,7 +161,7 @@ export function jdExcerpt(text, { target = 280, limit = 600 } = {}) {
       break;
     }
   }
-  let truncated = used < paragraphs.length;
+  let truncated = cut || used < paragraphs.length;
   if (excerpt.length > limit) {
     const head = excerpt.slice(0, limit);
     const sentence = Math.max(head.lastIndexOf(". "), head.lastIndexOf("! "), head.lastIndexOf("? "), head.lastIndexOf(".\n"));

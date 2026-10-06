@@ -64,9 +64,16 @@ function useSetup() {
       });
   }, []);
 
+  // 0.1.11.2: re-read the saved prefs without the loading state (a loading state unmounts the page that saved them).
+  const refresh = useCallback(() => {
+    getSetup()
+      .then((response) => setState({ loading: false, prefs: response.prefs, prefill: null, prefsMissing: false, error: null }))
+      .catch(() => {});
+  }, []);
+
   useEffect(reload, [reload]);
 
-  return { ...state, reload };
+  return { ...state, reload, refresh };
 }
 
 // P9 (v0.1.9): App.jsx routes across the app views. Q4a-nav: the tab row,
@@ -319,6 +326,9 @@ export default function App() {
             reloadConfig={reloadConfig}
             prefs={setupState.prefs}
             onEditPreferences={() => setEditingSetup(true)}
+            onPrefsSaved={() => {
+              setupState.refresh();
+            }}
             profiles={profilesState.profiles}
             selectedProfileId={profilesState.selectedProfileId}
             onSelectProfile={handleSelectProfile}
