@@ -197,11 +197,41 @@ const VERDICT_LABELS = {
   not_a_match: "Not a match",
 };
 
-export function verdictLabel(verdict) {
+// 0.1.11.2 (scout/fit.py): a match read from fewer than 4 requirement rows (every matrix row, the "N of M" the page
+// shows) is a thin posting: every surface says THIN_LABEL in place of "Matched". The server's row says the same
+// (`thin_posting`, `score_text`); this is for the pages that hold the assessment itself.
+export const THIN_POSTING = "thin_posting";
+export const THIN_POSTING_ROWS = 4;
+export const THIN_LABEL = "Thin posting: too few requirements to judge";
+
+export function isThinMatch(verdict, assessment) {
+  if (verdict !== "matched_above_threshold" || !assessment || typeof assessment !== "object") {
+    return false;
+  }
+  return (Array.isArray(assessment.matrix) ? assessment.matrix.length : 0) < THIN_POSTING_ROWS;
+}
+
+// ONE line for a thin match near its requirements: "Thin posting: too few requirements to judge (2 read). Open the
+// posting to check." It replaces the stored note's "Only 2 requirements were read ..." sentence (`storedNote`, the
+// served `requirements_note`), never both; anything else that note says (the posting was cut at 12,000 characters,
+// a pasted text had no requirements) follows it on the same line.
+const ONLY_N_READ = /Only \d+ requirements? (?:was|were) read from this posting\. Open the posting to check\.\s*/g;
+
+export function thinPostingLine(verdict, assessment, storedNote) {
+  if (!isThinMatch(verdict, assessment)) {
+    return null;
+  }
+  const rows = Array.isArray(assessment.matrix) ? assessment.matrix.length : 0;
+  const rest = typeof storedNote === "string" ? storedNote.replace(ONLY_N_READ, "").trim() : "";
+  return `${THIN_LABEL} (${rows} read). Open the posting to check.${rest ? ` ${rest}` : ""}`;
+}
+
+// `assessment` (optional): the assessment the verdict is of, so a thin match never reads "Matched".
+export function verdictLabel(verdict, assessment) {
   if (!verdict) {
     return null;
   }
-  return VERDICT_LABELS[verdict] || verdict;
+  return isThinMatch(verdict, assessment) ? THIN_LABEL : VERDICT_LABELS[verdict] || verdict;
 }
 
 // P9c: "2 hours ago"/"3 days ago"-style copy for a run's created_at, for the

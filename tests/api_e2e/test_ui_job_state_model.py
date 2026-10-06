@@ -228,6 +228,7 @@ def test_every_state_the_backend_serves_has_words(out: dict) -> None:
         "assessed": "Assessed",
         "needs_answers": "Needs your answers",
         "weak_fit": "Weak fit",
+        "thin_posting": "Thin posting",  # 0.1.11.2: matched by verdict on no requirement row at all
         "matched": "Matched",
         "has_gap": "Has a gap",
         "not_a_match": "Not a match",

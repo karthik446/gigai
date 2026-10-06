@@ -61,7 +61,7 @@ out.jobState = [
 ];
 out.chips = [
   m.headerChip("matched", { assessment: A }),
-  m.headerChip("matched", { assessment: { verdict: "matched_above_threshold", matrix: [{ requirement: "Helm", class: "list_item", status: "unmet" }, { requirement: "Istio", class: "nice_to_have", status: "unclear" }] } }),
+  m.headerChip("matched", { assessment: { verdict: "matched_above_threshold", matrix: [{ requirement: "Python", class: "hard", status: "met" }, { requirement: "Kubernetes", class: "hard", status: "met" }, { requirement: "Helm", class: "list_item", status: "unmet" }, { requirement: "Istio", class: "nice_to_have", status: "unclear" }] } }),  // 0.1.11.2: 4 rows, or the chip reads "thin posting"
   m.headerChip("needs_answers", { assessment: input.pending }),
   m.headerChip("has_gap", { assessment: A, gate: input.gapGate }),
   m.headerChip("not_a_match", {}), m.headerChip("weak_fit", {}), m.headerChip("not_assessed", {}),

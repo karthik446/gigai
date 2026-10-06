@@ -1521,8 +1521,18 @@ def assess_command(
 
     gap_text = minor_gap_text(minor_gaps(result.matrix))  # 0110-10-03: "matched_above_threshold, 1 minor gap: Helm"
     click.echo(f"  Verdict: {result.verdict.value if result.verdict is not None else 'none returned'}" + (f", {gap_text}" if gap_text else ""))
-    if response.requirements_note:
-        click.echo(f"  Note: {response.requirements_note}")  # GUARDFIX: the posting's requirements were thinly read
+    from .fit import THIN_LABEL, THIN_POSTING_ROWS
+    from .quick_assess import requirements_note_text
+
+    note = response.requirements_note or ""
+    if result.verdict is not None and result.verdict.value == "matched_above_threshold" and len(result.matrix) < THIN_POSTING_ROWS:
+        # 0.1.11.2: ONE line for a match read from fewer than 4 requirement rows, in place of the GUARDFIX sentence
+        # ("Only 2 requirements were read ..."); anything else the stored note says follows it.
+        for count in range(THIN_POSTING_ROWS):
+            note = note.replace(requirements_note_text(count), "")
+        note = " ".join(f"{THIN_LABEL} ({len(result.matrix)} read). Open the posting to check. {note}".split())
+    if note:
+        click.echo(f"  Note: {note}")  # GUARDFIX: the posting's requirements were thinly read
     if result.not_a_match_reason:
         click.echo(f"  Reason: {result.not_a_match_reason}")
     if result.sponsorship is not None:
@@ -2902,7 +2912,7 @@ def _jobs_errors() -> tuple[type[BaseException], ...]:
 @jobs_group.command("list")
 @click.option("--profile", "profile_ids", multiple=True, help="Only postings this active profile matches (repeatable). With one profile, its own row is shown.")
 @click.option("--query", "query", help="Words that must all be in the title, company or location.")
-@click.option("--state", "states", multiple=True, help="Keep this state (repeatable): not_assessed, needs_answers, matched, has_gap, not_a_match, tailored, assessed, recommended, weak_fit, ranked_low. A weak fit (waits on answers, few requirements met, low rank) is listed only with --state weak_fit; a posting not assessed yet and ranked below 50 only with --state ranked_low.")
+@click.option("--state", "states", multiple=True, help="Keep this state (repeatable): not_assessed, needs_answers, matched, has_gap, not_a_match, tailored, assessed, recommended, weak_fit, ranked_low, thin_posting (matched on no requirement at all). A weak fit (waits on answers, few requirements met, low rank) is listed only with --state weak_fit; a posting not assessed yet and ranked below 50 only with --state ranked_low.")
 @click.option("--window", "window", type=click.Choice(["new", "7d", "30d"]), help="new: first seen since your last check. 7d / 30d: published in the last 7 or 30 days.")
 @click.option("--removed", "removed", is_flag=True, help="The postings the board no longer lists, instead of the live ones.")
 @click.option("--history", "history", is_flag=True, help="Also what old find-jobs runs assessed, with each run's provenance.")

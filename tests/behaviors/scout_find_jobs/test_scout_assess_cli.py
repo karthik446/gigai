@@ -239,3 +239,26 @@ def test_assess_invalid_model_output_is_a_typed_error(tmp_path: Path, monkeypatc
     result = runner.invoke(cli, [*_base(home, target), "--job-text", str(posting)])
     assert result.exit_code == 1, result.output
     assert "Error: the model's answer was invalid after one retry" in result.output
+
+
+def test_assess_a_match_on_two_requirements_says_thin_posting_under_the_verdict_and_four_does_not(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """0.1.11.2 THIN: fewer than 4 requirement rows behind a match is said in ONE note line; the stored verdict is as it came."""
+
+    def matched(rows: int) -> str:
+        matrix = [{"requirement": f"Hard topic {n}", "class": "hard", "status": "met", "resume_evidence": ["six years"]} for n in range(1, rows + 1)]
+        return json.dumps({"verdict": "matched_above_threshold", "matrix": matrix, "suggestions": [], "questions": [], "not_a_match_reason": None})
+
+    home, target, runner = _setup(tmp_path)
+    posting = tmp_path / "posting.txt"
+    posting.write_text(_POSTING, encoding="utf-8")
+
+    _install_model(monkeypatch, [matched(2)])
+    thin = runner.invoke(cli, [*_base(home, target), "--job-text", str(posting), "--title", "Staff AI Engineer", "--company", "Acme"])
+    assert thin.exit_code == 0, thin.output
+    assert "Verdict: matched_above_threshold" in thin.output
+    assert "  Note: thin posting: too few requirements to judge (2 read). Open the posting to check." in thin.output, thin.output
+    assert thin.output.count("Note:") == 1 and "requirements were read" not in thin.output
+
+    _install_model(monkeypatch, [matched(4)])
+    full = runner.invoke(cli, [*_base(home, target), "--job-text", str(posting), "--title", "Staff AI Engineer", "--company", "Acme"])
+    assert full.exit_code == 0 and "Verdict: matched_above_threshold" in full.output and "thin posting" not in full.output, full.output

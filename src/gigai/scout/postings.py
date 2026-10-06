@@ -132,7 +132,8 @@ from .pipeline.store import PipelineStore, PostingBuild, PostingRecord, RunAsses
 # that comes from 0.1.10.10; a home that ran an earlier 0.1.10.11 build prepares once more.
 MATCH_VERSION = "posting-match:7"
 # :3 is 0110-10-02: a row carries its fit number, and a weak fit has its own state.
-FACTS_VERSION = "posting-facts:3"
+# :4 is 0.1.11.2: a match with no row about the job has the state ``thin_posting`` (stored rows get their facts again).
+FACTS_VERSION = "posting-facts:4"
 
 STATE_ACTIVE = "active"
 BUILD_FULL = "matched"
@@ -479,7 +480,7 @@ class _Facts:
         """``row`` with its facts as the stores hold them now."""
 
         from .find_jobs.job_state import NOT_ASSESSED, _identity_digest, derive_job_state, quick_assessment_fact
-        from .fit import fit_percent, plain_percent, shown_state
+        from .fit import fit_percent, plain_percent, shown_state, thin_state
         from .pipeline.steps import read_label
 
         profile_id = self.view.profile_id
@@ -505,6 +506,7 @@ class _Facts:
             state, stale = ran.state, self._run_stale(ran, row)
             assessed_at, met, requirements, questions = ran.assessed_at, ran.reqs_met, ran.reqs_total, ran.open_questions
             fit = plain_percent(met, requirements)  # a run's row has counts only: no classes to weight by
+            state = thin_state(state, requirements or 0)  # 0.1.11.2: a run's match with no requirement row at all
         # 0110-8-12: a tailored resume is the ``tailored`` flag below; the verdict state stays.
         label, ats_score = None, None
         if key in self._labelled:

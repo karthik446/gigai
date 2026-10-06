@@ -141,7 +141,10 @@ SORTS = (SORT_FIT, SORT_NEWEST_POSTED)
 STATE_ASSESSED = "assessed"
 STATE_RECOMMENDED = "recommended"
 # ``has_gap`` (0.1.11 N3, OD1): matched by verdict, held by the gate (``job_state.HAS_GAP``).
-_ROW_STATES = frozenset({"not_assessed", "needs_answers", "matched", "has_gap", "not_a_match", "tailored", fit_rules.WEAK_FIT})
+# ``thin_posting`` (0.1.11.2): matched by verdict on no row about the job (``fit.THIN_POSTING``): never in ``matched``.
+_ROW_STATES = frozenset({
+    "not_assessed", "needs_answers", "matched", "has_gap", "not_a_match", "tailored", fit_rules.WEAK_FIT, fit_rules.THIN_POSTING,
+})
 #: 0.1.11.2: ``ranked_low`` (``fit.RANKED_LOW``) lists the not-assessed postings ranked below the weak-fit rank.
 STATES = frozenset(_ROW_STATES | {STATE_ASSESSED, STATE_RECOMMENDED, fit_rules.RANKED_LOW})
 
@@ -787,7 +790,7 @@ def render(response: Mapping[str, object]) -> str:
     assert isinstance(listing, Mapping)
     for row in listing["rows"]:  # type: ignore[union-attr]
         tags = ", ".join(str(labels.get(item["profile_id"], item["profile_id"])) for item in row["profiles"])
-        gap = f" · {row['minor_gap_text']}" if row.get("minor_gap_text") else ""  # 0110-10-03
+        gap = f" · {row['minor_gap_text']}" if row.get("minor_gap_text") and not row.get("thin_posting") else ""  # 0110-10-03
         lines.append(f"{row['company_name'] or row['company'] or '?'}: {row['title'] or row['job_identity']} [{tags}] {row['score_text']}{gap}")
         posted = posted_text(row)  # 0110-10-14: "posted 2026-09-24" | "updated ..." | "first seen ..."
         lines.append(f"  {posted + ' · ' if posted else ''}{row['job_identity']}")

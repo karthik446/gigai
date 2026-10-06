@@ -40,6 +40,10 @@ def _lay(ui, demo, notice: dict | None, note: str | None = None) -> None:
             if item.get("job", {}).get("job_identity") == demo.hero_job:
                 item.pop("model_notice", None)
                 item.pop("requirements_note", None)
+                # 0.1.11.2: the small home's match has 2 requirement rows; with fewer than 4 the page says "thin posting"
+                # in place of the note (test_job_page_thin_posting.py). These flows are about the note itself: 4 rows.
+                rows = item["result"]["matrix"]
+                item["result"]["matrix"] = [*rows, *({**rows[0], "requirement": f"Synthetic requirement {n}"} for n in range(len(rows), 4))]
                 if note is not None:
                     item["requirements_note"] = note
                 if notice is not None:

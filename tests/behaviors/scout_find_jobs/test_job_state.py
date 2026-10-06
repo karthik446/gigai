@@ -69,6 +69,7 @@ def test_the_states_are_the_ticket_s_and_the_application_ones_are_core_event_kin
         "assessed",
         "needs_answers",
         "weak_fit",  # 0110-10-02: needs answers, few requirements met, low rank (JobStateSources only)
+        "thin_posting",  # 0.1.11.2: matched by verdict on no requirement row at all; never a match
         "matched",
         "not_a_match",
         "tailored",
