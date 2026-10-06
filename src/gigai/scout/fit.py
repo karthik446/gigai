@@ -38,12 +38,13 @@ above. The row's stored state stays ``not_assessed``.
 THIN POSTING (:func:`is_thin_posting`, :func:`thin_state`, 0.1.11.2). A match
 read from fewer than :data:`THIN_POSTING_ROWS` requirement rows says little:
 every surface says :data:`THIN_LABEL` instead of "Matched · fit 100%". With 1
-to 3 rows that is a LABEL only, judged when the row is shown from the counts
-already stored: the state, the order, the filters and the counts stay a
-match's. A match with NO row about the job (an empty matrix, a lone "No
-stated requirements" row, eligibility rows alone) has its own stored state,
-:data:`THIN_POSTING`: never a match in a count or a filter, and ordered below
-every other assessed posting of its group.
+to 3 rows that is a LABEL, judged when the row is shown from the counts
+already stored: the state, the filters and the counts stay a match's, and it
+is LISTED LAST (``scout_new.order_key``: after every other assessed posting
+and every posting not assessed yet). A match with NO row about the job (an
+empty matrix, a lone "No stated requirements" row, eligibility rows alone)
+has its own stored state, :data:`THIN_POSTING`: never a match in a count or a
+filter, and ordered last of the thin postings.
 
 TUNING. The defaults are the constants below. A project overrides them in
 the ``fit`` block of its settings file

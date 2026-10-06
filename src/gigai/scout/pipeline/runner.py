@@ -41,10 +41,14 @@ held it is gone; a drain also does it first thing (``reclaim``).
 
 **The rank lane and old runs** (0.1.10.7 M4a). After a drain the server's
 thread also gives the background rank lane a turn (``rank_lane.rank_tick``:
-a few calls, first :data:`RANK_START_DELAY_SECONDS` after the start, then
-every :data:`RANK_POLL_SECONDS`, or at once on :meth:`PipelineRunner.kick_rank`;
-it backs off when no model answers) and, once per start, imports what old
-find-jobs runs assessed into the read model (``run_history.migrate_runs``).
+a few calls, first AT THE START (0.1.11.2: an upgrade ranks what is unranked
+without waiting for a sources update), then every :data:`RANK_POLL_SECONDS`,
+or at once on :meth:`PipelineRunner.kick_rank` and whenever a sources update
+of any process has settled since the last look (``_sources_mark``: new
+postings arrived); a turn that had to wait (live work, another holder) comes
+again at the next poll; it backs off when no model answers) and, once per
+start, imports what old find-jobs runs assessed into the read model
+(``run_history.migrate_runs``; a failed import never delays the rank lane).
 An "assess these" batch is live work too (the same ``busy.py`` marker as the
 ``scout new`` batch): nothing is claimed while it runs.
 
@@ -91,8 +95,9 @@ DRAIN_SCHEMA = "scout-pipeline-drain:1"
 POLL_SECONDS = 30.0
 #: How often the server's thread gives the rank lane a turn when nothing kicked it, and how many calls a turn may make.
 RANK_POLL_SECONDS = 600.0
-#: The rank lane's first turn after the server starts: the start itself spends no model call.
-RANK_START_DELAY_SECONDS = 120.0
+#: The rank lane's first turn after the server starts: at once (0.1.11.2; it was 120 s, and a turn that then had to
+#: wait came again 10 minutes later, so a restarted server could show "not ranked yet" for a long time).
+RANK_START_DELAY_SECONDS = 0.0
 RANK_CALLS_PER_TURN = 4
 #: The rank lane's backoff when no model answers or its answer cannot be read: doubling, like a model lane's.
 RANK_BACKOFF_SECONDS = 300.0
@@ -264,6 +269,8 @@ class PipelineRunner:
         self._rank_kicked = threading.Event()
         self._rank_backoff = 0.0
         self._last_rank: dict[str, object] | None = None
+        self._last_rank_state: str | None = None
+        self._sources_seen: tuple[object, ...] | None = None  # the last settled sources update the rank lane looked after
         self._migrated = False
 
     # -- the server's thread ---------------------------------------------------------------
@@ -320,14 +327,28 @@ class PipelineRunner:
             if self._wake.wait(self._poll_seconds):
                 self._wake.clear()
 
+    def _sources_mark(self) -> tuple[object, ...] | None:
+        """The last sources update that settled (manual or background, of any process), or ``None``. One small file read."""
+
+        from ..find_jobs.company_index import CompanyIndex
+        from ..find_jobs.sources_update import STATUS_RUNNING
+
+        try:
+            snapshot = CompanyIndex.for_home(self.home_root).read_update_summary()
+        except Exception:  # noqa: BLE001 - a summary that cannot be read says nothing new arrived
+            return None
+        if snapshot is None or snapshot.get("status") == STATUS_RUNNING:
+            return None
+        return (snapshot.get("update_id"), snapshot.get("status"), snapshot.get("finished_at"))
+
     def _background(self) -> None:
         """Once per start: import what old runs assessed. Then the rank lane's turn, when it is due or was kicked."""
 
         from . import rank_lane
 
-        try:
-            if not self._migrated:
-                self._migrated = True
+        if not self._migrated:
+            self._migrated = True
+            try:
                 from ..run_history import migrate_runs
 
                 counts = migrate_runs(self.home_root, self.target)
@@ -336,8 +357,17 @@ class PipelineRunner:
                         "pipeline: imported %d assessment(s) of %d old run(s) into the read model",
                         counts["assessments_imported"], counts["runs_imported"],
                     )
+            except Exception as exc:  # noqa: BLE001 - the import waits for the next start; the rank lane still gets its turn
+                self._logger.warning("pipeline: importing old runs hit %s; it goes on", type(exc).__name__)
+        try:
             kicked = self._rank_kicked.is_set()
             self._rank_kicked.clear()
+            mark = self._sources_mark()
+            if mark is not None and mark != self._sources_seen:
+                # 0.1.11.2: a sources update settled since the last look (a background one or another process's kicks
+                # nothing): new postings may have arrived, so the lane looks now.
+                self._sources_seen = mark
+                kicked = True
             if time.monotonic() < self._rank_next and (self._rank_backoff or not kicked):
                 return  # not due yet; a kick does not cut a backoff short
             result = rank_lane.rank_tick(
@@ -348,12 +378,21 @@ class PipelineRunner:
             if result["state"] == rank_lane.STATE_UNAVAILABLE:
                 self._rank_backoff = min(RANK_BACKOFF_MAX_SECONDS, self._rank_backoff * 2 or RANK_BACKOFF_SECONDS)
                 self._rank_next = time.monotonic() + self._rank_backoff
+            elif result["state"] in (rank_lane.STATE_YIELDED, rank_lane.STATE_BUSY_ELSEWHERE):
+                # The turn had to wait (live work, another holder): it comes again at the next poll, not in 10 minutes.
+                self._rank_backoff = 0.0
+                self._rank_next = time.monotonic() + self._poll_seconds
             else:
                 self._rank_backoff = 0.0
                 more = result["state"] == rank_lane.STATE_RAN and int(result["calls"]) >= RANK_CALLS_PER_TURN  # type: ignore[call-overload]
                 self._rank_next = time.monotonic() + (0.0 if more else RANK_POLL_SECONDS)
             if result["calls"]:
                 self._logger.info("pipeline: ranked %d posting(s) in %d call(s)", result["ranked"], result["calls"])
+            said = f"{result['state']}:{result['reason'] or ''}"
+            if said != self._last_rank_state and result["state"] not in (rank_lane.STATE_RAN, rank_lane.STATE_IDLE):
+                # Codes only, once per change: why the lane is not ranking (the log said nothing before).
+                self._logger.info("pipeline: rank %s%s", result["state"], f" ({result['reason']})" if result["reason"] else "")
+            self._last_rank_state = said
         except Exception as exc:  # noqa: BLE001 - nothing else observes this thread: log it and keep the loop
             self._logger.warning("pipeline: the rank lane hit %s; it goes on", type(exc).__name__)
             self._rank_next = time.monotonic() + RANK_POLL_SECONDS

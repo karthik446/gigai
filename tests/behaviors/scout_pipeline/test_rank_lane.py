@@ -472,3 +472,134 @@ def test_only_postings_posted_in_the_last_7_days_are_ranked_and_a_ranked_one_nev
     assert {job for job, score in after.items() if score is not None} == inside | {url("fresh")}
     assert {job: after[job] for job in inside} == {job: scores[job] for job in inside}
     assert _tick(fx, environ={})["calls"] == 0 and len(model.rank_prompts) == 4
+
+
+# --- 0.1.11.2 RANKFIX: the server ranks at its start and when new postings arrive ---------------------------
+
+
+def _wait(until: object, *, seconds: float = 30.0) -> bool:
+    import time
+
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        if until():  # type: ignore[operator]
+            return True
+        time.sleep(0.05)
+    return bool(until())  # type: ignore[operator]
+
+
+def _fully_ranked(fx: PostingsFixture, part: str = "/") -> int:
+    """How many jobs whose URL has ``part`` carry a score on EVERY profile's row (read while the lane may be mid-turn)."""
+
+    if not pipeline_path(fx.home_root, fx.target).is_file():
+        return 0
+    store = _store(fx)
+    try:
+        rows = [row for row in store.postings() if part in row.job]
+    finally:
+        store.close()
+    jobs = {row.job for row in rows}
+    return len({job for job in jobs if all(row.rank_score is not None for row in rows if row.job == job)})
+
+
+def _real_days_ago(days: int):  # type: ignore[no-untyped-def]
+    """The server's lane reads the real clock (nothing injects one), so its postings are dated from it."""
+
+    from datetime import datetime
+
+    return datetime.now().astimezone() - timedelta(days=days)
+
+
+def test_a_server_start_ranks_the_unranked_postings_of_the_last_7_days_without_a_sources_update(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import threading
+
+    from gigai.scout.find_jobs.present_api import ScoutFindJobsBackend, serve
+
+    monkeypatch.delenv(PIPELINE_ENV, raising=False)
+    monkeypatch.setenv("GIGAI_SCOUT_AUTO_REFRESH", "0")
+    monkeypatch.setenv("GIGAI_SCOUT_MODEL_TAGS", "0")
+    fx, model = _fixture(tmp_path, monkeypatch)
+    set_pipeline_enabled(fx.home_root, fx.target, False)
+    recent = _real_days_ago(1)
+    fx.seed("acme", [lever_job("acme", 1, created=recent), lever_job("acme", 2, created=recent)], seen_at=recent)
+    fx.seed("old", [lever_job("old", 3, created=_real_days_ago(20))], seen_at=_real_days_ago(20))
+    assert pipeline_setting(fx.home_root, fx.target, environ={}).enabled is False  # the pipeline (tailoring) is off
+    backend = ScoutFindJobsBackend(home_root=fx.home_root, target=fx.target)
+
+    def start():  # type: ignore[no-untyped-def]
+        server = serve(backend=backend, bind=("127.0.0.1", 0), background_refresh=True)
+        serving = threading.Thread(target=server.serve_forever, daemon=True)
+        serving.start()
+        return server, serving
+
+    def end(server, serving) -> None:  # type: ignore[no-untyped-def]
+        server.shutdown()
+        server.server_close()
+        serving.join(timeout=5)
+
+    def ranked() -> int:
+        return _fully_ranked(fx, "/acme/")
+
+    # No sources update, no kick, no approval: only the start.
+    server, serving = start()
+    try:
+        in_time = _wait(lambda: ranked() == 2, seconds=20.0)
+        last = server.pipeline_runner._last_rank
+    finally:
+        end(server, serving)
+
+    # THE OUTCOME: the postings of the last 7 days carry a rank score a few seconds after the start.
+    assert in_time, f"ranked {ranked()} of 2 after the server start; the lane's last turn: {last}"
+    scores = _scores_or_none(fx)
+    assert all(type(score) is int for job, score in scores.items() if "/acme/" in job)
+    assert all(score is None for job, score in scores.items() if "/old/" in job)  # outside the window: never by this lane
+    assert len(model.rank_prompts) == 2  # one call per active profile, 50 a call at most
+    assert rank_lane.rank_status(fx.home_root, fx.target, environ={})["calls_today"]["used"] == 2  # type: ignore[index]
+
+    # A second start: a ranked posting is never ranked again, and no call is counted.
+    server, serving = start()
+    try:
+        assert _wait(lambda: (server.pipeline_runner._last_rank or {}).get("state") == "idle", seconds=20.0)
+    finally:
+        end(server, serving)
+    assert len(model.rank_prompts) == 2
+    assert rank_lane.rank_status(fx.home_root, fx.target, environ={})["calls_today"]["used"] == 2  # type: ignore[index]
+
+
+def test_a_turn_that_had_to_wait_and_postings_that_arrive_later_are_ranked_at_the_next_look(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv(PIPELINE_ENV, raising=False)
+    fx, model = _fixture(tmp_path, monkeypatch)
+    fx.seed("acme", [lever_job("acme", 1, created=_real_days_ago(1))], seen_at=_real_days_ago(1))
+    live: list[str | None] = ["sources_update"]
+    # ``migrate_runs`` failing (old runs that cannot be read) must not cost the lane its turn.
+    monkeypatch.setattr("gigai.scout.run_history.migrate_runs", lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("runs")))
+    runner = PipelineRunner(
+        home_root=fx.home_root, target=fx.target, config=fixture_config(fx.home_root), busy=lambda: live[0], environ={},
+        poll_seconds=0.05,
+    )
+    runner.start()
+    try:
+        # Something is live at the start: the lane waits and makes no call ...
+        assert _wait(lambda: (runner._last_rank or {}).get("state") == "yielded", seconds=20.0), runner._last_rank
+        assert model.rank_prompts == []
+        # ... and ranks at the next look once it is over (it used to come back 10 minutes later), with no kick.
+        live[0] = None
+        assert _wait(lambda: _fully_ranked(fx) == 1, seconds=20.0), runner._last_rank
+        sent = len(model.rank_prompts)
+        assert sent == 2
+
+        # New postings arrive by a sources update nobody kicked the runner for (a background one, or another process's).
+        fx.seed("late", [lever_job("late", 4, title=TITLE_SECOND_ONLY, created=_real_days_ago(0))], seen_at=_real_days_ago(0))
+        fx.index.write_update_summary({"update_id": "upd_late", "status": "succeeded", "trigger": "auto", "finished_at": "2026-10-06T00:00:00Z"})
+        assert _wait(lambda: _fully_ranked(fx) == 2, seconds=20.0), runner._last_rank
+    finally:
+        assert runner.stop(timeout=30) is True
+    # Only the new posting was sent: the ranked ones were not ranked again.
+    assert len(model.rank_prompts) == sent + 1
+    last_block = model.rank_prompts[-1].split("\nPOSTINGS (", 1)[1].split("\n\nAnswer with ONLY", 1)[0]
+    assert len(_LINE.findall(last_block)) == 1  # one posting line: the new one
+    assert rank_lane.rank_status(fx.home_root, fx.target, environ={})["calls_today"]["used"] == sent + 1  # type: ignore[index]

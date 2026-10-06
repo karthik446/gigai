@@ -678,9 +678,11 @@ _POSTING_COLUMNS = (
     "pinned_digest, settings_digest, updated_at, fit"
 )
 _POSTING_BUILD_COLUMNS = "profile_id, match_digest, facts_digest, pinned_digest, settings_digest, row_count, built_at"
-#: What a posting is ordered by (0110-8-04, 0110-10-02; the same key as ``scout_new.order_key``): a current assessment,
-#: then a stale one, then none; the verdict; the fit number; the rank score; the newest.
+#: What a posting is ordered by (0110-8-04, 0110-10-02; the same key as ``scout_new.order_key``): thin postings last
+#: (0.1.11.2, ``fit.is_thin_posting``: the thin state, or a match on fewer than 4 requirement rows); then a current
+#: assessment, then a stale one, then none; the verdict; the fit number; the rank score; the newest.
 _POSTING_ORDER = (
+    "CASE WHEN state = 'thin_posting' OR (state = 'matched' AND COALESCE(reqs_total, 0) < 4) THEN 1 ELSE 0 END, "
     "CASE WHEN state = 'not_assessed' THEN 2 WHEN stale_code IS NOT NULL THEN 1 ELSE 0 END, "
     "CASE WHEN label = 'recommended' THEN 0 ELSE 1 END, "
     "CASE state WHEN 'not_assessed' THEN 0 WHEN 'matched' THEN 0 WHEN 'needs_answers' THEN 1 WHEN 'weak_fit' THEN 3 "

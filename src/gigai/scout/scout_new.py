@@ -24,6 +24,10 @@ THE FLOW
   (``fit.py``: the share of requirements met, the must-haves weighted), the
   rank score, the newest. A not-assessed posting has no fit number and is
   ordered by its rank: a percentage is never compared with a rank score.
+  A THIN posting (``fit.is_thin_posting``: a match read from fewer than 4
+  requirement rows) comes after all of that: below every other assessed
+  posting and every posting not assessed yet, the thin ones among themselves
+  in this same order.
 - WEAK FIT (0110-10-02, ``fit.py``): a needs-answers posting with few
   requirements met AND a low rank has the state ``weak_fit``. It is left out
   of the rows listed here (``counts.weak_fit`` says how many, the message how
@@ -266,10 +270,12 @@ def fit_of(row: PostingRecord) -> int | None:
     return row.fit if row.fit is not None else fit_rules.plain_percent(row.reqs_met, row.reqs_total)
 
 
-def order_key(row: PostingRecord) -> tuple[int, int, int, int, int]:
+def order_key(row: PostingRecord) -> tuple[int, int, int, int, int, int]:
     """What the grid is ordered by before recency (0110-8-04, 0110-10-02); ``pipeline.store._POSTING_ORDER`` is the same key in SQL.
 
-    The freshness group, the Scout label ``recommended`` first inside it, the
+    Thin postings last (0.1.11.2: a "fit 100%" read from 2 requirements says
+    too little to list above a real match or a ranked posting). Then the
+    freshness group, the Scout label ``recommended`` first inside it, the
     verdict, then the real fit: the fit number (the share of requirements
     met, must-haves weighted), then the rank score. A not-assessed row has
     no fit number, so its group is ordered by rank.
@@ -279,6 +285,7 @@ def order_key(row: PostingRecord) -> tuple[int, int, int, int, int]:
     verdict = 0 if group == GROUP_NOT_ASSESSED else _VERDICT_ORDER.get(row.state, 2)
     found = fit_of(row)
     return (
+        1 if fit_rules.is_thin_posting(row.state, row.reqs_total) else 0,
         _GROUP_ORDER[group], 0 if row.label == _RECOMMENDED else 1, verdict,
         -(found if found is not None else -1), -(row.rank_score if row.rank_score is not None else -1),
     )
