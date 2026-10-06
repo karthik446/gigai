@@ -16,17 +16,23 @@ import { conflictOf } from "../masterModel.js";
 import {
   DRAFT_LABEL,
   NO_MASTER_TEXT,
+  NO_RESUME_OLD_ASSESSMENT_TEXT,
+  OWN_RESUME_TEXT,
+  REASSESS_LABEL,
+  assessmentIsOld,
   attentionItems,
   changedLines,
   gateHolds,
-  hasNoMaster,
   holdSentence,
   isUsersResume,
+  pickErrorText,
   proposedChange,
   provenanceLine,
   resumeOrigin,
+  selectionErrorText,
   staleActions,
   suggestionsAnswer,
+  unpickable,
 } from "../jobResumeModel.js";
 import { MASTER_HASH } from "../routing.js";
 import PickedLeftOut from "./PickedLeftOut.jsx";
@@ -49,8 +55,11 @@ import { Preview } from "./TailoredResumePanel.jsx";
 //            refresh buttons, each with its cost in the button; `proposed`:
 //            "A new suggested resume is available: Compare · Use it ·
 //            Dismiss"; the gate holds: no resume, one sentence, a link to the
-//            questions and "Make a draft anyway"; no master: the profile's
-//            own resume is used as it is
+//            questions and "Make a draft anyway"; no master, or a profile
+//            on a resume put in by hand: the profile's own resume is used as
+//            it is, and the page says how to get one picked (no dead button);
+//            a suggested resume that is not stored: "Pick it now"; a pick
+//            that is refused: one plain sentence by its code
 //   writes   only on a click, and never through a model: POST
 //            /api/job-resumes/pick (re-pick, draft, use / dismiss proposed),
 //            the per-line Restore, the length Restore, Add and Remove
@@ -161,7 +170,8 @@ export function useJobResume({ jobIdentity, jobUrl, profileId, expectRecord = fa
           setChanges((count) => count + 1);
           return readRecord(key);
         })
-        .catch((err) => requestKey.current === key && setError(err.detail || err.message || String(err)))
+        // Said in the page's own words, by the refusal's code: never the server's text (it names commands).
+        .catch((err) => requestKey.current === key && setError(pickErrorText(err)))
         .finally(() => requestKey.current === key && setPicking(null));
     },
     [jobUrl, jobIdentity, profileId, readRecord],
@@ -417,7 +427,12 @@ export default function JobResumePanel({ state, assessment, gate, items, reasses
   const changed = stored ? changedLines(stored) : [];
   const users = isUsersResume(origin);
   const heading = stored && users ? "Your resume for this job" : "Suggested resume";
-  const dataState = stored ? "stored" : holds ? "held" : hasNoMaster(record) ? "no-master" : "none";
+  const cannotPick = unpickable(record); // "no_master" | "own_resume" | null
+  const dataState = stored ? "stored" : holds ? "held" : cannotPick === "no_master" ? "no-master" : cannotPick === "own_resume" ? "own-resume" : "none";
+  const notPickedWhy = selectionErrorText(record && record.selection_error);
+  // A pick from an old assessment is refused (a new selection never sits beside scores made on other evidence):
+  // the page offers the step that works, Re-assess, instead of a button that answers a refusal.
+  const oldAssessment = assessmentIsOld(items);
 
   return (
     <section
@@ -458,14 +473,29 @@ export default function JobResumePanel({ state, assessment, gate, items, reasses
         </div>
       )}
 
-      {!stored && !holds && hasNoMaster(record) && (
+      {!stored && !holds && cannotPick === "no_master" && (
         <p data-role="no-master">
           {NO_MASTER_TEXT}: <a href={MASTER_HASH}>open the Master page</a>.
         </p>
       )}
-      {!stored && !holds && !hasNoMaster(record) && (
+      {!stored && !holds && cannotPick === "own_resume" && (
+        <p data-role="own-resume">
+          {OWN_RESUME_TEXT}: <a href={MASTER_HASH}>open the Master page</a>.
+        </p>
+      )}
+      {!stored && !holds && !cannotPick && oldAssessment && (
+        <p data-role="no-resume" data-old-assessment="true">
+          {NO_RESUME_OLD_ASSESSMENT_TEXT}{" "}
+          <span title={reassess && !reassess.enabled ? reassess.reason : undefined}>
+            <button type="button" className="button small secondary" data-action="reassess-stale" disabled={busy || !reassess || !reassess.enabled} onClick={reassess ? reassess.onClick : undefined}>
+              {REASSESS_LABEL}
+            </button>
+          </span>
+        </p>
+      )}
+      {!stored && !holds && !cannotPick && !oldAssessment && (
         <p data-role="no-resume">
-          No resume is stored for this job yet{record && record.selection_error ? ` (it could not be picked: ${String(record.selection_error).replace(/_/g, " ")})` : ""}.{" "}
+          No resume is stored for this job yet.{notPickedWhy ? ` ${notPickedWhy}` : ""}{" "}
           <button type="button" className="button small secondary" data-action="repick" disabled={busy} onClick={() => state.pick("refresh")}>
             {picking === "refresh" ? "Picking…" : "Pick it now · no model call"}
           </button>

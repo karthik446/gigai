@@ -75,6 +75,8 @@ _READER_ALLOWLIST: dict[tuple[str, str, str], str] = {
     # for ONE thing, as the hand-back reads it: its name line, whose words are kept out of every story line offered
     # (story_bank.assess_bank). No line of it is printed in the brief; no model is called; nothing is stored.
     ("gigai.scout.job_brief", "_resume_text", "resume_for_profile"): "name-line words removed from the story lines the brief offers (story_bank.assess_bank); never printed, never sent, never stored",
+    # 0.1.11.3 (the pick of a STORED job, no model call): the same local use as the assessment's own pick and the brief.
+    ("gigai.scout.pick", "_stored_inputs", "resume_for_profile"): "name-line words removed from the story lines a selection may cite (tailor_sources -> story_bank.assess_bank); never printed, never sent, never stored",
 }
 
 #: (module, function) -> the strip calls its body must make.

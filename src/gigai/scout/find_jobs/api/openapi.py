@@ -1175,7 +1175,7 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
         {
             "schema_version": "scout-job-suggestions-response:1", "job_identity": _JOB_URL, "profile_id": "prof_1", "updated_at": "2026-10-05T10:05:00Z",
             "gate": {"decision": "suggest", "ready": True, "reasons": []}, "counts": {"open": 1, "done": 0, "dismissed": 0},
-            "verdict": "matched_above_threshold", "stale": ["master_newer"],
+            "verdict": "matched_above_threshold", "basis": "master", "master_stored": True, "stale": ["master_newer"],
             "picked": {"picked_by": "model", "fallback": None, "draft": False, "made_at": "2026-10-05T10:05:00Z", "pages": 2, "max_pages": 2,
                        "pick_rules_version": "pick-rules:1", "selector_version": "sel-4"},
             "problems": [], "added_by_code": [], "conflicts": [], "selection_error": None, "proposed": None, "selected_lines": ["b-8aef71"],
@@ -1252,7 +1252,7 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
         "POST", "/api/job-resumes/pick", "Take one explicit step on a job's resume: pick again, make a draft, or take or drop the proposed one.", "write", "none",
         {
             "schema_version": "scout-job-resume-pick:1", "action": "refresh", "job_identity": _JOB_URL, "profile_id": "prof_1", "verdict": "matched_above_threshold",
-            "gate": {"decision": "suggest", "ready": True, "reasons": []}, "stale": [],
+            "gate": {"decision": "suggest", "ready": True, "reasons": []}, "basis": "master", "master_stored": True, "stale": [],
             "resume": {
                 "updated_at": "2026-10-05T10:07:00Z", "made_by": "scout.pick", "edited": None, "replaceable": True, "lines": 41,
                 "counts": {"picked": 28, "left_out": 30, "cut_for_length": 3}, "folder_path": "~/Documents/GigAI/resumes/acme-software-engineer-2026-10-05.md",
@@ -1270,7 +1270,8 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
         request_example={"job_url": _JOB_URL, "action": "refresh"},
         errors=(
             _UNKNOWN_KEY, _WRONG_TYPE, _INVALID, (404, "assessment_missing"), (404, "no_proposed_resume"), (409, "assessment_stale"), (409, "draft_not_needed"),
-            (409, "pages_unmeasured"), _NO_TARGET, (501, "pick_not_available"),
+            (409, "pages_unmeasured"), (409, "no_master"), (409, "profile_resume_in_use"), (409, "resume_held"), (409, "pick_failed"),
+            (404, "profile_not_found"), _NO_TARGET, (501, "pick_not_available"),
         ),
         description=(
             "No model call in any form. `refresh` picks again in code from the STORED assessment against the master as it is now; while that "
@@ -1281,7 +1282,10 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
             "`dismiss_proposed` drops the proposal (404 no_proposed_resume when none waits). The answer is what is stored after the step: the job "
             "resume (`made_by` is its producer, `counts` its Picked / Left out), who picked it (`picked`), what validation found (`problems`) and "
             "code added (`added_by_code`), the `gate`, the `stale` list (`assessment_stale:<reason>`, picked_line_changed, master_newer, "
-            "selection_rules_changed, assessment_newer) and the `conflicts`. 501 pick_not_available: this GigAI cannot pick again yet; re-assess the job."
+            "selection_rules_changed, assessment_newer) and the `conflicts`. `basis` is what a resume for this job is made from now (`master`, or "
+            "`profile_resume`: nothing is picked, 409 no_master without a master and 409 profile_resume_in_use for a profile whose resume was put in "
+            "by hand; `master_stored` tells them apart). A plain `refresh` of a job whose gate holds is 409 resume_held (make a `draft`); a pick that "
+            "fails is 409 pick_failed or pages_unmeasured. Every refusal's `message` is for the user: what to do, in plain words."
         ),
     ),
     RouteSpec(

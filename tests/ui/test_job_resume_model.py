@@ -135,6 +135,22 @@ out.brief = [m.briefCommands("https://jobs.example.test/a?b=1&c='x'", "profile_1
 const apply = (codes, stored = input.stored) => m.applyState({ stored, items: m.staleItems(codes) });
 out.apply = [apply([]), apply(["master_newer"]), apply(["picked_line_changed"]), apply(["assessment_stale:older_prompt", "picked_line_changed"]), apply(["assessment_newer"]), apply([], null)];
 out.noMaster = [m.hasNoMaster({ basis: { master: null }, selection: null }), m.hasNoMaster(input.record), m.hasNoMaster(null), m.NO_MASTER_TEXT];
+// 0.1.11.3: why nothing can be picked (what the server says the resume is made from now), and a refused pick in the page's own words.
+const servedBasis = (basis, master_stored, selection = null) => m.suggestionsAnswer(input.served, { ...input.pickView, picked: selection, basis, master_stored }).record;
+out.cannotPick = [
+  m.unpickable(servedBasis("profile_resume", false)), m.unpickable(servedBasis("profile_resume", true)), m.unpickable(servedBasis("master", true)),
+  m.unpickable(servedBasis("profile_resume", true, input.pickView.picked)), m.unpickable(servedBasis(null, false)), m.unpickable(null),
+  m.hasNoMaster(servedBasis("profile_resume", false)), m.hasNoMaster(servedBasis("profile_resume", true)), m.OWN_RESUME_TEXT,
+];
+out.pickErrors = input.pickCodes.map((code) => m.pickErrorText({ code, status: 409, message: "scout.pick.settle_stored is not part of it", detail: "pick_not_available" }));
+out.oldAssessment = [
+  m.assessmentIsOld(m.staleItems(["assessment_stale:resume_changed"])), m.assessmentIsOld(m.staleItems(["assessment_stale"])),
+  m.assessmentIsOld(m.staleItems(["picked_line_changed", "master_newer"])), m.assessmentIsOld([]), m.assessmentIsOld(null), m.NO_RESUME_OLD_ASSESSMENT_TEXT,
+];
+out.pickErrorOther = [
+  m.pickErrorText({ status: 0, message: "Could not reach the local API." }), m.pickErrorText(null), m.pickErrorText(new Error("TypeError: x is undefined")),
+  m.selectionErrorText("pages_unmeasured"), m.selectionErrorText("pick_failed"), m.selectionErrorText(null),
+];
 out.answer = [
   m.suggestionsAnswer(input.served, input.pickView), m.suggestionsAnswer(input.served, null), m.suggestionsAnswer(null, null),
   m.suggestionsAnswer(null, { ...input.pickView, resume: { made_by: "scout.tailor", edited: { written_by: "agent" } } }).origin,
@@ -242,6 +258,13 @@ PICK_VIEW = {
 }
 
 
+#: Every code `POST /api/job-resumes/pick` refuses with (`job_actions.pick_action`, `pick.settle_stored`), and one the page does not know.
+PICK_CODES = [
+    "pick_not_available", "pick_failed", "pages_unmeasured", "assessment_stale", "assessment_missing", "no_master", "profile_resume_in_use",
+    "profile_not_found", "resume_held", "draft_not_needed", "no_proposed_resume", "some_new_code",
+]
+
+
 @pytest.fixture(scope="module")
 def out() -> dict:
     node = shutil.which("node")
@@ -250,7 +273,7 @@ def out() -> dict:
     urls = [(UI_SRC / name).as_uri() for name in ("jobResumeModel.js", "jobStateModel.js")]
     payload = json.dumps({
         "assessment": ASSESSMENT, "pending": PENDING, "gapGate": GAP_GATE, "stored": STORED, "changed": CHANGED, "record": RECORD, "conflicts": CONFLICTS,
-        "added": ADDED, "skills": SKILLS, "proposed": PROPOSED, "served": SERVED, "pickView": PICK_VIEW,
+        "added": ADDED, "skills": SKILLS, "proposed": PROPOSED, "served": SERVED, "pickView": PICK_VIEW, "pickCodes": PICK_CODES,
     })
     done = subprocess.run([node, "--input-type=module", "-e", SCRIPT.replace("__URLS__", json.dumps(urls)), payload], capture_output=True, text=True, check=False, timeout=60)
     assert done.returncode == 0, done.stderr
@@ -406,6 +429,38 @@ def test_suggestions_the_brief_commands_apply_and_no_master(out: dict) -> None:
         "b-000003": {"supports": ["req-000002"], "added": None},
     }
     assert out["labels"] == ["Re-pick · no model call", "Re-assess · 1 model call", "Make a draft anyway", "Apply: get the PDF"]
+
+
+def test_a_refused_pick_and_a_profile_nothing_is_picked_for_are_said_in_plain_words(out: dict) -> None:
+    """0.1.11.3: the operator read "scout.pick.settle_stored is not part of it" on a job page. Never again: one sentence by code."""
+
+    import re
+
+    from gigai.scout import pick
+
+    no_master, own_resume, on_master, picked, unknown, nothing, has_none, has_own, own_text = out["cannotPick"]
+    assert (no_master, own_resume, on_master, picked, unknown, nothing) == ("no_master", "own_resume", None, None, None, None)
+    assert (has_none, has_own) == (True, False) and own_text.startswith("This profile uses the resume you put in by hand")
+    internal = re.compile(r"scout\.|settle_stored|pick_not_available|gigai |`|\b[a-z]+(?:_[a-z]+)+\b")
+    sentences = dict(zip(PICK_CODES, out["pickErrors"]))
+    for code, sentence in sentences.items():
+        assert sentence and sentence[0].isupper() and sentence.endswith(".") and not internal.search(sentence), (code, sentence)
+    general = sentences["pick_failed"]
+    assert general == "The resume could not be picked for this job. Try again, or re-assess the job to get a new pick."
+    assert sentences["pick_not_available"] == sentences["some_new_code"] == general  # a code the page does not know reads as the general one
+    assert len(set(sentences.values())) == len(PICK_CODES) - 2
+    assert "Master page" in sentences["no_master"] and "by hand" in sentences["profile_resume_in_use"] and "draft" in sentences["resume_held"]
+    assert "Re-assess the job first" in sentences["assessment_stale"]
+    # Every code the pick step itself refuses with has its sentence on the page.
+    assert set(pick.MESSAGES) <= set(PICK_CODES)
+    offline, none, thrown, unmeasured, failed, silent = out["pickErrorOther"]
+    assert offline == "Could not reach the local API." and none == thrown == general
+    assert "pages could not be measured" in unmeasured and failed == "It could not be picked when the job was assessed." and silent == ""
+    panel = (UI_SRC / "components" / "JobResumePanel.jsx").read_text(encoding="utf-8")
+    assert "setError(pickErrorText(err))" in panel and "selection_error).replace" not in panel
+    # An old assessment: the page offers Re-assess, never a pick that would be refused.
+    assert out["oldAssessment"][:5] == [True, True, False, False, False] and "re-assess the job to get one" in out["oldAssessment"][5]
+    assert "!cannotPick && oldAssessment && (" in panel and "!cannotPick && !oldAssessment && (" in panel
 
 
 def test_the_one_switch_and_the_three_routes() -> None:

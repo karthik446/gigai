@@ -844,9 +844,13 @@ def job_resume(
 def store_assessed(
     home_root: Path, target: Path, *, assessment: object, job: object, resume: object, gate_record: object | None, now: str,
     suggested: Iterable[AssessmentSuggestion] = (), settled: object | None = None, selection_error: str | None = None,
-    master_source: object | None = None, answers: Mapping[str, object] | None = None,
+    master_source: object | None = None, answers: Mapping[str, object] | None = None, repick: bool = False,
 ) -> SuggestionRecord:
     """Write the suggestion record of a NEW assessment and, with a selection, the job resume: one function, one lock.
+
+    ``repick`` (0.1.11.3, ``pick.settle_stored``): the assessment is the STORED one and only its selection is made
+    again. A record that exists keeps its suggestions, its ids and its basis (``with_selection``); a job with no
+    record yet gets the one its assessment would have written.
 
     ``settled`` (``pick.Settled``; ``None``: the gate holds, or no selection
     could be made, ``selection_error`` says why).  With one: when the stored
@@ -896,13 +900,19 @@ def store_assessed(
         # What the job resume prints NOW: the new selection when it was written, else the stored resume as it is.
         conflicts = getattr(settled, "conflicts", ()) if settled is not None and proposed is None else ()
         check = check_selection(rows, printed_ids(stored.result) if stored is not None else (), conflicts=conflicts) if stored is not None else None  # type: ignore[attr-defined]
-        record = merged(
-            previous, profile_id=str(profile_id or "ephemeral"), job_identity=identity, stored_path=os.fspath(record_path), now=now,
-            basis=basis_of(assessment, master_source), gate=gate_json(gate_record, check if selection is not None else None),
-            # With no job resume there is nothing printed to check a row against: the rows are stored without a coverage.
-            requirements=check.rows if check is not None else tuple(CoverageRow(row.id, row.requirement_class, row.status, row.sources) for row in rows),
-            suggested=suggested, selection=selection, proposed=proposed, selection_error=selection_error,
-        )
+        if repick and previous is not None:
+            if check is not None:
+                record = with_selection(previous, now=now, check=check, selection=selection, proposed=proposed, selection_error=selection_error)
+            else:  # no job resume, before and after: only why no selection could be made changes
+                record = replace(previous, updated_at=now, selection_error=selection_error)
+        else:
+            record = merged(
+                previous, profile_id=str(profile_id or "ephemeral"), job_identity=identity, stored_path=os.fspath(record_path), now=now,
+                basis=basis_of(assessment, master_source), gate=gate_json(gate_record, check if selection is not None else None),
+                # With no job resume there is nothing printed to check a row against: the rows are stored without a coverage.
+                requirements=check.rows if check is not None else tuple(CoverageRow(row.id, row.requirement_class, row.status, row.sources) for row in rows),
+                suggested=suggested, selection=selection, proposed=proposed, selection_error=selection_error,
+            )
         save_record(record)
     return record
 

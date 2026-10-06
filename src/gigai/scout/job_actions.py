@@ -22,8 +22,9 @@ and a waiting proposal.  ``pick_action`` is the four explicit steps:
 ``dismiss_proposed``  the waiting selection is dropped; the stored job resume is not touched
 ==================  =============================================================================================
 
-``refresh`` and ``draft`` are ``scout.pick``'s (``job_resume_port.settle_stored``); a GigAI that does not hold that
-action answers ``pick_not_available``.  No action here calls a model.
+``refresh`` and ``draft`` are ``scout.pick``'s (``pick.settle_stored``, through ``job_resume_port``); a GigAI that
+does not hold that action answers ``pick_not_available``.  No action here calls a model.  A step that is refused
+says so for the USER: what happened and what to do, in plain words, never the name of a module or a function.
 
 AFTER A HAND-BACK (``after_handback``): the final-selection check is made again on what the job resume now prints
 (a reworded line counts for every master id it cites) and the suggestions the writer named are set to ``done``
@@ -159,7 +160,7 @@ def _missing(job: job_brief.StoredJob) -> JobActionError:
 
 
 #: What the OPEN read adds to the suggestions (``GET /api/jobs/suggestions``, the page): ``pick_view``'s stored view.
-OPEN_KEYS: tuple[str, ...] = ("verdict", "stale", "picked", "problems", "added_by_code", "conflicts", "selection_error", "proposed", "selected_lines", "requirements")
+OPEN_KEYS: tuple[str, ...] = ("verdict", "basis", "master_stored", "stale", "picked", "problems", "added_by_code", "conflicts", "selection_error", "proposed", "selected_lines", "requirements")
 
 
 def list_suggestions(
@@ -337,6 +338,27 @@ def _resume_view(home_root: Path, resume: object | None, replaceable: bool) -> d
     }
 
 
+def _basis(home_root: Path, target: Path, check: object, profile_id: str, resolved: object | None) -> tuple[str | None, bool]:
+    """``(basis, master_stored)`` for the job's profile as it is now.
+
+    ``basis``: ``master`` | ``profile_resume`` (the brief's own rule, ``tailor_master.tailoring_basis``), or ``None``:
+    no gig, or the profile is gone.  Only ``master`` is picked from; ``profile_resume`` with a master stored is a
+    profile whose resume was put there by hand.  ``check``: the view's ``BasisCheck``, which has read the profiles
+    for the stale check already (nothing is read twice).
+    """
+
+    from .tailor_master import stored_master, tailoring_basis
+
+    if resolved is None:
+        return None, False
+    has_master = stored_master(home_root, target, resolved=resolved) is not None
+    try:
+        profile = check._profile(profile_id)  # type: ignore[attr-defined]  # noqa: SLF001 - the profiles this request already read
+    except Exception:  # noqa: BLE001 - a view never fails on what it cannot read: the basis is then unknown
+        return None, has_master
+    return (None if profile is None else tailoring_basis(home_root, profile, master_stored=has_master)), has_master
+
+
 def pick_view(home_root: Path, target: Path, job_url: str, *, profile_id: str | None = None) -> dict[str, object]:
     """What is stored for one job's resume (the module text). Reads only: nothing is recomputed and nothing is written."""
 
@@ -354,7 +376,8 @@ def pick_view(home_root: Path, target: Path, job_url: str, *, profile_id: str | 
         resolved: object | None = resolve_workpad(home_root=home_root, requested_target=target, gig_id=None, allow_semantic_state=True)
     except WorkpadError:
         resolved = None
-    reason = BasisCheck(home_root=home_root, target=target, resolved=resolved).reason(job.assessment)  # type: ignore[arg-type]
+    check = BasisCheck(home_root=home_root, target=target, resolved=resolved)
+    reason = check.reason(job.assessment)  # type: ignore[arg-type]
     stale = list(store.stale_for(home_root, target, job.profile_id, job.job_identity, assessment_stale=reason, resolved=resolved))
     replaceable = bool(store.is_replaceable(resume, store.read_suggestions(home_root, target, job.profile_id, job.job_identity)))
     gate = record.get("gate") if isinstance(record.get("gate"), Mapping) else None
@@ -363,10 +386,14 @@ def pick_view(home_root: Path, target: Path, job_url: str, *, profile_id: str | 
         gate = {"decision": stored_gate.decision, "ready": None, "reasons": [reason.to_json() for reason in stored_gate.reasons]}
     questions = job_brief.open_questions(home_root, target, job.assessment)
     asked = {str(item["row"]): str(item["question_id"]) for item in questions if item["row"]}
+    basis, master_stored = _basis(home_root, target, check, job.profile_id, resolved)
     return {
         "schema_version": PICK_SCHEMA,
         "job_identity": job.job_identity,
         "profile_id": job.profile_id,
+        # What a resume for this job is made from NOW (``tailor_master.tailoring_basis``): only ``master`` is picked from.
+        "basis": basis,
+        "master_stored": master_stored,
         "verdict": job_brief._word(getattr(job.assessment.result, "verdict", None)),  # type: ignore[attr-defined]  # noqa: SLF001 - the brief's own reading of an enum
         "gate": None if gate is None else dict(gate),
         "stale": stale,
@@ -424,7 +451,10 @@ def pick_action(home_root: Path, target: Path, job_url: str, action: str, *, pro
                 "(`gigai scout jobs assess URL --again`, or `gigai scout assess --job-url URL` for a job assessed by its URL; one model call, on the user's yes)",
             )
         if action == ACTION_DRAFT and decision == _GATE_SUGGEST:
-            raise JobActionError("draft_not_needed", "a resume is suggested for this job already; a draft is for a job that is held. Pick again with --refresh")
+            raise JobActionError(
+                "draft_not_needed",
+                "A resume is suggested for this job already; a draft is for a job that is held. Pick it again: `gigai scout resume pick --job-url URL --refresh`.",
+            )
         settle = job_resume_port.settle_stored()
         try:
             settle(home_root, target, *pair, action=action, now=when)

@@ -11,7 +11,7 @@ over HTTP against the real supervised server. Synthetic data only; no route here
    names each suggestion by id, with the assessment's ``why`` in the posting part and an agent's in the private one.
 3. The suggestions and the pick answer by code: a job whose assessment wrote no record (the offline model answers in
    the shape of before 0.1.11) is 404 ``suggestions_not_found``, no proposal waits (404 ``no_proposed_resume``), and
-   a GigAI without the step that picks a stored job again answers 501 ``pick_not_available``. Never a 500.
+   a pick that cannot be made (the job is held; this home has no master resume) is a 409 in plain words. Never a 500.
 4. Shape errors are typed 422s that name the allowed keys; a foreign Origin is 403 and changes nothing.
 
 The record itself (add, resolve, dismiss, what a new assessment keeps) is driven on the real store in
@@ -20,7 +20,6 @@ The record itself (add, resolve, dismiss, what a new assessment keeps) is driven
 
 from __future__ import annotations
 
-import importlib
 import json
 from pathlib import Path
 from urllib.parse import quote
@@ -40,8 +39,6 @@ _HEADER = "X-GigAI-Labels"
 _ROW = "req-0000a1"
 _ASSESSMENT_WHY = "The posting asks for a message queue and no line names one."
 _PHRASE = "experience with a durable message queue"
-#: Whether this tree (the server runs the same one) holds the pick's step for a stored assessment.
-HAS_PICK_STEP = hasattr(importlib.import_module("gigai.scout.pick"), "settle_stored")
 
 
 def _error(response: httpx.Response, status: int, code: str) -> dict[str, object]:
@@ -113,12 +110,12 @@ def test_job_brief_suggestions_and_pick_journey(tmp_path: Path, monkeypatch: pyt
         _error(client.post("/api/jobs/suggestions", json={"job_url": _URL, "action": "dismiss", "suggestion_id": "sg-1"}), 404, no_record)
         _error(client.post(pick, json={"job_url": _URL, "action": "use_proposed"}), 404, "no_proposed_resume")
         _error(client.post(pick, json={"job_url": _URL, "action": "dismiss_proposed"}), 404, "no_proposed_resume")
-        refreshed = client.post(pick, json={"job_url": _URL, "action": "refresh"})
-        if HAS_PICK_STEP:
-            assert refreshed.status_code < 500, refreshed.text
-        else:
-            message = str(_error(refreshed, 501, "pick_not_available")["message"])
-            assert "scout.pick.settle_stored" in message and "re-assess" in message
+        # 0.1.11.3: the step is there, and what it refuses it says by code, in plain words. This job waits for an answer
+        # (no resume is suggested: a plain pick is held), and this home has no master resume (so no draft either).
+        held = str(_error(client.post(pick, json={"job_url": _URL, "action": "refresh"}), 409, "resume_held")["message"])
+        no_master = str(_error(client.post(pick, json={"job_url": _URL, "action": "draft"}), 409, "no_master")["message"])
+        assert "draft" in held and "master resume" in no_master
+        assert all(name not in text for text in (held, no_master) for name in ("scout.pick", "settle_stored", "pick_not_available"))
         _error(client.get("/api/jobs/suggestions?url=https%3A%2F%2Fboards.greenhouse.io%2Facme%2Fjobs%2F999"), 404, "assessment_missing")
 
         # ---- 3b. with a record (seeded as an assessment made on 0.1.11 writes it): add, resolve, dismiss, list ---
