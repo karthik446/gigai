@@ -130,7 +130,9 @@ from .pipeline.store import PipelineStore, PostingBuild, PostingRecord, RunAsses
 # :7 is 0110-10-14 (the correction): a Greenhouse row's ``published_at`` is the posting's ``first_published``, not its
 # list ``updated_at``, so the window and the filters judge it by another date. The same one build covers it for a home
 # that comes from 0.1.10.10; a home that ran an earlier 0.1.10.11 build prepares once more.
-MATCH_VERSION = "posting-match:7"
+# :8 is 0.1.11.3 item 11: the country rule rejects a region outside the profile's countries ("Europe", "Remote
+# (Germany)") and reads a bare "Remote" as the US, so every stored list is matched once more.
+MATCH_VERSION = "posting-match:8"
 # :3 is 0110-10-02: a row carries its fit number, and a weak fit has its own state.
 # :4 is 0.1.11.2: a match with no row about the job has the state ``thin_posting`` (stored rows get their facts again).
 FACTS_VERSION = "posting-facts:4"

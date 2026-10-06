@@ -26,7 +26,11 @@ run outputs, see ``../../../../v0.1.8-uat.md`` U19/U20):
   which this fixes), not ambiguous. A region token alongside a real country
   match ("AMER; Denver, CO", "Remote - US") still matches on the country.
   An unrelated *unrecognized* token with no region signal at all (an
-  unknown city, "Remote" alone) stays ambiguous, as before.
+  unknown city) stays ambiguous, as before.
+* 0.1.11.3 item 11: a continent or named group ("Europe", "EU", "Asia",
+  "North America") is a region with member countries; brackets, "/" and "|"
+  separate places ("Remote (Germany)", "London / Remote"); and remote words
+  alone ("Remote", "Anywhere") are read as the default country, the US.
 * Empty string: genuinely no location data (Exa rows before ATS enrichment).
 
 P1b (operator's real run-2 numbers: US filter gave True 101 / False 41 /
@@ -239,9 +243,70 @@ _TIMEZONE_TOKENS: frozenset[str] = frozenset(
 # multi-country signal rather than a single-location one). Checked against
 # `location_countries` for accidental collisions (none of the six existing
 # aliases, nor these four, resolve to a real country/state/city token).
-_REGION_TOKENS: frozenset[str] = frozenset(
+_RULED_REGION_TOKENS: frozenset[str] = frozenset(
     {"amer", "americas", "emea", "apac", "latam", "apj", "anz", "asia-pacific", "asia pacific", "worldwide"}
 )
+
+# 0.1.11.3 item 11 (alpha user: "fetching OVERSEAS roles though we mentioned
+# filters"; the operator's own list held a remote job whose location was the
+# one word "Europe" under a US-only filter). A continent or a named group of
+# countries is a region too, and was in no table: "Europe", "Remote - Europe",
+# "EU", "Asia" resolved to no country, read as ambiguous, and were kept.
+#
+# Unlike the tokens above, each of these names its MEMBER countries, so the
+# region is a match for a profile whose country is in it ("Europe" lists for
+# a German profile, "North America" for a US one) and a definite non-match
+# for every other profile. Hand-made (ISO 3166 has no continents) and
+# deliberately coarse: a region word says where a job MAY be done, never
+# which of its countries the employer hires in. The tokens above keep their
+# ruling as they are (no members: a non-match for every single country).
+_EU_MEMBERS: frozenset[str] = frozenset(
+    "AT BE BG HR CY CZ DK EE FI FR DE GR HU IE IT LV LT LU MT NL PL PT RO SK SI ES SE".split()
+)
+_EUROPE: frozenset[str] = _EU_MEMBERS | frozenset(
+    "GB CH NO IS LI AL AD BA BY FO GI GG IM JE XK MC MD ME MK RS SM UA VA TR".split()
+)
+_NORDICS: frozenset[str] = frozenset("DK FI IS NO SE".split())
+_NORTH_AMERICA: frozenset[str] = frozenset("US CA MX".split())
+_SOUTH_AMERICA: frozenset[str] = frozenset("AR BO BR CL CO EC GY PY PE SR UY VE".split())
+_LATIN_AMERICA: frozenset[str] = _SOUTH_AMERICA | frozenset("MX BZ CR SV GT HN NI PA CU DO PR".split())
+_MIDDLE_EAST: frozenset[str] = frozenset("AE BH EG IL IQ IR JO KW LB OM PS QA SA SY TR YE".split())
+_ASIA: frozenset[str] = _MIDDLE_EAST - {"EG"} | frozenset(
+    "AF AM AZ BD BN BT CN GE HK ID IN JP KG KH KP KR KZ LA LK MM MN MO MV MY NP PH PK SG TH TJ TL TM TW UZ VN".split()
+)
+_AFRICA: frozenset[str] = frozenset(
+    "DZ AO BJ BW BF BI CV CM CF TD KM CG CD CI DJ EG GQ ER SZ ET GA GM GH GN GW KE LS LR LY MG MW ML MR MU MA MZ "
+    "NA NE NG RW ST SN SC SL SO ZA SS SD TZ TG TN UG ZM ZW".split()
+)
+_OCEANIA: frozenset[str] = frozenset("AU NZ FJ PG WS TO VU SB".split())
+_REGION_MEMBERS: dict[str, frozenset[str]] = {
+    "europe": _EUROPE,
+    "european union": _EU_MEMBERS,
+    "eu": _EU_MEMBERS,
+    "eea": _EU_MEMBERS | frozenset({"IS", "LI", "NO"}),
+    "dach": frozenset({"DE", "AT", "CH"}),
+    "benelux": frozenset({"BE", "NL", "LU"}),
+    "nordics": _NORDICS,
+    "nordic": _NORDICS,
+    "scandinavia": frozenset({"DK", "NO", "SE"}),
+    "north america": _NORTH_AMERICA,
+    "south america": _SOUTH_AMERICA,
+    "latin america": _LATIN_AMERICA,
+    "middle east": _MIDDLE_EAST,
+    "asia": _ASIA,
+    "africa": _AFRICA,
+    "oceania": _OCEANIA,
+}
+
+_REGION_TOKENS: frozenset[str] = _RULED_REGION_TOKENS | frozenset(_REGION_MEMBERS)
+
+# Words that say how or how widely a job is done, never where: dropped from a
+# segment before it is compared to a region token ("Remote Europe",
+# "Europe only", "Anywhere in Europe").
+_REGION_NOISE_WORDS: frozenset[str] = frozenset(
+    {"remote", "remotely", "hybrid", "onsite", "on-site", "anywhere", "in", "within", "across", "only", "based", "region", "the"}
+)
+_REGION_JOIN_RE = re.compile(r"\s+(?:&|\+|and|or)\s+")
 
 
 # Bare tech-hub city names with no country/state suffix at all (P1b:
@@ -347,15 +412,22 @@ def _fold(value: str) -> str:
     return "".join(ch for ch in decomposed if not unicodedata.combining(ch))
 
 
+# 0.1.11.3 item 11: brackets, "/" and "|" separate places as "," and ";" do.
+# "Remote (Germany)" used to be the one segment "remote (germany)", whose
+# token "(germany)" is no country, and "London / Remote" the one segment
+# "london / remote", which is no city: both resolved to nothing and were kept
+# under every country filter.
+_SEGMENT_SPLIT_RE = re.compile(r"[;,()\[\]/|]")
+
+
 def _segments(location: str) -> list[str]:
-    """Split a free-text location into comma/semicolon segments, folded."""
+    """Split a free-text location into segments (comma, semicolon, brackets, slash, pipe), folded."""
 
     parts: list[str] = []
-    for chunk in location.split(";"):
-        for piece in chunk.split(","):
-            piece = _fold(piece).strip()
-            if piece:
-                parts.append(piece)
+    for piece in _SEGMENT_SPLIT_RE.split(location):
+        piece = _fold(piece).strip()
+        if piece:
+            parts.append(piece)
     return parts
 
 
@@ -489,8 +561,51 @@ def location_countries(location: str) -> set[str]:
     return found
 
 
+def _regions(location: str) -> tuple[bool, set[str]]:
+    """``(a region token is named, the member countries of the regions named)``.
+
+    Walks the segments the way ``location_countries`` does (then the " - "
+    sub-joins, then "&"/"and"/"or" joins: "UK & Europe"), each compared to a
+    region token with its work-mode words dropped ("Remote Europe"). The
+    members are empty for the ruled tokens ("AMER", "EMEA": no single
+    country) -- see ``_REGION_MEMBERS``.
+    """
+
+    named = False
+    members: set[str] = set()
+    for segment in _segments(location or ""):
+        for joined in segment.split(" - "):
+            for sub in _REGION_JOIN_RE.split(joined):
+                token = " ".join(word for word in sub.split() if word not in _REGION_NOISE_WORDS)
+                if token in _REGION_TOKENS:
+                    named = True
+                    members |= _REGION_MEMBERS.get(token, frozenset())
+    return named, members
+
+
+#: The country a location that states none is read as (operator decision, 0.1.11.3 item 11).
+DEFAULT_COUNTRY = "US"
+
+_BARE_REMOTE_WORDS: frozenset[str] = frozenset(
+    {"remote", "remotely", "anywhere", "fully", "100", "work", "working", "from", "home", "wfh", "virtual", "distributed", "telecommute"}
+)
+_BARE_REMOTE_SIGNALS: frozenset[str] = frozenset({"remote", "remotely", "anywhere", "home", "wfh", "virtual", "telecommute"})
+_PLAIN_WORD_RE = re.compile(r"[a-z0-9]+")
+
+
+def _is_bare_remote(location: str) -> bool:
+    """True when the location is only remote words: "Remote", "Anywhere", "100% Remote", "Work from home".
+
+    Anything else beside them (a place the tables do not know, a timezone:
+    "Remote - EST", "Remote, Springfield") is not bare: it stays ambiguous.
+    """
+
+    words = _PLAIN_WORD_RE.findall(_fold(location or ""))
+    return bool(words) and all(word in _BARE_REMOTE_WORDS for word in words) and any(word in _BARE_REMOTE_SIGNALS for word in words)
+
+
 def _is_region_only(location: str) -> bool:
-    """True when every signal-bearing segment is a bare region token.
+    """True when the location names a region and no country, US state or known city.
 
     0.1.8.1 r1 (coordinator review of B1): the operator's UAT complaint was
     that a region string like "AMER" passed a US-only filter -- it resolved
@@ -498,33 +613,14 @@ def _is_region_only(location: str) -> bool:
     ``exclusion_reason`` never excludes ambiguous locations. A region token
     is not the same kind of "no signal" as a genuinely unrecognized token
     (an unknown city, "Remote" alone): it *is* a known, named multi-country
-    label, so a location that resolves to ONLY region tokens -- no country,
-    no US state, no known city anywhere in it -- is treated as a definite
-    non-match, not ambiguous.
-
-    Split the same way ``location_countries`` walks segments (comma/
-    semicolon, then " - " sub-joins) so "Remote - Americas" (one
-    comma-segment, "remote - americas", split into "remote"/"americas" only
-    here) is recognized the same way "AMER; Denver, CO" (already three
-    comma/semicolon segments) is. Returns ``False`` (not region-only) for
-    the empty string and for a location with no region token at all --
-    those stay however ``location_countries``/``country_match`` already
-    resolve them (ambiguous, or a real country match).
+    label, so a location that names a region and nothing finer is judged by
+    the region (``country_match``), not kept as ambiguous. ``False`` for the
+    empty string and for a location with no region token at all.
     """
 
-    if not location:
+    if not location or location_countries(location):
         return False
-    saw_region = False
-    for segment in _segments(location):
-        subsegments = [segment] + [sub.strip() for sub in segment.split(" - ") if sub.strip()]
-        for sub in subsegments:
-            if sub == segment and " - " in segment:
-                continue  # the whole joined segment itself, not a real token
-            if _segment_countries(sub):
-                return False  # a real country/state/city signal -- not region-only
-            if sub in _REGION_TOKENS:
-                saw_region = True
-    return saw_region
+    return _regions(location)[0]
 
 
 def _structured_countries(countries: tuple[str, ...] | None) -> set[str] | None:
@@ -574,9 +670,15 @@ def country_match(
     country/state/city anywhere in it -- "AMER", "EMEA", "APAC", "LATAM",
     "Remote - Americas") is also ``False``, a definite non-match, not
     ``None`` -- see ``_is_region_only``. A region token alongside a real
-    country match ("AMER; Denver, CO") still matches on the country, since
-    ``location_countries`` finds a non-empty set first and this branch is
-    never reached.
+    country match ("AMER; Denver, CO") still matches on the country.
+
+    0.1.11.3 item 11: a region that names its members ("Europe", "EU",
+    "Asia", "North America": ``_REGION_MEMBERS``) counts for those countries,
+    so it is ``True`` for a profile in the region and ``False`` for every
+    other. A location of remote words alone ("Remote", "Anywhere") is read
+    as the default country (``DEFAULT_COUNTRY``, the US): ``True`` when the
+    US is wanted, ``False`` when it is not. Only an EMPTY location, or one
+    naming a place no table knows, is still ``None``.
     """
 
     if not countries:
@@ -588,9 +690,20 @@ def country_match(
     if not location:
         return None
     found = location_countries(location)
+    # 0.1.11.3 item 11: a named region counts for its member countries
+    # ("Europe" for DE, "UK & Europe" for GB and DE); one with no members
+    # ("AMER") or with none of the wanted ones is a definite non-match.
+    region_named, members = _regions(location)
+    found |= members
     if not found:
-        if _is_region_only(location):
+        if region_named:
             return False
+        # Operator decision (0.1.11.3 item 11): the default country is the US.
+        # A location that says only "Remote" / "Anywhere" names no country
+        # and is read as a US job: listed for a profile whose countries hold
+        # the US, a non-match for one without it.
+        if _is_bare_remote(location):
+            return DEFAULT_COUNTRY in wanted
         return None
     return bool(found & wanted)
 
@@ -743,6 +856,7 @@ def exclusion_reason(posting: PostingRow, config: FindJobsConfig, *, now: dateti
 
 
 __all__ = [
+    "DEFAULT_COUNTRY",
     "country_match",
     "exclusion_reason",
     "location_countries",

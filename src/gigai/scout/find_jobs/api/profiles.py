@@ -158,7 +158,8 @@ def _string_list(body: dict[str, object], field: str, errors: dict[str, str]) ->
     return tuple(value)
 
 
-_NO_SETTINGS = ProfileSearchSettings(location=None, work_mode="any", countries=(), max_age_days=None)
+# 0.1.11.3 item 11: a new profile with nothing to prefill from searches the US (the default country).
+_NO_SETTINGS = ProfileSearchSettings(location=None, work_mode="any", countries=("US",), max_age_days=None)
 
 
 def _search_settings(

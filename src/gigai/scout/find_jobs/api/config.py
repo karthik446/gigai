@@ -33,7 +33,8 @@ def _prefs_prefill_from_config(config: FindJobsConfig) -> dict[str, object]:
     return {
         "roles": list(config.roles),
         "titles_to_avoid": [],
-        "countries": list(config.countries),
+        # 0.1.11.3 item 11: a fresh onboarding opens on the US (the default country), as the wizard shows it.
+        "countries": list(config.countries) or (["US"] if fresh else []),
         "work_mode": work_mode,
         "city": config.location,
         "visa_sponsorship_required": config.visa_sponsorship_required,
