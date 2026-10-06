@@ -1,6 +1,6 @@
 ---
 title: Resume and PDF
-description: Prepare a resume, tailor it to a posting, and download a PDF.
+description: Prepare a resume, see the resume picked for a posting, and download a PDF.
 ---
 
 ## Resume input
@@ -30,15 +30,19 @@ for the limits, including what versions before 0.1.10.7 stored.
 gigai scout resume add ./resume.md --json    # import + wrap your resume for find-jobs
 ```
 
-## Tailor a resume and download the PDF
+## The picked resume and the PDF
 
-**Tailor resume**, on a posting's page (or `gigai scout resume tailor`, `POST
-/api/tailored-resumes`), drafts a resume for that posting. Tailored resumes are
-drafts: review each line; every line shows its sources.
+Tailoring is switched off in 0.1.11. The resume for a job is **picked** from your master, word for
+word: the assessment picks the lines, and GigAI checks that the lines it shows are lines you wrote
+(see [How accurate is the picked resume](../accuracy-0-1-11/)). The job page shows it, with what
+was picked and what was left out; `gigai scout resume pick --job-url <url>` prints it.
+`gigai scout resume tailor` is still there and answers `tailoring_off` (no model call) unless the
+background pipeline was explicitly enabled in the settings; `POST /api/tailored-resumes` is the
+same switched-off step.
 
 > Every line comes from your resume, answers or stories. Read it before you send it.
 
-The panel also says where the file is. Each job's tailored resume (markdown) is saved in your
+The panel also says where the file is. Each job's resume (markdown) is saved in your
 resumes folder (`~/Documents/GigAI/resumes` unless you chose another in Settings), named
 `<company>-<role>-<date>.md`. A file you change there stays yours; Scout replaces only what
 it wrote itself.
@@ -66,9 +70,10 @@ puts all of it back in one step (`gigai scout resume length --job-url <url> --re
 or `PUT /api/tailored-resumes/length`). When the pages cannot be measured, or leaving
 out older roles would not be enough, no role is cut and the line says so.
 
-The background pipeline can tailor a resume for a job by itself after you
-answer one of its questions. It never replaces a tailored resume you made or
-edited; to refresh that one, press **Tailor resume** again.
+The background pipeline is off by default in 0.1.11, so nothing is tailored by itself. A home
+whose settings explicitly enable it keeps the 0.1.10 behaviour: it never replaces a resume you
+made or edited. A resume you edited is replaced only when you take the new suggested one
+(`gigai scout resume pick --use-proposed`).
 
 A line can also carry your own wording: an agent (or a script) sets it with `PUT
 /api/tailored-resumes/lines` and `"use": "custom"`. The line is then shown as
@@ -92,7 +97,7 @@ lines and answers it comes from, and hands the resume back
 against your master resume, your answers and your stories, and stores it or refuses it line by
 line. This check is a guard on numbers, names, ownership, entries and sources. It does not prove
 that a reworded line is true: read every changed line before you send the resume.
-[For agents](../agents/#5-tailor-and-the-pdf) has the five steps.
+[For agents](../agents/#5-the-picked-resume-and-the-pdf) has the five steps.
 
 ## The master resume
 

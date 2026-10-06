@@ -10,5 +10,5 @@ GigAI does not treat one model response as proof of correctness. What that means
 - **Inspectable runs.** Model calls, reviews, and results are recorded as
   durable Run state you can read back (see [Runs and the journal](../runs/)).
 - **Output you are asked to review.** A Gig can present model output as a draft.
-  For example, a tailored resume is a draft: review each line; every line shows
+  For example, a picked resume is a draft: review each line; every line shows
   its sources.

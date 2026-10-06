@@ -11,7 +11,7 @@ promise about an employer. The "?" beside each one in Scout opens this page.
 | [Rank](#rank) | Your model, from a short line per posting | Yes, in batches | Where the posting goes in the list |
 | [Verdict](#verdict) | Your model, from the full posting and your resume | Yes, one per posting | Matched, needs your answers, or not a match |
 | [Scout label](#scout-label) | Scout's own rule, no model | No | Recommended, or needs attention |
-| [Scout ATS score](#scout-ats-score) | Scout's own local check, no model | No | How well the tailored PDF reads and matches |
+| [Scout ATS score](#scout-ats-score) | Scout's own local check, no model | No | How well the resume PDF reads and matches |
 
 ## Rank
 
@@ -55,8 +55,10 @@ share of rows in that table your model marked met.
 
 ## Scout label
 
-**Recommended** or **needs attention**, shown after the background pipeline has tailored a resume
-for a job and assessed the tailored resume.
+**Recommended** or **needs attention**, shown after the background pipeline has run on a job. The
+pipeline is off by default in 0.1.11, so with the default settings no job gets this label; it
+appears only in a home that explicitly enabled the pipeline (which tailors a resume, assesses it
+and sets the label).
 
 > Scout's own suggestion from your settings, resume and answers. Not a prediction of what an employer will decide.
 
@@ -72,12 +74,12 @@ hold, and **needs attention** otherwise, with the reasons listed:
 "Recommended" means those four checks passed. It does not mean the employer will agree, and it
 does not replace reading the posting.
 
-Next to the label, "73 → 91 after tailoring" compares the share of requirements met before and
+Next to the label (pipeline homes only), "73 → 91 after tailoring" compares the share of requirements met before and
 after tailoring.
 
 ## Scout ATS score
 
-A number from 0 to 100 for one tailored resume PDF against one posting, with a line such as
+A number from 0 to 100 for one resume PDF against one posting, with a line such as
 "Scout ATS 84: parses cleanly · 9/11 key skills · missing: Terraform, SOC 2". Click the chip for
 the breakdown.
 
@@ -99,12 +101,12 @@ posting's skills. It does not mean a real system will rank you well. The keyword
 the posting's words, so check the "missing" list against the posting: a skill can be listed as
 missing when the posting only mentions it in passing.
 
-## A tailored resume and its PDF
+## A resume and its PDF
 
 > Every line comes from your resume, answers or stories. Read it before you send it.
 
-Each line of a tailored resume is either copied from your resume or rewritten from the sources it
-cites (a resume line, an answer or a story); Scout refuses a rewritten line that cites no source or
-states a number no source states. The wording of a rewritten line is still your model's. A line
-you or your agent typed yourself is marked **edited** and cites nothing: it is your text.
+Each line of the picked resume is a line of your master, word for word; nothing rewrites it. (A
+resume tailored on 0.1.10, or by a home that enabled the pipeline, can hold a rewritten line that
+cites the sources it came from; the wording of a rewritten line is still your model's.) A line you
+or your agent typed yourself is marked **edited** and cites nothing: it is your text.
 [Resume and PDF](../resume/) has the details.

@@ -193,7 +193,7 @@ def test_the_readme_says_tailored_resumes_are_drafts_and_states_the_evidence_exa
     """uat-bug-038: the draft sentence, the evidence note (judge count and adjudication, no rounding) and the wizard's saved target."""
 
     text = _flat(_page("scout/index.md") + _page("scout/configuration.md"))
-    assert "Tailored resumes are drafts: review each line; every line shows its sources." in text
+    assert "The picked resume is word for word from your master: review each line." in text
     assert "155 and 151 lines" in text and "0.6% and 0.66% of lines" in text
     assert "one judge-flagged plural" in text and "not a new fact" in text
     assert "the setup wizard's \"Model for Scout\" choice is saved here when you press Finish" in text
@@ -244,7 +244,7 @@ def test_the_quickstart_is_numbered_and_asks_for_a_resume_without_personal_info(
     assert "uv tool upgrade gigai" in quickstart and "@<tag>" in quickstart and "@v0" not in quickstart
     # 0.1.10.7 I: "Run find jobs" is removed (M4b) and first assessments are approval-gated ("Assess these");
     # was ("Update sources", "Run find jobs", "Assess all new", "Tailor resume").
-    for button in ("Update sources", "Jobs", "Assess these", "Tailor resume"):
+    for button in ("Update sources", "Jobs", "Assess these"):  # 0.1.11: no Tailor resume button
         assert f"**{button}**" in quickstart, button
     assert "Run find jobs" not in text and "Run find jobs" not in README.read_text(encoding="utf-8")
     # the human quickstart no longer starts with gigai init / gigai gigs

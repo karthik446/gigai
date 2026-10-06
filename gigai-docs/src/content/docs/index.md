@@ -21,7 +21,7 @@ portable, reviewable units of work, not plugins the runtime depends on.
 | | GigAI core | Scout (the first Gig) |
 | --- | --- | --- |
 | What it is | The runtime: setup, config, secrets, journal, proposal/approval lifecycle, model targets | A job-search workflow: `find-jobs` |
-| You use it to | Bind a project, register and run Gigs, read runs and failures | Find postings, rank and assess them against your resume, tailor a resume, download a PDF |
+| You use it to | Bind a project, register and run Gigs, read runs and failures | Find postings, rank and assess them against your resume, get a resume picked from your master, download a PDF |
 | Runs on | Your machine, with the model CLI you already use (Codex or Claude Code; for Ollama or OpenRouter see [Install](install/#requirements)) | Same, plus public job boards (Greenhouse, Lever, Ashby) |
 | Interfaces | `gigai` CLI | `gigai scout ...` CLI, a localhost API and web UI |
 
@@ -31,8 +31,8 @@ portable, reviewable units of work, not plugins the runtime depends on.
   an auto-managed watchlist (plus Exa search, if you turn it on).
 - **Rank**: every posting that passes your filters is ranked by your model target.
   The order is honest but coarse: likely fits first, likely no-matches last.
-- **Assess**: a requirements-by-resume matrix for the top-ranked postings, in the background.
-- **Present**: a localhost API and web UI; tailored resumes where every line shows its sources.
+- **Assess**: a requirements-by-resume matrix for the postings you choose to assess.
+- **Present**: a localhost API and web UI; the resume picked for each job, word for word from your master.
 
 ## Gigs
 
@@ -41,7 +41,7 @@ only from this table (the docs follow the same direction: a Gig imports core, no
 
 | Gig | What it does | Version | Docs |
 | --- | --- | --- | --- |
-| Scout | Find jobs, assess them against your resume, tailor a resume | `find-jobs` 1, ships with GigAI | [Scout](scout/) |
+| Scout | Find jobs, assess them against your resume, get a resume picked from your master | `find-jobs` 1, ships with GigAI | [Scout](scout/) |
 
 ## Status
 

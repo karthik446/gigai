@@ -83,7 +83,7 @@ or assessment. Scout runs `codex` with its shell tool and memories turned off, a
 | --- | --- | --- |
 | Ranking | One short line per posting + a compact digest of your resume (titles, skills, years), batch by batch | Your model target |
 | Assessment | The posting text and your resume (name and contact lines removed), per assessed posting | Your model target |
-| Tailoring | The posting text and your resume (name and contact lines removed) | Your model target |
+| Tailoring (switched off in 0.1.11) | The posting text and your resume (name and contact lines removed) | Your model target |
 | Update sources | Plain public requests, no key or login (your IP is visible) | Greenhouse, Lever, Ashby |
 | Exa search (off by default) | Your target roles, a start date, a country code, your Exa key | Exa |
 
@@ -111,8 +111,8 @@ your resume and that posting to that provider, exactly as any other assessment
 does. A token estimate is shown only once a call has been measured.
 
 The background pipeline (tailor, assess the tailored resume, Scout ATS score,
-Scout label) makes model calls by itself, only for jobs you engaged with, and
-at most 40 a day; ranking in the background makes at most 100 a day. Both
+Scout label) is off by default in 0.1.11. In a home that explicitly enabled it, it makes
+model calls by itself, only for jobs you engaged with, and at most 40 a day; ranking in the background makes at most 100 a day. Both
 limits are in Settings > Background pipeline. Each of those calls sends what
 the table above lists for its step.
 
@@ -137,7 +137,7 @@ Scout makes these other requests:
 ## What stays local
 
 Everything Scout writes stays under your configured GigAI home and the bound
-project's workpad. Tailored resumes are stored under the gig too
+project's workpad. Each job's resume is stored under the gig too
 (`scout/<project>/resumes/`, ephemeral pasted-resume runs under `ephemeral/`)
 and contain resume-derived text by design.
 
