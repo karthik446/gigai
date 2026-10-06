@@ -121,7 +121,7 @@ _BASIS_NOTE = (
     "one retry) is stored as the model gave it and carries `requirements_note`: \"Only N requirements were read from this posting. "
     "Open the posting to check.\" (omitted otherwise). A stored v9 assessment carries `checks` (0.1.11.4, omitted on older ones): "
     "counts of what the code checks did, no text and no ids: `{settled_rows, settled_by_rule: {rule: n}, questions_dropped, "
-    "questions_capped, suggestions_dropped: {reason: n}, citations_cleaned: {action: n}}`."
+    "questions_capped, suggestions_dropped: {reason: n}, citations_cleaned: {action: n}, questions_removed?: {reason: n}}`."
 )
 
 

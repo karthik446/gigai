@@ -257,10 +257,11 @@ def test_only_unclear_rows_are_settled_and_only_their_questions_are_dropped() ->
     before = [dict(row) for row in rows]
     questions = [_question("experience with  REACT"), _question("Experience with Helm"), _question("Experience with Docker"), "a plain question"]
     kept, dropped, settled = check.settle_stated(rows, questions, FACTS)
-    assert [(row["requirement"], rule) for row, rule in settled] == [("Experience with React", "master_line")]
+    # 0.1.11.4 A3: the question on the row that is met ALREADY goes too (the master states Docker); that row is not touched.
+    assert [(row["requirement"], rule) for row, rule in settled] == [("Experience with React", "master_line"), ("Experience with Docker", "met_row_question")]
     assert rows[0] == {**before[0], "status": "met", "resume_evidence": ["Built the checkout UI in React and TypeScript for two product teams."], "sources": ["b-000002"]}
     assert rows[1:] == before[1:]  # the unstated row, the met row and the unmet row are byte for byte what they were
-    assert dropped == [questions[0]] and kept == questions[1:]
+    assert dropped == [questions[0], questions[2]] and kept == [questions[1], questions[3]]
 
 
 def test_a_settled_row_cited_by_the_skills_line_drops_sources_it_no_longer_rests_on() -> None:
