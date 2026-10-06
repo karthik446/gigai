@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en" dir="ltr" data-theme="dark" data-has-toc data-has-sidebar class="astro-g5ptsecz"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/><title>Scout | GigAI</title><link rel="canonical" href="https://karthik446.github.io/gigai/next/scout/"/><link rel="sitemap" href="/gigai/next/sitemap-index.xml"/><link rel="shortcut icon" href="/gigai/next/favicon.svg" type="image/svg+xml"/><meta name="generator" content="Astro v7.3.5"/><meta name="generator" content="Starlight v0.42.4"/><meta property="og:title" content="Scout"/><meta property="og:type" content="article"/><meta property="og:url" content="https://karthik446.github.io/gigai/next/scout/"/><meta property="og:locale" content="en"/><meta property="og:description" content="The first Gig. Find jobs, assess them against your resume, tailor a resume."/><meta property="og:site_name" content="GigAI"/><meta name="twitter:card" content="summary_large_image"/><meta name="description" content="The first Gig. Find jobs, assess them against your resume, tailor a resume."/><script>
+<!DOCTYPE html><html lang="en" dir="ltr" data-theme="dark" data-has-toc data-has-sidebar class="astro-g5ptsecz"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/><title>Scout | GigAI</title><link rel="canonical" href="https://karthik446.github.io/gigai/next/scout/"/><link rel="sitemap" href="/gigai/next/sitemap-index.xml"/><link rel="shortcut icon" href="/gigai/next/favicon.svg" type="image/svg+xml"/><meta name="generator" content="Astro v7.3.5"/><meta name="generator" content="Starlight v0.42.4"/><meta property="og:title" content="Scout"/><meta property="og:type" content="article"/><meta property="og:url" content="https://karthik446.github.io/gigai/next/scout/"/><meta property="og:locale" content="en"/><meta property="og:description" content="The first Gig. Find jobs, assess them against your resume, get the resume picked from your master."/><meta property="og:site_name" content="GigAI"/><meta name="twitter:card" content="summary_large_image"/><meta name="description" content="The first Gig. Find jobs, assess them against your resume, get the resume picked from your master."/><script>
 	window.StarlightThemeProvider = (() => {
 		const storedTheme =
 			typeof localStorage !== 'undefined' && localStorage.getItem('starlight-theme');
@@ -92,9 +92,9 @@ exactly what leaves your machine for ranking and assessment; the other
 network traffic is listed in <a href="privacy/">Privacy and security</a>.</li>
 </ul>
 <p>Everything Scout writes stays under your configured GigAI home and the bound
-project’s workpad. Tailored resumes (<code dir="auto">gigai scout resume tailor</code>, <code dir="auto">POST /api/tailored-resumes</code>) are stored under the gig too (<code dir="auto">scout/&lt;project&gt;/resumes/</code>,
+project’s workpad. Each job’s resume (picked from your master; <code dir="auto">gigai scout resume tailor</code> is switched off in 0.1.11) is stored under the gig too (<code dir="auto">scout/&lt;project&gt;/resumes/</code>,
 ephemeral pasted-resume runs under <code dir="auto">ephemeral/</code>) and contain resume-derived
-text by design. Tailored resumes are drafts: review each line; every line shows its sources.
+text by design. The picked resume is word for word from your master: review each line.
 Two confirming live runs on the release candidate (155 and 151 lines) found no fabricated facts
 once one judge-flagged plural (“Kubernetes platforms” for the source’s “Kubernetes platform”) was
 reviewed as a wording difference, not a new fact; 1 minor precision flag in each run (0.6% and 0.66% of lines).</p>
@@ -141,7 +141,7 @@ rank digest = find_jobs/rank_digest.py (compact digest). Wording = scout/privacy
 <li><a href="first-10-minutes/">Your first 10 minutes</a>: install, set up a profile, ask your agent what is new, make a PDF.</li>
 <li><a href="quickstart/">Quickstart</a>: from zero to a running Scout.</li>
 <li><a href="privacy/">Privacy and security</a>: read this before you add a resume.</li>
-<li><a href="resume/">Resume and PDF</a>: preparing a resume, tailoring, the PDF.</li>
+<li><a href="resume/">Resume and PDF</a>: preparing a resume, the picked resume, the PDF.</li>
 <li><a href="numbers/">What Scout’s numbers and labels mean</a>: rank, verdict, Scout label, Scout ATS score.</li>
 <li><a href="sources/">Update sources</a> and <a href="configuration/">Configuration</a>: the company store, <code dir="auto">find-jobs.json</code>, Exa.</li>
 <li><a href="agents/">For agents</a>: the daily workflow from your own AI agent, setup, the security model.</li>

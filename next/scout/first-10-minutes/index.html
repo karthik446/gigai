@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en" dir="ltr" data-theme="dark" data-has-toc data-has-sidebar class="astro-g5ptsecz"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/><title>Your first 10 minutes | GigAI</title><link rel="canonical" href="https://karthik446.github.io/gigai/next/scout/first-10-minutes/"/><link rel="sitemap" href="/gigai/next/sitemap-index.xml"/><link rel="shortcut icon" href="/gigai/next/favicon.svg" type="image/svg+xml"/><meta name="generator" content="Astro v7.3.5"/><meta name="generator" content="Starlight v0.42.4"/><meta property="og:title" content="Your first 10 minutes"/><meta property="og:type" content="article"/><meta property="og:url" content="https://karthik446.github.io/gigai/next/scout/first-10-minutes/"/><meta property="og:locale" content="en"/><meta property="og:description" content="From nothing to your first tailored resume PDF, with your own AI agent doing the typing."/><meta property="og:site_name" content="GigAI"/><meta name="twitter:card" content="summary_large_image"/><meta name="description" content="From nothing to your first tailored resume PDF, with your own AI agent doing the typing."/><script>
+<!DOCTYPE html><html lang="en" dir="ltr" data-theme="dark" data-has-toc data-has-sidebar class="astro-g5ptsecz"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/><title>Your first 10 minutes | GigAI</title><link rel="canonical" href="https://karthik446.github.io/gigai/next/scout/first-10-minutes/"/><link rel="sitemap" href="/gigai/next/sitemap-index.xml"/><link rel="shortcut icon" href="/gigai/next/favicon.svg" type="image/svg+xml"/><meta name="generator" content="Astro v7.3.5"/><meta name="generator" content="Starlight v0.42.4"/><meta property="og:title" content="Your first 10 minutes"/><meta property="og:type" content="article"/><meta property="og:url" content="https://karthik446.github.io/gigai/next/scout/first-10-minutes/"/><meta property="og:locale" content="en"/><meta property="og:description" content="From nothing to your first picked resume PDF, with your own AI agent doing the typing."/><meta property="og:site_name" content="GigAI"/><meta name="twitter:card" content="summary_large_image"/><meta name="description" content="From nothing to your first picked resume PDF, with your own AI agent doing the typing."/><script>
 	window.StarlightThemeProvider = (() => {
 		const storedTheme =
 			typeof localStorage !== 'undefined' && localStorage.getItem('starlight-theme');
@@ -124,8 +124,9 @@ state. Your agent asks you:</p>
 <p>Answer in your own words. A short fact is saved as an answer and reused for every later
 posting. A longer reply, with a project and an outcome, can become a story, if you agree. Do
 not put your name or contact details in an answer.</p>
-<p>Jobs whose questions you answered are tailored and scored in the background, within the daily
-limits (40 pipeline model calls a day).</p>
+<p>The answer is kept and reused for every later posting. Nothing is tailored or scored in the
+background: the background pipeline is off by default in 0.1.11, and GigAI does not rewrite your
+resume for a job. The resume for a job is picked from your master, word for word.</p>
 <p>Your answer makes that job’s first assessment old: it was made before the answer. Until the job
 is assessed again it still reads “Needs your answers (old assessment: answers changed)”, and its
 Scout label reads “needs attention”. To answer and assess again in one step, ask your agent to
@@ -137,13 +138,16 @@ on the job’s page and press <strong>Re-assess</strong>.</p>
 <p>and gives you an <strong>open in Scout</strong> link. The agent’s own PDF has no name and no contact
 details, because GigAI has none. Open the link, type your details into the Generate PDF form in
 your browser, and download the finished PDF. GigAI does not keep what you type there.</p>
-<p>The PDF exists only after the job was tailored: by the background pipeline, after you answered
-one of its questions (step 4), or with <code dir="auto">gigai scout resume tailor --job-url &lt;job-url&gt;</code> (one model
-call). Before that the command says there is no tailored resume for the job yet.</p>
-<p>Every line comes from your resume, answers or stories. Read it before you send it.</p>
+<p>The PDF exists once the job has been assessed: the assessment picks the lines of your master,
+word for word, and that picked resume is what the PDF shows. Before the job is assessed the
+command says there is no resume for the job yet. <code dir="auto">gigai scout resume pick --job-url &lt;job-url&gt;</code>
+shows what was picked. (<code dir="auto">gigai scout resume tailor</code> is switched off in 0.1.11 and answers
+<code dir="auto">tailoring_off</code>.)</p>
+<p>Every line comes from your master resume. Read it before you send it.</p>
 <div class="sl-heading-wrapper level-h2"><h2 id="what-next">What next</h2><a class="sl-anchor-link" href="#what-next"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “What next”</span></a></div>
 <ul>
 <li><a href="../agents/">For agents</a>: the whole daily loop, the security model, an example session.</li>
+<li><a href="../agents/start/#11-start-fresh-reset-the-data-keep-the-master-resume-file">Start fresh</a>: stop Scout, move <code dir="auto">~/.gigai</code> aside and start again from a resume file.</li>
 <li><a href="../tokens/">Token usage</a>: what each step costs in tokens and time.</li>
 <li><a href="../privacy/">Privacy and security</a>: what is stored, what is sent, and to whom.</li>
 <li><a href="../numbers/">What Scout’s numbers and labels mean</a>.</li>

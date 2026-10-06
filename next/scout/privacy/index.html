@@ -161,7 +161,7 @@ your own Claude Code settings, as any <code dir="auto">claude -p</code> call doe
 <td>Your model target</td>
 </tr>
 <tr>
-<td>Tailoring</td>
+<td>Tailoring (switched off in 0.1.11)</td>
 <td>The posting text and your resume (name and contact lines removed)</td>
 <td>Your model target</td>
 </tr>
@@ -198,8 +198,8 @@ them no API key. With a hosted model target each posting’s assessment sends
 your resume and that posting to that provider, exactly as any other assessment
 does. A token estimate is shown only once a call has been measured.</p>
 <p>The background pipeline (tailor, assess the tailored resume, Scout ATS score,
-Scout label) makes model calls by itself, only for jobs you engaged with, and
-at most 40 a day; ranking in the background makes at most 100 a day. Both
+Scout label) is off by default in 0.1.11. In a home that explicitly enabled it, it makes
+model calls by itself, only for jobs you engaged with, and at most 40 a day; ranking in the background makes at most 100 a day. Both
 limits are in Settings &gt; Background pipeline. Each of those calls sends what
 the table above lists for its step.</p>
 <div class="sl-heading-wrapper level-h2"><h2 id="network-traffic-besides-your-model">Network traffic besides your model</h2><a class="sl-anchor-link" href="#network-traffic-besides-your-model"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “Network traffic besides your model”</span></a></div>
@@ -221,7 +221,7 @@ board addresses.</li>
 </ul>
 <div class="sl-heading-wrapper level-h2"><h2 id="what-stays-local">What stays local</h2><a class="sl-anchor-link" href="#what-stays-local"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “What stays local”</span></a></div>
 <p>Everything Scout writes stays under your configured GigAI home and the bound
-project’s workpad. Tailored resumes are stored under the gig too
+project’s workpad. Each job’s resume is stored under the gig too
 (<code dir="auto">scout/&lt;project&gt;/resumes/</code>, ephemeral pasted-resume runs under <code dir="auto">ephemeral/</code>)
 and contain resume-derived text by design.</p>
 <p>Your answers and stories stay local too: the text of each answer is a record in the project’s workpad, its tag, dates,

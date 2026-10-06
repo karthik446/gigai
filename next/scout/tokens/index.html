@@ -77,7 +77,7 @@ Every number below says where it comes from and when it was measured. Yours will
 <div class="sl-heading-wrapper level-h2"><h2 id="what-an-agent-costs">What an agent costs</h2><a class="sl-anchor-link" href="#what-an-agent-costs"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “What an agent costs”</span></a></div>
 <p>Two different things use tokens when you drive Scout from an agent:</p>
 <ul>
-<li><strong>Scout’s own model calls</strong>: ranking, assessing, tagging titles, tailoring. This page is about
+<li><strong>Scout’s own model calls</strong>: ranking, assessing, tagging titles (and tailoring, which is switched off in 0.1.11). This page is about
 these. Scout records each one on your computer (kind, model, tokens, seconds; no text).</li>
 <li><strong>Your agent’s own conversation</strong>: the grid it reads, your questions and its replies. That is
 your agent’s usage. GigAI does not see or measure it.</li>
@@ -90,8 +90,8 @@ posting.</li>
 <li><strong><code dir="auto">gigai scout metrics</code> shows the averages</strong> once the first calls are recorded: tokens,
 seconds and error rate per kind of call and per model. A token estimate is shown only after a
 call has been measured.</li>
-<li><strong>Daily caps for background work.</strong> The background pipeline (tailor, then assess the tailored
-resume) makes at most <strong>40</strong> model calls a day. Background ranking makes at most <strong>100</strong> calls
+<li><strong>Daily caps for background work.</strong> The background pipeline is off by default in 0.1.11. A home
+that switched it on explicitly makes at most <strong>40</strong> model calls a day with it. Background ranking makes at most <strong>100</strong> calls
 a day, with a warning past 60. Both are in <strong>Settings &gt; Background pipeline</strong>. A call that
 would go over the cap is not made.</li>
 <li><strong>The first run is the expensive one.</strong> The first <code dir="auto">gigai scout new --yes</code> catches up on every
@@ -149,6 +149,7 @@ the provider served from its prompt cache.</p>
 </tr>
 </tbody>
 </table>
+<p>The two tailoring rows were measured on 0.1.10. Tailoring and the background pipeline are off by default in 0.1.11, so a default home makes neither call.</p>
 <p>Source: GigAI 0.1.10.8 development build, 2026-10-03, codex-cli 0.159.3 and Claude Code
 2.1.288, each CLI’s default model, six calls per CLI, read with <code dir="auto">gigai scout metrics --json</code>.
 Of the two Codex first assessments, one had no cached input and one had 3,840 cached tokens.
@@ -160,8 +161,9 @@ uses more input tokens than this table shows. See the next section.</li>
 <li><strong>Most of an assessment’s input is not your text.</strong> Each CLI adds its own instructions to
 every call, and Scout’s prompt carries the rules and the answer format. That part repeats on
 every call, which is why a provider can cache it.</li>
-<li><strong>A job you answered a question for costs two more calls</strong>: one tailoring and one
-re-assessment. The Scout ATS score and the Scout label after them are local.</li>
+<li><strong>A job you answered a question for costs one more call</strong>: the re-assessment, when you ask for
+it. The pick of the resume, the Scout ATS score and the Scout label are local. (A home that
+switched the background pipeline on explicitly also pays for one tailoring call.)</li>
 <li><strong>One rank call covers 50 postings</strong>, so ranking is cheap per posting, and a posting is ranked
 once for a given resume and settings.</li>
 <li><strong>Six calls are a sample, not an average.</strong> Time per call moves with the provider’s load.</li>
