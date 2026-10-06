@@ -158,7 +158,9 @@ def _scene(fx: PostingsFixture, monkeypatch: pytest.MonkeyPatch) -> dict[str, st
 
     fx.seed("ord", [lever_job("ord", n, created=days_ago(3) + timedelta(minutes=n)) for n in range(1, 9)], seen_at=days_ago(1))
     jobs = {name: job_url("ord", n) for name, (n, _rank) in _SCENE.items()} | {"assessed_r20": job_url("ord", 8)}
-    assess_one(fx, jobs["assessed_r20"], matrix_answer([("5+ years of Python", "hard", "met"), ("Kubernetes", "hard", "met")]))
+    # Four requirement rows: a real match (fewer than 4 is a thin posting, listed last: test_thin_posting.py).
+    met = [("5+ years of Python", "hard", "met"), ("Kubernetes", "hard", "met"), ("Postgres", "hard", "met"), ("AWS", "hard", "met")]
+    assess_one(fx, jobs["assessed_r20"], matrix_answer(met))
     seed_rank(fx, monkeypatch, {jobs[name]: score for name, (_n, score) in _SCENE.items() if score is not None} | {jobs["assessed_r20"]: 20})
     return jobs
 

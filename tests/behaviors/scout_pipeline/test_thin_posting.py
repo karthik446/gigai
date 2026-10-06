@@ -4,9 +4,11 @@ End outcomes, synthetic fixtures, no model call beyond the scripted one.
 
 (A) FEWER THAN 4 REQUIREMENT ROWS (every matrix row, the "N of M requirements"
     a reader sees) is a LABEL: the row says "thin posting: too few
-    requirements to judge" and ``thin_posting: true``; its state, its place in
-    the list, the filters and the counts stay a match's. Judged when the row
-    is shown, so an assessment already stored is covered.
+    requirements to judge" and ``thin_posting: true``; its state, the filters
+    and the counts stay a match's. Judged when the row is shown, so an
+    assessment already stored is covered. It is LISTED LAST (RANKFIX, the
+    local release check: a 2-of-2 "fit 100%" was listed first): after every
+    other assessed posting and every posting not assessed yet.
 (B) NO ROW ABOUT THE JOB (an empty matrix, a lone "No stated requirements"
     row) is its own state, ``thin_posting``: never in ``by_state.matched`` or
     the matched filter, no fit number, and ordered below every other assessed
@@ -94,7 +96,7 @@ def test_the_rule_is_one_place() -> None:
     assert state(verdict=matched, gate="hold_unmet") == "has_gap" and state(verdict=matched, gate="suggest") == "matched"
 
 
-def test_a_match_on_fewer_than_four_requirements_says_thin_posting_and_keeps_its_place(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_match_on_fewer_than_four_requirements_says_thin_posting_and_is_listed_last(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     fx = build_postings_fixture(tmp_path, monkeypatch, deleted=False)
     jobs = _scene(fx, monkeypatch)
     names = {url: name for name, url in jobs.items()}
@@ -118,10 +120,10 @@ def test_a_match_on_fewer_than_four_requirements_says_thin_posting_and_keeps_its
         assert row["score_text"] == f"{THIN} · rank {rank}", row["score_text"]
         assert (row["thin_posting"], row["state"], row["fit"], row["score_kind"]) == (True, "thin_posting", None, "rank")
 
-    # The order. The 2-of-2 is where a match of its fit and rank is (label only: first, above the 4-of-4 at rank 70);
-    # the thin STATE comes after every other assessed posting, ranked or not, whatever its own rank (95, 99).
+    # The order. The 2-of-2 comes after every posting that is not thin, whatever its fit (100) and rank (90); the thin
+    # STATE comes last of all, whatever its own rank (95, 99).
     order = [names[str(row["job_identity"])] for row in _rows(everything)]
-    assert order == ["two", "four", "unranked_four", "needs", "lone", "empty"]
+    assert order == ["four", "unranked_four", "needs", "two", "lone", "empty"]
     # ... and the SQL twin of the order says the same.
     store = PipelineStore(pipeline_path(fx.home_root, fx.target))
     try:
@@ -131,13 +133,14 @@ def test_a_match_on_fewer_than_four_requirements_says_thin_posting_and_keeps_its
     finally:
         store.close()
     assert in_sql == order
-    assert keys["lone"][2] == keys["empty"][2] == 5 and keys["two"][2] == keys["four"][2] == 0
+    assert keys["lone"][3] == keys["empty"][3] == 5 and keys["two"][3] == keys["four"][3] == 0
+    assert [keys[name][0] for name in ("four", "needs", "two", "lone", "empty")] == [0, 0, 1, 1, 1]  # thin: after the rest
 
     # Never counted as a match: the counts by state, and the matched filter.
     counts = everything["counts"]
     assert counts["by_state"] == {"matched": 3, "needs_answers": 1, "thin_posting": 2}  # type: ignore[index]
     matched = _search(fx, states=["matched"])
-    assert [names[str(row["job_identity"])] for row in _rows(matched)] == ["two", "four", "unranked_four"]
+    assert [names[str(row["job_identity"])] for row in _rows(matched)] == ["four", "unranked_four", "two"]
     assert matched["counts"]["matched"] == 3  # type: ignore[index]
     thin = _search(fx, states=["thin_posting"])
     assert [names[str(row["job_identity"])] for row in _rows(thin)] == ["lone", "empty"]
@@ -157,7 +160,7 @@ def test_a_match_on_fewer_than_four_requirements_says_thin_posting_and_keeps_its
     assert "2 of 2 requirements" in listed.output and "fit 100% · 2 of 2" not in listed.output
     assert listed.output.count("Matched · fit 100%") == 2, listed.output  # the two 4-row matches only
     lines = [line for line in listed.output.splitlines() if " requirements · " in line]
-    assert [("thin posting" in line, "Matched" in line) for line in lines[:2]] == [(True, False), (False, True)]  # its place is kept
+    assert [("thin posting" in line, "Matched" in line) for line in lines[:4]] == [(False, True), (False, True), (False, False), (True, False)]  # after the matches and the one that waits on answers
     grid = scout_new.scout_new(fx.home_root, fx.target, peek=True, assess=False, now=NOW)
     new = {names[str(row["job_identity"])]: row for row in _rows(grid)}
     assert new["two"]["score_text"] == f"{THIN} · 2 of 2 requirements · rank 90" and new["two"]["thin_posting"] is True
@@ -201,3 +204,70 @@ def test_an_old_runs_match_with_few_or_no_requirement_rows_reads_thin_too(tmp_pa
     assert [(history[jobs[name]]["state"], history[jobs[name]]["thin_posting"]) for name in ("none", "three", "five")] == [
         ("thin_posting", True), ("matched", True), ("matched", False),
     ]
+
+
+# --- 0.1.11.2 RANKFIX (2): a thin posting is listed after the real matches and the ranked postings ----------
+
+
+def test_a_thin_posting_is_listed_after_every_real_match_and_every_ranked_posting(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import threading
+    from urllib.request import urlopen
+
+    from gigai.scout.find_jobs.present_api import ScoutFindJobsBackend, serve
+
+    fx = build_postings_fixture(tmp_path, monkeypatch, deleted=False)
+    fx.seed("order", [lever_job("order", n) for n in range(1, 5)], seen_at=days_ago(1))
+    jobs = {name: job_url("order", n) for n, name in enumerate(("thin", "real", "ranked", "unranked"), start=1)}
+    names = {url: name for name, url in jobs.items()}
+    # The operator's case: 2 of 2 requirements, fit 100%, the best rank of all. And a real match: 6 rows, the 4 must-haves met, fit 80%.
+    assess_one(fx, jobs["thin"], _met(2))
+    assess_one(fx, jobs["real"], matrix_answer([(f"Hard topic {n}", "hard", "met") for n in range(1, 5)] + [(f"Bonus topic {n}", "nice_to_have", "unmet") for n in (1, 2)]))
+    seed_rank(fx, monkeypatch, {jobs["thin"]: 99, jobs["real"]: 60, jobs["ranked"]: 70})
+    expected = ["real", "ranked", "unranked", "thin"]
+
+    def order(rows: list[dict[str, object]]) -> list[str]:
+        return [names[str(row["job_identity"])] for row in rows]
+
+    # The Jobs list, as GET /api/postings serves it.
+    server = serve(backend=ScoutFindJobsBackend(home_root=fx.home_root, target=fx.target), bind=("127.0.0.1", 0))
+    serving = threading.Thread(target=server.serve_forever, daemon=True)
+    serving.start()
+    try:
+        host, port = server.server_address[0], server.server_address[1]
+        with urlopen(f"http://{host}:{port}/api/postings?limit=50", timeout=30) as response:  # noqa: S310 - the test's own server
+            served = json.loads(response.read())
+    finally:
+        server.shutdown()
+        server.server_close()
+        serving.join(timeout=5)
+    by_name = {names[str(row["job_identity"])]: row for row in _rows(served)}
+    # The thin one is still a match underneath with the best numbers, and still says the thin label ...
+    assert (by_name["thin"]["state"], by_name["thin"]["fit"], by_name["thin"]["rank_score"], by_name["thin"]["thin_posting"]) == ("matched", 100, 99, True)
+    assert by_name["thin"]["score_text"] == f"{THIN} · 2 of 2 requirements · rank 99"
+    assert (by_name["real"]["thin_posting"], by_name["real"]["fit"], by_name["real"]["rank_score"]) == (False, 80, 60)
+    assert by_name["real"]["score_text"].endswith("fit 80% · 4 of 6 requirements · rank 60"), by_name["real"]["score_text"]
+    assert (by_name["ranked"]["state"], by_name["ranked"]["rank_score"]) == ("not_assessed", 70)
+    assert (by_name["unranked"]["state"], by_name["unranked"]["rank_score"]) == ("not_assessed", None)
+    # ... and THE OUTCOME: it is listed after the real match and after the ranked posting.
+    assert order(_rows(served)) == expected
+
+    # `gigai scout new` (the grid and its table) and `gigai scout jobs list` say the same order.
+    grid = scout_new.scout_new(fx.home_root, fx.target, peek=True, assess=False, now=NOW)
+    assert order(_rows(grid)) == expected
+    table = scout_new.render(grid)
+    assert table.index("4 of 6 requirements") < table.index("rank 70") < table.index("thin posting: too few requirements"), table
+    listed = CliRunner().invoke(cli, ["scout", "jobs", "list", "--home", str(fx.home_root), "--target", str(fx.target)])
+    assert listed.exit_code == 0, listed.output
+    assert listed.output.index("4 of 6 requirements") < listed.output.index("rank 70 · not assessed") < listed.output.index(THIN), listed.output
+
+    # The SQL twin (``pipeline.store._POSTING_ORDER``) and ``scout_new.order_key`` agree on it.
+    store = PipelineStore(pipeline_path(fx.home_root, fx.target))
+    try:
+        states = ["matched", "has_gap", "not_assessed"]
+        in_sql = [names[row.job] for row in store.postings_by_score(states=states, profile_id=fx.default_profile_id, limit=50)]
+        rows = store.postings(profile_id=fx.default_profile_id, live=False)
+    finally:
+        store.close()
+    assert in_sql == expected
+    assert [names[row.job] for _tags, row in scout_new.in_order(((), row) for row in rows)] == expected
+    assert [scout_new.order_key(row)[0] for _tags, row in scout_new.in_order(((), row) for row in rows)] == [0, 0, 0, 1]

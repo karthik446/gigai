@@ -26,11 +26,12 @@ operator-visible capability and must link to the relevant release or evidence.
 
 - **A posting with too few requirements is no longer a perfect match.** A match read from fewer than 4
   requirements says "thin posting: too few requirements to judge" in place of "Matched · fit 100%", on
-  the Jobs list, the job page, in the terminal and in the API (each row says `thin_posting`). It is a
-  warning only: the posting keeps its place in the list. A match with no requirement about the job at
-  all (none read, or only "No stated requirements") is not a match: it has its own state
-  (`thin_posting`), is not counted or filtered as matched, and is listed after every other assessed
-  posting. Assessments already stored are covered; nothing is re-assessed.
+  the Jobs list, the job page, in the terminal and in the API (each row says `thin_posting`). Thin
+  postings are listed after the real matches: below every other assessed posting and every posting that
+  is not assessed yet, in the Jobs list, `gigai scout jobs list` and `gigai scout new`; nothing is
+  hidden. A match with no requirement about the job at all (none read, or only "No stated
+  requirements") is not a match: it has its own state (`thin_posting`), is not counted or filtered as
+  matched, and is listed last of all. Assessments already stored are covered; nothing is re-assessed.
 - **Jobs are ordered by rank again, and weak fits are collapsed.** The Jobs list (and `gigai scout jobs
   list`) is ordered best fit first: assessed postings by fit, then the rest by rank, then the newest. A
   posting that is not assessed yet and ranked below 50 is no longer shown as a candidate: it is collapsed
@@ -44,8 +45,10 @@ operator-visible capability and must link to the relevant release or evidence.
   and the question say how many postings are ranked so far.
 
 - **Ranking is back, on its own switch.** The background pipeline stays off and nothing is tailored, but
-  ranking runs again after a sources update: it ranks postings posted in the last 7 days (a posting with
-  no date uses the day it was first seen), within the same daily call cap as before. `gigai scout
+  ranking runs again: the Scout server ranks when it starts (so an upgrade ranks what is not ranked yet
+  without waiting for a sources update) and whenever new postings arrive, with no approval. It ranks
+  postings posted in the last 7 days (a posting with no date uses the day it was first seen), up to 50
+  a call, within the same daily call cap as before; a ranked posting is not ranked again. `gigai scout
   pipeline status` shows "Ranking: on|off"; `rank.enabled` in the background settings turns it off.
 - **The job page shows the whole posting.** The description is no longer cut to one short paragraph; a
   preview that is still cut says so, and an assessment of a posting longer than 12,000 characters says
