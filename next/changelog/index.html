@@ -85,23 +85,50 @@ operator-visible capability and must link to the relevant release or evidence.</
 <div class="sl-heading-wrapper level-h2"><h2 id="released-versions">Released versions</h2><a class="sl-anchor-link" href="#released-versions"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “Released versions”</span></a></div>
 <div class="sl-heading-wrapper level-h3"><h3 id="01112">0.1.11.2</h3><a class="sl-anchor-link" href="#01112"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “0.1.11.2”</span></a></div>
 <ul>
-<li><strong>A posting with too few requirements is no longer a perfect match.</strong> A match read from fewer than 4
+<li>
+<p><strong>A posting with too few requirements is no longer a perfect match.</strong> A match read from fewer than 4
 requirements says “thin posting: too few requirements to judge” in place of “Matched · fit 100%”, on
 the Jobs list, the job page, in the terminal and in the API (each row says <code dir="auto">thin_posting</code>). It is a
 warning only: the posting keeps its place in the list. A match with no requirement about the job at
 all (none read, or only “No stated requirements”) is not a match: it has its own state
 (<code dir="auto">thin_posting</code>), is not counted or filtered as matched, and is listed after every other assessed
-posting. Assessments already stored are covered; nothing is re-assessed.</li>
-<li><strong>Jobs are ordered by rank again, and weak fits are collapsed.</strong> The Jobs list (and <code dir="auto">gigai scout jobs list</code>) is ordered best fit first: assessed postings by fit, then the rest by rank, then the newest. A
+posting. Assessments already stored are covered; nothing is re-assessed.</p>
+</li>
+<li>
+<p><strong>Jobs are ordered by rank again, and weak fits are collapsed.</strong> The Jobs list (and <code dir="auto">gigai scout jobs list</code>) is ordered best fit first: assessed postings by fit, then the rest by rank, then the newest. A
 posting that is not assessed yet and ranked below 50 is no longer shown as a candidate: it is collapsed
 under a count (“12 weak fits, ranked low: show”, or <code dir="auto">--state ranked_low</code>). Nothing is filtered away: the
 count opens the list. A posting that is not ranked yet stays in the list, after the ranked ones, and
-says “not ranked yet”. Sponsorship stays a label and never hides a posting.</li>
-<li><strong>Assess the top 50 by rank.</strong> The Jobs page shows “N not assessed” with an “Assess all” button. It
+says “not ranked yet”. Sponsorship stays a label and never hides a posting.</p>
+</li>
+<li>
+<p><strong>Assess the top 50 by rank.</strong> The Jobs page shows “N not assessed” with an “Assess all” button. It
 asks first, as before: the top 50 by rank, the estimate, the model and how many are left after these
 50. <code dir="auto">gigai scout new</code>, “Assess these” and the API take the same top 50 by rank instead of the newest
 50; postings you select or name are still the ones assessed. While ranking is still running, the page
-and the question say how many postings are ranked so far.</li>
+and the question say how many postings are ranked so far.</p>
+</li>
+<li>
+<p><strong>Ranking is back, on its own switch.</strong> The background pipeline stays off and nothing is tailored, but
+ranking runs again after a sources update: it ranks postings posted in the last 7 days (a posting with
+no date uses the day it was first seen), within the same daily call cap as before. <code dir="auto">gigai scout pipeline status</code> shows “Ranking: on|off”; <code dir="auto">rank.enabled</code> in the background settings turns it off.</p>
+</li>
+<li>
+<p><strong>The job page shows the whole posting.</strong> The description is no longer cut to one short paragraph; a
+preview that is still cut says so, and an assessment of a posting longer than 12,000 characters says
+that only the first 12,000 were assessed.</p>
+</li>
+<li>
+<p><strong>Onboarding:</strong> work mode starts on Remote-only for a new profile (a stored choice is kept), the
+sponsorship answer no longer says “hard filter” (it is a label, nothing is filtered), and the Companies
+step is gone (4 steps; company lists stay in Settings). The assess dialog says “Assessing N postings…”
+while it runs. A job address that differs only by a trailing slash before the query now finds its
+posting, and a job assessed from an address says so instead of “Job not found”.</p>
+</li>
+<li>
+<p><strong>Docs:</strong> the Install page pins the current version, the pipeline-off and picked-resume behaviour is
+described as it is, and “Start fresh” explains how to reset and start again from a resume file.</p>
+</li>
 </ul>
 <div class="sl-heading-wrapper level-h3"><h3 id="01111">0.1.11.1</h3><a class="sl-anchor-link" href="#01111"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “0.1.11.1”</span></a></div>
 <p>CI: one cut-down lane for the PR and the release pre-check (about 5 minutes). The full suite, the browser
