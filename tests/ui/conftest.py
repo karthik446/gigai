@@ -50,13 +50,6 @@ pytest.register_assert_rewrite("tests.ui.jobs_page")  # its asserts explain them
 
 from tests.ui import support  # noqa: E402
 
-
-def demo_gigai_home(root: Path) -> Path:
-    """The demo's GigAI home: M1 (0.1.11.4) builds it at <temporary HOME>/.gigai, beside the demo root."""
-
-    return root.parent / ".gigai"
-
-
 REPO = Path(__file__).resolve().parents[2]
 REQUIRED_ENV = "GIGAI_UI_REQUIRED"
 ARTIFACTS_ENV = "GIGAI_UI_ARTIFACTS"
@@ -186,8 +179,16 @@ class ScoutServer:
     demo: object  # tools.media.demo_home.DemoHome
 
     @property
+    def gigai_home(self) -> Path:
+        """The demo's GigAI home, `<temporary HOME>/.gigai` (tools.media.demo_home.demo_gigai_home)."""
+
+        from tools.media import demo_home
+
+        return demo_home.demo_gigai_home(self.root)
+
+    @property
     def target(self) -> Path:
-        return demo_gigai_home(self.root) / "scout"
+        return self.gigai_home / "scout"
 
 
 @pytest.fixture(scope="session")
@@ -206,7 +207,8 @@ def scout_server() -> Iterator[ScoutServer]:
             from tools.media import demo_home
 
             demo = demo_home.build(root, log=lambda line: None)
-            state = run_supervisor.status(home_root=demo_gigai_home(root), requested_target=demo_gigai_home(root) / "scout")
+            gigai_home = demo_home.demo_gigai_home(root)
+            state = run_supervisor.status(home_root=gigai_home, requested_target=gigai_home / "scout")
         if state.state != "running" or state.pid is None:
             raise RuntimeError(f"the Scout server is not running after the home was built: {state.state}")
         _RUN["small_home_build_seconds"] = round(time.monotonic() - started, 1)

@@ -540,11 +540,11 @@ def resume_tailor_command(
     validator rejects any number or posting skill the cited sources do not
     state (one retry, then an error). Synchronous: one model call plus at
     most one retry. Prints the markdown path (and copies the markdown to
-    --out FILE when given). The markdown also goes to your resumes folder
-    (`gigai scout resume folder`).
+    --out FILE when given). The markdown also goes to your jobs folder
+    (`gigai scout jobs-folder`).
 
     With --in FILE --job-url URL no model tailors: FILE (resume markdown in
-    GigAI's format, for example the job's file from your resumes folder,
+    GigAI's format, for example the job's resume.md from your jobs folder,
     edited) is stored as that job's tailored resume, marked edited with who
     wrote it (--as). An unchanged line keeps its sources; a changed or new
     line is checked: no name or contact detail, and every number and skill
@@ -656,20 +656,18 @@ def resume_tailor_command(
     click.echo(f"  Stored at {response.stored_path}")
     folder_file = _resume_folder_file(home_root, response)
     if folder_file is not None:
-        click.echo(f"  In your resumes folder: {folder_file}")
+        click.echo(f"  In your jobs folder: {folder_file}")
     if out_path is not None:
         click.echo(f"  Copied to {out_path}")
 
 
 def _resume_folder_file(home_root: Path, response: object) -> str | None:
-    """Where the resumes folder holds this stored tailored resume's markdown (as the user types it), or ``None``."""
+    """Where the jobs folder holds this stored job resume's markdown (as the user types it), or ``None``."""
 
-    from . import resumes_folder
+    from . import jobs_folder
 
-    name = resumes_folder.job_files(home_root, resumes_folder.job_key(home_root, response.stored_path))["markdown"]  # type: ignore[attr-defined]
-    if name is None:
-        return None
-    return _display_path(resumes_folder.resumes_folder(home_root).path / name)
+    folder = jobs_folder.stored_job_folder(home_root, response.stored_path)  # type: ignore[attr-defined]
+    return None if folder is None else folder.resume_shown
 
 
 def _attach_edited_resume(
@@ -741,7 +739,7 @@ def _attach_edited_resume(
         click.echo(f"  Lines: {response.result.line_count()} ({stats.edited} edited, {stats.copied} copied from your resume, {stats.shown_rewritten} kept rewrites)")
     click.echo(f"  Markdown: {response.markdown_path}")
     if folder_file is not None:
-        click.echo(f"  In your resumes folder: {folder_file}")
+        click.echo(f"  In your jobs folder: {folder_file}")
     if out_path is not None:
         click.echo(f"  Copied to {out_path}")
     if recheck["error_code"] == "assessment_missing":
@@ -976,21 +974,21 @@ def resume_pdf_command(
 @click.option("--home", "home_value", type=click.Path(path_type=Path, file_okay=False))
 @click.option("--json", "as_json", is_flag=True)
 def resume_folder_command(set_value: str | None, reset: bool, home_value: Path | None, as_json: bool) -> None:
-    """Show or change your resumes folder: the one visible place GigAI puts a job's resume files.
+    """Show or change your resumes folder: where GigAI keeps master.md and the PDFs made without a header.
 
-    Default ~/Documents/GigAI/resumes. It holds, per job, the tailored
-    resume's markdown and the PDFs `gigai scout resume pdf` makes, named
-    <company>-<role>-<YYYY-MM-DD>.md / .pdf: never your name or contact
+    Default ~/Documents/GigAI/resumes. It holds your master resume's file
+    (master.md) and the PDFs `gigai scout resume pdf` makes without --out,
+    named <company>-<role>-<YYYY-MM-DD>.pdf: never your name or contact
     details (a PDF with the Generate PDF form's header is saved only where
-    you save it). GigAI replaces a file there only when it is exactly what
-    GigAI last wrote, so a file you edit is yours. Running this also copies
-    in any stored tailored resume of your Scout folder (<home>/scout) that
-    is not there yet; `gigai scout run` does the same for the folder it
-    serves. --set moves nothing: files already written stay in the old folder.
+    you save it). A job's resume is no longer written here: since 0.1.11.4
+    it is resume.md in the job's own folder of your jobs folder
+    (`gigai scout jobs-folder`); the <company>-<role>-<date>.md files
+    already here are left as they are. GigAI replaces a file there only
+    when it is exactly what GigAI last wrote, so a file you edit is yours.
+    --set moves nothing: files already written stay in the old folder.
     """
 
     from . import resumes_folder
-    from .target_resolution import home_scout_target
 
     home_root = home_value or default_home_root()
     if set_value is not None and reset:
@@ -1004,15 +1002,79 @@ def resume_folder_command(set_value: str | None, reset: bool, home_value: Path |
     except resumes_folder.ResumesFolderError as exc:
         _fail(exc, as_json=as_json, fallback="invalid_value")
         return
-    # The folder is the home's, so this command takes no --target and never creates a Scout project:
-    # only an existing default one (<home>/scout) has tailored resumes to copy.
-    candidate = home_scout_target(home_root).expanduser()
-    copied = resumes_folder.sync_tailored(home_root, candidate) if candidate.is_dir() else 0
-    payload = {"ok": True, **folder.to_json(), "copied": copied}
+    # The folder is the home's, so this command takes no --target and never creates a Scout project.
+    # 0.1.11.4 J1: nothing is copied in any more (``copied`` stays in the JSON, always 0): a job's resume goes to the jobs folder.
+    payload = {"ok": True, **folder.to_json(), "copied": 0}
     lines = [f"Resumes folder: {folder.shown}" + (" (the default)" if folder.source == resumes_folder.SOURCE_DEFAULT else "")]
-    if copied:
-        lines.append(f"Copied {copied} stored tailored resume{'' if copied == 1 else 's'} into it.")
     _emit(payload, as_json, "\n".join(lines))
+
+
+@scout_group.command("jobs-folder")
+@click.argument("action", required=False, type=click.Choice(["migrate"]))
+@click.option("--set", "set_value", help="Use this folder from now on (an absolute path, or one that starts with ~); it is created when missing.")
+@click.option("--reset", "reset", is_flag=True, help="Go back to the default folder.")
+@click.option("--dry-run", "dry_run", is_flag=True, help="With migrate: list every planned copy and write nothing.")
+@click.option("--home", "home_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--json", "as_json", is_flag=True)
+def jobs_folder_command(action: str | None, set_value: str | None, reset: bool, dry_run: bool, home_value: Path | None, as_json: bool) -> None:
+    """Show or change your jobs folder: one folder per application, where GigAI puts a job's files.
+
+    Default ~/Documents/GigAI/jobs. Each job has its own folder,
+    <company>/<role>/ (lowercase, hyphens, no dates: thrive-market/
+    staff-software-engineer-fullstack/), and its picked resume is resume.md
+    there: clean markdown, never your name or contact details, and never a
+    PDF (a PDF goes where you save it). Two roles at one company are two
+    folders; when two postings would get the same folder the later one's
+    name ends in a short id. The same job always keeps the same folder.
+    cover-letter.md and interview/ are the names of the cover letter and the
+    interview package there; GigAI never creates either one empty. GigAI
+    replaces resume.md only when it is exactly what GigAI last wrote, so a
+    file you edit is yours (the new resume is then written beside it as
+    resume-2.md). --set moves nothing: folders already written stay in the
+    old folder.
+
+    migrate copies the job resumes of your old resumes folder (the flat
+    <company>-<role>-<date>.md files) into this layout, once. The company
+    and role come from the stored job, never from the file's name. The old
+    folder is left as it is; master.md and PDFs are not copied. Run it with
+    --dry-run first: that lists every copy and writes nothing.
+    """
+
+    from . import jobs_folder, jobs_folder_migrate
+
+    home_root = home_value or default_home_root()
+    if set_value is not None and reset:
+        _fail(ValueError("pass --set PATH or --reset, not both"), as_json=as_json, fallback="invalid_value")
+        return
+    if action is None and dry_run:
+        _fail(ValueError("--dry-run goes with migrate: gigai scout jobs-folder migrate --dry-run"), as_json=as_json, fallback="invalid_value")
+        return
+    if action == "migrate":
+        if set_value is not None or reset:
+            _fail(ValueError("migrate takes no --set or --reset: change the folder first, then migrate"), as_json=as_json, fallback="invalid_value")
+            return
+        try:
+            report = jobs_folder_migrate.migrate(home_root, dry_run=dry_run)
+        except jobs_folder.JobsFolderError as exc:
+            _fail(exc, as_json=as_json, fallback="invalid_value")
+            return
+        _emit({"ok": True, **report.to_json()}, as_json, "\n".join(report.lines()))
+        return
+    try:
+        if set_value is not None or reset:
+            folder = jobs_folder.set_jobs_folder(home_root, None if reset else set_value)
+        else:
+            folder = jobs_folder.jobs_folder(home_root)
+    except jobs_folder.JobsFolderError as exc:
+        _fail(exc, as_json=as_json, fallback="invalid_value")
+        return
+    # The folder is the home's, so this command takes no --target and never creates a Scout project.
+    # 0.1.11.4 J2: the old flat files still to import (the two indexes; no file is read).
+    legacy = jobs_folder_migrate.pending_count(home_root)
+    offer = jobs_folder_migrate.pending_line(legacy)
+    payload = {"ok": True, **folder.to_json(), "legacy_pending": legacy}
+    lines = [f"Jobs folder: {folder.shown}" + (" (the default)" if folder.source == jobs_folder.SOURCE_DEFAULT else "")]
+    _emit(payload, as_json, "\n".join(lines + ([offer] if offer else [])))
 
 
 def _other_server_label(other: OtherScoutServer) -> str:
@@ -1066,10 +1128,6 @@ def run_command(
         resolved_target = _resolved_target(target_value, home_root, as_json=as_json)
         # 0110-046: the one-time contact cleanup (idempotent, never raises); its report is also in the UI once.
         cleanup = _contact_cleanup(home_root, resolved_target)
-        # 0110-10-05 A: stored tailored resumes from before the resumes folder are copied into it once (never raises).
-        from . import resumes_folder
-
-        resumes_folder.sync_tailored(home_root, resolved_target)
         result = run_supervisor.start(
             home_root=home_root,
             requested_target=resolved_target,
@@ -1155,12 +1213,16 @@ def status_command(target_value: Path | None, home_value: Path | None, as_json: 
         _fail(exc, as_json=as_json, fallback="scout_status_failed")
         return
 
-    from . import resumes_folder
+    from . import jobs_folder, jobs_folder_migrate, resumes_folder
 
     folder = resumes_folder.resumes_folder(home_root)
+    jobs = jobs_folder.jobs_folder(home_root)
+    legacy = jobs_folder_migrate.pending_count(home_root)
+    legacy_offer = jobs_folder_migrate.pending_line(legacy)
     # 0.1.10.9 master P8: how the master resume's file in that folder stands (the index and one digest; no journal read).
     master_file = resumes_folder.master_file(home_root)
-    payload = {"ok": True, **current.to_json(), "resumes_folder": folder.to_json(), "master_file": master_file.to_json()}
+    payload = {"ok": True, **current.to_json(), "resumes_folder": folder.to_json(), "jobs_folder": jobs.to_json(), "master_file": master_file.to_json()}
+    payload["legacy_pending"] = legacy
     if as_json:
         _emit(payload, True, "")
         return
@@ -1181,6 +1243,9 @@ def status_command(target_value: Path | None, home_value: Path | None, as_json: 
     else:
         click.echo("stopped")
     click.echo(f"Resumes folder: {folder.shown}")
+    click.echo(f"Jobs folder: {jobs.shown}")
+    if legacy_offer:
+        click.echo(legacy_offer)
     if master_file.state == resumes_folder.MASTER_CHANGED:
         click.echo(f"{master_file.name} has changes not imported yet ({master_file.shown}). Import them: `gigai scout resume master sync`.")
     for other in current.other_servers:

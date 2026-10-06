@@ -316,16 +316,15 @@ def after_handback(
 
 
 def _resume_view(home_root: Path, resume: object | None, replaceable: bool) -> dict[str, object] | None:
-    """The stored job resume as ``resume pick`` shows it: its markdown, who made it, and where its file is."""
+    """The stored job resume as ``resume pick`` shows it: its markdown, who made it, and where its file and the job's folder are."""
 
-    from . import resumes_folder
+    from . import jobs_folder
 
     if resume is None:
         return None
     selection = getattr(resume, "selection", None)
     edited = getattr(resume, "edited", None)
-    file_name = resumes_folder.job_files(Path(home_root), resumes_folder.job_key(Path(home_root), resume.stored_path))["markdown"]  # type: ignore[attr-defined]
-    folder = resumes_folder.resumes_folder(Path(home_root))
+    folder = jobs_folder.stored_job_folder(Path(home_root), resume.stored_path)  # type: ignore[attr-defined]
     return {
         "updated_at": resume.updated_at,  # type: ignore[attr-defined]
         "made_by": resume.producer.callable,  # type: ignore[attr-defined]
@@ -336,7 +335,9 @@ def _resume_view(home_root: Path, resume: object | None, replaceable: bool) -> d
         "counts": None if selection is None else {
             "picked": len(selection.picked), "left_out": len(selection.left_out), "cut_for_length": len(selection.cut_for_length),
         },
-        "folder_path": None if file_name is None else f"{folder.shown}/{file_name}",
+        # 0.1.11.4 J1: <jobs>/<company>/<role>/resume.md, and the job's folder itself (paths only, for "Open folder").
+        "folder_path": None if folder is None else folder.resume_shown,
+        "job_folder": None if folder is None else folder.shown,
         "markdown": resume.markdown,  # type: ignore[attr-defined]
     }
 

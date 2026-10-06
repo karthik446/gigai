@@ -2,9 +2,8 @@ import { useEffect, useState } from "react";
 import { getResumesFolder, putResumesFolder } from "../api.js";
 import { folderChanged, folderLine, folderRequest } from "../resumesFolderModel.js";
 
-// 0110-10-05 A: the resumes folder (GET/PUT /api/resumes-folder): the one
-// visible place a job's resume markdown and the PDFs made without a header
-// are kept, named <company>-<role>-<date>. Save sends the typed path; "Use
+// 0110-10-05 A: the resumes folder (GET/PUT /api/resumes-folder): master.md and the PDFs made without a
+// header. 0.1.11.4 J3: legacy for job resumes (new picks go to the jobs folder, JobsFolderPanel). Save sends the typed path; "Use
 // the default" sends an empty one. Files already written are not moved.
 export default function ResumesFolderPanel() {
   const [folder, setFolder] = useState(null);
@@ -39,8 +38,8 @@ export default function ResumesFolderPanel() {
     <section className="panel" id="settings-resumes-folder">
       <h2>Resumes folder</h2>
       <p className="muted">
-        Each job's resume (markdown) and the PDFs made without a header are saved in this folder, named for the company, the role and
-        the date. A file you change there stays yours: a newer one gets a new name.
+        This is the older folder. Job resumes you picked before now are still here, left as they were; new picks go to the Jobs folder
+        above. The Master resume file (master.md) and PDFs made without a header are still saved here.
       </p>
       {folder && (
         <p data-testid="resumes-folder" data-source={folder.source}>

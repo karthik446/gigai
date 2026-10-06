@@ -42,10 +42,26 @@ same switched-off step.
 
 > Every line comes from your resume, answers or stories. Read it before you send it.
 
-The panel also says where the file is. Each job's resume (markdown) is saved in your
-resumes folder (`~/Documents/GigAI/resumes` unless you chose another in Settings), named
-`<company>-<role>-<date>.md`. A file you change there stays yours; Scout replaces only what
-it wrote itself.
+Each job's resume (markdown) is saved in the job's own folder of your jobs folder
+(`~/Documents/GigAI/jobs` unless you chose another with `gigai scout jobs-folder --set PATH`):
+`<company>/<role>/resume.md`, for example `thrive-market/staff-software-engineer-fullstack/resume.md`.
+Two roles at one company are two folders, and no name holds a date. The folder never holds your
+name or contact details, and never a PDF. A `resume.md` you change there stays yours; Scout
+replaces only what it wrote itself and writes a newer resume beside yours as `resume-2.md`.
+Files that an earlier version put in your resumes folder (`<company>-<role>-<date>.md`) are
+left where they are. To copy them into the new layout, once:
+
+```bash
+gigai scout jobs-folder migrate --dry-run
+gigai scout jobs-folder migrate
+```
+
+The dry run lists every copy and writes nothing. The company and role come from the stored job,
+not from the file's name. The old folder is left exactly as it was (it is a legacy place for job
+resumes now); `master.md` and the PDFs stay there. A file you edited is copied as yours and is
+never replaced. A file with no stored job, or one that holds contact details, is listed and not
+copied. A second run copies nothing. `gigai scout status` says so in one line while old files
+still wait.
 
 <!-- The images on this page are the release screenshots (`make media`, a synthetic demo home on the
 fixture model; see the note under "The master resume"). Paths are relative to this page, as on For agents. -->

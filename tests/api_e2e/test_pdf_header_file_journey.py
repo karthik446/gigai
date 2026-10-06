@@ -242,7 +242,11 @@ def test_the_header_file_fills_the_form_and_the_pdf_and_reaches_nobody_else(tmp_
     source.unlink()
     assert folder == home / "resumes" and folder.is_dir()
     names = sorted(path.name for path in folder.iterdir())
-    assert "master.md" in names and any(name.endswith(".md") and name != "master.md" for name in names) and any(name.endswith(".pdf") for name in names), names
+    # 0.1.11.4 J1: the resumes folder holds master.md and the headerless PDFs; the job's markdown is resume.md in its
+    # own folder of the jobs folder (<home>/jobs here), which never holds a PDF.
+    assert "master.md" in names and not any(name.endswith(".md") and not name.startswith("master") for name in names) and any(name.endswith(".pdf") for name in names), names
+    job_files = sorted(path.relative_to(home / "jobs").as_posix() for path in (home / "jobs").rglob("*") if path.is_file())
+    assert [name.rsplit("/", 1)[-1] for name in job_files] == [".gigai-job.json", "resume.md"], job_files
     for path in folder.iterdir():
         if path.suffix == ".pdf":
             _silent(f"the resumes folder's {path.name}", "\n".join(page.extract_text() for page in PdfReader(io.BytesIO(path.read_bytes())).pages))

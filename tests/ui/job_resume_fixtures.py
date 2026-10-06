@@ -382,13 +382,13 @@ def evidence_folder() -> Path | None:
     return Path(os.environ[EVIDENCE_ENV]).resolve() if os.environ.get(EVIDENCE_ENV) else None
 
 
-#: The one line of the job page that names a folder of the machine: the resumes folder, inside this run's temporary
+#: The one line of the job page that names a folder of the machine: the jobs folder, inside this run's temporary
 #: HOME (`~/op/home/resumes/...`). It is no user's path, and the privacy gate rightly reads any `/home/<name>` as one:
 #: the line is masked in the picture and left out of its text, and the picture's text says that it was.
-FOLDER_LINE = '[data-testid="resumes-folder-file"]'
+FOLDER_LINE = '[data-testid="jobs-folder-file"]'
 TEXT_JS = """(selector) => {
   const body = document.body.cloneNode(true);
-  body.querySelectorAll(selector).forEach((node) => { node.textContent = '[the resumes-folder line: masked in this picture]'; });
+  body.querySelectorAll(selector).forEach((node) => { node.textContent = '[the jobs-folder line: masked in this picture]'; });
   document.body.appendChild(body);  // innerText needs a rendered node
   const text = body.innerText;
   body.remove();

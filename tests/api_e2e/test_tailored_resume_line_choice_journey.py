@@ -85,6 +85,12 @@ def test_line_choice_journey(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) ->
         pdf_text = _text(client.post("/api/tailored-resumes/pdf", json=key).content)
         assert _WEAKER_STAFF in pdf_text and _STAFF not in pdf_text
         assert _bullets(shown())[1]["text"] == f"- {_DSAR}"  # the other line is untouched
+        # 0.1.11.4 J1: the job's resume.md in the jobs folder follows the choice (and Restore, below).
+        job_folder = client.get("/api/jobs-folder", params=key).json()["job"]
+        assert job_folder["relative"] == "acme/staff-engineer" and job_folder["files"] == {"resume": "resume.md"}
+        resume_md = Path(job_folder["path"]) / "resume.md"
+        assert resume_md.parent == home / "jobs" / "acme" / "staff-engineer"
+        assert _WEAKER_STAFF in resume_md.read_text(encoding="utf-8") and _STAFF not in resume_md.read_text(encoding="utf-8")
 
         # (b) the same choice again changes nothing.
         again = client.put(url, json=body)
@@ -96,6 +102,8 @@ def test_line_choice_journey(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) ->
         assert undone.status_code == 200 and _bullets(undone.json())[0]["text"] == f"- {_STAFF}"
         assert _bullets(undone.json())[0]["origin"] == "user" and shown() == undone.json()
         assert _text(client.post("/api/tailored-resumes/pdf", json=key).content).count(_STAFF) == 1
+        assert resume_md.read_text(encoding="utf-8").count(_STAFF) == 1 and _WEAKER_STAFF not in resume_md.read_text(encoding="utf-8"), "Restore rewrites resume.md"
+        assert sorted(path.name for path in resume_md.parent.iterdir()) == [".gigai-job.json", "resume.md"]
 
         # (d) a stale updated_at is 409 and changes nothing.
         stale = client.put(url, json={**body, "updated_at": "2020-01-01T00:00:00+00:00"})

@@ -2,15 +2,17 @@
 
 On the END outcome, with the synthetic gig and scripted model of
 ``tests/support/pipeline_fixtures`` (every model call is counted) and the real
-CLI. The home is a temporary one, so the resumes folder is ``<home>/resumes``
-(only the default home ``~/.gigai`` uses ``~/Documents/GigAI/resumes``): nothing
-here can reach the real Documents folder.
+CLI. The home is a temporary one, so the jobs folder is ``<home>/jobs`` and the
+resumes folder ``<home>/resumes`` (only the default home ``~/.gigai`` uses
+``~/Documents/GigAI``): nothing here can reach the real Documents folder.
 
-A. The folder: a tailoring puts the job's markdown there as
-   ``<company>-<role>-<YYYY-MM-DD>.md`` with no contact data;
-   ``gigai scout resume pdf`` without ``--out`` writes its headerless PDF there
-   and never into the current directory; markdown whose printed text holds a
-   contact detail is refused there; ``gigai scout status`` shows the folder.
+A. The folders (0.1.11.4 J1): a tailoring puts the job's markdown in the job's
+   own folder of the jobs folder, ``<company>/<role>/resume.md``, with no
+   contact data, and writes nothing into the flat resumes folder any more;
+   ``gigai scout resume pdf`` without ``--out`` still writes its headerless PDF
+   into the RESUMES folder (never the jobs folder, never the current
+   directory); markdown whose printed text holds a contact detail is refused
+   there; ``gigai scout status`` shows both folders.
 B. ``gigai scout resume tailor --in FILE --job-url URL``: the edited markdown is
    that job's tailored resume, marked edited with who wrote it; a number or a
    posting skill neither the resume nor an answer states is refused and nothing
@@ -120,6 +122,16 @@ def _folder_files(fx: PipelineFixture, suffix: str) -> list[Path]:
     return sorted(path for path in _folder(fx).iterdir() if path.suffix == suffix) if _folder(fx).is_dir() else []
 
 
+def _jobs(fx: PipelineFixture) -> Path:
+    return fx.home_root / "jobs"
+
+
+def _job_files(fx: PipelineFixture, suffix: str = ".md") -> list[Path]:
+    """Every file of that kind anywhere under the jobs folder (0.1.11.4 J1: ``<company>/<role>/resume.md``)."""
+
+    return sorted(path for path in _jobs(fx).rglob(f"*{suffix}") if path.is_file())
+
+
 def _edited(markdown: str) -> str:
     """The folder's markdown as an agent edits it: one more Experience bullet, the Other section dropped."""
 
@@ -139,20 +151,25 @@ def _save_terraform_answer(fx: PipelineFixture) -> None:
 # --- A. the visible folder -------------------------------------------------------------------
 
 
-def test_a_tailoring_puts_the_jobs_markdown_in_the_resumes_folder_without_contact_data(fx: PipelineFixture) -> None:
+def test_a_tailoring_puts_the_jobs_markdown_in_the_jobs_own_folder_without_contact_data(fx: PipelineFixture) -> None:
     stored = _pipeline_tailors(fx)
 
-    assert _cli(fx, "status")["resumes_folder"]["path"] == str(_folder(fx)), "a temporary home never uses ~/Documents"
+    assert _cli(fx, "status")["jobs_folder"]["path"] == str(_jobs(fx)), "a temporary home never uses ~/Documents"
     day = datetime.fromisoformat(stored.updated_at.replace("Z", "+00:00")).astimezone().date().isoformat()
-    (markdown,) = _folder_files(fx, ".md")
-    assert markdown.name == f"acme-staff-ai-engineer-{day}.md", "<company>-<role>-<YYYY-MM-DD>.md"
+    (markdown,) = _job_files(fx)
+    assert markdown == _jobs(fx) / "acme" / "staff-ai-engineer" / "resume.md", "<company>/<role>/resume.md: no date in a name"
+    assert sorted(path.name for path in markdown.parent.iterdir()) == [".gigai-job.json", "resume.md"], "no PDF, and interview/ is never created empty"
+    record = json.loads((markdown.parent / ".gigai-job.json").read_text(encoding="utf-8"))
+    assert (record["job_url"], record["role"], record["created"]) == (JOB, stored.job.title, day), "the date lives in the folder's record"
+    assert not _folder(fx).exists(), "the flat resumes folder is not written by a tailoring any more"
     text = markdown.read_text(encoding="utf-8")
     assert "## Experience" in text and "### Acme Corp — Senior Engineer (2019–2023)" in text
     assert "<!--" not in text, "the visible file reads as a resume: no source comments"
     assert not any(marker in text for marker in MARKERS), "the folder never holds a name or contact details"
     # The index that says which files are GigAI's own holds names, digests and keys: no resume text.
-    index = (fx.home_root / "scout" / "resumes-folder-index.json").read_text(encoding="utf-8")
-    assert "Python" not in index and markdown.name in index
+    index = (fx.home_root / "scout" / "jobs-folder-index.json").read_text(encoding="utf-8")
+    assert "Python" not in index and "acme/staff-ai-engineer" in index and markdown.name in index
+    assert not any(marker in index or marker in json.dumps(record) for marker in MARKERS)
 
 
 def test_resume_pdf_without_out_writes_the_headerless_pdf_into_the_folder_not_the_current_directory(
@@ -170,6 +187,7 @@ def test_resume_pdf_without_out_writes_the_headerless_pdf_into_the_folder_not_th
     assert list(elsewhere.iterdir()) == [], "nothing lands in the directory the command was run from"
     assert payload["in_resumes_folder"] is True and payload["header"] is False
     assert Path(str(payload["out_path"])).expanduser() == pdf, "the path is printed"
+    assert _job_files(fx, ".pdf") == [], "no PDF is ever written into the jobs folder (agents read it)"
     for marker in MARKERS:
         assert marker.encode() not in pdf.read_bytes()
 
@@ -201,15 +219,24 @@ def test_scout_status_shows_the_folder_and_it_can_be_changed(fx: PipelineFixture
     assert status["resumes_folder"]["path"] == str(_folder(fx)) and status["resumes_folder"]["source"] == "default"
     plain = CliRunner().invoke(scout_group, ["status", "--home", str(fx.home_root), "--target", str(fx.target)])
     assert f"Resumes folder: {status['resumes_folder']['shown']}" in plain.output
+    assert status["jobs_folder"]["path"] == str(_jobs(fx)) and status["jobs_folder"]["source"] == "default"
+    assert f"Jobs folder: {status['jobs_folder']['shown']}" in plain.output
 
     chosen = tmp_path / "my resumes"
     result = CliRunner().invoke(scout_group, ["resume", "folder", "--set", str(chosen), "--home", str(fx.home_root), "--json"])
     assert result.exit_code == 0, result.output
     assert json.loads(result.output)["source"] == "setting" and chosen.is_dir()
+    assert json.loads(result.output)["copied"] == 0, "nothing is copied into the resumes folder any more"
     assert _cli(fx, "status")["resumes_folder"]["path"] == str(chosen)
-    # The next tailoring goes to the chosen folder.
+    jobs = tmp_path / "my jobs"
+    result = CliRunner().invoke(scout_group, ["jobs-folder", "--set", str(jobs), "--home", str(fx.home_root), "--json"])
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.output)["source"] == "setting" and jobs.is_dir()
+    assert _cli(fx, "status")["jobs_folder"]["path"] == str(jobs)
+    # The next tailoring goes to the chosen jobs folder, and nothing to either resumes folder.
     _pipeline_tailors(fx)
-    assert [path.suffix for path in chosen.iterdir()] == [".md"] and _folder_files(fx, ".md") == []
+    assert [path.relative_to(jobs).as_posix() for path in jobs.rglob("*.md")] == ["acme/staff-ai-engineer/resume.md"]
+    assert list(chosen.iterdir()) == [] and not _folder(fx).exists() and not _jobs(fx).exists()
 
 
 # --- B. an edited resume, stored back for one job ----------------------------------------------
@@ -217,7 +244,7 @@ def test_scout_status_shows_the_folder_and_it_can_be_changed(fx: PipelineFixture
 
 def test_an_edited_markdown_becomes_that_jobs_tailored_resume_and_the_checks_run_on_it(fx: PipelineFixture, tmp_path: Path) -> None:
     before = _pipeline_tailors(fx)
-    (visible,) = _folder_files(fx, ".md")
+    (visible,) = _job_files(fx)
     edited = tmp_path / "edited.md"
     edited.write_text(_edited(visible.read_text(encoding="utf-8")), encoding="utf-8")
     stored_bytes = Path(before.stored_path).read_bytes()
@@ -262,9 +289,10 @@ def test_an_edited_markdown_becomes_that_jobs_tailored_resume_and_the_checks_run
     assert payload["status"]["outputs"]["tailored_resume"]["outcome"] == _KEPT
 
     # The folder holds the job's ONE markdown: the edited one.
-    (visible,) = _folder_files(fx, ".md")
+    (visible,) = _job_files(fx)
     assert _TERRAFORM_BULLET in visible.read_text(encoding="utf-8") and "## Other" not in visible.read_text(encoding="utf-8")
-    assert Path(str(payload["folder_path"])).expanduser() == visible
+    assert Path(str(payload["folder_path"])).expanduser() == visible == _jobs(fx) / "acme" / "staff-ai-engineer" / "resume.md"
+    assert Path(str(payload["job_folder"])).expanduser() == visible.parent, "the job's folder path, for Open folder (a path, no contents)"
 
     # Background tailoring never replaces it: forced through the pipeline again, no model tailors and the file is the same.
     edited_bytes = Path(after.stored_path).read_bytes()
@@ -293,7 +321,7 @@ def test_an_edited_line_that_cannot_be_traced_or_holds_personal_info_is_refused(
 ) -> None:
     before = _pipeline_tailors(fx)
     stored_bytes = Path(before.stored_path).read_bytes()
-    (visible,) = _folder_files(fx, ".md")
+    (visible,) = _job_files(fx)
     lines = visible.read_text(encoding="utf-8").splitlines()
     # A Skills item goes in the Skills section, anything else under the role.
     lines.insert(lines.index("## Other") - 1 if line.startswith("- Rust") else lines.index("## Skills") - 1, line)
@@ -309,7 +337,7 @@ def test_an_edited_line_that_cannot_be_traced_or_holds_personal_info_is_refused(
 
 def test_an_entry_heading_must_be_a_resume_line(fx: PipelineFixture, tmp_path: Path) -> None:
     before = _pipeline_tailors(fx)
-    (visible,) = _folder_files(fx, ".md")
+    (visible,) = _job_files(fx)
     edited = tmp_path / "edited.md"
     edited.write_text(visible.read_text(encoding="utf-8").replace("Senior Engineer (2019–2023)", "Principal Engineer (2015–2023)"), encoding="utf-8")
 

@@ -25,8 +25,9 @@ WHAT GOES WHERE, WHERE THE SPEC'S TEXT LEFT A CHOICE.  A model derived three thi
 the posting part's by the label vocabulary ("anything a model derived from them"): a requirement's words, its
 ``class_basis``, and the ``why`` of a suggestion the ASSESSMENT wrote.  The private part names such a suggestion
 by id, kind, line and requirement and says where its ``why`` is; a suggestion an agent or the user added is the
-user's own and prints its ``why`` there.  The file of the job in the resumes folder is named
-``<company>-<role>-<date>.md``, the posting's words: the private part gives the folder, the posting part the name.
+user's own and prints its ``why`` there.  The job's folder in the jobs folder is named
+``<company>/<role>``, the posting's words: the private part gives the jobs folder, the posting part the job's
+folder and its ``resume.md`` there.
 An answer's question (the assessment's words) is in neither part: an answer is named by its id.
 
 A NOTE is printed once: as the note of its master line (or entry), in the private part.  It guides which lines to
@@ -145,7 +146,7 @@ class YoursInputs:
     answers: Mapping[str, object] = field(default_factory=dict)
     pages: int | None = None
     max_pages: int = 2
-    #: The resumes folder as the user types it (``~/Documents/GigAI/resumes``).
+    #: The jobs folder as the user types it (``~/Documents/GigAI/jobs``).
     folder: str | None = None
     #: What a resume for this profile is made from (``tailor_master.BASES``).
     basis: str = "master"
@@ -179,8 +180,10 @@ class PostingInputs:
     rows: tuple[RowWords, ...] = ()
     #: Each ``{id, posting_phrase, why}`` of a suggestion the ASSESSMENT wrote (``why`` is a model's sentence about the posting).
     suggestions: tuple[Mapping[str, object], ...] = ()
-    #: The job's markdown file in the resumes folder: ``<company>-<role>-<date>.md``, the posting's words.
+    #: The job's markdown file under the jobs folder: ``<company>/<role>/resume.md``, the posting's words.
     resume_file: str | None = None
+    #: The job's folder under the jobs folder: ``<company>/<role>``, the posting's words.
+    job_folder: str | None = None
 
 
 # --- commands ----------------------------------------------------------------------------------------------
@@ -200,6 +203,7 @@ def commands(job_identity: str, profile_id: str) -> dict[str, str]:
         "posting": f"gigai scout resume brief {pair} --posting",
         "count_pages": "gigai scout resume pdf --in FILE --out FILE.pdf --json",
         "resumes_folder": "gigai scout resume folder --json",
+        "jobs_folder": "gigai scout jobs-folder --json",
         "apply": f"gigai scout resume pdf --job-url {job_identity} --json",
     }
 
@@ -393,11 +397,12 @@ def posting_part(inputs: PostingInputs) -> dict[str, object]:
         ],
         "suggestions": [dict(item) for item in inputs.suggestions],
         "resume_file": inputs.resume_file,
+        "job_folder": inputs.job_folder,
     }
     part[ENVELOPE_KEY] = labels_envelope({
         "/posting": PUBLIC_UNTRUSTED, "/requirements/*/text": PUBLIC_UNTRUSTED, "/requirements/*/class_basis": PUBLIC_UNTRUSTED,
         "/requirements/*/alternatives": PUBLIC_UNTRUSTED, "/suggestions/*/posting_phrase": PUBLIC_UNTRUSTED,
-        "/suggestions/*/why": PUBLIC_UNTRUSTED, "/resume_file": PUBLIC_UNTRUSTED,
+        "/suggestions/*/why": PUBLIC_UNTRUSTED, "/resume_file": PUBLIC_UNTRUSTED, "/job_folder": PUBLIC_UNTRUSTED,
     })
     check_part(part)
     return part
@@ -479,7 +484,7 @@ def _render_yours(part: Mapping[str, object]) -> str:
     if isinstance(resume, Mapping):
         if resume.get("edited_by"):
             out.append(f"edited by: {resume['edited_by']}")
-        out.append(f"file: in {resume.get('folder') or 'your resumes folder'} ({cmds['resumes_folder']}); its name is in the posting part (it is made of the posting's company and role)")
+        out.append(f"file: in {resume.get('folder') or 'your jobs folder'} ({cmds['jobs_folder']}); its path there is in the posting part (it is made of the posting's company and role)")
         out += ["", str(resume["markdown"]).rstrip("\n")]
     else:
         out.append("(no resume is stored for this job)")
@@ -566,7 +571,7 @@ def _render_posting(part: Mapping[str, object]) -> str:
     ]
     out += ["", "SUGGESTIONS OF THE ASSESSMENT (by id; a model wrote them from the posting)", fence_untrusted_posting("\n".join(phrases) if phrases else "(none)")]
     if part.get("resume_file"):
-        out += ["", "THE JOB'S FILE IN THE RESUMES FOLDER (named after the posting's company and role)", fence_untrusted_posting(str(part["resume_file"]))]
+        out += ["", "THE JOB'S FILE IN THE JOBS FOLDER (named after the posting's company and role)", fence_untrusted_posting(str(part["resume_file"]))]
     return "\n".join(out) + "\n"
 
 
@@ -755,7 +760,7 @@ def load_yours(home_root: Path, target: Path, job_url: str, profile_id: str | No
     """What the private part reads for one job, from the stores as they are. Nothing is recomputed and nothing is written."""
 
     from ..workpad import WorkpadError, resolve_workpad
-    from . import profile_records, resumes_folder
+    from . import jobs_folder, profile_records
     from .assessment_basis import BasisCheck, assessment_notice
     from .tailor_master import BASIS_MASTER, measure_pages, stored_master, tailoring_basis
     from .tailored_resume import LENGTH_RULE, read_tailored_resume, tailor_sources, tailored_resume_path
@@ -802,7 +807,7 @@ def load_yours(home_root: Path, target: Path, job_url: str, profile_id: str | No
         ),
         pages=pages,
         max_pages=LENGTH_RULE.max_pages,
-        folder=resumes_folder.resumes_folder(home_root).shown,
+        folder=jobs_folder.jobs_folder(home_root).shown,
         basis=basis,
         requirements_note=getattr(assessment, "requirements_note", None),
         model_notice=None if (notice := assessment_notice(assessment)) is None else notice.to_json(),  # type: ignore[arg-type]
@@ -818,7 +823,7 @@ def load_posting(home_root: Path, target: Path, job_url: str, profile_id: str | 
 def posting_inputs(home_root: Path, target: Path, job: StoredJob) -> PostingInputs:
     """``load_posting`` for a job that is already read (the cover-letter brief reads the stored assessment once)."""
 
-    from . import resumes_folder
+    from . import jobs_folder
     from .tailored_resume import tailored_resume_path
 
     assessment = job.assessment
@@ -835,11 +840,12 @@ def posting_inputs(home_root: Path, target: Path, job: StoredJob) -> PostingInpu
         for item in (job.record or {}).get("suggestions", ())  # type: ignore[union-attr]
         if isinstance(item, Mapping) and item.get("source") == "assessment"
     )
-    key = resumes_folder.job_key(home_root, tailored_resume_path(home_root, target, job.profile_id, job.job_identity))
+    folder = jobs_folder.stored_job_folder(home_root, tailored_resume_path(home_root, target, job.profile_id, job.job_identity))
     return PostingInputs(
         job_identity=job.job_identity, profile_id=job.profile_id, title=posting.title or "", company=posting.company or "",
         location=posting.location or "", text=assessment.posting_text or posting.text or "",  # type: ignore[attr-defined]
-        rows=rows, suggestions=suggestions, resume_file=resumes_folder.job_files(home_root, key)["markdown"],
+        rows=rows, suggestions=suggestions, resume_file=None if folder is None or folder.resume is None else f"{folder.relative}/{folder.resume}",
+        job_folder=None if folder is None else folder.relative,
     )
 
 

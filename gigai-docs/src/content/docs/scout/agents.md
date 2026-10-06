@@ -302,12 +302,15 @@ and it should not ask you for those details.
 
 Every line comes from your resume, answers or stories. Read it before you send it.
 
-**Where the files are.** Each job's resume (markdown) and the PDFs made without a header
-are in your resumes folder, `~/Documents/GigAI/resumes`, named `<company>-<role>-<date>.md` and
-`.pdf`. `gigai scout resume pdf` writes there unless you pass `--out`. `gigai scout status` and
-Settings show the folder; `gigai scout resume folder --set PATH` changes it. The folder never
-holds your name or contact details: a PDF you make with the Generate PDF form is saved only where
-you save it. A file you change there stays yours; Scout replaces only what it wrote itself.
+**Where the files are.** Each job has its own folder in your jobs folder,
+`~/Documents/GigAI/jobs/<company>/<role>/`, and its resume (markdown) is `resume.md` there: no
+date in a name, two roles at one company are two folders. `gigai scout status` shows the folder;
+`gigai scout jobs-folder --set PATH` changes it. The PDFs made without a header are in your
+resumes folder, `~/Documents/GigAI/resumes`, named `<company>-<role>-<date>.pdf`:
+`gigai scout resume pdf` writes there unless you pass `--out`, and never into the jobs folder
+(`gigai scout resume folder --set PATH` changes that one). Neither folder ever holds your name or
+contact details: a PDF you make with the Generate PDF form is saved only where you save it. A
+file you change there stays yours; Scout replaces only what it wrote itself.
 
 **Working on one job's resume, in chat.** GigAI rewords nothing. Say "work on my resume for this
 job" and your agent does it with you, for that one job, in five steps:
