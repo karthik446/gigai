@@ -2020,6 +2020,63 @@ def shown_text(line: TailoredLine) -> str:
     return _display(line.text) if line.kind == "copy" else line.text
 
 
+#: 0.1.11.4 item 9: a role none of whose lines is shown is never dropped silently.  It prints as ONE line (its title,
+#: its employer and its dates, ``heading_only_line``) in a block under this heading, at the end of the Experience
+#: section, newest first.  In a stored result such a role is an Experience entry with its heading lines and no
+#: bullets (the shape a reader of before 0.1.11.4 already reads, and prints as the full heading); in resume markdown
+#: the block is an entry of this heading whose lines under it are the roles' lines.
+EARLIER_HEADING = "Earlier experience"
+#: How many roles the block may list (the bound on an Experience section's entries).
+MAX_EARLIER_LINES = MAX_ENTRIES_PER_SECTION
+_ROLE_DATES = re.compile(r"\b(?:19|20)\d\d\b|\bPresent\b", re.IGNORECASE)
+
+
+def _role_part(text: str) -> tuple[str, str]:
+    """``(what the line says, its dates)`` of a heading line: ``Title | Feb 2016 - Jan 2017`` is two parts."""
+
+    shown = " ".join(_display(text).split())
+    head, sep, tail = shown.rpartition(" | ")
+    return (head, tail) if sep and _ROLE_DATES.search(tail) else (shown, "")
+
+
+def heading_only_line(heading: Sequence[str]) -> str:
+    """One role as ONE line: ``Senior Full Stack Developer, USDA | Feb 2016 - Jan 2017``.
+
+    ``heading``: the role's heading lines as its resume has them (the employer, then the title and dates line).
+    Every part is the resume's own: the title (the first line under the employer), the employer, and the first
+    dates any of the lines names.  Nothing is added, and a part the resume does not give is left out."""
+
+    parts = [_role_part(text) for text in heading if text.strip()]
+    if not parts:
+        return ""
+    employer = parts[0][0]
+    title = parts[1][0] if len(parts) > 1 else ""
+    dates = next((when for _what, when in parts if when), "")
+    what = ", ".join(part for part in (title, employer) if part)
+    return " | ".join(part for part in (what, dates) if part)
+
+
+def is_earlier_heading(text: str) -> bool:
+    """``text`` (an entry heading, with or without its markdown marker) is the heading of the heading-only block."""
+
+    return " ".join(_display(text).split()).casefold() == EARLIER_HEADING.casefold()
+
+
+def heading_only(section: TailoredSection) -> tuple[TailoredEntry, ...]:
+    """The roles of ``section`` that print as one line each (``EARLIER_HEADING``): the Experience entries with no
+    bullet whose heading is a line of the MASTER resume (its ref carries the master id).
+
+    Only a resume made from the master holds such a role on purpose.  An entry with no bullet in a resume tailored
+    from a profile's own resume (0.1.10: its refs carry no master id) prints as it always did, its heading in its place."""
+
+    if section.heading != "experience":
+        return ()
+    return tuple(
+        entry for entry in section.entries
+        if entry.heading and not entry.bullets and any(ref.kind == "resume" and ref.item_id is not None for ref in entry.heading[0].refs)
+    )
+
+
 def _refs_comment(line: TailoredLine) -> str:
     if line.kind == "custom":  # the operator's own text: no source is claimed
         return "<!-- edited -->"
@@ -2058,7 +2115,9 @@ def _printed_lines(lines: Sequence[TailoredLine]) -> list[TailoredLine]:
 def render_markdown(result: TailoredResume) -> str:
     """The ``.md`` text, from the validated JSON only; each line keeps its refs
     in a trailing HTML comment (``<!-- R12, A cloud:gcp -->``).  No copy line
-    repeats text the line above it already printed (``_printed_lines``)."""
+    repeats text the line above it already printed (``_printed_lines``).
+    An Experience role with no bullet prints as one line under ``EARLIER_HEADING``
+    (0.1.11.4 item 9), after the roles that show lines."""
 
     out: list[str] = []
     for index, line in enumerate(result.header):
@@ -2072,7 +2131,10 @@ def render_markdown(result: TailoredResume) -> str:
         out.append(f"## {section.heading.capitalize()}")
         out.append("")
         if section.heading in ENTRY_SECTIONS:
+            earlier = heading_only(section)
             for entry in section.entries:
+                if any(entry is role for role in earlier):
+                    continue
                 for index, line in enumerate(entry.heading):
                     shown = _display(line.text)
                     out.append((f"### {shown}" if index == 0 else shown) + " " + _refs_comment(line))
@@ -2080,6 +2142,13 @@ def render_markdown(result: TailoredResume) -> str:
                     out.append("")
                 for line in _printed_lines(entry.bullets):
                     out.append(f"- {shown_text(line)} {_refs_comment(line)}")
+                out.append("")
+            if earlier:
+                # A role with no line shown: one line each, after the roles that show lines (``EARLIER_HEADING``).
+                out += [f"### {EARLIER_HEADING}", ""]
+                for entry in earlier:
+                    refs = ", ".join(ref.label() for line in entry.heading for ref in line.refs)
+                    out.append(heading_only_line([line.text for line in entry.heading]) + (f" <!-- {refs} -->" if refs else ""))
                 out.append("")
         else:
             for line in _printed_lines(section.lines):
@@ -2750,6 +2819,7 @@ def save_tailor_response(response: TailorResponse, *, home_root: Path | None = N
 
 
 __all__ = [
+    "EARLIER_HEADING",
     "ENTRY_SECTIONS",
     "EPHEMERAL_RESUME_KEY",
     "FALLBACK_FLAGS",

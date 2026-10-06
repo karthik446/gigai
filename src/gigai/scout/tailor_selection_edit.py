@@ -294,6 +294,10 @@ def _selection_after(
     picked = [line for line in selection.picked if line.id not in gone and line.id != added]
     left = [line for line in selection.left_out if line.id != added and line.id not in gone]
     cuts = [cut for cut in selection.cut_for_length if cut.id != added and cut.id not in back]
+    if added is not None and master is not None and added in master.items:
+        # 0.1.11.4 item 9: a role that kept only its heading shows a line again: it is no longer a role cut.
+        role = master.items[added].entry_id
+        cuts = [cut for cut in cuts if not (cut.kind == "role" and cut.id == role)]
     if added is not None:
         picked.append(SelectedLine(added, *ADDED))
     for item_id, kind in room:

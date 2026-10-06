@@ -65,7 +65,8 @@ RULES: tuple[str, ...] = (
     "A line you copy unchanged needs nothing. A line you reword or add ends with its sources: `<!-- src: b-23b6dc, A tooling:temporal -->`.",
     "Keep every number exactly. Keep ownership as stated: \"worked on\" never becomes \"led\". One role or project per line. "
     "Write a line in resume voice: impersonal, past tense, no \"I\" or \"my\", using only the facts of its source; never paste an answer as it stands.",
-    "Entry headings (company, title, dates, school, degree, project name) are copied unchanged. Roles stay in date order, newest first.",
+    "Entry headings (company, title, dates, school, degree, project name) are copied unchanged. Roles stay in date order, newest first. "
+    "A role with no line shown is not left out: it stays on its one line under `### Earlier experience`, copied unchanged.",
     "Keep the Skills section. Add a skill only when an answer says the user has it, at the level the answer states.",
     "No name and no contact details anywhere.",
     "Two pages. Count them before you hand the resume back.",
@@ -236,9 +237,12 @@ def _line_comment(line: object) -> str:
 
 
 def resume_markdown(result: object) -> str:
-    """The stored job resume as markdown, each line with the master id it prints. A heading is never decorated: its id is a comment."""
+    """The stored job resume as markdown, each line with the master id it prints. A heading is never decorated: its id is a comment.
 
-    from .tailored_resume import ENTRY_SECTIONS, _display, _printed_lines, shown_text
+    A role with no line shown is its one line under ``EARLIER_HEADING`` (0.1.11.4 item 9), as ``render_markdown`` writes
+    it and as a hand-back gives it back."""
+
+    from .tailored_resume import EARLIER_HEADING, ENTRY_SECTIONS, _display, _printed_lines, heading_only, heading_only_line, shown_text
 
     out: list[str] = []
     for section in result.sections:  # type: ignore[attr-defined]
@@ -246,7 +250,10 @@ def resume_markdown(result: object) -> str:
             continue
         out += [f"## {section.heading.capitalize()}", ""]
         if section.heading in ENTRY_SECTIONS:
+            earlier = heading_only(section)
             for entry in section.entries:
+                if any(entry is role for role in earlier):
+                    continue
                 for index, line in enumerate(entry.heading):
                     shown = _display(line.text)
                     out.append(f"### {shown}{_line_comment(line)}" if index == 0 else shown)
@@ -254,6 +261,9 @@ def resume_markdown(result: object) -> str:
                     out.append("")
                 out += [f"- {shown_text(line)}{_line_comment(line)}" for line in _printed_lines(entry.bullets)]
                 out.append("")
+            if earlier:
+                out += [f"### {EARLIER_HEADING}", ""]
+                out += [heading_only_line([line.text for line in entry.heading]) + _line_comment(entry.heading[0]) for entry in earlier] + [""]
         else:
             out += [f"- {shown_text(line)}{_line_comment(line)}" for line in _printed_lines(section.lines)]
             out.append("")

@@ -1191,7 +1191,7 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
             "gate": {"decision": "suggest", "ready": True, "reasons": []}, "counts": {"open": 1, "done": 0, "dismissed": 0},
             "verdict": "matched_above_threshold", "basis": "master", "master_stored": True, "stale": ["master_newer"],
             "picked": {"picked_by": "model", "fallback": None, "draft": False, "made_at": "2026-10-05T10:05:00Z", "pages": 2, "max_pages": 2,
-                       "pick_rules_version": "pick-rules:1", "selector_version": "sel-5"},
+                       "pick_rules_version": "pick-rules:1", "selector_version": "sel-6"},
             "problems": [], "added_by_code": [], "conflicts": [], "selection_error": None, "proposed": None, "selected_lines": ["b-8aef71"],
             "requirements": [{"id": "req-77b0aa", "class": "hard", "status": "met", "sources": ["b-8aef71"], "in_resume": ["b-8aef71"], "coverage": "kept"}],
             "suggestions": [{
@@ -1272,7 +1272,7 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
                 "counts": {"picked": 28, "left_out": 30, "cut_for_length": 3}, "folder_path": "~/Documents/GigAI/resumes/acme-software-engineer-2026-10-05.md",
                 "markdown": "## Summary\n\n- ...",
             },
-            "picked": {"picked_by": "model", "fallback": None, "draft": False, "made_at": "2026-10-05T10:07:00Z", "pages": 2, "max_pages": 2, "pick_rules_version": "pick-rules:1", "selector_version": "sel-5"},
+            "picked": {"picked_by": "model", "fallback": None, "draft": False, "made_at": "2026-10-05T10:07:00Z", "pages": 2, "max_pages": 2, "pick_rules_version": "pick-rules:1", "selector_version": "sel-6"},
             "problems": [], "added_by_code": [], "conflicts": [], "selection_error": None, "proposed": None,
         },
         schema_version="scout-job-resume-pick:1",

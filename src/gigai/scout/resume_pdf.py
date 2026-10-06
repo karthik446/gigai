@@ -35,8 +35,10 @@ from gigai.scout.resume_display import (
 )
 from gigai.scout.resumes_folder import file_name
 from gigai.scout.tailored_resume import (
+    EARLIER_HEADING,
     ENTRY_SECTIONS,
     LENGTH_RULE,
+    MAX_EARLIER_LINES,
     MAX_HEADING_LINES,
     SECTION_HEADINGS,
     _LEADING_MARKERS,
@@ -44,6 +46,9 @@ from gigai.scout.tailored_resume import (
     TailoredResume,
     TailorResponse,
     _display,
+    heading_only,
+    heading_only_line,
+    is_earlier_heading,
     replaced_line,
     shown_text,
 )
@@ -138,9 +143,17 @@ def _body(result: TailoredResume) -> list[dict[str, object]]:
         entries: list[dict[str, object]] = []
         lines: list[dict[str, object]] = []
         if section.heading in ENTRY_SECTIONS:
+            earlier = heading_only(section)
             for entry in section.entries:
+                if any(entry is role for role in earlier):
+                    continue
                 # A copied bullet (the model's copy or a no-loss fallback, 0110-006) prints without its own "- ".
                 entries.append({"heading": [_heading_line(l.text) for l in entry.heading], "bullets": [_flat(shown_text(l)) for l in entry.bullets]})
+            if earlier:
+                # 0.1.11.4 item 9: a role with no line shown is ONE line (title, employer | dates) under its own heading,
+                # after the roles that show lines.  The same block ``render_markdown`` writes and the parser below reads.
+                roles = [_heading_line(heading_only_line([l.text for l in entry.heading])) for entry in earlier]
+                entries.append({"heading": [{"text": EARLIER_HEADING, "dates": ""}, *roles], "bullets": []})
         else:
             lines = _paragraphs(section.lines)
         tags = _tags(lines) if section.heading == "skills" else []
@@ -421,6 +434,9 @@ def parse_resume_markdown(markdown: str) -> tuple[str, list[dict[str, object]]]:
     * in Experience, Projects and Education, ``### <heading>`` opens an entry; plain lines under it
       (up to ``MAX_HEADING_LINES`` in all, e.g. ``Title | Jun 2022 - Present``) belong to the heading,
       ``- `` lines are its bullets;
+    * in Experience, the entry ``### Earlier experience`` (``tailored_resume.EARLIER_HEADING``) is the block of the
+      roles shown by their heading alone: each plain line under it is one role (``Title, Employer | dates``), up to
+      ``MAX_EARLIER_LINES``;
     * in Summary, Skills and Other, ``- `` lines and plain lines are the content: Summary prints as
       prose (lines with no blank line between them join into one paragraph), Skills as tags, and in
       Other a ``- `` line is a bullet and a plain line a paragraph;
@@ -502,7 +518,9 @@ def parse_resume_markdown(markdown: str) -> tuple[str, list[dict[str, object]]]:
             if bullet:
                 bullets.append(text)
             elif not bullets:
-                if len(entry["heading"]) >= MAX_HEADING_LINES:  # type: ignore[arg-type]
+                # The block of roles shown by their heading alone (0.1.11.4 item 9) lists one role on each line under it.
+                block = heading == "experience" and is_earlier_heading(entry["heading"][0])  # type: ignore[index]
+                if len(entry["heading"]) >= (MAX_EARLIER_LINES + 1 if block else MAX_HEADING_LINES):  # type: ignore[arg-type]
                     _bad(number, f"an entry heading has at most {MAX_HEADING_LINES} lines; bullets start with '- '")
                 entry["heading"].append(line)  # type: ignore[union-attr]
             elif last_bullet and not blank_before:

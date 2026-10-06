@@ -56,8 +56,10 @@ all follow the citations, so a cited line is never cut because another line
 shares the requirement's words.
 
 THE FIT (``fit_selected``; 0110-10-15, the selector's objective).  The page
-limit is a constraint: at most ``LENGTH_RULE.max_pages`` pages, no role
-printed without a bullet, every recent role present.  The cuts, in the one
+limit is a constraint: at most ``LENGTH_RULE.max_pages`` pages, every recent
+role present, and no employer dropped silently (0.1.11.4 item 9: a role with
+no line left keeps its heading, printed as one line under
+``tailored_resume.EARLIER_HEADING`` and counted in the pages).  The cuts, in the one
 order they may be applied (``cut_order``), the fewest that fit taken
 (``tailor_length.fit_by_cuts``):
 
@@ -66,9 +68,10 @@ order they may be applied (``cut_order``), the fewest that fit taken
    asks for, the ones the profile does not show first and the oldest first,
    before a third line for a requirement, before a second one).  A recent
    role keeps its best line (``master_selection.FLOORS``) and a project one
-   line; the cut that would empty an old role removes the role whole;
+   line; the cut that would empty an old role leaves its heading line;
 2. only when that is not enough: the best shown line of a role the posting's
-   title names (``Selected.title_entries``), then the profile's pins, then
+   title names (``Selected.title_entries``), then the heading lines of the
+   roles with no line left (the oldest first), then the profile's pins, then
    requirements' evidence.  Those cuts are a CONFLICT and are reported, never
    silent.
 
@@ -86,8 +89,9 @@ left out, each with the selector's reason (``master_selection.LineReason``) or
 the fit's, the skills the same way, who made the pick (``model``, or
 ``code`` for the fallback), and ``conflicts``: a mandatory requirement the
 master supports that the final resume shows no line for, a pin it does
-not show, and a role or project the posting's title names of which it
-shows no line.  Ids, codes, reasons and the posting's own requirement words only:
+not show, a role or project the posting's title names of which it
+shows no line, and the roles it does not list even by their heading line
+(``earlier_roles``).  Ids, codes, reasons and the posting's own requirement words only:
 a line's text is in the result (picked) or in the master revision
 ``sources.master`` names.
 
@@ -128,6 +132,7 @@ from .master_selection import (
     is_old_role,
     render_selection,
     select,
+    unlisted_roles_reason,
 )
 from .tailor_length import STATUS_CUT, Measure, fit_by_cuts
 from .tailored_resume import (
@@ -144,6 +149,7 @@ from .tailored_resume import (
     _resume_ref,
     _span_copy,
     apply_no_loss,
+    heading_only,
     replaced_line,
     resume_lines,
     tailor_context,
@@ -314,6 +320,8 @@ def job_candidates(
     if mode == MODE_VIEW:
         selected = select(master, profile, posting, today=today)
         entries = {entry_id: list(bullets) for entry_id, bullets in selected.entries.items()}
+        # 0.1.11.4 item 9: a role the selection shows by its heading alone is in the set, with no line under it.
+        entries.update({entry_id: [] for entry_id in selected.earlier})
         other, skills, skill_reasons = tuple(selected.other), tuple(selected.skills), selected.skill_reasons
     else:
         # The selector's pick before its page fit: with no page limit nothing is cut, and no layout is run.
@@ -342,8 +350,8 @@ def job_candidates(
             # No role is offered as a heading alone: the fit could only print it without a bullet.
             entries = {entry_id: bullets for entry_id, bullets in entries.items() if bullets or master.entries[entry_id].section == "education"}
     item_ids = [*selected.summary, *(item for entry_id, bullets in entries.items() for item in (entry_id, *bullets)), *other]
-    markdown = render_selection(master, item_ids, skills)
-    lines = _numbered(render_selection(master, item_ids, skills, ids=True))
+    markdown = render_selection(master, item_ids, skills, candidates=True)
+    lines = _numbered(render_selection(master, item_ids, skills, ids=True, candidates=True))
     if len(lines) != len(resume_lines(markdown)):  # the two renders differ only in the id comments
         raise ValueError("the candidate set's lines do not number as its markdown does")
     printed = [line.item_id for line in lines if line.kind == "entry" and line.item_id is not None]
@@ -431,9 +439,14 @@ def shown_evidence(shown_ids: Sequence[str], selected: Selected) -> dict[str, tu
 def cut_order(result: TailoredResume, candidates: JobCandidates, master: Master, *, today: date) -> tuple[list[tuple[str, str]], frozenset[str]]:
     """The cuts the fit may make on ``result``, in the one order it may make them (the module text's rules).
 
-    ``(cuts, refill)``: each cut is ``("bullet", <line id>)`` or ``("role", <the id of the role's first
-    heading line>)``; ``refill`` names the bullet cuts that come back when the last cut left room (never an
-    old role's line that supports nothing the posting asks for).
+    ``(cuts, refill)``: each cut is ``("bullet", <line id>)``, ``("role", <the id of the role's first
+    heading line>)`` (the role's last line goes: it keeps its one heading line) or ``("heading", <the same
+    id>)`` (that heading line goes too); ``refill`` names the bullet cuts that come back when the last cut left
+    room (never an old role's line that supports nothing the posting asks for).
+
+    THE HEADING LINES (0.1.11.4 item 9) stand after every line that is not a pin or a requirement's evidence, the
+    oldest role's first: a heading line is never cut while such a line can go, and never before a pin or evidence
+    is touched.  A caller with more to cut before them (``pick``: Other lines, Skills) moves them itself.
     """
 
     selected = candidates.selected
@@ -454,10 +467,12 @@ def cut_order(result: TailoredResume, candidates: JobCandidates, master: Master,
     # Every shown list the fit may shorten: (the least it keeps, whether the cut that would empty it removes the role, its lines).
     lists: list[tuple[int, str | None, list[TailoredLine]]] = []
     home: dict[str, int] = {}
+    roles_shown: list[tuple[int, str]] = []  # (its list, the id of its first heading line), in the page's order
     for heading, entry in shown:
         if not entry.heading or entry.heading[0].id is None:
             continue  # a role with no line id cannot be named for the way back: nothing of it is cut
         if heading == "experience":
+            roles_shown.append((len(lists), entry.heading[0].id))
             if is_old(entry):
                 lists.append((0, entry.heading[0].id, list(entry.bullets)))
             else:
@@ -513,6 +528,8 @@ def cut_order(result: TailoredResume, candidates: JobCandidates, master: Master,
     # Only when nothing else can go (a conflict, reported by ``selection_record``): the one line of an entry the
     # title names, then pins, then requirements' evidence.
     cut([line for line in cuttable if kept_for_last(line) == 1])
+    # Then the heading line of each role with no line left by now, from the bottom of the page up (the oldest first).
+    cuts += [("heading", role) for index, role in reversed(roles_shown) if left[index] == 0 and index not in kept_whole]
     cut([line for line in cuttable if kept_for_last(line) == 2])
     cut([line for line in cuttable if kept_for_last(line) == 3])
     return cuts, frozenset(refill)
@@ -643,8 +660,8 @@ def _items(value: object, name: str) -> list[object]:
 def _conflict(obj: object) -> Conflict:
     value = _object_with_optional(obj, ("kind", "ids", "reason"), ("requirement_id", "requirement", "covered"), "tailor_response.selection conflict")
     kind = _string(value["kind"], "selection conflict kind")
-    if kind not in ("mandatory_evidence", "must_keep", "title_entry", "over_budget"):
-        _fail("bad_enum", "tailor_response.selection conflict kind must be mandatory_evidence, must_keep, title_entry or over_budget")
+    if kind not in ("mandatory_evidence", "must_keep", "title_entry", "earlier_roles", "over_budget"):
+        _fail("bad_enum", "tailor_response.selection conflict kind must be mandatory_evidence, must_keep, title_entry, earlier_roles or over_budget")
     ids = value["ids"]
     if type(ids) is not list or any(type(item) is not str or not item for item in ids):
         _fail("wrong_type", "tailor_response.selection conflict ids must be an array of non-empty strings")
@@ -778,12 +795,14 @@ def selection_record(
     # What the fit left out, by master id: a whole role's lines, and single lines (the old-role trim included).
     cut: dict[str, tuple[str, str]] = {}
     cuts: list[SelectionCut] = []
+    unlisted: list[str] = []  # the roles not listed even by their heading line
     if length is not None and length.status == STATUS_CUT:
         gone_roles = {_entry_id(role.entry) for role in length.cut}
         for role in length.cut:
             entry_id = _entry_id(role.entry)
             if entry_id is not None:
                 cuts.append(SelectionCut(entry_id, "role", *_CUT_ROLE))
+                unlisted.append(entry_id)
             for line in role.entry.bullets:
                 item_id = line_item_id(line)
                 if item_id is not None:
@@ -792,8 +811,16 @@ def selection_record(
             entry.heading[0].id: _entry_id(entry)
             for entry in (*(e for s in result.sections for e in s.entries), *(role.entry for role in length.cut)) if entry.heading
         }
+        # 0.1.11.4 item 9: a role the fit left with no line keeps its heading line; its lines are one "role" cut, as before.
+        bare = {entry.heading[0].id for section in result.sections for entry in heading_only(section)}
         for trimmed in length.trimmed:
             entry_id = headings.get(trimmed.heading)
+            if trimmed.heading in bare:
+                gone_roles.add(entry_id)
+                if entry_id is not None:
+                    cuts.append(SelectionCut(entry_id, "role", *_CUT_ROLE))
+                cut.update({item_id: _CUT_ROLE for line in trimmed.bullets if (item_id := line_item_id(line)) is not None})
+                continue
             for line in trimmed.bullets:
                 item_id = line_item_id(line)
                 if item_id is not None:
@@ -847,6 +874,8 @@ def selection_record(
     missing_pins = tuple(item_id for item_id in (pins or candidates.profile.pins) if item_id in master.items and item_id not in final)
     if missing_pins:
         conflicts.append(Conflict("must_keep", missing_pins, "these pinned lines are not shown"))
+    if unlisted:
+        conflicts.append(Conflict("earlier_roles", tuple(unlisted), unlisted_roles_reason(len(unlisted), length.max_pages if length is not None else MAX_PAGES)))
     if length is not None and length.over():
         conflicts.append(Conflict("over_budget", (), f"{length.shown_pages()} pages; the limit is {length.max_pages}"))
     return TailorSelection(

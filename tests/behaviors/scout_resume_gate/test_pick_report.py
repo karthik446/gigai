@@ -101,7 +101,7 @@ def test_the_report_reads_a_home_prints_counts_and_ids_only_and_leaves_every_fil
 
     assert alone.returncode == 0 and beside.returncode == 0, (alone.stderr[-800:], beside.stderr[-800:])
     for out in (alone.stdout, beside.stdout):
-        assert out.startswith("Pick report: master revision 1 (") and "selector sel-5" in out
+        assert out.startswith("Pick report: master revision 1 (") and "selector sel-6" in out
         assert "Nothing was written, no model was called, no request was made." in out
         assert "Each posting was selected WITH the rows its stored assessment cites" in out
         assert out.count("## Profile profile_") == 2, "the newest assessed postings of EACH profile"

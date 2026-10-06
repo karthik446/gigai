@@ -181,8 +181,12 @@ def test_with_a_master_the_older_profiles_tailoring_shows_what_only_the_newer_re
     assert home.pages(home.swe_id) <= 2
     roles = _roles(on_disk)
     assert all(any(role.startswith(recent) for role in roles) for recent in RECENT_ROLES), roles
-    # The two oldest roles hold no evidence for this posting: they went whole.
-    assert not any(role.startswith(old) for role in roles for old in OLDEST_ROLES), roles
+    # The two oldest roles hold no evidence for this posting: every line of theirs went, and each is still listed, on
+    # one line under "Earlier experience" (0.1.11.4 item 9: no employer is dropped silently).
+    bare = [entry["heading"][0]["text"].removeprefix("### ") for entry in _sections(on_disk)["experience"]["entries"] if not entry["bullets"]]
+    assert all(any(role.startswith(old) for role in bare) for old in OLDEST_ROLES), bare
+    block = response.markdown.split("### Earlier experience", 1)[1].split("\n## ", 1)[0]
+    assert all(old in block and f"### {old}" not in response.markdown for old in OLDEST_ROLES)
     # The posting's must-haves the master can show are on the resume.
     posting = _posting()
     keywords = extract_keywords(posting["text"], title=posting["title"], skills=home.master()["skills"])
@@ -258,10 +262,12 @@ def test_what_the_fit_left_out_is_on_the_record_and_one_restore_puts_it_back(hom
     # The candidate set was more than fits: the fit left roles and lines out, whole, and says which.
     length = on_disk["result"]["length"]
     assert length["status"] == "cut" and length["pages"] <= 2 < length["full_pages"]
-    # Only an old role is ever cut whole (none of its lines is evidence for this posting); a recent role keeps a line.
-    cut_roles = [role["role"] for role in length["cut"]]
-    assert cut_roles and all(any(role.startswith(old) for old in (*OLDEST_ROLES, "Cascade Data")) for role in cut_roles), cut_roles
-    assert all(entry["bullets"] for entry in _sections(on_disk)["experience"]["entries"]), "no role is printed without a bullet"
+    # Only an old role ever loses every line (none of its lines is evidence for this posting), and it keeps its heading
+    # (0.1.11.4 item 9: no role is removed whole); a recent role keeps a line.
+    assert length["cut"] == []
+    bare = [entry["heading"][0]["text"].removeprefix("### ") for entry in _sections(on_disk)["experience"]["entries"] if not entry["bullets"]]
+    assert bare and all(any(role.startswith(old) for old in (*OLDEST_ROLES, "Cascade Data")) for role in bare), bare
+    assert {role["heading"] for role in length["trimmed"]} >= {entry["heading"][0]["id"] for entry in _sections(on_disk)["experience"]["entries"] if not entry["bullets"]}
     offered = [text for _number, text in _listed(port.prompts[0]) if text.startswith("- ")]
     shown = {line["text"] for line in _body_lines(on_disk)}
     assert len(offered) > len(shown)
@@ -357,7 +363,7 @@ def test_the_stored_tailoring_says_what_was_picked_what_was_left_out_and_why(hom
     master = home.master()
 
     selection = on_disk["selection"]
-    assert (selection["picked_by"], selection["fallback"], selection["selector_version"]) == ("model", None, "sel-5")
+    assert (selection["picked_by"], selection["fallback"], selection["selector_version"]) == ("model", None, "sel-6")
     picked = [line["id"] for line in selection["picked"]]
     left = [line["id"] for line in selection["left_out"]]
     # Picked is exactly what the resume shows; with Left out it is every line of the master, each once.

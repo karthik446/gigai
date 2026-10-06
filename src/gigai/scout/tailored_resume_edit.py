@@ -125,6 +125,9 @@ from .tailored_resume import (
     _with_ids,
     custom_line_text,
     guard_terms,
+    heading_only,
+    heading_only_line,
+    is_earlier_heading,
     numeric_values,
     read_tailored_resume,
     render_markdown,
@@ -237,8 +240,12 @@ class _Known:
             self._span.setdefault(_shown(_resume_ref(number, ctx).text), []).append(number)
         self._body: dict[str, list[TailoredLine]] = {}
         self._heading: dict[str, list[TailoredLine]] = {}
+        #: A stored role shown by its heading alone, by the one line it is listed by (``tailored_resume.EARLIER_HEADING``).
+        self.earlier: dict[str, TailoredEntry] = {}
         if previous is not None:
             for section in previous.result.sections:
+                for role in heading_only(section):
+                    self.earlier.setdefault(heading_only_line([line.text for line in role.heading]), role)
                 for line in section.body_lines():
                     self._body.setdefault(" ".join(shown_text(line).split()), []).append(line)
                 for entry in section.entries:
@@ -372,6 +379,16 @@ def edited_result(
                 invalid.append(f"the {section.heading.capitalize()} section has more than {MAX_ENTRIES_PER_SECTION} entries")
             entries: list[TailoredEntry] = []
             for entry in section.entries:
+                if section.heading == "experience" and entry.heading and is_earlier_heading(entry.heading[0].text):
+                    # The block of roles listed by their heading alone: each line is such a role of the stored resume.
+                    for item in (*entry.heading[1:], *entry.bullets):
+                        role = known.earlier.get(item.text)
+                        if role is None:
+                            invalid.append(f"line {item.number}: a line under Earlier experience must be a role your resume lists there, unchanged")
+                        else:
+                            entries.append(TailoredEntry(tuple(replace(line, id=None) for line in role.heading), ()))
+                    total += len(entry.heading) + len(entry.bullets)
+                    continue
                 heading: list[TailoredLine] = []
                 for item in entry.heading:
                     line = known.heading(item.text)
@@ -561,6 +578,17 @@ def handback_result(
                 invalid.append(f"the {section.heading.capitalize()} section has more than {MAX_ENTRIES_PER_SECTION} entries")
             entries: list[TailoredEntry] = []
             for entry in section.entries:
+                if section.heading == "experience" and entry.heading and is_earlier_heading(entry.heading[0].text):
+                    # The block of roles listed by their heading alone (0.1.11.4 item 9): each is its master heading, no bullet.
+                    for item in entry.heading[1:]:
+                        entry_id = checked.earlier.get(item.number)
+                        if entry_id is not None:
+                            raws = [(number, numbered.text(number)) for number in numbered.entries[entry_id]]
+                            entries.append(TailoredEntry(
+                                tuple(TailoredLine("copy", raw, (SourceRef("resume", number, None, raw, (), entry_id),), origin="user") for number, raw in raws), (),
+                            ))
+                    total += len(entry.heading)
+                    continue
                 place = place_of(section.heading, entry.heading[0].text if entry.heading else "")
                 head = [line for line in (heading(item) for item in entry.heading) if line is not None]
                 bullets = [line for item in entry.bullets for line in body(item, place, section.heading)]

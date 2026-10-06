@@ -1936,7 +1936,7 @@
                     "pages": 2,
                     "pick_rules_version": "pick-rules:1",
                     "picked_by": "model",
-                    "selector_version": "sel-5"
+                    "selector_version": "sel-6"
                   },
                   "problems": [],
                   "profile_id": "prof_1",
@@ -2605,7 +2605,7 @@
                     "pages": 2,
                     "pick_rules_version": "pick-rules:1",
                     "picked_by": "model",
-                    "selector_version": "sel-5"
+                    "selector_version": "sel-6"
                   },
                   "problems": [],
                   "profile_id": "prof_1",

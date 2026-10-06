@@ -50,9 +50,11 @@ def _date_key(entry) -> tuple[int, int]:
 
 
 def _shape(master, entries: dict[str, list[str]]) -> tuple[list[str], bool]:
-    """``(roles and projects printed with no bullet, experience roles in date order)`` for the entries a resume shows."""
+    """``(projects printed with no bullet, experience roles in date order)`` for the entries a resume shows.
 
-    empty = [entry_id for entry_id, bullets in entries.items() if entry_id in master.entries and master.entries[entry_id].section in ("experience", "projects") and not bullets]
+    A ROLE with no bullet is not empty (0.1.11.4 item 9): it is listed by its one heading line (``earlier`` in the probe's answer)."""
+
+    empty = [entry_id for entry_id, bullets in entries.items() if entry_id in master.entries and master.entries[entry_id].section == "projects" and not bullets]
     roles = [master.entries[entry_id] for entry_id in entries if entry_id in master.entries and master.entries[entry_id].section == "experience"]
     keys = [_date_key(entry) for entry in roles]
     return empty, keys == sorted(keys, reverse=True)
@@ -94,7 +96,9 @@ def _from_selected(master, selected) -> dict[str, object]:
         # Measured again from the final markdown, not taken from the selector's own word.
         "pages": measure_markdown(selected.markdown, spacing_scale=ms.FIT_SCALE)[0], "max_pages": selected.max_pages,
         "empty_entries": empty, "date_order": in_order,
-        "cuts": len(selected.cut_for_length), "roles_dropped": list(selected.roles_dropped),
+        # ``roles_dropped``: the roles not on the resume at all; ``earlier``: the ones listed by their heading line alone.
+        "cuts": len(selected.cut_for_length), "roles_dropped": [role for role in selected.roles_dropped if role not in selected.earlier],
+        "earlier": list(selected.earlier),
         "skills_left_out": [skill.name for skill in selected.skill_reasons if not skill.picked],
         "conflicts": _conflicts(selected),
         "keywords": _keywords(selected),
@@ -133,6 +137,7 @@ def _from_result(master, result, record=None, selected=None) -> dict[str, object
         "empty_entries": empty, "date_order": in_order,
         "cuts": (len(length.cut) + sum(len(role.bullets) for role in length.trimmed)) if length is not None else 0,
         "roles_dropped": [tm.line_item_id(role.entry.heading[0]) or "" for role in length.cut] if length is not None else [],
+        "earlier": [entry_id for entry_id, bullets in entries.items() if entry_id in master.entries and master.entries[entry_id].section == "experience" and not bullets],
         "skills_left_out": [name for name in master.skills() if name.casefold() not in listed],
         "conflicts": _conflicts(record) if record is not None else [],
         "keywords": _keywords(selected) if selected is not None else {"must": [], "nice": []},
