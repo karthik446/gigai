@@ -1,6 +1,6 @@
 {
- "note": "SYNTHETIC. What the code selector (SELECTOR_VERSION sel-4; no posting here has an assessment) picks from master.md for profiles.json x postings/, on 2026-10-03. Regenerate only with a deliberate selector change.",
- "selector_version": "sel-4",
+ "note": "SYNTHETIC. What the code selector (SELECTOR_VERSION sel-5; no posting here has an assessment) picks from master.md for profiles.json x postings/, on 2026-10-03. Regenerate only with a deliberate selector change.",
+ "selector_version": "sel-5",
  "today": "2026-10-03",
  "cases": {
   "profile-ai/base": {
@@ -20,8 +20,7 @@
      "b-lum-06",
      "b-lum-07",
      "b-lum-08",
-     "b-lum-11",
-     "b-lum-12"
+     "b-lum-11"
     ],
     "r-kes": [
      "b-kes-01",
@@ -163,8 +162,7 @@
     "b-task-03"
    ],
    "added_to_fill": [
-    "b-lum-11",
-    "b-lum-12"
+    "b-lum-11"
    ],
    "evidence_for": {},
    "conflicts": [],
@@ -206,9 +204,6 @@
     ],
     "p-task": [
      "b-task-01"
-    ],
-    "p-eval": [
-     "b-eval-01"
     ],
     "p-kce": [
      "b-kce-01"
@@ -335,6 +330,7 @@
     "b-hex-19",
     "b-hex-14",
     "b-fin-12",
+    "b-eval-01",
     "b-hex-16"
    ],
    "added_to_fill": [],
@@ -404,7 +400,8 @@
      "b-lum-04",
      "b-lum-02",
      "b-lum-18",
-     "b-lum-16"
+     "b-lum-16",
+     "b-lum-13"
     ],
     "r-kes": [
      "b-kes-01"
@@ -425,9 +422,6 @@
     ],
     "r-cas": [
      "b-cas-05"
-    ],
-    "p-eval": [
-     "b-eval-01"
     ],
     "p-kce": [
      "b-kce-03"
@@ -553,8 +547,8 @@
     "b-fin-03",
     "b-lum-03",
     "b-lum-26",
-    "b-lum-13",
-    "b-pgq-01"
+    "b-pgq-01",
+    "b-eval-01"
    ],
    "added_to_fill": [],
    "evidence_for": {
@@ -633,8 +627,7 @@
     "r-kes": [
      "b-kes-01",
      "b-kes-02",
-     "b-kes-05",
-     "b-kes-04"
+     "b-kes-05"
     ],
     "r-hex": [
      "b-hex-14",
@@ -766,6 +759,7 @@
     "o-vol",
     "b-kce-01",
     "b-lum-13",
+    "b-kes-04",
     "b-fin-06",
     "b-hex-26",
     "b-fin-05",
@@ -833,7 +827,7 @@
     "r-lum": [
      "b-lum-17",
      "b-lum-18",
-     "b-lum-24"
+     "b-lum-22"
     ],
     "r-kes": [
      "b-kes-06"
@@ -980,9 +974,9 @@
     "b-task-03",
     "b-pgq-01",
     "b-lum-23",
-    "b-lum-22",
     "b-lum-11",
-    "b-lum-06"
+    "b-lum-06",
+    "b-lum-24"
    ],
    "added_to_fill": [],
    "evidence_for": {},
@@ -1018,15 +1012,10 @@
      "b-kes-06"
     ],
     "r-hex": [
-     "b-hex-07",
-     "b-hex-14"
+     "b-hex-07"
     ],
     "r-fin": [
-     "b-fin-10",
-     "b-fin-12"
-    ],
-    "r-cas": [
-     "b-cas-04"
+     "b-fin-10"
     ],
     "p-task": [
      "b-task-01"
@@ -1150,8 +1139,12 @@
     "b-fin-18",
     "b-tes-02",
     "r-tes",
+    "b-fin-12",
     "b-hex-19",
+    "b-hex-14",
     "b-eval-01",
+    "b-cas-04",
+    "r-cas",
     "b-hex-21",
     "b-hex-16"
    ],
@@ -1205,6 +1198,7 @@
    },
    "conflicts": [],
    "roles_dropped": [
+    "r-cas",
     "r-bri",
     "r-tes"
    ]
@@ -1221,7 +1215,8 @@
      "b-lum-04",
      "b-lum-02",
      "b-lum-18",
-     "b-lum-16"
+     "b-lum-16",
+     "b-lum-13"
     ],
     "r-kes": [
      "b-kes-06"
@@ -1238,8 +1233,7 @@
      "b-hex-16"
     ],
     "r-fin": [
-     "b-fin-09",
-     "b-fin-13"
+     "b-fin-09"
     ],
     "r-cas": [
      "b-cas-05"
@@ -1248,7 +1242,6 @@
      "b-kce-03"
     ],
     "p-pgq": [
-     "b-pgq-01",
      "b-pgq-03"
     ],
     "e-ms": [],
@@ -1368,8 +1361,9 @@
     "b-lum-26",
     "b-fin-03",
     "b-cas-04",
-    "b-lum-13",
-    "b-eval-01"
+    "b-fin-13",
+    "b-eval-01",
+    "b-pgq-01"
    ],
    "added_to_fill": [],
    "evidence_for": {
@@ -1449,8 +1443,7 @@
     "r-kes": [
      "b-kes-01",
      "b-kes-02",
-     "b-kes-05",
-     "b-kes-04"
+     "b-kes-05"
     ],
     "r-hex": [
      "b-hex-14",
@@ -1583,7 +1576,8 @@
     "o-paper",
     "b-kce-01",
     "b-fin-04",
-    "b-lum-13"
+    "b-lum-13",
+    "b-kes-04"
    ],
    "added_to_fill": [],
    "evidence_for": {

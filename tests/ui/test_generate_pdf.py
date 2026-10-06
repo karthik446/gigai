@@ -12,7 +12,7 @@ not in the form after a reload, and not in any file of the server's home (every 
 included); the resumes folder holds no new file. Zero console errors.
 
 0.1.11.3 item 6: the seventh field, "Work authorization (optional)", is empty here (this page has no profile answer
-to start from), travels in the same `header`, prints as its own line of the PDF's header, and is kept nowhere,
+to start from), travels in the same `header`, prints in the PDF header's one contact line (item 15), and is kept nowhere,
 like the six: not in the browser, not on the server, and it is empty again after a reload.
 
 MEASURED (14-core laptop, 2026-10-04, three runs: Python 3.11 twice, 3.13 once): the render 0.08 to 0.10 s wall, 0.07
@@ -44,6 +44,13 @@ HEADER = {
 #: 0.1.11.3 item 6: the optional line; invented, with a marker no fixture holds.
 WORK_AUTHORIZATION = "TN status, no sponsorship needed (ZQ-4410)"
 SENT = {**HEADER, "work_authorization": WORK_AUTHORIZATION}
+#: The server's own sentence for a resume that does not fit its pages (`resume_pdf.over_limit_note`, pinned in
+#: tests/behaviors/scout_find_jobs/test_pdf_fits_page_limit.py), laid over a real response where a test needs it.
+OVER_LIMIT_NOTE = (
+    "This resume takes 3 pages: it does not fit on 2 pages even with the tightest spacing. To get 2 pages, shorten it automatically "
+    "(the Shorten automatically button on the job's page, or `gigai scout resume pick --job-url URL --shorten`; no model call), "
+    "then generate the PDF again. Or keep it at 3 pages."
+)
 PDF_WALL_SECONDS = FIRST_LOAD_WALL_SECONDS  # a render, not a click: 0.08 to 0.10 s measured on a three-line resume
 PDF_CPU_SECONDS = 5.0  # 0.07 measured; the renderer's first run on a machine reads its fonts
 
@@ -110,7 +117,7 @@ def test_generate_pdf_six_fields_a_download_and_nothing_stored(ui, scout_server)
 
     text = "\n".join(page.extract_text() for page in PdfReader(io.BytesIO(pdf)).pages)
     assert HEADER["name"].upper() in text.upper() and HEADER["email"] in text, "the PDF's header does not carry what was typed"  # the name prints in capitals
-    assert text.count(WORK_AUTHORIZATION) == 1 and WORK_AUTHORIZATION in text.split("\n")[:4], "the work authorization line is a line of the header"
+    assert text.count(WORK_AUTHORIZATION) == 1 and any(WORK_AUTHORIZATION in line for line in text.split("\n")[1:4]), "the work authorization is in the header's contact line"
     ui.cpu_budget("Generate PDF (small home)", PDF_CPU_SECONDS, "typed", "saved")
     ui.wall_budget("Generate PDF (small home)", PDF_WALL_SECONDS, "typed", "saved")
 
@@ -157,7 +164,7 @@ def test_generate_pdf_stays_on_the_page_limit_and_shows_the_servers_note_when_it
     assert len(contact) == 2, f"the contact line did not wrap to two: {pages[0].splitlines()[:5]}"
     assert ui.page.locator('[data-role="pdf-fit-note"]').count() == 0
 
-    note = "This resume takes 3 pages: it does not fit on 2 pages even with the tightest spacing. To get 2 pages, shorten it (remove a few lines or an older role) and generate the PDF again, or keep it at 3 pages."
+    note = OVER_LIMIT_NOTE
 
     def over_limit(route) -> None:
         response = route.fetch()
@@ -168,6 +175,71 @@ def test_generate_pdf_stays_on_the_page_limit_and_shows_the_servers_note_when_it
         ui.page.locator('[data-role="generate-pdf"]').click()
     shown = ui.page.locator('[data-role="pdf-fit-note"]')
     shown.wait_for()
-    assert (shown.text_content() or "").strip() == note
+    # 0.1.11.3 item 15: on this page (a stored job's resume) the note carries the "Shorten automatically" button.
+    assert (shown.text_content() or "").strip() == note + " Shorten automatically"
     ui.page.unroute("**/api/tailored-resumes/pdf")
+    ui.assert_clean()
+
+
+def test_shorten_automatically_asks_the_server_once_and_shows_its_sentence(ui, scout_server) -> None:
+    """0.1.11.3 item 15, in the browser: when Generate PDF says the resume does not fit, the form offers "Shorten
+    automatically" (never "edit it by hand"). The click is ONE `POST /api/job-resumes/pick` `{action: "shorten"}`,
+    answered by the real server; the form shows what it left out in the server's own sentence, and a refusal in the
+    page's own words by its code (never the server's text, which names commands).
+
+    The small home's resume is a few lines. So the note is laid over the real PDF response (as in the test above),
+    and the REAL answer to the click is the server's plain refusal for a resume that is short already; then the
+    answer a long resume gets ("Left out 2 lines: ...") is laid over the real route to see the form show it and drop
+    the note. The step itself, on a resume that really overflows, over HTTP on the real server and through the CLI:
+    tests/behaviors/scout_find_jobs/test_pick_header_room.py."""
+
+    demo = scout_server.demo
+    ui.goto("/#/pdf/" + quote(demo.hero_profile_id, safe="") + "/" + quote(demo.hero_job, safe=""))
+    ui.page.locator('[data-role="generate-pdf-form"]').wait_for()
+    ui.page.fill("#generate-pdf-name", HEADER["name"])
+    assert ui.page.locator('[data-action="shorten-resume"]').count() == 0, "the button is offered only with the note"
+
+    def over_limit(route) -> None:
+        response = route.fetch()
+        route.fulfill(response=response, headers={**response.headers, "X-GigAI-Fit-Note": OVER_LIMIT_NOTE})
+
+    ui.page.route("**/api/tailored-resumes/pdf", over_limit)
+    with ui.page.expect_download():
+        ui.page.locator('[data-role="generate-pdf"]').click()
+    button = ui.page.locator('[data-role="pdf-fit-note"] [data-action="shorten-resume"]')
+    button.wait_for()
+    assert (button.text_content() or "").strip() == "Shorten automatically"
+    assert "by hand" not in (ui.page.locator('[data-role="pdf-fit-note"]').text_content() or "")
+
+    # The real server's answer for THIS resume: it is short already, said in plain words; nothing is changed.
+    sent: list[dict] = []
+    ui.page.on("request", lambda request: sent.append(request.post_data_json) if request.url.endswith("/api/job-resumes/pick") else None)
+    with ui.page.expect_response("**/api/job-resumes/pick") as answered:
+        button.click()
+    assert answered.value.status == 409 and answered.value.json()["error"]["code"] == "resume_short_already"
+    assert sent == [{"job_url": demo.hero_job, "profile_id": demo.hero_profile_id, "action": "shorten"}]
+    refused = ui.page.locator('[data-role="pdf-shorten-error"]')
+    refused.wait_for()
+    said = (refused.text_content() or "").strip()
+    assert said == "The resume was not shortened. This resume already fits its pages with most of a page to spare, so nothing was left out."
+    assert not any(word in said for word in ("resume_short_already", "pick.", "settle", "Traceback"))
+
+    # A resume that was shortened: the server's sentence is shown as it is, and the note is gone until the next PDF.
+    message = 'Left out 2 lines: "Ran the weekly on-call review."; "Wrote the runbook for the billing export.". Generate the PDF again.'
+
+    def shortened(route) -> None:
+        route.fulfill(status=200, json={"action": "shorten", "shortened": {"left_out": ["a", "b"], "must_have_cut": False, "waiting": False, "message": message}})
+
+    ui.page.route("**/api/job-resumes/pick", shortened)
+    button.click()
+    done = ui.page.locator('[data-role="pdf-shortened"]')
+    done.wait_for()
+    assert (done.text_content() or "").strip() == message
+    assert ui.page.locator('[data-role="pdf-fit-note"]').count() == 0 and ui.page.locator('[data-role="pdf-shorten-error"]').count() == 0
+    ui.page.unroute("**/api/job-resumes/pick")
+    ui.page.unroute("**/api/tailored-resumes/pdf")
+    # The one refusal above (asked for) is the only thing the browser saw go wrong: it is taken off the list.
+    assert ui.problems() and all("409" in problem for problem in ui.problems()), ui.problems()
+    ui.network.console_errors.clear()
+    ui.network.http_errors.clear()
     ui.assert_clean()

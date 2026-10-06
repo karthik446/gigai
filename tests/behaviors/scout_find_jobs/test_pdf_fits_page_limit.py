@@ -52,12 +52,19 @@ FORM = {
     "name": "Zora Quillfeather", "email": "zora.quillfeather@example.invalid", "phone": "+1 (555) 010-0142", "location": "Nowhere Springs, Colorado",
     "linkedin": "linkedin.example.invalid/in/zora-quillfeather-staff-engineer", "link": "https://zora-quillfeather.example.invalid/portfolio/work",
 }
-HEADER_LINES = [
-    "ZORA QUILLFEATHER",
-    TITLE,
-    "zora.quillfeather@example.invalid | +1 (555) 010-0142 | Nowhere Springs, Colorado |",
-    "linkedin.example.invalid/in/zora-quillfeather-staff-engineer | zora-quillfeather.example.invalid/portfolio/work",
-]
+#: 0.1.11.3 item 15: the header is the name, the saved title, and ONE contact line (location, links, email, phone),
+#: here too long for one line even set smaller, so it wraps once: four lines.
+HEADER_TEXT = (
+    "ZORA QUILLFEATHER" + TITLE + "Nowhere Springs, Colorado | linkedin.example.invalid/in/zora-quillfeather-staff-engineer | "
+    "zora-quillfeather.example.invalid/portfolio/work | zora.quillfeather@example.invalid | +1 (555) 010-0142"
+)
+
+
+def _is_the_four_line_header(page: str) -> bool:
+    """The page starts with the four header lines (where the contact line wraps is the layout's business)."""
+
+    lines = [line.strip() for line in page.splitlines()]
+    return "".join("".join(lines[:4]).split()) == "".join(HEADER_TEXT.split()) and lines[4] == "SUMMARY"
 SKILLS = (
     "Python, Go, TypeScript, Kubernetes, PostgreSQL, Terraform, AWS, GCP, Kafka, Redis, Airflow, dbt, Snowflake, Spark, Docker, Helm, ArgoCD, "
     "Prometheus, Grafana, OpenTelemetry, gRPC, GraphQL, React, Node.js, FastAPI, PyTorch, LangChain, RAG, Vector search, CI/CD"
@@ -143,7 +150,7 @@ def test_the_fixture_is_the_failing_size(fx: PipelineFixture) -> None:
     unfitted = _render(_body(_stored(fx).result), header, company="Acme", timestamp=STAMP, spacing_scale=1.0, auto_fit=False, count_pages=True)
     pages = _pages(unfitted.pdf)
     assert unfitted.pages == len(pages) == 3
-    assert [line.strip() for line in pages[0].splitlines()[:4]] == HEADER_LINES, "the header is not four lines"
+    assert _is_the_four_line_header(pages[0]), "the header is not four lines"
     # ... and the 3rd page holds nothing but the end of the Skills chips.
     assert pages[2].strip().startswith(LAST_SKILLS[0]) and pages[2].strip().endswith(LAST_SKILLS[1]) and "Role" not in pages[2] and len(pages[2].splitlines()) <= 3
 
@@ -175,7 +182,7 @@ def test_api_pdf_with_a_four_line_header_stays_on_two_pages(fx: PipelineFixture,
         response = client.post("/api/tailored-resumes/pdf", json={**key, "header": FORM})
         assert response.status_code == 200, response.text
         pages = _pages(response.content)
-        assert [line.strip() for line in pages[0].splitlines()[:4]] == HEADER_LINES, "the header is not four lines"
+        assert _is_the_four_line_header(pages[0]), "the header is not four lines"
         assert len(pages) == 2, f"Generate PDF made {len(pages)} pages; the last holds: {pages[-1][:80]!r}"
         assert "x-gigai-fit-note" not in response.headers
         assert LAST_SKILLS[1] in pages[1]
@@ -204,10 +211,12 @@ def test_a_resume_that_cannot_fit_says_so_in_plain_words(fx: PipelineFixture, tm
     note = payload["note"]
     assert note == (
         "This resume takes 4 pages: it does not fit on 2 pages even with the tightest spacing. "
-        "To get 2 pages, shorten it (remove a few lines or an older role) and generate the PDF again, or keep it at 4 pages."
+        "To get 2 pages, shorten it automatically (the Shorten automatically button on the job's page, or "
+        "`gigai scout resume pick --job-url URL --shorten`; no model call), then generate the PDF again. Or keep it at 4 pages."
     )
+    assert "by hand" not in note and "remove a few lines" not in note, "the user is not told to edit: Shorten automatically does it"
     assert note.isascii() and "\n" not in note
-    for internal in ("max_pages", "spacing_scale", "auto_fit", "over_page_limit", "LengthFit", "pick", "Typst", "_"):
+    for internal in ("max_pages", "spacing_scale", "auto_fit", "over_page_limit", "LengthFit", "scout.pick", "Typst", "_"):
         assert internal not in note, internal
     # The text output carries the same sentence.
     result = CliRunner().invoke(scout_group, ["resume", "pdf", "--job-url", JOB, "--out", str(out), "--home", str(fx.home_root), "--target", str(fx.target)])

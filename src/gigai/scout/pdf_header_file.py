@@ -12,11 +12,21 @@ beside the resumes folder, never inside it (that folder never holds contact deta
       "email": "jane@example.com",
       "phone": "555-0100",
       "location": "Springfield, IL",
-      "links": [{"label": "LinkedIn", "url": "linkedin.com/in/jane-example"}],
+      "github": "jane-example",
+      "linkedin": "jane-example",
+      "website": "jane.example.com",
+      "links": [{"label": "Talks", "url": "example.com/talks"}],
       "work_authorization": "VISA: H1B"
     }
 
-Every field is optional.  ``work_authorization`` prints as the header's own last line, as written.
+Every field is optional.  The PDF header is the name and ONE line (0.1.11.3 items 15/16): location,
+``work_authorization`` as written, the links, email, phone.
+
+SHORTHAND (item 16).  ``github`` and ``linkedin`` take just the id (``github.com/<id>``,
+``linkedin.com/in/<id>``); the same thing written as ``github.com/<id>`` or as a full URL is accepted and
+read as the id.  ``website`` takes a host or a URL.  Each prints without ``https://`` or ``www.`` and is a
+clickable link to the full URL.  ``links`` keeps working beside them; a link both name prints once.  A
+shorthand value that still starts with ``REPLACE`` (a template's placeholder) is skipped.
 
 **GigAI only READS it, at PDF time.**  ``read_header_file`` is called from exactly two places: the
 Generate PDF form's prefill (``api/pdf_header.py``, the browser page's own route) and ``gigai scout
@@ -38,14 +48,18 @@ import stat
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .resume_display import HEADER_FIELDS, MAX_VALUE, WORK_AUTHORIZATION_FIELD, HeaderFormError, parse_header_form
+from .resume_display import HEADER_FIELDS, MAX_VALUE, WORK_AUTHORIZATION_FIELD, HeaderFormError, link_key, parse_header_form
 from .resumes_folder import default_folder
 from .target_resolution import _display_path
 
 RESPONSE_SCHEMA = "scout-pdf-header-prefill:1"
 FILE_NAME = "header.json"
 #: The file's keys.  ``links`` is a list of ``{"label", "url"}``.
-FILE_FIELDS: tuple[str, ...] = ("name", "email", "phone", "location", "links", "work_authorization")
+FILE_FIELDS: tuple[str, ...] = ("name", "email", "phone", "location", "github", "linkedin", "website", "links", "work_authorization")
+#: Item 16: the shorthand link fields, in the order their links print.
+SHORTHAND_FIELDS: tuple[str, ...] = ("github", "linkedin", "website")
+#: A value a template left for the person to fill in: skipped, never printed.
+PLACEHOLDER_PREFIX = "REPLACE"
 LINK_FIELDS: tuple[str, ...] = ("label", "url")
 MAX_LINKS = 6
 #: The file is a handful of short lines; anything larger is not this file.
@@ -62,7 +76,15 @@ SPONSORSHIP_DEFAULT = "Requires visa sponsorship"
 _CONTROL = re.compile(r"[\x00-\x1f\x7f]")
 _PLAIN_KEY = re.compile(r"\A[A-Za-z_]{1,30}\Z")
 _LINKEDIN = re.compile(r"(?:\A|[/.@])linkedin\.com(?:/|\Z)", re.IGNORECASE)
-_EXAMPLE = '{"name": "...", "email": "...", "phone": "...", "location": "...", "links": [{"label": "LinkedIn", "url": "..."}], "work_authorization": "..."}'
+_EXAMPLE = (
+    '{"name": "...", "email": "...", "phone": "...", "location": "...", "github": "your-id", "linkedin": "your-id", '
+    '"links": [{"label": "Website", "url": "..."}], "work_authorization": "..."}'
+)
+_SCHEME = re.compile(r"\A[a-z][a-z0-9+.-]*://", re.IGNORECASE)
+_WWW = re.compile(r"\Awww\.", re.IGNORECASE)
+_GITHUB_ID = re.compile(r"\A[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?\Z")
+_LINKEDIN_ID = re.compile(r"\A[^\s/?#@]{1,100}\Z")
+_HOST = re.compile(r"\A[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?\.[A-Za-z]{2,}(?:[/?#]\S*)?\Z")
 
 
 def default_path(home_root: Path) -> Path:
@@ -123,11 +145,42 @@ def _unknown(keys: object, allowed: tuple[str, ...], where: str = "") -> None:
             raise _Invalid(f"{named} is not a field of this file (the fields: {', '.join(allowed)})")
 
 
+def _bare(value: str) -> str:
+    """``value`` without a scheme, ``www.``, a query, a fragment or a trailing slash: what an id is read from."""
+
+    return re.split(r"[?#]", _WWW.sub("", _SCHEME.sub("", value)), maxsplit=1)[0].rstrip("/")
+
+
+def _shorthand(key: str, value: str) -> str | None:
+    """The link a shorthand value names, as ``host/path`` (no scheme: the header adds ``https://`` for the
+    target); ``None`` for an empty value or a placeholder.  ``_Invalid`` names the field and the rule only."""
+
+    if not value or value.startswith(PLACEHOLDER_PREFIX):
+        return None
+    bare = _bare(value)
+    if key == "github":
+        account = re.sub(r"\Agithub\.com/", "", bare, flags=re.IGNORECASE).lstrip("@")
+        if not _GITHUB_ID.fullmatch(account):
+            raise _Invalid('github must be your GitHub id alone, like "your-id" (github.com/your-id also works)')
+        return f"github.com/{account}"
+    if key == "linkedin":
+        account = re.sub(r"\A(?:[a-z]{2,3}\.)?linkedin\.com/", "", bare, flags=re.IGNORECASE)
+        account = re.sub(r"\Ain/", "", account, flags=re.IGNORECASE).lstrip("@")
+        if not _LINKEDIN_ID.fullmatch(account):
+            raise _Invalid('linkedin must be your LinkedIn id alone, like "your-id" (linkedin.com/in/your-id also works)')
+        return f"linkedin.com/in/{account}"
+    if not _HOST.fullmatch(_WWW.sub("", _SCHEME.sub("", value)).rstrip("/")):
+        raise _Invalid('website must be a site address, like "example.com"')
+    return _WWW.sub("", _SCHEME.sub("", value)).rstrip("/")
+
+
 def form_values(raw: object) -> tuple[dict[str, object], bool]:
     """``(the Generate PDF form's values, whether work_authorization is set at all)`` from the file's JSON; ``_Invalid`` otherwise.
 
     A link labelled LinkedIn (or to linkedin.com) fills the form's LinkedIn field, once; every other link is a row
-    of ``links`` under its own label.  Pure: no I/O, never logs."""
+    of ``links`` under its own label.  The shorthand fields (``_shorthand``) come first: ``linkedin`` fills that
+    same field, ``github`` and ``website`` are rows labelled GitHub and Website; a ``links`` row that names a link
+    already there is left out.  Pure: no I/O, never logs."""
 
     if type(raw) is not dict:
         raise _Invalid("the file must hold one JSON object, like " + _EXAMPLE)
@@ -141,6 +194,16 @@ def form_values(raw: object) -> tuple[dict[str, object], bool]:
     if len(links) > MAX_LINKS:
         raise _Invalid(f"links holds more than {MAX_LINKS} links")
     rows: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for key, label in (("github", "GitHub"), ("linkedin", "LinkedIn"), ("website", "Website")):
+        url = _shorthand(key, _text(raw, key))
+        if url is None or link_key(url) in seen:
+            continue
+        seen.add(link_key(url))
+        if key == "linkedin":
+            values["linkedin"] = url
+        else:
+            rows.append({"label": label, "url": url})
     for number, item in enumerate(links, 1):
         where = f"links[{number}]."
         if type(item) is not dict:
@@ -149,10 +212,15 @@ def form_values(raw: object) -> tuple[dict[str, object], bool]:
         label, url = _text(item, "label", where), _text(item, "url", where)
         if not url:
             raise _Invalid(f"{where}url is empty")
+        if link_key(url) in seen:
+            continue  # the same link as a shorthand field or an earlier row: once
+        seen.add(link_key(url))
         if not values["linkedin"] and (label.casefold() == "linkedin" or _LINKEDIN.search(url)):
             values["linkedin"] = url
         else:
             rows.append({"label": label or "Link", "url": url})
+    if len(rows) > MAX_LINKS:
+        raise _Invalid(f"the file names more than {MAX_LINKS} links besides LinkedIn")
     values["links"] = rows
     return values, WORK_AUTHORIZATION_FIELD in raw
 
@@ -245,7 +313,9 @@ __all__ = [
     "LINK_FIELDS",
     "MAX_BYTES",
     "MAX_LINKS",
+    "PLACEHOLDER_PREFIX",
     "RESPONSE_SCHEMA",
+    "SHORTHAND_FIELDS",
     "SPONSORSHIP_DEFAULT",
     "STATE_FILLED",
     "STATE_INVALID",

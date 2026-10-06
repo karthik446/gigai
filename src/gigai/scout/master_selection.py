@@ -7,7 +7,7 @@ lines most relevant to one posting under a character budget instead (what an
 assessment would read). Nothing here calls a model, reads a file or writes:
 the same master, profile, posting and day give the same ids.
 
-The rules (0110-10-15, the pick's objective; ``SELECTOR_VERSION`` ``sel-4``).  For a posting the
+The rules (0110-10-15, the pick's objective; ``SELECTOR_VERSION`` ``sel-5``).  For a posting the
 selection maximises, in this order, and a lower term never buys back a higher one:
 
 1. MANDATORY REQUIREMENT COVERAGE.  The posting's requirements are its list lines (``Requirement``; a
@@ -48,7 +48,9 @@ that cannot fit, the result carries a ``title_entry`` conflict.  It never costs 
 Skills section is not cut for it.
 
 PAGE FIT IS A CONSTRAINT, not a term: ``LENGTH_RULE.max_pages`` pages, measured with the shipped PDF
-template (``measure_markdown``), no role or project printed without a bullet, roles in date order, every
+template (``measure_markdown``) WITH ROOM FOR THE HEADER (``sel-5``, 0.1.11.3 item 15: the estimate keeps the
+header's block at its largest, ``resume_pdf.HEADER_RESERVE_LINES``, and never reads the header; ``sel-4`` kept two
+lines in all, so a pick that filled its last page ran onto another once the name and contact line were printed), no role or project printed without a bullet, roles in date order, every
 recent role present (``FLOORS``).  The steps:
 
 - SCORE every line (``_Keys``): which requirements it supports and how well, its derived strength, the
@@ -101,7 +103,7 @@ from .tailor_no_loss import OWNERSHIP_FAMILIES, normalize
 from .tailored_resume import LENGTH_RULE
 
 #: Names the scoring weights, caps, floors and cut order below; stored with a selection.
-SELECTOR_VERSION = "sel-4"
+SELECTOR_VERSION = "sel-5"
 MAX_PAGES = LENGTH_RULE.max_pages
 #: The page budget is "fits ``MAX_PAGES`` at this spacing or looser" (the renderer's own floor is 0.7).
 FIT_SCALE = 0.9

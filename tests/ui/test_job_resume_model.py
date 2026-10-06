@@ -261,7 +261,7 @@ PICK_VIEW = {
 #: Every code `POST /api/job-resumes/pick` refuses with (`job_actions.pick_action`, `pick.settle_stored`), and one the page does not know.
 PICK_CODES = [
     "pick_not_available", "pick_failed", "pages_unmeasured", "assessment_stale", "assessment_missing", "no_master", "profile_resume_in_use",
-    "profile_not_found", "resume_held", "draft_not_needed", "no_proposed_resume", "some_new_code",
+    "profile_not_found", "resume_held", "draft_not_needed", "no_proposed_resume", "no_resume_to_shorten", "resume_short_already", "some_new_code",
 ]
 
 

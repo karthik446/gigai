@@ -113,7 +113,7 @@ def test_refusals_and_a_success_keep_nothing(server, caplog: pytest.LogCaptureFi
     assert done.status_code == 200 and done.headers["content-type"] == "application/pdf"
     _clean(done)
     text = "\n".join(page.extract_text() for page in PdfReader(io.BytesIO(done.content)).pages)
-    assert text.startswith("ZORA QUILLFEATHER\nzora.q@example.invalid | 555-0142-ZQ | Quillshire, ZZ")
+    assert text.startswith("ZORA QUILLFEATHER\nQuillshire, ZZ | linkedin.com/in/zq-invalid | zq.example.invalid | zora.q@example.invalid | 555-0142-ZQ\n")
     for marker in MARKERS:
         assert marker not in caplog.text, marker
     assert _holders(home, target) == [], "the form's values are in no file: settings, logs, caches"

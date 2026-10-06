@@ -78,13 +78,17 @@ def test_the_form_header_prints_the_form_values_and_the_saved_title(tmp_path: Pa
     assert values["name"] == "Zora Quillfeather"
     header = rd.form_header(values, "Staff Engineer")
     assert (header.name, header.title) == ("Zora Quillfeather", "Staff Engineer")
+    # 0.1.11.3 items 15/16: ONE contact line, in this order: location, (work authorization,) links, email, phone.
+    # A link prints without https:// or www.; its target is the full URL.
     assert [(c.text, c.url) for c in header.contact] == [
+        ("Nowhere, ZZ", None),
+        ("linkedin.com/in/zq-invalid", "https://www.linkedin.com/in/zq-invalid/"),
+        ("zq.example.invalid", "https://zq.example.invalid"),
         ("zora.q@example.invalid", "mailto:zora.q@example.invalid"),
         ("555-0142-ZQ", None),
-        ("Nowhere, ZZ", None),
-        ("www.linkedin.com/in/zq-invalid", "https://www.linkedin.com/in/zq-invalid/"),
-        ("zq.example.invalid", "https://zq.example.invalid"),
     ]
+    with_line = rd.form_header(rd.parse_header_form({**FORM, "work_authorization": "VISA: H1B"}))
+    assert [c.text for c in with_line.contact][:2] == ["Nowhere, ZZ", "VISA: H1B"] and with_line.work_authorization == ""
     only_name = rd.form_header(rd.parse_header_form({"name": "Zora Quillfeather"}))
     assert only_name.contact == () and only_name.title == ""
     assert sorted(tmp_path.rglob("*")) == [], "parsing the form writes nothing"

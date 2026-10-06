@@ -166,13 +166,25 @@ def test_a_grid_is_made_in_short_lived_children_and_leaves_this_process_s_memory
     assert given == [ev.CASES_PER_CHILD] * 3 == [3, 3, 3], "9 cases: 3 children of 3 cases each"
 
 
+H2 = "H2 adding lines lowered a check"
+#: 0.1.11.3 item 15 (``sel-5``): the page estimate keeps room for the PDF's header (one more line than ``sel-4``), so
+#: a pick prints one line less. In ONE place the line that goes is a line the labels say to keep: with the "useful"
+#: lines added to the large master, ``loom-01`` (no mandatory requirement loses its coverage: H1 holds). A recorded
+#: exception, by the coordinator's decision (2026-10-06): the cut order is unchanged here; protecting a label-strong
+#: line in the cut order is a follow-up ticket.
+KNOWN_HEADER_ROOM = {f"agentic/large/base -> useful/{path}: must-keep dropped: loom-01" for path in ("select", "fallback", "tailor_copy")}
+
+
 @pytest.mark.parametrize("posting", POSTINGS)
 def test_the_hard_tests_hold_in_every_cell_of_a_posting(posting: str) -> None:
     results = _results(posting)
     assert len(results) == len(ev.SIZES) * len(ev.VARIATIONS) * len(ev.PATHS) == 81
     assert not any(checks.error for checks in results.values())
     failures = ev.hard_failures(results)
-    assert failures == {name: [] for name in failures}, "\n".join(item for found in failures.values() for item in found)
+    assert set(failures[H2]) <= KNOWN_HEADER_ROOM, "\n".join(failures[H2])
+    assert {name: found for name, found in failures.items() if name != H2} == {name: [] for name in failures if name != H2}, "\n".join(
+        item for found in failures.values() for item in found
+    )
     # No conflict was needed anywhere: everything mandatory fitted.
     assert all(checks.conflicts == 0 for checks in results.values())
 
@@ -213,7 +225,7 @@ def test_the_same_probe_runs_in_another_checkout_s_tree() -> None:
     request = ev.payload(["weakfit"], ["small"], ["base"], ["select"])
     here = ev.pick_probe.probe(request)
     there = ev.pick_probe.run_in_tree(request, ev.REPO)
-    assert there == json.loads(json.dumps(here)) and there["selector_version"] == "sel-4"
+    assert there == json.loads(json.dumps(here)) and there["selector_version"] == "sel-5"
     with pytest.raises(ValueError, match="holds no src/gigai"):
         ev.pick_probe.run_in_tree(request, ev.FIXTURES)
 

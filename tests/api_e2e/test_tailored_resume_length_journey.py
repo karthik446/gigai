@@ -32,7 +32,11 @@ from tests.api_e2e.harness import resolve_workpad_path, setup_and_init, start_se
 from tests.support.tailor_cases import CASES, copy_everything, install_scripted_model, ollama_config
 
 _CASE = CASES["over_long"]
-_CUT = ["Junior Developer — Bellweather Retail (2009–2011)", "Junior Developer — Dunmore Telecom (2007–2009)"]
+#: 0.1.11.3 item 15: the length rule keeps room for the PDF's header, so the third-oldest role is cut too.
+_CUT = [
+    "Software Engineer — Harrow Analytics (2011–2013)", "Junior Developer — Bellweather Retail (2009–2011)",
+    "Junior Developer — Dunmore Telecom (2007–2009)",
+]
 
 
 def _pages(pdf: bytes) -> int:
@@ -78,7 +82,7 @@ def test_length_journey(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None
         length = first["result"]["length"]
         assert (length["status"], length["pages"], length["full_pages"]) == ("cut", 2, 3)
         assert [role["role"] for role in length["cut"]] == _CUT and len(length["trimmed"]) == 5
-        assert _roles(first) == [10, 10, 10, 3, 3, 3] and pdf_pages() == 2
+        assert _roles(first) == [10, 10, 10, 3, 3] and pdf_pages() == 2
         body = {**key, "updated_at": stamp, "use": "restore"}
 
         # (a) restore: every role and bullet is back, and GET, the .md and the PDF follow.

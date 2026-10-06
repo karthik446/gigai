@@ -23,7 +23,8 @@ from gigai.scout.pdf_header_file import SPONSORSHIP_DEFAULT
 from tests.behaviors.scout_find_jobs.test_pdf_header_file import FILE, MARKERS
 
 MARKDOWN = "## Summary\n\n- Platform engineer with nine years building billing systems.\n\n## Skills\n\n- Python, SQL\n"
-CONTACT = "zora.q@example.invalid | 555-0142-ZQ | Quillshire, ZZ | linkedin.com/in/zq-invalid-7731 | github.com/zq-invalid-7731 | zq-invalid-7731.example.invalid"
+#: 0.1.11.3 items 15/16: ONE contact line: location | work authorization | links | email | phone.
+CONTACT = "Quillshire, ZZ | VISA: H1B (ZQ-7731) | github.com/zq-invalid-7731 | zq-invalid-7731.example.invalid | linkedin.com/in/zq-invalid-7731 | zora.q@example.invalid | 555-0142-ZQ"
 
 
 @pytest.fixture
@@ -90,7 +91,7 @@ def test_header_file_makes_the_full_pdf_and_prints_no_value(fx: dict[str, Path])
     assert payload["header"] is True and payload["header_file"] == str(fx["header"]) and payload["header_note"] is None
     assert payload["finish_url"] is None and payload["in_resumes_folder"] is False, "nothing is left to finish in the browser"
     assert _line(fx["out"]) == "ZORAQUILLFEATHER"
-    assert _squeezed(fx["out"]).startswith(_squeeze("ZORA QUILLFEATHER", CONTACT, "VISA: H1B (ZQ-7731)", "SUMMARY")), _lines(fx["out"])[:5]
+    assert _squeezed(fx["out"]).startswith(_squeeze("ZORA QUILLFEATHER", CONTACT, "SUMMARY")), _lines(fx["out"])[:5]
     _silent(done.output)
     text = _pdf(fx, "--out", str(fx["out"]), "--header", str(fx["header"]), as_json=False)
     assert text.exit_code == 0 and f"with your name and contact details from {fx['header']}." in text.output
@@ -203,16 +204,20 @@ def test_the_work_authorization_line_file_then_the_profiles_sponsorship_answer(f
     monkeypatch.setattr(resume_input, "read_config_preferences", preferences)
     no_key = {key: value for key, value in FILE.items() if key != "work_authorization"}
 
-    def third_line(content: dict[str, object]) -> str:
+    def contact_line(content: dict[str, object]) -> str:
+        """The header's ONE contact line (0.1.11.3 item 15: the work authorization is in it, after the location)."""
+
         fx["out"].unlink(missing_ok=True)
-        short = {**content, "links": []}  # a contact line that does not wrap: the line after it is line 3
+        short = {**content, "links": []}  # a contact line that does not wrap
         done = _pdf(fx, "--out", str(fx["out"]), "--header", str(_header(fx["header"], short)), "--target", str(target))
         assert done.exit_code == 0, done.output
-        return _line(fx["out"], 2)
+        assert _line(fx["out"], 2) == "SUMMARY", "the header is the name and one line"
+        return _line(fx["out"], 1)
 
-    assert third_line(FILE) == _squeeze("VISA: H1B (ZQ-7731)"), "the file's line wins over the profile's answer"
-    assert third_line(no_key) == _squeeze(SPONSORSHIP_DEFAULT), "no key in the file: the profile says sponsorship is needed"
-    assert third_line({**FILE, "work_authorization": ""}) == "SUMMARY", 'an empty key is "no line"'
+    plain = _squeeze("Quillshire, ZZ | zora.q@example.invalid | 555-0142-ZQ")
+    assert contact_line(FILE) == _squeeze("Quillshire, ZZ | VISA: H1B (ZQ-7731) | zora.q@example.invalid | 555-0142-ZQ"), "the file's line wins over the profile's answer"
+    assert contact_line(no_key) == _squeeze(f"Quillshire, ZZ | {SPONSORSHIP_DEFAULT} | zora.q@example.invalid | 555-0142-ZQ"), "no key in the file: the profile says sponsorship is needed"
+    assert contact_line({**FILE, "work_authorization": ""}) == plain, 'an empty key is "no line"'
     answers["visa"] = False
-    assert third_line(no_key) == "SUMMARY", "the profile needs no sponsorship: no line"
+    assert contact_line(no_key) == plain, "the profile needs no sponsorship: no line"
     assert asked and all(path == target.resolve() for path in asked)

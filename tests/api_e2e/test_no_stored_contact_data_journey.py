@@ -118,7 +118,7 @@ def test_no_contact_data_is_stored_anywhere(tmp_path: Path, monkeypatch: pytest.
         assert not _found(headers.encode()), headers
         assert re.fullmatch(r'attachment; filename="acme-staff-engineer-\d{4}-\d{2}-\d{2}\.pdf"', pdf.headers["content-disposition"])
         text = "\n".join(page.extract_text() for page in PdfReader(io.BytesIO(pdf.content)).pages)
-        assert text.startswith(f"ZORA QUILLFEATHER\n{EMAIL} | {PHONE} | Quillshire, ZZ | linkedin.com/in/zq-invalid | zq.example.invalid\n")
+        assert text.startswith(f"ZORA QUILLFEATHER\nQuillshire, ZZ | linkedin.com/in/zq-invalid | zq.example.invalid | {EMAIL} | {PHONE}\n")
         assert text.count("QUILLFEATHER") == 1 and "Quillfeather" not in text, "the name prints once, in the header only"
 
         # 2c. a render that fails (a bad form): a typed 422 that echoes nothing.

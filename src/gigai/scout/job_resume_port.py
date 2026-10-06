@@ -25,6 +25,10 @@ SETTLE_STORED = "settle_stored"
 ACTION_REFRESH = "refresh"
 ACTION_DRAFT = "draft"
 ACTIONS: tuple[str, ...] = (ACTION_REFRESH, ACTION_DRAFT)
+#: 0.1.11.3 item 15, "Shorten automatically": ``pick.<this>(home_root, target, profile_id, job_identity, *, now)
+#: -> pick.Shortened``: the same pick under a tighter page budget, and what it left out. No model call.
+SHORTEN_STORED = "shorten_stored"
+ACTION_SHORTEN = "shorten"
 
 NOT_AVAILABLE_MESSAGE = (
     "A resume cannot be picked again for this job here. Re-assess the job to get a new pick: `gigai scout jobs assess URL --again` "
@@ -51,4 +55,18 @@ def settle_stored() -> Callable[..., object]:
     return action
 
 
-__all__ = ["ACTIONS", "ACTION_DRAFT", "ACTION_REFRESH", "NOT_AVAILABLE_MESSAGE", "SETTLE_STORED", "NotBuilt", "settle_stored"]
+def shorten_stored() -> Callable[..., object]:
+    """The shorten action of ``scout.pick`` (:data:`SHORTEN_STORED`); :class:`NotBuilt` (``pick_not_available``) without it."""
+
+    from . import pick
+
+    action = getattr(pick, SHORTEN_STORED, None)
+    if action is None:
+        raise NotBuilt("pick_not_available", NOT_AVAILABLE_MESSAGE)
+    return action
+
+
+__all__ = [
+    "ACTIONS", "ACTION_DRAFT", "ACTION_REFRESH", "ACTION_SHORTEN", "NOT_AVAILABLE_MESSAGE", "SETTLE_STORED", "SHORTEN_STORED", "NotBuilt",
+    "settle_stored", "shorten_stored",
+]

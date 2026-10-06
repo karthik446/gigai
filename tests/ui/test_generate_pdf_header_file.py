@@ -106,7 +106,8 @@ def test_the_header_file_fills_the_generate_pdf_form_and_stays_editable(ui, scou
         name = waiting.value.suggested_filename
         assert "zora" not in name.lower() and "riley" not in name.lower(), "the file is named for the job"
         text = "".join("".join(page.extract_text() for page in PdfReader(io.BytesIO(Path(waiting.value.path()).read_bytes())).pages).split())
-        printed = "".join("zora.q@example.invalid | 555-0142-ZQ | Quillshire, ZZ | linkedin.com/in/zq-invalid-7731 | github.com/zq-invalid-7731".split())
+        # 0.1.11.3 items 15/16: ONE contact line: location | work authorization | links | email | phone.
+        printed = "".join("Quillshire, ZZ | VISA: H1B (ZQ-7731) | github.com/zq-invalid-7731 | linkedin.com/in/zq-invalid-7731 | zora.q@example.invalid | 555-0142-ZQ".split())
         assert text.startswith("RILEYFORMEDIT"), "the name typed in the form wins over the file's"
         assert printed in text and "VISA:H1B(ZQ-7731)" in text, "the file's untouched values print as they are"
         assert "QUILLFEATHER" not in text.upper() and "zq-invalid-7731.example.invalid" not in text, "what was edited away is not printed"

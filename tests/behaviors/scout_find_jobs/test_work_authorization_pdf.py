@@ -1,9 +1,10 @@
 """0.1.11.3 item 6: the Generate PDF form's optional "Work authorization" line, in the renderer and the form parser.
 
-The line is one of the form's values (``resume_display.HEADER_FIELDS``): it prints as a header line of its own,
-after the contact line, and an empty value prints no line.  With it the header is four lines (name, title, contact,
-work authorization) and a resume that fit two pages still does; through the route, the page-fit packet's
-failing-size pick (2 pages) stays on 2 pages with the line added.  Synthetic values only.
+The line is one of the form's values (``resume_display.HEADER_FIELDS``).  Since 0.1.11.3 item 15 the header is
+compact: it prints INSIDE the header's one contact line, after the location (location | work authorization | links |
+email | phone), and an empty value adds nothing (no separator either).  A resume that fit two pages still does;
+through the route, the page-fit packet's failing-size pick (2 pages) stays on 2 pages with it added.  Synthetic
+values only.
 """
 
 from __future__ import annotations
@@ -52,31 +53,34 @@ def test_the_form_takes_an_optional_work_authorization_value() -> None:
         assert "header.work_authorization" in str(refused.value)
 
 
-def test_the_line_is_its_own_header_line_and_never_a_contact_item() -> None:
+def test_the_line_is_an_item_of_the_one_contact_line_after_the_location() -> None:
     header = form_header(parse_header_form({**FORM, "work_authorization": LINE}), TITLE)
-    assert header.work_authorization == LINE
-    assert all(LINE not in item.text for item in header.contact) and len(header.contact) == 3
-    assert form_header(parse_header_form(FORM), TITLE).work_authorization == ""
+    assert [(item.text, item.url) for item in header.contact] == [
+        ("Columbus, Ohio", None), (LINE, None), ("riley@example.test", "mailto:riley@example.test"), ("555-010-0100", None),
+    ]
+    assert header.work_authorization == "", "the form's header has no line apart"
+    assert len(form_header(parse_header_form(FORM), TITLE).contact) == 3
 
 
 def test_the_pdf_prints_the_line_in_the_header_only_and_still_fits_two_pages() -> None:
     without = _pdf(form_header(parse_header_form(FORM), TITLE))
     with_line = _pdf(form_header(parse_header_form({**FORM, "work_authorization": LINE}), TITLE))
     text = _text(with_line)
-    # Four header lines, in order: name, title, contact, work authorization; then the body.
-    assert text.split("\n")[:4] == ["RILEY EXAMPLE", TITLE, "riley@example.test | 555-010-0100 | Columbus, Ohio", LINE]
+    # Three header lines, in order: name, title, the ONE contact line with the work authorization in it; then the body.
+    assert text.split("\n")[:3] == ["RILEY EXAMPLE", TITLE, f"Columbus, Ohio | {LINE} | riley@example.test | 555-010-0100"]
     assert text.count(LINE) == 1, "the line prints once, in the header"
     plain = _text(without)
     assert LINE not in plain and "sponsorship" not in plain.lower()
-    assert plain.split("\n")[:3] == text.split("\n")[:3] and plain.split("\n")[3:] == text.split("\n")[4:], "only the one line is added"
-    assert _pages(without) == 2 and _pages(with_line) == 2, "the four-line header still fits the two pages"
+    assert plain.split("\n")[:3] == ["RILEY EXAMPLE", TITLE, "Columbus, Ohio | riley@example.test | 555-010-0100"]
+    assert plain.split("\n")[3:] == text.split("\n")[3:], "only the one item is added: no line more"
+    assert _pages(without) == 2 and _pages(with_line) == 2
 
 
 def test_an_empty_value_and_a_headerless_pdf_print_no_line() -> None:
     empty = _pdf(form_header(parse_header_form({**FORM, "work_authorization": "   "}), TITLE))
     assert _text(empty) == _text(_pdf(form_header(parse_header_form(FORM), TITLE)))
     assert empty == _pdf(PdfHeader("Riley Example", TITLE, (
-        ContactItem("riley@example.test", "mailto:riley@example.test"), ContactItem("555-010-0100", None), ContactItem("Columbus, Ohio", None),
+        ContactItem("Columbus, Ohio", None), ContactItem("riley@example.test", "mailto:riley@example.test"), ContactItem("555-010-0100", None),
     ))), "no value: the PDF is byte for byte the one without the field"
     headerless = _text(_pdf(None))
     assert LINE not in headerless and "sponsorship" not in headerless.lower()
@@ -90,7 +94,7 @@ def test_generate_pdf_with_the_line_still_fits_the_picks_two_pages(fx, monkeypat
     import httpx
 
     from gigai.scout.find_jobs.present_api import ScoutFindJobsBackend, serve
-    from tests.behaviors.scout_find_jobs.test_pdf_fits_page_limit import FORM as LONG_FORM, HEADER_LINES, JOB
+    from tests.behaviors.scout_find_jobs.test_pdf_fits_page_limit import FORM as LONG_FORM, JOB
 
     monkeypatch.setenv("GIGAI_SCOUT_AUTO_REFRESH", "0")
     monkeypatch.setenv("GIGAI_SCOUT_MODEL_TAGS", "0")
@@ -102,7 +106,8 @@ def test_generate_pdf_with_the_line_still_fits_the_picks_two_pages(fx, monkeypat
         response = client.post("/api/tailored-resumes/pdf", json={**key, "header": {**LONG_FORM, "work_authorization": LINE}})
         assert response.status_code == 200, response.text
         pages = [page.extract_text() for page in PdfReader(io.BytesIO(response.content)).pages]
-        assert [line.strip() for line in pages[0].splitlines()[:5]] == [*HEADER_LINES, LINE], "the line is the header's last line"
+        header = " ".join(line.strip() for line in pages[0].split("SUMMARY")[0].splitlines())
+        assert f"Nowhere Springs, Colorado | {LINE} | linkedin.example.invalid" in header, "the line is in the contact line, after the location"
         assert len(pages) == 2, f"Generate PDF made {len(pages)} pages; the last holds: {pages[-1][:80]!r}"
         assert "x-gigai-fit-note" not in response.headers
         without = client.post("/api/tailored-resumes/pdf", json={**key, "header": LONG_FORM})

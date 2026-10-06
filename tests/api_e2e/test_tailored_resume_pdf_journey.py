@@ -98,7 +98,7 @@ def test_tailored_resume_pdf_journey(tmp_path: Path, monkeypatch: pytest.MonkeyP
         _no_marker(second, body_too=False)
         assert "x-gigai-finish-url" not in second.headers, "a PDF with its header needs no finishing"
         text = _text(second.content)
-        assert text.startswith("ZORA QUILLFEATHER\nStaff Engineer\nzora.q@example.invalid | 555-0142-ZQ | Nowhere, ZZ | linkedin.com/in/zq-invalid | zq.example.invalid")
+        assert text.startswith("ZORA QUILLFEATHER\nStaff Engineer\nNowhere, ZZ | linkedin.com/in/zq-invalid | zq.example.invalid | zora.q@example.invalid | 555-0142-ZQ\n")
         assert len(PdfReader(io.BytesIO(second.content)).pages) == len(PdfReader(io.BytesIO(headerless.content)).pages)
         name_only = client.post("/api/tailored-resumes/pdf", json={**key, "header": {"name": "Zora Quillfeather"}})
         assert _text(name_only.content).startswith("ZORA QUILLFEATHER\nStaff Engineer\n") and "|" not in _text(name_only.content).split("\n")[2]

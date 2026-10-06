@@ -12,17 +12,20 @@ and written under the record's own lock.
 
 THE PICK.  ``pick_view`` is what is STORED for one job, read and nothing else (SPEC 2.4: opening a job never
 recomputes): the job resume, who picked it, the Picked / Left out counts, the gate, the stale list, the conflicts
-and a waiting proposal.  ``pick_action`` is the four explicit steps:
+and a waiting proposal.  ``pick_action`` is the five explicit steps:
 
 ==================  =============================================================================================
 ``refresh``         the code-only re-pick. Refused (``assessment_stale``) while the stored assessment is stale:
                     a new selection never sits beside scores made on other evidence; the step then is Re-assess
 ``draft``           the explicit draft for a job whose gate holds. Refused when the gate suggests a resume
+``shorten``         0.1.11.3 item 15: the same pick under a tighter page budget, for a PDF that still does not
+                    fit its pages. The answer's ``shortened`` says in plain words what it left out. Not refused
+                    for an old assessment: it is the stored pick, cut further, not a new reading of the job
 ``use_proposed``    the waiting selection REPLACES the stored job resume: the one step that does
 ``dismiss_proposed``  the waiting selection is dropped; the stored job resume is not touched
 ==================  =============================================================================================
 
-``refresh`` and ``draft`` are ``scout.pick``'s (``pick.settle_stored``, through ``job_resume_port``); a GigAI that
+``refresh``, ``draft`` and ``shorten`` are ``scout.pick``'s (``pick.settle_stored`` / ``shorten_stored``, through ``job_resume_port``); a GigAI that
 does not hold that action answers ``pick_not_available``.  No action here calls a model.  A step that is refused
 says so for the USER: what happened and what to do, in plain words, never the name of a module or a function.
 
@@ -40,14 +43,14 @@ import re
 
 from . import job_brief, job_resume_port
 from . import suggestions as store
-from .job_resume_port import ACTION_DRAFT, ACTION_REFRESH, NotBuilt
+from .job_resume_port import ACTION_DRAFT, ACTION_REFRESH, ACTION_SHORTEN, NotBuilt
 
 SUGGESTIONS_SCHEMA = "scout-job-suggestions-response:1"
 PICK_SCHEMA = "scout-job-resume-pick:1"
 
 ACTION_USE_PROPOSED = "use_proposed"
 ACTION_DISMISS_PROPOSED = "dismiss_proposed"
-PICK_ACTIONS: tuple[str, ...] = (ACTION_REFRESH, ACTION_DRAFT, ACTION_USE_PROPOSED, ACTION_DISMISS_PROPOSED)
+PICK_ACTIONS: tuple[str, ...] = (ACTION_REFRESH, ACTION_DRAFT, ACTION_SHORTEN, ACTION_USE_PROPOSED, ACTION_DISMISS_PROPOSED)
 
 #: ``resolve``'s ``how`` (``dismiss`` is its own action).
 RESOLVE_HOWS: tuple[str, ...] = ("job_resume_edit", "master_line", "answer")
@@ -431,6 +434,7 @@ def pick_action(home_root: Path, target: Path, job_url: str, action: str, *, pro
     before = pick_view(home_root, target, job_url, profile_id=profile_id)
     pair = (str(before["profile_id"]), str(before["job_identity"]))
     when = now or _clock()
+    extra: dict[str, object] = {}
     if action in (ACTION_USE_PROPOSED, ACTION_DISMISS_PROPOSED):
         try:
             if action == ACTION_USE_PROPOSED:
@@ -455,9 +459,13 @@ def pick_action(home_root: Path, target: Path, job_url: str, action: str, *, pro
                 "draft_not_needed",
                 "A resume is suggested for this job already; a draft is for a job that is held. Pick it again: `gigai scout resume pick --job-url URL --refresh`.",
             )
-        settle = job_resume_port.settle_stored()
+        # ``shorten`` (0.1.11.3 item 15): the same pick under a tighter page budget; the answer says what it left out.
+        settle = job_resume_port.shorten_stored() if action == ACTION_SHORTEN else job_resume_port.settle_stored()
         try:
-            settle(home_root, target, *pair, action=action, now=when)
+            if action == ACTION_SHORTEN:
+                extra = {"shortened": settle(home_root, target, *pair, now=when).to_json()}
+            else:
+                settle(home_root, target, *pair, action=action, now=when)
         except NotBuilt:
             raise
         except ValueError as exc:  # the pick's and the record's own typed refusals (``PickError`` is a RuntimeError, below)
@@ -466,13 +474,14 @@ def pick_action(home_root: Path, target: Path, job_url: str, action: str, *, pro
             if getattr(exc, "code", None) is None:
                 raise
             raise _refused(exc) from exc
-    return {**pick_view(home_root, target, job_url, profile_id=pair[0]), "action": action}
+    return {**pick_view(home_root, target, job_url, profile_id=pair[0]), "action": action, **extra}
 
 
 __all__ = [
     "ACTION_DISMISS_PROPOSED",
     "ACTION_DRAFT",
     "ACTION_REFRESH",
+    "ACTION_SHORTEN",
     "ACTION_USE_PROPOSED",
     "HOW_DISMISSED",
     "HOW_JOB_RESUME_EDIT",

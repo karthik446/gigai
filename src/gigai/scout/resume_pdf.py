@@ -248,7 +248,8 @@ def over_limit_note(pages: int, max_pages: int) -> str:
     limit = f"{max_pages} page{'' if max_pages == 1 else 's'}"
     return (
         f"This resume takes {pages} pages: it does not fit on {limit} even with the tightest spacing. "
-        f"To get {limit}, shorten it (remove a few lines or an older role) and generate the PDF again, or keep it at {pages} pages."
+        f"To get {limit}, shorten it automatically (the Shorten automatically button on the job's page, or "
+        f"`gigai scout resume pick --job-url URL --shorten`; no model call), then generate the PDF again. Or keep it at {pages} pages."
     )
 
 
@@ -262,42 +263,67 @@ class RenderedPdf:
     note: str | None = None
 
 
-def _data(sections: list[dict[str, object]], header: PdfHeader | None, company: str) -> dict[str, object]:
-    """What the template reads; ``header`` ``None`` reserves a blank block of the header's height."""
+#: The header lines under the name that a page ESTIMATE keeps room for (0.1.11.3 item 15): the ONE contact line, and
+#: that line wrapped once.  The compact header is this tall at most (a line that wraps twice, or a saved title's own
+#: line, is one line more: the render's own fit, ``_render``'s ``max_pages``, takes that up), so a resume an estimate
+#: puts on N pages prints on N pages with the header on.  A fixed number: an estimate never reads the header's values
+#: (GigAI stores none; they belong to the Generate PDF form).  The block itself is the template's (``head-line`` in
+#: ``resume.typ``), the one the printed header is made of.
+HEADER_RESERVE_LINES = 2
+#: What a headerless PDF (an agent's, the CLI's) keeps blank under the name line.
+HEADERLESS_LINES = 1
+
+
+def _data(sections: list[dict[str, object]], header: PdfHeader | None, company: str, *, blank_lines: int = HEADERLESS_LINES) -> dict[str, object]:
+    """What the template reads; ``header`` ``None`` reserves a blank block of the header's height (``blank_lines`` under the name).
+
+    The header is compact (0.1.11.3 item 15): ONE contact line.  ``form_header`` orders its items; a work
+    authorization given apart (``PdfHeader.work_authorization``) joins that line after its first item, and an
+    item with no text is left out, so the line never holds an empty place between two separators."""
     shown = header or PdfHeader()
+    contact = [c for c in shown.contact if c.text.strip()]
+    if shown.work_authorization.strip():
+        contact.insert(min(1, len(contact)), ContactItem(shown.work_authorization.strip(), None))
     return {
         "doc_title": " ".join(part for part in ("Resume", company.strip()) if part),
         "name": shown.name,
         "title": shown.title,
-        "contact": [{"text": c.text, "url": c.url} for c in shown.contact],
-        "work_authorization": shown.work_authorization,
+        "contact": [{"text": c.text, "url": c.url} for c in contact],
         "blank_header": header is None,
+        "blank_lines": blank_lines,
         "sections": sections,
     }
+
+
+def _estimate(sections: list[dict[str, object]], spacing_scale: float, header_lines: int) -> tuple[int, float]:
+    """``(last page, fill)`` of ``sections`` under a blank header of ``header_lines`` lines: THE page estimate.
+
+    One definition for every side that fits a resume to a page limit without a header in hand (the pick's fit,
+    the tailoring's length rule, an edit's page count): the PDF's own template and layout, the header's block at
+    its largest (``HEADER_RESERVE_LINES``).  No PDF is compiled."""
+    root = resources.files("gigai.scout").joinpath("data", "resume")
+    with ExitStack() as stack:
+        directory = str(stack.enter_context(resources.as_file(root)))
+        template = (Path(directory) / "resume.typ").read_bytes()
+        return _end(template, directory, _data(sections, None, "", blank_lines=header_lines), clamp_scale(spacing_scale))
 
 
 def fewest_pages(result: TailoredResume) -> int:
     """The fewest pages ``result`` prints on at any spacing: the count at ``SPACING_MIN``, the tightest auto fit may choose.
 
-    The page-fit measurement itself (``_end``, Typst's own layout) with the header's block reserved, so it is the count
-    the finished PDF has; no PDF is compiled.  What the tailoring's length rule reads (``tailor_length``, 0110-10-05)."""
-    root = resources.files("gigai.scout").joinpath("data", "resume")
-    with ExitStack() as stack:
-        directory = str(stack.enter_context(resources.as_file(root)))
-        template = (Path(directory) / "resume.typ").read_bytes()
-        return _end(template, directory, _data(_body(result), None, ""), SPACING_MIN)[0]
+    The page estimate (``_estimate``: Typst's own layout, the header's block reserved at its largest), so it is the
+    count the finished PDF has; no PDF is compiled.  What the tailoring's length rule reads (``tailor_length``, 0110-10-05)."""
+    return _estimate(_body(result), SPACING_MIN, HEADER_RESERVE_LINES)[0]
 
 
-def pages_at(result: TailoredResume, spacing_scale: float) -> int:
-    """The pages ``result`` prints on at ``spacing_scale``: ``fewest_pages``'s measurement at a spacing the caller names.
+def pages_at(result: TailoredResume, spacing_scale: float, *, header_lines: int = HEADER_RESERVE_LINES) -> int:
+    """The pages ``result`` prints on at ``spacing_scale``: ``fewest_pages``'s estimate at a spacing the caller names.
 
     What the master resume's fit reads (0.1.10.9 master P4, ``tailor_master``): the selector's own page budget
-    is 2 pages at ``master_selection.FIT_SCALE``, and a tailoring of its candidates is held to the same one."""
-    root = resources.files("gigai.scout").joinpath("data", "resume")
-    with ExitStack() as stack:
-        directory = str(stack.enter_context(resources.as_file(root)))
-        template = (Path(directory) / "resume.typ").read_bytes()
-        return _end(template, directory, _data(_body(result), None, ""), clamp_scale(spacing_scale))[0]
+    is 2 pages at ``master_selection.FIT_SCALE``, and a tailoring of its candidates is held to the same one.
+    ``header_lines``: the header lines kept blank under the name; more than the default is a tighter budget
+    (``pick.shorten_stored``)."""
+    return _estimate(_body(result), spacing_scale, header_lines)[0]
 
 
 def _render(
@@ -309,8 +335,9 @@ def _render(
     ``max_pages`` (0.1.11.3) is the resume's page limit, the one its pick was fitted to: a render that would run
     past it at the saved spacing takes the loosest spacing down to ``FIT_FLOOR`` that stays on it, then the same
     with the Skills chips compact (the template's ``compact_tags``), then compact down to ``SPACING_MIN``.  That
-    is what holds a pick to its pages: its fit measures at 0.9 with a two-line header's block (``measure_markdown``),
-    a saved spacing may be looser and the real header up to two lines taller, and this is where both are absorbed.
+    is what holds a resume to its pages when its estimate did not (a pick made before 0.1.11.3 item 15 measured
+    with a two-line header's block; a saved spacing may be looser than the estimate's 0.9; a contact line may wrap
+    twice): this is where those are absorbed.
     A resume that already fits renders exactly as before.  One that cannot be put there renders as its layout
     says, with ``RenderedPdf.note``."""
     root = resources.files("gigai.scout").joinpath("data", "resume")
@@ -528,15 +555,15 @@ def render_markdown_pdf(
     return _render(sections, header, company=company, timestamp=timestamp, spacing_scale=spacing_scale, auto_fit=auto_fit, count_pages=True)
 
 
-def measure_markdown(markdown: str, *, spacing_scale: float = SPACING_DEFAULT) -> tuple[int, float]:
+def measure_markdown(markdown: str, *, spacing_scale: float = SPACING_DEFAULT, header_lines: int = HEADER_RESERVE_LINES) -> tuple[int, float]:
     """``(last page, fill of that page 0..1)`` where resume markdown ends at ``spacing_scale``: one layout query.
 
-    Headerless, as an agent's PDF is (the header's height is reserved), and no PDF is compiled: this is
-    how the master resume's selector fits a pick to the page budget (0.1.10.9 master P2)."""
+    The page estimate (``_estimate``): no header is read, the header's block is reserved at its largest
+    (``header_lines``), and no PDF is compiled.  This is how the master resume's selector fits a pick to the
+    page budget (0.1.10.9 master P2)."""
 
     _name, sections = parse_resume_markdown(markdown)
-    with resources.as_file(resources.files("gigai.scout").joinpath("data", "resume")) as directory:
-        return _end((Path(directory) / "resume.typ").read_bytes(), str(directory), _data(sections, None, ""), clamp_scale(spacing_scale))
+    return _estimate(sections, spacing_scale, header_lines)
 
 
 # --- the header and layout both entry points use ---------------------------------------------
@@ -625,6 +652,7 @@ __all__ = [
     "MAX_MARKDOWN_LINES",
     "ContactItem",
     "FIT_FLOOR",
+    "HEADER_RESERVE_LINES",
     "PdfHeader",
     "RenderedPdf",
     "ResumeMarkdownError",

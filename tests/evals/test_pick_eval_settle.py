@@ -32,6 +32,13 @@ POSTINGS = ("agentic", "backend", "leadership", "sre", "titlematch", "weakfit")
 #: The one cell where regrouping the skills lowers a check under ``settle`` (the module text).
 KNOWN_REGROUPED = {"agentic/large/regrouped/settle: must-keep dropped: relay-02"}
 H3 = "H3 order or grouping changed the pick"
+H2 = "H2 adding lines lowered a check"
+#: 0.1.11.3 item 15 (``sel-5``): the page estimate keeps room for the PDF's header (one more line than ``sel-4``), so
+#: the pick prints one line less. In ONE place the line that goes is a line the labels call strong: the medium
+#: master's ``qui-01`` (T2 stays covered, by ``hal-06``, which the labels call support). A recorded exception, by the
+#: coordinator's decision (2026-10-06): the cut order is unchanged here; protecting a row's label-strong source is a
+#: follow-up ticket.
+KNOWN_HEADER_ROOM = {"titlematch/small -> medium/base/settle: weaker evidence: T2", "titlematch/small -> medium/base/settle: must-keep dropped: qui-01"}
 
 
 @pytest.mark.parametrize("posting", POSTINGS)
@@ -42,7 +49,8 @@ def test_settle_holds_the_hard_tests_in_every_cell_of_a_posting_with_its_assessm
     failures = ev.hard_failures(results)
     regrouped = {item for item in failures[H3] if f"/{ev.REGROUPED}/" in item}
     assert regrouped <= KNOWN_REGROUPED, regrouped
-    assert {name: found for name, found in failures.items() if name != H3} == {name: [] for name in failures if name != H3}, failures
+    assert set(failures[H2]) <= KNOWN_HEADER_ROOM, failures[H2]
+    assert {name: found for name, found in failures.items() if name not in (H2, H3)} == {name: [] for name in failures if name not in (H2, H3)}, failures
     assert [item for item in failures[H3] if item not in regrouped] == [], failures[H3]  # a permuted master: the same selection
     # No conflict was needed anywhere, and every cell is the two pages the fit is for.
     assert all(checks.conflicts == 0 and checks.pages == 2 for checks in results.values())

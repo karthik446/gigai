@@ -69,12 +69,14 @@ def test_a_file_fills_the_forms_values_and_its_links(tmp_path: Path) -> None:
     assert set(found.values) == {*HEADER_FIELDS, "links"}
     # The form's own parser takes them, and the header prints every link's address in the contact line.
     header = form_header(parse_header_form(found.values), "Staff Engineer")
-    assert header.name == "Zora Quillfeather" and header.title == "Staff Engineer" and header.work_authorization == "VISA: H1B (ZQ-7731)"
+    # 0.1.11.3 items 15/16: ONE contact line: location, work authorization, the links, email, phone.
+    assert header.name == "Zora Quillfeather" and header.title == "Staff Engineer" and header.work_authorization == ""
     assert header.contact == (
-        ContactItem("zora.q@example.invalid", "mailto:zora.q@example.invalid"), ContactItem("555-0142-ZQ", None), ContactItem("Quillshire, ZZ", None),
-        ContactItem("linkedin.com/in/zq-invalid-7731", "https://linkedin.com/in/zq-invalid-7731"),
+        ContactItem("Quillshire, ZZ", None), ContactItem("VISA: H1B (ZQ-7731)", None),
         ContactItem("github.com/zq-invalid-7731", "https://github.com/zq-invalid-7731"),
         ContactItem("zq-invalid-7731.example.invalid", "https://zq-invalid-7731.example.invalid"),
+        ContactItem("linkedin.com/in/zq-invalid-7731", "https://linkedin.com/in/zq-invalid-7731"),
+        ContactItem("zora.q@example.invalid", "mailto:zora.q@example.invalid"), ContactItem("555-0142-ZQ", None),
     )
     # A link to linkedin.com is the LinkedIn field whatever its label; a second one is a row.
     two = read_header_file(_write(tmp_path / "two.json", {"links": [{"label": "Profile", "url": "https://www.linkedin.com/in/a"}, {"label": "LinkedIn", "url": "x.invalid/b"}]}))

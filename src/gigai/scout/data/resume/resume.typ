@@ -46,14 +46,31 @@
 #let bullet(x, keep: false) = block(below: s, sticky: keep, pad(left: 17.8pt, {place(left, dx: -11.8pt, [•]); x}))
 #let para(x) = block(below: 2 * s, t(x, fill: soft))
 
-// 0110-046: an agent's or the CLI's PDF has no header (GigAI stores no name or contact details): a blank block
-// as tall as the name line and one contact line keeps the pages the finished PDF (Generate PDF form) will have.
-#if d.at("blank_header", default: false) { block(below: 6 * s, height: 16.6pt); block(below: 2 * s, height: 14.3pt) }
-#if d.name != "" { block(below: 6 * s, t(upper(d.name), size: 16.6pt, lh: 16.6pt, weight: 600, tracking: 0.77pt)) }
-#if d.title != "" { block(below: 2 * s, d.title) }
-#if d.contact.len() > 0 { block(below: 2 * s, t(d.contact.map(item).join([ | ]), fill: soft)) }
-// 0.1.11.3 item 6: the Generate PDF form's optional "Work authorization" line, a header line of its own.
-#if d.at("work_authorization", default: "") != "" { block(below: 2 * s, t(d.work_authorization, fill: soft)) }
+// THE HEADER (0.1.11.3 item 15) is COMPACT: the name line, the optional title line, then ONE contact line whose items
+// are joined with " | " (the renderer orders them: location, work authorization, links, email, phone) and which wraps
+// only when it is too long for the page.  `head-line` is the ONE definition of a header line under the name: the
+// printed lines and the blank block below are made of it.
+#let head-name(body) = block(below: 6 * s, body)
+#let head-line(body) = block(below: 2 * s, body)
+// 0110-046: an agent's or the CLI's PDF has no header (GigAI stores no name or contact details): a blank block as
+// tall as the name line and `blank_lines` header lines.  The headerless PDF keeps one; the page ESTIMATE of a pick
+// (resume_pdf.HEADER_RESERVE_LINES) keeps the header at its largest, so the finished PDF stays on the pick's pages.
+#if d.at("blank_header", default: false) {
+  head-name(block(height: 16.6pt))
+  for _ in range(int(d.at("blank_lines", default: 1))) { head-line(block(height: 14.3pt)) }
+}
+#if d.name != "" { head-name(t(upper(d.name), size: 16.6pt, lh: 16.6pt, weight: 600, tracking: 0.77pt)) }
+#if d.title != "" { head-line(d.title) }
+// SHRINK BEFORE WRAP (item 16): a contact line too long for the page is set smaller, a step at a time down to the
+// last of `contact-sizes` (never below it: the Skills chips are 8.3pt), in the same 14.3pt line box, so the header is
+// as tall as before.  Only a line that is too long even there wraps, at the full size.
+#let contact-sizes = (9.5pt, 9pt, 8.5pt, 8pt)
+#let contact-line(items) = layout(avail => {
+  let made(size) = t(items.map(item).join([ | ]), size: size, fill: soft)
+  let fits = contact-sizes.find(size => measure(made(size)).width <= avail.width)
+  made(if fits == none { contact-sizes.first() } else { fits })
+})
+#if d.contact.len() > 0 { head-line(contact-line(d.contact)) }
 #for x in d.sections {
   sec(x.heading)
   for l in x.lines { if l.bullet { bullet(l.text) } else { para(l.text) } }

@@ -32,14 +32,17 @@ SPACING_MIN, SPACING_MAX, SPACING_DEFAULT = 0.7, 1.4, 1.0
 LEGACY_CONTACT_KEYS: tuple[str, ...] = ("name", "contact")
 #: The Generate PDF form's fields (0110-046), in the order the contact line prints them after the name.
 HEADER_FIELDS: tuple[str, ...] = ("name", "email", "phone", "location", "linkedin", "link", "work_authorization")
-#: 0.1.11.3 item 6: the form's optional "Work authorization" line (e.g. "H-1B, requires sponsorship").  It prints as its
-#: own line of this one PDF's header and, like the other form values, is never stored: not in the master, a job's resume
-#: markdown or JSON, or the resumes folder.  Sponsorship stays a label for jobs; this is only what the user prints.
+#: 0.1.11.3 item 6: the form's optional "Work authorization" text (e.g. "H-1B, requires sponsorship").  It prints as an
+#: item of this one PDF's header's contact line (item 15: after the location) and, like the other form values, is
+#: never stored: not in the master, a job's resume markdown or JSON, or the resumes folder.  Sponsorship stays a label
+#: for jobs; this is only what the user prints.
 WORK_AUTHORIZATION_FIELD = "work_authorization"
 #: 0.1.11.3 item 13: the form's optional extra links (the rows a header file's ``links`` fill): a list of
 #: ``{"label", "url"}``.  The URL prints in the contact line like the form's own link fields; the label names the row.
 LINKS_FIELD = "links"
 MAX_LINKS = 6
+#: 0.1.11.3 item 15: the order of the PDF header's ONE contact line (``form_header``), its items joined with " | ".
+CONTACT_ORDER: tuple[str, ...] = ("location", WORK_AUTHORIZATION_FIELD, LINKS_FIELD, "linkedin", "link", "email", "phone")
 _CONTROL = re.compile(r"[\x00-\x1f\x7f]")
 
 
@@ -214,28 +217,56 @@ def parse_header_form(raw: object) -> dict[str, object]:
     return values
 
 
+_WWW = re.compile(r"\Awww\.", re.IGNORECASE)
+
+
 def _link_item(value: str) -> ContactItem:
-    if _SCHEME.match(value):
-        return ContactItem(_SCHEME.sub("", value).rstrip("/"), value)
-    return ContactItem(value.rstrip("/"), "https://" + value)
+    """A link as the header prints it (0.1.11.3 item 16): the text has no ``https://`` and no ``www.``; the
+    target is the full URL (``https://`` added when none was given), so the printed text is clickable."""
+
+    bare = _SCHEME.sub("", value)
+    return ContactItem(_WWW.sub("", bare).rstrip("/"), value if _SCHEME.match(value) else "https://" + value)
+
+
+def link_key(value: str) -> str:
+    """What two spellings of one link share: no scheme, no ``www.``, no trailing slash, lower case."""
+
+    return _WWW.sub("", _SCHEME.sub("", value.strip())).rstrip("/").casefold()
 
 
 def form_header(values: Mapping[str, object], title: str = "") -> PdfHeader:
-    """The PDF header from the form's values (``parse_header_form``) and the saved per-profile title."""
+    """The PDF header from the form's values (``parse_header_form``) and the saved per-profile title.
+
+    COMPACT (0.1.11.3 item 15): every value but the name is one item of ONE contact line, in ``CONTACT_ORDER``
+    (location, work authorization, the links, email, phone).  Item 16: a link prints without ``https://`` or
+    ``www.`` and is clickable, and the same link given twice prints once.  A field left empty adds no item, so no
+    separator stands for it."""
+
+    def text(key: str) -> str:
+        value = values.get(key, "")
+        return value.strip() if isinstance(value, str) else ""
 
     contact: list[ContactItem] = []
-    for key in HEADER_FIELDS[1:]:
-        value = values.get(key, "")
-        if not value or key == WORK_AUTHORIZATION_FIELD or not isinstance(value, str):
+    linked: set[str] = set()
+
+    def link(value: str) -> None:
+        if value.strip() and link_key(value) not in linked:  # one link named twice (a shorthand and a links row) prints once
+            linked.add(link_key(value))
+            contact.append(_link_item(value.strip()))
+
+    for key in CONTACT_ORDER:
+        if key == LINKS_FIELD:
+            for row in values.get(LINKS_FIELD, ()):  # type: ignore[union-attr]
+                link(row["url"])
+        elif not text(key):
             continue
-        if key == "email":
-            contact.append(ContactItem(value, "mailto:" + value))
+        elif key == "email":
+            contact.append(ContactItem(text(key), "mailto:" + text(key)))
         elif key in ("linkedin", "link"):
-            contact.append(_link_item(value))
+            link(text(key))
         else:
-            contact.append(ContactItem(value, None))
-    contact.extend(_link_item(row["url"]) for row in values.get(LINKS_FIELD, ()))  # type: ignore[union-attr]
-    return PdfHeader(values.get("name", ""), _clean(title), tuple(contact), values.get(WORK_AUTHORIZATION_FIELD, ""))  # type: ignore[arg-type]
+            contact.append(ContactItem(text(key), None))
+    return PdfHeader(values.get("name", ""), _clean(title), tuple(contact))  # type: ignore[arg-type]
 
 
 def profile_title(settings: DisplaySettings | None, profile_id: str | None) -> str:
@@ -243,6 +274,7 @@ def profile_title(settings: DisplaySettings | None, profile_id: str | None) -> s
 
 
 __all__ = [
+    "CONTACT_ORDER",
     "ContactItem",
     "DisplaySettings",
     "HEADER_FIELDS",
@@ -259,6 +291,7 @@ __all__ = [
     "display_path",
     "form_header",
     "legacy_contact_fields",
+    "link_key",
     "load_display",
     "normalize",
     "parse_header_form",

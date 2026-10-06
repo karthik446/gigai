@@ -47,7 +47,12 @@ RESUME = (
     "Python · Postgres\n"
 )
 _JOB = {"job_text": "Acme is hiring a Staff Engineer for scheduling and billing systems. Requirements: Python, Postgres.", "title": "Staff Engineer", "company": "Acme"}
-CONTACT = "zora.q@example.invalid | 555-0142-ZQ | Quillshire, ZZ | linkedin.com/in/zq-invalid-7731 | github.com/zq-invalid-7731 | zq-invalid-7731.example.invalid"
+#: 0.1.11.3 items 15/16: ONE contact line: location | work authorization | links | email | phone.
+def _contact(line: str) -> str:
+    return f"Quillshire, ZZ | {line} | github.com/zq-invalid-7731 | zq-invalid-7731.example.invalid | linkedin.com/in/zq-invalid-7731 | zora.q@example.invalid | 555-0142-ZQ"
+
+
+CONTACT = _contact("VISA: H1B (ZQ-7731)")
 
 
 def _squeeze(*parts: str) -> str:
@@ -117,7 +122,7 @@ def test_the_header_file_fills_the_form_and_the_pdf_and_reaches_nobody_else(tmp_
 
         printed = client.post("/api/resume/pdf", json={"markdown": RESUME, "header": values}, headers=page)
         assert printed.status_code == 200 and printed.content.startswith(b"%PDF"), printed.text
-        assert _pdf_text(printed.content).startswith(_squeeze("ZORA QUILLFEATHER", CONTACT, "VISA: H1B (ZQ-7731)", "EXPERIENCE")), _answer(printed)[-600:]
+        assert _pdf_text(printed.content).startswith(_squeeze("ZORA QUILLFEATHER", CONTACT, "EXPERIENCE")), _answer(printed)[-600:]
 
         # Precedence: what the person edits in the form wins over the file.
         edited = {**values, "name": "Riley Formedit", "work_authorization": "Green card holder", "links": [{"label": "GitHub", "url": "github.com/riley-formedit"}]}
@@ -199,7 +204,7 @@ def test_the_header_file_fills_the_form_and_the_pdf_and_reaches_nobody_else(tmp_
             assert response.status_code == 200 and response.content.startswith(b"%PDF") and "x-gigai-finish-url" in response.headers, name
             _silent(name, _answer(response))
         stored = client.post("/api/tailored-resumes/pdf", json={**key, "header": values}, headers=page)
-        assert stored.status_code == 200 and _pdf_text(stored.content).startswith(_squeeze("ZORA QUILLFEATHER", CONTACT, "VISA: H1B (ZQ-7731)"))
+        assert stored.status_code == 200 and _pdf_text(stored.content).startswith(_squeeze("ZORA QUILLFEATHER", CONTACT))
 
         folder = Path(client.get("/api/resumes-folder").json()["path"])
         workpad = resolve_workpad_path(home, target)
@@ -213,13 +218,13 @@ def test_the_header_file_fills_the_form_and_the_pdf_and_reaches_nobody_else(tmp_
         full = runner.invoke(cli, [*pdf_args, "--out", str(out)])
         assert full.exit_code == 0, full.output
         assert json.loads(full.output)["header"] is True and json.loads(full.output)["finish_url"] is None
-        assert _pdf_text(out.read_bytes()).startswith(_squeeze("ZORA QUILLFEATHER", CONTACT, "VISA: H1B (ZQ-7731)"))
+        assert _pdf_text(out.read_bytes()).startswith(_squeeze("ZORA QUILLFEATHER", CONTACT))
         _silent("gigai scout resume pdf --out", full.output.replace(str(home), ""))
         # No work_authorization key in the file: the line is the profile's sponsorship answer.
         _write_header(header_file, {key_: value for key_, value in FILE.items() if key_ != "work_authorization"})
         defaulted = runner.invoke(cli, [*pdf_args, "--out", str(out)])
         assert defaulted.exit_code == 0, defaulted.output
-        assert _pdf_text(out.read_bytes()).startswith(_squeeze("ZORA QUILLFEATHER", CONTACT, "Requires visa sponsorship"))
+        assert _pdf_text(out.read_bytes()).startswith(_squeeze("ZORA QUILLFEATHER", _contact("Requires visa sponsorship")))
         _write_header(header_file)
         # Without --out the PDF goes to the resumes folder: headerless, and the command says why.
         in_folder = runner.invoke(cli, pdf_args)

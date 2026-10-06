@@ -815,13 +815,17 @@ def resume_pdf_command(
         "email": "jane@example.com",
         "phone": "555-0100",
         "location": "Springfield, IL",
-        "links": [{"label": "LinkedIn", "url": "linkedin.com/in/jane-example"}],
+        "github": "jane-example",
+        "linkedin": "jane-example",
         "work_authorization": "VISA: H1B"
       }
 
-    Every field is optional but the name. work_authorization prints as the
-    header's last line, as written; without that key the line comes from the
-    profile's sponsorship answer. GigAI only reads the file when it makes the
+    Every field is optional but the name. The header is the name and ONE
+    line: location | work authorization | links | email | phone (set smaller
+    before it wraps). github and linkedin take just your id (website: a site
+    address; links: [{"label", "url"}] also works); a link prints without
+    https:// or www. and is clickable. work_authorization prints as written;
+    without that key it comes from the profile's sponsorship answer. GigAI only reads the file when it makes the
     PDF: it is never copied into GigAI's store, a log or a model prompt, and a
     PDF with a header is written only to --out, never to the resumes folder.
     --no-header makes the PDF without one.

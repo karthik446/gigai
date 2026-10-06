@@ -73,9 +73,11 @@ details): `~/Documents/GigAI/header.json` (a GigAI home other than `~/.gigai`:
   "email": "jane@example.com",
   "phone": "555-0100",
   "location": "Springfield, IL",
+  "github": "jane-example",
+  "linkedin": "jane-example",
+  "website": "jane.example.com",
   "links": [
-    {"label": "LinkedIn", "url": "linkedin.com/in/jane-example"},
-    {"label": "GitHub", "url": "github.com/jane-example"}
+    {"label": "Talks", "url": "example.com/talks"}
   ],
   "work_authorization": "VISA: H1B"
 }
@@ -85,8 +87,14 @@ details): `~/Documents/GigAI/header.json` (a GigAI home other than `~/.gigai`:
   one line of at most 200 characters; `links` holds at most 6 links.
 - A link labelled LinkedIn fills the form's LinkedIn field; every other link gets a field
   of its own under its label. The PDF prints each link's address in the contact line.
-- `work_authorization` prints as the header's last line, exactly as you wrote it. Leave the
-  key out and the line starts from your profile's sponsorship answer; set it to `""` for no line.
+- The PDF header is your name and ONE line under it: location | work authorization | links |
+  email | phone. A field you leave empty leaves no gap. A line too long for the page is set
+  in slightly smaller type first, and wraps only when that is not enough.
+- `github` and `linkedin` take just your id (`github.com/<id>`, `linkedin.com/in/<id>`); a
+  full address works too. `website` takes a site address. Each prints without `https://` or
+  `www.` and is a clickable link. A link named both here and in `links` prints once.
+- `work_authorization` prints in that line exactly as you wrote it. Leave the
+  key out and it starts from your profile's sponsorship answer; set it to `""` to leave it out.
 - What prints is decided in this order: what you edit in the form, then the file, then the
   profile's sponsorship answer.
 - Scout only reads the file, and only to fill the form or make a PDF with

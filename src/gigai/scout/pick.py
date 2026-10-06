@@ -8,7 +8,7 @@ calls a model.  Pure except the page measurement (the shipped template at the
 selector's spacing, ``tailor_master.measure_pages``).
 
 WHAT IS REUSED, AND WHAT IS NEW.  The tree already holds a selector and a fit
-(0.1.10.9 master P2/P4, ``sel-4``), and this module adds no second one:
+(0.1.10.9 master P2/P4, ``sel-4``; ``sel-5`` keeps room for the PDF's header), and this module adds no second one:
 
 - the code selector (``master_selection.select``): the requirement rows of an
   assessment as ``SelectionPosting.cited`` (a row's supporters are exactly the
@@ -102,7 +102,7 @@ from pathlib import Path
 from . import suggestions
 from . import tailor_master as tm
 from .find_jobs.assess_contracts import PICK_SECTIONS, AssessmentPick
-from .job_resume_port import ACTION_DRAFT
+from .job_resume_port import ACTION_DRAFT, ACTION_SHORTEN
 from .master_resume import KIND_BULLET, KIND_OTHER, KIND_SKILLS, KIND_SUMMARY, Master
 from .master_selection import (
     MAX_PAGES,
@@ -874,6 +874,8 @@ REFUSED_HELD = "resume_held"
 REFUSED_DRAFT_NOT_NEEDED = "draft_not_needed"
 REFUSED_UNMEASURED = "pages_unmeasured"
 REFUSED_FAILED = "pick_failed"
+REFUSED_NOTHING_TO_SHORTEN = "no_resume_to_shorten"
+REFUSED_SHORT_ALREADY = "resume_short_already"
 
 _REASSESS = "`gigai scout jobs assess URL --again` (a job assessed by its URL: `gigai scout assess --job-url URL`; one model call, on your yes)"
 MESSAGES: Mapping[str, str] = {
@@ -896,6 +898,8 @@ MESSAGES: Mapping[str, str] = {
         "The resume could not be picked: its pages could not be measured on this computer (the PDF renderer did not start). Nothing was "
         "changed. Try again; if it keeps happening, run `gigai doctor`."
     ),
+    REFUSED_NOTHING_TO_SHORTEN: "There is no resume stored for this job yet, so there is nothing to shorten. Pick one first: `gigai scout resume pick --job-url URL --refresh`.",
+    REFUSED_SHORT_ALREADY: "This resume already fits its pages with most of a page to spare, so nothing was left out. If its PDF runs long, look at the spacing you chose for it.",
     REFUSED_FAILED: f"The resume could not be picked for this job. Nothing was changed. Try again, or re-assess the job to get a new pick: {_REASSESS}.",
 }
 
@@ -946,7 +950,7 @@ def pick_inputs(home_root: Path, target: Path, *, stored: object, prior: Selecti
 
 def settle_and_store(
     home_root: Path, target: Path, assessment: object, *, job: object, inputs: PickInputs | None, now: str, fallback: str | None = None,
-    draft: bool = False, repick: bool = False, selection_error: str | None = None,
+    draft: bool = False, repick: bool = False, selection_error: str | None = None, measure: Measure | None = None,
 ) -> tuple[suggestions.SuggestionRecord, str | None]:
     """Settle one job's selection (with ``inputs``) and write the suggestion record and the job resume. No model call.
 
@@ -956,7 +960,8 @@ def settle_and_store(
     be made is RECORDED (``selection: null`` with its error code), never
     raised: the answer is ``(the record, the error code or None)``.  A resume
     the user changed is kept; the new selection then waits as ``proposed``
-    (``suggestions.store_assessed``).
+    (``suggestions.store_assessed``).  ``measure``: the page measure of a
+    tighter budget (``shorten_stored``); ``None``: the selector's own.
     """
 
     settled: Settled | None = None
@@ -964,7 +969,7 @@ def settle_and_store(
         try:
             settled = settle(
                 inputs.master, assessment, None, None, profile=inputs.profile, answers=inputs.answers, posting=inputs.posting, excludes=inputs.excludes,
-                fallback=fallback, draft=draft,
+                fallback=fallback, draft=draft, measure=measure,
             )
         except PickError as exc:
             selection_error = exc.code
@@ -1012,7 +1017,9 @@ def _stored_inputs(home_root: Path, target: Path, assessment: object) -> PickInp
     return pick_inputs(home_root, target, stored=stored, prior=prior, profile=profile, resume=resume, job=assessment.job)  # type: ignore[attr-defined]
 
 
-def settle_stored(home_root: Path, target: Path, profile_id: str | None, job_identity: str, *, action: str, now: str) -> suggestions.SuggestionRecord:
+def settle_stored(
+    home_root: Path, target: Path, profile_id: str | None, job_identity: str, *, action: str, now: str, measure: Measure | None = None,
+) -> suggestions.SuggestionRecord:
     """Pick a STORED job's resume again (``action``: refresh) or make its draft (draft), and write the record. No model call.
 
     The stored assessment's pick is settled against the master AS IT IS NOW.
@@ -1021,7 +1028,8 @@ def settle_stored(home_root: Path, target: Path, profile_id: str | None, job_ide
     holds, picked by the code selector and marked as a draft.  A stored job
     resume that is the user's is kept: the new selection waits as
     ``proposed``.  A job with no suggestion record yet (its assessment could
-    not write one) gets it here.
+    not write one) gets it here.  ``measure``: a tighter page budget
+    (``shorten_stored``, which is this with ``action`` shorten).
 
     Raises ``PickError`` with a plain message (:data:`MESSAGES`):
     ``assessment_missing``, ``no_master``, ``profile_resume_in_use``,
@@ -1031,10 +1039,15 @@ def settle_stored(home_root: Path, target: Path, profile_id: str | None, job_ide
     rule (``job_actions.pick_action`` refuses a refresh then).
     """
 
+    return _settle_stored(Path(home_root), Path(target), profile_id, job_identity, action=action, now=now, measure=measure)[0]
+
+
+def _settle_stored(
+    home_root: Path, target: Path, profile_id: str | None, job_identity: str, *, action: str, now: str, measure: Measure | None,
+) -> tuple[suggestions.SuggestionRecord, PickInputs]:
     from .quick_assess import read_quick_assessment
     from .resume_gate import SUGGEST, gate
 
-    home_root, target = Path(home_root), Path(target)
     assessment = read_quick_assessment(home_root, target, profile_id, job_identity)
     if assessment is None:
         raise refusal(REFUSED_NO_ASSESSMENT)
@@ -1053,14 +1066,123 @@ def settle_stored(home_root: Path, target: Path, profile_id: str | None, job_ide
     try:
         record, error = settle_and_store(
             home_root, target, assessment, job=assessment.job, inputs=inputs, now=now, fallback=FALLBACK_DRAFT if drafting else None, draft=drafting,
-            repick=True,
+            repick=True, measure=measure,
         )
     except Exception as exc:  # noqa: BLE001 - whatever stopped the pick, the user is told in plain words what to do; the cause is in the log
         _logger.warning("a stored job's resume could not be picked", exc_info=True)
         raise refusal(REFUSED_FAILED) from exc
     if error is not None:
         raise refusal(error if error in MESSAGES else REFUSED_FAILED)
-    return record
+    return record, inputs
+
+
+# --- "Shorten automatically" (0.1.11.3 item 15) -------------------------------------------------------------------------
+#
+# When the PDF still does not fit its page limit (``resume_pdf.over_limit_note``) the user is not told to edit by hand:
+# the same pick is made again under a TIGHTER page budget, so the same fit drops the next lines of the SAME cut order
+# (3.2: a line no requirement rests on first; the last source of a met must-have and a pin only when nothing else can
+# go, and then it is a conflict and the answer says so).  No model call, and nothing of the PDF's header is read: the
+# budget is tightened in header lines (``resume_pdf.pages_at``'s ``header_lines``), the unit the estimate keeps room in.
+
+#: One shorten makes room for this many more lines than the stored resume needs to run past its pages.
+SHORTEN_STEP_LINES = 1
+#: A resume that still fits with this many header lines kept blank (most of a page) is not shortened (``resume_short_already``).
+_SHORTEN_MOST_LINES = 36
+_SHOWN_CHARS = 90
+
+
+@dataclass(frozen=True)
+class Shortened:
+    """What one shorten did: the record as stored, and what a person is told (``message``)."""
+
+    record: suggestions.SuggestionRecord
+    #: The text of each line the shorter resume leaves out, in the resume's order.
+    left_out: tuple[str, ...]
+    #: A line that backs a must-have requirement (or a pinned line) had to go: nothing else was left.
+    must_have_cut: bool
+    #: The stored resume is the user's and was kept; the shorter one waits as the new suggested resume.
+    waiting: bool
+
+    @property
+    def message(self) -> str:
+        if not self.left_out:
+            text = "Nothing more could be left out of this resume, so it is as it was."
+        else:
+            count = len(self.left_out)
+            text = f"Left out {count} line{'' if count == 1 else 's'}: " + "; ".join(f'"{line}"' for line in self.left_out) + "."
+            if self.must_have_cut:
+                text += " Nothing else was left to cut, so a line that backs a must-have requirement (or a line you pinned) was left out too."
+        if self.waiting:
+            return text + " The resume you edited was kept as it is; the shorter one is waiting as the new suggested resume."
+        return text + (" Generate the PDF again." if self.left_out else "")
+
+    def to_json(self) -> dict[str, object]:
+        return {"left_out": list(self.left_out), "must_have_cut": self.must_have_cut, "waiting": self.waiting, "message": self.message}
+
+
+def _tighter_measure(current: TailoredResume, max_pages: int) -> Measure:
+    """The page measure of the next tighter budget: room for ``SHORTEN_STEP_LINES`` more header lines than ``current`` can take."""
+
+    from .master_selection import FIT_SCALE
+    from .resume_pdf import HEADER_RESERVE_LINES, pages_at
+
+    try:
+        over = next((count for count in range(HEADER_RESERVE_LINES, _SHORTEN_MOST_LINES) if pages_at(current, FIT_SCALE, header_lines=count) > max_pages), None)
+    except Exception as exc:  # noqa: BLE001 - no renderer (Typst missing or failing): nothing is measured, nothing is changed
+        raise refusal(REFUSED_UNMEASURED) from exc
+    if over is None:
+        raise refusal(REFUSED_SHORT_ALREADY)
+    lines = over + SHORTEN_STEP_LINES
+
+    def measure(result: TailoredResume) -> int | None:
+        try:
+            return pages_at(result, FIT_SCALE, header_lines=lines)
+        except Exception:  # noqa: BLE001 - as ``tailor_master.measure_pages``: the length is flagged, never guessed
+            return None
+
+    return measure
+
+
+def shorten_stored(home_root: Path, target: Path, profile_id: str | None, job_identity: str, *, now: str) -> Shortened:
+    """Make a STORED job's resume shorter (the text above) and write the record. No model call.
+
+    Raises ``PickError`` as ``settle_stored`` does, ``no_resume_to_shorten`` for a job with no stored resume and
+    ``resume_short_already`` for one that fits its pages with most of a page to spare."""
+
+    from .tailored_resume import read_tailored_resume, tailored_resume_path
+
+    home_root, target = Path(home_root), Path(target)
+    stored = read_tailored_resume(tailored_resume_path(home_root, target, profile_id, job_identity))
+    if stored is None:
+        raise refusal(REFUSED_NOTHING_TO_SHORTEN)
+    length = getattr(stored.result, "length", None)
+    max_pages = length.max_pages if length is not None else MAX_PAGES
+    before = _printed(stored.result)
+    previous = suggestions.read_suggestions(home_root, target, profile_id, job_identity)
+    record, inputs = _settle_stored(
+        home_root, target, profile_id, job_identity, action=ACTION_SHORTEN, now=now, measure=_tighter_measure(stored.result, max_pages),
+    )
+    waiting = record.proposed is not None and (previous is None or record.proposed != previous.proposed)
+    made = record.proposed if waiting else record.selection
+    after = set(suggestions.recorded_marks(made))
+    protected = {CONFLICT_EVIDENCE, CONFLICT_PIN}
+
+    def conflicts(selection: Mapping[str, object] | None) -> set[tuple[object, ...]]:
+        found = (selection or {}).get("conflicts")
+        return {
+            (item.get("code"), item.get("requirement"), *item.get("ids", ()))
+            for item in (found if type(found) is list else ()) if type(item) is dict and item.get("code") in protected
+        }
+
+    def shown(item_id: str) -> str:
+        item = inputs.master.items.get(item_id)
+        text = " ".join(item.text.split()) if item is not None else "a line that is no longer in your master resume"
+        return text if len(text) <= _SHOWN_CHARS else text[: _SHOWN_CHARS - 3].rstrip() + "..."
+
+    return Shortened(
+        record=record, left_out=tuple(shown(item_id) for item_id in before if item_id not in after),
+        must_have_cut=bool(conflicts(made) - conflicts(previous.selection if previous is not None else None)), waiting=waiting,
+    )
 
 
 # --- the checks a selection is judged on (3.5) --------------------------------------------------------------------
@@ -1164,8 +1286,10 @@ __all__ = [
     "REFUSED_HELD",
     "REFUSED_NO_ASSESSMENT",
     "REFUSED_NO_MASTER",
+    "REFUSED_NOTHING_TO_SHORTEN",
     "REFUSED_NO_PROFILE",
     "REFUSED_PROFILE_RESUME",
+    "REFUSED_SHORT_ALREADY",
     "REFUSED_UNMEASURED",
     "Added",
     "Checks",
@@ -1173,7 +1297,9 @@ __all__ = [
     "PickError",
     "PickInputs",
     "Problem",
+    "SHORTEN_STEP_LINES",
     "Settled",
+    "Shortened",
     "Validated",
     "checks",
     "pick_inputs",
@@ -1181,6 +1307,7 @@ __all__ = [
     "settle",
     "settle_and_store",
     "settle_stored",
+    "shorten_stored",
     "validate_pick",
     "worse",
 ]

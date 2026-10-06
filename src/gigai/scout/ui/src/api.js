@@ -555,7 +555,8 @@ export function putTailoredResumeSelection({ profileId, jobIdentity, updatedAt, 
 //        404 suggestions_not_found for a job assessed before 0.1.11 (it has no record): the page asks only for a job
 //        whose stored assessment carries a `resume_gate` (`expect`), so a legacy job asks nothing
 //   POST /api/jobs/suggestions {job_url, profile_id, action: "resolve" | "dismiss" | "add", suggestion_id, how, ...}
-//   POST /api/job-resumes/pick {job_url, profile_id, action: "refresh" | "draft" | "use_proposed" | "dismiss_proposed"}
+//   POST /api/job-resumes/pick {job_url, profile_id, action: "refresh" | "draft" | "shorten" | "use_proposed" | "dismiss_proposed"}
+//        ("shorten", 0.1.11.3 item 15: the answer also holds `shortened.message`, the sentence about what was left out)
 //        ALWAYS needs an action, and every action is a step: there is no read-only form. The answer is the job's stored
 //        view after it: {gate, stale: [...], resume, picked, conflicts, proposed, selection_error}. No model call
 //   GET  /api/jobs/brief?url=&part=yours|posting&profile_id=   the agent's brief, two parts, never one response

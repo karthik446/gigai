@@ -429,18 +429,22 @@ def _pick_lines(view: dict[str, object]) -> list[str]:
 @_PROFILE
 @click.option("--refresh", "refresh", is_flag=True, help="Pick again from the stored assessment against your master as it is now. No model call.")
 @click.option("--draft", "draft", is_flag=True, help="Make a draft for a job whose gate holds (an open must-have question, a gap, not a match). No model call.")
+@click.option("--shorten", "shorten", is_flag=True, help="Make the stored resume shorter when its PDF does not fit its pages: the weakest lines go first, and the output says which. No model call.")
 @click.option("--use-proposed", "use_proposed", is_flag=True, help="Replace the stored job resume with the new suggested one that is waiting.")
 @click.option("--dismiss-proposed", "dismiss_proposed", is_flag=True, help="Drop the new suggested resume that is waiting; the stored one stays.")
 @_options
 def resume_pick_command(
-    job_url: str, profile_id: str | None, refresh: bool, draft: bool, use_proposed: bool, dismiss_proposed: bool,
+    job_url: str, profile_id: str | None, refresh: bool, draft: bool, shorten: bool, use_proposed: bool, dismiss_proposed: bool,
     target_value: Path | None, home_value: Path | None, as_json: bool,
 ) -> None:
     """The resume picked for ONE job, as it is stored: who picked it, the gate, what is stale. No model call.
 
     Without a flag nothing is recomputed and nothing is written. --refresh
     picks again in code (refused while the assessment is old: re-assess
-    instead); --draft makes a draft for a held job; --use-proposed takes the
+    instead); --draft makes a draft for a held job; --shorten leaves out the
+    next weakest lines when the PDF does not fit its pages (a line that backs
+    a must-have requirement only when nothing else is left, and it says so)
+    and prints what it left out; --use-proposed takes the
     new suggested resume that waits beside a resume you edited, and
     --dismiss-proposed drops it. A resume you edited is never replaced by
     anything but --use-proposed.
@@ -449,11 +453,12 @@ def resume_pick_command(
     from . import job_actions
 
     chosen = [name for name, given in (
-        (job_actions.ACTION_REFRESH, refresh), (job_actions.ACTION_DRAFT, draft), (job_actions.ACTION_USE_PROPOSED, use_proposed),
+        (job_actions.ACTION_REFRESH, refresh), (job_actions.ACTION_DRAFT, draft), (job_actions.ACTION_SHORTEN, shorten),
+        (job_actions.ACTION_USE_PROPOSED, use_proposed),
         (job_actions.ACTION_DISMISS_PROPOSED, dismiss_proposed),
     ) if given]
     if len(chosen) > 1:
-        _fail(ValueError("pass at most one of --refresh, --draft, --use-proposed, --dismiss-proposed"), as_json=as_json, fallback="invalid_value")
+        _fail(ValueError("pass at most one of --refresh, --draft, --shorten, --use-proposed, --dismiss-proposed"), as_json=as_json, fallback="invalid_value")
         return
     home_root = home_value or default_home_root()
     try:
@@ -469,7 +474,8 @@ def resume_pick_command(
     if as_json:
         _emit({"ok": True, **view})
         return
-    click.echo("\n".join(_pick_lines(view)))
+    shortened = view.get("shortened")
+    click.echo("\n".join([*([str(shortened["message"])] if isinstance(shortened, dict) else []), *_pick_lines(view)]))
 
 
 # --- suggestions ---------------------------------------------------------------------------------------------------

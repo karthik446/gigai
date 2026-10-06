@@ -7,7 +7,7 @@ postings) and nothing calls a model: the one model-shaped thing, a stored assess
 made with the scripted test transport. Every CLI test runs against a temp ``--home``.
 
 The golden cases pin ``today`` to 2026-10-03 (which roles are "old" depends on the year); what they
-expect is ``selection-golden.json``, written for ``SELECTOR_VERSION`` ``sel-4`` (0110-10-15: requirement
+expect is ``selection-golden.json``, written for ``SELECTOR_VERSION`` ``sel-5`` (0110-10-15: requirement
 coverage, then evidence strength, then pins, recency only as the tie-break; the Skills section kept whole;
 a role or project the posting's title names keeps its best line).
 The labelled eval of that rule is ``tests/evals/run_pick_eval.py`` (``test_pick_eval.py``).
@@ -536,7 +536,7 @@ def test_a_line_the_assessment_cites_is_kept_whatever_words_it_shares_and_report
     # that shares none with "Kubernetes in production": each is the only evidence of its row.
     cited = (_cited("r1", "Kubernetes in production.", "b-old-2"), _cited("r2", "On-call experience.", "b-new-3"))
     assessed = ms.select(small, profile, ms.SelectionPosting("Staff Engineer", text, cited=cited), today=TODAY, measure=tight, fill=False)
-    assert assessed.selector_version == "sel-4" and assessed.fits and assessed.conflicts == ()
+    assert assessed.selector_version == "sel-5" and assessed.fits and assessed.conflicts == ()
     # The requirements ARE the assessment's rows, each supported by exactly the line it cites: the posting's two lines
     # and its Kubernetes keyword are not matched by words at all, so no other line is "the evidence" in their place.
     assert [(requirement.id, requirement.cited, requirement.supporters) for requirement in assessed.requirements] == [("r1", True, ("b-old-2",)), ("r2", True, ("b-new-3",))]
@@ -985,7 +985,7 @@ def test_selection_show_for_a_job_lists_picked_and_left_out_with_reasons(tmp_pat
     out = _show(home, *_AI, "--job-text", str(posting), "--title", title, "--company", company)
 
     selection = out["selection"]
-    assert out["ok"] is True and selection["selector_version"] == "sel-4"
+    assert out["ok"] is True and selection["selector_version"] == "sel-5"
     assert selection["fits"] is True and selection["pages"] == 2 and selection["pages_before_fit"] > 2 and selection["max_pages"] == 2
     assert render_markdown_pdf(selection["markdown"], None, timestamp=STAMP).pages == 2
     assert selection["master"]["revision"] == 1 and selection["master"]["content_sha256"].startswith("sha256:")
@@ -1014,7 +1014,7 @@ def test_selection_show_for_a_job_lists_picked_and_left_out_with_reasons(tmp_pat
     ])
     assert plain.exit_code == 0, plain.output
     assert plain.output.startswith(f"Selection for {title} at {company}, profile Staff AI Engineer: 2 pages (")
-    assert "Picked " in plain.output and "left out " in plain.output and "Selector sel-4, master revision 1." in plain.output
+    assert "Picked " in plain.output and "left out " in plain.output and "Selector sel-5, master revision 1." in plain.output
     assert "    + sum-ai  Staff engineer with 16 years" in plain.output
     assert "    - sum-backend  " in plain.output and "another summary fits this posting better" in plain.output
     assert "r-tes  Tessel Robotics" in plain.output and ": not shown" in plain.output

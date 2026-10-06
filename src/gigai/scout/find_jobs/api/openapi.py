@@ -155,8 +155,9 @@ _IDENTITY_KEY: dict[str, object] = {"profile_id": "prof_1", "job_identity": _JOB
 _HEADER_PARAM = _b(
     "header", "object",
     "The Generate PDF form: {name, email, phone, location, linkedin, link, work_authorization}, each an optional string of at most 200 characters. "
-    "work_authorization (e.g. `H-1B, requires sponsorship`) prints as its own header line. "
-    "Optional links: at most 6 more links, each {label, url}; the url prints in the contact line. "
+    "The header is the name and ONE contact line: location | work_authorization (e.g. `VISA: H1B`, as written) | the links | email | phone; "
+    "an empty field leaves no separator, and a line too long for the page is set smaller before it wraps. "
+    "Optional links: at most 6 more links, each {label, url}; a link prints without `https://` or `www.` and its target is the full URL. "
     "Fills this one PDF's header; never stored, logged or returned. Left out: the PDF has no header. "
     "Details an agent sends here went through that agent and its model provider; the default for an agent is the headerless PDF "
     "and the person finishing it in Scout.",
@@ -1187,7 +1188,7 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
             "gate": {"decision": "suggest", "ready": True, "reasons": []}, "counts": {"open": 1, "done": 0, "dismissed": 0},
             "verdict": "matched_above_threshold", "basis": "master", "master_stored": True, "stale": ["master_newer"],
             "picked": {"picked_by": "model", "fallback": None, "draft": False, "made_at": "2026-10-05T10:05:00Z", "pages": 2, "max_pages": 2,
-                       "pick_rules_version": "pick-rules:1", "selector_version": "sel-4"},
+                       "pick_rules_version": "pick-rules:1", "selector_version": "sel-5"},
             "problems": [], "added_by_code": [], "conflicts": [], "selection_error": None, "proposed": None, "selected_lines": ["b-8aef71"],
             "requirements": [{"id": "req-77b0aa", "class": "hard", "status": "met", "sources": ["b-8aef71"], "in_resume": ["b-8aef71"], "coverage": "kept"}],
             "suggestions": [{
@@ -1259,7 +1260,7 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
         ),
     ),
     RouteSpec(
-        "POST", "/api/job-resumes/pick", "Take one explicit step on a job's resume: pick again, make a draft, or take or drop the proposed one.", "write", "none",
+        "POST", "/api/job-resumes/pick", "Take one explicit step on a job's resume: pick again, make a draft, shorten it, or take or drop the proposed one.", "write", "none",
         {
             "schema_version": "scout-job-resume-pick:1", "action": "refresh", "job_identity": _JOB_URL, "profile_id": "prof_1", "verdict": "matched_above_threshold",
             "gate": {"decision": "suggest", "ready": True, "reasons": []}, "basis": "master", "master_stored": True, "stale": [],
@@ -1268,27 +1269,33 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
                 "counts": {"picked": 28, "left_out": 30, "cut_for_length": 3}, "folder_path": "~/Documents/GigAI/resumes/acme-software-engineer-2026-10-05.md",
                 "markdown": "## Summary\n\n- ...",
             },
-            "picked": {"picked_by": "model", "fallback": None, "draft": False, "made_at": "2026-10-05T10:07:00Z", "pages": 2, "max_pages": 2, "pick_rules_version": "pick-rules:1", "selector_version": "sel-4"},
+            "picked": {"picked_by": "model", "fallback": None, "draft": False, "made_at": "2026-10-05T10:07:00Z", "pages": 2, "max_pages": 2, "pick_rules_version": "pick-rules:1", "selector_version": "sel-5"},
             "problems": [], "added_by_code": [], "conflicts": [], "selection_error": None, "proposed": None,
         },
         schema_version="scout-job-resume-pick:1",
         params=(
             _b("job_url", "string", "The posting's link: the ONE job.", required=True),
-            _b("action", "string", "The step.", required=True, enum=("refresh", "draft", "use_proposed", "dismiss_proposed")),
+            _b("action", "string", "The step.", required=True, enum=("refresh", "draft", "shorten", "use_proposed", "dismiss_proposed")),
             _b("profile_id", "string", "The profile. Default: the profile whose assessment of the job is newest."),
         ),
         request_example={"job_url": _JOB_URL, "action": "refresh"},
         errors=(
             _UNKNOWN_KEY, _WRONG_TYPE, _INVALID, (404, "assessment_missing"), (404, "no_proposed_resume"), (409, "assessment_stale"), (409, "draft_not_needed"),
             (409, "pages_unmeasured"), (409, "no_master"), (409, "profile_resume_in_use"), (409, "resume_held"), (409, "pick_failed"),
-            (404, "profile_not_found"), _NO_TARGET, (501, "pick_not_available"),
+            (409, "no_resume_to_shorten"), (409, "resume_short_already"), (404, "profile_not_found"), _NO_TARGET, (501, "pick_not_available"),
         ),
         description=(
             "No model call in any form. `refresh` picks again in code from the STORED assessment against the master as it is now; while that "
             "assessment is stale it answers 409 assessment_stale (a new selection never sits beside scores made on other evidence: re-assess with "
-            "POST /api/assess). `draft` makes a draft for a job whose gate holds (409 draft_not_needed when a resume is suggested already). A stored "
+            "POST /api/assess). `draft` makes a draft for a job whose gate holds (409 draft_not_needed when a resume is suggested already). `shorten` "
+            "is for a resume whose PDF does not fit its pages (the `X-GigAI-Fit-Note` of POST /api/tailored-resumes/pdf): the same pick is made again "
+            "with less room, so the next weakest lines are left out in the pick's own cut order (a line that backs a must-have requirement, or a "
+            "pinned line, only when nothing else is left); the answer then also holds `shortened`: `{left_out: [the text of each line left out], "
+            "must_have_cut, waiting, message}`, where `message` is the sentence for the user (\"Left out 2 lines: ...\"). It is not refused for a "
+            "stale assessment; a job with no stored resume is 409 no_resume_to_shorten, and a resume that fits its pages with most of a page to spare "
+            "is 409 resume_short_already. A stored "
             "resume that is the user's (edited, attached, a line choice, or made by the 0.1.10 tailoring; `resume.replaceable` false) is never "
-            "replaced by either: the new selection waits as `proposed`, `use_proposed` is the one step that replaces the job resume and "
+            "replaced by any of them: the new selection waits as `proposed`, `use_proposed` is the one step that replaces the job resume and "
             "`dismiss_proposed` drops the proposal (404 no_proposed_resume when none waits). The answer is what is stored after the step: the job "
             "resume (`made_by` is its producer, `counts` its Picked / Left out), who picked it (`picked`), what validation found (`problems`) and "
             "code added (`added_by_code`), the `gate`, the `stale` list (`assessment_stale:<reason>`, picked_line_changed, master_newer, "
@@ -1737,7 +1744,9 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
             "NOT for agents: it answers only Scout's own browser page (a request carrying this server's own Origin); any other caller gets 403 "
             "forbidden_origin and the file is not opened. An agent never needs it: it renders the PDF without a header and the person finishes it. "
             "The person may keep their name and contact details in a JSON file they own, `~/Documents/GigAI/header.json` (a GigAI home other than "
-            "`~/.gigai`: `<home>/header.json`): {name, email, phone, location, links: [{label, url}], work_authorization}, every field optional. "
+            "`~/.gigai`: `<home>/header.json`): {name, email, phone, location, github, linkedin, website, links: [{label, url}], work_authorization}, every field "
+            "optional. `github` and `linkedin` take just the id (a full address is read as the id) and `website` a site address; in `values` they "
+            "are already links (`linkedin`: `linkedin.com/in/<id>`; `links` rows labelled GitHub and Website), and a link named twice is there once. "
             "GigAI only reads it, here (to fill the Generate PDF form, where the person edits the values before generating) and in "
             "`gigai scout resume pdf --out FILE`; it is never copied into the store, the journal, a log, a record, a suggestion, a brief, the "
             "resumes folder or a model prompt, and no other route returns it. `state` is filled, missing or invalid; `message` is one plain "

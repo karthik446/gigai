@@ -357,7 +357,7 @@ def test_the_stored_tailoring_says_what_was_picked_what_was_left_out_and_why(hom
     master = home.master()
 
     selection = on_disk["selection"]
-    assert (selection["picked_by"], selection["fallback"], selection["selector_version"]) == ("model", None, "sel-4")
+    assert (selection["picked_by"], selection["fallback"], selection["selector_version"]) == ("model", None, "sel-5")
     picked = [line["id"] for line in selection["picked"]]
     left = [line["id"] for line in selection["left_out"]]
     # Picked is exactly what the resume shows; with Left out it is every line of the master, each once.

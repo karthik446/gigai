@@ -149,9 +149,10 @@ def test_a_tailoring_over_two_pages_fits_two_pages_by_leaving_out_its_oldest_rol
         "**Senior Software Engineer — Quillfeather Media** (2017–2019)",
         "**Software Engineer — Ostrava Health** (2015–2017)",
         "**Software Engineer — Pinecrest Travel** (2013–2015)",
-        "**Software Engineer — Harrow Analytics** (2011–2013)",
     ]
-    assert "Bellweather Retail" not in response.markdown and "Dunmore Telecom" not in response.markdown
+    # 0.1.11.3 item 15: the length rule keeps room for the PDF's header (the contact line, and one wrap of it), so
+    # the third-oldest role goes too: the PDF with the name and contact line on it is still 2 pages.
+    assert all(gone not in response.markdown for gone in ("Harrow Analytics", "Bellweather Retail", "Dunmore Telecom"))
     # Nothing else was cut for length: the three recent roles keep every bullet, and no other section lost a line.
     assert [len(entry["bullets"]) for entry in _section(on_disk, "experience")["entries"]][:3] == [10, 10, 10]
     assert len(_section(on_disk, "skills")["lines"]) == 3 and len(_section(on_disk, "education")["entries"]) == 1
@@ -218,8 +219,9 @@ def test_what_was_left_out_for_length_is_recorded_whole_and_one_restore_puts_it_
     fx, response, on_disk = _tailor(tmp_path, monkeypatch, "over_long")
     length = on_disk["result"]["length"]
     assert (length["status"], length["max_pages"], length["pages"], length["full_pages"]) == ("cut", 2, 2, 3)
-    # Per role: the two cut roles, with their place among the roles, and the bullets the old roles left out.
+    # Per role: the three cut roles, with their place among the roles, and the bullets the old roles left out.
     assert [(role["position"], role["role"]) for role in length["cut"]] == [
+        (5, "Software Engineer — Harrow Analytics (2011–2013)"),
         (6, "Junior Developer — Bellweather Retail (2009–2011)"),
         (7, "Junior Developer — Dunmore Telecom (2007–2009)"),
     ]
@@ -273,7 +275,7 @@ def test_the_cli_shows_what_was_cut_and_restores_it(tmp_path: Path, monkeypatch:
 
     shown = CliRunner().invoke(cli, base)
     assert shown.exit_code == 0, shown.output
-    assert "Cut for length (3 pages -> 2): Junior Developer — Bellweather Retail (2009–2011); Junior Developer — Dunmore Telecom (2007–2009); 15 older bullets" in shown.output
+    assert "Cut for length (3 pages -> 2): Software Engineer — Harrow Analytics (2011–2013); Junior Developer — Bellweather Retail (2009–2011); Junior Developer — Dunmore Telecom (2007–2009); 15 older bullets" in shown.output
     assert "--restore" in shown.output
     assert _stored(fx).result == response.result  # showing writes nothing
 

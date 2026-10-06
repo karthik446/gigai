@@ -33,7 +33,12 @@ function saveBlob(blob, fileName) {
 // <path>", every field still editable. What is in the form when the button is
 // pressed is what prints: form edits > the file > the profile's answer. The
 // file is only read; a missing or unusable one is one plain line here.
-export default function GeneratePdfForm({ render, disabled = false, visaRequired = false }) {
+//
+// 0.1.11.3 item 15: when the server says the PDF does not fit its pages
+// (`note`) and the caller gives `shorten` (a stored job's resume), the note
+// has one button, "Shorten automatically". `shorten()` answers the server's
+// own sentence about what was left out; the person then generates again.
+export default function GeneratePdfForm({ render, disabled = false, visaRequired = false, shorten = null }) {
   const [values, setValues] = useState(() => startValues({ visaRequired }));
   const [source, setSource] = useState(null);
   const touched = useRef(false);
@@ -41,6 +46,9 @@ export default function GeneratePdfForm({ render, disabled = false, visaRequired
   const [error, setError] = useState(null);
   const [savedAs, setSavedAs] = useState(null);
   const [note, setNote] = useState(null);
+  const [shortening, setShortening] = useState(false);
+  const [shortened, setShortened] = useState(null);
+  const [shortenError, setShortenError] = useState(null);
 
   useEffect(() => {
     let live = true;
@@ -78,6 +86,8 @@ export default function GeneratePdfForm({ render, disabled = false, visaRequired
     setError(null);
     setSavedAs(null);
     setNote(null);
+    setShortened(null);
+    setShortenError(null);
     try {
       const { blob, fileName, note: fitNote } = await render(headerBody(values));
       saveBlob(blob, fileName);
@@ -87,6 +97,20 @@ export default function GeneratePdfForm({ render, disabled = false, visaRequired
       setError(err.detail || err.message || String(err));
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function shortenNow() {
+    setShortening(true);
+    setShortenError(null);
+    try {
+      setShortened(await shorten());
+      setNote(null);
+      setSavedAs(null);
+    } catch (err) {
+      setShortenError(err.message || String(err));
+    } finally {
+      setShortening(false);
     }
   }
 
@@ -180,6 +204,24 @@ export default function GeneratePdfForm({ render, disabled = false, visaRequired
       {note && (
         <div className="callout warn" role="status" data-role="pdf-fit-note">
           {note}
+          {shorten && (
+            <>
+              {" "}
+              <button type="button" className="button small" disabled={shortening || busy} data-action="shorten-resume" onClick={shortenNow}>
+                {shortening ? "Shortening…" : "Shorten automatically"}
+              </button>
+            </>
+          )}
+        </div>
+      )}
+      {shortenError && (
+        <div className="callout danger" role="alert" data-role="pdf-shorten-error">
+          The resume was not shortened. {shortenError}
+        </div>
+      )}
+      {shortened && (
+        <div className="callout" role="status" data-role="pdf-shortened">
+          {shortened}
         </div>
       )}
       <div className="actions">

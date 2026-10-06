@@ -807,7 +807,16 @@ const PICK_ERRORS = {
   resume_held: "No resume is suggested for this job yet: a must-have requirement is waiting for your answer or is not met. Answer its questions, or make a draft.",
   draft_not_needed: "A resume is suggested for this job already. Pick it instead of making a draft.",
   no_proposed_resume: "No new suggested resume is waiting for this job.",
+  // 0.1.11.3 item 15: "Shorten automatically" (the Generate PDF form).
+  no_resume_to_shorten: "There is no resume stored for this job yet, so there is nothing to shorten. Pick one first.",
+  resume_short_already: "This resume already fits its pages with most of a page to spare, so nothing was left out.",
 };
+
+// "Shorten automatically": the server's own sentence about what the shorter resume leaves out (it holds the lines'
+// text and no command); a refusal is said in this page's words, by its code, like every refused pick.
+export function shortenedText(view) {
+  return (view && view.shortened && text(view.shortened.message)) || "The resume was shortened. Generate the PDF again.";
+}
 
 // One sentence for a refused or failed POST /api/job-resumes/pick. A request that never reached the server says so.
 export function pickErrorText(err) {

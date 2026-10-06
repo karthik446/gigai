@@ -2,8 +2,8 @@
 
 A synthetic home with a resume and a master (so ``master.md`` is in the resumes folder), one stored job resume, then:
 
-1. ``POST /api/tailored-resumes/pdf`` with the form's ``header`` and ``work_authorization``: the line prints as its own
-   header line, after the contact line; the response carries it nowhere but the PDF bytes;
+1. ``POST /api/tailored-resumes/pdf`` with the form's ``header`` and ``work_authorization``: it prints in the header's
+   ONE contact line, after the location (0.1.11.3 item 15); the response carries it nowhere but the PDF bytes;
 2. the same form WITHOUT the line (left out, and empty): no line;
 3. no ``header`` (an agent's PDF) and ``gigai scout resume pdf`` (the CLI's, saved to the resumes folder): no line;
 4. ``POST /api/resume/pdf`` (markdown) takes the same field; a two-line or over-long value is a 422 that echoes nothing.
@@ -31,7 +31,8 @@ from tests.api_e2e.harness import resolve_workpad_path, setup_and_init, start_se
 MARK = "ZQ-7731"
 LINE = f"H-1B, requires sponsorship ({MARK})"
 FORM = {"name": "Zora Quillfeather", "email": "zora.q@example.invalid", "phone": "555-0142-ZQ", "location": "Quillshire, ZZ", "linkedin": "", "link": ""}
-CONTACT = "zora.q@example.invalid | 555-0142-ZQ | Quillshire, ZZ"
+CONTACT = "Quillshire, ZZ | zora.q@example.invalid | 555-0142-ZQ"
+WITH_LINE = f"Quillshire, ZZ | {LINE} | zora.q@example.invalid | 555-0142-ZQ"
 RESUME = (
     "## Experience\n"
     "### Northwind Health\n"
@@ -72,11 +73,11 @@ def test_the_work_authorization_line_prints_in_the_pdf_header_and_is_stored_nowh
         assert tailored.status_code == 200, tailored.text
         key = {"profile_id": tailored.json()["resume"]["profile_id"], "job_identity": tailored.json()["job"]["job_identity"]}
 
-        # 1. with the line: its own header line, after the contact line; nothing of it in the response's headers.
+        # 1. with the line: in the ONE contact line, after the location; nothing of it in the response's headers.
         with_line = client.post("/api/tailored-resumes/pdf", json={**key, "header": {**FORM, "work_authorization": LINE}})
         assert with_line.status_code == 200 and with_line.content.startswith(b"%PDF"), with_line.text
         text = _text(with_line.content)
-        assert text.split("\n")[:3] == ["ZORA QUILLFEATHER", CONTACT, LINE], text[:300]
+        assert text.split("\n")[:2] == ["ZORA QUILLFEATHER", WITH_LINE], text[:300]
         assert text.count(LINE) == 1, "the line prints once, in the header only"
         assert MARK not in "\n".join(f"{name}: {value}" for name, value in with_line.headers.items())
 
@@ -86,8 +87,8 @@ def test_the_work_authorization_line_prints_in_the_pdf_header_and_is_stored_nowh
             assert plain.status_code == 200, plain.text
             body = _text(plain.content)
             assert body.split("\n")[:2] == ["ZORA QUILLFEATHER", CONTACT] and "sponsorship" not in body.lower() and MARK not in body
-            assert body.split("\n")[2:] == text.split("\n")[3:], "the rest of the PDF is the same"
-            assert _pages(plain.content) == _pages(with_line.content), "the extra header line does not add a page here"
+            assert body.split("\n")[2:] == text.split("\n")[2:], "the rest of the PDF is the same"
+            assert _pages(plain.content) == _pages(with_line.content), "the work authorization does not add a page"
 
         # 3. an agent's PDF (no form) has no header at all.
         agent = client.post("/api/tailored-resumes/pdf", json=key)
@@ -96,7 +97,7 @@ def test_the_work_authorization_line_prints_in_the_pdf_header_and_is_stored_nowh
         # 4. the markdown route takes the same field; a bad value is refused without being echoed.
         markdown = client.post("/api/resume/pdf", json={"markdown": RESUME, "header": {**FORM, "work_authorization": LINE}})
         assert markdown.status_code == 200, markdown.text
-        assert _text(markdown.content).split("\n")[:3] == ["ZORA QUILLFEATHER", CONTACT, LINE]
+        assert _text(markdown.content).split("\n")[:2] == ["ZORA QUILLFEATHER", WITH_LINE]
         for bad in (LINE + "\nand a second line", LINE + "x" * 200):
             refused = client.post("/api/tailored-resumes/pdf", json={**key, "header": {**FORM, "work_authorization": bad}})
             assert refused.status_code == 422 and MARK not in refused.text and "header.work_authorization" in refused.text, refused.text

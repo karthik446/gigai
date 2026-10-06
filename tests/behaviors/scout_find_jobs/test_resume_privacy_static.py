@@ -123,6 +123,9 @@ _DISPLAY_IMPORTERS: dict[str, frozenset[str]] = {
         # tailor_master (0.1.10.9 master P4): asks the renderer for a page count only (pages_at, headerless) to fit a
         # tailoring of the master's lines to the page budget; no header form, no display settings.
         "gigai.scout.tailor_master",
+        # pick (0.1.11.3 item 15, "Shorten automatically"): asks the renderer for a page count only (pages_at, headerless,
+        # with more header lines kept blank: the tighter budget); no header form, no display settings, no header file.
+        "gigai.scout.pick",
     }),
 }
 
