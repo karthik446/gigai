@@ -380,7 +380,7 @@ _NEW_EXAMPLE: dict[str, object] = {
             "removed_at": None, "profile_id": "prof_1",
             "profiles": [{"profile_id": "prof_1", "match_rank": 1, "rank_score": 82, "state": "not_assessed"}],
             "state": "not_assessed", "tailored": False, "stale_reason": None, "stale_label": None, "sort_group": "not_assessed",
-            "score": 82, "score_kind": "rank", "score_text": "rank 82 · not assessed", "thin_posting": False, "fit": None, "rank_score": 82, "assessment": None,
+            "score": 82, "score_kind": "rank", "score_text": "rank 82 · not assessed", "thin_posting": False, "ranked_low": False, "fit": None, "rank_score": 82, "assessment": None,
             "assessment_detail": None, "needs_tailoring": None, "unmet": [], "minor_gaps": [], "minor_gap_text": None, "rows_not_shown": 0,
             "open_questions": [], "label": None, "ats_score": None,
             "tag_pending": False,

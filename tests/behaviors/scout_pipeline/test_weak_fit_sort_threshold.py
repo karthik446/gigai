@@ -285,7 +285,7 @@ def test_rows_come_by_fit_then_rank_then_newest_inside_a_group_and_each_says_its
     names = {url: name for name, url in jobs.items()}
     # Matched group: fit 67 everywhere, so the rank (60, 55, 52, 52), then the newest of the two at 52. The plain share
     # (50%) would have put the 67%-plain "nice_met" first, and the old order (rank first) too: it has rank 95.
-    expected = ["must_met", "same_fit_low_rank", "newer", "older", "nice_met", "not_assessed"]
+    expected = ["must_met", "same_fit_low_rank", "newer", "older", "not_assessed", "nice_met"]  # 0.1.11.2: nice_met is thin (3 rows), listed last
 
     listed, grid = _search(fx), _new(fx, peek=True, assess=False)
 
@@ -303,14 +303,14 @@ def test_rows_come_by_fit_then_rank_then_newest_inside_a_group_and_each_says_its
     # A needs-answers row never climbs above a matched one on its fit number: the verdict group comes first.
     assess_one(fx, jobs["not_assessed"], matrix_answer([("Hard A", "hard", "met"), ("Hard B", "hard", "met"), ("Hard C", "hard", "met"), ("Askable A", "askable", "unclear")], questions=1))
     again = _rows(_search(fx))
-    assert [names[str(row["job_identity"])] for row in again] == [*expected[:5], "not_assessed"]
-    assert (again[-1]["state"], again[-1]["fit"]) == ("needs_answers", 75)
+    assert [names[str(row["job_identity"])] for row in again] == [*expected[:4], "not_assessed", "nice_met"]  # the thin "nice_met" stays last
+    assert (again[-2]["state"], again[-2]["fit"]) == ("needs_answers", 75)
 
     # The SQL order ("the 10 that still need attention") is the same key.
     scout_new.mark_all_seen(fx.home_root, fx.target, now=NOW)
     nothing = _new(fx, peek=True, now=NOW.replace(hour=16))
     assert nothing["status"] == "nothing_new"
-    assert [names[str(row["job_identity"])] for row in _rows(nothing)] == [*expected[:5], "not_assessed"]
+    assert [names[str(row["job_identity"])] for row in _rows(nothing)] == [*expected[:4], "not_assessed", "nice_met"]
 
     # The terminal table of ``scout new`` says the fit number in its score column.
     text = CliRunner().invoke(cli, fx.cli("--peek", "--no-assess"))

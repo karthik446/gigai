@@ -284,8 +284,8 @@ def test_c_new_postings_are_asked_about_and_assessed_only_on_a_yes(tmp_path: Pat
     nothing = _cli(fx)
     assert nothing["status"] == "nothing_new" and nothing["question"] is None and nothing["counts"]["new"] == 0  # type: ignore[index]
     assert str(nothing["message"]).startswith("Nothing new since your last check (") and str(nothing["message"]).endswith("still need your attention:")
-    # The two assessed ones, then the unassessed 20-day-old one. 0.1.11.2: the assessed ones are thin (2 rows): no percent.
-    assert [(row["state"], row["thin_posting"], row["score"]) for row in _rows(nothing)] == [("matched", True, None)] * 2 + [("not_assessed", False, None)]
+    # The unassessed 20-day-old one, then the two assessed ones (0.1.11.2: thin postings are listed last). 0.1.11.2: the assessed ones are thin (2 rows): no percent.
+    assert [(row["state"], row["thin_posting"], row["score"]) for row in _rows(nothing)] == [("not_assessed", False, None)] + [("matched", True, None)] * 2
     assert fx.base.model.calls == calls + 2
     _assert_labels(nothing)
 
