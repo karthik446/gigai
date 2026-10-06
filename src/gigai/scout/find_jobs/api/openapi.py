@@ -119,7 +119,9 @@ _BASIS_NOTE = (
     "the evidence view of the master carries `resume_basis`: `{input: \"evidence\", master_revision_id, master_revision, "
     "selector_version}`. An assessment whose answer read fewer than three requirements from a posting of 1,200+ characters (after "
     "one retry) is stored as the model gave it and carries `requirements_note`: \"Only N requirements were read from this posting. "
-    "Open the posting to check.\" (omitted otherwise)."
+    "Open the posting to check.\" (omitted otherwise). A stored v9 assessment carries `checks` (0.1.11.4, omitted on older ones): "
+    "counts of what the code checks did, no text and no ids: `{settled_rows, settled_by_rule: {rule: n}, questions_dropped, "
+    "questions_capped, suggestions_dropped: {reason: n}, citations_cleaned: {action: n}}`."
 )
 
 

@@ -730,6 +730,61 @@ class ResumeBasis(_Contract):
 
 
 @dataclass(frozen=True)
+class AssessChecks(_Contract):
+    """0.1.11.4 OBS (additive): what the code checks did to one stored v9 assessment, counts and kinds only.
+
+    ``settled_rows`` / ``settled_by_rule``: ``unclear`` rows the master's own lines settled as ``met`` (A2,
+    ``stated_check``), by rule. ``questions_dropped``: the questions dropped with them. ``questions_capped``: questions
+    dropped past the list-item and must-have caps. ``suggestions_dropped``: structured suggestions the code check
+    dropped (A1), by reason. ``citations_cleaned``: evidence items that were not one verbatim line, by what the check
+    did. No requirement, master or resume text and no row id; the keys are rule/reason/action names from the code.
+    """
+
+    settled_rows: int = 0
+    settled_by_rule: tuple[tuple[str, int], ...] = ()
+    questions_dropped: int = 0
+    questions_capped: int = 0
+    suggestions_dropped: tuple[tuple[str, int], ...] = ()
+    citations_cleaned: tuple[tuple[str, int], ...] = ()
+
+    def to_json(self) -> dict[str, object]:
+        return {
+            "settled_rows": self.settled_rows,
+            "settled_by_rule": dict(self.settled_by_rule),
+            "questions_dropped": self.questions_dropped,
+            "questions_capped": self.questions_capped,
+            "suggestions_dropped": dict(self.suggestions_dropped),
+            "citations_cleaned": dict(self.citations_cleaned),
+        }
+
+    @classmethod
+    def from_json(cls, obj: object) -> "AssessChecks":
+        keys = (
+            "settled_rows", "settled_by_rule", "questions_dropped", "questions_capped",
+            "suggestions_dropped", "citations_cleaned",
+        )
+        value = _object(obj, keys, "checks")
+
+        def counts(name: str) -> tuple[tuple[str, int], ...]:
+            raw = value[name]
+            if type(raw) is not dict:
+                _fail("wrong_type", f"checks.{name} must be an object")
+            return tuple(
+                (_string(key, f"checks.{name} key"), _integer(count, f"checks.{name}.{key}", minimum=0))
+                for key, count in sorted(raw.items())
+            )
+
+        return cls(
+            settled_rows=_integer(value["settled_rows"], "checks.settled_rows", minimum=0),
+            settled_by_rule=counts("settled_by_rule"),
+            questions_dropped=_integer(value["questions_dropped"], "checks.questions_dropped", minimum=0),
+            questions_capped=_integer(value["questions_capped"], "checks.questions_capped", minimum=0),
+            suggestions_dropped=counts("suggestions_dropped"),
+            citations_cleaned=counts("citations_cleaned"),
+        )
+
+
+@dataclass(frozen=True)
 class VerdictHistoryEntry(_Contract):
     """Q4a (v0.1.9): one line of a quick assessment's verdict history.
 
@@ -871,6 +926,9 @@ class AssessResponse(_Contract):
     # these fields and for a target with no evaluated model; each is omitted from JSON then.
     model_asked: str | None = None
     model_fallback: bool = False
+    # 0.1.11.4 OBS (additive): counts of what the code checks settled or dropped (:class:`AssessChecks`); ``None`` for a
+    # file written before this field and for a non-v9 answer, omitted from JSON then.
+    checks: AssessChecks | None = None
 
     def __post_init__(self) -> None:
         if (
@@ -939,6 +997,8 @@ class AssessResponse(_Contract):
             value["model_asked"] = self.model_asked
         if self.model_fallback:
             value["model_fallback"] = True
+        if self.checks is not None:
+            value["checks"] = self.checks.to_json()
         return value
 
     @classmethod
@@ -952,7 +1012,7 @@ class AssessResponse(_Contract):
             (
                 "updated_at", "history", "posting_text", "rank_score", "rank_skip_reason", "origin",
                 "prompt_version", "constraints_digest", "story_bank", "profile_ref", "posting_sha256", "model", "resume_basis",
-                "requirements_ref", "resume_gate", "requirements_note", "model_asked", "model_fallback",
+                "requirements_ref", "resume_gate", "requirements_note", "model_asked", "model_fallback", "checks",
             ),
             "assess_response",
         )
@@ -1019,6 +1079,7 @@ class AssessResponse(_Contract):
             ),
             model_asked=_string(value["model_asked"], "assess_response.model_asked") if "model_asked" in value else None,
             model_fallback=_bool(value["model_fallback"], "assess_response.model_fallback") if "model_fallback" in value else False,
+            checks=AssessChecks.from_json(value["checks"]) if "checks" in value else None,
         )
 
 
