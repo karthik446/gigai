@@ -34,7 +34,7 @@ export function usesArea(workMode) {
 }
 
 // The saved work mode: the prefs' own, else find-jobs.json's `work_mode`,
-// else Any. An older file's `remote` flag alone says nothing: the old
+// else Remote-only when nothing at all is stored (fresh onboarding, 0.1.11.2), else Any. An older file's `remote` flag alone says nothing: the old
 // wizard saved `remote: true` for Any as well as Remote-only.
 export function initialWorkMode(prefs, config) {
   const valid = (value) => WORK_MODES.some((mode) => mode.value === value);
@@ -45,12 +45,13 @@ export function initialWorkMode(prefs, config) {
   if (stored && valid(stored.work_mode)) {
     return stored.work_mode;
   }
-  return "any";
+  // Nothing stored: a fresh onboarding. A config that exists without a work_mode is an older file (Any).
+  return stored ? "any" : "remote";
 }
 
 // uat-bug-020 (A2): Discover is hidden in 0.1.9, so the last step is the
 // review alone: no discovery cadence, no budget.
-export const STEPS = ["Resume", "Resume display", "Target", "Companies", "Review"];
+export const STEPS = ["Resume", "Resume display", "Target", "Review"];
 
 // uat-bug-020: what Finish can store as a resume -- the formats and the
 // size `gigai scout resume add` accepts (resume_import.py).
@@ -123,7 +124,7 @@ export function initialFields({ prefs, config, selectedProfile, resumes }) {
     // opened; null until then. `displaySkipped` leaves the saved one untouched.
     display: null,
     displaySkipped: false,
-    // screen 4
+    // company lists: no wizard screen (0.1.11.2); Settings edits them, a save passes them through
     excludeCompanies: p.exclude_companies || [],
     watchCompanies: p.watch_companies || [],
     // Not asked (A2: Discover is hidden in 0.1.9). PUT /api/setup still
@@ -410,10 +411,8 @@ export function reviewRows(fields, resumes) {
     ["Titles to avoid", list(fields.titlesToAvoid)],
     ["Countries", list(fields.countries)],
     ["Work mode", workModeText],
-    ["Visa sponsorship required", fields.visaSponsorshipRequired ? "Yes (hard filter)" : "No"],
+    ["Visa sponsorship required", fields.visaSponsorshipRequired ? "Yes (postings are labelled, never filtered)" : "No"],
     ["Posting age", `last ${clampMaxAgeDays(fields.maxAgeDays)} days`],
-    ["Exclude companies", list(fields.excludeCompanies)],
-    ["Always watch", list(fields.watchCompanies)],
   ];
 }
 

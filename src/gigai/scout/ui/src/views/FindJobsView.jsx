@@ -37,7 +37,8 @@ import {
   staleLine,
 } from "../assessAllModel.js";
 import { MAX_LOOKUP_ROWS, postingJob, postingsQuery, EMPTY_FILTER } from "../postingsModel.js";
-import { RUNS_HASH, SETTINGS_HASH, runHash } from "../routing.js";
+import { RUNS_HASH, SETTINGS_HASH, assessmentHash, runHash } from "../routing.js";
+import { onDemandItemFor, resolveJobId } from "../jobAddress.js";
 
 const TERMINAL_STATUSES = new Set(["succeeded", "failed", "blocked", "cancelled", "interrupted"]);
 const POLL_INTERVAL_MS = 2000;
@@ -748,7 +749,10 @@ export default function FindJobsView({
   );
   // N33: a job page for a posting that is not on the loaded pages reads the
   // rest of the run (the pager asks for the pages it lacks).
-  const jobRouteId = route.view === "job" || route.view === "assessment" ? route.params.jobId : null;
+  // 0.1.11.2: the address is read the way the store keeps it (a trailing slash before the query, tracking parameters).
+  const routeAddress = route.view === "job" || route.view === "assessment" ? route.params.jobId : null;
+  const knownJobIds = useMemo(() => new Set(jobs.map((job) => job.id).concat(assessed.map((job) => job.id), [...postingRows.keys()])), [jobs, assessed, postingRows]);
+  const jobRouteId = routeAddress === null ? null : resolveJobId(routeAddress, knownJobIds);
   const jobInLoaded =
     jobRouteId === null || jobs.some((job) => job.id === jobRouteId) || assessed.some((job) => job.id === jobRouteId) || postingRows.has(jobRouteId);
   useEffect(() => {
@@ -817,7 +821,7 @@ export default function FindJobsView({
   }
 
   if (route.view === "job" || route.view === "assessment") {
-    const jobId = route.params.jobId;
+    const jobId = jobRouteId;
     const fromAssessments = route.view === "assessment";
     // An assessment's page reads the on-demand list first (a pasted-resume
     // assessment of a run posting's address is found there, not the run's
@@ -826,8 +830,11 @@ export default function FindJobsView({
     const pool = fromAssessments ? assessed.concat(jobs) : jobs.concat(assessed);
     const listed = postingRows.get(jobId);
     const job = pool.find((candidate) => candidate.id === jobId) || (listed ? postingJob(listed) : null);
+    // 0.1.11.2: no job page, but an on-demand assessment of this address: the page says so and links to it.
+    const onDemand = !job && !fromAssessments ? onDemandItemFor(quickItems, jobId) : null;
     return (
       <JobPage
+        onDemandHref={onDemand ? assessmentHash(onDemand.id) : null}
         job={job}
         jobId={jobId}
         from={fromAssessments ? "assessments" : "jobs"}

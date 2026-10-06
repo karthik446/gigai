@@ -133,7 +133,7 @@ export default function SetupInterviewForm({ initialPrefs, onSave, onCancel, sav
               aria-pressed={fields.visa_sponsorship_required}
               onClick={() => setField("visa_sponsorship_required", true)}
             >
-              Yes (hard filter)
+              Yes
             </button>
             <button
               type="button"

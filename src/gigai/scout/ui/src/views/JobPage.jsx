@@ -330,6 +330,7 @@ export default function JobPage({
   profileLabel,
   visaRequired,
   loading,
+  onDemandHref,
   listedRow,
   onQuickUpdated,
   onApplicationsChanged,
@@ -456,7 +457,12 @@ export default function JobPage({
         <BackToList from={from} />
         <section className="panel">
           <h2>{loading ? (from === "assessments" ? "Loading assessment…" : "Loading job…") : "Job not found"}</h2>
-          {!loading && (
+          {!loading && onDemandHref && (
+            <p className="muted" data-role="on-demand-hint">
+              This job was assessed on demand: <a href={onDemandHref}>open it under Assessments</a>.
+            </p>
+          )}
+          {!loading && !onDemandHref && (
             <p className="muted">
               {from === "assessments" ? "No assessment with this address for this profile: " : "No stored posting with this address for this profile: "}
               <code>{jobId}</code>

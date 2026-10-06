@@ -243,6 +243,8 @@ def test_get_setup_prefs_missing_prefills_defaults_when_config_also_missing() ->
     prefill = response.json()["error"]["prefill"]
     assert prefill["roles"] == []
     assert prefill["countries"] == []
+    # 0.1.11.2 (UAT-006): a fresh onboarding opens on Remote-only (the existing-config case above keeps "any").
+    assert prefill["work_mode"] == "remote"
     assert prefill["visa_sponsorship_required"] is False
 
 
