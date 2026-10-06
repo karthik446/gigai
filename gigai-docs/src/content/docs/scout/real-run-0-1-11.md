@@ -48,9 +48,9 @@ Counts only.
 | Files | 85,091 (2.1 GB) |
 | Postings matched for the first profile | 404 |
 | Boards (companies stored) | 10,349 |
-| Profiles | [FILL] |
-| Jobs | [FILL] |
-| Master lines | [FILL] |
+| Profiles | 2 (404 postings matched for the first, 398 for the second) |
+| Jobs | 2 carried a stored 0.1.10 tailored resume |
+| Master lines | 32 bullet lines (revision 5) |
 
 ## The steps
 
@@ -104,7 +104,7 @@ assessment.
 - **The first build read the careers-site link wrong.** It fetched the site's menu and footer instead of
   the posting and answered "matched" on nothing. This was fixed before release: a generic page is refused
   before any model call unless the page names its job board, and is then resolved through that board. The
-  fix was re-checked: [FILL recheck].
+  fix was re-checked on the same link against the same home: the posting was fetched through its job board's API (company and location filled, 6.2k characters), 11 requirement rows were read, one Opus call took 39.1 s, and the job was held on 2 sensible questions; no false match.
 - **The job list is over 1 s** (1.75 to 2.5 s); saving preferences is over 1 s (1.42 s).
 - **The page for a job assessed by its link** lives under the Assessments view; the Jobs address for it
   showed "not found", and also when the address differed by a trailing slash.
