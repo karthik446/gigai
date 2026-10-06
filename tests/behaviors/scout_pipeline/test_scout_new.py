@@ -265,7 +265,9 @@ def test_c_new_postings_are_asked_about_and_assessed_only_on_a_yes(tmp_path: Pat
     assert yes["assessed"] == {"requested": 2, "assessed": 2, "failed": [], "stopped": None, "fetched_on_demand": 0}
     assert len(fx.base.model.assess_prompts) == 2
     for row in _rows(yes):
-        assert (row["score"], row["score_kind"], row["state"]) == (100, "assessment", "matched")
+        # 0.1.11.2: the fixture's match has 2 requirement rows, a thin posting: no percentage in any field (not ranked: no score).
+        assert (row["score"], row["score_kind"], row["state"]) == (None, None, "matched")
+        assert (row["thin_posting"], row["fit"], row["assessment"]["percent"]) == (True, None, None)  # type: ignore[index]
         assert row["assessment"]["verdict"] == "matched_above_threshold" and row["needs_tailoring"] is False  # type: ignore[index]
     assert {row["profile_id"] for row in _rows(yes)} == {fx.default_profile_id, fx.second_profile_id}
     _assert_labels(yes)
@@ -282,8 +284,8 @@ def test_c_new_postings_are_asked_about_and_assessed_only_on_a_yes(tmp_path: Pat
     nothing = _cli(fx)
     assert nothing["status"] == "nothing_new" and nothing["question"] is None and nothing["counts"]["new"] == 0  # type: ignore[index]
     assert str(nothing["message"]).startswith("Nothing new since your last check (") and str(nothing["message"]).endswith("still need your attention:")
-    scores = [row["score"] for row in _rows(nothing)]
-    assert scores[:2] == [100, 100] and scores[2:] == [None]  # the two assessed ones, then the unassessed 20-day-old one
+    # The two assessed ones, then the unassessed 20-day-old one. 0.1.11.2: the assessed ones are thin (2 rows): no percent.
+    assert [(row["state"], row["thin_posting"], row["score"]) for row in _rows(nothing)] == [("matched", True, None)] * 2 + [("not_assessed", False, None)]
     assert fx.base.model.calls == calls + 2
     _assert_labels(nothing)
 
@@ -291,7 +293,7 @@ def test_c_new_postings_are_asked_about_and_assessed_only_on_a_yes(tmp_path: Pat
     text = CliRunner().invoke(cli, fx.cli("--peek"))
     assert text.exit_code == 0, text.output
     assert "Details" in text.output and "Needs tailoring?" in text.output and "Open questions" in text.output
-    assert f"[default, {SECOND_LABEL}]" in text.output and "2 of 2 requirements" in text.output and "thin posting:" in text.output  # 0.1.11.2: 2 rows are too few to read "Matched"
+    assert f"[default, {SECOND_LABEL}]" in text.output and "2 of 2 requirements" in text.output and "thin posting, not enough" in text.output and "fit 100%" not in text.output  # 0.1.11.2: 2 rows are too few to read "Matched"
     assert "What matches, from your own resume and answers (a separate call): gigai scout new --yours --since" in text.output
     assert "six years" not in text.output  # the user's own evidence is never printed next to posting text
     own = CliRunner().invoke(cli, fx.cli("--yours"))

@@ -294,7 +294,9 @@ def test_rows_come_by_fit_then_rank_then_newest_inside_a_group_and_each_says_its
         assert [names[str(row["job_identity"])] for row in rows] == expected
         by_name = {names[str(row["job_identity"])]: row for row in rows}
         assert (by_name["must_met"]["fit"], by_name["must_met"]["score"], by_name["must_met"]["rank_score"]) == (67, 50, 60)
-        assert (by_name["nice_met"]["fit"], by_name["nice_met"]["score"], by_name["nice_met"]["state"]) == (50, 67, "matched")
+        # 0.1.11.2: "nice_met" has 3 requirement rows, a thin posting: `fit` is null and `score` is its rank, never a percent.
+        assert (by_name["nice_met"]["fit"], by_name["nice_met"]["score"], by_name["nice_met"]["state"]) == (None, 95, "matched")
+        assert (by_name["nice_met"]["thin_posting"], by_name["nice_met"]["score_kind"]) == (True, "rank")
         assert by_name["must_met"]["score_text"] == "Matched · fit 67% · 2 of 4 requirements · rank 60"
         assert by_name["not_assessed"]["fit"] is None and by_name["not_assessed"]["score_text"] == "rank 99 · not assessed"
 

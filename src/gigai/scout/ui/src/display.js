@@ -202,7 +202,7 @@ const VERDICT_LABELS = {
 // (`thin_posting`, `score_text`); this is for the pages that hold the assessment itself.
 export const THIN_POSTING = "thin_posting";
 export const THIN_POSTING_ROWS = 4;
-export const THIN_LABEL = "Thin posting: too few requirements to judge";
+export const THIN_LABEL = "Thin posting, not enough requirements to score";
 
 export function isThinMatch(verdict, assessment) {
   if (verdict !== "matched_above_threshold" || !assessment || typeof assessment !== "object") {
@@ -211,7 +211,7 @@ export function isThinMatch(verdict, assessment) {
   return (Array.isArray(assessment.matrix) ? assessment.matrix.length : 0) < THIN_POSTING_ROWS;
 }
 
-// ONE line for a thin match near its requirements: "Thin posting: too few requirements to judge (2 read). Open the
+// ONE line for a thin match near its requirements: "Thin posting, not enough requirements to score (2 read). Open the
 // posting to check." It replaces the stored note's "Only 2 requirements were read ..." sentence (`storedNote`, the
 // served `requirements_note`), never both; anything else that note says (the posting was cut at 12,000 characters,
 // a pasted text had no requirements) follows it on the same line.

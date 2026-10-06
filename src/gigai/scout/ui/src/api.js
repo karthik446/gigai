@@ -823,6 +823,12 @@ export function postAssessThese(body) {
   return request("POST", "/api/postings/assess", body);
 }
 
+// 0.1.11.2 RANKUI: POST /api/postings/rank. {} reads the state; {mode} asks (the calls: no model call);
+// {mode, approve: true} starts the rank job (202, it never waits for the model). mode: "unranked" | "latest".
+export function postPostingsRank(body) {
+  return request("POST", "/api/postings/rank", body || {});
+}
+
 // 0.1.10.7 M4b: the background pipeline (find_jobs/api/pipeline.py).
 // GET /api/pipeline is its status (lanes, today's counters against their
 // caps, approvals, last errors); GET /api/pipeline/job one job's steps with

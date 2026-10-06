@@ -37,7 +37,7 @@ above. The row's stored state stays ``not_assessed``.
 
 THIN POSTING (:func:`is_thin_posting`, :func:`thin_state`, 0.1.11.2). A match
 read from fewer than :data:`THIN_POSTING_ROWS` requirement rows says little:
-every surface says :data:`THIN_LABEL` instead of "Matched · fit 100%". With 1
+every surface says :data:`THIN_LABEL` instead of "Matched · fit 100%", and no surface shows or serves a percentage for it (``fit`` is null). With 1
 to 3 rows that is a LABEL, judged when the row is shown from the counts
 already stored: the state, the filters and the counts stay a match's, and it
 is LISTED LAST (``scout_new.order_key``: after every other assessed posting
@@ -79,7 +79,7 @@ RANKED_LOW = "ranked_low"
 THIN_POSTING = "thin_posting"
 #: A match needs this many requirement rows (every matrix row, the "N of M" a reader sees) to read as a match.
 THIN_POSTING_ROWS = 4
-THIN_LABEL = "thin posting: too few requirements to judge"
+THIN_LABEL = "thin posting, not enough requirements to score"
 _MATCHED = "matched"
 
 #: Weak fit: the fit number is below this AND the rank score is below :data:`DEFAULT_WEAK_FIT_BELOW_RANK`.

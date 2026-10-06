@@ -325,7 +325,7 @@ export function rowChips(row) {
     chips.push({ kind: "state", label: ROW_STATE_WORDS.weak_fit, tone: "plain", testId: "weak-fit-chip", title: "Few requirements met and a low rank: no questions are asked for it." });
   } else if ((row.thin_posting === true && state === "matched") || state === "thin_posting") {
     // 0.1.11.2: a match read from fewer than 4 requirement rows is never drawn as a green "Matched".
-    chips.push({ kind: "state", label: ROW_STATE_WORDS.thin_posting, tone: "warn", testId: "thin-posting-chip", title: "Too few requirements were read from this posting to judge the match. Open the posting to check." });
+    chips.push({ kind: "state", label: ROW_STATE_WORDS.thin_posting, tone: "warn", testId: "thin-posting-chip", title: "Thin posting, not enough requirements to score. Open the posting to check." });
   } else if (assessed) {
     chips.push({ kind: "state", label: ROW_STATE_WORDS[state] || humanCode(state), tone: state === "not_a_match" ? "danger" : state === "has_gap" ? "warn" : "ok" });
   }

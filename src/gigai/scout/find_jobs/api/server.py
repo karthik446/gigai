@@ -2065,6 +2065,9 @@ def _make_handler(
                 if path == "/api/postings/assess":
                     self._handle_post_postings_assess()
                     return
+                if path == "/api/postings/rank":
+                    self._handle_post_postings_rank()
+                    return
                 if path == "/api/runs/import":
                     self._handle_post_runs_import()
                     return

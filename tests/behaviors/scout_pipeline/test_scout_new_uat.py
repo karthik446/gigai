@@ -237,7 +237,8 @@ def test_04_the_grid_orders_current_then_stale_then_not_assessed_and_says_n_of_m
     fx = build_postings_fixture(tmp_path, monkeypatch, deleted=False)
     jobs = _mixed(fx, monkeypatch)
     names = {url: name for name, url in jobs.items()}
-    expected = ["matched", "one_of_one", "answers", "no", "old", "ranked", "unranked"]
+    # 0.1.11.2: a thin posting (fewer than 4 requirement rows) is listed after every posting that is not thin.
+    expected = ["answers", "no", "ranked", "unranked", "matched", "one_of_one", "old"]
 
     grid = _new(fx, assess=False, peek=True)
     listed = _search(fx)
@@ -246,20 +247,23 @@ def test_04_the_grid_orders_current_then_stale_then_not_assessed_and_says_n_of_m
         rows = _rows(response)
         assert [names[row["job_identity"]] for row in rows] == expected  # type: ignore[index]
         groups = [row["sort_group"] for row in rows]
-        assert groups == ["current"] * 4 + ["stale"] + ["not_assessed"] * 2
-        # No stale row above a current one, and no rank-only row between assessed rows.
+        assert groups == ["current"] * 2 + ["not_assessed"] * 2 + ["current"] * 2 + ["stale"]
+        # Outside the thin postings (listed last): no stale row above a current one, no rank-only row between assessed rows.
         order = {"current": 0, "stale": 1, "not_assessed": 2}
-        assert [order[group] for group in groups] == sorted(order[group] for group in groups)  # type: ignore[index]
+        assert [order[group] for group in groups[:4]] == sorted(order[group] for group in groups[:4])  # type: ignore[index]
         by_name = {names[row["job_identity"]]: row for row in rows}  # type: ignore[index]
-        assert by_name["one_of_one"]["score_text"] == "thin posting: too few requirements to judge · 1 of 1 requirements · rank 40"  # 0.1.11.2: fewer than 4 rows
-        assert by_name["matched"]["score_text"] == "thin posting: too few requirements to judge · 2 of 2 requirements · rank 60"
+        assert by_name["one_of_one"]["score_text"] == "thin posting, not enough requirements to score · 1 of 1 requirements · rank 40"  # 0.1.11.2: fewer than 4 rows
+        assert by_name["matched"]["score_text"] == "thin posting, not enough requirements to score · 2 of 2 requirements · rank 60"
         assert by_name["answers"]["score_text"] == "Needs your answers · fit 50% · 1 of 2 requirements · rank 90"
         assert by_name["no"]["score_text"] == "Not a match · fit 50% · 1 of 2 requirements · rank 99"
-        assert by_name["old"]["score_text"] == "thin posting: too few requirements to judge (old assessment: older prompt) · 3 of 3 requirements · rank 95"
+        assert by_name["old"]["score_text"] == "thin posting, not enough requirements to score (old assessment: older prompt) · 3 of 3 requirements · rank 95"
         assert by_name["ranked"]["score_text"] == "rank 97 · not assessed"
         assert by_name["unranked"]["score_text"] == "not ranked yet · not assessed"
-        # Compatibility: the old numbers are still there, and the rank score always is.
-        assert (by_name["old"]["score"], by_name["old"]["score_kind"], by_name["old"]["rank_score"]) == (100, "assessment", 95)
+        # Compatibility: the old numbers are still there, and the rank score always is. 0.1.11.2: a thin posting
+        # (3 of 3) has no percentage in any field: its `score` is its rank, its `fit` null.
+        assert (by_name["old"]["score"], by_name["old"]["score_kind"], by_name["old"]["rank_score"]) == (95, "rank", 95)
+        assert by_name["old"]["fit"] is None and by_name["old"]["thin_posting"] is True
+        assert (by_name["answers"]["score"], by_name["answers"]["score_kind"], by_name["answers"]["fit"]) == (50, "assessment", 50)
         assert all(row["stale_reason"] is None for row in rows if row["sort_group"] == "current")
 
     # The terminal says the same: never a bare percent.
@@ -317,8 +321,8 @@ def test_08_only_old_assessments_are_their_own_question_and_yes_assesses_the_new
     row = listed[old[0]]
     assert (row["sort_group"], row["stale_reason"], row["assessment_detail"]) == ("stale", "older_prompt", False)
     assert row["stale_label"] == "old assessment: older prompt"
-    assert row["assessment"] == {"verdict": None, "met": 3, "requirements": 3, "percent": 100, "assessed_at": "2026-09-30T10:00:00.000000Z"}
-    assert row["score_text"] == "thin posting: too few requirements to judge (old assessment: older prompt) · 3 of 3 requirements · not ranked yet"
+    assert row["assessment"] == {"verdict": None, "met": 3, "requirements": 3, "percent": None, "assessed_at": "2026-09-30T10:00:00.000000Z"}  # thin: no percent
+    assert row["score_text"] == "thin posting, not enough requirements to score (old assessment: older prompt) · 3 of 3 requirements · not ranked yet"
 
     # --reassess-stale is the yes to the other question.
     again = _new(fx, assess=False, reassess_stale=True, peek=True)
@@ -384,7 +388,7 @@ def test_12_a_tailored_posting_keeps_its_verdict_and_shows_under_the_profile_tha
     for response in (_new(fx, peek=True), _search(fx)):
         row = _rows(response)[0]
         assert (row["profile_id"], row["state"], row["tailored"]) == (fx.default_profile_id, "matched", True)
-        assert row["score_text"] == "thin posting: too few requirements to judge · 2 of 2 requirements · rank 96 · resume tailored"
+        assert row["score_text"] == "thin posting, not enough requirements to score · 2 of 2 requirements · rank 96 · resume tailored"
         assert [item["profile_id"] for item in row["profiles"]] == [fx.default_profile_id, fx.second_profile_id]  # type: ignore[union-attr]
     # The state filter still finds it, by the verdict and by "tailored".
     assert [row["job_identity"] for row in _rows(_search(fx, states=["tailored"]))] == [job]

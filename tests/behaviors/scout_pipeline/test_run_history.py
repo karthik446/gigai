@@ -180,8 +180,10 @@ def test_an_old_run_migrates_once_with_its_provenance_and_a_profile_less_run_is_
     after = _search(fx, history=True)
     rows = {row["job_identity"]: row for row in after["postings"]["rows"]}  # type: ignore[index]
     one, two, three = (rows[job_url("acme", n)] for n in (1, 2, 3))
-    assert (one["profile_id"], one["state"], one["score"], one["score_kind"]) == (fx.default_profile_id, "matched", 100, "assessment")
-    assert one["assessment"] == {"verdict": None, "met": 3, "requirements": 3, "percent": 100, "assessed_at": "2026-09-01T10:00:00.000000Z"}
+    # 0.1.11.2: 3 of 3 is a thin posting: the counts are served, a percentage is not.
+    assert (one["profile_id"], one["state"], one["score"], one["score_kind"]) == (fx.default_profile_id, "matched", None, None)
+    assert (one["thin_posting"], one["fit"]) == (True, None)
+    assert one["assessment"] == {"verdict": None, "met": 3, "requirements": 3, "percent": None, "assessed_at": "2026-09-01T10:00:00.000000Z"}
     assert (two["state"], two["assessment"]["met"], two["assessment"]["requirements"]) == ("needs_answers", 1, 3)
     assert one["stale_reason"] == "posting_changed"  # the indexed posting is not the text the run assessed: said, not hidden
     basis = one["assessment_basis"]

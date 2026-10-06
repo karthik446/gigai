@@ -409,6 +409,19 @@ _POSTINGS_EXAMPLE: dict[str, object] = {
     "ranking": {"enabled": True, "in_progress": True, "window_days": 7, "by_profile": [{"profile_id": "prof_1", "ranked": 509, "total": 792}]},
     "history": None,
 }
+# 0.1.11.2 RANKUI: POST /api/postings/rank, an ask for "Re-rank latest 100" (nothing started, no model call).
+_POSTINGS_RANK_EXAMPLE: dict[str, object] = {
+    "schema_version": "scout-rank-now:1", "enabled": True, "source": "default", "how_to_enable": None,
+    "calls_today": {"day": "2026-10-06", "used": 2, "limit": 100, "warn_at": 60, "warning": False, "reached": False},
+    "ranking": {"enabled": True, "in_progress": False, "window_days": 7, "by_profile": [{"profile_id": "prof_1", "ranked": 57, "total": 57}]},
+    "plan": {
+        "mode": "latest", "postings": 57, "calls": 2, "max_calls": 2, "batch_size": 50, "calls_left_today": 98, "allowed": True,
+        "refusal": None, "by_profile": [{"profile_id": "prof_1", "postings": 57, "calls": 2}], "window_days": 7,
+    },
+    "job": None,
+    "started": False,
+}
+
 _POSTINGS_ASSESS_EXAMPLE: dict[str, object] = {
     "schema_version": "scout-postings-assess:1", "status": "ask", "checked_at": "2026-10-03T09:30:00.000000Z",
     "question": {
@@ -454,7 +467,7 @@ _POSTINGS_NOTE = (
     "is below `fit.weak_fit_below_percent`, 40, AND its rank score is below `fit.weak_fit_below_rank`, 50) is left out "
     "unless `state=weak_fit` asks for it; it asks no question (`open_questions` is empty) and `counts.weak_fit` is how many "
     "the other filters select, listed or not. "
-    "THIN POSTING (0.1.11.2): a row says `thin_posting` (true or false). It is true for a match read from fewer than 4 requirement rows (every matrix row, the \"N of M requirements\"): its `score_text` says \"thin posting: too few requirements to judge\" in place of \"Matched\" and \"fit N%\"; with 1 to 3 rows the state, the filters and the counts stay a match's, and the row is LISTED LAST: after every other assessed posting and every posting not assessed yet, ranked or not (a fit read from 2 requirements is never listed above a real match). A match with NO row about the job (an empty matrix, a lone \"No stated requirements\" row, eligibility rows alone) has the state `thin_posting` instead of `matched`: `fit` is null, it is never in `counts.by_state.matched` or `state=matched`, it is listed by `state=thin_posting`, and it comes last of the thin postings. "
+    "THIN POSTING (0.1.11.2): a row says `thin_posting` (true or false). It is true for a match read from fewer than 4 requirement rows (every matrix row, the \"N of M requirements\"): its `score_text` says \"thin posting, not enough requirements to score\" in place of \"Matched\" and \"fit N%\", its `fit` is null and no percentage is shown; with 1 to 3 rows the state, the filters and the counts stay a match's, and the row is LISTED LAST: after every other assessed posting and every posting not assessed yet, ranked or not (a fit read from 2 requirements is never listed above a real match). A match with NO row about the job (an empty matrix, a lone \"No stated requirements\" row, eligibility rows alone) has the state `thin_posting` instead of `matched`: `fit` is null, it is never in `counts.by_state.matched` or `state=matched`, it is listed by `state=thin_posting`, and it comes last of the thin postings. "
     "RANKED LOW (0.1.11.2): a posting nothing assessed yet whose KNOWN rank score is "
     "below `fit.weak_fit_below_rank` (50) is left out too, unless `state=ranked_low` asks for it: it is collapsed, never "
     "filtered away. `counts.ranked_low` is how many the other filters select, and each row says `ranked_low` (true only for "
@@ -506,7 +519,7 @@ _NEW_NOTE = (
     "assessment, else one with a stale one, else the highest rank score), with every active profile it matches in "
     "`profiles`, best first; the top-level `profiles` are the profile tags and each one's resume by id. `score_text` is the "
     "score column (the verdict, \"fit N%\", \"N of M requirements\", the rank; a stale row says `stale_label`, never a bare percent; "
-    "a row whose `thin_posting` is true, a match read from fewer than 4 requirement rows, says \"thin posting: too few requirements to judge\" "
+    "a row whose `thin_posting` is true, a match read from fewer than 4 requirement rows, says \"thin posting, not enough requirements to score\" "
     "in place of the verdict and the fit number and is listed after every posting that is not thin, and a match with no row about the job has the state `thin_posting`, listed last of all); "
     "A row has three dates, and they are different facts: `published_at` is the day the posting WENT UP on its board, the one "
     "`window: 7d | 30d` judges (null when the board gives none), and `published_kind` says what the date is: `posted` "
@@ -2226,6 +2239,43 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
         ),
     ),
     RouteSpec(
+        "POST", "/api/postings/rank", "Rank now, or re-rank the latest 100: ask first (the calls), rank on approval.", "write", "model",
+        _POSTINGS_RANK_EXAMPLE,
+        schema_version="scout-rank-now:1",
+        params=(
+            _b("mode", "string", "unranked (\"Rank now\": the postings of the last 7 days with no rank score) or latest (\"Re-rank latest 100\": the newest 100 of them, ranked again). Left out: only the state is read.", enum=("unranked", "latest")),
+            _b("approve", "boolean", "true: start ranking (model calls). Left out or false: only ask."),
+        ),
+        errors=(_INVALID, _WRONG_TYPE, _UNKNOWN_KEY, _NO_TARGET, (409, "rank_disabled"), (409, "rank_daily_cap"), (409, "config_unavailable")),
+        request_example={"mode": "latest"},
+        description=(
+            "The ranking the Jobs page shows and starts; the same lane as `gigai scout pipeline rank` and the background rank, "
+            "with its rules: one model call ranks up to 50 postings of one profile, every call is taken from the one daily "
+            "allowance (`calls_today`: 100 a day for all profiles), live work (a sources update, an assess batch, a run) is "
+            "yielded to, and the off switch is respected. Nothing is ranked without `approve: true`. "
+            "`{}` reads the state and starts nothing: `enabled` (false: ranking is off, `how_to_enable` says how to turn it "
+            "on, and an approval answers 409 rank_disabled), `calls_today`, `ranking` (as GET /api/postings: per active profile "
+            "`ranked` of `total`, the ranked postings plus the unranked ones of the last `window_days` days) and `job` (the "
+            "rank job of this server: `{job_id, mode, state: running | done, postings, planned_calls, calls, ranked, outcome, "
+            "reason, retry_at, warning, started_at, finished_at}`, null when none was started; `outcome` is the lane's last "
+            "state: ran, idle, waiting (the day's calls are used up), yielded, busy_elsewhere (the background rank holds "
+            "the lane), unavailable or disabled). "
+            "With a `mode` and no approval the answer also has `plan`, THE COST BEFORE ANYTHING RUNS: `postings` and `calls` "
+            "(the model calls it would make), per profile in `by_profile`, `calls_left_today`, `allowed` and, when it may not "
+            "run, `refusal` (rank_disabled, rank_daily_cap or nothing_to_rank). No model call is made. "
+            "`mode: unranked` ranks every in-window posting with no score, 50 a call, until none is left or the day's calls "
+            "are used up. `mode: latest` ranks the newest 100 in-window postings AGAIN, whether they have a score or not, in at "
+            "most 2 calls (`plan.max_calls`); with several profiles a call ranks one profile's postings, so the 2 calls hold "
+            "the newest that fit. It is all or nothing against the day's allowance: when it needs more calls than are left, "
+            "an approval answers 409 rank_daily_cap and no call is made. "
+            "With `approve: true` the job starts and the answer is 202 at once (`started: true`, `job`); it never waits for "
+            "the model. A second approval while a job runs joins it (200, `started: false`, the running `job`). With nothing "
+            "to rank the answer is 200, `started: false` and `plan.refusal` nothing_to_rank. Read the progress with `{}` and "
+            "with GET /api/postings (`ranking`, and the rows' `rank_score`): the rows get their scores after each turn of 2 calls. "
+            "System data only: ids, counts and codes; no posting, resume or answer text."
+        ),
+    ),
+    RouteSpec(
         "POST", "/api/postings/assess", "Assess these: ask first (count and estimate), assess the postings on approval.", "write", "model",
         _POSTINGS_ASSESS_EXAMPLE,
         schema_version="scout-postings-assess:1",
@@ -2473,6 +2523,7 @@ _META: dict[tuple[str, str], tuple[str, str]] = {
     ("GET", "/api/postings"): ("Search the stored postings", "Jobs"),
     ("GET", "/api/postings/status"): ("Get how the stored postings are being prepared", "Jobs"),
     ("POST", "/api/postings/assess"): ("Assess these postings, on approval", "Jobs"),
+    ("POST", "/api/postings/rank"): ("Rank the postings now, or re-rank the latest 100", "Jobs"),
     ("POST", "/api/runs/import"): ("Import what old runs assessed", "Runs"),
     ("GET", "/api/metrics"): ("Get the model call averages", "Settings"),
     ("GET", "/api/settings/background"): ("Get the background settings", "Settings"),
@@ -2587,6 +2638,7 @@ _LABELS: dict[tuple[str, str], tuple[str, ...]] = {
     ("GET", "/api/postings"): _UNTRUSTED,
     ("GET", "/api/postings/status"): _NONE,  # a state, a phase and counts
     ("POST", "/api/postings/assess"): _UNTRUSTED,
+    ("POST", "/api/postings/rank"): _NONE,  # the switch, counters, counts and the job: ids and codes
     ("POST", "/api/runs/import"): _NONE,
     ("GET", "/api/metrics"): _NONE,
     ("GET", "/api/settings/background"): _NONE,

@@ -29,7 +29,7 @@ from tests.behaviors.scout_pipeline.test_thin_posting import THIN, _scene
 from tests.support.posting_fixtures import NOW, build_postings_fixture
 
 UI_SRC = Path(static_module.__file__).resolve().parents[2] / "ui" / "src"
-LABEL = "Thin posting: too few requirements to judge"
+LABEL = "Thin posting, not enough requirements to score"
 
 SCRIPT = """
 import * as m from POSTINGS_URL;

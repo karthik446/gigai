@@ -33,8 +33,8 @@ mechanics here. Those belong in the internal changelog.
 ### 0.1.11.2
 
 - **A posting with too few requirements is no longer a perfect match.** A match read from fewer than 4
-  requirements says "thin posting: too few requirements to judge" in place of "Matched · fit 100%", on
-  the Jobs list, the job page, in the terminal and in the API (each row says `thin_posting`). Thin
+  requirements says "thin posting, not enough requirements to score" in place of "Matched · fit 100%", on
+  the Jobs list, the job page, in the terminal and in the API (each row says `thin_posting`, and its `fit` is empty: no percentage is shown or served for it anywhere). Thin
   postings are listed after the real matches: below every other assessed posting and every posting that
   is not assessed yet, in the Jobs list, `gigai scout jobs list` and `gigai scout new`; nothing is
   hidden. A match with no requirement about the job at all (none read, or only "No stated
@@ -51,6 +51,14 @@ mechanics here. Those belong in the internal changelog.
   50. `gigai scout new`, "Assess these" and the API take the same top 50 by rank instead of the newest
   50; postings you select or name are still the ones assessed. While ranking is still running, the page
   and the question say how many postings are ranked so far.
+- **The Jobs page shows the ranking, and ranks from the page.** A line says how many postings of the last
+  7 days are not ranked yet ("5 postings of the last 7 days are not ranked yet (ranked 52 of 57)"), and
+  "Rank now" ranks them: the page shows "ranked X of Y" as it goes and refreshes the list. "Re-rank
+  latest 100" ranks the newest 100 again, also the ones already ranked, in at most 2 model calls; it
+  shows the cost (the calls, and today's count) before anything runs, and nothing runs until you
+  approve. Both stay inside the daily cap of 100 rank calls: a re-rank that today's calls do not cover
+  is refused and makes no call. With ranking off, the buttons say so and the line says how to turn it
+  on. The API is `POST /api/postings/rank`.
 
 - **Ranking is back, on its own switch.** The background pipeline stays off and nothing is tailored, but
   ranking runs again: the Scout server ranks when it starts (so an upgrade ranks what is not ranked yet

@@ -219,7 +219,8 @@ class ScoutNewError(ValueError):
 def _score(row: PostingRecord) -> tuple[int | None, str | None]:
     """What a row is ordered by: the assessment's share of requirements met, else the rank score."""
 
-    if row.reqs_total and row.state != fit_rules.THIN_POSTING:  # 0.1.11.2: no row about the job, so no share to show
+    # 0.1.11.2: a thin posting (fewer than 4 requirement rows, or none about the job) has no share to show: its rank.
+    if row.reqs_total and not fit_rules.is_thin_posting(row.state, row.reqs_total):
         return round(100 * (row.reqs_met or 0) / row.reqs_total), "assessment"
     if row.rank_score is not None:
         return row.rank_score, "rank"
@@ -465,8 +466,9 @@ def _row_json(
         "score_text": score_text(row),
         # 0.1.11.2: a match read from fewer than 4 requirement rows (``fit.is_thin_posting``): "thin posting", never "Matched".
         "thin_posting": fit_rules.is_thin_posting(row.state, row.reqs_total),
-        # 0110-10-02: the one fit number of the row (must-haves weighted); null when not assessed, and for the thin state.
-        "fit": None if row.state == fit_rules.THIN_POSTING else fit_of(row),
+        # 0110-10-02: the one fit number of the row (must-haves weighted); null when not assessed, and for a thin
+        # posting (``thin_posting`` true: not enough requirements to score, so no percentage anywhere).
+        "fit": None if fit_rules.is_thin_posting(row.state, row.reqs_total) else fit_of(row),
         "rank_score": row.rank_score,
         "assessment": assessment,
         "assessment_detail": (item is not None) if assessed else None,

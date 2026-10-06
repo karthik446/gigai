@@ -246,7 +246,9 @@ def test_assess_these_asks_first_and_assesses_only_on_approval(tmp_path: Path, m
         store.close()
     shown = {row["job_identity"]: row for row in _search(fx)["postings"]["rows"]}  # type: ignore[index]
     for job in wanted:
-        assert (shown[job]["state"], shown[job]["score"], shown[job]["score_kind"]) == ("matched", 100, "assessment")
+        # 0.1.11.2: 2 requirement rows, a thin posting: no percentage (`score` is the rank score, and it is not ranked).
+        assert (shown[job]["state"], shown[job]["score"], shown[job]["score_kind"]) == ("matched", None, None)
+        assert (shown[job]["thin_posting"], shown[job]["fit"]) == (True, None)
         assert shown[job]["assessment_basis"] == {"origin": "quick_assess"}
     assert shown[job_url("old", 1)]["assessment_basis"] is None
 

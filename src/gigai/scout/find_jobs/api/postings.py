@@ -17,6 +17,13 @@ objects).
 - ``POST /api/runs/import`` imports what old runs assessed into the read
   model, once per run; a second call imports nothing.
 
+- ``POST /api/postings/rank`` (0.1.11.2) is the Jobs page's "Rank now" and
+  "Re-rank latest 100" (``pipeline.rank_now``). ``{}`` reads the state (the
+  switch, the day's rank calls, how far the rank is, the job); ``{"mode"}``
+  asks (the postings and the calls it would make: the cost) and calls no
+  model; ``{"mode", "approve": true}`` starts the job and answers ``202`` at
+  once. System data only: ids, counts and codes.
+
 - ``GET /api/postings/status`` (0110-9-01) says how the posting read model
   is in this server, from memory alone: it answers at once whatever a build
   is doing.
@@ -78,11 +85,19 @@ def preparing_body(progress: dict[str, object]) -> dict[str, object]:
 
 _FLAGS = {"1": True, "true": True, "0": False, "false": False}
 _QUERY_KEYS = frozenset({"profile_id", "q", "state", "window", "removed", "history", "include_hidden", "limit", "offset", "sort"})
+_RANK_KEYS = frozenset({"mode", "approve"})
+_RANK_ERROR_STATUS = {
+    "invalid_value": HTTPStatus.UNPROCESSABLE_ENTITY,
+    "rank_disabled": HTTPStatus.CONFLICT,
+    "rank_daily_cap": HTTPStatus.CONFLICT,
+    "target_unavailable": HTTPStatus.NOT_FOUND,
+    "config_unavailable": HTTPStatus.CONFLICT,
+}
 _ASSESS_KEYS = frozenset({"jobs", "profile_id", "query", "states", "window", "approve", "again", "actor", "include_low_rank"})
 
 
 class PostingsRoutesMixin:
-    """``Handler`` mixin: ``GET /api/postings``, ``POST /api/postings/assess``, ``POST /api/runs/import``."""
+    """``Handler`` mixin: ``GET /api/postings``, ``POST /api/postings/assess``, ``POST /api/postings/rank``, ``POST /api/runs/import``."""
 
     def _postings_target(self):
         target = getattr(self._backend, "target", None)
@@ -189,6 +204,41 @@ class PostingsRoutesMixin:
                 return answer(None)
 
         self._postings_answer(build)
+
+    def _handle_post_postings_rank(self) -> None:
+        from ...pipeline import rank_now
+
+        body = self._read_json_body()
+        if body is None:
+            return
+        if not isinstance(body, dict):
+            self._error(HTTPStatus.UNPROCESSABLE_ENTITY, "wrong_type", "the body must be a JSON object")
+            return
+        unknown = sorted(set(body) - _RANK_KEYS)
+        if unknown:
+            self._error(HTTPStatus.UNPROCESSABLE_ENTITY, "unknown_key", f"unknown key: {unknown[0]}")
+            return
+        mode, approve = body.get("mode"), body.get("approve", False)
+        if (mode is not None and type(mode) is not str) or type(approve) is not bool:
+            self._error(HTTPStatus.UNPROCESSABLE_ENTITY, "wrong_type", "mode must be a string and approve true or false")
+            return
+        if approve and mode is None:
+            self._error(HTTPStatus.UNPROCESSABLE_ENTITY, "invalid_value", "approve needs a mode: unranked or latest")
+            return
+        target = self._postings_target()
+        if target is None:
+            return
+        home_root = self._backend.home_root
+        try:
+            if approve:
+                response = rank_now.start(home_root, target, mode)
+            else:
+                response = {**rank_now.status(home_root, target, mode=mode, model_wait=model_wait_seconds()), "started": False}
+        except (rank_now.RankNowError, PostingModelError, PipelineStoreError) as exc:
+            self._error(_RANK_ERROR_STATUS.get(exc.code, HTTPStatus.CONFLICT), exc.code, str(exc))
+            return
+        # 202: a job was started and runs on; the same call with {} reads how far it is.
+        self._write_json(HTTPStatus.ACCEPTED if response["started"] else HTTPStatus.OK, response)
 
     def _handle_post_runs_import(self) -> None:
         body = self._read_json_body()

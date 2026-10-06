@@ -34,7 +34,7 @@ from gigai.scout.quick_assess import quick_assess_path
 from tests.support.fit_fixtures import assess_one, five_of_ten, matrix_answer, seed_rank
 from tests.support.posting_fixtures import NOW, PostingsFixture, build_postings_fixture, days_ago, job_url, lever_job
 
-THIN = "thin posting: too few requirements to judge"
+THIN = "thin posting, not enough requirements to score"
 NAMES = ("two", "four", "lone", "empty", "unranked_four", "needs")
 
 
@@ -107,7 +107,10 @@ def test_a_match_on_fewer_than_four_requirements_says_thin_posting_and_is_listed
     two = by_name["two"]
     assert two["score_text"] == f"{THIN} · 2 of 2 requirements · rank 90"
     assert "Matched" not in str(two["score_text"]) and "fit 100%" not in str(two["score_text"])
-    assert (two["thin_posting"], two["state"], two["fit"]) == (True, "matched", 100)
+    # RANKUI: no percentage anywhere for a thin posting: `fit` null, `score` its rank, `assessment.percent` null.
+    assert (two["thin_posting"], two["state"], two["fit"]) == (True, "matched", None)
+    assert (two["score"], two["score_kind"], two["assessment"]["percent"]) == (90, "rank", None)
+    assert "%" not in json.dumps([row["score_text"] for row in _rows(everything) if row["thin_posting"]])
     # A 4-row assessment is unchanged.
     four = by_name["four"]
     assert four["score_text"] == "Matched · fit 100% · 4 of 4 requirements · rank 70"
@@ -166,7 +169,7 @@ def test_a_match_on_fewer_than_four_requirements_says_thin_posting_and_is_listed
     assert new["two"]["score_text"] == f"{THIN} · 2 of 2 requirements · rank 90" and new["two"]["thin_posting"] is True
     assert new["lone"]["state"] == "thin_posting"
     table = scout_new.render(grid)  # one cell line per part of the score
-    assert table.count("| Matched") == 2 and table.count("| fit 100%") == 2 and table.count("thin posting: too few requirements") == 3, table
+    assert table.count("| Matched") == 2 and table.count("| fit 100%") == 2 and table.count("| thin posting, not enough") == 3, table  # the cell is narrow: the label wraps
 
 
 def test_an_old_runs_match_with_few_or_no_requirement_rows_reads_thin_too(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -242,7 +245,7 @@ def test_a_thin_posting_is_listed_after_every_real_match_and_every_ranked_postin
         serving.join(timeout=5)
     by_name = {names[str(row["job_identity"])]: row for row in _rows(served)}
     # The thin one is still a match underneath with the best numbers, and still says the thin label ...
-    assert (by_name["thin"]["state"], by_name["thin"]["fit"], by_name["thin"]["rank_score"], by_name["thin"]["thin_posting"]) == ("matched", 100, 99, True)
+    assert (by_name["thin"]["state"], by_name["thin"]["fit"], by_name["thin"]["rank_score"], by_name["thin"]["thin_posting"]) == ("matched", None, 99, True)
     assert by_name["thin"]["score_text"] == f"{THIN} · 2 of 2 requirements · rank 99"
     assert (by_name["real"]["thin_posting"], by_name["real"]["fit"], by_name["real"]["rank_score"]) == (False, 80, 60)
     assert by_name["real"]["score_text"].endswith("fit 80% · 4 of 6 requirements · rank 60"), by_name["real"]["score_text"]
@@ -255,7 +258,7 @@ def test_a_thin_posting_is_listed_after_every_real_match_and_every_ranked_postin
     grid = scout_new.scout_new(fx.home_root, fx.target, peek=True, assess=False, now=NOW)
     assert order(_rows(grid)) == expected
     table = scout_new.render(grid)
-    assert table.index("4 of 6 requirements") < table.index("rank 70") < table.index("thin posting: too few requirements"), table
+    assert table.index("4 of 6 requirements") < table.index("rank 70") < table.index("thin posting"), table
     listed = CliRunner().invoke(cli, ["scout", "jobs", "list", "--home", str(fx.home_root), "--target", str(fx.target)])
     assert listed.exit_code == 0, listed.output
     assert listed.output.index("4 of 6 requirements") < listed.output.index("rank 70 · not assessed") < listed.output.index(THIN), listed.output
@@ -271,3 +274,60 @@ def test_a_thin_posting_is_listed_after_every_real_match_and_every_ranked_postin
     assert in_sql == expected
     assert [names[row.job] for _tags, row in scout_new.in_order(((), row) for row in rows)] == expected
     assert [scout_new.order_key(row)[0] for _tags, row in scout_new.in_order(((), row) for row in rows)] == [0, 0, 0, 1]
+def test_no_percentage_for_a_thin_posting_in_any_json_row_api_new_scout_new_and_the_postings_api(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """RANKUI (3): `fit` is null for every thin row (fewer than 4 rows, or the thin state) wherever a row is served:
+    GET and POST /api/new, GET /api/postings, `gigai scout new --json` and `gigai scout jobs list --json`."""
+
+    import threading
+
+    import httpx
+
+    from gigai.scout.find_jobs.api.server import ScoutFindJobsBackend, serve
+
+    fx = build_postings_fixture(tmp_path, monkeypatch, deleted=False)
+    jobs = _scene(fx, monkeypatch)
+    thin_jobs, full_jobs = {jobs["two"], jobs["lone"], jobs["empty"]}, {jobs["four"], jobs["unranked_four"]}
+    since = "2020-01-01T00:00:00Z"  # every posting of the scene, whatever today is
+
+    def check(rows: list[dict[str, object]], where: str) -> None:
+        by_job = {str(row["job_identity"]): row for row in rows}
+        assert thin_jobs | full_jobs <= set(by_job), (where, sorted(by_job))
+        for job in thin_jobs:
+            row = by_job[job]
+            assert row["thin_posting"] is True and row["fit"] is None, (where, row["score_text"], row["fit"])
+            assert row["score_kind"] != "assessment" and (row["assessment"] or {}).get("percent") is None, (where, row)
+            assert "%" not in str(row["score_text"]) and str(row["score_text"]).startswith(THIN), (where, row["score_text"])
+        for job in full_jobs:
+            assert (by_job[job]["thin_posting"], by_job[job]["fit"]) == (False, 100), (where, by_job[job]["score_text"])
+
+    server = serve(backend=ScoutFindJobsBackend(home_root=fx.home_root, target=fx.target), bind=("127.0.0.1", 0))
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        with httpx.Client(base_url=f"http://127.0.0.1:{server.server_address[1]}", timeout=60.0) as client:
+            got = client.get(f"/api/new?since={since}")
+            assert got.status_code == 200, got.text
+            check(got.json()["postings"]["rows"], "GET /api/new")
+            posted = client.post("/api/new", json={"assess": False, "peek": True, "since": since})
+            assert posted.status_code == 200, posted.text
+            check(posted.json()["postings"]["rows"], "POST /api/new")
+            listed = client.get("/api/postings?limit=200")
+            assert listed.status_code == 200, listed.text
+            check(listed.json()["postings"]["rows"], "GET /api/postings")
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(10)
+
+    for args, where in ((["new", "--peek", "--since", since], "scout new --json"), (["jobs", "list", "--limit", "200"], "scout jobs list --json")):
+        printed = CliRunner().invoke(cli, ["scout", *args, "--home", str(fx.home_root), "--target", str(fx.target), "--json"])
+        assert printed.exit_code == 0, printed.output
+        check(json.loads(printed.stdout)["postings"]["rows"], where)
+    # The words a terminal prints: the thin wording, and never a percent on a thin line.
+    table = CliRunner().invoke(cli, ["scout", "new", "--peek", "--since", since, "--home", str(fx.home_root), "--target", str(fx.target)])
+    assert table.exit_code == 0 and THIN.split(",")[0] in table.output, table.output
+    plain = CliRunner().invoke(cli, ["scout", "jobs", "list", "--home", str(fx.home_root), "--target", str(fx.target)])
+    thin_lines = [line for line in plain.output.splitlines() if THIN in line]
+    assert len(thin_lines) == 3 and not any("%" in line for line in thin_lines), plain.output
