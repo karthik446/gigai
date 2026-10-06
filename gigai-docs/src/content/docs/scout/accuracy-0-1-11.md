@@ -10,6 +10,8 @@ never seen, and what that does not prove. GigAI 0.1.11 is an alpha.
 Nothing on this page is posting text, resume text, an answer or a company name. It holds numbers and
 kinds of role only.
 
+The picked resume is built from your master's lines word for word; nothing rewrites a line, which is why these numbers are about the picked resume.
+
 ## The standard
 
 The test asks one question of every posting: **is this result fully correct?** Fully correct means
