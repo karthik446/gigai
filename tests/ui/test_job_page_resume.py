@@ -238,7 +238,7 @@ def test_a_job_tailored_by_0_1_10_keeps_its_resume_and_says_who_made_it(ui, scou
 
     # Apply is the one button; nothing offers tailoring.
     apply = ui.page.locator(f"{APPLY} [data-action='apply']")
-    assert apply.count() == 1 and (apply.text_content() or "").strip() == "Apply: get the PDF"
+    assert apply.count() == 1 and (apply.text_content() or "").strip() == "Generate PDF"
     assert ui.page.locator(f'{PAGE} [data-role="open-generate-pdf"]').count() == 0, "Apply is the one way to the PDF"
     assert ui.page.locator(REASSESS).count() == 1
     no_tailoring(ui)

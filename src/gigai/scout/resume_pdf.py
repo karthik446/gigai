@@ -270,6 +270,7 @@ def _data(sections: list[dict[str, object]], header: PdfHeader | None, company: 
         "name": shown.name,
         "title": shown.title,
         "contact": [{"text": c.text, "url": c.url} for c in shown.contact],
+        "work_authorization": shown.work_authorization,
         "blank_header": header is None,
         "sections": sections,
     }
@@ -582,7 +583,7 @@ def stored_resume_pdf(
 
     company = company_display_name(home_root, stored.job.company) or stored.job.company
     # 0.1.11.3: the PDF stays on the page limit the resume was fitted to (its length record's, else the rule's).
-    length = stored.result.length
+    length = getattr(stored.result, "length", None)
     rendered = _render(
         _body(stored.result), pdf_header(settings, profile_id, form), company=company, timestamp=stamp,
         spacing_scale=scale, auto_fit=fit, count_pages=count_pages, max_pages=length.max_pages if length is not None else LENGTH_RULE.max_pages,

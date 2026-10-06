@@ -428,7 +428,7 @@ def test_suggestions_the_brief_commands_apply_and_no_master(out: dict) -> None:
         "b-000001": {"supports": ["req-000001"], "added": None}, "b-000002": {"supports": ["req-000001"], "added": None},
         "b-000003": {"supports": ["req-000002"], "added": None},
     }
-    assert out["labels"] == ["Re-pick · no model call", "Re-assess · 1 model call", "Make a draft anyway", "Apply: get the PDF"]
+    assert out["labels"] == ["Re-pick · no model call", "Re-assess · 1 model call", "Make a draft anyway", "Generate PDF"]
 
 
 def test_a_refused_pick_and_a_profile_nothing_is_picked_for_are_said_in_plain_words(out: dict) -> None:

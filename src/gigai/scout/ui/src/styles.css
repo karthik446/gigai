@@ -1626,6 +1626,12 @@ table.data-table th {
 .resume-display-preview-row { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-start; }
 /* 0110-046: the Generate PDF form (six fields, two columns where there is room). */
 .generate-pdf-form { margin: 8px 0 12px; }
+.suggestions-heading { margin: 0; }
+.suggestions-toggle { background: none; border: 0; padding: 0; margin: 0; font: inherit; color: inherit; cursor: pointer; text-align: left; }
+.suggestions-toggle:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
+#job-suggestions[data-expanded="true"] .suggestions-heading { margin-bottom: 8px; }
+.resume-apply { margin: 0 0 10px; }
+.resume-apply-bar { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; margin-bottom: 8px; }
 .generate-pdf-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 0 12px; }
 .resume-display-preview-row > .md-preview { flex: 1 1 260px; }
 .spacing-preview { display: flex; flex-direction: column; width: 120px; padding: 10px; border: 1px solid var(--border); border-radius: 6px; }

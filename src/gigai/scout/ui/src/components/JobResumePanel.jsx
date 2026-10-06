@@ -35,6 +35,7 @@ import {
   unpickable,
 } from "../jobResumeModel.js";
 import { MASTER_HASH } from "../routing.js";
+import ApplyPanel from "./ApplyPanel.jsx";
 import PickedLeftOut from "./PickedLeftOut.jsx";
 import { Preview } from "./TailoredResumePanel.jsx";
 
@@ -331,7 +332,7 @@ function scrollToQuestions() {
 
 // `gate` is jobResumeModel.gateOf(), `items` staleItems(); `reassess` is the page's ONE Re-assess
 // ({enabled, reason, onClick}: the stale label's "Re-assess · 1 model call" is the same action).
-export default function JobResumePanel({ state, assessment, gate, items, reassess, questionPrompts, hasQuestions = false }) {
+export default function JobResumePanel({ state, assessment, gate, items, reassess, questionPrompts, hasQuestions = false, visaRequired = false }) {
   const promptFor = (id) => (questionPrompts && questionPrompts.get(id)) || null;
   const { stored, record, origin, picking } = state;
   const [choosing, setChoosing] = useState(false);
@@ -448,6 +449,7 @@ export default function JobResumePanel({ state, assessment, gate, items, reasses
       <div className="resume-toolbar">
         <h3>{heading}</h3>
       </div>
+      <ApplyPanel state={state} items={items} reassess={reassess} visaRequired={visaRequired} />
       {state.error && (
         <div className="callout danger" role="alert" data-role="pick-error">
           {state.error}

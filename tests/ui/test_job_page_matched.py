@@ -19,9 +19,10 @@ server's: the Add, the per-line Restore and the PDF.
 - Picked: a line's reason names the requirements it supports, and what Scout added;
 - Changed: a line whose wording was changed (as the user's agent does it, `PUT /api/tailored-resumes/lines`) is
   shown beside the master line it replaced, with Restore (ONE real `PUT`, `use: original`);
-- Suggestions: the kind, what it is about, the posting phrase, why, who wrote it, the status; Dismiss and Done are
+- Suggestions (0.1.11.3 item 9): the card is ONE line, "Suggestions (N open)", closed by default and BELOW the
+  Suggested resume card; a click, Enter or Space opens and closes it. Open: the kind, what it is about, the posting phrase, why, who wrote it, the status; Dismiss and Done are
   ONE `POST /api/jobs/suggestions` each; "Work on this with your agent" shows the two brief commands;
-- Apply: ONE button, "Apply: get the PDF", opens the Generate PDF form; the PDF is ONE `POST
+- Apply: ONE button, "Generate PDF", inside the "Suggested resume" card (0.1.11.3 item 5), opens the Generate PDF form; the PDF is ONE `POST
   /api/tailored-resumes/pdf` and a download; after it NOTHING: no other request, no new page, no application
   recorded, the same buttons.
 
@@ -235,8 +236,28 @@ def test_a_matched_job_shows_its_picked_resume_and_apply_gives_the_pdf_and_nothi
         assert ui.writes_after("before-restore") == ["PUT /api/tailored-resumes/lines"]
         ui.wall_budget("Restore a line changed in chat (small home)", CHANGE_WALL_SECONDS, "before-restore", "restored")
 
-        # --- Suggestions: the list, the two brief commands, Dismiss and Done ---
+        # --- Suggestions (0.1.11.3 item 9): ONE line, closed by default, below the resume card; a click or the keyboard opens it ---
+        card = ui.page.locator(SUGGESTIONS)
+        toggle = card.locator('[data-action="toggle-suggestions"]')
         rows = ui.page.locator(f'{SUGGESTIONS} [data-role="suggestions"] li[data-suggestion-id]')
+        assert card.get_attribute("data-expanded") == "false" and toggle.get_attribute("aria-expanded") == "false"
+        assert (toggle.text_content() or "").strip().lstrip("▸").strip() == "Suggestions (2 open, 1 closed)"
+        assert rows.count() == 0 and card.locator("li, p, [data-action='suggestion-agent']").count() == 0, "closed: the card is its one line"
+        assert card.inner_text().strip().lstrip("▸").strip() == "Suggestions (2 open, 1 closed)"
+        assert ui.page.locator(".job-page > section.panel[id]").evaluate_all("(cards) => cards.map((card) => card.id).filter((id) => id === 'job-resume' || id === 'job-suggestions')") == [
+            "job-resume", "job-suggestions",
+        ], "the Suggested resume card (with Generate PDF) comes first, then Suggestions"
+        assert ui.page.locator(f"{PANEL} [data-action='apply']").bounding_box()["y"] < card.bounding_box()["y"]
+        toggle.focus()
+        ui.page.keyboard.press("Enter")  # the keyboard opens it
+        rows.first.wait_for()
+        assert card.get_attribute("data-expanded") == "true" and toggle.get_attribute("aria-expanded") == "true"
+        ui.page.keyboard.press("Space")  # and closes it
+        rows.first.wait_for(state="detached")
+        assert card.get_attribute("data-expanded") == "false"
+        toggle.click()  # a click opens it
+        rows.first.wait_for()
+        assert ui.writes_after("restored") == [], "opening the list writes nothing"
         assert rows.evaluate_all("(items) => items.map((item) => [item.dataset.suggestionId, item.dataset.kind, item.dataset.status])") == [
             ["sg-1", "reword", "open"], ["sg-2", "master_line", "open"], ["sg-3", "keyword", "done"],
         ]
@@ -276,7 +297,7 @@ def test_a_matched_job_shows_its_picked_resume_and_apply_gives_the_pdf_and_nothi
         # --- Apply: one button, the PDF, and nothing follows ---
         apply = ui.page.locator(APPLY)
         button = apply.locator('[data-action="apply"]')
-        assert ui.page.locator(f'{PAGE} [data-action="apply"]').count() == 1 and (button.text_content() or "").strip() == "Apply: get the PDF"
+        assert ui.page.locator(f'{PAGE} [data-action="apply"]').count() == 1 and (button.text_content() or "").strip() == "Generate PDF"
         assert ui.page.locator(f'{PAGE} [data-role="open-generate-pdf"]').count() == 0
         state_before = ui.page.locator(f'{PAGE} [data-role="job-state"]').get_attribute("data-state")
         button.click()

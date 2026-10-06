@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { FIELDS, canGenerate, emptyValues, headerBody } from "../generatePdfModel.js";
+import { FIELDS, canGenerate, headerBody, startValues } from "../generatePdfModel.js";
 import { PRIVACY_PDF_LINE, PRIVACY_PROMISE } from "../wording.js";
 
 function saveBlob(blob, fileName) {
@@ -13,15 +13,20 @@ function saveBlob(blob, fileName) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-// 0110-046: the Generate PDF form. Six fields with the standard autocomplete
+// 0110-046: the Generate PDF form. Its fields carry the standard autocomplete
 // tokens (so the browser may offer its own autofill) and one button. The
 // values live in this component's state only while it is mounted and go in
 // the one render request `render(header)` sends; GigAI stores none of them
 // (no localStorage, sessionStorage, cookie or URL). `render` answers
 // {blob, fileName} (api.js postTailoredResumePdf / postResumePdf); the file is
 // saved under the server's name: <company>-<role>-<date>.pdf, never yours.
-export default function GeneratePdfForm({ render, disabled = false }) {
-  const [values, setValues] = useState(emptyValues);
+//
+// 0.1.11.3 item 6: the optional "Work authorization" line starts, every time
+// the form opens, as the profile's sponsorship answer in plain words
+// (`visaRequired`). The user edits it for this PDF; it prints in the PDF's
+// header only and, like the other values, is not remembered.
+export default function GeneratePdfForm({ render, disabled = false, visaRequired = false }) {
+  const [values, setValues] = useState(() => startValues({ visaRequired }));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
   const [savedAs, setSavedAs] = useState(null);
@@ -61,7 +66,7 @@ export default function GeneratePdfForm({ render, disabled = false }) {
             </label>
             <input
               id={`generate-pdf-${field.key}`}
-              name={field.autocomplete === "url" ? field.key : field.autocomplete}
+              name={field.autocomplete === "url" || field.autocomplete === "off" ? field.key : field.autocomplete}
               type={field.type}
               inputMode={field.inputMode}
               autoComplete={field.autocomplete}
@@ -70,6 +75,11 @@ export default function GeneratePdfForm({ render, disabled = false }) {
               value={values[field.key]}
               onChange={(event) => setValues((current) => ({ ...current, [field.key]: event.target.value }))}
             />
+            {field.hint && (
+              <div className="muted small" data-role={`generate-pdf-hint-${field.key}`}>
+                {field.hint}
+              </div>
+            )}
           </div>
         ))}
       </div>

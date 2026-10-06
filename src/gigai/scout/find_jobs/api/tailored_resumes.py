@@ -26,7 +26,7 @@ That markdown is used for the render only: no model call, nothing stored, nothin
 (a refusal names a line number and a rule, never the text).
 
 0110-046: GigAI stores no name or contact details.  Both PDF routes take an optional ``header``
-(the Generate PDF form: ``name``, ``email``, ``phone``, ``location``, ``linkedin``, ``link``); its
+(the Generate PDF form: ``name``, ``email``, ``phone``, ``location``, ``linkedin``, ``link``, ``work_authorization``); its
 values fill this one PDF's header and are dropped: never written, logged, cached, or echoed in a
 response or an error (the PDF bytes aside; the file name is ``<company>-<role>-<date>.pdf``).
 Without ``header`` the PDF has no header and the response carries ``X-GigAI-Finish-Url``: the local

@@ -52,6 +52,8 @@
 #if d.name != "" { block(below: 6 * s, t(upper(d.name), size: 16.6pt, lh: 16.6pt, weight: 600, tracking: 0.77pt)) }
 #if d.title != "" { block(below: 2 * s, d.title) }
 #if d.contact.len() > 0 { block(below: 2 * s, t(d.contact.map(item).join([ | ]), fill: soft)) }
+// 0.1.11.3 item 6: the Generate PDF form's optional "Work authorization" line, a header line of its own.
+#if d.at("work_authorization", default: "") != "" { block(below: 2 * s, t(d.work_authorization, fill: soft)) }
 #for x in d.sections {
   sec(x.heading)
   for l in x.lines { if l.bullet { bullet(l.text) } else { para(l.text) } }

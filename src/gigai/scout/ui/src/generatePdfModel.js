@@ -1,7 +1,7 @@
 // 0110-046: the Generate PDF form, pure (no React, no fetch, no storage) so
 // tests/api_e2e/test_ui_generate_pdf_model.py can run it under node.
 //
-// GigAI never stores the user's name or contact details. The six values live
+// GigAI never stores the user's name or contact details. The values live
 // in the form's React state while it is open and travel ONLY in the one render
 // request (POST /api/tailored-resumes/pdf or POST /api/resume/pdf, `header`);
 // the server fills the PDF's header and drops them. Nothing here, or in the
@@ -18,12 +18,32 @@ export const FIELDS = [
   { key: "location", label: "Location", autocomplete: "address-level2", type: "text", placeholder: "City, State" },
   { key: "linkedin", label: "LinkedIn", autocomplete: "url", type: "text", inputMode: "url", placeholder: "linkedin.com/in/you" },
   { key: "link", label: "Other link", autocomplete: "url", type: "text", inputMode: "url", placeholder: "github.com/you or your site" },
+  // 0.1.11.3 item 6: optional, its own header line; `startValues` prefills it from the profile's sponsorship answer.
+  {
+    key: "work_authorization",
+    label: "Work authorization (optional)",
+    autocomplete: "off",
+    type: "text",
+    placeholder: "e.g. H-1B, requires sponsorship",
+    hint: "Printed as a line of the PDF's header only. Leave it empty for no line.",
+  },
 ];
 
 export const MAX_VALUE = 200;
 
 export function emptyValues() {
   return Object.fromEntries(FIELDS.map((field) => [field.key, ""]));
+}
+
+// 0.1.11.3 item 6: what the form starts with EVERY time it opens. The profile
+// stores only yes/no ("Visa sponsorship required"), so a yes prefills the
+// "Work authorization" line with a plain sentence the user edits to the exact
+// wording (e.g. "H-1B, requires sponsorship"). Like the other values, the
+// edit is never remembered: the next form starts from the profile again.
+export const WORK_AUTHORIZATION_PREFILL = "Requires visa sponsorship";
+
+export function startValues({ visaRequired = false } = {}) {
+  return { ...emptyValues(), work_authorization: visaRequired ? WORK_AUTHORIZATION_PREFILL : "" };
 }
 
 // The render request's `header`: every field, trimmed and capped (the server
