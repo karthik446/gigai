@@ -9,7 +9,7 @@ export default function RerankApprovalDialog({ dialog, submitting, error, onAppr
         <h2 id="rerank-approval-title">{dialog.title}</h2>
         <ul className="approval-facts">
           <li data-role="rerank-postings">
-            <strong>Postings:</strong> {dialog.postings}, the newest of the last 7 days, ranked again even if they have a rank
+            <strong>Postings:</strong> {dialog.postings}{dialog.ofTotal ? ` of the ${dialog.ofTotal} on the page` : ""}, the newest of the last 7 days, ranked again even if they have a rank
           </li>
           <li data-role="rerank-cost">
             <strong>Cost:</strong> {dialog.costLine}

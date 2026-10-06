@@ -164,13 +164,14 @@ def test_a_matched_job_shows_its_picked_resume_and_apply_gives_the_pdf_and_nothi
         assert coverage_of(ui, ROW_ANSWER_ONLY) == ("answer_only", "from your answer only")
         answer_row = ui.page.locator(f'{TABLE} td[data-row-id="{ROW_ANSWER_ONLY}"]')
         assert (answer_row.locator('[data-role="row-alternatives"]').text_content() or "").strip() == f"any one of: {', '.join(ALTERNATIVES)}"
-        # The posting wording behind the class: on hover, and on a click (the table itself is never collapsed).
-        basis = answer_row.locator('[data-role="row-class-basis"]')
-        assert basis.get_attribute("title") == f"The posting says: {CLASS_BASIS}"
-        why = basis.locator('[data-action="show-class-basis"]')
-        assert ROW_ANSWER_ONLY in (why.text_content() or "") and basis.locator('[data-role="class-basis"]').count() == 0
-        why.click()
-        assert CLASS_BASIS in (basis.locator('[data-role="class-basis"]').text_content() or "")
+        # 0.1.11.3 (item 4): the chips say Required / Nice to have; no internal id, no "Why this class", no "ask" in a chip.
+        table_text = ui.page.locator(TABLE).inner_text()
+        assert "Why this class" not in table_text and "req-" not in table_text, table_text
+        assert answer_row.locator('[data-role="row-class-basis"], [data-action="show-class-basis"]').count() == 0
+        chips = [" ".join((chip or "").split()) for chip in ui.page.locator(f"{TABLE} .status-badge").all_text_contents()]
+        assert chips and all(chip.split(":")[0] in {"Required", "Nice to have", "Bonus", "One of a list", "Met", "Unclear", "Not met"} for chip in chips), chips
+        assert "Nice to have: Met" in chips, chips
+        assert not any("ask" in chip.lower() or "must-have" in chip.lower() for chip in chips), chips
         ui.settle()
         assert ui.writes_after("start") == [], "opening the job writes nothing and picks nothing"
         assert fixture.reads == 1 and fixture.picks == [], "the record is read once, and nothing is refreshed by itself"

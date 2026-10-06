@@ -54,6 +54,7 @@ out.none = { line: m.rankStatusLine({ enabled: true, window_days: 7, by_profile:
 out.missing = [m.rankStatusLine(null, null), m.rankButtons(undefined, {}), m.rankTotals({}), m.rankStatusLine(undefined, null, null, { loading: true }), m.rankButtons(null, { busy: true })];
 out.off = { line: m.rankStatusLine(data.off.ranking, null, data.off.how_to_enable), buttons: m.rankButtons(data.off.ranking, { howToEnable: data.off.how_to_enable }), fallback: m.rankStatusLine(data.off.ranking, null) };
 out.dialog = m.rerankDialog(data.ask);
+out.ofTotal = [m.rerankDialog({ ...data.ask, ranking: { enabled: true, window_days: 7, by_profile: [{ ranked: 1, total: 140 }] } }).ofTotal, m.rerankDialog({ ...data.ask, ranking: { enabled: true, window_days: 7, by_profile: [{ ranked: 1, total: 3 }] } }).ofTotal];
 out.capped = m.rerankDialog(data.capped);
 out.notDialog = [m.rerankDialog(data.read), m.rerankDialog(data.askUnranked), m.rerankDialog(null)];
 out.refusal = [m.rankRefusalLine(data.capped), m.rankRefusalLine(data.ask), m.rankRefusalLine({ schema_version: m.RANK_SCHEMA, plan: { refusal: "nothing_to_rank" } })];
@@ -153,6 +154,8 @@ def test_the_re_rank_dialog_shows_the_cost_before_it_runs_and_refuses_past_the_d
     assert dialog["costLine"] == "1 model call (up to 50 postings a call, at most 2 calls)"
     assert dialog["todayLine"] == "0 of 100 rank calls used today; 100 left"
     assert dialog["approveBody"] == {"mode": "latest", "approve": True}
+    # 0.1.11.3: the dialog names the page's own total when it takes only the newest 100 of it.
+    assert out["ofTotal"] == [140, None]
     capped = out["capped"]
     assert (capped["allowed"], capped["approveBody"]) == (False, None)  # Approve is off: nothing can be sent
     assert capped["refusal"] == "Today's rank calls do not cover this: it needs 1, 0 of 100 are left. The count starts again tomorrow."
