@@ -24,11 +24,11 @@ operator-visible capability and must link to the relevant release or evidence.
 
 ### 0.1.11
 
-DRAFT. GigAI is now an alpha (it was labelled pre-alpha). No model rewrites your resume any more. The
-resume for a job is made of lines from your master resume, in your master's own words: the assessment
-picks them, and GigAI checks that the lines it shows are lines you wrote.  The tailoring call
-is gone, and a job now costs one model call (the assessment) where it used to cost about two. 
-Read "After you upgrade" and "Not proven".
+GigAI is now an alpha (it was labelled pre-alpha). Tailoring is switched off: the resume for a job is
+picked from your master, word for word. The assessment picks the lines, and GigAI checks that the lines
+it shows are lines you wrote. The removal of tailoring and the pipeline rework are in 0.1.11.1. There is
+no migration and no schema change in this version. Read "After you upgrade", "Known limits" and "Not
+proven".
 
 #### What changed for you
 
@@ -53,7 +53,7 @@ Read "After you upgrade" and "Not proven".
   line must be a line from your master, a line reworded from one with the source named, or a claim an
   answer of yours states. A line that states something none of them state is refused, and the refusal
   says which line and why. The check is a rule on wording, not a judge of truth: it can refuse a true
-  line and pass a loose one. (`resume tailor --in` still works for this release and says so.)
+  line and pass a loose one. (`gigai scout resume tailor` still exists in this release and is switched off by default.)
 - **Line notes.** A line or an entry in your master can carry a private note
   (`gigai scout resume master edit ITEM --note "..."`, `--clear-note`). A note steers the pick and
   appears in the brief. It is never written into a resume or a PDF. It is sent to your model, once and
@@ -80,11 +80,12 @@ Read "After you upgrade" and "Not proven".
 
 #### After you upgrade
 
-- **Do not go back to 0.1.10.x after you use this version.** A 0.1.10.x binary refuses the pipeline
-  file this version writes (schema 6: "pipeline.sqlite was written by a newer GigAI"), and refuses a
-  config that has no editor. Deleting `pipeline.sqlite` makes the old binary start; it loses the
-  pipeline history and metrics, nothing else. Nothing from the downgrade was run by hand: see "Not
-  proven".
+- **The background pipeline is OFF by default in 0.1.11.** A home whose settings explicitly enable it
+  keeps working as it did on 0.1.10.
+- **Do not go back to 0.1.10.x after you use this version** if you used these two things: a 0.1.10.x
+  binary refuses a config that has no editor, and it drops line notes when it writes a master revision
+  (see below). Nothing was changed in your stored files at upgrade: there is no migration. The downgrade
+  was not run by hand: see "Not proven".
 - **Every assessment made before 0.1.11 reads "older prompt".** They keep showing. Re-assessing is
   your click, and the offer is the newest 50.
 - **Your notes are dropped if a 0.1.10.x binary writes a master revision.** Do not edit the master
@@ -94,11 +95,13 @@ Read "After you upgrade" and "Not proven".
   it" replaces it. Lines the old tailoring reworded show the rewrite and its original.
 - **Other lines cut for length have no Restore.** When the page cuts lines of an "Other" section to
   fit two pages, there is no Restore for them; the cuts in your other sections can be restored.
-- **`gigai scout resume tailor` (one model call) is gone** and says what to run instead.
-  `POST /api/tailored-resumes` answers 410. The settings `pipeline.models.tailor` and
-  `pipeline.models.reassess` are read and ignored, with one line in `gigai scout pipeline status`.
-   The pipeline's steps are assess, pick, ats, label; a job finished on 0.1.10 is left as it
-  is until you open it. 
+- **`gigai scout resume tailor` still exists and is switched off by default.** It is removed in
+  0.1.11.1.
+
+#### Known limits
+
+- A posting that is only bullet fragments (no sentence and no requirement wording) is refused as having
+  no readable posting; paste its text.
 
 #### Not proven
 
