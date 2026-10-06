@@ -2,11 +2,15 @@
 
 What a find-jobs run's rank step did, without a run: the postings of each
 ACTIVE profile's demand set (the read model's rows, ``scout/postings.py``)
-that have no score in the home's rank score cache get one, newest first, in
-batches of 50 (``model_rank.DEFAULT_BATCH_SIZE``). The cache is the one a run
+that went up in the last 7 days (``scout_new.FIRST_USE_DAYS``; the posting's
+own posted date, ``scout_new.batch_date``: when Scout first saw it only for
+a posting with no date; 0.1.11.2) and that have no score in the home's rank score cache get one,
+newest first, in batches of 50 (``model_rank.DEFAULT_BATCH_SIZE``). The cache is the one a run
 used, keyed by posting content, resume digest, prefs and model: a posting
 ranked once is never ranked again until one of those changes, and two
-profiles never share or overwrite a score.
+profiles never share or overwrite a score. So the first turns rank the last
+7 days, and a later turn sees only what is new in them: a posting that went
+up longer ago than that is never ranked by this lane.
 
 WHO RUNS IT. The Scout server's pipeline thread, after each drain
 (``PipelineRunner``), a few calls at a time; and ``gigai scout pipeline
@@ -31,8 +35,11 @@ model call takes one from the day's allowance BEFORE it is made
 waits until the next local day (``daily_cap_reached``). A reserved call that
 was never made (everything was cached, or no model) is given back.
 
-OFF when the pipeline is off (``pipeline.enabled``, the environment, a
-settings file that cannot be read) or ``rank.max_calls_per_day`` is 0.
+ITS OWN SWITCH (0.1.11.2): ``rank.enabled``, on by default, separate from the
+pipeline's (``pipeline.enabled``: tailoring stays off while this ranks). OFF
+when ``rank.enabled`` is false, with a settings file that cannot be read,
+with ``GIGAI_SCOUT_PIPELINE`` off while the file does not name
+``rank.enabled`` (``settings.py``), or when ``rank.max_calls_per_day`` is 0.
 
 METRICS: every call is recorded by ``call_metrics`` (kind ``rank``, with the
 profile), by ``model_rank.rank_postings`` itself.
@@ -75,6 +82,27 @@ def _local_now() -> datetime:
     return datetime.now().astimezone()
 
 
+def _window_start(moment: datetime) -> str:
+    """The oldest posted date the lane ranks, as a stamp the read model's rows compare with."""
+
+    from .. import postings
+    from ..scout_new import FIRST_USE_DAYS
+
+    since = postings.stamp(moment - timedelta(days=FIRST_USE_DAYS))
+    assert since is not None
+    return since
+
+
+def _unranked(store: PipelineStore, profile_id: str, since: str) -> dict[str, object]:
+    """One profile's rows with no score that went up after ``since`` (``batch_date``: posted, else first seen), by job."""
+
+    from ..scout_new import batch_date
+
+    return {
+        row.job: row for row in store.postings(profile_id=profile_id) if row.rank_score is None and batch_date(row) > since
+    }
+
+
 def _next_day(moment: datetime) -> str:
     midnight = (moment + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
     return midnight.isoformat(timespec="seconds")
@@ -87,7 +115,7 @@ def rank_status(
 
     setting = pipeline_setting(Path(home_root), target, environ=environ)
     day = (now or _local_now)().date().isoformat()
-    enabled = setting.enabled and setting.rank_max_calls_per_day > 0
+    enabled = setting.rank_enabled and setting.rank_max_calls_per_day > 0
     store: PipelineStore | None = None
     try:
         if target is not None:
@@ -152,9 +180,9 @@ def rank_tick(
 
     ``max_calls`` bounds this tick (the server ranks a few batches per look,
     so the other lanes get their turn); ``busy`` is what the lane yields to
-    (``runner.live_work`` by default); ``force_enabled`` runs with the
-    pipeline switched off (the user asked: ``gigai scout pipeline rank``),
-    never with settings that cannot be read.
+    (``runner.live_work`` by default); ``force_enabled`` runs with ranking
+    switched off (the user asked: ``gigai scout pipeline rank``), never with
+    settings that cannot be read. The pipeline's own switch is not read here.
     """
 
     from .. import postings
@@ -176,8 +204,8 @@ def rank_tick(
         answer.update(state=state, reason=reason)
         return answer
 
-    if not setting.enabled and not (force_enabled and setting.source != SOURCE_UNREADABLE):
-        return done(STATE_DISABLED, setting.source)
+    if not setting.rank_enabled and not (force_enabled and setting.rank_source != SOURCE_UNREADABLE):
+        return done(STATE_DISABLED, setting.rank_source)
     if setting.rank_max_calls_per_day <= 0:
         return done(STATE_DISABLED, REASON_CAP_ZERO)
     is_busy = busy if busy is not None else (lambda: live_work(home_root, target))
@@ -216,18 +244,19 @@ def rank_tick(
         profiles: list[dict[str, object]] = []
         calls = ranked = 0
         halted = False
+        since = _window_start(started)  # one window for the turn, and for the count after it
         # Active profiles only: an archived or deleted profile is not in ``refreshed.profiles`` and has no rows.
         for view in refreshed.profiles:
             if halted:
                 break
-            unranked = {row.job: row for row in store.postings(profile_id=view.profile_id) if row.rank_score is None}
+            unranked = _unranked(store, view.profile_id, since)
             entry: dict[str, object] = {"profile_id": view.profile_id, "unranked": len(unranked), "ranked": 0, "calls": 0}
             profiles.append(entry)
             if not unranked:
                 continue
             # 0110-9-01: the boards the unranked rows are on, never the whole index again each turn.
             rows = [row for row in postings.posting_rows(home_root, unranked.values()) if row.normalized_url in unranked]  # type: ignore[attr-defined]
-            rows.sort(key=lambda row: (unranked[row.normalized_url].first_seen, row.normalized_url), reverse=True)  # type: ignore[attr-defined]
+            rows.sort(key=lambda row: (unranked[row.normalized_url].first_seen, row.normalized_url), reverse=True)  # type: ignore[attr-defined,union-attr]
             candidate: tuple[str, object] | None = None
             for start in range(0, len(rows), size):
                 if stop is not None and stop.is_set():
@@ -274,7 +303,7 @@ def rank_tick(
         if calls:
             postings.refresh(home_root, target, store=store, now=clock())  # the rows get the scores just cached
             for entry in profiles:
-                left = sum(1 for row in store.postings(profile_id=str(entry["profile_id"])) if row.rank_score is None)
+                left = len(_unranked(store, str(entry["profile_id"]), since))
                 if entry["ranked"] and left >= int(entry["unranked"]):  # type: ignore[call-overload]
                     # Scores were cached and the rows do not see them: never rank the same postings again and again.
                     state, why = STATE_UNAVAILABLE, REASON_CACHE_MISMATCH

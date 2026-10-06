@@ -5,8 +5,12 @@
     keeps an unchanged posting from being ranked again: a second pass makes 0
     calls. The daily counters are shared by the profiles: the 61st call of
     the day is flagged, the 101st is not made and the lane waits for the next
-    day. The lane yields to live work, is off with the pipeline, and has one
-    holder at a time.
+    day. The lane yields to live work and has one holder at a time.
+
+0.1.11.2 RANK-A: the lane has its OWN switch (``rank.enabled``, on by
+default): it ranks with the pipeline off while the drain (the tailoring)
+stays disabled; unreadable settings turn it off. It ranks only postings that
+went up in the last 7 days (first seen in them, for a posting with no date).
 """
 
 from __future__ import annotations
@@ -24,11 +28,13 @@ import pytest
 from gigai.adapters.port import InvocationResult, NormalizedUsage
 from gigai.cli import cli
 from gigai.scout.pipeline import rank_lane, triggers
-from gigai.scout.pipeline.settings import PIPELINE_ENV, PipelineSetting
+from gigai.scout.find_jobs.refresh_tick import settings_path
+from gigai.scout.pipeline.runner import DRAIN_DISABLED, PipelineRunner
+from gigai.scout.pipeline.settings import PIPELINE_ENV, PipelineSetting, pipeline_setting
 from gigai.scout.pipeline.store import CAP_RANK_CALLS, LEASE_RANK, PipelineStore, pipeline_path
 
 from tests.support.answers_stories_fixtures import config as fixture_config
-from tests.support.pipeline_fixtures import MARKERS, PipelineModel, install_model
+from tests.support.pipeline_fixtures import MARKERS, PipelineModel, install_model, set_pipeline_enabled
 from tests.support.posting_fixtures import (
     NOW,
     TITLE_SECOND_ONLY,
@@ -247,7 +253,7 @@ def test_the_rank_lane_and_a_second_caller_take_from_one_counter_across_two_prof
     assert per_profile(one_more)[fx.second_profile_id] == 1
 
 
-def test_the_lane_yields_is_off_with_the_pipeline_and_has_one_holder(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_the_lane_yields_is_off_with_the_environment_and_has_one_holder(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     fx, model = _fixture(tmp_path, monkeypatch)
     # Nothing stored to rank and no pipeline file yet: a look does not create it.
     assert not pipeline_path(fx.home_root, fx.target).exists()
@@ -256,6 +262,7 @@ def test_the_lane_yields_is_off_with_the_pipeline_and_has_one_holder(tmp_path: P
 
     yielded = _tick(fx, busy=lambda: "sources_update")
     assert (yielded["state"], yielded["reason"], yielded["calls"]) == ("yielded", "sources_update", 0)
+    # The variable that turns the pipeline off turns ranking off too, while the file does not name ``rank.enabled``.
     off = _tick(fx, environ={PIPELINE_ENV: "0"})
     assert (off["state"], off["reason"]) == ("disabled", "environment")
     other = _store(fx)
@@ -278,3 +285,190 @@ def test_the_lane_yields_is_off_with_the_pipeline_and_has_one_holder(tmp_path: P
     unreadable = _tick(fx)
     assert (unreadable["state"], unreadable["reason"], unreadable["calls"], unreadable["ranked"]) == ("unavailable", "model_output_invalid", 1, 0)
     assert unreadable["calls_today"]["used"] == 1  # type: ignore[index]
+
+
+# --- 0.1.11.2 RANK-A (1a): ranking on its own switch -----------------------------------------------------
+
+
+def _write_settings(fx: PostingsFixture, **blocks: object) -> None:
+    path = settings_path(fx.home_root, fx.target)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"schema_version": "scout-settings:1", **blocks}), encoding="utf-8")
+
+
+def _scores(fx: PostingsFixture) -> dict[str, int | None]:
+    """``job -> rank_score`` of every stored row (a job two profiles match must agree on having one or not)."""
+
+    store = _store(fx)
+    try:
+        found: dict[str, set[bool]] = {}
+        for row in store.postings():
+            found.setdefault(row.job, set()).add(row.rank_score is not None)
+        assert all(len(kinds) == 1 for kinds in found.values()), found
+        return {row.job: row.rank_score for row in store.postings()}
+    finally:
+        store.close()
+
+
+@pytest.mark.parametrize("pipeline_enabled", [False, None], ids=["pipeline_off_in_settings", "pipeline_off_by_default"])
+def test_ranking_runs_with_the_pipeline_off_and_the_drain_stays_disabled(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, pipeline_enabled: bool | None
+) -> None:
+    monkeypatch.delenv(PIPELINE_ENV, raising=False)
+    fx, model = _fixture(tmp_path, monkeypatch)
+    set_pipeline_enabled(fx.home_root, fx.target, pipeline_enabled)
+    assert pipeline_setting(fx.home_root, fx.target, environ={}).enabled is False
+    fx.seed("acme", [lever_job("acme", 1), lever_job("acme", 2)], seen_at=days_ago(1))
+
+    ticked = _tick(fx, environ={})
+
+    # THE OUTCOME: the rows carry a rank score, with the pipeline off.
+    assert (ticked["state"], ticked["reason"], ticked["calls"], ticked["ranked"]) == ("ran", None, 2, 4)
+    scores = _scores(fx)
+    assert len(scores) == 2 and all(type(score) is int for score in scores.values())
+    assert rank_lane.rank_status(fx.home_root, fx.target, environ={}, now=lambda: NOW)["enabled"] is True
+    setting = pipeline_setting(fx.home_root, fx.target, environ={})
+    assert (setting.rank_enabled, setting.rank_source) == (True, "default")
+    # ... and the pipeline did not come back with it: the drain answers disabled, no step exists, nothing was tailored.
+    runner = PipelineRunner(home_root=fx.home_root, target=fx.target, config=fixture_config(fx.home_root), busy=lambda: None, environ={})
+    drained = runner.drain()
+    assert (drained.state, drained.steps) == (DRAIN_DISABLED, [])
+    assert drained.reason == ("setting" if pipeline_enabled is False else "default")
+    store = _store(fx)
+    try:
+        assert store.steps() == ()
+    finally:
+        store.close()
+    assert model.tailor_prompts == [] and model.assess_prompts == [] and len(model.rank_prompts) == 2
+    # `gigai scout pipeline status` says the two apart.
+    printed = CliRunner().invoke(cli, ["scout", "pipeline", "status", "--home", str(fx.home_root), "--target", str(fx.target)])
+    assert printed.exit_code == 0, printed.output
+    assert "Pipeline: off" in printed.output
+    assert "Ranking: on (default); switched separately from the pipeline." in printed.output
+
+
+def test_rank_enabled_is_its_own_setting_and_unreadable_settings_turn_ranking_off(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv(PIPELINE_ENV, raising=False)
+    fx, model = _fixture(tmp_path, monkeypatch)
+    fx.seed("acme", [lever_job("acme", 1)], seen_at=days_ago(1))
+
+    def rank_block(environ: dict[str, str]) -> dict[str, object]:
+        return pipeline_setting(fx.home_root, fx.target, environ=environ).to_json()["rank"]  # type: ignore[return-value]
+
+    # rank.enabled false: off, whatever the pipeline's switch says.
+    _write_settings(fx, pipeline={"enabled": True}, rank={"enabled": False})
+    assert rank_block({}) == {"enabled": False, "source": "setting", "max_calls_per_day": 100, "warn_calls_per_day": 60}
+    off = _tick(fx, environ={})
+    assert (off["state"], off["reason"], off["calls"]) == ("disabled", "setting", 0)
+    assert rank_lane.rank_status(fx.home_root, fx.target, environ={}, now=lambda: NOW)["enabled"] is False
+    assert pipeline_setting(fx.home_root, fx.target, environ={}).enabled is True  # the pipeline's switch is not ranking's
+    # The variable set to off: ranking is off with the pipeline when the file does not name rank.enabled ...
+    _write_settings(fx, rank={"max_calls_per_day": 50})
+    assert rank_block({PIPELINE_ENV: "off"}) == {"enabled": False, "source": "environment", "max_calls_per_day": 50, "warn_calls_per_day": 60}
+    assert _tick(fx, environ={PIPELINE_ENV: "off"})["reason"] == "environment"
+    # ... set to on it changes nothing for ranking, and a file that says rank.enabled false stays off.
+    assert rank_block({PIPELINE_ENV: "on"})["enabled"] is True
+    _write_settings(fx, rank={"enabled": False})
+    assert rank_block({PIPELINE_ENV: "on"}) == {"enabled": False, "source": "setting", "max_calls_per_day": 100, "warn_calls_per_day": 60}
+
+    # The settings API writes the same key (PUT /api/settings/background): false, true, and null takes it out of the file.
+    from gigai.scout.find_jobs import background_settings
+
+    def put(body: dict[str, object]) -> dict[str, object]:
+        background_settings.write_background_settings(fx.home_root, fx.target, background_settings.validate_patch(body))
+        return background_settings.background_settings(fx.home_root, fx.target, environ={})
+
+    _write_settings(fx)
+    assert put({"rank": {"enabled": False}})["settings"]["rank"] == {"enabled": False, "max_calls_per_day": 100, "warn_calls_per_day": 60}  # type: ignore[index]
+    assert rank_block({})["source"] == "setting" and _tick(fx, environ={})["state"] == "disabled"
+    back = put({"rank": {"enabled": None, "max_calls_per_day": 70}})
+    assert back["settings"]["rank"]["enabled"] is True and back["effective"]["pipeline"]["rank"]["source"] == "default"  # type: ignore[index]
+    assert json.loads(settings_path(fx.home_root, fx.target).read_text(encoding="utf-8"))["rank"] == {"max_calls_per_day": 70}
+    with pytest.raises(background_settings.SettingsError) as refused:
+        background_settings.validate_patch({"rank": {"enabled": "yes"}})
+    assert refused.value.code == "wrong_type"
+
+    # Settings that cannot be read: ranking is OFF, also for the CLI's forced turn and with the variable set to on.
+    for text in ("{not json", json.dumps({"schema_version": "scout-settings:1", "rank": {"enabled": "yes"}}),
+                 json.dumps({"schema_version": "scout-settings:1", "rank": ["enabled"]})):
+        settings_path(fx.home_root, fx.target).write_text(text, encoding="utf-8")
+        for environ in ({}, {PIPELINE_ENV: "on"}):
+            assert rank_block(environ)["enabled"] is False and rank_block(environ)["source"] == "settings_unreadable", text
+            for forced in (False, True):
+                unreadable = _tick(fx, environ=environ, force_enabled=forced)
+                assert (unreadable["state"], unreadable["reason"], unreadable["calls"]) == ("disabled", "settings_unreadable", 0), text
+            assert rank_lane.rank_status(fx.home_root, fx.target, environ=environ, now=lambda: NOW)["enabled"] is False
+    assert model.rank_prompts == [] and all(score is None for score in _scores_or_none(fx).values())
+
+    # The file says rank.enabled true: the variable set to off does not switch ranking off (the file is explicit).
+    _write_settings(fx, rank={"enabled": True})
+    assert rank_block({PIPELINE_ENV: "off"})["source"] == "setting"
+    assert pipeline_setting(fx.home_root, fx.target, environ={PIPELINE_ENV: "off"}).enabled is False
+    on = _tick(fx, environ={PIPELINE_ENV: "off"})
+    assert (on["state"], on["calls"]) == ("ran", 2) and all(type(score) is int for score in _scores(fx).values())
+
+
+def _scores_or_none(fx: PostingsFixture) -> dict[str, int | None]:
+    """:func:`_scores`, or nothing when no turn has made the pipeline file yet."""
+
+    return _scores(fx) if pipeline_path(fx.home_root, fx.target).is_file() else {}
+
+
+# --- 0.1.11.2 RANK-A (1b, operator decision D2): only postings posted in the last 7 days ------------------
+
+
+def _undated(slug: str, n: int) -> dict[str, object]:
+    job = lever_job(slug, n)
+    del job["createdAt"]  # a board that gives no date: the window judges when Scout first saw it
+    return job
+
+
+def test_only_postings_posted_in_the_last_7_days_are_ranked_and_a_ranked_one_never_again(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv(PIPELINE_ENV, raising=False)
+    fx, model = _fixture(tmp_path, monkeypatch)
+    set_pipeline_enabled(fx.home_root, fx.target, False)
+    # One number per posting: the score cache is keyed by posting content, so two postings with one text share a score.
+    numbers = {"recent": 1, "stale": 2, "lateseen": 3, "earlyseen": 4, "nodatenew": 5, "nodateold": 6, "fresh": 7}
+
+    def url(slug: str) -> str:
+        return f"https://jobs.lever.co/{slug}/{slug}-{numbers[slug]:05d}"
+
+    fx.seed("recent", [lever_job("recent", 1, created=days_ago(3))], seen_at=days_ago(3))
+    fx.seed("stale", [lever_job("stale", 2, created=days_ago(10))], seen_at=days_ago(10))
+    fx.seed("lateseen", [lever_job("lateseen", 3, created=days_ago(10))], seen_at=NOW)  # posted 10 days ago, first seen today
+    fx.seed("earlyseen", [lever_job("earlyseen", 4, created=days_ago(3))], seen_at=days_ago(10))  # posted 3 days ago, seen 10 ago
+    fx.seed("nodatenew", [_undated("nodatenew", 5)], seen_at=days_ago(3))
+    fx.seed("nodateold", [_undated("nodateold", 6)], seen_at=days_ago(10))
+    inside = {url("recent"), url("earlyseen"), url("nodatenew")}
+    outside = {url("stale"), url("lateseen"), url("nodateold")}
+
+    first = _tick(fx, environ={})
+
+    assert (first["state"], first["calls"], first["ranked"]) == ("ran", 2, 6)  # 3 postings, two profiles, one call each
+    assert [item["unranked"] for item in first["profiles"]] == [3, 3]  # type: ignore[union-attr]  # counted inside the window
+    scores = _scores(fx)
+    assert set(scores) == inside | outside  # all six are stored rows: the window is the lane's, not the read model's
+    assert {job for job, score in scores.items() if score is not None} == inside
+    assert all(scores[job] is None for job in outside)
+    sent = "\n".join(model.rank_prompts)
+    # What the model was sent: the three inside the window, never one outside it.
+    assert all(f"@ {slug} |" in sent for slug in ("recent", "earlyseen", "nodatenew"))
+    assert all(slug not in sent for slug in ("stale", "lateseen", "nodateold"))
+
+    # A second turn: 0 calls. The unranked old postings are not "left over" work, and no cache mismatch is reported.
+    second = _tick(fx, environ={})
+    assert (second["state"], second["reason"], second["calls"], second["ranked"]) == ("idle", None, 0, 0)
+    assert [item["unranked"] for item in second["profiles"]] == [0, 0]  # type: ignore[union-attr]
+    assert len(model.rank_prompts) == 2 and second["calls_today"]["used"] == 2  # type: ignore[index]
+
+    # A posting that goes up later is the only one ranked: the ranked ones are not sent again, the old ones still never.
+    fx.seed("fresh", [lever_job("fresh", 7)], seen_at=NOW)
+    third = _tick(fx, environ={})
+    assert (third["state"], third["reason"], third["calls"], third["ranked"]) == ("ran", None, 2, 2)
+    assert all(prompt.count("\np0 | ") == 1 and "\np1 | " not in prompt for prompt in model.rank_prompts[2:])
+    after = _scores(fx)
+    assert {job for job, score in after.items() if score is not None} == inside | {url("fresh")}
+    assert {job: after[job] for job in inside} == {job: scores[job] for job in inside}
+    assert _tick(fx, environ={})["calls"] == 0 and len(model.rank_prompts) == 4

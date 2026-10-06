@@ -105,7 +105,7 @@ def test_pipeline_journey(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> No
         assert (fresh["schema_version"], fresh["readable"], fresh["yielding_to"]) == ("scout-pipeline:1", True, None)
         assert fresh["setting"] == {
             "enabled": True, "source": "default", "auto_jobs_per_trigger": 10, "max_model_calls_per_day": 40, "label_min_ats": 0,
-            "models": {}, "rank": {"max_calls_per_day": 100, "warn_calls_per_day": 60},
+            "models": {}, "rank": {"enabled": True, "source": "default", "max_calls_per_day": 100, "warn_calls_per_day": 60},
         }
         assert fresh["runner"]["active"] is True  # the real server runs the pipeline's thread
         assert fresh["jobs"] == [] and fresh["errors"] == [] and fresh["approvals"] == {"pending": 0, "items": []}
@@ -121,7 +121,7 @@ def test_pipeline_journey(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> No
         assert saved.json()["settings"]["pipeline"] == {
             "enabled": True, "auto_jobs_per_trigger": 0, "max_model_calls_per_day": 40, "label_min_ats": 10, "models": {},
         }
-        assert saved.json()["settings"]["rank"] == {"max_calls_per_day": 100, "warn_calls_per_day": 50}
+        assert saved.json()["settings"]["rank"] == {"enabled": True, "max_calls_per_day": 100, "warn_calls_per_day": 50}
         assert saved.json()["effective"]["pipeline"]["source"] == "setting"
         assert client.get("/api/settings/background").json() == saved.json()
         assert json.loads(path.read_text(encoding="utf-8")) == {

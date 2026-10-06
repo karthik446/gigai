@@ -18,7 +18,9 @@ already exist, each beside the job it switches:
   minimum of the Scout label (``pipeline.label_min_ats``, 0 to 100) and the
   model target of each model step (``pipeline.models``: ``tailor`` /
   ``reassess``; ``null`` for a step puts the project's model target back).
-  ``null`` for a cap puts its default back.
+  ``null`` for a cap puts its default back. ``rank.enabled`` (0.1.11.2) is
+  the background rank's own switch, separate from ``pipeline.enabled``;
+  ``null`` takes it out of the file (on again, by default).
 
 This module adds what was missing: :func:`write_background_settings` (the
 API's ``PUT /api/settings/background``), which changes only the keys it is
@@ -66,7 +68,7 @@ MAX_CHECK_TIMES_PER_DAY = 12
 CHECK_TIMES_DAYS = ("weekdays", "weekends")
 _HH_MM = re.compile(r"\A\d{2}:\d{2}\Z")
 
-#: block -> key -> what a value must be ("bool", "backfill_model", "manifest_url", "check_times", "count",
+#: block -> key -> what a value must be ("bool", "switch", "backfill_model", "manifest_url", "check_times", "count",
 #: "percent" or "step_models").
 _KEYS: dict[str, dict[str, str]] = {
     "sources": {"auto_refresh": "bool", "check_times": "check_times"},
@@ -76,7 +78,7 @@ _KEYS: dict[str, dict[str, str]] = {
         "enabled": "bool", "auto_jobs_per_trigger": "count", "max_model_calls_per_day": "count",
         "label_min_ats": "percent", "models": "step_models",
     },
-    "rank": {"max_calls_per_day": "count", "warn_calls_per_day": "count"},
+    "rank": {"enabled": "switch", "max_calls_per_day": "count", "warn_calls_per_day": "count"},
 }
 #: The most a cap may be set to through the API: a typo must not buy ten thousand model calls.
 MAX_CAP = 1000
@@ -197,6 +199,13 @@ def _value(block: str, key: str, kind: str, value: object) -> object:
             raise SettingsError("wrong_type", f"{name} must be a whole number or null for the default")
         if not 0 <= value <= most:
             raise SettingsError("invalid_value", f"{name} must be 0 to {most}, or null for the default")
+        return value
+    if kind == "switch":
+        # null takes the key out of the file: the default applies again.
+        if value is None:
+            return _REMOVE
+        if type(value) is not bool:
+            raise SettingsError("wrong_type", f"{name} must be true or false, or null for the default")
         return value
     if kind == "bool":
         if type(value) is not bool:
@@ -342,7 +351,8 @@ def background_settings(
     ``default``, the times a reset puts back. ``pipeline`` and ``rank``
     (0.1.10.7 PL5) are the background pipeline's switch, caps, Scout ATS
     minimum and per-step model targets; ``effective.pipeline`` is
-    ``PipelineSetting.to_json`` (the rank caps inside it). ``readable`` is
+    ``PipelineSetting.to_json`` (the rank switch, its ``source`` and the rank
+    caps inside it: ranking is switched separately from the pipeline). ``readable`` is
     false when the file exists and cannot be read: every job is then off
     (the pipeline too: ``effective.pipeline.enabled`` false, ``source``
     ``settings_unreadable``) and a write is refused until the file is fixed
@@ -380,6 +390,7 @@ def background_settings(
                 "models": dict(sorted(stored_pipeline.models.items())),
             },
             "rank": {
+                "enabled": stored_pipeline.rank_enabled,
                 "max_calls_per_day": stored_pipeline.rank_max_calls_per_day,
                 "warn_calls_per_day": stored_pipeline.rank_warn_calls_per_day,
             },
