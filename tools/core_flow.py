@@ -303,13 +303,8 @@ class Flow:
 
         self.step(mode, "gigai scout assess --job-url <one stored posting> --json", [gigai, "scout", "assess", "--job-url", job_url, "--json"], verdict)
 
-        def tailored(answer: dict[str, object], _lines: list[str]) -> str | None:
-            markdown = str(answer.get("markdown") or "")
-            if answer["job"]["normalized_url"] != job_url or "## " not in markdown:  # type: ignore[index]
-                return "no tailored markdown"
-            return f"ok: {len(markdown.splitlines())} lines of markdown"
-
-        self.step(mode, "gigai scout resume tailor --job-url <the same posting> --json", [gigai, "scout", "resume", "tailor", "--job-url", job_url, "--json"], tailored)
+        # 0.1.11: `gigai scout resume tailor` is switched off (the resume is picked at assessment); its step is out of the
+        # release rule until 0.1.11.1 reworks the pipeline.
 
         def merge(answer: dict[str, object], _lines: list[str]) -> str | None:
             plan, master = answer.get("migration"), answer.get("master")

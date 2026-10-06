@@ -223,7 +223,7 @@ def build(root: Path, *, log=print, resumes_folder: Path | None = None, master: 
         log(f"master: revision {ok(client.get('/api/master'))['master']['revision']}")
 
     # One job of a trigger runs by itself; the rest wait for an approval (the Background panel shows it).
-    ok(client.put("/api/settings/background", json={"pipeline": {"auto_jobs_per_trigger": 1}}))
+    ok(client.put("/api/settings/background", json={"pipeline": {"enabled": True, "auto_jobs_per_trigger": 1}}))
 
     def rows() -> list[dict]:
         return ok(client.get("/api/postings"))["postings"]["rows"]

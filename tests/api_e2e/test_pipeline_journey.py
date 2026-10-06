@@ -87,7 +87,7 @@ def _wait_for_job(client, job: str, states: tuple[str, ...], *, deadline_seconds
 
 
 def test_pipeline_journey(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("GIGAI_SCOUT_PIPELINE", raising=False)
+    monkeypatch.setenv("GIGAI_SCOUT_PIPELINE", "on")
     home, target = setup_and_init(tmp_path)
     add_resume(home, target, tmp_path)
     write_offline_find_jobs_config(target)

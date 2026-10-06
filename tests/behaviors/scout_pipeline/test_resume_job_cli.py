@@ -81,7 +81,7 @@ USER_ONLY = ("Northwind Labs", OWN, "Wrote the Terraform modules", "cut p99 late
 
 @pytest.fixture
 def fx(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> PipelineFixture:
-    monkeypatch.delenv(PIPELINE_ENV, raising=False)
+    monkeypatch.setenv(PIPELINE_ENV, "on")
     fx = build_pipeline_fixture(tmp_path, monkeypatch, resume=RESUME)
     source = tmp_path / "master.md"
     source.write_text(MASTER, encoding="utf-8")
@@ -289,7 +289,7 @@ def _long_master() -> str:
 
 @pytest.fixture
 def long_fx(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> PipelineFixture:
-    monkeypatch.delenv(PIPELINE_ENV, raising=False)
+    monkeypatch.setenv(PIPELINE_ENV, "on")
     fx = build_pipeline_fixture(tmp_path, monkeypatch, resume=RESUME)
     source = tmp_path / "long-master.md"
     source.write_text(_long_master(), encoding="utf-8")

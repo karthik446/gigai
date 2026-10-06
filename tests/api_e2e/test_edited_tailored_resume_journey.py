@@ -58,7 +58,7 @@ def test_edited_tailored_resume_journey(tmp_path: Path, monkeypatch: pytest.Monk
     home, target = setup_and_init(tmp_path)
     add_resume(home, target, tmp_path)
     write_offline_find_jobs_config(target, sources_live=True)
-    monkeypatch.delenv("GIGAI_SCOUT_PIPELINE", raising=False)  # the pipeline is on: the server's runner re-checks the edited resume
+    monkeypatch.setenv("GIGAI_SCOUT_PIPELINE", "on")  # the pipeline is on: the server's runner re-checks the edited resume
     server = start_server(home, target, monkeypatch=monkeypatch)
     try:
         client = server.client

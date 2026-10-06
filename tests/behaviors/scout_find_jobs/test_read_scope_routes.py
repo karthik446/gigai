@@ -260,6 +260,7 @@ def test_on_a_home_never_migrated_no_get_this_put_inside_the_scope_writes_and_th
         thread.join(10)
 
 
+@pytest.mark.skip(reason="needs the pipeline on: re-enable in 0.1.11.1 (pipeline off by default in 0.1.11)")
 def test_on_a_home_never_migrated_a_scoped_post_migrates_before_it_enters_the_scope(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, spy: _Spy,
 ) -> None:

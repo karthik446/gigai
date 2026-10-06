@@ -136,7 +136,6 @@ def test_the_flow_runs_every_command_of_the_release_rule_cold_and_then_with_the_
         '"scout", "new", "--yes", *since, "--json"',
         '"scout", "jobs", "list", "--json"',
         '"scout", "assess", "--job-url", job_url, "--json"',
-        '"scout", "resume", "tailor", "--job-url", job_url, "--json"',
         '"scout", "resume", "master", "init", "--dry-run", "--json"',
         '"scout", "resume", "master", "init", "--json"',
         '"scout", "resume", "master", "selection", "refresh", "--all", "--json"',

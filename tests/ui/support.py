@@ -44,9 +44,10 @@ LIST_READY_JS = """() => document.querySelectorAll('[data-testid="job-row"]').le
 
 #: A job page in full: the title, the state line and the pipeline timeline are drawn (a job that is still loading
 #: shows only a "Loading job…" heading, and one that is not found has none of the three).
+#: 0.1.11: the step timeline is part of the background pipeline's panel, which is hidden while the pipeline is off (the
+#: default), so the page is READY at its title and its state.
 JOB_PAGE_READY_JS = """() => !!document.querySelector('.job-page .job-title')
-  && !!document.querySelector('.job-page [data-role="job-state"]')
-  && !!document.querySelector('.job-page [data-testid="step-timeline"]')"""
+  && !!document.querySelector('.job-page [data-role="job-state"]')"""
 
 #: Installed before the page's own scripts: `window.__gigaiCountLines` holds every text the Jobs count line
 #: shows, in order (null while the page shown has no count line). A MutationObserver sees every committed

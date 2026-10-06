@@ -62,7 +62,7 @@ _BASE = json.dumps(
 
 @pytest.fixture
 def fx(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> PipelineFixture:
-    monkeypatch.delenv(PIPELINE_ENV, raising=False)
+    monkeypatch.setenv(PIPELINE_ENV, "on")
     fx = build_pipeline_fixture(tmp_path, monkeypatch, base=False)
     fx.model.assessed = _BASE
     run_quick_assessment(

@@ -83,7 +83,7 @@ SELECTION = {
 
 @pytest.fixture
 def fx(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> PipelineFixture:
-    monkeypatch.delenv(PIPELINE_ENV, raising=False)
+    monkeypatch.setenv(PIPELINE_ENV, "on")
     fx = build_pipeline_fixture(tmp_path, monkeypatch, resume=RESUME)
     source = tmp_path / "master.md"
     source.write_text(MASTER, encoding="utf-8")

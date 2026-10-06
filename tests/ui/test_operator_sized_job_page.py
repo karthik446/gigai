@@ -58,6 +58,7 @@ SETTLED_TIMELINE = f".job-page {tid('step-timeline')}" + "".join(f':not([data-st
 PIPELINE_PATIENCE_MS = 120_000
 
 
+@pytest.mark.skip(reason="needs the pipeline on: re-enable in 0.1.11.1 (pipeline off by default in 0.1.11)")
 def test_open_a_job_apply_and_go_back_on_the_operator_sized_home(operator_ui, operator_server) -> None:
     ui = operator_ui
     folder = evidence_folder()

@@ -73,7 +73,7 @@ def test_agent_api_journey(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> N
     # agent then tailors and edits that job's resume by hand: the background tailoring must keep it (no 409).
     # The order is made certain, not left to timing: the server's runner yields while an assess batch is live
     # (``busy.assess_batch``, the marker `scout new` leaves), so the background tailoring runs AFTER the agent's.
-    monkeypatch.delenv("GIGAI_SCOUT_PIPELINE", raising=False)
+    monkeypatch.setenv("GIGAI_SCOUT_PIPELINE", "on")
     server = start_server(home, target, monkeypatch=monkeypatch)
     try:
         client = server.client

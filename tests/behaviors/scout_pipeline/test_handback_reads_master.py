@@ -78,7 +78,7 @@ REWORDED = "- Own the Python inference services that 40 product teams depend on.
 
 @pytest.fixture
 def fx(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> PipelineFixture:
-    monkeypatch.delenv(PIPELINE_ENV, raising=False)
+    monkeypatch.setenv(PIPELINE_ENV, "on")
     return build_pipeline_fixture(tmp_path, monkeypatch, resume=RESUME)
 
 

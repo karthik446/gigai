@@ -127,5 +127,8 @@ class StaticRoutesMixin:
         self.send_response(HTTPStatus.OK)
         self.send_header("Content-Type", _static_content_type(resource.name))
         self.send_header("Content-Length", str(len(body)))
+        if resource.name == "index.html":
+            # 0.1.11: the page points at hashed bundles; a cached index.html would keep an old UI after an upgrade.
+            self.send_header("Cache-Control", "no-cache")
         self.end_headers()
         self.wfile.write(body)

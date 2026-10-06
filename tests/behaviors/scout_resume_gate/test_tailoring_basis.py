@@ -169,6 +169,7 @@ def _item_ids(on_disk: dict) -> list[str]:
 
 
 def test_the_header_the_line_under_it_and_every_status_name_the_basis_the_tailor_read(home: _Home, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("GIGAI_SCOUT_PIPELINE", "on")  # 0.1.11: tailoring is off by default; this test reads what the tailor read
     port = install_prompt_model(monkeypatch, copies_what_it_is_shown)
     master = home.cli("scout", "resume", "master", "show")["master"]
     master_texts = {item["text"] for item in master["items"] if item["kind"] != "skills"}

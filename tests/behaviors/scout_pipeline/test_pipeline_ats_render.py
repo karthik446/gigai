@@ -87,7 +87,7 @@ def _resume(names: str) -> str:
 
 
 def _processed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, names: str, tailored: dict[str, object] | None = TAILORED) -> PipelineFixture:
-    monkeypatch.delenv("GIGAI_SCOUT_PIPELINE", raising=False)
+    monkeypatch.setenv("GIGAI_SCOUT_PIPELINE", "on")
     fx = build_pipeline_fixture(tmp_path, monkeypatch, resume=_resume(names), posting=POSTING)
     if tailored is not None:
         fx.model.tailored = tailored
@@ -149,7 +149,7 @@ def test_a_short_tailoring_with_no_role_line_loses_no_fidelity_and_never_reports
 ) -> None:
     """The fixtures' own short tailoring: one entry whose heading has no "Title | dates" line, and no header."""
 
-    monkeypatch.delenv("GIGAI_SCOUT_PIPELINE", raising=False)
+    monkeypatch.setenv("GIGAI_SCOUT_PIPELINE", "on")
     fx = build_pipeline_fixture(tmp_path, monkeypatch)
     assert CliRunner().invoke(scout_group, fx.cli("process", JOB)).exit_code == 0
     result = _ats(fx)

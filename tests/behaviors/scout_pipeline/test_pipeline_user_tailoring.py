@@ -75,7 +75,7 @@ _DONE = dict.fromkeys(STEPS, "done")
 
 @pytest.fixture
 def fx(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> PipelineFixture:
-    monkeypatch.delenv(PIPELINE_ENV, raising=False)
+    monkeypatch.setenv(PIPELINE_ENV, "on")
     return build_pipeline_fixture(tmp_path, monkeypatch)
 
 
@@ -156,7 +156,7 @@ def _tailor_entries(drained) -> list[dict[str, object]]:
 def test_a_a_hand_tailored_resume_with_an_edited_line_survives_an_answer_triggered_run_and_downstream_uses_it(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.delenv(PIPELINE_ENV, raising=False)
+    monkeypatch.setenv(PIPELINE_ENV, "on")
     fx = build_pipeline_fixture(tmp_path, monkeypatch, base=False)
     _ask(fx, _ASKED)
     held = _tailor_by_hand(fx, _ASKED)

@@ -40,6 +40,13 @@ def test_index_served_at_root(running_server) -> None:
     assert "<div id=\"root\">" in response.text
 
 
+def test_index_is_not_cached_so_an_upgrade_shows_the_new_ui(running_server) -> None:
+    """0.1.11: a cached index.html kept an old script bundle after an upgrade: the page answers no-cache."""
+
+    assert running_server.get("/").headers["cache-control"] == "no-cache"
+    assert running_server.get("/index.html").headers["cache-control"] == "no-cache"
+
+
 def test_asset_served_with_correct_content_type(running_server) -> None:
     index = running_server.get("/").text
     # Pull the built, hashed asset filenames straight out of index.html so

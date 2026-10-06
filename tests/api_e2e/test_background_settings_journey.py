@@ -55,7 +55,7 @@ DEFAULTS = {
     "tagging": {"model_enabled": True, "backfill_enabled": False, "tag_backfill_model": "configured"},
     "snapshot": {"enabled": True, "manifest_url": DEFAULT_URL},
     # 0.1.10.7 PL5: the background pipeline's block and the rank caps (their own journey: test_pipeline_journey.py).
-    "pipeline": {"enabled": True, "auto_jobs_per_trigger": 10, "max_model_calls_per_day": 40, "label_min_ats": 0, "models": {}},
+    "pipeline": {"enabled": False, "auto_jobs_per_trigger": 10, "max_model_calls_per_day": 40, "label_min_ats": 0, "models": {}},
     "rank": {"max_calls_per_day": 100, "warn_calls_per_day": 60},
 }
 

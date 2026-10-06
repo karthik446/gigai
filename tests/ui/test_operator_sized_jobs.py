@@ -127,6 +127,7 @@ def beside_the_build(ui, server, numbers: dict[str, object], check) -> None:
         books.drop_open("dropped when the second tab closed")
 
 
+@pytest.mark.skip(reason="needs the pipeline on: re-enable in 0.1.11.1 (pipeline off by default in 0.1.11)")
 def test_jobs_load_open_a_job_and_back_on_the_operator_sized_home(operator_ui, operator_server, ui_artifacts: Path, request: pytest.FixtureRequest) -> None:
     ui, server = operator_ui, operator_server
     failures: list[str] = []

@@ -60,7 +60,7 @@ ANSWER_TRIGGER_SPAWNS_MAX = 38
 
 @pytest.fixture
 def fx(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> PipelineFixture:
-    monkeypatch.delenv(PIPELINE_ENV, raising=False)
+    monkeypatch.setenv(PIPELINE_ENV, "on")
     return build_pipeline_fixture(tmp_path, monkeypatch, base=False)
 
 

@@ -190,7 +190,7 @@ def out(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict:
     # One job of a trigger runs, the rest wait for an approval.
     path = settings_path(fx.home_root, fx.target)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps({"schema_version": "scout-settings:1", "pipeline": {"auto_jobs_per_trigger": 1, "label_min_ats": 10}}), encoding="utf-8")
+    path.write_text(json.dumps({"schema_version": "scout-settings:1", "pipeline": {"enabled": True, "auto_jobs_per_trigger": 1, "label_min_ats": 10}}), encoding="utf-8")
     for n in range(3):
         _ask(fx, _job(n))
     saved = CliRunner().invoke(

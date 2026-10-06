@@ -57,7 +57,7 @@ _POSTINGS = {
 
 @pytest.fixture
 def fx(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> PipelineFixture:
-    monkeypatch.delenv(PIPELINE_ENV, raising=False)
+    monkeypatch.setenv(PIPELINE_ENV, "on")
     fixture = build_pipeline_fixture(tmp_path, monkeypatch, base=False, resume=RESUME)
     answer = fixture.model.answer
 

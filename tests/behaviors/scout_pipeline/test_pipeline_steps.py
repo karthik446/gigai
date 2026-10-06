@@ -43,7 +43,7 @@ from tests.support.pipeline_fixtures import (
 
 @pytest.fixture
 def fx(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> PipelineFixture:
-    monkeypatch.delenv("GIGAI_SCOUT_PIPELINE", raising=False)
+    monkeypatch.setenv("GIGAI_SCOUT_PIPELINE", "on")
     return build_pipeline_fixture(tmp_path, monkeypatch)
 
 
