@@ -321,7 +321,7 @@ def test_rows_come_by_fit_then_rank_then_newest_inside_a_group_and_each_says_its
 
 
 def _states(fx: PostingsFixture) -> dict[str, str]:
-    return {str(row["job_identity"]): str(row["state"]) for row in _rows(_search(fx, states=["assessed", "not_assessed", "weak_fit", "ranked_low"]))}  # 0.1.11.2: every posting, the collapsed ones too
+    return {str(row["job_identity"]): str(row["state"]) for row in _rows(_search(fx, states=["assessed", "not_assessed", "weak_fit"]))}  # every posting: a ranked-low one is listed as not_assessed
 
 
 def test_scout_new_assesses_only_rank_50_or_more_and_asks_about_the_low_ranked_separately(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

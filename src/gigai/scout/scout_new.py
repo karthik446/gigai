@@ -28,6 +28,13 @@ THE FLOW
   requirement rows) comes after all of that: below every other assessed
   posting and every posting not assessed yet, the thin ones among themselves
   in this same order.
+- RANKED LOW (0.1.11.2, ``fit.is_ranked_low``): a posting not assessed yet
+  whose known rank score is below ``fit.weak_fit_below_rank`` is ORDERED
+  lower by that rank, never left out: its row says ``ranked_low: true``,
+  ``counts.ranked_low`` counts them and the table prints a plain
+  "Ranked low (N)" line above them (:func:`divider_text`). The rank order
+  itself puts them after the other ranked postings not assessed yet and
+  before the ones not ranked yet; :func:`order_key` needs no rule for it.
 - WEAK FIT (0110-10-02, ``fit.py``): a needs-answers posting with few
   requirements met AND a low rank has the state ``weak_fit``. It is left out
   of the rows listed here (``counts.weak_fit`` says how many, the message how
@@ -299,6 +306,22 @@ def in_order(shown: Iterable[tuple[Sequence[PostingRecord], PostingRecord]]) -> 
     ordered.sort(key=lambda pair: pair[1].first_seen, reverse=True)  # stable: equal stamps keep the URL order
     ordered.sort(key=lambda pair: order_key(pair[1]))
     return ordered
+
+
+def divider_text(before: Mapping[str, object] | None, row: Mapping[str, object], counts: Mapping[str, object]) -> str | None:
+    """0.1.11.2: the plain divider line a list in rank order prints above ``row`` (``before``: the row above it, if any).
+
+    "Ranked low (N)" above the first ranked-low row (``row["ranked_low"]``; N is ``counts["ranked_low"]``), and
+    "Not ranked yet" where the postings with no rank score start right below them. A divider only says where a part
+    of the list starts: every row under it is a row like any other.
+    """
+
+    low, was_low = row.get("ranked_low") is True, before is not None and before.get("ranked_low") is True
+    if low and not was_low:
+        return f"Ranked low ({counts.get('ranked_low') or 0})"
+    if was_low and not low and row.get("state", _NOT_ASSESSED) == _NOT_ASSESSED and row.get("rank_score") is None:
+        return "Not ranked yet"
+    return None
 
 
 def stale_label(row: PostingRecord) -> str | None:
@@ -715,16 +738,24 @@ def _ranking(
     ``pipeline.rank_lane._unranked``: :func:`batch_date` after the window's start). An older posting with no score
     stays "not ranked yet" for good, so it is not counted: ``total`` is the ranked postings plus the unranked ones
     inside the window, and ``in_progress`` ends when the lane has nothing left to rank.
+
+    ``stale_resume`` (0.1.11.2, ``postings.rank_resume_stale``): a profile's resume changed after its postings were
+    ranked (per profile, and true at the top when it is for any). The scores are stored per resume digest, so those
+    postings read "not ranked yet" until they are ranked again: the Jobs page offers "Re-rank". Never a model call.
     """
 
     from .pipeline.rank_lane import _unranked, _window_start, rank_status
 
     since = _window_start((now or datetime.now(UTC)).astimezone(UTC))  # the lane's own window and its own rule
     found = store.posting_rank_progress()
+    stale = postings.rank_resume_stale(store, views)
     by_profile = []
     for view in views:
         ranked = found.get(view.profile_id, (0, 0))[0]
-        by_profile.append({"profile_id": view.profile_id, "ranked": ranked, "total": ranked + len(_unranked(store, view.profile_id, since))})
+        by_profile.append({
+            "profile_id": view.profile_id, "ranked": ranked, "total": ranked + len(_unranked(store, view.profile_id, since)),
+            "stale_resume": stale[view.profile_id],
+        })
     try:
         enabled = bool(rank_status(home_root, target)["enabled"])
     except (PipelineStoreError, OSError, ValueError):  # a display read: a setting that cannot be read is "not ranking"
@@ -733,6 +764,7 @@ def _ranking(
         "enabled": enabled,
         "in_progress": enabled and any(item["ranked"] < item["total"] for item in by_profile),
         "window_days": FIRST_USE_DAYS,
+        "stale_resume": any(stale.values()),
         "by_profile": by_profile,
     }
 
@@ -1309,13 +1341,15 @@ def _scout_new(
             if low_pairs else None
         )
 
-        weak_fit = 0
+        weak_fit = ranked_low = 0
         if groups:
             shown = in_order((group, _shown(group, profile_id)) for group in groups.values())
             message = f"{new_count} new posting{'s' if new_count != 1 else ''} since {_when(since_at)}."
             # 0110-10-02: a weak fit is not listed; the count and how to list them are said instead.
             weak_fit = sum(1 for _group, row in shown if row.state == fit_rules.WEAK_FIT)
             shown = [(group, row) for group, row in shown if row.state != fit_rules.WEAK_FIT]
+            # 0.1.11.2: a posting ranked low is listed like any other, lower by its rank; this is the divider's number.
+            ranked_low = sum(1 for _group, row in shown if fit_rules.is_ranked_low(row.state, row.rank_score, setting))
             if len(shown) > NEW_ROWS_LIMIT:
                 shown = shown[:NEW_ROWS_LIMIT]
                 message += f" Showing the first {NEW_ROWS_LIMIT}: assessed ones first, by fit, then by rank."
@@ -1351,6 +1385,7 @@ def _scout_new(
             item = None if row.state == _NOT_ASSESSED else read_quick_assessment(home_root, target, row.profile_id, row.job)
             text = texts.get(row.job)
             rows_json.append(_row_json(group, row, text, item, pending(row.profile_id, None if text is None else text.title)))
+            rows_json[-1]["ranked_low"] = fit_rules.is_ranked_low(row.state, row.rank_score, setting)  # 0.1.11.2
             found = _evidence(row, item)
             if found is not None:
                 evidence.append(found)
@@ -1393,6 +1428,8 @@ def _scout_new(
                 "low_rank_skipped": len(low_pairs),
                 "only_stale": len(stale_pairs) + len(low_stale),
                 "weak_fit": weak_fit,
+                # 0.1.11.2: the new postings not assessed yet and ranked below ``fit.weak_fit_below_rank``. Listed, never left out.
+                "ranked_low": ranked_low if groups else sum(1 for row in rows_json if row["ranked_low"]),
                 "shown": len(rows_json),
                 "by_profile": [{"profile_id": view.profile_id, "new": per_profile.get(view.profile_id, 0)} for view in views],
             },
@@ -1570,7 +1607,13 @@ def render(response: Mapping[str, object]) -> str:
         rule = "-+-".join("-" * width for width in _WIDTHS)
         lines.extend(_table_row([[heading] for heading in _HEADINGS]))
         lines.append(rule)
+        counts = response.get("counts")
+        before: Mapping[str, object] | None = None
         for row in rows:
+            divider = divider_text(before, row, counts if isinstance(counts, Mapping) else {})  # 0.1.11.2: "Ranked low (N)"
+            if divider:
+                lines.extend([divider, rule])
+            before = row
             tags = ", ".join(str(labels.get(item["profile_id"], item["profile_id"])) for item in row["profiles"])
             details = [f"{row['company_name'] or '?'}: {row['title'] or row['job_identity']}", str(row["work_mode"])]
             if row["salary"]:
@@ -1672,6 +1715,7 @@ __all__ = [
     "newest_batch",
     "top_ranked_batch",
     "batch_date",
+    "divider_text",
     "order_key",
     "posted_text",
     "posting_dates",

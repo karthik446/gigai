@@ -1,20 +1,21 @@
-"""0.1.11.2 RANK-B: the Jobs page by rank: the collapse line, "N not assessed" + "Assess all", the top 50 by rank.
+"""0.1.11.2 RANK-B + RANKORDER: the Jobs page by rank: ranked-low postings LISTED under a plain divider, "N not assessed" + "Assess all".
 
 The demo home has no rank score (that needs the rank lane's model), so, as in `test_jobs_weak_fit.py`, the browser
 talks to the REAL Scout server for everything except `GET /api/postings` and `POST /api/postings/assess`, which this
 test answers itself (the first real response as the template: its profiles and row shape) the way the real routes
-do: 60 not-assessed postings in rank order (58 ranked, every score 50 or more; two not ranked yet, last),
-three more ranked below 50 that are left out unless `state=ranked_low` asks, `counts.ranked_low`, and `ranking` while
-the background rank still runs. The real routes' own rules (the order, the collapse, the 50 highest of 60 and what an
-approval assesses) are proven on the real server in `tests/behaviors/scout_pipeline/test_rank_order_and_top_batch.py`;
-here the page, the client list store and the hash router are the real ones.
+do: 63 not-assessed postings in rank order: 58 ranked 50 or more, then three ranked below 50 (`ranked_low: true`,
+`counts.ranked_low` 3), then two not ranked yet, and `ranking` while the background rank still runs. The real
+routes' own rules (the order, the 50 highest of 60 and what an approval assesses) are proven on the real server in
+`tests/behaviors/scout_pipeline/test_rank_order_and_top_batch.py`; here the page, the client list store and the hash
+router are the real ones.
 
-Pinned: the rows are drawn in the server's rank order and a ranked-low posting is not among them; a posting not
-ranked yet is at the bottom and says "not ranked yet"; "3 weak fits, ranked low: show" lists them (their chip, the
-address carries `state=ranked_low`) and "back to the list" closes it; "60 not assessed" with "Assess all", which asks
-first (never `approve`, never `jobs`) and opens the existing dialog: "Assess the top 50 by rank of 60 postings?", the
-estimate, the model, "10 more after these 50", and that ranking still runs; Approve sends the server's own yes, and
-the line then reads "10 not assessed"; "Assess these" (select and assess) is still there; zero console errors.
+Pinned: the rows are drawn in the server's rank order; NOTHING is collapsed (no "weak fits, ranked low: show" line,
+the default list asks for no state): the three ranked-low postings are rows of the list, on the page their rank
+puts them on, under a plain "Ranked low (3)" divider, with their chip; each can be ticked ("Assess these" counts
+it) and opened (its job deep link); the postings not ranked yet come after them under "Not ranked yet"; in the
+"Newest posted" order there is no divider; "63 not assessed" with "Assess all", which asks first (never `approve`,
+never `jobs`) and opens the existing dialog: "Assess the top 50 by rank of 60 postings?", the estimate, the model,
+"10 more after these 50", and that ranking still runs; Approve sends the server's own yes; zero console errors.
 """
 
 from __future__ import annotations
@@ -28,10 +29,13 @@ from tests.ui.support import tid
 
 pytestmark = pytest.mark.ui
 
-#: 60 not-assessed postings in the server's order: 58 ranked (99 down to 50; the score repeats near the end), then two not ranked yet.
-RANKS: list[int | None] = [max(50, 99 - n) for n in range(58)] + [None, None]
-#: Not assessed and ranked below 50: collapsed out of the list.
+#: Not assessed and ranked below 50: listed after the other ranked ones, never left out.
 LOW = [49, 31, 12]
+#: 63 not-assessed postings in the server's order: 58 ranked (99 down to 50; the score repeats near the end), the three
+#: ranked low, then two not ranked yet.
+RANKS: list[int | None] = [max(50, 99 - n) for n in range(58)] + LOW + [None, None]
+#: What "Assess all" takes without its low-rank yes (the assess threshold): the 58 and the two not ranked yet.
+ASSESSABLE = 60
 RANKING = {"enabled": True, "in_progress": True, "by_profile": [{"profile_id": "p", "ranked": 61, "total": 63}]}
 RANKING_WORDS = "Ranking is still running: 61 of 63 ranked. The order, and the top 50 by rank, are of what is ranked so far."
 
@@ -73,11 +77,11 @@ class Answers:
         self.listed.append(query)
         asked = parse_qs(query)
         first = self.template["postings"]["rows"][0]
-        if asked.get("state") == ["ranked_low"]:
-            rows = [_row(first, f"low-{index:02d}", rank, low=True) for index, rank in enumerate(LOW, start=1)]
-        else:
-            # The top `assessed` by rank have a verdict now and lead the list; the rest keep the rank order.
-            rows = [_row(first, f"job-{index:02d}", rank, assessed=index <= self.assessed) for index, rank in enumerate(RANKS, start=1)]
+        # The top `assessed` by rank have a verdict now and lead the list; the rest keep the rank order.
+        rows = [
+            _row(first, f"job-{index:02d}", rank, assessed=index <= self.assessed, low=rank is not None and rank < 50 and index > self.assessed)
+            for index, rank in enumerate(RANKS, start=1)
+        ]
         by_state: dict[str, int] = {}
         for row in rows:
             by_state[row["state"]] = by_state.get(row["state"], 0) + 1
@@ -92,7 +96,7 @@ class Answers:
     def _assess(self, route) -> None:
         body = json.loads(route.request.post_data or "{}")
         self.bodies.append(body)
-        left = len(RANKS) - self.assessed
+        left = ASSESSABLE - self.assessed
         batch = min(50, left)
         estimate = {"calls": batch, "tokens": 975000, "seconds": 560.0, "cost": None, "basis_calls": 12}
         yes = {"approve": True, "states": ["not_assessed"]}
@@ -148,49 +152,77 @@ def _text(ui, selector: str) -> str:
     return " ".join((ui.page.locator(selector).first.text_content() or "").split())
 
 
-def test_jobs_come_by_rank_weak_fits_are_collapsed_and_assess_all_takes_the_top_50_by_rank(ui) -> None:
+def _list(ui) -> list[str]:
+    """The list as drawn, top to bottom: a row's rank ("-" when it has none) or a divider's words."""
+
+    return ui.page.locator(f"{tid('jobs-list')} > li").evaluate_all(
+        """(items) => items.map((item) => item.classList.contains('posting-divider')
+          ? item.textContent.trim()
+          : (item.dataset.rank === undefined ? '-' : item.dataset.rank))"""
+    )
+
+
+def test_jobs_come_by_rank_ranked_low_postings_are_listed_under_a_divider_and_assess_all_takes_the_top_50_by_rank(ui) -> None:
     answers = Answers()
     ui.page.route("**/api/postings*", answers)
     ui.page.route("**/api/postings/assess", answers)
-    low_line, waiting = tid("ranked-low-line"), tid("not-assessed-line")
+    waiting = tid("not-assessed-line")
+    low_divider, unranked_divider = tid("ranked-low-divider"), tid("not-ranked-divider")
     notice = ui.page.locator('[data-role="assess-notice"]')
 
     ui.goto("/#/jobs")
     _wait_for_first(ui, "Posting job-01")
     ui.step("default")
 
-    # The rows are the server's, in its order: best rank first. No ranked-low posting is among them.
+    # The rows are the server's, in its order: best rank first. The first page is the 50 best ranked.
     rows = _rows(ui)
     assert [row["rank"] for row in rows] == RANKS[:50] and rows[0]["score"] == "rank 99 · not assessed"
     assert [row["rank"] for row in rows] == sorted((row["rank"] for row in rows), reverse=True)
-    assert min(row["rank"] for row in rows) >= 50 and ui.page.locator(tid("ranked-low-chip")).count() == 0
     assert all("state=" not in query for query in answers.listed), answers.listed  # the default list asks for no state
 
-    # The collapse line, what waits for an assessment, and how far the background rank is.
-    assert _text(ui, low_line) == "3 weak fits, ranked low: show"
-    assert _text(ui, f"{waiting} [data-role='not-assessed-count']") == "60 not assessed"
+    # Nothing is collapsed: no "N weak fits, ranked low: show" line and no toggle. All 63 wait for an assessment.
+    assert ui.page.locator(tid("ranked-low-line")).count() == 0 and ui.page.locator('[data-action="toggle-ranked-low"]').count() == 0
+    assert "weak fits, ranked low" not in (ui.page.locator("body").text_content() or "")
+    assert _text(ui, f"{waiting} [data-role='not-assessed-count']") == "63 not assessed"
     assert _text(ui, tid("assess-all")) == "Assess all" and ui.page.locator(tid("assess-these")).count() == 1  # select-and-assess stays
     assert _text(ui, tid("ranking-line")) == RANKING_WORDS
 
-    # A posting not ranked yet stays in the list, at the bottom, and says so.
+    # The ranked-low postings ARE in the list, where their rank puts them: after the other ranked ones, under a plain
+    # "Ranked low (3)" divider; the ones not ranked yet come after them and say so.
     ui.goto("/#/jobs?page=2")
     _wait_for_first(ui, "Posting job-51")
     last = _rows(ui)
-    assert [row["rank"] for row in last] == RANKS[50:] and [row["score"] for row in last[-2:]] == ["not ranked yet · not assessed"] * 2
-    assert all(row["chips"] == ["Not assessed"] for row in last), last  # never "Ranked low": nothing says its rank is low
+    assert [row["rank"] for row in last] == RANKS[50:]
+    assert _list(ui) == ["50"] * 8 + ["Ranked low (3)", "49", "31", "12", "Not ranked yet", "-", "-"]
+    assert ui.page.locator(low_divider).count() == 1 and ui.page.locator(unranked_divider).count() == 1
+    assert [row["chips"] for row in last] == [["Not assessed"]] * 8 + [["Not assessed", "Ranked low"]] * 3 + [["Not assessed"]] * 2, last
+    assert [row["score"] for row in last[8:]] == [
+        "rank 49 · not assessed", "rank 31 · not assessed", "rank 12 · not assessed", "not ranked yet · not assessed", "not ranked yet · not assessed",
+    ]
+    ui.step("ranked-low-listed")
 
-    # The count line opens the collapsed ones: their own chip, the address carries the filter. Never a hard filter.
+    # A ranked-low row is a row like any other: it can be ticked (the select-and-assess count moves) ...
+    low_row = ui.page.locator(tid("job-row")).nth(9)  # rank 31
+    assert low_row.get_attribute("data-rank") == "31"
+    box = low_row.locator('input[type="checkbox"]')
+    assert box.is_enabled() and not box.is_checked()
+    before = _text(ui, tid("assess-these"))
+    box.check()
+    assert box.is_checked() and _text(ui, tid("assess-these")) != before and "1" in _text(ui, tid("assess-these"))
+    box.uncheck()
+    # ... and opened: its link is the job's deep link, and the job page answers for it.
+    link = low_row.locator('[data-action="open-job"]')
+    assert (link.get_attribute("href") or "").startswith("#/jobs/") and "job-60" in (link.get_attribute("href") or "")
+
+    # In the other order the ranked-low rows are spread through the list: no divider, the same rows.
+    ui.goto("/#/jobs?sort=newest_posted&page=2")
+    _wait_for_first(ui, "Posting job-51")
+    assert ui.page.locator(low_divider).count() == 0 and ui.page.locator(unranked_divider).count() == 0
+    assert [row["rank"] for row in _rows(ui)] == RANKS[50:] and ui.page.locator(tid("ranked-low-chip")).count() == 3
+
     ui.goto("/#/jobs")
     _wait_for_first(ui, "Posting job-01")
-    ui.page.click('[data-action="toggle-ranked-low"]')
-    _wait_for_first(ui, "Posting low-01")
-    assert answers.listed[-1] == "state=ranked_low&limit=50" and "state=ranked_low" in ui.page.url
-    low = _rows(ui)
-    assert [row["rank"] for row in low] == LOW and all(row["chips"] == ["Not assessed", "Ranked low"] for row in low), low
-    assert _text(ui, low_line) == "Listing the 3 weak fits, ranked low: back to the list"
-    ui.page.click('[data-action="toggle-ranked-low"]')
-    _wait_for_first(ui, "Posting job-01")
-    assert "state=" not in ui.page.url and _text(ui, low_line) == "3 weak fits, ranked low: show"
+    assert ui.page.locator(low_divider).count() == 0  # the first page holds none of them: no divider without a row under it
 
     # "Assess all" asks first: every not-assessed posting of the list, nothing approved, no posting named.
     ui.page.click(tid("assess-all"))
@@ -210,7 +242,7 @@ def test_jobs_come_by_rank_weak_fits_are_collapsed_and_assess_all_takes_the_top_
     assert answers.bodies[-1] == {"approve": True, "states": ["not_assessed"]}
     assert _text(ui, '[data-role="assess-notice"]') == 'Assessed 50 of 50. 10 more not assessed yet: 50 at a time, "Assess these" again takes the next.'
     ui.page.wait_for_function(
-        """() => ((document.querySelector('[data-role="not-assessed-count"]') || {}).textContent || '') === '10 not assessed'"""
+        """() => ((document.querySelector('[data-role="not-assessed-count"]') || {}).textContent || '') === '13 not assessed'"""
     )
     assert {row["state"] for row in _rows(ui)} == {"matched"}  # the 50 assessed lead the list: best fit first
 

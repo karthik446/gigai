@@ -27,13 +27,16 @@ the ones below are counted and offered as their own question. A posting with
 no rank score yet is not low-ranked: nothing says so.
 
 RANKED LOW (:func:`is_ranked_low`, 0.1.11.2). A posting nothing assessed yet
-whose KNOWN rank score is below ``weak_fit_below_rank`` is a weak fit by its
-rank alone: the search leaves it out of the default list, counts it
-(``counts.ranked_low``) and lists it under the ``ranked_low`` filter
-(:data:`RANKED_LOW`). It is a collapse, never a hard filter: the count opens
-the list. A posting not ranked yet is never ranked low (it stays in the list,
-at the bottom, "not ranked yet"), and an assessed posting keeps the rules
-above. The row's stored state stays ``not_assessed``.
+whose KNOWN rank score is below ``weak_fit_below_rank`` is ranked low. It is
+ORDERED lower, NEVER hidden: every list (the Jobs page, ``scout jobs list``,
+``scout new``) shows it in rank order, after the other ranked postings not
+assessed yet, under a plain "Ranked low (N)" divider (``counts.ranked_low``),
+and it can be opened, selected and assessed like any other row. The resume
+may be missing real experience: once it has it, a re-rank lifts the posting.
+The ``ranked_low`` filter (:data:`RANKED_LOW`) lists only them. A posting not
+ranked yet is never ranked low (it is listed after them, "not ranked yet"),
+and an assessed posting keeps the rules above. The row's stored state stays
+``not_assessed``.
 
 THIN POSTING (:func:`is_thin_posting`, :func:`thin_state`, 0.1.11.2). A match
 read from fewer than :data:`THIN_POSTING_ROWS` requirement rows says little:
@@ -72,7 +75,7 @@ from pathlib import Path
 WEAK_FIT = "weak_fit"
 NEEDS_ANSWERS = "needs_answers"
 NOT_ASSESSED = "not_assessed"
-#: 0.1.11.2: the search's filter for the not-assessed postings ranked below ``weak_fit_below_rank`` (never a stored state).
+#: 0.1.11.2: the search's optional filter for the not-assessed postings ranked below ``weak_fit_below_rank`` (never a stored state).
 RANKED_LOW = "ranked_low"
 
 #: 0.1.11.2: the state of a match with no row about the job (``thin_state``); its words are :data:`THIN_LABEL`.

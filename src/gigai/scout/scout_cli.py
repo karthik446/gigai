@@ -2787,6 +2787,9 @@ def new_command(
     --include-low-rank beside --yes assesses them too. A posting that waits
     on your answers with few requirements met and a low rank is a "weak fit":
     it is not listed here (`gigai scout jobs list --state weak_fit` lists them).
+    A posting not assessed yet and ranked below 50 is listed like the rest,
+    lower by its rank: the table prints a "Ranked low (N)" line above them,
+    and with --json each row says ranked_low.
 
     While it assesses, progress lines go to stderr ("assessed 120 of 333 ·
     ~25 min left"); with --json, stdout is still the response alone.
@@ -2912,7 +2915,7 @@ def _jobs_errors() -> tuple[type[BaseException], ...]:
 @jobs_group.command("list")
 @click.option("--profile", "profile_ids", multiple=True, help="Only postings this active profile matches (repeatable). With one profile, its own row is shown.")
 @click.option("--query", "query", help="Words that must all be in the title, company or location.")
-@click.option("--state", "states", multiple=True, help="Keep this state (repeatable): not_assessed, needs_answers, matched, has_gap, not_a_match, tailored, assessed, recommended, weak_fit, ranked_low, thin_posting (matched on no requirement at all). A weak fit (waits on answers, few requirements met, low rank) is listed only with --state weak_fit; a posting not assessed yet and ranked below 50 only with --state ranked_low.")
+@click.option("--state", "states", multiple=True, help="Keep this state (repeatable): not_assessed, needs_answers, matched, has_gap, not_a_match, tailored, assessed, recommended, weak_fit, ranked_low, thin_posting (matched on no requirement at all). A weak fit (waits on answers, few requirements met, low rank) is listed only with --state weak_fit. A posting not assessed yet and ranked below 50 is always listed, lower by its rank; --state ranked_low lists only those.")
 @click.option("--window", "window", type=click.Choice(["new", "7d", "30d"]), help="new: first seen since your last check. 7d / 30d: published in the last 7 or 30 days.")
 @click.option("--removed", "removed", is_flag=True, help="The postings the board no longer lists, instead of the live ones.")
 @click.option("--history", "history", is_flag=True, help="Also what old find-jobs runs assessed, with each run's provenance.")

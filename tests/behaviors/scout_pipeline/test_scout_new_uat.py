@@ -495,10 +495,10 @@ def test_14_a_batch_of_twelve_prints_rising_progress_to_stderr_and_stdout_stays_
     assert all("assess" in line or "rank" in line for line in lines), lines  # nothing else on stderr
     # The response says how far the rank is, per profile.
     assert response["ranking"] == {
-        "enabled": True, "in_progress": True, "window_days": 7,
+        "enabled": True, "in_progress": True, "window_days": 7, "stale_resume": False,  # 0.1.11.2: no resume changed since the rank
         "by_profile": [
-            {"profile_id": fx.default_profile_id, "ranked": 5, "total": 12},
-            {"profile_id": fx.second_profile_id, "ranked": 0, "total": 12},
+            {"profile_id": fx.default_profile_id, "ranked": 5, "total": 12, "stale_resume": False},
+            {"profile_id": fx.second_profile_id, "ranked": 0, "total": 12, "stale_resume": False},
         ],
     }
     data_labels.assert_not_mixed(set(scout_new.response_labels(response)), what="scout new")

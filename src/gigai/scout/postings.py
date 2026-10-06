@@ -226,6 +226,33 @@ def split_board(board: str) -> tuple[str, str]:
 # --- one profile's inputs -------------------------------------------------------------------
 
 
+def rank_basis_name(profile_id: str) -> str:
+    """The ``posting_source`` name that holds the resume a profile's rank scores were made against (0.1.11.2)."""
+
+    return f"rank_basis_{digest_imported_bytes(profile_id.encode('utf-8')).split(':', 1)[1][:40]}"
+
+
+def rank_resume_stale(store: PipelineStore, views: Sequence["ProfileView"]) -> dict[str, bool]:
+    """0.1.11.2: ``profile_id -> the profile's resume changed after its postings were ranked``. A read: no model call.
+
+    The score cache is keyed by the resume digest the ranker saw, so a changed resume finds no stored score and the
+    rows read "not ranked yet". True while the rows are built for the profile's resume as it is now AND the last rank
+    scores they had were made against another one (``_Facts.note_rank_basis``). False for a profile never ranked,
+    and false again as soon as one posting is ranked against the new resume. A resume change the ranker cannot see
+    (the same resume digest) keeps the stored scores, so it is never stale.
+    """
+
+    builds = store.posting_builds()
+    found: dict[str, bool] = {}
+    for view in views:
+        basis = store.posting_source(rank_basis_name(view.profile_id))
+        build = builds.get(view.profile_id)
+        found[view.profile_id] = (
+            basis is not None and build is not None and build.pinned_digest == view.resume_digest and basis[0] != view.resume_digest
+        )
+    return found
+
+
 @dataclass(frozen=True)
 class ProfileView:
     """One active profile as the read model sees it."""
@@ -447,6 +474,20 @@ class _Facts:
         self._ranked = _stored_names(self._rank_dir)
         self._rank_inputs = self._rank_key_inputs(resolved, rank_model) if self._ranked and rank_model else None
         self._rank_model = rank_model
+        self._basis_noted = False
+
+    def note_rank_basis(self, store: PipelineStore, rows: Iterable[PostingRecord]) -> None:
+        """0.1.11.2: remember which resume this profile's rank scores were read for (:func:`rank_resume_stale`).
+
+        Written when a build gives at least one row a rank score: the pinned resume's digest and the score cache's
+        resume key (``model_rank.cache_key``: a score is stored per resume digest, so a changed resume finds none).
+        A build that finds no score leaves the record: it still names the resume the last scores were made against.
+        """
+
+        if self._basis_noted or self._rank_inputs is None or not any(row.rank_score is not None for row in rows):
+            return
+        self._basis_noted = True
+        store.set_posting_source(rank_basis_name(self.view.profile_id), self.view.resume_digest, f"sha256:{self._rank_inputs[0]}")
 
     def _rank_key_inputs(self, resolved: object, rank_model: str) -> tuple[str, str] | None:
         from .find_jobs.model_rank import _hex, prefs_digest
@@ -1119,10 +1160,10 @@ def _match(plan: _Plan, store: PipelineStore, views: Sequence[ProfileView], fact
             )
             records = _board_records(view, keys, rows, previous[view.profile_id], index, plan.built_at)
             facts = facts_of(view) if records else None
-            store.replace_board_postings(
-                view.profile_id, {key: want[view.profile_id][key] for key in keys},
-                [facts.of(record) for record in records] if facts is not None else [],
-            )
+            found = [facts.of(record) for record in records] if facts is not None else []
+            store.replace_board_postings(view.profile_id, {key: want[view.profile_id][key] for key in keys}, found)
+            if facts is not None:
+                facts.note_rank_basis(store, found)
         done += len(chunk)
         chunk, size = [], 0
         if progress is not None:
@@ -1175,6 +1216,7 @@ def _apply(plan: _Plan, store: PipelineStore, progress: Progress | None = None, 
         facts = facts_of(view)
         rows = [facts.of(replace(row, updated_at=plan.built_at)) for row in store.postings(profile_id=view.profile_id, live=False)]
         store.replace_postings(build, rows)
+        facts.note_rank_basis(store, rows)
     if dropped or any(kind != BUILD_UNCHANGED for kind in plan.kinds.values()):
         default_id = next((view.profile_id for view in views if view.is_default), None)
         store.set_match_ranks(_best_tag_order(store.posting_rank_inputs(), default_id))
@@ -1563,6 +1605,8 @@ def posting_texts(home_root: Path, rows: Iterable[PostingRecord]) -> dict[str, P
 
 
 __all__ = [
+    "rank_basis_name",
+    "rank_resume_stale",
     "BUILD_FACTS",
     "BUILD_FULL",
     "BUILD_STALE",

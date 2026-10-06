@@ -42,6 +42,19 @@ export function rankTotals(ranking) {
   return { enabled: ranking.enabled === true, ranked, total, unranked: total - ranked, windowDays: count(ranking.window_days) || 7 };
 }
 
+// 0.1.11.2: the line above "Re-rank" when a profile's resume changed after its postings were ranked
+// (`ranking.stale_resume`). A rank is made against the resume, so a posting ranked low for experience the master now
+// has can only move up when it is ranked again. null when nothing changed, with ranking off, or while a rank job runs.
+export const STALE_RESUME_LINE = "Your master changed since these postings were ranked";
+
+export function staleResumeLine(ranking, job = null) {
+  const totals = rankTotals(ranking);
+  if (!totals || !totals.enabled || ranking.stale_resume !== true || rankJobRunning(job)) {
+    return null;
+  }
+  return STALE_RESUME_LINE;
+}
+
 export function rankJobRunning(job) {
   return Boolean(job) && job.state === "running";
 }

@@ -126,33 +126,36 @@ export function toggleState(states, value) {
   return current.includes(value) ? current.filter((item) => item !== value) : current.concat(value);
 }
 
-// 0.1.11.2: RANKED LOW. A posting nothing assessed yet whose known rank is below the weak-fit rank (50) is a weak fit by
-// its rank alone: the server leaves it out of the list (`counts.ranked_low` says how many) and lists it only for
-// `state=ranked_low`. A collapse, never a hard filter: the count line opens them. A posting not ranked yet is never
-// ranked low: it stays in the list, after the ranked ones, and its score column says "not ranked yet".
-export const RANKED_LOW = "ranked_low";
-
+// 0.1.11.2: RANKED LOW. A posting nothing assessed yet whose known rank is below the weak-fit rank (50) says
+// `ranked_low: true`. It is ORDERED lower, never hidden or collapsed: the server lists it with the rest, in rank order
+// (after the other ranked postings not assessed yet, before the ones not ranked yet), and `counts.ranked_low` says how
+// many the list holds. The page draws a plain "Ranked low (N)" divider above them; each stays a row like any other
+// (open it, tick it, assess it). The master may be missing real experience: once it has it, a re-rank lifts the posting.
 export function rankedLowCount(counts) {
   const value = counts && counts.ranked_low;
   return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : 0;
 }
 
-// The collapse line: {text, action, active}, or null when there is none to show and the filter is off.
-//   "12 weak fits, ranked low" + "show"; while they are listed: "Listing the 12 weak fits, ranked low" + "back to the list".
-export function rankedLowLine(counts, states) {
-  const count = rankedLowCount(counts);
-  const active = (states || []).includes(RANKED_LOW);
-  if (!count && !active) {
-    return null;
+// The list as the page draws it: [{kind: "row", row} | {kind: "divider", key, text, testId}], the rows untouched and in
+// the server's order. In the rank order (`sort` "fit") a divider "Ranked low (N)" stands above the first ranked-low row
+// of a run, and "Not ranked yet" where the postings with no rank score start right below them. In any other order
+// ("newest posted") the ranked-low rows are spread through the list, so there is no divider: their chip says it.
+export function listItems(rows, counts, sort = null) {
+  const items = [];
+  const byRank = !sort || sort === "fit";
+  let before = null;
+  for (const row of rows || []) {
+    const low = row.ranked_low === true;
+    const wasLow = before !== null && before.ranked_low === true;
+    if (byRank && low && !wasLow) {
+      items.push({ kind: "divider", key: `ranked-low:${row.job_identity}`, text: `Ranked low (${rankedLowCount(counts)})`, testId: "ranked-low-divider" });
+    } else if (byRank && wasLow && !low && (row.state || "not_assessed") === "not_assessed" && typeof row.rank_score !== "number") {
+      items.push({ kind: "divider", key: `not-ranked:${row.job_identity}`, text: "Not ranked yet", testId: "not-ranked-divider" });
+    }
+    items.push({ kind: "row", row });
+    before = row;
   }
-  const words = `${count} weak fit${count === 1 ? "" : "s"}, ranked low`;
-  return active ? { text: `Listing the ${words}`, action: "back to the list", active } : { text: words, action: "show", active };
-}
-
-// A click on the collapse line: only the ranked-low postings, or the list as it was without them.
-export function toggleRankedLow(states) {
-  const current = states || [];
-  return current.includes(RANKED_LOW) ? current.filter((item) => item !== RANKED_LOW) : [RANKED_LOW];
+  return items;
 }
 
 // 0.1.11.2: "N not assessed", of the postings the list holds now (`counts.by_state.not_assessed`); null when none.
@@ -331,8 +334,8 @@ export function rowChips(row) {
   }
   chips.push(assessed ? { kind: "assessed", label: "Assessed", tone: "plain" } : { kind: "state", label: ROW_STATE_WORDS.not_assessed, tone: "plain" });
   if (!assessed && row.ranked_low === true) {
-    // 0.1.11.2: listed only under "weak fits, ranked low"; never a verdict.
-    chips.push({ kind: "rank", label: "Ranked low", tone: "plain", testId: "ranked-low-chip", title: "Not assessed, and its rank is below the weak-fit rank: left out of the main list." });
+    // 0.1.11.2: listed with the rest, lower by its rank; never a verdict.
+    chips.push({ kind: "rank", label: "Ranked low", tone: "plain", testId: "ranked-low-chip", title: "Not assessed, and its rank is below the weak-fit rank: listed after the other ranked postings. A re-rank can lift it." });
   }
   if (row.label === "recommended" || row.label === "needs_attention") {
     chips.push({
@@ -488,13 +491,13 @@ export function assessAskBody({ selectedIds = [], filter = EMPTY_FILTER, rows = 
 
 // 0.1.11.2: the ASK of "Assess all" (beside "N not assessed"): every not-assessed posting the filter selects, whatever
 // is ticked. The server answers the top 50 by rank, the estimate and how many are left; the low-ranked ones are its
-// second question. On the ranked-low list it asks about those. Several profile chips: the page's rows, as above.
+// second question. Several profile chips: the page's rows, as above.
 export function assessAllBody({ filter = EMPTY_FILTER, rows = [] } = {}) {
   const profiles = filter.profileIds || [];
   if (profiles.length > 1) {
     return { jobs: rows.filter((row) => (row.state || "not_assessed") === "not_assessed").map((row) => row.job_identity) };
   }
-  const body = { states: [(filter.states || []).includes(RANKED_LOW) ? RANKED_LOW : "not_assessed"] };
+  const body = { states: ["not_assessed"] };
   if (profiles.length === 1) {
     body.profile_id = profiles[0];
   }
@@ -741,7 +744,7 @@ export function parseJobsHash(hash) {
   const text = typeof hash === "string" ? hash : "";
   const mark = text.indexOf("?");
   const query = new URLSearchParams(mark < 0 ? "" : text.slice(mark + 1));
-  const states = query.getAll("state").filter((value) => value === RANKED_LOW || STATE_FILTERS.some((option) => option.value === value));
+  const states = query.getAll("state").filter((value) => STATE_FILTERS.some((option) => option.value === value));
   const window = query.get("window");
   return {
     filter: {

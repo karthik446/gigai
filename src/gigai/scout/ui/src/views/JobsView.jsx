@@ -22,6 +22,7 @@ import {
   isNew,
   jobsHash,
   keepActiveProfiles,
+  listItems,
   needsAnswers,
   notAssessedLine,
   pageCount,
@@ -30,7 +31,6 @@ import {
   postedLine,
   profileChips,
   profileTags,
-  rankedLowLine,
   rankingLine,
   rowChips,
   scoreText,
@@ -38,7 +38,6 @@ import {
   stateChips,
   timeChips,
   toggleProfile,
-  toggleRankedLow,
   toggleState,
   toggleSort,
   toggleWindow,
@@ -64,9 +63,7 @@ import { sourcesStrip } from "../sourcesStripModel.js";
 //   order chip      0110-10-14: "Newest posted" (off by default: the best
 //                   fit first). On, the server orders by the day the posting
 //                   went up (`sort=newest_posted`); it is not a filter
-//   count lines     0.1.11.2: "N weak fits, ranked low: show" (not-assessed
-//                   postings ranked below 50 are collapsed out of the list;
-//                   the line lists them, it is never a hard filter), "N not
+//   count lines     0.1.11.2: "N not
 //                   assessed" with "Assess all" (the same question and
 //                   approval dialog: the top 50 by rank, the estimate, what is
 //                   left), and "Ranking is still running: X of Y ranked"
@@ -476,7 +473,8 @@ export default function JobsView({ selectedProfileId, onSelectProfile, applicati
   }
   const totals = counts ? (hasFilter(filter) && totalRef.current ? totalRef.current : { matched, needsAnswers: needsAnswers(counts) }) : null;
   const busy = asking || approving;
-  const lowLine = rankedLowLine(counts, filter.states);
+  // 0.1.11.2: every row is listed; a plain "Ranked low (N)" divider stands above the ranked-low ones (never a collapse).
+  const items = listItems(rows, counts, filter.sort);
   const waitingAssess = filter.removed ? null : notAssessedLine(counts);
   const ranking = rankingLine(response && response.ranking);
 
@@ -632,15 +630,7 @@ export default function JobsView({ selectedProfileId, onSelectProfile, applicati
               )}
             </span>
           </div>
-          {/* 0.1.11.2: the collapse (never a hard filter), what waits for an assessment, and how far the rank is. */}
-          {lowLine && (
-            <div className="result-count" data-testid="ranked-low-line" data-active={lowLine.active ? "true" : undefined}>
-              {lowLine.text}:{" "}
-              <button type="button" className="link-button" data-action="toggle-ranked-low" onClick={() => setFilter((current) => ({ ...current, states: toggleRankedLow(current.states) }))}>
-                {lowLine.action}
-              </button>
-            </div>
-          )}
+          {/* 0.1.11.2: what waits for an assessment, and how far the rank is. */}
           {waitingAssess && (
             <div className="result-count" data-testid="not-assessed-line">
               <span data-role="not-assessed-count">{waitingAssess}</span>{" "}
@@ -674,19 +664,25 @@ export default function JobsView({ selectedProfileId, onSelectProfile, applicati
       )}
 
       <ul className="posting-list" data-testid="jobs-list">
-        {rows.map((row) => (
-          <PostingRow
-            key={row.job_identity}
-            row={row}
-            profiles={profiles}
-            anchor={anchor}
-            selected={selectedIds.includes(row.job_identity)}
-            onSelect={select}
-            onOpen={open}
-            onAssessAs={(target, profileId) => ask(assessAskBody({ selectedIds: [target.job_identity], profileId }))}
-            busy={busy}
-          />
-        ))}
+        {items.map((item) =>
+          item.kind === "divider" ? (
+            <li key={item.key} className="posting-divider" data-testid={item.testId}>
+              {item.text}
+            </li>
+          ) : (
+            <PostingRow
+              key={item.row.job_identity}
+              row={item.row}
+              profiles={profiles}
+              anchor={anchor}
+              selected={selectedIds.includes(item.row.job_identity)}
+              onSelect={select}
+              onOpen={open}
+              onAssessAs={(target, profileId) => ask(assessAskBody({ selectedIds: [target.job_identity], profileId }))}
+              busy={busy}
+            />
+          ),
+        )}
         {!loading && !error && rows.length === 0 && (
           <li className="empty-state" data-role="jobs-empty">
             {hasFilter(filter)
