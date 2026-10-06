@@ -43,7 +43,13 @@ READER = "pdf_header_file"
 #: The two places that may read the user's header file, and the function of each that does.
 READERS = {
     "scout/find_jobs/api/pdf_header.py": "_handle_post_pdf_header",  # the Generate PDF form's prefill: Scout's own page only
-    "scout/scout_cli.py": "resume_pdf_command",  # `gigai scout resume pdf`: the values go into the one PDF at --out
+    "scout/pdf_header_cli.py": "header_for_pdf",  # a PDF COMMAND's header: the values go into the one PDF at --out (0.1.11.4 C2: one reading, two commands)
+}
+#: 0.1.11.4 C2: the commands that may ask for that reading, and the function of each that does. Each writes ONE PDF to --out.
+COMMAND_READER = "header_for_pdf"
+COMMANDS = {
+    "scout/scout_cli.py": "resume_pdf_command",  # `gigai scout resume pdf`
+    "scout/cover_letter_cli.py": "cover_letter_pdf_command",  # `gigai scout cover-letter pdf`
 }
 #: 0.1.11.3 item 14: the one module that WRITES the file (the form's Save button), and the one function that calls it.
 WRITER = "scout/pdf_header_save.py"
@@ -95,6 +101,33 @@ def test_only_the_form_route_and_the_pdf_command_can_read_the_file() -> None:
         }
         assert calls == {READERS[relative]}, f"{relative}: the file is read in {sorted(calls)}"
         assert holders <= {READERS[relative]}, f"{relative}: {sorted(holders)} use the reader module"
+
+
+def test_only_the_two_pdf_commands_ask_for_the_header_and_neither_prints_it() -> None:
+    """0.1.11.4 C2: ``header_for_pdf`` is called by ``resume pdf`` and ``cover-letter pdf`` only; the reading logs and prints nothing."""
+    callers = {}
+    for path in sorted(SRC.rglob("*.py")):
+        relative = path.relative_to(SRC).as_posix()
+        source = path.read_text(encoding="utf-8")
+        if relative == "scout/pdf_header_cli.py" or COMMAND_READER not in source:
+            continue
+        calls = {
+            function.name
+            for function in ast.walk(ast.parse(source))
+            if isinstance(function, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and any(isinstance(node, ast.Call) and ast.unparse(node.func).endswith(COMMAND_READER) for node in ast.walk(function))
+        }
+        if calls:  # a mention in words (a docstring) is fine
+            callers[relative] = calls
+    assert callers == {relative: {function} for relative, function in COMMANDS.items()}, callers
+    reading = (SRC / "scout" / "pdf_header_cli.py").read_text(encoding="utf-8")
+    for banned in ("import logging", "getLogger", "print(", "click.echo", "_logger", "write_text", "write_bytes"):
+        assert banned not in reading, f"pdf_header_cli must not {banned}"
+    # The cover-letter brief and the letter's renderer are not readers: neither imports the file's reader or the commands' reading.
+    for module in ("cover_letter_brief.py", "cover_letter.py"):
+        tree = ast.parse((SRC / "scout" / module).read_text(encoding="utf-8"))
+        imported = [ast.unparse(node) for node in ast.walk(tree) if isinstance(node, (ast.Import, ast.ImportFrom))]
+        assert not [line for line in imported if READER in line or "pdf_header_cli" in line], module
 
 
 def test_only_the_save_button_route_can_write_the_file() -> None:

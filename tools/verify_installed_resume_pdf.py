@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from importlib import resources
 
-REQUIRED = ("resume.typ", "Inter-Regular.ttf", "Inter-SemiBold.ttf", "INTER-OFL-LICENSE.txt")
+REQUIRED = ("resume.typ", "letter.typ", "Inter-Regular.ttf", "Inter-SemiBold.ttf", "INTER-OFL-LICENSE.txt")
 
 
 def main() -> int:

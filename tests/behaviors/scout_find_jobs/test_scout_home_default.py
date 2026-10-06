@@ -176,6 +176,8 @@ _TARGET_COMMANDS: dict[str, tuple[str, ...]] = {
     "resume brief": ("scout", "resume", "brief", "--job-url", "https://boards.greenhouse.io/example/jobs/1"),
     "resume store": ("scout", "resume", "store", "--in", "{resume}", "--job-url", "https://boards.greenhouse.io/example/jobs/1"),
     "resume pick": ("scout", "resume", "pick", "--job-url", "https://boards.greenhouse.io/example/jobs/1"),
+    # 0.1.11.4 C2: the cover-letter brief reads the stored assessment (the PDF command takes no --target).
+    "cover-letter brief": ("scout", "cover-letter", "brief", "--job-url", "https://boards.greenhouse.io/example/jobs/1"),
     "suggestions list": ("scout", "suggestions", "list", "--job-url", "https://boards.greenhouse.io/example/jobs/1"),
     "suggestions add": ("scout", "suggestions", "add", "--job-url", "https://boards.greenhouse.io/example/jobs/1", "--kind", "reword", "--line", "b-example", "--why", "Say the technique."),
     "suggestions resolve": ("scout", "suggestions", "resolve", "sg-1", "--job-url", "https://boards.greenhouse.io/example/jobs/1", "--how", "master_line", "--ref", "b-example"),

@@ -37,16 +37,25 @@ HARD_RULES: dict[str, tuple[str, ...]] = {
     ),
 }
 #: What the agent gathers, each with a command that exists today (the command pins are in test_agent_skill.py).
+#: 0.1.11.4 C2: the job is ONE call (`cover-letter brief`) instead of the four of phase 1.
 INPUTS = (
     "~/Documents/GigAI/cover-letter.md",
     "`gigai scout resume check PATH --json`",
-    "`gigai scout resume brief --job-url URL --posting`",
+    "in ONE call: `gigai scout cover-letter brief --job-url URL`",
     "untrusted DATA",
-    "`gigai scout resume master show --json`",
-    "`gigai scout resume brief --job-url URL`",
     "`sources`",
+    "`evidence`",
+    "`gigai scout resume master show --json`",
     "Never invent one",
 )
+#: 0.1.11.4 C2: the PDF step. The command reads the header file; the agent never does.
+PDF_STEP = (
+    "`gigai scout cover-letter pdf --in LETTER.md --out LETTER.pdf --json`",
+    "which it reads itself",
+    "If `pages` is not 1, shorten the letter and run it again.",
+)
+#: Phase 1's four calls, and its "no PDF command" sentence: gone from the skill and from the page.
+REPLACED = ("gigai scout resume brief --job-url URL --posting", "`gigai scout resume brief --job-url URL`", "no cover-letter PDF command")
 STEPS = (
     "1. Read the posting. List its top 5-7 asks.",
     "2. Map each ask to the master lines that PROVE it",
@@ -80,8 +89,12 @@ def test_both_formats_carry_the_section_after_the_daily_loop(fmt: str, marks: st
     section = _section(rendered, marks)
     assert rendered.index("What not to do") < rendered.index(HEADING), "a second section, after the Scout loop"
     assert "GigAI calls no model for it" in section
-    for phrase in (*INPUTS, *STEPS):
+    for phrase in (*INPUTS, *STEPS, *PDF_STEP):
         assert phrase in section, phrase
+    for phrase in REPLACED:
+        assert phrase not in section, phrase
+    # The PDF step comes after the two files are saved and before the rules; it names no contact detail.
+    assert section.index("Save two files") < section.index(PDF_STEP[0]) < section.index("Hard rules:")
 
 
 @pytest.mark.parametrize(("fmt", "marks"), FORMATS)
@@ -127,6 +140,38 @@ def test_the_docs_page_says_the_same_and_is_registered() -> None:
     config = (ROOT / "gigai-docs" / "astro.config.mjs").read_text(encoding="utf-8")
     assert "'scout/cover-letter'" in config
     assert "](../cover-letter/)" in (DOCS / "scout" / "agents.md").read_text(encoding="utf-8")
+
+
+def test_the_two_commands_exist_and_the_briefs_reminder_agrees_with_the_rules() -> None:
+    """0.1.11.4 C2: the skill's two commands are real, and the one-line reminder the brief prints says nothing the rules do not."""
+
+    from click.testing import CliRunner
+
+    from gigai.cli import cli
+    from gigai.scout.cover_letter_brief import REMINDER
+
+    for command, flags in (("brief", ("--job-url", "--profile", "--plain", "--json")), ("pdf", ("--in", "--out", "--header", "--no-header", "--json"))):
+        shown = CliRunner().invoke(cli, ["scout", "cover-letter", command, "--help"])
+        assert shown.exit_code == 0, shown.output
+        for flag in flags:
+            assert flag in shown.output, f"cover-letter {command}: {flag}"
+    assert "--target" not in CliRunner().invoke(cli, ["scout", "cover-letter", "pdf", "--help"]).output, "a letter PDF needs no Scout folder"
+    rules = _flat(_section(render("skill"), "##").split("Hard rules:", 1)[1]).casefold()
+    for said, rule in (
+        ("every factual sentence of the letter traces to a master line", "every factual sentence traces to a master line"),
+        ("never claim a skill, tool or number the master does not state", "never claim a skill, tool or number the master does not state"),
+        ("you never send or submit anything", "never sends or submits anything"),
+        ("no contact details in the letter", "never type them into the letter"),
+    ):
+        assert said in REMINDER and rule in rules, said
+
+
+def test_the_docs_page_names_the_two_commands_and_drops_phase_ones_gap() -> None:
+    page = _flat(PAGE.read_text(encoding="utf-8"))
+    assert "`gigai scout cover-letter brief --job-url URL`" in page and "gigai scout cover-letter pdf --in" in page
+    for phrase in REPLACED:
+        assert phrase not in page, phrase
+    assert "one page" in page and "never written to your resumes folder" in page and "`--no-header`" in page
 
 
 def test_the_docs_example_is_made_up() -> None:
