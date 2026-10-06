@@ -223,12 +223,35 @@ def assess_base(fx: PipelineFixture, url: str = JOB, *, met: int = 1, posting: s
     fx.model.assess_prompts.clear()
 
 
+def set_pipeline_enabled(home_root: Path, target: Path, enabled: bool | None = True) -> None:
+    """0.1.11: the pipeline is OFF by default. Write ``pipeline.enabled`` in the project's settings file (``None``: the key is removed)."""
+
+    from gigai.scout.find_jobs.refresh_tick import settings_path
+
+    path = settings_path(Path(home_root), Path(target))
+    payload = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {"schema_version": "scout-settings:1"}
+    block = dict(payload.get("pipeline", {}))
+    if enabled is None:
+        block.pop("enabled", None)
+    else:
+        block["enabled"] = enabled
+    payload["pipeline"] = block
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+
 def build_pipeline_fixture(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, base: bool = True, resume: str = RESUME, posting: str = POSTING,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, base: bool = True, resume: str = RESUME, posting: str = POSTING, pipeline: bool = True,
 ) -> PipelineFixture:
-    """A gig with a resume, one answer, one story and (``base``) one assessed posting; the model installed."""
+    """A gig with a resume, one answer, one story and (``base``) one assessed posting; the model installed.
+
+    ``pipeline`` writes ``pipeline.enabled: true`` into the settings file (the 0.1.10 behaviour these tests are about);
+    ``False`` leaves the 0.1.11 default (no setting: off).
+    """
 
     gig = build_gig_with_resume(tmp_path, resume_text=resume.encode("utf-8"))
+    if pipeline:
+        set_pipeline_enabled(gig.home_root, gig.target, True)
     model = install_model(monkeypatch)
     profile = selected_profile(gig.resolved, home_root=gig.home_root, target=gig.target)
     assert profile is not None
@@ -275,5 +298,6 @@ __all__ = [
     "build_pipeline_fixture",
     "install_model",
     "output_files",
+    "set_pipeline_enabled",
     "resolved_job",
 ]

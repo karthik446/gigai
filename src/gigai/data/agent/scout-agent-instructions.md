@@ -10,7 +10,7 @@ The check is pattern-based and can miss things. Never ask the user to paste a re
 
 ## What calls a model, what is sent, three approvals
 
-- Only an assessment calls a model: `gigai scout jobs assess` and `gigai scout new` with `--yes`, and `--process` / `gigai scout pipeline process JOB` for a job whose assessment is old. The brief, the hand-back, the pick, the suggestions and the PDF (steps 8 and 9) call no model and send nothing.
+- Only an assessment calls a model: `gigai scout jobs assess` and `gigai scout new` with `--yes`, and, only on a home that turned the background pipeline on, `--process` / `gigai scout pipeline process JOB` (the pipeline is off by default in 0.1.11: they queue nothing and `process` refuses with `pipeline_off`). The brief, the hand-back, the pick, the suggestions and the PDF (steps 8 and 9) call no model and send nothing.
 - Preview first: `gigai scout jobs assess URL --json` calls no model. Show the user its estimate and `model_input_summary`: the profile, `resume_source` (`profile_view` or `master_evidence`), answers and stories used, the model target, whether a posting is fetched first.
 - One assessment sends to the user's model target (`codex_cli` / `claude_cli`: their own login) the stored posting, the resume (contact lines removed by pattern, which can miss a name or contact format), search preferences, saved answers and matching stories. A profile id is not contact data.
 - Three separate approvals: the user's choice to assess; Scout's own `--yes` (`approve: true` over the API); your runtime's sandbox or model-provider approval. `--yes` does not bypass your runtime's policy, and an API or UI route is not a workaround. If your runtime rejects the command, do not just stop: quote its rejection to the user and ask for the exact missing authorisation.
@@ -28,7 +28,7 @@ The check is pattern-based and can miss things. Never ask the user to paste a re
    If the user points you at their own code or docs, you may answer an open question from what you read there. Say where it came from: add `--source "from the user's repo NAME, at the user's request"`.
 6. Story: write a short narrative, loosely STAR (situation, task, action, result), using ONLY the user's own words. Show it. Save on their OK:
    `gigai scout story save --title "Cut CI time 60%" --raw-text "their words" --situation "..." --task "..." --action "..." --result "..." --tag ci --answers "Tell me about a time you improved a process" --as agent`
-7. When `scout new` offers to process waiting work, tell the user the estimate (model calls, inside the daily cap) and wait for a yes.
+7. Only when the background pipeline is on: when `scout new` offers to process waiting work, tell the user the estimate (model calls, inside the daily cap) and wait for a yes.
    Then run `gigai scout new --process --json`, or for one job `gigai scout pipeline process JOB --json`.
 8. Apply is the PDF of the resume picked for the job: `gigai scout resume pdf --job-url URL --json`. The PDF is HEADERLESS. The command prints an "open in Scout" link: give it to the user. They add their own contact details in the browser. You never do.
    Both files go to the user's resumes folder (`gigai scout resume folder --json`). Never put a name or contact detail there.
@@ -49,7 +49,7 @@ The check is pattern-based and can miss things. Never ask the user to paste a re
 - `gigai scout answers list|show|save|delete`: `show QUESTION_ID --json` gives the revision.
   `save ... --as agent [--source TEXT]`: who wrote it, and where the answer came from (free text).
 - `gigai scout story list|show|save|delete|prep`: `show STORY_ID --json` gives the revision.
-- `gigai scout pipeline status --json`, `gigai scout pipeline process JOB`, `gigai scout pipeline cancel JOB`, `gigai scout pipeline retry JOB`
+- (pipeline on only) `gigai scout pipeline status --json`, `gigai scout pipeline process JOB`, `gigai scout pipeline cancel JOB`, `gigai scout pipeline retry JOB`
 - `gigai scout pipeline approvals list --json`, then `approvals approve` / `approvals deny` on the user's word
 - `gigai scout metrics [--kind assess|rank|tag|tailor] [--json]`: average cost per call, for estimates.
 - `gigai scout resume check PATH [--json]` and `gigai scout resume clean PATH --out FILE [--force] [--json]`: local, no model, kinds and line numbers only.

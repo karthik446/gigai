@@ -17,7 +17,8 @@ with (``find_jobs.contracts.ModelTarget``); a step left out runs with the
 project's configured model target (``find-jobs.json``
 ``default_model_target``), the one every other Scout model call uses.
 
-``enabled`` is ON by default. A settings file that cannot be read, or a
+``enabled`` is OFF by default (0.1.11: the pipeline ships off; a home whose
+settings file says ``"enabled": true`` keeps it on, source ``setting``). A settings file that cannot be read, or a
 ``pipeline`` / ``rank`` block with a value of the wrong kind, turns the
 pipeline OFF (DESIGN 7, 12: a background job that spends model calls does not
 guess). :data:`PIPELINE_ENV` overrides ``enabled`` either way.
@@ -63,7 +64,7 @@ _ON = frozenset({"1", "true", "on", "yes"})
 class PipelineSetting:
     """What the pipeline may do for this project, and what said so."""
 
-    enabled: bool = True
+    enabled: bool = False
     source: str = SOURCE_DEFAULT
     auto_jobs_per_trigger: int = DEFAULT_AUTO_JOBS_PER_TRIGGER
     max_model_calls_per_day: int = DEFAULT_MAX_MODEL_CALLS_PER_DAY
@@ -149,7 +150,7 @@ def pipeline_setting(
     rank = payload.get("rank", {})
     if not isinstance(block, dict) or not isinstance(rank, dict):
         return forced(_SETTING_OFF)
-    enabled = block.get("enabled", True)
+    enabled = block.get("enabled", False)
     per_trigger = _count(block, "auto_jobs_per_trigger", DEFAULT_AUTO_JOBS_PER_TRIGGER)
     per_day = _count(block, "max_model_calls_per_day", DEFAULT_MAX_MODEL_CALLS_PER_DAY)
     min_ats = _count(block, "label_min_ats", DEFAULT_LABEL_MIN_ATS, most=100)

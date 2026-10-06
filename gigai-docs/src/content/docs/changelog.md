@@ -26,9 +26,10 @@ operator-visible capability and must link to the relevant release or evidence.
 
 DRAFT. GigAI is now an alpha (it was labelled pre-alpha). No model rewrites your resume any more. The
 resume for a job is made of lines from your master resume, in your master's own words: the assessment
-picks them, and GigAI checks that the lines it shows are lines you wrote.  The tailoring call
-is gone, and a job now costs one model call (the assessment) where it used to cost about two. 
-Read "After you upgrade" and "Not proven".
+picks them, and GigAI checks that the lines it shows are lines you wrote. Tailoring is switched off:
+the resume is picked from your master, word for word; the removal and the pipeline rework are in
+0.1.11.1. The background pipeline is off, so nothing tailors, re-assesses, scores or labels behind
+your back. Read "After you upgrade" and "Not proven".
 
 #### What changed for you
 
@@ -80,11 +81,13 @@ Read "After you upgrade" and "Not proven".
 
 #### After you upgrade
 
-- **Do not go back to 0.1.10.x after you use this version.** A 0.1.10.x binary refuses the pipeline
-  file this version writes (schema 6: "pipeline.sqlite was written by a newer GigAI"), and refuses a
-  config that has no editor. Deleting `pipeline.sqlite` makes the old binary start; it loses the
-  pipeline history and metrics, nothing else. Nothing from the downgrade was run by hand: see "Not
+- **Do not go back to 0.1.10.x after you use this version** if your config has no editor: a 0.1.10.x
+  binary refuses a config that has no editor. Nothing from the downgrade was run by hand: see "Not
   proven".
+- **The background pipeline is off.** A home with no pipeline setting is off. A home whose settings
+  file says `"pipeline": {"enabled": true}` explicitly keeps it and works as on 0.1.10, and
+  `GIGAI_SCOUT_PIPELINE=on` still turns it on. While it is off, `resume store` and the page's save make
+  no model call, and the job page and Settings show nothing of it.
 - **Every assessment made before 0.1.11 reads "older prompt".** They keep showing. Re-assessing is
   your click, and the offer is the newest 50.
 - **Your notes are dropped if a 0.1.10.x binary writes a master revision.** Do not edit the master
@@ -94,11 +97,9 @@ Read "After you upgrade" and "Not proven".
   it" replaces it. Lines the old tailoring reworded show the rewrite and its original.
 - **Other lines cut for length have no Restore.** When the page cuts lines of an "Other" section to
   fit two pages, there is no Restore for them; the cuts in your other sections can be restored.
-- **`gigai scout resume tailor` (one model call) is gone** and says what to run instead.
-  `POST /api/tailored-resumes` answers 410. The settings `pipeline.models.tailor` and
-  `pipeline.models.reassess` are read and ignored, with one line in `gigai scout pipeline status`.
-   The pipeline's steps are assess, pick, ats, label; a job finished on 0.1.10 is left as it
-  is until you open it. 
+- **`gigai scout resume tailor` is hidden from help and answers `tailoring_off`** (no model call)
+  unless you enabled the pipeline explicitly. `gigai scout resume store --in` is the way to hand an
+  edited resume back.
 
 #### Not proven
 

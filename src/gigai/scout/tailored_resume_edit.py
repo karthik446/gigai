@@ -150,6 +150,7 @@ MAX_PROBLEMS_SHOWN = 10
 
 RECHECK_SCHEMA = "scout-tailored-recheck:1"
 RECHECK_NOT_QUEUED = "not_queued"
+RECHECK_PIPELINE_OFF = "pipeline_off"
 
 
 #: One logical line of the markdown: where it starts, what it says (no marker, no comment), and the sources its
@@ -815,11 +816,13 @@ def queue_recheck(home_root: Path, target: Path, attached: AttachedResume) -> di
     The tailor step keeps the edited resume (it is the user's) and the re-assessment, the Scout
     ATS score and the Scout label run against it.  ``result`` is ``steps.enqueue_job``'s
     (``enqueued`` ...), ``unchanged`` when the attach changed nothing, or ``not_queued`` with
-    the ``error_code`` (``assessment_missing``: the job has no assessment for this profile yet).
+    the ``error_code`` (``assessment_missing``: the job has no assessment for this profile yet),
+    or ``pipeline_off`` (0.1.11 default: nothing queued, no model call, no error).
     Ids and codes only.
     """
 
     from .pipeline import triggers
+    from .pipeline.settings import pipeline_setting
     from .pipeline.steps import StepError
     from .pipeline.store import PipelineStoreError
 
@@ -832,6 +835,8 @@ def queue_recheck(home_root: Path, target: Path, attached: AttachedResume) -> di
         return {**body, "result": "unchanged"}
     if response.resume.profile_id is None:
         return {**body, "result": RECHECK_NOT_QUEUED, "error_code": "profile_unavailable"}
+    if not pipeline_setting(Path(home_root), Path(target)).enabled:
+        return {**body, "result": RECHECK_PIPELINE_OFF}  # 0.1.11: nothing is queued and no model call is made
     try:
         queued = triggers.process_now(Path(home_root), Path(target), response.resume.profile_id, response.job.job_identity, force=True)
     except (StepError, PipelineStoreError) as exc:
@@ -844,6 +849,7 @@ def queue_recheck(home_root: Path, target: Path, attached: AttachedResume) -> di
 __all__ = [
     "MAX_PROBLEMS_SHOWN",
     "RECHECK_NOT_QUEUED",
+    "RECHECK_PIPELINE_OFF",
     "RECHECK_SCHEMA",
     "AttachedResume",
     "HandbackRefused",
