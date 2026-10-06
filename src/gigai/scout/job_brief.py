@@ -817,11 +817,15 @@ def load_yours(home_root: Path, target: Path, job_url: str, profile_id: str | No
 def load_posting(home_root: Path, target: Path, job_url: str, profile_id: str | None = None) -> PostingInputs:
     """What the posting part reads for one job: the stored posting, the rows' words and the assessment's suggestions. Read only."""
 
+    return posting_inputs(Path(home_root), Path(target), stored_job(Path(home_root), Path(target), job_url, profile_id))
+
+
+def posting_inputs(home_root: Path, target: Path, job: StoredJob) -> PostingInputs:
+    """``load_posting`` for a job that is already read (the cover-letter brief reads the stored assessment once)."""
+
     from . import jobs_folder
     from .tailored_resume import tailored_resume_path
 
-    home_root, target = Path(home_root), Path(target)
-    job = stored_job(home_root, target, job_url, profile_id)
     assessment = job.assessment
     posting = assessment.job  # type: ignore[attr-defined]
     rows = tuple(
@@ -875,6 +879,7 @@ __all__ = [
     "load_posting",
     "load_yours",
     "part_labels",
+    "posting_inputs",
     "posting_part",
     "printed_ids",
     "render",

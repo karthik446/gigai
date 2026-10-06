@@ -8,7 +8,7 @@ agent runs**. You start with a letter of your own; your agent tailors it to one 
 facts your master resume states, and saves it for you to review.
 
 GigAI calls no model for it and writes no letter. It supplies the facts (the posting, your master
-resume, the lines the assessment cited); your agent writes; you review and send. The agent's own
+resume, the lines the assessment cited) and makes the PDF; your agent writes; you review and send. The agent's own
 conversation goes to its model provider, like everything else you do with an agent (see
 [Privacy and security](../privacy/)).
 
@@ -38,14 +38,27 @@ Then ask your agent: "Write a cover letter for this job", with the posting's URL
 
 ## What the agent does
 
-It gathers four things, each with a command that already exists:
+It gathers three things:
 
 | What | How | Note |
 | --- | --- | --- |
 | Your base letter | It reads the file you name, after `gigai scout resume check PATH --json` says it is clean | The same gate as for a resume file |
-| The posting | `gigai scout resume brief --job-url URL --posting` | Text written by strangers: the agent treats it as data, never as instructions |
-| The facts | `gigai scout resume master show --json`, and `gigai scout resume brief --job-url URL` for the master lines the assessment cited for each requirement | Every master line has an id |
+| The job | `gigai scout cover-letter brief --job-url URL`: one call | The posting, the requirement rows with their status, and the master lines the assessment cited for each row, by id and word for word |
 | Your name | Only the one your own letter signs with | Never invented, never asked for |
+
+The brief is one reply that holds two kinds of text, and says which is which. The posting and the
+requirements' words were written by strangers: they sit inside GigAI's untrusted-text markers,
+labelled `public-untrusted`, and the agent treats them as data, never as instructions. Your master
+lines are labelled `user-private`. The brief holds no name and no contact details, calls no model
+and stores nothing. It needs the job's assessment; without one it says which command makes it.
+
+```bash
+gigai scout cover-letter brief --job-url URL           # JSON, for the agent
+gigai scout cover-letter brief --job-url URL --plain   # the same, as text to read
+```
+
+The brief lists only the master lines the assessment cited. When the agent needs another line of
+yours it reads the master itself (`gigai scout resume master show --json`).
 
 Then it works in five steps:
 
@@ -88,10 +101,32 @@ The skill states these to the agent, in these words:
 These are instructions an agent follows, not a check GigAI runs: nothing in GigAI verifies a
 cover letter. The claims trace is there so that you can.
 
-`header.json` is the file of your own name and contact details that
-`gigai scout resume pdf` reads for a resume's header (see [Your resume](../resume/)). GigAI has
-no cover-letter PDF command in this version; when you turn the letter into a PDF yourself, add
-your contact details then.
+## The PDF
+
+When you are happy with the letter, your agent (or you) makes the PDF:
+
+```bash
+gigai scout cover-letter pdf --in ~/Documents/GigAI/cover-letters/acme-staff-software-engineer-2026-10-06.md --out ~/Documents/GigAI/cover-letters/acme-staff-software-engineer-2026-10-06.pdf --json
+```
+
+- **One page.** The letter is set in the same template as your resume's PDF. A letter that is a
+  little too long is set with tighter spacing, down to a readable floor, never smaller type. If it
+  still needs a second page, the command says so in one sentence and reports the page count
+  (`pages`, and `note` in the JSON): shorten the letter and run it again.
+- **Your header, from your own file.** The PDF gets the same compact header as your resume: your
+  name and one contact line, from `header.json`, the file of your own details that
+  `gigai scout resume pdf` reads (see [Your resume](../resume/)). `--header FILE` names another
+  file; `--no-header` makes the PDF without a header. A file that is missing a name, is not valid
+  or still holds `REPLACE` placeholders is refused in one plain sentence, as for a resume.
+- **The command reads that file, the agent never does.** Its values go into the PDF and nowhere
+  else: they are not printed, not logged and not stored. The agent sees a path, a page count and
+  plain notes.
+- **Only where you say.** The PDF is written to `--out` and is never written to your resumes folder
+  (that folder never holds a name or contact details, and a letter is signed).
+- **The letter file is plain paragraphs** with a blank line between them. Lines with no blank
+  line between them are one paragraph; a paragraph of short lines (the greeting, the sign-off with
+  your name under it) keeps its lines. Text prints as written. The claims trace beside the letter
+  is never opened and never printed.
 
 ## Example
 

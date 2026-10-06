@@ -123,6 +123,10 @@ _DISPLAY_IMPORTERS: dict[str, frozenset[str]] = {
         # tailor_master (0.1.10.9 master P4): asks the renderer for a page count only (pages_at, headerless) to fit a
         # tailoring of the master's lines to the page budget; no header form, no display settings.
         "gigai.scout.tailor_master",
+        # cover_letter (0.1.11.4 C2): sets a cover letter on a page through the resume renderer's own Typst calls and its
+        # compact header (`gigai scout cover-letter pdf`); the header's values come as an argument for that ONE PDF
+        # (pdf_header_cli), it reads no display setting, and nothing model-bound imports it.
+        "gigai.scout.cover_letter",
         # pick (0.1.11.3 item 15, "Shorten automatically"): asks the renderer for a page count only (pages_at, headerless,
         # with more header lines kept blank: the tighter budget); no header form, no display settings, no header file.
         "gigai.scout.pick",

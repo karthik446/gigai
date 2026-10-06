@@ -757,6 +757,11 @@ from .resume_job_cli import register as _register_resume_job_commands  # noqa: E
 
 _register_resume_job_commands(scout_group, resume_group)
 
+# 0.1.11.4 C2: `gigai scout cover-letter brief | pdf` (cover_letter_cli).
+from .cover_letter_cli import register as _register_cover_letter_commands  # noqa: E402
+
+_register_cover_letter_commands(scout_group)
+
 
 @resume_group.command("pdf")
 @click.option("--in", "in_file", help="Resume markdown FILE in GigAI's resume format (or - for stdin).")
@@ -843,11 +848,12 @@ def resume_pdf_command(
     if bool(in_file) == bool(tailored):
         _fail(ValueError("pass exactly one of --in FILE or --tailored --job-url URL"), as_json=as_json, fallback="invalid_value")
         return
-    if header_value is not None and (no_header or out_file is None):
-        reason = "--header and --no-header do not go together" if no_header else (
-            "--header needs --out FILE: a PDF with your name and contact details is never written to the resumes folder"
-        )
-        _fail(ValueError(reason), as_json=as_json, fallback="invalid_value")
+    from . import pdf_header_cli
+
+    try:
+        pdf_header_cli.check_flags(header_value, no_header=no_header, out_file=out_file)
+    except pdf_header_cli.PdfHeaderRefusal as exc:
+        _fail(exc, as_json=as_json, fallback=exc.code)
         return
     if bool(job_url) != bool(tailored):
         _fail(ValueError("--tailored and --job-url go together"), as_json=as_json, fallback="invalid_value")
@@ -863,31 +869,13 @@ def resume_pdf_command(
         _fail(exc, as_json=as_json, fallback="scout_resume_pdf_failed")
         return
 
-    # 0.1.11.3 item 13: the header comes from the user's own file, read here and only for this PDF.
-    form, header_file, header_note = None, None, None
-    if not no_header:
-        from . import pdf_header_file
-        from .find_jobs.resume_input import read_config_preferences
-
-        found = pdf_header_file.read_header_file(header_value if header_value is not None else pdf_header_file.default_path(home_root))
-        wanted = header_value is not None or (out_file is not None and found.state != pdf_header_file.STATE_MISSING)
-        problem = None if found.filled else found.message
-        if found.filled and wanted:
-            try:
-                # Nobody edits a form here: the file, then the profile's sponsorship answer for the work authorization line.
-                form = pdf_header_file.render_form(found, visa_required=read_config_preferences(target)[0] if target is not None else False)
-            except pdf_header_file.HeaderFileError as exc:
-                problem = str(exc)
-        if wanted and problem is not None:
-            hint = "" if header_value is not None else " (--no-header makes the PDF without a header)"
-            _fail(ValueError(problem + hint), as_json=as_json, fallback=pdf_header_file.FAILURE_CODES.get(found.state, "header_file_invalid"))
-            return
-        if form is not None:
-            # 0.1.11.3 item 14: REPLACE: placeholders are skipped, never printed; the note names their fields.
-            header_file, header_note = found.shown, " ".join(note for note in (found.warning, found.notice) if note) or None
-        elif found.state != pdf_header_file.STATE_MISSING:
-            # The default file is there but this PDF goes to the resumes folder, which never holds contact details.
-            header_note = f"Your header file ({found.shown}) was not used: pass --out FILE to make the PDF with your name and contact details."
+    # 0.1.11.3 item 13: the header comes from the user's own file, read only for this PDF (pdf_header_cli: the one reading).
+    try:
+        chosen = pdf_header_cli.header_for_pdf(header_value, no_header=no_header, out_file=out_file, home_root=home_root, target=target)
+    except pdf_header_cli.PdfHeaderRefusal as exc:
+        _fail(exc, as_json=as_json, fallback=exc.code)
+        return
+    form, header_file, header_note = chosen.form, chosen.header_file, chosen.header_note
 
     failure: tuple[Exception, str] | None = None
     rendered = None

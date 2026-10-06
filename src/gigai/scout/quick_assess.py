@@ -52,7 +52,7 @@ fake model call (the fixture ``MockTransport`` has no socket to time out).
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 import json
@@ -78,6 +78,7 @@ from .assessment_core import _MAX_PROMPT_POSTING_TEXT, prompt_reads_ids, templat
 from . import assess_model, story_bank
 from .find_jobs.assess_contracts import (
     ORIGIN_QUICK_ASSESS,
+    AssessChecks,
     AssessmentBody,
     AssessRequest,
     AssessResponse,
@@ -546,6 +547,26 @@ def _parse_body(raw: Mapping[str, object]) -> AssessmentBody:
 # in the v8 shape (every answer of the shipped v8 prompt) is stored exactly as before and nothing below runs.
 
 
+def _checks_of(extras: AssessExtras | None) -> AssessChecks | None:
+    """0.1.11.4 OBS: the counts of what the code checks did (rule/reason/action names only, no text, no ids)."""
+
+    if extras is None:
+        return None
+    from collections import Counter
+
+    def by(names: Iterable[str]) -> tuple[tuple[str, int], ...]:
+        return tuple(sorted(Counter(names).items()))
+
+    return AssessChecks(
+        settled_rows=len(extras.met_by_master),
+        settled_by_rule=by(rule for _row, rule in extras.met_by_master),
+        questions_dropped=len(extras.stated_questions),
+        questions_capped=len(extras.capped_questions) + len(extras.capped_mandatory_questions),
+        suggestions_dropped=by(reason for _kind, reason in extras.checked_suggestions),
+        citations_cleaned=by(extras.checked_citations),
+    )
+
+
 def _v9_body(body: AssessmentBody, extras: AssessExtras | None, row_ids: tuple[str, ...] | None) -> AssessmentBody:
     """The v9 answer as it is stored: every row with its id, the structured suggestions, and the pick only when a resume is suggested.
 
@@ -975,6 +996,7 @@ def run_quick_assessment(
     extracted_list = None
     requirements_ref = None
     resume_gate = None
+    checks = None
     if is_v9:
         row_ids = None
         if listed is not None:
@@ -988,6 +1010,7 @@ def run_quick_assessment(
             )
         body = _v9_body(body, attempt.extras, row_ids)
         resume_gate = gate(body.matrix, body.structured_questions, body.verdict).record()
+        checks = _checks_of(attempt.extras)
     if trigger is None:
         trigger = TRIGGER_ASSESS if previous is None else TRIGGER_REASSESS
     history = _history_with(previous, VerdictHistoryEntry(at=assessed_at, verdict=body.verdict, trigger=trigger))
@@ -1023,6 +1046,7 @@ def run_quick_assessment(
         resume_basis=None if master_input is None else master_input.basis,
         requirements_ref=requirements_ref,
         resume_gate=resume_gate,
+        checks=checks,
         requirements_note=requirements_note,
         model_asked=_model_id(policy.asked),
         model_fallback=policy.fallback,
