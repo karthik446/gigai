@@ -97,7 +97,16 @@ same switched-off step.</p>
 <blockquote>
 <p>Every line comes from your resume, answers or stories. Read it before you send it.</p>
 </blockquote>
-<p>Each job’s resume (markdown) is saved in the job’s own folder of your jobs folder
+<p>No employer is dropped to make the resume fit. A role none of whose lines is shown (an older
+role, usually: its lines were cut for length) is still listed, on one line, under <strong>Earlier
+experience</strong> at the end of the Experience section, newest first:
+<code dir="auto">Senior Full Stack Developer, Example Agency | Feb 2016 - Jan 2017</code>. The title, the employer
+and the dates are your master’s own. Those lines are counted in the 2 pages, so the resume
+still fits with your name and contact line on it. In the rare case where not even such a line
+fits, the pick says so (“… older roles are not listed on this resume …”) and keeps as many
+as fit, the newest first. A resume picked before 0.1.11.4 stays as it is until you pick it
+again (<code dir="auto">gigai scout resume pick --job-url &lt;url&gt; --refresh</code>).</p>
+<p>The panel also says where the file is. Each job’s resume (markdown) is saved in the job’s own folder of your jobs folder
 (<code dir="auto">~/Documents/GigAI/jobs</code> unless you chose another with <code dir="auto">gigai scout jobs-folder --set PATH</code>):
 <code dir="auto">&lt;company&gt;/&lt;role&gt;/resume.md</code>, for example <code dir="auto">thrive-market/staff-software-engineer-fullstack/resume.md</code>.
 Two roles at one company are two folders, and no name holds a date. The folder never holds your
