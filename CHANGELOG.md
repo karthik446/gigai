@@ -58,14 +58,20 @@ mechanics here. Those belong in the internal changelog.
   50. `gigai scout new`, "Assess these" and the API take the same top 50 by rank instead of the newest
   50; postings you select or name are still the ones assessed. While ranking is still running, the page
   and the question say how many postings are ranked so far.
-- **The Jobs page shows the ranking, and ranks from the page.** A line says how many postings of the last
-  7 days are not ranked yet ("5 postings of the last 7 days are not ranked yet (ranked 52 of 57)"), and
-  "Rank now" ranks them: the page shows "ranked X of Y" as it goes and refreshes the list. "Re-rank
-  latest 100" ranks the newest 100 again, also the ones already ranked, in at most 2 model calls; it
-  shows the cost (the calls, and today's count) before anything runs, and nothing runs until you
-  approve. Both stay inside the daily cap of 100 rank calls: a re-rank that today's calls do not cover
-  is refused and makes no call. With ranking off, the buttons say so and the line says how to turn it
-  on. The API is `POST /api/postings/rank`.
+- **The Jobs page shows the ranking, and ranks from the page.** One row above the list is always there:
+  "Ranked 52 of 57 (last 7 days) · 5 not ranked yet", with "Rank now" and "Re-rank latest 100". "Rank
+  now" ranks the postings not ranked yet: the page shows "ranked X of Y" as it goes and refreshes the
+  list. "Re-rank latest 100" ranks the newest 100 again, also the ones already ranked, in at most 2
+  model calls; it shows the cost (the calls, and today's count) before anything runs, and nothing runs
+  until you approve. Both stay inside the daily cap of 100 rank calls: a re-rank that today's calls do
+  not cover is refused and makes no call. A button that cannot run is greyed and says why ("Rank now:
+  nothing to rank" when everything is ranked; "ranking is off", and the line says how to turn it on).
+  When the list cannot be read the row says "Ranking status unavailable". The API is
+  `POST /api/postings/rank`.
+- **A tab left open over an upgrade says so.** After an upgrade and a restart, a Scout tab that stayed
+  open kept running the old page against the new server (it could miss what is new, such as the rank
+  row). The page now notices when the server serves a newer page than the one it runs and shows "Scout
+  was updated" with a "Reload" button. It never reloads by itself.
 
 - **Ranking is back, on its own switch.** The background pipeline stays off and nothing is tailored, but
   ranking runs again: the Scout server ranks when it starts (so an upgrade ranks what is not ranked yet

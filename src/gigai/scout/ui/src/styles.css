@@ -1635,6 +1635,9 @@ table.data-table th {
    title and details, the tag of every profile it matches, its score, its
    state chips, its actions. */
 .posting-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+/* 0.1.11.2 RANKVIS: "Scout was updated": above everything, on every page (the wizard too). */
+.ui-updated-banner { margin: 8px 24px 0; }
+
 /* 0.1.11.2: a plain divider inside the list ("Ranked low (N)"): the rows under it are rows like any other. */
 .posting-divider { list-style: none; padding: 6px 2px 2px; font-size: 0.78rem; font-weight: 600; color: var(--muted); border-bottom: 1px solid var(--border); }
 .posting-row {

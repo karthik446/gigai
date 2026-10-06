@@ -1,6 +1,7 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import App from "./App.jsx";
+import UpdatedBanner from "./components/UpdatedBanner.jsx";
 import { applyTheme, browserStorage, lockExtensionDarkMode, readStoredTheme } from "./theme.js";
 import "./styles.css";
 
@@ -11,6 +12,7 @@ lockExtensionDarkMode(document);
 
 createRoot(document.getElementById("root")).render(
   <StrictMode>
+    <UpdatedBanner />
     <App />
   </StrictMode>,
 );
