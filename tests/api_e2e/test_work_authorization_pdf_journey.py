@@ -16,6 +16,7 @@ user chose to print on one PDF; sponsorship stays a label for jobs.
 from __future__ import annotations
 
 import io
+import json
 import subprocess
 from pathlib import Path
 
@@ -110,10 +111,10 @@ def test_the_work_authorization_line_prints_in_the_pdf_header_and_is_stored_nowh
     finally:
         stop_server(server)
 
-    # The resumes folder gets the stored job resume's markdown (`resume folder` copies in what is not there yet); then
-    # the CLI's PDF: headerless, to --out and into the resumes folder, no line.
+    # `resume folder` copies nothing in any more (0.1.11.4 J1: the job's markdown is in the jobs folder); then the
+    # CLI's PDF: headerless, to --out and into the resumes folder, no line.
     copied = runner.invoke(cli, ["scout", "resume", "folder", "--home", str(home), "--json"])
-    assert copied.exit_code == 0, copied.output
+    assert copied.exit_code == 0 and json.loads(copied.output)["copied"] == 0, copied.output
     out = tmp_path / "cli.pdf"
     cli_pdf = runner.invoke(cli, ["scout", "resume", "pdf", "--in", str(source), "--out", str(out), "--home", str(home), "--target", str(target), "--json"])
     assert cli_pdf.exit_code == 0, cli_pdf.output
@@ -126,7 +127,13 @@ def test_the_work_authorization_line_prints_in_the_pdf_header_and_is_stored_nowh
     # Nowhere on disk: master.md, the job resume's files, the resumes folder, the home (logs too), the target, the workpad.
     assert folder == home / "resumes" and folder.is_dir()
     names = sorted(path.name for path in folder.iterdir())
-    assert "master.md" in names and any(name.endswith(".md") and name != "master.md" for name in names) and any(name.endswith(".pdf") for name in names), names
+    # 0.1.11.4 J1: the resumes folder holds master.md and the headerless PDFs; the job's markdown is resume.md in its
+    # own folder of the jobs folder (<home>/jobs here), which never holds a PDF.
+    assert "master.md" in names and not any(name.endswith(".md") and not name.startswith("master") for name in names) and any(name.endswith(".pdf") for name in names), names
+    job_files = sorted(path.relative_to(home / "jobs").as_posix() for path in (home / "jobs").rglob("*") if path.is_file())
+    assert [name.rsplit("/", 1)[-1] for name in job_files] == [".gigai-job.json", "resume.md"], job_files
+    for path in (home / "jobs").rglob("*"):
+        assert not path.is_file() or (MARK.encode() not in path.read_bytes() and b"sponsorship" not in path.read_bytes().lower()), path.name
     assert MARK not in master_file.read_text(encoding="utf-8") and "sponsorship" not in master_file.read_text(encoding="utf-8").lower()
     for path in folder.iterdir():
         data = path.read_bytes()

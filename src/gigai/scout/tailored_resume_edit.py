@@ -71,6 +71,7 @@ from dataclasses import dataclass, replace
 import os
 from pathlib import Path
 
+from ..canonical import digest_imported_bytes
 from .find_jobs.assess_contracts import AssessJobInput, AssessResumeInput
 from .find_jobs.contracts import FindJobsContractError, Producer
 from .handback_check import (
@@ -622,11 +623,11 @@ def _pages(markdown: str) -> int | None:
 
 @dataclass(frozen=True)
 class AttachedResume:
-    """What an attach did: the stored resume, whether it changed anything, and the file in the resumes folder."""
+    """What an attach did: the stored resume, whether it changed anything, and the file in the job's folder."""
 
     response: TailorResponse
     changed: bool
-    #: ``resumes_folder.SavedFile`` of the markdown, or ``None`` (nothing changed, or the folder could not be written).
+    #: ``jobs_folder.SavedJobFile`` of the markdown, or ``None`` (nothing changed, or the folder could not be written).
     saved: object | None = None
 
 
@@ -728,7 +729,7 @@ def attach_edited_resume(
     Validated by ``handback_result`` against the MASTER when this profile's resumes are made from it
     (0.1.11 N2; the stored resume then names the master revision it was checked against), else by
     ``edited_result`` against the profile's own resume, as before.  Stored where a tailoring is
-    stored, marked ``edited``, and its markdown written to the resumes folder.  Attaching what is
+    stored, marked ``edited``, and its markdown written to the job's folder of the jobs folder.  Attaching what is
     already stored changes nothing (``changed`` false).  Raises ``TailorError`` with the check's
     codes (``HandbackRefused`` lists every problem) or the tailoring's input codes
     (``job_input_invalid``, ``job_fetch_failed``, ``profile_not_found`` ...).
@@ -806,7 +807,8 @@ def attach_edited_resume(
             markdown_path=os.fspath(path.with_suffix(".md")),
             edited=mark,
         )
-        saved = save_tailor_response(response, home_root=home_root)
+        # 0.1.11.4 J1: the job's resume.md may be the very file handed back (edited in place): it is then replaced, not doubled.
+        saved = save_tailor_response(response, home_root=home_root, imported=digest_imported_bytes(markdown.encode("utf-8")))
     return AttachedResume(response, True, saved)
 
 

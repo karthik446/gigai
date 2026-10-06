@@ -2709,16 +2709,20 @@ def read_tailored_resume(path: Path) -> TailorResponse | None:
     return _read_stored(Path(path))
 
 
-def export_tailored_markdown(response: TailorResponse, *, home_root: Path):
-    """Put a stored tailored resume's markdown in the resumes folder (0110-10-05 A); where, or ``None``.
+def export_tailored_markdown(response: TailorResponse, *, home_root: Path, imported: str | None = None):
+    """Put a stored job resume's markdown in the job's folder of the jobs folder (0.1.11.4 J1); where, or ``None``.
 
-    ``<company>-<role>-<YYYY-MM-DD>.md``, dated the day the resume was last
-    tailored or attached; the folder's rules are ``resumes_folder``'s (never
-    contact data, never over a file the user changed).  Never raises: a
-    folder that cannot be written does not fail the store's write.
+    ``<jobs>/<company>/<role>/resume.md``: the company is the posting's
+    display name, the role its title; the day the resume was last picked or
+    attached is recorded in the folder's own record the first time, never in
+    a name.  The folder's rules are ``jobs_folder``'s (never contact data,
+    never over a file the user changed).  Never raises: a folder that cannot
+    be written does not fail the store's write.  The flat resumes folder is
+    no longer written by a resume's save.  ``imported``: the digest of the
+    text the user has just handed back (``jobs_folder.save_resume``).
     """
 
-    from . import resumes_folder
+    from . import jobs_folder, resumes_folder
     from .find_jobs.company_names import company_display_name
 
     home_root = Path(home_root)
@@ -2728,25 +2732,25 @@ def export_tailored_markdown(response: TailorResponse, *, home_root: Path):
         day = datetime.now(UTC).astimezone().date()
     # 0110-8-11: named for the company (the index's name), not its board token.
     company = company_display_name(home_root, response.job.company) or response.job.company
-    return resumes_folder.try_save_markdown(
-        home_root, key=resumes_folder.job_key(home_root, response.stored_path), company=company, role=response.job.title, day=day,
-        markdown=response.markdown,
+    job = jobs_folder.JobRef(
+        key=resumes_folder.job_key(home_root, response.stored_path), job_identity=response.job.job_identity, company=company or "", role=response.job.title or "",
     )
+    return jobs_folder.try_save_resume(home_root, job=job, markdown=response.markdown, day=day, imported=imported)
 
 
-def save_tailor_response(response: TailorResponse, *, home_root: Path | None = None):
+def save_tailor_response(response: TailorResponse, *, home_root: Path | None = None, imported: str | None = None):
     """Write a response's JSON and its sibling ``.md`` (atomically) at the paths it names.
 
     The write alone: a caller that replaces a stored resume holds
     ``tailored_resume_write_lock`` around its read and this write.  With
     ``home_root`` (every product write path passes it) the markdown also
-    goes to the visible resumes folder (``export_tailored_markdown``); the
+    goes to the job's folder of the jobs folder (``export_tailored_markdown``); the
     file written there, or ``None``, is returned.
     """
 
     atomic_write(Path(response.stored_path), json.dumps(response.to_json(), indent=2, sort_keys=True).encode("utf-8"))
     atomic_write(Path(response.markdown_path), response.markdown.encode("utf-8"))
-    return None if home_root is None else export_tailored_markdown(response, home_root=home_root)
+    return None if home_root is None else export_tailored_markdown(response, home_root=home_root, imported=imported)
 
 
 __all__ = [

@@ -154,5 +154,9 @@ def test_no_contact_data_is_stored_anywhere(tmp_path: Path, monkeypatch: pytest.
         if path.is_file() and not path.is_symlink() and _found(path.read_bytes())
     )
     assert holders == [], holders
+    # 0.1.11.4 J1: that search covered the jobs folder (<home>/jobs for this temporary home): the job's resume.md is
+    # there, written after a PDF was made with the form's header, and no PDF ever is.
+    job_files = sorted(path.relative_to(home / "jobs").as_posix() for path in (home / "jobs").rglob("*") if path.is_file())
+    assert job_files == ["acme/staff-engineer/.gigai-job.json", "acme/staff-engineer/resume.md"], job_files
     assert _found(_git_objects(workpad)) == [], "no journal object holds a marker"
     assert_clean_and_healthy(workpad, home)

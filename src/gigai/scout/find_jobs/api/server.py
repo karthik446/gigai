@@ -1610,6 +1610,7 @@ def _make_handler(
     from .rank import RankRoutesMixin
     from .resume_display import ResumeDisplayRoutesMixin
     from .resumes import ResumesRoutesMixin
+    from .jobs_folder import JobsFolderRoutesMixin
     from .resumes_folder import ResumesFolderRoutesMixin
     from .runs import RunRoutesMixin
     from .runs_list import RunsListRoutesMixin
@@ -1640,6 +1641,7 @@ def _make_handler(
         ResumesRoutesMixin,
         ResumeDisplayRoutesMixin,
         ResumesFolderRoutesMixin,
+        JobsFolderRoutesMixin,
         PdfHeaderRoutesMixin,
         MasterRoutesMixin,
         PrivacyCleanupRoutesMixin,
@@ -1917,6 +1919,9 @@ def _make_handler(
                     if path == "/api/resumes-folder":
                         self._handle_get_resumes_folder()
                         return
+                    if path == "/api/jobs-folder":
+                        self._handle_get_jobs_folder()
+                        return
                     if path == "/api/master":
                         self._handle_get_master()
                         return
@@ -2179,6 +2184,9 @@ def _make_handler(
                     return
                 if path == "/api/resumes-folder":
                     self._handle_put_resumes_folder()
+                    return
+                if path == "/api/jobs-folder":
+                    self._handle_put_jobs_folder()
                     return
                 if path == "/api/tailored-resumes":
                     self._handle_put_tailored_resume()

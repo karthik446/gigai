@@ -1,10 +1,13 @@
-"""0110-10-05: ``PUT /api/tailored-resumes`` and ``GET`` / ``PUT /api/resumes-folder`` over HTTP against the real supervised server.
+"""0110-10-05: ``PUT /api/tailored-resumes`` and ``GET`` / ``PUT /api/resumes-folder`` and (0.1.11.4 J1)
+``/api/jobs-folder`` over HTTP against the real supervised server.
 
-The home is a temporary one, so the resumes folder is ``<home>/resumes`` (only the default home
-``~/.gigai`` uses ``~/Documents/GigAI/resumes``): nothing here can reach the real Documents folder.
+The home is a temporary one, so the jobs folder is ``<home>/jobs`` and the resumes folder
+``<home>/resumes`` (only the default home ``~/.gigai`` uses ``~/Documents/GigAI``): nothing here can
+reach the real Documents folder.
 
-1. A tailoring puts the job's markdown in the resumes folder; ``GET /api/resumes-folder`` says where
-   the folder is and, for the job, which file.
+1. A tailoring puts the job's markdown in the job's own folder of the jobs folder
+   (``<company>/<role>/resume.md``) and nothing in the flat resumes folder; ``GET /api/jobs-folder``
+   says where the folder is and, for the job, its folder and file (paths and names, no contents).
 2. ``PUT /api/tailored-resumes`` with an edit the resume cannot support is 422
    ``edited_resume_unsupported`` (line number and number, never the text); a contact detail is 422
    ``personal_info_refused``; nothing is stored either time.
@@ -13,8 +16,8 @@ The home is a temporary one, so the resumes folder is ``<home>/resumes`` (only t
    runner makes the Scout ATS score and label again from it, keeping the edited resume; the folder's
    file follows; the same body again changes nothing; a write from the Scout UI is the operator's.
 4. Shape errors are typed 422s; a foreign Origin is 403 and changes nothing.
-5. ``PUT /api/resumes-folder`` chooses another folder (created), refuses a relative path, and an
-   empty path goes back to the default.
+5. ``PUT /api/resumes-folder`` and ``PUT /api/jobs-folder`` choose another folder (created), refuse
+   a relative path, and an empty path goes back to the default.
 """
 
 from __future__ import annotations
@@ -62,7 +65,7 @@ def test_edited_tailored_resume_journey(tmp_path: Path, monkeypatch: pytest.Monk
     server = start_server(home, target, monkeypatch=monkeypatch)
     try:
         client = server.client
-        folder = home / "resumes"
+        folder, jobs = home / "resumes", home / "jobs"
 
         # ---- 1. a tailoring lands in the folder ------------------------------------------------
         assert client.post("/api/assess", json={"job": {"job_url": _URL}}).status_code == 200
@@ -76,13 +79,27 @@ def test_edited_tailored_resume_journey(tmp_path: Path, monkeypatch: pytest.Monk
         assert where.status_code == 200, where.text
         assert where.json() == {
             "schema_version": "scout-resumes-folder-response:1", "path": str(folder), "shown": where.json()["shown"], "source": "default",
+            "default": where.json()["default"], "exists": False,
+        }
+        assert client.get("/api/resumes-folder", params=key).json()["files"] == {"markdown": None, "pdf": None}, "a tailoring writes nothing there any more"
+        assert not folder.exists()
+        where = client.get("/api/jobs-folder")
+        assert where.status_code == 200, where.text
+        assert where.json() == {
+            "schema_version": "scout-jobs-folder-response:1", "path": str(jobs), "shown": where.json()["shown"], "source": "default",
             "default": where.json()["default"], "exists": True,
         }
-        files = client.get("/api/resumes-folder", params=key).json()["files"]
-        assert files["pdf"] is None and files["markdown"].startswith("acme-software-engineer-") and files["markdown"].endswith(".md")
-        visible = folder / files["markdown"]
+        job_dir = jobs / "acme" / "software-engineer"
+        assert client.get("/api/jobs-folder", params=key).json()["job"] == {
+            "path": str(job_dir), "shown": f"{where.json()['shown']}/acme/software-engineer", "relative": "acme/software-engineer", "files": {"resume": "resume.md"},
+        }
+        visible = job_dir / "resume.md"
         text = visible.read_text(encoding="utf-8")
         assert _RESUME_LINE in text and "<!--" not in text
+        other = {**key, "job_identity": "https://boards.greenhouse.io/acme/jobs/999"}
+        assert client.get("/api/jobs-folder", params=other).json()["job"] is None, "a job GigAI made no folder for"
+        _error(client.get("/api/jobs-folder", params={"profile_id": key["profile_id"]}), 422, "invalid_value")
+        _error(client.get("/api/jobs-folder", params={"bogus": "1"}), 422, "unknown_key")
         _error(client.get("/api/resumes-folder", params={"profile_id": key["profile_id"]}), 422, "invalid_value")
         _error(client.get("/api/resumes-folder", params={"bogus": "1"}), 422, "unknown_key")
 
@@ -121,9 +138,9 @@ def test_edited_tailored_resume_journey(tmp_path: Path, monkeypatch: pytest.Monk
         detail = client.get("/api/pipeline/job", params=key)
         assert detail.status_code == 200, detail.text
         assert stored() == shown, "the pipeline kept the edited resume"
-        files = client.get("/api/resumes-folder", params=key).json()["files"]
-        assert _OWN_LINE in (folder / files["markdown"]).read_text(encoding="utf-8")
-        assert sorted(path.suffix for path in folder.iterdir()) == [".md"], "one markdown for the job; no PDF was asked for"
+        assert client.get("/api/jobs-folder", params=key).json()["job"]["files"] == {"resume": "resume.md"}
+        assert _OWN_LINE in visible.read_text(encoding="utf-8")
+        assert sorted(path.name for path in job_dir.iterdir()) == [".gigai-job.json", "resume.md"], "one markdown for the job; no PDF, no interview/"
 
         again = client.put(url, json={"job_url": _URL, "markdown": edited_markdown})
         assert again.status_code == 200 and again.json()["changed"] is False and again.json()["recheck"]["result"] == "unchanged"
@@ -138,7 +155,11 @@ def test_edited_tailored_resume_journey(tmp_path: Path, monkeypatch: pytest.Monk
         # A headerless PDF over the API is answered to the caller; the folder gets PDFs from `gigai scout resume pdf`.
         pdf = client.post("/api/tailored-resumes/pdf", json=key)
         assert pdf.status_code == 200 and pdf.content.startswith(b"%PDF")
-        assert sorted(path.suffix for path in folder.iterdir()) == [".md"]
+        assert sorted(path.name for path in job_dir.iterdir()) == [".gigai-job.json", "resume.md"], "a PDF never lands in the jobs folder"
+        assert sorted(path.relative_to(jobs).as_posix() for path in jobs.rglob("*") if path.is_file()) == [
+            "acme/software-engineer/.gigai-job.json", "acme/software-engineer/resume.md",
+        ]
+        assert not folder.exists()
 
         # ---- 4. shape errors, and the write guards ------------------------------------------------
         kept = stored()
@@ -166,6 +187,24 @@ def test_edited_tailored_resume_journey(tmp_path: Path, monkeypatch: pytest.Monk
         assert client.get("/api/resumes-folder").json()["path"] == str(chosen), "a refused value changes nothing"
         back = client.put("/api/resumes-folder", json={"path": ""})
         assert back.status_code == 200 and back.json()["source"] == "default" and back.json()["path"] == str(folder)
+
+        chosen = tmp_path / "my jobs"
+        changed = client.put("/api/jobs-folder", json={"path": str(chosen)})
+        assert changed.status_code == 200, changed.text
+        assert changed.json()["path"] == str(chosen) and changed.json()["source"] == "setting" and chosen.is_dir()
+        assert client.get("/api/jobs-folder").json()["path"] == str(chosen)
+        assert client.get("/api/jobs-folder", params=key).json()["job"] is None, "folders already written stay in the old folder"
+        _error(client.put("/api/jobs-folder", json={"path": "relative/folder"}), 422, "invalid_value")
+        _error(client.put("/api/jobs-folder", json={"path": str(home / "scout" / "x")}), 422, "invalid_value")
+        _error(client.put("/api/jobs-folder", json={"path": 7}), 422, "wrong_type")
+        _error(client.put("/api/jobs-folder", json={}), 422, "invalid_value")
+        _error(client.put("/api/jobs-folder", json={"path": str(chosen), "bogus": 1}), 422, "unknown_key")
+        foreign = httpx.put(f"{server.base_url}/api/jobs-folder", json={"path": str(tmp_path / "theirs")}, headers={"Origin": "http://evil.example.test"})
+        assert foreign.status_code == 403 and foreign.json()["error"]["code"] == "forbidden_origin" and not (tmp_path / "theirs").exists()
+        assert client.get("/api/jobs-folder").json()["path"] == str(chosen), "a refused value changes nothing"
+        back = client.put("/api/jobs-folder", json={"path": ""})
+        assert back.status_code == 200 and back.json()["source"] == "default" and back.json()["path"] == str(jobs)
+        assert client.get("/api/jobs-folder", params=key).json()["job"]["relative"] == "acme/software-engineer"
 
         workpad = resolve_workpad_path(home, target)
     finally:

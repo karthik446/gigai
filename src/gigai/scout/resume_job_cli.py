@@ -170,13 +170,21 @@ def resume_brief_command(job_url: str, profile_id: str | None, posting: bool, ou
 
 
 def _folder_file(home_root: Path, response: object) -> str | None:
-    """Where the resumes folder holds this stored resume's markdown (as the user types it), or ``None``."""
+    """Where the jobs folder holds this stored resume's markdown (``<company>/<role>/resume.md``, as the user types it), or ``None``."""
 
-    from . import resumes_folder
-    from .target_resolution import _display_path
+    from . import jobs_folder
 
-    name = resumes_folder.job_files(home_root, resumes_folder.job_key(home_root, response.stored_path))["markdown"]  # type: ignore[attr-defined]
-    return None if name is None else _display_path(resumes_folder.resumes_folder(home_root).path / name)
+    folder = jobs_folder.stored_job_folder(home_root, response.stored_path)  # type: ignore[attr-defined]
+    return None if folder is None else folder.resume_shown
+
+
+def _job_folder(home_root: Path, response: object) -> str | None:
+    """The job's folder in the jobs folder (as the user types it), or ``None``.  A path, never contents."""
+
+    from . import jobs_folder
+
+    folder = jobs_folder.stored_job_folder(home_root, response.stored_path)  # type: ignore[attr-defined]
+    return None if folder is None else folder.shown
 
 
 def store_resume(
@@ -242,7 +250,7 @@ def store_resume(
     if as_json:
         payload: dict[str, object] = {
             "ok": True, **response.to_json(), "changed": attached.changed, "out_path": None if out_path is None else str(out_path),
-            "folder_path": folder_file, "recheck": recheck, "drain": drain, "status": status, "recheck_failed": recheck_failed,
+            "folder_path": folder_file, "job_folder": _job_folder(home_root, response), "recheck": recheck, "drain": drain, "status": status, "recheck_failed": recheck_failed,
             "suggestions": record, "suggestions_error": record_error,
         }
         if renamed_from is not None:
@@ -268,7 +276,7 @@ def store_resume(
         click.echo(f"  Cut to {length.pages} of {length.max_pages} pages: {length.trimmed_count()} lines and {len(length.cut)} roles left out; the resume page can put them back.")
     click.echo(f"  Markdown: {response.markdown_path}")
     if folder_file is not None:
-        click.echo(f"  In your resumes folder: {folder_file}")
+        click.echo(f"  In your jobs folder: {folder_file}")
     if out_path is not None:
         click.echo(f"  Copied to {out_path}")
     if record is not None:
@@ -410,7 +418,7 @@ def _pick_lines(view: dict[str, object]) -> list[str]:
         if isinstance(picked, dict) and picked.get("pages") is not None:
             lines.append(f"  Pages: {picked['pages']} of {picked['max_pages']}.")
         if resume["folder_path"]:
-            lines.append(f"  In your resumes folder: {resume['folder_path']}")
+            lines.append(f"  In your jobs folder: {resume['folder_path']}")
     else:
         lines.append("Resume: none stored for this job." + _why_none(view))
     lines.append("Stale: " + (", ".join(str(code) for code in view["stale"]) or "nothing"))  # type: ignore[union-attr]

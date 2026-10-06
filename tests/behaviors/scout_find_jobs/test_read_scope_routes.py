@@ -90,6 +90,7 @@ GET_REQUESTS: dict[str, str] = {
     "/api/master/migration": "/api/master/migration",
     "/api/master/selection": "/api/master/selection",
     "/api/resumes-folder": "/api/resumes-folder",
+    "/api/jobs-folder": "/api/jobs-folder",
     "/api/resume-display": "/api/resume-display",
     "/api/privacy/cleanup": "/api/privacy/cleanup",
     "/api/watchlist": "/api/watchlist",
