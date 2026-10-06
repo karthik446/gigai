@@ -31,6 +31,7 @@
 //
 // Every sentence here is the page's own; a requirement's words are the
 // posting's and a line's text is the user's, both passed through untouched.
+import { isThinMatch, THIN_LABEL, THIN_POSTING } from "./display.js";
 import { dateLabel, effectiveVerdict, minorGaps, openQuestions } from "./jobModel.js";
 import { assessmentStaleFor } from "./jobStateModel.js";
 import { staleWords } from "./postingsModel.js";
@@ -180,11 +181,16 @@ const FIT_LABELS = {
   not_a_match: "Not a match",
 };
 const FIT_TONES = { matched: "ok", has_gap: "warn", needs_answers: "warn", not_a_match: "danger" };
+const MATCHED_VERDICT = "matched_above_threshold";
 
 // The header's ONE chip: Matched · Matched · 2 minor gaps · Needs your answers · Has a gap · Not a match · Weak fit.
 // `fit` is jobStateModel.fitStateFor(job): the gate's reading of the verdict, never the application state.
 export function headerChip(fit, { assessment = null, gate = null } = {}) {
   const label = FIT_LABELS[fit] || FIT_LABELS.assessed;
+  if (fit === THIN_POSTING || (fit === "matched" && isThinMatch(MATCHED_VERDICT, assessment))) {
+    // 0.1.11.2: a match read from fewer than 4 requirement rows; the chip only, the gate and the resume are as before.
+    return { state: THIN_POSTING, label: THIN_LABEL, tone: "warn", title: null };
+  }
   if (fit === "matched") {
     const gaps = minorGaps(assessment).length;
     return { state: fit, label: gaps > 0 ? `${label} · ${plural(gaps, "minor gap")}` : label, tone: "ok", title: null };

@@ -35,6 +35,7 @@ export const STATE_LABELS = {
   assessed: "Assessed",
   needs_answers: "Needs your answers",
   weak_fit: "Weak fit",
+  thin_posting: "Thin posting", // 0.1.11.2: matched by verdict on no requirement row at all; never a match
   matched: "Matched",
   has_gap: "Has a gap",
   not_a_match: "Not a match",
@@ -51,6 +52,7 @@ export const STATE_ORDER = [
   "not_assessed",
   "needs_answers",
   "weak_fit",
+  "thin_posting",
   "matched",
   "has_gap",
   "assessed",

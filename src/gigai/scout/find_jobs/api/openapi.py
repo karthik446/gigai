@@ -85,7 +85,10 @@ _STALE_NOTE = (
     "the assessment quoted is gone or a new line names one of its open questions; nothing is re-assessed until you ask (POST /api/assess, or assess-all). "
     "job_state.state `weak_fit` is `needs_answers` for a job whose stored assessment has few requirements met AND whose rank "
     "score is low (the `fit` block of the project's settings: below 40% and below rank 50): it is not counted with the jobs "
-    "that need your answers."
+    "that need your answers. "
+    "job_state.state `thin_posting` (0.1.11.2) is `matched` for a job whose stored assessment has no requirement row about the "
+    "job (an empty matrix, a lone \"No stated requirements\" row, eligibility rows alone): nothing was judged, so it is never "
+    "shown or counted as a match. A matched verdict whose stored gate decision is `not_a_match` reads `not_a_match`."
 )
 #: 0110-10-03: how a response names a posting's company, and what an assessment's rows weigh.
 _COMPANY_NOTE = (
@@ -377,7 +380,7 @@ _NEW_EXAMPLE: dict[str, object] = {
             "removed_at": None, "profile_id": "prof_1",
             "profiles": [{"profile_id": "prof_1", "match_rank": 1, "rank_score": 82, "state": "not_assessed"}],
             "state": "not_assessed", "tailored": False, "stale_reason": None, "stale_label": None, "sort_group": "not_assessed",
-            "score": 82, "score_kind": "rank", "score_text": "rank 82 · not assessed", "fit": None, "rank_score": 82, "assessment": None,
+            "score": 82, "score_kind": "rank", "score_text": "rank 82 · not assessed", "thin_posting": False, "fit": None, "rank_score": 82, "assessment": None,
             "assessment_detail": None, "needs_tailoring": None, "unmet": [], "minor_gaps": [], "minor_gap_text": None, "rows_not_shown": 0,
             "open_questions": [], "label": None, "ats_score": None,
             "tag_pending": False,
@@ -450,7 +453,9 @@ _POSTINGS_NOTE = (
     "assessed), then the rank score, then the newest. A posting whose state is `weak_fit` (it waits on answers, its `fit` "
     "is below `fit.weak_fit_below_percent`, 40, AND its rank score is below `fit.weak_fit_below_rank`, 50) is left out "
     "unless `state=weak_fit` asks for it; it asks no question (`open_questions` is empty) and `counts.weak_fit` is how many "
-    "the other filters select, listed or not. RANKED LOW (0.1.11.2): a posting nothing assessed yet whose KNOWN rank score is "
+    "the other filters select, listed or not. "
+    "THIN POSTING (0.1.11.2): a row says `thin_posting` (true or false). It is true for a match read from fewer than 4 requirement rows (every matrix row, the \"N of M requirements\"): its `score_text` says \"thin posting: too few requirements to judge\" in place of \"Matched\" and \"fit N%\"; with 1 to 3 rows that is a label only (state, order, filters and counts stay a match's). A match with NO row about the job (an empty matrix, a lone \"No stated requirements\" row, eligibility rows alone) has the state `thin_posting` instead of `matched`: `fit` is null, it is never in `counts.by_state.matched` or `state=matched`, it is listed by `state=thin_posting`, and it comes after every other assessed posting of its group. "
+    "RANKED LOW (0.1.11.2): a posting nothing assessed yet whose KNOWN rank score is "
     "below `fit.weak_fit_below_rank` (50) is left out too, unless `state=ranked_low` asks for it: it is collapsed, never "
     "filtered away. `counts.ranked_low` is how many the other filters select, and each row says `ranked_low` (true only for "
     "such a posting). A posting not ranked yet is never ranked low: it is listed after the ranked ones (`score_text` \"not "
@@ -469,7 +474,7 @@ _POSTINGS_NOTE = (
     "an old run's `{origin: \"run:<run_id>\", run_id, prompt_version, constraints_digest, story_bank_digest, profile_ref, resume, "
     "posting_sha256, model_target, model}` (ids and digests). `rank` is the background rank lane: whether it is on (its own switch, `rank.enabled`, not the pipeline's) and today's "
     "calls against `rank.max_calls_per_day` (100) and the warning level `rank.warn_calls_per_day` (60), counted once for all "
-    "profiles. With history=1, `history.rows` lists what old runs assessed (`{job_identity, profile_id, state, met, "
+    "profiles. With history=1, `history.rows` lists what old runs assessed (`{job_identity, profile_id, state, thin_posting, met, "
     "requirements, open_questions, assessed_at, hidden, basis}`); rows of a run with no profile (`ephemeral`) or of a profile "
     "that is not active are hidden: listed only with include_hidden=1 or when `profile_id` names them, and counted in "
     "`history.hidden` otherwise. No response mixes: posting text and what a model derived from it only (`postings._labels`: "
@@ -500,7 +505,9 @@ _NEW_NOTE = (
     "once, for its best profile (`profile_id`: the profile that tailored a resume for it, else one with a current "
     "assessment, else one with a stale one, else the highest rank score), with every active profile it matches in "
     "`profiles`, best first; the top-level `profiles` are the profile tags and each one's resume by id. `score_text` is the "
-    "score column (the verdict, \"fit N%\", \"N of M requirements\", the rank; a stale row says `stale_label`, never a bare percent); "
+    "score column (the verdict, \"fit N%\", \"N of M requirements\", the rank; a stale row says `stale_label`, never a bare percent; "
+    "a row whose `thin_posting` is true, a match read from fewer than 4 requirement rows, says \"thin posting: too few requirements to judge\" "
+    "in place of the verdict and the fit number, and a match with no row about the job has the state `thin_posting`, listed last of its group); "
     "A row has three dates, and they are different facts: `published_at` is the day the posting WENT UP on its board, the one "
     "`window: 7d | 30d` judges (null when the board gives none), and `published_kind` says what the date is: `posted` "
     "(Greenhouse, Lever, Ashby), or `updated` for a board kind that only gives its last change (none today), so say "
@@ -2190,7 +2197,7 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
         params=(
             _q("profile_id", "string", "Only postings this active profile matches; repeat it, or separate ids with commas. One id shows that profile's own row."),
             _q("q", "string", "Words that must all be in the title, company or location."),
-            _q("state", "string", "Keep these states (repeat or separate with commas): not_assessed, needs_answers, matched, has_gap (matched, with a must-have confirmed unmet), not_a_match, tailored, assessed (any assessment), recommended (the Scout label), weak_fit (listed only when asked for), ranked_low (not assessed and ranked below `fit.weak_fit_below_rank`, 50: listed only when asked for)."),
+            _q("state", "string", "Keep these states (repeat or separate with commas): not_assessed, needs_answers, matched, has_gap (matched, with a must-have confirmed unmet), not_a_match, tailored, assessed (any assessment), recommended (the Scout label), weak_fit (listed only when asked for), thin_posting (matched by verdict on no requirement row at all: never in matched), ranked_low (not assessed and ranked below `fit.weak_fit_below_rank`, 50: listed only when asked for)."),
             _q("window", "string", "new: first seen since the last check. 7d / 30d: posted (the day it went up; else first seen) in the last 7 or 30 days.", enum=("new", "7d", "30d")),
             _q("sort", "string", "fit (the default): the grid's order. newest_posted: the day the posting went up, the newest first.", enum=("fit", "newest_posted")),
             _q("removed", "string", "1: the postings the board no longer lists, instead of the live ones.", enum=("0", "1", "true", "false")),

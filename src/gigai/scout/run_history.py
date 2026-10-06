@@ -247,10 +247,15 @@ def basis_json(item: RunAssessment) -> dict[str, object]:
 def history_row(item: RunAssessment, *, active: bool) -> dict[str, object]:
     """One imported run assessment as a history row. ``hidden``: not in the default view (no active profile owns it)."""
 
+    from .fit import is_thin_posting, thin_state
+
     return {
         "job_identity": item.job,
         "profile_id": item.profile_id,
-        "state": item.state,
+        # 0.1.11.2: a run's match with no requirement row reads ``thin_posting``; one with fewer than 4 keeps its state
+        # and says ``thin_posting: true`` (``fit.py``). Judged here, from the counts the import stored.
+        "state": thin_state(item.state, item.reqs_total),
+        "thin_posting": is_thin_posting(item.state, item.reqs_total),
         "met": item.reqs_met,
         "requirements": item.reqs_total,
         "open_questions": item.open_questions,

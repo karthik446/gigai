@@ -252,7 +252,7 @@ export function scoreText(row) {
   if (typeof row.score_text === "string" && row.score_text.trim()) {
     // 0110-10-03: "Matched · 11 of 12 requirements · rank 80 · 1 minor gap: Helm".
     // Only a match has "minor gaps"; a weak fit or a needs-answers row says what it is missing in its own words.
-    const matched = typeof row.state !== "string" || row.state === "matched";
+    const matched = (typeof row.state !== "string" || row.state === "matched") && row.thin_posting !== true; // 0.1.11.2: a thin posting is no match
     const gap = matched && typeof row.minor_gap_text === "string" && row.minor_gap_text.trim() ? ` · ${row.minor_gap_text}` : "";
     return `${row.score_text}${gap}`;
   }
@@ -298,6 +298,7 @@ const ROW_STATE_WORDS = {
   not_a_match: "Not a match",
   tailored: "Resume ready",
   weak_fit: "Weak fit",
+  thin_posting: "Thin posting", // 0.1.11.2: the row's `thin_posting`, or the state of a match on no requirement at all
 };
 
 function humanCode(code) {
@@ -322,6 +323,9 @@ export function rowChips(row) {
     chips.push({ kind: "state", label: open ? `${ROW_STATE_WORDS.needs_answers} (${open})` : ROW_STATE_WORDS.needs_answers, tone: "warn" });
   } else if (state === WEAK_FIT) {
     chips.push({ kind: "state", label: ROW_STATE_WORDS.weak_fit, tone: "plain", testId: "weak-fit-chip", title: "Few requirements met and a low rank: no questions are asked for it." });
+  } else if ((row.thin_posting === true && state === "matched") || state === "thin_posting") {
+    // 0.1.11.2: a match read from fewer than 4 requirement rows is never drawn as a green "Matched".
+    chips.push({ kind: "state", label: ROW_STATE_WORDS.thin_posting, tone: "warn", testId: "thin-posting-chip", title: "Too few requirements were read from this posting to judge the match. Open the posting to check." });
   } else if (assessed) {
     chips.push({ kind: "state", label: ROW_STATE_WORDS[state] || humanCode(state), tone: state === "not_a_match" ? "danger" : state === "has_gap" ? "warn" : "ok" });
   }

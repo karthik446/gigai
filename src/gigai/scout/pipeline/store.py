@@ -684,7 +684,7 @@ _POSTING_ORDER = (
     "CASE WHEN state = 'not_assessed' THEN 2 WHEN stale_code IS NOT NULL THEN 1 ELSE 0 END, "
     "CASE WHEN label = 'recommended' THEN 0 ELSE 1 END, "
     "CASE state WHEN 'not_assessed' THEN 0 WHEN 'matched' THEN 0 WHEN 'needs_answers' THEN 1 WHEN 'weak_fit' THEN 3 "
-    "WHEN 'not_a_match' THEN 4 ELSE 2 END, "
+    "WHEN 'not_a_match' THEN 4 WHEN 'thin_posting' THEN 5 ELSE 2 END, "
     "COALESCE(fit, CASE WHEN reqs_total > 0 THEN (reqs_met * 100 + reqs_total / 2) / reqs_total END, -1) DESC, "
     "COALESCE(rank_score, -1) DESC, "
     "first_seen DESC, job"

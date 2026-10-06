@@ -26,6 +26,7 @@ States::
     needs_answers | matched | not_a_match | assessed   (the latest verdict)
     has_gap                                            (0.1.11, below)
     weak_fit                                           (0110-10-02, below)
+    thin_posting                                       (0.1.11.2, below)
     tailored
     applied -> interview_scheduled -> offer_received | rejected | withdrawn
 
@@ -46,6 +47,13 @@ low: it waits on answers that could hardly make it a match, so it is not
 counted with the jobs that need the user's answers. Only
 :class:`JobStateSources` says it (it knows the profile's rank score, from
 the posting read model); the pure :func:`derive_job_state` never does.
+
+``thin_posting`` (0.1.11.2, ``scout/fit.py``) is ``matched`` for a job whose
+stored assessment has NO matrix row about the job (an empty matrix, a lone
+"No stated requirements" row, eligibility rows alone;
+``AssessmentFact.real_rows`` is 0): nothing was judged, so it is never shown
+or counted as a match. A matched verdict whose stored gate decision is
+``not_a_match`` reads ``not_a_match``.
 
 The application state is the LATEST active event of the job, in core's own
 order (``occurred_at``, then when it was recorded): an event another event
@@ -81,6 +89,8 @@ NOT_ASSESSED = "not_assessed"
 ASSESSED = "assessed"
 NEEDS_ANSWERS = "needs_answers"
 WEAK_FIT = "weak_fit"
+#: 0.1.11.2: matched by verdict on NO row about the job (``scout/fit.py``): "thin posting", never a match.
+THIN_POSTING = "thin_posting"
 MATCHED = "matched"
 #: 0.1.11 N3 (OD1): matched by verdict, held by the gate: a must-have is confirmed unmet ("Has a gap").
 HAS_GAP = "has_gap"
@@ -98,6 +108,7 @@ JOB_STATES: tuple[str, ...] = (
     ASSESSED,
     NEEDS_ANSWERS,
     WEAK_FIT,
+    THIN_POSTING,
     MATCHED,
     NOT_A_MATCH,
     TAILORED,
@@ -140,6 +151,7 @@ _NEXT_EVENTS: dict[str, tuple[str, ...]] = {
 _TEXT_IDENTITY = re.compile(r"\Atext:sha256:[0-9a-f]{64}\Z")
 #: ``GateRecord.decision`` behind :data:`HAS_GAP` (``assess_contracts.GATE_HOLD_UNMET``).
 _GATE_HOLD_UNMET = "hold_unmet"
+_GATE_NOT_A_MATCH = "not_a_match"
 _EVENTS_PREFIX = "records/applications/events/"
 
 
@@ -204,6 +216,8 @@ class AssessmentFact:
     basis_stale: str | None = None
     #: 0.1.11 N3: the gate decision stored with a v9 assessment (``resume_gate``); ``None`` for every other one.
     gate: str | None = None
+    #: 0.1.11.2: how many matrix rows are about the job (``assessment_core.requirement_row_count``); ``None``: not known.
+    real_rows: int | None = None
 
 
 def next_events(state: str) -> tuple[str, ...]:
@@ -309,6 +323,10 @@ def derive_job_state(
     state = ASSESSED if assessment.verdict is None else _VERDICT_STATES.get(str(assessment.verdict), ASSESSED)
     if state == MATCHED and assessment.gate == _GATE_HOLD_UNMET:
         state = HAS_GAP  # 0.1.11 N3 (OD1): the gate, not the verdict, is what every reader uses
+    elif state == MATCHED and assessment.gate == _GATE_NOT_A_MATCH:
+        state = NOT_A_MATCH  # 0.1.11.2, defensive: a matched verdict the gate refused never reads as a match
+    elif state == MATCHED and assessment.real_rows == 0:
+        state = THIN_POSTING  # 0.1.11.2: a match on no requirement at all is not shown as one
     stale = None
     if (
         current_content_sha256
@@ -438,7 +456,12 @@ def quick_assessment_fact(item: AssessResponse, *, basis_stale: str | None = Non
     if item.job.fetch_kind == "ats_board" and item.posting_text:
         content = posting_content_digest(item.job.title, item.posting_text)
     gate = None if item.resume_gate is None else item.resume_gate.decision
-    return AssessmentFact(at=at, verdict=verdict, since=since, content_sha256=content, basis_stale=basis_stale, gate=gate)
+    from ..assessment_core import requirement_row_count
+
+    return AssessmentFact(
+        at=at, verdict=verdict, since=since, content_sha256=content, basis_stale=basis_stale, gate=gate,
+        real_rows=requirement_row_count(item.result),
+    )
 
 
 # --- reading the stores ----------------------------------------------------------------
@@ -644,6 +667,7 @@ __all__ = [
     "JobStateError",
     "JobStateSources",
     "STALE_POSTING_CHANGED",
+    "THIN_POSTING",
     "WEAK_FIT",
     "application_state",
     "check_transition",

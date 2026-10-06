@@ -35,6 +35,16 @@ the list. A posting not ranked yet is never ranked low (it stays in the list,
 at the bottom, "not ranked yet"), and an assessed posting keeps the rules
 above. The row's stored state stays ``not_assessed``.
 
+THIN POSTING (:func:`is_thin_posting`, :func:`thin_state`, 0.1.11.2). A match
+read from fewer than :data:`THIN_POSTING_ROWS` requirement rows says little:
+every surface says :data:`THIN_LABEL` instead of "Matched · fit 100%". With 1
+to 3 rows that is a LABEL only, judged when the row is shown from the counts
+already stored: the state, the order, the filters and the counts stay a
+match's. A match with NO row about the job (an empty matrix, a lone "No
+stated requirements" row, eligibility rows alone) has its own stored state,
+:data:`THIN_POSTING`: never a match in a count or a filter, and ordered below
+every other assessed posting of its group.
+
 TUNING. The defaults are the constants below. A project overrides them in
 the ``fit`` block of its settings file
 (``<home>/scout/<project_id>/settings.json``, beside ``pipeline`` and
@@ -63,6 +73,13 @@ NEEDS_ANSWERS = "needs_answers"
 NOT_ASSESSED = "not_assessed"
 #: 0.1.11.2: the search's filter for the not-assessed postings ranked below ``weak_fit_below_rank`` (never a stored state).
 RANKED_LOW = "ranked_low"
+
+#: 0.1.11.2: the state of a match with no row about the job (``thin_state``); its words are :data:`THIN_LABEL`.
+THIN_POSTING = "thin_posting"
+#: A match needs this many requirement rows (every matrix row, the "N of M" a reader sees) to read as a match.
+THIN_POSTING_ROWS = 4
+THIN_LABEL = "thin posting: too few requirements to judge"
+_MATCHED = "matched"
 
 #: Weak fit: the fit number is below this AND the rank score is below :data:`DEFAULT_WEAK_FIT_BELOW_RANK`.
 DEFAULT_WEAK_FIT_BELOW_PERCENT = 40
@@ -201,6 +218,29 @@ def assessment_is_weak_fit(item: object, rank_score: int | None, setting: FitSet
     return is_weak_fit(NEEDS_ANSWERS, fit_percent(getattr(result, "matrix", ())), rank_score, setting)
 
 
+# --- thin postings (0.1.11.2) ----------------------------------------------------------------
+
+
+def is_thin_posting(state: str, reqs_total: int | None) -> bool:
+    """A match that rests on fewer than :data:`THIN_POSTING_ROWS` requirement rows, or the :data:`THIN_POSTING` state.
+
+    ``reqs_total`` counts every matrix row, the "N of M requirements" a reader sees. Judged when a row is shown, so an
+    assessment stored before the rule reads thin too. Only a match is relabelled: no other state claims a fit to trust.
+    """
+
+    return state == THIN_POSTING or (state == _MATCHED and (reqs_total or 0) < THIN_POSTING_ROWS)
+
+
+def thin_state(state: str, real_rows: int | None) -> str:
+    """``state`` as the read model stores it: :data:`THIN_POSTING` for a match with NO row about the job, else ``state``.
+
+    ``real_rows`` is ``assessment_core.requirement_row_count``: a lone "No stated requirements" row and rows about
+    location or eligibility are not about the job. ``None`` (the count is not known) changes nothing.
+    """
+
+    return THIN_POSTING if state == _MATCHED and real_rows == 0 else state
+
+
 def stored_rank_scores(home_root: Path, target: Path) -> dict[tuple[str, str], int | None]:
     """``(profile_id, job) -> rank score`` as the posting read model holds them. Read only: no file is created.
 
@@ -247,6 +287,9 @@ __all__ = [
     "NEEDS_ANSWERS",
     "NOT_ASSESSED",
     "RANKED_LOW",
+    "THIN_LABEL",
+    "THIN_POSTING",
+    "THIN_POSTING_ROWS",
     "WEAK_FIT",
     "FitSetting",
     "assessment_is_weak_fit",
@@ -254,8 +297,10 @@ __all__ = [
     "fit_setting",
     "is_low_rank",
     "is_ranked_low",
+    "is_thin_posting",
     "is_weak_fit",
     "plain_percent",
     "shown_state",
     "stored_rank_scores",
+    "thin_state",
 ]

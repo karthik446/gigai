@@ -32,6 +32,13 @@ mechanics here. Those belong in the internal changelog.
 
 ### 0.1.11.2
 
+- **A posting with too few requirements is no longer a perfect match.** A match read from fewer than 4
+  requirements says "thin posting: too few requirements to judge" in place of "Matched · fit 100%", on
+  the Jobs list, the job page, in the terminal and in the API (each row says `thin_posting`). It is a
+  warning only: the posting keeps its place in the list. A match with no requirement about the job at
+  all (none read, or only "No stated requirements") is not a match: it has its own state
+  (`thin_posting`), is not counted or filtered as matched, and is listed after every other assessed
+  posting. Assessments already stored are covered; nothing is re-assessed.
 - **Jobs are ordered by rank again, and weak fits are collapsed.** The Jobs list (and `gigai scout jobs
   list`) is ordered best fit first: assessed postings by fit, then the rest by rank, then the newest. A
   posting that is not assessed yet and ranked below 50 is no longer shown as a candidate: it is collapsed

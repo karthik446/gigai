@@ -215,7 +215,7 @@ class ScoutNewError(ValueError):
 def _score(row: PostingRecord) -> tuple[int | None, str | None]:
     """What a row is ordered by: the assessment's share of requirements met, else the rank score."""
 
-    if row.reqs_total:
+    if row.reqs_total and row.state != fit_rules.THIN_POSTING:  # 0.1.11.2: no row about the job, so no share to show
         return round(100 * (row.reqs_met or 0) / row.reqs_total), "assessment"
     if row.rank_score is not None:
         return row.rank_score, "rank"
@@ -226,9 +226,11 @@ GROUP_CURRENT = "current"
 GROUP_STALE = "stale"
 GROUP_NOT_ASSESSED = "not_assessed"
 _GROUP_ORDER = {GROUP_CURRENT: 0, GROUP_STALE: 1, GROUP_NOT_ASSESSED: 2}
-#: Inside the assessed groups: matched, needs answers, anything else, weak fit, not a match.
-_VERDICT_ORDER = {"matched": 0, "needs_answers": 1, fit_rules.WEAK_FIT: 3, "not_a_match": 4}
+#: Inside the assessed groups: matched, needs answers, anything else, weak fit, not a match, and last a thin posting
+#: (0.1.11.2: a match on no requirement at all; ``pipeline.store._POSTING_ORDER`` has the same numbers).
+_VERDICT_ORDER = {"matched": 0, "needs_answers": 1, fit_rules.WEAK_FIT: 3, "not_a_match": 4, fit_rules.THIN_POSTING: 5}
 _VERDICT_WORDS = {
+    fit_rules.THIN_POSTING: fit_rules.THIN_LABEL,
     "matched": "Matched", "needs_answers": "Needs your answers", fit_rules.WEAK_FIT: "Weak fit", "not_a_match": "Not a match",
     "has_gap": "Has a gap",  # 0.1.11 N3 (OD1): sorted with "anything else", after Needs your answers
 }
@@ -336,13 +338,15 @@ def score_text(row: PostingRecord) -> str:
     if row.state == _NOT_ASSESSED:
         parts = [rank, "not assessed"]
     else:
-        verdict = _VERDICT_WORDS.get(row.state, "Assessed")
+        # 0.1.11.2: a match read from fewer than 4 requirement rows says so instead of "Matched · fit 100%" (``fit.py``).
+        thin = fit_rules.is_thin_posting(row.state, row.reqs_total)
+        verdict = fit_rules.THIN_LABEL if thin else _VERDICT_WORDS.get(row.state, "Assessed")
         old = stale_label(row)
         parts = [f"{verdict} ({old})" if old else verdict]
-        found = fit_of(row)
+        found = None if thin else fit_of(row)
         if found is not None:
             parts.append(f"fit {found}%")
-        if row.reqs_total:
+        if row.reqs_total and row.state != fit_rules.THIN_POSTING:  # the thin STATE has no row about the job to count
             parts.append(f"{row.reqs_met or 0} of {row.reqs_total} requirements")
         parts.append(rank)
     if row.tailored:
@@ -452,8 +456,10 @@ def _row_json(
         "score": score,
         "score_kind": kind,
         "score_text": score_text(row),
-        # 0110-10-02: the one fit number of the row (must-haves weighted); null when not assessed.
-        "fit": fit_of(row),
+        # 0.1.11.2: a match read from fewer than 4 requirement rows (``fit.is_thin_posting``): "thin posting", never "Matched".
+        "thin_posting": fit_rules.is_thin_posting(row.state, row.reqs_total),
+        # 0110-10-02: the one fit number of the row (must-haves weighted); null when not assessed, and for the thin state.
+        "fit": None if row.state == fit_rules.THIN_POSTING else fit_of(row),
         "rank_score": row.rank_score,
         "assessment": assessment,
         "assessment_detail": (item is not None) if assessed else None,
@@ -1566,7 +1572,7 @@ def render(response: Mapping[str, object]) -> str:
             if row.get("tag_pending"):
                 details.append("tag pending")  # 0110-8-05: matched by a generic title's words; its function tag is not known yet
             # One part per line (the column is narrow): the verdict, "old assessment: ...", "N of M requirements", the rank.
-            score = str(row["score_text"]).split(" · ") + ([str(row["minor_gap_text"])] if row.get("minor_gap_text") and row.get("state") == "matched" else [])
+            score = str(row["score_text"]).split(" · ") + ([str(row["minor_gap_text"])] if row.get("minor_gap_text") and row.get("state") == "matched" and not row.get("thin_posting") else [])
             if row.get("stale_label"):
                 score[0:1] = [score[0].split(" (")[0], str(row["stale_label"])]
             if row["needs_tailoring"] is None:

@@ -291,7 +291,7 @@ def test_c_new_postings_are_asked_about_and_assessed_only_on_a_yes(tmp_path: Pat
     text = CliRunner().invoke(cli, fx.cli("--peek"))
     assert text.exit_code == 0, text.output
     assert "Details" in text.output and "Needs tailoring?" in text.output and "Open questions" in text.output
-    assert f"[default, {SECOND_LABEL}]" in text.output and "2 of 2 requirements" in text.output and "Matched" in text.output
+    assert f"[default, {SECOND_LABEL}]" in text.output and "2 of 2 requirements" in text.output and "thin posting:" in text.output  # 0.1.11.2: 2 rows are too few to read "Matched"
     assert "What matches, from your own resume and answers (a separate call): gigai scout new --yours --since" in text.output
     assert "six years" not in text.output  # the user's own evidence is never printed next to posting text
     own = CliRunner().invoke(cli, fx.cli("--yours"))

@@ -1795,6 +1795,7 @@ table.data-table th {
 /* 0.1.11 N6: the job page without tailoring (SPEC section 6). */
 .verdict-chip.fit-has_gap { background: var(--warn-bg); color: var(--warn); }
 .verdict-chip.fit-weak_fit { background: var(--chip-bg); color: var(--muted); }
+.verdict-chip.fit-thin_posting { background: var(--warn-bg); color: var(--warn); }
 .state-chip.state-has_gap { background: var(--warn-bg); color: var(--warn); }
 .stale-label { margin-left: 2px; }
 .row-coverage .link-button { margin-left: 6px; }

@@ -3,7 +3,7 @@
 // the card-level Verdict enum (matched_above_threshold|pending_user_answers|
 // not_a_match) with its own label instead -- same badge shape, different
 // vocabulary and text.
-import { verdictLabel } from "../display.js";
+import { isThinMatch, verdictLabel } from "../display.js";
 
 const VERDICT_CLASS = {
   matched_above_threshold: "met",
@@ -11,9 +11,11 @@ const VERDICT_CLASS = {
   not_a_match: "unmet",
 };
 
-export default function MatrixBadge({ status, kind }) {
+export default function MatrixBadge({ status, kind, assessment }) {
   if (kind === "verdict") {
-    return <span className={`status-badge ${VERDICT_CLASS[status] || ""}`}>{verdictLabel(status) || status}</span>;
+    // 0.1.11.2: a thin match (fewer than 4 requirement rows) is not drawn as a met verdict.
+    const thin = isThinMatch(status, assessment);
+    return <span className={`status-badge ${thin ? "unclear" : VERDICT_CLASS[status] || ""}`}>{verdictLabel(status, assessment) || status}</span>;
   }
   return <span className={`status-badge ${status}`}>{status}</span>;
 }

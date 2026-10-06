@@ -307,7 +307,7 @@ export default function AssessmentBody({
     <>
       {showVerdict && assessment.verdict && (
         <div style={{ marginBottom: 8 }}>
-          <MatrixBadge status={assessment.verdict} kind="verdict" />
+          <MatrixBadge status={assessment.verdict} kind="verdict" assessment={assessment} />
         </div>
       )}
       {gaps}

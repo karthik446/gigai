@@ -20,7 +20,7 @@ import { useAnswerDrafts } from "../answerDrafts.js";
 import { assessSendsLine, assessSummaryLines, reassessErrorText, reassessGate } from "../answersModel.js";
 import { REASSESS_LABEL, coverageRows, gateOf, headerChip, staleCodes, staleItems } from "../jobResumeModel.js";
 import { postedLine, postingDate } from "../postingsModel.js";
-import { displayCompanyName, notAssessedReasonDetail, unchangedSinceLabel } from "../display.js";
+import { displayCompanyName, notAssessedReasonDetail, thinPostingLine, unchangedSinceLabel } from "../display.js";
 import {
   ORIGIN_JOB_PAGE,
   ageLabel,
@@ -504,7 +504,10 @@ export default function JobPage({
   const stale = assessment ? assessmentStaleFor(job) : null;
   const staleWordsNow = stale ? staleReasonWords(job) : null;
   const modelNotice = assessment && job.assessmentSource === "quick" ? modelNoticeLine(job.quick) : null; // the served item (job.quick) carries it, never a run row's own assessment
-  const requirementsNote = assessment && job.assessmentSource === "quick" ? requirementsNoteLine(job.quick) : null; // same served item as the model notice
+  // 0.1.11.2: ONE line for a thin match (fewer than 4 requirement rows), in place of the stored "Only 2 requirements were read" note.
+  const storedNote = assessment && job.assessmentSource === "quick" ? requirementsNoteLine(job.quick) : null; // same served item as the model notice
+  const thinLine = assessment ? thinPostingLine(job.verdict, assessment, storedNote) : null;
+  const requirementsNote = thinLine || storedNote;
   const staleDetail = stale && ["story_bank_changed", "resume_changed", "posting_changed"].includes(stale.reason) ? staleAssessmentNote(job) : null;
   // 0.1.11 N6: the gate decides whether a resume is suggested (the record's, else the assessment's, else the verdict);
   // the stale list is the server's when it sends one. Nothing here recomputes.
@@ -621,7 +624,7 @@ export default function JobPage({
       <JobDescription posting={posting} pasted={pasted} />
 
       {requirementsNote && (
-        <p className="muted small" data-role="requirements-note">
+        <p className="muted small" data-role="requirements-note" data-thin={thinLine ? "true" : undefined}>
           {requirementsNote}
         </p>
       )}
