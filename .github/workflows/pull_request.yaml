@@ -39,6 +39,12 @@ on:
 permissions:
   contents: read
 
+# 0.1.11: the release pre-check (profile `release`) runs the release-gate-only tests (tests/behaviors/ci_tooling/
+# test_docs_no_fill_markers.py: no '[FILL' placeholder may ship). release.yml publishes only a green run of this profile, so
+# a placeholder page fails here and cannot be skipped by forgetting a lane.
+env:
+  GIGAI_RELEASE_GATE: ${{ inputs.profile == 'release' && '1' || '' }}
+
 concurrency:
   group: gigai-pr-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}

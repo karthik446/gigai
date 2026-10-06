@@ -48,3 +48,10 @@ def test_changelog_and_accuracy_page_link_to_the_page_slug() -> None:
     accuracy = (DOCS / f"{ACCURACY}.md").read_text(encoding="utf-8")
     assert "](../real-run-0-1-11/)" in accuracy
     assert (DOCS / "scout" / "real-run-0-1-11.md").is_file()
+
+
+def test_the_release_profile_sets_the_release_gate_variable() -> None:
+    """The [FILL] check must be impossible to skip on the way out: the release pre-check workflow sets GIGAI_RELEASE_GATE."""
+
+    text = (ROOT / ".github" / "workflows" / "pull_request.yaml").read_text(encoding="utf-8")
+    assert "GIGAI_RELEASE_GATE: ${{ inputs.profile == 'release' && '1' || '' }}" in text
