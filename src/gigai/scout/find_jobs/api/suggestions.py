@@ -15,8 +15,10 @@ model or fetches anything. The two ``GET`` routes only read: nothing is recomput
 names its writer like every other write (``actor`` in the body, else ``X-GigAI-Actor``, else the Scout UI is the
 operator and anything else the agent).
 
-Errors are ``{"error": {"code", "message"}}``. ``501 pick_not_available``: this GigAI does not hold the step that
-picks a stored job's resume again (``job_resume_port.NotBuilt``); the message says what to do instead.
+Errors are ``{"error": {"code", "message"}}``. A pick that is refused or fails answers by its code (``409``:
+``assessment_stale``, ``draft_not_needed``, ``resume_held``, ``no_master``, ``profile_resume_in_use``,
+``pages_unmeasured``, ``pick_failed``) and its ``message`` is for the user: what to do, in plain words, never the
+name of a module or a function.
 """
 
 from __future__ import annotations

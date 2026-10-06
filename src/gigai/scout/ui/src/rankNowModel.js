@@ -163,9 +163,12 @@ export function rerankDialog(answer) {
   const calls = count(plan.calls);
   const used = count(today.used);
   const limit = Number.isInteger(today.limit) ? today.limit : 100;
+  const totals = rankTotals(answer.ranking);
   return {
     title: `Re-rank the latest ${plural(postings, "posting", "postings")}?`,
     postings,
+    // The page's "Ranked X of Y (last 7 days)": the dialog takes the newest 100 of those Y, so it says so when Y is more.
+    ofTotal: totals && totals.total > postings ? totals.total : null,
     calls,
     costLine: `${plural(calls, "model call", "model calls")} (up to 50 postings a call, at most ${count(plan.max_calls) || 2} calls)`,
     todayLine: `${used} of ${limit} rank calls used today; ${count(plan.calls_left_today)} left`,

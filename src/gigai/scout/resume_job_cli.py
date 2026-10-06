@@ -374,6 +374,21 @@ class _Removed(ValueError):
 # --- resume pick ---------------------------------------------------------------------------------------------------
 
 
+def _why_none(view: dict[str, object]) -> str:
+    """Why a job has no resume and what to do, as one plain sentence (never a code); "" for a job that is held."""
+
+    from . import pick
+
+    gate = view["gate"]
+    if view.get("selection_error"):
+        return " " + pick.MESSAGES.get(str(view["selection_error"]), pick.MESSAGES[pick.REFUSED_FAILED])
+    if view.get("basis") == "profile_resume":
+        return " " + pick.MESSAGES[pick.REFUSED_PROFILE_RESUME if view.get("master_stored") else pick.REFUSED_NO_MASTER]
+    if isinstance(gate, dict) and gate.get("decision") == "suggest":
+        return f" Pick it: gigai scout resume pick --job-url {view['job_identity']} --profile {view['profile_id']} --refresh (no model call)."
+    return ""
+
+
 def _pick_lines(view: dict[str, object]) -> list[str]:
     gate = view["gate"]
     lines = [f"Job: {view['job_identity']}   Profile: {view['profile_id']}", f"Verdict: {view['verdict'] or '(none)'}"]
@@ -397,7 +412,7 @@ def _pick_lines(view: dict[str, object]) -> list[str]:
         if resume["folder_path"]:
             lines.append(f"  In your resumes folder: {resume['folder_path']}")
     else:
-        lines.append("Resume: none stored for this job." + (f" ({view['selection_error']})" if view.get("selection_error") else ""))
+        lines.append("Resume: none stored for this job." + _why_none(view))
     lines.append("Stale: " + (", ".join(str(code) for code in view["stale"]) or "nothing"))  # type: ignore[union-attr]
     conflicts = [str(item.get("code")) + (f" {item['requirement']}" if item.get("requirement") else "") for item in view["conflicts"]]  # type: ignore[union-attr]
     lines.append("Conflicts: " + (", ".join(conflicts) or "none"))

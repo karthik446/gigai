@@ -82,6 +82,9 @@ export function suggestionsAnswer(suggestions, view = null) {
     selection: picked ? { ...picked, conflicts: list(pick.conflicts), added_by_code: list(pick.added_by_code), problems: list(pick.problems) } : null,
     proposed: pick && object(pick.proposed) ? pick.proposed : null,
     selection_error: pick ? pick.selection_error || null : null,
+    // What a resume for this job is made from now ("master" | "profile_resume"), and whether a master is stored at all.
+    resume_basis: pick ? text(pick.basis) || null : null,
+    master_stored: pick && typeof pick.master_stored === "boolean" ? pick.master_stored : null,
     suggestions: body ? list(body.suggestions) : [],
   };
   const stale = pick && Array.isArray(pick.stale) ? pick.stale.filter((code) => typeof code === "string") : null;
@@ -753,12 +756,75 @@ export function applyState({ stored = null, items = [] } = {}) {
   };
 }
 
-// --- no master (SPEC A2) ----------------------------------------------------------------------------------------
+// --- no master (SPEC A2), and a profile on its own resume ------------------------------------------------------
 
 export const NO_MASTER_TEXT = "This profile's own resume is used as it is. Build your master resume to get a resume picked for each job";
+export const OWN_RESUME_TEXT =
+  "This profile uses the resume you put in by hand, so no resume is picked from your master for its jobs. To get one picked for each job, make this profile's resume from your master again";
 
-// True when the record says the assessment read no master: nothing can be picked for this profile.
-export function hasNoMaster(record) {
-  return Boolean(object(record && record.basis)) && record.basis.master === null && !object(record.selection);
+// Why NOTHING can be picked for this job's profile: "no_master" | "own_resume", or null (a resume can be picked).
+// The server says what a resume is made from now (`resume_basis`, `master_stored`); a record in the stored shape
+// says only whether its assessment read a master (`basis.master`).
+export function unpickable(record) {
+  if (!record || object(record.selection)) {
+    return null;
+  }
+  if (record.resume_basis) {
+    return record.resume_basis === "profile_resume" ? (record.master_stored ? "own_resume" : "no_master") : null;
+  }
+  return object(record.basis) && record.basis.master === null ? "no_master" : null;
 }
 
+// True when there is no master to pick from: nothing can be picked for this profile.
+export function hasNoMaster(record) {
+  return unpickable(record) === "no_master";
+}
+
+// True when the stale list says the ASSESSMENT is old: a pick from it is refused, and the step that works is Re-assess.
+export function assessmentIsOld(items) {
+  return list(items).some((item) => item && item.action === "reassess" && text(item.code).startsWith(ASSESSMENT_STALE));
+}
+
+export const NO_RESUME_OLD_ASSESSMENT_TEXT = "No resume is stored for this job yet. Its assessment is old, so a resume cannot be picked from it: re-assess the job to get one.";
+
+// --- a pick that was refused, in the user's words -------------------------------------------------------------
+//
+// 0.1.11.3: the page never prints what the server sent for a refused pick (it names commands, and once named a
+// function: "scout.pick.settle_stored is not part of it"). Each refusal is one sentence by its CODE; a code this
+// page does not know reads as the general one.
+
+const PICK_FAILED_TEXT = "The resume could not be picked for this job. Try again, or re-assess the job to get a new pick.";
+const PICK_ERRORS = {
+  pick_failed: PICK_FAILED_TEXT,
+  pick_not_available: PICK_FAILED_TEXT,
+  pages_unmeasured: "The resume could not be picked: its pages could not be measured on this computer. Try again.",
+  assessment_stale: "This job's assessment is old, so a new pick would not match it. Re-assess the job first.",
+  assessment_missing: "This job is not assessed yet. Assess it first.",
+  no_master: "There is no master resume to pick from. Build your master resume on the Master page to get a resume picked for each job.",
+  profile_resume_in_use:
+    "This profile uses the resume you put in by hand, so no resume is picked from your master for its jobs. On the Master page, make this profile's resume from your master again.",
+  profile_not_found: "The profile this job was assessed for is no longer there. Assess the job again for a profile you have.",
+  resume_held: "No resume is suggested for this job yet: a must-have requirement is waiting for your answer or is not met. Answer its questions, or make a draft.",
+  draft_not_needed: "A resume is suggested for this job already. Pick it instead of making a draft.",
+  no_proposed_resume: "No new suggested resume is waiting for this job.",
+};
+
+// One sentence for a refused or failed POST /api/job-resumes/pick. A request that never reached the server says so.
+export function pickErrorText(err) {
+  const code = err && text(err.code);
+  if (code && PICK_ERRORS[code]) {
+    return PICK_ERRORS[code];
+  }
+  if (err && err.status === 0 && text(err.message)) {
+    return err.message;
+  }
+  return PICK_FAILED_TEXT;
+}
+
+// Why the assessment stored no resume (the record's `selection_error`), as one sentence; "" when it says nothing.
+export function selectionErrorText(code) {
+  if (!text(code)) {
+    return "";
+  }
+  return code === "pages_unmeasured" ? "Its pages could not be measured on this computer when the job was assessed." : "It could not be picked when the job was assessed.";
+}

@@ -99,7 +99,7 @@ export const STATE_FILTERS = [
   { value: "needs_answers", label: "Needs your answers" },
   { value: "assessed", label: "Assessed" },
   { value: "recommended", label: `${SCOUT_LABEL_NAME}: ${LABEL_WORDS.recommended}` },
-  { value: WEAK_FIT, label: "Weak fit", title: "Waits on your answers, but few requirements are met and the rank is low. Hidden unless this is on." },
+  { value: WEAK_FIT, label: "Weak fit", title: "Jobs that need answers from you, but match few of the requirements and rank low, so they are probably not worth your time. They stay out of the list unless this is on." },
 ];
 export const REMOVED_FILTER = { value: "removed", label: "Removed" };
 

@@ -2,7 +2,8 @@
 
 ONE ENTRY, ``settle(master, assessment, requirements, today)``: what
 ``quick_assess.run_quick_assessment``, the pipeline's ``pick`` step, the
-re-pick action and the pick eval (``tools/pick_probe.py``) all call.  It never
+re-pick action (``settle_stored``, at the end of this module) and the pick
+eval (``tools/pick_probe.py``) all call.  It never
 calls a model.  Pure except the page measurement (the shipped template at the
 selector's spacing, ``tailor_master.measure_pages``).
 
@@ -95,10 +96,13 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import date
+import logging
+from pathlib import Path
 
 from . import suggestions
 from . import tailor_master as tm
 from .find_jobs.assess_contracts import PICK_SECTIONS, AssessmentPick
+from .job_resume_port import ACTION_DRAFT
 from .master_resume import KIND_BULLET, KIND_OTHER, KIND_SKILLS, KIND_SUMMARY, Master
 from .master_selection import (
     MAX_PAGES,
@@ -113,7 +117,9 @@ from .master_selection import (
     select,
 )
 from .tailor_length import STATUS_UNMEASURED, Measure, fit_by_cuts
-from .tailored_resume import LENGTH_RULE, TailorJob, TailoredResume, apply_no_loss, render_markdown, validate_tailored_output
+from .tailored_resume import LENGTH_RULE, TailorJob, TailoredResume, apply_no_loss, render_markdown, tailor_sources, validate_tailored_output
+
+_logger = logging.getLogger("gigai.scout.server")
 
 #: Names the validation rules, the cut order and the fill above; stored with a selection (a change re-picks on request).
 PICK_RULES_VERSION = "pick-rules:1"
@@ -851,6 +857,212 @@ def settle(
     )
 
 
+# --- one job's selection, stored (SPEC 1.7 step 4; 2.4: the re-pick and the draft of a STORED job) ---------------------
+#
+# ONE path for the two callers that store a selection: ``quick_assess.run_quick_assessment`` (a new assessment) and
+# ``settle_stored`` (0.1.11.3: ``gigai scout resume pick --refresh | --draft``, ``POST /api/job-resumes/pick``, the job
+# page's "Pick it now").  Both read the same inputs (``pick_inputs``) and write through ``settle_and_store``.
+#
+# Every refusal here is a ``PickError`` whose message is for the USER: what happened and what to do, in plain words.
+# It never names a module, a function or a code (the code is the error's ``code``, for a program).
+
+REFUSED_NO_ASSESSMENT = "assessment_missing"
+REFUSED_NO_MASTER = "no_master"
+REFUSED_PROFILE_RESUME = "profile_resume_in_use"
+REFUSED_NO_PROFILE = "profile_not_found"
+REFUSED_HELD = "resume_held"
+REFUSED_DRAFT_NOT_NEEDED = "draft_not_needed"
+REFUSED_UNMEASURED = "pages_unmeasured"
+REFUSED_FAILED = "pick_failed"
+
+_REASSESS = "`gigai scout jobs assess URL --again` (a job assessed by its URL: `gigai scout assess --job-url URL`; one model call, on your yes)"
+MESSAGES: Mapping[str, str] = {
+    REFUSED_NO_ASSESSMENT: "This job has no stored assessment, so there is nothing to pick a resume from. Assess it first: `gigai scout jobs assess URL` (one model call, on your yes).",
+    REFUSED_NO_MASTER: (
+        "There is no master resume to pick from, so this profile's own resume is used as it is. Build your master resume to get a resume "
+        "picked for each job: `gigai scout resume master init`."
+    ),
+    REFUSED_PROFILE_RESUME: (
+        "This profile uses the resume you put in by hand, so no resume is picked from your master resume for its jobs. To get one picked for "
+        "each job, make this profile's resume from your master again: `gigai scout resume master selection refresh --profile ID`."
+    ),
+    REFUSED_NO_PROFILE: "The profile this job was assessed for is no longer there, so no resume can be picked for it. Assess the job again for a profile you have.",
+    REFUSED_HELD: (
+        "No resume is suggested for this job yet: a must-have requirement is waiting for your answer or is not met. Answer its questions, or "
+        "make a draft anyway: `gigai scout resume pick --job-url URL --draft`."
+    ),
+    REFUSED_DRAFT_NOT_NEEDED: "A resume is suggested for this job already; a draft is for a job that is held. Pick it again: `gigai scout resume pick --job-url URL --refresh`.",
+    REFUSED_UNMEASURED: (
+        "The resume could not be picked: its pages could not be measured on this computer (the PDF renderer did not start). Nothing was "
+        "changed. Try again; if it keeps happening, run `gigai doctor`."
+    ),
+    REFUSED_FAILED: f"The resume could not be picked for this job. Nothing was changed. Try again, or re-assess the job to get a new pick: {_REASSESS}.",
+}
+
+
+def refusal(code: str) -> PickError:
+    """The refusal ``code`` with its plain message (:data:`MESSAGES`)."""
+
+    return PickError(code, MESSAGES[code])
+
+
+@dataclass(frozen=True)
+class PickInputs:
+    """What one job's selection reads besides the assessment: the master, the profile as the selector's prior, the answers, the posting."""
+
+    master: Master
+    #: The master revision the selection is made from (``tailor_master.MasterSource``).
+    source: object
+    profile: SelectionProfile
+    excludes: tuple[str, ...]
+    answers: Mapping[str, object]
+    posting: SelectionPosting
+
+
+def pick_inputs(home_root: Path, target: Path, *, stored: object, prior: SelectionProfile, profile: object, resume: object, job: object) -> PickInputs:
+    """The inputs of one job's selection.
+
+    ``stored``: the stored master (``master_store.StoredMaster``).  ``prior``:
+    the profile as the selector's prior (``assess_master.profile_prior``).
+    ``profile``: its record (the pins and the excluded lines of its
+    selection).  ``resume``: the resume identity and text the answers and
+    stories are searched for.  ``job``: the posting (title, text, company,
+    location).
+    """
+
+    revision = stored.revision  # type: ignore[attr-defined]
+    selection = getattr(profile, "master_selection", None)
+    return PickInputs(
+        master=stored.master,  # type: ignore[attr-defined]
+        source=tm.MasterSource(revision.revision_id, revision.revision, revision.content_sha256),
+        profile=replace(prior, pins=tuple(selection.pins) if selection is not None else ()),
+        excludes=tuple(selection.excludes) if selection is not None else (),
+        answers=tailor_sources(
+            home_root=home_root, target=target, profile_id=resume.profile_id, resume_text=resume.text, title=job.title, posting_text=job.text,  # type: ignore[attr-defined]
+        ),
+        posting=SelectionPosting(job.title, job.text, job.company, job.location),  # type: ignore[attr-defined]
+    )
+
+
+def settle_and_store(
+    home_root: Path, target: Path, assessment: object, *, job: object, inputs: PickInputs | None, now: str, fallback: str | None = None,
+    draft: bool = False, repick: bool = False, selection_error: str | None = None,
+) -> tuple[suggestions.SuggestionRecord, str | None]:
+    """Settle one job's selection (with ``inputs``) and write the suggestion record and the job resume. No model call.
+
+    ``inputs`` ``None``: no selection is made (the gate holds, or nothing can
+    be picked) and the record alone is written; ``selection_error`` then says
+    why none could be made although one was wanted.  A selection that cannot
+    be made is RECORDED (``selection: null`` with its error code), never
+    raised: the answer is ``(the record, the error code or None)``.  A resume
+    the user changed is kept; the new selection then waits as ``proposed``
+    (``suggestions.store_assessed``).
+    """
+
+    settled: Settled | None = None
+    if inputs is not None:
+        try:
+            settled = settle(
+                inputs.master, assessment, None, None, profile=inputs.profile, answers=inputs.answers, posting=inputs.posting, excludes=inputs.excludes,
+                fallback=fallback, draft=draft,
+            )
+        except PickError as exc:
+            selection_error = exc.code
+    record = suggestions.store_assessed(
+        home_root, target, assessment=assessment, job=job, resume=assessment.resume, gate_record=assessment.resume_gate, now=now,  # type: ignore[attr-defined]
+        suggested=assessment.result.structured_suggestions, settled=settled, selection_error=selection_error,  # type: ignore[attr-defined]
+        master_source=None if inputs is None else inputs.source, answers=None if inputs is None else inputs.answers, repick=repick,
+    )
+    return record, selection_error
+
+
+def _stored_inputs(home_root: Path, target: Path, assessment: object) -> PickInputs:
+    """The inputs of a STORED job's selection, from the stores as they are now; a refusal when nothing can be picked."""
+
+    from ..private_records import PrivateRecordError
+    from ..workpad import WorkpadError, resolve_workpad
+    from .assess_master import profile_prior, reads_evidence
+    from .find_jobs.assess_contracts import AssessResumeInput
+    from .find_jobs.contracts import FindJobsContractError
+    from .find_jobs.resume_input import resolve_profile, resume_for_profile
+
+    profile_id = assessment.resume.profile_id  # type: ignore[attr-defined]
+    if profile_id is None:
+        raise refusal(REFUSED_NO_PROFILE)
+    try:
+        resolved = resolve_workpad(home_root=home_root, requested_target=target, gig_id=None, allow_semantic_state=True)
+        profile = resolve_profile(AssessResumeInput(profile_id=profile_id), resolved=resolved, home_root=home_root, target=target)
+    except (WorkpadError, PrivateRecordError, FindJobsContractError) as exc:
+        raise refusal(REFUSED_NO_PROFILE) from exc
+    assert profile is not None
+    stored = tm.stored_master(home_root, target, resolved=resolved)
+    if stored is None:
+        raise refusal(REFUSED_NO_MASTER)
+    if not reads_evidence(home_root, profile):
+        raise refusal(REFUSED_PROFILE_RESUME)
+    selection = profile.master_selection
+    prior = profile_prior(
+        titles=tuple(profile.titles), item_ids=tuple(selection.item_ids) if selection is not None else None, profile_id=profile.profile_id,
+        label=profile.label,
+    )
+    try:
+        resume = resume_for_profile(profile, resolved=resolved, home_root=home_root, target=target)
+    except FindJobsContractError as exc:
+        raise refusal(REFUSED_NO_PROFILE) from exc
+    return pick_inputs(home_root, target, stored=stored, prior=prior, profile=profile, resume=resume, job=assessment.job)  # type: ignore[attr-defined]
+
+
+def settle_stored(home_root: Path, target: Path, profile_id: str | None, job_identity: str, *, action: str, now: str) -> suggestions.SuggestionRecord:
+    """Pick a STORED job's resume again (``action``: refresh) or make its draft (draft), and write the record. No model call.
+
+    The stored assessment's pick is settled against the master AS IT IS NOW.
+    ``refresh`` is for a job whose gate suggests a resume (and for a draft
+    that is there already: it stays a draft); ``draft`` for a job whose gate
+    holds, picked by the code selector and marked as a draft.  A stored job
+    resume that is the user's is kept: the new selection waits as
+    ``proposed``.  A job with no suggestion record yet (its assessment could
+    not write one) gets it here.
+
+    Raises ``PickError`` with a plain message (:data:`MESSAGES`):
+    ``assessment_missing``, ``no_master``, ``profile_resume_in_use``,
+    ``profile_not_found``, ``resume_held``, ``draft_not_needed``,
+    ``pages_unmeasured`` (recorded as the record's ``selection_error``) and
+    ``pick_failed``.  Whether the stored assessment is stale is the caller's
+    rule (``job_actions.pick_action`` refuses a refresh then).
+    """
+
+    from .quick_assess import read_quick_assessment
+    from .resume_gate import SUGGEST, gate
+
+    home_root, target = Path(home_root), Path(target)
+    assessment = read_quick_assessment(home_root, target, profile_id, job_identity)
+    if assessment is None:
+        raise refusal(REFUSED_NO_ASSESSMENT)
+    if assessment.resume_gate is None:
+        # An answer stored without a gate (the shape of before 0.1.11): the gate of its rows, questions and verdict, by the same rules.
+        body = assessment.result
+        assessment = replace(assessment, resume_gate=gate(body.matrix, body.structured_questions, body.verdict).record())
+    record = suggestions.read_suggestions(home_root, target, profile_id, job_identity)
+    held = assessment.resume_gate.decision != SUGGEST
+    drafting = held and (action == ACTION_DRAFT or bool(((record.selection if record is not None else None) or {}).get("draft")))
+    if action == ACTION_DRAFT and not held:
+        raise refusal(REFUSED_DRAFT_NOT_NEEDED)
+    if held and not drafting:
+        raise refusal(REFUSED_HELD)
+    inputs = _stored_inputs(home_root, target, assessment)
+    try:
+        record, error = settle_and_store(
+            home_root, target, assessment, job=assessment.job, inputs=inputs, now=now, fallback=FALLBACK_DRAFT if drafting else None, draft=drafting,
+            repick=True,
+        )
+    except Exception as exc:  # noqa: BLE001 - whatever stopped the pick, the user is told in plain words what to do; the cause is in the log
+        _logger.warning("a stored job's resume could not be picked", exc_info=True)
+        raise refusal(REFUSED_FAILED) from exc
+    if error is not None:
+        raise refusal(error if error in MESSAGES else REFUSED_FAILED)
+    return record
+
+
 # --- the checks a selection is judged on (3.5) --------------------------------------------------------------------
 
 
@@ -940,21 +1152,35 @@ __all__ = [
     "FALLBACK_PICK_FAILED",
     "FALLBACK_TOO_SMALL",
     "FILL_LINES",
+    "MESSAGES",
     "MIN_PICK",
     "ORIGIN_PICK",
     "PICK_RULES_VERSION",
     "PRODUCER_ACTOR",
     "PRODUCER_CALLABLE",
     "PRODUCER_VERSION",
+    "REFUSED_DRAFT_NOT_NEEDED",
+    "REFUSED_FAILED",
+    "REFUSED_HELD",
+    "REFUSED_NO_ASSESSMENT",
+    "REFUSED_NO_MASTER",
+    "REFUSED_NO_PROFILE",
+    "REFUSED_PROFILE_RESUME",
+    "REFUSED_UNMEASURED",
     "Added",
     "Checks",
     "PickConflict",
     "PickError",
+    "PickInputs",
     "Problem",
     "Settled",
     "Validated",
     "checks",
+    "pick_inputs",
+    "refusal",
     "settle",
+    "settle_and_store",
+    "settle_stored",
     "validate_pick",
     "worse",
 ]

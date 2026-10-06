@@ -1,15 +1,15 @@
 """0.1.11 N5: the one door from the job commands to the step that picks a STORED job's resume again.
 
-``gigai scout resume pick --refresh | --draft`` and ``POST /api/job-resumes/pick`` (``job_actions.pick_action``) need
-one action of ``scout.pick`` that this tree does not hold yet (:data:`SETTLE_STORED`): settle the stored
-assessment's pick against the master as it is now, keep a resume that is the user's (the new selection then waits
-as ``proposed``), and write the suggestion record. ``pick.settle`` (the selection itself) and ``suggestions`` (the
-record and its store) are there; what is missing is that one function over a stored job.
+``gigai scout resume pick --refresh | --draft`` and ``POST /api/job-resumes/pick`` (``job_actions.pick_action``) call
+one action of ``scout.pick`` (:data:`SETTLE_STORED`, there since 0.1.11.3): settle the stored assessment's pick
+against the master as it is now, keep a resume that is the user's (the new selection then waits as ``proposed``),
+and write the suggestion record.
 
 It is looked up HERE, by name, when it is called, and nowhere else. A GigAI without it answers :class:`NotBuilt`
-(a ``NotImplementedError`` with an API/CLI ``code``, ``pick_not_available``): a typed refusal that says which part
-is missing and what to do instead, never an ``AttributeError`` and never a silent nothing. The day ``scout.pick``
-defines the function, the commands and the route call it with no change here.
+(a ``NotImplementedError`` with an API/CLI ``code``, ``pick_not_available``): a typed refusal, never an
+``AttributeError`` and never a silent nothing. Its message is for the USER, like every refusal of a pick: what to do
+instead, in plain words, and never the name of a module or a function (0.1.11.3: the operator read
+"scout.pick.settle_stored is not part of it" on a job page).
 
 No model call, no file of its own.
 """
@@ -26,9 +26,14 @@ ACTION_REFRESH = "refresh"
 ACTION_DRAFT = "draft"
 ACTIONS: tuple[str, ...] = (ACTION_REFRESH, ACTION_DRAFT)
 
+NOT_AVAILABLE_MESSAGE = (
+    "A resume cannot be picked again for this job here. Re-assess the job to get a new pick: `gigai scout jobs assess URL --again` "
+    "(a job assessed by its URL: `gigai scout assess --job-url URL`; one model call, on your yes)."
+)
+
 
 class NotBuilt(NotImplementedError):
-    """A part this GigAI does not hold yet; ``code`` is the API/CLI error code, the message names the part."""
+    """A part this GigAI does not hold; ``code`` is the API/CLI error code, the message says what to do instead."""
 
     def __init__(self, code: str, message: str) -> None:
         super().__init__(message)
@@ -42,12 +47,8 @@ def settle_stored() -> Callable[..., object]:
 
     action = getattr(pick, SETTLE_STORED, None)
     if action is None:
-        raise NotBuilt(
-            "pick_not_available",
-            f"this GigAI cannot pick a job's resume again yet (scout.pick.{SETTLE_STORED} is not part of it); "
-            "re-assess the job to get a new pick: `gigai scout jobs assess URL --again` (a job assessed by its URL: `gigai scout assess --job-url URL`)",
-        )
+        raise NotBuilt("pick_not_available", NOT_AVAILABLE_MESSAGE)
     return action
 
 
-__all__ = ["ACTIONS", "ACTION_DRAFT", "ACTION_REFRESH", "SETTLE_STORED", "NotBuilt", "settle_stored"]
+__all__ = ["ACTIONS", "ACTION_DRAFT", "ACTION_REFRESH", "NOT_AVAILABLE_MESSAGE", "SETTLE_STORED", "NotBuilt", "settle_stored"]

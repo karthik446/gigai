@@ -12,8 +12,9 @@ every model call counted) with the small invented master of N2's hand-back tests
 - ``resume tailor --in`` still works, does what ``resume store`` does and names the new spelling in one line.
 - ``--fit`` and ``--resolves`` are checked BEFORE anything is stored: a refusal stores nothing.
 - ``gigai scout resume pick`` shows what is stored and recomputes nothing; its steps go to ``scout.pick`` through one
-  door (``job_resume_port``): a GigAI without that step answers the typed ``pick_not_available``, and with one
-  (a fake here: ``scout.pick`` has no step for a stored job yet) it is called once with the job, and never while
+  door (``job_resume_port``): a GigAI without that step answers the typed ``pick_not_available`` in plain words, and
+  with one (a fake here; the real one, ``pick.settle_stored``, is driven in
+  ``tests/behaviors/scout_find_jobs/test_assess_then_picked.py``) it is called once with the job, and never while
   the assessment is stale.
 - ``gigai scout resume pdf --job-url URL`` is the stored job resume; ``--tailored`` stays an accepted spelling.
 - ``resume_tailor_removed_command`` (not wired in this packet) is the typed exit ``tailoring_removed``.
@@ -482,7 +483,9 @@ def test_a_gigai_without_the_pick_action_answers_a_typed_not_available(fx: Pipel
     for flag in ("--refresh", "--draft"):
         error = _refused(fx, "resume", "pick", "--job-url", JOB, flag)
         assert error["code"] == "pick_not_available", error
-        assert "scout.pick.settle_stored" in str(error["message"]) and "gigai scout jobs assess URL --again" in str(error["message"])
+        # 0.1.11.3: for the user, never the name of the part ("scout.pick.settle_stored is not part of it" was on a job page).
+        assert "scout.pick" not in str(error["message"]) and "settle_stored" not in str(error["message"])
+        assert "gigai scout jobs assess URL --again" in str(error["message"])
     for flag in ("--use-proposed", "--dismiss-proposed"):
         assert _refused(fx, "resume", "pick", "--job-url", JOB, flag)["code"] == "no_proposed_resume"
     assert _stored(fx) == before and fx.model.calls == calls

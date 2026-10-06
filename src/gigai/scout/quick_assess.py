@@ -578,42 +578,21 @@ def _settle_and_record(
     itself failing to write is logged, never raised.  No model is called.
     """
 
-    from . import suggestions
+    from . import pick
     from .resume_gate import SUGGEST
 
     gate_record = response.resume_gate
-    settled = None
-    error: str | None = None
-    source = None
-    answers = None
     stored = getattr(master_input, "stored", None)
+    inputs = None
+    failed: str | None = None
+    if gate_record is not None and gate_record.decision == SUGGEST and stored is not None and profile is not None:
+        try:
+            inputs = pick.pick_inputs(home_root, target, stored=stored, prior=master_input.prior, profile=profile, resume=response.resume, job=job)  # type: ignore[union-attr]
+        except Exception:  # noqa: BLE001 - the assessment is stored and stays: the record says no pick was made, and the user picks it again (resume pick --refresh)
+            _logger.warning("the inputs of an assessment's pick could not be read", exc_info=True)
+            failed = pick.REFUSED_FAILED
     try:
-        if gate_record is not None and gate_record.decision == SUGGEST and stored is not None and profile is not None:
-            from . import pick
-            from .tailor_master import MasterSource
-            from .tailored_resume import tailor_sources
-
-            revision = stored.revision
-            source = MasterSource(revision.revision_id, revision.revision, revision.content_sha256)
-            selection = getattr(profile, "master_selection", None)
-            prior = replace(master_input.prior, pins=tuple(selection.pins) if selection is not None else ())  # type: ignore[union-attr]
-            answers = tailor_sources(
-                home_root=home_root, target=target, profile_id=response.resume.profile_id, resume_text=response.resume.text, title=job.title,
-                posting_text=job.text,
-            )
-            try:
-                settled = pick.settle(
-                    stored.master, response, None, None, profile=prior, answers=answers,
-                    posting=pick.SelectionPosting(job.title, job.text, job.company, job.location),
-                    excludes=tuple(selection.excludes) if selection is not None else (),
-                )
-            except pick.PickError as exc:
-                error = exc.code
-        suggestions.store_assessed(
-            home_root, target, assessment=response, job=job, resume=response.resume, gate_record=gate_record, now=now,
-            suggested=response.result.structured_suggestions, settled=settled, selection_error=error,
-            master_source=source, answers=answers,
-        )
+        pick.settle_and_store(home_root, target, response, job=job, inputs=inputs, now=now, selection_error=failed)
     except Exception:  # noqa: BLE001 - the assessment is stored and stays: a selection or a record that fails is made again later (the pick step, resume pick)
         _logger.warning("the suggestion record of an assessment could not be written", exc_info=True)
 

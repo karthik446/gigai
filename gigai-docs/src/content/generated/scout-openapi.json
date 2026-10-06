@@ -1869,7 +1869,7 @@
     },
     "/api/job-resumes/pick": {
       "post": {
-        "description": "Take one explicit step on a job's resume: pick again, make a draft, or take or drop the proposed one. No model call in any form. `refresh` picks again in code from the STORED assessment against the master as it is now; while that assessment is stale it answers 409 assessment_stale (a new selection never sits beside scores made on other evidence: re-assess with POST /api/assess). `draft` makes a draft for a job whose gate holds (409 draft_not_needed when a resume is suggested already). A stored resume that is the user's (edited, attached, a line choice, or made by the 0.1.10 tailoring; `resume.replaceable` false) is never replaced by either: the new selection waits as `proposed`, `use_proposed` is the one step that replaces the job resume and `dismiss_proposed` drops the proposal (404 no_proposed_resume when none waits). The answer is what is stored after the step: the job resume (`made_by` is its producer, `counts` its Picked / Left out), who picked it (`picked`), what validation found (`problems`) and code added (`added_by_code`), the `gate`, the `stale` list (`assessment_stale:<reason>`, picked_line_changed, master_newer, selection_rules_changed, assessment_newer) and the `conflicts`. 501 pick_not_available: this GigAI cannot pick again yet; re-assess the job.",
+        "description": "Take one explicit step on a job's resume: pick again, make a draft, or take or drop the proposed one. No model call in any form. `refresh` picks again in code from the STORED assessment against the master as it is now; while that assessment is stale it answers 409 assessment_stale (a new selection never sits beside scores made on other evidence: re-assess with POST /api/assess). `draft` makes a draft for a job whose gate holds (409 draft_not_needed when a resume is suggested already). A stored resume that is the user's (edited, attached, a line choice, or made by the 0.1.10 tailoring; `resume.replaceable` false) is never replaced by either: the new selection waits as `proposed`, `use_proposed` is the one step that replaces the job resume and `dismiss_proposed` drops the proposal (404 no_proposed_resume when none waits). The answer is what is stored after the step: the job resume (`made_by` is its producer, `counts` its Picked / Left out), who picked it (`picked`), what validation found (`problems`) and code added (`added_by_code`), the `gate`, the `stale` list (`assessment_stale:<reason>`, picked_line_changed, master_newer, selection_rules_changed, assessment_newer) and the `conflicts`. `basis` is what a resume for this job is made from now (`master`, or `profile_resume`: nothing is picked, 409 no_master without a master and 409 profile_resume_in_use for a profile whose resume was put in by hand; `master_stored` tells them apart). A plain `refresh` of a job whose gate holds is 409 resume_held (make a `draft`); a pick that fails is 409 pick_failed or pages_unmeasured. Every refusal's `message` is for the user: what to do, in plain words.",
         "operationId": "post_api_job_resumes_pick",
         "parameters": [],
         "requestBody": {
@@ -1918,6 +1918,7 @@
                 "example": {
                   "action": "refresh",
                   "added_by_code": [],
+                  "basis": "master",
                   "conflicts": [],
                   "gate": {
                     "decision": "suggest",
@@ -1925,6 +1926,7 @@
                     "reasons": []
                   },
                   "job_identity": "https://boards.greenhouse.io/acme/jobs/101",
+                  "master_stored": true,
                   "picked": {
                     "draft": false,
                     "fallback": null,
@@ -1997,7 +1999,7 @@
                 }
               }
             },
-            "description": "assessment_missing, no_proposed_resume, target_unavailable"
+            "description": "assessment_missing, no_proposed_resume, profile_not_found, target_unavailable"
           },
           "409": {
             "content": {
@@ -2013,7 +2015,7 @@
                 }
               }
             },
-            "description": "assessment_stale, draft_not_needed, pages_unmeasured"
+            "description": "assessment_stale, draft_not_needed, pages_unmeasured, no_master, profile_resume_in_use, resume_held, pick_failed"
           },
           "415": {
             "content": {
@@ -2580,6 +2582,7 @@
               "application/json": {
                 "example": {
                   "added_by_code": [],
+                  "basis": "master",
                   "conflicts": [],
                   "counts": {
                     "dismissed": 0,
@@ -2592,6 +2595,7 @@
                     "reasons": []
                   },
                   "job_identity": "https://boards.greenhouse.io/acme/jobs/101",
+                  "master_stored": true,
                   "picked": {
                     "draft": false,
                     "fallback": null,

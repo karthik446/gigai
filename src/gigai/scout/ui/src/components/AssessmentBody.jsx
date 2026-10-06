@@ -1,4 +1,3 @@
-import { useState } from "react";
 import MatrixBadge from "./MatrixBadge.jsx";
 import RequirementActions from "./RequirementActions.jsx";
 import { useAnswerDrafts } from "../answerDrafts.js";
@@ -53,7 +52,7 @@ function QuestionBox({ question, state, value, onChange, disabled, showRequireme
 }
 
 // uat-batch1 (N8, operator decision: option A): a row's class and status
-// are one chip, "Must-have: Met" / "Can ask: Unclear" / "Bonus: Met".
+// are one chip, "Required: Met" / "Nice to have: Unclear" / "Bonus: Met".
 //
 // 0.1.11 N6 (SPEC section 6, item 2): a `met` row also says where its
 // evidence is on the job's resume: "in the resume", "not in the resume" (with
@@ -81,13 +80,9 @@ function StatusCells({ row, coverage, onShowLine }) {
   );
 }
 
-// 0.1.11 N6: what a v9 row carries beyond its words: its stable id, "any one
-// of: ..." for a row any one alternative meets, and the posting's own wording
-// behind its class (`class_basis`): on hover, and on a click (the table
-// itself is never collapsed). A row made before 0.1.11 has none of them and
-// reads as it did.
+// 0.1.11 N6: "any one of: ..." for a row any one alternative meets. 0.1.11.3:
+// no internal id and no "Why this class" link: the row shows its words only.
 function RequirementCell({ row }) {
-  const [why, setWhy] = useState(false);
   const alternatives = alternativesLine(row);
   return (
     <td data-row-id={row.id || undefined}>
@@ -95,14 +90,6 @@ function RequirementCell({ row }) {
       {alternatives && (
         <div className="muted small" data-role="row-alternatives">
           {alternatives}
-        </div>
-      )}
-      {row.class_basis && (
-        <div className="muted small row-class-basis" data-role="row-class-basis" title={`The posting says: ${row.class_basis}`}>
-          <button type="button" className="link-button" data-action="show-class-basis" aria-expanded={why} onClick={() => setWhy((open) => !open)}>
-            Why this class{row.id ? ` · ${row.id}` : ""}
-          </button>
-          {why && <span data-role="class-basis"> The posting says: {row.class_basis}</span>}
         </div>
       )}
     </td>
