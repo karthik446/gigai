@@ -308,6 +308,14 @@ export function createPostingsStore({
       store.peekNew({ force: true });
     },
 
+    // 0.1.11.3 (item 12): something outside the list changed what its rows say (an application was recorded): every kept
+    // page is stale now, so the next time the page is shown it is read again (the kept rows still show first).
+    expire() {
+      lists.forEach((kept) => {
+        kept.readAt = -Infinity;
+      });
+    },
+
     // The page unmounts: nothing stays in flight, nothing keeps polling. The rows that were read stay.
     release() {
       dropList();

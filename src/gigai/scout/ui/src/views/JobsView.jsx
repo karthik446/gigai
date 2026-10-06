@@ -203,6 +203,11 @@ function PostingRow({ row, profiles, anchor, selected, onSelect, onOpen, onAsses
 // back shows the rows that were read, at once, and refreshes them in place.
 const postingsStore = createPostingsStore({ fetchPostings: getPostings, fetchPeek: getNewPeek, fetchStatus: getPostingsStatus });
 
+// 0.1.11.3 (item 12): an application was recorded on a job page: the kept list's rows (their badge) are read again on return.
+export function expireJobsList() {
+  postingsStore.expire();
+}
+
 // 0110-10-01: the page, the page size and the filters live in the address (#/jobs?page=3&state=needs_answers), so
 // Back from a job lands on the same page and a page can be bookmarked. The hash is the one source: a click writes
 // it, and the list is whatever it says.

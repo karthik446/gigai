@@ -101,11 +101,11 @@ def out(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict:
 
 
 def test_the_weak_fit_chip_is_a_generic_state_filter_off_by_default_with_the_servers_count(out: dict) -> None:
-    assert out["filters"] == ["needs_answers", "assessed", "recommended", "weak_fit"]
+    assert out["filters"] == ["needs_answers", "assessed", "recommended", "applied", "weak_fit"]
     assert out["emptyStates"] == [] and "state" not in out["defaultQuery"], "the default list asks for no state: weak fits stay out"
     off = {chip["value"]: chip for chip in out["chips"]["off"]}
     assert (off["weak_fit"]["label"], off["weak_fit"]["active"], off["weak_fit"]["count"]) == ("Weak fit", False, 1)
-    assert [chip["count"] for chip in out["chips"]["off"] if chip["value"] != "weak_fit"] == [None, None, None]
+    assert [chip["count"] for chip in out["chips"]["off"] if chip["value"] != "weak_fit"] == [None, None, None, None]
     on = {chip["value"]: chip for chip in out["chips"]["on"]}
     assert (on["weak_fit"]["active"], on["weak_fit"]["count"]) == (True, 1)
     assert out["chips"]["unread"]["count"] is None  # before the first read: the chip, no number

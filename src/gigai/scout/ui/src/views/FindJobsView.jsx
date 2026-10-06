@@ -19,7 +19,7 @@ import Breadcrumb from "../components/Breadcrumb.jsx";
 import ModelAverage from "../components/ModelAverage.jsx";
 import JobPage from "./JobPage.jsx";
 import AssessmentsView from "./AssessmentsView.jsx";
-import JobsView from "./JobsView.jsx";
+import JobsView, { expireJobsList } from "./JobsView.jsx";
 import { relativeTimeLabel } from "../display.js";
 import { PASTED_RESUME_KEY, addRunPostings, assessmentJobs, buildJobs, dateTimeLabel, runJobs as onlyRunJobs, usedPastedResume, withRunEnd } from "../jobModel.js";
 import { createRankPass, isRanked, mergeRankScores, rankButtonLabel, rankPassLine, rankPassRunning } from "../rankModel.js";
@@ -829,7 +829,7 @@ export default function FindJobsView({
     // that has since moved to the other list keeps working.
     const pool = fromAssessments ? assessed.concat(jobs) : jobs.concat(assessed);
     const listed = postingRows.get(jobId);
-    const job = pool.find((candidate) => candidate.id === jobId) || (listed ? postingJob(listed) : null);
+    const job = pool.find((candidate) => candidate.id === jobId) || (listed ? withJobStates([postingJob(listed)], applications, tailoredIds)[0] : null);
     // 0.1.11.2: no job page, but an on-demand assessment of this address: the page says so and links to it.
     const onDemand = !job && !fromAssessments ? onDemandItemFor(quickItems, jobId) : null;
     return (
@@ -845,7 +845,10 @@ export default function FindJobsView({
         listedRow={listed || null}
         loading={fromAssessments ? quickLoading : resultsLoading || pagesLoading || quickLoading || (newestLoading && !runId) || !(postingLookup.id === jobId && postingLookup.done)}
         onQuickUpdated={handleQuickUpdated}
-        onApplicationsChanged={applicationsState.reload}
+        onApplicationsChanged={() => {
+          expireJobsList(); // the Jobs list's rows carry the application badge
+          applicationsState.reload();
+        }}
         onTailored={handleTailored}
       />
     );

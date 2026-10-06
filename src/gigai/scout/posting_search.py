@@ -143,13 +143,16 @@ SORTS = (SORT_FIT, SORT_NEWEST_POSTED)
 #: The state filters. ``assessed`` is any posting with an assessment; ``recommended`` the Scout label.
 STATE_ASSESSED = "assessed"
 STATE_RECOMMENDED = "recommended"
+#: 0.1.11.3 (item 12): ``applied`` keeps the postings an application event put in an application state (applied and
+#: beyond). It is a filter over the events, never a row state: the assessment state of a row is untouched.
+STATE_APPLIED = "applied"
 # ``has_gap`` (0.1.11 N3, OD1): matched by verdict, held by the gate (``job_state.HAS_GAP``).
 # ``thin_posting`` (0.1.11.2): matched by verdict on no row about the job (``fit.THIN_POSTING``): never in ``matched``.
 _ROW_STATES = frozenset({
     "not_assessed", "needs_answers", "matched", "has_gap", "not_a_match", "tailored", fit_rules.WEAK_FIT, fit_rules.THIN_POSTING,
 })
 #: 0.1.11.2: ``ranked_low`` (``fit.RANKED_LOW``) keeps only the not-assessed postings ranked below the weak-fit rank.
-STATES = frozenset(_ROW_STATES | {STATE_ASSESSED, STATE_RECOMMENDED, fit_rules.RANKED_LOW})
+STATES = frozenset(_ROW_STATES | {STATE_ASSESSED, STATE_RECOMMENDED, STATE_APPLIED, fit_rules.RANKED_LOW})
 
 DEFAULT_LIMIT = 50
 MAX_LIMIT = 200
@@ -220,10 +223,39 @@ def _in_window(row: PostingRecord, window: str | None, since: str, moment: datet
     return _posted(row) >= edge
 
 
-def _wanted(row: PostingRecord, states: Sequence[str], setting: fit_rules.FitSetting = fit_rules.DEFAULT_SETTING) -> bool:
+def _applications(resolved: object) -> dict[str, dict[str, object]]:
+    """0.1.11.3 (item 12): job identity -> ``{status, since}`` of every job an application event put in an application state.
+
+    ONE read of the committed events per request (``job_state.read_application_events``), joined to the rows by job
+    identity; a row never reads the events. A display read: events that cannot be read label nothing.
+    """
+
+    from .find_jobs.job_state import current_application_event, read_application_events
+
+    if resolved is None:
+        return {}
+    try:
+        events = read_application_events(resolved)
+    except Exception:  # noqa: BLE001 - a label read: events that cannot be read hide nothing
+        return {}
+    found: dict[str, dict[str, object]] = {}
+    for job, group in events.items():
+        event = current_application_event(group)
+        if event is not None:
+            since = event.get("occurred_at")
+            found[job] = {"status": str(event["event_kind"]), "since": since if isinstance(since, str) else None}
+    return found
+
+
+def _wanted(
+    row: PostingRecord, states: Sequence[str], setting: fit_rules.FitSetting = fit_rules.DEFAULT_SETTING,
+    applications: Mapping[str, object] | None = None,
+) -> bool:
     if not states:
         return True
     for state in states:
+        if state == STATE_APPLIED and applications is not None and row.job in applications:
+            return True
         if state == fit_rules.RANKED_LOW and fit_rules.is_ranked_low(row.state, row.rank_score, setting):
             return True
         if state == STATE_ASSESSED and row.state != _NOT_ASSESSED:
@@ -275,13 +307,16 @@ class _Selection:
         shown = [(group, _shown(group, only)) for group in groups.values()]
         weak = fit_rules.WEAK_FIT
         setting = fit_rules.fit_setting(home_root, target)
+        #: Item 12: the application of each job, read once; the "Applied" filter and the rows' badge both use it.
+        self.applications = _applications(refreshed.resolved)
+        applications = self.applications
 
         def low(row: PostingRecord) -> bool:
             return fit_rules.is_ranked_low(row.state, row.rank_score, setting)
 
         shown = [
             (group, row) for group, row in shown
-            if (_wanted(row, states, setting) or row.state == weak) and _in_window(row, window, self.since, moment)
+            if (_wanted(row, states, setting, applications) or row.state == weak) and _in_window(row, window, self.since, moment)
         ]
         words = [word for word in (query or "").casefold().split() if word]
         if words:
@@ -292,7 +327,7 @@ class _Selection:
         self.is_ranked_low = low
         shown = [
             (group, row) for group, row in shown
-            if _wanted(row, states, setting) and not _hidden(row, states, jobs is not None)
+            if _wanted(row, states, setting, applications) and not _hidden(row, states, jobs is not None)
         ]
         # 0.1.11.2: the not-assessed postings ranked low are LISTED (ordered lower by their rank, never left out);
         # this is how many the list holds, for the "Ranked low (N)" divider above them.
@@ -337,6 +372,7 @@ def _h1b_index() -> Mapping[tuple[str, str], Mapping[str, object]]:
 def _rows_json(
     home_root: Path, target: Path, store: PipelineStore, shown: Sequence[tuple[Sequence[PostingRecord], PostingRecord]],
     views: Sequence[ProfileView] = (), ranked_low: Callable[[PostingRecord], bool] | None = None,
+    applications: Mapping[str, Mapping[str, object]] | None = None,
 ) -> list[dict[str, object]]:
     """The grid rows: ``scout new``'s own row, plus where a row's assessment came from when it was a run's."""
 
@@ -361,6 +397,9 @@ def _rows_json(
         ats, token = postings.split_board(row.board)
         figure = h1b.get((ats, token.lower()))
         entry["h1b"] = None if figure is None else dict(figure)
+        # 0.1.11.3 (item 12): a LABEL (the job's latest application status and its date; null: none). Never a state.
+        applied = None if applications is None else applications.get(row.job)
+        entry["application"] = None if applied is None else dict(applied)
         origin: dict[str, object] | None = None
         if item is not None:
             origin = {"origin": "quick_assess"}
@@ -480,7 +519,7 @@ def search_postings(
                 "postings": {
                     ENVELOPE_KEY: labels_envelope(POSTINGS_LABELS),
                     "rule": UNTRUSTED_TEXT_RULE,
-                    "rows": _rows_json(home_root, target, store, page, selection.views, selection.is_ranked_low),
+                    "rows": _rows_json(home_root, target, store, page, selection.views, selection.is_ranked_low, selection.applications),
                 },
                 "profiles": selection.profiles_json(),
                 "rank": rank_status(home_root, target),
