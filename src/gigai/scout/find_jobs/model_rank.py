@@ -831,8 +831,12 @@ def rank_postings(
     max_tokens: int | None = None,
     target: Path | None = None,
     profile_id: str | None = None,
+    use_cache: bool = True,
 ) -> RankResult:
     """Rank ``rows`` for one candidate; one :class:`RankedPosting` per row, in input order.
+
+    ``use_cache=False`` (0.1.11.2, "Re-rank latest 100"): no stored score is read, so every row is sent to the model
+    again; a valid answer replaces the stored score, and a row the model did not score keeps the one it had.
 
     ``model_target`` is the adapter kind (``codex_cli`` -- the operator's
     ``default_model_target`` -- ``claude_cli``, ``ollama_local``,
@@ -925,7 +929,7 @@ def rank_postings(
     landed: list[BatchResult] = []
     pending: list[_Entry] = []
     for entry in entries:
-        hit = _read_cached(entry.cache_path)
+        hit = _read_cached(entry.cache_path) if use_cache else None
         if hit is None:
             pending.append(entry)
             continue

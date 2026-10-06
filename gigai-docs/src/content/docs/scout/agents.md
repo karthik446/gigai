@@ -861,7 +861,10 @@ What to know:
   one release, for scripts. Search the stored postings with `GET /api/postings`
   (`gigai scout jobs list`: live, no run, no model call), assess the ones you pick with
   `POST /api/postings/assess` (`gigai scout jobs assess`: it asks first, with the count and the
-  estimate, and assesses only on approval), and let the background rank them. Old runs stay
+  estimate, and assesses only on approval), and let the background rank them
+  (`POST /api/postings/rank` says how far the rank is and ranks on approval: `{"mode": "unranked"}`
+  the postings not ranked yet, `{"mode": "latest"}` the newest 100 again in at most 2 calls; without
+  `approve` it answers the calls it would make and calls no model). Old runs stay
   readable, and `POST /api/runs/import` (`gigai scout jobs import-runs`) puts what they assessed
   beside the newer assessments.
 - **A search run reuses it too.** The assessments a find-jobs run makes (`POST /api/run`, a

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { getNewPeek, getPostings, getPostingsStatus, postAssessThese, postMarkAllSeen } from "../api.js";
 import AssessApprovalDialog from "../components/AssessApprovalDialog.jsx";
+import RankPanel from "../components/RankPanel.jsx";
 import SourcesStrip from "../components/SourcesStrip.jsx";
 import { useSourcesStatus } from "../components/SourcesUpdatePanel.jsx";
 import { inProgressCount } from "../jobStateModel.js";
@@ -660,6 +661,8 @@ export default function JobsView({ selectedProfileId, onSelectProfile, applicati
               {ranking}
             </div>
           )}
+          {/* 0.1.11.2 RANKUI: how many postings are not ranked, "Rank now" and "Re-rank latest 100" (cost shown first). */}
+          {!filter.removed && <RankPanel ranking={response && response.ranking} onRefresh={() => postingsStore.refresh(filter, { page, size })} />}
         </div>
       </section>
 

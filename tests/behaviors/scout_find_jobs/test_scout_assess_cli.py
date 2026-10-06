@@ -256,7 +256,7 @@ def test_assess_a_match_on_two_requirements_says_thin_posting_under_the_verdict_
     thin = runner.invoke(cli, [*_base(home, target), "--job-text", str(posting), "--title", "Staff AI Engineer", "--company", "Acme"])
     assert thin.exit_code == 0, thin.output
     assert "Verdict: matched_above_threshold" in thin.output
-    assert "  Note: thin posting: too few requirements to judge (2 read). Open the posting to check." in thin.output, thin.output
+    assert "  Note: thin posting, not enough requirements to score (2 read). Open the posting to check." in thin.output, thin.output
     assert thin.output.count("Note:") == 1 and "requirements were read" not in thin.output
 
     _install_model(monkeypatch, [matched(4)])

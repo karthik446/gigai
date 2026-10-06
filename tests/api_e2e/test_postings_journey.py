@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import time
 
 import pytest
 from click.testing import CliRunner
@@ -194,6 +195,45 @@ def test_postings_journey(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> No
             assert refused.status_code == 422 and refused.json()["error"]["code"] == code, refused.text
         assert client.post("/api/runs/import", json={"run_id": run_id}).status_code == 422
         assert client.get("/api/postings", headers={"Host": "evil.example"}).status_code == 403
+
+        # 7. 0.1.11.2: ranking from the page (POST /api/postings/rank). A read and an ask call no model; the yes starts
+        # a job and answers at once; the stored posting ends ranked (by this job, or by the server's own background rank).
+        def rank_calls() -> int:
+            return sum(item["calls"] for item in client.get("/api/metrics?kind=rank").json()["aggregates"])
+
+        read = client.post("/api/postings/rank", json={})
+        assert read.status_code == 200, read.text
+        assert read.headers[data_labels.LABELS_HEADER] == data_labels.NO_LABELS  # ids, counts and codes only
+        state = read.json()
+        assert set(state) == set(_example("POST", "/api/postings/rank"))
+        assert (state["schema_version"], state["enabled"], state["how_to_enable"], state["plan"], state["started"]) == ("scout-rank-now:1", True, None, None, False)
+        before_calls = rank_calls()
+        asked = client.post("/api/postings/rank", json={"mode": "latest"}).json()
+        assert set(asked["plan"]) == set(_example("POST", "/api/postings/rank")["plan"])  # type: ignore[arg-type]
+        assert (asked["plan"]["mode"], asked["plan"]["postings"], asked["plan"]["calls"], asked["plan"]["max_calls"], asked["plan"]["allowed"]) == ("latest", 1, 1, 2, True)
+        assert asked["started"] is False
+        yes = client.post("/api/postings/rank", json={"mode": "unranked", "approve": True})
+        assert yes.status_code in (200, 202), yes.text  # 200: the background rank had already ranked it (nothing_to_rank)
+        assert yes.json()["started"] is (yes.status_code == 202)
+        deadline = time.monotonic() + 60
+        while True:
+            state = client.post("/api/postings/rank", json={}).json()
+            (progress,) = state["ranking"]["by_profile"]
+            idle = not (state["job"] and state["job"]["state"] == "running")
+            if idle and progress["ranked"] == progress["total"] >= 1:  # every in-window posting the profile matches
+                break
+            assert time.monotonic() < deadline, json.dumps(state)
+            time.sleep(0.25)
+        assert state["ranking"]["in_progress"] is False and rank_calls() >= max(1, before_calls)
+        ranked = next(item for item in client.get("/api/postings").json()["postings"]["rows"] if item["job_identity"] == _JOB)
+        assert isinstance(ranked["rank_score"], int) and f"rank {ranked['rank_score']}" in ranked["score_text"]
+        for payload, status, code in (
+            ({"mode": "everything"}, 422, "invalid_value"), ({"approve": True}, 422, "invalid_value"),
+            ({"mode": "latest", "approve": "yes"}, 422, "wrong_type"), ({"mode": "latest", "bogus": 1}, 422, "unknown_key"),
+        ):
+            refused = client.post("/api/postings/rank", json=payload)
+            assert refused.status_code == status and refused.json()["error"]["code"] == code, refused.text
+        assert client.post("/api/postings/rank", json={}, headers={"Origin": "https://evil.example"}).status_code == 403
 
         # The CLI prints the same objects; the documented examples have the responses' keys.
         def cli_json(*args: str) -> dict[str, object]:

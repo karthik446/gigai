@@ -4,7 +4,7 @@ Real server and page (the small home, no model call, no network). The small home
 assessment is served with its matrix cut to its first 2 rows and the 0.1.11 note a thin answer was stored with
 ("Only 2 requirements were read ..."), which is what an assessment already on disk looks like.
 
-- the header's ONE chip reads "Thin posting: too few requirements to judge" (warn, `data-fit="thin_posting"`), not
+- the header's ONE chip reads "Thin posting, not enough requirements to score" (warn, `data-fit="thin_posting"`), not
   "Matched";
 - near the requirements there is ONE line, the thin one; the old "Only 2 requirements were read" note is not beside it;
 - with 4 rows the same job reads "Matched" and has no such line;
@@ -27,7 +27,7 @@ pytestmark = pytest.mark.ui
 PAGE = ".job-page"
 CHIP = f'{PAGE} [data-role="job-chip"]'
 NOTE = f'{PAGE} [data-role="requirements-note"]'
-LABEL = "Thin posting: too few requirements to judge"
+LABEL = "Thin posting, not enough requirements to score"
 OLD_NOTE = "Only 2 requirements were read from this posting. Open the posting to check."
 
 
@@ -97,6 +97,6 @@ def test_a_match_on_two_requirements_reads_thin_posting_on_the_job_page_and_four
         thin = row["state"] == "thin_posting" or (row["state"] == "matched" and requirements < 4)
         assert row["thin_posting"] is thin, row["score_text"]
         if thin:
-            assert row["score_text"].startswith("thin posting: too few requirements to judge"), row["score_text"]
+            assert row["score_text"].startswith("thin posting, not enough requirements to score"), row["score_text"]
             assert "Matched" not in row["score_text"] and "fit 100%" not in row["score_text"]
     ui.assert_clean()
