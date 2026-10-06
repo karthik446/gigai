@@ -30,6 +30,12 @@ mechanics here. Those belong in the internal changelog.
 
 ## Released versions
 
+### 0.1.11.1
+
+CI: one cut-down lane for the PR and the release pre-check (about 5 minutes). The full suite, the browser
+tests, the 290k-posting gate and the macOS smoke move to a non-blocking full run, nightly and after each
+release. No product change.
+
 ### 0.1.11
 
 GigAI is now an alpha (it was labelled pre-alpha). Tailoring is switched off: the resume for a job is
