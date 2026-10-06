@@ -200,7 +200,7 @@ export default function AssessView({ profiles, selectedProfileId, config, config
 
           {unreadable && (
             <div className="callout info" data-role="requirements-unreadable">
-              {REQUIREMENTS_UNREADABLE_TEXT}. Nothing was assessed; try the posting's own page on the company's job board, or paste its text.
+              {REQUIREMENTS_UNREADABLE_TEXT}. Nothing was assessed.
             </div>
           )}
           {error && <div className="callout danger">{error}</div>}

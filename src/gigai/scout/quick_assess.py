@@ -93,9 +93,11 @@ from .find_jobs.contracts import (
     ProfileRef,
     StoryBankStamp,
     UsageBlock,
+    Verdict,
 )
 from .find_jobs.discovery.storage import atomic_write, project_id
 from .find_jobs.job_input import job_fetch_client, resolve_job
+from .find_jobs.job_source import ATS_FETCH_KINDS
 from .find_jobs.job_source import resolve_job_for_assessment
 from .find_jobs.resume_input import resolve_preferences, resolve_profile, resolve_resume, resume_for_profile
 
@@ -395,7 +397,9 @@ def _origin_for(request: AssessRequest, previous: AssessResponse | None) -> str 
 # --- unreadable-posting guard (uat-bug-029) -------------------------------------------
 
 #: What the operator is told when the posting text carries no requirements.
-POSTING_UNREADABLE_MESSAGE = "Couldn't read this posting's requirements"
+POSTING_UNREADABLE_MESSAGE = "Couldn't read this posting's requirements: open the posting and paste its text"
+#: BLOCK1: the note a PASTED text keeps when no requirement could be read from it (it is held, never matched).
+PASTED_UNREADABLE_NOTE = "No requirements could be read from this text. Check that the whole posting was pasted."
 
 # Words that mark a requirements-like section or bullet in real posting text.
 _REQUIREMENT_CUES = re.compile(
@@ -422,7 +426,9 @@ ERROR_NOT_STORED = "assessment_not_stored"
 REASON_TOO_FEW_REQUIREMENTS = "matched_on_too_few_requirements"
 #: - the text has no requirement wording at all AND the model found no requirement (:func:`posting_requirements_unreadable`, uat-bug-029).
 REASON_NO_REQUIREMENTS = "no_requirements_in_text"
-POSTING_UNREADABLE_REASONS: tuple[str, ...] = (REASON_TOO_FEW_REQUIREMENTS, REASON_NO_REQUIREMENTS)
+#: - BLOCK1: a fetched page with no posting body in it (a site's menu and footer): refused before any model call.
+REASON_NO_POSTING_BODY = "no_posting_body"
+POSTING_UNREADABLE_REASONS: tuple[str, ...] = (REASON_TOO_FEW_REQUIREMENTS, REASON_NO_REQUIREMENTS, REASON_NO_POSTING_BODY)
 
 
 #: 0.1.11 GUARDFIX (orchestrator #87): an answer with fewer than three requirement rows for a posting of 1,200+
@@ -445,29 +451,57 @@ def _has_real_requirement(body: AssessmentBody) -> bool:
     return any(row.requirement.strip().lower().rstrip(".") != _NO_STATED_REQUIREMENTS for row in body.matrix)
 
 
-def posting_requirements_unreadable(text: str, body: AssessmentBody) -> bool:
-    """True when this answer must NOT be presented as an assessment.
+def posting_requirements_unreadable(text: str, body: AssessmentBody, fetch_kind: str = "generic") -> bool:
+    """True when this answer must NOT be presented as an assessment (BLOCK1: never a match on nothing).
 
-    The rule needs BOTH: the posting text has no requirement-like cue
-    (no "requirements"/"qualifications"/"you have"/"N years"/"skills"/...
-    anywhere) AND the model found no real requirement (an empty matrix, or
-    only "No stated requirements").  Either alone is not enough: a real
-    posting without headings that yields real rows stays assessed, and a
-    posting with requirement wording whose model answer is "No stated
-    requirements" stays the legitimate requirement-free path.  A third
-    condition: the text must not read as running prose (``_reads_as_prose``),
-    so a short cue-free blurb is assessed while a list-of-names scrape is
-    refused.  Residual: a cue-free blurb written as short lines is refused.
+    Only an answer with NO real requirement row is looked at (an empty matrix,
+    or only "No stated requirements"); an answer with a real row is assessed.
+    The one answer without a real row that is kept is "No stated requirements"
+    as the ONLY row on a text that is a posting body (:func:`has_posting_body`),
+    or on the board's own text (an ATS fetch kind): a real posting can state no
+    requirements. Everything else is unreadable: an empty matrix, and a
+    "No stated requirements" on a menu-and-footer page that never had a posting.
     A previously stored bad Matched file is left in place (never deleted).
     """
 
-    return not _has_requirement_cue(text) and not _has_real_requirement(body) and not _reads_as_prose(text)
+    if _has_real_requirement(body):
+        return False
+    if not body.matrix:
+        return body.verdict is not Verdict.NOT_A_MATCH  # a not-a-match with no rows names no match; every other answer needs a row
+    return fetch_kind not in ATS_FETCH_KINDS and not has_posting_body(text)
 
 
 #: A line this long (in words) is running prose, not a nav/list label.
 _PROSE_LINE_WORDS = 8
 _PROSE_MIN_WORDS = 15
 _PROSE_MIN_SHARE = 0.6
+#: A sentence-like line is 4+ words ending in sentence punctuation.
+_CUE_SENTENCE_MIN_WORDS = 4
+_SENTENCE_END = (".", "!", "?", ":", ";")
+
+
+def has_posting_body(text: str) -> bool:
+    """True when ``text`` reads as a posting's own words, not a site's menu and footer.
+
+    The smallest rule that tells them apart: the text reads as running prose
+    (``_reads_as_prose``), OR one line is a sentence about the work (requirement
+    wording and either 4+ words ending in sentence punctuation, or 8+ words).
+    A menu and footer is short labels without sentences, so it has neither; a
+    short real posting ("You will help our team ship. There are no formal
+    qualifications.") has both. Residual: a posting of bare short bullet lines
+    with no sentence is read as having no body.
+    """
+
+    if _reads_as_prose(text):
+        return True
+    for line in text.splitlines():
+        line = line.strip()
+        words = len(line.split())
+        if words >= _PROSE_LINE_WORDS and _has_requirement_cue(line):
+            return True
+        if words >= _CUE_SENTENCE_MIN_WORDS and line.endswith(_SENTENCE_END) and _has_requirement_cue(line):
+            return True
+    return False
 
 
 def _reads_as_prose(text: str) -> bool:
@@ -767,6 +801,11 @@ def run_quick_assessment(
     posting_digest = posting_sha256(job.title, job.text)
     job = _apply_job_overrides(job, request)
 
+    # 1b. BLOCK1: a page that came back as a site's menu and footer (no posting body in it) is refused BEFORE
+    #     any model call: nothing to read, nothing to spend. Pasted text and the boards' own text are not held to it.
+    if job.fetch_kind == "generic" and not has_posting_body(job.text):
+        raise QuickAssessError(ERROR_POSTING_UNREADABLE, POSTING_UNREADABLE_MESSAGE, reason=REASON_NO_POSTING_BODY)
+
     # 2. Resume identity + text (the pinned profile resume, or ephemeral).
     profile = None
     resolved = None
@@ -890,7 +929,7 @@ def run_quick_assessment(
         refused = (
             attempt.incomplete_posting
             if not attempt.ok
-            else attempt.thin_requirements is not None or posting_requirements_unreadable(job.text, attempt.parsed)  # type: ignore[arg-type]
+            else attempt.thin_requirements is not None or posting_requirements_unreadable(job.text, attempt.parsed, job.fetch_kind)  # type: ignore[arg-type]
         )
         if refused and guard_retries < GUARD_RETRY_LIMIT:
             meter.unused(ERROR_POSTING_UNREADABLE)
@@ -916,11 +955,20 @@ def run_quick_assessment(
 
     body = attempt.parsed
     assert isinstance(body, AssessmentBody)
-    if posting_requirements_unreadable(job.text, body):
-        # Nothing is stored: the job stays "not assessed", never Matched.
-        meter.unused(ERROR_POSTING_UNREADABLE)  # 0110-8-09
-        raise QuickAssessError(ERROR_POSTING_UNREADABLE, POSTING_UNREADABLE_MESSAGE, reason=REASON_NO_REQUIREMENTS)
     requirements_note = None if attempt.thin_requirements is None else requirements_note_text(attempt.thin_requirements)
+    held_unreadable = False
+    if posting_requirements_unreadable(job.text, body, job.fetch_kind):
+        if job.fetch_kind != "pasted":
+            # Nothing is stored: the job stays "not assessed", never Matched.
+            meter.unused(ERROR_POSTING_UNREADABLE)  # 0110-8-09
+            raise QuickAssessError(ERROR_POSTING_UNREADABLE, POSTING_UNREADABLE_MESSAGE, reason=REASON_NO_REQUIREMENTS)
+        # BLOCK1: PASTED text is what the user chose to give: the answer is HELD (pending, no resume suggested) with a
+        # visible note, never matched on nothing. The user checks the paste and assesses again.
+        # It is stored without a v9 gate (``held_unreadable``): readers without a gate follow the verdict, and a pending
+        # one suggests no resume.
+        body = replace(body, verdict=Verdict.PENDING_USER_ANSWERS, pick=None, structured_suggestions=())
+        requirements_note = PASTED_UNREADABLE_NOTE
+        held_unreadable = True
     from .proposal_execution import _usage_block
 
     usage = _usage_block([attempt.usage] if attempt.usage is not None else [], UsageBlock)
@@ -932,7 +980,7 @@ def run_quick_assessment(
     # requirement list, selection and suggestion record. A v8 answer is stored as it always was.
     from .resume_gate import gate, uses_v9_rules
 
-    is_v9 = variant is None and uses_v9_rules(body.matrix)
+    is_v9 = variant is None and not held_unreadable and uses_v9_rules(body.matrix)
     extracted_list = None
     requirements_ref = None
     resume_gate = None
@@ -1024,6 +1072,7 @@ __all__ = [
     "ERROR_NOT_STORED",
     "ERROR_POSTING_UNREADABLE",
     "POSTING_UNREADABLE_REASONS",
+    "REASON_NO_POSTING_BODY",
     "REASON_NO_REQUIREMENTS",
     "REASON_TOO_FEW_REQUIREMENTS",
     "TAILORED_VARIANT_DIR",

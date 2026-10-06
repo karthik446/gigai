@@ -391,7 +391,7 @@ export function createRankPass({ runId, postRank, onResponse, onError, onEnd, is
 // when the posting's text has no requirements it could read. That is not a
 // failure of the page: the job stays not assessed and the page says so.
 export const REQUIREMENTS_UNREADABLE_CODE = "posting_requirements_unreadable";
-export const REQUIREMENTS_UNREADABLE_TEXT = "Couldn't read this posting's requirements";
+export const REQUIREMENTS_UNREADABLE_TEXT = "Couldn't read this posting's requirements: open the posting and paste its text";
 
 export function isRequirementsUnreadable(error) {
   return Boolean(error) && error.code === REQUIREMENTS_UNREADABLE_CODE;

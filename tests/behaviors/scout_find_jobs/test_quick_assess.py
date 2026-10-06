@@ -616,18 +616,62 @@ _NO_STATED = json.dumps(
 )
 
 
-def test_nexhealth_junk_text_is_not_assessed_and_never_matched(fx: ProfileFixtureGig, monkeypatch: pytest.MonkeyPatch) -> None:
-    """The exact scraped NexHealth text, with the model answering as it did in the UAT
-    ("No stated requirements", MATCHED): the end result is no assessment at all."""
+def test_nexhealth_junk_text_pasted_is_held_with_a_note_and_never_matched(fx: ProfileFixtureGig, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The scraped NexHealth text PASTED, the model answering as in the UAT ("No stated requirements", MATCHED):
+    BLOCK1: it is stored HELD (pending, no resume suggested) with a visible note, never Matched."""
 
-    _install(monkeypatch, [_NO_STATED, _NO_STATED])  # 0.1.11: the refused answer gets one more call before the error
+    _install(monkeypatch, [_NO_STATED, _NO_STATED])  # the refused answer gets one more call first
+
+    response = _run(fx, AssessRequest(job=AssessJobInput(job_text=_NEXHEALTH_JUNK)))
+
+    assert response.result.verdict is Verdict.PENDING_USER_ANSWERS
+    assert response.requirements_note == "No requirements could be read from this text. Check that the whole posting was pasted."
+    assert response.result.pick is None
+
+
+def _fetched_shell(fetch_kind: str = "generic"):
+    from gigai.canonical import digest_imported_bytes
+    from gigai.scout.find_jobs.assess_contracts import ResolvedJob
+
+    url = "https://careers.example.test/job/?gh_jid=4400123"
+    return ResolvedJob(
+        job_identity=url, source_url=url, normalized_url=url, fetch_kind=fetch_kind, title="Careers", company="", location="",
+        text=_NEXHEALTH_JUNK, text_sha256=digest_imported_bytes(_NEXHEALTH_JUNK.encode("utf-8")),
+    )
+
+
+def test_a_url_that_fetched_as_a_site_shell_is_refused_before_any_model_call(fx: ProfileFixtureGig, monkeypatch: pytest.MonkeyPatch) -> None:
+    """BLOCK1: a generic fetch with no posting body costs no model call and stores nothing."""
+
+    binding, asked = _install(monkeypatch, [_NO_STATED])
+    job = _fetched_shell()
 
     with pytest.raises(QuickAssessError) as excinfo:
-        _run(fx, AssessRequest(job=AssessJobInput(job_text=_NEXHEALTH_JUNK)))
+        run_quick_assessment(
+            AssessRequest(job=AssessJobInput(job_url=job.source_url)), home_root=fx.home_root, target=fx.target,
+            config=_config_with_ollama(fx.home_root), resolved_job=job,
+        )
 
     assert excinfo.value.code == "posting_requirements_unreadable"
-    assert str(excinfo.value) == "Couldn't read this posting's requirements"
-    assert list_quick_assessments(fx.home_root, fx.target) == ()  # nothing stored, so never Matched
+    assert excinfo.value.reason == "no_posting_body"
+    assert "open the posting and paste its text" in str(excinfo.value)
+    assert binding.port.prompts == [] and asked == []  # zero model calls
+    assert list_quick_assessments(fx.home_root, fx.target) == ()
+
+
+def test_a_shell_answered_with_no_stated_requirements_is_unreadable_by_the_gate_never_matched() -> None:
+    """The gate alone (the model answered): menu-and-footer text + only "No stated requirements" -> unreadable; a short real posting is not."""
+
+    from gigai.scout.find_jobs.assess_contracts import AssessmentBody
+
+    body = AssessmentBody.from_json(json.loads(_NO_STATED) | {"suggestions": [], "questions": []})
+    assert quick_assess.posting_requirements_unreadable(_NEXHEALTH_JUNK, body, "generic") is True
+    assert quick_assess.posting_requirements_unreadable(_NEXHEALTH_JUNK, body, "pasted") is True
+    short_real = "You will help our team ship. There are no formal qualifications."
+    assert quick_assess.posting_requirements_unreadable(short_real, body, "generic") is False
+    assert quick_assess.posting_requirements_unreadable("Short. Menu", body, "ats_single") is False  # the board's own text
+    empty = AssessmentBody.from_json({"matrix": [], "suggestions": [], "questions": [], "verdict": "matched_above_threshold"})
+    assert quick_assess.posting_requirements_unreadable(short_real, empty, "generic") is True  # no requirement row at all
 
 
 def test_requirement_free_wording_with_real_requirements_or_cues_stays_assessed(fx: ProfileFixtureGig, monkeypatch: pytest.MonkeyPatch) -> None:

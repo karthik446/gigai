@@ -276,7 +276,7 @@ function AssessNow({ posting, origin, onAssessed, label = "Assess" }) {
       </button>
       {unreadable && (
         <div className="muted requirements-unreadable" data-role="requirements-unreadable">
-          {REQUIREMENTS_UNREADABLE_TEXT}. It stays not assessed; open the posting to read it yourself.
+          {REQUIREMENTS_UNREADABLE_TEXT}. It stays not assessed.
         </div>
       )}
       {error && <div className="field-error">{error}</div>}
