@@ -491,7 +491,7 @@ def test_14_a_batch_of_twelve_prints_rising_progress_to_stderr_and_stdout_stays_
     assert all("assess" in line or "rank" in line for line in lines), lines  # nothing else on stderr
     # The response says how far the rank is, per profile.
     assert response["ranking"] == {
-        "enabled": True, "in_progress": True,
+        "enabled": True, "in_progress": True, "window_days": 7,
         "by_profile": [
             {"profile_id": fx.default_profile_id, "ranked": 5, "total": 12},
             {"profile_id": fx.second_profile_id, "ranked": 0, "total": 12},

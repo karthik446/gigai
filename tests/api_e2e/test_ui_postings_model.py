@@ -328,21 +328,21 @@ def test_assess_these_asks_first_and_approve_sends_the_servers_own_body(out: dic
     ]
 
 
-def test_the_approval_says_the_newest_50_the_total_and_what_is_left(out: dict) -> None:
-    """0110-10-11 (the operator's rule): one approval is the newest 50, never more; the dialog states the total and the 50."""
+def test_the_approval_says_the_top_50_by_rank_the_total_and_what_is_left(out: dict) -> None:
+    """0110-10-11 (the operator's rule): one approval is 50, never more (0.1.11.2: the top 50 by rank); the dialog states the total and the 50."""
 
     capped = out["capped"]
     assert capped["numbers"] == [50, 120, 70, 50, 112, 50, 62]
     assert capped["title"] == [
-        "Assess the newest 50 of 120 postings?", "Assess 2 postings?", "Assess 1 posting?", "Only low-ranked postings are selected",
+        "Assess the top 50 by rank of 120 postings?", "Assess 2 postings?", "Assess 1 posting?", "Only low-ranked postings are selected",
     ]
     assert capped["batch"] == [
-        'the newest 50 now, never more in one go. 70 more after these 50: "Assess these" again takes the next 50.',
+        'the top 50 by rank now, never more in one go. 70 more after these 50: "Assess these" again takes the next 50.',
         None,
-        'the newest 50 now, never more in one go. 3 more after these 50: "Assess these" again takes the next 3.',
+        'the top 50 by rank now, never more in one go. 3 more after these 50: "Assess these" again takes the next 3.',
     ]
     assert capped["low"] == (
-        "112 low-ranked ones are skipped (rank below 50). Assess the newest 50 of those too? ~50 model calls (62 more after these 50)"
+        "112 low-ranked ones are skipped (rank below 50). Assess the top 50 by rank of those too? ~50 model calls (62 more after these 50)"
     )
     assert capped["outcome"] == [
         'Assessed 50 of 50. 70 more not assessed yet: 50 at a time, "Assess these" again takes the next.',

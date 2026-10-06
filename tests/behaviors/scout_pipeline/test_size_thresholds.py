@@ -286,7 +286,7 @@ def test_the_question_says_k_tokens_when_enough_postings_wait_to_reach_1000(tmp_
     asked = scout_new.scout_new(fx.home_root, fx.target, now=NOW)
     assert asked["status"] == "ask" and asked["question"]["estimate"]["tokens"] == 1500  # type: ignore[index]
     assert str(asked["question"]["text"]).endswith(  # type: ignore[index]
-        "Assess the newest 50 of 54 not assessed yet? ~50 calls, ~2k tokens (4 more after these 50)"
+        "Assess the top 50 by rank of 54 not assessed yet? ~50 calls, ~2k tokens (4 more after these 50)"
     )
     assert (scout_new._tokens(999), scout_new._tokens(1000)) == (", ~999 tokens", ", ~1k tokens")
     assert fx.base.model.calls == calls  # the questions called no model

@@ -26,6 +26,19 @@ filters select, listed or not: the number on the page's "Weak fit" chip.
 The rows are in the grid's order (``scout_new.order_key``): inside a group by
 the fit number, then the rank score, then the newest.
 
+RANKED LOW (0.1.11.2, ``fit.is_ranked_low``). The list is ordered best fit
+first, and a posting NOTHING ASSESSED YET whose known rank score is below the
+weak-fit rank (``fit.weak_fit_below_rank``, 50) is LEFT OUT of a search too:
+with ranking it is not a candidate, and a title match alone must not read as
+one. It is a collapse, never a hard filter: ``counts.ranked_low`` is how many
+the other filters select, and the ``ranked_low`` state lists them (so does
+naming the posting). Each such row carries ``ranked_low: true``. A posting not
+ranked yet stays in the list, after the ranked ones ("not ranked yet"), and an
+assessed posting keeps the rules above. "Assess these" still counts them as
+its own low-rank question. ``ranking`` in both responses says how far the
+background rank is (ranked of total per profile): a batch taken while it runs
+is the top of a half-ranked list.
+
 HISTORY (``history=True``). What old find-jobs runs assessed, imported by
 ``run_history.py``, each with the provenance the run sealed. Rows of a run
 with no profile (the ``ephemeral`` pseudo-profile) and of a profile that is
@@ -50,10 +63,11 @@ score is below the assess threshold (``fit.assess_min_rank``, 50) is left out
 of the batch and counted; ``low_rank`` in the response is the separate
 question for those ("3 low-ranked ones are skipped; assess those too? ~3
 calls"), and ``include_low_rank`` assesses them with the rest. 0110-10-11 (the
-operator's rule, ``scout_new.BATCH_LIMIT``): one approval assesses the NEWEST
-50 of them and never more (by the day the posting went up, else by when Scout
-first saw it). The question says the real total and the 50 ("Assess the
-newest 50 of 120 postings? ~50 calls ... (70 more after these 50)"), its
+operator's rule, ``scout_new.BATCH_LIMIT``): one approval assesses 50 of them
+and never more. 0.1.11.2: the TOP 50 BY RANK (``scout_new.top_ranked_batch``:
+the best rank score first; a posting not ranked yet after the ranked ones, the
+newest first). The question says the real total and the 50 ("Assess the
+top 50 by rank of 120 postings? ~50 calls ... (70 more after these 50)"), its
 estimate is the batch's, ``question.batch`` / ``more_after`` and
 ``counts.batch`` / ``more_after`` say the same in numbers, and the same call
 again assesses the next 50.
@@ -65,7 +79,7 @@ next to ids, counts, codes and the profile tags, and nothing the user wrote.
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 import threading
@@ -99,10 +113,11 @@ from .scout_new import (
     _shown,
     batch_date,
     check_response,
+    _ranking,
     in_order,
-    newest_batch,
     posted_text,
     split_low_rank,
+    top_ranked_batch,
 )
 
 SCHEMA_VERSION = "scout-postings:1"
@@ -127,9 +142,11 @@ STATE_ASSESSED = "assessed"
 STATE_RECOMMENDED = "recommended"
 # ``has_gap`` (0.1.11 N3, OD1): matched by verdict, held by the gate (``job_state.HAS_GAP``).
 _ROW_STATES = frozenset({"not_assessed", "needs_answers", "matched", "has_gap", "not_a_match", "tailored", fit_rules.WEAK_FIT})
-STATES = frozenset(_ROW_STATES | {STATE_ASSESSED, STATE_RECOMMENDED})
+#: 0.1.11.2: ``ranked_low`` (``fit.RANKED_LOW``) lists the not-assessed postings ranked below the weak-fit rank.
+STATES = frozenset(_ROW_STATES | {STATE_ASSESSED, STATE_RECOMMENDED, fit_rules.RANKED_LOW})
 
 DEFAULT_LIMIT = 50
+RANKED_LOW_COMMAND = "gigai scout jobs list --state ranked_low"
 MAX_LIMIT = 200
 _NOT_ASSESSED = "not_assessed"
 
@@ -198,10 +215,12 @@ def _in_window(row: PostingRecord, window: str | None, since: str, moment: datet
     return _posted(row) >= edge
 
 
-def _wanted(row: PostingRecord, states: Sequence[str]) -> bool:
+def _wanted(row: PostingRecord, states: Sequence[str], setting: fit_rules.FitSetting = fit_rules.DEFAULT_SETTING) -> bool:
     if not states:
         return True
     for state in states:
+        if state == fit_rules.RANKED_LOW and fit_rules.is_ranked_low(row.state, row.rank_score, setting):
+            return True
         if state == STATE_ASSESSED and row.state != _NOT_ASSESSED:
             return True
         if state == STATE_RECOMMENDED and row.label == STATE_RECOMMENDED:
@@ -225,7 +244,7 @@ class _Selection:
     def __init__(
         self, home_root: Path, target: Path, store: PipelineStore, *, profile_ids: Sequence[str], query: str | None,
         states: Sequence[str], window: str | None, removed: bool, jobs: Sequence[str] | None, moment: datetime,
-        model_wait: float | None = None, sort: str = SORT_FIT,
+        model_wait: float | None = None, sort: str = SORT_FIT, collapse_ranked_low: bool = False,
     ) -> None:
         refreshed = postings.refresh(home_root, target, store=store, now=moment, wait=model_wait)
         #: Rows read as stored while a build runs (``postings.BUILD_STALE``), for a caller that acts on them.
@@ -250,9 +269,14 @@ class _Selection:
         only = self.profile_ids[0] if len(self.profile_ids) == 1 else None
         shown = [(group, _shown(group, only)) for group in groups.values()]
         weak = fit_rules.WEAK_FIT
+        setting = fit_rules.fit_setting(home_root, target)
+
+        def low(row: PostingRecord) -> bool:
+            return fit_rules.is_ranked_low(row.state, row.rank_score, setting)
+
         shown = [
             (group, row) for group, row in shown
-            if (_wanted(row, states) or row.state == weak) and _in_window(row, window, self.since, moment)
+            if (_wanted(row, states, setting) or row.state == weak or low(row)) and _in_window(row, window, self.since, moment)
         ]
         words = [word for word in (query or "").casefold().split() if word]
         if words:
@@ -260,7 +284,14 @@ class _Selection:
             shown = [(group, row) for group, row in shown if all(word in text.get(row.job, "") for word in words)]
         # 0110-10-02: the weak fits the OTHER filters select (the chip's number), then only the ones asked for stay.
         self.weak_fit = sum(1 for _group, row in shown if row.state == weak)
-        shown = [(group, row) for group, row in shown if _wanted(row, states) and not _hidden(row, states, jobs is not None)]
+        # 0.1.11.2: the same for the not-assessed postings ranked low; only the search collapses them (``collapse_ranked_low``).
+        self.ranked_low = sum(1 for _group, row in shown if low(row))
+        self.is_ranked_low = low
+        collapse = collapse_ranked_low and jobs is None and fit_rules.RANKED_LOW not in states
+        shown = [
+            (group, row) for group, row in shown
+            if _wanted(row, states, setting) and not _hidden(row, states, jobs is not None) and not (collapse and low(row))
+        ]
         # 0110-8-04: the grid's one order (``scout_new.order_key``): current, stale, not assessed; verdict; rank.
         self.shown = shown = in_order(shown)
         if sort == SORT_NEWEST_POSTED:
@@ -283,7 +314,7 @@ class _Selection:
 
 def _rows_json(
     home_root: Path, target: Path, store: PipelineStore, shown: Sequence[tuple[Sequence[PostingRecord], PostingRecord]],
-    views: Sequence[ProfileView] = (),
+    views: Sequence[ProfileView] = (), ranked_low: Callable[[PostingRecord], bool] | None = None,
 ) -> list[dict[str, object]]:
     """The grid rows: ``scout new``'s own row, plus where a row's assessment came from when it was a run's."""
 
@@ -314,6 +345,8 @@ def _rows_json(
             entry["assessment_detail"] = False
             origin = run_history.basis_json(old)
         entry["assessment_basis"] = origin
+        if ranked_low is not None:
+            entry["ranked_low"] = ranked_low(row)  # 0.1.11.2: not assessed and ranked below the weak-fit rank
         rows.append(entry)
     return rows
 
@@ -389,7 +422,7 @@ def search_postings(
         try:
             selection = _Selection(
                 home_root, target, store, profile_ids=wanted_profiles, query=query, states=wanted_states, window=window,
-                removed=removed, jobs=None, moment=moment, model_wait=model_wait, sort=sort,
+                removed=removed, jobs=None, moment=moment, model_wait=model_wait, sort=sort, collapse_ranked_low=True,
             )
             unknown = [item for item in selection.hidden_profiles if item != EPHEMERAL_PROFILE and not history]
             if unknown:
@@ -411,14 +444,18 @@ def search_postings(
                     "by_state": dict(sorted(by_state.items())),
                     # 0110-10-02: the weak fits these filters select; they are in ``matched`` only when the state is asked for.
                     "weak_fit": selection.weak_fit,
+                    # 0.1.11.2: the not-assessed postings ranked below the weak-fit rank; listed only by ``state=ranked_low``.
+                    "ranked_low": selection.ranked_low,
                 },
                 "postings": {
                     ENVELOPE_KEY: labels_envelope(POSTINGS_LABELS),
                     "rule": UNTRUSTED_TEXT_RULE,
-                    "rows": _rows_json(home_root, target, store, page, selection.views),
+                    "rows": _rows_json(home_root, target, store, page, selection.views, selection.is_ranked_low),
                 },
                 "profiles": selection.profiles_json(),
                 "rank": rank_status(home_root, target),
+                # 0.1.11.2: how far the background rank is: the order (and a batch) is of what is ranked so far.
+                "ranking": _ranking(store, selection.views, home_root, target, now=moment),
                 "history": _history(store, selection, include_hidden=include_hidden) if history else None,
             }
             check_response(response)
@@ -555,10 +592,12 @@ def assess_these(
             setting = fit_rules.fit_setting(home_root, target)
             ranks = {(row.job, row.profile_id): row.rank_score for _group, row in selection.shown}
             wanted, low = split_low_rank(candidates, ranks, setting, include=include_low_rank)
-            # 0110-10-11: one approval assesses the newest 50, never more; ``wanted`` is all of them, ``pairs`` the batch.
+            # 0110-10-11: one approval assesses 50, never more; ``wanted`` is all of them, ``pairs`` the batch.
+            # 0.1.11.2: the batch is the TOP 50 BY RANK (not ranked yet: after the ranked ones, the newest first).
             dates = {(row.job, row.profile_id): batch_date(row) for _group, row in selection.shown}
-            pairs, later = newest_batch(wanted, dates)
-            low_batch, low_later = newest_batch(low, dates)
+            pairs, later = top_ranked_batch(wanted, ranks, dates)
+            low_batch, low_later = top_ranked_batch(low, ranks, dates)
+            ranking = _ranking(store, selection.views, home_root, target, now=moment)
             model, estimate = _estimate(pairs, home_root, target)
             per_profile: dict[str, int] = {}
             for _job, owner in pairs:
@@ -569,7 +608,7 @@ def assess_these(
             tokens = estimate["tokens"]
             cost = f", ~{tokens / 1000:.0f}k tokens" if isinstance(tokens, (int, float)) and tokens >= 1000 else ""
             sentence = (
-                (f"Assess the newest {len(pairs)} of {len(wanted)} postings" if later else f"Assess {len(pairs)} posting{'s' if len(pairs) != 1 else ''}")
+                (f"Assess the top {len(pairs)} by rank of {len(wanted)} postings" if later else f"Assess {len(pairs)} posting{'s' if len(pairs) != 1 else ''}")
                 + (f" ({named_profiles})" if named_profiles else "") + f"? {_calls(estimate['calls'])}{cost}"
                 + (f" ({later} more after these {len(pairs)})" if later else "")
             )
@@ -594,7 +633,7 @@ def assess_these(
                     "batch": len(low_batch), "more_after": low_later,
                     "text": (
                         f"{len(low)} low-ranked {'one is' if one else 'ones are'} skipped (rank below {setting.assess_min_rank}); "
-                        f"assess {f'the newest {len(low_batch)} of ' if low_later else ''}{'that' if one else 'those'} too? "
+                        f"assess {f'the top {len(low_batch)} by rank of ' if low_later else ''}{'that' if one else 'those'} too? "
                         f"{_calls(low_estimate['calls'])}{low_cost}" + (f" ({low_later} more after these {len(low_batch)})" if low_later else "")
                     ),
                     "yes": {"api": {"method": "POST", "path": "/api/postings/assess", "body": {**body, "include_low_rank": True}}},
@@ -666,6 +705,7 @@ def assess_these(
                     "low_rank_skipped": len(low), "batch": len(pairs), "more_after": later,
                 },
                 "low_rank": low_rank,
+                "ranking": ranking,
                 "not_found": not_found,
                 "approval": None if approval_id is None else {"id": approval_id, "decided_by": decided_by, "jobs": len(pairs)},
                 "assessed": assessed,
@@ -682,6 +722,19 @@ def assess_these(
             store.close()
 
 
+def ranking_line(ranking: object) -> str | None:
+    """0.1.11.2: "Ranking is still running: 120 of 173 ranked. ..." while the background rank has postings left; else ``None``."""
+
+    if not isinstance(ranking, Mapping) or not ranking.get("in_progress"):
+        return None
+    rows = [item for item in ranking.get("by_profile") or () if isinstance(item, Mapping)]
+    ranked, total = sum(int(item["ranked"]) for item in rows), sum(int(item["total"]) for item in rows)
+    return (
+        f"Ranking is still running: {ranked} of {total} ranked. The order, and the top 50 by rank, are of what is ranked so far; "
+        "a posting not ranked yet comes after the ranked ones."
+    )
+
+
 def render(response: Mapping[str, object]) -> str:
     """A search or "assess these" response as the terminal shows it: counts, the question, one line per posting."""
 
@@ -696,6 +749,9 @@ def render(response: Mapping[str, object]) -> str:
             lines.extend(summary_lines(summary))  # 0110-10-13: what would be sent, above the question
         if isinstance(question, Mapping):
             lines.append(str(question["text"]))
+            running = ranking_line(response.get("ranking"))
+            if running:
+                lines.append(f"  {running}")
             lines.append("  Nothing was assessed. Yes: run the same command with --yes.")
         elif isinstance(assessed, Mapping):
             lines.append(f"Assessed {assessed['assessed']} of {assessed['requested']}." + (f" Fetched {assessed['fetched_on_demand']} missing description(s) first." if assessed.get("fetched_on_demand") else ""))
@@ -718,6 +774,15 @@ def render(response: Mapping[str, object]) -> str:
             lines.append(f"  not in the stored postings: {job}")
     else:
         lines.append(f"{counts['matched']} posting(s) match, {counts['new']} new since the last check. Showing {counts['shown']}.")
+        low_count = counts.get("ranked_low")
+        if low_count and fit_rules.RANKED_LOW not in response["filters"]["states"]:  # type: ignore[index]
+            lines.append(
+                f"{low_count} weak fit{'s' if low_count != 1 else ''}, ranked low, {'are' if low_count != 1 else 'is'} not listed: "
+                f"{RANKED_LOW_COMMAND}"
+            )
+        running = ranking_line(response.get("ranking"))
+        if running:
+            lines.append(running)
     listing = response["postings"]
     assert isinstance(listing, Mapping)
     for row in listing["rows"]:  # type: ignore[union-attr]

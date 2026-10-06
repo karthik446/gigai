@@ -8,9 +8,11 @@ import { modelTargetLabel } from "../modelTargets.js";
 // 0110-10-02: postings ranked below the assess threshold are left out of the
 // count; they are a second question in the same dialog (a box, off by
 // default), and Approve assesses them only when it is ticked.
-// 0110-10-11: one approval assesses the NEWEST 50 and never more. With more
-// than that selected the title says "the newest 50 of N", the estimate is the
-// 50's, and a line says how many are left and how to take the next 50.
+// 0110-10-11: one approval assesses 50 and never more. 0.1.11.2: the TOP 50
+// BY RANK. With more than that selected the title says "the top 50 by rank of
+// N", the estimate is the 50's, and a line says how many are left and how to
+// take the next 50. While the background rank still runs, a line says so
+// (`dialog.ranking`): the 50 are then the top of what is ranked so far.
 export default function AssessApprovalDialog({ dialog, submitting, error, includeLowRank = false, onIncludeLowRank, onApprove, onCancel }) {
   const low = dialog.lowRank;
   return (
@@ -26,6 +28,11 @@ export default function AssessApprovalDialog({ dialog, submitting, error, includ
           {approvalBatchLine(dialog) && (
             <li data-role="approval-batch">
               <strong>50 at a time:</strong> {approvalBatchLine(dialog)}
+            </li>
+          )}
+          {dialog.ranking && (
+            <li data-role="approval-ranking">
+              <strong>Ranking:</strong> {dialog.ranking}
             </li>
           )}
           <li data-role="approval-estimate">
