@@ -34,6 +34,7 @@ import {
   showQuickAssessChip,
   storedOrigin,
   workModeLabel,
+  h1bLabel,
 } from "../jobModel.js";
 import { assessmentStaleFor, eventActionLabel, fitStateFor, jobStateFor, staleAssessmentNote, staleReasonWords } from "../jobStateModel.js";
 import { modelTargetLabel } from "../modelTargets.js";
@@ -393,6 +394,8 @@ export default function JobPage({
   // 0110-10-14: the posting's dates. The Jobs row the page was opened from has them; opened by its link (a reload,
   // Assessments), the page asks for the job once. A past run's row keeps its own line (below).
   const rowDated = Boolean(listedRow && postingDate(listedRow));
+  // 0.1.11.3: the company's catalog H-1B figure is a label of the Jobs row; a run's or an assessment's job has none of its own.
+  const h1bFigure = job && h1bLabel(job.h1b) ? job.h1b : listedRow && h1bLabel(listedRow.h1b) ? listedRow.h1b : null;
   const askFullText = Boolean(job && job.fromPostings && /^https?:\/\//.test(job.id || ""));
   const askDates = askFullText || (Boolean(job) && !rowDated && !job.row && /^https?:\/\//.test(job.id || ""));
   const [servedDates, setServedDates] = useState(null);
@@ -568,7 +571,7 @@ export default function JobPage({
                 </span>
               )}
               <HelpLink topic="verdict" />
-              {visaRequired && <SponsorshipBadge sponsorship={job.sponsorship} h1b={job.h1b} />}
+              {(visaRequired || h1bFigure) && <SponsorshipBadge sponsorship={job.sponsorship} h1b={h1bFigure} />}
               {job.status === "carried_forward" && <span className="tag">{unchangedSinceLabel(job.fromRunDate)}</span>}
             </div>
             {assessment && (

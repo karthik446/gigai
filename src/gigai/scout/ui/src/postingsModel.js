@@ -800,7 +800,8 @@ export function postingJob(row) {
     assessment: null,
     assessmentSource: null,
     verdict: "not_assessed",
-    sponsorship: "unknown",
-    h1b: null,
+    // 0.1.11.3: the row's labels (the posting's stated sponsorship, the company's catalog H-1B figure; null = none)
+    sponsorship: row.sponsorship || "unknown",
+    h1b: row.h1b || null,
   };
 }
