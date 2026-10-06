@@ -151,3 +151,27 @@ def test_the_gate_fails_closed_without_ocr_or_images(tmp_path: Path, monkeypatch
     (tmp_path / "frame.png").write_bytes(b"not read: tesseract is looked up first")
     monkeypatch.setattr(privacy_scan.shutil, "which", lambda _name: None)
     assert privacy_scan.main([str(tmp_path)]) == 1
+
+
+def test_the_demo_home_shows_the_pdf_header_path_as_one_the_gate_passes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """0.1.11.3 release: the Generate PDF form prints `Filled from <path>` and `Save these details to <path>`.
+
+    The old demo home `<HOME>/demo/home` showed `~/demo/home/header.json`: `/home/header.json` is a gate hit.
+    The rule stays; the demo home is now `<HOME>/.gigai`, so the path is the default install's.
+    """
+
+    from gigai.scout import pdf_header_file
+
+    user_home = tmp_path.resolve()
+    monkeypatch.setenv("HOME", str(user_home))
+    monkeypatch.delenv("GIGAI_HOME", raising=False)
+    old_home = user_home / "demo" / "home"
+    old_shown = pdf_header_file.default_path(old_home)
+    assert [str(hit) for hit in privacy_scan.scan_text(f"Filled from ~/demo/home/{old_shown.name}")] == ["home-path: /home/header.json"]
+
+    new_home = demo_home.demo_gigai_home(user_home / "demo")
+    assert new_home == user_home / ".gigai"
+    shown = pdf_header_file.default_path(new_home)
+    for text in (f"Filled from {pdf_header_file._display_path(shown)}", f"Save these details to {pdf_header_file._display_path(shown)}"):
+        assert "~/Documents/GigAI/header.json" in text
+        assert privacy_scan.scan_text(text) == [], text

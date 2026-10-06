@@ -38,7 +38,9 @@ runtime dependency and not an extra of the published package.
   which the gate reads as a home path (`/home/<name>`), rightly: that failed the 0.1.10.9 release's
   screenshots. The build sets the resumes folder to `~/Documents/GigAI/resumes` instead
   (`demo_home.media_resumes_folder`), which is also what a reader's own Scout shows. The rule is not
-  loosened; if a new frame shows another path of the demo home, change what the demo shows.
+  loosened. 0.1.11.3's Generate PDF form also prints the header file's path (`~/demo/home/header.json`,
+  a `/home/header.json` hit): the demo's GigAI home is now `<temporary HOME>/.gigai`
+  (`demo_home.demo_gigai_home`), so the form shows `~/Documents/GigAI/header.json`. If a new frame shows another path of the demo home, change what the demo shows.
 
 ## What the fixture model limits
 
