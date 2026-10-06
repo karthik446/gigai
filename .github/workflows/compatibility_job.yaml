@@ -1,8 +1,11 @@
 name: Compatibility job (sweep)
 
-# ci-spike: no nightly schedule. The sweep runs after each release
-# (release.yml, post-release-compatibility) and on demand from here.
+# 0.1.11.1: the PR and the release pre-check run a cut-down lane; everything else is here, non-blocking:
+# nightly on main, after each release (release.yml, post-release-compatibility) and on demand. A failed row
+# in the run summary is a weakness to triage, not a release failure.
 on:
+  schedule:
+    - cron: "17 6 * * *"
   workflow_dispatch:
 
 permissions:

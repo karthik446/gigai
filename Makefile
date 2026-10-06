@@ -6,7 +6,7 @@ TEST_XDIST_WORKERS ?= auto
 TEST_XDIST_MAX_WORKERS ?= 14
 TEST_XDIST_DIST ?= worksteal
 
-.PHONY: test test-macos-smoke test-operator-home test-operator-writes test-core-flow test-source test-behavior test-wheel test-installed test-live test-debian-offline unit-tests api-e2e eval-live lint
+.PHONY: test test-macos-smoke test-operator-home test-operator-writes test-core-flow test-source test-behavior test-wheel test-installed test-live test-debian-offline unit-tests test-changed api-e2e eval-live lint
 
 # 0110-10-08: names the package uses and never defines. 0.1.10.9 shipped `time.monotonic()` in a module with no
 # `import time`, on a line only a large store reaches: no test ran it, and nothing read the code for it. Every PR
@@ -42,9 +42,7 @@ api-e2e:
 # Fast inner-loop lane: only tests tests/conftest.py's AST classifier marks
 # fast_unit (no filesystem, process, network, or mutable-workpad seam,
 # tracing same-file helpers and cross-file test-to-test imports). Measured
-# at 719 tests / ~6.6s wall on the 14-CPU reference host with -n 0; xdist
-# start-up cost exceeded its benefit at this lane's size, so it runs
-# unparallelized. Does not replace `make test`; see
+# at 719 tests / ~6.6s wall on the 14-CPU reference host with -n 0 (stale: see UNIT_WORKERS below). Does not replace `make test`; see
 # S19-test-suite-diet spike's revision note (kept in the maintainers' local
 # orchestrator docs).
 # --ignore=tests/api_e2e: test-gap-001's suite spawns a real child server
@@ -53,8 +51,21 @@ api-e2e:
 # happen to have no filesystem/process/network seam of their own (the
 # route-inventory AST-scan tests) would still get collected and run here,
 # even though the suite as a whole belongs in its own `make api-e2e` lane.
+# 0.1.11.1: the lane is no longer 719 tests: it is 2,730 (EXECUTED 2026-10-06), 207 s unparallelized and
+# 107 s with UNIT_WORKERS=4 on a laptop. CI (the PR lane and the release pre-check) passes UNIT_WORKERS=4.
+UNIT_WORKERS ?= 0
 unit-tests:
-	$(UV) run --locked --extra test pytest -m fast_unit -q --durations=25 -n 0 --ignore=tests/api_e2e
+	$(UV) run --locked --extra test pytest -m fast_unit -q --durations=25 -n $(UNIT_WORKERS) --ignore=tests/api_e2e
+
+# 0.1.11.1: the PR lane's second half. The test files that import what changed since BASE (a commit id; the
+# push's previous head in CI), chosen by tools/ci_select_tests.py; nothing when the change cannot be mapped or
+# the selection is over 500 tests (the nightly `full` run covers those). Not part of `make test`.
+#   make test-changed BASE=origin/main
+BASE ?= HEAD~1
+test-changed:
+	@files="$$(python3 tools/ci_select_tests.py --diff "$(BASE)" HEAD)"; \
+	if [ -z "$$files" ]; then echo "test-changed: nothing selected"; else \
+	$(UV) run --locked --extra test pytest -q -n 4 --dist worksteal $$files; fi
 
 # The unfiltered invocation is authoritative for source, unit, integration,
 # behavior-directory, CLI, and source-installed test discovery.  It uses a
@@ -118,8 +129,11 @@ test-operator-writes:
 # non-zero exit, a traceback or "Error" on stderr, stdout that is not JSON, or its own check. About 6 minutes on a
 # laptop. The table to paste into the "ready" message: $(CORE_FLOW_OUT)/table.md; each step's output: $(CORE_FLOW_OUT)/logs/.
 CORE_FLOW_OUT ?= build/core-flow
+# 0.1.11.1: CORE_FLOW_ARGS="--postings 15000 --companies 1200" is the small-home form every PR and pre-check runs
+# (about 90 s); the operator-sized form (the default) stays in the `full` run.
+CORE_FLOW_ARGS ?=
 test-core-flow:
-	$(UV) run --locked python tools/core_flow.py --out "$(CORE_FLOW_OUT)"
+	$(UV) run --locked python tools/core_flow.py --out "$(CORE_FLOW_OUT)" $(CORE_FLOW_ARGS)
 
 # G28's deterministic evaluator is not a pytest test and therefore remains an
 # explicit offline phase in the aggregate command.

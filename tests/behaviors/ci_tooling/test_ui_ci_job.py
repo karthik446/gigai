@@ -66,17 +66,18 @@ def _makefile() -> str:
 # ---------------------------------------------------------------------------- the `ui` job (every PR, every release pre-check)
 
 
-def test_the_ui_job_runs_make_ui_test_on_every_pr_and_release_precheck_and_not_in_the_sweep() -> None:
+def test_the_ui_job_runs_make_ui_test_in_the_non_blocking_full_profile_only() -> None:
     text = _workflow()
     assert release_notes.parse_workflow_jobs(text)["ui"].needs == ["changes"]
     job = _job(text, "ui")
-    assert "    if: needs.changes.outputs.code_changed == 'true' && (inputs.profile || 'pr') != 'full'\n" in job
+    assert "    if: needs.changes.outputs.code_changed == 'true' && (inputs.profile || 'pr') == 'full'\n" in job  # 0.1.11.1: not on a PR, not in the pre-check
+    assert "    continue-on-error: true\n" in job  # the sweep reports, it does not block
     assert "    runs-on: ubuntu-24.04\n" in job and 'python-version: "3.11"' in job
     assert 'uv sync --locked --extra test --group ui --python "3.11"' in job
     tests = _step(job, "run: make ui-test")
     assert tests.rstrip().endswith("run: make ui-test")  # the small home: not ui-test-full, not ui-test-operator
     assert "if:" not in tests  # nothing lets it be skipped: it blocks from day one
-    assert "continue-on-error" not in _code(job)
+    assert "continue-on-error" not in _code(job).replace("    continue-on-error: true\n", "")  # job level only, never a step
 
 
 def test_timing_ceilings_are_reported_in_ci_for_the_first_week_by_one_switch_per_job() -> None:
@@ -139,7 +140,7 @@ def test_no_retry_anywhere_in_the_browser_jobs() -> None:
 
     text = _workflow()
     for name in ("ui", "operator-home"):
-        job = _code(_job(text, name)).lower()
+        job = _code(_job(text, name)).lower().replace("    continue-on-error: true\n", "")  # job level: non-blocking, never per step
         for forbidden in ("retry", "rerun", "--reruns", "continue-on-error", "max_attempts", "attempt_limit", "|| make", "|| true"):
             assert forbidden not in job, f"{name}: {forbidden}"
         assert job.count("run: make ui-test") == 1, name
@@ -169,7 +170,7 @@ def test_the_release_precheck_builds_the_operator_sized_home_once_for_the_gate_a
 
     text = _workflow()
     job = _job(text, "operator-home")
-    assert "    if: needs.changes.outputs.code_changed == 'true' && inputs.profile == 'release'\n" in job
+    assert "    if: needs.changes.outputs.code_changed == 'true' && inputs.profile == 'full'\n" in job  # 0.1.11.1: the sweep, not the pre-check
     code = _code(job)
     assert code.count("tests.support.operator_home") == 1, "one build"
     build = _step(job, "tests.support.operator_home")

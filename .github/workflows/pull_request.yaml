@@ -8,6 +8,11 @@ name: Pull request
 # It tests the branch head, builds the release files and uploads them as the
 # artifact `release-dist-<version>`. It never tags and never publishes: that is
 # release.yml, which the operator starts, and which publishes this run's files.
+# 0.1.11.1: ONE cut-down lane. Profiles `pr` (every push) and `release` (the pre-check) run the same
+# blocking jobs: lint, the fast unit lane, the tests of the changed files (PR only), the wheel, the core-flow
+# smoke on a small home, eval scoring and the UI bundle check; `release` adds the release metadata, the build
+# and the artifact smoke. The 4-shard source suite, the browser tests, the 290k-posting gate and the macOS
+# smoke are in profile `full`: non-blocking, nightly (compatibility_job.yaml) and after each release.
 run-name: Pull request (${{ inputs.profile || 'pr' }})
 
 on:
@@ -15,7 +20,7 @@ on:
   workflow_call:
     inputs:
       profile:
-        description: "CI profile: pr (ubuntu/3.11), release = the release pre-check (pr + macOS smoke + the operator-sized home timing gate and browser flows + release metadata, build and artifact smoke), or full = the post-release compatibility sweep (non-blocking: ubuntu 3.12/3.13 + macOS 3.13 + sharded Debian offline)."
+        description: "CI profile: pr (the cut-down lane, ubuntu/3.11), release = the release pre-check (the same lane + release metadata, build and artifact smoke), or full = the non-blocking sweep (4-shard source suite on ubuntu 3.11/3.12/3.13 and macOS 3.13, browser tests, the 290k-posting gate, macOS smoke, sharded Debian offline)."
         required: false
         type: string
         default: pr
@@ -27,7 +32,7 @@ on:
   workflow_dispatch:
     inputs:
       profile:
-        description: "CI profile to run on this branch. release = the pre-check of a release; nothing is tagged or published."
+        description: "CI profile to run on this branch. release = the pre-check of a release (nothing is tagged or published); full = the non-blocking sweep."
         required: false
         type: choice
         options:
@@ -100,7 +105,7 @@ jobs:
 
   source-matrix:
     needs: changes
-    if: needs.changes.outputs.code_changed == 'true'
+    if: needs.changes.outputs.code_changed == 'true' && (inputs.profile || 'pr') == 'full'
     name: Compute source-suite matrix
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -116,22 +121,16 @@ jobs:
           SHARDS: "4"
         run: |
           case "${PROFILE}" in
-            pr)
-              entries='[{"os":"ubuntu-24.04","python":"3.11"}]'
-              ;;
-            release)
-              # ci-spike: one main target. The gate runs the same source
-              # suite as a PR (ubuntu/3.11, 4 shards) plus the macos-smoke job
-              # below; the OS x Python sweep runs after the release instead.
-              entries='[{"os":"ubuntu-24.04","python":"3.11"}]'
-              ;;
             full)
+              # 0.1.11.1: the whole source suite, 4 shards per entry, non-blocking. ubuntu/3.11 is
+              # here because the PR no longer runs the shards. (The cases pr and release do not
+              # exist: the job above does not run for them.)
               # ci-spike: the post-release sweep. ubuntu/3.11 is not repeated
               # (the gate ran it). macOS runs one Python (3.13, the newest; the
               # gate's smoke uses 3.12): GitHub allows 5 concurrent macOS jobs,
               # so 4 shards fit in one wave. Add {"os":"macos-latest","python":"3.11"}
               # here for an on-demand floor check (a second wave, ~+20 min).
-              entries='[{"os":"ubuntu-24.04","python":"3.12"},{"os":"ubuntu-24.04","python":"3.13"},{"os":"macos-latest","python":"3.13"}]'
+              entries='[{"os":"ubuntu-24.04","python":"3.11"},{"os":"ubuntu-24.04","python":"3.12"},{"os":"ubuntu-24.04","python":"3.13"},{"os":"macos-latest","python":"3.13"}]'
               ;;
             *)
               echo "unknown profile: ${PROFILE}" >&2
@@ -287,8 +286,8 @@ jobs:
 
   # U4 (0.1.10.9): the browser tests (tests/ui). Real Chromium against the real Scout
   # server on a small synthetic home (`make ui-test`: no network, no model, never a
-  # real home). Every PR and every release pre-check; not the post-release sweep (the
-  # gate ran it on this commit).
+  # real home). 0.1.11.1: profile `full` only (non-blocking: nightly and after each release); the
+  # PR and the pre-check no longer run it.
   # What fails the job from day one: structure (request counts, one request in flight
   # per resource, what the page shows) and console / page / HTTP problems. The timing
   # ceilings (wall-clock, server CPU, server memory) are REPORTED for the first week
@@ -306,10 +305,11 @@ jobs:
   # for the setup before the step and the uploads after it. NOT measured on a runner yet.
   ui:
     needs: changes
-    if: needs.changes.outputs.code_changed == 'true' && (inputs.profile || 'pr') != 'full'
+    if: needs.changes.outputs.code_changed == 'true' && (inputs.profile || 'pr') == 'full'
     name: Browser tests (small home)
     runs-on: ubuntu-24.04
     timeout-minutes: 20
+    continue-on-error: true
     env:
       GIGAI_UI_BUDGETS: report
     steps:
@@ -364,6 +364,105 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
+  # 0.1.11.1: the lane both profiles run. `make unit-tests` is the fast_unit lane (2,730 tests, 107 s on a
+  # laptop with 4 workers); the release pre-check adds the no-[FILL] gate. A PR push also runs
+  # `changed-tests` beside it. Measured before the cut: the 4 shards took 8-15 min.
+  fast-tests:
+    needs: changes
+    if: needs.changes.outputs.code_changed == 'true' && (inputs.profile || 'pr') != 'full'
+    name: Fast unit lane (+ no placeholder ships, release)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    env:
+      GIGAI_TEST_LATENCY_SCALE: "3"
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          ref: ${{ inputs.ref || github.sha }}
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      - uses: astral-sh/setup-uv@v8.0.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - run: uv sync --locked --extra test --python "3.11"
+      - name: Fast unit lane
+        run: make unit-tests UNIT_WORKERS=4
+      - name: No placeholder ships (release pre-check)
+        if: inputs.profile == 'release'
+        run: uv run --locked --extra test pytest -q -n 0 tests/behaviors/ci_tooling/test_docs_no_fill_markers.py
+
+  # 0.1.11.1: PR only. The test files that import what this push changed (tools/ci_select_tests.py). Its own
+  # job so it runs beside the unit lane, not after it.
+  changed-tests:
+    needs: changes
+    if: needs.changes.outputs.code_changed == 'true' && github.event_name == 'pull_request'
+    name: Tests of the files this push changed
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    env:
+      GIGAI_TEST_LATENCY_SCALE: "3"
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          ref: ${{ inputs.ref || github.sha }}
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      - uses: astral-sh/setup-uv@v8.0.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - run: uv sync --locked --extra test --python "3.11"
+      - name: Select and run
+        env:
+          BEFORE_SHA: ${{ github.event.before }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          base="${BEFORE_SHA}"
+          case "${base}" in ""|0000000000000000000000000000000000000000) base="${BASE_SHA}" ;; esac
+          git cat-file -e "${base}^{commit}" 2>/dev/null || base="${BASE_SHA}"
+          make test-changed BASE="${base}"
+
+  # 0.1.11.1: the core-flow smoke on a SMALL home (15,000 postings, 1,200 companies): the wheel built and
+  # installed with uv into a clean environment, then the installed `gigai` command through `scout new` and
+  # the commands around it, cold then warm (23 steps). 87 s on a laptop. The operator-sized form is in
+  # `operator-home` (profile full).
+  core-flow:
+    needs: changes
+    if: needs.changes.outputs.code_changed == 'true' && (inputs.profile || 'pr') != 'full'
+    name: Core-flow smoke (the wheel's gigai command, small home)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      - uses: astral-sh/setup-uv@v8.0.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - run: uv sync --locked --extra test --python "3.11"
+      - name: Core flow, cold then warm
+        run: make test-core-flow CORE_FLOW_OUT=build/core-flow CORE_FLOW_ARGS="--postings 15000 --companies 1200"
+      - name: Core-flow table in the job summary
+        if: ${{ !cancelled() }}
+        run: cat build/core-flow/table.md >> "${GITHUB_STEP_SUMMARY}"
+      - name: Upload every step's output on failure
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: core-flow-failure-attempt-${{ github.run_attempt }}
+          path: build/core-flow/
+          if-no-files-found: warn
+          retention-days: 14
+
   debian-offline:
     needs: changes
     if: needs.changes.outputs.code_changed == 'true' && (inputs.profile || 'pr') == 'full'
@@ -414,10 +513,11 @@ jobs:
   # init scenarios, config/latency journey). ~5-8 min, one runner.
   macos-smoke:
     needs: changes
-    if: needs.changes.outputs.code_changed == 'true' && inputs.profile == 'release'
+    if: needs.changes.outputs.code_changed == 'true' && inputs.profile == 'full'
     name: macOS smoke (Python 3.12)
     runs-on: macos-latest
     timeout-minutes: 25
+    continue-on-error: true
     env:
       TEST_XDIST_MAX_WORKERS: "3"
       GIGAI_TEST_LATENCY_SCALE: "7"
@@ -498,10 +598,11 @@ jobs:
   # operations 6) -> 40. NOT measured on a runner yet.
   operator-home:
     needs: changes
-    if: needs.changes.outputs.code_changed == 'true' && inputs.profile == 'release'
+    if: needs.changes.outputs.code_changed == 'true' && inputs.profile == 'full'
     name: Operator-sized home timing gate, browser flows and core-flow smoke (290k postings)
     runs-on: ubuntu-24.04
     timeout-minutes: 90
+    continue-on-error: true
     env:
       GIGAI_TEST_LATENCY_SCALE: "3"
       GIGAI_UI_BUDGETS: report
@@ -700,7 +801,7 @@ jobs:
   # ci-spike: the sweep's report. Runs after the sweep jobs whatever they did and
   # lists what failed in the run summary; it never fails the run itself.
   sweep-summary:
-    needs: [source-tests, debian-offline]
+    needs: [source-tests, debian-offline, ui, macos-smoke, operator-home]
     if: always() && (inputs.profile || 'pr') == 'full'
     name: Compatibility sweep summary
     runs-on: ubuntu-24.04
@@ -720,7 +821,7 @@ jobs:
             echo "| Job | Result | Minutes |"
             echo "| --- | --- | --- |"
             gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}/jobs?per_page=100" --paginate \
-              --jq '.jobs[] | select(.name | test("All tests|Debian")) | select(.conclusion != "skipped") | "| \(.name) | \(.conclusion // .status) | \(if .completed_at then (((.completed_at | fromdateiso8601) - (.started_at | fromdateiso8601)) / 60 | floor) else "-" end) |"'
+              --jq '.jobs[] | select(.name | test("All tests|Debian|Browser|macOS|Operator")) | select(.conclusion != "skipped") | "| \(.name) | \(.conclusion // .status) | \(if .completed_at then (((.completed_at | fromdateiso8601) - (.started_at | fromdateiso8601)) / 60 | floor) else "-" end) |"'
             echo
             echo "A failed row is a compatibility weakness to look at, not a release failure."
           } >> "${GITHUB_STEP_SUMMARY}"

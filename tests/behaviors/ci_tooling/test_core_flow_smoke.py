@@ -176,7 +176,8 @@ def test_each_round_changes_over_500_boards_and_other_boards_than_the_round_befo
 def test_make_test_core_flow_runs_the_smoke_and_says_where_the_table_is() -> None:
     makefile = _read("Makefile", "the Makefile is excluded from the offline container build context")
 
-    assert "\nCORE_FLOW_OUT ?= build/core-flow\ntest-core-flow:\n\t$(UV) run --locked python tools/core_flow.py --out \"$(CORE_FLOW_OUT)\"\n" in makefile
+    assert "\nCORE_FLOW_OUT ?= build/core-flow\n" in makefile
+    assert "\ntest-core-flow:\n\t$(UV) run --locked python tools/core_flow.py --out \"$(CORE_FLOW_OUT)\" $(CORE_FLOW_ARGS)\n" in makefile
     assert re.search(r"^\.PHONY: .*\btest-core-flow\b", makefile, re.MULTILINE)
 
 
@@ -188,10 +189,10 @@ def test_the_release_precheck_runs_the_smoke_on_the_prebuilt_home_with_a_limit_a
     code = "\n".join(line for line in job.splitlines() if not line.lstrip().startswith("#"))
     steps = ["      - " + step for step in ("\n" + code.split("\n    steps:\n", 1)[1]).split("\n      - ")[1:]]
 
-    assert "    if: needs.changes.outputs.code_changed == 'true' && inputs.profile == 'release'\n" in job  # the release pre-check
+    assert "    if: needs.changes.outputs.code_changed == 'true' && inputs.profile == 'full'\n" in job  # 0.1.11.1: the sweep; the pre-check runs the small-home `core-flow` job
     (smoke,) = [step for step in steps if "make test-core-flow" in step]
     assert smoke.rstrip().endswith("run: make test-core-flow CORE_FLOW_OUT=build/ui-artifacts/core-flow")
-    assert HOME_BUILT in smoke and "timeout-minutes: 20" in smoke and "continue-on-error" not in code
+    assert HOME_BUILT in smoke and "timeout-minutes: 20" in smoke and "continue-on-error" not in code.replace("    continue-on-error: true\n", "")
     # The home built once in this job (GIGAI_OPERATOR_HOME_PREBUILT, exported by the build step) is the one it takes.
     (build,) = [step for step in steps if "tests.support.operator_home" in step]
     assert f'echo "{operator_home.PREBUILT_ENV}=${{home}}/op" >> "${{GITHUB_ENV}}"' in build and steps.index(build) < steps.index(smoke)
