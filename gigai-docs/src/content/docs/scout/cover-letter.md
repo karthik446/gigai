@@ -1,11 +1,11 @@
 ---
 title: Cover letters
-description: How your agent tailors your own cover letter to one job from your master resume, the two files it writes, and the rules that keep it honest.
+description: How your agent tailors your own cover letter to one job from your master resume, the two files it writes beside that job's resume, and the rules that keep it honest.
 ---
 
 Some postings ask for a cover letter. Scout has no cover-letter button: this is a **skill your
 agent runs**. You start with a letter of your own; your agent tailors it to one job, using only
-facts your master resume states, and saves it for you to review.
+facts your master resume states, and saves it beside that job's resume for you to review.
 
 GigAI calls no model for it and writes no letter. It supplies the facts (the posting, your master
 resume, the lines the assessment cited) and makes the PDF; your agent writes; you review and send. The agent's own
@@ -32,7 +32,8 @@ You need three things before you ask:
    structure and your voice are the starting point.
 2. **A master resume** in Scout (see [Your resume](../resume/)).
 3. **An assessment of the job**, so Scout knows the posting's requirements and which of your
-   master lines answer each one.
+   master lines answer each one. The resume picked for the job gives it its own folder in your
+   jobs folder, and that is where the letter goes.
 
 Then ask your agent: "Write a cover letter for this job", with the posting's URL.
 
@@ -43,7 +44,7 @@ It gathers three things:
 | What | How | Note |
 | --- | --- | --- |
 | Your base letter | It reads the file you name, after `gigai scout resume check PATH --json` says it is clean | The same gate as for a resume file |
-| The job | `gigai scout cover-letter brief --job-url URL`: one call | The posting, the requirement rows with their status, and the master lines the assessment cited for each row, by id and word for word |
+| The job | `gigai scout cover-letter brief --job-url URL`: one call | The posting, the requirement rows with their status, the master lines the assessment cited for each row, by id and word for word, and the file to write the letter to |
 | Your name | Only the one your own letter signs with | Never invented, never asked for |
 
 The brief is one reply that holds two kinds of text, and says which is which. The posting and the
@@ -73,18 +74,41 @@ Then it works in five steps:
 
 ## The files it writes
 
-Two files, in a folder of their own, never in the resumes folder:
+Two files, in the job's own folder of your jobs folder, beside the resume picked for that job:
 
 | File | What it holds |
 | --- | --- |
-| `~/Documents/GigAI/cover-letters/<company>-<role>-<date>.md` | The letter |
-| `~/Documents/GigAI/cover-letters/<company>-<role>-<date>.claims.md` | The claims trace: each factual sentence of the letter, the master line id and its text, then the list "Asks the master cannot prove" |
+| `<jobs folder>/<company>/<role>/cover-letter.md` | The letter |
+| `<jobs folder>/<company>/<role>/cover-letter.claims.md` | The claims trace: each factual sentence of the letter, the master line id and its text, then the list "Asks the master cannot prove" |
 
-The company and the role in the file name come from the posting, written in lowercase letters,
-digits and hyphens only. Read the trace beside the letter: it is how you check, sentence by
-sentence, that the letter says nothing your master resume does not.
+Your jobs folder is `~/Documents/GigAI/jobs` unless you changed it (`gigai scout jobs-folder`
+shows it; see [Your resume](../resume/)). So one job's files sit together:
 
-GigAI does not read, index or send these files. They are yours.
+```text
+~/Documents/GigAI/jobs/acme/staff-software-engineer/
+  resume.md                  the resume picked for the job
+  cover-letter.md            the letter your agent wrote
+  cover-letter.claims.md     its claims trace
+```
+
+- **The brief names the files.** The folder is named after the posting's company and role, which
+  are a stranger's words. So the agent does not build the path: the brief gives it
+  (`cover_letter_file` and `claims_file`, labelled `public-untrusted`), and the agent writes to
+  exactly those two files.
+- **Your letter is never replaced.** A `cover-letter.md` that is already in the folder is yours:
+  the agent never overwrites it. The brief then names the next free file, `cover-letter-2.md`
+  (with `cover-letter-2.claims.md`), then `-3`. Delete the ones you do not want.
+- **No folder yet.** A job gets its folder when a resume is picked for it. When there is none,
+  the brief gives no path and says which command makes it:
+  `gigai scout resume pick --job-url URL --refresh` (no model call). The agent runs that, then
+  the brief again. It never chooses a folder of its own.
+
+Read the trace beside the letter: it is how you check, sentence by sentence, that the letter says
+nothing your master resume does not.
+
+GigAI writes neither file, and does not index or send them. They are yours. The letter is signed
+with the name your own letter signs with, so unlike `resume.md` it is a file in the jobs folder
+that holds your name; it holds no contact details.
 
 ## The hard rules
 
@@ -106,7 +130,7 @@ cover letter. The claims trace is there so that you can.
 When you are happy with the letter, your agent (or you) makes the PDF:
 
 ```bash
-gigai scout cover-letter pdf --in ~/Documents/GigAI/cover-letters/acme-staff-software-engineer-2026-10-06.md --out ~/Documents/GigAI/cover-letters/acme-staff-software-engineer-2026-10-06.pdf --json
+gigai scout cover-letter pdf --in ~/Documents/GigAI/jobs/acme/staff-software-engineer/cover-letter.md --out ~/Downloads/acme-cover-letter.pdf --json
 ```
 
 - **One page.** The letter is set in the same template as your resume's PDF. A letter that is a
@@ -121,8 +145,11 @@ gigai scout cover-letter pdf --in ~/Documents/GigAI/cover-letters/acme-staff-sof
 - **The command reads that file, the agent never does.** Its values go into the PDF and nowhere
   else: they are not printed, not logged and not stored. The agent sees a path, a page count and
   plain notes.
-- **Only where you say.** The PDF is written to `--out` and is never written to your resumes folder
-  (that folder never holds a name or contact details, and a letter is signed).
+- **Only where you say.** The PDF is written to `--out`, a place you name. It carries your
+  contact details, so it is never written into your jobs folder (agents read that folder; the
+  command refuses with `letter_not_in_jobs_folder`) and never written to your resumes folder.
+  The letter's markdown stays in the job's folder; the PDF goes somewhere else, for example
+  `~/Downloads`.
 - **The letter file is plain paragraphs** with a blank line between them. Lines with no blank
   line between them are one paragraph; a paragraph of short lines (the greeting, the sign-off with
   your name under it) keeps its lines. Text prints as written. The claims trace beside the letter
@@ -133,9 +160,10 @@ gigai scout cover-letter pdf --in ~/Documents/GigAI/cover-letters/acme-staff-sof
 Everything below is made up: the company (Acme), the person, the master lines and the numbers.
 
 You ask: "Write a cover letter for the Staff Software Engineer job at Acme", with its URL. The
-agent lists the posting's asks, maps them to your master lines, and saves:
+agent runs the brief, which names the two files, lists the posting's asks, maps them to your
+master lines, and saves:
 
-`~/Documents/GigAI/cover-letters/acme-staff-software-engineer-2026-10-06.md`
+`~/Documents/GigAI/jobs/acme/staff-software-engineer/cover-letter.md`
 
 ```markdown
 Dear Acme hiring team,
@@ -157,7 +185,7 @@ Thank you for reading,
 Jane Example
 ```
 
-`~/Documents/GigAI/cover-letters/acme-staff-software-engineer-2026-10-06.claims.md`
+`~/Documents/GigAI/jobs/acme/staff-software-engineer/cover-letter.claims.md`
 
 ```markdown
 # Claims trace: Acme, Staff Software Engineer

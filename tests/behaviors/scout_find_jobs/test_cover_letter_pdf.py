@@ -9,7 +9,8 @@ The END outcome is the PDF a user sends and what the command says about it:
 - the header file is read by the rules of ``gigai scout resume pdf --header``: the same refusals for a missing,
   invalid, placeholder or name-less file, in the same words;
 - PRIVACY: no value of the header file is in the command's stdout, stderr, JSON or a log; the letter is never
-  written to the resumes folder; a claims trace is never printed.
+  written to the resumes folder, nor (0.1.11.4 J4) into the jobs folder, where the letter's markdown lives and
+  agents read; a claims trace is never printed.
 
 Synthetic values, tmp homes only (the default header file of a scratch home is ``<home>/header.json``).
 """
@@ -338,6 +339,40 @@ def test_the_letter_is_never_written_to_the_resumes_folder(fx: dict[str, Path]) 
     refused = _pdf(fx, "--out", str(chosen / "letter.pdf"), "--no-header")
     assert refused.exit_code == 1 and json.loads(refused.stdout)["error"]["code"] == "letter_not_in_resumes_folder"
     assert not list(chosen.rglob("*.pdf"))
+
+
+def test_the_letters_pdf_is_never_written_into_the_jobs_folder(fx: dict[str, Path]) -> None:
+    """0.1.11.4 J4: the letter's markdown lives in the job's folder; its PDF carries the header's contact details, so it does not."""
+
+    jobs = fx["home"] / "jobs"
+    job = jobs / "acme" / "staff-software-engineer"
+    job.mkdir(parents=True)
+    letter = job / "cover-letter.md"
+    letter.write_text(LETTER, encoding="utf-8")
+    _header(fx["header"])
+    for out in (job / "cover-letter.pdf", jobs / "letter.pdf", jobs / "acme" / "new" / "letter.pdf"):
+        for as_json in (True, False):
+            refused = _pdf(fx, "--out", str(out), "--header", str(fx["header"]), as_json=as_json, letter=letter)
+            assert refused.exit_code == 1, _said(refused)
+            assert "a cover letter's PDF is never written into the jobs folder" in _said(refused) and "pass another --out FILE" in _said(refused)
+            if as_json:
+                assert json.loads(refused.stdout)["error"]["code"] == "letter_not_in_jobs_folder"
+            _silent(_said(refused))
+    assert sorted(path.relative_to(jobs).as_posix() for path in jobs.rglob("*") if path.is_file()) == ["acme/staff-software-engineer/cover-letter.md"]
+    for marker in MARKERS:
+        for path in jobs.rglob("*"):
+            assert not path.is_file() or marker not in path.read_text(encoding="utf-8"), marker
+    # A folder the user chose as the jobs folder is the jobs folder.
+    chosen = fx["work"] / "my-jobs"
+    set_folder = CliRunner().invoke(cli, ["scout", "jobs-folder", "--set", str(chosen), "--home", str(fx["home"]), "--json"])
+    assert set_folder.exit_code == 0, set_folder.output
+    refused = _pdf(fx, "--out", str(chosen / "acme" / "role" / "cover-letter.pdf"), "--no-header", letter=letter)
+    assert refused.exit_code == 1 and json.loads(refused.stdout)["error"]["code"] == "letter_not_in_jobs_folder"
+    assert not list(chosen.rglob("*.pdf"))
+    # The letter in the job's folder is what --in reads; the PDF goes where the user says, outside it.
+    done = _pdf(fx, "--out", str(fx["out"]), "--header", str(fx["header"]), letter=letter)
+    assert done.exit_code == 0, _said(done)
+    assert json.loads(done.stdout)["pages"] == 1 and fx["out"].is_file() and not list(jobs.rglob("*.pdf")) and not list(chosen.rglob("*.pdf"))
 
 
 def test_a_claims_trace_is_never_printed_and_the_letter_is_never_overwritten(fx: dict[str, Path]) -> None:

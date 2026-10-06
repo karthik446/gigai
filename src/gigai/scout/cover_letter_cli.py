@@ -3,11 +3,13 @@
     gigai scout cover-letter brief --job-url URL [--profile ID] [--plain]
     gigai scout cover-letter pdf   --in FILE --out FILE [--header FILE | --no-header]
 
-* ``brief`` (``cover_letter_brief``): the posting, the requirement rows and the master lines they cite, in one call.
+* ``brief`` (``cover_letter_brief``): the posting, the requirement rows, the master lines they cite and where the
+  letter goes (the job's folder of the jobs folder, the first free letter name there), in one call.
   JSON unless ``--plain``.  No model call, nothing fetched, nothing written.
 * ``pdf`` (``cover_letter``): the agent's letter file as a ONE-PAGE PDF with the compact header of the user's header
-  file (``pdf_header_cli``, the reading ``gigai scout resume pdf`` uses).  The letter carries the user's name in its
-  sign-off, so its PDF is written only where ``--out`` says and never into the resumes folder.  The command prints
+  file (``pdf_header_cli``, the reading ``gigai scout resume pdf`` uses).  The PDF carries the header's name and
+  contact details, so it is written only where ``--out`` says: never into the resumes folder, and (0.1.11.4 J4) never
+  into the jobs folder, where the letter's markdown lives beside the job's resume and agents read.  The command prints
   the path, the page count and plain notes: never a word of the letter and never a value of the header file.
 
 ``register`` puts the ``cover-letter`` group on the ``gigai scout`` tree (``scout_cli`` calls it once).
@@ -64,6 +66,13 @@ def cover_letter_brief_command(job_url: str, profile_id: str | None, plain: bool
     both that text and your own lines, and says so (labels, _labels). It
     holds no name and no contact details. The job needs a stored assessment.
     Nothing is fetched and nothing is stored.
+
+    It also says where the letter goes: the job's own folder of your jobs
+    folder (job_folder), the letter's file there (cover_letter_file:
+    cover-letter.md, or cover-letter-2.md when a letter is already there: a
+    letter that exists is yours and is never named again) and its claims
+    trace (claims_file). GigAI writes neither file. A job with no folder yet
+    gets no path and one sentence that names the pick to run (folder_note).
     """
 
     from . import cover_letter_brief
@@ -98,7 +107,7 @@ def _in_folder(path: Path, folder: Path) -> bool:
 
 @cover_letter_group.command("pdf")
 @click.option("--in", "in_file", required=True, type=click.Path(path_type=Path, dir_okay=False), help="The letter: a markdown FILE of plain paragraphs (a blank line between them).")
-@click.option("--out", "out_file", required=True, type=click.Path(path_type=Path, dir_okay=False), help="Write the PDF to FILE. Never a file in your resumes folder.")
+@click.option("--out", "out_file", required=True, type=click.Path(path_type=Path, dir_okay=False), help="Write the PDF to FILE. Never a file in your jobs folder or your resumes folder.")
 @click.option("--header", "header_value", type=click.Path(path_type=Path, dir_okay=False), help="Fill the PDF's header (name and one contact line) from this JSON FILE of yours. Default: ~/Documents/GigAI/header.json when it exists. GigAI only reads it.")
 @click.option("--no-header", "no_header", is_flag=True, help="Make the PDF without a header even when your header file exists.")
 @click.option("--home", "home_value", type=click.Path(path_type=Path, file_okay=False))
@@ -106,7 +115,8 @@ def _in_folder(path: Path, folder: Path) -> bool:
 def cover_letter_pdf_command(in_file: Path, out_file: Path, header_value: Path | None, no_header: bool, home_value: Path | None, as_json: bool) -> None:
     """Make a ONE-PAGE PDF of a cover letter, locally: no model call, no network.
 
-    --in FILE is the letter as your agent (or you) wrote it: plain
+    --in FILE is the letter as your agent (or you) wrote it (the job's
+    cover-letter.md in your jobs folder): plain
     paragraphs with a blank line between them. Lines with no blank line
     between them are one paragraph; a paragraph of short lines (a greeting, a
     sign-off with your name under it) keeps its lines. Text prints as
@@ -123,11 +133,14 @@ def cover_letter_pdf_command(in_file: Path, out_file: Path, header_value: Path |
     A letter that does not fit one page is set with tighter spacing, down to
     a readable floor, never smaller type. If it still needs a second page the
     command says so in one sentence and reports the page count: shorten the
-    letter and run it again. The PDF is written only to --out, never to your
-    resumes folder.
+    letter and run it again.
+
+    The PDF is written only to --out. It carries your name and contact
+    details, so --out is refused inside your jobs folder (agents read that
+    folder) and inside your resumes folder: name a place of your own.
     """
 
-    from . import cover_letter, pdf_header_cli, resumes_folder
+    from . import cover_letter, jobs_folder, pdf_header_cli, resumes_folder
 
     home_root = home_value or default_home_root()
     if cover_letter.looks_like_claims_trace(in_file.name):
@@ -137,7 +150,16 @@ def cover_letter_pdf_command(in_file: Path, out_file: Path, header_value: Path |
     if _in_folder(out_file, folder.path):
         _fail(
             "letter_not_in_resumes_folder",
-            f"a cover letter is never written to the resumes folder ({folder.shown}): pass another --out FILE, for example one beside the letter",
+            f"a cover letter is never written to the resumes folder ({folder.shown}): pass another --out FILE, outside it",
+            as_json=as_json,
+        )
+        return
+    jobs = jobs_folder.jobs_folder(home_root)
+    if _in_folder(out_file, jobs.path):
+        _fail(
+            "letter_not_in_jobs_folder",
+            f"a cover letter's PDF is never written into the jobs folder ({jobs.shown}), which agents read: it carries your name and "
+            "contact details; pass another --out FILE, outside it",
             as_json=as_json,
         )
         return

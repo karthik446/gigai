@@ -331,3 +331,24 @@ def test_the_jobs_folder_modules_import_no_pdf_and_no_header_reader() -> None:
     # The one writer takes markdown and refuses a contact shape before anything is created; it has no bytes/PDF entry point.
     writers = sorted(name for name in vars(jobs_folder) if name.startswith(("save_", "try_save_")))
     assert writers == ["save_resume", "try_save_resume"]
+
+
+def test_the_letters_name_is_the_first_one_that_is_free_and_nothing_is_written(tmp_path: Path) -> None:
+    """0.1.11.4 J4: GigAI only NAMES the cover letter's file; a letter (or a claims trace) that is there is never named again."""
+
+    from gigai.scout import cover_letter
+
+    assert jobs_folder.CLAIMS_SUFFIX == cover_letter.CLAIMS_SUFFIX, "the trace's name is the one `cover-letter pdf` refuses to print"
+    assert jobs_folder.claims_name("cover-letter.md") == "cover-letter.claims.md" and jobs_folder.claims_name("cover-letter-2.md") == "cover-letter-2.claims.md"
+    folder = tmp_path / "acme" / "staff-engineer"
+    folder.mkdir(parents=True)
+    assert jobs_folder.next_cover_letter(folder) == jobs_folder.COVER_LETTER_NAME == "cover-letter.md"
+    (folder / "cover-letter.md").write_text("mine\n", encoding="utf-8")
+    assert jobs_folder.next_cover_letter(folder) == "cover-letter-2.md"
+    (folder / "cover-letter-2.claims.md").write_text("a trace with no letter\n", encoding="utf-8")
+    assert jobs_folder.next_cover_letter(folder) == "cover-letter-3.md"
+    (folder / "cover-letter-3.md").symlink_to(tmp_path / "nowhere.md")  # a dangling link is a taken name too
+    (folder / "cover-letter-4.md").mkdir()
+    assert jobs_folder.next_cover_letter(folder) == "cover-letter-5.md"
+    assert sorted(path.name for path in folder.iterdir()) == ["cover-letter-2.claims.md", "cover-letter-3.md", "cover-letter-4.md", "cover-letter.md"]
+    assert (folder / "cover-letter.md").read_text(encoding="utf-8") == "mine\n"
