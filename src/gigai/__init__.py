@@ -1,1 +1,1 @@
-"""GigAI's contract-first pre-alpha package."""
+"""GigAI's contract-first alpha package."""

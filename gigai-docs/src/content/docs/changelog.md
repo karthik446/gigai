@@ -24,7 +24,106 @@ operator-visible capability and must link to the relevant release or evidence.
 
 ### 0.1.11
 
-(In progress.) The assessment picks the resume for a job from your master; no model rewrites it. Stub: rewritten at the end to what is true.
+DRAFT. GigAI is now an alpha (it was labelled pre-alpha). No model rewrites your resume any more. The
+resume for a job is made of lines from your master resume, in your master's own words: the assessment
+picks them, and GigAI checks that the lines it shows are lines you wrote.  The tailoring call
+is gone, and a job now costs one model call (the assessment) where it used to cost about two. 
+Read "After you upgrade" and "Not proven".
+
+#### What changed for you
+
+- **The assessment lists what the posting asks for, and holds the verdict until you have answered.**
+  Each requirement is a row marked required or optional. A required row your resume does not show and
+  you have not answered is "Needs your answers"; a required row you have confirmed you do not meet is
+  "Has a gap". Rows that are only examples ("such as Python, Go or Rust") and nice-to-haves never hold
+  the verdict. A job with a gap gets no resume of its own until you ask for a draft.
+   Sponsorship and work authorization are shown as a label on the job. They never hold a
+  verdict and never decide whether a resume is made. 
+- **The resume for a job is picked, not written.** The assessment names the master lines that answer
+  each requirement, the code fits them to two pages, and a recent role always shows at least one line.
+  A line a requirement cites is not cut for length while an uncited line stays. The job page shows what
+  was Picked and what was Left out, and says why.
+- **Suggestions.** Where your resume could say more (a word the posting uses for something you already
+  did, a line to move up), the job has a suggestion with the line it concerns. You dismiss it, or
+  resolve it by editing the resume (`resume store --resolves`). An answer goes into a role only when it names that role. Nothing is
+  applied without you.
+- **An agent can do the wording with you.** `gigai scout resume brief --job-url URL` gives your agent a
+  two-part brief: your master with its line ids, and the job's requirements and suggestions.
+  `gigai scout resume store --in FILE --job-url URL` hands the edited resume back and runs a check: a
+  line must be a line from your master, a line reworded from one with the source named, or a claim an
+  answer of yours states. A line that states something none of them state is refused, and the refusal
+  says which line and why. The check is a rule on wording, not a judge of truth: it can refuse a true
+  line and pass a loose one. (`resume tailor --in` still works for this release and says so.)
+- **Line notes.** A line or an entry in your master can carry a private note
+  (`gigai scout resume master edit ITEM --note "..."`, `--clear-note`). A note steers the pick and
+  appears in the brief. It is never written into a resume or a PDF. It is sent to your model, once and
+  labelled "private note", in the assessment.
+- **`gigai scout resume pick --job-url URL`** shows the stored job resume: who picked it, Picked and
+  Left out, the gate, what is out of date, conflicts. It makes no model call. `--refresh` picks again
+  from the stored assessment, `--draft` makes the draft for a job that has a gap, `--use-proposed`
+  takes a new selection that waited. A resume you edited is never replaced by itself; a new selection
+  waits as "proposed". `gigai scout suggestions` has `list`, `add`, `resolve` and `dismiss`.
+  `resume store --fit` lets code cut a resume over two pages by the pick's rules; without it a long
+  resume is refused with its page count.
+- **One profile is the default** for `resume brief`, `resume pick`, `suggestions` and `resume store`;
+  with two profiles and none marked default they ask which.
+- **Never more than 50 at a time, newest first.** An offer to assess many postings acts on the newest
+  50 (this began in 0.1.10.11).  `gigai scout new --yes`, `--reassess-stale`, `jobs assess`
+  with a filter, "Assess all new", pipeline runs and approvals work on one page of 50 and say how
+  many are left; `--page N` takes the next. Naming more than 50 jobs in one `jobs assess` is refused
+  with the count. `--all` exists on the command line and asks once more with the real number.
+  
+- **The editor is optional.** Setup no longer needs one. With none set, `gigai open` says so and
+  names `--editor` or `EDITOR`; everything else runs.
+- **The job page** shows the suggested resume, Picked / Left out, the suggestions, the gate state, and
+  Apply, which downloads the PDF of that resume.
+
+#### After you upgrade
+
+- **Do not go back to 0.1.10.x after you use this version.** A 0.1.10.x binary refuses the pipeline
+  file this version writes (schema 6: "pipeline.sqlite was written by a newer GigAI"), and refuses a
+  config that has no editor. Deleting `pipeline.sqlite` makes the old binary start; it loses the
+  pipeline history and metrics, nothing else. Nothing from the downgrade was run by hand: see "Not
+  proven".
+- **Every assessment made before 0.1.11 reads "older prompt".** They keep showing. Re-assessing is
+  your click, and the offer is the newest 50.
+- **Your notes are dropped if a 0.1.10.x binary writes a master revision.** Do not edit the master
+  with an older GigAI once you use line notes.
+- **Resumes tailored on 0.1.10 stay.** Nothing is rewritten at upgrade. One you edited, or one the
+  old tailoring made, is never replaced automatically; a new selection waits as "proposed" and "Use
+  it" replaces it. Lines the old tailoring reworded show the rewrite and its original.
+- **Other lines cut for length have no Restore.** When the page cuts lines of an "Other" section to
+  fit two pages, there is no Restore for them; the cuts in your other sections can be restored.
+- **`gigai scout resume tailor` (one model call) is gone** and says what to run instead.
+  `POST /api/tailored-resumes` answers 410. The settings `pipeline.models.tailor` and
+  `pipeline.models.reassess` are read and ignored, with one line in `gigai scout pipeline status`.
+   The pipeline's steps are assess, pick, ats, label; a job finished on 0.1.10 is left as it
+  is until you open it. 
+
+#### Not proven
+
+- **Accuracy on real postings is the point of this release and is reported separately:**
+  15 unseen real postings of one person, fully correct by an answer key built blind (fourth set):
+
+  | Model | Fully correct | Unnecessary questions | Seconds per call (mean) |
+  | --- | --- | --- | --- |
+  | Claude Code, `claude-opus-5-5` (pinned, the default) | 14 of 15 | 0 | 37.0 |
+  | Claude Code, `claude-sonnet-5-5` | 12 of 15 | 4 | 24.1 |
+  | Codex CLI, default (`gpt-6-astra`; the adapter does not report the model) | 10 of 15 | 9 | 38.5 |
+
+  No invented facts in any row. One call failed on each Claude row (a correct answer the "too few
+  requirements" guard refused; fixed, and still counted as a failure here). One person's master; the ask
+  side is thin on this set. An assessment made with a model other than the Claude reference says so.
+  Read the standard, the method, the per-point columns and what the test cannot show on the
+  [accuracy page](https://karthik446.github.io/gigai/scout/accuracy-0-1-11/) of the docs.
+  A real install of the candidate on a real home, with the time of each step, is on the
+  [real-run check page](https://karthik446.github.io/gigai/scout/real-run-0-1-11/).
+- A real agent session through the brief and the hand-back, on Claude Code and on Codex, was not run
+  when this was written. The Codex sandbox on this flow is untested.
+- The hand-back check's refusals of true lines were measured on synthetic text only.
+- Requirement lists from the two model CLIs for the same posting differ in places; the verdict and the
+  gate agreed on the sets tried, the lists did not always.
+- The downgrade path above was read from the code, not run.
 
 ### 0.1.10.11
 

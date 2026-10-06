@@ -1,6 +1,6 @@
 # Contributing
 
-GigAI is contract-first and pre-alpha. Contributions should preserve the
+GigAI is contract-first and alpha. Contributions should preserve the
 difference between approved design, executable research evidence, and shipped
 product behavior.
 
