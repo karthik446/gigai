@@ -765,7 +765,7 @@ Render a resume to PDF locally: your own markdown, or the resume stored for a jo
 
 `gigai scout resume pdf [OPTIONS]`
 
-effect: `write` · external: `none` · output: Human-readable text; --json emits one JSON object: {ok, out_path, in_resumes_folder, source, pages, bytes, spacing_scale, header, finish_url, scout_running}.
+effect: `write` · external: `none` · output: Human-readable text; --json emits one JSON object: {ok, out_path, in_resumes_folder, source, pages, bytes, spacing_scale, header, finish_url, scout_running, note}. A stored job resume (--job-url) stays on its page limit: when the saved spacing would run past it, the spacing is tightened (to 0.8; spacing_scale is the one used), then the Skills are laid out compactly, then the spacing goes to 0.7 at most; note is null, or one sentence saying the resume does not fit its limit and what to do.
 
 Example:
 

@@ -187,6 +187,8 @@ class TailoredResumesRoutesMixin:
         headers = {"Content-Disposition": f'attachment; filename="{file_name}"', **(extra or {})}
         if finish is not None:
             headers["X-GigAI-Finish-Url"] = finish
+        if rendered.note:  # 0.1.11.3: the resume does not fit its page limit; plain words, counts only
+            headers["X-GigAI-Fit-Note"] = rendered.note
         self._write_bytes(HTTPStatus.OK, "application/pdf", rendered.pdf, headers)
 
     def _finish_url(self, profile_id: str | None = None, job_identity: str | None = None) -> str:
