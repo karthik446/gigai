@@ -170,7 +170,7 @@ class TailoredResumesRoutesMixin:
         recheck["runner"] = self._pipeline_kick() if attached.changed and recheck["error_code"] is None else False
         self._write_json(HTTPStatus.OK, {**attached.response.to_json(), "changed": attached.changed, "recheck": recheck})
 
-    def _header_form(self, body: dict[str, object]) -> tuple[bool, dict[str, str] | None]:
+    def _header_form(self, body: dict[str, object]) -> tuple[bool, dict[str, object] | None]:
         """``(ok, the form's values or None)``; a 422 is written when ``header`` is unusable (never echoing a value)."""
 
         if "header" not in body:

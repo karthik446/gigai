@@ -542,7 +542,7 @@ def measure_markdown(markdown: str, *, spacing_scale: float = SPACING_DEFAULT) -
 # --- the header and layout both entry points use ---------------------------------------------
 
 
-def pdf_header(settings: DisplaySettings | None, profile_id: str | None, form: dict[str, str] | None) -> PdfHeader | None:
+def pdf_header(settings: DisplaySettings | None, profile_id: str | None, form: dict[str, object] | None) -> PdfHeader | None:
     """The header for one render: the form's values (``resume_display.parse_header_form``) with the saved
     per-profile title, or ``None`` (headerless) when no form was filled.  Reads nothing, writes nothing."""
 
@@ -565,7 +565,7 @@ def layout(settings: DisplaySettings, spacing_scale: float | None = None, auto_f
 
 
 def stored_resume_pdf(
-    stored: TailorResponse, *, home_root: Path, form: dict[str, str] | None = None, spacing_scale: float | None = None,
+    stored: TailorResponse, *, home_root: Path, form: dict[str, object] | None = None, spacing_scale: float | None = None,
     auto_fit: bool | None = None, count_pages: bool = False, today: date | None = None,
 ) -> tuple[RenderedPdf, str]:
     """``(the PDF, its file name)`` for one stored tailored resume: what ``POST /api/tailored-resumes/pdf`` serves.
@@ -606,7 +606,7 @@ def finish_url(base_url: str, profile_id: str | None = None, job_identity: str |
 
 
 def markdown_resume_pdf(
-    markdown: str, *, home_root: Path, profile_id: str | None = None, form: dict[str, str] | None = None,
+    markdown: str, *, home_root: Path, profile_id: str | None = None, form: dict[str, object] | None = None,
     spacing_scale: float | None = None, auto_fit: bool | None = None, now: datetime | None = None,
 ) -> tuple[RenderedPdf, str]:
     """``(the PDF, its file name)`` for resume markdown: what ``POST /api/resume/pdf`` and ``scout resume pdf --in``

@@ -6644,6 +6644,124 @@
         "x-gigai-labels": []
       }
     },
+    "/api/pdf-header": {
+      "post": {
+        "description": "Scout's own page only: the Generate PDF form's values from the person's header file. NOT for agents: it answers only Scout's own browser page (a request carrying this server's own Origin); any other caller gets 403 forbidden_origin and the file is not opened. An agent never needs it: it renders the PDF without a header and the person finishes it. The person may keep their name and contact details in a JSON file they own, `~/Documents/GigAI/header.json` (a GigAI home other than `~/.gigai`: `<home>/header.json`): {name, email, phone, location, links: [{label, url}], work_authorization}, every field optional. GigAI only reads it, here (to fill the Generate PDF form, where the person edits the values before generating) and in `gigai scout resume pdf --out FILE`; it is never copied into the store, the journal, a log, a record, a suggestion, a brief, the resumes folder or a model prompt, and no other route returns it. `state` is filled, missing or invalid; `message` is one plain sentence (what is wrong and where the file goes; never a value); `warning` says so when other users of the computer can read the file; `values` is the form's values when filled, else null. Not cached (Cache-Control: no-store).",
+        "operationId": "post_api_pdf_header",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "example": {},
+              "schema": {
+                "additionalProperties": false,
+                "properties": {},
+                "required": [],
+                "type": "object"
+              }
+            }
+          },
+          "required": false
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "has_work_authorization": false,
+                  "message": "There is no header file at ~/Documents/GigAI/header.json.",
+                  "schema_version": "scout-pdf-header-prefill:1",
+                  "shown": "~/Documents/GigAI/header.json",
+                  "state": "missing",
+                  "values": null,
+                  "warning": null
+                },
+                "schema": {
+                  "additionalProperties": true,
+                  "properties": {
+                    "schema_version": {
+                      "const": "scout-pdf-header-prefill:1"
+                    }
+                  },
+                  "required": [
+                    "schema_version"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "forbidden_origin",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden_origin"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "target_unavailable",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "target_unavailable"
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "unsupported_media_type: writes need Content-Type: application/json."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "invalid_value",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "invalid_value"
+          }
+        },
+        "summary": "Scout's page only: read the header file for the Generate PDF form",
+        "tags": [
+          "Tailored resumes"
+        ],
+        "x-gigai-effect": "read",
+        "x-gigai-external": "none",
+        "x-gigai-labels": [
+          "user-private"
+        ]
+      }
+    },
     "/api/pipeline": {
       "get": {
         "description": "What the background pipeline is doing: lanes, caps used today, queue counts, approvals, each job's steps and Scout label. System data only: ids, codes, counts, numbers and timestamps. A job is named by its `job_identity` (the posting's public link). No posting, resume, answer or story text, no title, no company. `setting` is the pipeline's settings in effect with the `source` that decided them (default, setting, environment, settings_unreadable); `readable` false: the settings file cannot be read and the pipeline is off. `runner` is this server's runner thread (null when it runs none); its `rank` is the background rank lane's last turn (null before the first: state, reason, model calls made, postings ranked, `warning`). `yielding_to` names live work the pipeline waits for (sources_update, assess_batch, find_jobs_run), else null. `lanes`: steps running per model lane against its cap, and `error_code` / `retry_at` while a lane is backed off. `caps`: today's model calls of the pipeline and of the background rank against their daily caps (one count for the install, every profile together; `warning` once the count is past `warn_at`) and `jobs_per_trigger`. `counts`: steps per state and jobs per state (running, awaiting_approval, failed, waiting, done, cancelled). `approvals`: the pending approvals with their estimate. `jobs`: at most 200, most recently changed first, each with its steps' states, the trigger that queued it, why it waits (daily_cap_reached, lane_backoff, retry_backoff), its failed step's code and, once the label step is done, the Scout label as codes (`label`: recommended or needs_attention, `reasons`, `ats_score`). `errors`: the last 20 failed attempts, newest first, by code. A job enters the pipeline only when the user answered one of its questions, saved a story about one, or asked for it (POST /api/pipeline/process): new postings never do. Reading makes no model call and creates nothing.",
@@ -9852,7 +9970,7 @@
                     "type": "boolean"
                   },
                   "header": {
-                    "description": "The Generate PDF form: {name, email, phone, location, linkedin, link, work_authorization}, each an optional string of at most 200 characters. work_authorization (e.g. `H-1B, requires sponsorship`) prints as its own header line. Fills this one PDF's header; never stored, logged or returned. Left out: the PDF has no header. Details an agent sends here went through that agent and its model provider; the default for an agent is the headerless PDF and the person finishing it in Scout.",
+                    "description": "The Generate PDF form: {name, email, phone, location, linkedin, link, work_authorization}, each an optional string of at most 200 characters. work_authorization (e.g. `H-1B, requires sponsorship`) prints as its own header line. Optional links: at most 6 more links, each {label, url}; the url prints in the contact line. Fills this one PDF's header; never stored, logged or returned. Left out: the PDF has no header. Details an agent sends here went through that agent and its model provider; the default for an agent is the headerless PDF and the person finishing it in Scout.",
                     "type": "object"
                   },
                   "markdown": {
@@ -14286,7 +14404,7 @@
                 "additionalProperties": false,
                 "properties": {
                   "header": {
-                    "description": "The Generate PDF form: {name, email, phone, location, linkedin, link, work_authorization}, each an optional string of at most 200 characters. work_authorization (e.g. `H-1B, requires sponsorship`) prints as its own header line. Fills this one PDF's header; never stored, logged or returned. Left out: the PDF has no header. Details an agent sends here went through that agent and its model provider; the default for an agent is the headerless PDF and the person finishing it in Scout.",
+                    "description": "The Generate PDF form: {name, email, phone, location, linkedin, link, work_authorization}, each an optional string of at most 200 characters. work_authorization (e.g. `H-1B, requires sponsorship`) prints as its own header line. Optional links: at most 6 more links, each {label, url}; the url prints in the contact line. Fills this one PDF's header; never stored, logged or returned. Left out: the PDF has no header. Details an agent sends here went through that agent and its model provider; the default for an agent is the headerless PDF and the person finishing it in Scout.",
                     "type": "object"
                   },
                   "job_identity": {

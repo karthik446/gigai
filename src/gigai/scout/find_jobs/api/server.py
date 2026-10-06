@@ -1601,6 +1601,7 @@ def _make_handler(
     from .master import MasterRoutesMixin
     from .metrics import MetricsRoutesMixin
     from .new import NewRoutesMixin
+    from .pdf_header import PdfHeaderRoutesMixin
     from .pipeline import PipelineRoutesMixin, _match_approval_id
     from .posted_window import PostedWindowRoutesMixin
     from .postings import PostingsRoutesMixin
@@ -1639,6 +1640,7 @@ def _make_handler(
         ResumesRoutesMixin,
         ResumeDisplayRoutesMixin,
         ResumesFolderRoutesMixin,
+        PdfHeaderRoutesMixin,
         MasterRoutesMixin,
         PrivacyCleanupRoutesMixin,
         SecretsStatusRoutesMixin,
@@ -2112,6 +2114,9 @@ def _make_handler(
                     return
                 if path == "/api/resume/pdf":
                     self._handle_post_resume_pdf()
+                    return
+                if path == "/api/pdf-header":
+                    self._handle_post_pdf_header()
                     return
                 if path == "/api/resumes":
                     self._handle_post_resumes()

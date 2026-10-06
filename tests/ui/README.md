@@ -56,6 +56,7 @@ The 11 flows of the UI-testing spike (REPORT.md 5.3), and the flows of the featu
 | 4. "Assess these": the dialog, approve on the fixture model | `test_jobs_assess_these.py` (changes the home); the low-ranked second question in `test_jobs_weak_fit.py` | - |
 | 5. Job page: questions, answer one, the timeline's four rows run (Assessed, Resume picked, Scout ATS, Scout label), the resume it stored shows without a reload, with the one Apply button and "Resume ready" | `test_job_page_questions.py` (changes the home) | a job page in a second tab WHILE the list is prepared: `test_operator_sized_jobs.py` |
 | 6. Generate PDF: six fields, a download, nothing stored | `test_generate_pdf.py` | - |
+| Generate PDF from the user's header file (0.1.11.3 item 13): "Filled from <path>", every field editable, an edit wins, the warning, an invalid and a missing file as one plain line | `test_generate_pdf_header_file.py` (writes `<home>/header.json` and removes it) | - |
 | 7. Answers and stories | `test_answers_stories.py` | the agent writes one: `test_operator_sized_pages.py` |
 | 8. Settings > Background updates | `test_settings_background.py` | Settings in a second tab WHILE the list is prepared: `test_operator_sized_jobs.py` |
 | 9. Past runs | `test_past_runs.py` | - |

@@ -11,6 +11,10 @@ The limits of that promise, plainly:
   PDF form sends them with that one request; they fill that PDF's header and are not written to a
   file, a log or a reply. Your browser may offer to remember them for autofill. That is your
   browser's own store, not GigAI's.
+- **You may keep them in a file of your own instead.** `~/Documents/GigAI/header.json` is yours:
+  GigAI only reads it to fill the Generate PDF form or a PDF you make with
+  `gigai scout resume pdf --out`, and never copies it into its store, a log or a model prompt.
+  See [Your header file](../resume/#your-header-file).
 - **A resume you add is stored without them.** The import removes the name line and the contact
   lines (email, phone, address, links) and discards them. It works on patterns. It can't catch
   personal details elsewhere in the text (a first line that holds both a title and your name, or

@@ -36,6 +36,10 @@ HEADER_FIELDS: tuple[str, ...] = ("name", "email", "phone", "location", "linkedi
 #: own line of this one PDF's header and, like the other form values, is never stored: not in the master, a job's resume
 #: markdown or JSON, or the resumes folder.  Sponsorship stays a label for jobs; this is only what the user prints.
 WORK_AUTHORIZATION_FIELD = "work_authorization"
+#: 0.1.11.3 item 13: the form's optional extra links (the rows a header file's ``links`` fill): a list of
+#: ``{"label", "url"}``.  The URL prints in the contact line like the form's own link fields; the label names the row.
+LINKS_FIELD = "links"
+MAX_LINKS = 6
 _CONTROL = re.compile(r"[\x00-\x1f\x7f]")
 
 
@@ -169,26 +173,44 @@ def save_display(home_root: Path, settings: DisplaySettings, *, now: datetime | 
 _SCHEME = re.compile(r"\A[a-z][a-z0-9+.-]*://", re.IGNORECASE)
 
 
-def parse_header_form(raw: object) -> dict[str, str]:
+def _form_text(raw: Mapping[str, object], key: str, name: str) -> str:
+    value = raw.get(key, "")
+    if not isinstance(value, str):
+        raise HeaderFormError("wrong_type", f"{name} must be a string")
+    if len(value) > MAX_VALUE:
+        raise HeaderFormError("invalid_value", f"{name} is longer than {MAX_VALUE} characters")
+    if _CONTROL.search(value):
+        raise HeaderFormError("invalid_value", f"{name} must be one line")
+    return value.strip()
+
+
+def parse_header_form(raw: object) -> dict[str, object]:
     """The form's values, trimmed, or ``HeaderFormError``.  Pure: no I/O, never logs.
 
     ``raw`` is an object of strings keyed by ``HEADER_FIELDS`` (each optional, at most ``MAX_VALUE``
-    characters, one line).  Errors name the field and the rule, never the value."""
+    characters, one line), plus the optional ``links``: at most ``MAX_LINKS`` objects ``{"label", "url"}``
+    (0.1.11.3 item 13; a row with an empty url is dropped).  Errors name the field and the rule, never the value."""
 
     if type(raw) is not dict:
         raise HeaderFormError("wrong_type", "header must be an object of strings: " + ", ".join(HEADER_FIELDS))
-    if any(key not in HEADER_FIELDS for key in raw):
-        raise HeaderFormError("unknown_key", "header has an unknown field (allowed: " + ", ".join(HEADER_FIELDS) + ")")
-    values: dict[str, str] = {}
-    for key in HEADER_FIELDS:
-        value = raw.get(key, "")
-        if not isinstance(value, str):
-            raise HeaderFormError("wrong_type", f"header.{key} must be a string")
-        if len(value) > MAX_VALUE:
-            raise HeaderFormError("invalid_value", f"header.{key} is longer than {MAX_VALUE} characters")
-        if _CONTROL.search(value):
-            raise HeaderFormError("invalid_value", f"header.{key} must be one line")
-        values[key] = value.strip()
+    if any(key not in HEADER_FIELDS and key != LINKS_FIELD for key in raw):
+        raise HeaderFormError("unknown_key", "header has an unknown field (allowed: " + ", ".join((*HEADER_FIELDS, LINKS_FIELD)) + ")")
+    values: dict[str, object] = {key: _form_text(raw, key, f"header.{key}") for key in HEADER_FIELDS}
+    if LINKS_FIELD in raw:
+        links = raw[LINKS_FIELD]
+        if type(links) is not list or any(type(item) is not dict for item in links):
+            raise HeaderFormError("wrong_type", "header.links must be a list of {label, url} objects")
+        if len(links) > MAX_LINKS:
+            raise HeaderFormError("invalid_value", f"header.links holds more than {MAX_LINKS} links")
+        rows: list[dict[str, str]] = []
+        for number, item in enumerate(links, 1):
+            if any(key not in ("label", "url") for key in item):
+                raise HeaderFormError("unknown_key", f"header.links[{number}] has an unknown field (allowed: label, url)")
+            label, url = (_form_text(item, key, f"header.links[{number}].{key}") for key in ("label", "url"))
+            if url:
+                rows.append({"label": label, "url": url})
+        if rows:
+            values[LINKS_FIELD] = rows
     return values
 
 
@@ -198,13 +220,13 @@ def _link_item(value: str) -> ContactItem:
     return ContactItem(value.rstrip("/"), "https://" + value)
 
 
-def form_header(values: Mapping[str, str], title: str = "") -> PdfHeader:
+def form_header(values: Mapping[str, object], title: str = "") -> PdfHeader:
     """The PDF header from the form's values (``parse_header_form``) and the saved per-profile title."""
 
     contact: list[ContactItem] = []
     for key in HEADER_FIELDS[1:]:
         value = values.get(key, "")
-        if not value or key == WORK_AUTHORIZATION_FIELD:
+        if not value or key == WORK_AUTHORIZATION_FIELD or not isinstance(value, str):
             continue
         if key == "email":
             contact.append(ContactItem(value, "mailto:" + value))
@@ -212,7 +234,8 @@ def form_header(values: Mapping[str, str], title: str = "") -> PdfHeader:
             contact.append(_link_item(value))
         else:
             contact.append(ContactItem(value, None))
-    return PdfHeader(values.get("name", ""), _clean(title), tuple(contact), values.get(WORK_AUTHORIZATION_FIELD, ""))
+    contact.extend(_link_item(row["url"]) for row in values.get(LINKS_FIELD, ()))  # type: ignore[union-attr]
+    return PdfHeader(values.get("name", ""), _clean(title), tuple(contact), values.get(WORK_AUTHORIZATION_FIELD, ""))  # type: ignore[arg-type]
 
 
 def profile_title(settings: DisplaySettings | None, profile_id: str | None) -> str:
@@ -225,6 +248,8 @@ __all__ = [
     "HEADER_FIELDS",
     "HeaderFormError",
     "LEGACY_CONTACT_KEYS",
+    "LINKS_FIELD",
+    "MAX_LINKS",
     "PdfHeader",
     "SCHEMA_VERSION",
     "SPACING_DEFAULT",

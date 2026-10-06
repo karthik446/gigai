@@ -710,6 +710,19 @@ async function postPdf(path, body) {
   return { blob: await response.blob(), fileName: pdfFileName(response.headers.get("Content-Disposition")), note: response.headers.get("X-GigAI-Fit-Note") || null };
 }
 
+// 0.1.11.3 item 13: the person's own header file, read by the server for the
+// Generate PDF form only (POST /api/pdf-header answers Scout's own page and
+// nobody else). The answer goes into the form's state and nowhere else; a
+// failure of any kind is "no file" (null): the form is then typed as before.
+export async function postPdfHeader() {
+  try {
+    const response = await fetch("/api/pdf-header", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}", cache: "no-store" });
+    return response.ok ? await response.json() : null;
+  } catch {
+    return null;
+  }
+}
+
 export function postTailoredResumePdf({ profileId, jobIdentity, header }) {
   const body = { profile_id: profileId, job_identity: jobIdentity };
   if (header) {

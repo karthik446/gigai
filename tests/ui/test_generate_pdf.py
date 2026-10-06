@@ -86,7 +86,8 @@ def test_generate_pdf_six_fields_a_download_and_nothing_stored(ui, scout_server)
     for key, value in SENT.items():
         ui.page.fill(f"#generate-pdf-{key}", value)
     assert button.is_enabled()
-    assert ui.writes_after("start") == [], "typing must not send anything"
+    # 0.1.11.3 item 13: the open form asked once for the user's header file (a read; a POST so only Scout's page is answered).
+    assert ui.writes_after("start") == ["POST /api/pdf-header"], "typing must not send anything"
 
     # Generate: one request with the six values, and a download named by the server.
     ui.step("typed")

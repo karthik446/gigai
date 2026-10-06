@@ -156,6 +156,7 @@ _HEADER_PARAM = _b(
     "header", "object",
     "The Generate PDF form: {name, email, phone, location, linkedin, link, work_authorization}, each an optional string of at most 200 characters. "
     "work_authorization (e.g. `H-1B, requires sponsorship`) prints as its own header line. "
+    "Optional links: at most 6 more links, each {label, url}; the url prints in the contact line. "
     "Fills this one PDF's header; never stored, logged or returned. Left out: the PDF has no header. "
     "Details an agent sends here went through that agent and its model provider; the default for an agent is the headerless PDF "
     "and the person finishing it in Scout.",
@@ -1724,6 +1725,26 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
         ),
     ),
     RouteSpec(
+        "POST", "/api/pdf-header", "Scout's own page only: the Generate PDF form's values from the person's header file.", "read", "none",
+        {
+            "schema_version": "scout-pdf-header-prefill:1", "state": "missing", "shown": "~/Documents/GigAI/header.json",
+            "message": "There is no header file at ~/Documents/GigAI/header.json.", "warning": None, "has_work_authorization": False, "values": None,
+        },
+        schema_version="scout-pdf-header-prefill:1", request_example={},
+        errors=(_INVALID, (403, "forbidden_origin"), _NO_TARGET),
+        description=(
+            "NOT for agents: it answers only Scout's own browser page (a request carrying this server's own Origin); any other caller gets 403 "
+            "forbidden_origin and the file is not opened. An agent never needs it: it renders the PDF without a header and the person finishes it. "
+            "The person may keep their name and contact details in a JSON file they own, `~/Documents/GigAI/header.json` (a GigAI home other than "
+            "`~/.gigai`: `<home>/header.json`): {name, email, phone, location, links: [{label, url}], work_authorization}, every field optional. "
+            "GigAI only reads it, here (to fill the Generate PDF form, where the person edits the values before generating) and in "
+            "`gigai scout resume pdf --out FILE`; it is never copied into the store, the journal, a log, a record, a suggestion, a brief, the "
+            "resumes folder or a model prompt, and no other route returns it. `state` is filled, missing or invalid; `message` is one plain "
+            "sentence (what is wrong and where the file goes; never a value); `warning` says so when other users of the computer can read the file; "
+            "`values` is the form's values when filled, else null. Not cached (Cache-Control: no-store)."
+        ),
+    ),
+    RouteSpec(
         "GET", "/api/resumes-folder", "The resumes folder: where a job's tailored markdown and headerless PDFs are kept.", "read", "none",
         {"schema_version": "scout-resumes-folder-response:1", "path": "/home/you/Documents/GigAI/resumes", "shown": "~/Documents/GigAI/resumes", "source": "default", "default": "~/Documents/GigAI/resumes", "exists": True},
         schema_version="scout-resumes-folder-response:1",
@@ -2530,6 +2551,7 @@ _META: dict[tuple[str, str], tuple[str, str]] = {
     ("POST", "/api/master/selection"): ("Refresh a profile's selection of the master", "Profiles and resume"),
     ("POST", "/api/tailored-resumes/pdf"): ("Render a tailored resume as a PDF", "Tailored resumes"),
     ("POST", "/api/resume/pdf"): ("Render resume markdown as a PDF", "Tailored resumes"),
+    ("POST", "/api/pdf-header"): ("Scout's page only: read the header file for the Generate PDF form", "Tailored resumes"),
     ("GET", "/api/resumes-folder"): ("Get the resumes folder", "Tailored resumes"),
     ("PUT", "/api/resumes-folder"): ("Choose the resumes folder", "Tailored resumes"),
     ("GET", "/api/resume-display"): ("Get the PDF layout settings", "Tailored resumes"),
@@ -2646,6 +2668,7 @@ _LABELS: dict[tuple[str, str], tuple[str, ...]] = {
     ("GET", "/api/resume-display"): _PRIVATE,
     ("PUT", "/api/resume-display"): _PRIVATE,
     # A folder path and file names (<company>-<role>-<date>): the folder is the user's, the company and role a posting's words.
+    ("POST", "/api/pdf-header"): _PRIVATE,
     ("GET", "/api/resumes-folder"): _BOTH,
     ("PUT", "/api/resumes-folder"): _PRIVATE,
     ("POST", "/api/resume/extract"): _PRIVATE,

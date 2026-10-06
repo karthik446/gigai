@@ -768,6 +768,8 @@ _register_resume_job_commands(scout_group, resume_group)
 @click.option("--profile", "profile_id", help="With --tailored: the Scout profile ID the resume was tailored for (default: the newest).")
 @click.option("--spacing", "spacing", type=float, help="Spacing scale 0.7-1.4 for this render (turns auto fit off unless --auto-fit is given). Default: the saved setting. A stored job resume is tightened when that keeps it on its page limit.")
 @click.option("--auto-fit/--no-auto-fit", "auto_fit", default=None, help="Pick the spacing that ends the content near a page boundary. Default: the saved setting.")
+@click.option("--header", "header_value", type=click.Path(path_type=Path, dir_okay=False), help="With --out: fill the PDF's header (name, contact line, work authorization) from this JSON FILE of yours. Default: ~/Documents/GigAI/header.json when it exists. GigAI only reads it.")
+@click.option("--no-header", "no_header", is_flag=True, help="Make the PDF without a header even when your header file exists.")
 @click.option("--target", "target_value", type=click.Path(path_type=Path, file_okay=False))
 @click.option("--home", "home_value", type=click.Path(path_type=Path, file_okay=False))
 @click.option("--json", "as_json", is_flag=True)
@@ -779,6 +781,8 @@ def resume_pdf_command(
     profile_id: str | None,
     spacing: float | None,
     auto_fit: bool | None,
+    header_value: Path | None,
+    no_header: bool,
     target_value: Path | None,
     home_value: Path | None,
     as_json: bool,
@@ -800,6 +804,27 @@ def resume_pdf_command(
     another), never the current directory. That folder never holds contact
     details: markdown whose printed text has an email, a phone number or a
     profile link needs --out FILE.
+
+    A PDF WITH your header, without the browser: keep your details in a JSON
+    file you own, ~/Documents/GigAI/header.json (or name one with --header
+    FILE), and pass --out FILE. The file:
+
+    \b
+      {
+        "name": "Jane Example",
+        "email": "jane@example.com",
+        "phone": "555-0100",
+        "location": "Springfield, IL",
+        "links": [{"label": "LinkedIn", "url": "linkedin.com/in/jane-example"}],
+        "work_authorization": "VISA: H1B"
+      }
+
+    Every field is optional but the name. work_authorization prints as the
+    header's last line, as written; without that key the line comes from the
+    profile's sponsorship answer. GigAI only reads the file when it makes the
+    PDF: it is never copied into GigAI's store, a log or a model prompt, and a
+    PDF with a header is written only to --out, never to the resumes folder.
+    --no-header makes the PDF without one.
     """
 
     from .find_jobs.contracts import FindJobsContractError
@@ -816,6 +841,12 @@ def resume_pdf_command(
     if bool(in_file) == bool(tailored):
         _fail(ValueError("pass exactly one of --in FILE or --tailored --job-url URL"), as_json=as_json, fallback="invalid_value")
         return
+    if header_value is not None and (no_header or out_file is None):
+        reason = "--header and --no-header do not go together" if no_header else (
+            "--header needs --out FILE: a PDF with your name and contact details is never written to the resumes folder"
+        )
+        _fail(ValueError(reason), as_json=as_json, fallback="invalid_value")
+        return
     if bool(job_url) != bool(tailored):
         _fail(ValueError("--tailored and --job-url go together"), as_json=as_json, fallback="invalid_value")
         return
@@ -830,6 +861,31 @@ def resume_pdf_command(
         _fail(exc, as_json=as_json, fallback="scout_resume_pdf_failed")
         return
 
+    # 0.1.11.3 item 13: the header comes from the user's own file, read here and only for this PDF.
+    form, header_file, header_note = None, None, None
+    if not no_header:
+        from . import pdf_header_file
+        from .find_jobs.resume_input import read_config_preferences
+
+        found = pdf_header_file.read_header_file(header_value if header_value is not None else pdf_header_file.default_path(home_root))
+        wanted = header_value is not None or (out_file is not None and found.state != pdf_header_file.STATE_MISSING)
+        problem = None if found.filled else found.message
+        if found.filled and wanted:
+            try:
+                # Nobody edits a form here: the file, then the profile's sponsorship answer for the work authorization line.
+                form = pdf_header_file.render_form(found, visa_required=read_config_preferences(target)[0] if target is not None else False)
+            except pdf_header_file.HeaderFileError as exc:
+                problem = str(exc)
+        if wanted and problem is not None:
+            hint = "" if header_value is not None else " (--no-header makes the PDF without a header)"
+            _fail(ValueError(problem + hint), as_json=as_json, fallback="header_file_missing" if found.state == pdf_header_file.STATE_MISSING else "header_file_invalid")
+            return
+        if form is not None:
+            header_file, header_note = found.shown, found.warning
+        elif found.state != pdf_header_file.STATE_MISSING:
+            # The default file is there but this PDF goes to the resumes folder, which never holds contact details.
+            header_note = f"Your header file ({found.shown}) was not used: pass --out FILE to make the PDF with your name and contact details."
+
     failure: tuple[Exception, str] | None = None
     rendered = None
     finish_ids: tuple[str | None, str | None] = (None, None)
@@ -842,13 +898,13 @@ def resume_pdf_command(
             items = list_tailored_resumes(home_root, target, profile_id=profile_id or None, job_identity=normalize_job_identity(job_url))
             if not items:
                 raise QuickAssessError("tailored_resume_not_found", "no stored tailored resume for that job; run `gigai scout resume tailor --job-url ...` first")
-            rendered, file_name = stored_resume_pdf(items[0], home_root=home_root, spacing_scale=spacing, auto_fit=auto_fit, count_pages=True)
+            rendered, file_name = stored_resume_pdf(items[0], home_root=home_root, form=form, spacing_scale=spacing, auto_fit=auto_fit, count_pages=True)
             finish_ids = (items[0].resume.profile_id or "ephemeral", items[0].job.job_identity)
             folder_key, printed = resumes_folder.job_key(home_root, items[0].stored_path), items[0].markdown
         else:
             assert in_file is not None
             markdown = _read_text_option(in_file, flag="--in")
-            rendered, file_name = markdown_resume_pdf(markdown, home_root=home_root, spacing_scale=spacing, auto_fit=auto_fit)
+            rendered, file_name = markdown_resume_pdf(markdown, home_root=home_root, profile_id=profile_id or None, form=form, spacing_scale=spacing, auto_fit=auto_fit)
             printed = printed_text(markdown)
     except OSError as exc:
         failure = (exc, "input_file_unreadable")
@@ -890,7 +946,7 @@ def resume_pdf_command(
                 base, running = current.url, True
         except Exception:  # noqa: BLE001 - no bound project or no state: the default local address
             pass
-    link = finish_url(base, *finish_ids)
+    link = finish_url(base, *finish_ids) if form is None else None
     payload: dict[str, object] = {
         "ok": True,
         "out_path": shown_path,
@@ -899,18 +955,25 @@ def resume_pdf_command(
         "pages": rendered.pages,
         "bytes": len(rendered.pdf),
         "spacing_scale": rendered.spacing_scale,
-        "header": False,
+        "header": form is not None,
+        "header_file": header_file,
+        "header_note": header_note,
         "finish_url": link,
         "scout_running": running,
         "note": rendered.note,
     }
-    lines = [
-        f"Wrote {shown_path} ({rendered.pages} page{'' if rendered.pages == 1 else 's'}, spacing {rendered.spacing_scale:g}), without your name and contact details.",
-        *([rendered.note] if rendered.note else []),
-        f"{FINISH_LINE}: {link}" + ("" if running else " (start Scout first: `gigai scout run`)"),
-    ]
-    if not tailored:
-        lines.append(f"There, choose {in_file if in_file != '-' else 'the same markdown'} as the resume.")
+    wrote = f"Wrote {shown_path} ({rendered.pages} page{'' if rendered.pages == 1 else 's'}, spacing {rendered.spacing_scale:g})"
+    if form is not None:
+        lines = [f"{wrote}, with your name and contact details from {header_file}.", *([rendered.note] if rendered.note else []), *([header_note] if header_note else [])]
+    else:
+        lines = [
+            f"{wrote}, without your name and contact details.",
+            *([rendered.note] if rendered.note else []),
+            *([header_note] if header_note else []),
+            f"{FINISH_LINE}: {link}" + ("" if running else " (start Scout first: `gigai scout run`)"),
+        ]
+        if not tailored:
+            lines.append(f"There, choose {in_file if in_file != '-' else 'the same markdown'} as the resume.")
     _emit(payload, as_json, "\n".join(lines))
 
 

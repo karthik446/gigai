@@ -35,6 +35,27 @@ console.log(JSON.stringify({
   bodyNull: m.headerBody(null),
   can: [m.canGenerate({ name: "Zora" }), m.canGenerate({ name: "  ", email: "a@b.c" }), m.canGenerate(null)],
   exports: Object.keys(m).sort(),
+  file: (() => {
+    const values = { name: "Zora Quillfeather", email: "zora.q@example.invalid", phone: "555-0142-ZQ", location: "Quillshire, ZZ", linkedin: "linkedin.com/in/zq", link: "", work_authorization: "VISA: H1B", links: [{ label: "GitHub", url: " github.com/zq " }, "junk", { label: 7, url: "zq.example.invalid" }] };
+    const filled = { state: "filled", shown: "~/Documents/GigAI/header.json", message: "Filled from ~/Documents/GigAI/header.json", warning: null, has_work_authorization: true, values };
+    const noKey = { ...filled, has_work_authorization: false, values: { ...values, work_authorization: "" } };
+    const emptyKey = { ...filled, values: { ...values, work_authorization: "" } };
+    const loose = { ...filled, warning: "~/Documents/GigAI/header.json can be read by other users of this computer." };
+    const missing = { state: "missing", shown: "~/Documents/GigAI/header.json", message: "There is no header file at ~/Documents/GigAI/header.json.", warning: null, values: null };
+    const invalid = { state: "invalid", shown: "~/Documents/GigAI/header.json", message: "~/Documents/GigAI/header.json was not used: phone must be text in double quotes.", warning: null, values: null };
+    const start = m.startValues({ visaRequired: true, file: filled });
+    return {
+      start,
+      body: m.headerBody(start),
+      edited: m.headerBody({ ...start, name: " Riley Formedit ", work_authorization: "", links: [{ label: "GitHub", url: "" }, { label: "Site", url: "riley.example.invalid" }] }),
+      lines: [m.startValues({ visaRequired: true, file: noKey }), m.startValues({ visaRequired: false, file: noKey }), m.startValues({ visaRequired: true, file: emptyKey })].map((v) => v.work_authorization),
+      unfilled: [m.startValues({ visaRequired: true, file: missing }), m.startValues({ visaRequired: true, file: invalid }), m.startValues({ visaRequired: true, file: null })],
+      sources: [m.headerSource(filled), m.headerSource(loose), m.headerSource(missing), m.headerSource(invalid), m.headerSource(null), m.headerSource({})],
+      values: [m.fileValues(filled) === values, m.fileValues(missing), m.fileValues({ state: "filled" }), m.fileValues(null)],
+      many: m.headerBody({ name: "x", links: Array.from({ length: 9 }, (_, n) => ({ label: "L", url: "x.invalid/" + n })) }).links.length,
+      maxLinks: m.MAX_LINKS,
+    };
+  })(),
   notices: [
     m.cleanupNotice({ removed_any: true, shown: false, text: "Removed contact details from 1 stored resume (email 1)." }),
     m.cleanupNotice({ removed_any: true, shown: true, text: "x" }),
@@ -86,7 +107,10 @@ def test_the_form_carries_the_one_privacy_notice_and_spells_out_none_of_it() -> 
     "never stores" had to be absent). The model still exports no wording of its own, and the form spells no
     sentence out: it shows the two shared constants.
     """
-    assert _run()["exports"] == ["FIELDS", "MAX_VALUE", "WORK_AUTHORIZATION_PREFILL", "canGenerate", "cleanupNotice", "emptyValues", "headerBody", "startValues"]
+    assert _run()["exports"] == [
+        "FIELDS", "MAX_LINKS", "MAX_VALUE", "WORK_AUTHORIZATION_PREFILL", "canGenerate", "cleanupNotice", "emptyValues", "fileValues", "headerBody",
+        "headerSource", "startValues",
+    ]
     form = (UI_SRC / "components" / "GeneratePdfForm.jsx").read_text(encoding="utf-8")
     assert 'import { PRIVACY_PDF_LINE, PRIVACY_PROMISE } from "../wording.js";' in form
     assert "<strong>{PRIVACY_PROMISE}</strong> {PRIVACY_PDF_LINE}" in form and 'data-role="pdf-privacy"' in form
@@ -106,6 +130,10 @@ def test_the_form_keeps_nothing_and_sends_the_values_only_in_the_render_request(
     assert "render(headerBody(values))" in form
     # 0.1.11.3 item 6: the form starts from the profile's answer each time it mounts, and imports no storage helper.
     assert "useState(() => startValues({ visaRequired }))" in form and "theme.js" not in form and "Storage" not in form
+    # 0.1.11.3 item 13: the header file's values come from the server once per open form and live in the same state.
+    assert "postPdfHeader().then((file) => {" in form and "setValues(startValues({ visaRequired, file }));" in form
+    assert form.count("postPdfHeader(") == 1 and "}, []);" in form, "asked once, when the form opens"
+    assert api.count('fetch("/api/pdf-header", { method: "POST"') == 1 and api.count("/api/pdf-header") == 2, "one caller, and its comment"
     # The only fetches that carry `header` are the two PDF routes.
     assert re.findall(r"body\.header = header", api) == ["body.header = header", "body.header = header"]
     assert 'postPdf("/api/tailored-resumes/pdf", body)' in api and 'postPdf("/api/resume/pdf", body)' in api
@@ -168,3 +196,39 @@ def test_the_work_authorization_line_starts_from_the_profiles_sponsorship_answer
     assert out["prefill"] == "Requires visa sponsorship"
     assert out["start"] == [{**blank, "work_authorization": "Requires visa sponsorship"}, blank, blank]
     assert not (UI_SRC / "workAuthorizationModel.js").exists(), "no module remembers the wording"
+
+
+def test_the_header_file_fills_the_form_and_an_edit_wins() -> None:
+    """0.1.11.3 item 13: form edits > the header file > the profile's sponsorship answer.
+
+    The file's values (``POST /api/pdf-header``) are what the form STARTS with; the request carries what is in the
+    form when Generate is pressed.  The profile's answer fills the work authorization line only when the file has
+    no such key at all; a missing or invalid file leaves the form as it was and says one plain sentence."""
+    from gigai.scout.pdf_header_file import SPONSORSHIP_DEFAULT
+    from gigai.scout.resume_display import MAX_LINKS, parse_header_form
+
+    out = _run()
+    file = out["file"]
+    assert file["start"] == {
+        "name": "Zora Quillfeather", "email": "zora.q@example.invalid", "phone": "555-0142-ZQ", "location": "Quillshire, ZZ", "linkedin": "linkedin.com/in/zq",
+        "link": "", "work_authorization": "VISA: H1B", "links": [{"label": "GitHub", "url": "github.com/zq"}, {"label": "", "url": "zq.example.invalid"}],
+    }, "the file's line wins over the profile's answer (visaRequired was true)"
+    assert file["body"] == file["start"] and parse_header_form(file["body"]) == file["start"], "untouched, the request carries the file's values and the server takes them"
+    # An edit wins: the name typed over, the line cleared, one link emptied (dropped) and one changed.
+    assert file["edited"] == {**file["start"], "name": "Riley Formedit", "work_authorization": "", "links": [{"label": "Site", "url": "riley.example.invalid"}]}
+    assert file["lines"] == [SPONSORSHIP_DEFAULT, "", ""], "no key: the profile's answer; an empty key: no line"
+    assert out["prefill"] == SPONSORSHIP_DEFAULT, "the form and the command line say the same sentence"
+    blank = {key: "" for key in HEADER_FIELDS}
+    assert file["unfilled"] == [{**blank, "work_authorization": SPONSORSHIP_DEFAULT}] * 3, "no usable file: the form is what it was"
+    shown = "~/Documents/GigAI/header.json"
+    assert file["sources"] == [
+        {"filled": True, "text": f"Filled from {shown}", "warning": None},
+        {"filled": True, "text": f"Filled from {shown}", "warning": f"{shown} can be read by other users of this computer."},
+        {"filled": False, "text": f"There is no header file at {shown}.", "warning": None},
+        {"filled": False, "text": f"{shown} was not used: phone must be text in double quotes.", "warning": None},
+        None, None,
+    ]
+    assert file["values"] == [True, None, None, None]
+    assert file["many"] == file["maxLinks"] == MAX_LINKS
+    form = (UI_SRC / "components" / "GeneratePdfForm.jsx").read_text(encoding="utf-8")
+    assert 'data-role="pdf-header-source"' in form and 'data-role="pdf-header-warning"' in form and 'data-role="generate-pdf-file-link"' in form

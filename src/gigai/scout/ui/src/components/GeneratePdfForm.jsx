@@ -1,5 +1,6 @@
-import { useState } from "react";
-import { FIELDS, canGenerate, headerBody, startValues } from "../generatePdfModel.js";
+import { useEffect, useRef, useState } from "react";
+import { postPdfHeader } from "../api.js";
+import { FIELDS, canGenerate, fileValues, headerBody, headerSource, startValues } from "../generatePdfModel.js";
 import { PRIVACY_PDF_LINE, PRIVACY_PROMISE } from "../wording.js";
 
 function saveBlob(blob, fileName) {
@@ -25,12 +26,48 @@ function saveBlob(blob, fileName) {
 // the form opens, as the profile's sponsorship answer in plain words
 // (`visaRequired`). The user edits it for this PDF; it prints in the PDF's
 // header only and, like the other values, is not remembered.
+//
+// 0.1.11.3 item 13: when the person keeps a header file of their own (default
+// ~/Documents/GigAI/header.json), the form asks the server for it each time it
+// opens (POST /api/pdf-header) and starts from its values: "Filled from
+// <path>", every field still editable. What is in the form when the button is
+// pressed is what prints: form edits > the file > the profile's answer. The
+// file is only read; a missing or unusable one is one plain line here.
 export default function GeneratePdfForm({ render, disabled = false, visaRequired = false }) {
   const [values, setValues] = useState(() => startValues({ visaRequired }));
+  const [source, setSource] = useState(null);
+  const touched = useRef(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
   const [savedAs, setSavedAs] = useState(null);
   const [note, setNote] = useState(null);
+
+  useEffect(() => {
+    let live = true;
+    postPdfHeader().then((file) => {
+      if (!live) {
+        return;
+      }
+      // Typed into before the answer came: the form keeps what was typed, and does not claim the file filled it.
+      const typed = touched.current;
+      if (!typed) {
+        setValues(startValues({ visaRequired, file }));
+      }
+      setSource(typed && fileValues(file) ? null : headerSource(file));
+    });
+    return () => {
+      live = false;
+    };
+    // Once per open form: the file is read when the form opens, not while the person types.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  function edit(change) {
+    touched.current = true;
+    setValues(change);
+  }
+
+  const linkRows = Array.isArray(values.links) ? values.links : [];
 
   async function submit(event) {
     event.preventDefault();
@@ -58,8 +95,60 @@ export default function GeneratePdfForm({ render, disabled = false, visaRequired
       <p className="muted small" data-role="pdf-privacy">
         <strong>{PRIVACY_PROMISE}</strong> {PRIVACY_PDF_LINE}
       </p>
+      {source && source.text && (
+        <p className="muted small" data-role="pdf-header-source" data-filled={source.filled ? "true" : "false"}>
+          {source.text}
+          {source.filled ? ". Edit anything below before you generate; the file is not changed." : ""}
+        </p>
+      )}
+      {source && source.warning && (
+        <div className="callout warn" role="status" data-role="pdf-header-warning">
+          {source.warning}
+        </div>
+      )}
       <div className="generate-pdf-fields">
-        {FIELDS.map((field) => (
+        {FIELDS.filter((field) => field.key !== "work_authorization").map((field) => (
+          <div className="form-group" key={field.key}>
+            <label className="form-label" htmlFor={`generate-pdf-${field.key}`}>
+              {field.label}
+            </label>
+            <input
+              id={`generate-pdf-${field.key}`}
+              name={field.autocomplete === "url" ? field.key : field.autocomplete}
+              type={field.type}
+              inputMode={field.inputMode}
+              autoComplete={field.autocomplete}
+              className="text-input"
+              placeholder={field.placeholder}
+              value={values[field.key]}
+              onChange={(event) => edit((current) => ({ ...current, [field.key]: event.target.value }))}
+            />
+          </div>
+        ))}
+        {linkRows.map((row, index) => (
+          <div className="form-group" key={`link-${index}`}>
+            <label className="form-label" htmlFor={`generate-pdf-links-${index}`}>
+              {row.label || "Link"}
+            </label>
+            <input
+              id={`generate-pdf-links-${index}`}
+              name={`links-${index}`}
+              type="text"
+              inputMode="url"
+              autoComplete="off"
+              className="text-input"
+              data-role="generate-pdf-file-link"
+              value={row.url}
+              onChange={(event) =>
+                edit((current) => ({
+                  ...current,
+                  links: current.links.map((item, at) => (at === index ? { ...item, url: event.target.value } : item)),
+                }))
+              }
+            />
+          </div>
+        ))}
+        {FIELDS.filter((field) => field.key === "work_authorization").map((field) => (
           <div className="form-group" key={field.key}>
             <label className="form-label" htmlFor={`generate-pdf-${field.key}`}>
               {field.label}
@@ -73,7 +162,7 @@ export default function GeneratePdfForm({ render, disabled = false, visaRequired
               className="text-input"
               placeholder={field.placeholder}
               value={values[field.key]}
-              onChange={(event) => setValues((current) => ({ ...current, [field.key]: event.target.value }))}
+              onChange={(event) => edit((current) => ({ ...current, [field.key]: event.target.value }))}
             />
             {field.hint && (
               <div className="muted small" data-role={`generate-pdf-hint-${field.key}`}>
