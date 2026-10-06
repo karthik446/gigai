@@ -744,16 +744,17 @@ def _ranking(
     postings read "not ranked yet" until they are ranked again: the Jobs page offers "Re-rank". Never a model call.
     """
 
-    from .pipeline.rank_lane import _unranked, _window_start, rank_status
+    from .pipeline.rank_lane import _window_start, rank_status
 
     since = _window_start((now or datetime.now(UTC)).astimezone(UTC))  # the lane's own window and its own rule
-    found = store.posting_rank_progress()
     stale = postings.rank_resume_stale(store, views)
     by_profile = []
     for view in views:
-        ranked = found.get(view.profile_id, (0, 0))[0]
+        # 0.1.11.3: both counts are of the window the line names ("last 7 days"), so "Re-rank" asks about the same
+        # postings: a ranked posting older than the window is no longer counted.
+        window = [row for row in store.postings(profile_id=view.profile_id) if batch_date(row) > since]
         by_profile.append({
-            "profile_id": view.profile_id, "ranked": ranked, "total": ranked + len(_unranked(store, view.profile_id, since)),
+            "profile_id": view.profile_id, "ranked": sum(1 for row in window if row.rank_score is not None), "total": len(window),
             "stale_resume": stale[view.profile_id],
         })
     try:

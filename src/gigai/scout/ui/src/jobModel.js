@@ -59,7 +59,7 @@ export const MODE_LABELS = { remote: "Remote", hybrid: "Hybrid", onsite: "On-sit
 // uat-batch1 (N8): the requirement class and status in the operator's words.
 // 0110-10-03: `list_item` is one tool of a list a single sentence names
 // ("Docker, Helm, and Kubernetes"): it weighs less than a requirement of its own.
-export const CLASS_LABELS = { hard: "Must-have", askable: "Can ask", list_item: "One of a list", nice_to_have: "Bonus" };
+export const CLASS_LABELS = { hard: "Required", askable: "Nice to have", list_item: "One of a list", nice_to_have: "Bonus" };
 export const STATUS_LABELS = { met: "Met", unmet: "Not met", unclear: "Unclear", partial: "Partial", gap: "Gap" };
 
 const CLASS_RANK = { hard: 0, askable: 1, list_item: 2, nice_to_have: 3 };
@@ -87,7 +87,7 @@ export function statusLabel(status) {
   return STATUS_LABELS[status] || humanizeId(status);
 }
 
-// "Must-have: Met"; a row the prompt gave no class reads "Met".
+// "Required: Met"; a row the prompt gave no class reads "Met".
 export function requirementStatusLabel(row) {
   const name = classLabel(row && row.class);
   const status = statusLabel(row && row.status);

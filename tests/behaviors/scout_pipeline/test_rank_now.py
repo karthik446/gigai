@@ -22,6 +22,7 @@ in-process server (``serve()`` with the real backend, no background runner):
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from contextlib import closing
 import json
 from pathlib import Path
 import re
@@ -246,3 +247,23 @@ def test_re_rank_is_refused_beyond_the_daily_cap_and_with_ranking_off_and_no_mod
             refused = client.post(ROUTE, json={"mode": mode, "approve": True})
             assert refused.status_code == 409 and refused.json()["error"]["code"] == "rank_disabled", refused.text
         assert len(model.rank_prompts) == 1
+
+
+def test_the_ranked_x_of_y_counts_the_window_the_dialog_re_ranks(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """0.1.11.3: a ranked posting older than the 7 days is not in "Ranked X of Y (last 7 days)", so the page's Y is
+    the number "Re-rank latest 100" shows (it said 59 on the page and 56 in the dialog)."""
+
+    import sqlite3
+
+    fx, _model = _fixture(tmp_path, monkeypatch, 5)
+    old = datetime.now(UTC) - timedelta(days=30)
+    fx.seed("ro", [lever_job("ro", n, title=TITLE_SECOND_ONLY, text=f"Old posting {n}: maintain batch jobs.", created=old) for n in range(1, 4)], seen_at=old)
+    with _Served(fx) as client:
+        assert client.get(f"/api/postings?profile_id={fx.second_profile_id}&limit=200").status_code == 200  # the store is made
+        with closing(sqlite3.connect(pipeline_path(fx.home_root, fx.target))) as conn:
+            assert conn.execute("UPDATE posting SET rank_score = 60 WHERE job LIKE '%/ro/%'").rowcount == 3
+            conn.commit()
+        read = _read(client)
+        plan = _read(client, {"mode": "latest"})["plan"]
+        assert _progress(read, fx.second_profile_id) == (0, 5)  # the 3 old ranked ones are out of the window
+        assert plan["postings"] == 5  # type: ignore[index]

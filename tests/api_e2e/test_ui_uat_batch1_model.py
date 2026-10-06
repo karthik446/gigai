@@ -22,7 +22,7 @@ What is pinned, by UAT item:
   gate went with the tailor call: the resume is picked when the job is
   assessed.)
 * N4  the job description is a short excerpt.
-* N8  ``Must-have: Met`` / ``Can ask: Unclear`` / ``Bonus: Met``.
+* N8  ``Required: Met`` / ``Nice to have: Unclear`` / ``Bonus: Met``.
 * N9  ``Sponsorship not stated · N H-1B approvals (FY2026)``, plain
   ``Sponsorship not stated`` without approvals, positive tone only with them.
 * N12 the rotation line never says ``?`` or ``unknown``; the run-confirm
@@ -387,11 +387,11 @@ def test_the_job_description_is_a_short_excerpt(out: dict) -> None:
 
 
 def test_status_reads_class_then_status(out: dict) -> None:
-    assert out["statusLabels"] == ["Must-have: Met", "Can ask: Unclear", "Bonus: Met", "Must-have: Not met", "Met", "Some new class: Partial"]
+    assert out["statusLabels"] == ["Required: Met", "Nice to have: Unclear", "Bonus: Met", "Required: Not met", "Met", "Some new class: Partial"]
 
 
 def test_the_status_rendering_is_option_a_only() -> None:
-    """N8, operator decision: one chip, "Must-have: Met". The two other
+    """N8, operator decision: one chip, "Required: Met". The two other
     renderings and the ``?status=`` switch that showed them are deleted."""
 
     model = (UI_SRC / "jobModel.js").read_text(encoding="utf-8")
