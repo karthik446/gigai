@@ -30,6 +30,56 @@ mechanics here. Those belong in the internal changelog.
 
 ## Released versions
 
+### 0.1.11.3
+
+**After you upgrade** (`uv tool upgrade gigai`): the first read matches your stored postings once more
+against the new country and title rules, so the first Jobs page after the upgrade can take a little
+longer. Jobs you picked a resume for before this version keep that resume; to get the one that fits two
+pages with a header, use "Pick it now" (or `gigai scout resume pick --job-url URL --refresh`) on them.
+
+- **"Pick it now" works.** A job that was assessed but had no suggested resume could not be picked again:
+  the button always failed. It now picks the resume from your master without a model call, keeps a resume
+  you edited as a proposal, and says in plain words when it cannot (no master, a resume you put in by
+  hand, an old assessment that needs a re-assess). `gigai scout resume pick --refresh | --draft` do the
+  same.
+- **The PDF fits the pages the pick says.** The picker now keeps room for the header, so a resume that
+  fills two pages is no longer pushed to a third by the header. Generate PDF also tightens its spacing
+  and compacts the skills before it gives up, and when a resume still cannot fit it says so and offers
+  "Shorten automatically" (`gigai scout resume pick --shorten`), which leaves out the weakest lines and
+  tells you which. The header is one line: your name, then location, work authorization, links, email
+  and phone joined with " | "; links show without `https://` or `www.`.
+- **Generate PDF is in the Suggested resume card**, next to the picked resume, with an optional **Work
+  authorization** line (for example "VISA: H1B") that is filled from your sponsorship answer each time
+  and printed in the PDF header only. It is not remembered and never written into your master or your
+  resumes folder. The Suggestions card is collapsed to one line below it.
+- **Your own header file.** Keep your contact details in `~/Documents/GigAI/header.json` (name, email,
+  phone, location, work authorization, and `github`, `linkedin`, `website` as plain ids, or `links`).
+  Generate PDF fills its form from it ("Filled from <path>") and `gigai scout resume pdf --header FILE`
+  uses it; "Save these details" in the form writes it for you (only when you click it, readable by you
+  only, and it asks before replacing). GigAI only reads it when it makes a PDF: it is never stored,
+  logged, sent to a model or shown to your agent. Values that are empty or start with `REPLACE` are
+  skipped, and a file with no name is refused with a plain message. The docs show an example with
+  made-up values.
+- **Country filter defaults to the US.** A location that names a region or country outside your
+  countries (Europe, EU, Asia, "Remote (Germany)", "London / Remote") is not listed. A job that says
+  only "Remote" or "Anywhere" counts as US. New profiles start on the US.
+- **Titles to avoid works, and the title must match as a whole.** A posting whose title has a word you
+  avoid is not listed. "Staff Training Engineer" no longer passes for "Staff Engineer"; titles that
+  extend your role after a comma or dash ("Staff Engineer, Payments") still do. Sponsorship is a label
+  and never hides a posting.
+- **Jobs cards and the job page: the company's H-1B approvals** next to the sponsorship label ("Sponsorship
+  not stated · 32 H-1B approvals"), shown only when there is a figure, and an **Applied badge**
+  ("Applied · Oct 6", then Interview, Offer, Rejected or Withdrawn as the status moves on) with an
+  Applied filter.
+- **The Jobs page updates by itself** when ranking finishes: the ranking row, the counts and the list
+  refresh without a reload. The requirement table says "Required" or "Nice to have" (no row ids), the
+  "Weak fit" tooltip is in plain words, and the re-rank question counts the same 7-day window as the
+  page.
+- **Fewer pointless questions.** A requirement your master already states (a tool in your skills line,
+  a skill named in a role, years that your dated roles add up to) is met from your own line and its
+  question is not asked. A suggestion that says your resume is silent on something a master line
+  contains is dropped, and a cited line is always one verbatim line of your master.
+
 ### 0.1.11.2
 
 - **A posting with too few requirements is no longer a perfect match.** A match read from fewer than 4

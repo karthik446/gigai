@@ -109,7 +109,7 @@ def test_the_stores_are_read_per_job_and_per_resume(fx: ProfileFixtureGig, gcp_a
     # The same verdict again: ``since`` stays where the verdict was first given.
     third = _assess(fx, monkeypatch, _MATCHED_ASSESSMENT)
     assert third.updated_at >= second.updated_at and len(third.history) == 3
-    assert quick_assessment_fact(third) == AssessmentFact(at=third.updated_at, verdict="matched_above_threshold", since=second.updated_at)
+    assert quick_assessment_fact(third) == AssessmentFact(at=third.updated_at, verdict="matched_above_threshold", since=second.updated_at, real_rows=1)
     assert _sources(fx).state_for(identity, profile_id=profile.profile_id).to_json() == matched
 
     # A pasted resume's assessment is its own resume identity ("ephemeral").
