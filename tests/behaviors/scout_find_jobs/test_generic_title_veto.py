@@ -7,6 +7,11 @@ Engineer". The generic title's rule needs only the words ``staff`` and
 Program Manager, Engineering Onboarding", though the tag store knew their
 functions (security, operations).
 
+0.1.11.3 (packet 14): the rule now reads the role as a whole and rejects that
+second title by itself (other words sit between "staff" and "engineering"), so
+the operations example here is "Staff Engineer, Technical Program Management":
+the rule passes it (the role, then its area) and the tag still says operations.
+
 (a) Those two do NOT match that profile: in the posting read model, in
     ``scout new``, in the rank lane's demand set and in the tag queue's. A
     posting the store has no tag for still matches by the generic rule and is
@@ -37,7 +42,7 @@ from tests.support.scout_profile_fixtures import uuids
 
 MIXED_TITLES = ("Staff Engineer", "Staff Software Engineer", "Staff AI Engineer")
 SECURITY = "Staff Security Engineer"
-TPM = "Staff Technical Program Manager, Engineering Onboarding"
+TPM = "Staff Engineer, Technical Program Management"
 SOFTWARE = "Staff Software Engineer"
 GENERIC_SOFTWARE = "Staff Engineer, World Model Development"
 #: Never put in the tag store: "not tagged yet".

@@ -263,7 +263,7 @@ def _assess_node_body(
     # Candidate resolution mirrors acquire's own selection loop exactly
     # (coordinator decision, P2 dispatch): a candidate is a new/edited,
     # role-matched row. Every candidate that isn't selected gets a reason
-    # -- exclusion_reason() first (location_mismatch/sponsorship_excluded),
+    # -- exclusion_reason() first (location_mismatch; sponsorship never excludes),
     # then B2's selection helper (duplicate/over_cap) for an otherwise-
     # eligible row acquire's diversity selection left behind. Duplicate/
     # failed and role-mismatched rows are not candidates at all and never

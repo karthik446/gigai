@@ -68,8 +68,8 @@ from .find_jobs.work_mode import in_person_modes
 from .question_ids import normalize_question_id
 from .requirement_weights import bound_rows, cap_list_item_questions, cap_mandatory_questions, settled_verdict
 from .requirements_list import ListedRequirement, check_listed, extracted, fold
-from .suggestion_check import MasterLine, check_suggestions, parse_master_lines, with_verbatim_evidence
 from .stated_check import MasterFacts, read_master, settle_stated
+from .suggestion_check import MasterLine, check_suggestions, clean_citations, parse_master_lines, truthful_notes, with_verbatim_evidence
 from .resume_gate import (
     HOLD_QUESTION,
     gate,
@@ -1002,6 +1002,8 @@ class AssessExtras:
     #: (``stated_check``), and the id of every question dropped with them.
     met_by_master: tuple[tuple[str, str], ...] = ()
     stated_questions: tuple[str, ...] = ()
+    #: 0.1.11.3 Q3: what the citation check did to each evidence item that was not one verbatim line (``suggestion_check.clean_citations``): ``trimmed_to_line`` | ``split_join`` | ``no_line``.
+    checked_citations: tuple[str, ...] = ()
 
 
 @dataclass
@@ -1489,9 +1491,12 @@ def _normalize_and_strip(decoded: Mapping[str, object], *, boundary: Boundary | 
     if all_rows:
         normalized_matrix, rows_not_shown = bound_rows(normalized_matrix)  # type: ignore[arg-type]
     is_v9 = all_rows and uses_v9_rules(normalized_matrix)  # type: ignore[arg-type]
+    cited: list[str] = []
     if is_v9 and boundary.lines:
         # 0.1.11 C2: a met row's evidence is the cited master line(s) by id, never the model's paraphrase of them.
         with_verbatim_evidence(normalized_matrix, boundary.lines, boundary.answers, boundary.stories)  # type: ignore[arg-type]
+        # 0.1.11.3 Q3: every other evidence item is ONE line as it is written (or one listed answer), or the row cites nothing.
+        cited = clean_citations(normalized_matrix, boundary.lines, boundary.answers, boundary.stories)  # type: ignore[arg-type]
     # Orchestrator #14: the words of each kept row of a v9 matrix -> its id (its own, or the one a first assessment's
     # row is given: that needs the posting's digest, so outside ``assess_once`` only a row's own id is known).
     row_ids: dict[str, str] = {}
@@ -1583,6 +1588,8 @@ def _normalize_and_strip(decoded: Mapping[str, object], *, boundary: Boundary | 
         with_ids = [{**row, "id": id_of_row[id(row)]} if id(row) in id_of_row else row for row in normalized_matrix]  # type: ignore[union-attr]
         suggested, refused = check_suggestions(suggested, with_ids, boundary.lines, boundary.answers)  # type: ignore[arg-type]
         checked = [(item.kind, why) for item, why in refused]
+        # 0.1.11.3 Q1: a plain-string suggestion that says the resume is silent on a term a master line states goes too.
+        raw_suggestions, _untrue = truthful_notes(raw_suggestions, boundary.lines)
     result: dict[str, object] = {
         "matrix": normalized_matrix,
         "suggestions": [item for item in raw_suggestions if isinstance(item, str)],
@@ -1634,6 +1641,7 @@ def _normalize_and_strip(decoded: Mapping[str, object], *, boundary: Boundary | 
         checked_suggestions=tuple(checked),
         met_by_master=tuple(met_by_master),
         stated_questions=tuple(stated_questions),
+        checked_citations=tuple(cited),
     )
     # Drop any other unknown keys (e.g. a model echoing "posting" back, or
     # inventing extra fields): the frozen contract is a closed object, and

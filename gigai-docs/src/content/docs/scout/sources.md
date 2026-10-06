@@ -36,7 +36,8 @@ Nothing in it leaves the machine.
 ## Find jobs reads that store
 
 Find jobs does not check the boards itself. A search
-takes your watchlist companies' stored postings, applies your titles, the
+takes your watchlist companies' stored postings, applies your titles
+([which titles match](#which-titles-match)), the
 publication window, the country rule and your work-mode preference, ranks
 every posting that passes, and fully assesses the top-ranked ones (the run's
 "Full assessments" setting) in the background, with no board request, so it takes seconds, not minutes. **Assess all new** on the finished run assesses the rest. Run **Update
@@ -84,6 +85,53 @@ check at 13:00`, and never starts anything itself: an update starts from the
 
 All of this is switched in **Settings > Background updates**; see
 [Configuration](../configuration/#background-updates).
+
+## Which titles match
+
+A posting is in a profile's list when its title is one of the profile's
+titles **as a whole role**, not when the title's words merely appear:
+
+- Every word of your title must be a word of the posting's title. Case,
+  punctuation and small words (of, the, and, for, in) do not matter, and
+  "Senior" or "Sr." in your title is not required.
+- The words must stand together. A word between them is the kind of the
+  same role and is kept: for the title "Staff Engineer", "Staff Software
+  Engineer", "Senior Staff Engineer" and "Staff Payments Engineer" match.
+  A short fixed list of words there makes it another role, and the posting
+  is not listed: Training, Trainer, Sales, Presales, Support, Solutions,
+  Customer, Field, Application, Program, Recruiting, Recruiter, Coordinator
+  and Intern. "Staff Training Engineer", "Staff Sales Engineer" and "Staff
+  Application Engineer" do not match "Staff Engineer". A title of yours that
+  says the word matches it: add "Staff Training Engineer" to get those.
+- A title is read in parts, cut at commas, brackets, slashes, colons and
+  dashes. What comes after the role, in the same part or a later one, names
+  the team and is free: "Staff Engineer - Payments", "Staff Engineer
+  (Backend)", "Staff Software Engineer, ML Training Infrastructure" all match.
+  The inverted form matches too: "Director, Engineering" and "Engineering
+  Director" for "Director of Engineering". There the part before the comma
+  holds only the role's own words, level words and discipline words, so
+  "Staff Accountant, Engineering" is no "Staff Engineer".
+- Another role's word next to it is another job: "Staff Engineering Manager",
+  "Director, Software Engineering", "Software Engineering Trainer" and "Staff
+  Engineer in Training" do not match "Staff Engineer" or "Software Engineer".
+  In front of an engineering title the listed words do the same ("Sales
+  Engineering Manager"), except Application and Program ("Application
+  Security Engineer" is a "Security Engineer"), and unless your own title
+  says that word.
+
+**Titles to avoid** (setup, and each profile's settings) take postings out of
+that profile's list. An entry is a word or a phrase; a posting whose title
+holds it is not listed at all. Whole words only, any case, no word stemming:
+"Trainer" does not remove "Training", and "intern" does not remove
+"Internal". A phrase must appear with its words in a row ("application
+engineer" removes "Staff Application Engineer, Salesforce"). The whole title
+is read, so avoiding "training" also removes "Staff Software Engineer, ML
+Training Infrastructure". Another profile without that entry still lists the
+posting. The list is matched again right after you change either setting.
+
+Whether a posting sponsors visas is never a filter. A posting that says it
+does not sponsor stays in the list with a "No sponsorship" label, also when
+your settings say you need a visa.
 
 ## Keywords
 

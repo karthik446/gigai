@@ -471,9 +471,9 @@ def _sponsorship_row(sponsorship: SponsorshipStatus | None) -> PostingRow:
     )
 
 
-def test_visa_required_excludes_not_offered_row(monkeypatch, tmp_path):
-    # B1 (0.1.8.1): dropped from `results` at acquire, same as a
-    # country-mismatch row -- not just left unselected.
+def test_visa_required_keeps_not_offered_row(monkeypatch, tmp_path):
+    # 0.1.11.3 (packet 14): sponsorship is a label. A "no sponsorship" row is
+    # kept and selected for a config that needs a visa (it was dropped, B1 0.1.8.1).
     row = _sponsorship_row(SponsorshipStatus.NOT_OFFERED)
     status = SimpleNamespace(complete=True, input_ref={"path": "input.json"})
     monkeypatch.setattr("gigai.scout.find_jobs.market_acquisition.import_public_rows", lambda **_: status)
@@ -482,9 +482,9 @@ def test_visa_required_excludes_not_offered_row(monkeypatch, tmp_path):
         _context(tmp_path, "acquire-visa-1"), _input([row], config=config),
         http_client=None, exa=_Exa(()), ats=_ATS(), watchlist=_Watchlist(),
     )
-    assert out.rows == ()
-    assert out.selected_postings == ()
-    assert out.dropped_counts == (DropCount(NotAssessedReason.SPONSORSHIP_EXCLUDED, 1),)
+    assert len(out.rows) == 1
+    assert [item.normalized_url for item in out.selected_postings] == [row.normalized_url]
+    assert out.dropped_counts == ()
 
 
 def test_visa_required_keeps_unknown_sponsorship_row(monkeypatch, tmp_path):

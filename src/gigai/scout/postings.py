@@ -132,7 +132,7 @@ from .pipeline.store import PipelineStore, PostingBuild, PostingRecord, RunAsses
 # that comes from 0.1.10.10; a home that ran an earlier 0.1.10.11 build prepares once more.
 # :8 is 0.1.11.3 item 11: the country rule rejects a region outside the profile's countries ("Europe", "Remote
 # (Germany)") and reads a bare "Remote" as the US, so every stored list is matched once more.
-MATCH_VERSION = "posting-match:8"
+MATCH_VERSION = "posting-match:9"
 # :3 is 0110-10-02: a row carries its fit number, and a weak fit has its own state.
 # :4 is 0.1.11.2: a match with no row about the job has the state ``thin_posting`` (stored rows get their facts again).
 FACTS_VERSION = "posting-facts:4"
@@ -637,14 +637,22 @@ def _watched(home_root: Path, target: Path) -> tuple[object, ...]:
         return ()
 
 
-def _memo_matcher(roles: Sequence[str], store: object | None) -> object:
+def _avoided(view: ProfileView) -> tuple[str, ...]:
+    """The profile's titles to avoid (0.1.11.3): a title holding one is not in its list."""
+
+    return tuple(getattr(view.record, "titles_to_avoid", ()) or ())
+
+
+def _memo_matcher(view: ProfileView, store: object | None) -> object:
     """The search's own ``TitleMatcher`` that decides each distinct title once (its counts are then of titles, and unused here)."""
 
     from .find_jobs.title_query import TitleMatcher
 
+    roles, avoid = view.config.roles, _avoided(view)  # type: ignore[attr-defined]
+
     class _Memo(TitleMatcher):
         def __init__(self) -> None:
-            super().__init__(roles, store)  # type: ignore[arg-type]
+            super().__init__(roles, store, avoid)  # type: ignore[arg-type]
             self._decided: dict[str, bool] = {}
 
         def matches(self, title: str) -> bool:
@@ -724,9 +732,10 @@ def _matched_rows(
     from .find_jobs.title_query import open_tag_store
 
     cache = BoardCache(home_root / "cache" / "scout" / "ats-boards", validator_source=lambda _provider, _url: None)
+    tags = open_tag_store(home_root)
     rows, _failures, _summary = read_indexed_boards(
         boards, index=index, cache=cache, config=view.config, now=now, remember_search=False,  # type: ignore[arg-type]
-        tags=open_tag_store(home_root), home_root=home_root,
+        tags=tags, home_root=home_root, title_matcher=_memo_matcher(view, tags),  # type: ignore[arg-type]
     )
     keys = [board_key(board.provider.value, board.board_token) for board in boards]  # type: ignore[attr-defined]
     return _board_records(view, keys, rows, {}, index, built_at)
@@ -745,9 +754,10 @@ def profile_posting_rows(view: ProfileView, home_root: Path, target: Path, now: 
     from .find_jobs.title_query import open_tag_store
 
     cache = BoardCache(home_root / "cache" / "scout" / "ats-boards", validator_source=lambda _provider, _url: None)
+    tags = open_tag_store(home_root)
     rows, _failures, _summary = read_indexed_boards(
         _watched(home_root, target), index=CompanyIndex.for_home(home_root), cache=cache, config=view.config, now=now,  # type: ignore[arg-type]
-        remember_search=False, tags=open_tag_store(home_root), home_root=home_root,
+        remember_search=False, tags=tags, home_root=home_root, title_matcher=_memo_matcher(view, tags),  # type: ignore[arg-type]
     )
     return list(rows)
 
@@ -799,7 +809,7 @@ class TagPending:
         from .find_jobs.title_query import TitleMatcher, open_tag_store
 
         store = open_tag_store(Path(home_root))
-        self._matchers = {view.profile_id: TitleMatcher(view.config.roles, store) for view in views}  # type: ignore[attr-defined]
+        self._matchers = {view.profile_id: TitleMatcher(view.config.roles, store, _avoided(view)) for view in views}  # type: ignore[attr-defined]
 
     def __call__(self, profile_id: str, title: str | None) -> bool:
         matcher = self._matchers.get(profile_id)
@@ -1142,7 +1152,7 @@ def _match(plan: _Plan, store: PipelineStore, views: Sequence[ProfileView], fact
     if not todo:
         return
     tags = open_tag_store(home_root)
-    matchers = {view.profile_id: _memo_matcher(view.config.roles, tags) for view in views}  # type: ignore[attr-defined]
+    matchers = {view.profile_id: _memo_matcher(view, tags) for view in views}
     cache = BoardCache(home_root / "cache" / "scout" / "ats-boards", validator_source=lambda _provider, _url: None)
     chunk: list[str] = []
     size = 0

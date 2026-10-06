@@ -14,7 +14,7 @@ What is queued (:func:`build_queue`): the run's rows in the grid's order
 outcome is ``new`` or ``edited``, that have a URL, that the run did not
 assess (nor carry an assessment forward for), that are not already in the
 quick-assess store for the profile, that the run did not leave out on
-purpose (:data:`EXCLUDED_REASONS`: its location / visa filters, a duplicate
+purpose (:data:`EXCLUDED_REASONS`: its location filter, a duplicate
 of a posting it kept, an unchanged posting), and that are not a near-copy
 (``selection.duplicate_key``: same company, title and country) of a posting
 assessed or queued before it -- the run's own selection drops those too.
@@ -87,7 +87,8 @@ FINISHED = frozenset({"complete", "cancelled", "failed"})
 #: K: calls at a time (see the module docstring for why 4).
 ASSESS_CONCURRENCY = SMALL_MACHINE_CONCURRENCY
 #: Rows the run left out on purpose; "Assess all new" leaves them out too.
-EXCLUDED_REASONS = frozenset({"location_mismatch", "sponsorship_excluded", "role_mismatch", "duplicate", "unchanged"})
+#: 0.1.11.3: not ``sponsorship_excluded`` (an older run's reason). Sponsorship is a label and leaves nothing out.
+EXCLUDED_REASONS = frozenset({"location_mismatch", "role_mismatch", "duplicate", "unchanged"})
 #: The error codes after which no further call can succeed: the job stops.
 FATAL_CODES = frozenset({"model_target_unavailable", "profile_not_found", "profile_unavailable", "resume_unavailable", "target_unavailable"})
 _NEW_OUTCOMES = frozenset({"new", "edited"})

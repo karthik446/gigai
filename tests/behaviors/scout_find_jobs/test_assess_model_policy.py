@@ -672,7 +672,8 @@ def test_candidate_partition_mixes_assessed_over_cap_and_exclusions(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Coordinator-specified mix: in-cap assessed, over_cap, location_mismatch,
-    sponsorship_excluded, and an unchanged row excluded from candidates entirely.
+    a "no sponsorship" row for a config that needs a visa (0.1.11.3: a label, so
+    it is an ordinary candidate, here over the cap), and an unchanged row.
     """
     fixture, target = _assess_fixture(tmp_path)
 
@@ -701,6 +702,8 @@ def test_candidate_partition_mixes_assessed_over_cap_and_exclusions(
         normalized_url="https://boards.greenhouse.io/acme/jobs/1004",
         text="We need C++ experience. No visa sponsorship available for this role.",
         sponsorship=SponsorshipStatus.NOT_OFFERED,
+        # Its own company, so it is over the cap and not a duplicate of assessed_posting.
+        company="Initech",
     )
     unchanged_posting = _posting(
         normalized_url="https://boards.greenhouse.io/acme/jobs/1005",
@@ -739,7 +742,8 @@ def test_candidate_partition_mixes_assessed_over_cap_and_exclusions(
     assert output.assessments[0].posting.normalized_url == assessed_posting.normalized_url
     assert by_url[over_cap_posting.normalized_url].reason is NotAssessedReason.OVER_CAP
     assert by_url[location_mismatch_posting.normalized_url].reason is NotAssessedReason.LOCATION_MISMATCH
-    assert by_url[sponsorship_excluded_posting.normalized_url].reason is NotAssessedReason.SPONSORSHIP_EXCLUDED
+    # 0.1.11.3: sponsorship never excludes. The row is left for the cap alone, like any other candidate.
+    assert by_url[sponsorship_excluded_posting.normalized_url].reason is NotAssessedReason.OVER_CAP
     # uat-bug-009: an UNCHANGED row is no longer excluded from candidates
     # outright -- this fixture has no `outputs/assess.json` anywhere on disk
     # (no earlier run ever produced a successful assessment for it), so it's

@@ -202,7 +202,7 @@ def test_a_term_the_master_does_not_state_keeps_its_question_and_the_job_stays_p
     rows = [GO_ROW, _row("Experience with React", klass="hard"), _row("Experience with Helm", klass="hard")]
     attempt = _assess(rows, [_question("Experience with React", "react"), _question("Experience with Helm", "helm")])
     helm = _stored(attempt, "Experience with Helm")
-    assert helm.status.value == "unclear" and list(helm.resume_evidence) == ["The resume does not show this."]
+    assert helm.status.value == "unclear" and list(helm.resume_evidence) == []  # A1 (Q3): a sentence about the resume is not evidence on an unclear row
     assert _open(attempt) == ["Experience with Helm"] and list(attempt.parsed.questions) == ["Do you have this: Experience with Helm?"]
     assert attempt.parsed.verdict.value == PENDING and _decision(attempt) == "hold_question"
     assert _stored(attempt, "Experience with React").status.value == "met"  # the private note's "Helm" is never read
@@ -229,7 +229,7 @@ def test_a_term_the_master_does_not_state_keeps_its_question_and_the_job_stays_p
 def test_a_requirement_the_master_does_not_settle_is_left_exactly_as_it_came(requirement: str) -> None:
     attempt = _assess([GO_ROW, _row(requirement, klass="hard")], [_question(requirement, "it")])
     row = _stored(attempt, requirement)
-    assert row.status.value == "unclear" and list(row.resume_evidence) == ["The resume does not show this."]
+    assert row.status.value == "unclear" and list(row.resume_evidence) == []  # A1 (Q3): no evidence text on an unsettled row
     assert _open(attempt) == [requirement] and attempt.parsed.verdict.value == PENDING
     assert _settled(attempt) == ()
 

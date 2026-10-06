@@ -38,7 +38,7 @@ from tests.api_e2e.harness import (
 from tests.support.latency import latency_bound
 
 BULK_ENV = "GIGAI_SCOUT_FIND_JOBS_TEST_BULK_POSTINGS"
-EXCLUDED = {"location_mismatch", "sponsorship_excluded", "role_mismatch", "duplicate", "unchanged"}
+EXCLUDED = {"location_mismatch", "role_mismatch", "duplicate", "unchanged"}
 
 
 def _run(client, **overrides) -> str:

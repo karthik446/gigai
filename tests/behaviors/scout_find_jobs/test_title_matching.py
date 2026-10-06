@@ -1,5 +1,9 @@
 """0110-021: whole-word, punctuation/filler-insensitive title prefilter.
 
+0.1.11.3 (packet 14): the role's words must also stand together as that role
+(``test_title_role_and_avoid.py`` has the table); the cases here that pinned
+"the words anywhere" say what the rule decides now.
+
 Synthetic titles only.
 """
 
@@ -44,8 +48,13 @@ def test_missing_role_word_does_not_match(title: str) -> None:
 def test_short_role_word_matches_whole_words_only() -> None:
     assert not matches_roles("Maintain the detail", ("ai",))
     assert not matches_roles("Airflow Engineer", ("ai",))
-    assert matches_roles("Director, AI Platform", ("ai",))
-    assert matches_roles("Director of AI/ML", ("ai",))
+    assert matches_roles("AI Platform Lead", ("ai",))
+    assert matches_roles("Senior AI/ML Engineer", ("ai",))
+    # 0.1.11.3: a director's title is not the role "AI" (another role's noun in front of it, or before the comma).
+    assert not matches_roles("Director, AI Platform", ("ai",))
+    assert not matches_roles("Director of AI/ML", ("ai",))
+    assert matches_roles("Director, AI Platform", ("Director of AI",))
+    assert matches_roles("Director of AI/ML", ("Director of AI",))
 
 
 def test_seniority_in_role_is_not_required() -> None:
@@ -85,11 +94,15 @@ _SYNTHETIC = [
 _ROLES = [("software engineer",), ("platform engineer", "data engineer"), ("Director of Engineering",), ("machine learning engineer",)]
 
 
+#: 0.1.11.3: the old rule's match that is another role (a manager is no software engineer).
+_ANOTHER_ROLE = {("Software Engineering Manager", ("software engineer",))}
+
+
 def test_titles_matched_by_the_old_substring_rule_still_match() -> None:
     for roles in _ROLES:
         for title in _SYNTHETIC:
             if _old(title, roles):
-                assert matches_roles(title, roles), (title, roles)
+                assert matches_roles(title, roles) is ((title, roles) not in _ANOTHER_ROLE), (title, roles)
 
 
 class _Row:
@@ -113,7 +126,7 @@ def test_second_check_keeps_old_verbatim_title_matches() -> None:
     for roles in _ROLES:
         for title in _SYNTHETIC:
             if _old(title, roles) and any(r.lower() in title.lower() for r in roles):
-                assert _role_match(_Row(title), roles), (title, roles)
+                assert _role_match(_Row(title), roles) is ((title, roles) not in _ANOTHER_ROLE), (title, roles)
 
 
 def test_url_lookup_wildcard_matches_any_title() -> None:

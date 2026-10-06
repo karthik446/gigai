@@ -842,6 +842,12 @@ def exclusion_reason(posting: PostingRow, config: FindJobsConfig, *, now: dateti
     ``startPublishedDate`` is only a request hint -- so a stale posting
     drops as ``PUBLISHED_TOO_OLD`` whichever source returned it. ``now`` is
     injectable for tests only.
+
+    0.1.11.3 (packet 14): sponsorship is a LABEL and excludes nothing. A
+    posting that says "no sponsorship" is kept for a config with
+    ``visa_sponsorship_required`` here as everywhere else (list, rank,
+    assess); ``NotAssessedReason.SPONSORSHIP_EXCLUDED`` stays in the contract
+    only so the records of older runs still read.
     """
 
     if published_too_old(posting, config, now=now):
@@ -850,8 +856,6 @@ def exclusion_reason(posting: PostingRow, config: FindJobsConfig, *, now: dateti
         match = country_match(posting.location, config.countries, structured_countries=posting.countries)
         if match is False:
             return NotAssessedReason.LOCATION_MISMATCH
-    if config.visa_sponsorship_required and posting.sponsorship is SponsorshipStatus.NOT_OFFERED:
-        return NotAssessedReason.SPONSORSHIP_EXCLUDED
     return None
 
 
