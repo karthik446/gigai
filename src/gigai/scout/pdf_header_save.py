@@ -12,8 +12,13 @@ what is in the form at that moment, to the same path the form reads (``pdf_heade
 - **Never over an existing file without a yes.**  Without ``replace`` an existing file answers ``exists`` and is
   not touched (the new file is put in place with a hard link, which cannot overwrite); the form then asks "Replace
   the existing header.json?" and sends ``replace``.
-- **Checked by the reader's own rules** (``pdf_header_file.form_values``): the six fields, one line of at most 200
-  characters each, at most 6 links, at most 16 KB.
+- **Checked by the reader's own rules** (``pdf_header_file.form_values``): the file's fields, one line of at most
+  200 characters each, at most 6 links, at most 16 KB.
+- **The shorthand** (0.1.11.3 item 16).  The form's GitHub and LinkedIn fields are saved as the id alone
+  (``"github": "<id>"``, ``"linkedin": "<id>"``; an address pasted there is saved as its id) and Website as the
+  site address; ``links`` holds only the other links.  What is written is what the reader reads back
+  (``form_values``), so a saved file fills the form with the same values.  A field left empty is left out of the
+  file; ``work_authorization`` alone is written when empty, because there an empty value means "no line".
 - **The folder.**  ``~/Documents/GigAI`` (the default GigAI home's folder for this file) is created, 0700, when it
   is not there yet; ``~/Documents`` itself is not.  For any other GigAI home the folder is the home, which exists.
   A folder that is missing or cannot be written is one plain sentence.
@@ -27,7 +32,7 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
-from .pdf_header_file import FILE_FIELDS, LINK_FIELDS, MAX_BYTES, PLACEHOLDER_PREFIX, SHORTHAND_FIELDS, _Invalid, _unknown, form_values
+from .pdf_header_file import FILE_FIELDS, LINK_FIELDS, MAX_BYTES, PLACEHOLDER_PREFIX, WORK_AUTHORIZATION_FIELD, _Invalid, _unknown, form_values
 from .target_resolution import _display_path
 
 RESPONSE_SCHEMA = "scout-pdf-header-save:1"
@@ -36,9 +41,9 @@ STATE_EXISTS = "exists"
 STATE_NOT_WRITABLE = "not_writable"
 #: What the form asks before a second request that carries ``replace``.
 REPLACE_QUESTION = "Replace the existing header.json?"
-#: What Save writes: the form's own fields.  The reader's link shorthand (``github`` / ``linkedin`` / ``website``,
-#: item 16) is not among them yet: the form holds links as ``links`` rows, and that is what is saved.
-SAVED_FIELDS = tuple(key for key in FILE_FIELDS if key not in SHORTHAND_FIELDS)
+#: What Save writes: every field of the file, the link shorthand (``github`` / ``linkedin`` / ``website``, item 16)
+#: among them.  Also the keys the save request may carry.
+SAVED_FIELDS = FILE_FIELDS
 _TEXT_FIELDS = tuple(key for key in SAVED_FIELDS if key != "links")
 
 
@@ -66,27 +71,29 @@ class HeaderSave:
 def file_content(details: object) -> bytes:
     """The bytes of ``header.json`` for the form's ``details``; ``HeaderSaveError`` when the reader would not take them.
 
-    Every text field is written, trimmed (an empty ``work_authorization`` means "no line"); ``links`` holds the
-    links that have a url.  Pure: no I/O, never logs."""
+    The content is the reader's own reading of ``details`` (``form_values``): the text fields trimmed, ``github`` and
+    ``linkedin`` as the id alone and ``website`` as the site address (an address typed there, or a link that is one
+    of them, is saved as the shorthand), ``links`` the other links that have a url.  A field left empty is left out;
+    ``work_authorization`` is always written (empty means "no line").  Pure: no I/O, never logs."""
 
     try:
         if type(details) is dict:
-            _unknown(details, SAVED_FIELDS)  # the form's own fields only (the reader's link shorthand is not saved yet)
-        form_values(details)
+            _unknown(details, SAVED_FIELDS)
+        values, _, _ = form_values(details)
     except _Invalid as exc:
         raise HeaderSaveError(str(exc)) from None
     assert isinstance(details, dict)
-    content: dict[str, object] = {}
-    for key in SAVED_FIELDS:
-        if key == "links":
-            links = [{name: str(item.get(name, "")).strip() for name in LINK_FIELDS} for item in details.get("links", [])]
-            content[key] = [link for link in links if link["url"]]
-        else:
-            content[key] = str(details.get(key, "")).strip()
-    typed = [str(content[key]) for key in _TEXT_FIELDS] + [text for link in content["links"] for text in link.values()]  # type: ignore[union-attr]
+    # What was typed, before the reader skips anything: a placeholder is refused here, never silently dropped.
+    typed = [str(details.get(key, "")).strip() for key in _TEXT_FIELDS]
+    typed += [str(item.get(name, "")).strip() for item in details.get("links", []) for name in LINK_FIELDS]
     if any(text.startswith(PLACEHOLDER_PREFIX) for text in typed):
         raise HeaderSaveError(f"a value still starts with {PLACEHOLDER_PREFIX}: type your own details first")
-    if not any(typed):
+    content: dict[str, object] = {}
+    for key in SAVED_FIELDS:
+        held = values[key]
+        if held or key == WORK_AUTHORIZATION_FIELD:
+            content[key] = held
+    if not any(content.values()):
         raise HeaderSaveError("there is nothing to save: type at least one of your details first")
     data = (json.dumps(content, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
     if len(data) > MAX_BYTES:

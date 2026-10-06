@@ -41,6 +41,10 @@ function saveBlob(blob, fileName) {
 // that request and that file only. A file that still holds REPLACE
 // placeholders fills only its real fields; the form names what was skipped.
 //
+// 0.1.11.3 item 16: GitHub and LinkedIn are an id each and Website a site
+// address; the file's shorthand keys fill them, Save writes them back as the
+// shorthand, and the PDF prints github.com/<id> and linkedin.com/in/<id>.
+//
 // 0.1.11.3 item 15: when the server says the PDF does not fit its pages
 // (`note`) and the caller gives `shorten` (a stored job's resume), the note
 // has one button, "Shorten automatically". `shorten()` answers the server's
@@ -170,7 +174,7 @@ export default function GeneratePdfForm({ render, disabled = false, visaRequired
             </label>
             <input
               id={`generate-pdf-${field.key}`}
-              name={field.autocomplete === "url" ? field.key : field.autocomplete}
+              name={field.autocomplete === "url" || field.autocomplete === "off" ? field.key : field.autocomplete}
               type={field.type}
               inputMode={field.inputMode}
               autoComplete={field.autocomplete}
@@ -179,6 +183,11 @@ export default function GeneratePdfForm({ render, disabled = false, visaRequired
               value={values[field.key]}
               onChange={(event) => edit((current) => ({ ...current, [field.key]: event.target.value }))}
             />
+            {field.hint && (
+              <div className="muted small" data-role={`generate-pdf-hint-${field.key}`}>
+                {field.hint}
+              </div>
+            )}
           </div>
         ))}
         {linkRows.map((row, index) => (

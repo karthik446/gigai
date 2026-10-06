@@ -215,7 +215,7 @@ def test_no_model_prompt_and_no_log_holds_a_value_of_the_file(running) -> None:
 
     # ... saved from the form (0.1.11.3 item 14: refused without the page's Origin, asked before replacing, then written) ...
     typed = {"name": "Zora Quillfeather", "email": "zora.q@example.invalid", "phone": "555-0142-ZQ", "location": "Quillshire, ZZ",
-             "links": [{"label": "GitHub", "url": "github.com/zq-invalid-7731"}], "work_authorization": "VISA: H1B (ZQ-7731)"}
+             "github": "zq-invalid-7731", "links": [{"label": "Talks", "url": "zq-invalid-7731.example.invalid/talks"}], "work_authorization": "VISA: H1B (ZQ-7731)"}
     assert client.post("/api/pdf-header/save", json=typed).status_code == 403
     assert client.post("/api/pdf-header/save", json=typed, headers=page).json()["state"] == "exists"
     assert client.post("/api/pdf-header/save", json={**typed, "replace": True}, headers=page).json()["state"] == "saved"

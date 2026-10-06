@@ -37,13 +37,15 @@ FILLED = {
     "generate-pdf-email": "zora.q@example.invalid",
     "generate-pdf-phone": "555-0142-ZQ",
     "generate-pdf-location": "Quillshire, ZZ",
-    "generate-pdf-linkedin": "linkedin.com/in/zq-invalid-7731",
+    # 0.1.11.3 item 16: the file's GitHub and LinkedIn links fill the id fields, as the id alone.
+    "generate-pdf-github": "zq-invalid-7731",
+    "generate-pdf-linkedin": "zq-invalid-7731",
+    "generate-pdf-website": "",
     "generate-pdf-link": "",
-    "generate-pdf-links-0": "https://github.com/zq-invalid-7731",
-    "generate-pdf-links-1": "zq-invalid-7731.example.invalid",
+    "generate-pdf-links-0": "zq-invalid-7731.example.invalid",
     "generate-pdf-work_authorization": "VISA: H1B (ZQ-7731)",
 }
-EMPTY = ["generate-pdf-name", "generate-pdf-email", "generate-pdf-phone", "generate-pdf-location", "generate-pdf-linkedin", "generate-pdf-link", "generate-pdf-work_authorization"]
+EMPTY = ["generate-pdf-name", "generate-pdf-email", "generate-pdf-phone", "generate-pdf-location", "generate-pdf-github", "generate-pdf-linkedin", "generate-pdf-website", "generate-pdf-link", "generate-pdf-work_authorization"]
 TYPED_NAME = "Riley Formedit"
 
 
@@ -82,15 +84,15 @@ def test_the_header_file_fills_the_generate_pdf_form_and_stays_editable(ui, scou
         assert _fields(ui) == FILLED
         assert list(_fields(ui)) == list(FILLED), "the file's other links sit between the link fields and the work authorization line"
         labels = ui.page.locator(f'{FORM} [data-role="generate-pdf-file-link"]').evaluate_all("(fields) => fields.map((field) => field.labels[0].textContent.trim())")
-        assert labels == ["GitHub", "Link"], "each other link is a field under its own label"
+        assert labels == ["Link"], "each other link is a field under its own label"
         assert ui.page.locator(f"{FORM} {WARNING}").count() == 0, "a 0600 file has no warning"
         button = ui.page.locator('[data-role="generate-pdf"]')
         assert button.is_enabled(), "the file's name is enough to generate"
 
         # --- editable: what is in the form is what prints ---
         ui.page.fill("#generate-pdf-name", TYPED_NAME)
-        ui.page.fill("#generate-pdf-links-1", "")
-        assert _fields(ui) == {**FILLED, "generate-pdf-name": TYPED_NAME, "generate-pdf-links-1": ""}
+        ui.page.fill("#generate-pdf-links-0", "")
+        assert _fields(ui) == {**FILLED, "generate-pdf-name": TYPED_NAME, "generate-pdf-links-0": ""}
         ui.settle()
         ui.step("edited")
         with ui.page.expect_download() as waiting:
@@ -100,9 +102,8 @@ def test_the_header_file_fills_the_generate_pdf_form_and_stays_editable(ui, scou
         assert ui.writes_after("edited") == ["POST /api/tailored-resumes/pdf"], "the file is read when the form opens, not again"
         assert sent.value.post_data_json["header"] == {
             "name": TYPED_NAME, "email": "zora.q@example.invalid", "phone": "555-0142-ZQ", "location": "Quillshire, ZZ",
-            "linkedin": "linkedin.com/in/zq-invalid-7731", "link": "", "work_authorization": "VISA: H1B (ZQ-7731)",
-            "links": [{"label": "GitHub", "url": "https://github.com/zq-invalid-7731"}],
-        }
+            "github": "zq-invalid-7731", "linkedin": "zq-invalid-7731", "website": "", "link": "", "work_authorization": "VISA: H1B (ZQ-7731)",
+        }, "the ids as the form holds them (the server prints the links); the emptied link is not sent"
         name = waiting.value.suggested_filename
         assert "zora" not in name.lower() and "riley" not in name.lower(), "the file is named for the job"
         text = "".join("".join(page.extract_text() for page in PdfReader(io.BytesIO(Path(waiting.value.path()).read_bytes())).pages).split())
@@ -110,6 +111,7 @@ def test_the_header_file_fills_the_generate_pdf_form_and_stays_editable(ui, scou
         printed = "".join("Quillshire, ZZ | VISA: H1B (ZQ-7731) | github.com/zq-invalid-7731 | linkedin.com/in/zq-invalid-7731 | zora.q@example.invalid | 555-0142-ZQ".split())
         assert text.startswith("RILEYFORMEDIT"), "the name typed in the form wins over the file's"
         assert printed in text and "VISA:H1B(ZQ-7731)" in text, "the file's untouched values print as they are"
+        assert "https://" not in text and "www." not in text, "a link prints without its scheme"
         assert "QUILLFEATHER" not in text.upper() and "zq-invalid-7731.example.invalid" not in text, "what was edited away is not printed"
         assert json.loads(header_file.read_text(encoding="utf-8")) == FILE, "the person's file is not changed"
 

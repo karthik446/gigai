@@ -38,7 +38,9 @@ HEADER = {
     "email": "zephyrine.quillfeather@example.test",
     "phone": "(303) 555-0199",
     "location": "Ridgway, Colorado",
-    "linkedin": "linkedin.example.test/in/zquillfeather",
+    "github": "zquillfeather-zq4410",  # 0.1.11.3 item 16: an id (invented); it prints as github.com/<id>
+    "linkedin": "linkedin.example.test/in/zquillfeather",  # not an id: it still prints as typed
+    "website": "site.zquillfeather.example.test",
     "link": "zquillfeather.example.test",
 }
 #: 0.1.11.3 item 6: the optional line; invented, with a marker no fixture holds.
@@ -82,10 +84,10 @@ def test_generate_pdf_six_fields_a_download_and_nothing_stored(ui, scout_server)
     form.wait_for()
     ui.step("form")
 
-    # Six contact fields and the work authorization line, all empty; nothing to generate until there is a name.
+    # Eight contact fields (0.1.11.3 item 16: GitHub, LinkedIn, Website) and the work authorization line, all empty; nothing to generate until there is a name.
     inputs = form.locator("input")
     assert inputs.evaluate_all("(fields) => fields.map((field) => field.id)") == [f"generate-pdf-{key}" for key in SENT]
-    assert inputs.evaluate_all("(fields) => fields.map((field) => field.value)") == [""] * 7
+    assert inputs.evaluate_all("(fields) => fields.map((field) => field.value)") == [""] * 9
     button = ui.page.locator('[data-role="generate-pdf"]')
     assert button.is_disabled()
     ui.page.fill("#generate-pdf-email", HEADER["email"])
@@ -135,7 +137,7 @@ def test_generate_pdf_six_fields_a_download_and_nothing_stored(ui, scout_server)
     # And the form forgets: after a reload every field is empty again, the work authorization line too.
     ui.reload()
     form.wait_for()
-    assert form.locator("input").evaluate_all("(fields) => fields.map((field) => field.value)") == [""] * 7
+    assert form.locator("input").evaluate_all("(fields) => fields.map((field) => field.value)") == [""] * 9
 
     ui.assert_clean()  # zero console errors, page errors, HTTP >= 400, failed requests
 
@@ -150,7 +152,7 @@ def test_generate_pdf_stays_on_the_page_limit_and_shows_the_servers_note_when_it
     from pypdf import PdfReader
 
     demo = scout_server.demo
-    long_header = {**HEADER, "linkedin": "linkedin.example.test/in/zephyrine-quillfeather-clinical-applications", "link": "zquillfeather.example.test/portfolio/selected-work"}
+    long_header = {**HEADER, "github": "", "website": "", "linkedin": "linkedin.example.test/in/zephyrine-quillfeather-clinical-applications", "link": "zquillfeather.example.test/portfolio/selected-work"}
     ui.goto("/#/pdf/" + quote(demo.hero_profile_id, safe="") + "/" + quote(demo.hero_job, safe=""))
     ui.page.locator('[data-role="generate-pdf-form"]').wait_for()
     for key, value in long_header.items():

@@ -52,8 +52,8 @@ fixture model; see the note under "The master resume"). Paths are relative to th
 <a href="../../media/job-resume-dark.png"><img class="light:sl-hidden" src="../../media/job-resume-dark.png" alt="The tailored resume on the job page, with where its file is in your resumes folder." loading="lazy" /></a>
 <a href="../../media/job-resume-light.png"><img class="dark:sl-hidden" src="../../media/job-resume-light.png" alt="The tailored resume on the job page, with where its file is in your resumes folder." loading="lazy" /></a>
 
-**Generate PDF** opens a small form: name, email, phone, location, LinkedIn and
-one more link. Fill what you want printed and press Generate PDF. The values go
+**Generate PDF** opens a small form: name, email, phone, location, your GitHub id, your
+LinkedIn id, a website and one more link. Fill what you want printed and press Generate PDF. The values go
 into that one PDF and are dropped: GigAI does not save them, so you type them
 each time (your browser may offer to autofill them). The file is named
 `<company>-<role>-<date>.pdf`, never after you.
@@ -73,20 +73,34 @@ details): `~/Documents/GigAI/header.json` (a GigAI home other than `~/.gigai`:
   "email": "jane@example.com",
   "phone": "555-0100",
   "location": "Springfield, IL",
-  "github": "jane-example",
-  "linkedin": "jane-example",
-  "website": "jane.example.com",
-  "links": [
-    {"label": "Talks", "url": "example.com/talks"}
-  ],
+  "github": "octocat",
+  "linkedin": "octocat",
+  "website": "example.com",
   "work_authorization": "VISA: H1B"
+}
+```
+
+`github` and `linkedin` are the short form: just your id. The PDF prints
+`github.com/octocat` and `linkedin.com/in/octocat`, each a clickable link. The older form, a
+`links` list, still works, alone or beside the short form:
+
+```json
+{
+  "name": "Jane Example",
+  "links": [
+    {"label": "GitHub", "url": "https://github.com/octocat"},
+    {"label": "LinkedIn", "url": "https://www.linkedin.com/in/octocat"},
+    {"label": "Talks", "url": "example.com/talks"}
+  ]
 }
 ```
 
 - Every field is optional (a PDF made from the command line needs the name). Each value is
   one line of at most 200 characters; `links` holds at most 6 links.
-- A link labelled LinkedIn fills the form's LinkedIn field; every other link gets a field
-  of its own under its label. The PDF prints each link's address in the contact line.
+- The form has a field each for GitHub, LinkedIn and Website. `github`, `linkedin` and
+  `website` fill them. So does a `links` entry that is your GitHub or LinkedIn profile
+  address (the form shows the id alone) or one labelled Website. Every other link gets a
+  field of its own under its label. The PDF prints each link's address in the contact line.
 - The PDF header is your name and ONE line under it: location | work authorization | links |
   email | phone. A field you leave empty leaves no gap. A line too long for the page is set
   in slightly smaller type first, and wraps only when that is not enough.
@@ -111,6 +125,10 @@ Generate PDF form and press "Save these details to `~/Documents/GigAI/header.jso
 button shows the real path). Scout then writes the file, once, with what is in the form:
 
 - Only on your click. Opening the form, typing and generating a PDF never write it.
+- It writes the short form: `"github": "octocat"`, `"linkedin": "octocat"` and
+  `"website": "example.com"` for the fields you filled. A full address typed in the GitHub or
+  LinkedIn field is saved as the id. `links` holds only your other links. A field you left
+  empty is left out of the file; `work_authorization` is the exception (`""` means no line).
 - The file is yours alone (mode 600) and is written whole or not at all: if the write
   fails, the file you had is still there.
 - A file that is already there is never replaced without asking. The form says "Replace the

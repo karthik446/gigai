@@ -6647,7 +6647,7 @@
     },
     "/api/pdf-header": {
       "post": {
-        "description": "Scout's own page only: the Generate PDF form's values from the person's header file. NOT for agents: it answers only Scout's own browser page (a request carrying this server's own Origin); any other caller gets 403 forbidden_origin and the file is not opened. An agent never needs it: it renders the PDF without a header and the person finishes it. The person may keep their name and contact details in a JSON file they own, `~/Documents/GigAI/header.json` (a GigAI home other than `~/.gigai`: `<home>/header.json`): {name, email, phone, location, github, linkedin, website, links: [{label, url}], work_authorization}, every field optional. `github` and `linkedin` take just the id (a full address is read as the id) and `website` a site address; in `values` they are already links (`linkedin`: `linkedin.com/in/<id>`; `links` rows labelled GitHub and Website), and a link named twice is there once. GigAI reads it here (to fill the Generate PDF form, where the person edits the values before generating) and in `gigai scout resume pdf --out FILE`, and writes it only when the person presses the form's Save button (POST /api/pdf-header/save); it is never copied into the store, the journal, a log, a record, a suggestion, a brief, the resumes folder or a model prompt, and no other route returns it. `state` is filled, missing, invalid or placeholder; `message` is one plain sentence (what is wrong and where the file goes; never a value); `warning` says so when other users of the computer can read the file; `values` is the form's values when filled, else null. A value that is empty or starts with REPLACE (a template placeholder) is skipped: `placeholders` names the skipped fields, `notice` is the one sentence about them, and `name_note` says so when the file has no name yet; state placeholder means nothing in the file is filled in. Not cached (Cache-Control: no-store).",
+        "description": "Scout's own page only: the Generate PDF form's values from the person's header file. NOT for agents: it answers only Scout's own browser page (a request carrying this server's own Origin); any other caller gets 403 forbidden_origin and the file is not opened. An agent never needs it: it renders the PDF without a header and the person finishes it. The person may keep their name and contact details in a JSON file they own, `~/Documents/GigAI/header.json` (a GigAI home other than `~/.gigai`: `<home>/header.json`): {name, email, phone, location, github, linkedin, website, links: [{label, url}], work_authorization}, every field optional. `github` and `linkedin` take just the id (a full address is read as the id) and `website` a site address; `values` holds them the same way (the id alone, the site address), a `links` entry that is a GitHub or LinkedIn profile address fills that field when it is empty, `values.links` holds the other links, and a link named twice is there once. GigAI reads it here (to fill the Generate PDF form, where the person edits the values before generating) and in `gigai scout resume pdf --out FILE`, and writes it only when the person presses the form's Save button (POST /api/pdf-header/save); it is never copied into the store, the journal, a log, a record, a suggestion, a brief, the resumes folder or a model prompt, and no other route returns it. `state` is filled, missing, invalid or placeholder; `message` is one plain sentence (what is wrong and where the file goes; never a value); `warning` says so when other users of the computer can read the file; `values` is the form's values when filled, else null. A value that is empty or starts with REPLACE (a template placeholder) is skipped: `placeholders` names the skipped fields, `notice` is the one sentence about them, and `name_note` says so when the file has no name yet; state placeholder means nothing in the file is filled in. Not cached (Cache-Control: no-store).",
         "operationId": "post_api_pdf_header",
         "parameters": [],
         "requestBody": {
@@ -6768,7 +6768,7 @@
     },
     "/api/pdf-header/save": {
       "post": {
-        "description": "Scout's own page only: write the Generate PDF form's details to the person's header file, on their click. NOT for agents: it answers only Scout's own browser page (a request carrying this server's own Origin); any other caller gets 403 forbidden_origin, the body is not read and nothing is written. It is the form's \"Save these details to `~/Documents/GigAI/header.json`\" button: one write per click of what is in the form, to the file POST /api/pdf-header reads (mode 0600, written to a temporary file in the same folder and put in place in one step). The values go into that file and nowhere else: not the store, the journal, a log, a record, a suggestion, a brief, the resumes folder or a model prompt, and this answer holds none of them. `state` is saved, exists (a file is already there and was not changed; the form asks \"Replace the existing header.json?\" and sends replace: true) or not_writable (the folder is missing or cannot be written; `message` says what to check). The folder `~/Documents/GigAI` is created when it is missing; no other folder is. The values follow the file's rules (422 invalid_value names the field and the rule, never a value).",
+        "description": "Scout's own page only: write the Generate PDF form's details to the person's header file, on their click. NOT for agents: it answers only Scout's own browser page (a request carrying this server's own Origin); any other caller gets 403 forbidden_origin, the body is not read and nothing is written. It is the form's \"Save these details to `~/Documents/GigAI/header.json`\" button: one write per click of what is in the form, to the file POST /api/pdf-header reads (mode 0600, written to a temporary file in the same folder and put in place in one step). The values go into that file and nowhere else: not the store, the journal, a log, a record, a suggestion, a brief, the resumes folder or a model prompt, and this answer holds none of them. `state` is saved, exists (a file is already there and was not changed; the form asks \"Replace the existing header.json?\" and sends replace: true) or not_writable (the folder is missing or cannot be written; `message` says what to check). The folder `~/Documents/GigAI` is created when it is missing; no other folder is. The values follow the file's rules (422 invalid_value names the field and the rule, never a value). The file gets the shorthand: `github` and `linkedin` as the id, `website` as the site address, `links` only for other links; a field left empty is left out of the file (work_authorization excepted).",
         "operationId": "post_api_pdf_header_save",
         "parameters": [],
         "requestBody": {
@@ -6787,8 +6787,16 @@
                     "description": "Optional.",
                     "type": "string"
                   },
+                  "github": {
+                    "description": "Optional: the GitHub id alone; a profile address is saved as the id.",
+                    "type": "string"
+                  },
+                  "linkedin": {
+                    "description": "Optional: the LinkedIn id alone; a profile address is saved as the id.",
+                    "type": "string"
+                  },
                   "links": {
-                    "description": "Optional: at most 6 links, each {label, url}.",
+                    "description": "Optional: at most 6 other links, each {label, url}. One that is a GitHub or LinkedIn profile is saved as that id.",
                     "type": "array"
                   },
                   "location": {
@@ -6807,8 +6815,12 @@
                     "description": "true: write over the file that is there. Sent only after the person answered the form's question.",
                     "type": "boolean"
                   },
+                  "website": {
+                    "description": "Optional: a site address.",
+                    "type": "string"
+                  },
                   "work_authorization": {
-                    "description": "Optional; empty means no line.",
+                    "description": "Optional; empty means no line (always written).",
                     "type": "string"
                   }
                 },
@@ -10125,7 +10137,7 @@
                     "type": "boolean"
                   },
                   "header": {
-                    "description": "The Generate PDF form: {name, email, phone, location, linkedin, link, work_authorization}, each an optional string of at most 200 characters. The header is the name and ONE contact line: location | work_authorization (e.g. `VISA: H1B`, as written) | the links | email | phone; an empty field leaves no separator, and a line too long for the page is set smaller before it wraps. Optional links: at most 6 more links, each {label, url}; a link prints without `https://` or `www.` and its target is the full URL. Fills this one PDF's header; never stored, logged or returned. Left out: the PDF has no header. Details an agent sends here went through that agent and its model provider; the default for an agent is the headerless PDF and the person finishing it in Scout.",
+                    "description": "The Generate PDF form: {name, email, phone, location, github, linkedin, website, link, work_authorization}, each an optional string of at most 200 characters. `github` and `linkedin` take the id alone and `website` a site address (a profile address there is read as the id); they print as links. The header is the name and ONE contact line: location | work_authorization (e.g. `VISA: H1B`, as written) | the links | email | phone; an empty field leaves no separator, and a line too long for the page is set smaller before it wraps. Optional links: at most 6 more links, each {label, url}; a link prints without `https://` or `www.` and its target is the full URL. Fills this one PDF's header; never stored, logged or returned. Left out: the PDF has no header. Details an agent sends here went through that agent and its model provider; the default for an agent is the headerless PDF and the person finishing it in Scout.",
                     "type": "object"
                   },
                   "markdown": {
@@ -14559,7 +14571,7 @@
                 "additionalProperties": false,
                 "properties": {
                   "header": {
-                    "description": "The Generate PDF form: {name, email, phone, location, linkedin, link, work_authorization}, each an optional string of at most 200 characters. The header is the name and ONE contact line: location | work_authorization (e.g. `VISA: H1B`, as written) | the links | email | phone; an empty field leaves no separator, and a line too long for the page is set smaller before it wraps. Optional links: at most 6 more links, each {label, url}; a link prints without `https://` or `www.` and its target is the full URL. Fills this one PDF's header; never stored, logged or returned. Left out: the PDF has no header. Details an agent sends here went through that agent and its model provider; the default for an agent is the headerless PDF and the person finishing it in Scout.",
+                    "description": "The Generate PDF form: {name, email, phone, location, github, linkedin, website, link, work_authorization}, each an optional string of at most 200 characters. `github` and `linkedin` take the id alone and `website` a site address (a profile address there is read as the id); they print as links. The header is the name and ONE contact line: location | work_authorization (e.g. `VISA: H1B`, as written) | the links | email | phone; an empty field leaves no separator, and a line too long for the page is set smaller before it wraps. Optional links: at most 6 more links, each {label, url}; a link prints without `https://` or `www.` and its target is the full URL. Fills this one PDF's header; never stored, logged or returned. Left out: the PDF has no header. Details an agent sends here went through that agent and its model provider; the default for an agent is the headerless PDF and the person finishing it in Scout.",
                     "type": "object"
                   },
                   "job_identity": {

@@ -119,9 +119,10 @@ def test_the_save_button_writes_the_header_file_once_and_the_values_reach_nobody
         assert filled["shown"] == body["shown"], "the button names the path the form reads"
         assert filled["values"] == {
             "name": "Zora Quillfeather", "email": "zora.q@example.invalid", "phone": "555-0142-ZQ", "location": "Quillshire, ZZ",
-            "linkedin": "linkedin.com/in/zq-invalid-7731", "link": "", "work_authorization": "VISA: H1B (ZQ-7731)",
-            "links": [{"label": "GitHub", "url": "https://github.com/zq-invalid-7731"}],
+            "github": "zq-invalid-7731", "linkedin": "zq-invalid-7731", "website": "zq-invalid-7731.example.invalid", "link": "",
+            "work_authorization": "VISA: H1B (ZQ-7731)", "links": [{"label": "Talks", "url": "zq-invalid-7731.example.invalid/talks"}],
         }
+        assert filled["values"] == {**TYPED, "link": ""}, "save -> reload: the form holds what was typed"
 
         # ---- 3. never over an existing file without a yes ----------------------------------------------------
         header_file.write_text(json.dumps(OLD), encoding="utf-8")
@@ -139,13 +140,45 @@ def test_the_save_button_writes_the_header_file_once_and_the_values_reach_nobody
         assert json.loads(header_file.read_text(encoding="utf-8")) == TYPED and stat.S_IMODE(header_file.stat().st_mode) == 0o600
         assert _names(home) == ["header.json"]
 
+        # ---- 3b. item 16: addresses pasted into the id fields are saved as the shorthand, and print as links ----
+        pasted = {
+            "name": "Zora Quillfeather", "email": "", "phone": "", "location": "Quillshire, ZZ",
+            "github": "https://github.com/zq-invalid-7731", "linkedin": "https://www.linkedin.com/in/zq-invalid-7731/",
+            "website": "https://www.zq-invalid-7731.example.invalid/", "links": [{"label": "Link", "url": "github.com/zq-invalid-7731"}],
+            "work_authorization": "", "replace": True,
+        }
+        short = client.post(ROUTE, json=pasted, headers=page)
+        assert short.status_code == 200 and short.json()["state"] == "saved", short.text
+        _silent("the shorthand save's answer", _answer(short))
+        assert json.loads(header_file.read_text(encoding="utf-8")) == {
+            "name": "Zora Quillfeather", "location": "Quillshire, ZZ", "github": "zq-invalid-7731", "linkedin": "zq-invalid-7731",
+            "website": "zq-invalid-7731.example.invalid", "work_authorization": "",
+        }, "the ids alone; no empty field; the link that is the GitHub profile is not written twice"
+        assert stat.S_IMODE(header_file.stat().st_mode) == 0o600 and _names(home) == ["header.json"]
+        reloaded = client.post("/api/pdf-header", json={}, headers=page).json()["values"]
+        assert (reloaded["github"], reloaded["linkedin"], reloaded["website"], reloaded["links"]) == ("zq-invalid-7731", "zq-invalid-7731", "zq-invalid-7731.example.invalid", [])
+        line = "Quillshire, ZZ | github.com/zq-invalid-7731 | zq-invalid-7731.example.invalid | linkedin.com/in/zq-invalid-7731"
+        from_form = client.post("/api/resume/pdf", json={"markdown": RESUME, "header": reloaded}, headers=page)
+        assert from_form.status_code == 200 and from_form.content.startswith(b"%PDF"), from_form.text
+        form_text = "\n".join(sheet.extract_text() for sheet in PdfReader(io.BytesIO(from_form.content)).pages)
+        assert line in form_text and "https://" not in form_text, form_text[:300]
+        by_command = runner.invoke(cli, ["scout", "resume", "pdf", "--in", str(source), "--home", str(home), "--target", str(target), "--out", str(out), "--header", str(header_file), "--json"])
+        assert by_command.exit_code == 0, by_command.output
+        command_text = "\n".join(sheet.extract_text() for sheet in PdfReader(io.BytesIO(out.read_bytes())).pages)
+        assert line in command_text and "https://" not in command_text, "the command prints the same compact line from the same file"
+        out.unlink()
+        assert client.post(ROUTE, json={**TYPED, "replace": True}, headers=page).json()["state"] == "saved"
+
         # ---- 4. details the file's rules refuse: a field and a rule, never a value ---------------------------
         before = header_file.read_bytes()
         for name, details, code, says in (
             ("a list for a text", {**TYPED, "phone": ["555-0142-ZQ"]}, "invalid_value", "phone must be text in double quotes"),
             ("too long", {**TYPED, "location": "Quillshire" * 30}, "invalid_value", "location is longer than 200 characters"),
             ("seven links", {**TYPED, "links": [{"label": "L", "url": f"zq-invalid-7731.example.invalid/{n}"} for n in range(7)]}, "invalid_value", "links holds more than 6 links"),
-            ("a form key that is not the file's", {**TYPED, "linkedin": "linkedin.com/in/zq-invalid-7731"}, "unknown_key", "not a field of the header file"),
+            ("a form key that is not the file's", {**TYPED, "link": "zq-invalid-7731.example.invalid"}, "unknown_key", "not a field of the header file"),
+            ("a GitHub id that is not one", {**TYPED, "github": "zq invalid 7731/x"}, "invalid_value", 'github must be your GitHub id alone, like "your-id" (your GitHub profile address also works)'),
+            ("a LinkedIn id that is not one", {**TYPED, "linkedin": "in/zq invalid 7731"}, "invalid_value", 'linkedin must be your LinkedIn id alone, like "your-id" (your LinkedIn profile address also works)'),
+            ("a website that is not an address", {**TYPED, "website": "zq-invalid-7731"}, "invalid_value", 'website must be a site address, like "example.com"'),
             ("a value where a key goes", {**TYPED, "zora.q@example.invalid": "x"}, "unknown_key", "not a field of the header file"),
             ("a path", {**TYPED, "path": "/tmp/elsewhere.json"}, "unknown_key", "not a field of the header file"),
             ("replace that is not yes or no", {**TYPED, "replace": "yes"}, "wrong_type", "replace must be true or false"),

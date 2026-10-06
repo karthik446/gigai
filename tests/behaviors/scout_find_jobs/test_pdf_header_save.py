@@ -31,13 +31,16 @@ from gigai.scout.pdf_header_save import STATE_EXISTS, STATE_NOT_WRITABLE, STATE_
 
 from tests.behaviors.scout_find_jobs.test_pdf_header_file import MARKERS
 
-#: What the form sends: the header file's own shape.
+#: What the form sends: the header file's own shape (0.1.11.3 item 16: the links as the shorthand ids, in the file's key order).
 TYPED = {
     "name": "Zora Quillfeather",
     "email": "zora.q@example.invalid",
     "phone": "555-0142-ZQ",
     "location": "Quillshire, ZZ",
-    "links": [{"label": "LinkedIn", "url": "linkedin.com/in/zq-invalid-7731"}, {"label": "GitHub", "url": "https://github.com/zq-invalid-7731"}],
+    "github": "zq-invalid-7731",
+    "linkedin": "zq-invalid-7731",
+    "website": "zq-invalid-7731.example.invalid",
+    "links": [{"label": "Talks", "url": "zq-invalid-7731.example.invalid/talks"}],
     "work_authorization": "VISA: H1B (ZQ-7731)",
 }
 OLD = {"name": "Riley Formerfile", "email": "riley.old@example.invalid"}
@@ -78,15 +81,15 @@ def test_a_save_writes_exactly_the_typed_fields_mode_0600_and_nothing_else(tmp_p
     # The reader takes what the writer wrote.
     found = read_header_file(path)
     assert found.state == STATE_FILLED and found.warning is None and found.placeholders == () and found.name_note is None
-    assert found.values["name"] == "Zora Quillfeather" and found.values["linkedin"] == "linkedin.com/in/zq-invalid-7731"
+    assert found.values["name"] == "Zora Quillfeather" and found.values["linkedin"] == "zq-invalid-7731"
 
 
 def test_values_are_trimmed_and_an_empty_link_is_left_out(tmp_path: Path) -> None:
     saved = save_header_file(tmp_path / "header.json", {"name": "  Zora Quillfeather ", "links": [{"label": " Site ", "url": " zq-invalid-7731.example.invalid "}, {"label": "GitHub", "url": " "}]})
     assert saved.state == STATE_SAVED
     assert json.loads((tmp_path / "header.json").read_text(encoding="utf-8")) == {
-        "name": "Zora Quillfeather", "email": "", "phone": "", "location": "",
-        "links": [{"label": "Site", "url": "zq-invalid-7731.example.invalid"}], "work_authorization": "",
+        # 2f: a field left empty is left out; work_authorization alone is always written (empty means "no line").
+        "name": "Zora Quillfeather", "links": [{"label": "Site", "url": "zq-invalid-7731.example.invalid"}], "work_authorization": "",
     }
 
 
@@ -222,7 +225,10 @@ def test_the_default_folder_is_created_0700_and_only_that_one(tmp_path: Path) ->
         ({"phone": "555-0142-ZQ" * 30}, f"phone is longer than {MAX_VALUE} characters"),
         ({"name": "Zora Quillfeather", "nickname": "Zora"}, "nickname is not a field of this file"),
         ({"zora.q@example.invalid": "x"}, "a field is not a field of this file"),
-        ({"name": "Zora Quillfeather", "linkedin": "linkedin.com/in/zq-invalid-7731"}, "linkedin is not a field of this file"),
+        ({"name": "Zora Quillfeather", "github": "zq invalid 7731/secret"}, "github must be your GitHub id alone"),
+        ({"name": "Zora Quillfeather", "linkedin": "in/zq invalid 7731"}, "linkedin must be your LinkedIn id alone"),
+        ({"name": "Zora Quillfeather", "website": "zq-invalid-7731"}, "website must be a site address"),
+        ({"name": "Zora Quillfeather", "github": "REPLACE: your id"}, "a value still starts with REPLACE"),
         ({"links": [{"label": "L", "url": f"zq-invalid-7731.example.invalid/{n}"} for n in range(7)]}, "links holds more than 6 links"),
         ({"links": [{"label": "GitHub", "url": "zq-invalid-7731.example.invalid", "note": "Zora"}]}, "links[1].note is not a field"),
         ({"name": "REPLACE: your name", "email": "zora.q@example.invalid"}, "a value still starts with REPLACE"),
@@ -299,8 +305,8 @@ def test_a_mixed_file_fills_the_real_fields_and_names_the_skipped_ones(tmp_path:
     found = read_header_file(_file(tmp_path, content))
     assert found.state == STATE_FILLED and found.message == f"Filled from {found.shown}" and found.name_note is None
     assert found.values == {
-        "name": "Zora Quillfeather", "email": "", "phone": "", "location": "Quillshire, ZZ", "linkedin": "", "link": "", "work_authorization": "",
-        "links": [{"label": "GitHub", "url": "github.com/zq-invalid-7731"}],
+        "name": "Zora Quillfeather", "email": "", "phone": "", "location": "Quillshire, ZZ", "github": "zq-invalid-7731", "linkedin": "", "website": "",
+        "link": "", "work_authorization": "", "links": [],
     }
     assert found.placeholders == ("email", "phone", "links", "work_authorization"), "names only, in the file's order"
     assert found.notice == f"{found.shown} still has placeholder values: replace the REPLACE: fields (or save your details here). Skipped: email, phone, links, work_authorization."
@@ -315,7 +321,7 @@ def test_a_mixed_file_fills_the_real_fields_and_names_the_skipped_ones(tmp_path:
 def test_empty_strings_are_skipped_without_a_word(tmp_path: Path) -> None:
     found = read_header_file(_file(tmp_path, {"name": "Zora Quillfeather", "email": "", "phone": "  ", "location": "", "links": [{"label": "GitHub", "url": ""}, {"label": "", "url": " "}], "work_authorization": ""}))
     assert found.state == STATE_FILLED and found.placeholders == () and found.notice is None and found.name_note is None
-    assert found.values == {"name": "Zora Quillfeather", "email": "", "phone": "", "location": "", "linkedin": "", "link": "", "work_authorization": "", "links": []}
+    assert found.values == {"name": "Zora Quillfeather", "email": "", "phone": "", "location": "", "github": "", "linkedin": "", "website": "", "link": "", "work_authorization": "", "links": []}
     assert found.has_work_authorization is True, "an empty work_authorization key still means: no line"
     form = render_form(found, visa_required=True)
     assert form["work_authorization"] == "" and form.get("links", []) == []

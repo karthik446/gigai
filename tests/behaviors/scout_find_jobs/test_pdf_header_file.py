@@ -62,9 +62,9 @@ def test_a_file_fills_the_forms_values_and_its_links(tmp_path: Path) -> None:
     assert found.message == f"Filled from {found.shown}"
     assert found.values == {
         "name": "Zora Quillfeather", "email": "zora.q@example.invalid", "phone": "555-0142-ZQ", "location": "Quillshire, ZZ",
-        # the link labelled LinkedIn fills the form's own LinkedIn field; the others are rows under their labels
-        "linkedin": "linkedin.com/in/zq-invalid-7731", "link": "", "work_authorization": "VISA: H1B (ZQ-7731)",
-        "links": [{"label": "GitHub", "url": "https://github.com/zq-invalid-7731"}, {"label": "Link", "url": "zq-invalid-7731.example.invalid"}],
+        # 0.1.11.3 item 16: a link to a GitHub or LinkedIn profile fills that field with the id alone; the others are rows under their labels
+        "github": "zq-invalid-7731", "linkedin": "zq-invalid-7731", "website": "", "link": "", "work_authorization": "VISA: H1B (ZQ-7731)",
+        "links": [{"label": "Link", "url": "zq-invalid-7731.example.invalid"}],
     }
     assert set(found.values) == {*HEADER_FIELDS, "links"}
     # The form's own parser takes them, and the header prints every link's address in the contact line.
@@ -78,9 +78,9 @@ def test_a_file_fills_the_forms_values_and_its_links(tmp_path: Path) -> None:
         ContactItem("linkedin.com/in/zq-invalid-7731", "https://linkedin.com/in/zq-invalid-7731"),
         ContactItem("zora.q@example.invalid", "mailto:zora.q@example.invalid"), ContactItem("555-0142-ZQ", None),
     )
-    # A link to linkedin.com is the LinkedIn field whatever its label; a second one is a row.
+    # A link to linkedin.com is the LinkedIn field (its id) whatever its label; a second one is a row.
     two = read_header_file(_write(tmp_path / "two.json", {"links": [{"label": "Profile", "url": "https://www.linkedin.com/in/a"}, {"label": "LinkedIn", "url": "x.invalid/b"}]}))
-    assert two.values["linkedin"] == "https://www.linkedin.com/in/a" and two.values["links"] == [{"label": "LinkedIn", "url": "x.invalid/b"}]
+    assert two.values["linkedin"] == "a" and two.values["links"] == [{"label": "LinkedIn", "url": "x.invalid/b"}]
 
 
 def test_every_field_is_optional_and_an_empty_object_fills_nothing(tmp_path: Path) -> None:

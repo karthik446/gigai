@@ -10,14 +10,21 @@
 // allows it; GigAI keeps nothing.
 
 // A link field is type "text" with inputMode "url": a browser's type="url"
-// check would refuse "linkedin.com/in/you" (no scheme).
+// check would refuse "example.com" (no scheme).
+//
+// 0.1.11.3 item 16: GitHub and LinkedIn take the id alone, Website a site
+// address. The SERVER reads them (an address pasted there is read as the id)
+// and prints github.com/<id>, linkedin.com/in/<id> and the site as clickable
+// links; nothing here expands or checks an id.
 export const FIELDS = [
   { key: "name", label: "Name", autocomplete: "name", type: "text", placeholder: "Your name" },
   { key: "email", label: "Email", autocomplete: "email", type: "email", placeholder: "you@example.com" },
   { key: "phone", label: "Phone", autocomplete: "tel", type: "tel", placeholder: "+1 555 123 4567" },
   { key: "location", label: "Location", autocomplete: "address-level2", type: "text", placeholder: "City, State" },
-  { key: "linkedin", label: "LinkedIn", autocomplete: "url", type: "text", inputMode: "url", placeholder: "linkedin.com/in/you" },
-  { key: "link", label: "Other link", autocomplete: "url", type: "text", inputMode: "url", placeholder: "github.com/you or your site" },
+  { key: "github", label: "GitHub", autocomplete: "off", type: "text", placeholder: "your GitHub id", hint: "Just the id: it prints as github.com/<id>." },
+  { key: "linkedin", label: "LinkedIn", autocomplete: "off", type: "text", placeholder: "your LinkedIn id", hint: "Just the id: it prints as linkedin.com/in/<id>." },
+  { key: "website", label: "Website", autocomplete: "url", type: "text", inputMode: "url", placeholder: "example.com" },
+  { key: "link", label: "Other link", autocomplete: "url", type: "text", inputMode: "url", placeholder: "any other link" },
   // 0.1.11.3 item 6: optional, its own header line; `startValues` prefills it from the profile's sponsorship answer.
   {
     key: "work_authorization",
@@ -112,25 +119,34 @@ export function headerSource(file) {
 
 // 0.1.11.3 item 14: what "Save these details to <path>" sends (POST
 // /api/pdf-header/save): the header FILE's shape, from what is in the form
-// now. The LinkedIn field is a link labelled LinkedIn, the "Other link" field
-// a link labelled Link, then the file's own link rows; a link with no url is
-// left out. work_authorization is always sent: empty means "no line".
+// now. GitHub, LinkedIn and Website go as the file's shorthand keys (item 16:
+// the server saves the id alone); `links` holds only the other links: the
+// "Other link" field as a link labelled Link, then the file's own link rows;
+// a link with no url is left out. The server leaves an empty field out of
+// the file; work_authorization is always sent: empty means "no line".
 export const REPLACE_QUESTION = "Replace the existing header.json?";
 
 export function headerFileBody(values) {
   const body = headerBody(values);
-  const links = [
-    ...(body.linkedin ? [{ label: "LinkedIn", url: body.linkedin }] : []),
-    ...(body.link ? [{ label: "Link", url: body.link }] : []),
-    ...(body.links || []),
-  ];
-  return { name: body.name, email: body.email, phone: body.phone, location: body.location, links, work_authorization: body.work_authorization };
+  const links = [...(body.link ? [{ label: "Link", url: body.link }] : []), ...(body.links || [])];
+  return {
+    name: body.name,
+    email: body.email,
+    phone: body.phone,
+    location: body.location,
+    github: body.github,
+    linkedin: body.linkedin,
+    website: body.website,
+    links,
+    work_authorization: body.work_authorization,
+  };
 }
 
 // Something to save: at least one detail typed.
 export function canSave(values) {
   const body = headerFileBody(values);
-  return [body.name, body.email, body.phone, body.location, body.work_authorization].some((value) => value.length > 0) || body.links.length > 0;
+  const typed = [body.name, body.email, body.phone, body.location, body.github, body.linkedin, body.website, body.work_authorization];
+  return typed.some((value) => value.length > 0) || body.links.length > 0;
 }
 
 // What the form says after a save request: {tone, text, ask}. `ask` is true

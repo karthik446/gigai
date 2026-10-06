@@ -55,7 +55,18 @@ import stat
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .resume_display import HEADER_FIELDS, MAX_VALUE, WORK_AUTHORIZATION_FIELD, HeaderFormError, link_key, parse_header_form
+from .resume_display import (
+    HEADER_FIELDS,
+    MAX_VALUE,
+    SHORTHAND_FIELDS,
+    WORK_AUTHORIZATION_FIELD,
+    HeaderFormError,
+    ShorthandError,
+    link_key,
+    parse_header_form,
+    shorthand_link,
+    shorthand_value,
+)
 from .resumes_folder import default_folder
 from .target_resolution import _display_path
 
@@ -63,8 +74,6 @@ RESPONSE_SCHEMA = "scout-pdf-header-prefill:1"
 FILE_NAME = "header.json"
 #: The file's keys.  ``links`` is a list of ``{"label", "url"}``.
 FILE_FIELDS: tuple[str, ...] = ("name", "email", "phone", "location", "github", "linkedin", "website", "links", "work_authorization")
-#: Item 16: the shorthand link fields, in the order their links print.
-SHORTHAND_FIELDS: tuple[str, ...] = ("github", "linkedin", "website")
 LINK_FIELDS: tuple[str, ...] = ("label", "url")
 MAX_LINKS = 6
 #: The file is a handful of short lines; anything larger is not this file.
@@ -92,11 +101,7 @@ _EXAMPLE = (
     '{"name": "...", "email": "...", "phone": "...", "location": "...", "github": "your-id", "linkedin": "your-id", '
     '"links": [{"label": "Website", "url": "..."}], "work_authorization": "..."}'
 )
-_SCHEME = re.compile(r"\A[a-z][a-z0-9+.-]*://", re.IGNORECASE)
-_WWW = re.compile(r"\Awww\.", re.IGNORECASE)
-_GITHUB_ID = re.compile(r"\A[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?\Z")
-_LINKEDIN_ID = re.compile(r"\A[^\s/?#@]{1,100}\Z")
-_HOST = re.compile(r"\A[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?\.[A-Za-z]{2,}(?:[/?#]\S*)?\Z")
+_GITHUB = re.compile(r"\Agithub\.com/", re.IGNORECASE)
 
 
 def default_path(home_root: Path) -> Path:
@@ -167,43 +172,36 @@ def _is_placeholder(value: str) -> bool:
     return value.startswith(PLACEHOLDER_PREFIX)
 
 
-def _bare(value: str) -> str:
-    """``value`` without a scheme, ``www.``, a query, a fragment or a trailing slash: what an id is read from."""
+def _link_field(label: str, url: str) -> str | None:
+    """The shorthand field a ``links`` row belongs in, or ``None``: a link to linkedin.com, a link to github.com,
+    a link labelled Website.  Only a row the field can hold (``shorthand_value``: a profile address, not a
+    repository or a company page) goes there; any other row stays a row."""
 
-    return re.split(r"[?#]", _WWW.sub("", _SCHEME.sub("", value)), maxsplit=1)[0].rstrip("/")
-
-
-def _shorthand(key: str, value: str) -> str | None:
-    """The link a shorthand value names, as ``host/path`` (no scheme: the header adds ``https://`` for the
-    target); ``None`` for an empty value or a placeholder.  ``_Invalid`` names the field and the rule only."""
-
-    if not value or _is_placeholder(value):
+    bare = link_key(url)
+    if _LINKEDIN.search(url):
+        key = "linkedin"
+    elif _GITHUB.match(bare):
+        key = "github"
+    elif label.casefold() == "website":
+        key = "website"
+    else:
         return None
-    bare = _bare(value)
-    if key == "github":
-        account = re.sub(r"\Agithub\.com/", "", bare, flags=re.IGNORECASE).lstrip("@")
-        if not _GITHUB_ID.fullmatch(account):
-            raise _Invalid('github must be your GitHub id alone, like "your-id" (github.com/your-id also works)')
-        return f"github.com/{account}"
-    if key == "linkedin":
-        account = re.sub(r"\A(?:[a-z]{2,3}\.)?linkedin\.com/", "", bare, flags=re.IGNORECASE)
-        account = re.sub(r"\Ain/", "", account, flags=re.IGNORECASE).lstrip("@")
-        if not _LINKEDIN_ID.fullmatch(account):
-            raise _Invalid('linkedin must be your LinkedIn id alone, like "your-id" (linkedin.com/in/your-id also works)')
-        return f"linkedin.com/in/{account}"
-    if not _HOST.fullmatch(_WWW.sub("", _SCHEME.sub("", value)).rstrip("/")):
-        raise _Invalid('website must be a site address, like "example.com"')
-    return _WWW.sub("", _SCHEME.sub("", value)).rstrip("/")
+    try:
+        shorthand_value(key, url)
+    except ShorthandError:
+        return None
+    return key
 
 
 def form_values(raw: object) -> tuple[dict[str, object], bool, tuple[str, ...]]:
     """``(the Generate PDF form's values, whether work_authorization is set at all, the placeholder fields)`` from the file's JSON; ``_Invalid`` otherwise.
 
-    A link labelled LinkedIn (or to linkedin.com) fills the form's LinkedIn field, once; every other link is a row
-    of ``links`` under its own label.  The shorthand fields (``_shorthand``, item 16) come first: ``linkedin`` fills
-    that same field, ``github`` and ``website`` are rows labelled GitHub and Website; a ``links`` row that names a
-    link already there is left out.  A value that starts with ``REPLACE`` is a placeholder: its field stays empty
-    (a link whose label or url is one is left out; a shorthand that is one adds no link) and is named in the third
+    The shorthand fields (item 16) are the form's GitHub, LinkedIn and Website fields: each holds the id (the site
+    address) alone, however the file spells it (``resume_display.shorthand_value``, the one reader of the
+    shorthand).  A ``links`` row that is such a link (``_link_field``: a github.com or linkedin.com profile, a
+    row labelled Website) fills that field when the field is still empty; every other link is a row of ``links``
+    under its own label, and a link named twice is there once.  A value that starts with ``REPLACE`` is a
+    placeholder: its field stays empty (a link whose label or url is one is left out) and is named in the third
     item; a placeholder ``work_authorization`` counts as a key that is not there.  A link with an empty url is left
     out too.  Pure: no I/O, never logs."""
 
@@ -224,19 +222,19 @@ def form_values(raw: object) -> tuple[dict[str, object], bool, tuple[str, ...]]:
         raise _Invalid(f"links holds more than {MAX_LINKS} links")
     rows: list[dict[str, str]] = []
     seen: set[str] = set()
-    for key, label in (("github", "GitHub"), ("linkedin", "LinkedIn"), ("website", "Website")):
+    for key in SHORTHAND_FIELDS:
         given = _text(raw, key)
         if _is_placeholder(given):
             placeholders.append(key)
             continue
-        url = _shorthand(key, given)
-        if url is None or link_key(url) in seen:
+        try:
+            held = shorthand_value(key, given)
+        except ShorthandError as exc:
+            raise _Invalid(str(exc)) from None
+        if not held or link_key(shorthand_link(key, held)) in seen:
             continue
-        seen.add(link_key(url))
-        if key == "linkedin":
-            values["linkedin"] = url
-        else:
-            rows.append({"label": label, "url": url})
+        seen.add(link_key(shorthand_link(key, held)))
+        values[key] = held
     for number, item in enumerate(links, 1):
         where = f"links[{number}]."
         if type(item) is not dict:
@@ -252,12 +250,12 @@ def form_values(raw: object) -> tuple[dict[str, object], bool, tuple[str, ...]]:
         if link_key(url) in seen:
             continue  # the same link as a shorthand field or an earlier row: once
         seen.add(link_key(url))
-        if not values["linkedin"] and (label.casefold() == "linkedin" or _LINKEDIN.search(url)):
-            values["linkedin"] = url
+        key = _link_field(label, url)
+        if key is not None and not values[key]:
+            values[key] = shorthand_value(key, url)
+            seen.add(link_key(shorthand_link(key, url)))
         else:
             rows.append({"label": label or "Link", "url": url})
-    if len(rows) > MAX_LINKS:
-        raise _Invalid(f"the file names more than {MAX_LINKS} links besides LinkedIn")
     values["links"] = rows
     has_line = WORK_AUTHORIZATION_FIELD in raw and WORK_AUTHORIZATION_FIELD not in placeholders
     # In the file's own order, whatever order they were found in.

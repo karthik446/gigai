@@ -31,7 +31,11 @@ SPACING_MIN, SPACING_MAX, SPACING_DEFAULT = 0.7, 1.4, 1.0
 #: The keys a file written before 0.1.10.7 may still hold: never read, dropped by any save.
 LEGACY_CONTACT_KEYS: tuple[str, ...] = ("name", "contact")
 #: The Generate PDF form's fields (0110-046), in the order the contact line prints them after the name.
-HEADER_FIELDS: tuple[str, ...] = ("name", "email", "phone", "location", "linkedin", "link", "work_authorization")
+HEADER_FIELDS: tuple[str, ...] = ("name", "email", "phone", "location", "github", "linkedin", "website", "link", "work_authorization")
+#: 0.1.11.3 item 16: the link fields that take a SHORTHAND.  ``github`` and
+#: ``linkedin`` hold the id alone, ``website`` a site address (``shorthand_value``); the header prints the link each
+#: names (``shorthand_link``).  The same three keys of the header file (``pdf_header_file``) and of the form.
+SHORTHAND_FIELDS: tuple[str, ...] = ("github", "linkedin", "website")
 #: 0.1.11.3 item 6: the form's optional "Work authorization" text (e.g. "H-1B, requires sponsorship").  It prints as an
 #: item of this one PDF's header's contact line (item 15: after the location) and, like the other form values, is
 #: never stored: not in the master, a job's resume markdown or JSON, or the resumes folder.  Sponsorship stays a label
@@ -42,7 +46,7 @@ WORK_AUTHORIZATION_FIELD = "work_authorization"
 LINKS_FIELD = "links"
 MAX_LINKS = 6
 #: 0.1.11.3 item 15: the order of the PDF header's ONE contact line (``form_header``), its items joined with " | ".
-CONTACT_ORDER: tuple[str, ...] = ("location", WORK_AUTHORIZATION_FIELD, LINKS_FIELD, "linkedin", "link", "email", "phone")
+CONTACT_ORDER: tuple[str, ...] = ("location", WORK_AUTHORIZATION_FIELD, "github", "website", LINKS_FIELD, "linkedin", "link", "email", "phone")
 _CONTROL = re.compile(r"[\x00-\x1f\x7f]")
 
 
@@ -187,18 +191,80 @@ def _form_text(raw: Mapping[str, object], key: str, name: str) -> str:
     return value.strip()
 
 
+_WWW = re.compile(r"\Awww\.", re.IGNORECASE)
+_GITHUB_ID = re.compile(r"\A[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?\Z")
+_LINKEDIN_ID = re.compile(r"\A[^\s/?#@]{1,100}\Z")
+_HOST = re.compile(r"\A[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?\.[A-Za-z]{2,}(?:[/?#]\S*)?\Z")
+
+
+class ShorthandError(ValueError):
+    """A shorthand link field does not hold an id (or a site address); the message names the field and the rule, never the value."""
+
+
+def _bare(value: str) -> str:
+    """``value`` without a scheme, ``www.``, a query, a fragment or a trailing slash: what an id is read from."""
+
+    return re.split(r"[?#]", _WWW.sub("", _SCHEME.sub("", value)), maxsplit=1)[0].rstrip("/")
+
+
+def shorthand_value(key: str, value: str) -> str:
+    """What a ``SHORTHAND_FIELDS`` field holds, normalised (0.1.11.3 item 16): the id alone for ``github`` and
+    ``linkedin`` (``github.com/<id>``, ``linkedin.com/in/<id>`` or the full URL is read as the id), the site address
+    without a scheme or ``www.`` for ``website``.  An empty value stays empty.  ``ShorthandError`` otherwise.
+
+    The ONE reader of the shorthand: the header file, the Generate PDF form's values and Save all go through it."""
+
+    value = value.strip()
+    if not value:
+        return ""
+    bare = _bare(value)
+    if key == "github":
+        account = re.sub(r"\Agithub\.com/", "", bare, flags=re.IGNORECASE).lstrip("@")
+        if not _GITHUB_ID.fullmatch(account):
+            raise ShorthandError('github must be your GitHub id alone, like "your-id" (your GitHub profile address also works)')
+        return account
+    if key == "linkedin":
+        account = re.sub(r"\A(?:[a-z]{2,3}\.)?linkedin\.com/", "", bare, flags=re.IGNORECASE)
+        account = re.sub(r"\Ain/", "", account, flags=re.IGNORECASE).lstrip("@")
+        if not _LINKEDIN_ID.fullmatch(account):
+            raise ShorthandError('linkedin must be your LinkedIn id alone, like "your-id" (your LinkedIn profile address also works)')
+        return account
+    site = _WWW.sub("", _SCHEME.sub("", value)).rstrip("/")
+    if not _HOST.fullmatch(site):
+        raise ShorthandError('website must be a site address, like "example.com"')
+    return site
+
+
+def shorthand_link(key: str, value: str) -> str:
+    """The link a ``SHORTHAND_FIELDS`` value names, as ``host/path`` (no scheme: the header adds ``https://`` for
+    the target): ``github.com/<id>``, ``linkedin.com/in/<id>``, the site.  Empty for an empty value."""
+
+    held = shorthand_value(key, value)
+    if not held:
+        return ""
+    return {"github": "github.com/", "linkedin": "linkedin.com/in/"}.get(key, "") + held
+
+
 def parse_header_form(raw: object) -> dict[str, object]:
     """The form's values, trimmed, or ``HeaderFormError``.  Pure: no I/O, never logs.
 
     ``raw`` is an object of strings keyed by ``HEADER_FIELDS`` (each optional, at most ``MAX_VALUE``
     characters, one line), plus the optional ``links``: at most ``MAX_LINKS`` objects ``{"label", "url"}``
-    (0.1.11.3 item 13; a row with an empty url is dropped).  Errors name the field and the rule, never the value."""
+    (0.1.11.3 item 13; a row with an empty url is dropped).  ``github`` and ``linkedin`` are an id, ``website`` a
+    site address (item 16; an address pasted there is read as the id: ``shorthand_value``).  A value there that is
+    not one is kept as typed and prints as the plain link it was before item 16 (``form_header``): the form never
+    refuses a PDF over it.  Errors name the field and the rule, never the value."""
 
     if type(raw) is not dict:
         raise HeaderFormError("wrong_type", "header must be an object of strings: " + ", ".join(HEADER_FIELDS))
     if any(key not in HEADER_FIELDS and key != LINKS_FIELD for key in raw):
         raise HeaderFormError("unknown_key", "header has an unknown field (allowed: " + ", ".join((*HEADER_FIELDS, LINKS_FIELD)) + ")")
     values: dict[str, object] = {key: _form_text(raw, key, f"header.{key}") for key in HEADER_FIELDS}
+    for key in SHORTHAND_FIELDS:
+        try:
+            values[key] = shorthand_value(key, str(values[key]))
+        except ShorthandError:
+            pass  # not an id: kept as typed, printed as a plain link
     if LINKS_FIELD in raw:
         links = raw[LINKS_FIELD]
         if type(links) is not list or any(type(item) is not dict for item in links):
@@ -215,9 +281,6 @@ def parse_header_form(raw: object) -> dict[str, object]:
         if rows:
             values[LINKS_FIELD] = rows
     return values
-
-
-_WWW = re.compile(r"\Awww\.", re.IGNORECASE)
 
 
 def _link_item(value: str) -> ContactItem:
@@ -262,7 +325,12 @@ def form_header(values: Mapping[str, object], title: str = "") -> PdfHeader:
             continue
         elif key == "email":
             contact.append(ContactItem(text(key), "mailto:" + text(key)))
-        elif key in ("linkedin", "link"):
+        elif key in SHORTHAND_FIELDS:
+            try:
+                link(shorthand_link(key, text(key)))
+            except ShorthandError:
+                link(text(key))  # not an id: the address as typed
+        elif key == "link":
             link(text(key))
         else:
             contact.append(ContactItem(text(key), None))
@@ -278,6 +346,8 @@ __all__ = [
     "ContactItem",
     "DisplaySettings",
     "HEADER_FIELDS",
+    "SHORTHAND_FIELDS",
+    "ShorthandError",
     "HeaderFormError",
     "LEGACY_CONTACT_KEYS",
     "LINKS_FIELD",
@@ -292,6 +362,8 @@ __all__ = [
     "form_header",
     "legacy_contact_fields",
     "link_key",
+    "shorthand_link",
+    "shorthand_value",
     "load_display",
     "normalize",
     "parse_header_form",

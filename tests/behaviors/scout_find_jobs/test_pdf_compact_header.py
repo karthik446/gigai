@@ -71,7 +71,7 @@ def test_the_header_is_the_name_and_one_contact_line_with_the_work_authorization
     assert set(sizes) == {FULL_SIZE}, "a line that fits is not set smaller"
     # No https:// or www. is printed; every link's target is the full URL, so the text is clickable.
     assert "https://" not in ONE_LINE and "www." not in ONE_LINE
-    assert targets == ["https://github.com/zora-q", "https://www.linkedin.com/in/zora-q/", "mailto:zq@example.invalid"]
+    assert targets == ["https://github.com/zora-q", "https://linkedin.com/in/zora-q", "mailto:zq@example.invalid"]
 
 
 def test_the_saved_title_keeps_its_own_line_above_the_contact_line() -> None:
@@ -148,18 +148,23 @@ def _values(raw: dict[str, object]) -> dict[str, object]:
 
 @pytest.mark.parametrize("given", ["zora-q", "@zora-q", "github.com/zora-q", "https://github.com/zora-q/", "http://www.github.com/zora-q?tab=repositories"])
 def test_github_takes_the_id_alone_or_the_address_read_as_the_id(given: str) -> None:
-    assert _values({"github": given})["links"] == [{"label": "GitHub", "url": "github.com/zora-q"}]
+    values = _values({"github": given})
+    assert values["github"] == "zora-q" and values["links"] == [], "2f: the form's GitHub field holds the id alone"
+    assert [item.text for item in form_header(values).contact] == ["github.com/zora-q"]
 
 
 @pytest.mark.parametrize("given", ["zora-q", "in/zora-q", "linkedin.com/in/zora-q", "https://www.linkedin.com/in/zora-q/", "https://uk.linkedin.com/in/zora-q"])
 def test_linkedin_takes_the_id_alone_or_the_address_read_as_the_id(given: str) -> None:
     values = _values({"linkedin": given})
-    assert values["linkedin"] == "linkedin.com/in/zora-q" and values["links"] == []
+    assert values["linkedin"] == "zora-q" and values["links"] == [], "2f: the form's LinkedIn field holds the id alone"
+    assert [item.text for item in form_header(values).contact] == ["linkedin.com/in/zora-q"]
 
 
 @pytest.mark.parametrize(("given", "url"), [("zora.example.invalid", "zora.example.invalid"), ("https://www.zora.example.invalid/work/", "zora.example.invalid/work")])
 def test_website_takes_a_site_address(given: str, url: str) -> None:
-    assert _values({"website": given})["links"] == [{"label": "Website", "url": url}]
+    values = _values({"website": given})
+    assert values["website"] == url and values["links"] == []
+    assert [item.text for item in form_header(values).contact] == [url]
 
 
 def test_the_shorthand_prints_as_clickable_links_in_the_one_line() -> None:
@@ -182,13 +187,12 @@ def test_links_keeps_working_beside_the_shorthand_and_a_link_named_twice_is_ther
             {"label": "Talks again", "url": "https://example.invalid/talks/"},
         ],
     })
-    assert values["linkedin"] == "linkedin.com/in/zora-q"
-    assert values["links"] == [
-        {"label": "GitHub", "url": "github.com/zora-q"}, {"label": "Website", "url": "zora.example.invalid"}, {"label": "Talks", "url": "example.invalid/talks"},
-    ]
-    # The old form alone is read as before: a LinkedIn link fills that field, the rest are rows under their labels.
-    old = _values({"links": [{"label": "LinkedIn", "url": "linkedin.com/in/zora-q"}, {"label": "GitHub", "url": "github.com/zora-q"}]})
-    assert old["linkedin"] == "linkedin.com/in/zora-q" and old["links"] == [{"label": "GitHub", "url": "github.com/zora-q"}]
+    assert (values["github"], values["linkedin"], values["website"]) == ("zora-q", "zora-q", "zora.example.invalid")
+    assert values["links"] == [{"label": "Talks", "url": "example.invalid/talks"}]
+    assert [item.text for item in form_header(values).contact] == ["github.com/zora-q", "zora.example.invalid", "example.invalid/talks", "linkedin.com/in/zora-q"]
+    # The old form alone still works (2f): a GitHub or LinkedIn profile link fills that field, the rest are rows under their labels.
+    old = _values({"links": [{"label": "LinkedIn", "url": "linkedin.com/in/zora-q"}, {"label": "GitHub", "url": "github.com/zora-q"}, {"label": "Repo", "url": "github.com/zora-q/tool"}]})
+    assert (old["github"], old["linkedin"]) == ("zora-q", "zora-q") and old["links"] == [{"label": "Repo", "url": "github.com/zora-q/tool"}]
     # The form's own guard: a link the form holds twice (a field and a row) prints once.
     twice = form_header(parse_header_form({"name": NAME, "linkedin": "linkedin.com/in/zora-q", "links": [{"label": "L", "url": "https://www.linkedin.com/in/zora-q/"}]}))
     assert [item.text for item in twice.contact] == ["linkedin.com/in/zora-q"]
@@ -196,7 +200,7 @@ def test_links_keeps_working_beside_the_shorthand_and_a_link_named_twice_is_ther
 
 def test_a_placeholder_shorthand_is_skipped() -> None:
     values = _values({"name": NAME, "github": "REPLACE_WITH_YOUR_GITHUB_ID", "linkedin": "REPLACE: your id", "website": "REPLACE"})
-    assert values["linkedin"] == "" and values["links"] == []
+    assert (values["github"], values["linkedin"], values["website"]) == ("", "", "") and values["links"] == []
 
 
 @pytest.mark.parametrize(("key", "given"), [("github", "zora q/secret-9931"), ("github", "gitlab.example.invalid/secret-9931"), ("linkedin", "in/secret 9931"), ("website", "secret-9931"), ("github", 7)])
@@ -211,5 +215,9 @@ def test_a_shorthand_that_is_not_an_id_is_refused_by_the_field_s_name_never_its_
 
 def test_more_links_than_the_form_holds_are_refused() -> None:
     rows = [{"label": f"L{n}", "url": f"example.invalid/{n}"} for n in range(pdf_header_file.MAX_LINKS)]
+    # 2f: the shorthand fields are fields of their own, so six other links fit beside them ...
+    values = _values({"github": "zora-q", "linkedin": "zora-q", "website": "zora.example.invalid", "links": rows})
+    assert len(values["links"]) == pdf_header_file.MAX_LINKS and parse_header_form(values)["links"] == rows
+    # ... and a seventh is refused, as before.
     with pytest.raises(ValueError, match="more than 6 links"):
-        _values({"github": "zora-q", "links": rows})
+        _values({"github": "zora-q", "links": [*rows, {"label": "L6", "url": "example.invalid/6"}]})

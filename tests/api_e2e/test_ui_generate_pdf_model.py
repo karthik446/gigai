@@ -36,7 +36,7 @@ console.log(JSON.stringify({
   can: [m.canGenerate({ name: "Zora" }), m.canGenerate({ name: "  ", email: "a@b.c" }), m.canGenerate(null)],
   exports: Object.keys(m).sort(),
   file: (() => {
-    const values = { name: "Zora Quillfeather", email: "zora.q@example.invalid", phone: "555-0142-ZQ", location: "Quillshire, ZZ", linkedin: "linkedin.com/in/zq", link: "", work_authorization: "VISA: H1B", links: [{ label: "GitHub", url: " github.com/zq " }, "junk", { label: 7, url: "zq.example.invalid" }] };
+    const values = { name: "Zora Quillfeather", email: "zora.q@example.invalid", phone: "555-0142-ZQ", location: "Quillshire, ZZ", github: "zq", linkedin: "zq", website: "zq.example.invalid/site", link: "", work_authorization: "VISA: H1B", links: [{ label: "GitHub", url: " github.com/zq/tool " }, "junk", { label: 7, url: "zq.example.invalid" }] };
     const filled = { state: "filled", shown: "~/Documents/GigAI/header.json", message: "Filled from ~/Documents/GigAI/header.json", warning: null, has_work_authorization: true, values };
     const noKey = { ...filled, has_work_authorization: false, values: { ...values, work_authorization: "" } };
     const emptyKey = { ...filled, values: { ...values, work_authorization: "" } };
@@ -58,7 +58,7 @@ console.log(JSON.stringify({
   })(),
   save: (() => {
     const shown = "~/Documents/GigAI/header.json";
-    const typed = { name: " Zora Quillfeather ", email: "zora.q@example.invalid", phone: "", location: "Quillshire, ZZ", linkedin: " linkedin.com/in/zq ", link: "zq.example.invalid", work_authorization: "", links: [{ label: "GitHub", url: "github.com/zq" }, { label: "Site", url: " " }] };
+    const typed = { name: " Zora Quillfeather ", email: "zora.q@example.invalid", phone: "", location: "Quillshire, ZZ", github: " https://github.com/zq ", linkedin: " zq ", website: "", link: "zq.example.invalid", work_authorization: "", links: [{ label: "Talks", url: "zq.example.invalid/talks" }, { label: "Site", url: " " }] };
     const sentence = shown + " still has placeholder values: replace the REPLACE: fields (or save your details here).";
     const template = { state: "placeholder", shown, message: sentence, warning: null, has_work_authorization: false, values: null, placeholders: ["name", "email"], notice: sentence, name_note: shown + " has no name yet." };
     const mixed = { state: "filled", shown, message: "Filled from " + shown, warning: null, has_work_authorization: false, placeholders: ["name", "phone"], notice: sentence + " Skipped: name, phone.", name_note: shown + " has no name yet.", values: { name: "", email: "zora.q@example.invalid", phone: "", location: "", linkedin: "", link: "", work_authorization: "", links: [] } };
@@ -66,7 +66,7 @@ console.log(JSON.stringify({
       question: m.REPLACE_QUESTION,
       body: m.headerFileBody(typed),
       bodyEmpty: m.headerFileBody(null),
-      can: [m.canSave(typed), m.canSave({ name: " " }), m.canSave(null), m.canSave({ work_authorization: "H-1B" }), m.canSave({ links: [{ label: "x", url: "y.invalid" }] })],
+      can: [m.canSave(typed), m.canSave({ name: " " }), m.canSave(null), m.canSave({ work_authorization: "H-1B" }), m.canSave({ links: [{ label: "x", url: "y.invalid" }] }), m.canSave({ github: "zq" }), m.canSave({ linkedin: "zq" }), m.canSave({ website: "zq.example.invalid" }), m.canSave({ github: " " })],
       results: [
         m.saveResult({ state: "saved", message: "Saved your details to " + shown + "." }),
         m.saveResult({ state: "exists", message: "There is already a file at " + shown + "." }),
@@ -101,11 +101,21 @@ def test_six_fields_with_the_standard_autocomplete_tokens_in_the_servers_order()
     fields = out["fields"]
     assert [field["key"] for field in fields] == list(HEADER_FIELDS)
     assert {field["key"]: field["autocomplete"] for field in fields} == {
-        "name": "name", "email": "email", "phone": "tel", "location": "address-level2", "linkedin": "url", "link": "url",
+        "name": "name", "email": "email", "phone": "tel", "location": "address-level2",
+        "github": "off", "linkedin": "off",  # 0.1.11.3 item 16: an id, not a URL the browser should offer
+        "website": "url", "link": "url",
         "work_authorization": "off",  # 0.1.11.3 item 6: not a browser-autofill value; the form prefills it itself
     }
-    assert [field["key"] for field in fields if field.get("hint")] == ["work_authorization"]
-    # a link is typed as text (a browser's type=url check refuses "linkedin.com/in/you")
+    labels = {field["key"]: field["label"] for field in fields}
+    assert (labels["github"], labels["linkedin"], labels["website"], labels["link"]) == ("GitHub", "LinkedIn", "Website", "Other link")
+    assert [field["key"] for field in fields if field.get("hint")] == ["github", "linkedin", "work_authorization"]
+    # The id fields say what prints; nothing in the form's model expands or checks an id (the server's one reader does).
+    hints = {field["key"]: field["hint"] for field in fields if field.get("hint")}
+    assert "github.com/<id>" in hints["github"] and "linkedin.com/in/<id>" in hints["linkedin"]
+    model = (UI_SRC / "generatePdfModel.js").read_text(encoding="utf-8")
+    code = "\n".join(line for line in model.splitlines() if not line.lstrip().startswith("//"))
+    assert "https://" not in code and "replace(" not in code and "RegExp" not in code, "no second copy of the shorthand's rules in the page"
+    # a link is typed as text (a browser's type=url check refuses "example.com")
     assert all(field["type"] != "url" for field in fields)
     assert out["maxValue"] == MAX_VALUE
 
@@ -114,7 +124,7 @@ def test_the_header_body_is_every_field_trimmed_and_capped() -> None:
     out = _run()
     assert out["empty"] == {key: "" for key in HEADER_FIELDS}
     assert out["body"] == {
-        "name": "Zora Quillfeather", "email": "zora.q@example.invalid", "phone": "", "location": "", "linkedin": "", "link": "y" * MAX_VALUE,
+        "name": "Zora Quillfeather", "email": "zora.q@example.invalid", "phone": "", "location": "", "github": "", "linkedin": "", "website": "", "link": "y" * MAX_VALUE,
         "work_authorization": "",
     }
     assert out["bodyNull"] == {key: "" for key in HEADER_FIELDS}
@@ -236,8 +246,9 @@ def test_the_header_file_fills_the_form_and_an_edit_wins() -> None:
     out = _run()
     file = out["file"]
     assert file["start"] == {
-        "name": "Zora Quillfeather", "email": "zora.q@example.invalid", "phone": "555-0142-ZQ", "location": "Quillshire, ZZ", "linkedin": "linkedin.com/in/zq",
-        "link": "", "work_authorization": "VISA: H1B", "links": [{"label": "GitHub", "url": "github.com/zq"}, {"label": "", "url": "zq.example.invalid"}],
+        "name": "Zora Quillfeather", "email": "zora.q@example.invalid", "phone": "555-0142-ZQ", "location": "Quillshire, ZZ",
+        "github": "zq", "linkedin": "zq", "website": "zq.example.invalid/site",  # 0.1.11.3 item 16: the file's shorthand fills the id fields
+        "link": "", "work_authorization": "VISA: H1B", "links": [{"label": "GitHub", "url": "github.com/zq/tool"}, {"label": "", "url": "zq.example.invalid"}],
     }, "the file's line wins over the profile's answer (visaRequired was true)"
     assert file["body"] == file["start"] and parse_header_form(file["body"]) == file["start"], "untouched, the request carries the file's values and the server takes them"
     # An edit wins: the name typed over, the line cleared, one link emptied (dropped) and one changed.
@@ -273,16 +284,25 @@ def test_the_save_button_sends_the_header_files_shape_and_placeholders_fill_noth
     assert save["question"] == REPLACE_QUESTION == "Replace the existing header.json?"
     assert save["body"] == {
         "name": "Zora Quillfeather", "email": "zora.q@example.invalid", "phone": "", "location": "Quillshire, ZZ",
-        "links": [{"label": "LinkedIn", "url": "linkedin.com/in/zq"}, {"label": "Link", "url": "zq.example.invalid"}, {"label": "GitHub", "url": "github.com/zq"}],
+        # 0.1.11.3 item 16: the id fields go as the file's shorthand keys, as typed (the server saves the id alone);
+        # links holds only the other links: the "Other link" field, then the file's own rows.
+        "github": "https://github.com/zq", "linkedin": "zq", "website": "",
+        "links": [{"label": "Link", "url": "zq.example.invalid"}, {"label": "Talks", "url": "zq.example.invalid/talks"}],
         "work_authorization": "",
     }
-    assert json.loads(file_content(save["body"])) == save["body"], "the server writes exactly what the form sends"
-    # Read back, the LinkedIn field is the LinkedIn field again and the other links are rows.
-    values, has_line, placeholders = form_values(save["body"])
-    assert values["linkedin"] == "linkedin.com/in/zq" and values["links"] == [{"label": "Link", "url": "zq.example.invalid"}, {"label": "GitHub", "url": "github.com/zq"}]
+    assert list(save["body"]) == ["name", "email", "phone", "location", "github", "linkedin", "website", "links", "work_authorization"]
+    # The server writes the shorthand: the pasted address as the id, no empty field (work_authorization excepted).
+    assert json.loads(file_content(save["body"])) == {
+        "name": "Zora Quillfeather", "email": "zora.q@example.invalid", "location": "Quillshire, ZZ", "github": "zq", "linkedin": "zq",
+        "links": [{"label": "Link", "url": "zq.example.invalid"}, {"label": "Talks", "url": "zq.example.invalid/talks"}], "work_authorization": "",
+    }
+    # Read back, the id fields hold the ids again and the other links are rows.
+    values, has_line, placeholders = form_values(json.loads(file_content(save["body"])))
+    assert (values["github"], values["linkedin"], values["website"]) == ("zq", "zq", "")
+    assert values["links"] == [{"label": "Link", "url": "zq.example.invalid"}, {"label": "Talks", "url": "zq.example.invalid/talks"}]
     assert has_line is True and placeholders == ()
-    assert save["bodyEmpty"] == {"name": "", "email": "", "phone": "", "location": "", "links": [], "work_authorization": ""}
-    assert save["can"] == [True, False, False, True, True], "something typed is enough; nothing typed is not"
+    assert save["bodyEmpty"] == {"name": "", "email": "", "phone": "", "location": "", "github": "", "linkedin": "", "website": "", "links": [], "work_authorization": ""}
+    assert save["can"] == [True, False, False, True, True, True, True, True, False], "something typed is enough (an id counts); nothing typed is not"
     shown = "~/Documents/GigAI/header.json"
     assert save["results"] == [
         {"tone": "saved", "text": f"Saved your details to {shown}.", "ask": False},

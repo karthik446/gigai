@@ -154,7 +154,8 @@ _IDENTITY_KEY: dict[str, object] = {"profile_id": "prof_1", "job_identity": _JOB
 #: 0110-046: the Generate PDF form's fields, for one render; GigAI stores no name or contact details.
 _HEADER_PARAM = _b(
     "header", "object",
-    "The Generate PDF form: {name, email, phone, location, linkedin, link, work_authorization}, each an optional string of at most 200 characters. "
+    "The Generate PDF form: {name, email, phone, location, github, linkedin, website, link, work_authorization}, each an optional string of at most 200 characters. "
+    "`github` and `linkedin` take the id alone and `website` a site address (a profile address there is read as the id); they print as links. "
     "The header is the name and ONE contact line: location | work_authorization (e.g. `VISA: H1B`, as written) | the links | email | phone; "
     "an empty field leaves no separator, and a line too long for the page is set smaller before it wraps. "
     "Optional links: at most 6 more links, each {label, url}; a link prints without `https://` or `www.` and its target is the full URL. "
@@ -1746,8 +1747,9 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
             "forbidden_origin and the file is not opened. An agent never needs it: it renders the PDF without a header and the person finishes it. "
             "The person may keep their name and contact details in a JSON file they own, `~/Documents/GigAI/header.json` (a GigAI home other than "
             "`~/.gigai`: `<home>/header.json`): {name, email, phone, location, github, linkedin, website, links: [{label, url}], work_authorization}, every field "
-            "optional. `github` and `linkedin` take just the id (a full address is read as the id) and `website` a site address; in `values` they "
-            "are already links (`linkedin`: `linkedin.com/in/<id>`; `links` rows labelled GitHub and Website), and a link named twice is there once. "
+            "optional. `github` and `linkedin` take just the id (a full address is read as the id) and `website` a site address; `values` holds them "
+            "the same way (the id alone, the site address), a `links` entry that is a GitHub or LinkedIn profile address fills that field when it is "
+            "empty, `values.links` holds the other links, and a link named twice is there once. "
             "GigAI reads it here (to fill the Generate PDF form, where the person edits the values before generating) and in "
             "`gigai scout resume pdf --out FILE`, and writes it only when the person presses the form's Save button (POST /api/pdf-header/save); it is never copied into the store, the journal, a log, a record, a suggestion, a brief, the "
             "resumes folder or a model prompt, and no other route returns it. `state` is filled, missing, invalid or placeholder; `message` is one plain "
@@ -1769,8 +1771,11 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
             _b("email", "string", "Optional."),
             _b("phone", "string", "Optional."),
             _b("location", "string", "Optional."),
-            _b("links", "array", "Optional: at most 6 links, each {label, url}."),
-            _b("work_authorization", "string", "Optional; empty means no line."),
+            _b("github", "string", "Optional: the GitHub id alone; a profile address is saved as the id."),
+            _b("linkedin", "string", "Optional: the LinkedIn id alone; a profile address is saved as the id."),
+            _b("website", "string", "Optional: a site address."),
+            _b("links", "array", "Optional: at most 6 other links, each {label, url}. One that is a GitHub or LinkedIn profile is saved as that id."),
+            _b("work_authorization", "string", "Optional; empty means no line (always written)."),
             _b("replace", "boolean", "true: write over the file that is there. Sent only after the person answered the form's question."),
         ),
         # No email, phone or link here: the outbound check must leave this document as it is (test_outbound_check.py).
@@ -1784,7 +1789,9 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
             "record, a suggestion, a brief, the resumes folder or a model prompt, and this answer holds none of them. `state` is saved, exists "
             "(a file is already there and was not changed; the form asks \"Replace the existing header.json?\" and sends replace: true) or "
             "not_writable (the folder is missing or cannot be written; `message` says what to check). The folder `~/Documents/GigAI` is created "
-            "when it is missing; no other folder is. The values follow the file's rules (422 invalid_value names the field and the rule, never a value)."
+            "when it is missing; no other folder is. The values follow the file's rules (422 invalid_value names the field and the rule, never a value). "
+            "The file gets the shorthand: `github` and `linkedin` as the id, `website` as the site address, `links` only for other links; a field "
+            "left empty is left out of the file (work_authorization excepted)."
         ),
     ),
     RouteSpec(

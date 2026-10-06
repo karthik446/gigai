@@ -82,7 +82,7 @@ def test_the_form_header_prints_the_form_values_and_the_saved_title(tmp_path: Pa
     # A link prints without https:// or www.; its target is the full URL.
     assert [(c.text, c.url) for c in header.contact] == [
         ("Nowhere, ZZ", None),
-        ("linkedin.com/in/zq-invalid", "https://www.linkedin.com/in/zq-invalid/"),
+        ("linkedin.com/in/zq-invalid", "https://linkedin.com/in/zq-invalid"),  # item 16: read as the id, printed as its link
         ("zq.example.invalid", "https://zq.example.invalid"),
         ("zora.q@example.invalid", "mailto:zora.q@example.invalid"),
         ("555-0142-ZQ", None),

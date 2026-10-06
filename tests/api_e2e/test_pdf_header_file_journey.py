@@ -116,8 +116,9 @@ def test_the_header_file_fills_the_form_and_the_pdf_and_reaches_nobody_else(tmp_
         values = body["values"]
         assert values == {
             "name": "Zora Quillfeather", "email": "zora.q@example.invalid", "phone": "555-0142-ZQ", "location": "Quillshire, ZZ",
-            "linkedin": "linkedin.com/in/zq-invalid-7731", "link": "", "work_authorization": "VISA: H1B (ZQ-7731)",
-            "links": [{"label": "GitHub", "url": "https://github.com/zq-invalid-7731"}, {"label": "Link", "url": "zq-invalid-7731.example.invalid"}],
+            # 0.1.11.3 item 16: the file's GitHub and LinkedIn links fill the form's id fields, as the id alone.
+            "github": "zq-invalid-7731", "linkedin": "zq-invalid-7731", "website": "", "link": "", "work_authorization": "VISA: H1B (ZQ-7731)",
+            "links": [{"label": "Link", "url": "zq-invalid-7731.example.invalid"}],
         }, "the response is the person's own details for their own form: not tokenized by the outbound check"
 
         printed = client.post("/api/resume/pdf", json={"markdown": RESUME, "header": values}, headers=page)
@@ -125,7 +126,7 @@ def test_the_header_file_fills_the_form_and_the_pdf_and_reaches_nobody_else(tmp_
         assert _pdf_text(printed.content).startswith(_squeeze("ZORA QUILLFEATHER", CONTACT, "EXPERIENCE")), _answer(printed)[-600:]
 
         # Precedence: what the person edits in the form wins over the file.
-        edited = {**values, "name": "Riley Formedit", "work_authorization": "Green card holder", "links": [{"label": "GitHub", "url": "github.com/riley-formedit"}]}
+        edited = {**values, "name": "Riley Formedit", "work_authorization": "Green card holder", "github": "riley-formedit", "links": []}
         changed = _pdf_text(client.post("/api/resume/pdf", json={"markdown": RESUME, "header": edited}, headers=page).content)
         assert changed.startswith("RILEYFORMEDIT") and _squeeze("Green card holder") in changed and "github.com/riley-formedit" in changed
         assert "QUILLFEATHER" not in changed and "ZQ-7731" not in changed and "zq-invalid-7731.example.invalid" not in changed
