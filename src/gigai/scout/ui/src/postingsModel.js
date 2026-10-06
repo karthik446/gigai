@@ -695,6 +695,8 @@ export function postingJob(row) {
     url: row.job_url || row.job_identity,
     normalized_url: row.job_identity,
     text: row.description || null,
+    // The list row's description is a preview: the server ends a cut one with "…".
+    text_cut: typeof row.description === "string" && row.description.endsWith("…"),
     published_at: null,
     provider: null,
     source_kind: "stored postings",

@@ -141,3 +141,27 @@ def test_the_batch_and_the_terminal_say_which_assessment_was_thinly_read() -> No
     batch = {"requirements_notes": [{"job_identity": "https://example.test/jobs/1", "profile_id": "p", "text": NOTE_2}]}
     assert quick_assess.requirements_note_lines(batch) == [f"  {NOTE_2} https://example.test/jobs/1"]
     assert quick_assess.requirements_note_lines({}) == []
+
+
+# 0.1.11.2: the model is sent only the first 12,000 characters; a longer posting says so on the assessment.
+CAPPED = "Only the first 12,000 characters of this posting were assessed."
+
+
+def test_a_posting_over_the_prompt_cap_carries_the_note_and_one_under_it_does_not(fx, monkeypatch: pytest.MonkeyPatch) -> None:  # noqa: ANN001, F811
+    long_text = _eight_bullet_posting() + ("Filler about the team and the office. " * 400)
+    assert len(long_text) > 12_000
+    _install(monkeypatch, [_EIGHT])
+    response = _assess(fx, long_text)
+    assert response.requirements_note == CAPPED
+    assert response.to_json()["requirements_note"] == CAPPED
+    [stored] = list_quick_assessments(fx.home_root, fx.target)
+    assert stored.requirements_note == CAPPED
+
+    _install(monkeypatch, [_EIGHT])
+    assert _assess(fx, _eight_bullet_posting()).requirements_note is None
+
+
+def test_the_cap_note_joins_a_thin_note(fx, monkeypatch: pytest.MonkeyPatch) -> None:  # noqa: ANN001, F811
+    _install(monkeypatch, [_TWO, _TWO])
+    response = _assess(fx, _two_bullet_posting() + ("Filler about the team and the office. " * 400))
+    assert response.requirements_note == f"{NOTE_2} {CAPPED}"
