@@ -68,7 +68,8 @@ from .find_jobs.work_mode import in_person_modes
 from .question_ids import normalize_question_id
 from .requirement_weights import bound_rows, cap_list_item_questions, cap_mandatory_questions, settled_verdict
 from .requirements_list import ListedRequirement, check_listed, extracted, fold
-from .suggestion_check import MasterLine, check_suggestions, parse_master_lines, with_verbatim_evidence
+from .stated_check import MasterFacts, read_master, settle_stated
+from .suggestion_check import MasterLine, check_suggestions, clean_citations, parse_master_lines, truthful_notes, with_verbatim_evidence
 from .resume_gate import (
     HOLD_QUESTION,
     gate,
@@ -622,6 +623,7 @@ def assess_once(
         countries=tuple(item.strip().upper() for item in ctx.countries if item and item.strip()),
         location=ctx.location.strip(), work_mode=ctx.work_mode, visa_required=ctx.visa_sponsorship_required,
         lines=parse_master_lines(ctx.resume_text) if ctx.resume_ids else {},
+        master=read_master(ctx.resume_text) if ctx.resume_ids else None,
         answers={item.question_id.lower(): item.answer for item in ctx.prior_answers},
         stories={item.question_id.lower(): item.summary for item in ctx.bank_answers},
     )
@@ -996,6 +998,12 @@ class AssessExtras:
     capped_mandatory_questions: tuple[str, ...] = ()
     #: 0.1.11 C3: ``(kind, reason)`` of every structured suggestion the code check dropped (``suggestion_check``); a suggestion turned into a gap is counted as ``master_line_to_gap``.
     checked_suggestions: tuple[tuple[str, str], ...] = ()
+    #: 0.1.11.3 Q2: ``(row id or "", rule)`` of every ``unclear`` row the master's own lines settled as ``met``
+    #: (``stated_check``), and the id of every question dropped with them.
+    met_by_master: tuple[tuple[str, str], ...] = ()
+    stated_questions: tuple[str, ...] = ()
+    #: 0.1.11.3 Q3: what the citation check did to each evidence item that was not one verbatim line (``suggestion_check.clean_citations``): ``trimmed_to_line`` | ``split_join`` | ``no_line``.
+    checked_citations: tuple[str, ...] = ()
 
 
 @dataclass
@@ -1037,6 +1045,8 @@ class Boundary:
     lines: Mapping[str, MasterLine] = field(default_factory=dict)
     answers: Mapping[str, str] = field(default_factory=dict)
     stories: Mapping[str, str] = field(default_factory=dict)
+    #: 0.1.11.3 Q2: what the RESUME block states, as ``stated_check`` reads it (skills line, dated roles). ``None``: no check.
+    master: MasterFacts | None = None
 
 
 def offered_sources(ctx: AssessContext) -> frozenset[str] | None:
@@ -1423,6 +1433,16 @@ def _normalize_and_strip(decoded: Mapping[str, object], *, boundary: Boundary | 
     dropped here, from both question lists, with no retry
     (``AssessExtras.capped_questions``). A ``not_a_match`` answer keeps no
     question at all, as before, and its count is the strip's.
+
+    0.1.11.3 Q2, v9 rows of a prompt that showed ids only. An ``unclear`` row
+    whose key terms the master states (``stated_check.settle_stated``: a
+    name in the skills line, a name a line holds as a whole word, years a
+    line states or the role dates cover) is ``met`` with the master's own
+    line(s) as its evidence and sources, and the question on it is dropped
+    from both lists (``AssessExtras.met_by_master`` / ``stated_questions``).
+    This runs before the caps, the unasked-row rule and the gate, so all
+    three read the settled rows; a ``pending`` verdict that rested on a
+    settled row is read again by the gate.
     """
     boundary = boundary if boundary is not None else Boundary()
     decoded = _without_authorization(decoded)
@@ -1471,9 +1491,12 @@ def _normalize_and_strip(decoded: Mapping[str, object], *, boundary: Boundary | 
     if all_rows:
         normalized_matrix, rows_not_shown = bound_rows(normalized_matrix)  # type: ignore[arg-type]
     is_v9 = all_rows and uses_v9_rules(normalized_matrix)  # type: ignore[arg-type]
+    cited: list[str] = []
     if is_v9 and boundary.lines:
         # 0.1.11 C2: a met row's evidence is the cited master line(s) by id, never the model's paraphrase of them.
         with_verbatim_evidence(normalized_matrix, boundary.lines, boundary.answers, boundary.stories)  # type: ignore[arg-type]
+        # 0.1.11.3 Q3: every other evidence item is ONE line as it is written (or one listed answer), or the row cites nothing.
+        cited = clean_citations(normalized_matrix, boundary.lines, boundary.answers, boundary.stories)  # type: ignore[arg-type]
     # Orchestrator #14: the words of each kept row of a v9 matrix -> its id (its own, or the one a first assessment's
     # row is given: that needs the posting's digest, so outside ``assess_once`` only a row's own id is known).
     row_ids: dict[str, str] = {}
@@ -1508,6 +1531,18 @@ def _normalize_and_strip(decoded: Mapping[str, object], *, boundary: Boundary | 
         structured_questions.append(normalized_item)
         plain_at[id(normalized_item)] = len(plain_questions)
         plain_questions.append(normalized_item["question"])
+
+    # 0.1.11.3 Q2: an unclear row whose key terms the master states is met with the master's line(s), and its question
+    # is not asked. BEFORE the caps and the gate, so a question that is kept takes the freed place and the verdict is the gate's.
+    met_by_master: list[tuple[str, str]] = []
+    stated_questions: list[str] = []
+    if is_v9 and boundary.master is not None:
+        structured_questions, answered, settled_rows = settle_stated(normalized_matrix, structured_questions, boundary.master)  # type: ignore[arg-type]
+        met_by_master = [(id_of_row.get(id(row), ""), rule) for row, rule in settled_rows]
+        stated_questions = [str(item["question_id"]) for item in answered]  # type: ignore[index]
+        gone = sorted(plain_at.pop(id(item)) for item in answered)
+        plain_questions = [text for index, text in enumerate(plain_questions) if index not in gone]
+        plain_at = {key: at - sum(1 for index in gone if index < at) for key, at in plain_at.items()}
 
     said = _normalize_verdict(decoded.get("verdict")) if "verdict" in decoded else None
     # Orchestrator #14: at most three questions on one-of-a-list rows, those of the rows first in the matrix; the rest
@@ -1553,6 +1588,8 @@ def _normalize_and_strip(decoded: Mapping[str, object], *, boundary: Boundary | 
         with_ids = [{**row, "id": id_of_row[id(row)]} if id(row) in id_of_row else row for row in normalized_matrix]  # type: ignore[union-attr]
         suggested, refused = check_suggestions(suggested, with_ids, boundary.lines, boundary.answers)  # type: ignore[arg-type]
         checked = [(item.kind, why) for item, why in refused]
+        # 0.1.11.3 Q1: a plain-string suggestion that says the resume is silent on a term a master line states goes too.
+        raw_suggestions, _untrue = truthful_notes(raw_suggestions, boundary.lines)
     result: dict[str, object] = {
         "matrix": normalized_matrix,
         "suggestions": [item for item in raw_suggestions if isinstance(item, str)],
@@ -1566,6 +1603,10 @@ def _normalize_and_strip(decoded: Mapping[str, object], *, boundary: Boundary | 
             result["sponsorship"] = sponsorship
     if "verdict" in decoded:
         verdict = _normalize_verdict(decoded.get("verdict"))
+        if met_by_master and verdict == "pending_user_answers":
+            # The verdict the model gave may rest on a settled row: read it again from what is left (as for a removed
+            # authorization row). ``settled_verdict`` below makes it pending when a must-have is still open.
+            verdict = "matched_above_threshold"
         if verdict is not None:
             # 0110-10-03: a lone open question on a one-of-a-list row does not hold a match (and a must-have one does).
             result["verdict"] = settled_verdict(verdict, normalized_matrix if isinstance(normalized_matrix, list) else (), structured_questions)
@@ -1598,6 +1639,9 @@ def _normalize_and_strip(decoded: Mapping[str, object], *, boundary: Boundary | 
         capped_questions=tuple(capped),
         capped_mandatory_questions=tuple(capped_mandatory),
         checked_suggestions=tuple(checked),
+        met_by_master=tuple(met_by_master),
+        stated_questions=tuple(stated_questions),
+        checked_citations=tuple(cited),
     )
     # Drop any other unknown keys (e.g. a model echoing "posting" back, or
     # inventing extra fields): the frozen contract is a closed object, and

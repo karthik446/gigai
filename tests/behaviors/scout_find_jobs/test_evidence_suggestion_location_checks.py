@@ -114,7 +114,8 @@ def test_a_met_rows_evidence_is_the_cited_lines_by_id_and_not_the_models_paraphr
     met, unclear = matrix[0], matrix[1]
     assert list(met.resume_evidence) == [check.parse_master_lines(MASTER)["b-000003"].text, check.parse_master_lines(MASTER)["b-000002"].text]
     assert stretched not in met.resume_evidence and "retrieval" not in " ".join(met.resume_evidence)
-    assert list(unclear.resume_evidence) == ["The master shows tracing only inside one SDK line."]  # a row that is not met keeps its words
+    # 0.1.11.3 Q3: a row that is not met has no sources; a sentence about the resume is no line of it, so the row cites nothing.
+    assert list(unclear.resume_evidence) == [] and unclear.status.value == "unclear"
 
 
 def test_an_answer_a_row_cites_is_shown_as_the_answers_own_text() -> None:
@@ -124,9 +125,12 @@ def test_an_answer_a_row_cites_is_shown_as_the_answers_own_text() -> None:
     assert evidence == ["Your answer: Pinned Helm charts applied through Terraform.", check.parse_master_lines(MASTER)["b-000002"].text]
 
 
-def test_a_met_row_without_a_usable_source_keeps_the_models_evidence() -> None:
-    answer = _answer([_row("Go services", "met", [], ["Built Go services."], "hard")])
-    assert list(_assess(answer).parsed.matrix[0].resume_evidence) == ["Built Go services."]
+def test_a_met_row_without_a_usable_source_cites_a_line_as_written_or_nothing() -> None:
+    # 0.1.11.3 Q3 (was: the model's words were kept): words no line says are not a citation; a piece of one line is that line.
+    answer = _answer([_row("Go services", "met", [], ["Built Go services."], "hard"), _row("Billing APIs", "met", [], ["Wrote the REST API layer"])])
+    matrix = _assess(answer).parsed.matrix
+    assert list(matrix[0].resume_evidence) == [] and matrix[0].status.value == "met"
+    assert list(matrix[1].resume_evidence) == [check.parse_master_lines(MASTER)["b-000004"].text]
     # A prompt that showed no ids has no lines: the answer is read as before.
     plain = build_assess_context(resume_text="- Built Go services")
     assert list(_assess(_answer([_row("Go services", "met", ["b-000003"], ["Built Go services."], "hard")]), ctx=plain).parsed.matrix[0].resume_evidence) == ["Built Go services."]
