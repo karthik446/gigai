@@ -51,6 +51,21 @@ mechanics here. Those belong in the internal changelog.
   50; postings you select or name are still the ones assessed. While ranking is still running, the page
   and the question say how many postings are ranked so far.
 
+- **Ranking is back, on its own switch.** The background pipeline stays off and nothing is tailored, but
+  ranking runs again after a sources update: it ranks postings posted in the last 7 days (a posting with
+  no date uses the day it was first seen), within the same daily call cap as before. `gigai scout
+  pipeline status` shows "Ranking: on|off"; `rank.enabled` in the background settings turns it off.
+- **The job page shows the whole posting.** The description is no longer cut to one short paragraph; a
+  preview that is still cut says so, and an assessment of a posting longer than 12,000 characters says
+  that only the first 12,000 were assessed.
+- **Onboarding:** work mode starts on Remote-only for a new profile (a stored choice is kept), the
+  sponsorship answer no longer says "hard filter" (it is a label, nothing is filtered), and the Companies
+  step is gone (4 steps; company lists stay in Settings). The assess dialog says "Assessing N postings…"
+  while it runs. A job address that differs only by a trailing slash before the query now finds its
+  posting, and a job assessed from an address says so instead of "Job not found".
+- **Docs:** the Install page pins the current version, the pipeline-off and picked-resume behaviour is
+  described as it is, and "Start fresh" explains how to reset and start again from a resume file.
+
 ### 0.1.11.1
 
 CI: one cut-down lane for the PR and the release pre-check (about 5 minutes). The full suite, the browser
