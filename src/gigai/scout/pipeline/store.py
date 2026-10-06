@@ -1719,6 +1719,16 @@ class PipelineStore:
         where, params = ("", ()) if profile_id is None else (" WHERE profile_id=?", (profile_id,))
         return self._conn().execute(f"SELECT COUNT(*) FROM posting{where}", params).fetchone()[0]
 
+    def rank_counts(self, profile_id: str, since: str) -> tuple[int, int]:
+        """``(ranked, total)`` of a profile's live rows posted after ``since`` (``published_at``, else ``first_seen``): two counts, no rows read."""
+
+        row = self._conn().execute(
+            "SELECT COUNT(rank_score), COUNT(*) FROM posting WHERE profile_id = ? AND removed_at IS NULL "
+            "AND COALESCE(NULLIF(published_at, ''), first_seen) > ?",
+            (_check("id", profile_id, "profile_id"), _check("timestamp", since, "since")),
+        ).fetchone()
+        return row[0], row[1]
+
     def postings(
         self,
         *,

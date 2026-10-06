@@ -752,11 +752,8 @@ def _ranking(
     for view in views:
         # 0.1.11.3: both counts are of the window the line names ("last 7 days"), so "Re-rank" asks about the same
         # postings: a ranked posting older than the window is no longer counted.
-        window = [row for row in store.postings(profile_id=view.profile_id) if batch_date(row) > since]
-        by_profile.append({
-            "profile_id": view.profile_id, "ranked": sum(1 for row in window if row.rank_score is not None), "total": len(window),
-            "stale_resume": stale[view.profile_id],
-        })
+        ranked, total = store.rank_counts(view.profile_id, since)  # two counts: a poll reads no rows
+        by_profile.append({"profile_id": view.profile_id, "ranked": ranked, "total": total, "stale_resume": stale[view.profile_id]})
     try:
         enabled = bool(rank_status(home_root, target)["enabled"])
     except (PipelineStoreError, OSError, ValueError):  # a display read: a setting that cannot be read is "not ranking"

@@ -816,6 +816,12 @@ export function getPostingsStatus(options) {
   return request("GET", "/api/postings/status", undefined, options);
 }
 
+// 0.1.11.3: GET /api/postings/ranking, the ranking block and the rank job alone (two counts on the server): what the
+// Jobs page reads while a rank it did not start runs.
+export function getPostingsRanking(options) {
+  return request("GET", "/api/postings/ranking", undefined, options);
+}
+
 export function postMarkAllSeen() {
   return request("POST", "/api/new/seen", {});
 }

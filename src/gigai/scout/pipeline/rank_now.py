@@ -52,6 +52,7 @@ from .store import LEASE_RANK, PipelineStore
 from .triggers import rank_calls_today, refund_rank_calls, spend_rank_calls
 
 SCHEMA_VERSION = "scout-rank-now:1"
+RANKING_SCHEMA_VERSION = "scout-postings-ranking:1"
 
 MODE_UNRANKED = "unranked"
 MODE_LATEST = "latest"
@@ -211,6 +212,26 @@ def status(
             "plan": None if mode is None else _plan(mode, store, refreshed.profiles, setting, moment, size=_batch_size()),
             "job": job_status(home_root, target),
         }
+    finally:
+        store.close()
+
+
+def ranking_read(home_root: Path, target: Path, *, now: Callable[[], datetime] | None = None) -> dict[str, object]:
+    """0.1.11.3: the ``ranking`` block alone, for the Jobs page to poll while a rank runs. Reads only, in two counts a profile.
+
+    No refresh of the read model (so no build, no write) and no row is read: ``ranked`` and ``total`` are SQL counts.
+    ``job`` is this process's rank job (``None`` when none was started).
+    """
+
+    from .. import postings
+    from ..scout_new import _ranking
+
+    home_root, target = Path(home_root), Path(target)
+    moment = (now or _local_now)()
+    _, views = postings.active_profiles(home_root, target)
+    store = postings.open_store(home_root, target)
+    try:
+        return {"schema_version": RANKING_SCHEMA_VERSION, "ranking": _ranking(store, views, home_root, target, now=moment), "job": job_status(home_root, target)}
     finally:
         store.close()
 

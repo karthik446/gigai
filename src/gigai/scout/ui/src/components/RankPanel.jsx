@@ -1,7 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { postPostingsRank } from "../api.js";
-import { isRankAnswer, RANK_POLL_MS, rankButtons, rankJobRunning, rankOutcomeLine, rankRefusalLine, rankStatusLine, rankTotals, rerankDialog, staleResumeLine } from "../rankNowModel.js";
+import { getPostingsRanking, postPostingsRank } from "../api.js";
+import {
+  isRankAnswer, RANK_POLL_MS, RANK_WATCH_MS, rankButtons, rankJobRunning, rankOutcomeLine, rankRefusalLine, rankSignature, rankStatusLine, rankTotals,
+  rerankDialog, shouldWatchRank, staleResumeLine, watchStep,
+} from "../rankNowModel.js";
 import RerankApprovalDialog from "./RerankApprovalDialog.jsx";
 
 // 0.1.11.2 RANKUI + RANKVIS: ranking on the Jobs page, ONE SMALL ROW THAT IS ALWAYS THERE: "Ranked 57 of 57 (last 7
@@ -13,6 +16,9 @@ import RerankApprovalDialog from "./RerankApprovalDialog.jsx";
 // "Re-rank" button: the same ask and dialog, never a model call without the yes. Nothing is read on load: `ranking` is
 // the list's own block (GET /api/postings); when it is missing (the list could not be read, an older server) the row
 // says "Ranking status unavailable" and shows the block of the row's own last answer once a button was clicked.
+// 0.1.11.3: a rank this page did not start (the background lane, a Re-rank from another tab) is watched too: while the
+// list's block says `in_progress` and the tab is visible the row reads GET /api/postings/ranking every RANK_WATCH_MS
+// (two counts on the server), says "Ranking… X of Y" once it has seen the count move, and reads the list again when the count moves or the rank ends.
 export default function RankPanel({ ranking, loading = false, onRefresh }) {
   const [answer, setAnswer] = useState(null); // the last POST /api/postings/rank answer of this page
   const [busy, setBusy] = useState(false);
@@ -27,7 +33,72 @@ export default function RankPanel({ ranking, loading = false, onRefresh }) {
   const running = rankJobRunning(job);
   // While the job runs the row's own read is the fresher one; otherwise the list's (the row's own when the list has none).
   const own = answer && answer.ranking ? answer.ranking : null;
-  const shown = (running && own) || ranking || own;
+  const [watched, setWatched] = useState(null); // the block of the last watch read, until the list's own block moves
+  const [hidden, setHidden] = useState(typeof document !== "undefined" && document.visibilityState === "hidden");
+  const [quiet, setQuiet] = useState(0);
+  const [moved, setMoved] = useState(false); // a watch read saw the rank move: something IS ranking (`in_progress` alone only says postings are left)
+  const shown = (running && own) || watched || ranking || own;
+  const watchOn = shouldWatchRank(shown, { job, hidden, quiet });
+
+  const inProgress = Boolean(shown && shown.in_progress);
+  useEffect(() => {
+    if (!inProgress) {
+      setMoved(false);
+    }
+  }, [inProgress]);
+
+  const listSignature = rankSignature(ranking);
+  useEffect(() => {
+    setWatched(null); // the list was read again: its block is the fresher one
+    setQuiet(0);
+  }, [listSignature]);
+
+  useEffect(() => {
+    const onVisibility = () => setHidden(document.visibilityState === "hidden");
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => document.removeEventListener("visibilitychange", onVisibility);
+  }, []);
+
+  useEffect(() => {
+    if (!watchOn) {
+      return undefined;
+    }
+    let stopped = false;
+    let timer = null;
+    const abort = new AbortController();
+    let seenSignature = rankSignature(shown);
+    let quietReads = quiet;
+    const read = () => {
+      getPostingsRanking({ signal: abort.signal })
+        .then((next) => {
+          if (stopped || !next || !next.ranking) {
+            return;
+          }
+          const step = watchStep(seenSignature, next.ranking, quietReads);
+          seenSignature = step.signature;
+          quietReads = step.quiet;
+          setWatched(next.ranking);
+          setQuiet(step.quiet);
+          if (step.changed) {
+            setMoved(true);
+            refresh.current && refresh.current(); // the rows have new rank scores, or the rank ended: the list is read again
+          }
+        })
+        .catch(() => {}) // a read that failed is read again at the next tick
+        .finally(() => {
+          if (!stopped) {
+            timer = setTimeout(read, RANK_WATCH_MS); // the next read only AFTER this answer: never two at once
+          }
+        });
+    };
+    timer = setTimeout(read, RANK_WATCH_MS);
+    return () => {
+      stopped = true;
+      abort.abort();
+      clearTimeout(timer);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `shown` and `quiet` are read once, when the watch starts
+  }, [watchOn]);
 
   const take = useCallback((next) => {
     if (!isRankAnswer(next)) {
@@ -118,7 +189,7 @@ export default function RankPanel({ ranking, loading = false, onRefresh }) {
   };
 
   const howToEnable = answer && typeof answer.how_to_enable === "string" ? answer.how_to_enable : null;
-  const line = rankStatusLine(shown, job, howToEnable, { loading });
+  const line = rankStatusLine(shown, job, howToEnable, { loading, watching: watchOn && moved });
   const buttons = rankButtons(shown, { job, busy, howToEnable });
   const stale = staleResumeLine(shown, job);
   return (

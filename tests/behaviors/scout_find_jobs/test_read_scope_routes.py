@@ -101,6 +101,7 @@ GET_REQUESTS: dict[str, str] = {
     "/api/pipeline/job": f"/api/pipeline/job?job_identity={_q(JOB)}&profile_id=PROFILE",
     "/api/postings": "/api/postings?limit=10",
     "/api/postings/status": "/api/postings/status",
+    "/api/postings/ranking": "/api/postings/ranking",
     "/api/metrics": "/api/metrics",
     "/api/settings/background": "/api/settings/background",
 }
@@ -108,7 +109,7 @@ GET_REQUESTS: dict[str, str] = {
 
 #: The ``GET`` routes that migrate the default profile on a home's first profile-aware read, inside a read scope of
 #: their OWN that predates this packet (``@reads_committed``, ``postings.refresh``, ``scout_new``).
-FIRST_READ_MIGRATES = frozenset({"/api/profiles", "/api/config", "/api/setup", "/api/postings", "/api/new", "/api/new/yours"})
+FIRST_READ_MIGRATES = frozenset({"/api/profiles", "/api/config", "/api/setup", "/api/postings", "/api/postings/ranking", "/api/new", "/api/new/yours"})  # 0.1.11.3: the ranking read lists the active profiles
 
 
 class _Spy:

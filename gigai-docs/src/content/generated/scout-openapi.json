@@ -8323,6 +8323,102 @@
         "x-gigai-labels": []
       }
     },
+    "/api/postings/ranking": {
+      "get": {
+        "description": "How far the ranking is: the ranking block and the rank job, two counts a profile. 0.1.11.3: what the Jobs page polls while a rank runs (a background rank, a Rank now, a Re-rank). `ranking` is the block of GET /api/postings (`in_progress`, `by_profile` ranked of total in the window); `job` the rank job this server runs, or null. It reads two counts a profile: it refreshes nothing, reads no posting row and writes nothing, so it costs the same on a small and on a very large home.",
+        "operationId": "get_api_postings_ranking",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "job": null,
+                  "ranking": {
+                    "by_profile": [
+                      {
+                        "profile_id": "prof_1",
+                        "ranked": 509,
+                        "stale_resume": false,
+                        "total": 792
+                      }
+                    ],
+                    "enabled": true,
+                    "in_progress": true,
+                    "stale_resume": false,
+                    "window_days": 7
+                  },
+                  "schema_version": "scout-postings-ranking:1"
+                },
+                "schema": {
+                  "additionalProperties": true,
+                  "properties": {
+                    "schema_version": {
+                      "const": "scout-postings-ranking:1"
+                    }
+                  },
+                  "required": [
+                    "schema_version"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden / forbidden_origin: loopback peer and Host `127.0.0.1:<port>` or `localhost:<port>` only (Origin too on writes)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "target_unavailable",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "target_unavailable"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "unknown_key",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "unknown_key"
+          }
+        },
+        "summary": "Get how far the ranking is",
+        "tags": [
+          "Jobs"
+        ],
+        "x-gigai-effect": "read",
+        "x-gigai-external": "none",
+        "x-gigai-host-checked": true,
+        "x-gigai-labels": []
+      }
+    },
     "/api/postings/status": {
       "get": {
         "description": "How the stored postings are being prepared in this server: ready, or a build and how far it is. Answered from memory, at once, whatever a build is doing. `state`: preparing (the first build runs, once after an upgrade or a new install: GET /api/postings and GET /api/new answer 202 until it is done), refreshing (a build runs and the stored rows are served meanwhile), ready, or unknown (nothing has asked for the postings since this server started). `percent` is the share of companies (`boards_done` of `boards_total`) the running build has matched; `phase` matching, facts or idle; `builds` how many builds this server has started and `last_boards` how many companies the last finished one matched. The postings are matched once for every request and kept in the project's pipeline file, so a restart does not match them again; after an index update only the companies that changed are matched again.",

@@ -14,6 +14,41 @@
 
 export const RANK_SCHEMA = "scout-rank-now:1";
 export const RANK_POLL_MS = 1500;
+// 0.1.11.3: the page watches a rank it did not start (the background lane, another tab): GET /api/postings/ranking, two
+// counts on the server, read every RANK_WATCH_MS while the block says `in_progress` and the tab is visible; the next read
+// is scheduled after the answer. It stops after RANK_WATCH_QUIET reads in a row that moved nothing (a lane stuck on the
+// day's cap or a model that fails is not watched for ever); a new list block that moved starts it again.
+export const RANK_WATCH_MS = 4000;
+export const RANK_WATCH_QUIET = 30;
+
+// What a block says about how far the rank is, as one comparable string: a change of it is a reason to read the list again.
+export function rankSignature(ranking) {
+  if (!ranking || typeof ranking !== "object" || !Array.isArray(ranking.by_profile)) {
+    return null;
+  }
+  const counts = ranking.by_profile.map((item) => `${item && item.profile_id}:${count(item && item.ranked)}/${count(item && item.total)}`);
+  return `${ranking.enabled === true ? "on" : "off"}|${ranking.in_progress === true ? "going" : "idle"}|${counts.join(",")}`;
+}
+
+// Whether the page reads the ranking now: the rank is in progress (the block's word, or the job this page started), the
+// tab is visible and the last reads were not all quiet.
+export function shouldWatchRank(ranking, { job = null, hidden = false, quiet = 0 } = {}) {
+  if (hidden || quiet >= RANK_WATCH_QUIET || rankJobRunning(job)) {
+    return false; // a job of this page has its own, faster read
+  }
+  return Boolean(ranking) && ranking.enabled === true && ranking.in_progress === true;
+}
+
+// One read's verdict: `changed` (the list is read again: the count moved, or the rank started or stopped) and the new
+// `quiet` count (reads in a row that moved nothing).
+export function watchStep(seen, ranking, quiet) {
+  const signature = rankSignature(ranking);
+  if (signature === null) {
+    return { signature: seen, changed: false, quiet: quiet + 1 };
+  }
+  const changed = signature !== seen;
+  return { signature, changed, quiet: changed ? 0 : quiet + 1 };
+}
 
 // The server's own words (rank_now.HOW_TO_ENABLE); the answer's `how_to_enable` is used when the page has one.
 export const HOW_TO_ENABLE =
@@ -69,7 +104,7 @@ export const RANK_READING = "Reading the ranking status…";
 
 // The ONE status line of the row. `job`: the rank job the page started (or joined), or null. `loading`: the list's
 // first read is on its way (no block yet).
-export function rankStatusLine(ranking, job, howToEnable, { loading = false } = {}) {
+export function rankStatusLine(ranking, job, howToEnable, { loading = false, watching = false } = {}) {
   const totals = rankTotals(ranking);
   if (!totals) {
     return loading ? RANK_READING : `${RANK_UNAVAILABLE}.`;
@@ -81,6 +116,9 @@ export function rankStatusLine(ranking, job, howToEnable, { loading = false } = 
   }
   if (rankJobRunning(job)) {
     return `${job.mode === "latest" ? "Re-ranking the latest 100" : "Ranking now"}: ranked ${count}`;
+  }
+  if (watching && ranking.in_progress === true) {
+    return `Ranking… ${count}`; // 0.1.11.3: a rank this page did not start, read live
   }
   return unranked ? `Ranked ${count} · ${unranked} not ranked yet` : `Ranked ${count}`;
 }

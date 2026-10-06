@@ -422,6 +422,12 @@ _POSTINGS_RANK_EXAMPLE: dict[str, object] = {
     "started": False,
 }
 
+_POSTINGS_RANKING_EXAMPLE: dict[str, object] = {
+    "schema_version": "scout-postings-ranking:1",
+    "ranking": {"enabled": True, "in_progress": True, "window_days": 7, "stale_resume": False, "by_profile": [{"profile_id": "prof_1", "ranked": 509, "total": 792, "stale_resume": False}]},
+    "job": None,
+}
+
 _POSTINGS_ASSESS_EXAMPLE: dict[str, object] = {
     "schema_version": "scout-postings-assess:1", "status": "ask", "checked_at": "2026-10-03T09:30:00.000000Z",
     "question": {
@@ -2252,6 +2258,18 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
         ),
     ),
     RouteSpec(
+        "GET", "/api/postings/ranking", "How far the ranking is: the ranking block and the rank job, two counts a profile.", "read", "none",
+        _POSTINGS_RANKING_EXAMPLE,
+        schema_version="scout-postings-ranking:1",
+        errors=(_UNKNOWN_KEY, _NO_TARGET),
+        description=(
+            "0.1.11.3: what the Jobs page polls while a rank runs (a background rank, a Rank now, a Re-rank). `ranking` is the "
+            "block of GET /api/postings (`in_progress`, `by_profile` ranked of total in the window); `job` the rank job this server "
+            "runs, or null. It reads two counts a profile: it refreshes nothing, reads no posting row and writes nothing, so it "
+            "costs the same on a small and on a very large home."
+        ),
+    ),
+    RouteSpec(
         "POST", "/api/postings/rank", "Rank now, or re-rank the latest 100: ask first (the calls), rank on approval.", "write", "model",
         _POSTINGS_RANK_EXAMPLE,
         schema_version="scout-rank-now:1",
@@ -2535,6 +2553,7 @@ _META: dict[tuple[str, str], tuple[str, str]] = {
     ("POST", "/api/pipeline/process"): ("Process one job now", "Jobs"),
     ("GET", "/api/postings"): ("Search the stored postings", "Jobs"),
     ("GET", "/api/postings/status"): ("Get how the stored postings are being prepared", "Jobs"),
+    ("GET", "/api/postings/ranking"): ("Get how far the ranking is", "Jobs"),
     ("POST", "/api/postings/assess"): ("Assess these postings, on approval", "Jobs"),
     ("POST", "/api/postings/rank"): ("Rank the postings now, or re-rank the latest 100", "Jobs"),
     ("POST", "/api/runs/import"): ("Import what old runs assessed", "Runs"),
@@ -2650,6 +2669,7 @@ _LABELS: dict[tuple[str, str], tuple[str, ...]] = {
     ("POST", "/api/pipeline/process"): _NONE,
     ("GET", "/api/postings"): _UNTRUSTED,
     ("GET", "/api/postings/status"): _NONE,  # a state, a phase and counts
+    ("GET", "/api/postings/ranking"): _NONE,  # the ranking block and the rank job
     ("POST", "/api/postings/assess"): _UNTRUSTED,
     ("POST", "/api/postings/rank"): _NONE,  # the switch, counters, counts and the job: ids and codes
     ("POST", "/api/runs/import"): _NONE,

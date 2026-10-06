@@ -24,6 +24,9 @@ objects).
   model; ``{"mode", "approve": true}`` starts the job and answers ``202`` at
   once. System data only: ids, counts and codes.
 
+- ``GET /api/postings/ranking`` (0.1.11.3) is the ``ranking`` block and the rank job alone, for the Jobs page to
+  poll while a rank runs: two SQL counts a profile, no refresh of the read model, no row read, no write.
+
 - ``GET /api/postings/status`` (0110-9-01) says how the posting read model
   is in this server, from memory alone: it answers at once whatever a build
   is doing.
@@ -158,6 +161,22 @@ class PostingsRoutesMixin:
             self._error(HTTPStatus.UNPROCESSABLE_ENTITY, "unknown_key", "this route takes no query keys")
             return
         self._write_json(HTTPStatus.OK, model_status(self._backend.home_root, target))
+
+    def _handle_get_postings_ranking(self) -> None:
+        from ...pipeline import rank_now
+
+        target = self._postings_target()
+        if target is None:
+            return
+        if urlsplit(self.path).query:
+            self._error(HTTPStatus.UNPROCESSABLE_ENTITY, "unknown_key", "this route takes no query keys")
+            return
+        try:
+            response = rank_now.ranking_read(self._backend.home_root, target)
+        except (PostingModelError, PipelineStoreError) as exc:
+            self._error(_ERROR_STATUS.get(exc.code, HTTPStatus.CONFLICT), exc.code, str(exc))
+            return
+        self._write_json(HTTPStatus.OK, response)
 
     def _handle_post_postings_assess(self) -> None:
         body = self._read_json_body()
