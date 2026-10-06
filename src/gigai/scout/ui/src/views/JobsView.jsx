@@ -176,7 +176,7 @@ function PostingRow({ row, profiles, anchor, selected, onSelect, onOpen, onAsses
         {scoreText(row)}
       </div>
       <div className="posting-chips" data-role="state-chips">
-        {h1bLabel(row.h1b) && <SponsorshipBadge sponsorship={row.sponsorship} h1b={row.h1b} />}
+        {(h1bLabel(row.h1b) || (row.sponsorship && row.sponsorship !== "unknown")) && <SponsorshipBadge sponsorship={row.sponsorship} h1b={row.h1b} />}
         {rowChips(row).map((chip) => (
           <span key={`${chip.kind}:${chip.label}`} className={`state-pill tone-${chip.tone}`} data-testid={chip.testId} data-kind={chip.kind} title={chip.title}>
             {chip.label}

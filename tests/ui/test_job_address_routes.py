@@ -48,7 +48,7 @@ def test_an_address_with_a_slash_before_the_query_opens_the_job_the_store_keeps(
     ui.wait_for_job_page()
     ui.page.locator(VERDICT).wait_for()
     ui.settle()
-    assert ui.page.locator(f"{PAGE} h2", has_text="Job not found").count() == 0
+    assert ui.page.locator(f"{PAGE} h2", has_text="We have no stored posting").count() == 0
     assert (ui.page.locator(VERDICT).text_content() or "").strip()
     shot(ui, "address-slash-before-query-opens")
     ui.assert_clean()
@@ -81,8 +81,9 @@ def test_the_not_found_page_points_at_an_on_demand_assessment_and_says_plainly_w
     ui.page.unroute_all()
 
     ui.goto("/#/jobs/" + quote(UNKNOWN, safe=""))
-    ui.page.locator(f"{PAGE}, .panel h2", has_text="Job not found").first.wait_for()
+    ui.page.locator(f"{PAGE}, .panel h2", has_text="We have no stored posting at this address").first.wait_for()
     ui.settle()
     assert ui.page.locator(HINT).count() == 0
-    assert "No stored posting with this address for this profile" in (ui.page.locator(".panel .muted").first.text_content() or "")
+    assert "Nothing is stored for" in (ui.page.locator(".panel .muted").first.text_content() or "")
+    assert ui.page.locator("[data-role='back-to-jobs']").get_attribute("href") == "#/jobs"
     shot(ui, "not-found-plain")

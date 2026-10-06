@@ -65,7 +65,13 @@ class ApiError extends Error {
   }
 }
 
+// 0.1.11.4 R1b: POST /api/assess answers 409 `posting_closed` for a posting its board no longer lists (no model call).
+export const POSTING_CLOSED_MESSAGE = "This job is closed: nothing to apply to. Skip it.";
+
 function messageForStatus(path, status, code, detail) {
+  if (code === "posting_closed") {
+    return POSTING_CLOSED_MESSAGE;
+  }
   if (code && CODES_WITH_OWN_MESSAGE.has(code) && detail) {
     return detail;
   }
