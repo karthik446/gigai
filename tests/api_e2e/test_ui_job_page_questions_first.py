@@ -95,9 +95,10 @@ def test_the_tailoring_status_went_with_the_tailor_call() -> None:
     assert actions.count("<Action ") == 1 and 'name="reassess"' in actions  # ONE action
     page = _code(UI_SRC / "views" / "JobPage.jsx")
     assert "tailorStatusFor" not in page and "tailorGate" not in page and "postTailoredResume(" not in page
-    assert "<JobResumePanel" in page and "<ApplyPanel" in page and "<SuggestionsPanel" in page
+    # 0.1.11.3 item 5: the ONE Generate PDF button (ApplyPanel) is inside the resume card, not a card of the page.
+    assert "<JobResumePanel" in page and "<ApplyPanel" not in page and "<SuggestionsPanel" in page
     panel = _code(UI_SRC / "components" / "JobResumePanel.jsx")
-    assert 'id="job-resume"' in panel and "postTailoredResume(" not in panel
+    assert 'id="job-resume"' in panel and "postTailoredResume(" not in panel and panel.count("<ApplyPanel") == 1
     # Every refresh is a button that says what it costs; none runs by itself.
     model = (UI_SRC / "jobResumeModel.js").read_text(encoding="utf-8")
     assert 'export const REPICK_LABEL = "Re-pick · no model call";' in model and 'export const REASSESS_LABEL = "Re-assess · 1 model call";' in model

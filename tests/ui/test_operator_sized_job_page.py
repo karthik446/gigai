@@ -5,7 +5,7 @@ process with its background threads running, nothing answered by the test. 0.1.1
 page never loaded on a home of this size: a page is not done until it was loaded there, in a real browser.
 
 The flow: Jobs, the assessed postings (the address the "Assessed" chip gives); one is opened FROM THE LIST; its job
-page shows the resume panel with the stored resume, the four pipeline rows and ONE "Apply: get the PDF" button; Apply opens the Generate PDF form, the PDF is ONE `POST /api/tailored-resumes/pdf` and a download, and
+page shows the resume panel with the stored resume, the four pipeline rows and ONE "Generate PDF" button, inside the resume panel (0.1.11.3 item 5); it opens the Generate PDF form, the PDF is ONE `POST /api/tailored-resumes/pdf` and a download, and
 nothing follows it (no other request, no new page); Back shows the same rows at once, with no "Loading" and at most
 the one refresh in place of the list.
 
@@ -110,7 +110,7 @@ def test_open_a_job_apply_and_go_back_on_the_operator_sized_home(operator_ui, op
 
     # --- Apply: one button, the form, the PDF, nothing after it ---
     button = ui.page.locator(f'{APPLY} [data-action="apply"]')
-    assert ui.page.locator(f'{PAGE} [data-action="apply"]').count() == 1 and (button.text_content() or "").strip() == "Apply: get the PDF"
+    assert ui.page.locator(f'{PAGE} [data-action="apply"]').count() == 1 and (button.text_content() or "").strip() == "Generate PDF"
     button.click()
     form = ui.page.locator(f'{APPLY} [data-role="generate-pdf-form"]')
     form.wait_for()

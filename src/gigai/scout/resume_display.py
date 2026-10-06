@@ -31,7 +31,11 @@ SPACING_MIN, SPACING_MAX, SPACING_DEFAULT = 0.7, 1.4, 1.0
 #: The keys a file written before 0.1.10.7 may still hold: never read, dropped by any save.
 LEGACY_CONTACT_KEYS: tuple[str, ...] = ("name", "contact")
 #: The Generate PDF form's fields (0110-046), in the order the contact line prints them after the name.
-HEADER_FIELDS: tuple[str, ...] = ("name", "email", "phone", "location", "linkedin", "link")
+HEADER_FIELDS: tuple[str, ...] = ("name", "email", "phone", "location", "linkedin", "link", "work_authorization")
+#: 0.1.11.3 item 6: the form's optional "Work authorization" line (e.g. "H-1B, requires sponsorship").  It prints as its
+#: own line of this one PDF's header and, like the other form values, is never stored: not in the master, a job's resume
+#: markdown or JSON, or the resumes folder.  Sponsorship stays a label for jobs; this is only what the user prints.
+WORK_AUTHORIZATION_FIELD = "work_authorization"
 _CONTROL = re.compile(r"[\x00-\x1f\x7f]")
 
 
@@ -54,6 +58,7 @@ class PdfHeader:
     name: str = ""
     title: str = ""
     contact: tuple[ContactItem, ...] = ()
+    work_authorization: str = ""
 
 
 class HeaderFormError(ValueError):
@@ -199,7 +204,7 @@ def form_header(values: Mapping[str, str], title: str = "") -> PdfHeader:
     contact: list[ContactItem] = []
     for key in HEADER_FIELDS[1:]:
         value = values.get(key, "")
-        if not value:
+        if not value or key == WORK_AUTHORIZATION_FIELD:
             continue
         if key == "email":
             contact.append(ContactItem(value, "mailto:" + value))
@@ -207,7 +212,7 @@ def form_header(values: Mapping[str, str], title: str = "") -> PdfHeader:
             contact.append(_link_item(value))
         else:
             contact.append(ContactItem(value, None))
-    return PdfHeader(values.get("name", ""), _clean(title), tuple(contact))
+    return PdfHeader(values.get("name", ""), _clean(title), tuple(contact), values.get(WORK_AUTHORIZATION_FIELD, ""))
 
 
 def profile_title(settings: DisplaySettings | None, profile_id: str | None) -> str:
@@ -223,6 +228,7 @@ __all__ = [
     "PdfHeader",
     "SCHEMA_VERSION",
     "SPACING_DEFAULT",
+    "WORK_AUTHORIZATION_FIELD",
     "SPACING_MAX",
     "SPACING_MIN",
     "display_path",

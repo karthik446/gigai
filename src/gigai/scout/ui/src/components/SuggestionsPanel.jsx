@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { postJobSuggestion } from "../api.js";
 import { briefCommands, suggestionRows } from "../jobResumeModel.js";
 
@@ -15,6 +15,11 @@ import { briefCommands, suggestionRows } from "../jobResumeModel.js";
 //   Work on this     shows the two brief commands to copy (SPEC 5.2: the
 //   with your agent  user's part and the posting's part are two calls, never
 //                    one response). Nothing is fetched and no model is called
+//
+// 0.1.11.3 item 9: the card is ONE line by default, "Suggestions (N open)",
+// below the resume card (which holds Generate PDF). The line is a button: a
+// click, Enter or Space opens the list and closes it again. Each job's card
+// starts closed. The data, the CLI and the agent brief are unchanged.
 //
 // The list is the suggestion record's; while the page holds no record, the
 // assessment's own structured suggestions are listed as open (they have no
@@ -60,6 +65,11 @@ export default function SuggestionsPanel({ state, assessment, jobUrl }) {
   const [busy, setBusy] = useState(null); // the suggestion id being written
   const [error, setError] = useState(null);
   const [briefFor, setBriefFor] = useState(null);
+  const [expanded, setExpanded] = useState(false);
+  const jobKey = `${state.profileId}\n${state.jobIdentity}`;
+  useEffect(() => {
+    setExpanded(false);
+  }, [jobKey]);
   const { record, stored } = state;
   // A line's text, for a line the stored resume prints (the page holds it already; no master read for this list).
   const texts = useMemo(() => {
@@ -92,18 +102,20 @@ export default function SuggestionsPanel({ state, assessment, jobUrl }) {
   };
   const open = rows.filter((row) => row.open).length;
   return (
-    <section className="panel" id="job-suggestions" data-testid="job-suggestions">
-      <h3>
-        Suggestions ({open} open{rows.length > open ? `, ${rows.length - open} closed` : ""})
+    <section className="panel" id="job-suggestions" data-testid="job-suggestions" data-expanded={expanded ? "true" : "false"}>
+      <h3 className="suggestions-heading">
+        <button type="button" className="suggestions-toggle" data-action="toggle-suggestions" aria-expanded={expanded} aria-controls="job-suggestions-list" onClick={() => setExpanded(!expanded)}>
+          <span aria-hidden="true">{expanded ? "▾" : "▸"}</span> Suggestions ({open} open{rows.length > open ? `, ${rows.length - open} closed` : ""})
+        </button>
       </h3>
-      <p className="muted small">What would make this resume fit the job better. Nothing here is written for you by a model: you and your agent change the words, in chat.</p>
-      {error && (
+      {expanded && <p className="muted small">What would make this resume fit the job better. Nothing here is written for you by a model: you and your agent change the words, in chat.</p>}
+      {expanded && error && (
         <div className="callout danger" role="alert" data-role="suggestion-error">
           {error}
         </div>
       )}
-      <ul className="story-list" data-role="suggestions">
-        {rows.map((row) => (
+      <ul className="story-list" id="job-suggestions-list" data-role="suggestions" hidden={!expanded}>
+        {(expanded ? rows : []).map((row) => (
           <li key={row.id} className="master-line" data-suggestion-id={row.id} data-kind={row.kind} data-status={row.status}>
             <div className="master-line-body">
               <strong data-role="suggestion-kind">{row.kindLabel}</strong>

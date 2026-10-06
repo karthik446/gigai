@@ -86,6 +86,17 @@ def _assert_unmixed(response, expected: str) -> None:
     assert response.headers[data_labels.LABELS_HEADER] == expected
 
 
+def _calls_but_the_rank(client) -> list[dict]:
+    """The model calls an ask may NOT make: every aggregate but the background rank's.
+
+    0.1.11.2: a started server ranks the unranked postings of the last 7 days by itself (the rank lane, its own daily
+    cap), about a second after the start, whatever is asked. So a "rank" aggregate may or may not be there yet when a
+    read comes back, and it is not the ask's: the ask still assesses nothing.
+    """
+
+    return [item for item in client.get("/api/metrics").json()["aggregates"] if item["kind"] != "rank"]
+
+
 def test_scout_new_journey(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     home, target = setup_and_init(tmp_path)
     add_resume(home, target, tmp_path)
@@ -108,7 +119,8 @@ def test_scout_new_journey(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> N
         (profile,) = ask["profiles"]
         assert (row["job_identity"], row["title"], row["company_slug"], row["work_mode"]) == (_JOB, "Software Engineer", "acmenew", "remote")
         assert row["profile_id"] == profile["profile_id"] and [item["profile_id"] for item in row["profiles"]] == [profile["profile_id"]]
-        assert (row["state"], row["score"], row["assessment"]) == ("not_assessed", None, None)
+        # Not assessed; its score is the rank once the server's own rank lane has ranked it (0.1.11.2), else none yet.
+        assert (row["state"], row["assessment"]) == ("not_assessed", None) and row["score"] in (None, 60)
         question = ask["question"]
         assert (question["kind"], question["new"], question["to_assess"]) == ("assess_new", 1, 1)
         assert question["by_profile"] == [{"profile_id": profile["profile_id"], "count": 1}]
@@ -116,7 +128,7 @@ def test_scout_new_journey(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> N
         assert question["yes"]["api"] == {"method": "POST", "path": "/api/new", "body": {"assess": True, "since": ask["since"]}}
         assert question["text"].startswith("1 new posting (") and "Assess them? ~1 call" in question["text"] and "~1 calls" not in question["text"]
         assert ask["yours_hint"]["api"] == {"method": "GET", "path": f"/api/new/yours?since={ask['since']}"} and ask["yours_hint"]["available"] == 0
-        assert client.get("/api/metrics").json()["aggregates"] == []
+        assert _calls_but_the_rank(client) == []
 
         # 2. The separate call: user-private only, and nothing to show before an assessment.
         mine = client.get("/api/new/yours")
@@ -264,7 +276,7 @@ def test_the_api_ask_is_a_preview_and_the_no_moves_the_mark(tmp_path: Path, monk
         assert answered["anchor"] == {"last_checked_at": None, "advances": True}
         after = client.get("/api/new").json()
         assert (after["status"], after["since_source"], after["since"], after["counts"]["new"]) == ("nothing_new", "anchor", answered["checked_at"], 0)
-        assert client.get("/api/metrics").json()["aggregates"] == []
+        assert _calls_but_the_rank(client) == []
     finally:
         stop_server(server)
     assert_clean_and_healthy(workpad, home)

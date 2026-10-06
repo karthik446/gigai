@@ -14,7 +14,6 @@ import StateChip from "../components/StateChip.jsx";
 import PrepPanel from "../components/PrepPanel.jsx";
 import JobResumePanel, { useJobResume } from "../components/JobResumePanel.jsx";
 import SuggestionsPanel from "../components/SuggestionsPanel.jsx";
-import ApplyPanel from "../components/ApplyPanel.jsx";
 import PipelineTimeline from "../components/PipelineTimeline.jsx";
 import { useAnswerDrafts } from "../answerDrafts.js";
 import { assessSendsLine, assessSummaryLines, reassessErrorText, reassessGate } from "../answersModel.js";
@@ -118,10 +117,13 @@ import { ASSESSMENTS_HASH, JOBS_HASH } from "../routing.js";
 //                   class, "any one of: ..." and, for a met row, where its
 //                   evidence is on the resume. ONE action: "Re-assess · 1
 //                   model call"
-//   4. the suggested resume, with Picked / Left out (JobResumePanel)
-//   5. suggestions  (SuggestionsPanel): no button rewrites with a model
-//   6. Apply        ONE button, the PDF, nothing after it (ApplyPanel)
-//   7. the pipeline's four rows
+//   4. the suggested resume, with Picked / Left out (JobResumePanel) and,
+//                   under its heading, the ONE "Generate PDF" button
+//                   (ApplyPanel; 0.1.11.3 item 5: it was a card at the bottom)
+//   5. suggestions  (SuggestionsPanel): ONE line, "Suggestions (N open)",
+//                   closed by default (0.1.11.3 item 9); no button rewrites
+//                   with a model
+//   6. the pipeline's four rows
 // Opening the page recomputes nothing: every refresh is a button that says
 // what it costs ("Re-pick · no model call", "Re-assess · 1 model call").
 //
@@ -661,11 +663,10 @@ export default function JobPage({
         reassess={reassess}
         questionPrompts={questionPrompts}
         hasQuestions={answerDrafts.questions.length > 0}
+        visaRequired={visaRequired}
       />
 
       {assessment && <SuggestionsPanel state={resume} assessment={assessment} jobUrl={jobUrl} />}
-
-      <ApplyPanel state={resume} items={staleList} reassess={reassess} />
 
       <PipelineTimeline
         jobIdentity={job.id}

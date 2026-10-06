@@ -238,7 +238,9 @@ def test_country_match_bare_city_diacritic_insensitive() -> None:
 
 
 def test_country_match_genuinely_ambiguous_locations_stay_none() -> None:
-    assert country_match("Remote", ("US",)) is None
+    # 0.1.11.3 item 11 (operator decision): a bare "Remote" is no longer ambiguous, it is read as the US.
+    assert country_match("Remote", ("US",)) is True
+    assert country_match("Remote", ("DE",)) is False
     assert country_match("", ("US",)) is None
     assert country_match(None, ("US",)) is None
 
@@ -422,7 +424,8 @@ def test_country_match_region_token_alongside_unrecognized_token_still_non_match
 def test_country_match_unrecognized_token_without_region_signal_stays_ambiguous() -> None:
     # No region token at all: an unrelated unrecognized token keeps its
     # pre-existing ambiguous (None) behavior, unaffected by this fix.
-    assert country_match("Remote", ("US",)) is None
+    # (0.1.11.3 item 11: "Remote" alone is the default country now, see the test above; an unknown place is unchanged.)
+    assert country_match("Remote - Some Unknown Place", ("US",)) is None
     assert country_match("Some Unknown Place", ("US",)) is None
 
 
