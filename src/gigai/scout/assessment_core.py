@@ -69,7 +69,7 @@ from .question_ids import normalize_question_id
 from .requirement_weights import bound_rows, cap_list_item_questions, cap_mandatory_questions, settled_verdict
 from .requirements_list import ListedRequirement, check_listed, extracted, fold
 from .stated_check import MasterFacts, read_master, settle_stated
-from .suggestion_check import MasterLine, check_suggestions, clean_citations, parse_master_lines, truthful_notes, with_verbatim_evidence
+from .suggestion_check import MasterLine, check_suggestions, clean_citations, parse_master_lines, truthful_notes, with_verbatim_evidence, without_unknown_places
 from .resume_gate import (
     HOLD_QUESTION,
     gate,
@@ -626,6 +626,10 @@ def assess_once(
         master=read_master(ctx.resume_text) if ctx.resume_ids else None,
         answers={item.question_id.lower(): item.answer for item in ctx.prior_answers},
         stories={item.question_id.lower(): item.summary for item in ctx.bank_answers},
+        known_text="\n".join([
+            job.title, job.company, job.location or "", job.posting_text, ctx.resume_text, ctx.location, *ctx.countries, *ctx.titles,
+            *(item.answer for item in ctx.prior_answers), *(item.summary for item in ctx.bank_answers),
+        ]),
     )
     prompts = 0
 
@@ -1004,6 +1008,8 @@ class AssessExtras:
     stated_questions: tuple[str, ...] = ()
     #: 0.1.11.3 Q3: what the citation check did to each evidence item that was not one verbatim line (``suggestion_check.clean_citations``): ``trimmed_to_line`` | ``split_join`` | ``no_line``.
     checked_citations: tuple[str, ...] = ()
+    #: 0.1.11.4 Q4: how many questions were dropped for naming a city no text the prompt showed names (``suggestion_check.names_unknown_place``).
+    unplaced_questions: int = 0
 
 
 @dataclass
@@ -1047,6 +1053,9 @@ class Boundary:
     stories: Mapping[str, str] = field(default_factory=dict)
     #: 0.1.11.3 Q2: what the RESUME block states, as ``stated_check`` reads it (skills line, dated roles). ``None``: no check.
     master: MasterFacts | None = None
+    #: 0.1.11.4 Q4: every text the prompt showed (role, company, location, posting, master, setup, answers, stories): where a
+    #: city a question or a suggestion names must come from. Empty: no check.
+    known_text: str = ""
 
 
 def offered_sources(ctx: AssessContext) -> frozenset[str] | None:
@@ -1513,6 +1522,10 @@ def _normalize_and_strip(decoded: Mapping[str, object], *, boundary: Boundary | 
         row_ids = {words: by_row[id(row)] for words, row in named_rows.items() if words and id(row) in by_row}
 
     raw_questions = _normalize_string_list(decoded.get("questions"))
+    unplaced = 0
+    if is_v9 and boundary.known_text:
+        # 0.1.11.4 Q4: a question that names a city nobody gave is not asked (its row, if it holds, gets the row's own question below).
+        raw_questions, unplaced = without_unknown_places(raw_questions, "question", boundary.known_text)
     plain_questions: list[str] = []
     structured_questions: list[object] = []
     plain_at: dict[int, int] = {}  # a structured question -> where its words are in the plain list
@@ -1586,10 +1599,10 @@ def _normalize_and_strip(decoded: Mapping[str, object], *, boundary: Boundary | 
     if is_v9 and boundary.lines:
         # 0.1.11 C3: a suggestion whose premises the matrix and the master do not hold is dropped (or becomes a gap).
         with_ids = [{**row, "id": id_of_row[id(row)]} if id(row) in id_of_row else row for row in normalized_matrix]  # type: ignore[union-attr]
-        suggested, refused = check_suggestions(suggested, with_ids, boundary.lines, boundary.answers)  # type: ignore[arg-type]
+        suggested, refused = check_suggestions(suggested, with_ids, boundary.lines, boundary.answers, boundary.known_text)  # type: ignore[arg-type]
         checked = [(item.kind, why) for item, why in refused]
         # 0.1.11.3 Q1: a plain-string suggestion that says the resume is silent on a term a master line states goes too.
-        raw_suggestions, _untrue = truthful_notes(raw_suggestions, boundary.lines)
+        raw_suggestions, _untrue = truthful_notes(raw_suggestions, boundary.lines, boundary.known_text)
     result: dict[str, object] = {
         "matrix": normalized_matrix,
         "suggestions": [item for item in raw_suggestions if isinstance(item, str)],
@@ -1642,6 +1655,7 @@ def _normalize_and_strip(decoded: Mapping[str, object], *, boundary: Boundary | 
         met_by_master=tuple(met_by_master),
         stated_questions=tuple(stated_questions),
         checked_citations=tuple(cited),
+        unplaced_questions=unplaced,
     )
     # Drop any other unknown keys (e.g. a model echoing "posting" back, or
     # inventing extra fields): the frozen contract is a closed object, and

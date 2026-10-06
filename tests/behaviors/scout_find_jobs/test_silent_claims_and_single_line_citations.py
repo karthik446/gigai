@@ -119,10 +119,11 @@ UNTRUE = [
     _gap("Golang is not listed.", "Go services"),
     {"kind": "keyword", "line": "b-000003", "posting_phrase": "Kafka", "why": "The resume doesn't mention Kafka."},
     {"kind": "master_line", "requirement": "React", "why": "ReactJS is missing from the resume."},
+    # 0.1.11.4 Q4: every term of the claim is checked, and it is false about Kafka (a line names it) though Flink is not there.
+    _gap("The resume does not mention Kafka or Flink.", "Kafka and Flink streaming"),
 ]
 TRUE = [
     _gap("The resume is silent on Flink; if you have run it, say so.", "Kafka and Flink streaming"),  # not in the master
-    _gap("The resume does not mention Kafka or Flink.", "Kafka and Flink streaming"),  # one of the two is not there
     _gap("The resume does not show leading a Kafka migration.", "Kafka and Flink streaming"),  # about more than a named term
     _gap("The resume does not state 6 years of React."),  # the master says 4
     _gap("The resume does not state 4 years of Kafka.", "Kafka and Flink streaming"),  # "4 years" is in another line than Kafka
