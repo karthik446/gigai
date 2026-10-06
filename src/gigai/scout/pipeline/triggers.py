@@ -371,6 +371,9 @@ def process_now(
     """
 
     home_root, target = Path(home_root), Path(target)
+    if not pipeline_setting(home_root, target).enabled:
+        # 0.1.11: the pipeline is off (the default): this queues nothing and no model call follows.
+        raise steps.StepError(steps.ERROR_PIPELINE_OFF, "the background pipeline is off; set pipeline.enabled in the settings file to use it")
     if store is None and not pipeline_path(home_root, target).is_file():
         # No queue yet, so nothing waits for an approval; a job that cannot enter the pipeline creates no file.
         return steps.enqueue_job(profile_id, job, force=force, home_root=home_root, target=target, trigger=TRIGGER_PROCESS)

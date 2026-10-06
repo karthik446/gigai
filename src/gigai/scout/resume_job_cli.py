@@ -225,7 +225,7 @@ def store_resume(
     drain: dict[str, object] | None = None
     status: dict[str, object] | None = None
     pair = (response.resume.profile_id, response.job.job_identity)
-    if attached.changed and recheck["error_code"] is None and pair[0] is not None:
+    if attached.changed and recheck["error_code"] is None and recheck["result"] != "pipeline_off" and pair[0] is not None:
         if not as_json:
             click.echo("Stored. Checking it again (this can take a minute)...")
         try:

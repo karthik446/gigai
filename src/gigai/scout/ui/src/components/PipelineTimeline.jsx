@@ -28,6 +28,7 @@ function ChipPopover({ label, tone, testId, older, legacy, children }) {
 // under each is the server's own wording. A job the 0.1.10 pipeline
 // processed keeps its label, marked "made on 0.1.10's tailored resume", and
 // offers "Check again".
+// 0.1.11: with the pipeline off (the default) this renders nothing at all (see the early return below).
 // "Process now" queues the job (POST /api/pipeline/process, 202: it never
 // waits for a model) and the timeline is read again while it moves.
 // `onPickDone` is called when a read says the pick step finished since the
@@ -92,6 +93,13 @@ export default function PipelineTimeline({ jobIdentity, profileId, assessed, ass
   }, [read, refreshKey]);
 
   if (!jobIdentity || !profileId) {
+    return null;
+  }
+
+  // 0.1.11: the background pipeline ships off. Nothing of it shows on the job page while the server says it is off
+  // (GET /api/pipeline/job `enabled`): no panel, no rows, no buttons, no Scout ATS or Scout label chip. Nothing is
+  // drawn before the first read either, so an off pipeline never flashes a panel.
+  if (!error && (detail === null || detail.enabled === false)) {
     return null;
   }
 

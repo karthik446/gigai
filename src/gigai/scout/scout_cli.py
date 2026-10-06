@@ -475,7 +475,7 @@ def resume_length_command(
         else:
             items = list_tailored_resumes(home_root, target, profile_id=profile_id or None, job_identity=job_identity)
             if not items:
-                raise QuickAssessError("tailored_resume_not_found", "no stored tailored resume for that job; run `gigai scout resume tailor --job-url ...` first")
+                raise QuickAssessError("tailored_resume_not_found", "no stored resume for that job; assess it (`gigai scout assess --job-url ...`) so a resume is picked, then run this again")
             stored = items[0]
     except (ScoutTargetError, WorkpadError, QuickAssessError, FindJobsContractError, OSError, ValueError) as exc:
         _fail(exc, as_json=as_json, fallback="scout_resume_length_failed")
@@ -498,7 +498,7 @@ def resume_length_command(
     _emit(payload, as_json, "\n".join(lines))
 
 
-@resume_group.command("tailor")
+@resume_group.command("tailor", hidden=True)
 @click.option("--job-url", "job_url", help="Public job posting URL to fetch and tailor the resume to.")
 @click.option("--job-text", "job_text_file", help="File with the posting text (or - for stdin).")
 @click.option("--profile", "profile_id", help="Scout profile ID whose pinned resume to tailor (default: the selected profile).")
@@ -580,6 +580,16 @@ def resume_tailor_command(
         from .resume_job_cli import store_resume  # 0.1.11 N5: the old spelling of `gigai scout resume store`
 
         store_resume(in_file, job_url, profile_id, actor, source, out_file, home_root, target, as_json, renamed_from="gigai scout resume tailor --in")
+        return
+    from .pipeline.settings import pipeline_setting
+    from .pipeline.steps import StepError
+
+    if not pipeline_setting(home_root, target).enabled:
+        # 0.1.11: tailoring is switched off (the background pipeline's switch); the resume is picked from the master. No model call.
+        _fail(
+            StepError("tailoring_off", "tailoring is switched off in 0.1.11: the resume is picked from your master, word for word (`gigai scout resume pick`)"),
+            as_json=as_json, fallback="tailoring_off",
+        )
         return
     if sum(1 for item in (profile_id, resume_file, resume_text) if item) > 1:
         _fail(ValueError("pass at most one of --profile, --resume or --resume-text"), as_json=as_json, fallback="resume_input_invalid")
@@ -699,7 +709,7 @@ def _attach_edited_resume(
     drain: dict[str, object] | None = None
     status: dict[str, object] | None = None
     pair = (response.resume.profile_id, response.job.job_identity)
-    if attached.changed and recheck["error_code"] is None and pair[0] is not None:
+    if attached.changed and recheck["error_code"] is None and recheck["result"] != "pipeline_off" and pair[0] is not None:
         if not as_json:
             click.echo("Stored. Checking it again (the assessment against it is one model call; this can take a minute)...")
         try:
@@ -752,8 +762,8 @@ _register_resume_job_commands(scout_group, resume_group)
 
 @resume_group.command("pdf")
 @click.option("--in", "in_file", help="Resume markdown FILE in GigAI's resume format (or - for stdin).")
-@click.option("--tailored", "tailored", is_flag=True, help="Render the STORED tailored resume for --job-url instead of a markdown file.")
-@click.option("--job-url", "job_url", help="With --tailored: the posting URL the resume was tailored to.")
+@click.option("--tailored", "tailored", is_flag=True, help="Render the resume STORED for --job-url (the picked one, or the one you edited) instead of a markdown file. --job-url alone does the same.")
+@click.option("--job-url", "job_url", help="The posting URL whose stored resume (picked or edited) to render.")
 @click.option("--out", "out_file", type=click.Path(path_type=Path, dir_okay=False), help="Write the PDF to FILE (default: <company>-<role>-<YYYY-MM-DD>.pdf, or resume-<YYYY-MM-DD>.pdf, in your resumes folder).")
 @click.option("--profile", "profile_id", help="With --tailored: the Scout profile ID the resume was tailored for (default: the newest).")
 @click.option("--spacing", "spacing", type=float, help="Spacing scale 0.7-1.4 for this render (turns auto fit off unless --auto-fit is given). Default: the saved setting.")
@@ -3148,7 +3158,7 @@ def snapshot_status_command(home_value: Path | None, target_value: Path | None, 
 
 @scout_group.group("pipeline")
 def pipeline_group() -> None:
-    """The background pipeline of one job: tailor the resume, assess it again, score it, set the Scout label."""
+    """The background pipeline (off by default in 0.1.11): steps, queue and caps. Nothing runs while it is off."""
 
 
 def _pipeline_target(target_value: Path | None, home_root: Path, *, as_json: bool) -> Path:
@@ -3343,14 +3353,14 @@ def pipeline_status_command(
 @pipeline_group.command("process")
 @click.argument("job")
 @click.option("--profile", "profile_id", help="Scout profile ID (default: the selected profile).")
-@click.option("--force", "force", is_flag=True, help="Tailor again even when nothing the tailoring reads has changed.")
+@click.option("--force", "force", is_flag=True, help="Queue it again even when nothing its steps read has changed.")
 @click.option("--home", "home_value", type=click.Path(path_type=Path, file_okay=False))
 @click.option("--target", "target_value", type=click.Path(path_type=Path, file_okay=False))
 @click.option("--json", "as_json", is_flag=True)
 def pipeline_process_command(
     job: str, profile_id: str | None, force: bool, home_value: Path | None, target_value: Path | None, as_json: bool
 ) -> None:
-    """Put one assessed job through the pipeline now: tailor, assess again, Scout ATS score, Scout label."""
+    """Put one assessed job through the pipeline now. Refused (pipeline_off) while the pipeline is off, the 0.1.11 default."""
 
     from .pipeline.runner import pipeline_status, run_once
     from .pipeline.triggers import process_now

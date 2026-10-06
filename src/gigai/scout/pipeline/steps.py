@@ -126,6 +126,8 @@ LABEL_REASONS: tuple[str, ...] = (REASON_NOT_MATCHED, REASON_OPEN_QUESTIONS, REA
 
 #: Step failures of this module's own (the model and input codes are ``quick_assess``'s).
 ERROR_ASSESSMENT_MISSING = "assessment_missing"
+#: 0.1.11: the pipeline is off (the default); ``triggers.process_now`` queues nothing.
+ERROR_PIPELINE_OFF = "pipeline_off"
 ERROR_POSTING_TEXT_UNAVAILABLE = "posting_text_unavailable"
 ERROR_UPSTREAM_OUTPUT_MISSING = "upstream_output_missing"
 ERROR_CONTACT_DATA_FOUND = "contact_data_found"
