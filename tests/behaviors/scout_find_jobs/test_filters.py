@@ -566,10 +566,12 @@ def test_sponsorship_b3_required_offered_phrases(text: str) -> None:
     assert sponsorship_from_text(text) is SponsorshipStatus.OFFERED
 
 
-def test_sponsorship_b3_visa_required_excludes_not_offered() -> None:
+def test_sponsorship_b3_visa_required_keeps_not_offered() -> None:
+    # 0.1.11.3: sponsorship is a label, never an exclusion.
     row = _row(sponsorship=sponsorship_from_text("We will not sponsor employment visas for this role."))
+    assert row.sponsorship is SponsorshipStatus.NOT_OFFERED
     config = _config(visa_sponsorship_required=True)
-    assert exclusion_reason(row, config) is NotAssessedReason.SPONSORSHIP_EXCLUDED
+    assert exclusion_reason(row, config) is None
 
 
 # --- exclusion_reason ------------------------------------------------------
@@ -598,10 +600,10 @@ def test_exclusion_reason_matching_country_is_not_excluded() -> None:
     assert exclusion_reason(row, config) is None
 
 
-def test_exclusion_reason_sponsorship_excluded() -> None:
+def test_exclusion_reason_sponsorship_never_excludes() -> None:
     row = _row(sponsorship=SponsorshipStatus.NOT_OFFERED)
     config = _config(visa_sponsorship_required=True)
-    assert exclusion_reason(row, config) is NotAssessedReason.SPONSORSHIP_EXCLUDED
+    assert exclusion_reason(row, config) is None
 
 
 def test_exclusion_reason_sponsorship_not_required_keeps_not_offered_row() -> None:

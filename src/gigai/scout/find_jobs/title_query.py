@@ -1,4 +1,4 @@
-"""ONE title matcher for search: the whole-word rule plus the profile's tag query (0110-024b, P2).
+"""ONE title matcher for search: the role rule, the profile's tag query (0110-024b, P2) and its titles to avoid.
 
 ``index_search.read_indexed_boards`` and ``market_acquisition._role_match``
 both decide "does this posting's title fit the profile's roles" here, so the
@@ -6,9 +6,9 @@ two can never disagree.
 
 A posting matches when EITHER
 
-* its title passes the committed whole-word rule (``ats_board_clients.matches_roles``;
-  the 021 rule). It always does: tags only ADD matches, recall never drops
-  below the rule's; or
+* its title passes the committed role rule (``ats_board_clients.matches_roles``:
+  the role's whole words, standing together as that role). It always does:
+  tags only ADD matches, recall never drops below the rule's; or
 * the tag store holds a tag for its normalized title whose level equals the
   level of one of the profile's roles and whose function equals that role's
   function. Each role is tagged by ``posting_tags.tag_title`` on the role text
@@ -18,7 +18,11 @@ A posting matches when EITHER
   Software Development" come in.
 
 A role whose tag has no function (the rules found no family) takes no part in
-the tag query and keeps the plain rule only. A posting whose function tag is
+the tag query and keeps the plain rule only. A title the rule REJECTED (the
+role's words are all there, as another role: "Staff Training Engineer" for
+"Staff Engineer", ``role_fit`` is ``False``) is never matched by a tag: the
+rules tag it staff + software like the role itself, and the tag must not bring
+it back. A posting whose function tag is
 missing (not in the store, or ``function`` is ``None``) is judged by the rule
 alone: the untagged fallback. With no tag store, or an unreadable one, the
 matcher is exactly the rule and never raises.
@@ -45,6 +49,17 @@ Engineer, Product Experiences" stays, though the rules tag it ``product``). A
 profile with ONLY generic titles names no function of its own, so nothing is
 vetoed and it matches exactly as before: every title with its words
 (``generic_title_warnings`` is what tells the user how wide that is).
+
+0.1.11.3 (packet 14), TITLES TO AVOID: a matcher built with the profile's
+``titles_to_avoid`` matches no title that holds one of them
+(``title_avoided``), whatever the rule or a tag says. An entry is a word or a
+phrase: the title is read as its lower-cased words (letters, digits, ``+``
+and ``#``; punctuation and spacing only separate words), and an entry matches
+when its own words are words of the title, in a row and in order. Whole words
+only and no stemming: "Trainer" does not match "Training" or "Trainers",
+"intern" does not match "Internal". The WHOLE title is read, the part after a
+comma too: avoiding "training" also takes out "Staff Software Engineer, ML
+Training Infrastructure". An entry with no letter or digit avoids nothing.
 """
 
 from __future__ import annotations
@@ -54,7 +69,7 @@ from dataclasses import dataclass
 from pathlib import Path
 import sqlite3
 
-from .ats_board_clients import _SENIORITY_WORDS, _words, matches_roles
+from .ats_board_clients import _SENIORITY_WORDS, _WORD_RE, _words, matches_roles, role_fit
 from .posting_tags import _LEVEL_RES, default_store, normalize_title, tag_title
 from .tag_store import TagStore
 
@@ -74,6 +89,38 @@ def is_generic_role(role: str) -> bool:
         return False
     rest = [word for word in _words(role) if word not in _SENIORITY_WORDS and not _is_level_word(word)]
     return bool(rest) and all(word in GENERIC_ROLE_WORDS for word in rest)
+
+
+def avoid_phrases(titles_to_avoid: Sequence[str]) -> tuple[tuple[str, ...], ...]:
+    """Each entry of a profile's titles to avoid as its lower-cased words; an entry with none is left out."""
+
+    phrases = []
+    for entry in titles_to_avoid:
+        words = tuple(_WORD_RE.findall(entry.lower())) if type(entry) is str else ()
+        if words and words not in phrases:
+            phrases.append(words)
+    return tuple(phrases)
+
+
+def _holds_avoided(title: str, phrases: Sequence[tuple[str, ...]]) -> bool:
+    words = _WORD_RE.findall(title.lower())
+    for phrase in phrases:
+        size = len(phrase)
+        if size == 1:
+            if phrase[0] in words:
+                return True
+            continue
+        first = phrase[0]
+        for at in range(len(words) - size + 1):
+            if words[at] == first and tuple(words[at:at + size]) == phrase:
+                return True
+    return False
+
+
+def title_avoided(title: str, titles_to_avoid: Sequence[str]) -> bool:
+    """Whether ``title`` holds one of ``titles_to_avoid`` as whole words in a row (see the module text)."""
+
+    return type(title) is str and _holds_avoided(title, avoid_phrases(titles_to_avoid))
 
 
 @dataclass(frozen=True, slots=True)
@@ -123,7 +170,7 @@ class TitleMatchCounts:
 
 @dataclass(frozen=True, slots=True)
 class TitleDecision:
-    """What the matcher decided for one title, and how (``by``: ``rule`` / ``tag`` / ``vetoed`` / ``None``)."""
+    """What the matcher decided for one title, and how (``by``: ``rule`` / ``tag`` / ``vetoed`` / ``avoided`` / ``None``)."""
 
     matched: bool
     by: str | None = None
@@ -135,6 +182,7 @@ _NO_MATCH = TitleDecision(False)
 _BY_RULE = TitleDecision(True, "rule")
 _BY_TAG = TitleDecision(True, "tag")
 _VETOED = TitleDecision(False, "vetoed")
+_AVOIDED = TitleDecision(False, "avoided")
 _PENDING = TitleDecision(True, "rule", tag_pending=True)
 
 
@@ -157,10 +205,13 @@ class TitleMatcher:
     postings the rule rejected and that carry no function tag, so the rule
     was the only judge. ``decide`` is ``matches`` with the reason (a generic
     title's veto and the tag-pending flag, 0110-8-05: see the module text).
+    ``avoid`` is the profile's titles to avoid: a title holding one is never
+    matched (and counted nowhere).
     """
 
-    def __init__(self, roles: Sequence[str], store: TagStore | None = None) -> None:
+    def __init__(self, roles: Sequence[str], store: TagStore | None = None, avoid: Sequence[str] = ()) -> None:
         self.roles = tuple(str(role) for role in roles)
+        self._avoid = avoid_phrases(avoid)
         self.query = tag_query_for_roles(self.roles) if store is not None else TagQuery(frozenset())
         self._store = store if self.query else None
         self.counts = TitleMatchCounts()
@@ -178,6 +229,8 @@ class TitleMatcher:
         self.generic_roles, self._specific_roles = (), self.roles
 
     def decide(self, title: str) -> TitleDecision:
+        if self._avoid and type(title) is str and _holds_avoided(title, self._avoid):
+            return _AVOIDED
         if matches_roles(title, self._specific_roles):
             self.counts.matched_by_rule += 1
             return _BY_RULE
@@ -205,7 +258,7 @@ class TitleMatcher:
                 return _BY_RULE
             self.counts.vetoed_by_tag += 1
             return _VETOED
-        if (tag.level, tag.function) in self.query.pairs:
+        if (tag.level, tag.function) in self.query.pairs and role_fit(title, self.roles) is None:
             self.counts.matched_by_tag += 1
             return _BY_TAG
         return _NO_MATCH
@@ -214,10 +267,10 @@ class TitleMatcher:
         return self.decide(title).matched
 
 
-def title_matches(title: str, roles: Sequence[str], store: TagStore | None = None) -> bool:
+def title_matches(title: str, roles: Sequence[str], store: TagStore | None = None, avoid: Sequence[str] = ()) -> bool:
     """One-shot form of ``TitleMatcher`` (what ``_role_match`` calls)."""
 
-    return TitleMatcher(roles, store).matches(title)
+    return TitleMatcher(roles, store, avoid).matches(title)
 
 
 __all__ = [
@@ -226,8 +279,10 @@ __all__ = [
     "TitleDecision",
     "TitleMatchCounts",
     "TitleMatcher",
+    "avoid_phrases",
     "is_generic_role",
     "open_tag_store",
     "tag_query_for_roles",
+    "title_avoided",
     "title_matches",
 ]

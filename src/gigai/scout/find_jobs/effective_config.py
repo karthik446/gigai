@@ -45,8 +45,10 @@ def overlay_selected_profile(config: FindJobsConfig, profile: ProfileRecord | No
     resume yet for this gig, so ``ensure_default_profile`` no-ops) returns
     ``config`` unchanged: the pre-F1-b shared-roles behaviour, never a
     crash. ``titles_to_avoid`` is NOT a ``FindJobsConfig`` field at all (it
-    only feeds the shared discovery prefs' union, per the S25 spike's Q5
-    decision) and is never part of this overlay.
+    feeds the shared discovery prefs' union, per the S25 spike's Q5
+    decision) and is never part of this overlay; since 0.1.11.3 the posting
+    read model gives the profile's own list to its title matcher
+    (``title_query.TitleMatcher(avoid=...)``), so it filters that profile's list.
 
     0110-022: a profile with its OWN ``search_settings`` (never the default
     profile) also replaces ``location``, ``work_mode`` (and ``remote``, kept

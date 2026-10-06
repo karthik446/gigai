@@ -95,8 +95,11 @@ def test_cto_inside_director_is_not_a_chief() -> None:
 def test_lookalikes_pass_the_021_matcher_but_are_not_software() -> None:
     roles = ("Director of Engineering",)
     for title in ("Director, Mechanical Engineering", "Sales Engineering Director"):
-        assert matches_roles(title, roles)
         assert tag_title(title).function != "software"
+    # A discipline of the same role still passes the title rule; the tag is what tells it apart.
+    assert matches_roles("Director, Mechanical Engineering", roles)
+    # 0.1.11.3: "Sales" in front of an engineering role is another role, and the rule says so itself.
+    assert not matches_roles("Sales Engineering Director", roles)
     assert tag_title("Director, Engineering").function == "software"
 
 

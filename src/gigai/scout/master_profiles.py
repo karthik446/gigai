@@ -473,7 +473,7 @@ def index_stand_in(home_root: Path, target: Path, profile: ProfileRecord, master
         index = CompanyIndex.for_home(home_root)
         cache = BoardCache(home_root / "cache" / "scout" / "ats-boards", validator_source=lambda _provider, _url: None)
         tags = open_tag_store(home_root)
-        matcher = TitleMatcher(view.config.roles, tags)  # type: ignore[attr-defined]
+        matcher = TitleMatcher(view.config.roles, tags, view.record.titles_to_avoid)  # type: ignore[attr-defined]
         now = datetime.now(timezone.utc)
         for start in range(0, len(boards), INDEX_BOARDS_STEP):
             rows, _failures, _summary = read_indexed_boards(
