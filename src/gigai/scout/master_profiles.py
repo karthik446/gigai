@@ -128,10 +128,10 @@ def view_record_id(resolved: ResolvedWorkpad, profile_id: str) -> str:
 
 
 def selection_ids(selected: Selected) -> tuple[str, ...]:
-    """What a ``Selected`` shows as a stored selection's ``item_ids``: every entry and line, in print order."""
+    """What a ``Selected`` shows as a stored selection's ``item_ids``: every entry and line, in print order, and
+    each role it shows by its heading alone (0.1.11.4 item 9: an entry id with no line of its own)."""
 
-    entries = tuple(item for entry_id, bullets in selected.entries.items() for item in (entry_id, *bullets))
-    return (*selected.summary, *entries, *selected.other)
+    return selected.stored_ids()
 
 
 def _store_view(resolved: ResolvedWorkpad, home_root: Path, target: Path, profile_id: str, markdown: str) -> PinnedResume:

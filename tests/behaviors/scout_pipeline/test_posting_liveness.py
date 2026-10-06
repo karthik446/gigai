@@ -418,3 +418,34 @@ def test_generate_pdf_of_a_closed_posting_still_makes_the_pdf_and_carries_the_no
     assert after.status_code == 200 and after.content.startswith(b"%PDF"), "a closed posting's PDF was refused"
     assert after.headers["x-gigai-posting-note"] == "This posting looks closed: check it before you apply"
     assert all(row.removed_at is not None for row in _rows(fx, url))
+
+
+# --- a custom careers URL never decides: the index's board token does (0.1.11.4, the Pindrop case) ----------------------------
+
+
+def test_a_posting_on_the_company_site_is_asked_about_through_the_boards_token_never_the_company_host(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The stored URL is the company's own careers page (``?gh_jid=``) and it 404s; the board (``pindropsecurity``) lists the job. Open."""
+
+    fx = build_postings_fixture(tmp_path, monkeypatch, deleted=False)
+    company_page = "https://www.pindrop.com/careers/job-title/?gh_jid=8236603"
+    job = {**gh_job("pindropsecurity", 8236603, TITLE_BOTH, updated_at=_UPDATED), "absolute_url": company_page}
+    seed_greenhouse(fx, "pindropsecurity", [job], seen_at=days_ago(1), details={8236603: (posting_text(8236603), _UPDATED)})
+    postings.refresh(fx.home_root, fx.target, now=NOW)
+    boards = _Boards().install(monkeypatch)
+    url = next(iter(_listed(fx)))
+    assert "pindrop.com" in url, url
+
+    answer = posting_live.job_liveness(fx.home_root, fx.target, url, now=NOW)
+
+    assert (answer.state, answer.closed_at) == ("open", None)
+    assert boards.requests == ["boards-api.greenhouse.io/v1/boards/pindropsecurity/jobs/8236603"], "only the board's own job endpoint is asked, never the company site"
+    assert all(row.removed_at is None for row in _rows(fx, url)) and url in _listed(fx)
+
+
+def test_a_company_site_address_with_no_stored_row_is_unknown_and_makes_no_request(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    fx = build_postings_fixture(tmp_path, monkeypatch, deleted=False)
+    boards = _Boards().install(monkeypatch)
+
+    answer = posting_live.job_liveness(fx.home_root, fx.target, "https://www.pindrop.com/careers/job-title/?gh_jid=8236603", now=NOW)
+
+    assert answer.state == "unknown" and boards.requests == [], "a host that is not a board names no board to ask: unknown, never closed"

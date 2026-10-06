@@ -480,16 +480,23 @@ export default function JobPage({
       <div>
         <BackToList from={from} />
         <section className="panel">
-          <h2>{loading ? (from === "assessments" ? "Loading assessment…" : "Loading job…") : "Job not found"}</h2>
+          <h2>{loading ? (from === "assessments" ? "Loading assessment…" : "Loading job…") : from === "assessments" ? "Job not found" : "We have no stored posting at this address"}</h2>
           {!loading && onDemandHref && (
             <p className="muted" data-role="on-demand-hint">
               This job was assessed on demand: <a href={onDemandHref}>open it under Assessments</a>.
             </p>
           )}
           {!loading && !onDemandHref && (
-            <p className="muted">
-              {from === "assessments" ? "No assessment with this address for this profile: " : "No stored posting with this address for this profile: "}
+            <p className="muted" data-role="no-stored-posting">
+              {from === "assessments" ? "No assessment with this address for this profile: " : "Nothing is stored for: "}
               <code>{jobId}</code>
+            </p>
+          )}
+          {!loading && !onDemandHref && from !== "assessments" && (
+            <p>
+              <a href={JOBS_HASH} data-role="back-to-jobs">
+                Back to the Jobs list
+              </a>
             </p>
           )}
         </section>
@@ -544,12 +551,13 @@ export default function JobPage({
         {closed && (
           <div className="callout danger" data-role="posting-closed" data-since={closed.since || undefined} style={{ margin: "0 0 12px" }}>
             <strong>{closed.text}.</strong> Its board no longer lists it.{" "}
-            {jobUrl && (
-              <a href={jobUrl} target="_blank" rel="noreferrer" data-role="posting-closed-link">
-                Open the posting
+            {jobUrl ? (
+              <a href={jobUrl} target="_blank" rel="noopener noreferrer" data-role="posting-closed-link">
+                Open the posting to confirm
               </a>
+            ) : (
+              "Check it before you apply."
             )}
-            {jobUrl ? " to check it before you apply." : "Check it before you apply."}
           </div>
         )}
         <div className="job-header">

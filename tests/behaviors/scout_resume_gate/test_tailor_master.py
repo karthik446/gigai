@@ -24,6 +24,7 @@ from gigai.scout import master_selection as ms
 from gigai.scout import tailor_master as tm
 from gigai.scout.master_resume import Master, parse_master
 from gigai.scout.posting_keywords import mentions
+from gigai.scout.resume_pdf import printed_text
 from gigai.scout.tailor_length import STATUS_CUT, STATUS_RESTORED, cut_again, restore_cut
 from gigai.scout.tailor_skills import finish_tailoring
 from gigai.scout.tailored_resume import (
@@ -118,8 +119,13 @@ def test_the_three_candidate_sets_are_the_view_the_pick_before_its_fit_and_the_e
     view, shortlist, evidence = (tm.job_candidates(master, profile, posting, mode=mode, today=TODAY) for mode in tm.CANDIDATE_MODES)
     selected = ms.select(master, profile, posting, today=TODAY)
 
-    # view: exactly the selector's 2-page selection.
-    assert view.markdown == selected.markdown and view.item_ids() == frozenset(selected.item_ids())
+    # view: exactly the selector's 2-page selection. A role it shows by its heading alone (0.1.11.4 item 9) is in the
+    # set as its own heading with no line under it, so a settled copy lists it; what the copy PRINTS is the selection.
+    assert view.item_ids() == frozenset(selected.item_ids()) and selected.earlier
+    assert view.markdown == ms.render_selection(master, selected.stored_ids(), selected.skills, candidates=True)
+    assert [role for role, bullets in view.entries.items() if not bullets and master.entries[role].section == "experience"] == list(selected.earlier)
+    copied, _ctx = _copied(view)
+    assert printed_text(render_markdown(copied)) == printed_text(selected.markdown)
     # shortlist: the selector's pick before its page fit: every role, under the caps it picks under (a line the
     # posting's requirements are about passes the cap for general lines, up to the hard cap), about twice what fits.
     assert set(shortlist.entries) >= set(OLD_ROLES) | set(RECENT_ROLES)
@@ -179,7 +185,9 @@ def test_a_requirements_evidence_is_offered_and_stays_through_the_fit_wherever_i
     settled, ctx = _copied(only_old)
     fitted = tm.fit_selected(tm.ensure_skills_line(settled, only_old, ctx), only_old, master, today=TODAY)
     roles = _roles(fitted)
-    assert tm.measure_pages(fitted) == 2 and [role for role in roles if role in OLD_ROLES] == ["r-cas"] and "b-cas-08" in roles["r-cas"]
+    assert tm.measure_pages(fitted) == 2 and [role for role in roles if role in OLD_ROLES and roles[role]] == ["r-cas"] and "b-cas-08" in roles["r-cas"]
+    # The other old roles lost every line and are still listed, by their heading alone (0.1.11.4 item 9).
+    assert roles["r-bri"] == [] == roles["r-tes"] and fitted.length is not None and fitted.length.cut == ()
     record = tm.selection_record(master, only_old, fitted, today=TODAY)
     assert record.conflicts == ()
     recent_cut = [cut.id for cut in record.cut_for_length if cut.kind == "bullet" and master.items[cut.id].entry_id in RECENT_ROLES]
@@ -200,7 +208,9 @@ def test_the_fit_reaches_two_pages_lowest_value_first_with_every_recent_role_pre
     roles = _roles(fitted)
     for index, role in enumerate(RECENT_ROLES):
         assert len(roles[role]) >= ms.FLOORS[index] >= 1, f"{role} is under its floor"
-    assert all(bullets for bullets in roles.values()), "no role is printed without a bullet"
+    # No employer is dropped (0.1.11.4 item 9): every role the tailoring showed is still there, and only an old role
+    # is listed by its heading alone.
+    assert set(roles) == set(_roles(whole)) and all(bullets or role in OLD_ROLES for role, bullets in roles.items())
     # The order: bullets by the selector's value for the posting, lowest first; the lines that are a requirement's
     # evidence among what the tailoring shows come last of all, and none of them was cut here.
     by_line = {line.id: tm.line_item_id(line) for section in whole.sections for line in section.all_lines()}
@@ -211,8 +221,8 @@ def test_the_fit_reaches_two_pages_lowest_value_first_with_every_recent_role_pre
     assert bullets[: len(free)] == free and [values[item] for item in free] == sorted(values[item] for item in free)  # type: ignore[index]
     assert evidence and evidence <= set(_shown_ids(fitted))
     assert tm.selection_record(master, candidates, fitted, today=TODAY).conflicts == ()
-    # The cut that would leave an old role without a bullet removes the role; room left never brings back an old
-    # role's line that supports nothing the posting asks for.
+    # The cut that would leave an old role without a bullet leaves its heading line; room left never brings back an
+    # old role's line that supports nothing the posting asks for.
     supported = {item for requirement in candidates.selected.requirements for item in requirement.supporters}
     assert {by_line[target] for kind, target in cuts if kind == "role"} <= set(OLD_ROLES)
     assert all(master.items[by_line[target]].entry_id not in OLD_ROLES or by_line[target] in supported for target in refill)  # type: ignore[index]
@@ -305,36 +315,41 @@ def test_the_cut_order_on_a_small_master_lowest_value_first_the_evidence_last_an
 
     # Lowest value for the posting first, whatever the role's age: the lines that support nothing (an old role's
     # before a recent role's of the same strength), then further lines for Kubernetes. The cut that would empty
-    # OlderCo removes the role; each recent role keeps its best line. The evidence comes last: Kubernetes' in the
-    # newest role is that role's last line and stays; Fortran's is the old role's only line left, so the role goes with it.
+    # OlderCo takes its last line and leaves its heading line (0.1.11.4 item 9); each recent role keeps its best line.
+    # That heading line goes only after every line that is not evidence. The evidence comes last: Kubernetes' in the
+    # newest role is that role's last line and stays; Fortran's is the old role's only line left.
     assert named == [
         ("bullet", "b-p2"), ("bullet", "b-o3"), ("bullet", "b-o2"), ("bullet", "b-m3"), ("bullet", "b-n4"), ("bullet", "b-n3"),
-        ("role", "r-older"), ("bullet", "b-m1"), ("bullet", "b-n2"), ("role", "r-old"),
+        ("role", "r-older"), ("bullet", "b-m1"), ("bullet", "b-n2"), ("heading", "r-older"), ("role", "r-old"),
     ]
     values = candidates.selected.values
     free = [item for kind, item in named[:6]]
     assert [values[item] for item in free] == sorted(values[item] for item in free) and max(values[item] for item in free) < values["b-o1"]
     assert {ids[target] for target in refill} == {"b-m3", "b-n4", "b-n3", "b-m1", "b-n2"}, "an old role's line that supports nothing never comes back"
 
-    # A budget of 9 bullets: three lines that support nothing go, two of them the old role's. Of 4: OlderCo goes
-    # whole, both recent roles are cut to what supports the posting, and Fortran is still shown, in its old role.
+    # A budget of 9 bullets: three lines that support nothing go, two of them the old role's. Of 4: OlderCo keeps
+    # its heading alone, both recent roles are cut to what supports the posting, and Fortran is still shown, in its old role.
     nine = tm.fit_selected(settled, candidates, master, today=TODAY, measure=_by_bullets(9))
     assert {role: len(bullets) for role, bullets in _roles(nine).items()} == {"r-new": 4, "r-mid": 3, "r-old": 1, "r-older": 1}
     assert _roles(nine)["r-old"] == ["b-o1"] and nine.length is not None and nine.length.cut == ()
     four = tm.fit_selected(settled, candidates, master, today=TODAY, measure=_by_bullets(4))
-    assert _roles(four) == {"r-new": ["b-n1", "b-n2"], "r-mid": ["b-m2"], "r-old": ["b-o1"]}
-    assert [role.entry.heading[0].text for role in four.length.cut] == ["### OlderCo"]  # type: ignore[union-attr]
+    assert _roles(four) == {"r-new": ["b-n1", "b-n2"], "r-mid": ["b-m2"], "r-old": ["b-o1"], "r-older": []}
+    assert four.length.cut == () and "Junior Engineer, OlderCo | Jan 2006 - Dec 2009" in render_markdown(four)  # type: ignore[union-attr]
+    assert sorted(_shown_ids(restore_cut(four))) == sorted(_shown_ids(settled)), "one Restore puts the role's lines back under its heading"
     record = tm.selection_record(master, candidates, four, today=TODAY)
     codes = {line.id: line.code for line in record.left_out}
     assert codes["b-p1"] == codes["b-p2"] == "cut_role_dropped" and codes["b-o2"] == codes["b-o3"] == codes["b-m1"] == "cut_lowest_value"
     assert [cut.id for cut in record.cut_for_length if cut.kind == "role"] == ["r-older"] and record.conflicts == ()
     assert next(line for line in record.picked if line.id == "b-o1").code == "requirement_evidence"
     # A budget nothing reaches: every cut stays applied, each recent role keeps its best line, and the record says
-    # which requirement lost its evidence and that the resume is still over. Nothing mandatory goes silently.
+    # which requirement lost its evidence, which role is not listed even by its heading (the oldest: its heading
+    # line went before the evidence did) and that the resume is still over. Nothing goes silently.
     over = tm.fit_selected(settled, candidates, master, today=TODAY, measure=lambda _result: 3)
-    assert over.length is not None and over.length.over() and _roles(over) == {"r-new": ["b-n1"], "r-mid": ["b-m2"]}
+    assert over.length is not None and over.length.over() and _roles(over) == {"r-new": ["b-n1"], "r-mid": ["b-m2"], "r-old": []}
+    assert [role.entry.heading[0].text for role in over.length.cut] == ["### OlderCo"]
     record = tm.selection_record(master, candidates, over, today=TODAY)
-    assert [conflict.kind for conflict in record.conflicts] == ["mandatory_evidence", "mandatory_evidence", "over_budget"]
+    assert [conflict.kind for conflict in record.conflicts] == ["mandatory_evidence", "mandatory_evidence", "earlier_roles", "over_budget"]
+    assert record.conflicts[2].ids == ("r-older",) and record.conflicts[2].reason.startswith("1 older role is not listed on this resume, not even by a single heading line")
     assert {conflict.requirement for conflict in record.conflicts[:2]} == {"Fortran for the legacy solver.", "Fortran"}
     assert all(conflict.ids == ("b-o1",) and "page limit" in conflict.reason for conflict in record.conflicts[:2])
     stored = record.to_json()
@@ -357,19 +372,20 @@ def test_a_role_the_posting_s_title_names_keeps_its_best_shown_line_through_the_
     ids = {line.id: tm.line_item_id(line) for section in settled.sections for line in section.all_lines()}
     cuts, _refill = tm.cut_order(settled, candidates, master, today=TODAY)
     named = [(kind, ids[target]) for kind, target in cuts]
-    # The role is no longer the first to go whole (``sel-3``: its two lines were cuts 1 and 7 of 10): the cut that
-    # removes it comes after every other line that is not evidence, and before the evidence.
+    # The role is no longer the first to lose its lines (``sel-3``: its two lines were cuts 1 and 7 of 10): the cut
+    # that takes its last line comes after every other line that is not evidence, then its heading line (0.1.11.4
+    # item 9), and both before the evidence.
     assert named == [
         ("bullet", "b-o3"), ("bullet", "b-o2"), ("bullet", "b-m3"), ("bullet", "b-n4"), ("bullet", "b-n3"), ("bullet", "b-p2"),
-        ("bullet", "b-m1"), ("bullet", "b-n2"), ("role", "r-older"), ("role", "r-old"),
+        ("bullet", "b-m1"), ("bullet", "b-n2"), ("role", "r-older"), ("heading", "r-older"), ("role", "r-old"),
     ]
     # Room for four bullets: each recent role its one line, the evidence in its old role, and the role the title names.
     four = tm.fit_selected(settled, candidates, master, today=TODAY, measure=_by_bullets(4))
     assert _roles(four) == {"r-new": ["b-n1"], "r-mid": ["b-m2"], "r-old": ["b-o1"], "r-older": ["b-p1"]}
     assert tm.selection_record(master, candidates, four, today=TODAY).conflicts == ()
-    # Room for three: the role goes before any evidence does, and the record names it.
+    # Room for three: the role's line goes before any evidence does (its heading line stays), and the record names it.
     three = tm.fit_selected(settled, candidates, master, today=TODAY, measure=_by_bullets(3))
-    assert _roles(three) == {"r-new": ["b-n1"], "r-mid": ["b-m2"], "r-old": ["b-o1"]}
+    assert _roles(three) == {"r-new": ["b-n1"], "r-mid": ["b-m2"], "r-old": ["b-o1"], "r-older": []}
     record = tm.selection_record(master, candidates, three, today=TODAY)
     (conflict,) = record.conflicts
     assert (conflict.kind, conflict.ids) == ("title_entry", ("r-older", "b-p1")) and conflict.reason.endswith("the page limit left no room for one")
@@ -455,13 +471,15 @@ def test_room_the_last_cut_left_goes_back_to_a_recent_roles_line() -> None:
     settled, _ctx = _copied(candidates)
 
     def measure(result: TailoredResume) -> int:
-        # The OlderCo heading costs as much as two lines: once the role is gone, one more line fits than before.
+        # The OlderCo heading costs as much as two lines while the role shows a line, and one line once it is listed by
+        # its heading alone (0.1.11.4 item 9): when its last line goes, one more line fits than before.
         lines = sum(len(entry.bullets) for section in result.sections for entry in section.entries)
-        lines += 2 * sum(tm.line_item_id(entry.heading[0]) == "r-older" for section in result.sections for entry in section.entries)
+        lines += sum(2 if entry.bullets else 1 for section in result.sections for entry in section.entries if tm.line_item_id(entry.heading[0]) == "r-older")
         return 2 if lines <= 7 else 3
 
     fitted = tm.fit_selected(settled, candidates, master, today=TODAY, measure=measure)
-    assert measure(fitted) == 2 and sum(len(bullets) for bullets in _roles(fitted).values()) == 7, "the page is full, not one line short"
+    assert _roles(fitted)["r-older"] == [], "the role is still listed, by its heading"
+    assert measure(fitted) == 2 and sum(len(bullets) for bullets in _roles(fitted).values()) == 6, "the page is full (6 lines and the heading line), not one line short"
 
 
 # --- the record's contract ----------------------------------------------------------------------------

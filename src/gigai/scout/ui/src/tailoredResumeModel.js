@@ -145,11 +145,41 @@ function contentLine(line, display, where, role, plain, heading = false) {
   return row;
 }
 
+// The `## ` sections of the stored markdown that the structured result has no section for (0.1.11.4 UI1 item 11): the
+// stored file is what the PDF prints, so the preview shows them too, as copied lines (the trailing refs comment dropped).
+function markdownOnlySections(result, markdown) {
+  if (typeof markdown !== "string" || markdown === "") {
+    return [];
+  }
+  const known = new Set((result && Array.isArray(result.sections) ? result.sections : []).map((section) => String(section.heading).toLowerCase()));
+  const found = [];
+  let current = null;
+  markdown.split("\n").forEach((raw) => {
+    const text = raw.replace(/<!--.*?-->/g, "").trim();
+    if (text.startsWith("## ")) {
+      const heading = text.slice(3).trim();
+      current = known.has(heading.toLowerCase()) ? null : { heading, rows: [] };
+      if (current) {
+        found.push(current);
+      }
+    } else if (current && text !== "") {
+      if (text.startsWith("### ")) {
+        current.rows.push({ role: "entry", text: text.slice(4).trim() });
+      } else if (text.startsWith("- ")) {
+        current.rows.push({ role: "bullet", text: text.slice(2).trim() });
+      } else {
+        current.rows.push({ role: "text", text });
+      }
+    }
+  });
+  return found.filter((section) => section.rows.length > 0);
+}
+
 // The preview rows, in render_markdown()'s order: `{kind, text, display, refs, where}`
 // for content lines, `{kind:"heading", display}` for section headings and
 // `{kind:"blank"}` between blocks. `where` names the line the way the
 // validator's messages do ("summary line 1", "experience entry 2 bullet 3").
-export function previewLines(result) {
+export function previewLines(result, markdown = "") {
   const out = [];
   if (!result || typeof result !== "object") {
     return out;
@@ -165,8 +195,11 @@ export function previewLines(result) {
   (Array.isArray(result.sections) ? result.sections : []).forEach((section) => {
     out.push({ kind: "heading", display: `## ${capitalize(section.heading)}`, text: capitalize(section.heading) });
     out.push({ kind: "blank" });
-    if (ENTRY_SECTIONS.has(section.heading)) {
-      (section.entries || []).forEach((entry, entryIndex) => {
+    // 0.1.11.4 UI1 item 11: a section that holds entries (an Other section's earlier roles) prints them, and one that
+    // holds lines prints those, whatever its heading: nothing the stored resume holds is left out of the preview.
+    const entries = section.entries || [];
+    if (ENTRY_SECTIONS.has(section.heading) || entries.length > 0) {
+      entries.forEach((entry, entryIndex) => {
         (entry.heading || []).forEach((line, index) => {
           const shown = displayText(line.text);
           out.push(
@@ -191,13 +224,26 @@ export function previewLines(result) {
         });
         out.push({ kind: "blank" });
       });
-    } else {
-      (section.lines || []).forEach((line, index) => {
+    }
+    if (!ENTRY_SECTIONS.has(section.heading)) {
+      const lines = section.lines || [];
+      lines.forEach((line, index) => {
         const shown = line.kind === "copy" ? displayText(line.text) : line.text;
         out.push(contentLine(line, `- ${shown}`, `${section.heading} line ${index + 1}`, "bullet", shown));
       });
-      out.push({ kind: "blank" });
+      if (lines.length > 0 || entries.length === 0) {
+        out.push({ kind: "blank" });
+      }
     }
+  });
+  markdownOnlySections(result, markdown).forEach((section) => {
+    out.push({ kind: "heading", display: `## ${section.heading}`, text: section.heading });
+    out.push({ kind: "blank" });
+    section.rows.forEach((row, index) => {
+      const line = { kind: "copy", text: row.text };
+      out.push(contentLine(line, row.role === "bullet" ? `- ${row.text}` : row.text, `${section.heading} line ${index + 1}`, row.role, row.text, row.role !== "bullet"));
+    });
+    out.push({ kind: "blank" });
   });
   while (out.length > 0 && out[out.length - 1].kind === "blank") {
     out.pop();

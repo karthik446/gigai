@@ -8,7 +8,7 @@ calls a model.  Pure except the page measurement (the shipped template at the
 selector's spacing, ``tailor_master.measure_pages``).
 
 WHAT IS REUSED, AND WHAT IS NEW.  The tree already holds a selector and a fit
-(0.1.10.9 master P2/P4, ``sel-4``; ``sel-5`` keeps room for the PDF's header), and this module adds no second one:
+(0.1.10.9 master P2/P4, ``sel-4``; ``sel-5`` keeps room for the PDF's header, ``sel-6`` lists a role with no line by its heading), and this module adds no second one:
 
 - the code selector (``master_selection.select``): the requirement rows of an
   assessment as ``SelectionPosting.cited`` (a row's supporters are exactly the
@@ -22,7 +22,7 @@ WHAT IS REUSED, AND WHAT IS NEW.  The tree already holds a selector and a fit
   ``ensure_skills_line``): every line of a selection is a COPY of a master line;
 - the fit and its record (``tailor_master.cut_order``, ``tailor_length.fit_by_cuts``):
   the fewest cuts that fit, a recent role keeps its best line, an old role
-  that loses its last line goes whole, what was cut is on the result
+  that loses its last line keeps its heading line, what was cut is on the result
   (``TailoredResume.length``) so one Restore puts it back;
 - Picked / Left out (``tailor_master.selection_record``) and its conflicts;
 - the fallback (``tailor_master.code_only``): the selector's own 2-page selection.
@@ -67,14 +67,27 @@ first:
 4. Other lines, the model's last-ranked first;
 5. Skills, what nothing asks for first (``skills_do_not_fit``).
 
-A role or project left with no line stops printing.  FILL: a pick that leaves
+A project left with no line stops printing.  NO EMPLOYER IS DROPPED SILENTLY
+(0.1.11.4 item 9): every role of the master is in the selection.  A role with
+no line in the pick, or none left after the fit, is an Experience entry with
+its heading and no bullet, and prints as ONE line (title, employer, dates)
+under ``tailored_resume.EARLIER_HEADING``, after the roles that show lines,
+newest first.  Those lines are measured with the page, so the fit cuts one
+more line when a heading needs its room.  A heading line is cut only after
+the Other lines and the Skills (6 below), the oldest role's first, and then it
+is a conflict.
+
+6. the heading lines of the roles with no line left, the oldest first
+   (``earlier_roles_do_not_fit``); then the protected lines.
+
+FILL: a pick that leaves
 room on the last page gets the unpicked source lines of mandatory rows, then
 the selector's best unpicked lines of the recent roles (``room_left``).
 
 CONFLICTS (3.3).  When the protected lines alone do not fit, the selection is
 still cut to the page limit and each loss is a ``PickConflict``:
 ``mandatory_evidence_does_not_fit``, ``pinned_line_does_not_fit``,
-``skills_do_not_fit``.  A conflict makes the resume not ready
+``skills_do_not_fit``, ``earlier_roles_do_not_fit``.  A conflict makes the resume not ready
 (``suggestions.check_selection``) and is never resolved silently.
 
 THE FALLBACK (3.4): the code selector's own selection, with the reason:
@@ -155,6 +168,8 @@ CONFLICT_EVIDENCE = "mandatory_evidence_does_not_fit"
 CONFLICT_PIN = "pinned_line_does_not_fit"
 CONFLICT_SKILLS = "skills_do_not_fit"
 CONFLICT_OVER = "over_page_limit"
+#: 0.1.11.4 item 9: one or more roles are not listed even by their heading line.
+CONFLICT_HEADINGS = "earlier_roles_do_not_fit"
 
 #: ``resume.origin`` of a selection: who made the stored job resume it names.
 ORIGIN_PICK = "pick"
@@ -203,9 +218,14 @@ class PickConflict:
     requirement: str | None = None
     lines: tuple[str, ...] = ()
     cut: bool = True
+    #: What a person reads, for a conflict that has its own sentence (``earlier_roles_do_not_fit``); in the JSON only then.
+    message: str | None = None
 
     def to_json(self) -> dict[str, object]:
-        return {"code": self.code, "requirement": self.requirement, "lines": list(self.lines), "cut": self.cut}
+        out: dict[str, object] = {"code": self.code, "requirement": self.requirement, "lines": list(self.lines), "cut": self.cut}
+        if self.message is not None:
+            out["message"] = self.message
+        return out
 
 
 # --- validating the model's pick (3.1) -----------------------------------------------------------------------
@@ -407,9 +427,12 @@ def _candidates(
     master: Master, base: Selected, profile: SelectionProfile, posting: SelectionPosting, *, summary: str | None, lines: Sequence[str], skills: Sequence[str],
     requirements: Sequence[Requirement], added: Sequence[Added], rank: Mapping[str, int], old: set[str], dropped_other: Sequence[str] = (),
 ) -> tm.JobCandidates:
-    """The candidate set of a pick: its lines under their entries, every degree, the Skills section; numbered like any resume."""
+    """The candidate set of a pick: its lines under their entries, every role and degree, the Skills section; numbered like any resume.
 
-    entries: dict[str, list[str]] = {entry.id: [] for entry in master.entries_in("education")}
+    EVERY role of the master is in the set (0.1.11.4 item 9): one the pick takes no line of is there by its heading
+    alone, so the settled resume lists it (``tailored_resume.EARLIER_HEADING``) and no employer is dropped silently."""
+
+    entries: dict[str, list[str]] = {entry.id: [] for section in ("experience", "education") for entry in master.entries_in(section)}
     other: list[str] = []
     for item_id in lines:
         item = master.items[item_id]
@@ -424,8 +447,8 @@ def _candidates(
             entries[entry_id] = sorted(bullets, key=lambda bullet: bullet not in protecting)
     summary_ids = [summary] if summary else []
     item_ids = [*summary_ids, *(item for entry_id, bullets in entries.items() for item in (entry_id, *bullets)), *other]
-    markdown = render_selection(master, item_ids, skills)
-    numbered = tm._numbered(render_selection(master, item_ids, skills, ids=True))  # noqa: SLF001 - the candidate set's own numbering
+    markdown = render_selection(master, item_ids, skills, candidates=True)
+    numbered = tm._numbered(render_selection(master, item_ids, skills, ids=True, candidates=True))  # noqa: SLF001 - the candidate set's own numbering
     printed = [line.item_id for line in numbered if line.kind == "entry" and line.item_id is not None]
     shown = [*summary_ids, *(bullet for bullets in entries.values() for bullet in bullets), *other]
     selected = replace(
@@ -578,6 +601,9 @@ def _conflicts(record: tm.TailorSelection, skills_cut: bool, rows: Sequence[sugg
             out.append(PickConflict(CONFLICT_EVIDENCE, conflict.requirement_id if conflict.requirement_id in known else None, tuple(conflict.ids)))
         elif conflict.kind == "must_keep":
             out.append(PickConflict(CONFLICT_PIN, None, tuple(conflict.ids)))
+        elif conflict.kind == "earlier_roles":
+            # (``lines`` are master LINE ids, read against the printed lines; the roles are named by the record's conflict.)
+            out.append(PickConflict(CONFLICT_HEADINGS, message=conflict.reason))
         elif conflict.kind == "over_budget":
             out.append(PickConflict(CONFLICT_OVER, None, (), cut=False))
     if skills_cut:
@@ -681,8 +707,13 @@ def _pick_selection(
 
     def fit(built: _Built, *, protected: bool) -> TailoredResume:
         cuts, refill = tm.cut_order(built.settled, built.candidates, master, today=today)
+        # The heading lines of the roles with no line left (0.1.11.4 item 9) go only in the last stage (``protected``),
+        # after the Other lines and the Skills: they are placed below, after every line that is not protected.
+        headings = [cut for cut in cuts if cut[0] == "heading"]
+        cuts = [cut for cut in cuts if cut[0] != "heading"]
+        every = list(cuts)
         unpicked, first, recent = _unpicked_cuts(master, built.settled, added, profile.pins, built.candidates.selected.values)
-        if not protected:
+        if not protected or headings:
             # Protected: the last printed source of a met mandatory row, and the pins. A role that holds one is not cut whole.
             shown = [item for section in built.settled.sections for entry in section.entries for line in entry.bullets if (item := tm.line_item_id(line)) is not None]
             kept = set(tm.shown_evidence(shown, built.candidates.selected)) | set(profile.pins)
@@ -691,7 +722,8 @@ def _pick_selection(
                 entry.heading[0].id for section in built.settled.sections for entry in section.entries
                 if entry.heading and any(tm.line_item_id(line) in kept for line in entry.bullets)
             }
-            cuts = [cut for cut in cuts if (cut[1] not in holds if cut[0] == "role" else line_item.get(cut[1]) not in kept)]
+            free = [cut for cut in cuts if (cut[1] not in holds if cut[0] == "role" else line_item.get(cut[1]) not in kept)]
+            cuts = free if not protected else cuts
         # 0.1.11 (C1): a line the model did not pick goes before any line it did pick; those cuts are never refilled. The line given
         # to a recent role goes after the picked lines no row rests on (a gap between two printed roles is the worse loss), before the rest.
         rest = [cut for cut in cuts if cut not in first and cut[1] not in unpicked]
@@ -703,6 +735,10 @@ def _pick_selection(
         }
         bare = [cut for cut in rest if not ({items.get(cut[1])} if cut[0] == "bullet" else roles_items.get(cut[1], {None})) & rests]
         cuts = [*first, *bare, *recent, *(cut for cut in rest if cut not in bare)]
+        if protected and headings:
+            held = set(every) - set(free)
+            after = max((place for place, cut in enumerate(cuts) if cut not in held), default=-1) + 1
+            cuts[after:after] = headings
         return fit_by_cuts(built.settled, cuts, measure=pages, max_pages=max_pages, refill=refill - unpicked)
 
     all_skills = list(base.skills)
@@ -1238,7 +1274,9 @@ def checks(master: Master, settled: Settled, requirements: Sequence[suggestions.
     dates = [tm._newest_first(master.entries[entry_id]) for entry_id, _bullets in entries if master.entries[entry_id].section == "experience"]  # noqa: SLF001
     return Checks(
         lost=tuple(lost), weak=tuple(weak), omitted=tuple(item_id for item_id in dict.fromkeys((*settled.record.pins, *must_keep)) if item_id not in shown),
-        pages=settled.pages, max_pages=settled.max_pages, empty_entries=tuple(entry_id for entry_id, bullets in entries if not bullets),
+        # (A role with no bullet is its one heading line, 0.1.11.4 item 9: only a project can be empty.)
+        pages=settled.pages, max_pages=settled.max_pages,
+        empty_entries=tuple(entry_id for entry_id, bullets in entries if not bullets and master.entries[entry_id].section == "projects"),
         roles_in_date_order=dates == sorted(dates),
     )
 
@@ -1264,6 +1302,7 @@ __all__ = [
     "ADDED_RECENT_ROLE",
     "ADDED_ROOM_LEFT",
     "CONFLICT_EVIDENCE",
+    "CONFLICT_HEADINGS",
     "CONFLICT_OVER",
     "CONFLICT_PIN",
     "CONFLICT_SKILLS",

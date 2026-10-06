@@ -367,7 +367,8 @@ def test_the_cli_shortens_and_prints_what_it_left_out_first(fx: PostingsFixture,
 def test_when_only_must_have_lines_are_left_one_goes_and_the_answer_says_so(fx: PostingsFixture, monkeypatch: pytest.MonkeyPatch) -> None:
     """A page budget so tight that the lines the must-haves rest on do not all fit: nothing else is left to cut.
 
-    A recent role always keeps its best line, so the line that goes is the old role's: the role goes whole."""
+    A recent role always keeps its best line, so the line that goes is the old role's: the role is then listed by
+    its heading alone (0.1.11.4 item 9: no employer is dropped silently)."""
 
     _assess_the_old_way(fx, monkeypatch)
     real = pick._tighter_measure  # noqa: SLF001 - the budget is the thing under test
@@ -380,7 +381,8 @@ def test_when_only_must_have_lines_are_left_one_goes_and_the_answer_says_so(fx: 
     answer = _ok(fx, "resume", "pick", "--job-url", _URL, "--shorten")
     shortened = answer["shortened"]
     markdown = answer["resume"]["markdown"]
-    assert OLD_ROLE_LINE not in markdown and "Lanternfish Labs" not in markdown, "the fixture left room for every must-have line"
+    assert OLD_ROLE_LINE not in markdown, "the fixture left room for every must-have line"
+    assert "### Lanternfish Labs" not in markdown and "### Earlier experience\n\nStaff Engineer, Lanternfish Labs | 2013 - 2015" in markdown
     assert all(line in markdown for line in MUST_LINES[:3])
     # ... and it went LAST: nothing is printed but the lines each recent role always keeps.
     assert sum(line.startswith("- Role ") for line in markdown.splitlines()) <= len(ROLES) - 1, "a must-have line went while another line could go"

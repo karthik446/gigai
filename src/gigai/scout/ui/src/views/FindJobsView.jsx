@@ -38,7 +38,7 @@ import {
 } from "../assessAllModel.js";
 import { MAX_LOOKUP_ROWS, postingJob, postingsQuery, EMPTY_FILTER } from "../postingsModel.js";
 import { RUNS_HASH, SETTINGS_HASH, assessmentHash, runHash } from "../routing.js";
-import { onDemandItemFor, resolveJobId } from "../jobAddress.js";
+import { normalizeJobAddress, onDemandItemFor, resolveJobId } from "../jobAddress.js";
 
 const TERMINAL_STATUSES = new Set(["succeeded", "failed", "blocked", "cancelled", "interrupted"]);
 const POLL_INTERVAL_MS = 2000;
@@ -774,7 +774,9 @@ export default function FindJobsView({
       .then((response) => {
         const found = response.postings ? response.postings.rows : [];
         addPostingRows(found);
-        if (found.some((row) => row.job_identity === jobRouteId)) {
+        // 0.1.11.4: a stored address is matched the way the API reads it (a slash before the query, tracking parameters).
+        const wanted = normalizeJobAddress(jobRouteId);
+        if (found.some((row) => row.job_identity === jobRouteId || (wanted !== null && normalizeJobAddress(row.job_identity) === wanted))) {
           return undefined;
         }
         // 0.1.11.4 R1: a posting its board no longer lists is under Removed; its page still opens and says it is closed.

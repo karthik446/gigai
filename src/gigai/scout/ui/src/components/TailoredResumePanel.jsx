@@ -241,7 +241,7 @@ function PreviewLine({ line, index, open, onToggle, promptFor, showChanges, onCh
 export function Preview({ response, provenance = null, promptFor, initialView = "changes", onChooseLine = null, choiceBusy = false, choiceError = null, onLength = null, onSaveWording = null, wordingSaved = null }) {
   const [open, setOpen] = useState(() => new Set());
   const [view, setView] = useState(initialView); // "changes" | "clean"
-  const lines = previewLines(response.result);
+  const lines = previewLines(response.result, response.markdown);
   const stats = previewStats(lines);
   // 0110-10-05 C: what was left out for length, and the way back.
   const length = lengthNote(response);

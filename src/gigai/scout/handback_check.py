@@ -37,7 +37,10 @@ Line by line (``check_handback``), each refusal a code of ``CODES``:
 - any line the writer wrote: no name, no contact detail (``personal_info_refused``).
 
 The whole resume (G7): roles newest first (``roles_out_of_order``), no entry without a line
-(``empty_entry``).  The page limit (``over_page_limit``) is measured by the caller, which owns the
+(``empty_entry``).  A role with no line shown is listed on one line in the block
+``tailored_resume.EARLIER_HEADING`` (0.1.11.4 item 9): each line of that block must be a role of the
+master as ``heading_only_line`` writes it (``heading_not_master`` otherwise), and it is stored as that
+role's own heading lines with no bullet.  The page limit (``over_page_limit``) is measured by the caller, which owns the
 renderer; ``over_page_limit`` here only words it.
 
 Word matching (G9) goes through the selector's stem (``master_selection._stem``): "fine-tuned" and
@@ -83,6 +86,8 @@ from .tailored_resume import (
     _display,
     _is_technical,
     canonical_term,
+    heading_only_line,
+    is_earlier_heading,
     personal_info_found,
     unsupported_numbers,
 )
@@ -226,6 +231,8 @@ class Handback:
     lines: Mapping[int, LineSource] = field(default_factory=dict)
     #: heading line number -> ``(master entry id, 0 for the heading or k for its k-th title/dates line)``.
     headings: Mapping[int, tuple[str, int]] = field(default_factory=dict)
+    #: A line of the block of roles shown by their heading alone (``tailored_resume.EARLIER_HEADING``) -> the master role it is.
+    earlier: Mapping[int, str] = field(default_factory=dict)
 
     @property
     def accepted(self) -> bool:
@@ -253,7 +260,10 @@ _FIXES: Mapping[str, str] = {
     "skill_not_stated": "save an answer that states it (`gigai scout answer`) or add it to your master's Skills, then hand the resume back again",
     "personal_info_refused": "GigAI stores no name or contact details: you type them in Scout's Generate PDF form when you make the PDF, never in a resume line",
     "roles_out_of_order": "put the roles in date order, newest first",
-    "empty_entry": "show at least one of its lines, or leave the entry out",
+    "empty_entry": (
+        "show at least one of its lines; a role with no line shown is listed on ONE line under `### Earlier experience` "
+        "(its title, its employer | its dates, as your master resume has them); a project with no line is left out"
+    ),
     "over_page_limit": (
         f"cut lines until it prints on {LENGTH_RULE.max_pages} pages "
         "(`gigai scout resume pdf --in FILE --out FILE.pdf --json` prints `pages`)"
@@ -588,8 +598,12 @@ class _Index:
             for text in dict.fromkeys((shown(item.text), " ".join(item.text.split()))):
                 self.by_text.setdefault(text, []).append(item)
         self.by_heading: dict[str, list[MasterEntry]] = {}
+        #: A role as the ONE line a resume lists it by when it shows none of its lines (0.1.11.4 item 9) -> the role.
+        self.by_role_line: dict[str, MasterEntry] = {}
         for entry in master.entries.values():
             self.by_heading.setdefault(shown(entry.heading), []).append(entry)
+            if entry.section == "experience":
+                self.by_role_line.setdefault(heading_only_line((entry.heading, *entry.sublines)), entry)
         #: every single skill of the master's Skills lines (``_skill_keys``) -> the line that lists it.
         self.skill_parts: dict[tuple[str, ...], str] = {}
         self.skill_keys: set[str] = set()
@@ -671,6 +685,7 @@ class _Check:
         self.problems: list[Problem] = []
         self.lines: dict[int, LineSource] = {}
         self.headings: dict[int, tuple[str, int]] = {}
+        self.earlier: dict[int, str] = {}
         self._answer_stated: dict[str, Stated] = {}
 
     def refuse(self, line: int | None, code: str, what: str) -> None:
@@ -682,6 +697,18 @@ class _Check:
         return self._answer_stated[key]
 
     # -- headings and the whole resume
+
+    def earlier_block(self, entry: HandbackEntry) -> None:
+        """The block of roles listed by their heading alone: each line is a role of the master, as the master has it."""
+
+        for line in entry.heading[1:]:
+            found = self.index.by_role_line.get(line.text)
+            if found is None:
+                self.refuse(line.number, "heading_not_master", "this line is not a role of your master resume as it is listed by its heading alone (its title, its employer, its dates)")
+            else:
+                self.earlier[line.number] = found.id
+        for line in entry.bullets:
+            self.refuse(line.number, "heading_not_master", "the Earlier experience block lists a role on one line; a line of a role goes under that role's own heading")
 
     def entry(self, section: str, entry: HandbackEntry) -> MasterEntry | None:
         if not entry.heading:
@@ -911,6 +938,9 @@ def check_handback(
             continue
         roles: list[tuple[int, MasterEntry]] = []
         for entry in section.entries:
+            if section.heading == "experience" and entry.heading and is_earlier_heading(entry.heading[0].text):
+                check.earlier_block(entry)
+                continue
             found = check.entry(section.heading, entry)
             heading = entry.heading[0].text if entry.heading else ""
             if found is not None and entry.heading:
@@ -925,7 +955,7 @@ def check_handback(
         if section.heading == "experience":
             check.role_order(roles)
     problems = sorted(check.problems, key=lambda item: (item.line is None, item.line or 0))
-    return Handback(tuple(problems), check.lines, check.headings)
+    return Handback(tuple(problems), check.lines, check.headings, check.earlier)
 
 
 __all__ = [

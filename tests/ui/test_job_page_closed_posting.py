@@ -22,7 +22,7 @@ import json
 import os
 from pathlib import Path
 import threading
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 import urllib.request
 
 import pytest
@@ -35,6 +35,8 @@ pytestmark = pytest.mark.ui
 
 BANNER, ROW = '[data-role="posting-closed"]', tid("job-row")
 _UPDATED = "2026-10-02T09:00:00Z"
+SLASHED = "https://boards.greenhouse.io/acme/jobs/503/?gh_jid=503"  # stored with a slash before the query (0.1.11.4 UI1 item 8)
+BARE = "https://boards.greenhouse.io/acme/jobs/503?gh_jid=503"
 
 
 @dataclass
@@ -64,8 +66,8 @@ def closed_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Clo
     monkeypatch.setenv("GIGAI_SCOUT_MODEL_TAGS", "0")
     fx = build_postings_fixture(tmp_path, monkeypatch, deleted=False)
     seed_greenhouse(
-        fx, "acme", [gh_job("acme", n, TITLE_BOTH, updated_at=_UPDATED) for n in (501, 502)], seen_at=days_ago(1),
-        details={n: (posting_text(n), _UPDATED) for n in (501, 502)},
+        fx, "acme", [gh_job("acme", n, TITLE_BOTH, updated_at=_UPDATED) for n in (501, 502)] + [{**gh_job("acme", 503, TITLE_BOTH, updated_at=_UPDATED), "absolute_url": SLASHED}],
+        seen_at=days_ago(1), details={n: (posting_text(n), _UPDATED) for n in (501, 502, 503)},
     )
     postings.refresh(fx.home_root, fx.target, now=NOW)
     requests: list[str] = []
@@ -137,7 +139,7 @@ def test_a_closed_posting_says_so_on_its_page_and_is_a_closed_chip_under_removed
     ui.goto("/#/jobs")
     ui.wait_for_jobs_list()
     ui.settle()
-    assert ui.job_rows() == 2 and ui.page.locator(f"{ROW}.removed").count() == 0
+    assert ui.job_rows() == 3 and ui.page.locator(f"{ROW}.removed").count() == 0
     assert home.requests == []
 
     # The open posting's page: one request, no banner.
@@ -151,8 +153,10 @@ def test_a_closed_posting_says_so_on_its_page_and_is_a_closed_chip_under_removed
     ui.page.wait_for_selector(BANNER)
     ui.settle()
     banner = " ".join((ui.page.locator(BANNER).inner_text() or "").split())
-    assert banner == "This posting is closed. Its board no longer lists it. Open the posting to check it before you apply."
-    assert ui.page.locator(f'{BANNER} [data-role="posting-closed-link"]').get_attribute("href") == home.dead
+    assert banner == "This posting is closed. Its board no longer lists it. Open the posting to confirm"
+    link = ui.page.locator(f'{BANNER} [data-role="posting-closed-link"]')
+    assert link.get_attribute("href") == home.dead and link.get_attribute("target") == "_blank"
+    assert "noopener" in (link.get_attribute("rel") or "")
     assert ui.page.locator(BANNER).get_attribute("data-since")
     assert home.requests == [board + "501", board + "502"], "more than one request for a posting"
     shot(ui, "job-page-closed-banner")
@@ -160,9 +164,9 @@ def test_a_closed_posting_says_so_on_its_page_and_is_a_closed_chip_under_removed
     # The list: the dead posting is gone by default.
     ui.goto("/#/jobs")
     ui.wait_for_jobs_list()
-    ui.page.wait_for_function("(selector) => document.querySelectorAll(selector).length === 1", arg=ROW)
+    ui.page.wait_for_function("(selector) => document.querySelectorAll(selector).length === 2", arg=ROW)
     ui.settle()
-    assert len(_listed(ui)) == 1 and quote(home.dead, safe="") not in "".join(_listed(ui))
+    assert len(_listed(ui)) == 2 and quote(home.dead, safe="") not in "".join(_listed(ui))
 
     # Under "Removed": listed, dimmed, a "Closed" chip, its checkbox off.
     ui.page.click('[data-role="state-filter"] [data-state="removed"]')
@@ -183,3 +187,63 @@ def test_a_closed_posting_says_so_on_its_page_and_is_a_closed_chip_under_removed
     ui.settle()
     assert home.requests == [board + "501", board + "502"], "the page asked the board about a posting already removed"
     ui.assert_clean()  # zero console errors, page errors, HTTP >= 400, failed requests
+
+
+
+def test_assessing_one_closed_posting_says_plainly_to_skip_it_and_makes_no_model_call(closed_ui, closed_home: ClosedServer) -> None:
+    """R1b (a): the page's Assess on a posting its board dropped answers 409 `posting_closed`; the page says it in words."""
+
+    ui, home = closed_ui, closed_home
+    _save_preferences(home)
+    assert _job_page(ui, home.dead)["state"] == "closed"
+    ui.page.wait_for_selector(BANNER)
+    ui.settle()
+    with ui.page.expect_response(lambda response: response.request.method == "POST" and urlsplit(response.url).path == "/api/assess") as answered:
+        ui.page.locator(".job-page button", has_text="Assess").first.click()
+    assert answered.value.status == 409 and answered.value.json()["error"]["code"] == "posting_closed"
+    ui.page.wait_for_selector(".job-page .field-error")
+    text = " ".join((ui.page.locator(".job-page .field-error").first.inner_text() or "").split())
+    assert text == "This job is closed: nothing to apply to. Skip it.", text
+    assert "posting_closed" not in ui.page.locator(".job-page").inner_text()
+    assert ui.server_json("/api/assessments").get("items") == [], "an assessment was stored for a closed posting (a model call was made)"
+    shot(ui, "assess-closed-plain-message")
+    assert ui.problems() and all("409" in problem for problem in ui.problems()), ui.problems()  # the refusal is the only one
+    ui.network.console_errors.clear()
+    ui.network.http_errors.clear()
+
+
+def test_a_page_route_without_the_slash_resolves_the_stored_address_and_an_unknown_one_says_so(closed_ui, closed_home: ClosedServer) -> None:
+    """Item 8: the stored address has a slash before the query, the route has none: same job page. Unknown: a plain page with a link back."""
+
+    ui, home = closed_ui, closed_home
+    _save_preferences(home)
+
+    def stored_with_a_slash(route) -> None:
+        if route.request.method != "GET":
+            route.continue_()
+            return
+        body = route.fetch().json()
+        for row in (body.get("postings") or {}).get("rows", []):
+            if row.get("job_identity") == BARE:
+                row["job_identity"] = SLASHED
+        route.fulfill(status=200, content_type="application/json", body=json.dumps(body))
+
+    ui.page.route("**/api/postings?*", stored_with_a_slash)
+    for form in (SLASHED, BARE):
+        ui.goto("/#/jobs/" + quote(form, safe=""))
+        ui.page.wait_for_selector(".job-page .job-title")
+        ui.settle()
+        assert ui.page.evaluate("location.hash").startswith("#/jobs/https"), "the page left its route"
+        assert ui.page.locator(".job-page [data-role='no-stored-posting']").count() == 0, form
+    shot(ui, "address-without-slash-opens")
+
+    unknown = "https://boards.greenhouse.io/acme/jobs/909?gh_jid=909"
+    ui.goto("/#/jobs/" + quote(unknown, safe=""))
+    ui.page.locator(".panel h2", has_text="We have no stored posting at this address").wait_for()
+    ui.settle()
+    assert ui.page.evaluate("location.hash") == "#/jobs/" + quote(unknown, safe=""), "a silent redirect"
+    back = ui.page.locator("[data-role='back-to-jobs']")
+    assert (back.get_attribute("href") or "") == "#/jobs" and "Jobs list" in (back.text_content() or "")
+    shot(ui, "address-unknown-plain-page")
+    ui.page.unroute_all()
+    ui.assert_clean()
