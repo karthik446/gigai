@@ -824,6 +824,9 @@ def render(response: Mapping[str, object]) -> str:
             lines.append("  Nothing was assessed. Yes: run the same command with --yes.")
         elif isinstance(assessed, Mapping):
             lines.append(f"Assessed {assessed['assessed']} of {assessed['requested']}." + (f" Fetched {assessed['fetched_on_demand']} missing description(s) first." if assessed.get("fetched_on_demand") else ""))
+            from .find_jobs.posting_live import closed_skipped_text
+
+            lines.extend(filter(None, [closed_skipped_text(assessed)]))  # 0.1.11.4 R1
             for item in assessed["failed"]:  # type: ignore[union-attr]
                 lines.append(f"  not assessed ({item['error_code']}{': ' + str(item['reason']) if item.get('reason') else ''}): {item['job_identity']}")
             lines.extend(failure_lines(assessed["failed"]))  # 0110-10-13: each typed cause once, with its facts and next action

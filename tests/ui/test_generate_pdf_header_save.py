@@ -85,7 +85,7 @@ def test_save_these_details_writes_the_header_file_on_a_click_and_asks_before_re
     from pypdf import PdfReader
 
     demo = scout_server.demo
-    header_file = scout_server.root / "home" / "header.json"
+    header_file = scout_server.home / "Documents" / "GigAI" / "header.json"
     assert not header_file.exists(), "the synthetic home starts without a header file"
     address = "/#/pdf/" + quote(demo.hero_profile_id, safe="") + "/" + quote(demo.hero_job, safe="")
     try:
@@ -94,7 +94,7 @@ def test_save_these_details_writes_the_header_file_on_a_click_and_asks_before_re
         assert said.startswith("There is no header file at "), said
         button = ui.page.locator(SAVE)
         label = (button.text_content() or "").strip()
-        assert label.startswith("Save these details to ") and label.endswith("/home/header.json") and str(scout_server.home) not in label, label
+        assert label.startswith("Save these details to ") and label.endswith("~/Documents/GigAI/header.json") and str(scout_server.home) not in label, label
         assert label.removeprefix("Save these details to ") in said, "the path the form reads is the path it writes"
         assert button.is_disabled(), "nothing typed, nothing to save"
         ui.settle()
@@ -115,7 +115,7 @@ def test_save_these_details_writes_the_header_file_on_a_click_and_asks_before_re
         assert ui.writes_after("typed") == ["POST /api/pdf-header/save"]
         assert sent.value.post_data_json == SENT, "the request is the header file's shape, without replace"
         text = (saved.text_content() or "").strip()
-        assert text.startswith("Saved your details to ") and text.endswith("/home/header.json. GigAI keeps no other copy."), text
+        assert text.startswith("Saved your details to ") and text.endswith("~/Documents/GigAI/header.json. GigAI keeps no other copy."), text
         assert _read(header_file) == WRITTEN, "the file has exactly the fields typed, the links as the shorthand ids"
         assert "https://" not in header_file.read_text(encoding="utf-8"), "the pasted address is saved as the id"
         assert ui.page.locator(f"{FORM} {SOURCE}").count() == 0, "the line 'There is no header file' is gone once there is one"

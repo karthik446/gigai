@@ -59,7 +59,7 @@ PATIENCE_MS = int(os.environ.get("GIGAI_UI_PATIENCE_MS", "20000"))
 #: Environment the server and the home build must NOT inherit from the developer's shell.
 SCRUBBED = ("GIGAI_HOME", "GIGAI_SCOUT_PIPELINE")
 #: Belt and braces beside the fixture seams demo_home sets: no network snapshot, no background model tagging.
-EXTRA_SEAMS = {"GIGAI_SCOUT_SNAPSHOT": "0", "GIGAI_SCOUT_MODEL_TAGS": "0"}
+EXTRA_SEAMS = {"GIGAI_SCOUT_SNAPSHOT": "0", "GIGAI_SCOUT_MODEL_TAGS": "0", "GIGAI_SCOUT_POSTING_LIVENESS": "0"}
 FIXTURE_LATENCY_SCALE = "8"  # only widens the server's 15 s health wait on a slow machine
 
 _OPERATOR_FIXTURES = frozenset({"operator_ui", "operator_server"})

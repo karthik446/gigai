@@ -138,6 +138,13 @@ class AssessRoutesMixin:
         target = self._assess_target()
         if target is None:
             return
+        # 0.1.11.4 R1: a posting its board no longer lists is not assessed (no model call). Pasted text is.
+        from ..posting_live import CLOSED_ASSESS_MESSAGE, ERROR_POSTING_CLOSED, closed_before_assess
+
+        closed = closed_before_assess(self._backend.home_root, target, request.job.job_url)
+        if closed is not None:
+            self._error_with_extra(HTTPStatus.CONFLICT, ERROR_POSTING_CLOSED, CLOSED_ASSESS_MESSAGE, {"liveness": closed.to_json()})
+            return
         try:
             response = run_quick_assessment(request, home_root=self._backend.home_root, target=target)
         except QuickAssessError as exc:

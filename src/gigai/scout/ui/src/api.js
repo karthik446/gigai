@@ -730,7 +730,9 @@ async function postPdf(path, body) {
     throw new ApiError(response.status, detail || `Request failed with status ${response.status}.`, code, { detail });
   }
   // X-GigAI-Fit-Note (0.1.11.3): the server's own sentence when the resume does not fit its page limit.
-  return { blob: await response.blob(), fileName: pdfFileName(response.headers.get("Content-Disposition")), note: response.headers.get("X-GigAI-Fit-Note") || null };
+  // X-GigAI-Posting-Note (0.1.11.4 R1): "This posting looks closed: check it before you apply"; the PDF is made all the same.
+  const notes = [response.headers.get("X-GigAI-Fit-Note"), response.headers.get("X-GigAI-Posting-Note")].filter(Boolean);
+  return { blob: await response.blob(), fileName: pdfFileName(response.headers.get("Content-Disposition")), note: notes.join(" ") || null };
 }
 
 // 0.1.11.3 item 13: the person's own header file, read by the server for the
