@@ -1010,11 +1010,13 @@ def resume_folder_command(set_value: str | None, reset: bool, home_value: Path |
 
 
 @scout_group.command("jobs-folder")
+@click.argument("action", required=False, type=click.Choice(["migrate"]))
 @click.option("--set", "set_value", help="Use this folder from now on (an absolute path, or one that starts with ~); it is created when missing.")
 @click.option("--reset", "reset", is_flag=True, help="Go back to the default folder.")
+@click.option("--dry-run", "dry_run", is_flag=True, help="With migrate: list every planned copy and write nothing.")
 @click.option("--home", "home_value", type=click.Path(path_type=Path, file_okay=False))
 @click.option("--json", "as_json", is_flag=True)
-def jobs_folder_command(set_value: str | None, reset: bool, home_value: Path | None, as_json: bool) -> None:
+def jobs_folder_command(action: str | None, set_value: str | None, reset: bool, dry_run: bool, home_value: Path | None, as_json: bool) -> None:
     """Show or change your jobs folder: one folder per application, where GigAI puts a job's files.
 
     Default ~/Documents/GigAI/jobs. Each job has its own folder,
@@ -1030,13 +1032,33 @@ def jobs_folder_command(set_value: str | None, reset: bool, home_value: Path | N
     file you edit is yours (the new resume is then written beside it as
     resume-2.md). --set moves nothing: folders already written stay in the
     old folder.
+
+    migrate copies the job resumes of your old resumes folder (the flat
+    <company>-<role>-<date>.md files) into this layout, once. The company
+    and role come from the stored job, never from the file's name. The old
+    folder is left as it is; master.md and PDFs are not copied. Run it with
+    --dry-run first: that lists every copy and writes nothing.
     """
 
-    from . import jobs_folder
+    from . import jobs_folder, jobs_folder_migrate
 
     home_root = home_value or default_home_root()
     if set_value is not None and reset:
         _fail(ValueError("pass --set PATH or --reset, not both"), as_json=as_json, fallback="invalid_value")
+        return
+    if action is None and dry_run:
+        _fail(ValueError("--dry-run goes with migrate: gigai scout jobs-folder migrate --dry-run"), as_json=as_json, fallback="invalid_value")
+        return
+    if action == "migrate":
+        if set_value is not None or reset:
+            _fail(ValueError("migrate takes no --set or --reset: change the folder first, then migrate"), as_json=as_json, fallback="invalid_value")
+            return
+        try:
+            report = jobs_folder_migrate.migrate(home_root, dry_run=dry_run)
+        except jobs_folder.JobsFolderError as exc:
+            _fail(exc, as_json=as_json, fallback="invalid_value")
+            return
+        _emit({"ok": True, **report.to_json()}, as_json, "\n".join(report.lines()))
         return
     try:
         if set_value is not None or reset:
@@ -1047,8 +1069,12 @@ def jobs_folder_command(set_value: str | None, reset: bool, home_value: Path | N
         _fail(exc, as_json=as_json, fallback="invalid_value")
         return
     # The folder is the home's, so this command takes no --target and never creates a Scout project.
-    payload = {"ok": True, **folder.to_json()}
-    _emit(payload, as_json, f"Jobs folder: {folder.shown}" + (" (the default)" if folder.source == jobs_folder.SOURCE_DEFAULT else ""))
+    # 0.1.11.4 J2: the old flat files still to import (the two indexes; no file is read).
+    legacy = jobs_folder_migrate.pending_count(home_root)
+    offer = jobs_folder_migrate.pending_line(legacy)
+    payload = {"ok": True, **folder.to_json(), "legacy_pending": legacy}
+    lines = [f"Jobs folder: {folder.shown}" + (" (the default)" if folder.source == jobs_folder.SOURCE_DEFAULT else "")]
+    _emit(payload, as_json, "\n".join(lines + ([offer] if offer else [])))
 
 
 def _other_server_label(other: OtherScoutServer) -> str:
@@ -1187,13 +1213,16 @@ def status_command(target_value: Path | None, home_value: Path | None, as_json: 
         _fail(exc, as_json=as_json, fallback="scout_status_failed")
         return
 
-    from . import jobs_folder, resumes_folder
+    from . import jobs_folder, jobs_folder_migrate, resumes_folder
 
     folder = resumes_folder.resumes_folder(home_root)
     jobs = jobs_folder.jobs_folder(home_root)
+    legacy = jobs_folder_migrate.pending_count(home_root)
+    legacy_offer = jobs_folder_migrate.pending_line(legacy)
     # 0.1.10.9 master P8: how the master resume's file in that folder stands (the index and one digest; no journal read).
     master_file = resumes_folder.master_file(home_root)
     payload = {"ok": True, **current.to_json(), "resumes_folder": folder.to_json(), "jobs_folder": jobs.to_json(), "master_file": master_file.to_json()}
+    payload["legacy_pending"] = legacy
     if as_json:
         _emit(payload, True, "")
         return
@@ -1215,6 +1244,8 @@ def status_command(target_value: Path | None, home_value: Path | None, as_json: 
         click.echo("stopped")
     click.echo(f"Resumes folder: {folder.shown}")
     click.echo(f"Jobs folder: {jobs.shown}")
+    if legacy_offer:
+        click.echo(legacy_offer)
     if master_file.state == resumes_folder.MASTER_CHANGED:
         click.echo(f"{master_file.name} has changes not imported yet ({master_file.shown}). Import them: `gigai scout resume master sync`.")
     for other in current.other_servers:

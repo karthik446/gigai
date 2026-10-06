@@ -38,6 +38,7 @@ Nothing here calls a model or the network.  Errors name a rule, never a resume's
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import date, datetime
 import json
@@ -271,10 +272,17 @@ def _usable(directory: Path, key: str, *, recorded: bool = False) -> bool:
     return owner == key or (recorded and owner is None)
 
 
-def _choose_dir(root: Path, job: JobRef, recorded: object) -> str:
-    """``<company>/<role>`` for ``job``: the folder recorded for it, else the plain name, else ``<role>-<id>`` (a collision)."""
+def _choose_dir(root: Path, job: JobRef, recorded: object, claimed: Mapping[str, str] | None = None) -> str:
+    """``<company>/<role>`` for ``job``: the folder recorded for it, else the plain name, else ``<role>-<id>`` (a collision).
 
-    if isinstance(recorded, str) and _usable(root / recorded, job.key, recorded=True):
+    ``claimed``: folders planned and not written yet (``<company>/<role>`` -> job key), which count as taken
+    by that job (the migration's dry run plans several jobs before any folder exists)."""
+
+    def usable(relative: str, *, was_recorded: bool = False) -> bool:
+        owner = (claimed or {}).get(relative)
+        return owner == job.key if owner is not None else _usable(root / relative, job.key, recorded=was_recorded)
+
+    if isinstance(recorded, str) and usable(recorded, was_recorded=True):
         return recorded  # decided once: the same job, the same folder
     company, role = company_slug(job.company), role_slug(job.role)
     parent = root / company
@@ -282,7 +290,7 @@ def _choose_dir(root: Path, job: JobRef, recorded: object) -> str:
         raise JobsFolderError("folder_unwritable", "the jobs folder has a file where this job's company folder goes")
     suffixed = f"{role}-{short_id(job.key)}"
     for name in (role, suffixed, *(f"{suffixed}-{attempt}" for attempt in range(2, _MAX_NAME_TRIES + 1))):
-        if _usable(parent / name, job.key):
+        if usable(f"{company}/{name}"):
             return f"{company}/{name}"
     raise JobsFolderError("folder_unwritable", "the jobs folder has no free folder name for this job")
 

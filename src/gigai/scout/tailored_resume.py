@@ -2709,17 +2709,14 @@ def read_tailored_resume(path: Path) -> TailorResponse | None:
     return _read_stored(Path(path))
 
 
-def export_tailored_markdown(response: TailorResponse, *, home_root: Path, imported: str | None = None):
-    """Put a stored job resume's markdown in the job's folder of the jobs folder (0.1.11.4 J1); where, or ``None``.
+def folder_job_ref(response: TailorResponse, *, home_root: Path):
+    """The job a stored resume names in the jobs folder, and its day: ``(jobs_folder.JobRef, date)``.
 
-    ``<jobs>/<company>/<role>/resume.md``: the company is the posting's
-    display name, the role its title; the day the resume was last picked or
-    attached is recorded in the folder's own record the first time, never in
-    a name.  The folder's rules are ``jobs_folder``'s (never contact data,
-    never over a file the user changed).  Never raises: a folder that cannot
-    be written does not fail the store's write.  The flat resumes folder is
-    no longer written by a resume's save.  ``imported``: the digest of the
-    text the user has just handed back (``jobs_folder.save_resume``).
+    The company is the posting's display name, the role its title, both from
+    the stored record (never from a file name); the day is the one the resume
+    was last picked or attached.  One rule for a resume's save and for the
+    import of the old flat files (``jobs_folder_migrate``), so the same job
+    always gets the same folder.
     """
 
     from . import jobs_folder, resumes_folder
@@ -2735,7 +2732,26 @@ def export_tailored_markdown(response: TailorResponse, *, home_root: Path, impor
     job = jobs_folder.JobRef(
         key=resumes_folder.job_key(home_root, response.stored_path), job_identity=response.job.job_identity, company=company or "", role=response.job.title or "",
     )
-    return jobs_folder.try_save_resume(home_root, job=job, markdown=response.markdown, day=day, imported=imported)
+    return job, day
+
+
+def export_tailored_markdown(response: TailorResponse, *, home_root: Path, imported: str | None = None):
+    """Put a stored job resume's markdown in the job's folder of the jobs folder (0.1.11.4 J1); where, or ``None``.
+
+    ``<jobs>/<company>/<role>/resume.md``: the company is the posting's
+    display name, the role its title; the day the resume was last picked or
+    attached is recorded in the folder's own record the first time, never in
+    a name.  The folder's rules are ``jobs_folder``'s (never contact data,
+    never over a file the user changed).  Never raises: a folder that cannot
+    be written does not fail the store's write.  The flat resumes folder is
+    no longer written by a resume's save.  ``imported``: the digest of the
+    text the user has just handed back (``jobs_folder.save_resume``).
+    """
+
+    from . import jobs_folder
+
+    job, day = folder_job_ref(response, home_root=home_root)
+    return jobs_folder.try_save_resume(Path(home_root), job=job, markdown=response.markdown, day=day, imported=imported)
 
 
 def save_tailor_response(response: TailorResponse, *, home_root: Path | None = None, imported: str | None = None):

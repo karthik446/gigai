@@ -115,6 +115,7 @@ def test_the_command_shows_and_sets_the_folder(home_root: Path, user_home: Path,
     assert json.loads(shown.output) == {
         "ok": True, "schema_version": "scout-jobs-folder-response:1", "path": str(home_root / "jobs"), "shown": json.loads(shown.output)["shown"],
         "source": "default", "default": json.loads(shown.output)["default"], "exists": False,
+        "legacy_pending": 0,  # 0.1.11.4 J2: old flat resumes still to import (none here)
     }
     assert not (home_root / "jobs").exists() and not (home_root / "scout").exists(), "showing the folder writes nothing"
     plain = run()
