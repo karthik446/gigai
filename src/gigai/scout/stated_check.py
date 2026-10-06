@@ -44,6 +44,41 @@ development and nothing else): a Summary line that states the years of an engine
 an engineering title. This is also the ALTERNATIVE TRACK: ``a degree in X, or 8+ years of software engineering
 experience`` is met by the years. A bare ``N years of experience`` does not say of what, and is left as it came; so is
 a requirement with more than one "N years", or any other number.
+
+0.1.11.4 A3.  The re-run of the 100 showed the rule above settling a handful of rows only: a requirement is rarely made
+of nothing but names. What is read now, each still settled by the master's own line(s) and nothing else:
+
+* A PHRASE (:data:`RULE_PHRASE`). Two or more neighbouring words that are not names (``infrastructure
+  administration``) are a term when ONE line of the master holds them word for word, in that order.
+* A WORD BESIDE A TERM (:data:`RULE_BESIDE`). One such word alone (``web`` in "building web applications with React",
+  ``payments`` in "payments systems in Go") is stated only by a line that holds it TOGETHER with one of the row's key
+  terms ("Built the web checkout in React"): that line is cited. With no such line, or no key term, it is still the
+  requirement's own substance, and the row is left as it came. A phrase in a row that has key terms is tied to a
+  term the same way: two lines that each hold half ("support tickets" here, "Go" there) do not state the whole.
+* A SLASHED NAME (:data:`RULE_COMPOUND`: ``React/TypeScript``) is each of its names, and EVERY one must be stated;
+  ``React-based`` is React.
+* WORDS THAT DESCRIBE A KIND (:data:`RULE_KIND`), directly before a category noun that examples follow or that "other" / "similar"
+  introduces (``relational databases such as PostgreSQL``, ``React or a similar frontend framework``), are ignored like
+  the category noun itself. Nowhere else: ``payments systems in Go`` keeps its question.
+* A LINE THAT TAKES BACK ONE THING still states the others (:data:`RULE_PARTIAL`, :func:`_weak_at`): ``Replaced a
+  jQuery UI with React`` is evidence of React (not of jQuery), ``moved 40 services to Kubernetes with no downtime`` of Kubernetes. A ``not`` /
+  ``never`` / ``basic`` / ``exposure to`` anywhere in a line still makes the whole line no evidence; ``machine
+  learning`` is not "learning".
+* ALTERNATIVES (:data:`RULE_ALTERNATIVE`, :func:`stated_alternative`). A row that carries ``alternatives`` (the
+  posting's own "any one of") is met when ONE of them is a key term the master states, whatever the row's head says
+  ("hands-on experience with cloud infrastructure tooling" + ``[Terraform, Ansible]``). Not when the head asks for
+  people, a level or a credential, holds a number other than "N years" (which is then required of the alternative), or
+  joins the alternatives with "and".
+* A QUESTION ON A ``met`` ROW is dropped, the row left byte for byte as it came, when this check itself finds the
+  requirement stated (:data:`RULE_MET_QUESTION`), or when the row is an alternative track ("X or Y", or it carries
+  ``alternatives``) that the model met by citing a line the prompt showed (:data:`RULE_TRACK_QUESTION`: the question
+  can only be about the other track).
+
+Each rule above is independent and counted under its own name (:data:`ACTIVE_RULES`).
+
+Stricter than before (the one row of the re-run a reader did not accept was a named set shown in part): examples named
+after "such as" / "like" / "e.g." with no "or" are ALL required, as a list joined by "and" is; and ``React`` is not
+stated by ``React Native``.
 """
 
 from __future__ import annotations
@@ -67,6 +102,21 @@ RULE_LINE = "master_line"
 RULE_SKILLS = "skills_line"
 RULE_YEARS_STATED = "years_stated"
 RULE_YEARS_ROLES = "years_from_roles"
+#: 0.1.11.4 A3 (the module text): one name per reading added, so the stored ``checks`` record counts each on its own.
+#: A row settled only because of one of them carries ITS name (the first of this order that was needed), not the
+#: 0.1.11.3 name of the line that states it. The last two drop a question and leave the row, already ``met``, as it came.
+RULE_PHRASE = "master_phrase"
+RULE_BESIDE = "word_beside_term"
+RULE_COMPOUND = "compound_name"
+RULE_KIND = "kind_words"
+RULE_PARTIAL = "line_takes_back_other"
+RULE_ALTERNATIVE = "alternative"
+RULE_MET_QUESTION = "met_row_question"
+RULE_TRACK_QUESTION = "alternative_track_question"
+QUESTION_ONLY_RULES = frozenset({RULE_MET_QUESTION, RULE_TRACK_QUESTION})
+_READINGS = (RULE_PHRASE, RULE_BESIDE, RULE_COMPOUND, RULE_KIND, RULE_PARTIAL)
+#: The 0.1.11.4 rules in force. Each is independent: take one name out and the check reads that case as 0.1.11.3 did.
+ACTIVE_RULES = frozenset({*_READINGS, RULE_ALTERNATIVE, RULE_MET_QUESTION, RULE_TRACK_QUESTION})
 
 _ID_COMMENT = re.compile(r"<!--\s*id:\s*(\S+?)\s*-->")
 _ANY_COMMENT = re.compile(r"\s*<!--.*?-->")
@@ -98,13 +148,15 @@ class Role:
 @dataclass(frozen=True)
 class MasterFacts:
     """``lines``: the lines that carry an id (no Education line); ``skills``: the skills line(s); ``skill_names``:
-    each name of them, folded; ``lower_names``: those the master writes in lower case; ``roles``: the dated roles."""
+    each name of them, folded; ``lower_names``: those the master writes in lower case; ``roles``: the dated roles;
+    ``ids``: every id the text shows (lines, roles, degrees): what a row's ``sources`` may name."""
 
     lines: tuple[Line, ...]
     skills: tuple[Line, ...]
     skill_names: frozenset[str]
     lower_names: frozenset[str]
     roles: tuple[Role, ...]
+    ids: frozenset[str] = frozenset()
 
 
 _MONTHS = {name: index + 1 for index, name in enumerate("jan feb mar apr may jun jul aug sep oct nov dec".split())}
@@ -161,6 +213,7 @@ def read_master(resume_text: str, *, today: date | None = None) -> MasterFacts:
     in_entry = False
     sublines: list[str] = []
     bullets: list[Line] = []
+    ids: set[str] = set()
 
     def close() -> None:
         nonlocal in_entry, sublines, bullets
@@ -175,6 +228,7 @@ def read_master(resume_text: str, *, today: date | None = None) -> MasterFacts:
         stripped = raw.strip()
         if not stripped or stripped.startswith("<!--"):
             continue
+        ids.update(_ID_COMMENT.findall(stripped))
         if stripped.startswith("#"):
             close()
             if stripped.startswith("###"):
@@ -208,7 +262,7 @@ def read_master(resume_text: str, *, today: date | None = None) -> MasterFacts:
                     names.add(_fold(part))
                     if part.strip().islower():
                         lower.add(_fold(part))
-    return MasterFacts(tuple(lines), tuple(skills), frozenset(names), frozenset(lower), tuple(roles))
+    return MasterFacts(tuple(lines), tuple(skills), frozenset(names), frozenset(lower), tuple(roles), frozenset(ids))
 
 
 # --- the words of a requirement ---------------------------------------------------------------------------
@@ -231,8 +285,13 @@ _TOKEN = re.compile(r"\x00|\.?[A-Za-z0-9][A-Za-z0-9+#./'’_-]*|[,;:()&/]")
 _OR = frozenset({"or", "and/or"})
 _AND = frozenset({"and", "&", "plus"})
 _BREAK = frozenset({",", ";", ":", "(", ")", "/"})
-#: Words that say the terms after them are examples or alternatives: one is enough.
+#: List words ("such as", "or similar"): ignored. Only "or", ``alternatives`` or a word of :data:`_CHOICE` makes one enough.
 _ANY_OF = frozenset({"e.g", "eg", "such", "like", "similar", "either", "any"})
+_CHOICE = frozenset({"either", "any"})
+#: Stands between the names of a slashed name ("React/TypeScript"): each is a term of its own, and every one is required.
+_PART = "\x01"
+#: "React-based", "Kubernetes-native": the name before the hyphen is the term.
+_SUFFIXES = frozenset({"based", "native", "hosted", "powered", "driven"})
 
 #: Words every requirement is made of. They are never a key term and never the requirement's substance.
 _GRAMMAR = frozenset(
@@ -261,9 +320,32 @@ _CATEGORY = frozenset(
     "language languages framework frameworks library libraries tool tools tooling technology technologies tech stack stacks platform "
     "platforms provider providers database databases cloud application applications app apps software system systems service services "
     "product products solution solutions project projects environment environments codebase codebases other others equivalent comparable "
-    "related modern popular major common public some several multiple various including include includes".split()
+    "related modern popular major common public some several multiple various including include includes another".split()
 ) | _ANY_OF
 _IGNORED = _GRAMMAR | _HAVING | _DOING | _STRENGTH | _CATEGORY
+
+#: Category nouns whose kind words are ignored when examples follow or "other" / "similar" introduces them (:func:`_kind_words`).
+_KIND_NOUNS = frozenset(
+    "language languages framework frameworks library libraries tool tools tooling technology technologies stack stacks platform platforms "
+    "provider providers database databases system systems service services solution solutions environment environments".split()
+)
+_EXAMPLES = frozenset({"such", "like", "e.g", "eg", "including", "include", "includes", "(", ":"})
+_OTHER = frozenset({"similar", "other", "others", "equivalent", "comparable", "another"})
+_MAX_KIND_WORDS = 3
+#: "-ing" words that are nouns ("monitoring tools"); any other "-ing" word is something done ("managing platforms") and is never a kind word.
+_ING_NOUNS = frozenset(
+    "monitoring logging tracing testing networking processing computing caching scripting programming streaming messaging alerting "
+    "modeling modelling warehousing learning engineering tooling".split()
+)
+_PLAIN = re.compile(r"[a-z]+(?:-[a-z]+)*\Z")
+
+#: In the head of a row with ``alternatives``: it asks for people, a level or a credential, which no named alternative shows.
+_BEYOND = re.compile(
+    r"\b(?:lead\w*|led|manag\w*|mentor\w*|coach\w*|hir(?:e|es|ed|ing)|supervis\w*|teams?|people|reports?|stakeholders?|executives?|"
+    r"customers?|clients?|certif\w*|accredit\w*|degrees?|diplomas?|bachelor\w*|master['’]?s|phd|doctorate|licen[cs]\w*|clearance|"
+    r"expert\w*|all|each|every|both)\b",
+    re.IGNORECASE,
+)
 
 #: With a number of years and no key term ("8+ years of software engineering experience"): the words that make the
 #: years those of a career in engineering (counted on the roles with an engineering title). Any other category or doing
@@ -298,12 +380,47 @@ _ALIASES: dict[str, tuple[str, ...]] = {name: group for group in _ALIAS_GROUPS f
 #: Spellings that are also plain words: found in the master only as written here.
 _EXACT_SPELLING = {"go": "Go", "node": "Node", "react": "React", "vue": "Vue", "js": "JS", "ts": "TS"}
 
-#: A line that takes its own claim back is not evidence.
+#: A line that takes its own claim back is not evidence. A line with none of these words is CLEAN (the 0.1.11.3 test,
+#: still the first one tried); one that has such a word is read place by place (:func:`_weak_at`, :data:`RULE_PARTIAL`).
 _WEAK = re.compile(
-    r"\b(?:no|not|never|without|instead of|basic|beginner|exposure to|learning|studying|migrat\w+ (?:off|away)|"
+    r"\b(?:no|not|never|\w+n['’]t|without|instead of|basic|beginner|exposure to|learning|studying|migrat\w+ (?:off|away)|"
     r"mov\w+ (?:off|away)|replac\w+|deprecat\w+|retir\w+|sunset\w*)\b",
     re.IGNORECASE,
 )
+#: These, anywhere in the line, take back all of it.
+_NEVER = re.compile(
+    r"\b(?:not|never|\w+n['’]t|instead of|(?<!visual )basic|beginner|exposure to|"
+    r"(?<!machine )(?<!deep )(?<!reinforcement )learning|studying)\b",
+    re.IGNORECASE,
+)
+#: These take back what FOLLOWS them in the sentence ("without Kubernetes"), not what stands before ("on Kubernetes without downtime").
+_WITHOUT = re.compile(r"\b(?:no|without)\b", re.IGNORECASE)
+#: These take back what they are said of: what follows with no "with / to / in ..." between ("replaced Jenkins with Actions"
+#: takes back Jenkins), or what stands before a passive ("Jenkins was retired") or right before the word ("the Angular replacement").
+_GONE_WORDS = r"(?:migrat\w+ (?:off|away)|mov\w+ (?:off|away)|replac\w+|deprecat\w+|retir\w+|sunset\w*)"
+_GONE = re.compile(r"\b" + _GONE_WORDS + r"\b", re.IGNORECASE)
+_ONTO = re.compile(r"\b(?:with|by|to|onto|into|using|in|on|for|via)\b", re.IGNORECASE)
+_GONE_AFTER = re.compile(
+    r"\b(?:was|were|been|being|is|are|got|since|later|now)\s+(?:\w+\s+)?" + _GONE_WORDS + r"\b|\A\s*\(\s*" + _GONE_WORDS + r"\b|\A\s+(?:[\w-]+\s+)?" + _GONE_WORDS + r"\b",
+    re.IGNORECASE,
+)
+_SENTENCE_END = re.compile(r";\s*|(?<=[a-z0-9%)]{3}[.!?])\s+(?=[A-Z])")
+#: "React Native" does not state React (the assess prompt's own example of a neighbouring technology).
+_NEIGHBOURS = {"react": ("native",)}
+
+
+def _weak_at(text: str, start: int, end: int) -> bool:
+    """Whether ``text`` takes back what it says at ``[start, end)`` (the module text). The whole line when it says "not"."""
+
+    if _NEVER.search(text):
+        return True
+    cuts = [found.span() for found in _SENTENCE_END.finditer(text)]
+    low = max((cut[1] for cut in cuts if cut[1] <= start), default=0)
+    high = min((cut[0] for cut in cuts if cut[0] >= end), default=len(text))
+    before, after = text[low:start], text[end:high]
+    if _WITHOUT.search(before) or _GONE_AFTER.search(after):
+        return True
+    return any(not _ONTO.search(before[found.end():]) for found in _GONE.finditer(before))
 
 
 def _fold(text: str) -> str:
@@ -316,6 +433,8 @@ class _Term:
 
     text: str
     exact: bool = False
+    #: 0.1.11.4 A3: plain words, not a name; stated only by a line that holds them word for word (:data:`RULE_PHRASE`).
+    phrase: bool = False
 
 
 def _singular(word: str) -> str:
@@ -339,8 +458,9 @@ def _pattern(text: str, *, exact: bool) -> re.Pattern[str]:
 
     body = r"\s+".join(re.escape(part) for part in text.split())
     plural = "s?" if text[-1].isalpha() and not text.endswith("s") and len(text) > 2 else ""
+    neighbours = "".join(rf"(?!\s+(?i:{re.escape(word)})\b)" for word in _NEIGHBOURS.get(text.casefold(), ()))
     return re.compile(
-        r"(?<![A-Za-z0-9+#_.\-])" + body + plural + r"(?![A-Za-z0-9+#_\-])(?!\.[A-Za-z0-9])(?!\s+(?:19|20)\d\d\b)",
+        r"(?<![A-Za-z0-9+#_.\-])" + body + plural + r"(?![A-Za-z0-9+#_\-])(?!\.[A-Za-z0-9])(?!\s+(?:19|20)\d\d\b)" + neighbours,
         0 if exact else re.IGNORECASE,
     )
 
@@ -355,8 +475,8 @@ def _spellings(term: _Term) -> list[re.Pattern[str]]:
     return out
 
 
-def _holds(line: Line, term: _Term) -> bool:
-    """Whether ``line`` holds ``term`` as a whole word.
+def _holds(line: Line, term: _Term, *, evidence: bool = False) -> bool:
+    """Whether ``line`` holds ``term`` as a whole word; with ``evidence``, at a place the line does not take back (:func:`_weak_at`).
 
     A word that is only capitalised must stand INSIDE a sentence of the master (``... in React and ...``): the first
     word of a line is capitalised whatever it is (``Ownership of ...``), so it does not show a name.
@@ -364,19 +484,41 @@ def _holds(line: Line, term: _Term) -> bool:
 
     for pattern in _spellings(term):
         for found in pattern.finditer(line.text):
-            if not (term.exact and line.section != "skills" and found.start() == 0):
+            if term.exact and line.section != "skills" and found.start() == 0:
+                continue
+            if not (evidence and _weak_at(line.text, found.start(), found.end())):
                 return True
     return False
 
 
-def _line_for(term: _Term, facts: MasterFacts) -> Line | None:
-    """The master line that states ``term``: a bullet of a role first (the strongest evidence), the skills line last."""
+def _shows(line: Line, term: _Term, *, partial: bool) -> bool:
+    """Whether ``line`` is evidence of ``term``: a clean line that holds it, or (``partial``) one that takes something ELSE back."""
+
+    if bool(_WEAK.search(line.text)) != partial or len(line.text) > _MAX_EVIDENCE:
+        return False
+    return _holds(line, term, evidence=partial)
+
+
+def _line_for(term: _Term, facts: MasterFacts) -> tuple[Line, bool] | None:
+    """``(the master line that states term, whether it is a line that takes something else back)``.
+
+    A bullet of a role first (the strongest evidence), then the skills line; a line read place by place
+    (:data:`RULE_PARTIAL`) only when no clean line and no skills line states the term.
+    """
 
     order = {"experience": 0, "projects": 1, "summary": 2}
-    for line in sorted(facts.lines, key=lambda item: order.get(item.section, 3)):
-        if len(line.text) <= _MAX_EVIDENCE and not _WEAK.search(line.text) and _holds(line, term):
-            return line
-    return next((line for line in facts.skills if len(line.text) <= _MAX_EVIDENCE and _holds(line, term)), None)
+    lines = sorted(facts.lines, key=lambda item: order.get(item.section, 3))
+    for line in lines:
+        if _shows(line, term, partial=False):
+            return line, False
+    for line in facts.skills:
+        if len(line.text) <= _MAX_EVIDENCE and _holds(line, term):
+            return line, False
+    if RULE_PARTIAL in ACTIVE_RULES:
+        for line in lines:
+            if _shows(line, term, partial=True):
+                return line, True
+    return None
 
 
 # --- years ------------------------------------------------------------------------------------------------
@@ -448,20 +590,30 @@ def _says_fewer(line: Line, term: _Term, years: int) -> bool:
     return False
 
 
-def _term_years(term: _Term, years: int, facts: MasterFacts) -> tuple[list[Line | str], str] | None:
-    """Years of ``term``: a line that holds it and states that many, else the dated roles whose shown bullets hold it."""
+def _term_years(term: _Term, years: int, facts: MasterFacts) -> tuple[list[Line | str], str, bool] | None:
+    """Years of ``term``: a line that holds it and states that many, else the dated roles whose shown bullets hold it.
 
-    for line in facts.lines:
-        said = _years_in(line.text)
-        if said is not None and said >= years and not _WEAK.search(line.text) and _holds(line, term):
-            return [line], RULE_YEARS_STATED
+    The third item: whether a line that takes something else back had to be read (:data:`RULE_PARTIAL`).
+    """
+
+    tiers = (False, True) if RULE_PARTIAL in ACTIVE_RULES else (False,)
+    for partial in tiers:
+        for line in facts.lines:
+            said = _years_in(line.text)
+            if said is not None and said >= years and _shows(line, term, partial=partial):
+                return [line], RULE_YEARS_STATED, partial
     if any(_says_fewer(line, term, years) for line in facts.lines):
         return None
-    held = {id(role): next((line for line in role.bullets if not _WEAK.search(line.text) and _holds(line, term)), None) for role in facts.roles}
-    counted = _covered([role for role in facts.roles if held[id(role)] is not None], years * 12)
-    if counted is None:
-        return None
-    return [item for role in counted for item in (role.dated, held[id(role)])], RULE_YEARS_ROLES  # type: ignore[misc]
+    for partial in tiers:
+        # The clean bullets alone first; then with the bullets read place by place.
+        held = {
+            id(role): next((line for tier in tiers[: partial + 1] for line in role.bullets if _shows(line, term, partial=tier)), None)
+            for role in facts.roles
+        }
+        counted = _covered([role for role in facts.roles if held[id(role)] is not None], years * 12)
+        if counted is not None:
+            return [item for role in counted for item in (role.dated, held[id(role)])], RULE_YEARS_ROLES, partial  # type: ignore[misc]
+    return None
 
 
 def _career_years(years: int, facts: MasterFacts) -> tuple[list[Line | str], str] | None:
@@ -493,6 +645,68 @@ def _skill(words: Sequence[str], facts: MasterFacts) -> bool:
     return low in facts.skill_names or _fold(_singular(joined)) in facts.skill_names
 
 
+def _expanded(tokens: Sequence[str], facts: MasterFacts) -> list[str]:
+    """``tokens`` with a slashed name as its names (``React/TypeScript``) and ``React-based`` as ``React``.
+
+    A slashed word the master's skills line or a spelling group holds whole (``CI/CD``) stays whole, and so does one
+    with a part that is not a name (``and/or``, ``I/O``).
+    """
+
+    out: list[str] = []
+    if RULE_COMPOUND not in ACTIVE_RULES:
+        return list(tokens)
+    for token in tokens:
+        head, _, tail = token.rpartition("-")
+        if head and tail.casefold() in _SUFFIXES and "/" not in head and _named(head)[0]:
+            out.append(head)
+            continue
+        parts = token.split("/")
+        if len(parts) > 1 and token.casefold() not in _ALIASES and not _skill([token], facts) and all(len(part) > 1 and _named(part)[0] for part in parts):
+            for part in parts:
+                out += [part, _PART]
+            out.pop()
+            continue
+        out.append(token)
+    return out
+
+
+def _kind_words(tokens: Sequence[str], folded: Sequence[str]) -> set[int]:
+    """The places of the words that only say what KIND of thing a category noun means (the module text).
+
+    ``relational databases such as ...``, ``a modern frontend framework (React, ...)``, ``or another message queue
+    system``: at most :data:`_MAX_KIND_WORDS` plain words directly before a noun of :data:`_KIND_NOUNS`, when examples
+    follow the noun or "other" / "similar" stands before the words. A word that says something is DONE (``managing``)
+    is never one.
+    """
+
+    found: set[int] = set()
+    if RULE_KIND not in ACTIVE_RULES:
+        return found
+    for at, low in enumerate(folded):
+        if low not in _KIND_NOUNS:
+            continue
+        after = folded[at + 1] if at + 1 < len(folded) else ""
+        examples = after in _EXAMPLES and (after != "such" or folded[at + 2: at + 3] == ["as"])
+        words: list[int] = []
+        other = False
+        back = at - 1
+        while back >= 0 and len(words) < _MAX_KIND_WORDS:
+            word = folded[back]
+            if word in _OTHER:
+                other = True
+                break
+            if word in _STRENGTH or (word in _CATEGORY and word not in _ANY_OF):
+                back -= 1
+                continue
+            if word in _IGNORED or not _PLAIN.match(tokens[back]) or (word.endswith("ing") and word not in _ING_NOUNS):
+                break
+            words.append(back)
+            back -= 1
+        if words and (examples or other):
+            found.update(words)
+    return found
+
+
 def stated(requirement: str, facts: MasterFacts, *, alternatives: bool = False) -> Stated | None:
     """The master lines that settle ``requirement``, or ``None`` when the row is to be left as it came (the module text)."""
 
@@ -504,10 +718,13 @@ def stated(requirement: str, facts: MasterFacts, *, alternatives: bool = False) 
     if spans:
         years = _number(spans[0].group(1))
         text = f"{text[: spans[0].start()]} {_YEARS_MARK} {text[spans[0].end():]}"
-    tokens = [token.rstrip(".'’") or token for token in _TOKEN.findall(text)]
+    written = [token.rstrip(".'’") or token for token in _TOKEN.findall(text)]
+    tokens = _expanded(written, facts)
     folded = [token.casefold() for token in tokens]
-    joins = _OR | _AND | _BREAK
-    any_of = (alternatives or any(token in _OR or token in _ANY_OF for token in folded)) and not any(token in _AND for token in folded)
+    joins = _OR | _AND | _BREAK | {_PART}
+    kind_words = _kind_words(tokens, folded)
+    # 0.1.11.4 A3: "such as" / "like" / "e.g." alone no longer make one of a list enough (a named set shown in part).
+    any_of = (alternatives or any(token in _OR or token in _CHOICE for token in folded)) and not any(token in _AND for token in folded)
 
     # THE ALTERNATIVE TRACK ("a degree in X, or 8+ years of software engineering experience"): the part that is only the
     # years of a career is one way to meet the row, whatever the other parts ask for.
@@ -533,19 +750,30 @@ def stated(requirement: str, facts: MasterFacts, *, alternatives: bool = False) 
     # One segment per alternative (one in all when every term is required): its key terms, and whether "N years" stood in it.
     segments: list[tuple[list[_Term], bool]] = []
     terms: list[_Term] = []
+    phrases: list[_Term] = []  # required whatever the alternative: a phrase is the requirement's own substance
     run: list[str] = []
     run_exact = False
+    run_plain = False
     marked = False
     family = False
     career_only = True  # nothing but the words a plain "N years of experience" is made of
     seen_term = False
+    lone: list[str] = []  # plain words with no neighbour: stated only beside a key term, in one line (RULE_BESIDE)
+    alone = False  # ... or not this check's to read
 
     def end_run() -> None:
-        nonlocal run, run_exact, seen_term
-        if run:
+        nonlocal run, run_exact, run_plain, seen_term, alone
+        if run and run_plain:
+            if len(run) > 1 and RULE_PHRASE in ACTIVE_RULES:
+                phrases.append(_Term(" ".join(run), phrase=True))
+            elif len(run) == 1 and RULE_BESIDE in ACTIVE_RULES:
+                lone.append(run[0])
+            else:
+                alone = True
+        elif run:
             terms.append(_Term(" ".join(run), run_exact and len(run) == 1))
-            seen_term = True
-        run, run_exact = [], False
+        seen_term = seen_term or bool(run)
+        run, run_exact, run_plain = [], False, False
 
     def end_segment() -> None:
         nonlocal terms, marked
@@ -561,7 +789,7 @@ def stated(requirement: str, facts: MasterFacts, *, alternatives: bool = False) 
             marked = True
         elif low in _OR or low in _BREAK:
             end_segment() if any_of else end_run()
-        elif low in _AND:
+        elif low in _AND or token == _PART or index in kind_words:
             end_run()
         else:
             # A name of the skills line, longest first: it may hold ignored words ("Distributed Systems").
@@ -592,48 +820,131 @@ def stated(requirement: str, facts: MasterFacts, *, alternatives: bool = False) 
             else:
                 name, capitalised = _named(token)
                 verb = index == 0 and capitalised and low in _VERBS and index + 1 < len(tokens) and folded[index + 1] in _VERB_FOLLOWS
-                if not name or verb:
-                    return None  # the requirement's own substance: not this check's to read
-                run.append(_singular(token))
-                run_exact = capitalised
+                if verb or not (name or _PLAIN.match(token)):
+                    return None  # the requirement's own substance (a verb, a bare number): not this check's to read
+                career_only = False
+                if name:
+                    run.append(_singular(token))
+                    run_exact = capitalised
+                else:
+                    # A plain word: with a neighbour it is a phrase the master must hold word for word.
+                    run.append(token)
+                    run_plain = True
         index += 1
     end_segment()
+    if alone:
+        return None
 
-    def settle(wanted: Sequence[_Term]) -> Stated | None:
-        if not wanted or len(wanted) > MAX_LINES:
+    def settle(names: Sequence[_Term]) -> Stated | None:
+        if not (names or phrases) or len(names) + len(phrases) + len(lone) > MAX_LINES or (lone and not names):
             return None
+        tiers = (False, True) if RULE_PARTIAL in ACTIVE_RULES else (False,)
         cited: list[Line | str] = []
         rules: list[str] = []
-        for term in wanted:
+        # The 0.1.11.4 readings this row could not be settled without, for the count (:data:`_READINGS`).
+        needed = {RULE_PHRASE} if phrases else set()
+        if lone:
+            needed.add(RULE_BESIDE)
+        if tokens != written:
+            needed.add(RULE_COMPOUND)
+        if kind_words:
+            needed.add(RULE_KIND)
+        # Beside a key term, a phrase or a lone word is stated only by a line that holds it TOGETHER with one of the terms.
+        tied: list[Line] = []
+        for item in (*phrases, *(_Term(word) for word in lone)) if names else ():
+            beside = next(
+                ((line, partial) for partial in tiers for line in facts.lines if _shows(line, item, partial=partial) and any(_shows(line, term, partial=partial) for term in names)),
+                None,
+            )
+            if beside is None:
+                return None
+            tied.append(beside[0])
+            cited.append(beside[0])
+            if beside[1]:
+                needed.add(RULE_PARTIAL)
+        for term in names if names else phrases:
             if years is not None:
                 found = _term_years(term, years, facts)
                 if found is None:
                     return None
                 cited += found[0]
                 rules.append(found[1])
+                partial = found[2]
             else:
-                line = _line_for(term, facts)
-                if line is None:
+                shown = next(((line, bool(_WEAK.search(line.text))) for line in tied if _holds(line, term, evidence=True)), None) or _line_for(term, facts)
+                if shown is None:
                     return None
+                line, partial = shown
                 cited.append(line)
                 rules.append(RULE_SKILLS if line.id is None else RULE_LINE)
-        return _cite(cited, rules[0])
+            if partial:
+                needed.add(RULE_PARTIAL)
+        return _cite(cited, next((rule for rule in _READINGS if rule in needed), rules[0]))
 
     def career() -> Stated | None:
         # Only "N years of software engineering experience": bare "N years of experience" does not say of what.
-        if years is None or not career_only or not family:
+        if years is None or not career_only or not family or phrases:
             return None
         found = _career_years(years, facts)
         return None if found is None else _cite(*found)
 
     every = [term for found, _in in segments for term in found]
-    if not any_of:
-        return settle(every) if every else career()
+    if not any_of or (phrases and not every):
+        return settle(every) if every or phrases else career()
     for found, in_segment in segments:
         # "a degree or 8 years of experience": the years are one of the alternatives.
         result = settle(found) if found else career() if in_segment else None
         if result is not None:
             return result
+    return None
+
+
+def stated_alternative(requirement: str, options: Sequence[object], facts: MasterFacts) -> Stated | None:
+    """0.1.11.4 A3: the master line that states ONE of a row's ``alternatives`` (the posting's own "any one of"), or ``None``.
+
+    The row's head is not read ("hands-on experience with cloud infrastructure tooling"); the alternative is, by
+    :func:`stated`: it must be a key term the master states. Left as it came when the head asks for people, a level or
+    a credential, holds a number other than "N years" (the years are then required OF the alternative), names a tool
+    of its own that the master does not state, or joins the alternatives with "and" (a set: every one is required).
+    """
+
+    names = [" ".join(item.split()) for item in options if isinstance(item, str) and item.strip()]
+    text = " ".join(requirement.split())
+    spans = list(_YEARS.finditer(text))
+    if not names or len(spans) > 1:
+        return None
+    years = _number(spans[0].group(1)) if spans else None
+    rest = f"{text[: spans[0].start()]} {text[spans[0].end():]}" if spans else text
+    places = [found.span() for name in names for found in [re.search(r"(?<![A-Za-z0-9+#_.\-])" + re.escape(name) + r"(?![A-Za-z0-9+#_\-])", rest, re.IGNORECASE)] if found]
+    head = rest
+    if places:
+        first, last = min(start for start, _end in places), max(end for _start, end in places)
+        between = [token.casefold() for token in _TOKEN.findall(rest[first:last])]
+        if any(token in _AND for token in between):
+            return None
+        head = f"{rest[:first]} {rest[last:]}"
+    # "one of the following" is what ``alternatives`` means; any other number is a count this check does not read.
+    if _BEYOND.search(head) or any(char.isdigit() for char in head) or any(token.casefold() in _NUMBER_WORDS and token.casefold() != "one" for token in _TOKEN.findall(head)):
+        return None
+    # A tool the head itself names ("Python, with one of Django or Flask") is required beside the alternative.
+    own: list[Line] = []
+    for at, token in enumerate(_TOKEN.findall(head)):
+        token = token.rstrip(".'’") or token
+        name, capitalised = _named(token)
+        if not name or token.casefold() in _IGNORED or (at == 0 and capitalised):
+            continue
+        shown = _line_for(_Term(_singular(token), capitalised), facts)
+        if shown is None:
+            return None
+        own.append(shown[0])
+    for name in names:
+        found = stated(f"{years} years of {name}" if years is not None else name, facts)
+        if found is None:
+            continue
+        evidence = tuple(dict.fromkeys([*(line.text for line in own), *found.evidence]))
+        sources = tuple(dict.fromkeys([*(line.id for line in own if line.id is not None), *found.sources]))
+        if len(evidence) <= _MAX_ITEMS:
+            return Stated(evidence, sources, RULE_ALTERNATIVE)
     return None
 
 
@@ -644,6 +955,26 @@ def _key(text: object) -> str:
     return " ".join(str(text).split()).casefold() if isinstance(text, str) else ""
 
 
+def _found(row: Mapping[str, object], facts: MasterFacts) -> Stated | None:
+    """What settles ``row``: its requirement as written (:func:`stated`), else one of its ``alternatives`` (:func:`stated_alternative`)."""
+
+    requirement = str(row.get("requirement"))
+    options = row.get("alternatives")
+    found = stated(requirement, facts, alternatives=bool(options))
+    if found is None and isinstance(options, (list, tuple)) and options and RULE_ALTERNATIVE in ACTIVE_RULES:
+        found = stated_alternative(requirement, options, facts)
+    return found
+
+
+def _track_met_by_a_line(row: Mapping[str, object], facts: MasterFacts) -> bool:
+    """Whether ``row`` is an alternative track ("X or Y", or it carries ``alternatives``) the model met by citing a line the prompt showed."""
+
+    sources = row.get("sources")
+    if not isinstance(sources, (list, tuple)) or not any(isinstance(item, str) and item in facts.ids for item in sources):
+        return False
+    return bool(row.get("alternatives")) or any(token.casefold() in _OR for token in _TOKEN.findall(str(row.get("requirement"))))
+
+
 def settle_stated(
     matrix: Iterable[dict[str, object]], questions: Sequence[object], facts: MasterFacts,
 ) -> tuple[list[object], list[object], list[tuple[dict[str, object], str]]]:
@@ -652,16 +983,33 @@ def settle_stated(
     IN PLACE, like ``suggestion_check.with_verbatim_evidence``: a settled row's ``status`` is ``met``, its
     ``resume_evidence`` the master's line(s) and its ``sources`` the ids of those that have one. A question is dropped
     when it names a settled row. Every other row and question is returned as it came.
+
+    0.1.11.4 A3: a question that names a row which is ``met`` ALREADY is dropped too, when this check finds the row
+    stated itself or the row is an alternative track met by a line the prompt showed (the module text). That row is
+    not touched; it is in the returned list under a rule of :data:`QUESTION_ONLY_RULES`.
     """
 
+    rows = [row for row in matrix if isinstance(row, dict)]
+    asked = {_key(question.get("requirement")) for question in questions if isinstance(question, Mapping)}
+    asked.discard("")
     settled: list[tuple[dict[str, object], str]] = []
-    for row in matrix:
+    for row in rows:
         requirement = row.get("requirement")
-        if row.get("status") != "unclear" or not isinstance(requirement, str) or not requirement.strip():
+        status = row.get("status")
+        if status not in ("unclear", "met") or not isinstance(requirement, str) or not requirement.strip():
             continue
         if is_eligibility_id(row.get("id")) or is_authorization_row(row):
             continue  # the setup's rows; sponsorship is a label
-        found = stated(requirement, facts, alternatives=bool(row.get("alternatives")))
+        if status == "met":
+            # Never changed. Only its question, if it has one, is looked at.
+            if _key(requirement) not in asked:
+                continue
+            if RULE_MET_QUESTION in ACTIVE_RULES and _found(row, facts) is not None:
+                settled.append((row, RULE_MET_QUESTION))
+            elif RULE_TRACK_QUESTION in ACTIVE_RULES and _track_met_by_a_line(row, facts):
+                settled.append((row, RULE_TRACK_QUESTION))
+            continue
+        found = _found(row, facts)
         if found is None:
             continue
         row["status"] = "met"
@@ -672,6 +1020,8 @@ def settle_stated(
             row.pop("sources", None)
         settled.append((row, found.rule))
     names = {_key(row.get("requirement")) for row, _ in settled}
+    # Two rows may share their words: a question on them is dropped only when no row of that name is left open.
+    names -= {_key(row.get("requirement")) for row in rows if row.get("status") not in ("met",)}
     kept: list[object] = []
     dropped: list[object] = []
     for question in questions:
@@ -681,9 +1031,19 @@ def settle_stated(
 
 
 __all__ = [
+    "ACTIVE_RULES",
     "MAX_LINES",
+    "QUESTION_ONLY_RULES",
+    "RULE_ALTERNATIVE",
+    "RULE_BESIDE",
+    "RULE_COMPOUND",
+    "RULE_KIND",
     "RULE_LINE",
+    "RULE_MET_QUESTION",
+    "RULE_PARTIAL",
+    "RULE_PHRASE",
     "RULE_SKILLS",
+    "RULE_TRACK_QUESTION",
     "RULE_YEARS_ROLES",
     "RULE_YEARS_STATED",
     "Line",
@@ -693,4 +1053,5 @@ __all__ = [
     "read_master",
     "settle_stated",
     "stated",
+    "stated_alternative",
 ]

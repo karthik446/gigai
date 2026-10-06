@@ -734,7 +734,10 @@ class AssessChecks(_Contract):
     """0.1.11.4 OBS (additive): what the code checks did to one stored v9 assessment, counts and kinds only.
 
     ``settled_rows`` / ``settled_by_rule``: ``unclear`` rows the master's own lines settled as ``met`` (A2,
-    ``stated_check``), by rule. ``questions_dropped``: the questions dropped with them. ``questions_capped``: questions
+    ``stated_check``), by rule. 0.1.11.4 A3 adds rule names (``master_phrase``, ``compound_name``, ``kind_words``,
+    ``line_takes_back_other``, ``alternative``) and two that count a question dropped on a row that was ``met``
+    already (``met_row_question``, ``alternative_track_question``): those are in ``settled_by_rule`` and
+    ``questions_dropped``, never in ``settled_rows``. ``questions_dropped``: the questions dropped. ``questions_capped``: questions
     dropped past the list-item and must-have caps. ``suggestions_dropped``: structured suggestions the code check
     dropped (A1), by reason. ``citations_cleaned``: evidence items that were not one verbatim line, by what the check
     did. No requirement, master or resume text and no row id; the keys are rule/reason/action names from the code.
