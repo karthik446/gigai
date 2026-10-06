@@ -322,15 +322,21 @@ class ApplicationsRoutesMixin:
                 self._error(_status_for(exc.code), exc.code, str(exc))
                 return
         event = result.get("event")
-        self._write_json(
-            HTTPStatus.CREATED,
-            {
-                "schema_version": "scout-application-response:1",
-                "status": result.get("status"),
-                "event": event,
-                "job_state": _job_state_json([*events, event] if isinstance(event, dict) else events),
-            },
-        )
+        response: dict[str, object] = {
+            "schema_version": "scout-application-response:1",
+            "status": result.get("status"),
+            "event": event,
+            "job_state": _job_state_json([*events, event] if isinstance(event, dict) else events),
+        }
+        if event_kind == "applied":
+            # 0.1.11.4 R1: never refused; a posting that looks closed gets a plain note beside the recorded event.
+            from ..posting_live import job_liveness
+
+            with committed_read_cache():  # the workpad check that just passed is the kept one (no further git process)
+                note = job_liveness(self._backend.home_root, self._backend.target, normalized_url).note
+            if note:
+                response["posting_note"] = note
+        self._write_json(HTTPStatus.CREATED, response)
 
 
 __all__ = ["ApplicationsRoutesMixin"]

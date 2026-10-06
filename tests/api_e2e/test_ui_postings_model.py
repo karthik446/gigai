@@ -267,7 +267,7 @@ def test_the_row_chips_say_the_state_the_scout_label_stale_and_removed(out: dict
     ]
     assert chips["removed"] == [
         ("state", "Not a match", "danger", None), ("assessed", "Assessed", "plain", None),
-        ("stale", "Old assessment: settings changed", "warn", "stale-chip"), ("removed", "Removed", "danger", None),
+        ("stale", "Old assessment: settings changed", "warn", "stale-chip"), ("removed", "Closed", "danger", None),
     ]
     assert [kind for kind, *_rest in chips["unknownLabel"]] == ["state", "assessed"], "a label code the backend does not have is never shown"
     assert out["scores"] == ["not ranked yet · not assessed", "73% of requirements met", "rank 81"]

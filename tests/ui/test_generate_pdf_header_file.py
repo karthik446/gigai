@@ -72,7 +72,7 @@ def test_the_header_file_fills_the_generate_pdf_form_and_stays_editable(ui, scou
     from pypdf import PdfReader
 
     demo = scout_server.demo
-    header_file = scout_server.root / "home" / "header.json"
+    header_file = scout_server.home / "Documents" / "GigAI" / "header.json"
     assert not header_file.exists(), "the synthetic home starts without a header file"
     address = "/#/pdf/" + quote(demo.hero_profile_id, safe="") + "/" + quote(demo.hero_job, safe="")
     _write(header_file, FILE)
@@ -80,7 +80,7 @@ def test_the_header_file_fills_the_generate_pdf_form_and_stays_editable(ui, scou
         # --- filled: "Filled from <path>", every field holds the file's value ---
         said = _open(ui, address, filled=True)
         assert said.startswith("Filled from ") and said.endswith("header.json. Edit anything below before you generate; the file is not changed."), said
-        assert "/home/header.json" in said and str(scout_server.home) not in said, "the path is shown as the person types it (~/...)"
+        assert "~/Documents/GigAI/header.json" in said and str(scout_server.home) not in said, "the path is shown as the person types it (~/...)"
         assert _fields(ui) == FILLED
         assert list(_fields(ui)) == list(FILLED), "the file's other links sit between the link fields and the work authorization line"
         labels = ui.page.locator(f'{FORM} [data-role="generate-pdf-file-link"]').evaluate_all("(fields) => fields.map((field) => field.labels[0].textContent.trim())")

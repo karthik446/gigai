@@ -50,6 +50,13 @@ pytest.register_assert_rewrite("tests.ui.jobs_page")  # its asserts explain them
 
 from tests.ui import support  # noqa: E402
 
+
+def demo_gigai_home(root: Path) -> Path:
+    """The demo's GigAI home: M1 (0.1.11.4) builds it at <temporary HOME>/.gigai, beside the demo root."""
+
+    return root.parent / ".gigai"
+
+
 REPO = Path(__file__).resolve().parents[2]
 REQUIRED_ENV = "GIGAI_UI_REQUIRED"
 ARTIFACTS_ENV = "GIGAI_UI_ARTIFACTS"
@@ -59,7 +66,7 @@ PATIENCE_MS = int(os.environ.get("GIGAI_UI_PATIENCE_MS", "20000"))
 #: Environment the server and the home build must NOT inherit from the developer's shell.
 SCRUBBED = ("GIGAI_HOME", "GIGAI_SCOUT_PIPELINE")
 #: Belt and braces beside the fixture seams demo_home sets: no network snapshot, no background model tagging.
-EXTRA_SEAMS = {"GIGAI_SCOUT_SNAPSHOT": "0", "GIGAI_SCOUT_MODEL_TAGS": "0"}
+EXTRA_SEAMS = {"GIGAI_SCOUT_SNAPSHOT": "0", "GIGAI_SCOUT_MODEL_TAGS": "0", "GIGAI_SCOUT_POSTING_LIVENESS": "0"}
 FIXTURE_LATENCY_SCALE = "8"  # only widens the server's 15 s health wait on a slow machine
 
 _OPERATOR_FIXTURES = frozenset({"operator_ui", "operator_server"})
@@ -180,7 +187,7 @@ class ScoutServer:
 
     @property
     def target(self) -> Path:
-        return self.root / "home" / "scout"
+        return demo_gigai_home(self.root) / "scout"
 
 
 @pytest.fixture(scope="session")
@@ -199,7 +206,7 @@ def scout_server() -> Iterator[ScoutServer]:
             from tools.media import demo_home
 
             demo = demo_home.build(root, log=lambda line: None)
-            state = run_supervisor.status(home_root=root / "home", requested_target=root / "home" / "scout")
+            state = run_supervisor.status(home_root=demo_gigai_home(root), requested_target=demo_gigai_home(root) / "scout")
         if state.state != "running" or state.pid is None:
             raise RuntimeError(f"the Scout server is not running after the home was built: {state.state}")
         _RUN["small_home_build_seconds"] = round(time.monotonic() - started, 1)

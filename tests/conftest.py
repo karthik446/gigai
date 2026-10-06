@@ -288,3 +288,10 @@ def _no_snapshot_request(monkeypatch: pytest.MonkeyPatch) -> None:
     """Update sources tries the shipped snapshot first: no test may reach the real release URL. Snapshot tests pass their own environ/client."""
 
     monkeypatch.setenv("GIGAI_SCOUT_SNAPSHOT", "0")
+
+
+@pytest.fixture(autouse=True)
+def _no_posting_liveness_request(monkeypatch: pytest.MonkeyPatch) -> None:
+    """0.1.11.4 R1: opening or assessing a job asks its board whether the posting is still open: no test may reach a real board. The liveness tests switch it on with their own fake transport."""
+
+    monkeypatch.setenv("GIGAI_SCOUT_POSTING_LIVENESS", "0")

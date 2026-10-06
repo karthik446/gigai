@@ -1558,6 +1558,11 @@ def assess_command(
         _fail(exc, as_json=as_json, fallback="invalid_value")
         return
 
+    from .find_jobs.posting_live import CLOSED_ASSESS_MESSAGE, ERROR_POSTING_CLOSED, closed_before_assess
+
+    if closed_before_assess(home_root, target, job_url or None) is not None:  # 0.1.11.4 R1: no model call for a closed posting
+        _fail(QuickAssessError(ERROR_POSTING_CLOSED, CLOSED_ASSESS_MESSAGE), as_json=as_json, fallback="scout_assess_failed", assess=True)
+        return
     if not as_json:
         click.echo("Assessing (one model call; this can take up to a minute)...")
     try:

@@ -746,6 +746,7 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
             "work_mode_fit": None,
             "h1b": None,
             "index_posting": None,
+            "liveness": {"state": "open", "checked_at": "2026-10-06T10:00:00Z", "closed_at": None, "note": None},
             "assessments": [{
                 "source": "run", "run_id": "run_20260929T100000Z", "profile_id": None, "verdict": "matched_above_threshold",
                 "matrix": [{"requirement": "Helm", "class": "list_item", "status": "unclear", "resume_evidence": []}],
@@ -773,7 +774,13 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
         errors=(_INVALID, _UNKNOWN_KEY, _NOT_FOUND, _NO_TARGET, (403, "forbidden_origin")),
         host_checked=True,
         description=(
-            "Read only; never calls a model or the network. Aggregates the newest run posting, its rank, every run or quick "
+            "Never calls a model. 0.1.11.4: `liveness` says whether the posting's board still lists it: `state` is open | closed | unknown, "
+            "`checked_at` when the board was asked, `closed_at` since when it is closed, `note` one plain sentence for a closed one "
+            "(null otherwise). That is ONE request to the posting's public board at most (Greenhouse: its single-job endpoint, 404 or "
+            "410 is closed; Lever and Ashby: the board's list, closed only when a list that answered 200 no longer has the posting), "
+            "none within an hour of the last answer and none for a posting already removed; anything else the board says (5xx, 429, a "
+            "redirect, a timeout) is unknown and changes nothing. A closed posting of the index gets `removed_at` (GET /api/postings "
+            "then lists it only with `removed=1`); a job that is no index posting is only reported. Aggregates the newest run posting, its rank, every run or quick "
             "assessment of the job (with the requirement matrix), the questions still unanswered, stored tailored resumes, the job's "
             "state with the events it accepts next, and the action links. The UI route `#/jobs/<posting url>` maps to this route. "
             "A job no run acquired is joined to its index posting by the URL alone, whatever host it is on (a Greenhouse board "
@@ -992,9 +999,11 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
         {"schema_version": "scout-assess-response:1", "job": {"job_identity": _JOB_URL}, "result": {"verdict": "matched_above_threshold", "matrix": [], "suggestions": [], "questions": []}},
         schema_version="scout-assess-response:1", params=(*_JOB_INPUT, _b("preferences", "object", "Override the effective preferences."), _b("origin", "string", "quick_assess | job_page.")),
         request_example={"job": {"job_url": _JOB_URL}},
-        errors=(*_ROW_ERRORS, (422, "job_input_invalid"), (502, "job_fetch_failed"), (504, "assess_timeout"), *_MODEL_ERRORS, (500, "assessment_not_stored"), _NO_TARGET),
+        errors=(*_ROW_ERRORS, (422, "job_input_invalid"), (502, "job_fetch_failed"), (504, "assess_timeout"), *_MODEL_ERRORS, (500, "assessment_not_stored"), (409, "posting_closed"), _NO_TARGET),
         description=(
             "Synchronous: blocks for the model call (and a public fetch for job_url). Stores the assessment; read it back with GET /api/jobs?url=. "
+            "0.1.11.4: a job_url whose board no longer lists the posting (GET /api/jobs `liveness.state: closed`) answers 409 posting_closed "
+            "with that `liveness` and makes no model call; pasted job_text is always assessed. "
             "An error whose code is model_target_unavailable, model_denied, model_unavailable, assess_timeout, model_output_invalid or "
             "assessment_not_stored also carries `model_call_started`, `may_have_used_tokens`, `fresh_assessment_stored` (always false) and "
             "`next_action`. This route does not ask first: POST /api/postings/assess without `approve` is the no-call preview of what an "
@@ -1179,6 +1188,10 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
             _b("occurred_at", "string", "ISO time; default now."), _b("notes", "string", "Free text."),
         ),
         request_example={"normalized_url": _JOB_URL, "event_kind": "applied"}, errors=(_UNKNOWN_KEY, _INVALID, (409, "invalid_transition"), _NO_TARGET),
+        description=(
+            "0.1.11.4: `applied` is never refused for a posting that looks closed; the answer then also carries `posting_note` "
+            "(\"This posting looks closed: check it before you apply\"; the key is absent otherwise)."
+        ),
     ),
     RouteSpec(
         "GET", "/api/applications", "Every application event, by job.", "read", "none", {"applications": []}, errors=(_NO_TARGET,),
@@ -1714,7 +1727,9 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
             "Returns application/pdf with Content-Disposition: attachment; filename=`<company>-<role>-<YYYY-MM-DD>.pdf` (never your name); changes nothing. "
             + _HEADER_NOTE
             + " The PDF stays on the resume's page limit: a saved spacing that would run past it is tightened (to 0.8), then the Skills are laid out compactly, then the spacing goes to 0.7 at most; "
-            "when no spacing fits, the PDF is rendered as saved and X-GigAI-Fit-Note says so in one plain sentence (page counts and what to do; nothing of the resume)."
+            "when no spacing fits, the PDF is rendered as saved and X-GigAI-Fit-Note says so in one plain sentence (page counts and what to do; nothing of the resume). "
+            "0.1.11.4: when the posting's board no longer lists it the PDF is made all the same and X-GigAI-Posting-Note says "
+            "\"This posting looks closed: check it before you apply\" (GET /api/jobs `liveness`: one board request at most, none within the hour)."
         ),
     ),
     RouteSpec(
@@ -2089,7 +2104,10 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
         description=(
             "The yes or no to `status: \"ask\"`. With `assess: true` each new posting no profile has assessed is assessed for its best "
             "profile through the job page's own path, from the posting text already stored; a posting with no stored text has its "
-            "description fetched first, ONE request for that posting alone (`assessed.fetched_on_demand` counts them); the calls are "
+            "description fetched first, ONE request for that posting alone (`assessed.fetched_on_demand` counts them); 0.1.11.4: each posting of "
+            "the batch is first asked about at its board (one request, none within the hour) and one the board no longer lists is not "
+            "assessed: no model call, `removed_at` is set, it is in `assessed.failed` as `posting_closed` and counted in "
+            "`assessed.closed_skipped` (the key is absent when none was closed); the calls are "
             "recorded like every model call (GET /api/metrics). `assessed.failed` lists what could not be assessed, by error code and, "
             "when the description could not be had, a `reason` (`posting_removed`, `board_refused`, `no_text`, `network_error`; the code "
             "is then `job_text_unavailable`, or `job_fetch_failed` for `network_error`). `posting_requirements_unreadable` (the "
@@ -2409,7 +2427,10 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
             "recorded as approved (`approval`: its id, who approved, how many), runs as live work (the pipeline and the rank lane "
             "start nothing meanwhile; a second batch answers 409 assess_batch_running) and each posting is assessed for its best "
             "profile through the job page's own path, from the posting text already stored (a posting with none has its description "
-            "fetched first: one request for it alone, counted in `assessed.fetched_on_demand`). The results are "
+            "fetched first: one request for it alone, counted in `assessed.fetched_on_demand`). 0.1.11.4: each posting of the batch (50 at "
+            "most) is first asked about at its board (one request, none within the hour); one the board no longer lists is not assessed: "
+            "no model call, `removed_at` is set, it is in `assessed.failed` as `posting_closed` and counted in `assessed.closed_skipped` "
+            "(the key is absent when none was closed). The results are "
             "stored like any assessment, so GET /api/postings, GET /api/new and GET /api/jobs show them. `status` is then "
             "`assessed`; `assessed.failed` lists what could not be assessed, by error code and, for a missing description, a `reason`; "
             "a typed cause (model_target_unavailable, model_denied, model_unavailable, assess_timeout, model_output_invalid, "

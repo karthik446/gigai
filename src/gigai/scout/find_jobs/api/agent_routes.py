@@ -260,6 +260,11 @@ class AgentRoutesMixin:
             return
         home_root = backend.home_root
 
+        # 0.1.11.4 R1: is the posting still open? One request at most (none for a row already removed, none within the
+        # hour); a closed one is marked removed before the job is read, so the read below serves it as removed.
+        from ..posting_live import job_liveness
+
+        live = job_liveness(home_root, target, identity)
         try:
             body = self._job_aggregate(identity, home_root=home_root, target=target)
         except QuickAssessError as exc:
@@ -268,6 +273,7 @@ class AgentRoutesMixin:
         if body is None:
             self._error(HTTPStatus.NOT_FOUND, "not_found", "no run, assessment or tailored resume names that job")
             return
+        body["liveness"] = live.to_json()
         self._write_json(HTTPStatus.OK, body)
 
     def _job_aggregate(self, identity: str, *, home_root: Path, target: Path) -> dict[str, object] | None:

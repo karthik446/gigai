@@ -771,7 +771,17 @@ export default function FindJobsView({
     setPostingLookup({ id: jobRouteId, done: false });
     getPostings(postingsQuery(EMPTY_FILTER, { limit: MAX_LOOKUP_ROWS }))
       // 0110-9-01: a 202 "preparing" answer has no rows yet.
-      .then((response) => addPostingRows(response.postings ? response.postings.rows : []))
+      .then((response) => {
+        const found = response.postings ? response.postings.rows : [];
+        addPostingRows(found);
+        if (found.some((row) => row.job_identity === jobRouteId)) {
+          return undefined;
+        }
+        // 0.1.11.4 R1: a posting its board no longer lists is under Removed; its page still opens and says it is closed.
+        return getPostings(postingsQuery({ ...EMPTY_FILTER, removed: true }, { limit: MAX_LOOKUP_ROWS })).then((removed) =>
+          addPostingRows(removed.postings ? removed.postings.rows : []),
+        );
+      })
       .catch(() => {})
       .finally(() => setPostingLookup((current) => (current.id === jobRouteId ? { id: jobRouteId, done: true } : current)));
   }, [jobRouteId, jobInLoaded, settled, postingLookup.id, addPostingRows]);
