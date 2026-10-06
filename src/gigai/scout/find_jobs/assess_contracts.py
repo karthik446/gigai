@@ -738,6 +738,8 @@ class AssessChecks(_Contract):
     dropped past the list-item and must-have caps. ``suggestions_dropped``: structured suggestions the code check
     dropped (A1), by reason. ``citations_cleaned``: evidence items that were not one verbatim line, by what the check
     did. No requirement, master or resume text and no row id; the keys are rule/reason/action names from the code.
+    ``questions_removed`` (Q4, omitted when empty): questions dropped by a truth check, by reason
+    (``place_not_in_posting``: the question named a city no text the prompt showed names).
     """
 
     settled_rows: int = 0
@@ -746,9 +748,10 @@ class AssessChecks(_Contract):
     questions_capped: int = 0
     suggestions_dropped: tuple[tuple[str, int], ...] = ()
     citations_cleaned: tuple[tuple[str, int], ...] = ()
+    questions_removed: tuple[tuple[str, int], ...] = ()
 
     def to_json(self) -> dict[str, object]:
-        return {
+        value: dict[str, object] = {
             "settled_rows": self.settled_rows,
             "settled_by_rule": dict(self.settled_by_rule),
             "questions_dropped": self.questions_dropped,
@@ -756,6 +759,9 @@ class AssessChecks(_Contract):
             "suggestions_dropped": dict(self.suggestions_dropped),
             "citations_cleaned": dict(self.citations_cleaned),
         }
+        if self.questions_removed:
+            value["questions_removed"] = dict(self.questions_removed)
+        return value
 
     @classmethod
     def from_json(cls, obj: object) -> "AssessChecks":
@@ -763,7 +769,7 @@ class AssessChecks(_Contract):
             "settled_rows", "settled_by_rule", "questions_dropped", "questions_capped",
             "suggestions_dropped", "citations_cleaned",
         )
-        value = _object(obj, keys, "checks")
+        value = _object_with_optional(obj, keys, ("questions_removed",), "checks")
 
         def counts(name: str) -> tuple[tuple[str, int], ...]:
             raw = value[name]
@@ -781,6 +787,7 @@ class AssessChecks(_Contract):
             questions_capped=_integer(value["questions_capped"], "checks.questions_capped", minimum=0),
             suggestions_dropped=counts("suggestions_dropped"),
             citations_cleaned=counts("citations_cleaned"),
+            questions_removed=counts("questions_removed") if "questions_removed" in value else (),
         )
 
 

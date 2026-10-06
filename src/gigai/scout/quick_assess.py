@@ -564,6 +564,7 @@ def _checks_of(extras: AssessExtras | None) -> AssessChecks | None:
         questions_capped=len(extras.capped_questions) + len(extras.capped_mandatory_questions),
         suggestions_dropped=by(reason for _kind, reason in extras.checked_suggestions),
         citations_cleaned=by(extras.checked_citations),
+        questions_removed=(("place_not_in_posting", extras.unplaced_questions),) if extras.unplaced_questions else (),
     )
 
 
