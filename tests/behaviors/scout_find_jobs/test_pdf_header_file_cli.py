@@ -151,7 +151,7 @@ def test_a_file_other_users_can_read_is_used_and_warned_about(fx: dict[str, Path
         (None, "header_file_missing", "There is no header file at"),
         ('{"name": "Zora Quillfeather", ', "header_file_invalid", "is not valid JSON"),
         ({"name": "Zora Quillfeather", "phone": ["555-0142-ZQ"]}, "header_file_invalid", "phone must be text in double quotes"),
-        ({"email": "zora.q@example.invalid"}, "header_file_invalid", "has no name; a PDF header needs one"),
+        ({"email": "zora.q@example.invalid"}, "header_file_invalid", "has no name yet; a PDF header needs one"),
     ],
 )
 def test_a_missing_or_unusable_file_is_one_plain_sentence(fx: dict[str, Path], content: object, code: str, says: str) -> None:

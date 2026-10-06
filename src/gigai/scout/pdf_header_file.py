@@ -26,7 +26,7 @@ SHORTHAND (item 16).  ``github`` and ``linkedin`` take just the id (``github.com
 ``linkedin.com/in/<id>``); the same thing written as ``github.com/<id>`` or as a full URL is accepted and
 read as the id.  ``website`` takes a host or a URL.  Each prints without ``https://`` or ``www.`` and is a
 clickable link to the full URL.  ``links`` keeps working beside them; a link both name prints once.  A
-shorthand value that still starts with ``REPLACE`` (a template's placeholder) is skipped.
+shorthand value that still starts with ``REPLACE`` is a placeholder like any other (item 14, below).
 
 **GigAI only READS it, at PDF time.**  ``read_header_file`` is called from exactly two places: the
 Generate PDF form's prefill (``api/pdf_header.py``, the browser page's own route) and ``gigai scout
@@ -38,6 +38,13 @@ suggestion or a model prompt (``tests/behaviors/scout_find_jobs/test_pdf_header_
 Precedence, wherever a header is put together: what the person edits in the form, then this file,
 then the profile's sponsorship answer (the ``work_authorization`` line only, and only when the file
 does not have that key at all: a key that is there and empty means "no line").
+
+0.1.11.3 item 14: a value that starts with ``REPLACE`` is a template placeholder nobody filled in yet.  It
+never fills the form and never prints in a PDF, and neither does an empty value: the real fields are used,
+the placeholders are skipped and the answer names them (field names only).  A file whose name is missing
+or a placeholder says "has no name yet": the form flags it and ``gigai scout resume pdf`` refuses.  The Generate PDF form may also WRITE this file, once, when the
+person presses "Save these details to <path>": that is ``pdf_header_save``, not this module, which still
+only reads.
 """
 
 from __future__ import annotations
@@ -58,8 +65,6 @@ FILE_NAME = "header.json"
 FILE_FIELDS: tuple[str, ...] = ("name", "email", "phone", "location", "github", "linkedin", "website", "links", "work_authorization")
 #: Item 16: the shorthand link fields, in the order their links print.
 SHORTHAND_FIELDS: tuple[str, ...] = ("github", "linkedin", "website")
-#: A value a template left for the person to fill in: skipped, never printed.
-PLACEHOLDER_PREFIX = "REPLACE"
 LINK_FIELDS: tuple[str, ...] = ("label", "url")
 MAX_LINKS = 6
 #: The file is a handful of short lines; anything larger is not this file.
@@ -68,6 +73,13 @@ MAX_BYTES = 16 * 1024
 STATE_FILLED = "filled"
 STATE_MISSING = "missing"
 STATE_INVALID = "invalid"
+#: 0.1.11.3 item 14: the file is there and valid, and every value in it is still a template placeholder.
+STATE_PLACEHOLDER = "placeholder"
+#: A value that starts with this is a template's placeholder, not the person's own: never filled, never printed.
+PLACEHOLDER_PREFIX = "REPLACE"
+
+#: ``gigai scout resume pdf``: the error code of a file that cannot make the header, by its state.
+FAILURE_CODES = {STATE_MISSING: "header_file_missing", STATE_INVALID: "header_file_invalid", STATE_PLACEHOLDER: "header_file_placeholders"}
 
 #: What the ``work_authorization`` line starts as when the profile says sponsorship is needed and the header
 #: file does not say otherwise.  The same sentence as the form's (``ui/src/generatePdfModel.js``).
@@ -109,6 +121,12 @@ class HeaderFile:
     values: dict[str, object] | None = field(default=None, repr=False)
     #: Whether the file has a ``work_authorization`` key at all (an empty one means "no line").
     has_work_authorization: bool = False
+    #: The fields skipped because their value is still a ``REPLACE`` placeholder (names of ``FILE_FIELDS`` only, never a value).
+    placeholders: tuple[str, ...] = ()
+    #: One plain sentence about those placeholders, or ``None``.  Never a value.
+    notice: str | None = None
+    #: "<path> has no name yet." when the file is valid and its name is missing, empty or a placeholder; else ``None``.
+    name_note: str | None = None
 
     @property
     def shown(self) -> str:
@@ -145,6 +163,10 @@ def _unknown(keys: object, allowed: tuple[str, ...], where: str = "") -> None:
             raise _Invalid(f"{named} is not a field of this file (the fields: {', '.join(allowed)})")
 
 
+def _is_placeholder(value: str) -> bool:
+    return value.startswith(PLACEHOLDER_PREFIX)
+
+
 def _bare(value: str) -> str:
     """``value`` without a scheme, ``www.``, a query, a fragment or a trailing slash: what an id is read from."""
 
@@ -155,7 +177,7 @@ def _shorthand(key: str, value: str) -> str | None:
     """The link a shorthand value names, as ``host/path`` (no scheme: the header adds ``https://`` for the
     target); ``None`` for an empty value or a placeholder.  ``_Invalid`` names the field and the rule only."""
 
-    if not value or value.startswith(PLACEHOLDER_PREFIX):
+    if not value or _is_placeholder(value):
         return None
     bare = _bare(value)
     if key == "github":
@@ -174,20 +196,27 @@ def _shorthand(key: str, value: str) -> str | None:
     return _WWW.sub("", _SCHEME.sub("", value)).rstrip("/")
 
 
-def form_values(raw: object) -> tuple[dict[str, object], bool]:
-    """``(the Generate PDF form's values, whether work_authorization is set at all)`` from the file's JSON; ``_Invalid`` otherwise.
+def form_values(raw: object) -> tuple[dict[str, object], bool, tuple[str, ...]]:
+    """``(the Generate PDF form's values, whether work_authorization is set at all, the placeholder fields)`` from the file's JSON; ``_Invalid`` otherwise.
 
     A link labelled LinkedIn (or to linkedin.com) fills the form's LinkedIn field, once; every other link is a row
-    of ``links`` under its own label.  The shorthand fields (``_shorthand``) come first: ``linkedin`` fills that
-    same field, ``github`` and ``website`` are rows labelled GitHub and Website; a ``links`` row that names a link
-    already there is left out.  Pure: no I/O, never logs."""
+    of ``links`` under its own label.  The shorthand fields (``_shorthand``, item 16) come first: ``linkedin`` fills
+    that same field, ``github`` and ``website`` are rows labelled GitHub and Website; a ``links`` row that names a
+    link already there is left out.  A value that starts with ``REPLACE`` is a placeholder: its field stays empty
+    (a link whose label or url is one is left out; a shorthand that is one adds no link) and is named in the third
+    item; a placeholder ``work_authorization`` counts as a key that is not there.  A link with an empty url is left
+    out too.  Pure: no I/O, never logs."""
 
     if type(raw) is not dict:
         raise _Invalid("the file must hold one JSON object, like " + _EXAMPLE)
     _unknown(raw, FILE_FIELDS)
     values: dict[str, object] = {key: "" for key in HEADER_FIELDS}
+    placeholders: list[str] = []
     for key in ("name", "email", "phone", "location", WORK_AUTHORIZATION_FIELD):
         values[key] = _text(raw, key)
+        if _is_placeholder(str(values[key])):
+            values[key] = ""
+            placeholders.append(key)
     links = raw.get("links", [])
     if type(links) is not list:
         raise _Invalid('links must be a list, like [{"label": "LinkedIn", "url": "..."}]')
@@ -196,7 +225,11 @@ def form_values(raw: object) -> tuple[dict[str, object], bool]:
     rows: list[dict[str, str]] = []
     seen: set[str] = set()
     for key, label in (("github", "GitHub"), ("linkedin", "LinkedIn"), ("website", "Website")):
-        url = _shorthand(key, _text(raw, key))
+        given = _text(raw, key)
+        if _is_placeholder(given):
+            placeholders.append(key)
+            continue
+        url = _shorthand(key, given)
         if url is None or link_key(url) in seen:
             continue
         seen.add(link_key(url))
@@ -211,7 +244,11 @@ def form_values(raw: object) -> tuple[dict[str, object], bool]:
         _unknown(item, LINK_FIELDS, where)
         label, url = _text(item, "label", where), _text(item, "url", where)
         if not url:
-            raise _Invalid(f"{where}url is empty")
+            continue
+        if _is_placeholder(url) or _is_placeholder(label):
+            if "links" not in placeholders:
+                placeholders.append("links")
+            continue
         if link_key(url) in seen:
             continue  # the same link as a shorthand field or an earlier row: once
         seen.add(link_key(url))
@@ -222,7 +259,16 @@ def form_values(raw: object) -> tuple[dict[str, object], bool]:
     if len(rows) > MAX_LINKS:
         raise _Invalid(f"the file names more than {MAX_LINKS} links besides LinkedIn")
     values["links"] = rows
-    return values, WORK_AUTHORIZATION_FIELD in raw
+    has_line = WORK_AUTHORIZATION_FIELD in raw and WORK_AUTHORIZATION_FIELD not in placeholders
+    # In the file's own order, whatever order they were found in.
+    return values, has_line, tuple(key for key in FILE_FIELDS if key in placeholders)
+
+
+def placeholder_notice(shown: str, placeholders: tuple[str, ...], *, all_of_it: bool) -> str:
+    """The one sentence about a file that still holds ``REPLACE`` placeholders: field names only, never a value."""
+
+    sentence = f"{shown} still has placeholder values: replace the REPLACE: fields (or save your details here)."
+    return sentence if all_of_it else f"{sentence} Skipped: {', '.join(placeholders)}."
 
 
 def _where_it_goes(shown: str) -> str:
@@ -255,13 +301,20 @@ def read_header_file(path: Path) -> HeaderFile:
         # A JSON error's own text can quote the file: say only that it is not JSON.
         return HeaderFile(path, STATE_INVALID, f"{shown} is not valid JSON, so it was not used. It should look like " + _EXAMPLE + ".")
     try:
-        values, has_line = form_values(raw)
+        values, has_line, placeholders = form_values(raw)
     except _Invalid as exc:
         return HeaderFile(path, STATE_INVALID, f"{shown} was not used: {exc}.")
+    real = any(values[key] for key in values)
+    if placeholders and not real:
+        # Nothing of the person's own in it yet: the form is not filled and no PDF is made from it.
+        notice = placeholder_notice(shown, placeholders, all_of_it=True)
+        return HeaderFile(path, STATE_PLACEHOLDER, notice, placeholders=placeholders, notice=notice, name_note=f"{shown} has no name yet.")
     warning = None
     if _others_can_read(info.st_mode):
         warning = f"{shown} can be read by other users of this computer. To keep it to yourself: chmod 600 {shown}"
-    return HeaderFile(path, STATE_FILLED, f"Filled from {shown}", warning, values, has_line)
+    notice = placeholder_notice(shown, placeholders, all_of_it=False) if placeholders else None
+    name_note = None if values["name"] else f"{shown} has no name yet."
+    return HeaderFile(path, STATE_FILLED, f"Filled from {shown}", warning, values, has_line, placeholders, notice, name_note)
 
 
 def with_sponsorship_default(values: dict[str, object], *, has_work_authorization: bool, visa_required: bool) -> dict[str, object]:
@@ -284,7 +337,8 @@ def render_form(found: HeaderFile, *, visa_required: bool) -> dict[str, object]:
 
     values = found.values or {}
     if not values.get("name"):
-        raise HeaderFileError(f"{found.shown} has no name; a PDF header needs one")
+        problem = f"{found.shown} has no name yet; a PDF header needs one"
+        raise HeaderFileError(f"{problem}. {found.notice.rstrip('.')}" if found.notice else problem)
     try:
         return parse_header_form(with_sponsorship_default(values, has_work_authorization=found.has_work_authorization, visa_required=visa_required))
     except HeaderFormError as exc:
@@ -302,10 +356,14 @@ def prefill_response(found: HeaderFile) -> dict[str, object]:
         "warning": found.warning,
         "has_work_authorization": found.has_work_authorization,
         "values": found.values,
+        "placeholders": list(found.placeholders),
+        "notice": found.notice,
+        "name_note": found.name_note,
     }
 
 
 __all__ = [
+    "FAILURE_CODES",
     "FILE_FIELDS",
     "FILE_NAME",
     "HeaderFile",
@@ -320,8 +378,10 @@ __all__ = [
     "STATE_FILLED",
     "STATE_INVALID",
     "STATE_MISSING",
+    "STATE_PLACEHOLDER",
     "default_path",
     "form_values",
+    "placeholder_notice",
     "prefill_response",
     "read_header_file",
     "render_form",

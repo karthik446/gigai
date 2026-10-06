@@ -56,6 +56,27 @@ console.log(JSON.stringify({
       maxLinks: m.MAX_LINKS,
     };
   })(),
+  save: (() => {
+    const shown = "~/Documents/GigAI/header.json";
+    const typed = { name: " Zora Quillfeather ", email: "zora.q@example.invalid", phone: "", location: "Quillshire, ZZ", linkedin: " linkedin.com/in/zq ", link: "zq.example.invalid", work_authorization: "", links: [{ label: "GitHub", url: "github.com/zq" }, { label: "Site", url: " " }] };
+    const sentence = shown + " still has placeholder values: replace the REPLACE: fields (or save your details here).";
+    const template = { state: "placeholder", shown, message: sentence, warning: null, has_work_authorization: false, values: null, placeholders: ["name", "email"], notice: sentence, name_note: shown + " has no name yet." };
+    const mixed = { state: "filled", shown, message: "Filled from " + shown, warning: null, has_work_authorization: false, placeholders: ["name", "phone"], notice: sentence + " Skipped: name, phone.", name_note: shown + " has no name yet.", values: { name: "", email: "zora.q@example.invalid", phone: "", location: "", linkedin: "", link: "", work_authorization: "", links: [] } };
+    return {
+      question: m.REPLACE_QUESTION,
+      body: m.headerFileBody(typed),
+      bodyEmpty: m.headerFileBody(null),
+      can: [m.canSave(typed), m.canSave({ name: " " }), m.canSave(null), m.canSave({ work_authorization: "H-1B" }), m.canSave({ links: [{ label: "x", url: "y.invalid" }] })],
+      results: [
+        m.saveResult({ state: "saved", message: "Saved your details to " + shown + "." }),
+        m.saveResult({ state: "exists", message: "There is already a file at " + shown + "." }),
+        m.saveResult({ state: "not_writable", message: "Your details were not saved: GigAI cannot write to ~/Documents/GigAI." }),
+        m.saveResult(null),
+      ],
+      sources: [m.headerSource(template), m.headerSource(mixed)],
+      starts: [m.startValues({ visaRequired: true, file: template }), m.startValues({ visaRequired: true, file: mixed })],
+    };
+  })(),
   notices: [
     m.cleanupNotice({ removed_any: true, shown: false, text: "Removed contact details from 1 stored resume (email 1)." }),
     m.cleanupNotice({ removed_any: true, shown: true, text: "x" }),
@@ -108,8 +129,8 @@ def test_the_form_carries_the_one_privacy_notice_and_spells_out_none_of_it() -> 
     sentence out: it shows the two shared constants.
     """
     assert _run()["exports"] == [
-        "FIELDS", "MAX_LINKS", "MAX_VALUE", "WORK_AUTHORIZATION_PREFILL", "canGenerate", "cleanupNotice", "emptyValues", "fileValues", "headerBody",
-        "headerSource", "startValues",
+        "FIELDS", "MAX_LINKS", "MAX_VALUE", "REPLACE_QUESTION", "WORK_AUTHORIZATION_PREFILL", "canGenerate", "canSave", "cleanupNotice", "emptyValues",
+        "fileValues", "headerBody", "headerFileBody", "headerSource", "saveResult", "startValues",
     ]
     form = (UI_SRC / "components" / "GeneratePdfForm.jsx").read_text(encoding="utf-8")
     assert 'import { PRIVACY_PDF_LINE, PRIVACY_PROMISE } from "../wording.js";' in form
@@ -133,7 +154,12 @@ def test_the_form_keeps_nothing_and_sends_the_values_only_in_the_render_request(
     # 0.1.11.3 item 13: the header file's values come from the server once per open form and live in the same state.
     assert "postPdfHeader().then((file) => {" in form and "setValues(startValues({ visaRequired, file }));" in form
     assert form.count("postPdfHeader(") == 1 and "}, []);" in form, "asked once, when the form opens"
-    assert api.count('fetch("/api/pdf-header", { method: "POST"') == 1 and api.count("/api/pdf-header") == 2, "one caller, and its comment"
+    assert api.count('fetch("/api/pdf-header", { method: "POST"') == 1 and api.count("/api/pdf-header") - api.count("/api/pdf-header/save") == 2, "one caller, and its comment"
+    # 0.1.11.3 item 14: the Save button is the one other request that carries the values: one caller, on a click only.
+    assert api.count('request("POST", "/api/pdf-header/save"') == 1 and api.count("/api/pdf-header/save") == 1, "one caller"
+    assert form.count("postPdfHeaderSave(") == 1 and form.count("saveDetails(") == 3, "the save function, called by the Save and the Replace buttons only"
+    assert "onClick={() => saveDetails(false)}" in form and "onClick={() => saveDetails(true)}" in form
+    assert "useEffect(() => {" in form and form.count("useEffect(") == 1, "nothing but the prefill runs without a click"
     # The only fetches that carry `header` are the two PDF routes.
     assert re.findall(r"body\.header = header", api) == ["body.header = header", "body.header = header"]
     assert 'postPdf("/api/tailored-resumes/pdf", body)' in api and 'postPdf("/api/resume/pdf", body)' in api
@@ -221,14 +247,60 @@ def test_the_header_file_fills_the_form_and_an_edit_wins() -> None:
     blank = {key: "" for key in HEADER_FIELDS}
     assert file["unfilled"] == [{**blank, "work_authorization": SPONSORSHIP_DEFAULT}] * 3, "no usable file: the form is what it was"
     shown = "~/Documents/GigAI/header.json"
+    rest = {"shown": shown, "notice": None, "nameNote": None}  # 0.1.11.3 item 14: the path the Save button names; no placeholders here
     assert file["sources"] == [
-        {"filled": True, "text": f"Filled from {shown}", "warning": None},
-        {"filled": True, "text": f"Filled from {shown}", "warning": f"{shown} can be read by other users of this computer."},
-        {"filled": False, "text": f"There is no header file at {shown}.", "warning": None},
-        {"filled": False, "text": f"{shown} was not used: phone must be text in double quotes.", "warning": None},
+        {"filled": True, "text": f"Filled from {shown}", "warning": None, **rest},
+        {"filled": True, "text": f"Filled from {shown}", "warning": f"{shown} can be read by other users of this computer.", **rest},
+        {"filled": False, "text": f"There is no header file at {shown}.", "warning": None, **rest},
+        {"filled": False, "text": f"{shown} was not used: phone must be text in double quotes.", "warning": None, **rest},
         None, None,
     ]
     assert file["values"] == [True, None, None, None]
     assert file["many"] == file["maxLinks"] == MAX_LINKS
     form = (UI_SRC / "components" / "GeneratePdfForm.jsx").read_text(encoding="utf-8")
     assert 'data-role="pdf-header-source"' in form and 'data-role="pdf-header-warning"' in form and 'data-role="generate-pdf-file-link"' in form
+
+
+def test_the_save_button_sends_the_header_files_shape_and_placeholders_fill_nothing() -> None:
+    """0.1.11.3 item 14: what "Save these details to <path>" sends, what the form says back, and a file with ``REPLACE`` placeholders.
+
+    The request is the header FILE's shape (the reader's own rules take it), from what is in the form at the click.
+    A file that is all placeholders fills nothing; a mixed one fills its real fields and the form names the rest."""
+    from gigai.scout.pdf_header_file import form_values
+    from gigai.scout.pdf_header_save import REPLACE_QUESTION, file_content
+
+    save = _run()["save"]
+    assert save["question"] == REPLACE_QUESTION == "Replace the existing header.json?"
+    assert save["body"] == {
+        "name": "Zora Quillfeather", "email": "zora.q@example.invalid", "phone": "", "location": "Quillshire, ZZ",
+        "links": [{"label": "LinkedIn", "url": "linkedin.com/in/zq"}, {"label": "Link", "url": "zq.example.invalid"}, {"label": "GitHub", "url": "github.com/zq"}],
+        "work_authorization": "",
+    }
+    assert json.loads(file_content(save["body"])) == save["body"], "the server writes exactly what the form sends"
+    # Read back, the LinkedIn field is the LinkedIn field again and the other links are rows.
+    values, has_line, placeholders = form_values(save["body"])
+    assert values["linkedin"] == "linkedin.com/in/zq" and values["links"] == [{"label": "Link", "url": "zq.example.invalid"}, {"label": "GitHub", "url": "github.com/zq"}]
+    assert has_line is True and placeholders == ()
+    assert save["bodyEmpty"] == {"name": "", "email": "", "phone": "", "location": "", "links": [], "work_authorization": ""}
+    assert save["can"] == [True, False, False, True, True], "something typed is enough; nothing typed is not"
+    shown = "~/Documents/GigAI/header.json"
+    assert save["results"] == [
+        {"tone": "saved", "text": f"Saved your details to {shown}.", "ask": False},
+        {"tone": "ask", "text": f"There is already a file at {shown}.", "ask": True},
+        {"tone": "failed", "text": "Your details were not saved: GigAI cannot write to ~/Documents/GigAI.", "ask": False},
+        {"tone": "failed", "text": "Your details were not saved.", "ask": False},
+    ]
+    sentence = f"{shown} still has placeholder values: replace the REPLACE: fields (or save your details here)."
+    assert save["sources"] == [
+        {"filled": False, "text": sentence, "warning": None, "shown": shown, "notice": None, "nameNote": f"{shown} has no name yet."},
+        {"filled": True, "text": f"Filled from {shown}", "warning": None, "shown": shown, "notice": sentence + " Skipped: name, phone.", "nameNote": f"{shown} has no name yet."},
+    ]
+    blank = {key: "" for key in HEADER_FIELDS}
+    assert save["starts"] == [
+        {**blank, "work_authorization": "Requires visa sponsorship"},  # all placeholders: the form is what it was
+        {**blank, "email": "zora.q@example.invalid", "work_authorization": "Requires visa sponsorship"},  # the real field; the profile's line
+    ]
+    form = (UI_SRC / "components" / "GeneratePdfForm.jsx").read_text(encoding="utf-8")
+    for role in ("pdf-header-save", "pdf-header-replace", "pdf-header-replace-yes", "pdf-header-replace-no", "pdf-header-saved", "pdf-header-placeholders"):
+        assert f'data-role="{role}"' in form, role
+    assert "`Save these details to ${source.shown}`" in form and "{REPLACE_QUESTION}" in form

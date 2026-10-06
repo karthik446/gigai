@@ -6647,7 +6647,7 @@
     },
     "/api/pdf-header": {
       "post": {
-        "description": "Scout's own page only: the Generate PDF form's values from the person's header file. NOT for agents: it answers only Scout's own browser page (a request carrying this server's own Origin); any other caller gets 403 forbidden_origin and the file is not opened. An agent never needs it: it renders the PDF without a header and the person finishes it. The person may keep their name and contact details in a JSON file they own, `~/Documents/GigAI/header.json` (a GigAI home other than `~/.gigai`: `<home>/header.json`): {name, email, phone, location, github, linkedin, website, links: [{label, url}], work_authorization}, every field optional. `github` and `linkedin` take just the id (a full address is read as the id) and `website` a site address; in `values` they are already links (`linkedin`: `linkedin.com/in/<id>`; `links` rows labelled GitHub and Website), and a link named twice is there once. GigAI only reads it, here (to fill the Generate PDF form, where the person edits the values before generating) and in `gigai scout resume pdf --out FILE`; it is never copied into the store, the journal, a log, a record, a suggestion, a brief, the resumes folder or a model prompt, and no other route returns it. `state` is filled, missing or invalid; `message` is one plain sentence (what is wrong and where the file goes; never a value); `warning` says so when other users of the computer can read the file; `values` is the form's values when filled, else null. Not cached (Cache-Control: no-store).",
+        "description": "Scout's own page only: the Generate PDF form's values from the person's header file. NOT for agents: it answers only Scout's own browser page (a request carrying this server's own Origin); any other caller gets 403 forbidden_origin and the file is not opened. An agent never needs it: it renders the PDF without a header and the person finishes it. The person may keep their name and contact details in a JSON file they own, `~/Documents/GigAI/header.json` (a GigAI home other than `~/.gigai`: `<home>/header.json`): {name, email, phone, location, github, linkedin, website, links: [{label, url}], work_authorization}, every field optional. `github` and `linkedin` take just the id (a full address is read as the id) and `website` a site address; in `values` they are already links (`linkedin`: `linkedin.com/in/<id>`; `links` rows labelled GitHub and Website), and a link named twice is there once. GigAI reads it here (to fill the Generate PDF form, where the person edits the values before generating) and in `gigai scout resume pdf --out FILE`, and writes it only when the person presses the form's Save button (POST /api/pdf-header/save); it is never copied into the store, the journal, a log, a record, a suggestion, a brief, the resumes folder or a model prompt, and no other route returns it. `state` is filled, missing, invalid or placeholder; `message` is one plain sentence (what is wrong and where the file goes; never a value); `warning` says so when other users of the computer can read the file; `values` is the form's values when filled, else null. A value that is empty or starts with REPLACE (a template placeholder) is skipped: `placeholders` names the skipped fields, `notice` is the one sentence about them, and `name_note` says so when the file has no name yet; state placeholder means nothing in the file is filled in. Not cached (Cache-Control: no-store).",
         "operationId": "post_api_pdf_header",
         "parameters": [],
         "requestBody": {
@@ -6671,6 +6671,9 @@
                 "example": {
                   "has_work_authorization": false,
                   "message": "There is no header file at ~/Documents/GigAI/header.json.",
+                  "name_note": null,
+                  "notice": null,
+                  "placeholders": [],
                   "schema_version": "scout-pdf-header-prefill:1",
                   "shown": "~/Documents/GigAI/header.json",
                   "state": "missing",
@@ -6757,6 +6760,155 @@
           "Tailored resumes"
         ],
         "x-gigai-effect": "read",
+        "x-gigai-external": "none",
+        "x-gigai-labels": [
+          "user-private"
+        ]
+      }
+    },
+    "/api/pdf-header/save": {
+      "post": {
+        "description": "Scout's own page only: write the Generate PDF form's details to the person's header file, on their click. NOT for agents: it answers only Scout's own browser page (a request carrying this server's own Origin); any other caller gets 403 forbidden_origin, the body is not read and nothing is written. It is the form's \"Save these details to `~/Documents/GigAI/header.json`\" button: one write per click of what is in the form, to the file POST /api/pdf-header reads (mode 0600, written to a temporary file in the same folder and put in place in one step). The values go into that file and nowhere else: not the store, the journal, a log, a record, a suggestion, a brief, the resumes folder or a model prompt, and this answer holds none of them. `state` is saved, exists (a file is already there and was not changed; the form asks \"Replace the existing header.json?\" and sends replace: true) or not_writable (the folder is missing or cannot be written; `message` says what to check). The folder `~/Documents/GigAI` is created when it is missing; no other folder is. The values follow the file's rules (422 invalid_value names the field and the rule, never a value).",
+        "operationId": "post_api_pdf_header_save",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "example": {
+                "links": [],
+                "location": "Springfield, IL",
+                "name": "Jane Example",
+                "work_authorization": ""
+              },
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "email": {
+                    "description": "Optional.",
+                    "type": "string"
+                  },
+                  "links": {
+                    "description": "Optional: at most 6 links, each {label, url}.",
+                    "type": "array"
+                  },
+                  "location": {
+                    "description": "Optional.",
+                    "type": "string"
+                  },
+                  "name": {
+                    "description": "Optional; one line of at most 200 characters, like every text field here.",
+                    "type": "string"
+                  },
+                  "phone": {
+                    "description": "Optional.",
+                    "type": "string"
+                  },
+                  "replace": {
+                    "description": "true: write over the file that is there. Sent only after the person answered the form's question.",
+                    "type": "boolean"
+                  },
+                  "work_authorization": {
+                    "description": "Optional; empty means no line.",
+                    "type": "string"
+                  }
+                },
+                "required": [],
+                "type": "object"
+              }
+            }
+          },
+          "required": false
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "message": "Saved your details to ~/Documents/GigAI/header.json. GigAI keeps no other copy.",
+                  "schema_version": "scout-pdf-header-save:1",
+                  "shown": "~/Documents/GigAI/header.json",
+                  "state": "saved"
+                },
+                "schema": {
+                  "additionalProperties": true,
+                  "properties": {
+                    "schema_version": {
+                      "const": "scout-pdf-header-save:1"
+                    }
+                  },
+                  "required": [
+                    "schema_version"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "forbidden_origin",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden_origin"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "target_unavailable",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "target_unavailable"
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "unsupported_media_type: writes need Content-Type: application/json."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "unknown_key",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "unknown_key, wrong_type, invalid_value"
+          }
+        },
+        "summary": "Scout's page only: save the Generate PDF form's details to the header file",
+        "tags": [
+          "Tailored resumes"
+        ],
+        "x-gigai-effect": "write",
         "x-gigai-external": "none",
         "x-gigai-labels": [
           "user-private"

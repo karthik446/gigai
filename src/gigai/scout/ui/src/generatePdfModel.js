@@ -65,7 +65,14 @@ export function startValues({ visaRequired = false, file = null } = {}) {
 // {state: filled | missing | invalid, shown, message, warning,
 // has_work_authorization, values}. The server reads the file for THIS form
 // only; what the person leaves in the form is what prints (form edits > the
-// file > the profile's sponsorship answer). Nothing is written back.
+// file > the profile's sponsorship answer). Nothing is written back unless
+// the person presses "Save these details to <path>" (item 14, below).
+//
+// 0.1.11.3 item 14: a value of the file that is empty or starts with REPLACE
+// (a template placeholder) is skipped by the server: it never reaches this
+// form. `placeholders` names the skipped fields, `notice` is the server's one
+// sentence about them, `name_note` says "<path> has no name yet." State
+// "placeholder": nothing in the file is filled in, so nothing is filled here.
 export const MAX_LINKS = 6;
 
 export function fileValues(file) {
@@ -93,10 +100,50 @@ export function headerSource(file) {
     return null;
   }
   const text = (value) => (typeof value === "string" && value ? value : null);
+  // The path the Save button names and writes: the one the server reads.
+  const shown = text(file.shown);
+  const nameNote = text(file.name_note);
   if (fileValues(file)) {
-    return { filled: true, text: `Filled from ${text(file.shown) || "your header file"}`, warning: text(file.warning) };
+    return { filled: true, text: `Filled from ${shown || "your header file"}`, warning: text(file.warning), shown, notice: text(file.notice), nameNote };
   }
-  return { filled: false, text: text(file.message), warning: null };
+  // The message of a file that is all placeholders IS the notice: said once.
+  return { filled: false, text: text(file.message), warning: null, shown, notice: null, nameNote: file.state === "placeholder" ? nameNote : null };
+}
+
+// 0.1.11.3 item 14: what "Save these details to <path>" sends (POST
+// /api/pdf-header/save): the header FILE's shape, from what is in the form
+// now. The LinkedIn field is a link labelled LinkedIn, the "Other link" field
+// a link labelled Link, then the file's own link rows; a link with no url is
+// left out. work_authorization is always sent: empty means "no line".
+export const REPLACE_QUESTION = "Replace the existing header.json?";
+
+export function headerFileBody(values) {
+  const body = headerBody(values);
+  const links = [
+    ...(body.linkedin ? [{ label: "LinkedIn", url: body.linkedin }] : []),
+    ...(body.link ? [{ label: "Link", url: body.link }] : []),
+    ...(body.links || []),
+  ];
+  return { name: body.name, email: body.email, phone: body.phone, location: body.location, links, work_authorization: body.work_authorization };
+}
+
+// Something to save: at least one detail typed.
+export function canSave(values) {
+  const body = headerFileBody(values);
+  return [body.name, body.email, body.phone, body.location, body.work_authorization].some((value) => value.length > 0) || body.links.length > 0;
+}
+
+// What the form says after a save request: {tone, text, ask}. `ask` is true
+// when a file is already there: the form then asks REPLACE_QUESTION.
+export function saveResult(answer) {
+  const text = answer && typeof answer.message === "string" ? answer.message : "";
+  if (answer && answer.state === "saved") {
+    return { tone: "saved", text, ask: false };
+  }
+  if (answer && answer.state === "exists") {
+    return { tone: "ask", text, ask: true };
+  }
+  return { tone: "failed", text: text || "Your details were not saved.", ask: false };
 }
 
 // The render request's `header`: every field, trimmed and capped (the server

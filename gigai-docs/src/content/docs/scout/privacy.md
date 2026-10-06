@@ -14,6 +14,7 @@ The limits of that promise, plainly:
 - **You may keep them in a file of your own instead.** `~/Documents/GigAI/header.json` is yours:
   GigAI only reads it to fill the Generate PDF form or a PDF you make with
   `gigai scout resume pdf --out`, and never copies it into its store, a log or a model prompt.
+  It writes that file only when you press "Save these details" in the Generate PDF form.
   See [Your header file](../resume/#your-header-file).
 - **A resume you add is stored without them.** The import removes the name line and the contact
   lines (email, phone, address, links) and discards them. It works on patterns. It can't catch

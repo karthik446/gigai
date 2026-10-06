@@ -97,14 +97,42 @@ details): `~/Documents/GigAI/header.json` (a GigAI home other than `~/.gigai`:
   key out and it starts from your profile's sponsorship answer; set it to `""` to leave it out.
 - What prints is decided in this order: what you edit in the form, then the file, then the
   profile's sponsorship answer.
-- Scout only reads the file, and only to fill the form or make a PDF with
-  `gigai scout resume pdf`. It is never copied into GigAI's store, a log, a record, a
-  suggestion, a job brief, the resumes folder or a model prompt, and Scout's agent API does
-  not return it.
+- Scout reads the file only to fill the form or make a PDF with
+  `gigai scout resume pdf`, and writes it only when you press the Save button described
+  below. It is never copied into GigAI's store, a log, a record, a suggestion, a job brief,
+  the resumes folder or a model prompt, and Scout's agent API does not return it.
 - Keep it to yourself: `chmod 600 ~/Documents/GigAI/header.json`. The form and the command
   say so when other users of the computer can read it.
 - A file that is missing, cannot be read or is not valid is one plain line in the form
   (what is wrong and where the file goes); you can still type the values.
+
+**Save these details.** You do not have to write the file by hand. Type your details in the
+Generate PDF form and press "Save these details to `~/Documents/GigAI/header.json`" (the
+button shows the real path). Scout then writes the file, once, with what is in the form:
+
+- Only on your click. Opening the form, typing and generating a PDF never write it.
+- The file is yours alone (mode 600) and is written whole or not at all: if the write
+  fails, the file you had is still there.
+- A file that is already there is never replaced without asking. The form says "Replace the
+  existing header.json?"; Cancel leaves your file as it was.
+- The form shows the path it wrote. If the folder is missing or cannot be written, it says
+  so in one plain line. `~/Documents/GigAI` is created when it is not there yet; no other
+  folder is.
+- The details go into that file and nowhere else: not GigAI's store, a log, a record, a
+  job brief, the resumes folder or a model prompt. An agent cannot use the button: the
+  server answers Scout's own page only.
+
+**Placeholder values.** If you start from a template, any value that still starts with
+`REPLACE` (for example `"REPLACE: your phone"`) is skipped, and so is an empty value:
+neither fills the form nor prints in a PDF.
+
+- A file that holds nothing but placeholders fills nothing. The form says "header.json
+  still has placeholder values: replace the REPLACE: fields (or save your details here)".
+- A file with some real values fills those, and the form lists the fields it skipped (their
+  names only).
+- A name that is missing or still a placeholder is flagged: "header.json has no name yet".
+  The form still needs a name before it generates, and `gigai scout resume pdf` stops with
+  that same plain sentence instead of making a PDF without your name.
 
 A skill the posting asks for that your resume does not name, and that one of your
 answers says you have, is added to Skills with that answer as its source. An answer

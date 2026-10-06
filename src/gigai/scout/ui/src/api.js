@@ -724,6 +724,15 @@ export async function postPdfHeader() {
   }
 }
 
+// 0.1.11.3 item 14: "Save these details to <path>" in the Generate PDF form.
+// One request per click (a second, with replace, only after the person said
+// yes to "Replace the existing header.json?"). The server writes the person's
+// own header file and nothing else; the answer is {state: saved | exists |
+// not_writable, shown, message} and holds none of the values.
+export function postPdfHeaderSave(details, { replace = false } = {}) {
+  return request("POST", "/api/pdf-header/save", replace ? { ...details, replace: true } : details);
+}
+
 export function postTailoredResumePdf({ profileId, jobIdentity, header }) {
   const body = { profile_id: profileId, job_identity: jobIdentity };
   if (header) {
