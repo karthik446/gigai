@@ -2442,7 +2442,7 @@ def profile_update_command(
         else:
             base = existing.search_settings or shared
             merged: dict[str, object] = (
-                base.to_json() if base is not None else {"location": None, "work_mode": "any", "countries": [], "max_age_days": None}
+                base.to_json() if base is not None else {"location": None, "work_mode": "any", "countries": ["US"], "max_age_days": None}
             )
             if location is not None:
                 merged["location"] = location
