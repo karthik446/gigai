@@ -266,6 +266,16 @@ def resume_markdown(result: object) -> str:
     return "\n".join(out) + "\n"
 
 
+def _revision_comment(resume: object) -> str:
+    """The comment line (and the blank line under it) that names the stored revision of ``resume``; "" for one with no stored markdown."""
+
+    from .tailored_resume_edit import revision_comment
+
+    if not isinstance(getattr(resume, "markdown", None), str) or not isinstance(getattr(resume, "updated_at", None), str):
+        return ""
+    return revision_comment(resume) + "\n\n"  # type: ignore[arg-type]
+
+
 def _left_out_codes(resume: object | None) -> dict[str, str]:
     selection = getattr(resume, "selection", None)
     return {line.id: line.code for line in getattr(selection, "left_out", ())}
@@ -343,7 +353,8 @@ def yours_part(inputs: YoursInputs) -> dict[str, object]:
             "lines": resume.result.line_count() if resume is not None else 0,  # type: ignore[attr-defined]
         },
         "resume": None if resume is None else {
-            "markdown": resume_markdown(resume.result),  # type: ignore[attr-defined]
+            # 0.1.11.4 E1: the first line names the stored revision this text is (a comment no reader stores or prints).
+            "markdown": _revision_comment(resume) + resume_markdown(resume.result),  # type: ignore[attr-defined]
             "updated_at": resume.updated_at,  # type: ignore[attr-defined]
             "edited_by": None if edited is None else edited.written_by,
             "folder": inputs.folder,

@@ -500,6 +500,9 @@ def change_stored_selection(
         edit = edit_selection(stored, held.master, use=use, item_id=item_id, fit=fit, tailoring=tailoring, measure=measure)
         if edit.applied and edit.changed:
             save_tailor_response(edit.response, home_root=home_root)
+            from .suggestions import drop_proposal_after_edit
+
+            drop_proposal_after_edit(home_root, target, edit.response)  # 0.1.11.4 E1: it waited beside the resume as it was
     return edit
 
 

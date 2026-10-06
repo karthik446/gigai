@@ -32,6 +32,7 @@ import {
   resumeOrigin,
   selectionErrorText,
   staleActions,
+  EDITED_KEEPS_TEXT,
   suggestionsAnswer,
   unpickable,
 } from "../jobResumeModel.js";
@@ -225,7 +226,7 @@ function Attention({ items, onShowLine }) {
   );
 }
 
-function Stale({ items, busy, picking, onRepick, onReassess, reassess }) {
+function Stale({ items, busy, picking, onRepick, onReassess, reassess, yours }) {
   if (items.length === 0) {
     return null;
   }
@@ -254,6 +255,11 @@ function Stale({ items, busy, picking, onRepick, onReassess, reassess }) {
         ),
       )}
       <span className="muted small"> Nothing refreshes by itself.</span>
+      {yours && actions.some((action) => action.use === "repick") && (
+        <p className="muted small" data-role="edited-keeps">
+          {EDITED_KEEPS_TEXT}
+        </p>
+      )}
     </div>
   );
 }
@@ -519,7 +525,7 @@ export default function JobResumePanel({ state, assessment, gate, items, reasses
       {stored && (
         <>
           <Attention items={attention} onShowLine={state.showLine} />
-          <Stale items={items} busy={busy} picking={picking} onRepick={() => state.pick("refresh")} onReassess={reassess ? reassess.onClick : undefined} reassess={reassess} />
+          <Stale items={items} busy={busy} picking={picking} onRepick={() => state.pick("refresh")} onReassess={reassess ? reassess.onClick : undefined} reassess={reassess} yours={users} />
           <Proposed change={proposed} busy={busy} picking={picking} onUse={() => state.pick("use_proposed")} onDismiss={() => state.pick("dismiss_proposed")} />
           {provenance && provenance.draft && (
             <p className="muted small" data-role="draft-note">

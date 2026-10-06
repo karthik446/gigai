@@ -1869,7 +1869,7 @@
     },
     "/api/job-resumes/pick": {
       "post": {
-        "description": "Take one explicit step on a job's resume: pick again, make a draft, shorten it, or take or drop the proposed one. No model call in any form. `refresh` picks again in code from the STORED assessment against the master as it is now; while that assessment is stale it answers 409 assessment_stale (a new selection never sits beside scores made on other evidence: re-assess with POST /api/assess). `draft` makes a draft for a job whose gate holds (409 draft_not_needed when a resume is suggested already). `shorten` is for a resume whose PDF does not fit its pages (the `X-GigAI-Fit-Note` of POST /api/tailored-resumes/pdf): the same pick is made again with less room, so the next weakest lines are left out in the pick's own cut order (a line that backs a must-have requirement, or a pinned line, only when nothing else is left); the answer then also holds `shortened`: `{left_out: [the text of each line left out], must_have_cut, waiting, message}`, where `message` is the sentence for the user (\"Left out 2 lines: ...\"). It is not refused for a stale assessment; a job with no stored resume is 409 no_resume_to_shorten, and a resume that fits its pages with most of a page to spare is 409 resume_short_already. A stored resume that is the user's (edited, attached, a line choice, or made by the 0.1.10 tailoring; `resume.replaceable` false) is never replaced by any of them: the new selection waits as `proposed`, `use_proposed` is the one step that replaces the job resume and `dismiss_proposed` drops the proposal (404 no_proposed_resume when none waits). The answer is what is stored after the step: the job resume (`made_by` is its producer, `counts` its Picked / Left out), who picked it (`picked`), what validation found (`problems`) and code added (`added_by_code`), the `gate`, the `stale` list (`assessment_stale:<reason>`, picked_line_changed, master_newer, selection_rules_changed, assessment_newer) and the `conflicts`. `basis` is what a resume for this job is made from now (`master`, or `profile_resume`: nothing is picked, 409 no_master without a master and 409 profile_resume_in_use for a profile whose resume was put in by hand; `master_stored` tells them apart). A plain `refresh` of a job whose gate holds is 409 resume_held (make a `draft`); a pick that fails is 409 pick_failed or pages_unmeasured. Every refusal's `message` is for the user: what to do, in plain words.",
+        "description": "Take one explicit step on a job's resume: pick again, make a draft, shorten it, or take or drop the proposed one. No model call in any form. `refresh` picks again in code from the STORED assessment against the master as it is now; while that assessment is stale it answers 409 assessment_stale (a new selection never sits beside scores made on other evidence: re-assess with POST /api/assess). `draft` makes a draft for a job whose gate holds (409 draft_not_needed when a resume is suggested already). `shorten` is for a resume whose PDF does not fit its pages (the `X-GigAI-Fit-Note` of POST /api/tailored-resumes/pdf): the same pick is made again with less room, so the next weakest lines are left out in the pick's own cut order (a line that backs a must-have requirement, or a pinned line, only when nothing else is left); the answer then also holds `shortened`: `{left_out: [the text of each line left out], must_have_cut, waiting, message}`, where `message` is the sentence for the user (\"Left out 2 lines: ...\"). It is not refused for a stale assessment; a job with no stored resume is 409 no_resume_to_shorten, and a resume that fits its pages with most of a page to spare is 409 resume_short_already. A stored resume that is the user's (edited, attached, a line choice, or made by the 0.1.10 tailoring; `resume.replaceable` false) is never replaced by any of them: the new selection waits as `proposed`, `use_proposed` is the one step that replaces the job resume and `dismiss_proposed` drops the proposal (404 no_proposed_resume when none waits). `use_proposed` takes a proposal only over the resume it was made beside: when the stored resume changed after the proposal was made it answers 409 proposal_stale and replaces nothing, and an edit of the stored resume drops the waiting proposal itself. A stored resume file that cannot be read is the user's and is never written over: `resume` is null with `resume_unreadable` true, and refresh, draft, shorten and use_proposed answer 409 stored_resume_unreadable. The answer is what is stored after the step: the job resume (`made_by` is its producer, `counts` its Picked / Left out), who picked it (`picked`), what validation found (`problems`) and code added (`added_by_code`), the `gate`, the `stale` list (`assessment_stale:<reason>`, picked_line_changed, master_newer, selection_rules_changed, assessment_newer) and the `conflicts`. `basis` is what a resume for this job is made from now (`master`, or `profile_resume`: nothing is picked, 409 no_master without a master and 409 profile_resume_in_use for a profile whose resume was put in by hand; `master_stored` tells them apart). A plain `refresh` of a job whose gate holds is 409 resume_held (make a `draft`); a pick that fails is 409 pick_failed or pages_unmeasured. Every refusal's `message` is for the user: what to do, in plain words.",
         "operationId": "post_api_job_resumes_pick",
         "parameters": [],
         "requestBody": {
@@ -1955,6 +1955,7 @@
                     "replaceable": true,
                     "updated_at": "2026-10-05T10:07:00Z"
                   },
+                  "resume_unreadable": false,
                   "schema_version": "scout-job-resume-pick:1",
                   "selection_error": null,
                   "stale": [],
@@ -2007,7 +2008,7 @@
               "application/json": {
                 "example": {
                   "error": {
-                    "code": "assessment_stale",
+                    "code": "proposal_stale",
                     "message": "..."
                   }
                 },
@@ -2016,7 +2017,7 @@
                 }
               }
             },
-            "description": "assessment_stale, draft_not_needed, pages_unmeasured, no_master, profile_resume_in_use, resume_held, pick_failed, no_resume_to_shorten, resume_short_already"
+            "description": "proposal_stale, stored_resume_unreadable, assessment_stale, draft_not_needed, pages_unmeasured, no_master, profile_resume_in_use, resume_held, pick_failed, no_resume_to_shorten, resume_short_already"
           },
           "415": {
             "content": {
@@ -14409,7 +14410,7 @@
         ]
       },
       "put": {
-        "description": "Store an edited resume markdown as one job's tailored resume (no model call). Attaches the markdown to that one job (and profile) as its tailored resume; other jobs and the profile's resume are untouched. A line that is unchanged from the stored tailored resume keeps its sources; a line that is a resume line is a copy; any other body line becomes kind custom (your own text, no source cited). A custom line is checked, with your whole resume and every answer as the sources: a name or contact detail answers 422 personal_info_refused; a number, a skill the posting names, or a Skills item that neither the resume nor an answer states answers 422 edited_resume_unsupported (save an answer that states it with POST /api/answers, then send the markdown again). An entry heading (employer, title, dates) must be a resume line, unchanged. A refusal lists every problem by the markdown's line number, never a line's text. Lines above the first `## ` section are not stored. The response is the stored resume with `edited` (`written_by` operator or agent, `edited_at`, `source`), `changed` (false when it already was the stored one) and `recheck`: the job is queued in the pipeline, whose tailor step keeps an edited resume, so the re-assessment, the Scout ATS score and the Scout label run against it (`result` enqueued, or not_queued with `error_code`, e.g. assessment_missing; `runner` false: run `gigai scout pipeline run --once`). Background tailoring never replaces an edited resume; POST /api/tailored-resumes does. The markdown also goes to the job's folder of the jobs folder as resume.md (GET /api/jobs-folder).",
+        "description": "Store an edited resume markdown as one job's tailored resume (no model call). Attaches the markdown to that one job (and profile) as its tailored resume; other jobs and the profile's resume are untouched. A line that is unchanged from the stored tailored resume keeps its sources; a line that is a resume line is a copy; any other body line becomes kind custom (your own text, no source cited). A custom line is checked, with your whole resume and every answer as the sources: a name or contact detail answers 422 personal_info_refused; a number, a skill the posting names, or a Skills item that neither the resume nor an answer states answers 422 edited_resume_unsupported (save an answer that states it with POST /api/answers, then send the markdown again). An entry heading (employer, title, dates) must be a resume line, unchanged. A refusal lists every problem by the markdown's line number, never a line's text. Lines above the first `## ` section are not stored. The response is the stored resume with `edited` (`written_by` operator or agent, `edited_at`, `source`), `changed` (false when it already was the stored one) and `recheck`: the job is queued in the pipeline, whose tailor step keeps an edited resume, so the re-assessment, the Scout ATS score and the Scout label run against it (`result` enqueued, or not_queued with `error_code`, e.g. assessment_missing; `runner` false: run `gigai scout pipeline run --once`). Background tailoring never replaces an edited resume; POST /api/tailored-resumes does. The markdown also goes to the job's folder of the jobs folder as resume.md (GET /api/jobs-folder). Markdown that carries the revision comment of the job brief (`<!-- gigai-resume: updated_at=... sha256=... -->`) is refused with 409 resume_file_stale when the stored resume is another version than the one it names (read the brief again, then edit), and a stored resume file that cannot be read is not written over (409 stored_resume_unreadable). Storing an edit drops a proposed resume that was waiting for the job.",
         "operationId": "put_api_tailored_resumes",
         "parameters": [],
         "requestBody": {
@@ -14521,6 +14522,22 @@
               }
             },
             "description": "profile_not_found, target_unavailable"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "resume_file_stale",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "resume_file_stale, stored_resume_unreadable"
           },
           "415": {
             "content": {

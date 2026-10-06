@@ -118,6 +118,8 @@ class JobResumeFixture:
         self.relabel: dict[str, dict] = {}
         self.selection: dict | None = {}  # laid over the record's selection; None: the record has none
         self.proposed: dict | None = None
+        #: What a `refresh` leaves waiting as `proposed` (a stored resume that is the user's is never replaced by it).
+        self.refresh_proposes: dict | None = None
         self.conflicts: list[dict] = []
         self.suggestions: list[dict] = []
         self.structured: list[dict] = []  # the assessment's own structured suggestions
@@ -297,6 +299,8 @@ class JobResumeFixture:
         action = body.get("action")
         if action == "refresh":
             self.stale = []
+            if self.refresh_proposes is not None:  # the stored resume is the user's: the new pick waits beside it
+                self.proposed = copy.deepcopy(self.refresh_proposes)
         elif action == "draft":
             self.resume = "stored"
             self.selection = {"picked_by": "code", "fallback": "draft_requested", "draft": True}

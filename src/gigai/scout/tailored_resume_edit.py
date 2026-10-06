@@ -70,6 +70,7 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, replace
 import os
 from pathlib import Path
+import re
 
 from ..canonical import digest_imported_bytes
 from .find_jobs.assess_contracts import AssessJobInput, AssessResumeInput
@@ -621,6 +622,38 @@ def _pages(markdown: str) -> int | None:
         return None
 
 
+# --- 0.1.11.4 E1: the revision a file was made from ---------------------------------------------------------
+
+#: ``resume_file_stale``: the file names another revision of the job resume than the one stored (one sentence, with the fix).
+STALE_FILE = (
+    "This file was made from an older version of the resume. Get the current one with "
+    "gigai scout resume brief --job-url URL --out FILE, then make your edits again."
+)
+_REVISION_LINE = re.compile(r"^[ \t]*<!--[ \t]*gigai-resume:(.*?)-->[ \t]*$", re.MULTILINE)
+_REVISION_FIELDS = re.compile(r"\Aupdated_at=(\S+)[ \t]+sha256=([0-9a-f]{64})\Z")
+
+
+def _markdown_sha256(markdown: str) -> str:
+    return digest_imported_bytes(markdown.encode("utf-8")).removeprefix("sha256:")
+
+
+def revision_comment(stored: TailorResponse) -> str:
+    """The comment ``resume brief`` writes above the job resume: the stored revision the text was made from.
+
+    ``<!-- gigai-resume: updated_at=... sha256=... -->``: a comment above the first section, which no reader of
+    resume markdown stores or prints (like a line's ``<!-- R12 -->``).  ``attach_edited_resume`` reads it back."""
+
+    return f"<!-- gigai-resume: updated_at={stored.updated_at} sha256={_markdown_sha256(stored.markdown)} -->"
+
+
+def recorded_revision(markdown: str) -> tuple[str, str] | None:
+    """``(updated_at, sha256)`` of the revision comment in ``markdown``, or ``None``: it has none (or not one this GigAI wrote)."""
+
+    found = _REVISION_LINE.search(markdown) if isinstance(markdown, str) else None
+    fields = _REVISION_FIELDS.match(found.group(1).strip()) if found is not None else None
+    return None if fields is None else (fields.group(1), fields.group(2))
+
+
 @dataclass(frozen=True)
 class AttachedResume:
     """What an attach did: the stored resume, whether it changed anything, and the file in the job's folder."""
@@ -723,6 +756,7 @@ def attach_edited_resume(
     source: str | None = None,
     resolved_job=None,
     fit: bool = False,
+    force: bool = False,
 ) -> AttachedResume:
     """Store ``markdown`` as the tailored resume of the job at ``job_url`` for one profile (default: the selected one).
 
@@ -737,6 +771,11 @@ def attach_edited_resume(
     ``fit`` (0.1.11 N5b, SPEC 5.3): a master-checked hand-back over the page limit is cut to it by code (3.2), the
     cut recorded on the stored resume (``length``, so one Restore puts it back); without ``fit`` it is refused
     (``over_page_limit``).  It changes nothing for a resume that fits.
+
+    0.1.11.4 E1: a file that names the revision it was made from (``revision_comment``) is refused when the stored
+    resume is another one (``resume_file_stale``: its lines would be checked against a resume they were not copied
+    from), and a stored file that cannot be read is not written over (``stored_resume_unreadable``); ``force``
+    stores the file in both cases.  A change of the stored resume drops the selection that waited beside the old one.
     """
 
     home_root, target = Path(home_root), Path(target)
@@ -774,6 +813,14 @@ def attach_edited_resume(
     # The stored resume is read and replaced under the store's write lock: no model call is out, only local work.
     with tailored_resume_write_lock(path):
         previous = read_tailored_resume(path)
+        if not force:
+            from . import suggestions
+
+            if previous is None and suggestions.stored_unreadable(path):
+                raise TailorError("stored_resume_unreadable", suggestions.STORED_UNREADABLE)
+            made_from = recorded_revision(markdown)
+            if previous is not None and made_from is not None and made_from[1] != _markdown_sha256(previous.markdown):
+                raise TailorError("resume_file_stale", STALE_FILE)
         if basis is None:
             result = edited_result(markdown, ctx=ctx, job=tailor_job, previous=previous)
         else:
@@ -809,6 +856,10 @@ def attach_edited_resume(
         )
         # 0.1.11.4 J1: the job's resume.md may be the very file handed back (edited in place): it is then replaced, not doubled.
         saved = save_tailor_response(response, home_root=home_root, imported=digest_imported_bytes(markdown.encode("utf-8")))
+        # The selection that waited beside the resume as it was is not this one's: it goes with it.
+        from .suggestions import drop_proposal_after_edit
+
+        drop_proposal_after_edit(home_root, target, response)
     return AttachedResume(response, True, saved)
 
 
@@ -853,6 +904,7 @@ __all__ = [
     "RECHECK_NOT_QUEUED",
     "RECHECK_PIPELINE_OFF",
     "RECHECK_SCHEMA",
+    "STALE_FILE",
     "AttachedResume",
     "HandbackRefused",
     "attach_edited_resume",
@@ -860,4 +912,6 @@ __all__ = [
     "edited_result",
     "handback_result",
     "queue_recheck",
+    "recorded_revision",
+    "revision_comment",
 ]

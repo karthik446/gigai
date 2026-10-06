@@ -321,7 +321,10 @@ def test_use_proposed_recomputes_the_check_from_the_stored_resume_too(fx: Pipeli
     # The waiting selection recorded a conflict about a line the stored resume prints: taking it leaves no conflict.
     sibling = sg.proposed_resume_path(_path(fx))
     conflict = {"code": "mandatory_evidence_does_not_fit", "requirement": REQ_PYTHON, "lines": [ids[OWN]], "cut": True}
-    proposed = {**SELECTION, "conflicts": [conflict], "resume": {"stored_path": str(sibling), "markdown_sha256": "sha256:" + "0" * 64, "origin": "pick"}}
+    proposed = {
+        **SELECTION, "conflicts": [conflict], "resume": {"stored_path": str(sibling), "markdown_sha256": "sha256:" + "0" * 64, "origin": "pick"},
+        "against": sg.revision_of(stored),  # made beside the resume that is stored (0.1.11.4 E1)
+    }
     _assessed(fx, [], now=LATER, proposed=proposed)
     sibling.write_text(json.dumps(stored.to_json(), indent=2, sort_keys=True), encoding="utf-8")
     taken = _ok(fx, "resume", "pick", "--job-url", JOB, "--use-proposed")
@@ -336,7 +339,7 @@ def _propose(fx: PipelineFixture, **more: object) -> Path:
 
     (stored,) = _stored(fx)
     sibling = sg.proposed_resume_path(_path(fx))
-    record = _assessed(fx, [], now=LATER, proposed={**SELECTION, "picked_by": "code", "fallback": "no_pick", "made_at": LATER, "resume": {"stored_path": str(sibling), "markdown_sha256": "sha256:" + "0" * 64, "origin": "pick"}}, **more)
+    record = _assessed(fx, [], now=LATER, proposed={**SELECTION, "picked_by": "code", "fallback": "no_pick", "made_at": LATER, "resume": {"stored_path": str(sibling), "markdown_sha256": "sha256:" + "0" * 64, "origin": "pick"}, "against": sg.revision_of(stored)}, **more)
     sibling.write_text(json.dumps(stored.to_json(), indent=2, sort_keys=True), encoding="utf-8")
     assert record.proposed is not None
     return sibling

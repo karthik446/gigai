@@ -1272,6 +1272,7 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
                 "counts": {"picked": 28, "left_out": 30, "cut_for_length": 3}, "folder_path": "~/Documents/GigAI/resumes/acme-software-engineer-2026-10-05.md",
                 "markdown": "## Summary\n\n- ...",
             },
+            "resume_unreadable": False,
             "picked": {"picked_by": "model", "fallback": None, "draft": False, "made_at": "2026-10-05T10:07:00Z", "pages": 2, "max_pages": 2, "pick_rules_version": "pick-rules:1", "selector_version": "sel-5"},
             "problems": [], "added_by_code": [], "conflicts": [], "selection_error": None, "proposed": None,
         },
@@ -1283,7 +1284,7 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
         ),
         request_example={"job_url": _JOB_URL, "action": "refresh"},
         errors=(
-            _UNKNOWN_KEY, _WRONG_TYPE, _INVALID, (404, "assessment_missing"), (404, "no_proposed_resume"), (409, "assessment_stale"), (409, "draft_not_needed"),
+            _UNKNOWN_KEY, _WRONG_TYPE, _INVALID, (404, "assessment_missing"), (404, "no_proposed_resume"), (409, "proposal_stale"), (409, "stored_resume_unreadable"), (409, "assessment_stale"), (409, "draft_not_needed"),
             (409, "pages_unmeasured"), (409, "no_master"), (409, "profile_resume_in_use"), (409, "resume_held"), (409, "pick_failed"),
             (409, "no_resume_to_shorten"), (409, "resume_short_already"), (404, "profile_not_found"), _NO_TARGET, (501, "pick_not_available"),
         ),
@@ -1299,7 +1300,11 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
             "is 409 resume_short_already. A stored "
             "resume that is the user's (edited, attached, a line choice, or made by the 0.1.10 tailoring; `resume.replaceable` false) is never "
             "replaced by any of them: the new selection waits as `proposed`, `use_proposed` is the one step that replaces the job resume and "
-            "`dismiss_proposed` drops the proposal (404 no_proposed_resume when none waits). The answer is what is stored after the step: the job "
+            "`dismiss_proposed` drops the proposal (404 no_proposed_resume when none waits). `use_proposed` takes a proposal only over the resume it "
+            "was made beside: when the stored resume changed after the proposal was made it answers 409 proposal_stale and replaces nothing, and an "
+            "edit of the stored resume drops the waiting proposal itself. A stored resume file that cannot be read is the user's and is never "
+            "written over: `resume` is null with `resume_unreadable` true, and refresh, draft, shorten and use_proposed answer 409 "
+            "stored_resume_unreadable. The answer is what is stored after the step: the job "
             "resume (`made_by` is its producer, `counts` its Picked / Left out), who picked it (`picked`), what validation found (`problems`) and "
             "code added (`added_by_code`), the `gate`, the `stale` list (`assessment_stale:<reason>`, picked_line_changed, master_newer, "
             "selection_rules_changed, assessment_newer) and the `conflicts`. `basis` is what a resume for this job is made from now (`master`, or "
@@ -1379,7 +1384,8 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
         request_example={"job_url": _JOB_URL, "markdown": "## Summary\n\n- Platform engineer with nine years building billing systems.\n\n## Experience\n\n### Northwind Health\nStaff Engineer | Jun 2020 - Present\n\n- Rebuilt the scheduling service on Python and Postgres.\n", "actor": "agent"},
         errors=(
             _UNKNOWN_KEY, _WRONG_TYPE, _INVALID, (422, "resume_markdown_invalid"), (422, "resume_markdown_too_large"), (422, "personal_info_refused"),
-            (422, "edited_resume_unsupported"), (404, "profile_not_found"), (502, "job_fetch_failed"), _NO_TARGET,
+            (422, "edited_resume_unsupported"), (409, "resume_file_stale"), (409, "stored_resume_unreadable"), (404, "profile_not_found"),
+            (502, "job_fetch_failed"), _NO_TARGET,
         ),
         description=(
             "Attaches the markdown to that one job (and profile) as its tailored resume; other jobs and the profile's resume are untouched. "
@@ -1393,7 +1399,10 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
             "one) and `recheck`: the job is queued in the pipeline, whose tailor step keeps an edited resume, so the re-assessment, the Scout ATS "
             "score and the Scout label run against it (`result` enqueued, or not_queued with `error_code`, e.g. assessment_missing; `runner` "
             "false: run `gigai scout pipeline run --once`). Background tailoring never replaces an edited resume; POST /api/tailored-resumes does. "
-            "The markdown also goes to the job's folder of the jobs folder as resume.md (GET /api/jobs-folder)."
+            "The markdown also goes to the job's folder of the jobs folder as resume.md (GET /api/jobs-folder). Markdown that carries the revision "
+            "comment of the job brief (`<!-- gigai-resume: updated_at=... sha256=... -->`) is refused with 409 resume_file_stale when the stored "
+            "resume is another version than the one it names (read the brief again, then edit), and a stored resume file that cannot be read is "
+            "not written over (409 stored_resume_unreadable). Storing an edit drops a proposed resume that was waiting for the job."
         ),
     ),
     RouteSpec(

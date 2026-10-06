@@ -374,6 +374,9 @@ class TailoredResumesRoutesMixin:
                     failure = (_status_for(exc.code), exc.code, str(exc))
             if failure is None and updated is not stored:
                 save_tailor_response(updated, home_root=home_root)
+                from ...suggestions import drop_proposal_after_edit
+
+                drop_proposal_after_edit(home_root, target, updated)  # 0.1.11.4 E1: it waited beside the resume as it was
         if failure is not None:
             self._error(*failure)
             return
