@@ -1694,6 +1694,8 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
         description=(
             "Returns application/pdf with Content-Disposition: attachment; filename=`<company>-<role>-<YYYY-MM-DD>.pdf` (never your name); changes nothing. "
             + _HEADER_NOTE
+            + " The PDF stays on the resume's page limit: a saved spacing that would run past it is tightened (to 0.8), then the Skills are laid out compactly, then the spacing goes to 0.7 at most; "
+            "when no spacing fits, the PDF is rendered as saved and X-GigAI-Fit-Note says so in one plain sentence (page counts and what to do; nothing of the resume)."
         ),
     ),
     RouteSpec(

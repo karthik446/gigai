@@ -706,7 +706,8 @@ async function postPdf(path, body) {
     }
     throw new ApiError(response.status, detail || `Request failed with status ${response.status}.`, code, { detail });
   }
-  return { blob: await response.blob(), fileName: pdfFileName(response.headers.get("Content-Disposition")) };
+  // X-GigAI-Fit-Note (0.1.11.3): the server's own sentence when the resume does not fit its page limit.
+  return { blob: await response.blob(), fileName: pdfFileName(response.headers.get("Content-Disposition")), note: response.headers.get("X-GigAI-Fit-Note") || null };
 }
 
 export function postTailoredResumePdf({ profileId, jobIdentity, header }) {

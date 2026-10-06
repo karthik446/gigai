@@ -25,6 +25,7 @@ export default function GeneratePdfForm({ render, disabled = false }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
   const [savedAs, setSavedAs] = useState(null);
+  const [note, setNote] = useState(null);
 
   async function submit(event) {
     event.preventDefault();
@@ -34,10 +35,12 @@ export default function GeneratePdfForm({ render, disabled = false }) {
     setBusy(true);
     setError(null);
     setSavedAs(null);
+    setNote(null);
     try {
-      const { blob, fileName } = await render(headerBody(values));
+      const { blob, fileName, note: fitNote } = await render(headerBody(values));
       saveBlob(blob, fileName);
       setSavedAs(fileName);
+      setNote(fitNote || null);
     } catch (err) {
       setError(err.detail || err.message || String(err));
     } finally {
@@ -73,6 +76,11 @@ export default function GeneratePdfForm({ render, disabled = false }) {
       {error && (
         <div className="callout danger" role="alert">
           Could not make the PDF. {error}
+        </div>
+      )}
+      {note && (
+        <div className="callout warn" role="status" data-role="pdf-fit-note">
+          {note}
         </div>
       )}
       <div className="actions">

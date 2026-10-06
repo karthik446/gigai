@@ -766,7 +766,7 @@ _register_resume_job_commands(scout_group, resume_group)
 @click.option("--job-url", "job_url", help="The posting URL whose stored resume (picked or edited) to render.")
 @click.option("--out", "out_file", type=click.Path(path_type=Path, dir_okay=False), help="Write the PDF to FILE (default: <company>-<role>-<YYYY-MM-DD>.pdf, or resume-<YYYY-MM-DD>.pdf, in your resumes folder).")
 @click.option("--profile", "profile_id", help="With --tailored: the Scout profile ID the resume was tailored for (default: the newest).")
-@click.option("--spacing", "spacing", type=float, help="Spacing scale 0.7-1.4 for this render (turns auto fit off unless --auto-fit is given). Default: the saved setting.")
+@click.option("--spacing", "spacing", type=float, help="Spacing scale 0.7-1.4 for this render (turns auto fit off unless --auto-fit is given). Default: the saved setting. A stored job resume is tightened when that keeps it on its page limit.")
 @click.option("--auto-fit/--no-auto-fit", "auto_fit", default=None, help="Pick the spacing that ends the content near a page boundary. Default: the saved setting.")
 @click.option("--target", "target_value", type=click.Path(path_type=Path, file_okay=False))
 @click.option("--home", "home_value", type=click.Path(path_type=Path, file_okay=False))
@@ -902,9 +902,11 @@ def resume_pdf_command(
         "header": False,
         "finish_url": link,
         "scout_running": running,
+        "note": rendered.note,
     }
     lines = [
         f"Wrote {shown_path} ({rendered.pages} page{'' if rendered.pages == 1 else 's'}, spacing {rendered.spacing_scale:g}), without your name and contact details.",
+        *([rendered.note] if rendered.note else []),
         f"{FINISH_LINE}: {link}" + ("" if running else " (start Scout first: `gigai scout run`)"),
     ]
     if not tailored:

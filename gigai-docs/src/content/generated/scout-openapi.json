@@ -14176,7 +14176,7 @@
     },
     "/api/tailored-resumes/pdf": {
       "post": {
-        "description": "Render the stored tailored resume as a PDF (binary). Returns application/pdf with Content-Disposition: attachment; filename=`<company>-<role>-<YYYY-MM-DD>.pdf` (never your name); changes nothing. GigAI stores no name or contact details: without header the PDF has no header (a blank block keeps the page layout) and the response carries X-GigAI-Finish-Url, the local Scout page where the person adds their details in the Generate PDF form and downloads; an agent cannot finish that step unless it drives that person's browser.",
+        "description": "Render the stored tailored resume as a PDF (binary). Returns application/pdf with Content-Disposition: attachment; filename=`<company>-<role>-<YYYY-MM-DD>.pdf` (never your name); changes nothing. GigAI stores no name or contact details: without header the PDF has no header (a blank block keeps the page layout) and the response carries X-GigAI-Finish-Url, the local Scout page where the person adds their details in the Generate PDF form and downloads; an agent cannot finish that step unless it drives that person's browser. The PDF stays on the resume's page limit: a saved spacing that would run past it is tightened (to 0.8), then the Skills are laid out compactly, then the spacing goes to 0.7 at most; when no spacing fits, the PDF is rendered as saved and X-GigAI-Fit-Note says so in one plain sentence (page counts and what to do; nothing of the resume).",
         "operationId": "post_api_tailored_resumes_pdf",
         "parameters": [],
         "requestBody": {

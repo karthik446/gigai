@@ -36,6 +36,7 @@ from gigai.scout.resume_display import (
 from gigai.scout.resumes_folder import file_name
 from gigai.scout.tailored_resume import (
     ENTRY_SECTIONS,
+    LENGTH_RULE,
     MAX_HEADING_LINES,
     SECTION_HEADINGS,
     _LEADING_MARKERS,
@@ -236,12 +237,29 @@ def clamp_scale(value: float) -> float:
     return min(SPACING_MAX, max(SPACING_MIN, float(value)))
 
 
+#: How tight a render makes a SAVED spacing so the resume stays on its page limit (``_render``'s ``max_pages``) before
+#: it lays the Skills out compactly; only when that is not enough does it go on down to ``SPACING_MIN``, the spacing
+#: the length rule measures at.  A saved scale below it is used as saved.
+FIT_FLOOR = 0.8
+
+
+def over_limit_note(pages: int, max_pages: int) -> str:
+    """What a person reads when the resume cannot be put on ``max_pages`` pages: plain words, ASCII (a header value)."""
+    limit = f"{max_pages} page{'' if max_pages == 1 else 's'}"
+    return (
+        f"This resume takes {pages} pages: it does not fit on {limit} even with the tightest spacing. "
+        f"To get {limit}, shorten it (remove a few lines or an older role) and generate the PDF again, or keep it at {pages} pages."
+    )
+
+
 @dataclass(frozen=True)
 class RenderedPdf:
     pdf: bytes
     #: The page count; ``None`` when the caller did not ask for it (``count_pages``) and auto fit did not measure it.
     pages: int | None
     spacing_scale: float
+    #: ``over_limit_note`` when the resume has a page limit and no spacing puts it there; else ``None``.
+    note: str | None = None
 
 
 def _data(sections: list[dict[str, object]], header: PdfHeader | None, company: str) -> dict[str, object]:
@@ -283,25 +301,53 @@ def pages_at(result: TailoredResume, spacing_scale: float) -> int:
 
 def _render(
     sections: list[dict[str, object]], header: PdfHeader | None, *, company: str, timestamp: datetime, spacing_scale: float, auto_fit: bool,
-    count_pages: bool = False,
+    count_pages: bool = False, max_pages: int | None = None,
 ) -> RenderedPdf:
-    """``header`` ``None``: no header, a blank block of the header's height reserved (an agent's PDF)."""
-    data = _data(sections, header, company)
+    """``header`` ``None``: no header, a blank block of the header's height reserved (an agent's PDF).
+
+    ``max_pages`` (0.1.11.3) is the resume's page limit, the one its pick was fitted to: a render that would run
+    past it at the saved spacing takes the loosest spacing down to ``FIT_FLOOR`` that stays on it, then the same
+    with the Skills chips compact (the template's ``compact_tags``), then compact down to ``SPACING_MIN``.  That
+    is what holds a pick to its pages: its fit measures at 0.9 with a two-line header's block (``measure_markdown``),
+    a saved spacing may be looser and the real header up to two lines taller, and this is where both are absorbed.
+    A resume that already fits renders exactly as before.  One that cannot be put there renders as its layout
+    says, with ``RenderedPdf.note``."""
     root = resources.files("gigai.scout").joinpath("data", "resume")
     with ExitStack() as stack:
         directory = str(stack.enter_context(resources.as_file(root)))
         template = (Path(directory) / "resume.typ").read_bytes()
-        measured: dict[float, tuple[int, float]] = {}
 
-        def measure(candidate: float) -> tuple[int, float]:
-            if candidate not in measured:
-                measured[candidate] = _end(template, directory, data, candidate)
-            return measured[candidate]
+        def placed(data: dict[str, object], floor: float = FIT_FLOOR) -> tuple[float, int | None]:
+            measured: dict[float, tuple[int, float]] = {}
 
-        scale = fit_scale(measure) if auto_fit else clamp_scale(spacing_scale)
-        # Auto fit already measured the scale it chose; otherwise the count costs one layout query, only on request.
-        pages = measured[scale][0] if scale in measured else (measure(scale)[0] if count_pages else None)
-        return RenderedPdf(_compile(template, directory, data, scale, timestamp), pages, scale)
+            def measure(candidate: float) -> tuple[int, float]:
+                if candidate not in measured:
+                    measured[candidate] = _end(template, directory, data, candidate)
+                return measured[candidate]
+
+            scale = fit_scale(measure) if auto_fit else clamp_scale(spacing_scale)
+            if max_pages is None:
+                # Auto fit already measured the scale it chose; otherwise the count costs one layout query, only on request.
+                return scale, measured[scale][0] if scale in measured else (measure(scale)[0] if count_pages else None)
+            if not auto_fit and measure(scale)[0] > max_pages:  # auto fit already ends on the fewest pages any spacing reaches
+                tighter = [candidate for candidate in _GRID if floor <= candidate < scale]  # loosest first
+                if tighter and measure(tighter[-1])[0] <= max_pages:
+                    scale = next(candidate for candidate in tighter if measure(candidate)[0] <= max_pages)
+            return scale, measure(scale)[0]
+
+        data = _data(sections, header, company)
+        scale, pages = placed(data)
+        note = None
+        if max_pages is not None and pages is not None and pages > max_pages:
+            compact = {**data, "compact_tags": True} if any(section["tags"] for section in sections) else data
+            for floor in (FIT_FLOOR, SPACING_MIN)[compact is data:]:
+                tight_scale, tight_pages = placed(compact, floor)
+                if tight_pages is not None and tight_pages <= max_pages:
+                    data, scale, pages = compact, tight_scale, tight_pages
+                    break
+            else:
+                note = over_limit_note(pages, max_pages)
+        return RenderedPdf(_compile(template, directory, data, scale, timestamp), pages, scale, note)
 
 
 def render_pdf(
@@ -488,9 +534,8 @@ def measure_markdown(markdown: str, *, spacing_scale: float = SPACING_DEFAULT) -
     how the master resume's selector fits a pick to the page budget (0.1.10.9 master P2)."""
 
     _name, sections = parse_resume_markdown(markdown)
-    data = {"doc_title": "Resume", "name": "", "title": "", "contact": [], "blank_header": True, "sections": sections}
     with resources.as_file(resources.files("gigai.scout").joinpath("data", "resume")) as directory:
-        return _end((Path(directory) / "resume.typ").read_bytes(), str(directory), data, clamp_scale(spacing_scale))
+        return _end((Path(directory) / "resume.typ").read_bytes(), str(directory), _data(sections, None, ""), clamp_scale(spacing_scale))
 
 
 # --- the header and layout both entry points use ---------------------------------------------
@@ -536,9 +581,11 @@ def stored_resume_pdf(
     from .find_jobs.company_names import company_display_name
 
     company = company_display_name(home_root, stored.job.company) or stored.job.company
+    # 0.1.11.3: the PDF stays on the page limit the resume was fitted to (its length record's, else the rule's).
+    length = stored.result.length
     rendered = _render(
         _body(stored.result), pdf_header(settings, profile_id, form), company=company, timestamp=stamp,
-        spacing_scale=scale, auto_fit=fit, count_pages=count_pages,
+        spacing_scale=scale, auto_fit=fit, count_pages=count_pages, max_pages=length.max_pages if length is not None else LENGTH_RULE.max_pages,
     )
     return rendered, pdf_file_name(company, stored.job.title, today or date.today())
 
@@ -576,6 +623,7 @@ __all__ = [
     "MAX_MARKDOWN_BYTES",
     "MAX_MARKDOWN_LINES",
     "ContactItem",
+    "FIT_FLOOR",
     "PdfHeader",
     "RenderedPdf",
     "ResumeMarkdownError",
@@ -587,6 +635,7 @@ __all__ = [
     "layout",
     "markdown_resume_pdf",
     "measure_markdown",
+    "over_limit_note",
     "parse_resume_markdown",
     "pdf_file_name",
     "pdf_header",

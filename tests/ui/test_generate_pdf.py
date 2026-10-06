@@ -121,3 +121,43 @@ def test_generate_pdf_six_fields_a_download_and_nothing_stored(ui, scout_server)
     assert form.locator("input").evaluate_all("(fields) => fields.map((field) => field.value)") == [""] * 6
 
     ui.assert_clean()  # zero console errors, page errors, HTTP >= 400, failed requests
+
+
+def test_generate_pdf_stays_on_the_page_limit_and_shows_the_servers_note_when_it_cannot(ui, scout_server) -> None:
+    """0.1.11.3 packet 7, in the browser: a header of four lines still downloads a PDF on the resume's page limit, with
+    no note; and when the server says the resume cannot fit (`X-GigAI-Fit-Note`), the form shows that sentence.
+
+    The small home's resume is a few lines, so the over-limit answer is the real response with the header laid over
+    it (the size that overflowed, through the same route over HTTP: tests/behaviors/scout_find_jobs/test_pdf_fits_page_limit.py)."""
+
+    from pypdf import PdfReader
+
+    demo = scout_server.demo
+    long_header = {**HEADER, "linkedin": "linkedin.example.test/in/zephyrine-quillfeather-clinical-applications", "link": "zquillfeather.example.test/portfolio/selected-work"}
+    ui.goto("/#/pdf/" + quote(demo.hero_profile_id, safe="") + "/" + quote(demo.hero_job, safe=""))
+    ui.page.locator('[data-role="generate-pdf-form"]').wait_for()
+    for key, value in long_header.items():
+        ui.page.fill(f"#generate-pdf-{key}", value)
+    with ui.page.expect_download() as waiting:
+        ui.page.locator('[data-role="generate-pdf"]').click()
+    ui.page.locator('[data-role="pdf-saved"]').wait_for()
+    pages = [page.extract_text() for page in PdfReader(io.BytesIO(Path(waiting.value.path()).read_bytes())).pages]
+    assert len(pages) <= 2, f"Generate PDF made {len(pages)} pages"
+    contact = [line for line in pages[0].splitlines()[:5] if "example.test" in line]
+    assert len(contact) == 2, f"the contact line did not wrap to two: {pages[0].splitlines()[:5]}"
+    assert ui.page.locator('[data-role="pdf-fit-note"]').count() == 0
+
+    note = "This resume takes 3 pages: it does not fit on 2 pages even with the tightest spacing. To get 2 pages, shorten it (remove a few lines or an older role) and generate the PDF again, or keep it at 3 pages."
+
+    def over_limit(route) -> None:
+        response = route.fetch()
+        route.fulfill(response=response, headers={**response.headers, "X-GigAI-Fit-Note": note})
+
+    ui.page.route("**/api/tailored-resumes/pdf", over_limit)
+    with ui.page.expect_download():
+        ui.page.locator('[data-role="generate-pdf"]').click()
+    shown = ui.page.locator('[data-role="pdf-fit-note"]')
+    shown.wait_for()
+    assert (shown.text_content() or "").strip() == note
+    ui.page.unroute("**/api/tailored-resumes/pdf")
+    ui.assert_clean()

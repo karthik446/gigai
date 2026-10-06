@@ -38,7 +38,10 @@
 #set page(paper: "us-letter", margin: (x: margin-x, y: margin-y))
 #let item(c) = if c.url != none { link(c.url, c.text) } else { c.text }
 // Skills: inline chips of real text (selected and read in order); the .md keeps a "·" line.
-#let chip(x) = box(fill: tag-fill, inset: (x: 10.7pt, y: 3pt), t(x, size: 8.3pt, lh: 12.5pt))
+// COMPACT (0.1.11.3, resume_pdf._render): the same chips with less padding and a smaller row gap, used only when
+// the resume would otherwise run past its page limit (a last row of chips alone on an extra page).
+#let compact = d.at("compact_tags", default: false)
+#let chip(x) = box(fill: tag-fill, inset: if compact { (x: 5pt, y: 1.5pt) } else { (x: 10.7pt, y: 3pt) }, t(x, size: 8.3pt, lh: 12.5pt))
 #let sec(x) = block(above: 15 * s, below: 8 * s, sticky: true, t(x, size: 7.1pt, lh: 7.1pt, weight: 600, fill: accent, tracking: 0.71pt))
 #let bullet(x, keep: false) = block(below: s, sticky: keep, pad(left: 17.8pt, {place(left, dx: -11.8pt, [•]); x}))
 #let para(x) = block(below: 2 * s, t(x, fill: soft))
@@ -53,7 +56,7 @@
   sec(x.heading)
   for l in x.lines { if l.bullet { bullet(l.text) } else { para(l.text) } }
   if x.tags.len() > 0 {
-    block(below: 2 * s, par(leading: 3 * s, text(size: 8.3pt, ..edges(8.3pt, 12.5pt), x.tags.map(chip).join([#h(1.8pt)·#h(1.8pt)]))))
+    block(below: 2 * s, par(leading: if compact { 1.5 * s } else { 3 * s }, text(size: 8.3pt, ..edges(8.3pt, 12.5pt), x.tags.map(chip).join([#h(1.8pt)·#h(1.8pt)]))))
   }
   for e in x.entries {
     // Sticky heading + role line keep the first bullet with them (a heading is never stranded at a page end).
