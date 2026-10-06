@@ -2,14 +2,15 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   getJobSuggestions,
   getMaster,
-  getResumesFolder,
+  getJobsFolder,
+  openJobsFolder,
   getTailoredResumes,
   postJobResumePick,
   putMasterLine,
   putTailoredResumeLength,
   putTailoredResumeLine,
 } from "../api.js";
-import { folderFilePath } from "../resumesFolderModel.js";
+import { jobFilePath, openFolderNote } from "../resumesFolderModel.js";
 import { TAILORED_WORDING } from "../wording.js";
 import { latestStored, newerStored } from "../tailoredResumeModel.js";
 import { conflictOf } from "../masterModel.js";
@@ -31,6 +32,7 @@ import {
   resumeOrigin,
   selectionErrorText,
   staleActions,
+  EDITED_KEEPS_TEXT,
   suggestionsAnswer,
   unpickable,
 } from "../jobResumeModel.js";
@@ -224,7 +226,7 @@ function Attention({ items, onShowLine }) {
   );
 }
 
-function Stale({ items, busy, picking, onRepick, onReassess, reassess }) {
+function Stale({ items, busy, picking, onRepick, onReassess, reassess, yours }) {
   if (items.length === 0) {
     return null;
   }
@@ -253,6 +255,11 @@ function Stale({ items, busy, picking, onRepick, onReassess, reassess }) {
         ),
       )}
       <span className="muted small"> Nothing refreshes by itself.</span>
+      {yours && actions.some((action) => action.use === "repick") && (
+        <p className="muted small" data-role="edited-keeps">
+          {EDITED_KEEPS_TEXT}
+        </p>
+      )}
     </div>
   );
 }
@@ -337,23 +344,34 @@ export default function JobResumePanel({ state, assessment, gate, items, reasses
   const { stored, record, origin, picking } = state;
   const [choosing, setChoosing] = useState(false);
   const [choiceError, setChoiceError] = useState(null);
-  // 0110-10-05 A: where this job's markdown is in the resumes folder; asked
+  // 0.1.11.4 J3: where this job's resume is in the jobs folder (<company>/<role>/resume.md); asked
   // again when the stored resume changes (a line choice rewrites the file).
   const [folderFile, setFolderFile] = useState("");
+  const [folderNote, setFolderNote] = useState("");
   const storedStamp = stored ? `${stored.updated_at}|${stored.markdown ? stored.markdown.length : 0}` : "";
   useEffect(() => {
     let current = true;
     setFolderFile("");
+    setFolderNote("");
     if (!storedStamp || !state.profileId || !state.jobIdentity) {
       return undefined;
     }
-    getResumesFolder({ profileId: state.profileId, jobIdentity: state.jobIdentity })
-      .then((response) => current && setFolderFile(folderFilePath(response)))
+    getJobsFolder({ profileId: state.profileId, jobIdentity: state.jobIdentity })
+      .then((response) => current && setFolderFile(jobFilePath(response)))
       .catch(() => {}); // the folder line is extra: the panel works without it
     return () => {
       current = false;
     };
   }, [storedStamp, state.profileId, state.jobIdentity]);
+
+  // "Open folder": the server finds the job's folder and asks the computer to show it; when it cannot, the note says
+  // so with the path to copy.
+  const openFolder = useCallback(() => {
+    setFolderNote("");
+    openJobsFolder({ profileId: state.profileId, jobIdentity: state.jobIdentity })
+      .then((response) => setFolderNote(openFolderNote(response, null)))
+      .catch((caught) => setFolderNote(openFolderNote(null, caught)));
+  }, [state.profileId, state.jobIdentity]);
 
   // One write of the stored resume; the response replaces `stored`, so the
   // clean copy and the PDF follow. A 409 means a newer resume replaced this
@@ -507,7 +525,7 @@ export default function JobResumePanel({ state, assessment, gate, items, reasses
       {stored && (
         <>
           <Attention items={attention} onShowLine={state.showLine} />
-          <Stale items={items} busy={busy} picking={picking} onRepick={() => state.pick("refresh")} onReassess={reassess ? reassess.onClick : undefined} reassess={reassess} />
+          <Stale items={items} busy={busy} picking={picking} onRepick={() => state.pick("refresh")} onReassess={reassess ? reassess.onClick : undefined} reassess={reassess} yours={users} />
           <Proposed change={proposed} busy={busy} picking={picking} onUse={() => state.pick("use_proposed")} onDismiss={() => state.pick("dismiss_proposed")} />
           {provenance && provenance.draft && (
             <p className="muted small" data-role="draft-note">
@@ -518,8 +536,17 @@ export default function JobResumePanel({ state, assessment, gate, items, reasses
             {TAILORED_WORDING}
           </p>
           {folderFile && (
-            <p className="muted small" data-testid="resumes-folder-file">
-              In your resumes folder: <code>{folderFile}</code>
+            <p className="muted small" data-testid="jobs-folder-file">
+              In your jobs folder: <code>{folderFile}</code>{" "}
+              <button type="button" className="link-button" data-testid="jobs-folder-open" onClick={openFolder}>
+                Open folder
+              </button>
+              {folderNote && (
+                <span data-testid="jobs-folder-note">
+                  {" "}
+                  {folderNote}
+                </span>
+              )}
             </p>
           )}
           <PickedLeftOut stored={stored} state={state} record={record} assessment={assessment} origin={origin} changed={changed} busy={busy} onRestoreLine={(lineId, use) => chooseLine(lineId, use)} />

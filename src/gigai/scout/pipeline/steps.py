@@ -620,7 +620,8 @@ def _users_resume(ctx: StepContext, claim: Claim, path: Path):
     The user's: any stored resume that is not this step's own last tailoring,
     byte for byte. So one tailored on demand, one with a line choice or an
     edited line, and one written while this step's model call was out. A file
-    that no longer parses is nobody's work and may be replaced.
+    that cannot be read is never replaced either (0.1.11.4 E1): ``_tailor``
+    refuses before it calls a model (``_refuse_unreadable``).
     """
 
     from ..tailored_resume import read_tailored_resume
@@ -636,6 +637,15 @@ def _users_resume(ctx: StepContext, claim: Claim, path: Path):
         except OSError:
             pass
     return stored
+
+
+def _refuse_unreadable(path: Path) -> None:
+    """A stored resume file that cannot be read is the user's: the step fails and the file is left as it is."""
+
+    from ..suggestions import STORED_UNREADABLE, stored_unreadable
+
+    if stored_unreadable(path):
+        raise StepError(ERROR_STORE_UNWRITABLE, STORED_UNREADABLE)
 
 
 def _keep(ctx: StepContext, claim: Claim, path: Path, stored: object) -> StepResult:
@@ -658,6 +668,7 @@ def _tailor(ctx: StepContext, claim: Claim, found: _Inputs) -> StepResult:
     )
 
     path = tailored_resume_path(ctx.home_root, ctx.target, claim.profile_id, found.job.job_identity)  # type: ignore[attr-defined]
+    _refuse_unreadable(path)  # before any model call
     users = _users_resume(ctx, claim, path)
     if users is not None:
         return _keep(ctx, claim, path, users)  # no model call: the user's resume is never replaced
@@ -670,6 +681,7 @@ def _tailor(ctx: StepContext, claim: Claim, found: _Inputs) -> StepResult:
         # Compare and swap: the stored resume is read again under the store's write lock (the one a line choice
         # holds), so what landed while the model call was out is kept and this tailoring is dropped.
         with tailored_resume_write_lock(written):
+            _refuse_unreadable(written)
             landed = _users_resume(ctx, claim, written)
             if landed is not None:
                 kept.append((written, landed))

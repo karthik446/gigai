@@ -18,7 +18,7 @@ import PipelineTimeline from "../components/PipelineTimeline.jsx";
 import { useAnswerDrafts } from "../answerDrafts.js";
 import { assessSendsLine, assessSummaryLines, reassessErrorText, reassessGate } from "../answersModel.js";
 import { REASSESS_LABEL, coverageRows, gateOf, headerChip, staleCodes, staleItems } from "../jobResumeModel.js";
-import { applicationBadge, postedLine, postingDate } from "../postingsModel.js";
+import { applicationBadge, closedBanner, postedLine, postingDate } from "../postingsModel.js";
 import { displayCompanyName, notAssessedReasonDetail, thinPostingLine, unchangedSinceLabel } from "../display.js";
 import {
   ORIGIN_JOB_PAGE,
@@ -400,20 +400,29 @@ export default function JobPage({
   const h1bFigure = job && h1bLabel(job.h1b) ? job.h1b : listedRow && h1bLabel(listedRow.h1b) ? listedRow.h1b : null;
   const askFullText = Boolean(job && job.fromPostings && /^https?:\/\//.test(job.id || ""));
   const askDates = askFullText || (Boolean(job) && !rowDated && !job.row && /^https?:\/\//.test(job.id || ""));
+  // 0.1.11.4 R1: the same read says whether the board still lists the posting (`liveness`); every job with a link asks it.
+  const askLive = Boolean(job) && /^https?:\/\//.test(job.id || "");
   const [servedDates, setServedDates] = useState(null);
+  const [liveness, setLiveness] = useState(null);
   useEffect(() => {
     setServedDates(null);
-    if (!askDates) {
+    setLiveness(null);
+    if (!askDates && !askLive) {
       return undefined;
     }
     let current = true;
     getJob(jobId)
-      .then((response) => current && setServedDates(response && response.posting ? response.posting : null))
+      .then((response) => {
+        if (current) {
+          setServedDates(askDates && response && response.posting ? response.posting : null);
+          setLiveness(response && response.liveness ? response.liveness : null);
+        }
+      })
       .catch(() => {});
     return () => {
       current = false;
     };
-  }, [jobId, askDates]);
+  }, [jobId, askDates, askLive]);
 
   const servedText = askFullText && servedDates && typeof servedDates.text === "string" && servedDates.text.trim() ? servedDates.text : null;
   const posting = useMemo(
@@ -524,6 +533,7 @@ export default function JobPage({
   const coverage = coverageRows({ assessment, record: resume.record, stored: resume.stored });
   // The page's ONE Re-assess, as the stale label and Apply offer it too.
   const reassess = { enabled: Boolean(assessment) && answerDrafts.gate.enabled && !answerDrafts.busy, reason: answerDrafts.gate.reason, onClick: answerDrafts.reassess };
+  const closed = closedBanner(liveness, listedRow, servedDates, posting);
   const structured = Boolean(resume.record) || Boolean(assessment && Array.isArray(assessment.structured_suggestions) && assessment.structured_suggestions.length > 0);
 
   return (
@@ -531,6 +541,17 @@ export default function JobPage({
       <BackToList from={from} />
 
       <section className="panel">
+        {closed && (
+          <div className="callout danger" data-role="posting-closed" data-since={closed.since || undefined} style={{ margin: "0 0 12px" }}>
+            <strong>{closed.text}.</strong> Its board no longer lists it.{" "}
+            {jobUrl && (
+              <a href={jobUrl} target="_blank" rel="noreferrer" data-role="posting-closed-link">
+                Open the posting
+              </a>
+            )}
+            {jobUrl ? " to check it before you apply." : "Check it before you apply."}
+          </div>
+        )}
         <div className="job-header">
           <div style={{ minWidth: 0, flex: 1 }}>
             <h2 className="job-title">{posting.title || "(untitled posting)"}</h2>

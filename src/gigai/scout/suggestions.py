@@ -59,8 +59,10 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
+from datetime import datetime
 import fcntl
 import json
+import logging
 import os
 from pathlib import Path
 import re
@@ -75,6 +77,8 @@ from .find_jobs.assess_contracts import (
 )
 from .find_jobs.contracts import is_row_id
 from .find_jobs.discovery.storage import atomic_write, project_id
+
+_logger = logging.getLogger("gigai.scout.server")
 
 SCHEMA_VERSION = "scout-job-suggestions:1"
 
@@ -783,8 +787,68 @@ def _markdown_digest(markdown: str) -> str:
     return digest_imported_bytes(markdown.encode("utf-8"))
 
 
-def is_replaceable(stored: object | None, record: SuggestionRecord | None) -> bool:
+#: What a person is told when a proposal was made against another resume than the one stored now (``proposal_stale``).
+PROPOSAL_STALE = "the resume changed after this suggestion was made; pick again"
+#: What a person is told when the stored job resume is a file that cannot be read (``stored_resume_unreadable``).
+STORED_UNREADABLE = "the stored resume could not be read; it was left as it is"
+
+
+def stored_unreadable(path: Path) -> bool:
+    """Whether a file IS stored at ``path`` and cannot be read as a job resume (``read_tailored_resume`` answers ``None``
+    for it, as for no file).  Such a file is the user's: nothing writes over it but their own hand-back with ``--force``."""
+
+    from .tailored_resume import read_tailored_resume
+
+    path = Path(path)
+    return (path.is_symlink() or path.exists()) and read_tailored_resume(path) is None
+
+
+def revision_of(stored: object) -> dict[str, object]:
+    """The revision of a stored job resume: when it was written and the digest of its markdown."""
+
+    return {"updated_at": stored.updated_at, "markdown_sha256": _markdown_digest(stored.markdown)}  # type: ignore[attr-defined]
+
+
+def _instant(value: object) -> datetime | None:
+    try:
+        return datetime.fromisoformat(str(value).replace("Z", "+00:00")) if isinstance(value, str) else None
+    except ValueError:
+        return None
+
+
+def proposal_is_stale(proposed: Mapping[str, object], stored: object) -> bool:
+    """Whether ``proposed`` was made against another resume than ``stored`` (the job resume as it is stored NOW).
+
+    A proposal records the revision it was made beside (``against``, ``revision_of``).  One written before that was
+    recorded is stale when the stored resume was written after it was made, or when that cannot be told."""
+
+    against = proposed.get("against")
+    if isinstance(against, Mapping):
+        return dict(against) != revision_of(stored)
+    made, written = _instant(proposed.get("made_at")), _instant(getattr(stored, "updated_at", None))
+    if made is None or written is None or (made.tzinfo is None) != (written.tzinfo is None):
+        return True
+    return written > made
+
+
+def drop_proposal_after_edit(home_root: Path, target: Path, response: object) -> None:
+    """An EDIT of the stored job resume (``response``: what was just stored) drops the selection that waited beside the
+    resume as it was: a proposal is never taken over a resume it was not made against.  Never raises: ``use_proposed``
+    refuses a stale proposal itself (``proposal_stale``)."""
+
+    try:
+        dismiss_proposed(
+            Path(home_root), Path(target), response.resume.profile_id, response.job.job_identity, now=response.updated_at,  # type: ignore[attr-defined]
+        )
+    except (OSError, ValueError):
+        _logger.warning("a waiting suggested resume could not be dropped after an edit", exc_info=True)
+
+
+def is_replaceable(stored: object | None, record: SuggestionRecord | None, *, path: Path | None = None) -> bool:
     """Whether a new selection may REPLACE the stored job resume: there is none, or it is the pick's own, untouched.
+
+    ``path``: where the job resume is stored.  With it, "there is none" means NO FILE: a file that cannot be read
+    (``stored_unreadable``) is the user's and is never replaced.
 
     The pick's own: ``producer.callable`` is ``scout.pick``, it carries no
     ``edited`` mark, and its markdown is byte for byte what the record says
@@ -794,7 +858,7 @@ def is_replaceable(stored: object | None, record: SuggestionRecord | None) -> bo
     """
 
     if stored is None:
-        return True
+        return path is None or not stored_unreadable(path)
     if getattr(stored.producer, "callable", None) != "scout.pick" or getattr(stored, "edited", None) is not None:  # type: ignore[attr-defined]
         return False
     resume = (record.selection or {}).get("resume") if record is not None else None
@@ -884,7 +948,7 @@ def store_assessed(
                 created_at=stored.created_at if stored is not None else now, now=now,
             )
             names = {"markdown_sha256": _markdown_digest(response.markdown), "origin": "pick"}  # type: ignore[attr-defined]
-            if is_replaceable(stored, previous):
+            if is_replaceable(stored, previous, path=resume_path):
                 save_tailor_response(response, home_root=Path(home_root))  # type: ignore[arg-type]
                 stored = response
                 selection = settled.selection_json(  # type: ignore[attr-defined]
@@ -895,6 +959,8 @@ def store_assessed(
                 proposed = settled.selection_json(  # type: ignore[attr-defined]
                     made_at=now, result_digest=digest, master_revision_id=revision_id, resume={"stored_path": os.fspath(sibling), **names},
                 )
+                # The resume it waits beside, as it is now: ``use_proposed`` takes it over this revision only.
+                proposed["against"] = None if stored is None else revision_of(stored)
         if proposed is None:
             sibling.unlink(missing_ok=True)  # a proposal of an earlier assessment goes with it
         # What the job resume prints NOW: the new selection when it was written, else the stored resume as it is.
@@ -919,9 +985,11 @@ def store_assessed(
 
 def use_proposed(home_root: Path, target: Path, profile_id: str | None, job_identity: str, *, now: str) -> SuggestionRecord:
     """Take the proposed selection: its resume REPLACES the stored job resume (the one explicit step that does), and
-    ``proposed`` becomes ``selection``. Raises ``SuggestionError`` (``no_proposed_resume``) when nothing is proposed."""
+    ``proposed`` becomes ``selection``. Raises ``SuggestionError``: ``no_proposed_resume`` when nothing is proposed,
+    ``proposal_stale`` when the stored resume is not the one the proposal was made beside (an edit since: nothing is
+    replaced), ``stored_resume_unreadable`` when the stored file cannot be read (it is left as it is)."""
 
-    from .tailored_resume import TailorResponse, save_tailor_response, tailored_resume_path, tailored_resume_write_lock
+    from .tailored_resume import TailorResponse, read_tailored_resume, save_tailor_response, tailored_resume_path, tailored_resume_write_lock
 
     record_path = suggestions_path(home_root, target, profile_id, job_identity)
     resume_path = tailored_resume_path(Path(home_root), Path(target), profile_id, job_identity)
@@ -930,9 +998,14 @@ def use_proposed(home_root: Path, target: Path, profile_id: str | None, job_iden
         record = read_record(record_path)
         if record is None or record.proposed is None or sibling.is_symlink() or not sibling.is_file():
             raise SuggestionError("no_proposed_resume", "no new suggested resume is waiting for this job")
+        stored = read_tailored_resume(resume_path)
+        if stored is None and stored_unreadable(resume_path):
+            raise SuggestionError("stored_resume_unreadable", STORED_UNREADABLE)
+        if stored is not None and proposal_is_stale(record.proposed, stored):
+            raise SuggestionError("proposal_stale", PROPOSAL_STALE)
         response = replace(TailorResponse.from_json(parse_json_bytes(sibling.read_bytes())), updated_at=now)
         save_tailor_response(response, home_root=Path(home_root))
-        taken = dict(record.proposed)
+        taken = {key: value for key, value in record.proposed.items() if key != "against"}
         taken["resume"] = {"stored_path": os.fspath(resume_path), "markdown_sha256": _markdown_digest(response.markdown), "origin": "pick"}
         rows = [RequirementRow(row.id, row.requirement_class, row.status, row.sources) for row in record.requirements]
         printed = printed_ids(response.result)
@@ -967,6 +1040,7 @@ __all__ = [
     "COVERAGE_LOST",
     "COVERAGE_NONE",
     "HOWS",
+    "PROPOSAL_STALE",
     "REASON_CONFLICT",
     "REASON_LOST_EVIDENCE",
     "SCHEMA_VERSION",
@@ -977,6 +1051,7 @@ __all__ = [
     "STALE_PICKED_LINE",
     "STALE_RULES",
     "STATUSES",
+    "STORED_UNREADABLE",
     "CheckReason",
     "CoverageRow",
     "RequirementRow",
@@ -989,6 +1064,7 @@ __all__ = [
     "basis_of",
     "check_selection",
     "dismiss_proposed",
+    "drop_proposal_after_edit",
     "gate_json",
     "is_answer_source",
     "is_replaceable",
@@ -997,6 +1073,7 @@ __all__ = [
     "marks_json",
     "merged",
     "printed_ids",
+    "proposal_is_stale",
     "proposed_resume_path",
     "read_record",
     "read_suggestions",
@@ -1005,10 +1082,12 @@ __all__ = [
     "requirement_rows",
     "resolve_suggestion",
     "result_digest",
+    "revision_of",
     "save_record",
     "stale",
     "stale_for",
     "store_assessed",
+    "stored_unreadable",
     "suggestions_dir",
     "suggestions_path",
     "use_proposed",

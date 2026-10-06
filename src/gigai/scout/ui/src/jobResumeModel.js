@@ -50,6 +50,8 @@ const VERDICT_GATES = { matched_above_threshold: GATE_SUGGEST, pending_user_answ
 
 // The cost of each refresh, said in its button (SPEC section 6, item 4).
 export const REPICK_LABEL = "Re-pick · no model call";
+// 0.1.11.4 E1: said beside Re-pick when the stored resume is the user's: what the button will (and will not) do.
+export const EDITED_KEEPS_TEXT = "You edited this resume: a new pick will wait beside it, yours stays until you use it.";
 export const REASSESS_LABEL = "Re-assess · 1 model call";
 export const DRAFT_LABEL = "Make a draft anyway";
 export const APPLY_LABEL = "Generate PDF";
@@ -807,6 +809,9 @@ const PICK_ERRORS = {
   resume_held: "No resume is suggested for this job yet: a must-have requirement is waiting for your answer or is not met. Answer its questions, or make a draft.",
   draft_not_needed: "A resume is suggested for this job already. Pick it instead of making a draft.",
   no_proposed_resume: "No new suggested resume is waiting for this job.",
+  // 0.1.11.4 E1: a suggestion is taken only over the resume it was made beside; a file nobody can read is never written over.
+  proposal_stale: "The resume changed after this suggestion was made, so it was not used. Pick again to get a new one.",
+  stored_resume_unreadable: "The stored resume could not be read; it was left as it is.",
   // 0.1.11.3 item 15: "Shorten automatically" (the Generate PDF form).
   no_resume_to_shorten: "There is no resume stored for this job yet, so there is nothing to shorten. Pick one first.",
   resume_short_already: "This resume already fits its pages with most of a page to spare, so nothing was left out.",

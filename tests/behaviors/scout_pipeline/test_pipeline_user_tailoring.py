@@ -203,6 +203,22 @@ def test_a_a_resume_tailored_on_demand_is_the_users_even_before_any_line_choice(
     assert len(fx.model.tailor_prompts) == 1 and _WORDING in _stored(fx, JOB).markdown
 
 
+def test_a_a_stored_resume_that_cannot_be_read_is_not_tailored_over_and_no_model_is_called(fx: PipelineFixture) -> None:
+    """0.1.11.4 E1: a file that cannot be read is the user's; the step fails before its model call and leaves it."""
+
+    held = _tailor_by_hand(fx, JOB)
+    path = Path(held.stored_path)
+    path.write_bytes(path.read_bytes()[:-40])  # cut short: no longer JSON
+    before = (path.read_bytes(), path.stat().st_mtime_ns)
+
+    answer = _cli(fx, "pipeline", "process", JOB, "--force")
+
+    assert (path.read_bytes(), path.stat().st_mtime_ns) == before, "the pipeline wrote over a stored resume it could not read"
+    assert len(fx.model.tailor_prompts) == 1, "no model call is made for a resume that cannot be replaced"
+    (tailor,) = [step for step in answer["drain"]["steps"] if step["name"] == "tailor"]
+    assert tailor["outcome"] != "done" and tailor.get("error_code") == "store_unwritable", tailor
+
+
 def test_a_a_line_edited_on_the_pipelines_own_resume_makes_it_the_users(fx: PipelineFixture) -> None:
     _cli(fx, "pipeline", "process", JOB)
     held = _stored(fx, JOB)

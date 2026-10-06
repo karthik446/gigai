@@ -550,8 +550,10 @@ def _assess(
     from ..workpad import committed_read_cache
     from .find_jobs.market_acquisition import AcquireLimits
     from .assessment_basis import assessment_notice
+    from .find_jobs.posting_live import ERROR_POSTING_CLOSED, jobs_liveness
     from .quick_assess import ERROR_NOT_STORED, QuickAssessError, run_quick_assessment
 
+    closed: set[str] = set()
     marked = nullcontext(live) if live is not None else assess_batch(home_root, target)
 
     failed: list[dict[str, object]] = []
@@ -592,6 +594,8 @@ def _assess(
 
     def assess_one(pair: tuple[str, str]) -> tuple[str, str | None] | None:
         job, profile_id = pair
+        if job in closed:
+            return (ERROR_POSTING_CLOSED, None)  # 0.1.11.4 R1: its board no longer lists it; no model call
         if stop:
             return ("not_started", None)
         text = texts.get(job)
@@ -637,6 +641,9 @@ def _assess(
     # PL5: the batch is live work the pipeline's runner yields to (DESIGN 7), like an "assess all" batch.
     try:
         with marked as live:
+            # 0.1.11.4 R1: only the postings of THIS batch are asked about (one request each, none within the hour);
+            # a closed one is marked removed and not assessed. A board that does not answer changes nothing.
+            closed.update(job for job, answer in jobs_liveness(home_root, target, [job for job, _profile in pairs]).items() if answer.closed)
             if progress is not None:
                 progress.start()
             with ThreadPoolExecutor(max_workers=max(1, assess_concurrency()), thread_name_prefix="scout-new-assess") as pool:
@@ -656,6 +663,8 @@ def _assess(
         "requested": len(pairs), "assessed": len(pairs) - len(failed), "failed": failed, "stopped": stop[0] if stop else None,
         "fetched_on_demand": len(fetched),
     }
+    if closed:
+        batch["closed_skipped"] = len({job for job, _profile in pairs if job in closed})  # omitted when no posting of the batch was closed
     if thin:
         batch["requirements_notes"] = [thin[job] for job in sorted(thin)]  # omitted when every answer read enough requirements
     if notices:
@@ -1534,7 +1543,10 @@ def _table_row(cells: Sequence[Sequence[str]]) -> list[str]:
 def _fetched_note(batch: Mapping[str, object]) -> str:
     """0110-8-02: said for either batch (assess new, re-assess stale) when a missing description was fetched first."""
 
-    return f" Fetched {batch['fetched_on_demand']} missing description(s) first." if batch.get("fetched_on_demand") else ""
+    from .find_jobs.posting_live import closed_skipped_text
+
+    closed = closed_skipped_text(batch)  # 0.1.11.4 R1: said the same way for either batch
+    return (f" Fetched {batch['fetched_on_demand']} missing description(s) first." if batch.get("fetched_on_demand") else "") + (f" {closed}" if closed else "")
 
 
 def _next_lines(batch: Mapping[str, object], what: str) -> list[str]:

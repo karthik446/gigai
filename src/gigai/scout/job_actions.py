@@ -316,16 +316,15 @@ def after_handback(
 
 
 def _resume_view(home_root: Path, resume: object | None, replaceable: bool) -> dict[str, object] | None:
-    """The stored job resume as ``resume pick`` shows it: its markdown, who made it, and where its file is."""
+    """The stored job resume as ``resume pick`` shows it: its markdown, who made it, and where its file and the job's folder are."""
 
-    from . import resumes_folder
+    from . import jobs_folder
 
     if resume is None:
         return None
     selection = getattr(resume, "selection", None)
     edited = getattr(resume, "edited", None)
-    file_name = resumes_folder.job_files(Path(home_root), resumes_folder.job_key(Path(home_root), resume.stored_path))["markdown"]  # type: ignore[attr-defined]
-    folder = resumes_folder.resumes_folder(Path(home_root))
+    folder = jobs_folder.stored_job_folder(Path(home_root), resume.stored_path)  # type: ignore[attr-defined]
     return {
         "updated_at": resume.updated_at,  # type: ignore[attr-defined]
         "made_by": resume.producer.callable,  # type: ignore[attr-defined]
@@ -336,7 +335,9 @@ def _resume_view(home_root: Path, resume: object | None, replaceable: bool) -> d
         "counts": None if selection is None else {
             "picked": len(selection.picked), "left_out": len(selection.left_out), "cut_for_length": len(selection.cut_for_length),
         },
-        "folder_path": None if file_name is None else f"{folder.shown}/{file_name}",
+        # 0.1.11.4 J1: <jobs>/<company>/<role>/resume.md, and the job's folder itself (paths only, for "Open folder").
+        "folder_path": None if folder is None else folder.resume_shown,
+        "job_folder": None if folder is None else folder.shown,
         "markdown": resume.markdown,  # type: ignore[attr-defined]
     }
 
@@ -371,7 +372,8 @@ def pick_view(home_root: Path, target: Path, job_url: str, *, profile_id: str | 
 
     home_root, target = Path(home_root), Path(target)
     job = _job(home_root, target, job_url, profile_id)
-    resume = read_tailored_resume(tailored_resume_path(home_root, target, job.profile_id, job.job_identity))
+    resume_path = tailored_resume_path(home_root, target, job.profile_id, job.job_identity)
+    resume = read_tailored_resume(resume_path)
     record = job.record or {}
     selection = record.get("selection") if isinstance(record.get("selection"), Mapping) else None
     proposed = record.get("proposed") if isinstance(record.get("proposed"), Mapping) else None
@@ -382,7 +384,7 @@ def pick_view(home_root: Path, target: Path, job_url: str, *, profile_id: str | 
     check = BasisCheck(home_root=home_root, target=target, resolved=resolved)
     reason = check.reason(job.assessment)  # type: ignore[arg-type]
     stale = list(store.stale_for(home_root, target, job.profile_id, job.job_identity, assessment_stale=reason, resolved=resolved))
-    replaceable = bool(store.is_replaceable(resume, store.read_suggestions(home_root, target, job.profile_id, job.job_identity)))
+    replaceable = bool(store.is_replaceable(resume, store.read_suggestions(home_root, target, job.profile_id, job.job_identity), path=resume_path))
     gate = record.get("gate") if isinstance(record.get("gate"), Mapping) else None
     if gate is None and getattr(job.assessment, "resume_gate", None) is not None:
         stored_gate = job.assessment.resume_gate  # type: ignore[attr-defined]
@@ -401,6 +403,8 @@ def pick_view(home_root: Path, target: Path, job_url: str, *, profile_id: str | 
         "gate": None if gate is None else dict(gate),
         "stale": stale,
         "resume": _resume_view(home_root, resume, replaceable),
+        # 0.1.11.4 E1: a file IS stored for this job and cannot be read. It is the user's: no pick writes over it.
+        "resume_unreadable": resume is None and store.stored_unreadable(resume_path),
         "picked": None if selection is None else {
             key: selection.get(key) for key in ("picked_by", "fallback", "draft", "made_at", "pages", "max_pages", "pick_rules_version", "selector_version")
         },
@@ -424,7 +428,8 @@ def pick_view(home_root: Path, target: Path, job_url: str, *, profile_id: str | 
 def pick_action(home_root: Path, target: Path, job_url: str, action: str, *, profile_id: str | None = None, now: str | None = None) -> dict[str, object]:
     """One explicit step on a job's resume (the module text's table), then the view after it. No model call.
 
-    Raises ``JobActionError`` (``invalid_value``, ``assessment_stale``, ``draft_not_needed``, ``no_proposed_resume`` ...)
+    Raises ``JobActionError`` (``invalid_value``, ``assessment_stale``, ``draft_not_needed``, ``no_proposed_resume``,
+    ``proposal_stale``, ``stored_resume_unreadable`` ...)
     or ``NotBuilt`` (``pick_not_available``).
     """
 
@@ -435,6 +440,9 @@ def pick_action(home_root: Path, target: Path, job_url: str, action: str, *, pro
     pair = (str(before["profile_id"]), str(before["job_identity"]))
     when = now or _clock()
     extra: dict[str, object] = {}
+    if before["resume_unreadable"] and action != ACTION_DISMISS_PROPOSED:
+        # Said before anything is computed: the step would make a resume that could only wait beside a file nobody can read.
+        raise JobActionError("stored_resume_unreadable", store.STORED_UNREADABLE)
     if action in (ACTION_USE_PROPOSED, ACTION_DISMISS_PROPOSED):
         try:
             if action == ACTION_USE_PROPOSED:

@@ -1715,6 +1715,21 @@ class PipelineStore:
         with self._write() as c:
             c.executemany("UPDATE posting SET match_rank=? WHERE job=? AND profile_id=?", values)
 
+    def mark_posting_removed(self, job: str, removed_at: str) -> int:
+        """0.1.11.4 R1: the board no longer lists ``job`` (a liveness check found it closed); returns the rows marked.
+
+        Every profile's row of the posting gets ``removed_at``, so each read that leaves removed postings out
+        leaves it out. A row already removed keeps its own time. The next build of its board decides again from
+        the index, as for any row: a posting the board lists again is live again.
+        """
+
+        _check("job", job, "posting job")
+        _check("timestamp", removed_at, "posting removed_at")
+        with self._write() as c:
+            return c.execute(
+                "UPDATE posting SET removed_at=?, updated_at=? WHERE job=? AND removed_at IS NULL", (removed_at, removed_at, job)
+            ).rowcount
+
     def posting_count(self, *, profile_id: str | None = None) -> int:
         where, params = ("", ()) if profile_id is None else (" WHERE profile_id=?", (profile_id,))
         return self._conn().execute(f"SELECT COUNT(*) FROM posting{where}", params).fetchone()[0]

@@ -14,7 +14,7 @@ Pinned: the page is the job (title, state "Needs your answers", the questions se
 the requirement it is about); Re-assess is ONE `POST /api/answers` carrying the typed answer and this job; after it
 the questions section is gone and the state leaves "Needs your answers", without a reload; the timeline reaches
 "done" with the Scout label and Scout ATS chips by the page's own polling; the page then shows the resume the
-pipeline stored, its resumes-folder line, the ONE "Generate PDF" button and the state "Resume ready", WITHOUT a
+pipeline stored, its jobs-folder line, the ONE "Generate PDF" button and the state "Resume ready", WITHOUT a
 reload (the 0.1.10.9 U3 flow found it shown only after one): the stored resume is read once for the new assessment (the
 pick comes with it) and ONCE more when the timeline says the pick step finished, and the timeline is not read again for
 it; no action on the page tailors anything; the server holds the typed answer as the user's ("Written
@@ -169,7 +169,7 @@ def test_answer_a_question_on_the_job_page_and_the_pipeline_runs(ui) -> None:
     panel = ui.page.locator('#job-resume[data-state="stored"]')
     tailored_state = ui.page.locator('.job-page [data-role="job-state"][data-state="tailored"]')
     panel.wait_for()
-    ui.page.locator(f"#job-resume {tid('resumes-folder-file')}").wait_for()
+    ui.page.locator(f"#job-resume {tid('jobs-folder-file')}").wait_for()
     tailored_state.wait_for()
     assert "Resume ready" in (tailored_state.text_content() or "")
     assert ui.page.locator('.job-page [data-action="tailor"]').count() == 0
@@ -193,6 +193,6 @@ def test_answer_a_question_on_the_job_page_and_the_pipeline_runs(ui) -> None:
     ui.reload()
     ui.wait_for_job_page()
     panel.wait_for()
-    ui.page.locator(f"#job-resume {tid('resumes-folder-file')}").wait_for()
+    ui.page.locator(f"#job-resume {tid('jobs-folder-file')}").wait_for()
     tailored_state.wait_for()
     ui.assert_clean()  # zero console errors, page errors, HTTP >= 400, failed requests

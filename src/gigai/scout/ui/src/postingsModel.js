@@ -103,6 +103,20 @@ export const STATE_FILTERS = [
   { value: WEAK_FIT, label: "Weak fit", title: "Jobs that need answers from you, but match few of the requirements and rank low, so they are probably not worth your time. They stay out of the list unless this is on." },
 ];
 export const REMOVED_FILTER = { value: "removed", label: "Removed" };
+// 0.1.11.4 R1: what a removed posting's chip and its page say.
+export const CLOSED_LABEL = "Closed";
+export const CLOSED_TEXT = "This posting is closed";
+
+// The job page's closed banner: {text, since} when the posting is closed, else null. `liveness` is the job read's
+// (GET /api/jobs: {state, checked_at, closed_at, note}); a row or a posting that carries `removed_at` says it too.
+export function closedBanner(liveness, ...carriers) {
+  const removed = carriers.map((item) => (item && typeof item.removed_at === "string" ? item.removed_at : "")).find(Boolean) || "";
+  const closed = Boolean(liveness && liveness.state === "closed");
+  if (!closed && !removed) {
+    return null;
+  }
+  return { text: CLOSED_TEXT, since: (closed && typeof liveness.closed_at === "string" && liveness.closed_at) || removed || null };
+}
 
 // How many weak fits the other filters select (listed or not); null when the server does not say.
 export function weakFitCount(counts) {
@@ -379,7 +393,8 @@ export function rowChips(row) {
     chips.push({ kind: "stale", label: `${label.charAt(0).toUpperCase()}${label.slice(1)}`, tone: "warn", testId: "stale-chip", title: row.stale_reason });
   }
   if (row.removed_at) {
-    chips.push({ kind: "removed", label: "Removed", tone: "danger", title: row.removed_at });
+    // 0.1.11.4 R1: the board no longer lists the posting. The chip says what that means; the filter that lists them is still "Removed".
+    chips.push({ kind: "removed", label: CLOSED_LABEL, tone: "danger", title: `Closed: the board no longer lists this posting (since ${row.removed_at})` });
   }
   return chips;
 }

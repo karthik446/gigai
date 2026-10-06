@@ -1,4 +1,4 @@
-"""0110-10-05 on the job page: the Tailored resume panel's resumes-folder line, and "Cut for length" with Restore.
+"""0110-10-05 on the job page: the Tailored resume panel's jobs-folder line, and "Cut for length" with Restore.
 
 The hero job of the small home has a tailored resume the background pipeline made (real server, fixture model).
 
@@ -68,31 +68,36 @@ def open_hero(ui, demo) -> None:
     ui.page.locator(f'{PANEL}[data-state="stored"]').wait_for()
 
 
-def test_the_panel_says_where_the_resume_is_in_the_resumes_folder(ui, scout_server) -> None:
+def test_the_panel_says_where_the_resume_is_in_the_jobs_folder(ui, scout_server) -> None:
     demo = scout_server.demo
     key = f"profile_id={quote(demo.hero_profile_id, safe='')}&job_identity={quote(demo.hero_job, safe='')}"
-    folder = ui.server_json(f"/api/resumes-folder?{key}")
+    folder = ui.server_json(f"/api/jobs-folder?{key}")
     stored = ui.server_json(f"/api/tailored-resumes?{key}")["items"][0]
-    assert folder["files"]["markdown"], "the small home's hero job has its markdown in the resumes folder"
+    job = folder["job"]
+    assert job and job["files"]["resume"] == "resume.md", "the small home's hero job has its resume in its own folder of the jobs folder"
+    assert job["relative"].count("/") == 1, "<company>/<role>"
 
     open_hero(ui, demo)
-    line = ui.page.locator(f"{PANEL} {tid('resumes-folder-file')}")
+    line = ui.page.locator(f"{PANEL} {tid('jobs-folder-file')}")
     line.wait_for()
     ui.step("shown")
-    shown = f"{folder['shown'].rstrip('/')}/{folder['files']['markdown']}"
-    assert (line.text_content() or "").strip() == f"In your resumes folder: {shown}"
-    assert shown.startswith("~/") and line.locator("code").text_content() == shown
+    shown = f"{job['shown'].rstrip('/')}/resume.md"
+    assert shown.startswith("~/") and shown.endswith(f"/jobs/{job['relative']}/resume.md")
+    assert line.locator("code").text_content() == shown
+    assert (line.text_content() or "").strip() == f"In your jobs folder: {shown} Open folder"
     # The file the line names is there, and it is this job's tailored markdown.
-    on_disk = Path(folder["path"]) / folder["files"]["markdown"]
+    on_disk = Path(job["path"]) / "resume.md"
     # (the folder's copy is the clean one: the store's markdown without its `<!-- R1 -->` source marks)
     assert on_disk.is_file() and on_disk.read_text(encoding="utf-8") == re.sub(r" <!-- [^>]*-->", "", stored["markdown"])
-    assert on_disk.resolve().is_relative_to(scout_server.home), "the resumes folder is outside the temporary home"
+    assert on_disk.resolve().is_relative_to(scout_server.home), "the jobs folder is outside the temporary home"
+    assert ui.page.locator(tid("resumes-folder-file")).count() == 0, "the legacy resumes folder is not named on the job page"
 
     # A resume that fits says nothing about length; the panel is a stored resume with its change summary.
     assert ui.page.locator(f"{PANEL} {tid('length-note')}").count() == 0
     assert (ui.page.locator(f"{PANEL} {tid('change-summary')}").text_content() or "").strip()
     ui.settle()
-    assert ui.requests_after("start", "/api/resumes-folder") == 1 and ui.requests_after("start", "/api/tailored-resumes") == 1
+    assert ui.requests_after("start", "/api/jobs-folder") == 1 and ui.requests_after("start", "/api/tailored-resumes") == 1
+    assert ui.requests_after("start", "/api/resumes-folder") == 0
     assert ui.writes_after("start") == []
     ui.cpu_budget("job page with its tailored resume, cold page (small home)", JOB_PAGE_CPU_SECONDS, "start", "shown")
     ui.wall_budget("job page with its tailored resume, cold page (small home)", JOB_PAGE_WALL_SECONDS, "start", "shown")

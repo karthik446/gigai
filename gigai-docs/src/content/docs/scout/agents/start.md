@@ -102,9 +102,10 @@ in the background and prints its address (`http://127.0.0.1:8765` unless the por
 add `--port`). If you started it with `--port`, use your port in the commands below wherever they
 say `8765`. `--no-browser` keeps it from opening a browser tab from inside an agent session.
 Everything GigAI stores goes under `~/.gigai` on this computer, except the resume files it makes
-for the user: each job's tailored resume (markdown) and the PDFs without a header go to the
-resumes folder, `~/Documents/GigAI/resumes` unless the user chose another (`gigai scout status`
-shows it). That folder never holds a name or contact details.
+for the user: each job's resume (markdown) goes to the job's own folder of the jobs folder,
+`~/Documents/GigAI/jobs/<company>/<role>/resume.md`, and the master's file and the PDFs without
+a header go to the resumes folder, `~/Documents/GigAI/resumes`, unless the user chose others
+(`gigai scout status` shows both). Neither folder ever holds a name or contact details.
 
 `--no-browser` is a choice, not a requirement: without it Scout opens the browser itself. When
 the user wants to look at something, give them the address the command printed, or one job's
@@ -297,10 +298,11 @@ in order, and move things aside; never delete.
    mv ~/.gigai ~/.gigai.before-$(date +%Y-%m-%d)
    ```
 
-3. **What stays.** The resumes folder is **not** inside the home: the markdown and PDFs GigAI
-   made for the user's jobs stay in `~/Documents/GigAI/resumes` (or the folder the user chose;
-   `gigai scout resume folder` shows it, before step 2 if you need the path). A GigAI home other
-   than `~/.gigai` keeps them in `<home>/resumes` instead, so they move with it. Leave the folder
+3. **What stays.** The resumes folder and the jobs folder are **not** inside the home: the
+   markdown and PDFs GigAI made for the user's jobs stay in `~/Documents/GigAI/jobs` and
+   `~/Documents/GigAI/resumes` (or the folders the user chose; `gigai scout jobs-folder` and
+   `gigai scout resume folder` show them, before step 2 if you need the paths). A GigAI home other
+   than `~/.gigai` keeps them in `<home>/jobs` and `<home>/resumes` instead, so they move with it. Leave the folder
    alone, or move it aside the same way (`mv ~/Documents/GigAI/resumes
    ~/Documents/GigAI/resumes.before-<date>`) when the user wants no old files there. If the
    operating system refuses the move (`Operation not permitted`), stop and tell the user: do not

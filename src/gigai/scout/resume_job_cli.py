@@ -170,18 +170,26 @@ def resume_brief_command(job_url: str, profile_id: str | None, posting: bool, ou
 
 
 def _folder_file(home_root: Path, response: object) -> str | None:
-    """Where the resumes folder holds this stored resume's markdown (as the user types it), or ``None``."""
+    """Where the jobs folder holds this stored resume's markdown (``<company>/<role>/resume.md``, as the user types it), or ``None``."""
 
-    from . import resumes_folder
-    from .target_resolution import _display_path
+    from . import jobs_folder
 
-    name = resumes_folder.job_files(home_root, resumes_folder.job_key(home_root, response.stored_path))["markdown"]  # type: ignore[attr-defined]
-    return None if name is None else _display_path(resumes_folder.resumes_folder(home_root).path / name)
+    folder = jobs_folder.stored_job_folder(home_root, response.stored_path)  # type: ignore[attr-defined]
+    return None if folder is None else folder.resume_shown
+
+
+def _job_folder(home_root: Path, response: object) -> str | None:
+    """The job's folder in the jobs folder (as the user types it), or ``None``.  A path, never contents."""
+
+    from . import jobs_folder
+
+    folder = jobs_folder.stored_job_folder(home_root, response.stored_path)  # type: ignore[attr-defined]
+    return None if folder is None else folder.shown
 
 
 def store_resume(
     in_file: str, job_url: str, profile_id: str | None, actor: str, source: str | None, out_file: Path | None, home_root: Path, target: Path, as_json: bool,
-    *, resolves: str | None = None, fit: bool = False, renamed_from: str | None = None,
+    *, resolves: str | None = None, fit: bool = False, renamed_from: str | None = None, force: bool = False,
 ) -> None:
     """``gigai scout resume store`` (and the old ``resume tailor --in``, ``renamed_from``): check, store, then the checks again."""
 
@@ -203,6 +211,7 @@ def store_resume(
         job_actions.check_resolves(home_root, target, job_url, profile_id, names)
         attached = attach_edited_resume(
             markdown, job_url=job_url, profile_id=profile_id, written_by=actor, source=source, home_root=home_root, target=target, fit=fit,
+            force=force,
         )
     except _errors() as exc:
         _fail(exc, as_json=as_json, fallback="scout_resume_store_failed")
@@ -242,7 +251,7 @@ def store_resume(
     if as_json:
         payload: dict[str, object] = {
             "ok": True, **response.to_json(), "changed": attached.changed, "out_path": None if out_path is None else str(out_path),
-            "folder_path": folder_file, "recheck": recheck, "drain": drain, "status": status, "recheck_failed": recheck_failed,
+            "folder_path": folder_file, "job_folder": _job_folder(home_root, response), "recheck": recheck, "drain": drain, "status": status, "recheck_failed": recheck_failed,
             "suggestions": record, "suggestions_error": record_error,
         }
         if renamed_from is not None:
@@ -268,7 +277,7 @@ def store_resume(
         click.echo(f"  Cut to {length.pages} of {length.max_pages} pages: {length.trimmed_count()} lines and {len(length.cut)} roles left out; the resume page can put them back.")
     click.echo(f"  Markdown: {response.markdown_path}")
     if folder_file is not None:
-        click.echo(f"  In your resumes folder: {folder_file}")
+        click.echo(f"  In your jobs folder: {folder_file}")
     if out_path is not None:
         click.echo(f"  Copied to {out_path}")
     if record is not None:
@@ -301,10 +310,11 @@ def store_resume(
 @click.option("--source", "source", help="Where the edit came from, in your own words (one line).")
 @click.option("--resolves", "resolves", help="The suggestions this edit settles, by id: sg-1,sg-3. They are set to done once the resume is stored.")
 @click.option("--fit", "fit", is_flag=True, help="Let GigAI cut the resume to two pages and record what it cut.")
+@click.option("--force", "force", is_flag=True, help="Store FILE although it was made from an older version of the stored resume, or the stored resume cannot be read.")
 @click.option("--out", "out_file", type=click.Path(path_type=Path, dir_okay=False), help="Also write the stored markdown to FILE.")
 @_options
 def resume_store_command(
-    in_file: str, job_url: str, profile_id: str | None, actor: str, source: str | None, resolves: str | None, fit: bool, out_file: Path | None,
+    in_file: str, job_url: str, profile_id: str | None, actor: str, source: str | None, resolves: str | None, fit: bool, force: bool, out_file: Path | None,
     target_value: Path | None, home_value: Path | None, as_json: bool,
 ) -> None:
     """Hand an edited resume back for ONE job: checked in code, then stored. No model rewrites anything.
@@ -318,6 +328,13 @@ def resume_store_command(
     problem by line number, with its fix, and stores nothing. The stored
     resume is marked edited with who wrote it (--as), and the Scout ATS score
     and the Scout label are made again from it.
+
+    The resume `resume brief` prints starts with a comment that names the
+    stored version it is (`<!-- gigai-resume: updated_at=... sha256=... -->`).
+    Keep it: a FILE made from an older version than the one stored now is
+    refused in one sentence (get the current one with `resume brief`, then
+    make your edits again), and --force stores it anyway. A new suggested
+    resume that was waiting is dropped when your edit is stored.
     """
 
     home_root = home_value or default_home_root()
@@ -326,7 +343,7 @@ def resume_store_command(
     except _errors() as exc:
         _fail(exc, as_json=as_json, fallback="scout_resume_store_failed")
         return
-    store_resume(in_file, job_url, profile_id or None, actor, source, out_file, home_root, target, as_json, resolves=resolves, fit=fit)
+    store_resume(in_file, job_url, profile_id or None, actor, source, out_file, home_root, target, as_json, resolves=resolves, fit=fit, force=force)
 
 
 # --- resume tailor (removed) ------------------------------------------------------------------------------------
@@ -410,7 +427,11 @@ def _pick_lines(view: dict[str, object]) -> list[str]:
         if isinstance(picked, dict) and picked.get("pages") is not None:
             lines.append(f"  Pages: {picked['pages']} of {picked['max_pages']}.")
         if resume["folder_path"]:
-            lines.append(f"  In your resumes folder: {resume['folder_path']}")
+            lines.append(f"  In your jobs folder: {resume['folder_path']}")
+    elif view.get("resume_unreadable"):
+        from .suggestions import STORED_UNREADABLE
+
+        lines.append(f"Resume: {STORED_UNREADABLE}. To put your own in its place: gigai scout resume store --in FILE --job-url {view['job_identity']} --force")
     else:
         lines.append("Resume: none stored for this job." + _why_none(view))
     lines.append("Stale: " + (", ".join(str(code) for code in view["stale"]) or "nothing"))  # type: ignore[union-attr]
@@ -450,7 +471,9 @@ def resume_pick_command(
     and prints what it left out; --use-proposed takes the
     new suggested resume that waits beside a resume you edited, and
     --dismiss-proposed drops it. A resume you edited is never replaced by
-    anything but --use-proposed.
+    anything but --use-proposed, and --use-proposed is refused when the
+    resume changed after the suggestion was made (pick again). A stored
+    resume that cannot be read is left as it is.
     """
 
     from . import job_actions

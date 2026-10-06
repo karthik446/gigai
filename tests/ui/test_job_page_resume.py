@@ -247,6 +247,34 @@ def test_a_job_tailored_by_0_1_10_keeps_its_resume_and_says_who_made_it(ui, scou
     ui.wall_budget("open a job tailored by 0.1.10 (small home)", JOB_PAGE_WALL_SECONDS, "start", "shown")
     shot(ui, evidence_folder(), "legacy-1-job-tailored-by-0.1.10")
 
+    # --- 0.1.11.4 E1: Re-pick on a resume that is the user's says what it does, and the new pick waits beside it ---
+    waiting = {"picked_by": "code", "fallback": "no_pick", "draft": False, "pages": 2, "max_pages": 2, "line_marks": []}
+    mine = JobResumeFixture(ui, profile_id=demo.hero_profile_id, job_identity=demo.hero_job)
+    mine.picked, mine.selection = False, None
+    mine.stale = ["picked_line_changed"]
+    mine.refresh_proposes = waiting
+    mine.install()
+    open_job(ui, demo.hero_job)
+    stale = ui.page.locator(f'{PANEL} [data-role="resume-stale"]')
+    stale.wait_for()
+    ui.step("mine-stale")
+    assert (stale.locator('[data-role="edited-keeps"]').text_content() or "").strip() == "You edited this resume: a new pick will wait beside it, yours stays until you use it."
+    assert ui.page.locator(f'{PANEL} [data-role="proposed"]').count() == 0
+    kept = (ui.page.locator(f"{PANEL} .md-preview, {PANEL} .clean-wrap").first.text_content() or "").strip()
+    with ui.page.expect_request(lambda request: request.method == "POST" and urlsplit(request.url).path == "/api/job-resumes/pick") as repick:
+        stale.locator('[data-action="repick"]').click()
+    waits = ui.page.locator(f'{PANEL} [data-role="proposed"]')
+    waits.wait_for()
+    assert repick.value.post_data_json == {"job_url": demo.hero_job, "profile_id": demo.hero_profile_id, "action": "refresh"}
+    assert (waits.locator('[data-action="use-proposed"]').text_content() or "").strip() == "Use it"
+    assert "Yours stays as it is until you take the new one." in (waits.text_content() or "")
+    assert ui.page.locator(PANEL).get_attribute("data-origin") == "old_tailor", "the resume shown is still the user's"
+    assert (ui.page.locator(f"{PANEL} .md-preview, {PANEL} .clean-wrap").first.text_content() or "").strip() == kept
+    ui.settle()
+    assert mine.picks == [{"job_url": demo.hero_job, "profile_id": demo.hero_profile_id, "action": "refresh"}]
+    assert ui.writes_after("mine-stale") == ["POST /api/job-resumes/pick"]
+    shot(ui, evidence_folder(), "legacy-1b-re-pick-on-an-edited-resume-waits-beside-it")
+
     # --- a new selection waits as `proposed`: the user's resume is never replaced by itself ---
     printed = [ref["item_id"] for section in stored["result"]["sections"] for line in [*section.get("lines", []), *(bullet for entry in section.get("entries", []) for bullet in entry["bullets"])] for ref in line["refs"] if ref.get("item_id")]
     fixture = JobResumeFixture(ui, profile_id=demo.hero_profile_id, job_identity=demo.hero_job)

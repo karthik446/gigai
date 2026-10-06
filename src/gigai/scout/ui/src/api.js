@@ -669,6 +669,28 @@ export function putResumesFolder(body) {
   return request("PUT", "/api/resumes-folder", body);
 }
 
+// 0.1.11.4 J3: the jobs folder (find_jobs/api/jobs_folder.py): one folder per application. Same shape as the
+// resumes folder; with a profile and a job, `job` is that job's own folder ({shown, relative, files: {resume}}) or null.
+export function getJobsFolder({ profileId, jobIdentity } = {}) {
+  const params = new URLSearchParams();
+  if (profileId && jobIdentity) {
+    params.set("profile_id", profileId);
+    params.set("job_identity", jobIdentity);
+  }
+  const qs = params.toString();
+  return request("GET", `/api/jobs-folder${qs ? `?${qs}` : ""}`);
+}
+
+export function putJobsFolder(body) {
+  return request("PUT", "/api/jobs-folder", body);
+}
+
+// "Open folder": the server finds the folder itself (a job's, or the jobs folder with no argument) and asks the
+// computer to show it. The page never sends a path. -> {opened, shown, message}; opened false = copy the path.
+export function openJobsFolder({ profileId, jobIdentity } = {}) {
+  return request("POST", "/api/jobs-folder/open", profileId && jobIdentity ? { profile_id: profileId, job_identity: jobIdentity } : {});
+}
+
 // 0110-046: the one-time contact cleanup's report (find_jobs/api/
 // privacy_cleanup.py). GET runs the cleanup when it has not run yet; PUT
 // records that the UI showed the report.
@@ -708,7 +730,9 @@ async function postPdf(path, body) {
     throw new ApiError(response.status, detail || `Request failed with status ${response.status}.`, code, { detail });
   }
   // X-GigAI-Fit-Note (0.1.11.3): the server's own sentence when the resume does not fit its page limit.
-  return { blob: await response.blob(), fileName: pdfFileName(response.headers.get("Content-Disposition")), note: response.headers.get("X-GigAI-Fit-Note") || null };
+  // X-GigAI-Posting-Note (0.1.11.4 R1): "This posting looks closed: check it before you apply"; the PDF is made all the same.
+  const notes = [response.headers.get("X-GigAI-Fit-Note"), response.headers.get("X-GigAI-Posting-Note")].filter(Boolean);
+  return { blob: await response.blob(), fileName: pdfFileName(response.headers.get("Content-Disposition")), note: notes.join(" ") || null };
 }
 
 // 0.1.11.3 item 13: the person's own header file, read by the server for the

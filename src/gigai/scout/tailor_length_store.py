@@ -78,6 +78,9 @@ def change_stored_length(
         updated = with_length_use(stored, use)
         if updated is not stored:
             save_tailor_response(updated)
+            from .suggestions import drop_proposal_after_edit
+
+            drop_proposal_after_edit(home_root, target, updated)  # 0.1.11.4 E1: it waited beside the resume as it was
     return updated
 
 

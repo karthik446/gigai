@@ -21,6 +21,26 @@ export function folderFilePath(folder) {
   return `${folder.shown.replace(/\/+$/, "")}/${name}`;
 }
 
+// 0.1.11.4 J3: where this job's resume is in the jobs folder, from GET /api/jobs-folder?profile_id&job_identity
+// ({path, shown, ..., job: {shown, relative, files: {resume}} | null}), as the user types it
+// (~/Documents/GigAI/jobs/<company>/<role>/resume.md); "" when GigAI has made no folder or file for the job.
+export function jobFilePath(folder) {
+  const job = folder && folder.job;
+  const name = job && job.files && job.files.resume;
+  if (!job || !job.shown || !name) {
+    return "";
+  }
+  return `${job.shown.replace(/\/+$/, "")}/${name}`;
+}
+
+// The line under the path after "Open folder": the server's plain sentence, or why it could not be asked.
+export function openFolderNote(response, error) {
+  if (error) {
+    return `Could not open the folder: ${error.detail || error.message || String(error)}`;
+  }
+  return response && response.message ? String(response.message) : "";
+}
+
 // PUT /api/resumes-folder's body for what was typed: an empty field is the
 // default folder.
 export function folderRequest(typed) {

@@ -118,6 +118,8 @@ class JobResumeFixture:
         self.relabel: dict[str, dict] = {}
         self.selection: dict | None = {}  # laid over the record's selection; None: the record has none
         self.proposed: dict | None = None
+        #: What a `refresh` leaves waiting as `proposed` (a stored resume that is the user's is never replaced by it).
+        self.refresh_proposes: dict | None = None
         self.conflicts: list[dict] = []
         self.suggestions: list[dict] = []
         self.structured: list[dict] = []  # the assessment's own structured suggestions
@@ -297,6 +299,8 @@ class JobResumeFixture:
         action = body.get("action")
         if action == "refresh":
             self.stale = []
+            if self.refresh_proposes is not None:  # the stored resume is the user's: the new pick waits beside it
+                self.proposed = copy.deepcopy(self.refresh_proposes)
         elif action == "draft":
             self.resume = "stored"
             self.selection = {"picked_by": "code", "fallback": "draft_requested", "draft": True}
@@ -382,13 +386,13 @@ def evidence_folder() -> Path | None:
     return Path(os.environ[EVIDENCE_ENV]).resolve() if os.environ.get(EVIDENCE_ENV) else None
 
 
-#: The one line of the job page that names a folder of the machine: the resumes folder, inside this run's temporary
+#: The one line of the job page that names a folder of the machine: the jobs folder, inside this run's temporary
 #: HOME (`~/op/home/resumes/...`). It is no user's path, and the privacy gate rightly reads any `/home/<name>` as one:
 #: the line is masked in the picture and left out of its text, and the picture's text says that it was.
-FOLDER_LINE = '[data-testid="resumes-folder-file"]'
+FOLDER_LINE = '[data-testid="jobs-folder-file"]'
 TEXT_JS = """(selector) => {
   const body = document.body.cloneNode(true);
-  body.querySelectorAll(selector).forEach((node) => { node.textContent = '[the resumes-folder line: masked in this picture]'; });
+  body.querySelectorAll(selector).forEach((node) => { node.textContent = '[the jobs-folder line: masked in this picture]'; });
   document.body.appendChild(body);  // innerText needs a rendered node
   const text = body.innerText;
   body.remove();

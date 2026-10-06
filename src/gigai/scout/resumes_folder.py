@@ -1,8 +1,10 @@
-"""0110-10-05 A: the resumes folder -- the one visible place GigAI puts a job's resume files.
+"""0110-10-05 A: the resumes folder -- where GigAI keeps ``master.md`` and the PDFs made without a header.
 
-Everything about the folder is here (where it is, the setting, the file names, what may be
-written into it and what may be replaced), so the tailored resumes, ``gigai scout resume pdf``
-and, later, the master resume all go through one module.
+0.1.11.4 J1: a job's resume markdown is NOT written here any more.  It is ``resume.md`` in the
+job's own folder of the jobs folder (``jobs_folder``, which reuses this module's setting rule,
+lock and digest check).  The flat ``<company>-<role>-<date>.md`` files this module wrote before
+are left as they are (``save_markdown`` stays for them and is no longer called by a resume's
+save); the master's file and the headerless PDFs still go through this module.
 
 **Where.**  ``~/Documents/GigAI/resumes`` for the default GigAI home (``~/.gigai``).  Any other
 home (``--home``, ``GIGAI_HOME``: a scratch or test home) defaults to ``<home>/resumes``, so
@@ -165,20 +167,81 @@ def resumes_folder(home_root: Path) -> ResumesFolder:
     """The resumes folder of this home: the saved setting, else the default.  Reads only."""
 
     default = default_folder(home_root)
-    raw = _read_json(setting_path(home_root))
-    saved = raw.get("path") if raw is not None and raw.get("schema_version") == SETTING_SCHEMA else None
-    if isinstance(saved, str) and saved and not _CONTROL.search(saved) and Path(saved).is_absolute():
-        return ResumesFolder(Path(saved), SOURCE_SETTING, default)
+    saved = _saved_folder(setting_path(home_root), SETTING_SCHEMA)
+    if saved is not None:
+        return ResumesFolder(saved, SOURCE_SETTING, default)
     return ResumesFolder(default, SOURCE_DEFAULT, default)
 
 
-def _make_folder(path: Path) -> None:
+def _make_folder(path: Path, noun: str = "resumes") -> None:
     try:
         path.mkdir(parents=True, exist_ok=True)
     except OSError as exc:
-        raise ResumesFolderError("folder_unwritable", "the resumes folder could not be created; choose another folder") from exc
+        raise ResumesFolderError("folder_unwritable", f"the {noun} folder could not be created; choose another folder") from exc
     if not os.access(path, os.W_OK | os.X_OK):
-        raise ResumesFolderError("folder_unwritable", "the resumes folder cannot be written; choose another folder")
+        raise ResumesFolderError("folder_unwritable", f"the {noun} folder cannot be written; choose another folder")
+
+
+def _saved_folder(setting_file: Path, schema: str) -> Path | None:
+    """The folder a setting file names, or ``None`` (no file, another schema, a path that is not absolute).  Reads only."""
+
+    raw = _read_json(setting_file)
+    saved = raw.get("path") if raw is not None and raw.get("schema_version") == schema else None
+    if isinstance(saved, str) and saved and not _CONTROL.search(saved) and Path(saved).is_absolute():
+        return Path(saved)
+    return None
+
+
+def _save_folder_setting(
+    home_root: Path, value: object, *, setting_file: Path, schema: str, default: Path, noun: str, now: datetime | None = None,
+) -> Path | None:
+    """The one rule of a visible folder's setting (the resumes folder's, and the jobs folder's): save ``value`` and
+    return the folder (created when missing), or remove the setting and return ``None`` for ``None`` / ``""``.
+
+    Refused (``invalid_value``): a relative path, a path that is a file, and a folder inside the GigAI
+    home other than the default one (the home is GigAI's own store).  Raises ``ResumesFolderError``.
+    """
+
+    if value is None or (isinstance(value, str) and not value.strip()):
+        try:
+            if setting_file.is_symlink() or setting_file.exists():
+                setting_file.unlink()
+        except OSError as exc:
+            raise ResumesFolderError("setting_write_failed", f"could not save the {noun} folder setting") from exc
+        return None
+    if not isinstance(value, str):
+        raise ResumesFolderError("wrong_type", "path must be a string")
+    text = value.strip()
+    if len(text) > MAX_PATH_CHARS or _CONTROL.search(text):
+        raise ResumesFolderError("invalid_value", f"path must be one line of at most {MAX_PATH_CHARS} characters")
+    try:
+        expanded = Path(text).expanduser()
+    except RuntimeError as exc:
+        raise ResumesFolderError("invalid_value", "path could not be resolved") from exc
+    if not expanded.is_absolute():
+        raise ResumesFolderError("invalid_value", f"path must be absolute or start with ~ (for example ~/Documents/GigAI/{noun})")
+    folder = Path(os.path.normpath(expanded))
+    if folder != default:
+        try:
+            store, resolved = Path(home_root).expanduser().resolve(strict=False), folder.resolve(strict=False)
+        except (OSError, RuntimeError) as exc:
+            raise ResumesFolderError("invalid_value", "path could not be resolved") from exc
+        if resolved == store or resolved.is_relative_to(store):
+            raise ResumesFolderError("invalid_value", "path is inside the GigAI home, which is GigAI's own store; choose a folder outside it")
+    if folder.is_symlink() or (folder.exists() and not folder.is_dir()):
+        raise ResumesFolderError("invalid_value", "path is not a folder")
+    _make_folder(folder, noun)
+    stamp = (now or datetime.now(timezone.utc)).isoformat().replace("+00:00", "Z")
+    payload = {"schema_version": schema, "path": os.fspath(folder), "updated_at": stamp}
+    try:
+        if setting_file.is_symlink():
+            raise OSError(f"the {noun} folder setting path is a symlink")
+        setting_file.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        atomic_write(setting_file, (json.dumps(payload, indent=2, ensure_ascii=False) + "\n").encode("utf-8"))
+        os.chmod(setting_file, 0o600)
+    except OSError as exc:
+        raise ResumesFolderError("setting_write_failed", f"could not save the {noun} folder setting") from exc
+    return folder
 
 
 def set_resumes_folder(home_root: Path, value: object, *, now: datetime | None = None) -> ResumesFolder:
@@ -190,48 +253,9 @@ def set_resumes_folder(home_root: Path, value: object, *, now: datetime | None =
     """
 
     home_root = Path(home_root)
-    path_file = setting_path(home_root)
-    if value is None or (isinstance(value, str) and not value.strip()):
-        try:
-            if path_file.is_symlink() or path_file.exists():
-                path_file.unlink()
-        except OSError as exc:
-            raise ResumesFolderError("setting_write_failed", "could not save the resumes folder setting") from exc
-        return resumes_folder(home_root)
-    if not isinstance(value, str):
-        raise ResumesFolderError("wrong_type", "path must be a string")
-    text = value.strip()
-    if len(text) > MAX_PATH_CHARS or _CONTROL.search(text):
-        raise ResumesFolderError("invalid_value", f"path must be one line of at most {MAX_PATH_CHARS} characters")
-    try:
-        expanded = Path(text).expanduser()
-    except RuntimeError as exc:
-        raise ResumesFolderError("invalid_value", "path could not be resolved") from exc
-    if not expanded.is_absolute():
-        raise ResumesFolderError("invalid_value", "path must be absolute or start with ~ (for example ~/Documents/GigAI/resumes)")
-    folder = Path(os.path.normpath(expanded))
     default = default_folder(home_root)
-    if folder != default:
-        try:
-            store, resolved = home_root.expanduser().resolve(strict=False), folder.resolve(strict=False)
-        except (OSError, RuntimeError) as exc:
-            raise ResumesFolderError("invalid_value", "path could not be resolved") from exc
-        if resolved == store or resolved.is_relative_to(store):
-            raise ResumesFolderError("invalid_value", "path is inside the GigAI home, which is GigAI's own store; choose a folder outside it")
-    if folder.is_symlink() or (folder.exists() and not folder.is_dir()):
-        raise ResumesFolderError("invalid_value", "path is not a folder")
-    _make_folder(folder)
-    stamp = (now or datetime.now(timezone.utc)).isoformat().replace("+00:00", "Z")
-    payload = {"schema_version": SETTING_SCHEMA, "path": os.fspath(folder), "updated_at": stamp}
-    try:
-        if path_file.is_symlink():
-            raise OSError("the resumes folder setting path is a symlink")
-        path_file.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-        atomic_write(path_file, (json.dumps(payload, indent=2, ensure_ascii=False) + "\n").encode("utf-8"))
-        os.chmod(path_file, 0o600)
-    except OSError as exc:
-        raise ResumesFolderError("setting_write_failed", "could not save the resumes folder setting") from exc
-    return ResumesFolder(folder, SOURCE_SETTING, default)
+    folder = _save_folder_setting(home_root, value, setting_file=setting_path(home_root), schema=SETTING_SCHEMA, default=default, noun="resumes", now=now)
+    return resumes_folder(home_root) if folder is None else ResumesFolder(folder, SOURCE_SETTING, default)
 
 
 # --- file names -----------------------------------------------------------------------------
@@ -597,36 +621,6 @@ def save_master(home_root: Path, *, markdown: str, text: str, revision: int, rev
         raise ResumesFolderError("folder_unwritable", "the master resume could not be written into the resumes folder") from exc
 
 
-def sync_tailored(home_root: Path, target: Path) -> int:
-    """Write the markdown of every stored tailored resume that was never put in the folder; how many were written.
-
-    For a home from before the folder existed.  A resume whose file the user removed is not
-    written again (its index entry stays); a later save of that resume writes it.  Never raises.
-    """
-
-    from .tailored_resume import export_tailored_markdown, read_tailored_resume, tailored_resume_dir
-
-    home_root = Path(home_root)
-    written = 0
-    try:
-        root = tailored_resume_dir(home_root, Path(target))
-        if not root.is_dir():
-            return 0
-        known = {entry["key"] for entry in _load_index(home_root, resumes_folder(home_root).path).values()}
-        # Names only: a stored resume is read (and parsed) just the once it is copied.
-        for path in sorted(root.glob("*/*.json")):
-            if job_key(home_root, path) in known:
-                continue
-            item = read_tailored_resume(path)
-            if item is None:
-                continue
-            saved = export_tailored_markdown(item, home_root=home_root)
-            written += int(saved is not None and saved.written)
-    except Exception as exc:  # noqa: BLE001 - a start never fails because of the folder: logged by type
-        _logger.warning("resumes folder: the stored tailored resumes were not copied (%s)", type(exc).__name__)
-    return written
-
-
 __all__ = [
     "INDEX_SCHEMA",
     "MARKDOWN",
@@ -659,6 +653,5 @@ __all__ = [
     "save_pdf",
     "set_resumes_folder",
     "setting_path",
-    "sync_tailored",
     "try_save_markdown",
 ]

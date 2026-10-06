@@ -225,7 +225,14 @@ class TailoredResumesRoutesMixin:
         except Exception:  # noqa: BLE001 - a render failure is typed, and never echoes the resume or the form
             self._error(HTTPStatus.INTERNAL_SERVER_ERROR, "pdf_render_failed", "the PDF could not be rendered")
             return
-        self._write_pdf(rendered, file_name, finish=None if form is not None else self._finish_url(profile_id, job_identity))
+        # 0.1.11.4 R1: a closed posting's PDF is still made (the user decides); the answer says so in plain words.
+        from ..posting_live import job_liveness
+
+        note = job_liveness(home_root, target, job_identity).note
+        self._write_pdf(
+            rendered, file_name, {"X-GigAI-Posting-Note": note} if note else None,
+            finish=None if form is not None else self._finish_url(profile_id, job_identity),
+        )
 
     def _refuse_large_body(self) -> bool:
         """True (and a 422 written) when the request body is too large to be resume markdown."""
@@ -374,6 +381,9 @@ class TailoredResumesRoutesMixin:
                     failure = (_status_for(exc.code), exc.code, str(exc))
             if failure is None and updated is not stored:
                 save_tailor_response(updated, home_root=home_root)
+                from ...suggestions import drop_proposal_after_edit
+
+                drop_proposal_after_edit(home_root, target, updated)  # 0.1.11.4 E1: it waited beside the resume as it was
         if failure is not None:
             self._error(*failure)
             return
