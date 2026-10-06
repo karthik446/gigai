@@ -78,7 +78,7 @@ def test_ui_shots_wait_on_test_ids_never_on_visible_text() -> None:
         assert literal, f"data-testid {test_id} is gone from the UI source"
     assert {
         "job-row", "time-chip-new", "assess-these", "approval-dialog", "step-timeline", "scout-label-chip", "background-panel", "approvals-list",
-        "resumes-folder-file", "picked-left-out",
+        "jobs-folder-file", "picked-left-out",
     } <= used
     # 0110-10-07: the Master page and the Picked / Left out lists have no test ids; the names the shots wait on must exist too.
     roles = set(re.findall(r'data-role="([a-z-]+)"', source))

@@ -107,6 +107,7 @@ JOURNEYS: dict[Route, str] = {
     Route("PUT", "/api/resumes-folder"): "test_edited_tailored_resume_journey.py",
     Route("GET", "/api/jobs-folder"): "test_edited_tailored_resume_journey.py",
     Route("PUT", "/api/jobs-folder"): "test_edited_tailored_resume_journey.py",
+    Route("POST", "/api/jobs-folder/open"): "test_jobs_folder_open_journey.py (0.1.11.4 J3: Scout's own page only)",
     Route("GET", "/api/resume-display"): "test_resume_display_journey.py",
     Route("PUT", "/api/resume-display"): "test_resume_display_journey.py",
     Route("GET", "/api/watchlist"): "test_watchlist_journey.py",

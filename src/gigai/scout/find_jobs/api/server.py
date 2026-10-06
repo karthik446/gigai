@@ -2126,6 +2126,9 @@ def _make_handler(
                 if path == "/api/pdf-header/save":
                     self._handle_post_pdf_header_save()
                     return
+                if path == "/api/jobs-folder/open":
+                    self._handle_post_jobs_folder_open()
+                    return
                 if path == "/api/resumes":
                     self._handle_post_resumes()
                     return

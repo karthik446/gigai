@@ -1848,6 +1848,24 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
         ),
     ),
     RouteSpec(
+        "POST", "/api/jobs-folder/open", "Scout's own page only: show the jobs folder, or one job's folder, in the computer's file manager.", "write", "none",
+        {"schema_version": "scout-jobs-folder-open:1", "opened": True, "shown": "~/Documents/GigAI/jobs/acme/staff-engineer", "message": "Opened ~/Documents/GigAI/jobs/acme/staff-engineer."},
+        schema_version="scout-jobs-folder-open:1",
+        params=(
+            _b("profile_id", "string", "Optional: with job_identity, the job whose folder to open. Without both, the jobs folder itself is opened."),
+            _b("job_identity", "string", "Optional: the job's identity (the page's own)."),
+        ),
+        request_example={}, errors=(_UNKNOWN_KEY, _WRONG_TYPE, _INVALID, (403, "forbidden_origin"), (404, "folder_missing"), (422, "outside_jobs_folder"), _NO_TARGET),
+        description=(
+            "NOT for agents: it answers only Scout's own browser page (a request carrying this server's own Origin); any other caller gets 403 "
+            "forbidden_origin and nothing is opened. The request never carries a folder path: GigAI finds the folder itself, from the stored job "
+            "(or from the jobs folder setting), and refuses one that is not inside the jobs folder (422 outside_jobs_folder). A job GigAI has made no "
+            "folder for, or a folder that is not there, answers 404 folder_missing. It asks the computer to show the folder (macOS `open`, Linux "
+            "`xdg-open` when there is a desktop); the answer is 200 either way: `opened` false means this computer could not, and `message` says so "
+            "in one plain sentence that names the folder so the person can copy it. It shows the folder only: no file is read or changed."
+        ),
+    ),
+    RouteSpec(
         "PUT", "/api/resumes-folder", "Choose the resumes folder.", "write", "none",
         {"schema_version": "scout-resumes-folder-response:1", "path": "/home/you/Resumes", "shown": "~/Resumes", "source": "setting", "default": "~/Documents/GigAI/resumes", "exists": True},
         schema_version="scout-resumes-folder-response:1",
@@ -2644,6 +2662,7 @@ _META: dict[tuple[str, str], tuple[str, str]] = {
     ("PUT", "/api/resumes-folder"): ("Choose the resumes folder", "Tailored resumes"),
     ("GET", "/api/jobs-folder"): ("Get the jobs folder", "Tailored resumes"),
     ("PUT", "/api/jobs-folder"): ("Choose the jobs folder", "Tailored resumes"),
+    ("POST", "/api/jobs-folder/open"): ("Scout's page only: show a job's folder in the file manager", "Tailored resumes"),
     ("GET", "/api/resume-display"): ("Get the PDF layout settings", "Tailored resumes"),
     ("PUT", "/api/resume-display"): ("Save the PDF layout settings", "Tailored resumes"),
     ("POST", "/api/resume/extract"): ("Extract search preferences from a resume", "Profiles and resume"),
@@ -2765,6 +2784,7 @@ _LABELS: dict[tuple[str, str], tuple[str, ...]] = {
     # A folder path and <company>/<role>: the folder is the user's, the company and role a posting's words.
     ("GET", "/api/jobs-folder"): _BOTH,
     ("PUT", "/api/jobs-folder"): _PRIVATE,
+    ("POST", "/api/jobs-folder/open"): _PRIVATE,
     ("POST", "/api/resume/extract"): _PRIVATE,
     ("POST", "/api/resume/check"): _PRIVATE,
     ("POST", "/api/resumes"): _PRIVATE,

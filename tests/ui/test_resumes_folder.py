@@ -1,8 +1,7 @@
 """0110-10-05 A: Settings shows the resumes folder, and it can be changed and put back (real browser, real server).
 
-The session's HOME is a temporary directory and the GigAI home is a folder inside it that is not ``~/.gigai``, so
-its default resumes folder is ``<home>/resumes`` (only the default home uses ``~/Documents/GigAI/resumes``),
-printed as the user types it (``~/.../resumes``): the real Documents folder is never involved. The chosen folder
+The session's HOME is a temporary directory and the GigAI home is its ``.gigai`` (tools.media.demo_home), so its
+default resumes folder is ``~/Documents/GigAI/resumes`` of that temporary HOME: the real Documents folder is never involved. The chosen folder
 is a temporary one too, and the test ends on the default again, so the shared home is left as it was found. The job
 page's own line (the job's file in the folder) is ``test_tailored_resume_panel.py``, on the hero job's tailored resume.
 
@@ -24,14 +23,14 @@ from tests.ui.support import tid
 pytestmark = pytest.mark.ui
 
 
-def test_settings_shows_the_resumes_folder_and_changes_it(ui, tmp_path: Path) -> None:
+def test_settings_shows_the_resumes_folder_and_changes_it(ui, scout_server, tmp_path: Path) -> None:
     ui.goto("/#/settings")
     folder = ui.page.locator(tid("resumes-folder"))
     folder.wait_for()
     served = ui.page.evaluate("() => fetch('/api/resumes-folder').then((response) => response.json())")
     default = f"{served['shown']} (the default)"
     assert served["source"] == "default" and served["shown"].startswith("~/") and served["shown"].endswith("/resumes")
-    assert "Documents" not in served["path"], "a temporary home never uses the Documents folder"
+    assert served["path"].startswith(str(scout_server.home)), "the folder is inside the temporary HOME (the demo home is its .gigai: ~/Documents/GigAI/resumes)"
     assert folder.inner_text().strip() == default
     assert folder.get_attribute("data-source") == "default"
     assert ui.page.locator(tid("resumes-folder-default")).count() == 0
