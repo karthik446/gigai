@@ -7,7 +7,8 @@
 // started}.
 //
 // The rules the page keeps:
-//   - a user whose postings are not ranked SEES it: one line with the count, never a silent "not ranked yet";
+//   - the row is ALWAYS on the Jobs page (RANKVIS): "Ranked X of Y (last 7 days)" with the count of what is not ranked
+//     yet, never a silent "not ranked yet" and never nothing;
 //   - "Rank now" ranks them from the page; "Re-rank latest 100" shows its cost (the calls) BEFORE it runs;
 //   - no model call without a click, and with ranking off the buttons say so and the line says how to turn it on.
 
@@ -59,32 +60,42 @@ export function rankJobRunning(job) {
   return Boolean(job) && job.state === "running";
 }
 
-// The ONE status line of the panel. `job`: the rank job the page started (or joined), or null.
-export function rankStatusLine(ranking, job, howToEnable) {
+// 0.1.11.2 RANKVIS: THE ROW IS ALWAYS THERE. One small row above the list: "Ranked 57 of 57 (last 7 days)", then
+// "Rank now" and "Re-rank latest 100". A button that cannot run is greyed and SAYS WHY in its own text ("Rank now:
+// nothing to rank", "Rank now: ranking is off") and in its title; with no ranking block (an older server, a list that
+// could not be read) the row says "Ranking status unavailable", never nothing.
+export const RANK_UNAVAILABLE = "Ranking status unavailable";
+export const RANK_READING = "Reading the ranking status…";
+
+// The ONE status line of the row. `job`: the rank job the page started (or joined), or null. `loading`: the list's
+// first read is on its way (no block yet).
+export function rankStatusLine(ranking, job, howToEnable, { loading = false } = {}) {
   const totals = rankTotals(ranking);
   if (!totals) {
-    return null;
+    return loading ? RANK_READING : `${RANK_UNAVAILABLE}.`;
   }
   const { ranked, total, unranked, windowDays } = totals;
+  const count = `${ranked} of ${total} (last ${windowDays} days)`;
   if (!totals.enabled) {
-    const waiting = unranked ? `${plural(unranked, "posting", "postings")} of the last ${windowDays} days ${unranked === 1 ? "is" : "are"} not ranked. ` : "";
-    return `${waiting}${howToEnable || HOW_TO_ENABLE}`;
+    return `Ranked ${count} · ${howToEnable || HOW_TO_ENABLE}`;
   }
   if (rankJobRunning(job)) {
-    return `${job.mode === "latest" ? "Re-ranking the latest 100" : "Ranking now"}: ranked ${ranked} of ${total}.`;
+    return `${job.mode === "latest" ? "Re-ranking the latest 100" : "Ranking now"}: ranked ${count}`;
   }
-  if (unranked) {
-    return `${plural(unranked, "posting", "postings")} of the last ${windowDays} days ${unranked === 1 ? "is" : "are"} not ranked yet (ranked ${ranked} of ${total}).`;
-  }
-  return total ? `Ranked ${ranked} of ${total}: every posting of the last ${windowDays} days is ranked.` : `No posting of the last ${windowDays} days to rank.`;
+  return unranked ? `Ranked ${count} · ${unranked} not ranked yet` : `Ranked ${count}`;
 }
 
-// The two buttons: {rankNow: {label, disabled, title}, rerank: {label, disabled, title}}; null with no ranking block.
-// `busy`: a request of the panel is on its way.
+// The two buttons: {rankNow: {label, disabled, title}, rerank: {label, disabled, title}}. A disabled one carries its
+// reason in the label. `busy`: a request of the row is on its way. With no ranking block the buttons stay on: a click
+// asks the server, and its answer carries the ranking block the row then shows.
 export function rankButtons(ranking, { job = null, busy = false, howToEnable = null } = {}) {
   const totals = rankTotals(ranking);
+  const rerankTitle = "Ranks the newest 100 postings again, also the ranked ones. Asks first: the calls it makes. Nothing runs until you approve.";
   if (!totals) {
-    return null;
+    return {
+      rankNow: { label: "Rank now", disabled: busy, title: `${RANK_UNAVAILABLE}. Asks the server to rank the postings not ranked yet.` },
+      rerank: { label: "Re-rank latest 100", disabled: busy, title: `${RANK_UNAVAILABLE}. ${rerankTitle}` },
+    };
   }
   if (!totals.enabled) {
     const title = howToEnable || HOW_TO_ENABLE;
@@ -95,20 +106,32 @@ export function rankButtons(ranking, { job = null, busy = false, howToEnable = n
   }
   const running = rankJobRunning(job);
   const hold = busy || running;
-  return {
-    rankNow: {
-      label: running && job.mode !== "latest" ? "Ranking…" : "Rank now",
-      disabled: hold || totals.unranked === 0,
-      title: totals.unranked
-        ? `Ranks the ${plural(totals.unranked, "posting", "postings")} not ranked yet: one model call per 50, inside today's 100 rank calls.`
-        : "Every posting of the window is ranked.",
-    },
-    rerank: {
-      label: running && job.mode === "latest" ? "Re-ranking…" : "Re-rank latest 100",
-      disabled: hold || totals.total === 0,
-      title: "Ranks the newest 100 postings again, also the ranked ones. Asks first: the calls it makes. Nothing runs until you approve.",
-    },
-  };
+  const window = `the last ${totals.windowDays} days`;
+  let rankNow;
+  if (running && job.mode !== "latest") {
+    rankNow = { label: "Ranking…", disabled: true, title: "Ranking the postings not ranked yet." };
+  } else if (totals.unranked === 0) {
+    rankNow = {
+      label: "Rank now: nothing to rank",
+      disabled: true,
+      title: totals.total ? `Nothing to rank: every posting of ${window} is ranked.` : `Nothing to rank: no posting of ${window}.`,
+    };
+  } else {
+    rankNow = {
+      label: "Rank now",
+      disabled: hold,
+      title: `Ranks the ${plural(totals.unranked, "posting", "postings")} not ranked yet: one model call per 50, inside today's 100 rank calls.`,
+    };
+  }
+  let rerank;
+  if (running && job.mode === "latest") {
+    rerank = { label: "Re-ranking…", disabled: true, title: rerankTitle };
+  } else if (totals.total === 0) {
+    rerank = { label: "Re-rank latest 100: nothing to rank", disabled: true, title: `Nothing to rank: no posting of ${window}.` };
+  } else {
+    rerank = { label: "Re-rank latest 100", disabled: hold, title: rerankTitle };
+  }
+  return { rankNow, rerank };
 }
 
 function refusalLine(plan, today) {

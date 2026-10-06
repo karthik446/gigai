@@ -651,8 +651,9 @@ export default function JobsView({ selectedProfileId, onSelectProfile, applicati
               {ranking}
             </div>
           )}
-          {/* 0.1.11.2 RANKUI: how many postings are not ranked, "Rank now" and "Re-rank latest 100" (cost shown first). */}
-          {!filter.removed && <RankPanel ranking={response && response.ranking} onRefresh={() => postingsStore.refresh(filter, { page, size })} />}
+          {/* 0.1.11.2 RANKUI + RANKVIS: the rank row, ALWAYS there: "Ranked X of Y (last 7 days)", "Rank now" and
+              "Re-rank latest 100" (cost shown first); "Ranking status unavailable" when the list has no ranking block. */}
+          <RankPanel ranking={response && response.ranking} loading={loading && !response && !error} onRefresh={() => postingsStore.refresh(filter, { page, size })} />
         </div>
       </section>
 

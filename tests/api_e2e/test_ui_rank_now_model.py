@@ -5,11 +5,13 @@
 asks, no model call) on a synthetic home with unranked postings. LOUD skip
 without ``node``. What lives in JSX is pinned by reading the source.
 
-Pinned: the one status line with the count of unranked postings ("3 postings
-of the last 7 days are not ranked yet (ranked 0 of 3)"), "ranked X of Y" while
-a job runs, the buttons (off: they say ranking is off, the line says how to
+Pinned: the one status line ("Ranked 0 of 3 (last 7 days) · 3 not ranked
+yet"), "ranked X of Y" while a job runs, the buttons (a greyed one says why in
+its own label: "nothing to rank", "ranking is off", and the line says how to
 turn it on, in the server's own words), the re-rank dialog's cost before it
 runs and its refusal past the daily cap, and what a finished job says.
+RANKVIS: the row is ALWAYS drawn; with no ranking block the line says
+"Ranking status unavailable" and the buttons stay (never nothing).
 """
 
 from __future__ import annotations
@@ -49,7 +51,7 @@ const all = { enabled: true, in_progress: false, window_days: 7, by_profile: [{ 
 out.all = { line: m.rankStatusLine(all, null), buttons: m.rankButtons(all, {}) };
 out.one = m.rankStatusLine({ enabled: true, window_days: 7, by_profile: [{ profile_id: "a", ranked: 4, total: 5 }] }, null);
 out.none = { line: m.rankStatusLine({ enabled: true, window_days: 7, by_profile: [] }, null), buttons: m.rankButtons({ enabled: true, window_days: 7, by_profile: [] }, {}) };
-out.missing = [m.rankStatusLine(null, null), m.rankButtons(undefined, {}), m.rankTotals({})];
+out.missing = [m.rankStatusLine(null, null), m.rankButtons(undefined, {}), m.rankTotals({}), m.rankStatusLine(undefined, null, null, { loading: true }), m.rankButtons(null, { busy: true })];
 out.off = { line: m.rankStatusLine(data.off.ranking, null, data.off.how_to_enable), buttons: m.rankButtons(data.off.ranking, { howToEnable: data.off.how_to_enable }), fallback: m.rankStatusLine(data.off.ranking, null) };
 out.dialog = m.rerankDialog(data.ask);
 out.capped = m.rerankDialog(data.capped);
@@ -104,31 +106,42 @@ def out(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict:
 def test_a_user_whose_postings_are_not_ranked_sees_the_count_and_can_rank_now(out: dict) -> None:
     assert out["isAnswer"] == [True, False, False]
     assert out["totals"] == {"enabled": True, "ranked": 0, "total": 3, "unranked": 3, "windowDays": 7}
-    assert out["line"] == "3 postings of the last 7 days are not ranked yet (ranked 0 of 3)."
-    assert out["one"] == "1 posting of the last 7 days is not ranked yet (ranked 4 of 5)."
+    assert out["line"] == "Ranked 0 of 3 (last 7 days) · 3 not ranked yet"
+    assert out["one"] == "Ranked 4 of 5 (last 7 days) · 1 not ranked yet"
     now, rerank = out["buttons"]["rankNow"], out["buttons"]["rerank"]
     assert (now["label"], now["disabled"]) == ("Rank now", False) and "3 postings not ranked yet" in now["title"]
     assert (rerank["label"], rerank["disabled"]) == ("Re-rank latest 100", False) and "Asks first" in rerank["title"]
     assert [out["busy"][name]["disabled"] for name in ("rankNow", "rerank")] == [True, True]  # a request is on its way
-    assert out["missing"] == [None, None, None]  # an older server: no panel, never a wrong line
+    # RANKVIS: no ranking block (an older server, a list that could not be read): the row says so, never nothing.
+    line, buttons, totals, reading, busy = out["missing"]
+    assert (line, totals, reading) == ("Ranking status unavailable.", None, "Reading the ranking status…")
+    assert [(buttons[name]["label"], buttons[name]["disabled"]) for name in ("rankNow", "rerank")] == [("Rank now", False), ("Re-rank latest 100", False)]
+    assert all(buttons[name]["title"].startswith("Ranking status unavailable. ") for name in ("rankNow", "rerank"))
+    assert [busy[name]["disabled"] for name in ("rankNow", "rerank")] == [True, True]
 
 
 def test_ranked_x_of_y_while_a_job_runs_and_what_it_says_when_all_are_ranked(out: dict) -> None:
     running = out["running"]
-    assert running["line"] == "Ranking now: ranked 50 of 60."
+    assert running["line"] == "Ranking now: ranked 50 of 60 (last 7 days)"
     assert (running["buttons"]["rankNow"]["label"], running["buttons"]["rankNow"]["disabled"], running["buttons"]["rerank"]["disabled"]) == ("Ranking…", True, True)
-    assert running["latest"] == "Re-ranking the latest 100: ranked 50 of 60."
+    assert running["latest"] == "Re-ranking the latest 100: ranked 50 of 60 (last 7 days)"
     assert (running["latestButtons"]["rerank"]["label"], running["latestButtons"]["rankNow"]["label"]) == ("Re-ranking…", "Rank now")
-    assert out["all"]["line"] == "Ranked 57 of 57: every posting of the last 7 days is ranked."
-    assert (out["all"]["buttons"]["rankNow"]["disabled"], out["all"]["buttons"]["rerank"]["disabled"]) == (True, False)  # nothing unranked; a re-rank is still offered
-    assert out["none"]["line"] == "No posting of the last 7 days to rank."
-    assert [out["none"]["buttons"][name]["disabled"] for name in ("rankNow", "rerank")] == [True, True]
+    assert out["all"]["line"] == "Ranked 57 of 57 (last 7 days)"
+    # Nothing unranked: "Rank now" is greyed and says why in its label and its title; a re-rank is still offered.
+    assert out["all"]["buttons"]["rankNow"] == {"label": "Rank now: nothing to rank", "disabled": True, "title": "Nothing to rank: every posting of the last 7 days is ranked."}
+    assert (out["all"]["buttons"]["rerank"]["label"], out["all"]["buttons"]["rerank"]["disabled"]) == ("Re-rank latest 100", False)
+    assert out["none"]["line"] == "Ranked 0 of 0 (last 7 days)"
+    none = out["none"]["buttons"]
+    assert [(none[name]["label"], none[name]["disabled"], none[name]["title"]) for name in ("rankNow", "rerank")] == [
+        ("Rank now: nothing to rank", True, "Nothing to rank: no posting of the last 7 days."),
+        ("Re-rank latest 100: nothing to rank", True, "Nothing to rank: no posting of the last 7 days."),
+    ]
 
 
 def test_with_ranking_off_the_buttons_say_so_and_the_line_says_how_to_turn_it_on(out: dict) -> None:
     assert out["howTo"] == rank_now.HOW_TO_ENABLE  # the page's fallback is the server's own sentence
     off = out["off"]
-    assert off["line"] == f"3 postings of the last 7 days are not ranked. {rank_now.HOW_TO_ENABLE}" == off["fallback"]
+    assert off["line"] == f"Ranked 0 of 3 (last 7 days) · {rank_now.HOW_TO_ENABLE}" == off["fallback"]
     assert off["buttons"]["rankNow"] == {"label": "Rank now: ranking is off", "disabled": True, "title": rank_now.HOW_TO_ENABLE}
     assert off["buttons"]["rerank"] == {"label": "Re-rank latest 100: ranking is off", "disabled": True, "title": rank_now.HOW_TO_ENABLE}
 
@@ -166,6 +179,7 @@ def test_what_a_finished_job_says(out: dict) -> None:
 def test_the_page_draws_the_panel_the_buttons_and_the_cost_dialog() -> None:
     view = (UI_SRC / "views" / "JobsView.jsx").read_text(encoding="utf-8")
     assert "<RankPanel ranking={response && response.ranking}" in view and 'data-testid="ranking-line"' in view
+    assert "&& <RankPanel" not in view  # RANKVIS: the row is always drawn, under no condition of the page
     panel = (UI_SRC / "components" / "RankPanel.jsx").read_text(encoding="utf-8")
     for needle in (
         'data-testid="rank-panel"', 'data-testid="rank-status-line"', 'data-testid="rank-now"', 'data-testid="rerank-latest"',
@@ -175,6 +189,8 @@ def test_the_page_draws_the_panel_the_buttons_and_the_cost_dialog() -> None:
         assert needle in panel, needle
     # No model call without a click: the only approvals are in the two click handlers; nothing is posted on load.
     assert panel.count("approve: true") == 1 and "useEffect(() => {\n    if (!running)" in panel
+    # RANKVIS: no early return hides the row (the one `return null` is `take`, for an answer of another route).
+    assert panel.count("return null") == 1 and "return null; // not this route's answer" in panel and "!line || !buttons" not in panel
     dialog = (UI_SRC / "components" / "RerankApprovalDialog.jsx").read_text(encoding="utf-8")
     for needle in ('data-testid="rerank-dialog"', 'data-role="rerank-cost"', 'data-role="rerank-refusal"', 'data-action="rerank-approve"', "!dialog.approveBody"):
         assert needle in dialog, needle

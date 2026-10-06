@@ -5,8 +5,8 @@ The demo home has postings of the last 7 days for two profiles; its server ranks
 last step (the off switch: the real list with `ranking.enabled` false, as a server with ranking off serves it).
 
 Pinned:
-- the panel's one line is the server's count ("N postings of the last 7 days are not ranked yet (ranked X of Y)", or
-  "Ranked Y of Y: every posting ..."), never a silent "not ranked yet";
+- the row's one line is the server's count ("Ranked X of Y (last 7 days) · N not ranked yet", or "Ranked Y of Y (last 7
+  days)"), never a silent "not ranked yet" (RANKVIS: tests/ui/test_jobs_rank_row.py pins the row case by case);
 - "Rank now" ranks the unranked ones: the line ends at "Ranked Y of Y", the list has no "not ranked yet" row left, and
   the server's own read says the same;
 - "Re-rank latest 100" shows the COST FIRST (postings, calls, today's count) and makes no model call until Approve
@@ -75,12 +75,10 @@ def test_the_jobs_page_shows_how_far_the_rank_is_ranks_now_and_re_ranks_with_the
 
     _open(ui)
     unranked = total - ranked
-    all_ranked = f"Ranked {total} of {total}: every posting of the last 7 days is ranked."
+    all_ranked = f"Ranked {total} of {total} (last 7 days)"
     if unranked:
         # Not ranked, and the page says so with the count; "Rank now" is on.
-        noun = "posting" if unranked == 1 else "postings"
-        verb = "is" if unranked == 1 else "are"
-        assert _text(ui, LINE) == f"{unranked} {noun} of the last 7 days {verb} not ranked yet (ranked {ranked} of {total})."
+        assert _text(ui, LINE) == f"Ranked {ranked} of {total} (last 7 days) · {unranked} not ranked yet"
         assert ui.page.locator(RANK_NOW).is_enabled() and _text(ui, RANK_NOW) == "Rank now"
         shot(ui, "jobs-rank-panel-unranked")
         for _attempt in range(3):  # the server's own background rank may hold the lane for a moment: the click is repeated
@@ -88,8 +86,8 @@ def test_the_jobs_page_shows_how_far_the_rank_is_ranks_now_and_re_ranks_with_the
                 break
             ui.page.locator(RANK_NOW).click()
             ui.page.wait_for_function(
-                "([line, notice]) => (document.querySelector(line)?.textContent || '').startsWith('Ranked ') || !!document.querySelector(notice)",
-                arg=[LINE, NOTICE], timeout=60000,
+                "([line, notice, done]) => (document.querySelector(line)?.textContent || '').trim() === done || !!document.querySelector(notice)",
+                arg=[LINE, NOTICE, all_ranked], timeout=60000,
             )
             ui.settle()
             if _text(ui, LINE) == all_ranked:
@@ -99,6 +97,7 @@ def test_the_jobs_page_shows_how_far_the_rank_is_ranks_now_and_re_ranks_with_the
     # The end outcome: every in-window posting is ranked, on the page, in the list and in the server's read.
     assert _text(ui, LINE) == all_ranked
     assert ui.page.locator(RANK_NOW).is_disabled() and ui.page.locator(RERANK).is_enabled()
+    assert _text(ui, RANK_NOW) == "Rank now: nothing to rank"
     after = _wait_idle(ui)
     assert _totals(after) == (total, total) and after["ranking"]["in_progress"] is False
     if unranked:
@@ -205,7 +204,7 @@ def test_the_jobs_page_shows_how_far_the_rank_is_ranks_now_and_re_ranks_with_the
     ui.page.route("**/api/postings?*", ranking_off)
     ui.page.route("**/api/postings", ranking_off)
     _open(ui)
-    assert _text(ui, LINE).startswith("3 postings of the last 7 days are not ranked. Ranking is off. To turn it on, ") and HOW_TO in _text(ui, LINE)
+    assert _text(ui, LINE).startswith(f"Ranked {total} of {total + 3} (last 7 days) · Ranking is off. To turn it on, ") and HOW_TO in _text(ui, LINE)
     assert (_text(ui, RANK_NOW), _text(ui, RERANK)) == ("Rank now: ranking is off", "Re-rank latest 100: ranking is off")
     assert ui.page.locator(RANK_NOW).is_disabled() and ui.page.locator(RERANK).is_disabled()
     assert ui.page.locator(STALE_LINE).count() == 0
