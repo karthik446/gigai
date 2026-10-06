@@ -31,6 +31,7 @@ from gigai.adapters.port import ModelInvocationError
 from gigai.scout import assess_causes, assess_master, assess_preview, posting_search, postings, scout_new
 from gigai.scout.find_jobs.api.assess import write_assess_error
 from gigai.scout.master_store import import_master
+from gigai.scout.pipeline.settings import PIPELINE_ENV
 from gigai.scout.quick_assess import QuickAssessError, read_quick_assessment
 
 from tests.support.greenhouse_fixtures import gh_job, gh_url, seed_greenhouse
@@ -164,7 +165,11 @@ def test_the_preview_names_the_master_evidence_view_and_a_posting_that_is_fetche
     assert assess_master.resume_source(home_root=fx.home_root, target=fx.target, profile=None) == "profile_view"  # a pasted resume
 
 
-def test_the_terminal_says_the_same_facts_above_the_question(fx: PostingsFixture) -> None:
+def test_the_terminal_says_the_same_facts_above_the_question(fx: PostingsFixture, monkeypatch: pytest.MonkeyPatch) -> None:
+    # The command reads the real clock and the fixture's postings have fixed dates: inside 7 days of them the terminal
+    # also says "Ranking is still running: ..." under the question (0.1.11.2, pinned in test_rank_order_and_top_batch).
+    # Ranking off, so this says the same on any day.
+    monkeypatch.setenv(PIPELINE_ENV, "off")
     label = _default_label(fx)
 
     shown = _invoke(fx, "jobs", "assess", _FIRST)
