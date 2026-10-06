@@ -2,9 +2,11 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, use
 import { getNewPeek, getPostings, getPostingsStatus, postAssessThese, postMarkAllSeen } from "../api.js";
 import AssessApprovalDialog from "../components/AssessApprovalDialog.jsx";
 import RankPanel from "../components/RankPanel.jsx";
+import SponsorshipBadge from "../components/SponsorshipBadge.jsx";
 import SourcesStrip from "../components/SourcesStrip.jsx";
 import { useSourcesStatus } from "../components/SourcesUpdatePanel.jsx";
 import { inProgressCount } from "../jobStateModel.js";
+import { h1bLabel } from "../jobModel.js";
 import {
   EMPTY_FILTER,
   ORDER_CHIP,
@@ -174,6 +176,7 @@ function PostingRow({ row, profiles, anchor, selected, onSelect, onOpen, onAsses
         {scoreText(row)}
       </div>
       <div className="posting-chips" data-role="state-chips">
+        {h1bLabel(row.h1b) && <SponsorshipBadge sponsorship={row.sponsorship} h1b={row.h1b} />}
         {rowChips(row).map((chip) => (
           <span key={`${chip.kind}:${chip.label}`} className={`state-pill tone-${chip.tone}`} data-testid={chip.testId} data-kind={chip.kind} title={chip.title}>
             {chip.label}

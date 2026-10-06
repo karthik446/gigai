@@ -414,9 +414,9 @@ def test_the_sponsorship_chip(out: dict) -> None:
     assert no_record["label"] == "Sponsorship not stated" and no_record["positive"] is False
     assert zero["label"] == "Sponsorship not stated" and zero["positive"] is False
     assert null_status["label"] == "Sponsorship not stated · 1 H-1B approval (FY2025–2026)" and null_status["positive"] is True
-    # A posting that states its position never shows the count.
-    assert offered["label"] == "Sponsors visas" and offered["positive"] is False
-    assert not_offered["label"] == "No sponsorship" and not_offered["positive"] is False
+    # 0.1.11.3: a posting that states its position shows it plus the company's figure (a label, never a contradiction).
+    assert offered["label"] == "Sponsors visas · 32 H-1B approvals (FY2026)" and offered["positive"] is False
+    assert not_offered["label"] == "No sponsorship · 32 H-1B approvals (FY2026)" and not_offered["positive"] is False
     for chip in out["chips"]:
         assert "Unknown" not in chip["label"]
 

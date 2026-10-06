@@ -82,6 +82,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from datetime import UTC, datetime, timedelta
+from functools import lru_cache
 from pathlib import Path
 import threading
 import uuid
@@ -316,6 +317,23 @@ class _Selection:
         ]
 
 
+@lru_cache(maxsize=1)
+def _h1b_index() -> Mapping[tuple[str, str], Mapping[str, object]]:
+    """``(provider, board token lower-cased)`` -> the shipped catalog's company H-1B figure, built once per process.
+
+    0.1.11.3 (item 8): a LABEL on the row, read from the bundled catalog (no network, no per-row read). A catalog that
+    cannot load gives an empty index: the figure is display-only and never breaks the list.
+    """
+
+    from .find_jobs.company_catalog import CompanyCatalogError, load_company_catalog
+
+    try:
+        index = load_company_catalog().h1b_by_board()
+    except CompanyCatalogError:
+        return {}
+    return {(provider.value, token): figure.to_json() for (provider, token), figure in index.items() if figure.approvals > 0}
+
+
 def _rows_json(
     home_root: Path, target: Path, store: PipelineStore, shown: Sequence[tuple[Sequence[PostingRecord], PostingRecord]],
     views: Sequence[ProfileView] = (), ranked_low: Callable[[PostingRecord], bool] | None = None,
@@ -331,10 +349,18 @@ def _rows_json(
             ran.update({(item.profile_id, item.job): item for item in store.run_assessments(profile_id=profile_id, latest=True)})
     rows: list[dict[str, object]] = []
     pending = postings.TagPending(home_root, views)
+    h1b = _h1b_index() if shown else {}  # once per request: a row looks its board up, never reads the catalog
     for group, row in shown:
         item = None if row.state == _NOT_ASSESSED else read_quick_assessment(home_root, target, row.profile_id, row.job)
         text = texts.get(row.job)
         entry = _row_json(group, row, text, item, pending(row.profile_id, None if text is None else text.title))
+        # 0.1.11.3 (item 8): LABELS only (never a filter, sort key or hold). ``sponsorship`` is what the assessment read
+        # from the posting (null: not stated / not assessed); ``h1b`` the company's catalog figure (null: none held).
+        stated = None if item is None else getattr(item.result, "sponsorship", None)  # type: ignore[attr-defined]
+        entry["sponsorship"] = None if stated is None else stated.value
+        ats, token = postings.split_board(row.board)
+        figure = h1b.get((ats, token.lower()))
+        entry["h1b"] = None if figure is None else dict(figure)
         origin: dict[str, object] | None = None
         if item is not None:
             origin = {"origin": "quick_assess"}

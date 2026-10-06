@@ -260,13 +260,15 @@ export function h1bLabel(h1b) {
 }
 
 // The sponsorship chip's words (SponsorshipBadge renders them): the
-// posting's own statement, or "Sponsorship not stated" plus the company's
-// H-1B approvals when the posting is silent. `positive` (the chip's green
-// tone) is true only for a silent posting whose company has approvals.
+// posting's own statement ("Sponsors visas" / "No sponsorship" / "Sponsorship
+// not stated") plus the company's H-1B approvals whenever the catalog holds a
+// figure (0.1.11.3: stated or silent, "Sponsors visas · 32 H-1B approvals").
+// A LABEL only. `positive` (the chip's green tone) is true only for a silent
+// posting whose company has approvals.
 export function sponsorshipChip(sponsorship, h1b) {
   const status = sponsorship || "unknown";
   const silent = status === "unknown";
-  const approvals = silent ? h1bLabel(h1b) : null;
+  const approvals = h1bLabel(h1b);
   let label = sponsorshipLabel(status);
   let title = silent ? "The posting does not mention sponsorship" : "Stated in the posting";
   if (approvals) {
@@ -276,7 +278,7 @@ export function sponsorshipChip(sponsorship, h1b) {
       title = `${title}, ${h1b.denials} denial${h1b.denials === 1 ? "" : "s"} in the same period`;
     }
   }
-  return { status, label, title, positive: Boolean(approvals) };
+  return { status, label, title, positive: Boolean(approvals) && silent };
 }
 
 export function workModeLabel(posting) {
