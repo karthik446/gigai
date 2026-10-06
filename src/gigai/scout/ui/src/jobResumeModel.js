@@ -52,7 +52,7 @@ const VERDICT_GATES = { matched_above_threshold: GATE_SUGGEST, pending_user_answ
 export const REPICK_LABEL = "Re-pick · no model call";
 export const REASSESS_LABEL = "Re-assess · 1 model call";
 export const DRAFT_LABEL = "Make a draft anyway";
-export const APPLY_LABEL = "Apply: get the PDF";
+export const APPLY_LABEL = "Generate PDF";
 
 // --- the suggestion route's answer -------------------------------------------------------
 

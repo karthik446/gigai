@@ -4,9 +4,13 @@ import { APPLY_LABEL, applyState } from "../jobResumeModel.js";
 import GeneratePdfForm from "./GeneratePdfForm.jsx";
 
 // 0.1.11 N6 (SPEC section 6, item 7; D7: "Apply = the PDF. Nothing after
-// it."): ONE button, "Apply: get the PDF". It opens the existing Generate PDF
-// form (GeneratePdfForm.jsx: the name and contact details are typed there for
-// this one PDF and never stored) and gives the PDF.
+// it."), moved by 0.1.11.3 item 5: ONE button, "Generate PDF", INSIDE the
+// "Suggested resume" card, right under its heading (JobResumePanel renders
+// this; the page has no separate Apply card at the bottom any more). It opens
+// the existing Generate PDF form (GeneratePdfForm.jsx: the name and contact
+// details are typed there for this one PDF and never stored) and gives the PDF.
+// `visaRequired` (the profile's sponsorship answer) prefills the form's
+// optional "Work authorization" line (0.1.11.3 item 6).
 //
 // With a stale resume it first says so and offers the refresh that is allowed
 // ("Re-pick first · no model call", or "Re-assess first · 1 model call" when
@@ -15,7 +19,7 @@ import GeneratePdfForm from "./GeneratePdfForm.jsx";
 // After the PDF: nothing. This button opens no posting, asks nothing about
 // having applied and writes no application record. (The State line's own
 // "Mark applied" is the existing Applications feature, untouched.)
-export default function ApplyPanel({ state, items, reassess }) {
+export default function ApplyPanel({ state, items, reassess, visaRequired = false }) {
   const { stored } = state;
   const [open, setOpen] = useState(false);
   const [asking, setAsking] = useState(false);
@@ -52,9 +56,8 @@ export default function ApplyPanel({ state, items, reassess }) {
     }
   };
   return (
-    <section className="panel" id="job-apply" data-testid="job-apply" data-stale={apply.stale ? "true" : undefined}>
-      <div className="resume-toolbar">
-        <h3>Apply</h3>
+    <div className="resume-apply" id="job-apply" data-testid="job-apply" data-stale={apply.stale ? "true" : undefined}>
+      <div className="resume-apply-bar">
         <button type="button" className="button" aria-expanded={open} data-action="apply" disabled={state.picking !== null} onClick={click}>
           {open ? "Close" : APPLY_LABEL}
         </button>
@@ -76,7 +79,7 @@ export default function ApplyPanel({ state, items, reassess }) {
           ))}
         </div>
       )}
-      {open && <GeneratePdfForm render={renderPdf} />}
-    </section>
+      {open && <GeneratePdfForm render={renderPdf} visaRequired={visaRequired} />}
+    </div>
   );
 }

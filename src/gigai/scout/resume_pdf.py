@@ -270,6 +270,7 @@ def _data(sections: list[dict[str, object]], header: PdfHeader | None, company: 
         "name": shown.name,
         "title": shown.title,
         "contact": [{"text": c.text, "url": c.url} for c in shown.contact],
+        "work_authorization": shown.work_authorization,
         "blank_header": header is None,
         "sections": sections,
     }

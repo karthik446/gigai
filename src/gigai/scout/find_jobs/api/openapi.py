@@ -154,7 +154,8 @@ _IDENTITY_KEY: dict[str, object] = {"profile_id": "prof_1", "job_identity": _JOB
 #: 0110-046: the Generate PDF form's fields, for one render; GigAI stores no name or contact details.
 _HEADER_PARAM = _b(
     "header", "object",
-    "The Generate PDF form: {name, email, phone, location, linkedin, link}, each an optional string of at most 200 characters. "
+    "The Generate PDF form: {name, email, phone, location, linkedin, link, work_authorization}, each an optional string of at most 200 characters. "
+    "work_authorization (e.g. `H-1B, requires sponsorship`) prints as its own header line. "
     "Fills this one PDF's header; never stored, logged or returned. Left out: the PDF has no header. "
     "Details an agent sends here went through that agent and its model provider; the default for an agent is the headerless PDF "
     "and the person finishing it in Scout.",

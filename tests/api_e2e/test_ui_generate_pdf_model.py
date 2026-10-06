@@ -2,8 +2,10 @@
 
 ``ui/src/generatePdfModel.js`` is pure JavaScript, run under the system ``node``
 (LOUD skip when it is not on PATH); the form component is checked statically.
-The six values live in the form's state and travel only in the one render
-request: no browser storage, no URL, no saved setting.
+The values live in the form's state and travel only in the one render
+request: no browser storage, no URL, no saved setting.  That holds for the
+optional "Work authorization" line too (0.1.11.3 item 6): it starts from the
+profile's sponsorship answer every time and an edit is never remembered.
 """
 
 from __future__ import annotations
@@ -27,6 +29,8 @@ console.log(JSON.stringify({
   fields: m.FIELDS,
   maxValue: m.MAX_VALUE,
   empty: m.emptyValues(),
+  start: [m.startValues({ visaRequired: true }), m.startValues({ visaRequired: false }), m.startValues()],
+  prefill: m.WORK_AUTHORIZATION_PREFILL,
   body: m.headerBody({ name: "  Zora Quillfeather ", email: "zora.q@example.invalid", phone: 5550142, extra: "x", link: "y".repeat(300) }),
   bodyNull: m.headerBody(null),
   can: [m.canGenerate({ name: "Zora" }), m.canGenerate({ name: "  ", email: "a@b.c" }), m.canGenerate(null)],
@@ -56,7 +60,9 @@ def test_six_fields_with_the_standard_autocomplete_tokens_in_the_servers_order()
     assert [field["key"] for field in fields] == list(HEADER_FIELDS)
     assert {field["key"]: field["autocomplete"] for field in fields} == {
         "name": "name", "email": "email", "phone": "tel", "location": "address-level2", "linkedin": "url", "link": "url",
+        "work_authorization": "off",  # 0.1.11.3 item 6: not a browser-autofill value; the form prefills it itself
     }
+    assert [field["key"] for field in fields if field.get("hint")] == ["work_authorization"]
     # a link is typed as text (a browser's type=url check refuses "linkedin.com/in/you")
     assert all(field["type"] != "url" for field in fields)
     assert out["maxValue"] == MAX_VALUE
@@ -65,7 +71,10 @@ def test_six_fields_with_the_standard_autocomplete_tokens_in_the_servers_order()
 def test_the_header_body_is_every_field_trimmed_and_capped() -> None:
     out = _run()
     assert out["empty"] == {key: "" for key in HEADER_FIELDS}
-    assert out["body"] == {"name": "Zora Quillfeather", "email": "zora.q@example.invalid", "phone": "", "location": "", "linkedin": "", "link": "y" * MAX_VALUE}
+    assert out["body"] == {
+        "name": "Zora Quillfeather", "email": "zora.q@example.invalid", "phone": "", "location": "", "linkedin": "", "link": "y" * MAX_VALUE,
+        "work_authorization": "",
+    }
     assert out["bodyNull"] == {key: "" for key in HEADER_FIELDS}
     assert out["can"] == [True, False, False]
 
@@ -77,7 +86,7 @@ def test_the_form_carries_the_one_privacy_notice_and_spells_out_none_of_it() -> 
     "never stores" had to be absent). The model still exports no wording of its own, and the form spells no
     sentence out: it shows the two shared constants.
     """
-    assert _run()["exports"] == ["FIELDS", "MAX_VALUE", "canGenerate", "cleanupNotice", "emptyValues", "headerBody"]
+    assert _run()["exports"] == ["FIELDS", "MAX_VALUE", "WORK_AUTHORIZATION_PREFILL", "canGenerate", "cleanupNotice", "emptyValues", "headerBody", "startValues"]
     form = (UI_SRC / "components" / "GeneratePdfForm.jsx").read_text(encoding="utf-8")
     assert 'import { PRIVACY_PDF_LINE, PRIVACY_PROMISE } from "../wording.js";' in form
     assert "<strong>{PRIVACY_PROMISE}</strong> {PRIVACY_PDF_LINE}" in form and 'data-role="pdf-privacy"' in form
@@ -95,6 +104,8 @@ def test_the_form_keeps_nothing_and_sends_the_values_only_in_the_render_request(
             assert kept not in source, kept
     assert 'autoComplete={field.autocomplete}' in form and 'onSubmit={submit}' in form and "Generate PDF" in form
     assert "render(headerBody(values))" in form
+    # 0.1.11.3 item 6: the form starts from the profile's answer each time it mounts, and imports no storage helper.
+    assert "useState(() => startValues({ visaRequired }))" in form and "theme.js" not in form and "Storage" not in form
     # The only fetches that carry `header` are the two PDF routes.
     assert re.findall(r"body\.header = header", api) == ["body.header = header", "body.header = header"]
     assert 'postPdf("/api/tailored-resumes/pdf", body)' in api and 'postPdf("/api/resume/pdf", body)' in api
@@ -147,3 +158,13 @@ def test_the_cleanup_report_shows_once_and_only_when_something_was_removed() -> 
     assert _run()["notices"] == ["Removed contact details from 1 stored resume (email 1).", None, None, None]
     app = (UI_SRC / "App.jsx").read_text(encoding="utf-8")
     assert "getPrivacyCleanup()" in app and "putPrivacyCleanupShown()" in app and 'data-role="app-notice"' in app
+
+
+def test_the_work_authorization_line_starts_from_the_profiles_sponsorship_answer() -> None:
+    """0.1.11.3 item 6: the profile stores yes/no only, so "yes" prefills a plain sentence and "no" leaves the line empty;
+    the six contact values always start empty.  Nothing is read from anywhere else: an edit is never remembered."""
+    out = _run()
+    blank = {key: "" for key in HEADER_FIELDS}
+    assert out["prefill"] == "Requires visa sponsorship"
+    assert out["start"] == [{**blank, "work_authorization": "Requires visa sponsorship"}, blank, blank]
+    assert not (UI_SRC / "workAuthorizationModel.js").exists(), "no module remembers the wording"
