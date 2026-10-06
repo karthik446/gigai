@@ -233,29 +233,202 @@ def _words(text: str) -> list[str]:
     return [_stem(w) for w in _WORD_RE.findall(text.lower()) if w not in _FILLER_WORDS]
 
 
-def matches_roles(title: str, roles: tuple[str, ...]) -> bool:
-    """Case-insensitive whole-word match: any configured role's words all
-    appear as words of the title.
+# --- the role as a whole (0.1.11.3, packet 14) ----------------------------------------------
+#
+# A role's words all being somewhere in a title is not that role: "Staff Training Engineer" has the words of "Staff
+# Engineer". The rule below reads a title in SEGMENTS and asks for the role's words together.
 
-    Punctuation and filler words (of, the, and, &, -, ,) are ignored and word
-    order is free, so the role "Director of Engineering" matches "Director,
-    Engineering" and "Engineering Director". Seniority words in the role
-    (Sr., Senior, Associate, Managing) are not required. This is a prefilter:
-    ``titles_to_avoid`` still excludes and ranking judges fit. An empty
-    ``roles`` tuple matches nothing (fail closed, not fail open).
+#: Where a title is cut into segments: , ; : | / ( ) [ ] { } @, a dash of its own (" - ") and an en or em dash.
+_SEGMENT_RE = re.compile(r"[,;:|/()\[\]{}@]|\s-+\s|[\u2013\u2014]")
+
+
+def _stems(words: str) -> frozenset[str]:
+    return frozenset(_stem(word) for word in words.split())
+
+
+#: Level and seniority words, and discipline words (the kinds of the same role: "Staff SOFTWARE Engineer"). They are
+#: what the comma-inverted form may hold beside the role's words in its first part: see ``matches_roles``.
+_LEVEL_WORDS = _stems(
+    "senior sr staff principal lead junior jr mid associate managing distinguished fellow founding member technical tech "
+    "i ii iii iv v vi l1 l2 l3 l4 l5 l6 l7 l8 e3 e4 e5 e6 e7 e8 ic"
+)
+_DISCIPLINE_WORDS = _stems(
+    "software backend back end frontend front fullstack full stack platform infrastructure infra cloud devops sre site "
+    "reliability production system systems distributed service services api core web mobile ios android "
+    "data analytics database storage compute network networking security appsec "
+    "ai ml machine learning deep genai llm nlp vision computer applied research science "
+    "product developer development dev tools tooling build release automation test qa quality performance "
+    "observability kernel os linux hardware firmware embedded robotics mechanical electrical "
+    "python java javascript typescript go golang rust c c++ c# ruby scala kotlin swift react node js php elixir sql net"
+)
+_NEUTRAL_WORDS = _LEVEL_WORDS | _DISCIPLINE_WORDS
+#: THE DENY WORDS (operator decision, 0.1.11.3). BETWEEN a role's words one of these makes it another role ("Staff
+#: TRAINING Engineer", "Staff SALES Engineer", "Staff APPLICATION Engineer"). Any other word there is the kind of the
+#: same role and is kept ("Staff Payments Engineer"): a real job hidden is worse than an odd one shown, and the
+#: profile's "titles to avoid" take out the rest. A role that names the word itself is not denied it.
+TITLE_DENY_WORDS = (
+    "training", "trainer", "sales", "presales", "support", "solutions", "customer", "field", "application", "program",
+    "recruiting", "recruiter", "coordinator", "intern",
+)
+_DENY_WORDS = frozenset(_stem(word) for word in TITLE_DENY_WORDS)
+#: Another role's noun. Between the role's words, in front of them, at the end of the segment before them, or after
+#: them in their segment, it says the posting is that role ("Staff Engineering MANAGER", "DIRECTOR, Software Engineering").
+_ROLE_NOUNS = _stems(
+    "manager mgr director head vp svp evp president officer trainer instructor recruiter sourcer coordinator specialist "
+    "analyst consultant representative technician advocate evangelist writer intern"
+)
+#: After the role's words the same nouns, and a trainee's words ("Staff Engineer in Training").
+_AFTER_WORDS = _ROLE_NOUNS | _stems("training trainee")
+_ENGINEERING_NOUNS = _stems("engineer developer programmer architect")
+#: In front of an engineering role these deny words make it a customer-facing or teaching one ("Sales Engineering
+#: Manager"). Not "application" and "program" there: "Application Security Engineer" is a "Security Engineer".
+_ROLE_CHANGING_WORDS = _DENY_WORDS - _stems("application program")
+
+
+def _needed(role: str) -> list[str]:
+    """The words a title must hold for ``role``: its words, seniority words aside (unless it has no other)."""
+
+    role_words = _words(role)
+    return [w for w in role_words if w not in _SENIORITY_WORDS] or role_words
+
+
+def _title_segments(title: str) -> tuple[list[str], list[int]]:
+    """``title``'s words in order, and for each the number of the segment it is in."""
+
+    words: list[str] = []
+    segment_of: list[int] = []
+    for number, segment in enumerate(_SEGMENT_RE.split(title.lower())):
+        for word in _WORD_RE.findall(segment):
+            if word not in _FILLER_WORDS:
+                words.append(_stem(word))
+                segment_of.append(number)
+    return words, segment_of
+
+
+def _role_as_a_whole(words: list[str], segment_of: list[int], needed: frozenset[str]) -> bool:
+    """Whether ``needed`` (a role's words, all of them in ``words``) stand together as that role. See ``matches_roles``."""
+
+    between_veto = (_DENY_WORDS | _ROLE_NOUNS) - needed
+    front_veto = _ROLE_NOUNS - needed
+    if needed & _ENGINEERING_NOUNS and not needed & _ROLE_CHANGING_WORDS:
+        front_veto = front_veto | _ROLE_CHANGING_WORDS
+    after_veto = _AFTER_WORDS - needed
+    count = len(words)
+    for start in range(count):
+        if words[start] not in needed:
+            continue
+        seen: set[str] = set()
+        end = start
+        while end < count:
+            word = words[end]
+            if word in needed:
+                seen.add(word)
+                if len(seen) == len(needed):
+                    break
+            elif word in between_veto:
+                break
+            end += 1
+        if len(seen) != len(needed):
+            continue
+        first, last = segment_of[start], segment_of[end]
+        head = start
+        while head > 0 and segment_of[head - 1] == first:
+            head -= 1
+        if first != last:
+            # The comma-inverted form ("Director, Engineering"; "Software Engineer, Staff"): its first part is the role's
+            # own words with level and discipline words only ("Staff Accountant, Engineering" is no "Staff Engineer").
+            part = [word for word, segment in zip(words[head:end], segment_of[head:end]) if segment == first]
+            if any(word not in needed and word not in _NEUTRAL_WORDS and not word.isdigit() for word in part):
+                continue
+        elif any(word in front_veto for word in words[head:start]):
+            continue
+        if head > 0 and words[head - 1] in _ROLE_NOUNS and words[head - 1] not in needed:
+            continue
+        tail = end + 1
+        while tail < count and segment_of[tail] == last:
+            if words[tail] in after_veto:
+                break
+            tail += 1
+        else:
+            return True
+    return False
+
+
+def role_fit(title: str, roles: tuple[str, ...]) -> bool | None:
+    """How ``title`` stands to ``roles``: ``True`` a role matches as a whole; ``False`` a role's words are all in the
+    title but as another role (a function tag must not bring it back either); ``None`` no role's words are all there.
     """
 
     if type(title) is not str:
-        return False
-    title_words = set(_words(title))
+        return None
+    words: list[str] | None = None
+    segment_of: list[int] = []
+    present: frozenset[str] = frozenset()
+    found: bool | None = None
     for role in roles:
         if role == MATCH_ANY_TITLE_ROLE:
             return True
-        role_words = _words(role)
-        needed = [w for w in role_words if w not in _SENIORITY_WORDS] or role_words
-        if needed and all(w in title_words for w in needed):
+        needed = frozenset(_needed(role))
+        if not needed:
+            continue
+        if words is None:
+            words, segment_of = _title_segments(title)
+            present = frozenset(words)
+        if not needed <= present:
+            continue
+        if _role_as_a_whole(words, segment_of, needed):
             return True
-    return False
+        found = False
+    return found
+
+
+def matches_roles(title: str, roles: tuple[str, ...]) -> bool:
+    """Case-insensitive whole-word match of a configured role AS A WHOLE (0.1.11.3).
+
+    Every word of the role must be a word of the title (seniority words of
+    the role, Sr. / Senior / Associate / Managing, are not required; filler
+    words, of / the / and / a / an / for / in, are ignored on both sides), and
+    the words must stand together:
+
+    * between them any word may sit ("Staff Software Engineer", "Staff
+      Payments Engineer" are a "Staff Engineer") except a deny word
+      (``TITLE_DENY_WORDS``: Training, Trainer, Sales, Presales, Support,
+      Solutions, Customer, Field, Application, Program, Recruiting,
+      Recruiter, Coordinator, Intern) and another role's noun
+      (``_ROLE_NOUNS``: Manager, Director, Trainer, Recruiter, ...). "Staff
+      Training Engineer", "Staff Sales Engineer" and "Staff Application
+      Engineer" are not a "Staff Engineer". A role that names the word itself
+      keeps it ("Sales Engineer" matches "Senior Sales Engineer");
+    * their order is free and they may straddle a segment break, so
+      "Director of Engineering" is "Director, Engineering" and "Engineering
+      Director", and "Staff Software Engineer" is "Software Engineer, Staff".
+      That inverted form is read strictly in its FIRST part: beside the
+      role's words it holds only level words (Senior, Staff, Principal, Lead,
+      II, ...) and discipline words (``_DISCIPLINE_WORDS``), so "Staff
+      Accountant, Engineering" and "Chief of Staff, Engineering" are no
+      "Staff Engineer";
+    * in ONE segment anything may come in front ("Payments Software
+      Engineer", "Enterprise Account Executive") except another role's noun
+      ("Director Software Engineering") and, for an engineering role that
+      names none of them itself, a deny word other than Application and
+      Program ("Sales Engineering Manager"; "Application Security Engineer"
+      stays a "Security Engineer");
+    * the segment before must not end in another role's noun ("Director,
+      Software Engineering" is no "Software Engineer");
+    * after them, in their segment, no other role's noun and no trainee word
+      ("Staff Engineering Manager", "Staff Engineer in Training"). Any other
+      word there, and every later segment, names the team or area and is free:
+      "Staff Engineer - Payments", "Staff Software Engineer, ML Training
+      Infrastructure".
+
+    A title is cut into segments at ``, ; : | / ( ) [ ] { } @``, at a dash
+    with a space on both sides and at an en or em dash. This is the list's
+    title rule, not only a prefilter: a profile's "titles to avoid"
+    (``title_query.title_avoided``) then takes titles out, and ranking judges
+    fit. An empty ``roles`` tuple matches nothing (fail closed, not fail open).
+    """
+
+    return role_fit(title, roles) is True
 
 
 def _redacted_fail(code: str, provider: str, board_token: str) -> None:
@@ -1529,7 +1702,9 @@ __all__ = [
     "list_greenhouse_board",
     "list_lever_board",
     "MATCH_ANY_TITLE_ROLE",
+    "TITLE_DENY_WORDS",
     "matches_roles",
+    "role_fit",
     "posting_content_digest",
     "parse_board_url",
     "work_mode_from_label",

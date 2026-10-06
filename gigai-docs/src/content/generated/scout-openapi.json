@@ -8949,7 +8949,7 @@
                     "type": "array"
                   },
                   "titles_to_avoid": {
-                    "description": "Titles to skip.",
+                    "description": "Words or phrases: a posting whose title holds one (whole words, any case) is not in this profile's list.",
                     "type": "array"
                   }
                 },
@@ -9322,7 +9322,7 @@
                     "type": "array"
                   },
                   "titles_to_avoid": {
-                    "description": "Titles to skip.",
+                    "description": "Words or phrases: a posting whose title holds one (whole words, any case) is not in this profile's list.",
                     "type": "array"
                   }
                 },
@@ -11157,7 +11157,7 @@
     },
     "/api/runs/{run_id}/posting": {
       "get": {
-        "description": "One posting of a run, complete with its text and assessment. For a job across runs and quick assessments use GET /api/jobs?url= instead. `bank_suggestions` is added when a question this assessment left open has a near match in the user's answers. not_assessed_reason is one of: unchanged, duplicate, failed, over_cap, role_mismatch, no_resume, model_unavailable, model_denied, location_mismatch, sponsorship_excluded, model_output_invalid, posting_incomplete, region_only, published_too_old, work_mode_mismatch (posting_incomplete: the requirement list looked cut off, so no verdict was given). job_state may carry `assessment_stale: {reason: \"posting_changed\"}` (absent otherwise) when the assessment that gives the state was made on posting text that has since changed: the verdict still reads, and the job should be re-assessed. The same marker carries reason `older_prompt`, `settings_changed` or `story_bank_changed` when the state comes from a stored quick assessment made with an older assess prompt, other candidate settings (work mode, countries, location, sponsorship need) or answers and stories that have since changed, and `resume_changed` when a master resume is stored and a resume line the assessment quoted is gone or a new line names one of its open questions; nothing is re-assessed until you ask (POST /api/assess, or assess-all). job_state.state `weak_fit` is `needs_answers` for a job whose stored assessment has few requirements met AND whose rank score is low (the `fit` block of the project's settings: below 40% and below rank 50): it is not counted with the jobs that need your answers. job_state.state `thin_posting` (0.1.11.2) is `matched` for a job whose stored assessment has no requirement row about the job (an empty matrix, a lone \"No stated requirements\" row, eligibility rows alone): nothing was judged, so it is never shown or counted as a match. A matched verdict whose stored gate decision is `not_a_match` reads `not_a_match`.",
+        "description": "One posting of a run, complete with its text and assessment. For a job across runs and quick assessments use GET /api/jobs?url= instead. `bank_suggestions` is added when a question this assessment left open has a near match in the user's answers. not_assessed_reason is one of: unchanged, duplicate, failed, over_cap, role_mismatch, no_resume, model_unavailable, model_denied, location_mismatch, sponsorship_excluded, model_output_invalid, posting_incomplete, region_only, published_too_old, work_mode_mismatch (posting_incomplete: the requirement list looked cut off, so no verdict was given; sponsorship_excluded: older runs only, since 0.1.11.3 sponsorship is a label and leaves no posting out). job_state may carry `assessment_stale: {reason: \"posting_changed\"}` (absent otherwise) when the assessment that gives the state was made on posting text that has since changed: the verdict still reads, and the job should be re-assessed. The same marker carries reason `older_prompt`, `settings_changed` or `story_bank_changed` when the state comes from a stored quick assessment made with an older assess prompt, other candidate settings (work mode, countries, location, sponsorship need) or answers and stories that have since changed, and `resume_changed` when a master resume is stored and a resume line the assessment quoted is gone or a new line names one of its open questions; nothing is re-assessed until you ask (POST /api/assess, or assess-all). job_state.state `weak_fit` is `needs_answers` for a job whose stored assessment has few requirements met AND whose rank score is low (the `fit` block of the project's settings: below 40% and below rank 50): it is not counted with the jobs that need your answers. job_state.state `thin_posting` (0.1.11.2) is `matched` for a job whose stored assessment has no requirement row about the job (an empty matrix, a lone \"No stated requirements\" row, eligibility rows alone): nothing was judged, so it is never shown or counted as a match. A matched verdict whose stored gate decision is `not_a_match` reads `not_a_match`.",
         "operationId": "get_api_runs_run_id_posting",
         "parameters": [
           {
@@ -12222,7 +12222,7 @@
                     "type": "array"
                   },
                   "titles_to_avoid": {
-                    "description": "Titles to skip.",
+                    "description": "Words or phrases: a posting whose title holds one (whole words, any case) is not in this profile's list.",
                     "type": "array"
                   },
                   "visa_sponsorship_required": {

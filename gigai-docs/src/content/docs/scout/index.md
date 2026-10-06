@@ -9,8 +9,8 @@ gets no special runtime treatment: it is one Gig among others GigAI can host.
 - **Acquire**: pull public postings from the Greenhouse/Lever/Ashby
   applicant-tracking boards through an auto-managed watchlist, plus Exa
   search if you turn it on (it is off for a new setup).
-- **Rank**: every posting that passes your filters (titles, location, the
-  publication window, visa sponsorship, work mode) is ranked by the model
+- **Rank**: every posting that passes your filters (titles, titles to
+  avoid, location, the publication window, work mode) is ranked by the model
   target you already use, and results stream in as batches finish. The order
   is honest but coarse: *likely fits first, likely no-matches last*. It
   pre-filters hard blockers (a no-sponsorship or citizenship line, a

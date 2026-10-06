@@ -800,7 +800,7 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
         {"roles": ["Software Engineer"], "countries": ["US"]},
         params=(
             _b("roles", "array", "Job titles to search for (non-empty).", required=True),
-            _b("titles_to_avoid", "array", "Titles to skip."), _b("countries", "array", "Country codes."),
+            _b("titles_to_avoid", "array", "Words or phrases: a posting whose title holds one (whole words, any case) is not in this profile's list."), _b("countries", "array", "Country codes."),
             _b("work_mode", "string", "remote | hybrid | onsite (as the wizard offers)."), _b("city", "string", "City for onsite/hybrid."),
             _b("visa_sponsorship_required", "boolean", "Default false."), _b("exclude_companies", "array", "Companies to skip."),
             _b("watch_companies", "array", "Companies to watch."), _b("company_stage_size", "string", "Stage/size preference."),
@@ -887,7 +887,7 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
         description=(
             "For a job across runs and quick assessments use GET /api/jobs?url= instead. "
             "`bank_suggestions` is added when a question this assessment left open has a near match in the user's answers. "
-            f"not_assessed_reason is one of: {_NOT_ASSESSED_REASONS} (posting_incomplete: the requirement list looked cut off, so no verdict was given). "
+            f"not_assessed_reason is one of: {_NOT_ASSESSED_REASONS} (posting_incomplete: the requirement list looked cut off, so no verdict was given; sponsorship_excluded: older runs only, since 0.1.11.3 sponsorship is a label and leaves no posting out). "
             + _STALE_NOTE
         ),
     ),
@@ -943,7 +943,7 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
         "POST", "/api/profiles", "Create a profile.", "write", "none", {"profile": {"profile_id": "prof_1", "label": "Backend"}},
         params=(
             _b("label", "string", "Profile name.", required=True), _b("titles", "array", "Titles to search (non-empty).", required=True),
-            _b("titles_to_avoid", "array", "Titles to skip."), _b("queries", "array", "Search queries (default: titles)."),
+            _b("titles_to_avoid", "array", "Words or phrases: a posting whose title holds one (whole words, any case) is not in this profile's list."), _b("queries", "array", "Search queries (default: titles)."),
             _b("resume_record_id", "string", "Stored resume record."), _b("resume_revision_id", "string", "Stored resume revision."),
             _b("search_settings", "object", "This profile's own {location, work_mode, countries, max_age_days}; omitted = a copy of the default's, null = same as default."),
         ),
@@ -954,7 +954,7 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
         "PUT", "/api/profiles/{profile_id}", "Update a profile.", "write", "none", {"profile": {"profile_id": "prof_1"}},
         params=(
             _PROFILE_ID, _b("label", "string", "Profile name.", required=True), _b("titles", "array", "Titles (non-empty).", required=True),
-            _b("titles_to_avoid", "array", "Titles to skip."), _b("queries", "array", "Search queries."),
+            _b("titles_to_avoid", "array", "Words or phrases: a posting whose title holds one (whole words, any case) is not in this profile's list."), _b("queries", "array", "Search queries."),
             _b("resume_record_id", "string", "Stored resume record."), _b("resume_revision_id", "string", "Stored resume revision."),
             _b("search_settings", "object", "Any of {location, work_mode, countries, max_age_days} to change; null = same as default."),
         ),
