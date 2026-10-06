@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { postPostingsRank } from "../api.js";
-import { isRankAnswer, RANK_POLL_MS, rankButtons, rankJobRunning, rankOutcomeLine, rankRefusalLine, rankStatusLine, rerankDialog } from "../rankNowModel.js";
+import { isRankAnswer, RANK_POLL_MS, rankButtons, rankJobRunning, rankOutcomeLine, rankRefusalLine, rankStatusLine, rerankDialog, staleResumeLine } from "../rankNowModel.js";
 import RerankApprovalDialog from "./RerankApprovalDialog.jsx";
 
 // 0.1.11.2 RANKUI: ranking on the Jobs page. One line says how far the rank is ("12 postings of the last 7 days are
@@ -9,7 +9,9 @@ import RerankApprovalDialog from "./RerankApprovalDialog.jsx";
 // dialog shows the calls) and ranks the newest 100 again. A click starts a job on the server (POST /api/postings/rank,
 // 202); the panel then reads it every RANK_POLL_MS, shows "ranked X of Y" as it goes and refreshes the list
 // (`onRefresh`) when the count moves and when the job ends. With ranking off the buttons say so and the line says how
-// to turn it on. Nothing is read on load: `ranking` is the list's own block (GET /api/postings).
+// to turn it on. 0.1.11.2: when the master changed after the postings were ranked (`ranking.stale_resume`) a line says
+// so with a "Re-rank" button: the same "Re-rank latest 100" ask and dialog, never a model call without the yes.
+// Nothing is read on load: `ranking` is the list's own block (GET /api/postings).
 export default function RankPanel({ ranking, onRefresh }) {
   const [answer, setAnswer] = useState(null); // the last POST /api/postings/rank answer of this page
   const [busy, setBusy] = useState(false);
@@ -119,8 +121,24 @@ export default function RankPanel({ ranking, onRefresh }) {
   if (!line || !buttons) {
     return null;
   }
+  const stale = staleResumeLine(shown, job);
   return (
     <>
+      {stale && (
+        <div className="result-count" data-testid="stale-resume-line">
+          <span role="status">{stale}</span>
+          <button
+            type="button"
+            className="button small"
+            data-testid="rerank-stale"
+            disabled={buttons.rerank.disabled}
+            title="Asks first: how many postings and model calls. Nothing is ranked until you approve."
+            onClick={askRerank}
+          >
+            Re-rank
+          </button>
+        </div>
+      )}
       <div className="result-count" data-testid="rank-panel" data-ranking={running ? "running" : undefined}>
         <span data-testid="rank-status-line" role="status">
           {line}

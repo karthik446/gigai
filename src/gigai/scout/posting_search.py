@@ -28,14 +28,15 @@ the fit number, then the rank score, then the newest.
 
 RANKED LOW (0.1.11.2, ``fit.is_ranked_low``). The list is ordered best fit
 first, and a posting NOTHING ASSESSED YET whose known rank score is below the
-weak-fit rank (``fit.weak_fit_below_rank``, 50) is LEFT OUT of a search too:
-with ranking it is not a candidate, and a title match alone must not read as
-one. It is a collapse, never a hard filter: ``counts.ranked_low`` is how many
-the other filters select, and the ``ranked_low`` state lists them (so does
-naming the posting). Each such row carries ``ranked_low: true``. A posting not
-ranked yet stays in the list, after the ranked ones ("not ranked yet"), and an
-assessed posting keeps the rules above. "Assess these" still counts them as
-its own low-rank question. ``ranking`` in both responses says how far the
+weak-fit rank (``fit.weak_fit_below_rank``, 50) is ranked low. It is ORDERED
+lower, NEVER hidden or collapsed: it is listed with the rest, in rank order,
+so it comes after the other ranked postings not assessed yet and before the
+ones not ranked yet. A resume that gains the experience and a re-rank lift
+it. Each such row carries ``ranked_low: true``, ``counts.ranked_low`` is how
+many the list holds (the "Ranked low (N)" divider above them), and the
+``ranked_low`` state is an optional filter that lists only them. An assessed
+posting keeps the rules above. "Assess these" still counts them as its own
+low-rank question. ``ranking`` in both responses says how far the
 background rank is (ranked of total per profile): a batch taken while it runs
 is the top of a half-ranked list.
 
@@ -113,6 +114,7 @@ from .scout_new import (
     _shown,
     batch_date,
     check_response,
+    divider_text,
     _ranking,
     in_order,
     posted_text,
@@ -145,11 +147,10 @@ STATE_RECOMMENDED = "recommended"
 _ROW_STATES = frozenset({
     "not_assessed", "needs_answers", "matched", "has_gap", "not_a_match", "tailored", fit_rules.WEAK_FIT, fit_rules.THIN_POSTING,
 })
-#: 0.1.11.2: ``ranked_low`` (``fit.RANKED_LOW``) lists the not-assessed postings ranked below the weak-fit rank.
+#: 0.1.11.2: ``ranked_low`` (``fit.RANKED_LOW``) keeps only the not-assessed postings ranked below the weak-fit rank.
 STATES = frozenset(_ROW_STATES | {STATE_ASSESSED, STATE_RECOMMENDED, fit_rules.RANKED_LOW})
 
 DEFAULT_LIMIT = 50
-RANKED_LOW_COMMAND = "gigai scout jobs list --state ranked_low"
 MAX_LIMIT = 200
 _NOT_ASSESSED = "not_assessed"
 
@@ -247,7 +248,7 @@ class _Selection:
     def __init__(
         self, home_root: Path, target: Path, store: PipelineStore, *, profile_ids: Sequence[str], query: str | None,
         states: Sequence[str], window: str | None, removed: bool, jobs: Sequence[str] | None, moment: datetime,
-        model_wait: float | None = None, sort: str = SORT_FIT, collapse_ranked_low: bool = False,
+        model_wait: float | None = None, sort: str = SORT_FIT,
     ) -> None:
         refreshed = postings.refresh(home_root, target, store=store, now=moment, wait=model_wait)
         #: Rows read as stored while a build runs (``postings.BUILD_STALE``), for a caller that acts on them.
@@ -279,7 +280,7 @@ class _Selection:
 
         shown = [
             (group, row) for group, row in shown
-            if (_wanted(row, states, setting) or row.state == weak or low(row)) and _in_window(row, window, self.since, moment)
+            if (_wanted(row, states, setting) or row.state == weak) and _in_window(row, window, self.since, moment)
         ]
         words = [word for word in (query or "").casefold().split() if word]
         if words:
@@ -287,14 +288,14 @@ class _Selection:
             shown = [(group, row) for group, row in shown if all(word in text.get(row.job, "") for word in words)]
         # 0110-10-02: the weak fits the OTHER filters select (the chip's number), then only the ones asked for stay.
         self.weak_fit = sum(1 for _group, row in shown if row.state == weak)
-        # 0.1.11.2: the same for the not-assessed postings ranked low; only the search collapses them (``collapse_ranked_low``).
-        self.ranked_low = sum(1 for _group, row in shown if low(row))
         self.is_ranked_low = low
-        collapse = collapse_ranked_low and jobs is None and fit_rules.RANKED_LOW not in states
         shown = [
             (group, row) for group, row in shown
-            if _wanted(row, states, setting) and not _hidden(row, states, jobs is not None) and not (collapse and low(row))
+            if _wanted(row, states, setting) and not _hidden(row, states, jobs is not None)
         ]
+        # 0.1.11.2: the not-assessed postings ranked low are LISTED (ordered lower by their rank, never left out);
+        # this is how many the list holds, for the "Ranked low (N)" divider above them.
+        self.ranked_low = sum(1 for _group, row in shown if low(row))
         # 0110-8-04: the grid's one order (``scout_new.order_key``): current, stale, not assessed; verdict; rank.
         self.shown = shown = in_order(shown)
         if sort == SORT_NEWEST_POSTED:
@@ -425,7 +426,7 @@ def search_postings(
         try:
             selection = _Selection(
                 home_root, target, store, profile_ids=wanted_profiles, query=query, states=wanted_states, window=window,
-                removed=removed, jobs=None, moment=moment, model_wait=model_wait, sort=sort, collapse_ranked_low=True,
+                removed=removed, jobs=None, moment=moment, model_wait=model_wait, sort=sort,
             )
             unknown = [item for item in selection.hidden_profiles if item != EPHEMERAL_PROFILE and not history]
             if unknown:
@@ -447,7 +448,7 @@ def search_postings(
                     "by_state": dict(sorted(by_state.items())),
                     # 0110-10-02: the weak fits these filters select; they are in ``matched`` only when the state is asked for.
                     "weak_fit": selection.weak_fit,
-                    # 0.1.11.2: the not-assessed postings ranked below the weak-fit rank; listed only by ``state=ranked_low``.
+                    # 0.1.11.2: the not-assessed postings ranked below the weak-fit rank. They are in ``matched`` and in the rows.
                     "ranked_low": selection.ranked_low,
                 },
                 "postings": {
@@ -777,18 +778,19 @@ def render(response: Mapping[str, object]) -> str:
             lines.append(f"  not in the stored postings: {job}")
     else:
         lines.append(f"{counts['matched']} posting(s) match, {counts['new']} new since the last check. Showing {counts['shown']}.")
-        low_count = counts.get("ranked_low")
-        if low_count and fit_rules.RANKED_LOW not in response["filters"]["states"]:  # type: ignore[index]
-            lines.append(
-                f"{low_count} weak fit{'s' if low_count != 1 else ''}, ranked low, {'are' if low_count != 1 else 'is'} not listed: "
-                f"{RANKED_LOW_COMMAND}"
-            )
         running = ranking_line(response.get("ranking"))
         if running:
             lines.append(running)
     listing = response["postings"]
     assert isinstance(listing, Mapping)
+    filters = response.get("filters")
+    by_rank = not isinstance(filters, Mapping) or filters.get("sort", SORT_FIT) == SORT_FIT
+    before: Mapping[str, object] | None = None
     for row in listing["rows"]:  # type: ignore[union-attr]
+        divider = divider_text(before, row, counts) if by_rank else None  # 0.1.11.2: "Ranked low (N)", in the rank order only
+        if divider:
+            lines.append(divider)
+        before = row
         tags = ", ".join(str(labels.get(item["profile_id"], item["profile_id"])) for item in row["profiles"])
         gap = f" · {row['minor_gap_text']}" if row.get("minor_gap_text") and not row.get("thin_posting") else ""  # 0110-10-03
         lines.append(f"{row['company_name'] or row['company'] or '?'}: {row['title'] or row['job_identity']} [{tags}] {row['score_text']}{gap}")

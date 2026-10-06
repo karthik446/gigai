@@ -40,12 +40,19 @@ mechanics here. Those belong in the internal changelog.
   hidden. A match with no requirement about the job at all (none read, or only "No stated
   requirements") is not a match: it has its own state (`thin_posting`), is not counted or filtered as
   matched, and is listed last of all. Assessments already stored are covered; nothing is re-assessed.
-- **Jobs are ordered by rank again, and weak fits are collapsed.** The Jobs list (and `gigai scout jobs
-  list`) is ordered best fit first: assessed postings by fit, then the rest by rank, then the newest. A
-  posting that is not assessed yet and ranked below 50 is no longer shown as a candidate: it is collapsed
-  under a count ("12 weak fits, ranked low: show", or `--state ranked_low`). Nothing is filtered away: the
-  count opens the list. A posting that is not ranked yet stays in the list, after the ranked ones, and
-  says "not ranked yet". Sponsorship stays a label and never hides a posting.
+- **Jobs are ordered by rank again; a low rank is listed last, never hidden.** The Jobs list, `gigai
+  scout jobs list` and `gigai scout new` are ordered best fit first: assessed postings by fit, then the
+  rest by rank, then the newest. A posting that is not assessed yet and ranked below 50 stays in the
+  list, after the other ranked postings, under a plain "Ranked low (N)" divider: it can be opened,
+  selected and assessed like any other (`--state ranked_low` lists only those; each row says
+  `ranked_low` in the JSON). A posting that is not ranked yet comes after them and says "not ranked
+  yet". Sponsorship stays a label and never hides a posting.
+- **A changed master offers a re-rank.** A rank is made against your resume, so when your master (or the
+  resume a profile uses) changed after the postings were ranked, the Jobs page says "Your master
+  changed since these postings were ranked" with a "Re-rank" button. It opens the same "Re-rank latest
+  100" question (the calls are shown first; nothing is ranked without your yes, and it stays inside the
+  100 rank calls a day), so a posting ranked low for experience your master now has can move up. The
+  API says it as `ranking.stale_resume`.
 - **Assess the top 50 by rank.** The Jobs page shows "N not assessed" with an "Assess all" button. It
   asks first, as before: the top 50 by rank, the estimate, the model and how many are left after these
   50. `gigai scout new`, "Assess these" and the API take the same top 50 by rank instead of the newest

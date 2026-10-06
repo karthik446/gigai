@@ -11,11 +11,15 @@ scripted fake):
 (2) THE LIST IS ORDERED BY RANK, best fit first: assessed postings first, then
     the not-assessed ones by rank score, then the ones not ranked yet ("not
     ranked yet"), in the search and in its SQL twin.
-(3) RANKED LOW IS COLLAPSED. A posting nothing assessed whose known rank is
-    below ``fit.weak_fit_below_rank`` (50) is absent from the default list,
-    counted (``counts.ranked_low``) and listed by ``state=ranked_low``. An
-    assessed posting with the same low rank keeps its place; one not ranked yet
-    is never collapsed.
+(3) RANKED LOW IS LISTED LOWER, NEVER HIDDEN (the operator's correction: the
+    master may be missing real experience, and a re-rank must be able to lift
+    the posting). A posting nothing assessed whose known rank is below
+    ``fit.weak_fit_below_rank`` (50) is in every list, in rank order: after
+    the other ranked postings not assessed yet, before the ones not ranked
+    yet. Its row says ``ranked_low``, ``counts.ranked_low`` counts them, the
+    terminal prints a plain "Ranked low (N)" line above them, and
+    ``state=ranked_low`` is an optional filter that lists only them. An
+    assessed posting with the same low rank keeps its place.
 """
 
 from __future__ import annotations
@@ -147,7 +151,7 @@ def test_the_ranking_line_is_said_only_while_the_rank_runs() -> None:
     assert posting_search.ranking_line({**running, "in_progress": False}) is None and posting_search.ranking_line(None) is None
 
 
-# --- (2) the order, (3) the collapse ----------------------------------------------------------
+# --- (2) the order, (3) ranked low is listed lower, never hidden -------------------------------
 
 #: name -> (posting number, rank score or None). Seeded so that the day a posting went up says nothing about its rank.
 _SCENE = {"r70": (1, 70), "r90": (2, 90), "r50": (3, 50), "r49": (4, 49), "r20": (5, 20), "unranked_a": (6, None), "unranked_b": (7, None)}
@@ -170,7 +174,15 @@ def _names(response: dict[str, object], jobs: dict[str, str]) -> list[str]:
     return [by_url[str(row["job_identity"])] for row in _rows(response)]
 
 
-def test_the_list_is_ordered_by_rank_and_low_ranked_unassessed_postings_are_collapsed_under_a_count(
+_ALL = ["assessed_r20", "r90", "r70", "r50", "r49", "r20", "unranked_a", "unranked_b"]
+
+
+def _line_of(output: str, text: str) -> int:
+    (found,) = [number for number, line in enumerate(output.splitlines()) if text in line]
+    return found
+
+
+def test_the_list_is_ordered_by_rank_and_low_ranked_unassessed_postings_are_listed_lower_never_hidden(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     fx = build_postings_fixture(tmp_path, monkeypatch, deleted=False)
@@ -178,66 +190,112 @@ def test_the_list_is_ordered_by_rank_and_low_ranked_unassessed_postings_are_coll
 
     listed = _search(fx)
 
-    # Best fit first: the assessed one, then by rank score; the ones not ranked yet last. Rank 49 and 20 are not listed.
-    assert _names(listed, jobs) == ["assessed_r20", "r90", "r70", "r50", "unranked_a", "unranked_b"]
+    # EVERY posting is listed. Best fit first: the assessed one, then by rank score, so the two ranked below 50 come
+    # after the other ranked ones; the ones not ranked yet last.
+    assert _names(listed, jobs) == _ALL
     counts = listed["counts"]
-    assert (counts["matched"], counts["ranked_low"], counts["weak_fit"]) == (6, 2, 0)  # type: ignore[index]
-    assert counts["by_state"] == {"matched": 1, "not_assessed": 5}  # type: ignore[index]
+    assert (counts["matched"], counts["shown"], counts["ranked_low"], counts["weak_fit"]) == (8, 8, 2, 0)  # type: ignore[index]
+    assert counts["by_state"] == {"matched": 1, "not_assessed": 7}  # type: ignore[index]
     by_name = dict(zip(_names(listed, jobs), _rows(listed)))
-    assert by_name["r90"]["score_text"] == "rank 90 · not assessed" and by_name["r90"]["ranked_low"] is False
-    # Not ranked yet: in the list, at the bottom, and it says so. Never collapsed: nothing says its rank is low.
-    assert by_name["unranked_a"]["score_text"] == "not ranked yet · not assessed" and by_name["unranked_a"]["ranked_low"] is False
+    # Which rows the "Ranked low (2)" divider stands above: only the not-assessed ones with a KNOWN rank below 50.
+    assert [name for name in _ALL if by_name[name]["ranked_low"]] == ["r49", "r20"]
+    assert [(by_name[name]["state"], by_name[name]["score_text"]) for name in ("r49", "r20")] == [
+        ("not_assessed", "rank 49 · not assessed"), ("not_assessed", "rank 20 · not assessed"),
+    ]
+    assert by_name["r90"]["score_text"] == "rank 90 · not assessed"
+    # Not ranked yet: after the ranked ones, and it says so. Nothing says its rank is low.
+    assert by_name["unranked_a"]["score_text"] == "not ranked yet · not assessed"
     # An ASSESSED posting keeps today's rules, whatever its rank: Matched, listed first.
-    assert (by_name["assessed_r20"]["state"], by_name["assessed_r20"]["rank_score"], by_name["assessed_r20"]["ranked_low"]) == ("matched", 20, False)
+    assert (by_name["assessed_r20"]["state"], by_name["assessed_r20"]["rank_score"]) == ("matched", 20)
 
-    # A collapse, not a hard filter: the count's own filter lists them, by rank.
+    # The optional filter lists only them, by rank; "Not assessed" lists all seven, in the one order.
     low = _search(fx, states=["ranked_low"])
     assert _names(low, jobs) == ["r49", "r20"] and low["counts"]["matched"] == 2 and low["counts"]["ranked_low"] == 2  # type: ignore[index]
-    assert [(row["state"], row["ranked_low"], row["score_text"]) for row in _rows(low)] == [
-        ("not_assessed", True, "rank 49 · not assessed"), ("not_assessed", True, "rank 20 · not assessed"),
-    ]
-    # "Not assessed" alone still leaves them out; with their filter beside it they are back, in the one order.
-    assert _names(_search(fx, states=["not_assessed"]), jobs) == ["r90", "r70", "r50", "unranked_a", "unranked_b"]
-    assert _names(_search(fx, states=["not_assessed", "ranked_low"]), jobs) == ["r90", "r70", "r50", "r49", "r20", "unranked_a", "unranked_b"]
-    # The other order (the day the posting went up) is an order, not a way around the collapse.
-    assert sorted(_names(_search(fx, sort="newest_posted"), jobs)) == sorted(["assessed_r20", "r90", "r70", "r50", "unranked_a", "unranked_b"])
+    assert _names(_search(fx, states=["not_assessed"]), jobs) == _ALL[1:]
+    assert _search(fx, states=["assessed"])["counts"]["ranked_low"] == 0  # type: ignore[index]  # the count is of the rows listed
+    # The other order (the day the posting went up) holds every posting too.
+    assert sorted(_names(_search(fx, sort="newest_posted"), jobs)) == sorted(_ALL)
+    # A page of the list is a slice of the same order: the ranked-low ones are on the page their rank puts them on.
+    assert _names(_search(fx, limit=3, offset=3), jobs) == ["r50", "r49", "r20"]
 
-    # The SQL twin of the order (``pipeline.store._POSTING_ORDER``) says the same for the not-assessed rows.
+    # The order's two halves agree: ``scout_new.order_key`` and its SQL twin (``pipeline.store._POSTING_ORDER``).
     store = PipelineStore(pipeline_path(fx.home_root, fx.target))
     try:
         by_url = {url: name for name, url in jobs.items()}
-        in_sql = [by_url[row.job] for row in store.postings_by_score(states=["not_assessed"], profile_id=fx.default_profile_id, limit=50)]
+        in_sql = [by_url[row.job] for row in store.postings_by_score(states=["not_assessed", "matched"], profile_id=fx.default_profile_id, limit=50)]
+        rows = store.postings(profile_id=fx.default_profile_id)
     finally:
         store.close()
-    assert in_sql == ["r90", "r70", "r50", "r49", "r20", "unranked_a", "unranked_b"]
+    by_key = [by_url[row.job] for _group, row in scout_new.in_order(([row], row) for row in rows)]
+    assert in_sql == by_key == _ALL
 
-    # "Assess these" still counts them, as its own low-rank question (never silently dropped).
+    # "Assess these" still asks about them separately (the 0.1.10 assess threshold), never drops them.
     asked = _these(fx)
     assert (asked["question"]["to_assess"], asked["question"]["low_rank_skipped"]) == (5, 2)  # type: ignore[index]
 
-    # The terminal: the count and how to list them; the filter lists them.
+    # The terminal: every posting, a plain "Ranked low (2)" line above the two, "Not ranked yet" below them.
     home = ["--home", str(fx.home_root), "--target", str(fx.target), "--profile", fx.default_profile_id]
     plain = CliRunner().invoke(cli, ["scout", "jobs", "list", *home])
     assert plain.exit_code == 0, plain.output
-    assert "2 weak fits, ranked low, are not listed: gigai scout jobs list --state ranked_low" in plain.output
-    assert jobs["r49"] not in plain.output and jobs["r20"] not in plain.output and jobs["r90"] in plain.output
+    assert "8 posting(s) match" in plain.output and "not listed" not in plain.output
+    order = [_line_of(plain.output, text) for text in (jobs["r50"], "Ranked low (2)", jobs["r49"], jobs["r20"], "Not ranked yet", jobs["unranked_a"])]
+    assert order == sorted(order) and plain.output.splitlines()[order[1]] == "Ranked low (2)", plain.output
+    as_json = CliRunner().invoke(cli, ["scout", "jobs", "list", "--json", *home])
+    assert [row["ranked_low"] for row in json.loads(as_json.output)["postings"]["rows"]] == [False, False, False, False, True, True, False, False]
     shown = CliRunner().invoke(cli, ["scout", "jobs", "list", "--state", "ranked_low", *home])
     assert shown.exit_code == 0 and jobs["r49"] in shown.output and jobs["r20"] in shown.output and jobs["r90"] not in shown.output, shown.output
+    # In another order the ranked-low rows are spread through the list: no divider, and they are listed all the same.
+    newest = posting_search.render(_search(fx, sort="newest_posted"))
+    assert "Ranked low" not in newest and jobs["r20"] in newest and jobs["r49"] in newest
+
+    # A ranked-low posting is a row like any other: named, it is assessed (the low-rank yes), and then reads assessed.
+    done = _these(fx, jobs=[jobs["r20"]], approve=True, include_low_rank=True)
+    assert done["assessed"]["assessed"] == 1  # type: ignore[index]
+    after = _search(fx)
+    assert after["counts"]["ranked_low"] == 1 and len(_rows(after)) == 8  # type: ignore[index]
+    assert next(row for row in _rows(after) if row["job_identity"] == jobs["r20"])["state"] != "not_assessed"
 
 
-def test_the_collapse_follows_the_weak_fit_rank_setting(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_ranked_low_follows_the_weak_fit_rank_setting_and_never_hides(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     fx = build_postings_fixture(tmp_path, monkeypatch, deleted=False)
     jobs = _scene(fx, monkeypatch)
     path = settings_path(fx.home_root, fx.target)
     path.parent.mkdir(parents=True, exist_ok=True)
 
+    def low(response: dict[str, object]) -> list[str]:
+        return [name for name, row in zip(_names(response, jobs), _rows(response)) if row["ranked_low"]]
+
     path.write_text(json.dumps({"schema_version": "scout-settings:1", "fit": {"weak_fit_below_rank": 30}}), encoding="utf-8")
     relaxed = _search(fx)
-    assert relaxed["counts"]["ranked_low"] == 1 and "r49" in _names(relaxed, jobs) and "r20" not in _names(relaxed, jobs)  # type: ignore[index]
+    assert relaxed["counts"]["ranked_low"] == 1 and low(relaxed) == ["r20"] and _names(relaxed, jobs) == _ALL  # type: ignore[index]
 
     path.write_text(json.dumps({"schema_version": "scout-settings:1", "fit": {"weak_fit_below_rank": 0}}), encoding="utf-8")
-    off = _search(fx)  # 0 switches the rule off: nothing is collapsed
-    assert off["counts"]["ranked_low"] == 0 and _names(off, jobs)[-4:] == ["r49", "r20", "unranked_a", "unranked_b"]  # type: ignore[index]
+    off = _search(fx)  # 0 switches the rule off: no row is ranked low; the order is the rank's all the same
+    assert off["counts"]["ranked_low"] == 0 and low(off) == [] and _names(off, jobs) == _ALL  # type: ignore[index]
+
+
+def test_scout_new_lists_the_ranked_low_postings_under_a_divider_and_marks_them_in_the_json(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fx = build_postings_fixture(tmp_path, monkeypatch, deleted=False)
+    numbers = [1, 2, 3, 4, 5]
+    scores = {1: 90, 2: 60, 3: 49, 4: 10}  # 5 is not ranked yet
+    fx.seed("nw", [lever_job("nw", n, title=f"Staff AI Engineer {n}", created=days_ago(2) + timedelta(minutes=n)) for n in numbers], seen_at=days_ago(1))
+    seed_rank(fx, monkeypatch, {job_url("nw", n): score for n, score in scores.items()})
+
+    response = scout_new.scout_new(fx.home_root, fx.target, peek=True, assess=False, profile_id=fx.default_profile_id, now=NOW)
+
+    assert _numbers(response) == numbers  # all five, in rank order: nothing is left out
+    assert [row["ranked_low"] for row in _rows(response)] == [False, False, True, True, False]
+    assert (response["counts"]["new"], response["counts"]["shown"], response["counts"]["ranked_low"]) == (5, 5, 2)  # type: ignore[index]
+    table = scout_new.render(response).splitlines()
+    order = [next(i for i, line in enumerate(table) if text in line) for text in ("Staff AI Engineer 2", "Ranked low (2)", "Staff AI Engineer 3", "Staff AI Engineer 4", "Not ranked yet", "Staff AI Engineer 5")]
+    assert order == sorted(order) and table[order[1]] == "Ranked low (2)", "\n".join(table)
+
+    shown = CliRunner().invoke(cli, [*fx.cli("--no-assess", "--peek", "--json", "--profile", fx.default_profile_id)])
+    assert shown.exit_code == 0, shown.output
+    rows = json.loads(shown.output)["postings"]["rows"]
+    assert [(int(str(row["job_identity"]).rsplit("-", 1)[1]), row["ranked_low"]) for row in rows] == [(1, False), (2, False), (3, True), (4, True), (5, False)]
 
 
 def test_ranking_progress_counts_only_what_the_rank_lane_will_rank(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

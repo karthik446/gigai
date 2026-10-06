@@ -12,6 +12,9 @@ Pinned:
 - "Re-rank latest 100" shows the COST FIRST (postings, calls, today's count) and makes no model call until Approve
   (the server's rank calls of the day do not move while the dialog is open, and Cancel leaves them); Approve makes
   exactly the calls the dialog named, and the page says "Re-ranked N postings in 2 calls.";
+- RANKORDER: served `ranking.stale_resume` (the list answered as a server whose profile's resume changed serves it),
+  the page says "Your master changed since these postings were ranked" with "Re-rank", which opens the same cost
+  dialog and calls no model; the real server, where nothing changed, shows no such line;
 - with ranking off both buttons say so, are disabled, and the line says how to turn it on;
 - a thin posting's row (the real rows) shows the thin wording and no percentage;
 - zero console errors.
@@ -32,6 +35,7 @@ pytestmark = pytest.mark.ui
 ROUTE = "/api/postings/rank"
 PANEL, LINE, NOTICE = tid("rank-panel"), tid("rank-status-line"), tid("rank-notice")
 RANK_NOW, RERANK, DIALOG = tid("rank-now"), tid("rerank-latest"), tid("rerank-dialog")
+STALE_LINE, RERANK_STALE = tid("stale-resume-line"), tid("rerank-stale")
 HOW_TO = 'set "rank": {"enabled": true}'
 
 
@@ -148,6 +152,42 @@ def test_the_jobs_page_shows_how_far_the_rank_is_ranks_now_and_re_ranks_with_the
     assert _text(ui, LINE) == all_ranked
     shot(ui, "jobs-rerank-done")
 
+    # 0.1.11.2 RANKORDER: A CHANGED MASTER OFFERS A RE-RANK. Nothing changed on this server: no line. Then the list as a
+    # server whose profile's resume changed after the rank serves it (`ranking.stale_resume`; the real flag is proven in
+    # tests/behaviors/scout_pipeline/test_rank_resume_stale.py): the line, and "Re-rank" opens the SAME cost dialog.
+    assert ui.server_json("/api/postings?limit=1")["ranking"]["stale_resume"] is False
+    assert ui.page.locator(STALE_LINE).count() == 0
+
+    def master_changed(route) -> None:
+        if route.request.method != "GET":
+            route.continue_()
+            return
+        body = route.fetch().json()
+        if isinstance(body.get("ranking"), dict):
+            body["ranking"]["stale_resume"] = True
+        route.fulfill(status=200, content_type="application/json", body=json.dumps(body))
+
+    ui.page.goto("about:blank")
+    ui.page.route("**/api/postings?*", master_changed)
+    ui.page.route("**/api/postings", master_changed)
+    _open(ui)
+    used = ui.server_json(ROUTE, {})["calls_today"]["used"]
+    assert _text(ui, f"{STALE_LINE} [role='status']") == "Your master changed since these postings were ranked"
+    assert _text(ui, RERANK_STALE) == "Re-rank" and ui.page.locator(RERANK_STALE).is_enabled()
+    assert _text(ui, RERANK) == "Re-rank latest 100" and ui.page.locator(RERANK).is_enabled()  # always there
+    shot(ui, "jobs-master-changed-rerank-offer")
+    ui.page.locator(RERANK_STALE).click()
+    ui.page.locator(DIALOG).wait_for()
+    assert _text(ui, f"{DIALOG} h2") == f"Re-rank the latest {total} postings?"
+    assert _text(ui, f"{DIALOG} [data-role='rerank-cost']") == f"Cost: {calls} model {call_word} (up to 50 postings a call, at most 2 calls)"
+    assert _text(ui, f"{DIALOG} [data-role='rerank-today']") == f"Today: {used} of 100 rank calls used today; {100 - used} left"
+    assert ui.server_json(ROUTE, {})["calls_today"]["used"] == used  # the click asked; no model was called
+    ui.page.locator(f"{DIALOG} [data-action='rerank-cancel']").click()
+    ui.page.locator(DIALOG).wait_for(state="detached")
+    read = ui.server_json(ROUTE, {})
+    assert read["calls_today"]["used"] == used and not (read["job"] and read["job"]["state"] == "running")
+    ui.page.unroute_all()
+
     # The off switch, as a server with ranking off serves the list: the buttons say so and the line says how to turn it on.
     def ranking_off(route) -> None:
         if route.request.method != "GET":
@@ -156,6 +196,7 @@ def test_the_jobs_page_shows_how_far_the_rank_is_ranks_now_and_re_ranks_with_the
         body = route.fetch().json()
         if isinstance(body.get("ranking"), dict):
             body["ranking"]["enabled"] = False
+            body["ranking"]["stale_resume"] = True  # a changed master is not offered a re-rank that would be refused
             body["ranking"]["in_progress"] = False
             body["ranking"]["by_profile"][0]["total"] += 3  # three postings nothing ranked
         route.fulfill(status=200, content_type="application/json", body=json.dumps(body))
@@ -167,6 +208,7 @@ def test_the_jobs_page_shows_how_far_the_rank_is_ranks_now_and_re_ranks_with_the
     assert _text(ui, LINE).startswith("3 postings of the last 7 days are not ranked. Ranking is off. To turn it on, ") and HOW_TO in _text(ui, LINE)
     assert (_text(ui, RANK_NOW), _text(ui, RERANK)) == ("Rank now: ranking is off", "Re-rank latest 100: ranking is off")
     assert ui.page.locator(RANK_NOW).is_disabled() and ui.page.locator(RERANK).is_disabled()
+    assert ui.page.locator(STALE_LINE).count() == 0
     assert HOW_TO in (ui.page.locator(RANK_NOW).get_attribute("title") or "")
     shot(ui, "jobs-rank-panel-off")
     ui.page.unroute_all()

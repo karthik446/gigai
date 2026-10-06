@@ -323,7 +323,7 @@ _NEW_EXAMPLE: dict[str, object] = {
     "checked_at": "2026-10-03T09:30:00.000000Z", "peek": True, "profile_id": None,
     "anchor": {"last_checked_at": _NEW_SINCE, "advances": False},
     "counts": {
-        "new": 1, "to_assess": 1, "low_rank_skipped": 0, "only_stale": 2, "weak_fit": 0, "shown": 1,
+        "new": 1, "to_assess": 1, "low_rank_skipped": 0, "only_stale": 2, "weak_fit": 0, "ranked_low": 0, "shown": 1,
         "by_profile": [{"profile_id": "prof_1", "new": 1}],
     },
     "message": "1 new posting since Thu 01 Oct 14:02.",
@@ -357,7 +357,7 @@ _NEW_EXAMPLE: dict[str, object] = {
     "fit": {"assess_min_rank": 50, "weak_fit_below_percent": 40, "weak_fit_below_rank": 50, "source": "default"},
     "assessed": None,
     "reassessed": None,
-    "ranking": {"enabled": True, "in_progress": True, "window_days": 7, "by_profile": [{"profile_id": "prof_1", "ranked": 509, "total": 792}]},
+    "ranking": {"enabled": True, "in_progress": True, "window_days": 7, "stale_resume": False, "by_profile": [{"profile_id": "prof_1", "ranked": 509, "total": 792, "stale_resume": False}]},
     "pipeline": {
         "waiting": 3, "awaiting_approval": 2, "approvals": ["apv_0123456789abcdef0123456789abcdef"], "est_calls": 6,
         "command": "gigai scout new --process", "text": "3 waiting (2 need your approval), process now? ~6 calls",
@@ -406,14 +406,14 @@ _POSTINGS_EXAMPLE: dict[str, object] = {
     },
     "profiles": [{"profile_id": "prof_1", "label": "Staff Engineer", "is_default": True, "matched": 1, "resume": {"record_id": "rec_1", "revision_id": "rev_1"}}],
     "rank": {"enabled": True, "calls_today": {"day": "2026-10-03", "used": 4, "limit": 100, "warn_at": 60, "warning": False, "reached": False}},
-    "ranking": {"enabled": True, "in_progress": True, "window_days": 7, "by_profile": [{"profile_id": "prof_1", "ranked": 509, "total": 792}]},
+    "ranking": {"enabled": True, "in_progress": True, "window_days": 7, "stale_resume": False, "by_profile": [{"profile_id": "prof_1", "ranked": 509, "total": 792, "stale_resume": False}]},
     "history": None,
 }
 # 0.1.11.2 RANKUI: POST /api/postings/rank, an ask for "Re-rank latest 100" (nothing started, no model call).
 _POSTINGS_RANK_EXAMPLE: dict[str, object] = {
     "schema_version": "scout-rank-now:1", "enabled": True, "source": "default", "how_to_enable": None,
     "calls_today": {"day": "2026-10-06", "used": 2, "limit": 100, "warn_at": 60, "warning": False, "reached": False},
-    "ranking": {"enabled": True, "in_progress": False, "window_days": 7, "by_profile": [{"profile_id": "prof_1", "ranked": 57, "total": 57}]},
+    "ranking": {"enabled": True, "in_progress": False, "window_days": 7, "stale_resume": False, "by_profile": [{"profile_id": "prof_1", "ranked": 57, "total": 57, "stale_resume": False}]},
     "plan": {
         "mode": "latest", "postings": 57, "calls": 2, "max_calls": 2, "batch_size": 50, "calls_left_today": 98, "allowed": True,
         "refusal": None, "by_profile": [{"profile_id": "prof_1", "postings": 57, "calls": 2}], "window_days": 7,
@@ -442,7 +442,7 @@ _POSTINGS_ASSESS_EXAMPLE: dict[str, object] = {
     },
     "counts": {"selected": 1, "to_assess": 1, "already_current": 0, "not_found": 0, "low_rank_skipped": 0, "batch": 1, "more_after": 0},
     "low_rank": None,
-    "ranking": {"enabled": True, "in_progress": True, "window_days": 7, "by_profile": [{"profile_id": "prof_1", "ranked": 509, "total": 792}]},
+    "ranking": {"enabled": True, "in_progress": True, "window_days": 7, "stale_resume": False, "by_profile": [{"profile_id": "prof_1", "ranked": 509, "total": 792, "stale_resume": False}]},
     "not_found": [], "approval": None, "assessed": None,
     "postings": _POSTINGS_EXAMPLE["postings"],
     "profiles": _POSTINGS_EXAMPLE["profiles"],
@@ -469,12 +469,16 @@ _POSTINGS_NOTE = (
     "the other filters select, listed or not. "
     "THIN POSTING (0.1.11.2): a row says `thin_posting` (true or false). It is true for a match read from fewer than 4 requirement rows (every matrix row, the \"N of M requirements\"): its `score_text` says \"thin posting, not enough requirements to score\" in place of \"Matched\" and \"fit N%\", its `fit` is null and no percentage is shown; with 1 to 3 rows the state, the filters and the counts stay a match's, and the row is LISTED LAST: after every other assessed posting and every posting not assessed yet, ranked or not (a fit read from 2 requirements is never listed above a real match). A match with NO row about the job (an empty matrix, a lone \"No stated requirements\" row, eligibility rows alone) has the state `thin_posting` instead of `matched`: `fit` is null, it is never in `counts.by_state.matched` or `state=matched`, it is listed by `state=thin_posting`, and it comes last of the thin postings. "
     "RANKED LOW (0.1.11.2): a posting nothing assessed yet whose KNOWN rank score is "
-    "below `fit.weak_fit_below_rank` (50) is left out too, unless `state=ranked_low` asks for it: it is collapsed, never "
-    "filtered away. `counts.ranked_low` is how many the other filters select, and each row says `ranked_low` (true only for "
-    "such a posting). A posting not ranked yet is never ranked low: it is listed after the ranked ones (`score_text` \"not "
+    "below `fit.weak_fit_below_rank` (50) is ranked low. It is ORDERED lower, never hidden or collapsed: it is in the rows and "
+    "in `counts.matched` like any other posting, in rank order, so it comes after the other ranked postings not assessed yet "
+    "and before the ones not ranked yet. Each row says `ranked_low` (true only for such a posting), `counts.ranked_low` is "
+    "how many the list holds (a page draws a plain \"Ranked low (N)\" divider above them), and `state=ranked_low` is an "
+    "optional filter that lists only them. A posting not ranked yet is never ranked low: it is listed after them (`score_text` \"not "
     "ranked yet · not assessed\"); an assessed posting keeps the rules above whatever its rank. `ranking` is how far the "
-    "background rank is (`{enabled, in_progress, window_days, by_profile: [{profile_id, ranked, total}]}`; `total` is the ranked postings plus the unranked ones that went up in the last `window_days` days, the only ones the rank lane ranks): while `in_progress` the order "
-    "is of what is ranked so far. `counts.matched` is every posting the filters keep, "
+    "background rank is (`{enabled, in_progress, window_days, stale_resume, by_profile: [{profile_id, ranked, total, stale_resume}]}`; `total` is the ranked postings plus the unranked ones that went up in the last `window_days` days, the only ones the rank lane ranks): while `in_progress` the order "
+    "is of what is ranked so far. `ranking.stale_resume` is true when a profile's resume (its master) changed after its postings were ranked: "
+    "a rank score is stored per resume, so those postings read \"not ranked yet\" until they are ranked again (the Jobs page then offers "
+    "\"Re-rank\": POST /api/postings/rank, `mode: latest`). It is a read: no model is called for it. `counts.matched` is every posting the filters keep, "
     "`counts.new` those first seen since the last check (`anchor.since`; the last 7 days before the first check). This call "
     "never moves that anchor. `sort=newest_posted` orders the rows by the day the posting went up instead, the newest first "
     "(a posting the board gives no date for: by when Scout first saw it); `sort=fit`, the default, is the order above. "
@@ -504,7 +508,9 @@ _NEW_NOTE = (
     "needs answers, other, weak fit, not a match), then `fit` (the row's one fit number: the share of requirements met "
     "with the must-haves counted twice, 0 to 100; null when not assessed), the rank score, the newest. A `weak_fit` posting "
     "(it waits on answers, `fit` below `fit.weak_fit_below_percent` AND rank below `fit.weak_fit_below_rank`) is not "
-    "listed: `counts.weak_fit` counts them and GET /api/postings?state=weak_fit lists them. A yes assesses only postings "
+    "listed: `counts.weak_fit` counts them and GET /api/postings?state=weak_fit lists them. A posting not assessed yet "
+    "whose known rank score is below `fit.weak_fit_below_rank` is ranked low (0.1.11.2): it is listed, never left out, lower by its "
+    "rank; its row says `ranked_low: true` and `counts.ranked_low` counts the new ones. A yes assesses only postings "
     "whose rank score is at least `fit.assess_min_rank` (50; one not ranked yet is assessed): the ones below are "
     "`counts.low_rank_skipped` and their own question, `low_rank_question` (count, estimate, the yes), answered by "
     "`include_low_rank: true` beside `assess: true`. 50 AT A TIME: every yes (`assess`, `reassess_stale`, with or without "
@@ -2210,7 +2216,7 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
         params=(
             _q("profile_id", "string", "Only postings this active profile matches; repeat it, or separate ids with commas. One id shows that profile's own row."),
             _q("q", "string", "Words that must all be in the title, company or location."),
-            _q("state", "string", "Keep these states (repeat or separate with commas): not_assessed, needs_answers, matched, has_gap (matched, with a must-have confirmed unmet), not_a_match, tailored, assessed (any assessment), recommended (the Scout label), weak_fit (listed only when asked for), thin_posting (matched by verdict on no requirement row at all: never in matched), ranked_low (not assessed and ranked below `fit.weak_fit_below_rank`, 50: listed only when asked for)."),
+            _q("state", "string", "Keep these states (repeat or separate with commas): not_assessed, needs_answers, matched, has_gap (matched, with a must-have confirmed unmet), not_a_match, tailored, assessed (any assessment), recommended (the Scout label), weak_fit (listed only when asked for), thin_posting (matched by verdict on no requirement row at all: never in matched), ranked_low (only the postings not assessed and ranked below `fit.weak_fit_below_rank`, 50; without it they are listed with the rest, lower by their rank)."),
             _q("window", "string", "new: first seen since the last check. 7d / 30d: posted (the day it went up; else first seen) in the last 7 or 30 days.", enum=("new", "7d", "30d")),
             _q("sort", "string", "fit (the default): the grid's order. newest_posted: the day the posting went up, the newest first.", enum=("fit", "newest_posted")),
             _q("removed", "string", "1: the postings the board no longer lists, instead of the live ones.", enum=("0", "1", "true", "false")),
@@ -2255,7 +2261,7 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
             "yielded to, and the off switch is respected. Nothing is ranked without `approve: true`. "
             "`{}` reads the state and starts nothing: `enabled` (false: ranking is off, `how_to_enable` says how to turn it "
             "on, and an approval answers 409 rank_disabled), `calls_today`, `ranking` (as GET /api/postings: per active profile "
-            "`ranked` of `total`, the ranked postings plus the unranked ones of the last `window_days` days) and `job` (the "
+            "`ranked` of `total`, the ranked postings plus the unranked ones of the last `window_days` days, and `stale_resume`) and `job` (the "
             "rank job of this server: `{job_id, mode, state: running | done, postings, planned_calls, calls, ranked, outcome, "
             "reason, retry_at, warning, started_at, finished_at}`, null when none was started; `outcome` is the lane's last "
             "state: ran, idle, waiting (the day's calls are used up), yielded, busy_elsewhere (the background rank holds "

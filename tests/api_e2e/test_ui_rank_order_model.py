@@ -6,9 +6,12 @@ a synthetic home with five not-assessed postings around the weak-fit rank
 (80, 50, 49, 20 and one not ranked yet). LOUD skip without ``node``. What
 lives in JSX is pinned by reading the source.
 
-Pinned: the collapse line ("2 weak fits, ranked low" + "show") and its filter
-(the address carries it); a ranked-low row's chip; a posting not ranked yet
-says "not ranked yet" and is never ranked low; "N not assessed" and the body
+Pinned (RANKORDER, the operator's correction): the ranked-low postings are in
+the list, in rank order, never collapsed; a plain "Ranked low (2)" divider
+stands above them and "Not ranked yet" below (``listItems``), only in the
+rank order; a ranked-low row's chip; a posting not ranked yet says "not
+ranked yet" and is never ranked low; the "Your master changed since these
+postings were ranked" line (``rankNowModel.staleResumeLine``); "N not assessed" and the body
 "Assess all" asks with; the dialog says "top 50 by rank", never "newest"; the
 "ranking is still running" line.
 """
@@ -32,6 +35,7 @@ UI_SRC = Path(static_module.__file__).resolve().parents[2] / "ui" / "src"
 
 SCRIPT = """
 import * as m from MODEL_URL;
+import * as r from RANK_URL;
 
 const data = DATA;
 const out = {};
@@ -39,22 +43,36 @@ const rows = data.listed.postings.rows;
 const lowRows = data.low.postings.rows;
 out.order = rows.map((row) => m.scoreText(row));
 out.lowOrder = lowRows.map((row) => m.scoreText(row));
-out.line = [m.rankedLowLine(data.listed.counts, []), m.rankedLowLine(data.low.counts, ["ranked_low"]), m.rankedLowLine({ ranked_low: 1 }, []), m.rankedLowLine({ ranked_low: 0 }, []), m.rankedLowLine(null, [])];
-out.toggle = [m.toggleRankedLow([]), m.toggleRankedLow(["needs_answers"]), m.toggleRankedLow(["ranked_low"])];
-out.query = m.postingsQuery({ ...m.EMPTY_FILTER, states: m.toggleRankedLow([]) });
-out.hash = m.jobsHash({ ...m.EMPTY_FILTER, states: ["ranked_low"] });
+const shape = (items) => items.map((item) => (item.kind === "divider" ? `${item.testId}: ${item.text}` : m.scoreText(item.row)));
+out.items = shape(m.listItems(rows, data.listed.counts, null));
+out.itemsFit = shape(m.listItems(rows, data.listed.counts, "fit"));
+out.itemsNewest = shape(m.listItems(rows, data.listed.counts, m.NEWEST_POSTED));
+out.itemsPageTwo = shape(m.listItems(rows.slice(3), data.listed.counts, null));
+out.itemsNone = [m.listItems([], data.listed.counts, null), m.listItems(null, null, null), shape(m.listItems(rows.slice(0, 2), null, null))];
+out.itemRows = m.listItems(rows, data.listed.counts, null).filter((item) => item.kind === "row").map((item) => item.row.job_identity);
+out.rowIds = rows.map((row) => row.job_identity);
+out.exports = ["rankedLowLine", "toggleRankedLow", "RANKED_LOW"].filter((name) => name in m);
 out.parsed = m.parseJobsHash("#/jobs?state=ranked_low").filter.states;
-out.hasFilter = m.hasFilter({ ...m.EMPTY_FILTER, states: ["ranked_low"] });
+const ranked = { enabled: true, in_progress: false, window_days: 7, by_profile: [{ profile_id: "a", ranked: 5, total: 5, stale_resume: true }] };
+out.stale = [
+  r.staleResumeLine({ ...ranked, stale_resume: true }),
+  r.staleResumeLine({ ...ranked, stale_resume: false }),
+  r.staleResumeLine(ranked),
+  r.staleResumeLine({ ...ranked, stale_resume: true, enabled: false }),
+  r.staleResumeLine({ ...ranked, stale_resume: true }, { state: "running", mode: "latest" }),
+  r.staleResumeLine(null),
+  r.staleResumeLine(data.listed.ranking),
+];
 out.chips = {
   low: lowRows.map((row) => m.rowChips(row).map((chip) => chip.label)),
   listed: rows.map((row) => m.rowChips(row).map((chip) => chip.label)),
   lowChip: m.rowChips(lowRows[0]).find((chip) => chip.kind === "rank"),
+  lowScore: lowRows.map((row) => m.scoreText(row)),
 };
 out.notAssessed = [m.notAssessedLine(data.listed.counts), m.notAssessedLine({ by_state: { matched: 2 } }), m.notAssessedLine(null), m.notAssessedLine({ by_state: { not_assessed: 1 } })];
 out.allBody = [
   m.assessAllBody({ filter: m.EMPTY_FILTER, rows }),
   m.assessAllBody({ filter: { ...m.EMPTY_FILTER, profileIds: ["p1"], query: " python ", window: "7d", states: ["needs_answers"] }, rows }),
-  m.assessAllBody({ filter: { ...m.EMPTY_FILTER, states: ["ranked_low"] }, rows: lowRows }),
   m.assessAllBody({ filter: { ...m.EMPTY_FILTER, profileIds: ["p1", "p2"] }, rows: [{ job_identity: "a", state: "not_assessed" }, { job_identity: "b", state: "matched" }] }),
 ];
 const running = { enabled: true, in_progress: true, by_profile: [{ profile_id: "a", ranked: 100, total: 150 }, { profile_id: "b", ranked: 20, total: 23 }] };
@@ -87,6 +105,7 @@ def out(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict:
         "low": posting_search.search_postings(fx.home_root, fx.target, now=NOW, profile_ids=one, states=["ranked_low"]),
     }
     script = SCRIPT.replace("MODEL_URL", json.dumps((UI_SRC / "postingsModel.js").resolve().as_uri()))
+    script = script.replace("RANK_URL", json.dumps((UI_SRC / "rankNowModel.js").resolve().as_uri()))
     # The ask "Assess all" sends is the model's own body: it is made first, then the server answers it.
     body = {"states": ["not_assessed"], "profile_id": fx.default_profile_id}
     data["ask"] = posting_search.assess_these(fx.home_root, fx.target, now=NOW, **body)  # type: ignore[arg-type]
@@ -100,34 +119,51 @@ def out(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict:
     return result
 
 
-def test_the_list_is_in_rank_order_and_a_posting_not_ranked_yet_says_so_at_the_bottom(out: dict) -> None:
-    # The page draws the rows in the server's order: by rank, the one not ranked yet last. Rank 49 and 20 are collapsed.
-    assert out["order"] == ["rank 80 · not assessed", "rank 50 · not assessed", "not ranked yet · not assessed"]
-    assert out["lowOrder"] == ["rank 49 · not assessed", "rank 20 · not assessed"]
-    assert out["chips"]["listed"] == [["Not assessed"], ["Not assessed"], ["Not assessed"]]  # never "Ranked low": not for an unranked one
-    assert out["chips"]["low"] == [["Not assessed", "Ranked low"], ["Not assessed", "Ranked low"]]
-    assert out["chips"]["lowChip"]["testId"] == "ranked-low-chip" and "left out of the main list" in out["chips"]["lowChip"]["title"]
+def test_every_posting_is_listed_in_rank_order_with_the_ranked_low_ones_under_a_plain_divider(out: dict) -> None:
+    # The page draws EVERY row, in the server's order: by rank, so 49 and 20 come after 80 and 50, the unranked one last.
+    assert out["order"] == [
+        "rank 80 · not assessed", "rank 50 · not assessed", "rank 49 · not assessed", "rank 20 · not assessed", "not ranked yet · not assessed",
+    ]
+    assert out["data"]["listed"]["counts"]["ranked_low"] == 2 and out["data"]["listed"]["counts"]["matched"] == 5
+    # A plain divider above the two, and one where the unranked start: nothing is collapsed, no row is dropped or moved.
+    assert out["items"] == out["itemsFit"] == [
+        "rank 80 · not assessed", "rank 50 · not assessed", "ranked-low-divider: Ranked low (2)", "rank 49 · not assessed",
+        "rank 20 · not assessed", "not-ranked-divider: Not ranked yet", "not ranked yet · not assessed",
+    ]
+    assert out["itemRows"] == out["rowIds"]
+    # A page that starts inside them says so at its top (the count is the list's, not the page's).
+    assert out["itemsPageTwo"] == ["ranked-low-divider: Ranked low (2)", "rank 20 · not assessed", "not-ranked-divider: Not ranked yet", "not ranked yet · not assessed"]
+    # In another order they are spread through the list: no divider, the rows as they are.
+    assert out["itemsNewest"] == out["order"]
+    assert out["itemsNone"] == [[], [], ["rank 80 · not assessed", "rank 50 · not assessed"]]
+    assert out["chips"]["listed"] == [["Not assessed"], ["Not assessed"], ["Not assessed", "Ranked low"], ["Not assessed", "Ranked low"], ["Not assessed"]]
+    # The optional server filter (`state=ranked_low`) lists only them; the chip says where they are listed, never "left out".
+    assert out["chips"]["lowScore"] == ["rank 49 · not assessed", "rank 20 · not assessed"]
+    assert out["chips"]["lowChip"]["testId"] == "ranked-low-chip" and "listed after the other ranked postings" in out["chips"]["lowChip"]["title"]
+    assert "left out" not in out["chips"]["lowChip"]["title"]
 
 
-def test_the_collapse_line_counts_the_ranked_low_postings_and_opens_them(out: dict) -> None:
-    closed, opened, single, none, unread = out["line"]
-    assert closed == {"text": "2 weak fits, ranked low", "action": "show", "active": False}
-    assert opened == {"text": "Listing the 2 weak fits, ranked low", "action": "back to the list", "active": True}
-    assert single["text"] == "1 weak fit, ranked low" and none is None and unread is None
-    # A click lists only them; a second click is the list as it was. The address carries it (a bookmark, Back).
-    assert out["toggle"] == [["ranked_low"], ["ranked_low"], []]
-    assert out["query"] == "state=ranked_low&limit=50"
-    assert out["hash"] == "#/jobs?state=ranked_low" and out["parsed"] == ["ranked_low"] and out["hasFilter"] is True
+def test_there_is_no_collapse_left_in_the_model(out: dict) -> None:
+    assert out["exports"] == []  # no "N weak fits, ranked low: show" line, no toggle
+    assert out["parsed"] == []  # the page has no ranked-low view of its own: the rows are in the list
+
+
+def test_a_changed_master_is_said_with_the_re_rank_offer(out: dict) -> None:
+    stale, fresh, absent, off, running, none, served = out["stale"]
+    assert stale == "Your master changed since these postings were ranked"
+    assert fresh is None and absent is None and none is None
+    assert off is None  # ranking is off: a re-rank would be refused, so it is not offered
+    assert running is None  # the re-rank runs
+    assert served is None and out["data"]["listed"]["ranking"]["stale_resume"] is False  # the server's own block: nothing changed
 
 
 def test_n_not_assessed_and_what_assess_all_asks(out: dict) -> None:
-    assert out["notAssessed"] == ["3 not assessed", None, None, "1 not assessed"]
-    plain, filtered, low, several = out["allBody"]
+    assert out["notAssessed"] == ["5 not assessed", None, None, "1 not assessed"]
+    plain, filtered, several = out["allBody"]
     assert plain == {"states": ["not_assessed"]}  # every not-assessed posting, whatever is ticked: never `jobs`, never `approve`
     assert filtered == {"states": ["not_assessed"], "profile_id": "p1", "query": "python", "window": "7d"}
-    assert low == {"states": ["ranked_low"]}  # on the ranked-low list it asks about those
     assert several == {"jobs": ["a"]}  # the route takes one profile: the page's not-assessed rows are named
-    # The server's answer to that ask: the three listed are the batch, the two ranked low are the second question.
+    # The server's answer to that ask: three are the batch, the two ranked low are the second question (the assess threshold).
     dialog = out["dialog"]
     assert (dialog["count"], dialog["total"], dialog["moreAfter"], dialog["lowRank"]["count"]) == (3, 3, 0, 2)
     assert out["dialogTitle"] == "Assess 3 postings?" and dialog["approveBody"]["approve"] is True
@@ -151,9 +187,14 @@ def test_the_dialog_says_top_50_by_rank_and_that_ranking_still_runs(out: dict) -
 def test_the_page_draws_the_lines_and_the_dialog_the_ranking() -> None:
     view = (UI_SRC / "views" / "JobsView.jsx").read_text(encoding="utf-8")
     for needle in (
-        'data-testid="ranked-low-line"', 'data-action="toggle-ranked-low"', 'data-testid="not-assessed-line"', 'data-testid="assess-all"',
+        "listItems(rows, counts, filter.sort)", 'className="posting-divider"', "data-testid={item.testId}",
+        'data-testid="not-assessed-line"', 'data-testid="assess-all"',
         "ask(assessAllBody({ filter, rows }))", 'data-testid="ranking-line"', 'data-testid="assess-these"',
     ):
         assert needle in view, needle
+    assert "ranked-low-line" not in view and "toggle-ranked-low" not in view  # the collapse is gone
+    panel = (UI_SRC / "components" / "RankPanel.jsx").read_text(encoding="utf-8")
+    for needle in ('data-testid="stale-resume-line"', 'data-testid="rerank-stale"', "staleResumeLine(shown, job)", "onClick={askRerank}"):
+        assert needle in panel, needle
     dialog = (UI_SRC / "components" / "AssessApprovalDialog.jsx").read_text(encoding="utf-8")
     assert 'data-role="approval-ranking"' in dialog and "dialog.ranking" in dialog

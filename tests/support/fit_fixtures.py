@@ -26,10 +26,13 @@ from tests.support.posting_fixtures import NOW, PostingsFixture, days_ago, job_u
 TERRAFORM = ("tooling:terraform", "Have you used Terraform in production?")
 
 
-def seed_rank(fx: PostingsFixture, monkeypatch: pytest.MonkeyPatch, scores: dict[str, int], profile_id: str | None = None) -> None:
+def seed_rank(
+    fx: PostingsFixture, monkeypatch: pytest.MonkeyPatch, scores: dict[str, int], profile_id: str | None = None, *, resume: str = RESUME,
+) -> None:
     """What the background rank does: a score in the home's rank cache, written as the ranker writes it.
 
-    The cache is keyed by a posting's content: two postings with the same title and text share one score.
+    The cache is keyed by a posting's content: two postings with the same title and text share one score. It is
+    keyed by the resume too: ``resume`` is the text the profile's resume has now (the fixture's, unless it changed).
     """
 
     owner = profile_id or fx.default_profile_id
@@ -47,7 +50,7 @@ def seed_rank(fx: PostingsFixture, monkeypatch: pytest.MonkeyPatch, scores: dict
     cache_dir(fx.home_root).mkdir(parents=True, exist_ok=True)
     for job, score in scores.items():
         key = cache_key(
-            content_sha256=digests[job], resume_digest_sha256=_hex({"resume_digest": resume_digest(RESUME, prefs)}),
+            content_sha256=digests[job], resume_digest_sha256=_hex({"resume_digest": resume_digest(resume, prefs)}),
             prefs_sha256=prefs_digest(prefs), model=model,
         )
         (cache_dir(fx.home_root) / f"{key}.json").write_text(json.dumps({"score": score, "reasons": [], "blockers": []}), encoding="utf-8")
