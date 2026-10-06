@@ -441,11 +441,21 @@ def fit_by_cuts(
     caller decides the order (the oldest role's bullets, that role, the next
     oldest, then recent roles' lowest-value lines); this applies it and
     keeps the record ``fit_to_pages`` keeps.  A cut is ``("bullet", <line
-    id>)`` or ``("role", <the id of the role's first heading line>)``.  A
-    cut role goes to ``LengthFit.cut`` whole; a cut bullet of a role that
-    stays goes to ``LengthFit.trimmed`` beside the old-role bullets
-    ``apply_no_loss`` left out, so ``restore_cut`` puts everything back and
-    ``cut_again`` leaves the same things out.  When every cut is applied and
+    id>)``, ``("role", <the id of the role's first heading line>)`` or
+    ``("heading", <the same id>)``.
+
+    NO EMPLOYER IS DROPPED SILENTLY (0.1.11.4 item 9).  A ``role`` cut takes
+    the role's LINES and leaves its heading: the entry stays, with no
+    bullet, and prints as one line (``tailored_resume.EARLIER_HEADING``),
+    which the measure counts like any line.  Its bullets go to
+    ``LengthFit.trimmed`` (all of them), beside a cut bullet of a role that
+    keeps lines and the old-role bullets ``apply_no_loss`` left out, so
+    ``restore_cut`` puts everything back and ``cut_again`` leaves the same
+    things out.  Only a ``heading`` cut removes a role whole (to
+    ``LengthFit.cut``, with its lines), and only a role with no line left
+    by then: the caller puts those cuts where a heading line may go, and
+    says so (a conflict).  (Until 0.1.11.4 a ``role`` cut removed the role
+    whole.)  When every cut is applied and
     the result is still over the limit they all stay applied and the record
     says so (``LengthFit.over``).  A result that fits, a result with no cut
     to make and an unmeasurable one are marked exactly as ``fit_to_pages``
@@ -475,15 +485,24 @@ def fit_by_cuts(
         return shown
 
     def applied(chosen: Sequence[tuple[str, str]]) -> tuple[TailoredResume, tuple[CutRole, ...], tuple[TrimmedRole, ...]]:
-        roles = [target for kind, target in chosen if kind == "role"]
+        bare = {target for kind, target in chosen if kind == "role"}
+        unlisted = {target for kind, target in chosen if kind == "heading"}
         gone = {target for kind, target in chosen if kind == "bullet"}
+        roles: list[str] = []
         wanted: list[TrimmedRole] = []
         for section in base.sections:
             for entry in section.entries:
                 heading = _heading_id(entry)
-                if heading is None or heading in roles:
-                    continue  # a role cut whole carries its bullets with it
-                lines = tuple(line for line in entry.bullets if line.id in gone)
+                if heading is None:
+                    continue
+                is_role = section.heading == ROLE_SECTION
+                if heading in bare and not is_role:
+                    continue  # only a role is cut by its heading
+                # A role cut keeps its heading line: every bullet of it goes, the entry stays.
+                lines = entry.bullets if heading in bare else tuple(line for line in entry.bullets if line.id in gone)
+                if is_role and heading in unlisted and len(lines) == len(entry.bullets):
+                    roles.append(heading)  # not even its heading line fits: the role goes whole, with its lines
+                    continue
                 if lines:
                     wanted.append(TrimmedRole(heading, role_label(entry), lines))
         return _left_out(base, roles, wanted)

@@ -435,7 +435,10 @@ def _pick_lines(view: dict[str, object]) -> list[str]:
     else:
         lines.append("Resume: none stored for this job." + _why_none(view))
     lines.append("Stale: " + (", ".join(str(code) for code in view["stale"]) or "nothing"))  # type: ignore[union-attr]
-    conflicts = [str(item.get("code")) + (f" {item['requirement']}" if item.get("requirement") else "") for item in view["conflicts"]]  # type: ignore[union-attr]
+    conflicts = [
+        str(item.get("code")) + (f" {item['requirement']}" if item.get("requirement") else "") + (f" ({item['message']})" if item.get("message") else "")
+        for item in view["conflicts"]  # type: ignore[union-attr]
+    ]
     lines.append("Conflicts: " + (", ".join(conflicts) or "none"))
     asking = [str(item["question_id"]) for item in view.get("open_questions", ())]  # type: ignore[union-attr]
     if asking:

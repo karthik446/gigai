@@ -1,6 +1,6 @@
 {
- "note": "SYNTHETIC. What the code selector (SELECTOR_VERSION sel-5; no posting here has an assessment) picks from master.md for profiles.json x postings/, on 2026-10-03. Regenerate only with a deliberate selector change.",
- "selector_version": "sel-5",
+ "note": "SYNTHETIC. What the code selector (SELECTOR_VERSION sel-6; no posting here has an assessment) picks from master.md for profiles.json x postings/, on 2026-10-03. Regenerate only with a deliberate selector change.",
+ "selector_version": "sel-6",
  "today": "2026-10-03",
  "cases": {
   "profile-ai/base": {
@@ -18,9 +18,7 @@
      "b-lum-21",
      "b-lum-05",
      "b-lum-06",
-     "b-lum-07",
-     "b-lum-08",
-     "b-lum-11"
+     "b-lum-12"
     ],
     "r-kes": [
      "b-kes-01",
@@ -30,15 +28,13 @@
      "b-hex-01"
     ],
     "r-fin": [
-     "b-fin-04",
-     "b-fin-23"
+     "b-fin-04"
     ],
     "r-cas": [
      "b-cas-03"
     ],
     "p-eval": [
      "b-eval-01",
-     "b-eval-02",
      "b-eval-03"
     ],
     "e-ms": [],
@@ -65,15 +61,29 @@
     "chaos testing",
     "CI/CD",
     "consensus protocols",
+    "contract testing",
+    "Datadog",
+    "dbt",
+    "Docker",
     "Elasticsearch",
+    "embeddings",
+    "event-driven systems",
+    "feature stores",
+    "fine-tuning",
     "GCP",
+    "GDPR",
+    "Git",
     "Go",
     "Grafana",
+    "GraphQL",
+    "gRPC",
     "Helm",
     "HIPAA",
+    "hiring",
     "Java",
     "JavaScript",
     "Kafka",
+    "Kotlin",
     "Kubernetes",
     "Linux",
     "LLM",
@@ -115,23 +125,9 @@
     "Observability",
     "Node.js",
     "mentoring",
-    "Kotlin",
     "ISO 27001",
     "incident response",
     "idempotent APIs",
-    "hiring",
-    "gRPC",
-    "GraphQL",
-    "Git",
-    "GDPR",
-    "fine-tuning",
-    "feature stores",
-    "event-driven systems",
-    "embeddings",
-    "Docker",
-    "dbt",
-    "Datadog",
-    "contract testing",
     "b-tes-02",
     "b-kes-06",
     "b-kce-03",
@@ -154,19 +150,27 @@
     "b-task-01",
     "b-fin-12",
     "b-fin-05",
+    "b-eval-02",
     "b-cas-16",
     "b-cas-02",
     "b-bri-06",
     "r-bri",
+    "b-fin-23",
     "b-task-04",
-    "b-task-03"
+    "b-task-03",
+    "b-lum-08",
+    "b-lum-07"
    ],
    "added_to_fill": [
-    "b-lum-11"
+    "b-lum-12"
    ],
    "evidence_for": {},
    "conflicts": [],
    "roles_dropped": [
+    "r-bri",
+    "r-tes"
+   ],
+   "earlier": [
     "r-bri",
     "r-tes"
    ]
@@ -190,8 +194,7 @@
      "b-lum-24",
      "b-lum-16",
      "b-lum-13",
-     "b-lum-22",
-     "b-lum-10"
+     "b-lum-22"
     ],
     "r-kes": [
      "b-kes-01"
@@ -331,7 +334,8 @@
     "b-hex-14",
     "b-fin-12",
     "b-eval-01",
-    "b-hex-16"
+    "b-hex-16",
+    "b-lum-10"
    ],
    "added_to_fill": [],
    "evidence_for": {
@@ -386,6 +390,11 @@
     "r-cas",
     "r-bri",
     "r-tes"
+   ],
+   "earlier": [
+    "r-cas",
+    "r-bri",
+    "r-tes"
    ]
   },
   "profile-ai/p2-staff-swe-core-infrastructure": {
@@ -400,8 +409,7 @@
      "b-lum-04",
      "b-lum-02",
      "b-lum-18",
-     "b-lum-16",
-     "b-lum-13"
+     "b-lum-16"
     ],
     "r-kes": [
      "b-kes-01"
@@ -414,11 +422,11 @@
      "b-hex-09",
      "b-hex-12",
      "b-hex-14",
-     "b-hex-21",
-     "b-hex-16"
+     "b-hex-21"
     ],
     "r-fin": [
-     "b-fin-12"
+     "b-fin-12",
+     "b-fin-03"
     ],
     "r-cas": [
      "b-cas-05"
@@ -544,11 +552,12 @@
     "b-cas-04",
     "b-fin-13",
     "b-fin-09",
-    "b-fin-03",
     "b-lum-03",
     "b-lum-26",
+    "b-lum-13",
     "b-pgq-01",
-    "b-eval-01"
+    "b-eval-01",
+    "b-hex-16"
    ],
    "added_to_fill": [],
    "evidence_for": {
@@ -605,6 +614,10 @@
    "roles_dropped": [
     "r-bri",
     "r-tes"
+   ],
+   "earlier": [
+    "r-bri",
+    "r-tes"
    ]
   },
   "profile-ai/p3-staff-engineer-ml-platform": {
@@ -635,10 +648,7 @@
      "b-hex-18"
     ],
     "r-fin": [
-     "b-fin-01",
-     "b-fin-12",
-     "b-fin-04",
-     "b-fin-23"
+     "b-fin-01"
     ],
     "r-cas": [
      "b-cas-08",
@@ -764,7 +774,10 @@
     "b-hex-26",
     "b-fin-05",
     "b-cas-16",
-    "b-lum-05"
+    "b-fin-23",
+    "b-fin-04",
+    "b-lum-05",
+    "b-fin-12"
    ],
    "added_to_fill": [],
    "evidence_for": {
@@ -813,6 +826,10 @@
    },
    "conflicts": [],
    "roles_dropped": [
+    "r-bri",
+    "r-tes"
+   ],
+   "earlier": [
     "r-bri",
     "r-tes"
    ]
@@ -881,29 +898,16 @@
     "chaos testing",
     "CI/CD",
     "consensus protocols",
-    "contract testing",
-    "Datadog",
-    "dbt",
     "Docker",
-    "Elasticsearch",
-    "embeddings",
-    "event-driven systems",
-    "feature stores",
-    "fine-tuning",
     "GCP",
-    "GDPR",
-    "Git",
     "Go",
     "Grafana",
-    "GraphQL",
     "gRPC",
     "Helm",
     "HIPAA",
-    "hiring",
     "Java",
     "JavaScript",
     "Kafka",
-    "Kotlin",
     "Kubernetes",
     "Linux",
     "LLM",
@@ -945,9 +949,22 @@
     "Model Context Protocol",
     "mentoring",
     "LLM evaluation",
+    "Kotlin",
     "ISO 27001",
     "incident response",
     "idempotent APIs",
+    "hiring",
+    "GraphQL",
+    "Git",
+    "GDPR",
+    "fine-tuning",
+    "feature stores",
+    "event-driven systems",
+    "embeddings",
+    "Elasticsearch",
+    "dbt",
+    "Datadog",
+    "contract testing",
     "b-tes-02",
     "b-kes-05",
     "b-kce-01",
@@ -984,6 +1001,10 @@
    "roles_dropped": [
     "r-cas",
     "r-tes"
+   ],
+   "earlier": [
+    "r-cas",
+    "r-tes"
    ]
   },
   "profile-swe/p1-staff-ai-agent-platform": {
@@ -1005,14 +1026,14 @@
      "b-lum-24",
      "b-lum-16",
      "b-lum-13",
-     "b-lum-22",
-     "b-lum-10"
+     "b-lum-22"
     ],
     "r-kes": [
      "b-kes-06"
     ],
     "r-hex": [
-     "b-hex-07"
+     "b-hex-07",
+     "b-hex-14"
     ],
     "r-fin": [
      "b-fin-10"
@@ -1141,12 +1162,12 @@
     "r-tes",
     "b-fin-12",
     "b-hex-19",
-    "b-hex-14",
     "b-eval-01",
     "b-cas-04",
     "r-cas",
     "b-hex-21",
-    "b-hex-16"
+    "b-hex-16",
+    "b-lum-10"
    ],
    "added_to_fill": [],
    "evidence_for": {
@@ -1201,6 +1222,11 @@
     "r-cas",
     "r-bri",
     "r-tes"
+   ],
+   "earlier": [
+    "r-cas",
+    "r-bri",
+    "r-tes"
    ]
   },
   "profile-swe/p2-staff-swe-core-infrastructure": {
@@ -1215,8 +1241,7 @@
      "b-lum-04",
      "b-lum-02",
      "b-lum-18",
-     "b-lum-16",
-     "b-lum-13"
+     "b-lum-16"
     ],
     "r-kes": [
      "b-kes-06"
@@ -1229,8 +1254,7 @@
      "b-hex-09",
      "b-hex-12",
      "b-hex-14",
-     "b-hex-21",
-     "b-hex-16"
+     "b-hex-21"
     ],
     "r-fin": [
      "b-fin-09"
@@ -1362,8 +1386,10 @@
     "b-fin-03",
     "b-cas-04",
     "b-fin-13",
+    "b-lum-13",
     "b-eval-01",
-    "b-pgq-01"
+    "b-pgq-01",
+    "b-hex-16"
    ],
    "added_to_fill": [],
    "evidence_for": {
@@ -1420,6 +1446,10 @@
    "roles_dropped": [
     "r-bri",
     "r-tes"
+   ],
+   "earlier": [
+    "r-bri",
+    "r-tes"
    ]
   },
   "profile-swe/p3-staff-engineer-ml-platform": {
@@ -1454,14 +1484,11 @@
     "r-fin": [
      "b-fin-01",
      "b-fin-06",
-     "b-fin-09",
-     "b-fin-12",
-     "b-fin-17"
+     "b-fin-09"
     ],
     "r-cas": [
      "b-cas-08",
-     "b-cas-09",
-     "b-cas-01"
+     "b-cas-09"
     ],
     "e-ms": [],
     "e-bs": []
@@ -1577,7 +1604,10 @@
     "b-kce-01",
     "b-fin-04",
     "b-lum-13",
-    "b-kes-04"
+    "b-kes-04",
+    "b-fin-17",
+    "b-cas-01",
+    "b-fin-12"
    ],
    "added_to_fill": [],
    "evidence_for": {
@@ -1626,6 +1656,10 @@
    },
    "conflicts": [],
    "roles_dropped": [
+    "r-bri",
+    "r-tes"
+   ],
+   "earlier": [
     "r-bri",
     "r-tes"
    ]

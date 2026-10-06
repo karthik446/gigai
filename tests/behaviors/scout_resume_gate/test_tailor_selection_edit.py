@@ -147,16 +147,20 @@ def test_a_line_of_a_role_that_was_cut_whole_brings_the_role_back_with_that_line
     home, response = tailored
     master = home.master()
     record = response.result.length
-    assert record.cut, "the older profile's tailoring leaves whole roles out"
-    role = record.cut[-1]
-    line = role.entry.bullets[0]
+    # 0.1.11.4 item 9: a role the fit left with no line keeps its heading (one line under "Earlier experience"); its
+    # lines are on the length record, and no role is removed whole.
+    experience = next(section for section in response.result.sections if section.heading == "experience")
+    bare = [entry for entry in experience.entries if not entry.bullets]
+    assert bare and record.cut == (), "the older profile's tailoring leaves an old role with no line"
+    role = next(trimmed for trimmed in record.trimmed if trimmed.heading == bare[-1].heading[0].id)
+    line = role.bullets[0]
     item_id = next(ref.item_id for ref in line.refs if ref.item_id)
-    heading = role.entry.heading[0].text.removeprefix("### ")
-    assert heading not in response.markdown
+    heading = bare[-1].heading[0].text.removeprefix("### ")
+    assert f"### {heading}" not in response.markdown and f", {heading} | " in response.markdown.split("### Earlier experience")[1]
 
     edit = _change(home, response, "add", item_id, fit="keep")
     stored = home.stored(home.swe_id)
-    assert edit.applied and heading in stored.markdown and master["items"][item_id] in stored.markdown
+    assert edit.applied and f"### {heading}" in stored.markdown and stored.markdown.count(heading) == 1 and master["items"][item_id] in stored.markdown
     experience = next(section for section in stored.result.sections if section.heading == "experience")
     back = next(entry for entry in experience.entries if entry.heading[0].text.removeprefix("### ") == heading)
     assert [line.id for line in back.bullets] == [line.id]  # the role, with that one line
