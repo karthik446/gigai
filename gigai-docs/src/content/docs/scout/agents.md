@@ -402,6 +402,10 @@ your agent reads.
 every command. It teaches the commands, not the loop: use it when your agent has no instruction
 file at all.
 
+The same instructions carry a second section, for a cover letter: your agent tailors a letter of
+your own to one job, from your master resume, and saves it with a claims trace beside it. See
+[Cover letters](../cover-letter/).
+
 ### Claude Code
 
 1. Install the skill. The command creates the folders it needs:

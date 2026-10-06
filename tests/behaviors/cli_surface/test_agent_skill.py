@@ -12,7 +12,7 @@ import click
 import pytest
 from click.testing import CliRunner
 
-from gigai.agent_skill import PERMISSIONS_SNIPPET, render, source_text
+from gigai.agent_skill import PERMISSIONS_SNIPPET, cover_letter_text, render, source_text
 from gigai.cli import cli
 from gigai.scout.ats_score import ATS_WORDING
 from gigai.scout.pipeline.steps import LABEL_NAME, LABEL_WORDING
@@ -22,7 +22,8 @@ FLAG = re.compile(r"(?<![\w-])--[a-z][a-z-]*")
 
 
 def _spans() -> list[str]:
-    return SPAN.findall(source_text())
+    # 0.1.11.4: the cover-letter section is a second file of the same skill; its commands are pinned the same way.
+    return SPAN.findall(source_text() + cover_letter_text())
 
 
 def _resolve(words: list[str]) -> list[tuple[click.Command, list[str]]]:
@@ -177,5 +178,5 @@ def test_agent_permissions_takes_the_port_scout_runs_on(tmp_path: Path, monkeypa
     assert CliRunner().invoke(cli, ["agent-permissions", "--port", "0"]).exit_code == 2
 
 
-GOLDEN_SKILL = "4055df8d7e47832892baa944677020752ae9bc9c5fbddaae4824ce99aad0f893"
-GOLDEN_AGENTS = "136c1f56685df347f43b32602d792891708655cb2818ec48413c1e1675e3f38c"
+GOLDEN_SKILL = "eff6891941c1420d5098287a341711776f7ef328e61de0b1d48899f036d177c4"
+GOLDEN_AGENTS = "4b4bf2ad465d5926071f19f809a4deb8dac15c84111e41646545c46af4b94488"

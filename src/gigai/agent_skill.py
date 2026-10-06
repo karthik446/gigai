@@ -1,7 +1,10 @@
 """:command:`gigai agent-skill` and :command:`gigai agent-permissions`: the agent side of Scout.
 
-The instructions are ONE packaged source file, rendered either as a Claude Code
-skill (``SKILL.md`` with frontmatter) or as an ``AGENTS.md`` section. Both
+The instructions are packaged source files, rendered either as a Claude Code
+skill (``SKILL.md`` with frontmatter) or as an ``AGENTS.md`` section: the daily
+Scout loop (:func:`source_text`, capped at 100 lines) and, after it, the
+cover-letter section (:func:`cover_letter_text`, its own file and cap; 0.1.11.4).
+The cover letter is text only: GigAI calls no model for it. Both
 commands print by default; ``--out`` writes only the file the user named, and
 nothing here ever touches an agent's own settings.
 """
@@ -17,8 +20,8 @@ import click
 SKILL_NAME = "gigai-scout"
 SKILL_DESCRIPTION = (
     "Run the daily GigAI Scout job-search loop with the `gigai` CLI: what is new on Scout, "
-    "assess postings, open questions, answers and stories, tailored resume PDF. Use when the user "
-    "asks \"what's new on Scout\", about job postings or GigAI."
+    "assess postings, open questions, answers and stories, tailored resume PDF, a cover letter for one job. "
+    "Use when the user asks \"what's new on Scout\", about job postings, a cover letter or GigAI."
 )
 FORMATS = ("skill", "agents-md")
 #: The port `gigai scout run` uses unless it is given another; `gigai agent-permissions --port` names another.
@@ -51,8 +54,14 @@ def source_text() -> str:
     return resources.files("gigai").joinpath("data/agent/scout-agent-instructions.md").read_text(encoding="utf-8")
 
 
+def cover_letter_text() -> str:
+    """The second section of the skill: how an agent tailors the user's own cover letter to one job."""
+
+    return resources.files("gigai").joinpath("data/agent/cover-letter-instructions.md").read_text(encoding="utf-8")
+
+
 def render(fmt: str) -> str:
-    source = source_text().rstrip("\n")
+    source = source_text().rstrip("\n") + "\n\n" + cover_letter_text().rstrip("\n")
     if fmt == "skill":
         return f"---\nname: {SKILL_NAME}\ndescription: {SKILL_DESCRIPTION}\n---\n\n{source}\n"
     # AGENTS.md section: one level down, so it nests under the user's own headings.

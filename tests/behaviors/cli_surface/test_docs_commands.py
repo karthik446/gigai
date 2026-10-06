@@ -33,6 +33,8 @@ PAGES = (
     "gigai-docs/src/content/docs/scout/agents/start.md",
     "gigai-docs/src/content/docs/scout/first-10-minutes.md",
     "gigai-docs/src/content/docs/scout/tokens.md",
+    # 0.1.11.4: the cover-letter skill's page.
+    "gigai-docs/src/content/docs/scout/cover-letter.md",
 )
 #: The public llms.txt (plain text, no fenced blocks): its commands are the inline code spans that start with ``gigai``.
 LLMS_TXT = "gigai-docs/src/llms.template.txt"

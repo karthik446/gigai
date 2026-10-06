@@ -32,7 +32,7 @@ export default defineConfig({
         {
           label: 'Scout',
           badge: { text: 'Gig', variant: 'tip' },
-          items: ['scout', 'scout/first-10-minutes', 'scout/quickstart', 'scout/privacy', 'scout/resume', 'scout/numbers', 'scout/tokens', 'scout/accuracy-0-1-11', 'scout/real-run-0-1-11', 'scout/sources', 'scout/configuration', 'scout/agents', 'scout/agents/start', 'scout/limitations', 'scout/roadmap', 'scout/reference/cli', ...openAPISidebarGroups],
+          items: ['scout', 'scout/first-10-minutes', 'scout/quickstart', 'scout/privacy', 'scout/resume', 'scout/numbers', 'scout/tokens', 'scout/accuracy-0-1-11', 'scout/real-run-0-1-11', 'scout/sources', 'scout/configuration', 'scout/agents', 'scout/agents/start', 'scout/cover-letter', 'scout/limitations', 'scout/roadmap', 'scout/reference/cli', ...openAPISidebarGroups],
         },
         { label: 'Project', items: ['changelog'] },
       ],
