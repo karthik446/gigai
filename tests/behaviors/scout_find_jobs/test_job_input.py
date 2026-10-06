@@ -451,3 +451,45 @@ def test_gh_jid_url_of_an_unindexed_company_keeps_the_page_fetch(tmp_path) -> No
     with _nex_client(seen) as client, pytest.raises(FindJobsContractError):
         resolve_job(AssessJobInput(job_url=_NEX_URL), client=client, home_root=tmp_path)
     assert seen == ["www.nexhealth.com/careers/open-positions"]
+
+
+# --- BLOCK1: a gh_jid URL on a company site finds its board in the page's own Greenhouse embed ----------------------
+
+_EMBED_URL = "https://careers.example.test/job/?gh_jid=4400123"
+_EMBED_JOB_JSON = {
+    "id": 4400123, "title": "Staff Engineer", "company_name": "Example Co", "location": {"name": "Remote"},
+    "content": "&lt;p&gt;Requirements:&lt;/p&gt;&lt;ul&gt;&lt;li&gt;8+ years of backend engineering.&lt;/li&gt;&lt;/ul&gt;",
+}
+
+
+def _embed_client(seen: list[str], page_html: str) -> httpx.Client:
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(f"{request.url.host}{request.url.path}")
+        if request.url.host == "boards-api.greenhouse.io" and request.url.path == "/v1/boards/exampleco/jobs/4400123":
+            return httpx.Response(200, json=_EMBED_JOB_JSON)
+        return httpx.Response(200, text=page_html)
+
+    return httpx.Client(transport=httpx.MockTransport(handler), follow_redirects=True)
+
+
+def test_gh_jid_on_a_company_site_resolves_the_board_from_the_pages_embed_script(tmp_path) -> None:
+    page = (
+        "<html><body><nav>Menu</nav><div id='grnhse_app'></div>"
+        '<script src="https://job-boards.greenhouse.io/embed/job_board/js?for=exampleco&amp;b=x"></script></body></html>'
+    )
+    seen: list[str] = []
+    with _embed_client(seen, page) as client:
+        resolved = resolve_job(AssessJobInput(job_url=_EMBED_URL), client=client, home_root=tmp_path)
+
+    assert seen == ["careers.example.test/job/", "boards-api.greenhouse.io/v1/boards/exampleco/jobs/4400123"]
+    assert resolved.fetch_kind == "ats_single"
+    assert resolved.title == "Staff Engineer" and resolved.company == "Example Co" and resolved.location == "Remote"
+    assert "8+ years of backend engineering" in resolved.text
+
+
+def test_gh_jid_on_a_company_site_with_no_embed_token_stays_the_page_fetch_once(tmp_path) -> None:
+    seen: list[str] = []
+    with _embed_client(seen, "<html><body>" + "Menu item. " * 80 + "</body></html>") as client:
+        resolved = resolve_job(AssessJobInput(job_url=_EMBED_URL), client=client, home_root=tmp_path)
+    assert seen == ["careers.example.test/job/"]  # one page fetch, no API call
+    assert resolved.fetch_kind == "generic"

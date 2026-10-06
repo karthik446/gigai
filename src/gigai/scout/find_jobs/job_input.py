@@ -102,6 +102,7 @@ class _FetchFailure(Exception):
 class _Page:
     title: str
     text: str
+    html: str = ""
 
 
 def job_fetch_client() -> "httpx.Client":
@@ -153,8 +154,19 @@ def resolve_job(job: AssessJobInput, *, client: "httpx.Client", home_root: Path 
         job_id = _greenhouse_path_job_id(url)
     failures: list[str] = []
 
+    page: _Page | None = None
+    page_fetched = False
     if board is None and _has_gh_jid(url):
         token = _embedded_greenhouse_token(url, home_root)
+        if token is None:
+            # BLOCK1: the company's own page names the board it embeds (the one fetch is kept for the page path below).
+            page_fetched = True
+            try:
+                page = _fetch_page(client, url)
+            except _FetchFailure as exc:
+                failures.append(f"page fetch ({exc})")
+            else:
+                token = embedded_greenhouse_token_in_page(page.html)
         if token is not None:
             try:
                 return _greenhouse_single_job(client, token, _gh_jid(url), source_url=url, normalized_url=normalized)
@@ -172,11 +184,11 @@ def resolve_job(job: AssessJobInput, *, client: "httpx.Client", home_root: Path 
         except _FetchFailure as exc:
             failures.append(f"greenhouse single-job endpoint ({exc})")
 
-    page: _Page | None = None
-    try:
-        page = _fetch_page(client, url)
-    except _FetchFailure as exc:
-        failures.append(f"page fetch ({exc})")
+    if not page_fetched:
+        try:
+            page = _fetch_page(client, url)
+        except _FetchFailure as exc:
+            failures.append(f"page fetch ({exc})")
 
     if board is not None and (page is None or len(page.text) < MIN_POSTING_TEXT_CHARS):
         provider, token = board
@@ -262,6 +274,23 @@ def _embedded_greenhouse_token(url: str, home_root: Path | None) -> str | None:
         posting = None if entry is None else entry.postings.get(job_id)
         if posting is not None and not posting.removed:
             return slug
+    return None
+
+
+#: A Greenhouse embed names its board: ``.../embed/job_board/js?for=<token>`` (also ``job_app``), or a link
+#: ``boards.greenhouse.io/<token>/jobs/<id>``. Read from the page's own markup, never from a company's name.
+_GH_EMBED_FOR = re.compile(r"greenhouse\.io/embed/[A-Za-z_/]+\?(?:[^\"'\s<>]*?[&?])?for=([A-Za-z0-9_-]+)", re.IGNORECASE)
+_GH_BOARD_LINK = re.compile(r"(?:job-)?boards\.greenhouse\.io/(?!embed/)([A-Za-z0-9_-]+)/jobs/", re.IGNORECASE)
+
+
+def embedded_greenhouse_token_in_page(html: str) -> str | None:
+    """The Greenhouse board token a company page embeds (its embed script's ``for=<token>``), or ``None``."""
+
+    markup = _html_entities.unescape(html)
+    for pattern in (_GH_EMBED_FOR, _GH_BOARD_LINK):
+        found = pattern.search(markup)
+        if found is not None:
+            return found.group(1)
     return None
 
 
@@ -455,7 +484,7 @@ def _posting_text(html: str) -> str:
 def _fetch_page(client: "httpx.Client", url: str) -> _Page:
     body, charset = _read_capped(client, url)
     html = _decode(body, charset)
-    return _Page(title=_page_title(html), text=_posting_text(html))
+    return _Page(title=_page_title(html), text=_posting_text(html), html=html)
 
 
 def _greenhouse_single_job(

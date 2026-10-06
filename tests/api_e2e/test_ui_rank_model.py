@@ -563,7 +563,7 @@ def test_requirements_unreadable_is_the_servers_words_and_a_note(out: dict) -> N
     assert out["unreadable"] == {
         "status": 422,
         "code": "posting_requirements_unreadable",
-        "message": "Couldn't read this posting's requirements",
+        "message": "Couldn't read this posting's requirements: open the posting and paste its text",
         "isUnreadable": True,
     }
     assert out["unreadableOthers"] == [False, False]
@@ -581,7 +581,7 @@ def test_the_bundle_ships_the_same_words() -> None:
     bundle = _dist_js()
     for words in (
         "likely fits first · likely no-matches last",
-        "Couldn't read this posting's requirements",
+        "Couldn't read this posting's requirements: open the posting and paste its text",
         "Ranked by your model: ",
         "Re-rank",
         "posting_requirements_unreadable",
