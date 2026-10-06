@@ -259,7 +259,9 @@ def test_with_no_work_mode_a_hybrid_role_elsewhere_stays_a_question(fx: ProfileF
     austin = _assess(fx, _run_id(401), profile_id=None, postings=[_job(401, company, location, text)], config=_candidate(location="Austin, TX", visa=False))
     assert austin.assessments[0].verdict.value == "pending_user_answers"
     assert [item.question_id for item in austin.assessments[0].structured_questions] == ["location:houston"]
-    assert "work mode" not in binding.port.prompts[-1].lower() and "remote only" not in binding.port.prompts[-1].lower()
+    # The v9 rules NAME the paragraph (rule 5) and say "remote" (rule 4), so a substring check proves nothing:
+    # what matters is that no paragraph (block split on blank lines) IS the work mode paragraph.
+    assert not any(block.startswith("CANDIDATE WORK MODE") for block in binding.port.prompts[-1].split("\n\n"))
 
 
 # --- one builder, and what the run seals -----------------------------------------------------------
