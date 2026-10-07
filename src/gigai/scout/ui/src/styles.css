@@ -1491,6 +1491,20 @@ table.data-table th {
 .resume-preview-pages[aria-busy="true"] .resume-preview-page { opacity: 0.6; }
 .resume-preview-page { display: block; width: 100%; height: auto; background: white; border: 1px solid var(--border); box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12); transition: opacity 120ms; }
 .resume-preview-wait { min-height: 240px; display: flex; align-items: center; justify-content: center; }
+/* 0.1.11.5 (b): the list of points under the slider; the column scrolls by itself beside the pages. */
+.resume-preview[data-with-points="true"] .resume-preview-side { flex: 2 0 280px; max-width: 400px; max-height: calc(100vh - 92px); overflow-y: auto; padding-right: 4px; }
+.resume-points { margin-top: 12px; border-top: 1px solid var(--border); padding-top: 8px; }
+.resume-points-title { margin: 0 0 4px; font-size: 0.95rem; }
+.resume-points [data-role="points-status"] { min-height: 1.2em; margin: 4px 0; }
+.resume-points-role { margin: 10px 0 2px; font-weight: 600; font-size: 0.85rem; }
+.resume-point { padding: 4px 0; }
+.resume-point-text { display: block; width: 100%; box-sizing: border-box; font: inherit; font-size: 0.82rem; line-height: 1.35; padding: 4px 6px; resize: vertical; field-sizing: content; min-height: 2.6em; }
+.resume-point-actions { display: flex; justify-content: flex-end; gap: 10px; font-size: 0.8rem; }
+.resume-points-choices { margin: 6px 0; padding: 6px 8px; border: 1px solid var(--border); background: var(--chip-bg); max-height: 45vh; overflow-y: auto; }
+.resume-points-search { width: 100%; box-sizing: border-box; margin-bottom: 4px; }
+.resume-point-choice { display: flex; gap: 8px; align-items: flex-start; justify-content: space-between; padding: 4px 0; border-top: 1px solid var(--border); font-size: 0.82rem; }
+.resume-point-choice:first-child { border-top: 0; }
+.resume-point-choice button { white-space: nowrap; }
 .tailor-error { margin: 0 0 10px; font-size: 0.85rem; }
 
 

@@ -327,5 +327,5 @@ def test_the_job_page_reads_its_own_posting_text() -> None:
     assert "}, [runId, jobId, needsText]);" in read
     # The text it read is the posting the page shows; a posting that has its
     # text (a quick assessment's) is left as it is.
-    assert "job && postingText && !job.posting.text ? { ...job.posting, text: postingText }" in page
+    assert "job && postingText && !job.posting.text ? { ...job.posting, text: postingText }" in " ".join(page.split())  # the formatter may break the line
     assert "<JobDescription posting={posting}" in page

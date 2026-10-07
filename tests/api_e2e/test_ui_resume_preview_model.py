@@ -76,7 +76,8 @@ def test_the_preview_is_asked_for_by_one_effect_and_keeps_nothing() -> None:
     preview, panel, model = (code(UI_SRC / name) for name in ("components/ResumePreview.jsx", "components/JobResumePanel.jsx", "resumePreviewModel.js"))
     api = (UI_SRC / "api.js").read_text(encoding="utf-8")
     assert preview.count("postResumePreview(") == 1 and preview.count("useEffect(") == 1, "one request, in one effect"
-    assert "}, [profileId, jobIdentity, wanted, slider]);" in preview, "asked again only for another job, header or slider value"
+    # 0.1.11.5 (b): `content` is the stored resume's text: a change of its lines asks again too.
+    assert "}, [profileId, jobIdentity, wanted, slider, content]);" in preview, "asked again only for another job, header, slider value or resume text"
     assert "if (sequence.current !== mine) {" in preview and "controller.abort()" in preview and "clearTimeout(timer)" in preview, "a stale answer is dropped, a stale request cancelled"
     assert "setPreview(null)" not in preview, "the pages on screen are never cleared while the next are made"
     assert api.count('request("POST", "/api/tailored-resumes/preview"') == 1 and "postResumePreview" not in panel, "the panel itself asks nothing"

@@ -41,6 +41,7 @@ import { MASTER_HASH } from "../routing.js";
 import { headerBody } from "../generatePdfModel.js";
 import { previewHeader } from "../resumePreviewModel.js";
 import ResumePreview from "./ResumePreview.jsx";
+import ResumePoints from "./ResumePoints.jsx";
 import ApplyPanel from "./ApplyPanel.jsx";
 import PickedLeftOut from "./PickedLeftOut.jsx";
 import { Preview } from "./TailoredResumePanel.jsx";
@@ -587,6 +588,8 @@ export default function JobResumePanel({ state, assessment, gate, items, reasses
                 jobIdentity={state.jobIdentity}
                 header={formHeader || null}
                 onSpacing={setPreviewSpacing}
+                content={stored.markdown || ""}
+                side={<ResumePoints stored={stored} state={state} />}
               >
                 {text}
               </ResumePreview>
