@@ -162,11 +162,12 @@ def test_wrong_file_name_fails_only_the_file_name_rule() -> None:
     assert _failed(_score(_good(), file_name=None)) == []
 
 
-def test_skill_chips_extract_with_a_visible_separator() -> None:
-    """The template prints a middle dot between chips, so a reader gets ``Python · Go · Terraform`` not ``Python Go Terraform``."""
+def test_skills_extract_with_a_visible_separator() -> None:
+    """The template prints the Skills as comma-separated lines (0.1.11.5 (d); until then chips with a middle dot between
+    them), so a reader gets ``Python, Go, Terraform`` not ``Python Go Terraform``."""
     text = "\n".join(page.extract_text() for page in PdfReader(io.BytesIO(_good())).pages)
     skills = text.split("SKILLS")[1].split("EDUCATION")[0]
-    assert "Python · Go · Terraform · Kubernetes · AWS" in " ".join(skills.split()), skills
+    assert "Python, Go, Terraform, Kubernetes, AWS" in " ".join(skills.split()), skills
 
 
 def test_a_damaged_pdf_is_scored_unreadable_not_raised() -> None:
@@ -240,9 +241,9 @@ def test_a_heading_font_with_no_space_glyph_is_the_case_under_test() -> None:
     assert spaces["Inter-SemiBold"] is False and spaces["Inter-Light"] is True, spaces
 
 
-def test_chip_separators_are_plain_characters() -> None:
+def test_skill_separators_are_plain_characters() -> None:
     result = _score(_headerless(RESUME))
-    assert "plain characters" not in _failed(result) and " · " in "\n".join(p.extract_text() for p in PdfReader(io.BytesIO(_headerless(RESUME))).pages)
+    assert "plain characters" not in _failed(result) and "Python, Go, " in "\n".join(p.extract_text() for p in PdfReader(io.BytesIO(_headerless(RESUME))).pages)
 
 
 def test_a_source_with_no_role_line_and_no_email_loses_nothing_for_them() -> None:

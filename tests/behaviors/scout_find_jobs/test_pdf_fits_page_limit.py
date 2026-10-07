@@ -1,7 +1,7 @@
 """0.1.11.3 packet 7: a stored job resume's PDF stays on the page limit it was fitted to, on the END outcome.
 
 The operator's case, on synthetic data: a job resume the fit measured at 2 pages (the selector's spacing, 0.9) was
-rendered at the saved spacing (1.0, auto fit off) and ran to a 3rd page that held only the last row of Skills chips,
+rendered at the saved spacing (1.0, auto fit off) and ran to a 3rd page that held only the end of the Skills,
 through the CLI and, with the Generate PDF form's header, through the UI's route.
 
 Pinned on the page count of the PDF that comes back (pypdf reads it):
@@ -11,8 +11,8 @@ Pinned on the page count of the PDF that comes back (pypdf reads it):
 - ``POST /api/tailored-resumes/pdf`` over HTTP on the real server (in this process), with a header of FOUR lines (the name, the
   title, a contact line that wraps to two), answers 2 pages and no ``X-GigAI-Fit-Note``;
 - a spacing the user names below the floor is used as named, and a resume that fits keeps its saved spacing;
-- a resume one more line long, which no spacing down to 0.8 fits, fits with the Skills laid out compactly; a
-  longer one, compact at the tightest spacing (0.7); a longer one still gets the sentence below;
+- a longer resume takes the floor's spacing (0.8), a longer one the tightest (0.7), a longer one still gets the
+  sentence below (0.1.11.5 (d): the Skills are plain lines and have no compact form, so that step is gone);
 - every size the fit accepts (2 pages at 0.9) is 2 pages with the four-line header at a saved spacing of 1.0 and of 1.4;
 - a resume that cannot fit is still rendered, with ONE plain sentence (the CLI's ``note``, the route's
   ``X-GigAI-Fit-Note``): page counts and what to do, no internal name, nothing of the resume.
@@ -69,7 +69,7 @@ SKILLS = (
     "Python, Go, TypeScript, Kubernetes, PostgreSQL, Terraform, AWS, GCP, Kafka, Redis, Airflow, dbt, Snowflake, Spark, Docker, Helm, ArgoCD, "
     "Prometheus, Grafana, OpenTelemetry, gRPC, GraphQL, React, Node.js, FastAPI, PyTorch, LangChain, RAG, Vector search, CI/CD"
 )
-LAST_SKILLS = ("Prometheus", "CI/CD")
+LAST_SKILL = "CI/CD"
 
 
 def resume(long_lines: int = 0, short_lines: int = 3, roles: int = 5) -> str:
@@ -94,16 +94,16 @@ def resume(long_lines: int = 0, short_lines: int = 3, roles: int = 5) -> str:
 
 
 #: The failing size: 2 pages where the fit measures (spacing 0.9), a 3rd page of skills at the saved spacing 1.0.
-FAILING = resume()
-#: Longer: 3 pages at every spacing down to the floor with the chips as they are, 2 with them compact.
-#: (0.1.11.5: below 1.0 the spacing also tightens the body's lines, so each of these three is longer than it was.)
-NEEDS_COMPACT = resume(long_lines=6, short_lines=2)
-#: Longer: 2 pages only with the chips compact AND the tightest spacing.
+#: (0.1.11.5 (d): the Skills are plain lines and a degree is one line, so every size here is longer than it was.)
+FAILING = resume(long_lines=2)
+#: Longer: 3 pages at every spacing above the floor (0.8), 2 pages there.
+NEEDS_FLOOR = resume(long_lines=7, short_lines=3)
+#: Longer: 2 pages only at the tightest spacing.
 NEEDS_TIGHTEST = resume(long_lines=9, short_lines=3)
 #: Longer still: 3 pages whatever is done.
-TOO_LONG = resume(long_lines=12, short_lines=3)
+TOO_LONG = resume(long_lines=13, short_lines=3)
 #: The master: nine roles, 4 pages. ``FAILING`` is its first five roles, line for line.
-LONG = resume(roles=9)
+LONG = resume(long_lines=2, roles=9)
 
 
 def _pages(pdf: bytes) -> list[str]:
@@ -152,8 +152,8 @@ def test_the_fixture_is_the_failing_size(fx: PipelineFixture) -> None:
     pages = _pages(unfitted.pdf)
     assert unfitted.pages == len(pages) == 3
     assert _is_the_four_line_header(pages[0]), "the header is not four lines"
-    # ... and the 3rd page holds nothing but the end of the Skills chips.
-    assert pages[2].strip().startswith(LAST_SKILLS[0]) and pages[2].strip().endswith(LAST_SKILLS[1]) and "Role" not in pages[2] and len(pages[2].splitlines()) <= 3
+    # ... and the 3rd page holds nothing but the end of the Skills.
+    assert pages[2].strip().startswith("SKILLS") and pages[2].strip().endswith(LAST_SKILL) and len(pages[2].strip().splitlines()) <= 4
 
 
 def test_cli_pdf_of_the_stored_job_resume_stays_on_two_pages(fx: PipelineFixture, tmp_path: Path) -> None:
@@ -162,7 +162,7 @@ def test_cli_pdf_of_the_stored_job_resume_stays_on_two_pages(fx: PipelineFixture
     pages = _pages(out.read_bytes())
     assert len(pages) == payload["pages"] == 2, f"the CLI's PDF is {len(pages)} pages at spacing {payload['spacing_scale']}"
     assert FIT_FLOOR <= payload["spacing_scale"] < 1.0 and payload["note"] is None
-    assert LAST_SKILLS[1] in pages[1] and "Role 0 line 0" in pages[0], "the resume is not whole"
+    assert LAST_SKILL in pages[1] and "Role 0 line 0" in pages[0], "the resume is not whole"
 
     # A spacing the user names is still theirs: one that fits is used as named, also below the floor.
     for named in (0.7, 0.85):
@@ -186,7 +186,7 @@ def test_api_pdf_with_a_four_line_header_stays_on_two_pages(fx: PipelineFixture,
         assert _is_the_four_line_header(pages[0]), "the header is not four lines"
         assert len(pages) == 2, f"Generate PDF made {len(pages)} pages; the last holds: {pages[-1][:80]!r}"
         assert "x-gigai-fit-note" not in response.headers
-        assert LAST_SKILLS[1] in pages[1]
+        assert LAST_SKILL in pages[1]
         # The headerless PDF (an agent's) is on the same pages.
         headerless = client.post("/api/tailored-resumes/pdf", json=key)
         assert headerless.status_code == 200 and len(_pages(headerless.content)) == 2 and "x-gigai-fit-note" not in headerless.headers
@@ -224,7 +224,7 @@ def test_a_resume_that_cannot_fit_says_so_in_plain_words(fx: PipelineFixture, tm
     assert result.exit_code == 0 and note in result.output
 
 
-def test_skills_go_compact_before_a_page_holds_only_chips_and_a_fitting_resume_is_untouched(fx: PipelineFixture) -> None:
+def test_a_saved_spacing_is_tightened_to_the_floor_then_to_the_tightest_and_a_fitting_resume_is_untouched(fx: PipelineFixture) -> None:
     stored = _stored(fx)
     header = form_header(FORM, TITLE)
 
@@ -233,15 +233,16 @@ def test_skills_go_compact_before_a_page_holds_only_chips_and_a_fitting_resume_i
 
         return _render(parse_resume_markdown(markdown)[1], header, company="Acme", timestamp=STAMP, spacing_scale=scale, auto_fit=False, count_pages=True, max_pages=max_pages)
 
-    # No spacing down to the floor fits this one with the chips as they are ...
-    assert [render(NEEDS_COMPACT, scale, None).pages for scale in (1.0, 0.9, FIT_FLOOR)] == [3, 3, 3]
-    fitted = render(NEEDS_COMPACT, 1.0, 2)
+    # No spacing above the floor fits this one ...
+    assert [render(NEEDS_FLOOR, scale, None).pages for scale in (1.0, 0.9, 0.85, FIT_FLOOR)] == [3, 3, 3, 2]
+    fitted = render(NEEDS_FLOOR, 1.0, 2)
     pages = _pages(fitted.pdf)
-    # ... so the Skills are laid out compactly: 2 pages, every skill still printed, in order, and no note.
-    assert fitted.pages == len(pages) == 2 and fitted.note is None and fitted.spacing_scale == 0.85
+    # ... so it takes the floor's: 2 pages, every skill printed, in order, and no note.
+    assert fitted.pages == len(pages) == 2 and fitted.note is None and fitted.spacing_scale == FIT_FLOOR
     printed = pages[1][pages[1].index("SKILLS"):].replace("\n", " ")
-    assert [part.strip() for part in printed.removeprefix("SKILLS").split("·")] == [skill.strip() for skill in SKILLS.split(",")]
-    # A longer one takes the tightest spacing too; a longer one still is rendered as saved, with the sentence.
+    assert [part.strip() for part in printed.removeprefix("SKILLS").split(",")] == [skill.strip() for skill in SKILLS.split(",")]
+    # A longer one takes the tightest spacing; a longer one still is rendered as saved, with the sentence.
+    assert render(NEEDS_TIGHTEST, FIT_FLOOR, None).pages == 3
     tightest = render(NEEDS_TIGHTEST, 1.0, 2)
     assert (tightest.pages, tightest.spacing_scale, tightest.note) == (2, SPACING_MIN, None) and len(_pages(tightest.pdf)) == 2
     over = render(TOO_LONG, 1.0, 2)

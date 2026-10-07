@@ -115,17 +115,22 @@ def _texts(data: bytes) -> list[str]:
 
 
 def _skill_runs(data: bytes) -> list[str]:
-    """Every text run (one per chip) after the SKILLS heading, in reading order."""
+    """Every text run (one per printed line) after the SKILLS heading, in reading order."""
     runs: list[str] = []
     for page in PdfReader(io.BytesIO(data)).pages:
         found: list[str] = []
         page.extract_text(visitor_text=lambda text, cm, tm, font, size: found.append(text) if text.strip() else None)
         runs += found
-    return [r.strip() for r in runs[[r.strip() for r in runs].index("SKILLS") + 1 :] if r.strip() != "·"]  # "·": the separator printed between chips
+    return [r.strip() for r in runs[[r.strip() for r in runs].index("SKILLS") + 1 :]]
 
 
 def _skill_tags(data: bytes) -> list[str]:
-    return _skill_runs(data)
+    """The skills the PDF prints (0.1.11.5 (d): plain comma-separated lines; until then one chip a skill): the lines
+    joined (a line may end inside a slash group) and split on the commas outside parentheses."""
+    from gigai.scout.resume_pdf import _TAG_SEPARATORS
+
+    text = "".join(run if run.endswith("/") else run + " " for run in _skill_runs(data))
+    return [tag.strip() for tag in _TAG_SEPARATORS.split(text) if tag.strip()]
 
 
 def test_no_duplicated_text_lines() -> None:
@@ -293,7 +298,7 @@ def test_auto_fit_spreads_a_long_two_page_resume_to_fill_page_two() -> None:
 
 def test_auto_fit_pulls_a_just_over_one_page_resume_onto_one_page() -> None:
     """(b) ~1.06 pages at 1.0x: auto fit tightens the spacing (never below 0.7x, never smaller type) to one page."""
-    result = _sized(1, 8)
+    result = _sized(1, 12)  # 0.1.11.5 (d): the Skills are plain lines, so the fixture needs four more lines to pass one page
     assert len(_lines(_pdf(result, spacing_scale=1.0, auto_fit=False))) == 2
     data = _pdf(result)
     assert len(_lines(data)) == 1

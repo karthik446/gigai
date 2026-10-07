@@ -38,7 +38,7 @@ from gigai.scout.master_store import import_master
 from gigai.scout.pipeline.settings import PIPELINE_ENV
 from gigai.scout.resume_pdf import ResumeMarkdownError, parse_resume_markdown, printed_text
 from gigai.scout.tailor_length import restore_cut
-from gigai.scout.tailored_resume import EARLIER_HEADING, TailorResponse, heading_only, heading_only_line, read_tailored_resume, render_markdown, tailored_resume_path
+from gigai.scout.tailored_resume import EARLIER_HEADING, EARLIER_TITLE_MIN, TailorResponse, heading_only, heading_only_line, read_tailored_resume, render_markdown, tailored_resume_path
 from gigai.scout.tailored_resume_edit import HandbackRefused, handback_result
 
 from tests.behaviors.scout_find_jobs.test_assessment_v9_flow import V9_PARAGRAPHS
@@ -191,7 +191,8 @@ def test_a_role_none_of_whose_lines_is_shown_still_prints_its_heading_in_the_mar
     text = "\n".join(pages)
     assert len(_header_lines(pages[0])) == 3, f"the header is not at its largest: {_header_lines(pages[0])}"
     assert len(pages) == payload["pages"] >= 2, f"the PDF with the header is {len(pages)} pages; it says {payload['pages']}"
-    assert EARLIER_HEADING.upper() in text
+    # 0.1.11.5 (d): three roles or fewer have no title of their own in the PDF; their lines follow the last role.
+    assert len(OLD) < EARLIER_TITLE_MIN and EARLIER_HEADING.upper() not in text
     places = [text.index(f"{title}, {employer}") for employer, title, _dates, _lines in OLD]
     assert places == sorted(places) and text.index("QUILLSHIRE FREIGHT") < places[0] < text.index("SKILLS")
     assert all(dates in text for _employer, _title, dates, _lines in OLD)

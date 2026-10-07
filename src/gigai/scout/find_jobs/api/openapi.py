@@ -1763,7 +1763,7 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
             "POST /api/tailored-resumes/preview) is rendered at that spacing as saved; below 1.0 the spacing also tightens the body's line height "
             "(14.3pt at 1.0 down to 11.5pt at 0.7; the type size never changes), so 0.7 holds about a quarter more text than 1.0. "
             + _HEADER_NOTE
-            + " The PDF stays on the resume's page limit: a saved spacing that would run past it is tightened (to 0.8), then the Skills are laid out compactly, then the spacing goes to 0.7 at most; "
+            + " The PDF stays on the resume's page limit: a saved spacing that would run past it is tightened (to 0.8), then the spacing goes to 0.7 at most; "
             "when no spacing fits, the PDF is rendered as saved and X-GigAI-Fit-Note says so in one plain sentence (page counts and what to do; nothing of the resume). "
             "0.1.11.4: when the posting's board no longer lists it the PDF is made all the same and X-GigAI-Posting-Note says "
             "\"This posting looks closed: check it before you apply\" (GET /api/jobs `liveness`: one board request at most, none within the hour)."

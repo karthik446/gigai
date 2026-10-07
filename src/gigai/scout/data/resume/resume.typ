@@ -16,13 +16,19 @@
 // body's own single-spaced line (Inter's ascender + descender = 1.21 x the size = 11.49pt): at the floor a line's
 // descenders end where the next line's ascenders begin, and they never overlap.  The type SIZE never changes (the
 // line box alone gives the room), an entry heading (10.7pt) keeps a line box of at least its own 13pt, and the
-// header's lines, the section titles and the Skills chips keep theirs.  `fixed_lines` (a page ESTIMATE:
+// header's lines and the section titles keep theirs.  `fixed_lines` (a page ESTIMATE:
 // resume_pdf._estimate) keeps 14.3pt at every scale: the pick and the length rule budget as they did, and the PDF
 // never takes more pages than they counted.
 //
 // AUTO FIT (resume_pdf.fit_scale): the renderer queries <fit-end> below at a few scales and keeps the largest
 // that still ends on the fewest pages.  Range: above 1.0 only the gaps grow (~20% of a page's height); below it the
 // body's lines tighten too, so 0.7x holds about a quarter more text than 1.0x.  Type sizes and margins never change.
+//
+// LAYOUT OF FOUR BLOCKS (0.1.11.5 (d); the words are the resume's own, only how they are set changed):
+// the Summary is a plain paragraph (no bullet); a degree is ONE line (school, then its degree, the years at the
+// right margin); the roles shown by their heading alone have no title of their own when there are fewer than four
+// (`untitled`: plain lines after the last role); the Skills are plain comma-separated lines, at most
+// `skill-max-lines` (`skills` below).  Everything else is set as before.
 //
 // PAGE RULES (0110-015): an entry heading and role line stay with the first bullet (sticky), the first bullet
 // stays with the second, and the second-to-last stays with the last, so a page break never leaves ONE bullet of
@@ -37,7 +43,6 @@
 #let accent = rgb(d.at("accent", default: "#1F65F5"))
 #let ink = rgb("#323336")
 #let soft = rgb("#434343")
-#let tag-fill = rgb("#F1F5F7")
 #let margin-x = 65pt
 #let margin-y = 50pt
 // Inter's vertical metrics (hhea, all weights): ascender 1984/2048, descender 494/2048.
@@ -51,11 +56,27 @@
 #set block(spacing: 0pt)
 #set page(paper: "us-letter", margin: (x: margin-x, y: margin-y))
 #let item(c) = if c.url != none { link(c.url, c.text) } else { c.text }
-// Skills: inline chips of real text (selected and read in order); the .md keeps a "·" line.
-// COMPACT (0.1.11.3, resume_pdf._render): the same chips with less padding and a smaller row gap, used only when
-// the resume would otherwise run past its page limit (a last row of chips alone on an extra page).
-#let compact = d.at("compact_tags", default: false)
-#let chip(x) = box(fill: tag-fill, inset: if compact { (x: 5pt, y: 1.5pt) } else { (x: 10.7pt, y: 3pt) }, t(x, size: 8.3pt, lh: 12.5pt))
+// SKILLS (0.1.11.5 (d)): plain comma-separated lines of real text, in the order given (what the posting asks for
+// first), at most `skill-max-lines` lines.  SHRINK BEFORE CUT: the whole list is set at the body's size when it fits
+// in those lines, else a step smaller, down to the last of `skill-sizes` (8.3pt, the size the Skills chips had; never
+// below it).  Only a list too long even there is cut: the names that fit, from the front, and the rest are not
+// printed.  Nothing marks the cut (no "..." and no "and more"): the list claims nothing it does not show.
+#let skill-sizes = (9.5pt, 9pt, 8.5pt, 8.3pt)
+#let skill-max-lines = 4
+#let skills(names) = layout(avail => {
+  let made(n, size) = block(width: avail.width, t(names.slice(0, n).join(", "), size: size, lh: lh-body, fill: soft))
+  let fits(n, size) = measure(made(n, size)).height <= skill-max-lines * lh-body + 0.01pt
+  let whole = skill-sizes.find(size => fits(names.len(), size))
+  if whole != none { made(names.len(), whole) } else {
+    let size = skill-sizes.last()
+    let (lo, hi) = (1, names.len())
+    while lo < hi {
+      let mid = calc.quo(lo + hi + 1, 2)
+      if fits(mid, size) { lo = mid } else { hi = mid - 1 }
+    }
+    made(lo, size)
+  }
+})
 #let sec(x) = block(above: 15 * s, below: 8 * s, sticky: true, t(x, size: 7.1pt, lh: 7.1pt, weight: 600, fill: accent, tracking: 0.71pt))
 #let bullet(x, keep: false) = block(below: s, sticky: keep, pad(left: 17.8pt, {place(left, dx: -11.8pt, t([•], lh: lh-body)); t(x, lh: lh-body)}))
 #let para(x) = block(below: 2 * s, t(x, lh: lh-body, fill: soft))
@@ -76,7 +97,7 @@
 #if d.name != "" { head-name(t(upper(d.name), size: 16.6pt, lh: 16.6pt, weight: 600, tracking: 0.77pt)) }
 #if d.title != "" { head-line(d.title) }
 // SHRINK BEFORE WRAP (item 16): a contact line too long for the page is set smaller, a step at a time down to the
-// last of `contact-sizes` (never below it: the Skills chips are 8.3pt), in the same 14.3pt line box, so the header is
+// last of `contact-sizes` (never below it), in the same 14.3pt line box, so the header is
 // as tall as before.  Only a line that is too long even there wraps, at the full size.
 #let contact-sizes = (9.5pt, 9pt, 8.5pt, 8pt)
 #let contact-line(items) = layout(avail => {
@@ -88,15 +109,29 @@
 #for x in d.sections {
   sec(x.heading)
   for l in x.lines { if l.bullet { bullet(l.text) } else { para(l.text) } }
-  if x.tags.len() > 0 {
-    block(below: 2 * s, par(leading: if compact { 1.5 * s } else { 3 * s }, text(size: 8.3pt, ..edges(8.3pt, 12.5pt), x.tags.map(chip).join([#h(1.8pt)·#h(1.8pt)]))))
-  }
+  if x.tags.len() > 0 { block(below: 2 * s, skills(x.tags)) }
   for e in x.entries {
-    // Sticky heading + role line keep the first bullet with them (a heading is never stranded at a page end).
-    if e.heading.len() > 0 { block(above: 7 * s, sticky: true, t(if x.caps { upper(e.heading.at(0).text) } else { e.heading.at(0).text }, size: 10.7pt, lh: calc.max(lh-body, 13pt), weight: 600, tracking: 0.75pt)) }
-    for h in e.heading.slice(calc.min(1, e.heading.len())) {
+    let oneline = e.at("oneline", default: false)
+    let untitled = e.at("untitled", default: false)
+    let lh-head = calc.max(lh-body, 13pt)
+    if oneline {
+      // A degree on ONE line: the school as an entry heading, its degree after it in the role line's type (on the
+      // heading's baseline: one paragraph), the years at the right margin.  A line too long for the page wraps.
+      let deg = e.heading.at(0)
+      let after(body) = text(size: 9.5pt, weight: 400, fill: soft, ..edges(10.7pt, lh-head), body)
+      block(above: 2 * s, below: 2 * s, sticky: e.heading.len() > 1 or e.bullets.len() > 0, {
+        t(if x.caps { upper(deg.text) } else { deg.text }, size: 10.7pt, lh: lh-head, weight: 600, tracking: 0.75pt)
+        if deg.detail != "" { after([ | ] + deg.detail) }
+        if deg.dates != "" { h(1fr); after(deg.dates) }
+      })
+    } else if not untitled and e.heading.len() > 0 {
+      // Sticky heading + role line keep the first bullet with them (a heading is never stranded at a page end).
+      block(above: 7 * s, sticky: true, t(if x.caps { upper(e.heading.at(0).text) } else { e.heading.at(0).text }, size: 10.7pt, lh: lh-head, weight: 600, tracking: 0.75pt))
+    }
+    for (i, h) in (if untitled { e.heading } else { e.heading.slice(calc.min(1, e.heading.len())) }).enumerate() {
       let role = if h.dates != "" { grid(columns: (1fr, auto), h.text, h.dates) } else { h.text }
-      block(below: 2 * s, sticky: true, t(role, lh: lh-body, weight: 400, fill: soft))
+      // An untitled block (roles shown by their heading alone, fewer than four) starts with the gap between entries.
+      if untitled and i == 0 { block(above: 7 * s, below: 2 * s, sticky: true, t(role, lh: lh-body, weight: 400, fill: soft)) } else { block(below: 2 * s, sticky: true, t(role, lh: lh-body, weight: 400, fill: soft)) }
     }
     let n = e.bullets.len()
     for (i, b) in e.bullets.enumerate() { bullet(b, keep: n >= 2 and (i == 0 or i == n - 2)) }
