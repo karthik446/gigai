@@ -80,7 +80,7 @@ def main(argv: list[str] | None = None) -> int:
         with step("demo home"):
             server_started = True
             # The folder a default install shows (0110-10-07), and a master resume for the Master page and Picked / Left out.
-            demo = demo_home.build(root, log=lambda line: print(f"  {line}", flush=True), resumes_folder=demo_home.media_resumes_folder(), master=True)
+            demo = demo_home.build(root, log=lambda line: print(f"  {line}", flush=True), resumes_folder=demo_home.media_resumes_folder(), master=True, showcase=True)
         with step("UI screenshots"):
             rows += ui_shots.take_all(demo, out)
         with step("terminal frames"):

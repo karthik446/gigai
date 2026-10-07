@@ -2,7 +2,7 @@
   "schema": "gigai-media-manifest:1",
   "version": "0.1.11.5",
   "generated_on": "2026-10-07",
-  "total_bytes": 1398386,
+  "total_bytes": 1397072,
   "images": [
     {
       "file": "answers-dark.png",
@@ -31,8 +31,8 @@
       "alt": "The Background pipeline panel, with jobs waiting for your approval.",
       "width": 1280,
       "height": 800,
-      "bytes": 40546,
-      "sha256": "675ce0e1f12e003e2a13b1262cde1417531c334b8f174fb8e0d495398ecf72d6"
+      "bytes": 40540,
+      "sha256": "61b90faed1fd2ce4fbe1bbe06410e51006a72e8e54c9a7b14a65f4cfbaa806aa"
     },
     {
       "file": "background-light.png",
@@ -41,8 +41,8 @@
       "alt": "The Background pipeline panel, with jobs waiting for your approval.",
       "width": 1280,
       "height": 800,
-      "bytes": 40834,
-      "sha256": "2354ad15828a5d835d33746094753af90d9d5516f4ef6d6be19fb769e63ca956"
+      "bytes": 40903,
+      "sha256": "3d32d4d2eaf58956a3e2ec7cc0737f4c5fff4c45b23cf0222de42308e9295b32"
     },
     {
       "file": "job-left-out-dark.png",
@@ -51,8 +51,8 @@
       "alt": "Left out: the other lines of your master resume, each with why, and Add to show one on this resume.",
       "width": 1280,
       "height": 800,
-      "bytes": 61299,
-      "sha256": "a1ff29f77a5079ef299cc45ac15d3831aba2a0b133055c6ebbd1132cfa1ba49d"
+      "bytes": 61327,
+      "sha256": "11841eb5faad62f530f7a082f53275675eea478428587af8eb587de1b07e95d1"
     },
     {
       "file": "job-left-out-light.png",
@@ -61,8 +61,8 @@
       "alt": "Left out: the other lines of your master resume, each with why, and Add to show one on this resume.",
       "width": 1280,
       "height": 800,
-      "bytes": 62553,
-      "sha256": "e52e173277fdd9372891a33857fd2aab0b441ea00825e5ea9bd5ee4659415c7e"
+      "bytes": 62571,
+      "sha256": "554a1c16d7482f4efb3d86630f38dd3f18373ff7fe8895936da72110ee2ed07d"
     },
     {
       "file": "job-picked-dark.png",
@@ -71,8 +71,8 @@
       "alt": "Picked: the lines of your master resume this job's resume shows, each with why.",
       "width": 1280,
       "height": 800,
-      "bytes": 56451,
-      "sha256": "2c8f7a99db22614ed2f5047f649eac08c08efcf29e94b1a39fe933fbf62b2ba5"
+      "bytes": 56559,
+      "sha256": "6e3293c19328a736023df75697fe04376529be05ac9f3051f912ea37cb58ae47"
     },
     {
       "file": "job-picked-light.png",
@@ -81,8 +81,8 @@
       "alt": "Picked: the lines of your master resume this job's resume shows, each with why.",
       "width": 1280,
       "height": 800,
-      "bytes": 57144,
-      "sha256": "9f0626ecea2b8500927ba1587051f0d37fbe0c7299e8c6b0031fccb1df95066f"
+      "bytes": 57219,
+      "sha256": "a9f43166f551094be0fec82312013ce4cb47d90f54275839a7d9d62123a6ce32"
     },
     {
       "file": "job-pipeline-dark.png",
@@ -91,8 +91,8 @@
       "alt": "The same job page further down: the end of the resume card with its Points list, then the background pipeline's steps, the Scout ATS score and the Scout label.",
       "width": 1280,
       "height": 800,
-      "bytes": 43703,
-      "sha256": "c0dc2bceb61ea375bcaadaf5262e295a9a980a2868981fa6dce27def65a125e4"
+      "bytes": 43701,
+      "sha256": "49f4a902b671b7dfb1b00f1038c86555eb10660ff8d7581e0d7e36b789cf81fb"
     },
     {
       "file": "job-pipeline-light.png",
@@ -102,7 +102,7 @@
       "width": 1280,
       "height": 800,
       "bytes": 43805,
-      "sha256": "74d9e1d2e695172d6fa424c9075817cca33ddfadbd638449540192748b95ef14"
+      "sha256": "a70a338ef0b2e2d20c53e182292b60e05af8b2ae1942cb98606f679a4b312c1a"
     },
     {
       "file": "job-resume-dark.png",
@@ -111,8 +111,8 @@
       "alt": "The resume card on a job page: Generate PDF, where the file is in your jobs folder, the preview with the spacing slider and the page count, and the Points list.",
       "width": 1280,
       "height": 800,
-      "bytes": 58970,
-      "sha256": "29c6022e43a484f84795ea1aa41cc70510c53962149ac3469ae426912255a9d4"
+      "bytes": 58973,
+      "sha256": "007418513265b2b337d98c51dac74b0f7c3061e94c2235b16f35252167a8d777"
     },
     {
       "file": "job-resume-light.png",
@@ -121,8 +121,8 @@
       "alt": "The resume card on a job page: Generate PDF, where the file is in your jobs folder, the preview with the spacing slider and the page count, and the Points list.",
       "width": 1280,
       "height": 800,
-      "bytes": 60059,
-      "sha256": "58a1d8da6fce4cec83a723dcc8e1e7e01df2c859dd1828725637655729fd9e9d"
+      "bytes": 60078,
+      "sha256": "d55e99b186ab676b1aa1cf28cb2f8ed54cfc8cf85262d1f3ba0b42d21772765a"
     },
     {
       "file": "jobs-dark.png",
@@ -131,8 +131,8 @@
       "alt": "The Jobs page: every stored posting your profiles match, with filter chips, profile tags and the Fit and Rank chips under each title.",
       "width": 1280,
       "height": 800,
-      "bytes": 62493,
-      "sha256": "c028fdc378b87b164b92ea1ac30c9f94692f0880028cb600ae36dae5f3209cd3"
+      "bytes": 61465,
+      "sha256": "9042c77a3030a36e67b92993f95bfef07ea0a0330eb447ed5d8082e9344b9852"
     },
     {
       "file": "jobs-light.png",
@@ -141,8 +141,8 @@
       "alt": "The Jobs page: every stored posting your profiles match, with filter chips, profile tags and the Fit and Rank chips under each title.",
       "width": 1280,
       "height": 800,
-      "bytes": 62410,
-      "sha256": "9aba4bf6bd7fa451700bafd161ac24943d84eeb8c3237b0c57f414541c0e27f6"
+      "bytes": 61759,
+      "sha256": "602d94d2ff1ad67937caf8d68830d9b36503fd2075f8f314e55228e193490736"
     },
     {
       "file": "master-dark.png",
@@ -241,8 +241,8 @@
       "alt": "After your yes, the agent assesses the new postings and shows them ranked.",
       "width": 1280,
       "height": 701,
-      "bytes": 45904,
-      "sha256": "aebb040a30ecb45f8cd1a78ebe3e36e0ae5e4b3f8a81c6f12ea32c5a7385b636"
+      "bytes": 44429,
+      "sha256": "5d5828a9633f7c3f711927b0f3cd14c511e7ed4c170a51ed4264a6e8be5bdd1c"
     },
     {
       "file": "terminal-master-add.png",
@@ -251,8 +251,8 @@
       "alt": "The agent adds your story to the master resume as one line, on your OK; each profile is offered the new line, never changed by itself.",
       "width": 1280,
       "height": 295,
-      "bytes": 30883,
-      "sha256": "5c279032a258bf92041672bf0d9f5b18daf2fdc8d277390b55f9c5b0bdbf2b06"
+      "bytes": 31097,
+      "sha256": "ea2638530dd3ac08e1c836a007d083c3881817b1ab6fd1b5d740d0333ecd24d2"
     },
     {
       "file": "terminal-master.png",
@@ -261,8 +261,8 @@
       "alt": "`gigai scout resume master show`: your master resume, every role and line once, each with its id and how well it is backed.",
       "width": 1280,
       "height": 527,
-      "bytes": 40652,
-      "sha256": "651e273f6aeb82de86e47ae06f2d7f7c95d9e8e2e697463a57df9048a6035841"
+      "bytes": 40754,
+      "sha256": "20bb1bd80c7f5c03f4af2e2c4d581cb0529bc75f4d281b6973af33cc6b1c265a"
     },
     {
       "file": "terminal-new.png",
@@ -270,9 +270,9 @@
       "scheme": "dark",
       "alt": "An agent runs `gigai scout new`: what is new, and the cost, before anything is assessed.",
       "width": 1280,
-      "height": 742,
-      "bytes": 44142,
-      "sha256": "14af6987cb13850774f544dbbbc652f323fe8d804c7fd06cbf78882b6b38065a"
+      "height": 722,
+      "bytes": 40531,
+      "sha256": "3928e1ae3728350355a8f5df0c7b6d36e69b41cc81f54e3800ea2a50da3b0b53"
     },
     {
       "file": "terminal-pdf.png",
@@ -281,8 +281,8 @@
       "alt": "The agent renders the tailored resume as a headerless PDF and hands you the link to finish it in Scout.",
       "width": 1280,
       "height": 215,
-      "bytes": 20144,
-      "sha256": "355fba59914589f31ed97fd29a6bb26ee2f8fe0b7627593fa240f8f4b0b1353f"
+      "bytes": 20319,
+      "sha256": "a5a2b228d51da429b7258bc855b40cac2d66978445b5ad761a8daa9b47c4a4b4"
     },
     {
       "file": "terminal-story.png",
@@ -300,9 +300,9 @@
       "scheme": "dark",
       "alt": "`gigai scout new --yours`: what matches, from your own resume and answers, as a separate call.",
       "width": 1280,
-      "height": 330,
-      "bytes": 18221,
-      "sha256": "b18f401b1349e44116c8819cd40dd03e5824aece00bbeaf55a854a94d43c4d40"
+      "height": 389,
+      "bytes": 22869,
+      "sha256": "a6d7fd87f97507f62edbd601e690a5c20b6049860958dab123db15d1b8baf87e"
     }
   ]
 }
