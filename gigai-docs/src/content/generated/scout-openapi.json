@@ -36,7 +36,7 @@
   "info": {
     "description": "Loopback-only HTTP API of `gigai scout`. Writes need Content-Type: application/json and a Host of the bound 127.0.0.1/localhost port. Errors are {\"error\": {\"code\", \"message\"}}. x-gigai-effect says whether a route changes stored state; x-gigai-external says whether it spends a model call or reads the network. x-gigai-labels lists the labels of the data a route's response can hold (personal, user-private, public-untrusted; [] when it holds ids, counts and states only); every JSON response carries the same list in X-GigAI-Labels (none when empty). In a JSON response, contact-shaped text (an email address, a phone number, a street address, a linkedin/github/gitlab link) outside posting text is replaced by `[removed: <kind>]`, and the response then carries `_redactions` {kind: count}.",
     "title": "GigAI Scout local API",
-    "version": "0.1.11.4"
+    "version": "0.1.11.5"
   },
   "openapi": "3.1.0",
   "paths": {

@@ -30,6 +30,43 @@ mechanics here. Those belong in the internal changelog.
 
 ## Released versions
 
+### 0.1.11.5
+
+**After you upgrade** (`uv tool upgrade gigai`): the first read matches your stored postings once more against the
+new title rules, so the first Jobs page can take a little longer. Resumes you picked before this version keep their
+lines and are shown as they are; use "Re-pick" on a job (or `gigai scout resume pick --job-url URL --refresh`) to get
+the new pick of up to 20 points, and open the job page to set the spacing yourself.
+
+- **The resume is a preview you can set.** On a job page the resume card opens on **Preview**: the resume as the PDF
+  prints it, one spacing slider beside it and a live page count ("2 pages", or "3 pages" with a hint to move the
+  slider left). The slider's whole range changes how many points fit: below 1.0 it also tightens the line height
+  (never the type size), so a 20-point resume that is 3 pages at 1.0 reaches 2 pages lower down. What you set is
+  saved for that job (in a small `.layout` file beside the job's resume; older versions ignore it), the preview and
+  the downloaded PDF are the same render, and nothing else is written.
+- **Edit, remove or add a point beside the preview.** A list of the picked points: change a point's words, remove it,
+  or add one from the lines your master left out. Each change is saved to this job's resume straight away, the
+  preview re-renders, and the page count follows. Nothing reaches your master unless you ask: an edited point has
+  "Save this wording to my master", which shows the old and the new words and changes that one master line after
+  one confirm (other jobs take the new wording on their next pick).
+- **The pick no longer counts pages.** It takes up to 20 points by score (must-cover lines first) and leaves the
+  page to you and the slider, so picks are no longer stopped at 14 points "cut for length". "Shorten
+  automatically" is gone (the slider and Remove a point replace it). Older roles with no point still appear as
+  one line each.
+- **A tighter page.** Education is one line per degree; "Earlier experience" has no title of its own when it lists
+  three roles or fewer; Skills are at most four plain lines (the posting's terms first, no duplicates, a long list
+  is cut at the end); the Summary is a paragraph.
+- **Fit and rank at a glance.** The Jobs list shows a Fit chip ("Fit 92% · 19/22", green for a match) and a Rank
+  chip ("Rank 92") under each title, and an assessed job page shows its fit and rank in the top-right box.
+- **Assess all can be cancelled and shows progress.** The dialog closes when the batch starts; the page shows
+  "12 of 50 assessed" and a Cancel ("Cancelling: finishing the N in flight": calls already running finish and are
+  kept, nothing else starts). Stopping Scout ends its own model calls. The dialog says the estimate, "Assess top 50
+  of 177", and what the low-rank checkbox does.
+- **Fewer wrong titles.** A job title that names a broad family ("Forward Deployed Engineer", "Staff AI Engineer")
+  or carries a qualifier ("Staff Software Engineer, AI Platform") now matches by its own words, not every posting
+  of the same function.
+- **Safer copies of a home.** A resume read from a copied GigAI home is now written back to that copy, not to the
+  original.
+
 ### 0.1.11.4
 
 **After you upgrade** (`uv tool upgrade gigai`): resumes you picked before this version keep their
