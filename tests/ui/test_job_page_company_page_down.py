@@ -92,8 +92,9 @@ def company_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Co
     pages = {httpx.URL(url).path: status for url, status in COMPANY_PAGES.values()}
 
     def web(request: httpx.Request) -> httpx.Response:
-        requests.append(f"{request.url.host}{request.url.path}")
-        if request.url.host == "boards-api.greenhouse.io":
+        host = request.headers.get("host", request.url.host)  # S2: the company page is requested at its vetted address
+        requests.append(f"{host}{request.url.path}")
+        if host == "boards-api.greenhouse.io":
             token, job_id = request.url.path.strip("/").split("/")[2], int(request.url.path.rstrip("/").split("/")[-1])
             return httpx.Response(200, json=gh_detail(gh_job(token, job_id, TITLE_BOTH), posting_text(job_id)))
         status = pages[request.url.path]
@@ -102,6 +103,9 @@ def company_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Co
     monkeypatch.setenv(posting_live.LIVENESS_ENV, "1")  # the suite switches the check off; this flow is about it
     monkeypatch.setattr(posting_live, "liveness_client", lambda: httpx.Client(transport=httpx.MockTransport(web), follow_redirects=False))
     posting_live.reset_memory()
+    from tests.support.fake_dns import PUBLIC_V4, install_fake_dns
+
+    install_fake_dns(monkeypatch, {"www.example-co.com": [PUBLIC_V4]})  # S2: the company page's name is resolved once; no lookup leaves the process
     server = serve(backend=ScoutFindJobsBackend(home_root=fx.home_root, target=fx.target), bind=("127.0.0.1", 0))
     serving = threading.Thread(target=server.serve_forever, daemon=True)
     serving.start()

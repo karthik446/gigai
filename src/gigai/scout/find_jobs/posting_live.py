@@ -46,6 +46,14 @@ answer is kept for :data:`CACHE_SECONDS` too
 (``<home>/cache/scout/liveness/pages/``) and NEVER closes or removes
 anything: it only changes which link the page puts first.
 
+The stored URL is the board's text, written by strangers (0.1.11.4 S2), so
+that one ``GET`` goes through ``outbound_guard``: the name is resolved ONCE,
+a name with any address that is not on the public internet (this machine, a
+private network, the cloud metadata address) is never requested (``unknown``,
+nothing written), and the connection is made to the vetted address itself,
+so no second lookup can answer differently. A board token or posting id that
+is not a plain name never becomes part of a board's endpoint (``unknown``).
+
 ``GIGAI_SCOUT_POSTING_LIVENESS=0`` turns the check off (every answer is
 ``unknown``, no request). Under the fixture transport
 (``GIGAI_SCOUT_FIND_JOBS_TEST_HTTP=1``) no request is made either: that
@@ -66,6 +74,7 @@ from urllib.parse import quote, urlsplit
 
 from ...canonical import digest_imported_bytes
 from .contracts import FindJobsContractError, normalize_url, parse_board_url
+from .outbound_guard import pinned_stream, public_looking_host, safe_path_segment, safe_public_target
 
 if TYPE_CHECKING:  # pragma: no cover - imported only by static type checkers
     import httpx
@@ -113,8 +122,6 @@ _BOARD_JOB_URL = {
     "lever": "https://jobs.lever.co/{token}/{id}",
     "ashby": "https://jobs.ashbyhq.com/{token}/{id}",
 }
-#: A company page is asked only at a public-looking name (the URL is the board's text, written by strangers).
-_PRIVATE_SUFFIXES = (".local", ".localhost", ".internal", ".lan", ".home", ".test", ".invalid")
 _LIST_PROVIDERS = frozenset({"lever", "ashby"})
 
 
@@ -278,16 +285,22 @@ def _greenhouse_job_id(url: str) -> str | None:
 
 
 def _where(url: str, provider: str | None, token: str | None, posting_id: str | None) -> tuple[str, str, str | None] | None:
-    """``(provider, board token, posting id)`` to ask about, or ``None`` when no board is known for the URL."""
+    """``(provider, board token, posting id)`` to ask about, or ``None`` when no board is known for the URL.
+
+    The token (and a Greenhouse id) becomes a path segment of the board's endpoint: one that is not a plain name
+    (``outbound_guard.safe_path_segment``) names no board, so it can never add a segment or a query to that address.
+    """
 
     if not provider or not token:
         parsed = parse_board_url(url)
         if parsed is None:
             return None
         provider, token = parsed
+    if not safe_path_segment(token):
+        return None
     if provider == "greenhouse":
         posting_id = posting_id or _greenhouse_job_id(url)
-        return (provider, token, posting_id) if posting_id else None
+        return (provider, token, posting_id) if safe_path_segment(posting_id) else None
     if provider in _LIST_PROVIDERS:
         return provider, token, posting_id
     return None
@@ -461,25 +474,12 @@ def board_job_url(provider: str | None, token: str | None, posting_id: str | Non
 
 
 def _askable_page(url: str) -> bool:
-    """Whether the stored URL may be asked: plain ``https`` at a public-looking name (no address literal, port or login)."""
+    """Whether the stored URL may be asked at all: plain ``https`` at a public-looking name (no address literal, port or login).
 
-    import ipaddress
+    No lookup is made here; what the name RESOLVES to is ``outbound_guard.safe_public_target``'s to refuse.
+    """
 
-    try:
-        parsed = urlsplit(url)
-        host, port = parsed.hostname, parsed.port
-    except ValueError:
-        return False
-    if parsed.scheme != "https" or not host or port not in (None, 443) or parsed.username is not None or parsed.password is not None:
-        return False
-    host = host.lower().rstrip(".")
-    try:
-        ipaddress.ip_address(host)
-    except ValueError:
-        pass
-    else:
-        return False
-    return "." in host and host != "localhost" and not host.endswith(_PRIVATE_SUFFIXES)
+    return public_looking_host(url) is not None
 
 
 def _page_path(home_root: Path, job: str) -> Path:
@@ -540,6 +540,11 @@ def check_company_page(
     network error) is ``unknown``. The body is never read. Only a company-site
     URL is asked (:func:`is_company_site`), only over ``https`` at a public
     name, never when the check is off. Never raises, never writes a posting.
+
+    S2: the name is resolved once and the request connects to that vetted
+    address (``outbound_guard``). A name that gives no address, or any
+    address off the public internet, is not requested: ``unknown``, held in
+    this process for the hour (no lookup per page open) and written nowhere.
     """
 
     home_root = Path(home_root)
@@ -552,13 +557,18 @@ def check_company_page(
         return kept
     if not request or not enabled() or not _askable_page(url):
         return UNKNOWN
+    page = safe_public_target(url)
+    if page is None:
+        with _LOCK:
+            _PAGES[(str(home_root), job)] = (UNKNOWN, time.monotonic())
+        return UNKNOWN
     own = client is None
     state = UNKNOWN
     try:
         if own:
             client = liveness_client()
-        _paced("page:" + (_host(url) or ""))
-        with client.stream("GET", url) as response:  # type: ignore[union-attr]
+        _paced("page:" + page.host)
+        with pinned_stream(client, page) as response:  # type: ignore[arg-type]
             status = response.status_code
         if status in (404, 410):
             state = PAGE_DOWN

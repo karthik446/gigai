@@ -51,6 +51,7 @@ from .contracts import (
 )
 from .company_index import CompanyIndex
 from .market_acquisition import job_id_from_url
+from .outbound_guard import safe_path_segment
 
 if TYPE_CHECKING:  # pragma: no cover - imported only by static type checkers
     import httpx
@@ -490,6 +491,9 @@ def _fetch_page(client: "httpx.Client", url: str) -> _Page:
 def _greenhouse_single_job(
     client: "httpx.Client", token: str, job_id: str, *, source_url: str, normalized_url: str
 ) -> ResolvedJob:
+    if not safe_path_segment(token) or not safe_path_segment(job_id):
+        # Each is one path segment of the board's endpoint: a ``/``, ``?`` or ``..`` in it would name another address there.
+        raise _FetchFailure("bad_board_name", "boards-api.greenhouse.io", "the board token or job id is not a plain name")
     endpoint = _GREENHOUSE_JOB_URL.format(token=token, job_id=job_id)
     body, charset = _read_capped(client, endpoint)
     host = _host_of(endpoint)

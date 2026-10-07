@@ -26,6 +26,7 @@ import pytest
 from gigai.scout import postings
 from gigai.scout.posting_search import assess_these, search_postings
 
+from tests.support.fake_dns import PUBLIC_V4, install_fake_dns
 from tests.support.greenhouse_fixtures import gh_detail, gh_job, gh_url, posting_text, seed_greenhouse
 from tests.support.posting_fixtures import NOW, TITLE_BOTH, PostingsFixture, build_postings_fixture, days_ago
 
@@ -49,13 +50,18 @@ class _Web:
     def __init__(self, page: object = 404) -> None:
         self.requests: list[str] = []
         self.methods: list[str] = []
+        self.targets: list[str] = []  # where each company-page request was sent (S2: the one resolved address)
         self.page = page
         self.board = 200
 
     def handler(self, request: httpx.Request) -> httpx.Response:
-        self.requests.append(f"{request.url.host}{request.url.path}")
+        # S2: the company page is requested at its vetted ADDRESS; the ``Host`` header is the name the site is asked as.
+        host = request.headers.get("host", request.url.host)
+        self.requests.append(f"{host}{request.url.path}")
         self.methods.append(request.method)
-        if request.url.host == "boards-api.greenhouse.io":
+        if host != "boards-api.greenhouse.io":
+            self.targets.append(request.url.host)
+        if host == "boards-api.greenhouse.io":
             token, job_id = request.url.path.strip("/").split("/")[2], int(request.url.path.rstrip("/").split("/")[-1])
             if self.board != 200:
                 return httpx.Response(self.board, json={"error": "Job not found"})
@@ -73,6 +79,7 @@ class _Web:
         monkeypatch.setenv("GIGAI_SCOUT_ATS_MIN_INTERVAL_SECONDS", "0")
         monkeypatch.setattr(posting_live, "liveness_client", lambda: httpx.Client(transport=httpx.MockTransport(self.handler), follow_redirects=False))
         posting_live.reset_memory()
+        self.dns = install_fake_dns(monkeypatch, {"www.example-co.com": [PUBLIC_V4]})  # no name lookup leaves the process
         return self
 
 
@@ -151,6 +158,8 @@ def test_the_company_page_404s_and_the_board_lists_the_job_the_read_says_open_do
     assert all(row.removed_at is None for row in _rows(fx, job)) and job in _listed(fx) and job not in _listed(fx, removed=True)
     # One liveness request (the board, by the index token) and one GET of the company page.
     assert web.requests == [BOARD_API, PAGE_REQUEST] and web.methods == ["GET", "GET"]
+    # S2: the page was asked at the one address its name resolved to, after one lookup.
+    assert web.targets == [PUBLIC_V4] and web.dns.calls == ["www.example-co.com"]
 
     # The page opened again, and again in a new process, within the hour: no request at all.
     assert client.get("/api/jobs", params={"url": job}).json()["liveness"]["company_page"] == "down"
