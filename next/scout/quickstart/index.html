@@ -155,9 +155,13 @@ resume; it is not a verdict.</li>
 <p>An assessed job’s page shows the same two numbers in a box at the top right: the fit, “19 of
 22 requirements” and “Rank 92”. <a href="../numbers/">What Scout’s numbers and labels mean</a> says how
 each is made.</p>
-<p>A row can also carry <strong>New</strong>, <strong>Applied · Oct 6</strong> (after <strong>Mark applied</strong> on the job’s page;
-it becomes Interview, Offer, Rejected or Withdrawn as you record those) and <strong>Closed</strong>. The
-<strong>Applied</strong> chip above the list shows only the jobs you applied to.</p>
+<p>A row can also carry <strong>New</strong> and <strong>Closed</strong>. After <strong>Mark applied</strong> on a job’s page the job
+reads <strong>Applied · Oct 6</strong> (it becomes Interview, Offer, Rejected or Withdrawn as you record
+those), and it leaves the list: jobs you have already applied to (and the ones that moved on
+from there) are left out of the Jobs list, its counts and “Assess top 50”. The <strong>Applied</strong> chip
+above the list shows how many there are (“Applied 7”) and lists only them; opening or
+assessing one by its address still works. <code dir="auto">gigai scout jobs list</code> and <code dir="auto">gigai scout new</code> leave
+them out too and say how many, and <code dir="auto">gigai scout jobs list --state applied</code> lists them.</p>
 <div class="sl-heading-wrapper level-h3"><h3 id="assess-a-batch">Assess a batch</h3><a class="sl-anchor-link" href="#assess-a-batch"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “Assess a batch”</span></a></div>
 <p>Above the list, “177 not assessed” has a button beside it. One approval assesses at most 50
 postings, the top 50 by rank, so the button reads <strong>Assess top 50 of 177</strong>; with 50 or fewer
