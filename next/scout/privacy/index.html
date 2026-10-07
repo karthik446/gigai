@@ -78,7 +78,8 @@ PDF form sends them with that one request; they fill that PDF’s header and are
 file, a log or a reply. Your browser may offer to remember them for autofill. That is your
 browser’s own store, not GigAI’s.</li>
 <li><strong>You may keep them in a file of your own instead.</strong> <code dir="auto">~/Documents/GigAI/header.json</code> is yours:
-GigAI only reads it to fill the Generate PDF form or a PDF you make with
+GigAI only reads it to fill the Generate PDF form, to show your header in the resume preview
+on a job’s page in your own browser, or for a PDF you make with
 <code dir="auto">gigai scout resume pdf --out</code>, and never copies it into its store, a log or a model prompt.
 It writes that file only when you press “Save these details” in the Generate PDF form.
 See <a href="../resume/#your-header-file">Your header file</a>.</li>
