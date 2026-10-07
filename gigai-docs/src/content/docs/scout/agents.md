@@ -107,6 +107,11 @@ gigai scout jobs assess URL --again --yes --actor agent --json  # again, althoug
 > guarantee. A profile id is not contact data. With codex_cli or claude_cli the model target is
 > your own login.
 
+**Cancel and stop.** `gigai scout jobs assess --cancel` stops the batch that is running, also
+one the Jobs page started: no further model call starts, the calls in flight finish, and what
+is assessed is kept. The same assess command again takes the rest. `gigai scout stop` stops
+the server and ends the model calls it started.
+
 **The preview says it exactly.** Without `--yes` the reply is `status: "ask"`: no model call was
 made, and `model_input_summary` says what the postings asked about would send and where. For
 each profile: its id and label, and `resume_source` (`master_evidence`: the lines of your master
@@ -337,7 +342,7 @@ gigai scout resume pdf --job-url <job-url> --json        # 5. apply: the PDF
 3. **A changed line cites its sources.** A line copied unchanged needs nothing. A line that is
    reworded or added ends with the master lines and answers it comes from:
    `<!-- src: b-23b6dc, A tooling:temporal -->`. Every number stays exactly; "worked on" never
-   becomes "led"; entry headings are copied unchanged; no name and no contact details; two pages.
+   becomes "led"; entry headings are copied unchanged; no name and no contact details; two pages at the tightest spacing.
 4. **The hand-back is checked, then stored**, marked edited with who wrote it. A refusal stores
    nothing and lists every problem by line number with its own fix: keep the cited line's
    number, cite the line that states the thing, or drop the claim. Saving an answer is the fix
@@ -355,7 +360,8 @@ suggested for the job and what was done about each; `gigai scout suggestions add
 shows the resume picked for the job as it is stored: who picked it, whether a resume is suggested
 at all, and what is stale. A resume you edited is never replaced by a new pick: the new one waits
 beside it, and `gigai scout resume pick --job-url <job-url> --use-proposed` is the one step that
-takes it.
+takes it. On the job's page the card's first line then reads "A new resume is ready for this
+job." with **Compare**, **Use it** and **Dismiss** (`--dismiss-proposed` from a terminal).
 
 ### 6. Your master resume
 
@@ -624,11 +630,11 @@ It asks your open questions, saves your answer, and offers to turn an experience
 
 The same jobs in the Scout UI. (The screenshots below were taken with the pipeline enabled: the Scout label and Scout ATS score appear only in a home that enabled it; it is off by default in 0.1.11.)
 
-<a href="../../media/jobs-dark.png"><img class="light:sl-hidden" src="../../media/jobs-dark.png" alt="The Jobs page: every stored posting your profiles match, with filter chips, profile tags and Scout's chips." loading="lazy" /></a>
-<a href="../../media/jobs-light.png"><img class="dark:sl-hidden" src="../../media/jobs-light.png" alt="The Jobs page: every stored posting your profiles match, with filter chips, profile tags and Scout's chips." loading="lazy" /></a>
+<a href="../../media/jobs-dark.png"><img class="light:sl-hidden" src="../../media/jobs-dark.png" alt="The Jobs page: every stored posting your profiles match, with filter chips, profile tags and the Fit and Rank chips under each title." loading="lazy" /></a>
+<a href="../../media/jobs-light.png"><img class="dark:sl-hidden" src="../../media/jobs-light.png" alt="The Jobs page: every stored posting your profiles match, with filter chips, profile tags and the Fit and Rank chips under each title." loading="lazy" /></a>
 
-<a href="../../media/job-pipeline-dark.png"><img class="light:sl-hidden" src="../../media/job-pipeline-dark.png" alt="The same job page further down: the background pipeline's steps, the Scout label and the Scout ATS score, then the tailored resume." loading="lazy" /></a>
-<a href="../../media/job-pipeline-light.png"><img class="dark:sl-hidden" src="../../media/job-pipeline-light.png" alt="The same job page further down: the background pipeline's steps, the Scout label and the Scout ATS score, then the tailored resume." loading="lazy" /></a>
+<a href="../../media/job-pipeline-dark.png"><img class="light:sl-hidden" src="../../media/job-pipeline-dark.png" alt="The same job page further down: the end of the resume card with its Points list, then the background pipeline's steps, the Scout ATS score and the Scout label." loading="lazy" /></a>
+<a href="../../media/job-pipeline-light.png"><img class="dark:sl-hidden" src="../../media/job-pipeline-light.png" alt="The same job page further down: the end of the resume card with its Points list, then the background pipeline's steps, the Scout ATS score and the Scout label." loading="lazy" /></a>
 
 Jobs over the per-trigger limit wait for your approval.
 
@@ -642,7 +648,7 @@ What you told your agent is kept once, on this machine, and reused.
 
 The agent's PDF has no name or contact details. It hands you a link, and you add yours in the browser.
 
-<a href="../../media/terminal-pdf.png"><img src="../../media/terminal-pdf.png" alt="The agent renders the tailored resume as a headerless PDF and hands you the link to finish it in Scout." loading="lazy" /></a>
+<a href="../../media/terminal-pdf.png"><img src="../../media/terminal-pdf.png" alt="The agent renders the job's resume as a headerless PDF and hands you the link to finish it in Scout." loading="lazy" /></a>
 
 <a href="../../media/pdf-dark.png"><img class="light:sl-hidden" src="../../media/pdf-dark.png" alt="Generate PDF: you add your own name and contact details in the browser; GigAI stores none." loading="lazy" /></a>
 <a href="../../media/pdf-light.png"><img class="dark:sl-hidden" src="../../media/pdf-light.png" alt="Generate PDF: you add your own name and contact details in the browser; GigAI stores none." loading="lazy" /></a>
@@ -738,8 +744,8 @@ What to know:
 
 - An edited line is marked `kind: custom` with `origin: user`. It cites no source (`refs` is
   empty) and the no-loss check does not cover it: it is your text. `edited_from` keeps the line it
-  replaced, so `"use": "original"` or `"use": "rewritten"` brings that back. The UI shows the line as
-  edited, with the same way back.
+  replaced, so `"use": "original"` or `"use": "rewritten"` brings that back. The UI marks the point
+  "Your words"; **Restore** on the Changed tab brings the master line back.
 - `text` is one line of at most 400 characters. Body lines only (a summary, skills or other line, or
   an entry's bullet), never an entry heading.
 - A text that looks like a name line or a contact detail (email, phone, link, street address) is
@@ -761,7 +767,7 @@ What to know:
   heading lines (`Staff Engineer | Jun 2020 - Present`), and lists `- ` bullets. Trailing
   `<!-- ... -->` comments are dropped and lines above the first `## ` are not printed. Text prints
   as written (inline markdown such as `**bold**` is not interpreted). Summary lines print as one
-  paragraph and Skills as tags, so a summary or other line that was a bullet in your original
+  paragraph and Skills as plain comma-separated lines, four at most, so a summary or other line that was a bullet in your original
   resume can print differently from the stored tailored resume's PDF; use `--tailored` (or
   `POST /api/tailored-resumes/pdf`) when you want exactly that PDF.
 - Errors are 422s that say what is wrong: `resume_markdown_invalid` names the line number and the

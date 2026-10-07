@@ -34,23 +34,34 @@ mechanics here. Those belong in the internal changelog.
 
 **After you upgrade** (`uv tool upgrade gigai`): the first read matches your stored postings once more against the
 new title rules, so the first Jobs page can take a little longer. Resumes you picked before this version keep their
-lines and are shown as they are; use "Re-pick" on a job (or `gigai scout resume pick --job-url URL --refresh`) to get
-the new pick of up to 20 points, and open the job page to set the spacing yourself.
+lines and are shown as they are; use "Re-pick · no model call" on a job (it is under "Stale: Scout's rules for
+picking changed after this resume was picked"), or `gigai scout resume pick --job-url URL --refresh`, to get the new
+pick of up to 20 points, and open the job page to set the spacing yourself. If the job's assessment is old, re-assess
+it instead ("Re-assess · 1 model call", or `gigai scout jobs assess URL --again`). If you edited the resume, it is not
+replaced: the new pick waits at the top of the card ("A new resume is ready for this job.", with Compare, Use it and
+Dismiss). `resume pick --shorten` is retired and only says so.
 
-- **The resume is a preview you can set.** On a job page the resume card opens on **Preview**: the resume as the PDF
+- **The resume is a preview you can set.** On a job page the resume card shows the resume as the PDF
   prints it, one spacing slider beside it and a live page count ("2 pages", or "3 pages" with a hint to move the
   slider left). The slider's whole range changes how many points fit: below 1.0 it also tightens the line height
   (never the type size), so a 20-point resume that is 3 pages at 1.0 reaches 2 pages lower down. What you set is
-  saved for that job (in a small `.layout` file beside the job's resume; older versions ignore it), the preview and
+  saved for that job (in a small `.layout` file in GigAI's own store, not in your jobs folder; older versions ignore it), the preview and
   the downloaded PDF are the same render, and nothing else is written.
   The preview shows a header too: yours, from `header.json`, when that file has your name (read for the
   pictures on your own page only, never stored), and otherwise a grey placeholder ("Your Name") of the same
   size, so the page count is the one your PDF will have. A PDF never contains the placeholder.
+  "Show changes" and "Clean copy" are gone: a changed point is marked "Your words", and the Changed tab lists the
+  changes with Restore.
 - **Edit, remove or add a point beside the preview.** A list of the picked points: change a point's words, remove it,
   or add one from the lines your master left out. Each change is saved to this job's resume straight away, the
   preview re-renders, and the page count follows. Nothing reaches your master unless you ask: an edited point has
   "Save this wording to my master", which shows the old and the new words and changes that one master line after
-  one confirm (other jobs take the new wording on their next pick).
+  one confirm (other jobs take the new wording on their next pick). The button says how many lines are left out,
+  "Add a left-out point (N)", or "Nothing left out".
+- **A new resume waits, and a stale line is named.** When a new pick waits beside a resume you edited, the first line
+  of the card says "A new resume is ready for this job." with Compare, Use it (it lists the edited points it would
+  drop) and Dismiss. When your master retired or reworded a line the resume prints, the card names that line with
+  "Remove it from this resume" or "Use the new wording"; neither calls a model.
 - **The pick no longer counts pages.** It takes up to 20 points by score (must-cover lines first) and leaves the
   page to you and the slider, so picks are no longer stopped at 14 points "cut for length". "Shorten
   automatically" is gone (the slider and Remove a point replace it). Older roles with no point still appear as
@@ -64,8 +75,10 @@ the new pick of up to 20 points, and open the job page to set the spacing yourse
   chip ("Rank 92") under each title, and an assessed job page shows its fit and rank in the top-right box.
 - **Assess all can be cancelled and shows progress.** The dialog closes when the batch starts; the page shows
   "12 of 50 assessed" and a Cancel ("Cancelling: finishing the N in flight": calls already running finish and are
-  kept, nothing else starts). Stopping Scout ends its own model calls. The dialog says the estimate, "Assess top 50
-  of 177", and what the low-rank checkbox does.
+  kept, nothing else starts). `gigai scout jobs assess --cancel` does the same from a terminal. Stopping Scout ends
+  its own model calls. The button says what it will do ("Assess top 50 of 177"), and the dialog says the estimate and
+  what the low-rank checkbox does ("Include the 105 low-ranked ones in the pool (still 50 per run)"). A row listed
+  for another profile has a link, "Or assess as" and that profile's name.
 - **Fewer wrong titles.** A job title that names a broad family ("Forward Deployed Engineer", "Staff AI Engineer")
   or carries a qualifier ("Staff Software Engineer, AI Platform") now matches by its own words, not every posting
   of the same function.

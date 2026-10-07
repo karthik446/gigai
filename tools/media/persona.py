@@ -87,7 +87,7 @@ COMPANIES: tuple[Company, ...] = (
     Company(
         slug="tallgrass-health",
         blurb="Tallgrass Health builds scheduling and records software for rural clinics.",
-        age_days=12,
+        age_days=6,  # inside the rank lane's 7-day window: older postings are not ranked, and every row shows a Rank chip
         wave=1,
         postings=(
             Posting("Senior Software Engineer, Scheduling", REMOTE_US, "remote", (172_000, 205_000),
@@ -101,7 +101,7 @@ COMPANIES: tuple[Company, ...] = (
     Company(
         slug="quillon-robotics",
         blurb="Quillon Robotics makes warehouse robots and the fleet software that directs them.",
-        age_days=9,
+        age_days=5,
         wave=1,
         postings=(
             Posting("Staff Software Engineer, Fleet Services", "Boulder, CO", "hybrid", (198_000, 240_000),

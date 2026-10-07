@@ -199,6 +199,9 @@ def test_an_agent_changes_two_bullets_and_renders_a_new_pdf(tmp_path: Path, monk
         assert f"Open in Scout to add your name and contact details and download: {stored_pdf.headers['x-gigai-finish-url']}" in named.output
         missing = CliRunner().invoke(cli, ["scout", "resume", "pdf", "--tailored", "--job-url", "https://example.test/none", "--out", str(tmp_path / "x.pdf"), "--home", str(home), "--target", str(target), "--json"])
         assert missing.exit_code == 1 and json.loads(missing.output)["error"]["code"] == "tailored_resume_not_found"
+        # 0.1.11.5: the message names the step that works (the pick), never the switched-off `resume tailor`.
+        said = json.loads(missing.output)["error"]["message"]
+        assert "gigai scout resume pick --job-url URL --refresh" in said and "resume tailor" not in said, said
 
         # (d) the personal-info check refuses contact details and a name-shaped line; nothing changes.
         for text, found in (

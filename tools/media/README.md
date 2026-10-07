@@ -46,7 +46,11 @@ runtime dependency and not an extra of the published package.
 
 The fixture model is not a model. Every assessment has the same two requirements (Python, GCP),
 it asks one question until that answer is saved, every rank is 60, and the "tailored" resume is
-three lines. The screenshots show the product's layout and flow with believable data around
+three lines. For the screenshots only, `overlay/sitecustomize.py` (on the demo server's PYTHONPATH,
+`demo_home.build(showcase=True)`) wraps the fixture so the Jobs list reads like a used one: a spread of
+rank scores by title, ranked through the page's own "Rank now", and matches that carry the posting's four
+requirements plus four nice-to-haves (Fit 100%, 92% or 83%; two rows would be a "thin posting" with no
+Fit chip). One job, Quillon's staff role, stays "Needs your answers". The product code is not touched. The screenshots show the product's layout and flow with believable data around
 that; they do not show what a real model writes.
 
 With a master resume the fixture is weaker still: its "tailored" resume cites the first line it is

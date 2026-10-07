@@ -116,14 +116,21 @@ def _lever_body(company: persona.Company, seen: datetime) -> list[dict[str, obje
     return body
 
 
-def build(root: Path, *, log=print, resumes_folder: Path | None = None, master: bool = False) -> DemoHome:
+OVERLAY_DIR = Path(__file__).resolve().parent / "overlay"
+
+
+def build(root: Path, *, log=print, resumes_folder: Path | None = None, master: bool = False, showcase: bool = False) -> DemoHome:
     """Create the home under `root`, start Scout, fill it. The caller stops it with `stop(root)`.
 
     `resumes_folder` saves that folder as the home's resumes folder (the real `gigai scout resume
     folder --set`) before anything is written to it; `master` makes the master resume from the
     profiles' resumes (the Master page's own route) before the first job is tailored, so the hero
-    job's resume is picked from the master. Both are off for the browser tests (tests/ui), which
-    pin the default folder and make the master themselves; `make media` turns both on.
+    job's resume is picked from the master. `showcase` starts the server with the fixture-model overlay
+    (`overlay/sitecustomize.py`: a spread of rank scores, assessments with four or more requirements)
+    and ranks every posting through the real "Rank now" route, so the Jobs list shows Rank and Fit
+    chips and "Ranked 14 of 14". All three are off for the browser tests (tests/ui), which
+    pin the default folder, make the master themselves and expect the fixture's own answers;
+    `make media` turns them on.
     """
 
     assert_synthetic_home(root)
@@ -203,6 +210,9 @@ def build(root: Path, *, log=print, resumes_folder: Path | None = None, master: 
     with socket.socket() as probe:
         probe.bind(("127.0.0.1", 0))
         port = probe.getsockname()[1]
+    if showcase:
+        os.environ["GIGAI_MEDIA_OVERLAY"] = "1"
+        os.environ["PYTHONPATH"] = os.pathsep.join(filter(None, [str(OVERLAY_DIR), os.environ.get("PYTHONPATH", "")]))
     started = run_supervisor.start(
         home_root=home, requested_target=target, port=port, foreground=False, open_browser=False, allow_test_seams=True,
     )
@@ -253,7 +263,7 @@ def build(root: Path, *, log=print, resumes_folder: Path | None = None, master: 
         return [row["job_identity"] for row in rows() if f"/{slug}/" in row["job_identity"]]
 
     # Before the GCP answer exists: these need the user's answer.
-    first = of("tallgrass-health")[:1] + of("quillon-robotics")
+    first = of("tallgrass-health")[:1] + of("quillon-robotics")  # the staff role stays "Needs your answers" (its assessment is old now)
     log(f"assessed before the answer: {assess(first)}")
     ok(client.post("/api/new/seen", json={}))
 
@@ -338,6 +348,31 @@ def build(root: Path, *, log=print, resumes_folder: Path | None = None, master: 
         pipeline = pipeline_done()
         done_job = pipeline["hero"]
         log(f"hero resume: picked {stored['selection']['counts']['picked']}, left out {stored['selection']['counts']['left_out']}")
+
+    if showcase:
+        # The SRE role at Quillon was assessed before the answer: assess it again so it is a match, and rank everything
+        # through the Jobs page's own "Rank now" (the routes the page calls), then wait for it to finish.
+        log(f"assessed again after the answer: {assess([i for i in of('quillon-robotics') if i.endswith('-0002')], again=True)}")
+        # "Rank now" ranks the postings of the last 7 days (the demo's are all inside it: see persona.age_days).
+        for mode in ("unranked",):
+            ok(client.post("/api/postings/rank", json={"mode": mode, "approve": True}), 202)
+            deadline = time.monotonic() + PIPELINE_WAIT_SECONDS
+            while time.monotonic() < deadline:
+                progress = ok(client.get("/api/postings/ranking"))
+                job = progress.get("job") or {}
+                if job.get("state") == "done" and not progress["ranking"]["in_progress"]:
+                    break
+                time.sleep(0.5)
+            else:
+                raise DemoHomeError(f"the demo postings were not all ranked: {progress}")
+        for _ in range(20):  # the rows pick the new scores up when the store next refreshes
+            ranked = [item for item in rows() if item.get("rank_score") is not None]
+            if len(ranked) == len(rows()):
+                break
+            time.sleep(0.5)
+        if len(ranked) != len(rows()):
+            raise DemoHomeError(f"the demo postings were not all ranked: {len(ranked)} of {len(rows())}: {progress['job']}")
+        log(f"ranked: {len(ranked)} of {len(rows())}")
 
     final = ok(client.get("/api/postings"))
     counts = {key: int(value) for key, value in final["counts"].items() if isinstance(value, int)}

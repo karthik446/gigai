@@ -3,13 +3,14 @@ title: What Scout's numbers and labels mean
 description: What the rank, the verdict, the Scout label and the Scout ATS score are, who made each one, and what it is not.
 ---
 
-Scout shows four things beside a job. Each one is made a different way, and none of them is a
+Scout shows five things beside a job. Each one is made a different way, and none of them is a
 promise about an employer. The "?" beside each one in Scout opens this page.
 
 | | Made by | Costs a model call | Says |
 | --- | --- | --- | --- |
 | [Rank](#rank) | Your model, from a short line per posting | Yes, in batches | Where the posting goes in the list |
 | [Verdict](#verdict) | Your model, from the full posting and your resume | Yes, one per posting | Matched, needs your answers, or not a match |
+| [Fit](#fit) | Scout, from the assessment's table of requirements | No | How many of the posting's requirements are met |
 | [Scout label](#scout-label) | Scout's own rule, no model | No | Recommended, or needs attention |
 | [Scout ATS score](#scout-ats-score) | Scout's own local check, no model | No | How well the resume PDF reads and matches |
 
@@ -54,8 +55,17 @@ can check it. An assessment made before your settings, your answers or Scout's p
 reads **Assessed with older settings**; the verdict still shows, and nothing is assessed again
 until you ask.
 
-On the Jobs page an assessed job also shows a percentage such as "73% of requirements met": the
-share of rows in that table your model marked met.
+## Fit
+
+On the Jobs page each job has two chips under its title. **Fit** ("Fit 92% · 19/22") is the
+share of requirements met, with the must-haves counted twice, then met of total: 19 of the 22
+rows of the assessment's table are marked met. **Rank** ("Rank 92") is the rank above, or
+"Not ranked yet". An assessed job's page shows both in the box at the top right.
+
+The Fit chip is green only for a matched job; on any other job it is grey, so a high fit
+beside "Needs your answers" is not a match yet. A posting too thin to have a table of
+requirements has no fit. Fit is counted by Scout from the assessment: no model call of its
+own.
 
 ## Scout label
 
@@ -112,5 +122,5 @@ missing when the posting only mentions it in passing.
 Each line of the picked resume is a line of your master, word for word; nothing rewrites it. (A
 resume tailored on 0.1.10, or by a home that enabled the pipeline, can hold a rewritten line that
 cites the sources it came from; the wording of a rewritten line is still your model's.) A line you
-or your agent typed yourself is marked **edited** and cites nothing: it is your text.
+or your agent typed is marked "Your words" and cites nothing: it is your text.
 [Resume and PDF](../resume/) has the details.

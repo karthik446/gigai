@@ -61,7 +61,7 @@ def test_the_expected_files_are_what_the_shot_lists_produce() -> None:
     assert ui_shots.VIEWPORT == {"width": 1280, "height": 800}, "desktop width only"
     source = Path(terminal.__file__).read_text(encoding="utf-8")
     assert tuple(re.findall(r'Frame\("(terminal-[a-z-]+)"', source)) == manifest.TERMINAL_NAMES
-    assert len(manifest.EXPECTED_FILES) == 2 * len(manifest.UI_NAMES) + len(manifest.TERMINAL_NAMES) == 36
+    assert len(manifest.EXPECTED_FILES) == 2 * len(manifest.UI_NAMES) + len(manifest.TERMINAL_NAMES) == 30
     # 0110-10-07: the master resume and the resumes folder are in the set.
     assert {"master", "master-lines", "job-resume", "job-picked", "job-left-out"} <= set(manifest.UI_NAMES)
     assert {"terminal-master", "terminal-master-add"} <= set(manifest.TERMINAL_NAMES)
@@ -77,7 +77,7 @@ def test_ui_shots_wait_on_test_ids_never_on_visible_text() -> None:
         literal = f'"{test_id}"' in ui_source or (test_id.startswith("time-chip-") and "`time-chip-${window}`" in ui_source)
         assert literal, f"data-testid {test_id} is gone from the UI source"
     assert {
-        "job-row", "time-chip-new", "assess-these", "approval-dialog", "step-timeline", "scout-label-chip", "background-panel", "approvals-list",
+        "job-row", "step-timeline", "scout-label-chip", "background-panel", "approvals-list",
         "jobs-folder-file", "picked-left-out",
     } <= used
     # 0110-10-07: the Master page and the Picked / Left out lists have no test ids; the names the shots wait on must exist too.

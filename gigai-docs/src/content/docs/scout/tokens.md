@@ -21,7 +21,8 @@ What keeps Scout's side under your control:
 
 - **It asks before it assesses.** `gigai scout new` (and **Assess these** in the UI) gives the
   count and an estimate from your own past calls, and assesses only on a yes. One model call per
-  posting.
+  posting, at most 50 postings per approval, and a running batch can be cancelled
+  ([Assess a batch](../quickstart/#assess-a-batch)).
 - **`gigai scout metrics` shows the averages** once the first calls are recorded: tokens,
   seconds and error rate per kind of call and per model. A token estimate is shown only after a
   call has been measured.

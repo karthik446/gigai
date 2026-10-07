@@ -24,7 +24,7 @@ REPO = Path(__file__).resolve().parents[2]
 DOCS_MEDIA = REPO / "gigai-docs" / "public" / "media"
 
 UI_NAMES: tuple[str, ...] = (
-    "jobs", "jobs-new", "approval-dialog", "job-page", "job-pipeline", "job-resume", "job-picked", "job-left-out", "master", "master-lines",
+    "jobs", "job-pipeline", "job-resume", "job-picked", "job-left-out", "master", "master-lines",
     "answers", "stories", "pdf", "background",
 )
 TERMINAL_NAMES: tuple[str, ...] = (
