@@ -83,7 +83,7 @@ out.dialog = m.approvalDialog(data.ask, data.ask.profiles);
 out.dialogTitle = m.approvalTitle(out.dialog);
 const capped = m.approvalDialog({ status: "ask", ranking: running, question: { to_assess: 60, batch: 50, more_after: 10, estimate: { calls: 50 }, yes: { api: { body: { states: ["not_assessed"] } } } },
   low_rank: { skipped: 112, batch: 50, more_after: 62, min_rank: 50, estimate: { calls: 50 }, yes: { api: { body: {} } } } }, []);
-out.capped = { title: m.approvalTitle(capped), batch: m.approvalBatchLine(capped), low: m.lowRankLine(capped.lowRank), ranking: capped.ranking, body: m.approvalBody(capped, false) };
+out.capped = { title: m.approvalTitle(capped), batch: m.approvalBatchLine(capped), low: m.lowRankLine(capped.lowRank, capped.count), ranking: capped.ranking, body: m.approvalBody(capped, false) };
 console.log(JSON.stringify(out));
 """
 
@@ -174,7 +174,7 @@ def test_the_dialog_says_top_50_by_rank_and_that_ranking_still_runs(out: dict) -
     capped = out["capped"]
     assert capped["title"] == "Assess the top 50 by rank of 60 postings?"
     assert capped["batch"] == 'the top 50 by rank now, never more in one go. 10 more after these 50: "Assess these" again takes the next 10.'
-    assert capped["low"] == "112 low-ranked ones are skipped (rank below 50). Assess the top 50 by rank of those too? ~50 model calls (62 more after these 50)"
+    assert capped["low"] == "Include the 112 low-ranked ones in the pool (still 50 per run)."  # 0.1.11.5 ASSESS-01
     assert "newest" not in json.dumps(capped)
     running = "Ranking is still running: 120 of 173 ranked. The order, and the top 50 by rank, are of what is ranked so far."
     assert capped["ranking"] == running

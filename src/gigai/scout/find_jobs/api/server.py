@@ -2003,6 +2003,9 @@ def _make_handler(
                     if path == "/api/postings/ranking":
                         self._handle_get_postings_ranking()
                         return
+                    if path == "/api/postings/assess/status":
+                        self._handle_get_postings_assess_status()
+                        return
                     # run-reads-fast (uat-bug-022): with a query these two are
                     # the page-sized reads (``run_reads.py``); with none they
                     # answer what they always did.
@@ -2074,6 +2077,9 @@ def _make_handler(
                     return
                 if path == "/api/postings/assess":
                     self._handle_post_postings_assess()
+                    return
+                if path == "/api/postings/assess/cancel":
+                    self._handle_post_postings_assess_cancel()
                     return
                 if path == "/api/postings/rank":
                     self._handle_post_postings_rank()

@@ -20,6 +20,8 @@ import { assessSendsLine, assessSummaryLines, reassessErrorText, reassessGate } 
 import { REASSESS_LABEL, coverageRows, gateOf, headerChip, staleCodes, staleItems } from "../jobResumeModel.js";
 import { applicationBadge, boardLink, closedBanner, postedLine, postingDate, scoreBox } from "../postingsModel.js";
 import { displayCompanyName, notAssessedReasonDetail, thinPostingLine, unchangedSinceLabel } from "../display.js";
+import { jobBatchLine, jobLeftBatch, jobWaitsInBatch } from "../assessBatchModel.js";
+import { useAssessBatch } from "../useAssessBatch.js";
 import {
   ORIGIN_JOB_PAGE,
   ageLabel,
@@ -355,7 +357,30 @@ export default function JobPage({
   onQuickUpdated,
   onApplicationsChanged,
   onTailored,
+  onBatchChanged,
 }) {
+  // 0.1.11.5 (ASSESS-01, UI-01 part 3): "is it still assessing?". While an assess batch runs the page says how far
+  // it is and whether this posting waits in it; when the posting gets its result (or the batch ends) the page's
+  // assessments are read again (`onBatchChanged`).
+  const batchSeen = useRef(null);
+  const batchJob = useRef(null);
+  const batchChanged = useRef(onBatchChanged);
+  batchChanged.current = onBatchChanged;
+  const batch = useAssessBatch({
+    onProgress: (next) => {
+      if (jobLeftBatch(batchSeen.current, next, batchJob.current) && batchChanged.current) {
+        batchChanged.current();
+      }
+      batchSeen.current = next;
+    },
+    onEnd: () => {
+      batchSeen.current = null;
+      batchChanged.current && batchChanged.current();
+    },
+  });
+  if (batch.running && batchSeen.current === null) {
+    batchSeen.current = batch.status;
+  }
   const [answers, setAnswers] = useState([]);
   const [modelTarget, setModelTarget] = useState(null);
   useEffect(() => {
@@ -454,6 +479,8 @@ export default function JobPage({
   );
   const assessment = job ? job.assessment : null;
   const jobUrl = posting && posting.url ? posting.url : null;
+  batchJob.current = posting ? posting.normalized_url || jobId : jobId;
+  const batchLine = jobBatchLine(batch.status, batchJob.current);
   const priorAnswers = useMemo(() => new Map(answers.map((answer) => [answer.question_id, answer])), [answers]);
   const assessOrigin = assessOriginFor(job);
   const assessByUrl = useCallback(() => postAssess({ job: { job_url: jobUrl }, origin: assessOrigin }), [jobUrl, assessOrigin]);
@@ -663,10 +690,15 @@ export default function JobPage({
                 {assessment.not_a_match_reason}
               </div>
             )}
+            {batchLine && (
+              <div className="callout info" style={{ margin: "12px 0 0" }} role="status" data-testid="job-assess-batch">
+                {batchLine}
+              </div>
+            )}
             {!assessment && (
               <div className="callout info" style={{ margin: "12px 0 0" }} title={job.notAssessedReason ? notAssessedReasonDetail(job.notAssessedReason) : undefined}>
                 {notAssessedLine(job)}.
-                {job.status !== "assessing" && (job.status !== "acquired" || job.runEnded) && <AssessNow posting={posting} origin={assessOrigin} onAssessed={onQuickUpdated} />}
+                {!jobWaitsInBatch(batch.status, batchJob.current) && job.status !== "assessing" && (job.status !== "acquired" || job.runEnded) && <AssessNow posting={posting} origin={assessOrigin} onAssessed={onQuickUpdated} />}
               </div>
             )}
           </div>

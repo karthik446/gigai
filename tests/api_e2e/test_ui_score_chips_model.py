@@ -44,6 +44,15 @@ for (const [name, row] of Object.entries(rows)) {
   out.box[name] = m.scoreBox(row);
   out.rowChips[name] = m.rowChips(row).map((chip) => chip.label);
 }
+// 0.1.11.5 (B1 review): the Fit chip's colour by the row's state. Green ("ok") only for a match.
+const fitAt50 = { thin_posting: false, fit: 50, rank_score: 71, assessment: { met: 5, requirements: 10 } };
+out.tones = {};
+for (const state of ["matched", "tailored", "needs_answers", "has_gap", "weak_fit", "not_a_match"]) {
+  out.tones[state] = Object.fromEntries(m.scoreChips({ ...fitAt50, state }).map((chip) => [chip.kind, chip.tone]));
+}
+out.tones.thin_posting = Object.fromEntries(m.scoreChips(thin).map((chip) => [chip.kind, chip.tone]));
+out.tones.not_assessed = Object.fromEntries(m.scoreChips(notAssessed).map((chip) => [chip.kind, chip.tone]));
+out.greenStates = m.FIT_GREEN_STATES;
 out.noScoreText = m.stateText({ state: "matched" });
 out.noListedRow = [m.scoreBox(null), m.scoreChips(null)];
 console.log(JSON.stringify(out));
@@ -65,6 +74,24 @@ def out() -> dict:
 def test_an_assessed_row_has_a_fit_chip_and_a_rank_chip(out: dict) -> None:
     assert out["chips"]["assessed"] == [["fit", "Fit 92% · 19/22", "fit-chip"], ["rank", "Rank 92", "rank-chip"]]
     assert out["chips"]["old"] == out["chips"]["assessed"]
+
+
+def test_the_fit_chip_is_green_only_on_a_matched_row_and_neutral_on_every_other_state(out: dict) -> None:
+    """0.1.11.5 (B1 review): a green chip read as "good fit" on a job that waits on answers at Fit 50%."""
+
+    tones = out["tones"]
+    assert tones["matched"] == {"fit": "ok", "rank": "plain"}
+    assert tones["tailored"] == {"fit": "ok", "rank": "plain"}  # a matched job with its resume
+    for state in ("needs_answers", "has_gap", "weak_fit", "not_a_match"):
+        assert tones[state] == {"fit": "plain", "rank": "plain"}, state
+    assert tones["thin_posting"] == {"rank": "plain"} and tones["not_assessed"] == {"rank": "plain"}  # no fit chip at all
+    assert out["greenStates"] == ["matched", "tailored"]
+    # The page draws the tone as a class, and only `tone-ok` is green.
+    view = (UI_SRC / "views" / "JobsView.jsx").read_text(encoding="utf-8")
+    assert "className={`score-chip ${chip.kind} tone-${chip.tone}`}" in view and "data-tone={chip.tone}" in view
+    styles = (UI_SRC / "styles.css").read_text(encoding="utf-8")
+    assert ".score-chip.fit.tone-ok { border-color: var(--ok); background: var(--ok-bg); color: var(--ok); }" in styles
+    assert ".score-chip.fit {" not in styles, "a fit chip with no tone must not be green"
 
 
 def test_a_not_assessed_row_has_the_rank_chip_alone_and_a_ranked_low_row_keeps_its_own_chip(out: dict) -> None:

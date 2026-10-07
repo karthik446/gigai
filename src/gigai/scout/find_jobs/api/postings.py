@@ -96,7 +96,7 @@ _RANK_ERROR_STATUS = {
     "target_unavailable": HTTPStatus.NOT_FOUND,
     "config_unavailable": HTTPStatus.CONFLICT,
 }
-_ASSESS_KEYS = frozenset({"jobs", "profile_id", "query", "states", "window", "approve", "again", "actor", "include_low_rank"})
+_ASSESS_KEYS = frozenset({"jobs", "profile_id", "query", "states", "window", "approve", "again", "actor", "include_low_rank", "background"})
 
 
 class PostingsRoutesMixin:
@@ -195,8 +195,9 @@ class PostingsRoutesMixin:
                 self._error(HTTPStatus.UNPROCESSABLE_ENTITY, "wrong_type", f"{name} must be a list of strings")
                 return
         approve, again, include_low_rank = body.get("approve", False), body.get("again", False), body.get("include_low_rank", False)
-        if type(approve) is not bool or type(again) is not bool or type(include_low_rank) is not bool:
-            self._error(HTTPStatus.UNPROCESSABLE_ENTITY, "wrong_type", "approve, again and include_low_rank must be true or false")
+        background = body.get("background", False)
+        if type(approve) is not bool or type(again) is not bool or type(include_low_rank) is not bool or type(background) is not bool:
+            self._error(HTTPStatus.UNPROCESSABLE_ENTITY, "wrong_type", "approve, again, include_low_rank and background must be true or false")
             return
         texts = {key: body.get(key) for key in ("profile_id", "query", "window", "actor")}
         if any(value is not None and type(value) is not str for value in texts.values()):
@@ -207,22 +208,66 @@ class PostingsRoutesMixin:
             return
         home_root = self._backend.home_root
 
-        def answer(model_wait: float | None) -> dict[str, object]:
+        def answer(model_wait: float | None, on_live=None) -> dict[str, object]:
             return assess_these(
                 home_root, target, jobs=jobs, profile_id=texts["profile_id"], query=texts["query"], states=states,
                 window=texts["window"], approve=approve, again=again, decided_by=texts["actor"] or "operator",
-                include_low_rank=include_low_rank, model_wait=model_wait,
+                include_low_rank=include_low_rank, model_wait=model_wait, on_live=on_live,
             )
 
-        def build() -> dict[str, object]:
+        def build(on_live=None) -> dict[str, object]:
             # 0.1.10.11 (C8): from the rows as stored while a large build runs, as the GET that listed them. With no
             # stored rows yet (the first build) a POST waits for the build, as it always did: only a GET answers 202.
             try:
-                return answer(model_wait_seconds())
+                return answer(model_wait_seconds(), on_live)
             except PostingModelPreparing:
-                return answer(None)
+                return answer(None, on_live)
 
-        self._postings_answer(build)
+        if not (approve and background):
+            self._postings_answer(build)
+            return
+        # 0.1.11.5 (ASSESS-01): the approved batch runs on a thread of the server; the request answers 202 as soon as
+        # the batch is live. A call that assessed nothing (nothing to assess, a refusal) answers what it always did.
+        from ... import assess_batch_job
+
+        job = assess_batch_job.start(home_root, target, build)
+        if job.live is not None or not job.done.is_set():
+            # A batch was started: 202, also when it has ended already (a fast one): `last` then says how.
+            self._write_json(HTTPStatus.ACCEPTED, assess_batch_job.started_body(home_root, target))
+            return
+
+        def ended() -> dict[str, object]:
+            if job.error is not None:
+                raise job.error
+            assert job.response is not None
+            return job.response
+
+        self._postings_answer(ended)
+
+    def _handle_get_postings_assess_status(self) -> None:
+        from ... import assess_batch_job
+
+        target = self._postings_target()
+        if target is None:
+            return
+        if urlsplit(self.path).query:
+            self._error(HTTPStatus.UNPROCESSABLE_ENTITY, "unknown_key", "this route takes no query keys")
+            return
+        self._write_json(HTTPStatus.OK, assess_batch_job.status(self._backend.home_root, target))
+
+    def _handle_post_postings_assess_cancel(self) -> None:
+        from ... import assess_batch_job
+
+        body = self._read_json_body()
+        if body is None:
+            return
+        if not (isinstance(body, dict) and not body):
+            self._error(HTTPStatus.UNPROCESSABLE_ENTITY, "unknown_key", "this route takes no body keys")
+            return
+        target = self._postings_target()
+        if target is None:
+            return
+        self._write_json(HTTPStatus.OK, assess_batch_job.cancel(self._backend.home_root, target))
 
     def _handle_post_postings_rank(self) -> None:
         from ...pipeline import rank_now

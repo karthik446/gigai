@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { getNewPeek, getPostings, getPostingsStatus, postAssessThese, postMarkAllSeen } from "../api.js";
+import { assessAllLabel, assessAsLabel, batchEndLine, isBatchStarted } from "../assessBatchModel.js";
 import AssessApprovalDialog from "../components/AssessApprovalDialog.jsx";
+import AssessBatchProgress from "../components/AssessBatchProgress.jsx";
+import { useAssessBatch } from "../useAssessBatch.js";
 import RankPanel from "../components/RankPanel.jsx";
 import SponsorshipBadge from "../components/SponsorshipBadge.jsx";
 import SourcesStrip from "../components/SourcesStrip.jsx";
@@ -26,6 +29,7 @@ import {
   keepActiveProfiles,
   listItems,
   needsAnswers,
+  notAssessedCount,
   notAssessedLine,
   pageCount,
   pageNumbers,
@@ -172,7 +176,7 @@ function PostingRow({ row, profiles, anchor, selected, onSelect, onOpen, onAsses
             </span>
           ))}
           {scoreChips(row).map((chip) => (
-            <span key={chip.kind} className={`score-chip ${chip.kind}`} data-testid={chip.testId} title={chip.title}>
+            <span key={chip.kind} className={`score-chip ${chip.kind} tone-${chip.tone}`} data-testid={chip.testId} data-tone={chip.tone} title={chip.title}>
               {chip.label}
             </span>
           ))}
@@ -196,7 +200,7 @@ function PostingRow({ row, profiles, anchor, selected, onSelect, onOpen, onAsses
         {!row.removed_at &&
           others.map((tag) => (
             <button key={tag.profileId} type="button" className="link-button" disabled={busy} data-action="assess-as" onClick={() => onAssessAs(row, tag.profileId)}>
-              Assess as {tag.label}
+              {assessAsLabel(tag.label)}
             </button>
           ))}
       </div>
@@ -299,6 +303,17 @@ export default function JobsView({ selectedProfileId, onSelectProfile, applicati
   const [notice, setNotice] = useState(null);
   const [marking, setMarking] = useState(false);
   const sources = useSourcesStatus({ enabled: true });
+  // 0.1.11.5 (ASSESS-01): the approved batch runs on the server; the page reads how far it is while it runs, reads the
+  // list again as postings get their result, and says how it ended.
+  const batch = useAssessBatch({
+    onProgress: () => postingsStore.refresh(placeRef.current.filter, { page: placeRef.current.page, size: placeRef.current.size }),
+    onEnd: (last) => {
+      setNotice(batchEndLine(last));
+      postingsStore.refresh(placeRef.current.filter, { page: placeRef.current.page, size: placeRef.current.size });
+    },
+  });
+  // Cancel in the dialog while its approval is on its way: the batch that request starts is cancelled when it answers.
+  const cancelStart = useRef(false);
 
   // The scroll position to put back once the rows of the page shown are there (0: the top of a page not seen before).
   const restore = useRef(scrollAt.get(jobsHash(filter, page, size)) ?? null);
@@ -448,14 +463,25 @@ export default function JobsView({ selectedProfileId, onSelectProfile, applicati
       .finally(() => setAsking(false));
   };
 
+  // 0.1.11.5: Approve STARTS the batch (`background`): the server answers as soon as it is live, the dialog closes
+  // and the progress row takes over. An answer that is not a started batch (nothing to assess) is said as before.
   const approve = () => {
     setApproving(true);
     setApprovalError(null);
-    postAssessThese(approvalBody(approval.dialog, includeLowRank))
+    cancelStart.current = false;
+    postAssessThese(approvalBody(approval.dialog, includeLowRank), { background: true })
       .then((answer) => {
         setApproval(null);
-        setNotice(assessOutcomeLine(answer));
         setSelectedIds([]);
+        if (isBatchStarted(answer)) {
+          setNotice(null);
+          batch.adopt(answer);
+          if (cancelStart.current) {
+            batch.cancel();
+          }
+          return;
+        }
+        setNotice(assessOutcomeLine(answer));
         postingsStore.refresh(filter, { page, size });
       })
       .catch((err) => setApprovalError(err.detail || err.message || String(err)))
@@ -486,7 +512,8 @@ export default function JobsView({ selectedProfileId, onSelectProfile, applicati
     totalRef.current = { matched: counts.matched, needsAnswers: needsAnswers(counts) };
   }
   const totals = counts ? (hasFilter(filter) && totalRef.current ? totalRef.current : { matched, needsAnswers: needsAnswers(counts) }) : null;
-  const busy = asking || approving;
+  const busy = asking || approving || batch.running;
+  const batchTitle = batch.running ? "An assess batch is running: wait for it to finish, or cancel it." : null;
   // 0.1.11.2: every row is listed; a plain "Ranked low (N)" divider stands above the ranked-low ones (never a collapse).
   const items = listItems(rows, counts, filter.sort);
   const waitingAssess = filter.removed ? null : notAssessedLine(counts);
@@ -515,7 +542,7 @@ export default function JobsView({ selectedProfileId, onSelectProfile, applicati
               onClick={() => ask(assessAskBody({ selectedIds, filter, rows }))}
               disabled={busy || loading || rows.length === 0 || filter.removed}
               data-testid="assess-these"
-              title="Asks first: the count and an estimate. Nothing is assessed until you approve."
+              title={batchTitle || "Asks first: the count and an estimate. Nothing is assessed until you approve."}
             >
               {asking ? "Counting…" : selectedIds.length ? `Assess these (${selectedIds.length} selected)` : "Assess these"}
             </button>
@@ -653,10 +680,10 @@ export default function JobsView({ selectedProfileId, onSelectProfile, applicati
                 className="button small"
                 data-testid="assess-all"
                 disabled={busy || loading}
-                title="Asks first: the top 50 by rank, the estimate and how many are left. Nothing is assessed until you approve."
+                title={batchTitle || "Asks first: the top 50 by rank, the estimate and how many are left. Nothing is assessed until you approve."}
                 onClick={() => ask(assessAllBody({ filter, rows }))}
               >
-                Assess all
+                {assessAllLabel(notAssessedCount(counts))}
               </button>
             </div>
           )}
@@ -672,6 +699,7 @@ export default function JobsView({ selectedProfileId, onSelectProfile, applicati
       </section>
 
       {error && <div className="callout danger">Could not load the postings: {error}</div>}
+      {batch.running && <AssessBatchProgress batch={batch} profiles={profiles} />}
       {notice && (
         <div className="callout info" role="status" data-role="assess-notice">
           {notice}
@@ -727,6 +755,7 @@ export default function JobsView({ selectedProfileId, onSelectProfile, applicati
           onIncludeLowRank={setIncludeLowRank}
           onApprove={approve}
           onCancel={() => {
+            cancelStart.current = approving; // its approval is on its way: the batch it starts is cancelled at once
             setApproval(null);
             setApprovalError(null);
           }}

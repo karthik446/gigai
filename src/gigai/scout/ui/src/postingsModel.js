@@ -313,16 +313,22 @@ export function fitText(row) {
   return { percent: `${row.fit}%`, requirements: counts ? `${counts.met} of ${counts.total} requirements` : null, short: counts ? `${row.fit}% · ${counts.met}/${counts.total}` : `${row.fit}%` };
 }
 
+// 0.1.11.5 (B1 review): the Fit chip is GREEN (`tone: "ok"`) only on a row whose state is a match (`matched`, and
+// `tailored`: a matched job with its resume). On every other state (needs your answers, has a gap, weak fit, not a
+// match, ...) it is neutral like the Rank chip (`tone: "plain"`): a green chip must never read as "good fit" on a job
+// that waits on answers at Fit 50%.
+export const FIT_GREEN_STATES = ["matched", "tailored"];
+
 export function scoreChips(row) {
   const chips = [];
   const fit = fitText(row);
   if (fit) {
-    chips.push({ kind: "fit", label: `Fit ${fit.short}`, testId: "fit-chip", title: `${fit.requirements ? `${fit.requirements} met. ` : ""}Fit counts the must-have requirements twice.` });
+    chips.push({ kind: "fit", tone: FIT_GREEN_STATES.includes(row.state) ? "ok" : "plain", label: `Fit ${fit.short}`, testId: "fit-chip", title: `${fit.requirements ? `${fit.requirements} met. ` : ""}Fit counts the must-have requirements twice.` });
   }
   if (row && typeof row.rank_score === "number") {
-    chips.push({ kind: "rank", label: `Rank ${row.rank_score}`, testId: "rank-chip", title: "Rank is a first guess from the posting and your resume; it is not a verdict." });
+    chips.push({ kind: "rank", tone: "plain", label: `Rank ${row.rank_score}`, testId: "rank-chip", title: "Rank is a first guess from the posting and your resume; it is not a verdict." });
   } else if (row) {
-    chips.push({ kind: "rank", label: "Not ranked yet", testId: "rank-chip", title: "This posting has no rank yet. Rank now (above the list) ranks it." }); // the old sentence said so too
+    chips.push({ kind: "rank", tone: "plain", label: "Not ranked yet", testId: "rank-chip", title: "This posting has no rank yet. Rank now (above the list) ranks it." }); // the old sentence said so too
   }
   return chips;
 }
@@ -654,6 +660,9 @@ export function approvalDialog(response, profiles) {
   const lowEstimate = (low && low.estimate) || {};
   const whole = (value, fallback) => (Number.isInteger(value) && value >= 0 ? value : fallback);
   const batch = whole(question.batch, question.to_assess);
+  // 0.1.11.5 (ASSESS-01): what ticking the box does to THIS run (`low_rank.included`, the server's own pool logic).
+  const included = low && low.included && typeof low.included === "object" ? low.included : null;
+  const includedEstimate = (included && included.estimate) || {};
   return {
     lowRank:
       low && low.skipped > 0
@@ -666,6 +675,20 @@ export function approvalDialog(response, profiles) {
             tokens: tokensText(lowEstimate.tokens),
             seconds: secondsText(lowEstimate.seconds),
             approveBody: lowYes && typeof lowYes === "object" ? { ...lowYes, approve: true, include_low_rank: true } : null,
+            // With the box ticked: `withBatch` postings in this run (of `pool`), `joined` of them low-ranked;
+            // `changesBatch` false when the run would be the same 50 (null: an older server did not say).
+            pool: included ? whole(included.pool, null) : null,
+            withBatch: included ? whole(included.batch, null) : null,
+            joined: included ? whole(included.low_ranked_in_batch, null) : null,
+            changesBatch: included && typeof included.changes_batch === "boolean" ? included.changes_batch : null,
+            withEstimate: included
+              ? {
+                  calls: typeof includedEstimate.calls === "number" ? includedEstimate.calls : whole(included.batch, 0),
+                  tokens: tokensText(includedEstimate.tokens),
+                  seconds: secondsText(includedEstimate.seconds),
+                  rawSeconds: typeof includedEstimate.seconds === "number" ? includedEstimate.seconds : null,
+                }
+              : null,
           }
         : null,
     count: batch,
@@ -677,6 +700,7 @@ export function approvalDialog(response, profiles) {
     calls: typeof estimate.calls === "number" ? estimate.calls : batch,
     tokens: tokensText(estimate.tokens),
     seconds: secondsText(estimate.seconds),
+    rawSeconds: typeof estimate.seconds === "number" ? estimate.seconds : null,
     basisCalls: typeof estimate.basis_calls === "number" ? estimate.basis_calls : 0,
     approveBody: yes && typeof yes === "object" ? { ...yes, approve: true } : null,
     ranking: rankingLine(response.ranking),
@@ -695,28 +719,60 @@ export function approvalBody(dialog, includeLowRank) {
   return dialog.count > 0 ? dialog.approveBody : null;
 }
 
-// "112 low-ranked ones are skipped (rank below 50). Assess those too? ~112 model calls, ~2.6M tokens"
-export function lowRankLine(lowRank) {
-  if (!lowRank) {
+// 0.1.11.5 (ASSESS-01 part 4): the low-rank BOX. Ticking it puts the low-ranked postings back in the pool; one
+// approval is still the top 50 by rank of the whole pool. It used to read as 50 MORE calls ("Assess the top 50 by
+// rank of those too? ~50 model calls").
+//   "Include the 105 low-ranked ones in the pool (still 50 per run): 12 of them would be in this run."
+//   "Include the 3 low-ranked ones (rank below 50): 7 postings in this run instead of 4."
+// null when the box cannot change the run (its 50 would be the same): the box is hidden and lowRankNote says why.
+export function lowRankLine(lowRank, count = 0) {
+  if (!lowRank || lowRank.changesBatch === false) {
+    return null;
+  }
+  const one = lowRank.count === 1;
+  const ones = `${one ? "" : `${lowRank.count} `}low-ranked ${one ? "one" : "ones"}`;
+  const below = lowRank.minRank === null ? "" : ` (rank below ${lowRank.minRank})`;
+  const run = lowRank.withBatch;
+  const capped = lowRank.pool === null || lowRank.pool === undefined ? count + lowRank.count > 50 : lowRank.pool > (run ?? 50);
+  if (capped) {
+    const size = run ?? 50;
+    const joined = Number.isInteger(lowRank.joined) ? `: ${lowRank.joined} of them would be in this run` : "";
+    return `Include the ${ones} in the pool (still ${size} per run)${joined}.`;
+  }
+  const whole = Number.isInteger(run) ? `: ${run} posting${run === 1 ? "" : "s"} in this run${count > 0 ? ` instead of ${count}` : ""}` : "";
+  return `Include the ${ones}${below}${whole}.`;
+}
+
+// The line in place of the box when ticking it would change nothing; null otherwise.
+export function lowRankNote(lowRank, count = 0) {
+  if (!lowRank || lowRank.changesBatch !== false) {
     return null;
   }
   const one = lowRank.count === 1;
   const below = lowRank.minRank === null ? "" : ` (rank below ${lowRank.minRank})`;
-  // 0110-10-11, 0.1.11.2: its batch is the top 50 by rank too.
-  const more = lowRank.moreAfter > 0;
-  const which = more ? `the top ${lowRank.batch} by rank of those` : one ? "that" : "those";
-  const after = more ? ` (${lowRank.moreAfter} more after these ${lowRank.batch})` : "";
-  return `${lowRank.count} low-ranked ${one ? "one is" : "ones are"} skipped${below}. Assess ${which} too? ${estimateLine(lowRank)}${after}`;
+  return `${lowRank.count} low-ranked ${one ? "one is" : "ones are"} left out${below}. Including ${one ? "it" : "them"} would not change this run: its ${count} are all ranked higher.`;
 }
 
-// 0.1.11.2 (UAT-010): the dialog's line while the approved batch runs: the count is the request's own (`count`, the
-// top-50-by-rank batch the Approve sent); the server streams no progress, so there is no done/total. With the low-ranked box
-// ticked the count is not the one shown at the ask, so the line names no number.
+// The estimate the dialog shows: the run's own, or (the box ticked) the run with the low-ranked ones in the pool.
+export function shownEstimate(dialog, includeLowRank = false) {
+  return includeLowRank && dialog.lowRank && dialog.lowRank.withEstimate ? dialog.lowRank.withEstimate : dialog;
+}
+
+// How many postings Approve sends for: the run's own count, or the run with the low-ranked ones in the pool.
+export function approveCount(dialog, includeLowRank = false) {
+  return includeLowRank && dialog.lowRank && Number.isInteger(dialog.lowRank.withBatch) ? dialog.lowRank.withBatch : includeLowRank && dialog.lowRank ? null : dialog.count;
+}
+
+// 0.1.11.5 (ASSESS-01 parts 2 and 3): the dialog's line while the approval is on its way. The dialog closes as soon
+// as the batch has started (the page then shows its progress), so this is seen for a moment. It says the ESTIMATE
+// ("about 29 min for 50"), never a vague "a minute" beside a 29 minute estimate.
 export function assessingLine(dialog, includeLowRank = false) {
-  if (includeLowRank && dialog.lowRank) {
-    return "Assessing postings, the low-ranked ones included… this can take a minute.";
-  }
-  return `Assessing ${dialog.count} posting${dialog.count === 1 ? "" : "s"}… this can take a minute.`;
+  const count = approveCount(dialog, includeLowRank);
+  const raw = shownEstimate(dialog, includeLowRank).rawSeconds;
+  const minutes = typeof raw === "number" && raw > 0 ? (raw < 45 ? "under a minute" : `about ${Math.max(1, Math.round(raw / 60))} min`) : null;
+  const what = count === null ? "the batch, the low-ranked ones in the pool" : `${count} posting${count === 1 ? "" : "s"}`;
+  const estimate = minutes ? (count === null ? `: ${minutes}` : `: ${minutes} for ${count}`) : "";
+  return `Starting ${what}${estimate}. This closes when the batch has started; the page then shows how far it is, with Cancel.`;
 }
 
 // 0110-10-11, 0.1.11.2: the dialog's title. "Assess the top 50 by rank of 120 postings?" when a batch is less than all of them.
