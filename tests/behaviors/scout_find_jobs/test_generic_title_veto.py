@@ -178,7 +178,10 @@ def test_a_the_tag_queue_demand_set_is_the_same_roles_and_never_a_vetoed_title(t
     # One matcher: what the queue's answer changes is exactly what the search matches by.
     matcher = TitleMatcher(MIXED_TITLES, store)
     assert matcher.matches("Staff Wizard of Things") is False  # no generic rule hit, no tag: not a match
+    # 0.1.11.5 (TITLE-01): only the software family adds a match by its tag; ai_ml is a wide family, rule only.
     store.set_model_function(normalize_title("Staff Wizard of Things"), "ai_ml", model="m", prompt_version="tag-v1")
+    assert TitleMatcher(MIXED_TITLES, store).matches("Staff Wizard of Things") is False
+    store.set_model_function(normalize_title("Staff Wizard of Things"), "software", model="m", prompt_version="tag-v1")
     assert TitleMatcher(MIXED_TITLES, store).matches("Staff Wizard of Things") is True
 
 

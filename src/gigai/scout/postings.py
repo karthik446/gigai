@@ -132,7 +132,8 @@ from .pipeline.store import PipelineStore, PostingBuild, PostingRecord, RunAsses
 # that comes from 0.1.10.10; a home that ran an earlier 0.1.10.11 build prepares once more.
 # :8 is 0.1.11.3 item 11: the country rule rejects a region outside the profile's countries ("Europe", "Remote
 # (Germany)") and reads a bare "Remote" as the US, so every stored list is matched once more.
-MATCH_VERSION = "posting-match:9"
+# :10 is 0.1.11.5 (TITLE-01): a role of a wide function family, or one with a qualifier, takes no part in the tag query.
+MATCH_VERSION = "posting-match:10"
 # :3 is 0110-10-02: a row carries its fit number, and a weak fit has its own state.
 # :4 is 0.1.11.2: a match with no row about the job has the state ``thin_posting`` (stored rows get their facts again).
 FACTS_VERSION = "posting-facts:4"
