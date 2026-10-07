@@ -238,6 +238,16 @@ header.app-header h1 {
   border: 1px solid var(--info-border);
 }
 
+/* 0.1.11.5 SP: a resume that waits for the user is the resume card's first line and cannot be missed. */
+.callout.proposed-ready {
+  border-width: 2px;
+  font-size: 1rem;
+}
+.callout.proposed-ready p,
+.callout.proposed-ready ul {
+  margin: 6px 0 0;
+}
+
 /* uat-batch1 (N10): the backdrop and its dialog sit ABOVE the sticky top
    bar (.top-bar, z-index 20); before this the bar covered the dialog's
    title. */

@@ -163,7 +163,7 @@ def _missing(job: job_brief.StoredJob) -> JobActionError:
 
 
 #: What the OPEN read adds to the suggestions (``GET /api/jobs/suggestions``, the page): ``pick_view``'s stored view.
-OPEN_KEYS: tuple[str, ...] = ("verdict", "basis", "master_stored", "master_education", "stale", "picked", "problems", "added_by_code", "conflicts", "selection_error", "proposed", "selected_lines", "requirements")
+OPEN_KEYS: tuple[str, ...] = ("verdict", "basis", "master_stored", "master_education", "stale", "stale_lines", "picked", "problems", "added_by_code", "conflicts", "selection_error", "proposed", "selected_lines", "requirements")
 
 
 def list_suggestions(
@@ -171,7 +171,8 @@ def list_suggestions(
 ) -> dict[str, object]:
     """The suggestions of one job as they are stored; ``status`` keeps one of open, done, dismissed. Read only.
 
-    ``with_view``: also the job's stored view for the page (SPEC 2.4, opening a job): the derived ``stale`` list, the
+    ``with_view``: also the job's stored view for the page (SPEC 2.4, opening a job): the derived ``stale`` list (and
+    ``stale_lines``: the printed lines the master retired or reworded), the
     selection (``picked``: who, pages, max pages), its ``conflicts``, the ``proposed`` selection (the line ids of each side
     for Compare) and the requirement ``requirements`` rows. Nothing is recomputed and nothing is written.
     """
@@ -386,7 +387,9 @@ def pick_view(home_root: Path, target: Path, job_url: str, *, profile_id: str | 
         resolved = None
     check = BasisCheck(home_root=home_root, target=target, resolved=resolved)
     reason = check.reason(job.assessment)  # type: ignore[arg-type]
-    stale = list(store.stale_for(home_root, target, job.profile_id, job.job_identity, assessment_stale=reason, resolved=resolved))
+    # (the stored resume read above: the stale list is about the lines it STILL prints, and no file is read twice)
+    codes, changed = store.stale_view(home_root, target, job.profile_id, job.job_identity, assessment_stale=reason, resolved=resolved, resume=resume)
+    stale = list(codes)
     replaceable = bool(store.is_replaceable(resume, store.read_suggestions(home_root, target, job.profile_id, job.job_identity), path=resume_path))
     gate = record.get("gate") if isinstance(record.get("gate"), Mapping) else None
     if gate is None and getattr(job.assessment, "resume_gate", None) is not None:
@@ -407,6 +410,8 @@ def pick_view(home_root: Path, target: Path, job_url: str, *, profile_id: str | 
         "verdict": job_brief._word(getattr(job.assessment.result, "verdict", None)),  # type: ignore[attr-defined]  # noqa: SLF001 - the brief's own reading of an enum
         "gate": None if gate is None else dict(gate),
         "stale": stale,
+        # Behind ``picked_line_changed``: each printed line the master retired or reworded since the pick (ids only, no text).
+        "stale_lines": [dict(item) for item in changed],
         "resume": _resume_view(home_root, resume, replaceable),
         # 0.1.11.4 E1: a file IS stored for this job and cannot be read. It is the user's: no pick writes over it.
         "resume_unreadable": resume is None and store.stored_unreadable(resume_path),

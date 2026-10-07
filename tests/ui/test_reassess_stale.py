@@ -191,7 +191,7 @@ def test_re_assess_an_old_assessment_from_its_job_page(ui) -> None:
         ui.step("reassessed")
         made = answered.value.json()
         assert answered.value.status in (200, 201)
-        assert answered.value.request.post_data_json == {"job": {"job_url": job["job_url"]}, "origin": "job_page"}
+        assert answered.value.request.post_data_json == {"job": {"job_url": job["job_url"]}, "resume": {"profile_id": job["profile_id"]}, "origin": "job_page"}  # 0.1.11.5 SP: the page's profile
         assert _changes(ui, "ready") == ["POST /api/assess"]
         assert made["basis_stale"] is False and made["updated_at"] > old_at and made["created_at"] < made["updated_at"]
         ui.cpu_budget("re-assess an old assessment (fixture model)", REASSESS_CPU_SECONDS, "ready", "reassessed")

@@ -803,7 +803,7 @@ def load_yours(home_root: Path, target: Path, job_url: str, profile_id: str | No
     record = job.record or {}
     selection = record.get("selection") if isinstance(record.get("selection"), Mapping) else None
     reason = BasisCheck(home_root=home_root, target=target, resolved=resolved).reason(assessment)  # type: ignore[arg-type]
-    stale = record_store.stale_for(home_root, target, job.profile_id, job.job_identity, assessment_stale=reason, resolved=resolved)
+    stale = record_store.stale_for(home_root, target, job.profile_id, job.job_identity, assessment_stale=reason, resolved=resolved, resume=resume)
     questions = open_questions(home_root, target, assessment)
     # The pages a hand-back is checked on (``tailored_resume_edit``): as printed, at the tightest spacing the PDF may
     # choose.  (Until 0.1.11.5 this was the pick's own page budget, which a 20-bullet pick now runs past: an agent

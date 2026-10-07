@@ -11,10 +11,11 @@
 //   the job resume      GET /api/tailored-resumes (the store kept its path):
 //                       `selection` (Picked / Left out), `producer`, `edited`
 //   the suggestions    GET /api/jobs/suggestions: {gate: {decision, ready,
-//                       reasons}, counts, suggestions}. The stale list, the
-//                       conflicts and `proposed` are served only by the answer
-//                       of POST /api/job-resumes/pick (the job's stored view
-//                       after a step): `pickView`
+//                       reasons}, counts, suggestions} AND the job's stored
+//                       view (`stale`, `stale_lines`, `picked`, `conflicts`,
+//                       `proposed`): a waiting resume is there when the job
+//                       is OPENED. POST /api/job-resumes/pick answers the
+//                       same view after a step
 //   the master          GET /api/master, only for a line's text
 //
 // Nothing here recomputes a decision the server stored (SPEC A5). Where the
@@ -65,10 +66,10 @@ export const APPLY_LABEL = "Generate PDF";
 // derive it from the assessment and the stored resume, which is all the page can know.
 export function suggestionsAnswer(suggestions, view = null) {
   const body = object(suggestions);
-  // GET /api/jobs/suggestions serves no stale list, pages, conflicts or proposed selection today (they are in the pick
-  // view, which only a step returns). If the server ever puts the pick view's fields in that answer, they are read
-  // from it: the `view` of a step always wins.
-  const inBody = body && (Array.isArray(body.stale) || object(body.picked) || object(body.proposed) || Array.isArray(body.conflicts)) ? body : null;
+  // GET /api/jobs/suggestions serves the stored view too (the stale list, the conflicts, the proposed selection): a
+  // waiting resume shows when the job is opened. The `view` of a step wins while it is the newest answer; the page
+  // drops it when a later read serves the view (`servesView`).
+  const inBody = servesView(body) ? body : null;
   const pick = object(view) || inBody;
   if (!body && !pick) {
     return { record: null, stale: null, origin: null };
@@ -84,6 +85,8 @@ export function suggestionsAnswer(suggestions, view = null) {
     selection: picked ? { ...picked, conflicts: list(pick.conflicts), added_by_code: list(pick.added_by_code), problems: list(pick.problems) } : null,
     proposed: pick && object(pick.proposed) ? pick.proposed : null,
     selection_error: pick ? pick.selection_error || null : null,
+    // Behind `picked_line_changed`: the printed lines the master retired or reworded, [{id, change}] (`staleLineFixes`).
+    stale_lines: pick ? list(pick.stale_lines).filter(object) : [],
     // What a resume for this job is made from now ("master" | "profile_resume"), and whether a master is stored at all.
     resume_basis: pick ? text(pick.basis) || null : null,
     master_stored: pick && typeof pick.master_stored === "boolean" ? pick.master_stored : null,
@@ -98,6 +101,12 @@ export function suggestionsAnswer(suggestions, view = null) {
   const mine = pick && object(pick.resume) ? Boolean(pick.resume.edited) || (made === "scout.pick" && pick.resume.replaceable === false) : false;
   const origin = pick && object(pick.resume) ? (mine ? "edited" : made === "scout.pick" ? "pick" : null) : null;
   return { record, stale, origin };
+}
+
+// True when an answer of GET /api/jobs/suggestions carries the job's stored view (the stale list, a selection).
+export function servesView(suggestions) {
+  const body = object(suggestions);
+  return Boolean(body) && (Array.isArray(body.stale) || object(body.picked) !== null || object(body.proposed) !== null || Array.isArray(body.conflicts));
 }
 
 // --- requirement rows ----------------------------------------------------------------------
@@ -281,6 +290,49 @@ export function staleActions(items) {
 // True when a stale code is a warning (anything but the `master_newer` note): Apply then says so first.
 export function isStale(items) {
   return list(items).some((item) => !item.note);
+}
+
+// A line's words, short, for a notice: the whole line up to `max` characters, else cut at a word with "…".
+export function shortWords(value, max = 90) {
+  const words = clean(value).replace(/\s+/g, " ");
+  if (words.length <= max) {
+    return words;
+  }
+  const cut = words.slice(0, max);
+  const at = words[max] === " " ? max : cut.lastIndexOf(" ");
+  return `${(at > max / 2 ? cut.slice(0, at) : cut).replace(/[\s,;:.]+$/, "")}…`;
+}
+
+export const REMOVE_STALE_LABEL = "Remove it from this resume";
+export const REWORD_STALE_LABEL = "Use the new wording";
+
+// Behind `picked_line_changed`: each printed line the master retired or reworded, NAMED by its words on this resume,
+// with the fix that needs no model: [{id, lineId, change, words, label, action: {use, label}}].
+//   retired   "Remove it from this resume"  (PUT /api/tailored-resumes/selection, remove)
+//   reworded  "Use the new wording"         (PUT /api/tailored-resumes/lines, the master's words for that point)
+// A line the stored resume does not show is not listed (the page then says the general sentence). No id is shown.
+export function staleLineFixes(record, stored) {
+  const printed = resumeLines(stored && stored.result);
+  const cites = (line, id) => [line, line && line.kind === "custom" ? object(line.edited_from) : null].some((base) => list(base && base.refs).some((ref) => ref && ref.kind === "resume" && ref.item_id === id));
+  const out = [];
+  list(record && record.stale_lines).filter(object).forEach((item) => {
+    const id = text(item.id);
+    const retired = item.change === "retired";
+    const found = id && (retired || item.change === "reworded") ? printed.find(({ line }) => cites(line, id)) : null;
+    if (!found || out.some((fix) => fix.id === id)) {
+      return;
+    }
+    const words = shortWords(found.line.text);
+    out.push({
+      id,
+      lineId: text(found.line.id) || null,
+      change: retired ? "retired" : "reworded",
+      words,
+      label: retired ? `a line this resume prints was retired from your master: “${words}”` : `a line this resume prints was reworded in your master: “${words}”`,
+      action: retired ? { use: "remove", label: REMOVE_STALE_LABEL } : { use: "reword", label: REWORD_STALE_LABEL },
+    });
+  });
+  return out;
 }
 
 // --- what the stored resume prints -------------------------------------------------------------
@@ -661,6 +713,9 @@ export function skillsView(stored) {
 // --- proposed -----------------------------------------------------------------------------------------------
 
 function markIds(selection) {
+  if (selection && Array.isArray(selection.lines)) {
+    return selection.lines.filter((id) => typeof id === "string" && id); // the served view: the ids it prints
+  }
   const marks = selection && selection.line_marks;
   if (Array.isArray(marks)) {
     return marks.filter(object).map((mark) => text(mark.id)).filter(Boolean);
@@ -677,7 +732,7 @@ export function proposedChange(record, stored) {
   }
   // The pick route names no lines of a proposed selection (only who picked it, its pages and its conflicts): the
   // lists are null then, and Compare says what it knows. With `line_marks` (a record read whole) they are lists.
-  const known = Array.isArray(proposed.line_marks) || object(proposed.line_marks);
+  const known = Array.isArray(proposed.lines) || Array.isArray(proposed.line_marks) || object(proposed.line_marks);
   const next = markIds(proposed);
   const now = printedIds(stored);
   return {
@@ -688,6 +743,55 @@ export function proposedChange(record, stored) {
     draft: proposed.draft === true,
     conflicts: list(proposed.conflicts).length,
   };
+}
+
+// Master line id -> the words the stored resume prints for it: Compare names a line the master no longer holds by them.
+export function printedWords(stored) {
+  const out = {};
+  resumeLines(stored && stored.result).forEach(({ line }) => {
+    [line, line && line.kind === "custom" ? object(line.edited_from) : null].forEach((base) =>
+      list(base && base.refs).forEach((ref) => {
+        if (ref && ref.kind === "resume" && text(ref.item_id) && !out[ref.item_id]) {
+          out[ref.item_id] = clean(line.text);
+        }
+      }),
+    );
+  });
+  return out;
+}
+
+// The points of the stored resume the USER worded (edited on the page, or changed in chat), by their words, short.
+export function editedPoints(stored) {
+  return changedLines(stored)
+    .filter((line) => line.mine)
+    .map((line) => shortWords(line.text))
+    .filter(Boolean);
+}
+
+export const PROPOSED_READY_TEXT = "A new resume is ready for this job.";
+export const PROPOSED_KEEPS_TEXT = "Yours stays as it is until you take the new one.";
+
+// What the waiting resume changes, in one sentence: "It adds 2 lines and leaves out 1 line this resume prints."
+// "" when the server names no line of it (Compare then says what it knows).
+export function proposedSummary(change) {
+  if (!change || !Array.isArray(change.adds) || !Array.isArray(change.drops)) {
+    return "";
+  }
+  if (change.adds.length === 0 && change.drops.length === 0) {
+    return "It prints the same lines as this resume, as your master words them now.";
+  }
+  const adds = change.adds.length ? `adds ${plural(change.adds.length, "line")}` : "";
+  const drops = change.drops.length ? `leaves out ${plural(change.drops.length, "line")} this resume prints` : "";
+  return `It ${[adds, drops].filter(Boolean).join(" and ")}.`;
+}
+
+export const PROPOSED_REPLACES_TEXT = "Using it replaces the resume you edited. It would drop your edited";
+
+// What "Use it" would cost, said in the waiting callout: {text, points}; null when the stored resume has no edited
+// point (the callout then says nothing extra).
+export function proposedReplaces(stored) {
+  const points = editedPoints(stored);
+  return points.length > 0 ? { text: `${PROPOSED_REPLACES_TEXT} ${points.length === 1 ? "point" : "points"}:`, points } : null;
 }
 
 // --- Suggestions (SPEC section 6, item 6) -----------------------------------------------------------------------

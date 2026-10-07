@@ -36,6 +36,7 @@ import {
   storedOrigin,
   workModeLabel,
   h1bLabel,
+  PASTED_RESUME_KEY,
 } from "../jobModel.js";
 import { assessmentStaleFor, eventActionLabel, fitStateFor, isApplicationState, jobStateFor, staleAssessmentNote, staleReasonWords } from "../jobStateModel.js";
 import { modelTargetLabel } from "../modelTargets.js";
@@ -261,7 +262,14 @@ function JobDescription({ posting, pasted, board }) {
 // uat-bug-029: a posting whose requirements could not be read (POST
 // /api/assess 422 posting_requirements_unreadable) stays not assessed, and
 // the page says so as a note, not an error.
-function AssessNow({ posting, origin, onAssessed, label = "Assess" }) {
+// 0.1.11.5 SP: an assessment asked for on a job page names the page's profile. Without it the server assesses the
+// profile selected at that moment, which another tab or the CLI may have changed since the page was opened: the new
+// assessment (and a resume that waits beside an edited one) then landed on a profile this page does not show.
+function assessResume(profileId) {
+  return profileId && profileId !== PASTED_RESUME_KEY ? { resume: { profile_id: profileId } } : {};
+}
+
+function AssessNow({ posting, profileId, origin, onAssessed, label = "Assess" }) {
   const [state, setState] = useState("idle");
   const [error, setError] = useState(null);
   const [unreadable, setUnreadable] = useState(false);
@@ -279,7 +287,7 @@ function AssessNow({ posting, origin, onAssessed, label = "Assess" }) {
           setState("saving");
           setError(null);
           setUnreadable(false);
-          postAssess({ job: { job_url: posting.url }, origin })
+          postAssess({ job: { job_url: posting.url }, ...assessResume(profileId), origin })
             .then((response) => {
               setState("idle");
               onAssessed(response);
@@ -485,7 +493,7 @@ export default function JobPage({
   const batchLine = jobBatchLine(batch.status, batchJob.current);
   const priorAnswers = useMemo(() => new Map(answers.map((answer) => [answer.question_id, answer])), [answers]);
   const assessOrigin = assessOriginFor(job);
-  const assessByUrl = useCallback(() => postAssess({ job: { job_url: jobUrl }, origin: assessOrigin }), [jobUrl, assessOrigin]);
+  const assessByUrl = useCallback(() => postAssess({ job: { job_url: jobUrl }, ...assessResume(profileId), origin: assessOrigin }), [jobUrl, profileId, assessOrigin]);
 
   // Hooks run on every render, a missing job included (its state is empty).
   const answerDrafts = useAnswerDrafts({
@@ -700,7 +708,7 @@ export default function JobPage({
             {!assessment && (
               <div className="callout info" style={{ margin: "12px 0 0" }} title={job.notAssessedReason ? notAssessedReasonDetail(job.notAssessedReason) : undefined}>
                 {notAssessedLine(job)}.
-                {!jobWaitsInBatch(batch.status, batchJob.current) && job.status !== "assessing" && (job.status !== "acquired" || job.runEnded) && <AssessNow posting={posting} origin={assessOrigin} onAssessed={onQuickUpdated} />}
+                {!jobWaitsInBatch(batch.status, batchJob.current) && job.status !== "assessing" && (job.status !== "acquired" || job.runEnded) && <AssessNow posting={posting} profileId={profileId} origin={assessOrigin} onAssessed={onQuickUpdated} />}
               </div>
             )}
           </div>
