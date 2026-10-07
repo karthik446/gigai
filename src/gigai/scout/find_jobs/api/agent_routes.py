@@ -262,9 +262,10 @@ class AgentRoutesMixin:
 
         # 0.1.11.4 R1: is the posting still open? One request at most (none for a row already removed, none within the
         # hour); a closed one is marked removed before the job is read, so the read below serves it as removed.
+        # 7b: an open posting stored under the company's own URL is asked once more, at that URL (`company_page`).
         from ..posting_live import job_liveness
 
-        live = job_liveness(home_root, target, identity)
+        live = job_liveness(home_root, target, identity, company_page=True)
         try:
             body = self._job_aggregate(identity, home_root=home_root, target=target)
         except QuickAssessError as exc:

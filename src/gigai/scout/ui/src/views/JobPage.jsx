@@ -18,7 +18,7 @@ import PipelineTimeline from "../components/PipelineTimeline.jsx";
 import { useAnswerDrafts } from "../answerDrafts.js";
 import { assessSendsLine, assessSummaryLines, reassessErrorText, reassessGate } from "../answersModel.js";
 import { REASSESS_LABEL, coverageRows, gateOf, headerChip, staleCodes, staleItems } from "../jobResumeModel.js";
-import { applicationBadge, closedBanner, postedLine, postingDate } from "../postingsModel.js";
+import { applicationBadge, boardLink, closedBanner, postedLine, postingDate } from "../postingsModel.js";
 import { displayCompanyName, notAssessedReasonDetail, thinPostingLine, unchangedSinceLabel } from "../display.js";
 import {
   ORIGIN_JOB_PAGE,
@@ -213,7 +213,19 @@ function OpenPosting({ url, children }) {
   );
 }
 
-function JobDescription({ posting, pasted }) {
+// 7b: the posting's address on its board, beside every "Open posting" of a job stored under the company's own URL.
+function OpenOnBoard({ board, className }) {
+  if (!board) {
+    return null;
+  }
+  return (
+    <a className={className} href={board.url} target="_blank" rel="noopener noreferrer" data-role="open-on-board">
+      {board.label} ↗
+    </a>
+  );
+}
+
+function JobDescription({ posting, pasted, board }) {
   // A job page opened from the Jobs list shows the whole stored text once GET /api/jobs has served it.
   const excerpt = posting.text_full ? jdExcerpt(posting.text, { target: Infinity, limit: Infinity }) : jdExcerpt(posting.text, { cut: Boolean(posting.text_cut) });
   if (!excerpt) {
@@ -223,6 +235,8 @@ function JobDescription({ posting, pasted }) {
         <p className="muted" data-role="jd-missing">
           {pasted ? "You pasted this posting's text. Pasted text is used for the assessment only and is never stored." : "The posting text was not captured for this row."}{" "}
           {posting.url && <OpenPosting url={posting.url}>Open the posting</OpenPosting>}
+          {posting.url && board && " · "}
+          {posting.url && <OpenOnBoard board={board} />}
         </p>
       </section>
     );
@@ -234,6 +248,8 @@ function JobDescription({ posting, pasted }) {
       {excerpt.truncated && (
         <p className="muted jd-more">
           This is the start of the posting. {posting.url && <OpenPosting url={posting.url}>Open posting for the rest</OpenPosting>}
+          {posting.url && board && " · "}
+          {posting.url && <OpenOnBoard board={board} />}
         </p>
       )}
     </section>
@@ -541,6 +557,8 @@ export default function JobPage({
   // The page's ONE Re-assess, as the stale label and Apply offer it too.
   const reassess = { enabled: Boolean(assessment) && answerDrafts.gate.enabled && !answerDrafts.busy, reason: answerDrafts.gate.reason, onClick: answerDrafts.reassess };
   const closed = closedBanner(liveness, listedRow, servedDates, posting);
+  // 7b: the same read gives the posting's address on its board when the stored URL is the company's own page.
+  const board = closed ? null : boardLink(liveness);
   const structured = Boolean(resume.record) || Boolean(assessment && Array.isArray(assessment.structured_suggestions) && assessment.structured_suggestions.length > 0);
 
   return (
@@ -558,6 +576,11 @@ export default function JobPage({
             ) : (
               "Check it before you apply."
             )}
+          </div>
+        )}
+        {board && board.down && (
+          <div className="callout warn" role="status" data-role="company-page-down" style={{ margin: "0 0 12px" }}>
+            {board.note}. <OpenOnBoard board={board} />
           </div>
         )}
         <div className="job-header">
@@ -651,17 +674,19 @@ export default function JobPage({
           </div>
         </div>
         <div className="job-actions">
+          {posting.url && board && board.down && <OpenOnBoard board={board} className="button small" />}
           {posting.url && (
-            <a className="button secondary small" href={posting.url} target="_blank" rel="noreferrer">
+            <a className="button secondary small" href={posting.url} target="_blank" rel="noreferrer" data-role="open-posting">
               Open posting ↗
             </a>
           )}
+          {posting.url && board && !board.down && <OpenOnBoard board={board} className="button secondary small" />}
         </div>
         <JobStateActions jobId={job.id} state={state} pasted={pasted} onRecorded={handleApplicationRecorded} />
         {!pasted && <AssessSends jobUrl={posting.url} profileId={profileId} target={modelTarget} />}
       </section>
 
-      <JobDescription posting={posting} pasted={pasted} />
+      <JobDescription posting={posting} pasted={pasted} board={board} />
 
       {requirementsNote && (
         <p className="muted small" data-role="requirements-note" data-thin={thinLine ? "true" : undefined}>

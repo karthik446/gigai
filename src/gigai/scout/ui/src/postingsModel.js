@@ -118,6 +118,20 @@ export function closedBanner(liveness, ...carriers) {
   return { text: CLOSED_TEXT, since: (closed && typeof liveness.closed_at === "string" && liveness.closed_at) || removed || null };
 }
 
+// 0.1.11.4 7b: a posting stored under the company's own URL also has an address on its board (the job read's
+// `liveness.board_url`). {url, label, down, note} while there is one, else null: the page shows it as a second link
+// beside "Open posting", and first, with the server's sentence, when the company page is down and the job is open.
+export const BOARD_LINK_LABEL = "Open on the job board";
+const BOARD_PREFIXES = ["https://job-boards.greenhouse.io/", "https://jobs.lever.co/", "https://jobs.ashbyhq.com/"];
+export function boardLink(liveness) {
+  const url = liveness && typeof liveness.board_url === "string" ? liveness.board_url : "";
+  if (!BOARD_PREFIXES.some((prefix) => url.startsWith(prefix))) {
+    return null;
+  }
+  const note = liveness.state === "open" && liveness.company_page === "down" && typeof liveness.company_page_note === "string" ? liveness.company_page_note.trim() : "";
+  return { url, label: BOARD_LINK_LABEL, down: Boolean(note), note: note || null };
+}
+
 // How many weak fits the other filters select (listed or not); null when the server does not say.
 export function weakFitCount(counts) {
   const value = counts && counts.weak_fit;
