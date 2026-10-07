@@ -35,6 +35,14 @@ unless the ``applied`` state is asked for or the posting is named.
 ``counts.applied`` is how many the other filters select, listed or not: the
 number on the page's "Applied" chip. The events are read once per request.
 
+ONE POSTING BY ITS ADDRESS (0.1.11.6, ``jobs``). A search that NAMES its
+postings is an exact read, never a page of a list: each named posting the
+store holds is a row whatever hides it from the list: an application, a weak
+fit, a board that no longer lists it (``removed`` is not applied) or its
+place past the first 200 rows. This is how a job page opened by its address
+finds its posting. The profile, word, state and window filters still apply
+when they are given.
+
 RANKED LOW (0.1.11.2, ``fit.is_ranked_low``). The list is ordered best fit
 first, and a posting NOTHING ASSESSED YET whose known rank score is below the
 weak-fit rank (``fit.weak_fit_below_rank``, 50) is ranked low. It is ORDERED
@@ -300,7 +308,7 @@ class _Selection:
 
     def __init__(
         self, home_root: Path, target: Path, store: PipelineStore, *, profile_ids: Sequence[str], query: str | None,
-        states: Sequence[str], window: str | None, removed: bool, jobs: Sequence[str] | None, moment: datetime,
+        states: Sequence[str], window: str | None, removed: bool | None, jobs: Sequence[str] | None, moment: datetime,
         model_wait: float | None = None, sort: str = SORT_FIT,
     ) -> None:
         refreshed = postings.refresh(home_root, target, store=store, now=moment, wait=model_wait)
@@ -317,7 +325,8 @@ class _Selection:
             postings.stamp(self.anchor) if self.anchor is not None else postings.stamp(moment - timedelta(days=FIRST_USE_DAYS))
         ) or ""
         rows = store.postings(jobs=jobs, live=False) if jobs is not None else store.postings(live=False)
-        groups = _grouped(row for row in rows if (row.removed_at is not None) == removed)
+        # 0.1.11.6: ``removed`` None (a read of named postings) takes a posting whether its board still lists it or not.
+        groups = _grouped(row for row in rows if removed is None or (row.removed_at is not None) == removed)
         if self.hidden_profiles and not self.profile_ids:
             groups = {}  # only profiles with no live rows were asked for: nothing of an active profile is shown instead
         elif self.profile_ids:
@@ -488,8 +497,14 @@ def search_postings(
     now: datetime | None = None,
     model_wait: float | None = None,
     sort: str | None = None,
+    jobs: Iterable[str] | None = None,
 ) -> dict[str, object]:
     """The live search, as the ``scout-postings:1`` response. See the module docstring.
+
+    ``jobs`` (0.1.11.6): only these postings, by address (raw or normalized),
+    each one the store holds whatever hides it from the list: an application,
+    a weak fit, a removed posting (``removed`` is not applied). ``filters.jobs``
+    echoes the normalized addresses.
 
     ``sort`` (0110-10-14): ``fit`` (the default: the grid's order) or
     ``newest_posted`` (the day the posting went up, the newest first).
@@ -502,6 +517,8 @@ def search_postings(
     """
 
     from ..workpad import committed_read_cache
+    from .find_jobs.contracts import FindJobsContractError
+    from .find_jobs.job_state import normalize_job_identity
     from .pipeline.rank_lane import rank_status
 
     home_root, target = Path(home_root), Path(target)
@@ -514,13 +531,21 @@ def search_postings(
         raise PostingSearchError("invalid_value", f"limit must be 1..{MAX_LIMIT} and offset 0 or more")
     wanted_states = _names(states, STATES, "state")
     wanted_profiles = _names(profile_ids, None, "profile_id")
+    named: list[str] | None = None
+    if jobs is not None:
+        try:
+            named = list(dict.fromkeys(normalize_job_identity(job) for job in jobs))
+        except FindJobsContractError as exc:
+            raise PostingSearchError("invalid_value", "job must be a posting URL (a job identity)") from exc
+        if not named or len(named) > MAX_LIMIT:
+            raise PostingSearchError("invalid_value", f"job must name 1..{MAX_LIMIT} postings")
     moment = (now or datetime.now(UTC)).astimezone(UTC)
     with committed_read_cache():
         store = postings.open_store(home_root, target)
         try:
             selection = _Selection(
                 home_root, target, store, profile_ids=wanted_profiles, query=query, states=wanted_states, window=window,
-                removed=removed, jobs=None, moment=moment, model_wait=model_wait, sort=sort,
+                removed=None if named is not None else removed, jobs=named, moment=moment, model_wait=model_wait, sort=sort,
             )
             unknown = [item for item in selection.hidden_profiles if item != EPHEMERAL_PROFILE and not history]
             if unknown:
@@ -535,6 +560,7 @@ def search_postings(
                 "filters": {
                     "profile_ids": list(wanted_profiles), "query": query or None, "states": list(wanted_states), "window": window,
                     "removed": bool(removed), "limit": limit, "offset": offset, "sort": sort,
+                    **({} if named is None else {"jobs": named}),
                 },
                 "anchor": {"last_checked_at": selection.anchor, "since": selection.since},
                 "counts": {

@@ -36,9 +36,9 @@ import {
   skipReasonText,
   staleLine,
 } from "../assessAllModel.js";
-import { MAX_LOOKUP_ROWS, postingJob, postingsQuery, EMPTY_FILTER } from "../postingsModel.js";
+import { postingByAddressQuery, postingJob } from "../postingsModel.js";
 import { RUNS_HASH, SETTINGS_HASH, assessmentHash, runHash } from "../routing.js";
-import { normalizeJobAddress, onDemandItemFor, resolveJobId } from "../jobAddress.js";
+import { onDemandItemFor, resolveJobId } from "../jobAddress.js";
 
 const TERMINAL_STATUSES = new Set(["succeeded", "failed", "blocked", "cancelled", "interrupted"]);
 const POLL_INTERVAL_MS = 2000;
@@ -207,7 +207,7 @@ export default function FindJobsView({
   // unfiltered list's "needs your answers" count (the top bar's number).
   const [postingRows, setPostingRows] = useState(() => new Map());
   const [postingsWaiting, setPostingsWaiting] = useState(0);
-  const [postingLookup, setPostingLookup] = useState({ id: null, done: false }); // the one-off read of the list for a job page
+  const [postingLookup, setPostingLookup] = useState({ id: null, done: false }); // the one-off read of a job page's posting, by its address
   const addPostingRows = useCallback((rows) => {
     setPostingRows((known) => {
       const next = new Map(known);
@@ -761,35 +761,32 @@ export default function FindJobsView({
     }
   }, [jobInLoaded, resultsTotal, rows.length, wantResultRows]);
   // 0.1.10.7 M4b: a job page opened by its link (a reload) for a posting the
-  // newest run and the stored assessments do not carry: one read of the Jobs
-  // list finds its row, once the run and the store have been read.
+  // newest run and the stored assessments do not carry: one read finds its
+  // row, once the run and the store have been read.
+  // 0.1.11.6 (APPLIED-01): that read is of the ONE posting, by its address (GET /api/postings?job=), never a search of
+  // the Jobs list: the list leaves out a posting with an application (0.1.11.5) and a weak fit, keeps the removed ones
+  // apart and ends at 200 rows, so a page that searched it said "no stored posting" for a job the user applied to.
   const settled = !resultsLoading && !pagesLoading && !quickLoading && !newestLoading;
   // 0.1.11.5 (UI-01): a loaded job (an assessment) opened by its link has no Jobs row either; its page's fit and rank
-  // box is of that row, so the same one read finds it (a job a run or an assessment carries is not looked for under Removed).
+  // box is of that row, so the same one read finds it.
   const rowKnown = jobRouteId === null || postingRows.has(jobRouteId);
   useEffect(() => {
     if (jobRouteId === null || rowKnown || !settled || postingLookup.id === jobRouteId) {
       return;
     }
+    const byAddress = postingByAddressQuery(jobRouteId);
+    if (byAddress === null) {
+      setPostingLookup({ id: jobRouteId, done: true }); // a pasted posting has no row to read
+      return;
+    }
     setPostingLookup({ id: jobRouteId, done: false });
-    getPostings(postingsQuery(EMPTY_FILTER, { limit: MAX_LOOKUP_ROWS }))
-      // 0110-9-01: a 202 "preparing" answer has no rows yet.
-      .then((response) => {
-        const found = response.postings ? response.postings.rows : [];
-        addPostingRows(found);
-        // 0.1.11.4: a stored address is matched the way the API reads it (a slash before the query, tracking parameters).
-        const wanted = normalizeJobAddress(jobRouteId);
-        if (jobInLoaded || found.some((row) => row.job_identity === jobRouteId || (wanted !== null && normalizeJobAddress(row.job_identity) === wanted))) {
-          return undefined;
-        }
-        // 0.1.11.4 R1: a posting its board no longer lists is under Removed; its page still opens and says it is closed.
-        return getPostings(postingsQuery({ ...EMPTY_FILTER, removed: true }, { limit: MAX_LOOKUP_ROWS })).then((removed) =>
-          addPostingRows(removed.postings ? removed.postings.rows : []),
-        );
-      })
+    getPostings(byAddress)
+      // 0110-9-01: a 202 "preparing" answer has no rows yet. 0.1.11.4 R1: a posting its board no longer lists is in
+      // the same answer (the row says `removed_at`); its page still opens and says it is closed.
+      .then((response) => addPostingRows(response.postings ? response.postings.rows : []))
       .catch(() => {})
       .finally(() => setPostingLookup((current) => (current.id === jobRouteId ? { id: jobRouteId, done: true } : current)));
-  }, [jobRouteId, jobInLoaded, rowKnown, settled, postingLookup.id, addPostingRows]);
+  }, [jobRouteId, rowKnown, settled, postingLookup.id, addPostingRows]);
   const anyRanked = useMemo(() => runJobs.some((job) => isRanked(job.rank)), [runJobs]);
   const assessmentsWaiting = useMemo(() => needAnswersCount(assessed), [assessed]);
   useEffect(() => {

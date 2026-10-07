@@ -29,7 +29,7 @@ export const PAGE_ROWS = 50;
 // 0110-10-01: real pages. The sizes the page offers; the server's own cap is MAX_LOOKUP_ROWS.
 export const PAGE_SIZES = [25, 50, 100];
 export const JOBS_HASH_BASE = "#/jobs";
-// The most rows one read may ask for (posting_search.MAX_LIMIT): a job page opened by its link looks its posting up in them.
+// The most rows one read may ask for (posting_search.MAX_LIMIT).
 export const MAX_LOOKUP_ROWS = 200;
 export const PROFILE_FILTER_KEY = "scout.jobs.profileFilter";
 
@@ -258,6 +258,20 @@ export function postingsQuery(filter, { limit = PAGE_ROWS, offset = 0 } = {}) {
   if (offset) {
     query.set("offset", String(offset));
   }
+  return query.toString();
+}
+
+// 0.1.11.6 (APPLIED-01): the query of the ONE posting at `address` (GET /api/postings?job=): an exact read, never a
+// search of a page of the list. The list leaves out a posting with an application and a weak fit, holds the removed
+// ones apart and ends at 200 rows; this read finds the posting in every one of those cases, so its job page opens.
+// null for what is no web address (a pasted posting's `text:` identity has no row).
+export function postingByAddressQuery(address) {
+  if (typeof address !== "string" || !/^https?:\/\//i.test(address)) {
+    return null;
+  }
+  const query = new URLSearchParams();
+  query.set("job", address);
+  query.set("limit", "1");
   return query.toString();
 }
 
