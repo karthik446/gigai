@@ -84,7 +84,7 @@ def test_an_edited_point_is_saved_to_the_master_only_after_the_confirm_and_the_p
     ui.goto("/#/jobs/" + quote(_JOB, safe=""))
     _opens_on_preview(ui)
     assert ui.page.locator(f"{POINT} {ACTION}").count() == 0, "a point as the master has it offers to save its wording"
-    assert ui.requests_after("open", "/api/master") == 0, "the master is read for a resume with an edited point (or for 'Add a point'), not before"
+    assert ui.requests_after("open", "/api/master") == 0, "the master is read for a resume with an edited point (or for 'Add a left-out point'), not before"
 
     # --- an edit is saved for THIS JOB only: the master is not written ---
     role_points = ui.page.locator(f'{POINTS} [data-role="point-group"]').nth(1).locator('[data-role="point"]')

@@ -1,4 +1,4 @@
-"""0.1.11.5 (b++) and the "Add a point" finding: the points list's model, on invented lines.
+"""0.1.11.5 (b++) and the "Add a left-out point" finding: the points list's model, on invented lines.
 
 ``ui/src/resumePointsModel.js`` is pure JavaScript, run under the system ``node`` (LOUD skip when it is not on PATH).
 

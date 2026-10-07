@@ -5,7 +5,7 @@
 ``test_pick_header_room.py``, read through the real routes):
 
 - the list is the stored resume's Summary and each role's bullets, under their role, in the order they print;
-- "Add a point" offers the master's lines the resume leaves out, by role in the master's order (newest first), a line
+- "Add a left-out point" offers the master's lines the resume leaves out, by role in the master's order (newest first), a line
   the person removed first in its role as "Put back", never a Skills line; the search keeps the lines with every word;
 - Picked / Left out FOLLOW THE STORED RESUME: after Restore (``PUT /api/tailored-resumes/length``), which puts the
   lines cut for length back without writing the pick's record, the two counts are what the resume prints (the
@@ -60,6 +60,8 @@ console.log(JSON.stringify({
   search: flat(choices(input.picked, "role 2 LINE 5:")).map((line) => line.text),
   searchRole: choices(input.picked, "lanternfish").groups.map((group) => group.label),
   searchNone: choices(input.picked, "zebra"),
+  addLabels: [points.addPointLabel(input.picked, null), points.addPointLabel(input.picked, choices(input.picked)), points.addPointLabel(input.picked, { total: 0, groups: [] }), points.addPointLabel({ selection: { picked: [], left_out: [] }, result: input.picked.result }, null), points.addPointLabel({ selection: { picked: [], left_out: ["x-1", "x-2", "x-3"].map((id) => ({ id, code: "not_picked", reason: "" })) }, result: { sections: [] } }, null)],
+  addHeading: points.ADD_HEADING,
   restoredChoices: choices(input.restored).total,
   edits: [points.editOf({ text: "As it is." }, "As it is."), points.editOf({ text: "As it is." }, "  As it   is. "), points.editOf({ text: "As it is." }, "   "), points.editOf({ text: "As it is." }, " New\\n words. ")],
   errors: ["master_line_not_found", "selection_line_not_shown", "tailored_resume_changed", "personal_info_refused", "selection_line_unsupported", "something_else"].map((code) => err(code, "master line 'b-12ab34'")),
@@ -144,6 +146,16 @@ def test_add_a_point_offers_the_left_out_lines_by_role_newest_first(out: dict) -
     # The search keeps the lines with every word (any case), in the line or in its role's name.
     assert out["search"] and all(text.startswith("Role 2 line 5:") for text in out["search"])
     assert out["searchRole"] == [heading for heading in order if "Lanternfish" in heading] and out["searchNone"] == {"total": len(left), "groups": []}
+
+
+def test_the_add_button_says_how_many_left_out_lines_it_offers(out: dict) -> None:
+    left = out["choices"]["total"]
+    before_open, after_open, none_after_open, none_stored, three = out["addLabels"]
+    assert after_open == f"Add a left-out point ({left})" and left > 0, "the opened picker's own total is the label"
+    assert before_open == f"Add a left-out point ({out['picked']['leftOut']})", "before the master is read the label is the selection's Left out count"
+    assert none_after_open == none_stored == "Nothing left out"
+    assert three == "Add a left-out point (3)", "a resume with three left-out lines says (3)"
+    assert out["addHeading"] == "Left out of this resume: add one"
 
 
 def test_picked_and_left_out_follow_the_stored_resume_after_restore(out: dict) -> None:
