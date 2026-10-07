@@ -30,6 +30,62 @@ mechanics here. Those belong in the internal changelog.
 
 ## Released versions
 
+### 0.1.11.4
+
+**After you upgrade** (`uv tool upgrade gigai`): resumes you picked before this version keep their
+lines; to get older roles listed and a layout that fits two pages with your header, pick them again
+("Re-pick" on the job page, or `gigai scout resume pick --job-url URL --refresh`). New resumes are
+saved in a jobs folder, one folder per role (see below); your old resumes folder is left as it is, and
+`gigai scout jobs-folder migrate --dry-run` shows what would be copied. If you use the cover-letter
+skill or any other agent skill file, write it again so it has the new text:
+`gigai agent-skill --out FILE --force`.
+
+- **A cover-letter skill for your agent.** `gigai agent-skill` now has a second section: your agent
+  reads the job, the master line behind each requirement and your own letter, and writes a one-page
+  letter in your voice beside the job's resume (`<jobs folder>/<company>/<role>/cover-letter.md`),
+  with a claims file that traces every factual sentence to a master line. It never invents a skill or
+  a number, lists what the master cannot prove, never sends anything, and never types your contact
+  details. `gigai scout cover-letter brief --job-url URL` hands it the posting, the requirement rows
+  and the master lines in one call; `gigai scout cover-letter pdf --in FILE --out FILE` makes a
+  one-page PDF with your name and contact line from `header.json` (never written into the jobs or
+  resumes folder).
+- **One folder per role.** Each job's resume is `<jobs folder>/<company>/<role>/resume.md`
+  (`~/Documents/GigAI/jobs` by default; `gigai scout jobs-folder` shows or changes it, and Settings has
+  a Jobs folder panel). Two roles at one company are two folders, no name holds a date, a `resume.md`
+  you edited is never replaced, and the job page shows the path with an "Open folder" button. The folder
+  never holds a PDF, a name or contact details.
+- **Old roles no longer vanish.** A role whose lines were all cut to fit two pages is now listed as one
+  line (title, employer, dates) under "Earlier experience", so a 14-year career no longer reads as 8.
+  The two-page fit counts those lines. The pick also keeps room for your header.
+- **Your master says when it has no education.** `master show`, the Master page and the job's resume
+  card say "Your master has no education" with an "Add education" action, and `master init --from FILE`
+  tells you when lines of your file look like a degree but were not read as one.
+- **Closed postings.** Opening a job, assessing it, making its PDF or marking it applied checks that the
+  posting is still on its board (one polite request, remembered for an hour; only a "not found" answer
+  counts as closed). A closed posting is marked Closed and left out of the list and out of batches, and
+  nothing is assessed for it. When the company's own page for an open job is down, the job page says so
+  and links the job board.
+- **Your edit survives.** A suggested new pick is only applied over the resume it was made beside, an edit
+  clears an old suggestion, an unreadable stored resume is left as it is, and a file made from an older
+  version of a resume says so instead of failing on a line length. The Re-pick button says what it will do
+  when you edited the resume.
+- **Fewer pointless questions and untruthful suggestions.** More requirements your master already states
+  are settled from your own line (a tool named anywhere in it, a question on a requirement the model
+  already met, one track of an "X or Y"); a suggestion that calls your resume silent on something it
+  contains, or "only in Skills" when a role says it, is dropped; so is one that names a city no text of
+  the job mentions. Each stored assessment now records counts of what these checks did.
+- **Safer fetches of addresses written by job boards.** A posting's own address is text a stranger wrote.
+  When GigAI asks a company's page whether a job is still up, or fetches a stored posting's page for its
+  text, it now looks the name up once, refuses anything that is not a public address (your own machine,
+  your network, the cloud metadata address), connects to exactly the address it checked, and checks every
+  redirect the same way; board names and job numbers must be plain names. An address you type yourself is
+  fetched as before.
+- **Smaller fixes.** The Jobs card shows "No sponsorship" or "Sponsors visas" whether or not there is an
+  H-1B figure; the job page for a link written without the slash before the query finds its posting, and
+  a link we do not know says so instead of returning to the list; the stored-resume preview shows the
+  Other section; a job page for a closed posting says so and links the posting; the release screenshots
+  build passes its privacy check again.
+
 ### 0.1.11.3
 
 **After you upgrade** (`uv tool upgrade gigai`): the first read matches your stored postings once more
