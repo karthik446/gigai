@@ -87,7 +87,7 @@ def preparing_body(progress: dict[str, object]) -> dict[str, object]:
 
 
 _FLAGS = {"1": True, "true": True, "0": False, "false": False}
-_QUERY_KEYS = frozenset({"profile_id", "q", "state", "window", "removed", "history", "include_hidden", "limit", "offset", "sort"})
+_QUERY_KEYS = frozenset({"profile_id", "q", "state", "window", "removed", "history", "include_hidden", "limit", "offset", "sort", "job"})
 _RANK_KEYS = frozenset({"mode", "approve"})
 _RANK_ERROR_STATUS = {
     "invalid_value": HTTPStatus.UNPROCESSABLE_ENTITY,
@@ -149,7 +149,7 @@ class PostingsRoutesMixin:
             lambda: search_postings(
                 home_root, target, profile_ids=query.get("profile_id"), query=(query.get("q") or [None])[0],
                 states=query.get("state"), window=(query.get("window") or [None])[0], limit=limit, offset=offset,
-                model_wait=model_wait_seconds(), sort=(query.get("sort") or [None])[0], **flags,
+                model_wait=model_wait_seconds(), sort=(query.get("sort") or [None])[0], jobs=query.get("job"), **flags,
             )
         )
 
