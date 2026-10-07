@@ -51,6 +51,7 @@ export const SAVED_TEXT = "Saved for this job. Your master is unchanged.";
 export const EMPTY_TEXT = "Not saved: a point cannot be empty. Use Remove to take it off this resume.";
 export const NO_SELECTION_TEXT = "This resume was not picked from your master: its points can be reworded here, not added or removed.";
 export const NOTHING_LEFT_TEXT = "Every line of your master is on this resume.";
+export const ADD_HEADING = "Left out of this resume: add one";
 export const NO_MATCH_TEXT = "No left-out line has those words.";
 export const SAVE_TO_MASTER_LABEL = "Save this wording to my master";
 // The kinds of master line a point stands for (a Skills line is not a point).
@@ -145,6 +146,14 @@ export function leftOutChoices(stored, master, query = "") {
     .filter((group) => group.lines.length > 0);
   groups.sort((a, b) => a.at - b.at);
   return { total, groups: groups.map(({ at: _at, ...group }) => group) };
+}
+
+// The "Add a left-out point (N)" button. N is the picker's own total once the master is read (`choices`); before that
+// it is the selection's Left out count (the page has no master yet), which can be higher: it also counts Skills
+// lines and lines the master no longer has, which the picker does not list.
+export function addPointLabel(stored, choices) {
+  const count = choices ? choices.total : pickedLeftOut(stored, null).counts.leftOut;
+  return count > 0 ? `Add a left-out point (${count})` : "Nothing left out";
 }
 
 // What a refused change says, in the page's own words (never an id, never the server's sentence).

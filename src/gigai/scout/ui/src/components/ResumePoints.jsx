@@ -4,7 +4,9 @@ import { latestStored } from "../tailoredResumeModel.js";
 import {
   EMPTY_TEXT,
   MAX_POINT_CHARS,
+  ADD_HEADING,
   NOTHING_LEFT_TEXT,
+  addPointLabel,
   NO_MATCH_TEXT,
   NO_SELECTION_TEXT,
   SAVED_TEXT,
@@ -259,6 +261,8 @@ export default function ResumePoints({ stored, state }) {
 
   const groups = pointGroups(stored);
   const choices = adding && master ? leftOutChoices(stored, master, query) : null;
+  const addLabel = addPointLabel(stored, choices);
+  const nothingLeft = addLabel === "Nothing left out";
   return (
     <div className="resume-points" data-testid="resume-points" data-points={pointCount(groups)} data-state={status ? status.kind : "idle"}>
       <h4 className="resume-points-title">Points ({pointCount(groups)})</h4>
@@ -270,9 +274,10 @@ export default function ResumePoints({ stored, state }) {
       </p>
       {movable ? (
         <div className="resume-points-add">
-          <button type="button" className="button small secondary" data-action="add-point" aria-expanded={adding} onClick={() => setAdding((open) => !open)}>
-            Add a point
+          <button type="button" className="button small secondary" data-action="add-point" aria-expanded={adding} disabled={nothingLeft && !adding} onClick={() => setAdding((open) => !open)}>
+            {addLabel}
           </button>
+          {adding && <h5 className="resume-points-add-title" data-role="add-heading">{ADD_HEADING}</h5>}
           {adding && !master && !masterError && <p className="muted small">Reading your master…</p>}
           {adding && masterError && (
             <p className="callout danger small" role="alert">
