@@ -329,7 +329,7 @@ _NEW_EXAMPLE: dict[str, object] = {
     "checked_at": "2026-10-03T09:30:00.000000Z", "peek": True, "profile_id": None,
     "anchor": {"last_checked_at": _NEW_SINCE, "advances": False},
     "counts": {
-        "new": 1, "to_assess": 1, "low_rank_skipped": 0, "only_stale": 2, "weak_fit": 0, "ranked_low": 0, "shown": 1,
+        "new": 1, "to_assess": 1, "low_rank_skipped": 0, "only_stale": 2, "weak_fit": 0, "applied": 0, "ranked_low": 0, "shown": 1,
         "by_profile": [{"profile_id": "prof_1", "new": 1}],
     },
     "message": "1 new posting since Thu 01 Oct 14:02.",
@@ -404,7 +404,7 @@ _POSTINGS_EXAMPLE: dict[str, object] = {
     "schema_version": "scout-postings:1", "checked_at": "2026-10-03T09:30:00.000000Z",
     "filters": {"profile_ids": [], "query": None, "states": [], "window": None, "removed": False, "limit": 50, "offset": 0, "sort": "fit"},
     "anchor": {"last_checked_at": _NEW_SINCE, "since": _NEW_SINCE},
-    "counts": {"matched": 1, "shown": 1, "new": 1, "by_state": {"not_assessed": 1}, "weak_fit": 0, "ranked_low": 0},
+    "counts": {"matched": 1, "shown": 1, "new": 1, "by_state": {"not_assessed": 1}, "weak_fit": 0, "applied": 0, "ranked_low": 0},
     "postings": {
         "_labels": _NEW_EXAMPLE["postings"]["_labels"],  # type: ignore[index]
         "rule": UNTRUSTED_TEXT_RULE,
@@ -494,6 +494,7 @@ _POSTINGS_NOTE = (
     "the other filters select, listed or not. "
     "THIN POSTING (0.1.11.2): a row says `thin_posting` (true or false). It is true for a match read from fewer than 4 requirement rows (every matrix row, the \"N of M requirements\"): its `score_text` says \"thin posting, not enough requirements to score\" in place of \"Matched\" and \"fit N%\", its `fit` is null and no percentage is shown; with 1 to 3 rows the state, the filters and the counts stay a match's, and the row is LISTED LAST: after every other assessed posting and every posting not assessed yet, ranked or not (a fit read from 2 requirements is never listed above a real match). A match with NO row about the job (an empty matrix, a lone \"No stated requirements\" row, eligibility rows alone) has the state `thin_posting` instead of `matched`: `fit` is null, it is never in `counts.by_state.matched` or `state=matched`, it is listed by `state=thin_posting`, and it comes last of the thin postings. "
     "APPLIED LABEL (0.1.11.3): each row of `GET /api/postings` says `application` (`{status, since}`: the job's latest application status, `applied`, `interview_scheduled`, `offer_received`, `rejected` or `withdrawn`, and when it happened; null when none). It is a label read from the application events once per request: it never changes a row's `state`, rank or gate. "
+    "ALREADY APPLIED (0.1.11.5): a posting with an application (any of those statuses, a rejected or withdrawn one too) is left out like a weak fit: of the rows, of `counts.matched` and `counts.by_state`, and of the postings a filter selects for POST /api/postings/assess, unless `state=applied` asks for it (then every one of them is listed, a weak fit too) or the posting is named (`jobs`). `counts.applied` is how many the other filters select, listed or not. "
     "SPONSORSHIP AND H-1B (0.1.11.3): each row of `GET /api/postings` says `sponsorship` (`offered`, `not_offered` or `unknown`: what the assessment read from the posting; null when the posting is not assessed) and `h1b` (`{approvals, fiscal_years}`: the COMPANY's H-1B approvals from the bundled company catalog, no network; null when the catalog holds no figure). The page shows them as a label (\"Sponsorship not stated · 32 H-1B approvals\"); they never filter, sort, hold or rank a posting. "
     "RANKED LOW (0.1.11.2): a posting nothing assessed yet whose KNOWN rank score is "
     "below `fit.weak_fit_below_rank` (50) is ranked low. It is ORDERED lower, never hidden or collapsed: it is in the rows and "
@@ -535,7 +536,9 @@ _NEW_NOTE = (
     "needs answers, other, weak fit, not a match), then `fit` (the row's one fit number: the share of requirements met "
     "with the must-haves counted twice, 0 to 100; null when not assessed), the rank score, the newest. A `weak_fit` posting "
     "(it waits on answers, `fit` below `fit.weak_fit_below_percent` AND rank below `fit.weak_fit_below_rank`) is not "
-    "listed: `counts.weak_fit` counts them and GET /api/postings?state=weak_fit lists them. A posting not assessed yet "
+    "listed: `counts.weak_fit` counts them and GET /api/postings?state=weak_fit lists them. A new posting with an application "
+    "(applied and every later status) is left out of `counts.new`, the rows, the questions and every batch (0.1.11.5): "
+    "`counts.applied` counts them and GET /api/postings?state=applied lists them. A posting not assessed yet "
     "whose known rank score is below `fit.weak_fit_below_rank` is ranked low (0.1.11.2): it is listed, never left out, lower by its "
     "rank; its row says `ranked_low: true` and `counts.ranked_low` counts the new ones. A yes assesses only postings "
     "whose rank score is at least `fit.assess_min_rank` (50; one not ranked yet is assessed): the ones below are "
@@ -2435,7 +2438,7 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
         params=(
             _q("profile_id", "string", "Only postings this active profile matches; repeat it, or separate ids with commas. One id shows that profile's own row."),
             _q("q", "string", "Words that must all be in the title, company or location."),
-            _q("state", "string", "Keep these states (repeat or separate with commas): not_assessed, needs_answers, matched, has_gap (matched, with a must-have confirmed unmet), not_a_match, tailored, assessed (any assessment), recommended (the Scout label), weak_fit (listed only when asked for), thin_posting (matched by verdict on no requirement row at all: never in matched), ranked_low (only the postings not assessed and ranked below `fit.weak_fit_below_rank`, 50; without it they are listed with the rest, lower by their rank), applied (0.1.11.3: the postings marked applied or beyond: interview, offer, rejected, withdrawn)."),
+            _q("state", "string", "Keep these states (repeat or separate with commas): not_assessed, needs_answers, matched, has_gap (matched, with a must-have confirmed unmet), not_a_match, tailored, assessed (any assessment), recommended (the Scout label), weak_fit (listed only when asked for), thin_posting (matched by verdict on no requirement row at all: never in matched), ranked_low (only the postings not assessed and ranked below `fit.weak_fit_below_rank`, 50; without it they are listed with the rest, lower by their rank), applied (0.1.11.3: the postings marked applied or beyond: interview, offer, rejected, withdrawn; 0.1.11.5: listed only when asked for)."),
             _q("window", "string", "new: first seen since the last check. 7d / 30d: posted (the day it went up; else first seen) in the last 7 or 30 days.", enum=("new", "7d", "30d")),
             _q("sort", "string", "fit (the default): the grid's order. newest_posted: the day the posting went up, the newest first.", enum=("fit", "newest_posted")),
             _q("removed", "string", "1: the postings the board no longer lists, instead of the live ones.", enum=("0", "1", "true", "false")),

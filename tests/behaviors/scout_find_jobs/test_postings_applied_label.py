@@ -2,8 +2,10 @@
 
 - a row says ``application`` ``{status, since}``: applied, then interview, offer, rejected and withdrawn each replace it
   (the latest status wins); a job with no application says ``null``;
-- the label never changes a row's ``state`` (the assessment's), its order or the counts;
+- the label never changes a row's ``state`` (the assessment's) or its facts;
 - ``state=applied`` lists exactly the jobs with an application status (applied and beyond), with every later status too;
+- 0.1.11.5 (packet AP): such a job is LEFT OUT of the list unless ``state=applied`` asks for it, so the rows that
+  carry a label are read with that filter here (tests/behaviors/scout_pipeline/test_applied_left_out.py pins the rule);
 - the events are read ONCE per request, however many rows: the read does not grow with the page.
 """
 
@@ -72,26 +74,31 @@ def test_each_status_replaces_the_one_before_it(fx: PostingsFixture) -> None:
     ]
     for kind, when, expected in steps:
         _record(fx, 1, kind, when)
-        row = _by_job(_search(fx))[job]
+        row = _by_job(_search(fx, states=["applied"]))[job]
         assert row["application"] == {"status": expected, "since": when}, kind
-        assert all(other["application"] is None for key, other in _by_job(_search(fx)).items() if key != job)
+        others = _by_job(_search(fx))
+        assert len(others) == 4 and job not in others and all(other["application"] is None for other in others.values())
 
 
 def test_withdrawn_after_an_interview(fx: PostingsFixture) -> None:
     _record(fx, 2, "applied", "2026-10-06T10:00:00Z")
     _record(fx, 2, "interview_scheduled", "2026-10-08T10:00:00Z")
     _record(fx, 2, "withdrawn", "2026-10-09T10:00:00Z")
-    assert _by_job(_search(fx))[job_url(SLUG, 2)]["application"] == {"status": "withdrawn", "since": "2026-10-09T10:00:00Z"}
+    assert _by_job(_search(fx, states=["applied"]))[job_url(SLUG, 2)]["application"] == {"status": "withdrawn", "since": "2026-10-09T10:00:00Z"}
 
 
-def test_the_label_changes_no_state_order_or_count(fx: PostingsFixture) -> None:
+def test_the_label_changes_no_state_or_fact_of_a_row(fx: PostingsFixture) -> None:
     before = _search(fx)
     _record(fx, 3, "applied", "2026-10-06T10:00:00Z")
     _record(fx, 3, "interview_scheduled", "2026-10-08T10:00:00Z")
-    after = _search(fx)
     strip = lambda rows: [{key: value for key, value in row.items() if key != "application"} for row in rows]  # noqa: E731
-    assert strip(after["postings"]["rows"]) == strip(before["postings"]["rows"])
-    assert after["counts"] == before["counts"]
+    job = job_url(SLUG, 3)
+    # The applied row itself, read with its filter: the same row as before, plus its label.
+    assert strip(_search(fx, states=["applied"])["postings"]["rows"]) == strip([_by_job(before)[job]])
+    # 0.1.11.5: the default list is the other four, each as before, in the same order.
+    after = _search(fx)
+    assert strip(after["postings"]["rows"]) == strip([row for row in before["postings"]["rows"] if row["job_identity"] != job])
+    assert after["counts"] == {**before["counts"], "matched": 4, "shown": 4, "new": 4, "by_state": {"not_assessed": 4}, "applied": 1}
 
 
 def test_the_applied_filter_lists_every_job_with_a_status(fx: PostingsFixture) -> None:
@@ -103,7 +110,7 @@ def test_the_applied_filter_lists_every_job_with_a_status(fx: PostingsFixture) -
     assert sorted(_by_job(listed)) == sorted([job_url(SLUG, 1), job_url(SLUG, 4)])
     assert listed["counts"]["matched"] == 2
     assert {row["application"]["status"] for row in listed["postings"]["rows"]} == {"applied", "rejected"}
-    assert len(_search(fx)["postings"]["rows"]) == 5, "the filter is a view: the full list is unchanged"
+    assert len(_search(fx)["postings"]["rows"]) == 3, "0.1.11.5: the list without the filter leaves the two out"
 
 
 def test_the_events_are_read_once_per_request_not_per_row(fx: PostingsFixture, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -112,9 +119,11 @@ def test_the_events_are_read_once_per_request_not_per_row(fx: PostingsFixture, m
     reads: list[int] = []
     real = job_state.read_application_events
     monkeypatch.setattr(job_state, "read_application_events", lambda resolved: reads.append(1) or real(resolved))
-    response = _search(fx)
+    response = _search(fx, states=["applied"])
     assert len(response["postings"]["rows"]) == 5 and all(row["application"] for row in response["postings"]["rows"])
     assert len(reads) == 1, "one read of the events for the whole list"
     reads.clear()
-    assert len(_search(fx, limit=2)["postings"]["rows"]) == 2
+    assert len(_search(fx, states=["applied"], limit=2)["postings"]["rows"]) == 2
     assert len(reads) == 1, "and the same one read for a page of two"
+    reads.clear()
+    assert _search(fx)["postings"]["rows"] == [] and len(reads) == 1, "0.1.11.5: and one for the list that leaves them out"

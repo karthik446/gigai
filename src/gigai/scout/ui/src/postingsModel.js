@@ -94,12 +94,13 @@ export function keepActiveProfiles(selectedIds, profiles) {
 // `removed` is not a state of the search: it lists the postings the board no longer shows.
 // 0110-10-02: a weak fit (it waits on answers, few requirements are met and its rank is low) is listed ONLY while its
 // chip is on: the server leaves it out of every other list, and `counts.weak_fit` is the chip's number.
+// 0.1.11.5: the same for a job you already applied to: listed only while "Applied" is on, `counts.applied` its number.
 export const WEAK_FIT = "weak_fit";
 export const STATE_FILTERS = [
   { value: "needs_answers", label: "Needs your answers" },
   { value: "assessed", label: "Assessed" },
   { value: "recommended", label: `${SCOUT_LABEL_NAME}: ${LABEL_WORDS.recommended}` },
-  { value: "applied", label: "Applied", title: "Jobs you marked applied, and the ones that moved on from there (interview, offer, rejected, withdrawn)." },
+  { value: "applied", label: "Applied", title: "Jobs you marked applied, and the ones that moved on from there (interview, offer, rejected, withdrawn). They stay out of the list unless this is on." },
   { value: WEAK_FIT, label: "Weak fit", title: "Jobs that need answers from you, but match few of the requirements and rank low, so they are probably not worth your time. They stay out of the list unless this is on." },
 ];
 export const REMOVED_FILTER = { value: "removed", label: "Removed" };
@@ -138,7 +139,15 @@ export function weakFitCount(counts) {
   return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null;
 }
 
-// The state chips: [{value, label, title, active, count}]. Only the weak-fit chip carries a count (what it would list).
+// How many jobs you already applied to the other filters select (listed or not); null when there is none to say.
+export const APPLIED = "applied";
+export function appliedCount(counts) {
+  const value = counts && counts.applied;
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : null;
+}
+
+// The state chips: [{value, label, title, active, count}]. The chips of what the list leaves out carry a count (what
+// the chip would list): weak fit, and applied (no number when there is none).
 export function stateChips(states, counts) {
   const on = states || [];
   return STATE_FILTERS.map((option) => ({
@@ -146,7 +155,7 @@ export function stateChips(states, counts) {
     label: option.label,
     title: option.title,
     active: on.includes(option.value),
-    count: option.value === WEAK_FIT ? weakFitCount(counts) : null,
+    count: option.value === WEAK_FIT ? weakFitCount(counts) : option.value === APPLIED ? appliedCount(counts) : null,
   }));
 }
 
@@ -613,10 +622,11 @@ export function assessAskBody({ selectedIds = [], filter = EMPTY_FILTER, rows = 
 
 // 0.1.11.2: the ASK of "Assess all" (beside "N not assessed"): every not-assessed posting the filter selects, whatever
 // is ticked. The server answers the top 50 by rank, the estimate and how many are left; the low-ranked ones are its
-// second question. Several profile chips: the page's rows, as above.
+// second question. Several profile chips: the page's rows, as above. 0.1.11.5: the same while "Applied" is on: a
+// filter never selects a job you applied to, so the ones the page lists are named.
 export function assessAllBody({ filter = EMPTY_FILTER, rows = [] } = {}) {
   const profiles = filter.profileIds || [];
-  if (profiles.length > 1) {
+  if (profiles.length > 1 || (filter.states || []).includes("applied")) {
     return { jobs: rows.filter((row) => (row.state || "not_assessed") === "not_assessed").map((row) => row.job_identity) };
   }
   const body = { states: ["not_assessed"] };

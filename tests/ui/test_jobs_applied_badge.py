@@ -9,8 +9,11 @@ This flow CHANGES the shared home (an application event is append-only), so it r
 - a job with no application shows no badge, on its card or its page;
 - "Mark applied" on the job page: the header badge reads "Applied · <month day>" at once (the page is not reloaded), and
   the job's assessment state chip is not touched;
-- the Jobs card of that job has the same badge; the "Applied" chip lists that job and no other; the badge is on every row it lists;
-- "Interview scheduled" on the job page: the badge reads "Interview · <month day>", with no reload; the card follows.
+- 0.1.11.5 (packet AP): the job is then LEFT OUT of the Jobs list ("Showing 1-N of M" counts one fewer, no card, no
+  badge) and the "Applied" chip says how many there are ("Applied 1"); the chip lists that job and no other, with its
+  badge and its assessment state untouched;
+- "Interview scheduled" on the job page: the badge reads "Interview · <month day>", with no reload; the card (listed
+  by the "Applied" chip) follows, and the job stays out of the list without the chip.
 """
 
 from __future__ import annotations
@@ -21,7 +24,7 @@ from urllib.parse import quote
 
 import pytest
 
-from tests.ui.jobs_page import LIST
+from tests.ui.jobs_page import LIST, count_line, identities, shown
 
 pytestmark = pytest.mark.ui
 
@@ -31,6 +34,8 @@ ROW = '[data-testid="job-row"]'
 BADGE = '[data-testid="application-badge"]'
 PAGE_BADGE = '.job-page [data-role="application-badge"]'
 MARK = "window.__applied_badge_marker"
+APPLIED_CHIP = '[data-role="state-filter"] [data-state="applied"]'
+CHIP_COUNT = f'{APPLIED_CHIP} [data-role="chip-count"]'
 
 
 def _day(since: str) -> str:
@@ -42,7 +47,7 @@ def _card(ui, job: str):
 
 
 def _application(ui, job: str) -> dict | None:
-    rows = ui.server_json(f"{LIST}?limit=200")["postings"]["rows"]
+    rows = ui.server_json(f"{LIST}?limit=200&state=applied")["postings"]["rows"]  # 0.1.11.5: only this filter lists it
     return next(row["application"] for row in rows if row["job_identity"] == job)
 
 
@@ -56,6 +61,9 @@ def test_mark_applied_shows_a_badge_on_the_page_and_the_card_and_filters(ui, sco
     ui.settle()
     assert ui.page.locator(BADGE).count() == 0
     state_before = _card(ui, job).get_attribute("data-state")
+    matched_before = ui.server_json(f"{LIST}?limit=50")["counts"]["matched"]
+    assert count_line(ui).endswith(f"of {matched_before} postings")
+    assert ui.page.locator(APPLIED_CHIP).inner_text().strip() == "Applied" and ui.page.locator(CHIP_COUNT).count() == 0, "none applied: no number"
 
     ui.goto("/#/jobs/" + quote(job, safe=""))
     ui.wait_for_job_page()
@@ -73,19 +81,27 @@ def test_mark_applied_shows_a_badge_on_the_page_and_the_card_and_filters(ui, sco
     assert badge.get_attribute("data-status") == "applied"
     assert ui.page.evaluate(MARK) is True, "the page was not reloaded"
 
-    # The Jobs card: the badge, the filter, and the assessment state untouched.
+    # 0.1.11.5: the Jobs list leaves the job out (the list, its count), and the chip says there is one.
     ui.goto("/#/jobs")
     ui.wait_for_jobs_list()
     ui.settle()
+    ui.page.wait_for_function("() => (document.querySelector('[data-role=\"postings-count\"]') || {dataset: {}}).dataset.refreshing !== 'true'")
+    counts = ui.server_json(f"{LIST}?limit=50")["counts"]
+    assert (counts["matched"], counts["applied"]) == (matched_before - 1, 1)
+    assert count_line(ui).endswith(f"of {matched_before - 1} postings"), count_line(ui)
+    assert job not in identities(shown(ui)["rows"]) and _card(ui, job).count() == 0, "an applied job is not in the default list"
+    assert ui.page.locator(BADGE).count() == 0
+    assert ui.page.locator(CHIP_COUNT).inner_text().strip() == "1" and ui.page.locator(APPLIED_CHIP).inner_text().split() == ["Applied", "1"]
+    # The chip lists it, and only it: the badge, and the assessment state untouched.
+    with ui.page.expect_response(lambda r: r.url.split("?")[0].endswith(LIST) and "state=applied" in r.url):
+        ui.page.click(APPLIED_CHIP)
+    ui.page.wait_for_function("() => document.querySelectorAll('[data-testid=\"job-row\"]').length === 1")
+    assert ui.page.locator(f"{ROW} [data-action='open-job']").get_attribute("href") == "#/jobs/" + quote(job, safe="")
     card = _card(ui, job)
     assert card.locator(BADGE).inner_text().strip() == f"Applied · {_day(since)}"
     assert card.get_attribute("data-state") == state_before, "a label only: the card's assessment state is unchanged"
-    assert ui.page.locator(BADGE).count() == 1, "no other card carries the badge"
-    with ui.page.expect_response(lambda r: r.url.split("?")[0].endswith(LIST) and "state=applied" in r.url):
-        ui.page.click('[data-role="state-filter"] [data-state="applied"]')
-    ui.page.wait_for_function("() => document.querySelectorAll('[data-testid=\"job-row\"]').length === 1")
-    assert ui.page.locator(f"{ROW} [data-action='open-job']").get_attribute("href") == "#/jobs/" + quote(job, safe="")
     assert ui.page.locator(BADGE).count() == 1
+    assert count_line(ui) == "Showing 1 of 1 posting" and ui.page.locator(CHIP_COUNT).inner_text().strip() == "1"
 
     # A later status: the badge on the job page follows, with no reload; the card follows too.
     ui.goto("/#/jobs/" + quote(job, safe=""))
@@ -102,10 +118,16 @@ def test_mark_applied_shows_a_badge_on_the_page_and_the_card_and_filters(ui, sco
     assert ui.page.evaluate(MARK) is True, "the page was not reloaded"
     assert ui.page.locator('.job-page [data-event="applied"]').count() == 0, "the applied button is gone once applied"
 
-    ui.goto("/#/jobs")
+    ui.goto("/#/jobs?state=applied")
     ui.wait_for_jobs_list()
     ui.settle()
     # The kept rows show first and are read again in place: wait for that read, never a reload.
     ui.page.wait_for_function("() => (document.querySelector('[data-role=\"postings-count\"]') || {dataset: {}}).dataset.refreshing !== 'true'")
     assert _card(ui, job).locator(BADGE).inner_text().strip() == f"Interview · {_day(later['since'])}"
+    # A later status is still an application: the list without the chip leaves it out.
+    with ui.page.expect_response(lambda r: r.url.split("?")[0].endswith(LIST) and "state=applied" not in r.url):
+        ui.page.click(APPLIED_CHIP)
+    ui.page.wait_for_function("(job) => !document.querySelector(`[data-testid=\"job-row\"] a[href='#/jobs/${job}']`)", arg=quote(job, safe=""))
+    ui.page.wait_for_function("() => (document.querySelector('[data-role=\"postings-count\"]') || {dataset: {}}).dataset.refreshing !== 'true'")
+    assert job not in identities(shown(ui)["rows"]) and ui.page.locator(CHIP_COUNT).inner_text().strip() == "1"
     ui.assert_clean()

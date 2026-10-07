@@ -141,7 +141,7 @@ def test_a_each_new_posting_once_with_its_profile_tags_and_never_the_deleted_pro
     assert all(set(item["resume"]) == {"record_id", "revision_id"} for item in tags)  # type: ignore[union-attr]
     assert (both["company_slug"], both["title"], both["work_mode"], both["salary"]) == ("acme", "Staff AI Engineer", "remote", "USD 180,000-220,000 per year")
     assert response["counts"] == {
-        "new": 2, "to_assess": 2, "low_rank_skipped": 0, "only_stale": 0, "weak_fit": 0, "ranked_low": 0, "shown": 2,
+        "new": 2, "to_assess": 2, "low_rank_skipped": 0, "only_stale": 0, "weak_fit": 0, "applied": 0, "ranked_low": 0, "shown": 2,
         "by_profile": [{"profile_id": fx.default_profile_id, "new": 1}, {"profile_id": fx.second_profile_id, "new": 2}],
     }
     _assert_labels(response)

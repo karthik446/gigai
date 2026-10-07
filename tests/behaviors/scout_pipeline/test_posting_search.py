@@ -125,7 +125,7 @@ def test_a_live_search_returns_what_the_index_matches_per_active_profile_with_no
     assert [item["profile_id"] for item in by_job[job_url("acme", 1)]["profiles"]] == [fx.default_profile_id, fx.second_profile_id]
     assert [item["profile_id"] for item in by_job[job_url("acme", 2)]["profiles"]] == [fx.second_profile_id]
     assert fx.deleted_profile_id is not None and fx.deleted_profile_id not in json.dumps(everything)
-    assert everything["counts"] == {"matched": 3, "shown": 3, "new": 2, "by_state": {"not_assessed": 3}, "weak_fit": 0, "ranked_low": 0}
+    assert everything["counts"] == {"matched": 3, "shown": 3, "new": 2, "by_state": {"not_assessed": 3}, "weak_fit": 0, "applied": 0, "ranked_low": 0}
     assert [(item["profile_id"], item["matched"]) for item in everything["profiles"]] == [(fx.default_profile_id, 2), (fx.second_profile_id, 3)]  # type: ignore[union-attr]
     assert everything["history"] is None and everything["anchor"]["last_checked_at"] is None  # type: ignore[index]
     _assert_public_only(everything)

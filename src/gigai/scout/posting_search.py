@@ -26,6 +26,15 @@ filters select, listed or not: the number on the page's "Weak fit" chip.
 The rows are in the grid's order (``scout_new.order_key``): inside a group by
 the fit number, then the rank score, then the newest.
 
+ALREADY APPLIED (0.1.11.5). A posting with an application (an application
+event put it in an application state: applied, interview scheduled, offer
+received, rejected, withdrawn) is LEFT OUT the same way, by the same rule
+(:func:`_hidden`): of the list, of every count of it (``matched``,
+``by_state``) and of the postings a filter selects for "Assess these",
+unless the ``applied`` state is asked for or the posting is named.
+``counts.applied`` is how many the other filters select, listed or not: the
+number on the page's "Applied" chip. The events are read once per request.
+
 RANKED LOW (0.1.11.2, ``fit.is_ranked_low``). The list is ordered best fit
 first, and a posting NOTHING ASSESSED YET whose known rank score is below the
 weak-fit rank (``fit.weak_fit_below_rank``, 50) is ranked low. It is ORDERED
@@ -105,6 +114,7 @@ from .pipeline.store import (
 )
 from .postings import PostingModelError, PostingModelPreparing, ProfileView
 from .scout_new import (
+    APPLIED_COMMAND,
     FIRST_USE_DAYS,
     POSTINGS_LABELS,
     STOPPED_CANCELLED,
@@ -146,6 +156,7 @@ STATE_ASSESSED = "assessed"
 STATE_RECOMMENDED = "recommended"
 #: 0.1.11.3 (item 12): ``applied`` keeps the postings an application event put in an application state (applied and
 #: beyond). It is a filter over the events, never a row state: the assessment state of a row is untouched.
+#: 0.1.11.5: and only this filter (or naming the posting) lists such a posting: ``_hidden``.
 STATE_APPLIED = "applied"
 # ``has_gap`` (0.1.11 N3, OD1): matched by verdict, held by the gate (``job_state.HAS_GAP``).
 # ``thin_posting`` (0.1.11.2): matched by verdict on no row about the job (``fit.THIN_POSTING``): never in ``matched``.
@@ -270,10 +281,18 @@ def _wanted(
     return False
 
 
-def _hidden(row: PostingRecord, states: Sequence[str], named: bool) -> bool:
-    """0110-10-02: a weak fit is listed only when asked for: the ``weak_fit`` state, or the posting named."""
+def _hidden(row: PostingRecord, states: Sequence[str], named: bool, applications: Mapping[str, object] | None = None) -> bool:
+    """What a list leaves out unless it is asked for (its state filter, or the posting named).
 
-    return row.state == fit_rules.WEAK_FIT and not named and fit_rules.WEAK_FIT not in states
+    0110-10-02: a weak fit (the ``weak_fit`` state). 0.1.11.5: a posting with an application (the ``applied`` state);
+    the ``applied`` filter lists every one of them, a weak fit too.
+    """
+
+    if named:
+        return False
+    if applications is not None and row.job in applications:
+        return STATE_APPLIED not in states
+    return row.state == fit_rules.WEAK_FIT and fit_rules.WEAK_FIT not in states
 
 
 class _Selection:
@@ -308,27 +327,36 @@ class _Selection:
         shown = [(group, _shown(group, only)) for group in groups.values()]
         weak = fit_rules.WEAK_FIT
         setting = fit_rules.fit_setting(home_root, target)
-        #: Item 12: the application of each job, read once; the "Applied" filter and the rows' badge both use it.
+        #: Item 12: the application of each job, read once; the "Applied" filter, the rows' badge and (0.1.11.5) what
+        #: the list leaves out all use it.
         self.applications = _applications(refreshed.resolved)
         applications = self.applications
+        named = jobs is not None
 
         def low(row: PostingRecord) -> bool:
             return fit_rules.is_ranked_low(row.state, row.rank_score, setting)
 
         shown = [
             (group, row) for group, row in shown
-            if (_wanted(row, states, setting, applications) or row.state == weak) and _in_window(row, window, self.since, moment)
+            if (_wanted(row, states, setting, applications) or row.state == weak or row.job in applications)
+            and _in_window(row, window, self.since, moment)
         ]
         words = [word for word in (query or "").casefold().split() if word]
         if words:
             text = _index_words(home_root, [row for _group, row in shown])
             shown = [(group, row) for group, row in shown if all(word in text.get(row.job, "") for word in words)]
         # 0110-10-02: the weak fits the OTHER filters select (the chip's number), then only the ones asked for stay.
-        self.weak_fit = sum(1 for _group, row in shown if row.state == weak)
+        # 0.1.11.5: the same for the postings with an application; a weak fit the list leaves out as applied is not
+        # in the weak-fit number (its chip would not list it).
+        self.applied = sum(1 for _group, row in shown if row.job in applications)
+        self.weak_fit = sum(
+            1 for _group, row in shown
+            if row.state == weak and not (row.job in applications and _hidden(row, states, named, applications))
+        )
         self.is_ranked_low = low
         shown = [
             (group, row) for group, row in shown
-            if _wanted(row, states, setting, applications) and not _hidden(row, states, jobs is not None)
+            if _wanted(row, states, setting, applications) and not _hidden(row, states, named, applications)
         ]
         # 0.1.11.2: the not-assessed postings ranked low are LISTED (ordered lower by their rank, never left out);
         # this is how many the list holds, for the "Ranked low (N)" divider above them.
@@ -514,6 +542,9 @@ def search_postings(
                     "by_state": dict(sorted(by_state.items())),
                     # 0110-10-02: the weak fits these filters select; they are in ``matched`` only when the state is asked for.
                     "weak_fit": selection.weak_fit,
+                    # 0.1.11.5: the postings with an application these filters select; in ``matched`` only when the
+                    # ``applied`` state is asked for.
+                    "applied": selection.applied,
                     # 0.1.11.2: the not-assessed postings ranked below the weak-fit rank. They are in ``matched`` and in the rows.
                     "ranked_low": selection.ranked_low,
                 },
@@ -815,6 +846,15 @@ def assess_these(
             store.close()
 
 
+def applied_left_out_line(applied: object, filters: object = None) -> str | None:
+    """0.1.11.5: "7 you already applied to are left out: gigai scout jobs list --state applied"; ``None`` when none is left out."""
+
+    asked = isinstance(filters, Mapping) and STATE_APPLIED in (filters.get("states") or ())
+    if type(applied) is not int or applied < 1 or asked:
+        return None
+    return f"{applied} you already applied to {'are' if applied != 1 else 'is'} left out: {APPLIED_COMMAND}"
+
+
 def ranking_line(ranking: object) -> str | None:
     """0.1.11.2: "Ranking is still running: 120 of 173 ranked. ..." while the background rank has postings left; else ``None``."""
 
@@ -872,6 +912,9 @@ def render(response: Mapping[str, object]) -> str:
             lines.append(f"  not in the stored postings: {job}")
     else:
         lines.append(f"{counts['matched']} posting(s) match, {counts['new']} new since the last check. Showing {counts['shown']}.")
+        left_out = applied_left_out_line(counts.get("applied"), response.get("filters"))
+        if left_out:
+            lines.append(left_out)
         running = ranking_line(response.get("ranking"))
         if running:
             lines.append(running)

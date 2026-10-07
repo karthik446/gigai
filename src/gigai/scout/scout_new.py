@@ -40,6 +40,11 @@ THE FLOW
   of the rows listed here (``counts.weak_fit`` says how many, the message how
   to list them), it is never one of the postings that "still need attention",
   and its row asks no question (``open_questions`` is empty).
+- ALREADY APPLIED (0.1.11.5): a new posting with an application (applied and
+  every later application state, a rejected or withdrawn one too) is left
+  out of what is new: of ``counts.new``, the rows, the questions and every
+  batch. ``counts.applied`` says how many and the message how to list them
+  (``gigai scout jobs list --state applied``).
 - THE ASSESS THRESHOLD (0110-10-02): a yes assesses only the postings whose
   rank score is at least ``fit.assess_min_rank`` (50; a posting not ranked
   yet is assessed). The ones below are counted (``counts.low_rank_skipped``)
@@ -174,6 +179,8 @@ PIPELINE_COMMAND = "gigai scout new --process"
 NOTHING_NEW_MEANS = "no posting that matches your profiles was first stored by Scout"
 UPDATE_COUNTS_ALL = "(A sources update counts every new posting on every board, whatever its title.)"
 WEAK_FIT_COMMAND = "gigai scout jobs list --state weak_fit"
+#: 0.1.11.5: how to list the postings with an application, which every other list leaves out.
+APPLIED_COMMAND = "gigai scout jobs list --state applied"
 
 #: States that still want something from the user (a posting Scout labelled recommended is left out by the query).
 _ATTENTION_STATES = ("needs_answers", "matched", "assessed", "tailored", "not_assessed")
@@ -1283,11 +1290,17 @@ def _scout_new(
         else:
             since_at, source = postings.stamp(moment - timedelta(days=FIRST_USE_DAYS)) or checked_at, SINCE_FIRST_USE
 
+        # 0.1.11.5: a posting with an application is left out of what is new, of its counts and of every batch
+        # (``gigai scout jobs list --state applied`` lists them). The events are read once per request.
+        applied = _applied(refreshed.resolved)
+        applied_new = 0
+
         def read_new() -> dict[str, list[PostingRecord]]:
+            nonlocal applied_new
             selected = store.postings(since=since_at, profile_id=profile_id)
-            if profile_id is None:
-                return _grouped(selected)
-            return _grouped(store.postings(jobs={row.job for row in selected}))
+            found = _grouped(selected) if profile_id is None else _grouped(store.postings(jobs={row.job for row in selected}))
+            applied_new = sum(1 for job in found if job in applied)
+            return {job: group for job, group in found.items() if job not in applied}
 
         setting = fit_rules.fit_setting(home_root, target)
 
@@ -1296,7 +1309,7 @@ def _scout_new(
 
             ranks = {(row.job, row.profile_id): row.rank_score for group in groups.values() for row in group}
             new_keep, new_low = split_low_rank(_new_pairs(groups, profile_id), ranks, setting, include=include_low_rank)
-            old = _stale_rows(store, profile_id)
+            old = [row for row in _stale_rows(store, profile_id) if row.job not in applied]
             old_ranks = {(row.job, row.profile_id): row.rank_score for row in old}
             old_keep, old_low = split_low_rank(list(old_ranks), old_ranks, setting, include=include_low_rank)
             # 0110-10-11, 0.1.11.2: what the batch of 50 a yes acts on is ordered by: the rank score, then the newest.
@@ -1403,7 +1416,6 @@ def _scout_new(
                     f" {WEAK_FIT_COMMAND}"
                 )
         else:
-            applied = _applied(refreshed.resolved)
             best = [
                 row for row in store.postings_by_score(states=_ATTENTION_STATES, profile_id=profile_id, limit=ATTENTION_LIMIT * 3)
                 if row.job not in applied
@@ -1418,6 +1430,12 @@ def _scout_new(
                 message = f"Nothing new since your last check ({_when(since_at)}): {NOTHING_NEW_MEANS} after it. {UPDATE_COUNTS_ALL}"
             if shown:
                 message += f" Top {len(shown)} that still need your attention:"
+
+        if applied_new:
+            message += (
+                f" {applied_new} new posting{'s' if applied_new != 1 else ''} you already applied to"
+                f" {'are' if applied_new != 1 else 'is'} left out: {APPLIED_COMMAND}"
+            )
 
         texts = postings.posting_texts(home_root, [row for _group, row in shown])
         rows_json: list[dict[str, object]] = []
@@ -1472,6 +1490,8 @@ def _scout_new(
                 "low_rank_skipped": len(low_pairs),
                 "only_stale": len(stale_pairs) + len(low_stale),
                 "weak_fit": weak_fit,
+                # 0.1.11.5: the new postings with an application: left out of ``new``, of the rows and of every batch.
+                "applied": applied_new,
                 # 0.1.11.2: the new postings not assessed yet and ranked below ``fit.weak_fit_below_rank``. Listed, never left out.
                 "ranked_low": ranked_low if groups else sum(1 for row in rows_json if row["ranked_low"]),
                 "shown": len(rows_json),
