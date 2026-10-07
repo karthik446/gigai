@@ -49,6 +49,13 @@ by text. Its rules:
   second dated title line after the employer's bullets is the next role at
   that employer. Dates an entry heading ends with move to a role line when
   no role line names a year (``_dates_to_role_line``);
+* EDUCATION IS NEVER LOST SILENTLY (0.1.11.4 item 9d): lines that LOOK like
+  education (a degree with a school and a year, or the lines under a line
+  that is only the word Education inside another section,
+  ``_education_looking``) and did not become an Education entry are said by
+  line number and by the section that holds them, when the result has no
+  Education entry at all (``ResumeReading.education``). Reporting only:
+  what is stored does not change, and no entry is ever made up;
 * NOTHING IS LEFT OUT SILENTLY: every content line of a resume is in the
   master, folded into a line the master holds, or named as left out by line
   number and reason (``ResumeReading``, ``SourceLines``,
@@ -178,6 +185,13 @@ READ_AS: dict[str, str] = {
     "listed_entry": "a list item with no entry above it: read as an entry of its own",
     "kept_in_other": "in Experience, Projects or Education with no entry above it: kept as a line of Other",
 }
+#: A degree as a resume writes it: an abbreviation in its own capitals (``B.S.``, ``BS``, ``BA``, ``MS``, ``MBA``,
+#: ``PhD``), or the word (``Bachelor of``, ``Master's``). With a school and a year beside it, the line is education.
+_DEGREE = re.compile(
+    r"(?<![\w.])(?:B\.?S\.?c?|B\.?A\.?|B\.?Eng\.?|B\.?Tech\.?|M\.?S\.?c?|M\.A\.?|M\.?Eng\.?|M\.?Tech\.?|M\.?B\.?A\.?|Ph\.?\s?D\.?)(?!\w)"
+    r"|\b(?i:bachelor|master|doctor|associate)(?:'s|s)?\s+(?i:of|in|degree)\b|\b(?i:bachelor's|master's|doctorate)\b"
+)
+_SCHOOL = re.compile(r"\b(?:university|college|institute)\b", re.IGNORECASE)
 #: Why a content line that was read is not a line of its own in the master: the master holds it already.
 FOLDED_REASONS: tuple[str, ...] = ("exact_duplicate", "near_duplicate", "conflict", "same_entry", "role_line", "skills_joined")
 
@@ -254,6 +268,9 @@ class ResumeReading:
     sections: tuple[tuple[int, str, str, str], ...] = ()
     #: ``(how, file line)`` for every kept line that has no place of its own in its section (``READ_AS``).
     read_as: tuple[tuple[str, int], ...] = ()
+    #: ``(first file line, last file line, the section that holds them)`` for lines that look like education and are not
+    #: an Education entry; empty when the draft has an Education entry (0.1.11.4 item 9d). Line numbers only.
+    education: tuple[tuple[int, int, str], ...] = ()
 
 
 @dataclass
@@ -276,6 +293,8 @@ class _Normalized:
     carried: dict[int, int] = field(default_factory=dict)
     #: Index -> how the line there was read (``READ_AS``).
     read_as: dict[int, str] = field(default_factory=dict)
+    #: ``(first index, last index, the section that holds them)``: lines that look like education and are not in Education.
+    education: list[tuple[int, int, str]] = field(default_factory=list)
 
 
 def _dated(text: str) -> bool:
@@ -337,6 +356,58 @@ def _above_first_section(result: _Normalized, kinds: list[tuple[str, str]], firs
         else:
             result.left.update({item: "above_first_section" for item in block})
         block = []
+
+
+def _education_looking(result: _Normalized, kinds: list[tuple[str, str]], sections: dict[int, str]) -> None:
+    """The lines that LOOK like education and are kept somewhere that is not an Education entry (``result.education``).
+
+    ``sections``: the index of a section heading -> the section it was read as.  Two shapes, each by what the file
+    says, never by a guess about what it means:
+
+    * a line that is only the name of the Education section but is not a section heading here (a bold line or a
+      deeper heading inside another section), with the lines under it up to the next heading that names a section;
+    * a degree with a school and a year (``_DEGREE``, ``_SCHOOL``, a year) on one line, or on lines that touch.
+
+    (A heading that names education IS the Education section, and every line under it becomes an entry or opens
+    one, so such a file has its Education entry and nothing is said.)  A line that is left out (said already, by
+    its own reason), a summary line and a line of an Education entry are never named.  Nothing is moved: this only
+    says where the lines are."""
+
+    in_other = {index for indexes, _words in result.other for index in indexes}
+    place: dict[int, str] = {}  # a kept content line -> the section that holds it
+    section = ""
+    for index, (kind, _text) in enumerate(kinds):
+        if kind == "section":
+            section = sections.get(index, "")
+        elif section and kind not in ("blank", "drop") and index not in result.left:
+            place[index] = "other" if index in in_other else section
+    found: dict[int, str] = {}
+    label = False  # under a line that is only the Education section's name
+    for index in range(len(kinds)):
+        kind, words = kinds[index]
+        if kind == "section":
+            label = False
+        if index not in place:
+            continue
+        named = _section_of(words) if kind in ("entry", "bold", "text") else None
+        if named is not None:
+            label = named == "education" and place[index] != "education"
+        if place[index] in ("education", "summary"):
+            continue
+        if label:
+            found[index] = place[index]
+        if not _DEGREE.search(words):
+            continue
+        near = [item for item in (index - 1, index, index + 1) if place.get(item) == place[index]]
+        if all(any(mark.search(kinds[item][1]) for item in near) for mark in (_SCHOOL, _YEARS)):
+            found.update({item: place[item] for item in near if item == index or _SCHOOL.search(kinds[item][1]) or _YEARS.search(kinds[item][1])})
+    for index in sorted(found):
+        last = result.education[-1] if result.education else None
+        # One block: the lines that follow each other in one section, with no other content line between them.
+        if last is not None and last[2] == found[index] and not any(item in result.content for item in range(last[1] + 1, index)):
+            result.education[-1] = (last[0], index, last[2])
+        else:
+            result.education.append((index, index, found[index]))
 
 
 def _normalized_lines(text: str) -> _Normalized:
@@ -582,6 +653,7 @@ def _normalized_lines(text: str) -> _Normalized:
         else:
             result.read_as[index] = "entry_line"
             out.append(f"- {words}{tail}")  # text after an entry's bullets: a line of that entry
+    _education_looking(result, kinds, {index: found[0] for index, found in named.items()})
     return result
 
 
@@ -687,10 +759,13 @@ def read_resume_lines(text: str) -> ResumeReading:
     draft = MasterDraft(list(merged.values()))
     # Never silent: a content line that is in nothing above is named too.
     left = {index: normal.left.get(index, "unread") for index in normal.content if index not in read}
+    # 0.1.11.4 item 9d: lines that look like education are said only when the file gave no Education entry at all.
+    schooled = any(section.name == "education" and section.entries for section in draft.sections)
     return ResumeReading(
         draft, len(normal.content), section_lines, spans, tuple((left[index], index + 1) for index in sorted(left)),
         tuple((index + 1, heading[:_HEADING_SHOWN], section, how) for index, heading, section, how in normal.sections),
         tuple((how, index + 1) for index, how in sorted(normal.read_as.items())),
+        () if schooled else tuple((first + 1, last + 1, section) for first, last, section in normal.education),
     )
 
 
@@ -796,6 +871,14 @@ class SourceSelection:
     skills: tuple[str, ...]
 
 
+def education_message(first: int, last: int, section: str, profiles: tuple[str, ...] = ()) -> str:
+    """``education: lines 31-32 of your file were kept in Other, not as a degree``: line numbers and a section, never the text."""
+
+    lines = f"line {first}" if first == last else f"lines {first}-{last}"
+    of = f"the resume of {', '.join(profiles)}" if profiles else "your file"
+    return f"education: {lines} of {of} {'was' if first == last else 'were'} kept in {section.capitalize()}, not as a degree"
+
+
 @dataclass(frozen=True)
 class SourceLines:
     """What became of every content line of the resumes (a line that is not blank and not only a comment).
@@ -811,12 +894,18 @@ class SourceLines:
     kept: int = 0
     folded: tuple[tuple[str, int], ...] = ()
     #: ``(the source's key, its profiles, its content lines, ((reason, file line), ...), the section headings read as
-    #: another section, the lines kept where they had no place)`` per resume, in the sources' order (``ResumeReading``).
-    resumes: tuple[tuple[str, tuple[str, ...], int, tuple[tuple[str, int], ...], tuple[tuple[int, str, str, str], ...], tuple[tuple[str, int], ...]], ...] = ()
+    #: another section, the lines kept where they had no place, the lines that look like education and are not an
+    #: Education entry)`` per resume, in the sources' order (``ResumeReading``).
+    resumes: tuple[
+        tuple[
+            str, tuple[str, ...], int, tuple[tuple[str, int], ...], tuple[tuple[int, str, str, str], ...], tuple[tuple[str, int], ...],
+            tuple[tuple[int, int, str], ...],
+        ], ...,
+    ] = ()
 
     @property
     def left_out(self) -> dict[str, int]:
-        found = [reason for _key, _profiles, _lines, left, _sections, _read_as in self.resumes for reason, _line in left]
+        found = [reason for _key, _profiles, _lines, left, *_read in self.resumes for reason, _line in left]
         return {reason: found.count(reason) for reason in LEFT_OUT_REASONS}
 
     def to_json(self) -> dict[str, object]:
@@ -842,8 +931,14 @@ class SourceLines:
                         {"how": how, "why": READ_AS[how], "lines": [line for found, line in read_as if found == how]}
                         for how in READ_AS if any(found == how for found, _line in read_as)
                     ],
+                    # 0.1.11.4 item 9d: lines that look like education and are not an Education entry, when the master
+                    # this gives has no Education entry: where they are, by line number (never their text).
+                    "education": [
+                        {"first": first, "last": last, "section": section, "message": education_message(first, last, section, profiles)}
+                        for first, last, section in education
+                    ],
                 }
-                for _key, profiles, lines, left, sections, read_as in self.resumes
+                for _key, profiles, lines, left, sections, read_as, education in self.resumes
             ],
         }
 
@@ -1052,7 +1147,7 @@ def plan_migration(sources: list[SourceResume], *, base: Master | None = None, a
     if base is not None:
         take(draft_master(base.markdown()), "")
     merge.lines_in = merge.exact = 0  # the base master's own lines are not lines coming in
-    read: list[tuple[str, tuple[str, ...], int, tuple[tuple[str, int], ...], tuple[tuple[int, str, str, str], ...], tuple[tuple[str, int], ...]]] = []
+    read: list[tuple] = []  # SourceLines.resumes, a row for each source
     for source in sources:
         try:
             reading = read_resume_lines(source.text)
@@ -1062,7 +1157,7 @@ def plan_migration(sources: list[SourceResume], *, base: Master | None = None, a
         merge.kept += reading.section_lines
         take(reading.draft, source.key)
         left = sorted([*reading.left_out, *(("contact", line) for line in source.contact_lines)], key=lambda item: item[1])
-        read.append((source.key, source.profiles, reading.lines + len(source.contact_lines), tuple(left), reading.sections, reading.read_as))
+        read.append((source.key, source.profiles, reading.lines + len(source.contact_lines), tuple(left), reading.sections, reading.read_as, reading.education))
     unknown = sorted(set(merge.answers) - {question.question_id for question in merge.questions})
     if unknown:
         raise MasterResumeError("migration_answer_unknown", "no question has the id " + ", ".join(unknown) + "; run it again without --answer to read the questions")
@@ -1071,6 +1166,9 @@ def plan_migration(sources: list[SourceResume], *, base: Master | None = None, a
         raise MasterResumeError("migration_answer_invalid", "an answer is a, b or both (" + ", ".join(wrong) + ")")
     assignment = assign_ids(merge.draft, base)
     master = build_master(merge.draft)
+    if any(entry.section == "education" for entry in master.entries.values()):
+        # The master has its education (another resume gave it, or the master stored already): nothing to say.
+        read = [(*row[:6], ()) for row in read]
 
     def ids(held: list[object]) -> tuple[str, ...]:
         return tuple(dict.fromkeys(str(item.id) for item in held))  # type: ignore[attr-defined]
@@ -1094,7 +1192,7 @@ def file_source_lines(reading: ResumeReading, contact_lines: tuple[int, ...] = (
 
     left = sorted([*reading.left_out, *(("contact", line) for line in contact_lines)], key=lambda item: item[1])
     lines = reading.lines + len(contact_lines)
-    return SourceLines(lines, reading.lines - len(reading.left_out), (), (("", (), lines, tuple(left), reading.sections, reading.read_as),))
+    return SourceLines(lines, reading.lines - len(reading.left_out), (), (("", (), lines, tuple(left), reading.sections, reading.read_as, reading.education),))
 
 
 __all__ = [
@@ -1112,6 +1210,7 @@ __all__ = [
     "SourceLines",
     "SourceResume",
     "SourceSelection",
+    "education_message",
     "file_source_lines",
     "is_master_file",
     "near_duplicate",

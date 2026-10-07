@@ -125,6 +125,10 @@ class JobResumeFixture:
         self.structured: list[dict] = []  # the assessment's own structured suggestions
         self.master: dict | None = {"revision_id": "rev-fixture", "revision": 1, "content_sha256": "sha256:" + "0" * 64}
         self.record_served = True  # False: the route answers `record: null`
+        #: 0.1.11.4 item 9d: what the server says about the master's education (`master_education`); None: it says nothing.
+        self.master_education: bool | None = None
+        #: Laid over the stored resume as it is served (a function of the item, changing it in place), or None.
+        self.lay_over = None
         #: ASSUMED, not the server's today: GET /api/jobs/suggestions carries the pick view's stale list, pages, conflicts and proposed.
         self.serve_view = True
         #: What the page sent to the three N5 routes, in order.
@@ -184,6 +188,8 @@ class JobResumeFixture:
             # them from the list when they are there (jobResumeModel.suggestionsAnswer); this flag is the assumption, in one place.
             view = self.pick_view()
             body.update({key: view[key] for key in ("stale", "picked", "conflicts", "added_by_code", "proposed", "selection_error", "resume")})
+        if self.master_education is not None:
+            body.update({"basis": "master", "master_stored": True, "master_education": self.master_education})  # `job_actions.OPEN_KEYS`
         return body
 
     def _users(self) -> bool:
@@ -241,6 +247,8 @@ class JobResumeFixture:
             item["producer"] = {**item.get("producer", {}), "callable": "scout.pick"}
         for line in (item.get("selection") or {}).get("picked", []):
             line.update(self.relabel.get(line["id"], {}))
+        if self.lay_over is not None:
+            self.lay_over(item)
         return item
 
     # ------------------------------------------------------------------ the routes

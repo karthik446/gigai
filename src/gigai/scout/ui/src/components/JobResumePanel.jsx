@@ -13,7 +13,7 @@ import {
 import { jobFilePath, openFolderNote } from "../resumesFolderModel.js";
 import { TAILORED_WORDING } from "../wording.js";
 import { latestStored, newerStored } from "../tailoredResumeModel.js";
-import { conflictOf } from "../masterModel.js";
+import { NO_EDUCATION_TEXT, conflictOf } from "../masterModel.js";
 import {
   DRAFT_LABEL,
   NO_MASTER_TEXT,
@@ -26,6 +26,7 @@ import {
   gateHolds,
   holdSentence,
   isUsersResume,
+  needsEducationNotice,
   pickErrorText,
   proposedChange,
   provenanceLine,
@@ -535,6 +536,11 @@ export default function JobResumePanel({ state, assessment, gate, items, reasses
           <p className="muted small" data-role="tailored-wording">
             {TAILORED_WORDING}
           </p>
+          {needsEducationNotice(record, stored) && (
+            <p data-role="no-education">
+              {NO_EDUCATION_TEXT} This resume prints none: <a href={MASTER_HASH}>add it on the Master page</a>.
+            </p>
+          )}
           {folderFile && (
             <p className="muted small" data-testid="jobs-folder-file">
               In your jobs folder: <code>{folderFile}</code>{" "}

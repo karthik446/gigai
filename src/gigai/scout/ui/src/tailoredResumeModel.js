@@ -33,6 +33,45 @@ export function displayText(text) {
   return stripped || raw.trim();
 }
 
+// 0.1.11.4 item 9: a role none of whose lines is shown is listed on ONE line, in a block "Earlier experience" at the
+// end of Experience (a mirror of tailored_resume.heading_only_line / heading_only / render_markdown). In the stored
+// result such a role is an Experience entry with its heading lines (the master's own, each with its master id) and
+// no bullet.
+export const EARLIER_HEADING = "Earlier experience";
+const ROLE_DATES = /\b(?:19|20)\d\d\b|\bPresent\b/i;
+
+function rolePart(text) {
+  const shown = displayText(text).split(/\s+/).filter(Boolean).join(" ");
+  const at = shown.lastIndexOf(" | ");
+  return at >= 0 && ROLE_DATES.test(shown.slice(at + 3)) ? [shown.slice(0, at), shown.slice(at + 3)] : [shown, ""];
+}
+
+// "Senior Full Stack Developer, USDA | Feb 2016 - Jan 2017": the title (the first line under the employer), the
+// employer, and the first dates any of the heading lines names. A part the resume does not give is left out.
+export function headingOnlyLine(heading) {
+  const parts = (Array.isArray(heading) ? heading : []).filter((line) => String(line || "").trim() !== "").map(rolePart);
+  if (parts.length === 0) {
+    return "";
+  }
+  const what = [parts.length > 1 ? parts[1][0] : "", parts[0][0]].filter(Boolean).join(", ");
+  const dates = (parts.find(([, when]) => when) || ["", ""])[1];
+  return [what, dates].filter(Boolean).join(" | ");
+}
+
+// The entries of an Experience section that print as one line each: no bullet, and a heading that is a line of the
+// MASTER (its ref carries the master id). An entry with no bullet in a resume tailored from a profile's own resume
+// (0.1.10) prints as it always did, its heading in its place.
+export function headingOnlyEntries(section) {
+  if (!section || section.heading !== "experience") {
+    return [];
+  }
+  return (section.entries || []).filter((entry) => {
+    const heading = (entry && entry.heading) || [];
+    const refs = heading.length > 0 && Array.isArray(heading[0].refs) ? heading[0].refs : [];
+    return heading.length > 0 && (entry.bullets || []).length === 0 && refs.some((ref) => ref && ref.kind === "resume" && typeof ref.item_id === "string" && ref.item_id !== "");
+  });
+}
+
 // --- what changed (uat-bug-044) ------------------------------------------
 // Every rewritten line cites the resume lines it came from and each ref
 // carries that source text, so the originals are derived from the response
@@ -198,8 +237,12 @@ export function previewLines(result, markdown = "") {
     // 0.1.11.4 UI1 item 11: a section that holds entries (an Other section's earlier roles) prints them, and one that
     // holds lines prints those, whatever its heading: nothing the stored resume holds is left out of the preview.
     const entries = section.entries || [];
+    const earlier = headingOnlyEntries(section);
     if (ENTRY_SECTIONS.has(section.heading) || entries.length > 0) {
       entries.forEach((entry, entryIndex) => {
+        if (earlier.includes(entry)) {
+          return; // listed below, on one line (EARLIER_HEADING)
+        }
         (entry.heading || []).forEach((line, index) => {
           const shown = displayText(line.text);
           out.push(
@@ -224,6 +267,19 @@ export function previewLines(result, markdown = "") {
         });
         out.push({ kind: "blank" });
       });
+      if (earlier.length > 0) {
+        // The roles with no line shown: one line each, after the roles that show lines, the way the markdown and the PDF print them.
+        out.push({ kind: "heading", level: 3, earlier: true, display: `### ${EARLIER_HEADING}`, text: EARLIER_HEADING });
+        out.push({ kind: "blank" });
+        earlier.forEach((entry) => {
+          const shown = headingOnlyLine(entry.heading.map((line) => line.text));
+          const refs = entry.heading.flatMap((line) => (Array.isArray(line.refs) ? line.refs : []));
+          const row = contentLine({ kind: "copy", text: shown, refs }, shown, `${section.heading} entry ${entries.indexOf(entry) + 1} heading`, "text", shown, true);
+          row.earlier = true;
+          out.push(row);
+        });
+        out.push({ kind: "blank" });
+      }
     }
     if (!ENTRY_SECTIONS.has(section.heading)) {
       const lines = section.lines || [];

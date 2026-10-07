@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   getMaster,
   getMasterHistory,
@@ -12,12 +12,16 @@ import {
 } from "../api.js";
 import MasterSelections from "../components/MasterSelections.jsx";
 import {
+  ADD_EDUCATION_LABEL,
   ANSWER_LABELS,
   ENTRY_SECTIONS,
   LINE_WORD,
+  NO_EDUCATION_TEXT,
+  NO_EDUCATION_WHY,
   afterWriteLine,
   answersComplete,
   conflictOf,
+  educationRows,
   entryWhen,
   errorText,
   fileLine,
@@ -25,6 +29,7 @@ import {
   historyRows,
   importAnywayOf,
   leftOutRows,
+  masterHasNoEducation,
   masterSections,
   migrationState,
   migrationSummary,
@@ -229,9 +234,18 @@ function AddLine({ label, target, write, busy }) {
   );
 }
 
-function EntryForm({ initial, submit, busy, onDone, onCancel }) {
+// `school`: the form adds a school (its placeholders say so). `focus`: a number that moves when the page asks for
+// this form ("Add education"): the form scrolls into view and its first field takes the cursor.
+function EntryForm({ initial, submit, busy, onDone, onCancel, school = false, focus = 0 }) {
   const [heading, setHeading] = useState(initial ? initial.heading : "");
   const [when, setWhen] = useState(initial ? (initial.sublines || []).join("\n") : "");
+  const first = useRef(null);
+  useEffect(() => {
+    if (focus > 0 && first.current) {
+      first.current.scrollIntoView({ block: "center" });
+      first.current.focus({ preventScroll: true });
+    }
+  }, [focus]);
   const ready = heading.trim() !== "";
   return (
     <form
@@ -244,8 +258,8 @@ function EntryForm({ initial, submit, busy, onDone, onCancel }) {
         }
       }}
     >
-      <input aria-label="Employer, project or school" value={heading} placeholder="Employer, project or school" onChange={(event) => setHeading(event.target.value)} disabled={busy} />
-      <textarea aria-label="Title and dates" rows={2} value={when} placeholder="Staff Engineer | Jun 2022 - Present" onChange={(event) => setWhen(event.target.value)} disabled={busy} />
+      <input ref={first} aria-label="Employer, project or school" value={heading} placeholder={school ? "School" : "Employer, project or school"} onChange={(event) => setHeading(event.target.value)} disabled={busy} />
+      <textarea aria-label="Title and dates" rows={2} value={when} placeholder={school ? "Degree | Year" : "Staff Engineer | Jun 2022 - Present"} onChange={(event) => setWhen(event.target.value)} disabled={busy} />
       <div className="card-actions">
         <button type="submit" className="button small" data-action="save-entry" disabled={busy || !ready}>
           {busy ? "Saving…" : "Save"}
@@ -337,6 +351,7 @@ function Migration({ onMade }) {
   const state = migrationState(plan);
   const questions = plan ? plan.questions || [] : [];
   const leftOut = leftOutRows(plan);
+  const education = educationRows(plan);
   return (
     <section className="panel" data-role="master-migration" data-migration-state={state}>
       <h2>Make your master resume</h2>
@@ -359,6 +374,20 @@ function Migration({ onMade }) {
                 {leftOut.map((row) => (
                   <li key={row.key} data-reason={row.reason}>
                     The resume of {row.resume}, {row.lines}: {row.why}.
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
+          {education.length > 0 && (
+            <>
+              <p className="muted small">
+                Looks like education, but not read as a degree, so the master would have no education. You can add it on this page once the master is made:
+              </p>
+              <ul className="story-postings" data-role="migration-education">
+                {education.map((row) => (
+                  <li key={row.key} data-section={row.section}>
+                    {row.text}.
                   </li>
                 ))}
               </ul>
@@ -559,6 +588,9 @@ export default function MasterView({ reloadProfiles = null }) {
 
   const sections = useMemo(() => masterSections(master), [master]);
   const file = fileLine(body ? body.file : null);
+  // 0.1.11.4 item 9d: "Add education" opens the school form of the Education section and takes the cursor there.
+  const [educationAsked, setEducationAsked] = useState(0);
+  const noEducation = masterHasNoEducation(master);
 
   if (body === null) {
     return (
@@ -608,6 +640,14 @@ export default function MasterView({ reloadProfiles = null }) {
           <span className="master-strength backed">B</span> backed by a story or an answer · <span className="master-strength quantified">#</span> states a number ·{" "}
           <span className="master-strength stated">·</span> stated
         </p>
+        {noEducation && (
+          <div className="callout" data-role="no-education">
+            <strong>{NO_EDUCATION_TEXT}</strong> {NO_EDUCATION_WHY}{" "}
+            <button type="button" className="button small" data-action="add-education" onClick={() => setEducationAsked((count) => count + 1)} disabled={busy}>
+              {ADD_EDUCATION_LABEL}
+            </button>
+          </div>
+        )}
         {notice && (
           <div className="callout info" data-role="master-notice">
             {notice}
@@ -641,7 +681,7 @@ export default function MasterView({ reloadProfiles = null }) {
               {group.entries.map((entryGroup) => (
                 <Entry key={entryGroup.entry.id} group={entryGroup} body={body} write={write} busy={busy} />
               ))}
-              <AddEntry section={group.section} write={write} busy={busy} />
+              <AddEntry section={group.section} write={write} busy={busy} asked={group.section === "education" ? educationAsked : 0} />
             </>
           ) : (
             <>
@@ -659,9 +699,14 @@ export default function MasterView({ reloadProfiles = null }) {
   );
 }
 
-function AddEntry({ section, write, busy }) {
+function AddEntry({ section, write, busy, asked = 0 }) {
   const [open, setOpen] = useState(false);
   const word = section === "experience" ? "role" : section === "projects" ? "project" : "school";
+  useEffect(() => {
+    if (asked > 0) {
+      setOpen(true);
+    }
+  }, [asked]);
   if (!open) {
     return (
       <button className="button small secondary" data-action="add-entry" onClick={() => setOpen(true)} disabled={busy}>
@@ -672,6 +717,8 @@ function AddEntry({ section, write, busy }) {
   return (
     <EntryForm
       busy={busy}
+      school={section === "education"}
+      focus={asked}
       submit={(heading, sublines) => write((revision) => postMasterEntry({ revision, section, heading, sublines }))}
       onDone={() => setOpen(false)}
       onCancel={() => setOpen(false)}

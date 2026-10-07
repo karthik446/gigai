@@ -688,7 +688,9 @@ _MIGRATION_NOTE = (
     "lists what the privacy strip left out of a resume by profile, kind and line number, never a value. `migration.source_lines` says what became "
     "of EVERY line of the resumes (a line that is not blank; headings, role lines and each line of a wrapped bullet count): `in` = `kept` (in the "
     "master) + `folded` (the master holds it already; `folded_by_reason`) + `left_out` (`left_out_by_reason`), and per resume the lines left out, "
-    "by `reason`, a sentence saying `why`, and their line numbers in the stored resume, never their text. Read it before answering: a line "
+    "by `reason`, a sentence saying `why`, and their line numbers in the stored resume, never their text. `resumes[].education` (0.1.11.4): the "
+    "lines that look like education (a heading that names it, or a degree with a school and a year) and did not become an Education entry, when "
+    "the master would have none: `first`, `last` (line numbers), the `section` that holds them and a `message`; a report only. Read it before answering: a line "
     "the reader left out is not in the master. `file` (after a write): where the master went in the resumes folder. Local only: no model call."
 )
 _SELECTION_STATUS: dict[str, object] = {
@@ -1214,7 +1216,7 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
         {
             "schema_version": "scout-job-suggestions-response:1", "job_identity": _JOB_URL, "profile_id": "prof_1", "updated_at": "2026-10-05T10:05:00Z",
             "gate": {"decision": "suggest", "ready": True, "reasons": []}, "counts": {"open": 1, "done": 0, "dismissed": 0},
-            "verdict": "matched_above_threshold", "basis": "master", "master_stored": True, "stale": ["master_newer"],
+            "verdict": "matched_above_threshold", "basis": "master", "master_stored": True, "master_education": True, "stale": ["master_newer"],
             "picked": {"picked_by": "model", "fallback": None, "draft": False, "made_at": "2026-10-05T10:05:00Z", "pages": 2, "max_pages": 2,
                        "pick_rules_version": "pick-rules:1", "selector_version": "sel-6"},
             "problems": [], "added_by_code": [], "conflicts": [], "selection_error": None, "proposed": None, "selected_lines": ["b-8aef71"],
@@ -1291,7 +1293,7 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
         "POST", "/api/job-resumes/pick", "Take one explicit step on a job's resume: pick again, make a draft, shorten it, or take or drop the proposed one.", "write", "none",
         {
             "schema_version": "scout-job-resume-pick:1", "action": "refresh", "job_identity": _JOB_URL, "profile_id": "prof_1", "verdict": "matched_above_threshold",
-            "gate": {"decision": "suggest", "ready": True, "reasons": []}, "basis": "master", "master_stored": True, "stale": [],
+            "gate": {"decision": "suggest", "ready": True, "reasons": []}, "basis": "master", "master_stored": True, "master_education": True, "stale": [],
             "resume": {
                 "updated_at": "2026-10-05T10:07:00Z", "made_by": "scout.pick", "edited": None, "replaceable": True, "lines": 41,
                 "counts": {"picked": 28, "left_out": 30, "cut_for_length": 3}, "folder_path": "~/Documents/GigAI/resumes/acme-software-engineer-2026-10-05.md",

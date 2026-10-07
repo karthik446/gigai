@@ -87,6 +87,8 @@ export function suggestionsAnswer(suggestions, view = null) {
     // What a resume for this job is made from now ("master" | "profile_resume"), and whether a master is stored at all.
     resume_basis: pick ? text(pick.basis) || null : null,
     master_stored: pick && typeof pick.master_stored === "boolean" ? pick.master_stored : null,
+    // 0.1.11.4 item 9d: the master holds an Education entry (null: no master, or a server that does not say).
+    master_education: pick && typeof pick.master_education === "boolean" ? pick.master_education : null,
     suggestions: body ? list(body.suggestions) : [],
   };
   const stale = pick && Array.isArray(pick.stale) ? pick.stale.filter((code) => typeof code === "string") : null;
@@ -310,6 +312,19 @@ export function printedIds(stored) {
   return ids;
 }
 
+// 0.1.11.4 item 9d: true when the stored resume prints an Education section (an entry or a line of it).
+export function resumeHasEducation(stored) {
+  return list(stored && stored.result && stored.result.sections).some(
+    (section) => text(section && section.heading).toLowerCase() === "education" && list(section.entries).length + list(section.lines).length > 0,
+  );
+}
+
+// The resume card's one-line notice "Your master has no education": only when the server says the master holds none
+// AND the stored resume prints none. Never when either has it, and never when the server does not say.
+export function needsEducationNotice(record, stored) {
+  return Boolean(stored) && object(record) !== null && record.master_education === false && !resumeHasEducation(stored);
+}
+
 // How many content lines the resume prints (headings and the header are not lines).
 export function printedLineCount(stored) {
   return resumeLines(stored && stored.result).length;
@@ -489,6 +504,10 @@ export function attentionItems({ record = null, assessment = null, stored = null
       line = `${plural(lines.length || 1, "pinned line does", "pinned lines do")} not fit ${max} pages`;
     } else if (conflict.code === "skills_do_not_fit") {
       line = `your Skills section does not fit ${max} pages whole: some groups were cut`;
+    } else if (conflict.code === "earlier_roles_do_not_fit") {
+      // 0.1.11.4 item 9: an old role that is not listed even by its one heading line. The pick's own sentence when it
+      // carries one ("2 older roles are not listed on this resume, not even by a single heading line: ...").
+      line = text(conflict.message) || `some earlier roles could not be listed on ${max} pages: there was no room left for their heading lines`;
     } else if (conflict.code === "over_page_limit") {
       line = `the resume is over ${max} pages and nothing more can be cut`;
     } else {

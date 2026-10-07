@@ -103,8 +103,14 @@ def _emit(payload: dict[str, object]) -> None:
     click.echo(json.dumps(payload, sort_keys=True, separators=(",", ":")))
 
 
+#: 0.1.11.4 item 9d: a master with no school in it says so, with the command that adds one (the page says the same words).
+NO_EDUCATION = "Your master has no education."
+ADD_EDUCATION = 'gigai scout resume master add --heading SCHOOL --role "DEGREE | YEAR" --section education'
+
+
 def echo_reading(resume: dict[str, object], of: str) -> None:
-    """How one resume was read where that is worth saying (``source_lines.resumes[]``): the headings read as another section, the lines kept where they had no place."""
+    """How one resume was read where that is worth saying (``source_lines.resumes[]``): the headings read as another
+    section, the lines kept where they had no place, and the lines that look like education and are not a degree."""
 
     sections = [
         f"line {row['line']} \"{row['heading']}\" as {str(row['section']).capitalize()}"
@@ -115,6 +121,11 @@ def echo_reading(resume: dict[str, object], of: str) -> None:
         click.echo(f"  Section headings of {of}: " + "; ".join(sections) + ".")
     for row in resume.get("read_as", ()):  # type: ignore[union-attr]
         click.echo(f"  In {of}: line {', '.join(str(line) for line in row['lines'])}: {row['why']}.")
+    education = list(resume.get("education", ()))  # type: ignore[union-attr, call-overload]
+    for row in education:
+        click.echo(f"  {row['message']}.")
+    if education:
+        click.echo(f"  If that is your education, add it as a degree: `{ADD_EDUCATION}`.")
 
 
 def echo_contact_removed(removed) -> None:  # noqa: ANN001 - a master_store.ContactRemoved
@@ -242,6 +253,9 @@ def master_show_command(
                 click.echo(f"    {line(item)}")
         for item in (item for item in items if item.section == name and item.entry_id is None):
             click.echo(f"  {line(item)}")
+    if wanted in (None, "education") and entry_id is None and not any(entry.section == "education" for entry in master.entries.values()):
+        # 0.1.11.4 item 9d: a resume picked from this master prints no education, because the master holds none.
+        click.echo(f"\n{NO_EDUCATION} Add it: `{ADD_EDUCATION}`.")
     said = status_line(file)
     if said:
         click.echo(f"\n{said}")
