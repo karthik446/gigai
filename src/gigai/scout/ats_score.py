@@ -146,8 +146,9 @@ def _row_order_text(frags: list[tuple[int, int, float, str, float]]) -> str:
 def _entries_intact(text: str, markdown: str) -> float:
     """Share of source role lines ("Title | dates") that come out with title and dates adjacent.
 
-    1 when the source has no such line: nothing to split."""
-    roles = _ROLE_LINE.findall(markdown)
+    1 when the source has no such line: nothing to split.  A degree's one line (0.1.11.5 (d): ``### School | Degree
+    | dates``) is read as its last part and its dates (``Degree``, ``dates``): the school is the entry's heading."""
+    roles = [(title.rsplit(" | ", 1)[-1], dates) for title, dates in _ROLE_LINE.findall(markdown)]
     if not roles:
         return 1.0
     ok = sum(1 for title, dates in roles if re.search(re.escape(title) + r"\s+" + re.escape(dates).replace("\\ ", r"\s+"), text))

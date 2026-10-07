@@ -36,6 +36,7 @@ from gigai.scout.resume_display import (
 from gigai.scout.resumes_folder import file_name
 from gigai.scout.tailored_resume import (
     EARLIER_HEADING,
+    EARLIER_TITLE_MIN,
     ENTRY_SECTIONS,
     LENGTH_RULE,
     MAX_EARLIER_LINES,
@@ -46,6 +47,7 @@ from gigai.scout.tailored_resume import (
     TailoredResume,
     TailorResponse,
     _display,
+    degree_line,
     heading_only,
     heading_only_line,
     is_earlier_heading,
@@ -87,8 +89,11 @@ def _covered(line: TailoredLine) -> set[int]:
     return {n for ref in line.refs if ref.kind == "resume" for n in (ref.line, *ref.continued_lines)}
 
 
-def _paragraphs(lines: tuple[TailoredLine, ...]) -> list[dict[str, object]]:
+def _paragraphs(lines: tuple[TailoredLine, ...], *, prose: bool = False) -> list[dict[str, object]]:
     """Real bullets stay bullets; consecutive non-bullet lines (a hard-wrapped paragraph) join into one.
+
+    ``prose`` (the Summary, 0.1.11.5 (d)): no line is a bullet, so the section is one plain paragraph with no
+    bullet and no indent, as ``parse_resume_markdown`` reads a Summary.
 
     A copy line is stored EXPANDED to its wrapped continuation lines (``tailored_resume._resume_ref``), so a
     hard-wrapped paragraph copied line by line stores line 1 = 1..n, line 2 = 2..n, ...; a copy whose first
@@ -104,7 +109,7 @@ def _paragraphs(lines: tuple[TailoredLine, ...]) -> list[dict[str, object]]:
             continue
         if replaced_line(line).kind == "copy":
             printed |= _covered(replaced_line(line))
-        if _source_is_bullet(line):
+        if not prose and _source_is_bullet(line):
             out.append({"text": text, "bullet": True})
         elif out and not out[-1]["bullet"]:
             out[-1]["text"] = f"{out[-1]['text']} {text}"
@@ -116,18 +121,72 @@ def _paragraphs(lines: tuple[TailoredLine, ...]) -> list[dict[str, object]]:
 _TAG_SEPARATORS = re.compile(r"\s*[·;]\s*|\s*,\s*(?![^()]*\))")
 
 
+_SLASH = re.compile(r"\s*/\s*")
+
+
 def _tags(paragraphs: list[dict[str, object]]) -> list[str]:
-    """Skills as unique chips: split on middle dots, semicolons and commas outside parentheses (a slash group
-    such as ``Docker/Kubernetes`` stays one tag, as the resume writes it); order kept, case-insensitive dedupe."""
+    """The Skills names, each once, in the section's order (what the posting asks for first: the selection's order).
+
+    Split on middle dots, semicolons and commas outside parentheses.  The template prints them as plain
+    comma-separated lines (0.1.11.5 (d); ``resume.typ`` ``skills``).
+
+    NO SKILL TWICE: a name the list already holds is left out (case-insensitive), and so is a single skill of a
+    slash group that an earlier name already printed: after ``Python/Ruby``, ``Ruby/Rails`` prints as ``Rails`` and
+    ``Ruby`` not at all.  The single skills of a name are the selector's (``master_selection.skill_atoms``: ``CI/CD``
+    and ``A/B testing`` stay whole).  Nothing is added, and no skill the section names is lost by this rule."""
+    from .master_selection import skill_atoms  # lazy: the selector imports the resume's contract, not this module
+
     seen: set[str] = set()
     tags: list[str] = []
     for paragraph in paragraphs:
         for part in _TAG_SEPARATORS.split(str(paragraph["text"])):
             tag = part.strip().rstrip(".").strip()
-            if tag and tag.casefold() not in seen:
-                seen.add(tag.casefold())
-                tags.append(tag)
+            if not tag or tag.casefold() in seen:
+                continue
+            atoms = skill_atoms(tag)
+            seen.add(tag.casefold())
+            if len(atoms) > 1 and "(" not in tag and [atom.casefold() for atom in atoms] == [part.strip().casefold() for part in _SLASH.split(tag)]:
+                # A slash group: its skills not printed yet, still as one group.
+                fresh = [atom for atom in atoms if atom.casefold() not in seen]
+                if not fresh:
+                    continue
+                if len(fresh) < len(atoms):
+                    tag = "/".join(fresh)
+                    seen.add(tag.casefold())
+            seen.update(atom.casefold() for atom in atoms)
+            tags.append(tag)
     return tags
+
+
+def _degree_heading(texts: list[str]) -> list[dict[str, str]] | None:
+    """An Education entry's heading as the template sets it (0.1.11.5 (d)): ONE line, ``School | Degree`` with the
+    years at the right margin, then any further heading line as it is.  ``None``: the lines cannot be one
+    (``tailored_resume.degree_line``), and the entry prints as before."""
+    degree = degree_line(texts)
+    if degree is None:
+        return None
+    school, detail, dates = (_flat(part) for part in degree)
+    single = len([text for text in texts[:2] if text.strip()]) < 2
+    return [{"text": school, "detail": detail, "dates": dates}, *(_heading_line(text) for text in texts[1 if single else 2:])]
+
+
+def _entry(section: str, texts: list[str], bullets: list[str]) -> dict[str, object]:
+    """One entry in the template's shape; ``texts``: its heading lines.  The ONE place an entry's shape is decided,
+    for a stored resume (``_body``) and for resume markdown (``parse_resume_markdown``)."""
+    degree = _degree_heading(texts) if section == "education" else None
+    if degree is not None:
+        return {"heading": degree, "bullets": bullets, "oneline": True}
+    return {"heading": [_heading_line(text) for text in texts], "bullets": bullets}
+
+
+def _earlier_entry(roles: list[str]) -> dict[str, object]:
+    """The block of roles shown by their heading alone: one line a role.  Under its title (``EARLIER_HEADING``) when
+    it lists ``EARLIER_TITLE_MIN`` roles or more; with fewer it has no title (0.1.11.5 (d): a plain continuation of
+    Experience) and the template sets its lines after the last role with the gap between two entries."""
+    lines = [_heading_line(role) for role in roles]
+    if len(lines) < EARLIER_TITLE_MIN:
+        return {"heading": lines, "bullets": [], "untitled": True}
+    return {"heading": [{"text": EARLIER_HEADING, "dates": ""}, *lines], "bullets": []}
 
 
 def _heading_line(text: str) -> dict[str, str]:
@@ -152,14 +211,13 @@ def _body(result: TailoredResume) -> list[dict[str, object]]:
                 if any(entry is role for role in earlier):
                     continue
                 # A copied bullet (the model's copy or a no-loss fallback, 0110-006) prints without its own "- ".
-                entries.append({"heading": [_heading_line(l.text) for l in entry.heading], "bullets": [_flat(shown_text(l)) for l in entry.bullets]})
+                entries.append(_entry(section.heading, [l.text for l in entry.heading], [_flat(shown_text(l)) for l in entry.bullets]))
             if earlier:
-                # 0.1.11.4 item 9: a role with no line shown is ONE line (title, employer | dates) under its own heading,
-                # after the roles that show lines.  The same block ``render_markdown`` writes and the parser below reads.
-                roles = [_heading_line(heading_only_line([l.text for l in entry.heading])) for entry in earlier]
-                entries.append({"heading": [{"text": EARLIER_HEADING, "dates": ""}, *roles], "bullets": []})
+                # 0.1.11.4 item 9: a role with no line shown is ONE line (title, employer | dates), after the roles that
+                # show lines.  The same block ``render_markdown`` writes and the parser below reads.
+                entries.append(_earlier_entry([heading_only_line([l.text for l in entry.heading]) for entry in earlier]))
         else:
-            lines = _paragraphs(section.lines)
+            lines = _paragraphs(section.lines, prose=section.heading == "summary")
         tags = _tags(lines) if section.heading == "skills" else []
         # Organisation names print in capitals (the type scale); a project title keeps its own case (names, URLs).
         caps = section.heading in ("experience", "education")
@@ -273,9 +331,9 @@ def clamp_scale(value: float) -> float:
     return min(SPACING_MAX, max(SPACING_MIN, float(value)))
 
 
-#: How tight a render makes a SAVED spacing so the resume stays on its page limit (``_render``'s ``max_pages``) before
-#: it lays the Skills out compactly; only when that is not enough does it go on down to ``SPACING_MIN``, the spacing
-#: the length rule measures at.  A saved scale below it is used as saved.
+#: How tight a render first makes a SAVED spacing so the resume stays on its page limit (``_render``'s ``max_pages``);
+#: only when that is not enough does it go on down to ``SPACING_MIN``, the spacing the length rule measures at.  A
+#: saved scale below it is used as saved.
 FIT_FLOOR = 0.8
 
 
@@ -385,20 +443,17 @@ def _render(
 ) -> RenderedPdf:
     """``header`` ``None``: no header, a blank block of the header's height reserved (an agent's PDF).
 
-    ``max_pages`` (0.1.11.3) is the resume's page limit, the one its pick was fitted to: a render that would run
-    past it at the saved spacing takes the loosest spacing down to ``FIT_FLOOR`` that stays on it, then the same
-    with the Skills chips compact (the template's ``compact_tags``), then compact down to ``SPACING_MIN``.  That
-    is what holds a resume to its pages when its estimate did not (a pick made before 0.1.11.3 item 15 measured
-    with a two-line header's block; a saved spacing may be looser than the estimate's 0.9; a contact line may wrap
-    twice): this is where those are absorbed.
-    A resume that already fits renders exactly as before.  One that cannot be put there renders as its layout
-    says, with ``RenderedPdf.note``.
+    ``max_pages`` (0.1.11.3) is the resume's page limit: a render that would run past it at the saved spacing takes
+    the loosest spacing down to ``FIT_FLOOR`` that stays on it, then down to ``SPACING_MIN``.  That is what holds a
+    resume to its pages when a saved spacing is looser than it needs or a contact line wraps twice.  (Until
+    0.1.11.5 (d) there was a step between the two, the Skills chips set compactly; the Skills are plain lines now
+    and have no second form.)  A resume that already fits renders exactly as before.  One that cannot be put there
+    renders as its layout says, with ``RenderedPdf.note``.
 
     ``fixed`` (0.1.11.5): ``spacing_scale`` is the person's own choice for THIS job (the job page's slider) and is
-    used as given: nothing tightens it.  A resume over its limit there still gets the compact Skills at that same
-    spacing, else the note.  ``images``: the same document as one PNG a page (the job page's preview) in place of
-    the PDF.  ONE definition: the preview and the PDF go through this function, so at the same header and spacing
-    they are the same layout and the same pages."""
+    used as given: nothing tightens it; over its limit there, the note.  ``images``: the same document as one PNG a
+    page (the job page's preview) in place of the PDF.  ONE definition: the preview and the PDF go through this
+    function, so at the same header and spacing they are the same layout and the same pages."""
     root = resources.files("gigai.scout").joinpath("data", "resume")
     with ExitStack() as stack:
         directory = str(stack.enter_context(resources.as_file(root)))
@@ -426,12 +481,9 @@ def _render(
         scale, pages = placed(data)
         note = None
         if max_pages is not None and pages is not None and pages > max_pages:
-            compact = {**data, "compact_tags": True} if any(section["tags"] for section in sections) else data
-            for floor in (() if compact is data else (FIT_FLOOR,)) + (() if fixed else (SPACING_MIN,)):
-                tight_scale, tight_pages = placed(compact, floor)
-                if tight_pages is not None and tight_pages <= max_pages:
-                    data, scale, pages = compact, tight_scale, tight_pages
-                    break
+            tight_scale, tight_pages = (scale, pages) if fixed else placed(data, SPACING_MIN)
+            if tight_pages is not None and tight_pages <= max_pages:
+                scale, pages = tight_scale, tight_pages
             else:
                 note = over_limit_note(pages, max_pages, scale if fixed else None)
         if images:
@@ -485,10 +537,13 @@ def parse_resume_markdown(markdown: str) -> tuple[str, list[dict[str, object]]]:
       ``- `` lines are its bullets;
     * in Experience, the entry ``### Earlier experience`` (``tailored_resume.EARLIER_HEADING``) is the block of the
       roles shown by their heading alone: each plain line under it is one role (``Title, Employer | dates``), up to
-      ``MAX_EARLIER_LINES``;
+      ``MAX_EARLIER_LINES``; the PDF prints the block's title only when it lists ``EARLIER_TITLE_MIN`` roles or more
+      (``_earlier_entry``);
+    * in Education, a degree is set on ONE line (``_entry``): written as ``### School`` with ``Degree | 2010 -
+      2012`` under it (what ``render_markdown`` writes), or as ``### School | Degree | 2010 - 2012``;
     * in Summary, Skills and Other, ``- `` lines and plain lines are the content: Summary prints as
-      prose (lines with no blank line between them join into one paragraph), Skills as tags, and in
-      Other a ``- `` line is a bullet and a plain line a paragraph;
+      prose (lines with no blank line between them join into one paragraph), Skills as plain comma-separated
+      lines (each skill once, ``_tags``), and in Other a ``- `` line is a bullet and a plain line a paragraph;
     * a plain line right under a bullet continues that bullet (a hard wrap);
     * a trailing ``<!-- ... -->`` comment (the source refs) is dropped, text prints literally (inline
       markdown is not interpreted), and anything above the first ``## `` is NOT printed: the PDF header
@@ -516,7 +571,11 @@ def parse_resume_markdown(markdown: str) -> tuple[str, list[dict[str, object]]]:
         if not heading or (not lines and not entries):
             return
         tags = _tags(lines) if heading == "skills" else []
-        shown = [{"heading": [_heading_line(text) for text in entry["heading"]], "bullets": entry["bullets"]} for entry in entries]  # type: ignore[union-attr]
+        shown = [
+            _earlier_entry(entry["heading"][1:]) if heading == "experience" and is_earlier_heading(entry["heading"][0])  # type: ignore[index]
+            else _entry(heading, entry["heading"], entry["bullets"])  # type: ignore[arg-type]
+            for entry in entries
+        ]
         sections.append({"heading": heading.upper(), "lines": [] if tags else lines, "tags": tags, "entries": shown, "caps": heading in ("experience", "education")})
 
     for number, raw in enumerate(raw_lines, 1):
@@ -608,7 +667,7 @@ def printed_text(markdown: str) -> str:
         out.extend(str(line["text"]) for line in section["lines"])  # type: ignore[union-attr]
         out.extend(str(tag) for tag in section["tags"])  # type: ignore[union-attr]
         for entry in section["entries"]:  # type: ignore[union-attr]
-            out.extend(" ".join(part for part in (item["text"], item["dates"]) if part) for item in entry["heading"])
+            out.extend(" ".join(part for part in (item["text"], item.get("detail", ""), item["dates"]) if part) for item in entry["heading"])
             out.extend(str(bullet) for bullet in entry["bullets"])
     return "\n".join(out)
 

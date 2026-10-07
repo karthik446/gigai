@@ -49,9 +49,12 @@ GOLDEN: dict[str, tuple[str, str]] = {
     # header (``resume_pdf.HEADER_RESERVE_LINES``), so the 3-page resume loses a third old role (Harrow Analytics) to
     # print on 2 pages with the name and contact line on it.  Before (the commit before P4):
     # sha256:4a3e6dbf... (JSON), sha256:e2023da0... (markdown).  ``control`` and ``helm_terse_answer`` fit and are unchanged.
+    # 0.1.11.5 (d), the same ONE case again: the PDF sets the Skills as plain lines and a degree on one line, so the
+    # estimate has room for that third role and the case is back, byte for byte, at the digests of before item 15
+    # (with item 15 they were sha256:41ddaf29... and sha256:06c4afce...).
     "over_long": (
-        "sha256:41ddaf29d2a130348e291c1e2b57c0a6efdfe339a9e812ea45d98ce93718dbc0",
-        "sha256:06c4afcea8aecea58a8237352ed08e6adaebef18f9ef75935eee8bc5e768fbd6",
+        "sha256:4a3e6dbf8a39bdb732e2c827862e14a5d4ae099d8b2e3224e2176fa78f546875",
+        "sha256:e2023da068e589dc654ac7616b9eb380f5322a4b2146cb5b65fed47d5aa2af59",
     ),
 }
 

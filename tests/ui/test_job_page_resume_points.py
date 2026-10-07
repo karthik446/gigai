@@ -194,14 +194,16 @@ def test_a_point_is_edited_removed_and_added_beside_the_preview_and_the_preview_
     assert ui.requests_after("open", "/api/master") == 0, "the master is read when 'Add a point' is opened or a point is edited, not before"
     _shot(ui, "1-opened")
 
-    # --- the slider is left at 0.90: saved for the job, and the count below is at that spacing ---
+    # --- the slider is left at 0.85: saved for the job, and the count below is at that spacing ---
+    # (0.90 until 0.1.11.5 (d): the Skills as plain lines and a degree on one line then put the restored resume on
+    # the cut one's pages there, and Restore must move the count.)
     ui.page.locator(SLIDER).focus()
     ui.page.keyboard.press("Home")
-    for _ in range(4):  # 0.70 -> 0.90
+    for _ in range(3):  # 0.70 -> 0.85
         ui.page.keyboard.press("ArrowRight")
-    ui.page.locator(f'{PREVIEW}[data-state="ready"][data-spacing="0.90"]').wait_for()
+    ui.page.locator(f'{PREVIEW}[data-state="ready"][data-spacing="0.85"]').wait_for()
     ui.settle()
-    assert json.loads(layout.read_text(encoding="utf-8")) == {"spacing_percent": 90}
+    assert json.loads(layout.read_text(encoding="utf-8")) == {"spacing_percent": 85}
     spacing = layout.read_bytes()
     # THE BASELINE: the pages of the resume as it is stored, at the spacing the person left. The pick counted none.
     base = _shown(ui)["pages"]
@@ -318,7 +320,7 @@ def test_a_point_is_edited_removed_and_added_beside_the_preview_and_the_preview_
             break
     grown, held = _shown(ui), _held(ui)
     assert base + 1 > 2, "the grown resume must be over its 2 pages, or the 'over' sentence below proves nothing"
-    assert (grown["pages"], grown["count"], grown["over"], grown["spacing"]) == (base + 1, _count(base + 1), "true", "0.90"), f"{len(added)} added points did not move the page count: {grown['count']}"
+    assert (grown["pages"], grown["count"], grown["over"], grown["spacing"]) == (base + 1, _count(base + 1), "true", "0.85"), f"{len(added)} added points did not move the page count: {grown['count']}"
     assert "Move the slider left to reach 2 pages." in (ui.page.locator(COUNT).text_content() or "")
     assert all(master[item_id].text in grown["text"] for item_id in added) and victim_text not in grown["text"]
     assert grown["points"] == before["points"] + len(added) == _printed(held) and grown["tabs"] == _tabs(held)
@@ -337,7 +339,7 @@ def test_a_point_is_edited_removed_and_added_beside_the_preview_and_the_preview_
     assert ui.page.locator(f'{PANEL} [data-action="view-clean"]').get_attribute("aria-pressed") == "true", "a resume with a changed point did not reopen on Preview"
     _ready(ui, pages=base + 1)
     reloaded = _shown(ui)
-    assert (reloaded["count"], reloaded["spacing"], reloaded["points"], reloaded["tabs"]) == (_count(base + 1), "0.90", grown["points"], grown["tabs"]), reloaded
+    assert (reloaded["count"], reloaded["spacing"], reloaded["points"], reloaded["tabs"]) == (_count(base + 1), "0.85", grown["points"], grown["tabs"]), reloaded
     texts = ui.page.locator(f'{POINT} [data-role="point-text"]').evaluate_all("(boxes) => boxes.map((box) => box.value)")
     assert FIRST in texts and SECOND in texts and victim_text not in texts and all(master[item_id].text in texts for item_id in added)
     assert ui.writes_after("reloaded") == [f"POST {PREVIEW_ROUTE}"], "a reload wrote something"

@@ -2056,6 +2056,35 @@ def heading_only_line(heading: Sequence[str]) -> str:
     return " | ".join(part for part in (what, dates) if part)
 
 
+#: 0.1.11.5 (d): the block prints its title only when it lists this many roles or more.  With fewer, its lines print
+#: as a plain continuation of Experience (the same one line a role, newest first, no title of their own).  A rule of
+#: how the block is SET (the PDF and the preview); the markdown keeps the block under its heading.
+EARLIER_TITLE_MIN = 4
+
+
+def degree_line(heading: Sequence[str]) -> tuple[str, str, str] | None:
+    """One degree as ONE line (0.1.11.5 (d)): ``(school, degree, years)`` from an Education entry's heading lines.
+
+    How a degree is SET (the PDF and the preview).  The markdown keeps the school's line and the degree's line as
+    the resume has them: they are what a hand-back copies unchanged.
+    ``heading``: the entry's first line (the school), and its second when it has one (``M.S., Information Systems |
+    2010 - 2012``); or the one line a person may write instead (``School | Degree | 2010 - 2012``).  Every part is the
+    resume's own words; a part it does not give is ``""``.  ``None`` when the two lines cannot be one (both carry
+    dates): they then print as they are."""
+
+    lines = [text for text in heading[:2] if text.strip()]
+    if not lines:
+        return None
+    school, years = _role_part(lines[0])
+    if len(lines) == 1:
+        school, _sep, degree = school.partition(" | ")
+        return school, degree, years
+    degree, degree_years = _role_part(lines[1])
+    if years and degree_years:
+        return None
+    return school, degree, degree_years or years
+
+
 def is_earlier_heading(text: str) -> bool:
     """``text`` (an entry heading, with or without its markdown marker) is the heading of the heading-only block."""
 
@@ -2859,6 +2888,8 @@ def save_tailor_response(response: TailorResponse, *, home_root: Path | None = N
 
 __all__ = [
     "EARLIER_HEADING",
+    "EARLIER_TITLE_MIN",
+    "degree_line",
     "ENTRY_SECTIONS",
     "EPHEMERAL_RESUME_KEY",
     "FALLBACK_FLAGS",

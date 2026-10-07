@@ -122,7 +122,7 @@ def test_the_pipeline_scores_scouts_own_realistic_render_at_least_90_with_no_fai
 
 
 @pytest.mark.parametrize("names", ["spaced", "one_word"])
-def test_a_headerless_pdf_scores_like_a_headered_one_and_chips_are_plain_characters(
+def test_a_headerless_pdf_scores_like_a_headered_one_and_the_skills_are_plain_characters(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, names: str,
 ) -> None:
     fx = _processed(tmp_path, monkeypatch, names)
@@ -134,8 +134,8 @@ def test_a_headerless_pdf_scores_like_a_headered_one_and_chips_are_plain_charact
         rendered, file_name = stored_resume_pdf(tailored, home_root=fx.home_root, form=form)
         scored[kind] = ats_score.score(rendered.pdf, tailored.result, keywords, file_name=file_name)
         text = _text(rendered.pdf)
-        # The template's chip separator (U+00B7) is in the text a reader gets and is a plain character.
-        assert "Python · Go · Terraform" in " ".join(text.split()), text
+        # The Skills are comma-separated lines (0.1.11.5 (d); chips with a middle dot until then): plain characters.
+        assert "Python, Go, Terraform" in " ".join(text.split()), text
         assert ("Jordan Example".upper() in text) is (form is not None)
         assert scored[kind].breakdown["format"]["failed"] == [], (kind, scored[kind].line)  # type: ignore[index]
 

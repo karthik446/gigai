@@ -56,7 +56,15 @@ a resume shorter, remove a point on the job's page ("Shorten automatically" and
 No employer is dropped. A role none of whose lines is shown (an older role, usually) is still
 listed, on one line, under **Earlier experience** at the end of the Experience section, newest
 first: `Senior Full Stack Developer, Example Agency | Feb 2016 - Jan 2017`. The title, the
-employer and the dates are your master's own.
+employer and the dates are your master's own. With three such roles or fewer the PDF prints their
+lines right after the last role, with no "Earlier experience" title; with four or more it keeps
+the title.
+
+The PDF sets four blocks to leave room for your points, and changes none of their words: the
+Summary is a plain paragraph; a degree is one line (school, degree, years at the right); the
+Skills are plain comma-separated lines, four at most, with what the posting asks for first and no
+skill twice. A Skills list too long for four lines is first set a little smaller; if it is still
+too long, the skills at the end of the list are not printed (your master keeps them all).
 
 The panel also says where the file is. Each job's resume (markdown) is saved in the job's own folder of your jobs folder
 (`~/Documents/GigAI/jobs` unless you chose another with `gigai scout jobs-folder --set PATH`):

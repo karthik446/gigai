@@ -1,8 +1,12 @@
 """0.1.11.5 (a): the stronger spacing scale, the job page's preview and the job's own saved spacing, on the END outcome.
 
 The operator's case, on synthetic data (``tests/support/resume_spacing_fixture.py``: a 20-bullet job resume in the
-shape of a real pick): at spacing 1.0 it is 3 pages, and the old scale (the gaps alone) could not bring it to 2 at
+shape of a real pick): at spacing 1.0 it was 3 pages, and the old scale (the gaps alone) could not bring it to 2 at
 any spacing. Pinned here, on the PDF that comes back (pypdf reads it) and on Typst's own layout:
+
+(0.1.11.5 (d) then set four blocks in fewer lines (Skills as plain lines, a degree on one line), by design: the
+same resume is 2 pages up to 1.05 and every number below was measured again; that what is NOT one of those blocks
+did not move at 1.0 and above is pinned in ``test_resume_layout_blocks.py``.)
 
 - AT 1.0 AND ABOVE NOTHING MOVES: where the resume ends is what the template before this change measured, to the
   last digit, and a body line is 14.3pt from the next;
@@ -50,10 +54,13 @@ FORM = {
     "name": "Zora Quillfeather", "email": "zora.quillfeather@example.invalid", "phone": "+1 (555) 010-0142", "location": "Nowhere Springs, Colorado",
     "github": "zora-quillfeather", "linkedin": "zora-quillfeather", "work_authorization": "H-1B, requires sponsorship",
 }
-#: Where the 20-bullet resume ends (page, fill of that page) as the template BEFORE 0.1.11.5 measured it.
-BEFORE = {1.0: (3, 0.36040462427745673), 1.2: (3, 0.3851156069364162), 1.4: (3, 0.40982658959537577)}
-#: Role bullets that fit on 2 pages, with the header's room kept (measured 2026-10-07; before: 19 at 0.7, 14 at 1.0).
-ROOM = {0.7: 28, 0.85: 20, 1.0: 14, 1.4: 11}
+#: Where the 20-bullet resume ends (page, fill of that page) at 1.0 and above.  Before 0.1.11.5 (d) the template
+#: measured (3, 0.3604...), (3, 0.3851...), (3, 0.4098...) and part (a) pinned those; part (d) moved them on purpose
+#: (measured 2026-10-07).
+BEFORE = {1.0: (2, 0.9829624277456647), 1.2: (3, 0.04132947976878614), 1.4: (3, 0.19315317919075148)}
+#: Role bullets that fit on 2 pages, with the header's room kept (measured 2026-10-07 after part (d); part (a):
+#: 28 / 20 / 14 / 11; before 0.1.11.5: 19 at 0.7, 14 at 1.0).
+ROOM = {0.7: 30, 0.85: 25, 1.0: 21, 1.4: 17}
 
 
 def _pages(pdf: bytes) -> int:
@@ -101,10 +108,10 @@ def test_below_one_the_lines_tighten_down_to_the_readable_floor_and_the_type_nev
 def test_the_slider_range_moves_a_twenty_bullet_resume_by_many_bullets() -> None:
     assert {spacing: _fits(spacing) for spacing in ROOM} == ROOM
     assert ROOM[SPACING_MIN] - ROOM[1.0] >= 5 and ROOM[SPACING_MIN] - ROOM[SPACING_MAX] >= 5
-    # The 20-bullet resume: 3 pages at 1.0, 2 pages inside the range.
-    assert measure_markdown(PICKED, spacing_scale=1.0, printed=True)[0] == 3 and measure_markdown(PICKED, spacing_scale=0.85, printed=True)[0] == 2
+    # The 20-bullet resume: 3 pages at 1.2, 2 pages inside the range.
+    assert measure_markdown(PICKED, spacing_scale=1.2, printed=True)[0] == 3 and measure_markdown(PICKED, spacing_scale=0.85, printed=True)[0] == 2
     # A page ESTIMATE (what a pick and the length rule budget with) keeps the full line height: it counts as it did.
-    assert {spacing: measure_markdown(PICKED, spacing_scale=spacing) for spacing in (0.7, 0.85)} == {0.7: (3, pytest.approx(0.05865751445086707)), 0.85: (3, pytest.approx(0.09280491329479769))}
+    assert {spacing: measure_markdown(PICKED, spacing_scale=spacing) for spacing in (0.7, 0.85)} == {0.7: (2, pytest.approx(0.9080881502890178)), 0.85: (2, pytest.approx(0.9455252890173411))}
 
 
 def _invoke(fx: PipelineFixture, *args: str) -> dict:
@@ -178,7 +185,7 @@ def test_the_preview_opens_fitted_on_two_pages_and_saves_nothing(fx: PipelineFix
     before = _home_files(fx)
     opened = server.preview(header=FORM)
     assert (opened["pages"], opened["max_pages"], opened["saved"], opened["note"]) == (2, 2, False, None)
-    assert SPACING_MIN <= opened["spacing_scale"] < 1.0 and opened["spacing"] == {"min": SPACING_MIN, "max": SPACING_MAX, "step": 0.05}
+    assert opened["spacing_scale"] == 1.05 and opened["spacing"] == {"min": SPACING_MIN, "max": SPACING_MAX, "step": 0.05}
     # Asked again it is the same spacing, and the PDF that names no spacing is rendered at it: the same 2 pages.
     assert server.preview(header=FORM)["spacing_scale"] == opened["spacing_scale"]
     fitted = server.pdf(header=FORM)
@@ -207,20 +214,19 @@ def test_the_preview_and_the_pdf_are_the_same_pages_at_every_spacing(fx: Pipelin
         # Without a header the count is the headerless PDF's (a blank block of the header's height is kept).
         assert server.preview()["pages"] == _pages(server.pdf().content)
         counts[spacing] = shown["pages"]
-    # 0.9 is 2 pages with the Skills laid out compactly (the render does that at the spacing given before it says "3 pages").
-    assert counts == {0.7: 2, 0.8: 2, 0.85: 2, 0.9: 2, 1.0: 3, 1.2: 3, 1.4: 3}
+    assert counts == {0.7: 2, 0.8: 2, 0.85: 2, 0.9: 2, 1.0: 2, 1.2: 3, 1.4: 3}
 
 
 def test_a_spacing_that_does_not_reach_two_pages_says_three_pages_plainly(fx: PipelineFixture, server: _Server) -> None:
-    loose = server.preview(header=FORM, spacing_scale=1.0)
-    assert (loose["pages"], loose["max_pages"], loose["spacing_scale"]) == (3, 2, 1.0), "the slider's spacing was not used as given"
-    assert loose["note"].startswith("This resume takes 3 pages at spacing 1.00: its limit is 2 pages. Move the spacing slider")
-    pdf = server.pdf(header=FORM, spacing_scale=1.0)
+    loose = server.preview(header=FORM, spacing_scale=1.2)
+    assert (loose["pages"], loose["max_pages"], loose["spacing_scale"]) == (3, 2, 1.2), "the slider's spacing was not used as given"
+    assert loose["note"].startswith("This resume takes 3 pages at spacing 1.20: its limit is 2 pages. Move the spacing slider")
+    pdf = server.pdf(header=FORM, spacing_scale=1.2)
     assert _pages(pdf.content) == 3 and pdf.headers["x-gigai-fit-note"] == loose["note"]
     for bad in (0.5, 1.6, "1.0", True):
         refused = server.client.post("/api/tailored-resumes/preview", json={**server.key, "spacing_scale": bad})
         assert refused.status_code == 422 and refused.json()["error"]["code"] == "invalid_value"
-    assert job_spacing(tailored_resume_path(fx.home_root, fx.target, fx.profile_id, JOB)) == 1.0, "a refused spacing was saved"
+    assert job_spacing(tailored_resume_path(fx.home_root, fx.target, fx.profile_id, JOB)) == 1.2, "a refused spacing was saved"
 
 
 def test_a_slider_move_is_saved_for_this_job_and_nothing_else_is_written(fx: PipelineFixture, server: _Server, tmp_path: Path) -> None:
