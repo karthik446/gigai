@@ -337,7 +337,10 @@ def test_the_job_read_says_open_then_closed_and_never_asks_about_a_row_already_r
 
     opened = client.get("/api/jobs", params={"url": url})
     assert opened.status_code == 200, opened.text
-    assert opened.json()["liveness"] == {"state": "open", "checked_at": opened.json()["liveness"]["checked_at"], "closed_at": None, "note": None}
+    assert opened.json()["liveness"] == {
+        "state": "open", "checked_at": opened.json()["liveness"]["checked_at"], "closed_at": None, "note": None,
+        "company_page": "unknown", "company_page_note": None, "board_url": None,  # 7b: a URL on the board's own host has neither
+    }
     assert opened.json()["posting"]["removed_at"] is None
     assert client.get("/api/jobs", params={"url": url}).json()["liveness"]["state"] == "open"
     assert boards.requests == ["boards-api.greenhouse.io/v1/boards/acme/jobs/471"], "the page asked the board twice within the hour"

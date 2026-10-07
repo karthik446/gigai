@@ -748,7 +748,10 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
             "work_mode_fit": None,
             "h1b": None,
             "index_posting": None,
-            "liveness": {"state": "open", "checked_at": "2026-10-06T10:00:00Z", "closed_at": None, "note": None},
+            "liveness": {
+                "state": "open", "checked_at": "2026-10-06T10:00:00Z", "closed_at": None, "note": None,
+                "company_page": "unknown", "company_page_note": None, "board_url": None,
+            },
             "assessments": [{
                 "source": "run", "run_id": "run_20260929T100000Z", "profile_id": None, "verdict": "matched_above_threshold",
                 "matrix": [{"requirement": "Helm", "class": "list_item", "status": "unclear", "resume_evidence": []}],
@@ -782,7 +785,16 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
             "410 is closed; Lever and Ashby: the board's list, closed only when a list that answered 200 no longer has the posting), "
             "none within an hour of the last answer and none for a posting already removed; anything else the board says (5xx, 429, a "
             "redirect, a timeout) is unknown and changes nothing. A closed posting of the index gets `removed_at` (GET /api/postings "
-            "then lists it only with `removed=1`); a job that is no index posting is only reported. Aggregates the newest run posting, its rank, every run or quick "
+            "then lists it only with `removed=1`); a job that is no index posting is only reported. "
+            "`liveness.board_url` is the posting's address on its board, built from the index's board token and posting id "
+            "(Greenhouse `https://job-boards.greenhouse.io/<token>/jobs/<id>`, Lever `https://jobs.lever.co/<token>/<id>`, Ashby "
+            "`https://jobs.ashbyhq.com/<token>/<id>`), when the stored URL is the company's own page (any host that is not the "
+            "board's) and the posting is not closed; null otherwise, and always null for a job with no index posting. For such a "
+            "posting whose board answered open, this read (and no other route, never a batch) makes ONE more request, a GET of the "
+            "stored URL, at most once an hour per job: `liveness.company_page` is down (404 or 410) | ok (2xx) | unknown (anything "
+            "else: 5xx, 429, a redirect, a timeout; not asked; the check is off), and `liveness.company_page_note` is \"The company "
+            "page for this job is down; the job is still open on the board\" when it is down (null otherwise). A company page that "
+            "is down never closes or removes the posting: `state` stays open and `removed_at` stays null. Aggregates the newest run posting, its rank, every run or quick "
             "assessment of the job (with the requirement matrix), the questions still unanswered, stored tailored resumes, the job's "
             "state with the events it accepts next, and the action links. The UI route `#/jobs/<posting url>` maps to this route. "
             "A job no run acquired is joined to its index posting by the URL alone, whatever host it is on (a Greenhouse board "
