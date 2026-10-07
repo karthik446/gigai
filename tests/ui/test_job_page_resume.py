@@ -262,7 +262,13 @@ def test_a_job_tailored_by_0_1_10_keeps_its_resume_and_says_who_made_it(ui, scou
     ui.step("mine-stale")
     assert (stale.locator('[data-role="edited-keeps"]').text_content() or "").strip() == "You edited this resume: a new pick will wait beside it, yours stays until you use it."
     assert ui.page.locator(f'{PANEL} [data-role="proposed"]').count() == 0
+    # 0.1.11.5: the card opens on Preview always, and says "Making the preview…" until its pages are rendered. The
+    # resume's text is read once the render is there (the preview's own state and its page count), never before: a
+    # text read mid-render held that sentence and could not equal the one read after the re-pick.
+    rendered = ui.page.locator(f'{PANEL} [data-testid="resume-preview"][data-state="ready"] [data-role="preview-pages"]')
+    rendered.wait_for()
     kept = (ui.page.locator(f"{PANEL} .md-preview, {PANEL} .clean-wrap").first.text_content() or "").strip()
+    assert kept and "Making the preview" not in kept, kept[:200]
     with ui.page.expect_request(lambda request: request.method == "POST" and urlsplit(request.url).path == "/api/job-resumes/pick") as repick:
         stale.locator('[data-action="repick"]').click()
     waits = ui.page.locator(f'{PANEL} [data-role="proposed"]')
@@ -271,6 +277,7 @@ def test_a_job_tailored_by_0_1_10_keeps_its_resume_and_says_who_made_it(ui, scou
     assert (waits.locator('[data-action="use-proposed"]').text_content() or "").strip() == "Use it"
     assert "Yours stays as it is until you take the new one." in (waits.text_content() or "")
     assert ui.page.locator(PANEL).get_attribute("data-origin") == "old_tailor", "the resume shown is still the user's"
+    rendered.wait_for()
     assert (ui.page.locator(f"{PANEL} .md-preview, {PANEL} .clean-wrap").first.text_content() or "").strip() == kept
     ui.settle()
     assert mine.picks == [{"job_url": demo.hero_job, "profile_id": demo.hero_profile_id, "action": "refresh"}]
