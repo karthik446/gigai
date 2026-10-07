@@ -322,8 +322,7 @@ def selection_refresh_command(
         basis = f"{_n(change.postings, 'matching posting')} in the local index" if change.source != "titles" and change.postings else "its titles (no matching posting in the local index)"
         verb = ("would be " if dry_run else "") + ("its first selection" if change.action == "first" else "refreshed")
         moved = f"; +{len(change.added)} -{len(change.removed)} against what it showed" if change.action == "refreshed" else ""
-        fit = "" if change.fits else f" (DOES NOT FIT {change.pages} pages after every cut the rules allow)"
-        click.echo(f"Profile {change.label}: {verb} from {basis}: {size}{pages}{fit}{moved}.")
+        click.echo(f"Profile {change.label}: {verb} from {basis}: {size}{pages}{moved}.")
         if change.written:
             click.echo("    The profile's resume is now this selection.")
 

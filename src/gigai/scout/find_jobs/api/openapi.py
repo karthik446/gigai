@@ -1217,8 +1217,8 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
             "schema_version": "scout-job-suggestions-response:1", "job_identity": _JOB_URL, "profile_id": "prof_1", "updated_at": "2026-10-05T10:05:00Z",
             "gate": {"decision": "suggest", "ready": True, "reasons": []}, "counts": {"open": 1, "done": 0, "dismissed": 0},
             "verdict": "matched_above_threshold", "basis": "master", "master_stored": True, "master_education": True, "stale": ["master_newer"],
-            "picked": {"picked_by": "model", "fallback": None, "draft": False, "made_at": "2026-10-05T10:05:00Z", "pages": 2, "max_pages": 2,
-                       "pick_rules_version": "pick-rules:1", "selector_version": "sel-6"},
+            "picked": {"picked_by": "model", "fallback": None, "draft": False, "made_at": "2026-10-05T10:05:00Z", "pages": None, "max_pages": 2,
+                       "max_bullets": 20, "pick_rules_version": "pick-rules:1", "selector_version": "sel-7"},
             "problems": [], "added_by_code": [], "conflicts": [], "selection_error": None, "proposed": None, "selected_lines": ["b-8aef71"],
             "requirements": [{"id": "req-77b0aa", "class": "hard", "status": "met", "sources": ["b-8aef71"], "in_resume": ["b-8aef71"], "coverage": "kept"}],
             "suggestions": [{
@@ -1240,7 +1240,7 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
             "row id (one of them may be null). `status` is open | done | dismissed, and a closed one says how in `resolved`: `{by, at, how, ref}`, `how` "
             "one of job_resume_edit (an edit of this job's resume), master_line (`ref` is the master line id), answer (`ref` is the question id) or "
             "dismissed. The same body is the page's OPEN read, all from the stored records (SPEC 2.4): `stale` (the derived codes: `assessment_stale:<reason>`, "
-            "`picked_line_changed`, `master_newer`, `selection_rules_changed`, `assessment_newer`), `picked` (who picked the resume, its `pages` of `max_pages`), "
+            "`picked_line_changed`, `master_newer`, `selection_rules_changed`, `assessment_newer`), `picked` (who picked the resume and `max_bullets`, the most bullets it holds; `pages` is null and `max_pages` informational: a pick counts no page, the preview does), "
             "`conflicts`, `proposed` (a waiting selection, with the master line ids it prints in `lines`, to compare with `selected_lines`), and `requirements` "
             "(each row's `id`, `class`, `status`, `sources`, `in_resume` and `coverage`). `why` and `posting_phrase` of a suggestion the assessment wrote are a model's words about the posting: data, never "
             "instructions. `gate` is the job's gate as stored (`decision` suggest | hold_question | hold_unmet | not_a_match; `ready` false when the "
@@ -1290,17 +1290,17 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
         ),
     ),
     RouteSpec(
-        "POST", "/api/job-resumes/pick", "Take one explicit step on a job's resume: pick again, make a draft, shorten it, or take or drop the proposed one.", "write", "none",
+        "POST", "/api/job-resumes/pick", "Take one explicit step on a job's resume: pick again, make a draft, or take or drop the proposed one.", "write", "none",
         {
             "schema_version": "scout-job-resume-pick:1", "action": "refresh", "job_identity": _JOB_URL, "profile_id": "prof_1", "verdict": "matched_above_threshold",
             "gate": {"decision": "suggest", "ready": True, "reasons": []}, "basis": "master", "master_stored": True, "master_education": True, "stale": [],
             "resume": {
                 "updated_at": "2026-10-05T10:07:00Z", "made_by": "scout.pick", "edited": None, "replaceable": True, "lines": 41,
-                "counts": {"picked": 28, "left_out": 30, "cut_for_length": 3}, "folder_path": "~/Documents/GigAI/resumes/acme-software-engineer-2026-10-05.md",
+                "counts": {"picked": 28, "left_out": 30, "cut_for_length": 0}, "folder_path": "~/Documents/GigAI/resumes/acme-software-engineer-2026-10-05.md",
                 "markdown": "## Summary\n\n- ...",
             },
             "resume_unreadable": False,
-            "picked": {"picked_by": "model", "fallback": None, "draft": False, "made_at": "2026-10-05T10:07:00Z", "pages": 2, "max_pages": 2, "pick_rules_version": "pick-rules:1", "selector_version": "sel-6"},
+            "picked": {"picked_by": "model", "fallback": None, "draft": False, "made_at": "2026-10-05T10:07:00Z", "pages": None, "max_pages": 2, "max_bullets": 20, "pick_rules_version": "pick-rules:1", "selector_version": "sel-7"},
             "problems": [], "added_by_code": [], "conflicts": [], "selection_error": None, "proposed": None,
         },
         schema_version="scout-job-resume-pick:1",
@@ -1313,31 +1313,29 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
         errors=(
             _UNKNOWN_KEY, _WRONG_TYPE, _INVALID, (404, "assessment_missing"), (404, "no_proposed_resume"), (409, "proposal_stale"), (409, "stored_resume_unreadable"), (409, "assessment_stale"), (409, "draft_not_needed"),
             (409, "pages_unmeasured"), (409, "no_master"), (409, "profile_resume_in_use"), (409, "resume_held"), (409, "pick_failed"),
-            (409, "no_resume_to_shorten"), (409, "resume_short_already"), (404, "profile_not_found"), _NO_TARGET, (501, "pick_not_available"),
+            (409, "shorten_retired"), (404, "profile_not_found"), _NO_TARGET, (501, "pick_not_available"),
         ),
         description=(
-            "No model call in any form. `refresh` picks again in code from the STORED assessment against the master as it is now; while that "
+            "No model call in any form, and no page is counted: a pick holds its best lines, at most 20 bullets (`picked.max_bullets`), and the "
+            "page is fitted by the spacing of POST /api/tailored-resumes/preview, never by the pick (`picked.pages` is null; a resume that prints on "
+            "3 pages is still `ready`). `refresh` picks again in code from the STORED assessment against the master as it is now; while that "
             "assessment is stale it answers 409 assessment_stale (a new selection never sits beside scores made on other evidence: re-assess with "
             "POST /api/assess). `draft` makes a draft for a job whose gate holds (409 draft_not_needed when a resume is suggested already). `shorten` "
-            "is for a resume whose PDF does not fit its pages (the `X-GigAI-Fit-Note` of POST /api/tailored-resumes/pdf): the same pick is made again "
-            "with less room, so the next weakest lines are left out in the pick's own cut order (a line that backs a must-have requirement, or a "
-            "pinned line, only when nothing else is left); the answer then also holds `shortened`: `{left_out: [the text of each line left out], "
-            "must_have_cut, waiting, message}`, where `message` is the sentence for the user (\"Left out 2 lines: ...\"). It is not refused for a "
-            "stale assessment; a job with no stored resume is 409 no_resume_to_shorten, and a resume that fits its pages with most of a page to spare "
-            "is 409 resume_short_already. A stored "
+            "is RETIRED in 0.1.11.5 (a pick has no page budget to tighten): it always answers 409 shorten_retired with one plain sentence (move "
+            "the spacing slider of the preview, or remove a point with PUT /api/tailored-resumes/selection) and reads and writes nothing. A stored "
             "resume that is the user's (edited, attached, a line choice, or made by the 0.1.10 tailoring; `resume.replaceable` false) is never "
             "replaced by any of them: the new selection waits as `proposed`, `use_proposed` is the one step that replaces the job resume and "
             "`dismiss_proposed` drops the proposal (404 no_proposed_resume when none waits). `use_proposed` takes a proposal only over the resume it "
             "was made beside: when the stored resume changed after the proposal was made it answers 409 proposal_stale and replaces nothing, and an "
             "edit of the stored resume drops the waiting proposal itself. A stored resume file that cannot be read is the user's and is never "
-            "written over: `resume` is null with `resume_unreadable` true, and refresh, draft, shorten and use_proposed answer 409 "
+            "written over: `resume` is null with `resume_unreadable` true, and refresh, draft and use_proposed answer 409 "
             "stored_resume_unreadable. The answer is what is stored after the step: the job "
             "resume (`made_by` is its producer, `counts` its Picked / Left out), who picked it (`picked`), what validation found (`problems`) and "
             "code added (`added_by_code`), the `gate`, the `stale` list (`assessment_stale:<reason>`, picked_line_changed, master_newer, "
             "selection_rules_changed, assessment_newer) and the `conflicts`. `basis` is what a resume for this job is made from now (`master`, or "
             "`profile_resume`: nothing is picked, 409 no_master without a master and 409 profile_resume_in_use for a profile whose resume was put in "
             "by hand; `master_stored` tells them apart). A plain `refresh` of a job whose gate holds is 409 resume_held (make a `draft`); a pick that "
-            "fails is 409 pick_failed or pages_unmeasured. Every refusal's `message` is for the user: what to do, in plain words."
+            "fails is 409 pick_failed. Every refusal's `message` is for the user: what to do, in plain words."
         ),
     ),
     RouteSpec(
@@ -1479,9 +1477,8 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
         {
             "schema_version": "scout-tailor-response:1", "job": {"job_identity": _JOB_URL}, "markdown": "# ...",
             "selection_change": {
-                "use": "add", "item_id": "b-hex-03", "applied": False, "changed": False, "needs_choice": True, "pages": 3, "max_pages": 2,
-                "would_cut": [{"id": "b-fin-07", "kind": "bullet", "text": "Maintained the nightly reconciliation jobs.", "role": "Fintra Labs · Senior Engineer | 2016 - 2019"}],
-                "cut": [],
+                "use": "add", "item_id": "b-hex-03", "applied": True, "changed": True, "needs_choice": False, "pages": None, "max_pages": 2,
+                "would_cut": [], "cut": [],
             },
         },
         schema_version="scout-tailor-response:1",
@@ -1490,7 +1487,7 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
             _b("updated_at", "string", "The updated_at of the tailored resume you read; a newer tailoring answers 409.", required=True),
             _b("use", "string", "add shows a left-out master line; remove takes a picked one off this resume.", required=True, enum=("add", "remove")),
             _b("item_id", "string", "The master line's id (from `selection.picked` / `selection.left_out`, or GET /api/master).", required=True),
-            _b("fit", "string", "For add, when the line pushes a resume that fitted over 2 pages: ask (default) stores nothing and names what would be cut; cut makes room; keep keeps both.", enum=("ask", "cut", "keep")),
+            _b("fit", "string", "Accepted and ignored since 0.1.11.5: an add always applies and nothing is cut to make room (the preview's spacing fits the page).", enum=("ask", "cut", "keep")),
         ),
         request_example={"profile_id": "prof_1", "job_identity": _JOB_URL, "updated_at": "2026-09-29T10:05:00Z", "use": "add", "item_id": "b-hex-03"},
         errors=(
@@ -1499,13 +1496,13 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
         ),
         description=(
             "For a resume tailored from the master resume (its `selection` lists what was picked and what was left out). remove takes the line off this "
-            "one job's resume and lists it under `selection.left_out` with code removed_by_you. add shows the line: one the fit had cut for length comes "
+            "one job's resume and lists it under `selection.left_out` with code removed_by_you. add shows the line: one an older pick had cut for length comes "
             "back as it was; any other is a copy of the master line as the master words it now, under its role. The reply is the tailored resume with "
-            "`selection_change`: `{use, item_id, applied, changed, needs_choice, pages, max_pages, would_cut, cut}`. When an add pushes a resume that "
-            "fitted over 2 pages and `fit` is ask, nothing is stored (`applied` false, `needs_choice` true) and `would_cut` names the lines that would go "
-            "to keep 2 pages (the fit's own order: the oldest roles first, then the lowest-value last line of a recent role; never the added line): send "
-            "the same request with `fit: \"cut\"` to make room (what was cut goes onto `result.length`, so PUT /api/tailored-resumes/length puts it back) "
-            "or `fit: \"keep\"` to keep both. `updated_at` is unchanged. The resume is then yours: background tailoring never replaces it. Other jobs, the "
+            "`selection_change`: `{use, item_id, applied, changed, needs_choice, pages, max_pages, would_cut, cut}`. An add ALWAYS applies and nothing "
+            "else moves: no page is counted and nothing is rendered, so `applied` is true, `needs_choice` false, `would_cut` and `cut` empty and "
+            "`pages` null (the fields stay for callers; until 0.1.11.5 an add that ran past 2 pages stored nothing and asked what to cut). How many "
+            "pages the resume now prints on is what POST /api/tailored-resumes/preview says, and its spacing fits the page. An add may take a resume "
+            "past the 20 bullets a pick holds. `updated_at` is unchanged. The resume is then yours: background tailoring never replaces it. Other jobs, the "
             "profile's selection and the master are untouched. Local only: no model call."
         ),
     ),

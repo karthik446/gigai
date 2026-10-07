@@ -509,7 +509,9 @@ def resume_check(key: Mapping[str, Any], suggestions: Mapping[str, Any], printed
        has at least one of its ``settled_by`` lines printed (the summary id, a
        bullet id, an entry id; a skills id counts when skills are printed);
     2. verbatim: every printed line is a line of the master (skills: a token);
-    3. pages_ok / skills_kept: within the page limit, and every master skill kept;
+    3. pages_ok / skills_kept: within its limit, and every master skill kept.  The limit of a selection stored since
+       0.1.11.5 is its CAP OF BULLETS (``selection.max_bullets``; it counts no page, and its ``pages`` is null): the
+       bullets printed are at most that many.  A selection stored before it is within its page limit, as it was made;
     4. c1: see :func:`c1_check` (the stored resume's selection; a room-fill line printed
        while a picked one is cut, or a recent-role line printed while a picked line a met row rests on is cut).
     """
@@ -538,10 +540,11 @@ def resume_check(key: Mapping[str, Any], suggestions: Mapping[str, Any], printed
             bad.append(text[:60])
     bad += [token[:60] for token in skills if token not in master["skills"]]
     c1 = c1_check(key, suggestions, stored)
-    pages, limit = selection.get("pages"), selection.get("max_pages")
-    pages_ok = isinstance(pages, int) and isinstance(limit, int) and pages <= limit
+    pages, limit, cap = selection.get("pages"), selection.get("max_pages"), selection.get("max_bullets")
+    pages_ok = len(bullets) <= cap if isinstance(cap, int) else isinstance(pages, int) and isinstance(limit, int) and pages <= limit
     kept = sorted(set(master["skills"]) - set(skills))
     return {"covers": not uncovered, "uncovered": uncovered, "verbatim": not bad, "not_verbatim": bad, "pages": pages, "max_pages": limit, "pages_ok": pages_ok,
+            "bullets": len(bullets), "max_bullets": cap if isinstance(cap, int) else None,
             "skills_kept": not kept, "skills_cut": kept[:5], **c1,
             "bar": bool(not uncovered and not bad and pages_ok and not kept and c1["c1"] is not False)}
 

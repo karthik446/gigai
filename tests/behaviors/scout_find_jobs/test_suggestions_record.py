@@ -73,12 +73,36 @@ def test_the_resume_is_ready_when_every_mandatory_row_keeps_a_line_and_nothing_c
     assert check.ready and check.reasons == () and check.lost() == ()
     assert {row.id: row.coverage for row in check.rows}[HELM] == "lost"
     conflict = SimpleNamespace(code="mandatory_evidence_does_not_fit", requirement=GO)
-    skills = SimpleNamespace(code="skills_do_not_fit", requirement=None)
-    held = sg.check_selection(ROWS, ["b-go1", "b-kafka"], conflicts=[conflict, skills])
+    pinned = SimpleNamespace(code="pinned_line_does_not_fit", requirement=None)
+    held = sg.check_selection(ROWS, ["b-go1", "b-kafka"], conflicts=[conflict, pinned])
     assert not held.ready and [reason.to_json() for reason in held.reasons] == [
         {"code": "selection_conflict", "requirement": GO}, {"code": "selection_conflict", "requirement": None},
     ]
     assert sg.check_selection((), ()).ready  # nothing to lose
+
+
+def test_the_page_count_is_never_a_reason_a_stored_page_driven_conflict_leaves_the_resume_ready() -> None:
+    """0.1.11.5 item 1c: the pick knows no page limit. A selection stored before it may hold a conflict the page made
+    (the Skills cut, a heading line cut, still over the limit): it stays in the record and is no reason."""
+
+    assert sg.PAGE_CONFLICTS == {"skills_do_not_fit", "earlier_roles_do_not_fit", "over_page_limit"}
+    stored = [SimpleNamespace(code=code, requirement=None) for code in sorted(sg.PAGE_CONFLICTS)]
+    check = sg.check_selection(ROWS, ["b-go1", "b-kafka"], conflicts=stored)
+    assert check.ready and check.reasons == ()
+    # ... and it never hides a real one beside it.
+    mixed = sg.check_selection(ROWS, ["b-go1", "b-kafka"], conflicts=[*stored, SimpleNamespace(code="mandatory_evidence_does_not_fit", requirement=GO)])
+    assert not mixed.ready and [reason.to_json() for reason in mixed.reasons] == [{"code": "selection_conflict", "requirement": GO}]
+    # Read back from a stored record (``live_selection``): the conflicts are kept as stored, and only the real one is a reason.
+    selection = {"conflicts": [
+        {"code": "skills_do_not_fit", "requirement": None, "lines": [], "cut": True},
+        {"code": "earlier_roles_do_not_fit", "requirement": None, "lines": [], "cut": True, "message": "2 older roles are not listed on this resume"},
+        {"code": "over_page_limit", "requirement": None, "lines": [], "cut": False},
+        {"code": "mandatory_evidence_does_not_fit", "requirement": GO, "lines": ["b-go2"], "cut": True},
+    ]}
+    kept, reasons = sg.live_selection(selection, ["b-go1", "b-kafka"])
+    assert kept["conflicts"] == selection["conflicts"] and [reason.to_json() for reason in reasons] == [{"code": "selection_conflict", "requirement": GO}]
+    kept, reasons = sg.live_selection({"conflicts": selection["conflicts"][:3]}, ["b-go1"])
+    assert len(kept["conflicts"]) == 3 and reasons == ()
 
 
 # --- the record ---------------------------------------------------------------------------------------------------------

@@ -117,19 +117,19 @@ _DISPLAY_IMPORTERS: dict[str, frozenset[str]] = {
         # tailored_resume_edit (0110-10-05 B): checks an edited markdown with resume_pdf's markdown parser (the format's one
         # description) and its line patterns; it renders nothing and never touches resume_display or a header form.
         "gigai.scout.tailored_resume_edit",
-        # master_selection (0.1.10.9 master P2): measures a pick of the master (contact-free at import) HEADERLESS with
-        # resume_pdf.measure_markdown to fit it to the page budget; no header form, no display settings, no model.
+        # master_selection (0.1.10.9 master P2): the page ESTIMATE of a printed profile view (contact-free at import),
+        # HEADERLESS with resume_pdf.measure_markdown; no header form, no display settings, no model. (0.1.11.5 item 1c:
+        # no SELECTION measures a page any more.)
         "gigai.scout.master_selection",
-        # tailor_master (0.1.10.9 master P4): asks the renderer for a page count only (pages_at, headerless) to fit a
-        # tailoring of the master's lines to the page budget; no header form, no display settings.
+        # tailor_master (0.1.10.9 master P4): asks the renderer for a page count only (pages_at, headerless): the page
+        # estimate of a tailor call's fit; no header form, no display settings.
         "gigai.scout.tailor_master",
         # cover_letter (0.1.11.4 C2): sets a cover letter on a page through the resume renderer's own Typst calls and its
         # compact header (`gigai scout cover-letter pdf`); the header's values come as an argument for that ONE PDF
         # (pdf_header_cli), it reads no display setting, and nothing model-bound imports it.
         "gigai.scout.cover_letter",
-        # pick (0.1.11.3 item 15, "Shorten automatically"): asks the renderer for a page count only (pages_at, headerless,
-        # with more header lines kept blank: the tighter budget); no header form, no display settings, no header file.
-        "gigai.scout.pick",
+        # (0.1.11.5 item 1c: gigai.scout.pick is NOT here any more. A pick and a shorten count no page, so the module
+        # no longer imports the renderer at all.)
     }),
 }
 

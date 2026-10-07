@@ -9,15 +9,18 @@ What holds in all 162 cells, and is a hard test here:
 
 - H1 no mandatory requirement of the LABELS is left without a supporting line;
 - H2 adding lines to a master never lowers coverage, strength or the must-keep lines shown;
-- H4 every cell fits 2 pages, with no role printed without a bullet and the roles in date order;
+- H4 every cell holds at most ``master_selection.MAX_PICK_BULLETS`` bullets (here: exactly that many), with no
+  project printed without a bullet and the roles in date order; NO PAGE IS COUNTED (0.1.11.5 item 1c);
 - H5 no met mandatory row of the assessment loses every line it names unless a conflict is reported;
 - H6 no role or project the posting's title names is dropped whole unless a conflict is reported;
 - the same lines in another ORDER give the same selection.
 
-What does not, and is said here instead of hidden: with the same skills grouped differently the Skills line prints at
-another length, and in ONE cell (``agentic`` on the large master) a line the reviewer's labels call must-keep, which
-no row of the assessment names, is the last line that no longer fits.  ``settle`` protects what the assessment names
-and what the profile pins; a label it is never given is not a pin.
+NOTHING IS A RECORDED EXCEPTION ANY MORE (0.1.11.5 item 1c).  While the pick was fitted to 2 pages, three cells lost a
+line the reviewer's labels call must-keep or strong, each time because something else took the page's room: the Skills
+line printed longer once regrouped (``agentic`` large, ``relay-02``), the header's reserve (``sel-5``: ``titlematch``
+small -> medium, ``qui-01`` and T2's strength) and the heading lines of the roles with no bullet (``sel-6``:
+``agentic`` medium -> large, ``relay-02``).  With a cap of bullets and no page, none of them takes a bullet's place:
+all 162 cells are clean, and the test below says so by EQUALITY, so a cell that moves again is seen.
 
 Regression protection on these cases, not a proof that every pick is right.
 """
@@ -29,21 +32,8 @@ import pytest
 from tests.evals import run_pick_eval as ev
 
 POSTINGS = ("agentic", "backend", "leadership", "sre", "titlematch", "weakfit")
-#: The one cell where regrouping the skills lowers a check under ``settle`` (the module text).
-KNOWN_REGROUPED = {"agentic/large/regrouped/settle: must-keep dropped: relay-02"}
 H3 = "H3 order or grouping changed the pick"
 H2 = "H2 adding lines lowered a check"
-#: 0.1.11.3 item 15 (``sel-5``): the page estimate keeps room for the PDF's header (one more line than ``sel-4``), so
-#: the pick prints one line less. In ONE place the line that goes is a line the labels call strong: the medium
-#: master's ``qui-01`` (T2 stays covered, by ``hal-06``, which the labels call support). A recorded exception, by the
-#: coordinator's decision (2026-10-06): the cut order is unchanged here; protecting a row's label-strong source is a
-#: follow-up ticket.
-KNOWN_HEADER_ROOM = {"titlematch/small -> medium/base/settle: weaker evidence: T2", "titlematch/small -> medium/base/settle: must-keep dropped: qui-01"}
-#: 0.1.11.4 item 9 (``sel-6``): a role with no line left keeps its one heading line ("Earlier experience"), and those
-#: lines are in the page that is measured, so a pick with such roles prints a line or two less. In ONE more place the
-#: line that goes is a line the labels say to keep: the large master's ``relay-02`` (no mandatory row loses its
-#: coverage: H1 holds). The same recorded exception as above, for the same follow-up ticket (protect a label-strong line).
-KNOWN_HEADING_ROOM = {"agentic/medium -> large/base/settle: must-keep dropped: relay-02"}
 
 
 @pytest.mark.parametrize("posting", POSTINGS)
@@ -52,13 +42,18 @@ def test_settle_holds_the_hard_tests_in_every_cell_of_a_posting_with_its_assessm
     assert len(results) == len(ev.SIZES) * len(ev.VARIATIONS) == 27
     assert not any(checks.error for checks in results.values()), {key: checks.error for key, checks in results.items() if checks.error}
     failures = ev.hard_failures(results)
-    regrouped = {item for item in failures[H3] if f"/{ev.REGROUPED}/" in item}
-    assert regrouped <= KNOWN_REGROUPED, regrouped
-    assert set(failures[H2]) <= KNOWN_HEADER_ROOM | KNOWN_HEADING_ROOM, failures[H2]
-    assert {name: found for name, found in failures.items() if name not in (H2, H3)} == {name: [] for name in failures if name not in (H2, H3)}, failures
-    assert [item for item in failures[H3] if item not in regrouped] == [], failures[H3]  # a permuted master: the same selection
-    # No conflict was needed anywhere, and every cell is the two pages the fit is for.
-    assert all(checks.conflicts == 0 and checks.pages == 2 for checks in results.values())
+    # Every hard test, with NO recorded exception (the module text): the cells that p15's header reserve, H1's heading
+    # lines and the regrouped Skills line once moved (H2, H3) are clean, because nothing takes a bullet's place now.
+    assert failures == {name: [] for name in failures}, failures
+    # No conflict was needed anywhere, and every cell holds exactly the cap: these masters have more lines than it.
+    assert all(checks.conflicts == 0 and checks.bullets == ev.MAX_PICK_BULLETS == 20 for checks in results.values())
+    assert not any(checks.lost or checks.weak or checks.omitted or checks.cited_lost for checks in results.values())
+
+
+def _bullets(final: dict) -> int:
+    """The bullets a final selection shows under roles and projects (what the cap counts), for the medium master."""
+
+    return sum(len(final["entries"].get(entry, ())) for entry in ev.master_case("medium", "base").entries)
 
 
 def test_the_settle_path_is_the_products_function_and_says_who_picked() -> None:
@@ -67,9 +62,10 @@ def test_the_settle_path_is_the_products_function_and_says_who_picked() -> None:
     key = ev.cell_key("agentic", "medium", "base")
     with_pick = ev.in_children(assessed, ev.REPO)["results"][key][ev.SETTLE]
     without = ev.in_children(plain, ev.REPO)["results"][key]
-    # With an assessment: the stand-in pick, validated and fitted by ``pick.settle``.
+    # With an assessment: the stand-in pick, validated and capped by ``pick.settle``, which lays out nothing.
     assert (with_pick["picked_by"], with_pick["fallback"], with_pick["pick_conflicts"], with_pick["ready"]) == ("model", None, [], True)
-    assert with_pick["pages"] == 2 and with_pick["layouts"] > 0 and not with_pick["empty_entries"] and with_pick["date_order"]
+    assert with_pick["layouts"] == 0 and not with_pick["empty_entries"] and with_pick["date_order"]
+    assert _bullets(with_pick) == ev.MAX_PICK_BULLETS
     # Without one there is no pick: the code selector's selection, through the same function, with the reason.
     assert (without[ev.SETTLE]["picked_by"], without[ev.SETTLE]["fallback"]) == ("code", "no_pick")
     shown = lambda final: (final["summary"], final["entries"], final["other"], final["skills"])  # noqa: E731
@@ -80,7 +76,7 @@ def test_the_settle_path_is_the_products_function_and_says_who_picked() -> None:
     own["cases"][0]["posting"] = {**own["cases"][0]["posting"], "pick": ["b-zzzzzz", "s-lang", *lines]}
     mine = ev.in_children(own, ev.REPO)["results"][key][ev.SETTLE]
     assert mine["picked_by"] == "model" and [problem["code"] for problem in mine["problems"]][:2] == ["unknown_id", "not_selectable"]
-    assert mine["pages"] == 2 and set(lines) <= {line for bullets in mine["entries"].values() for line in bullets} | set(mine["other"])
+    assert _bullets(mine) == ev.MAX_PICK_BULLETS and set(lines) <= {line for bullets in mine["entries"].values() for line in bullets} | set(mine["other"])
 
 
 def test_a_tree_without_settle_answers_an_error_for_that_path_and_the_cell_reads_as_failed() -> None:

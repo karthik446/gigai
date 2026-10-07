@@ -42,15 +42,21 @@ same switched-off step.
 
 > Every line comes from your resume, answers or stories. Read it before you send it.
 
-No employer is dropped to make the resume fit. A role none of whose lines is shown (an older
-role, usually: its lines were cut for length) is still listed, on one line, under **Earlier
-experience** at the end of the Experience section, newest first:
-`Senior Full Stack Developer, Example Agency | Feb 2016 - Jan 2017`. The title, the employer
-and the dates are your master's own. Those lines are counted in the 2 pages, so the resume
-still fits with your name and contact line on it. In the rare case where not even such a line
-fits, the pick says so ("... older roles are not listed on this resume ...") and keeps as many
-as fit, the newest first. A resume picked before 0.1.11.4 stays as it is until you pick it
-again (`gigai scout resume pick --job-url <url> --refresh`).
+A pick holds your best lines for the job, **at most 20 bullets**, and it does not count pages:
+you fit the page yourself with the spacing slider beside the preview on the job's page, which
+says how many pages the resume prints on ("2 pages", or "3 pages" when it runs over). The
+lines that back a must-have requirement of the posting are kept first, then the lines you
+pinned; the lines past the 20 are under **Left out**, where you can add one back. A pick is
+never "cut for length", and a resume that prints on 3 pages is not held back for it. To make
+a resume shorter, remove a point on the job's page ("Shorten automatically" and
+`resume pick --shorten` are retired: they change nothing and say so). A resume picked before
+0.1.11.5 stays as it is until you pick it again
+(`gigai scout resume pick --job-url <url> --refresh`).
+
+No employer is dropped. A role none of whose lines is shown (an older role, usually) is still
+listed, on one line, under **Earlier experience** at the end of the Experience section, newest
+first: `Senior Full Stack Developer, Example Agency | Feb 2016 - Jan 2017`. The title, the
+employer and the dates are your master's own.
 
 The panel also says where the file is. Each job's resume (markdown) is saved in the job's own folder of your jobs folder
 (`~/Documents/GigAI/jobs` unless you chose another with `gigai scout jobs-folder --set PATH`):
@@ -182,7 +188,8 @@ A skill the posting asks for that your resume does not name, and that one of you
 answers says you have, is added to Skills with that answer as its source. An answer
 that says you do not have it adds nothing.
 
-A tailored resume is kept to 2 pages. Scout measures the pages itself and, when the
+A resume made by the tailoring step (switched off by default, see above; not a picked
+resume) is kept to 2 pages. Scout measures the pages itself and, when the
 resume runs over, leaves out whole roles, the oldest first, until it fits; a role that
 ended more than 8 years ago also keeps only its first 3 bullets. Nothing else is cut
 for length. The panel says what was left out ("Cut for length: ...") and **Restore**

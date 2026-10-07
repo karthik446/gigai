@@ -226,6 +226,10 @@ def test_a_printed_line_not_in_the_master_a_cut_skill_or_too_many_pages_fails() 
     assert resume(selection_md=SELECTION_MD.replace("- Cut example costs.", "- Ran the example platform at scale."))["verbatim"] is False
     assert resume(printed={**PRINTED, "skills": ["Go", "Postgres"]})["skills_kept"] is False
     assert resume(suggestions={"selection": {**SUGGESTIONS["selection"], "pages": 3}})["pages_ok"] is False
+    # A selection stored since 0.1.11.5 counts no page: it is within its limit while it prints at most its cap of bullets.
+    capped = {**SUGGESTIONS["selection"], "pages": None, "max_bullets": 20}
+    assert resume(suggestions={"selection": capped})["pages_ok"] is True and resume(suggestions={"selection": capped})["bullets"] == len({i for ids in PRINTED["entries"].values() for i in ids})
+    assert resume(suggestions={"selection": {**capped, "max_bullets": 1}})["pages_ok"] is False
 
 
 STORED = {"picked": [{"id": "sum-1", "code": "summary_variant"}, {"id": "b-1", "code": "supports_requirement"}, {"id": "b-2", "code": "picked_by_assessment"}],

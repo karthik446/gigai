@@ -115,6 +115,10 @@ out.provenance = {
 out.attention = {
   lost: m.attentionItems({ record: input.record, assessment: A }),
   conflicts: m.attentionItems({ record: selection({ conflicts: input.conflicts }), assessment: A }).map((item) => [item.code, item.requirement, item.text, item.lines]),
+  // 0.1.11.5 (item 1c): a pick that knows no page limit says how many bullets it holds at most.
+  capped: m.attentionItems({ record: selection({ conflicts: input.conflicts, max_bullets: 20, pages: null }), assessment: A }).map((item) => [item.code, item.text]),
+  // A stored pick whose ONLY conflicts came from the page limit, on a gate the server already calls ready.
+  pageOnly: m.attentionItems({ record: { ...selection({ conflicts: input.conflicts.slice(2) }), gate: { decision: "suggest", ready: true, reasons: [] } }, assessment: A }),
   ready: m.attentionItems({ record: { ...input.record, gate: { decision: "suggest", ready: true, reasons: [] } }, assessment: A }),
   none: m.attentionItems({}),
 };
@@ -261,7 +265,7 @@ PICK_VIEW = {
 #: Every code `POST /api/job-resumes/pick` refuses with (`job_actions.pick_action`, `pick.settle_stored`), and one the page does not know.
 PICK_CODES = [
     "pick_not_available", "pick_failed", "pages_unmeasured", "assessment_stale", "assessment_missing", "no_master", "profile_resume_in_use",
-    "profile_not_found", "resume_held", "draft_not_needed", "no_proposed_resume", "no_resume_to_shorten", "resume_short_already", "some_new_code",
+    "profile_not_found", "resume_held", "draft_not_needed", "no_proposed_resume", "shorten_retired", "some_new_code",
 ]
 
 
@@ -351,7 +355,7 @@ def test_one_provenance_line_says_who_made_the_resume(out: dict) -> None:
         "Picked by Scout's own rules: the assessment's pick could not be used (the assessment gave no pick) · 3 lines · 2 pages",
         "Picked by Scout's own rules: the assessment's pick could not be used (too few lines) · 3 lines · 2 pages",
         "Picked by Scout's own rules: the assessment's pick could not be used (the master revision it read could not be loaded) · 3 lines · 2 pages",
-        "Picked by Scout's own rules: the assessment's pick could not be used (it could not be fitted) · 3 lines · 2 pages",
+        "Picked by Scout's own rules: the assessment's pick could not be used (it could not be put together) · 3 lines · 2 pages",
     ]
     assert said["draft"] == ["pick", "A draft, picked by Scout's own rules because you asked for one · 3 lines · 2 pages"]
     assert said["edited"] == ["edited", "Your edited resume (agent, 4 Oct)"] and said["editedByYou"] == "Your edited resume (you, 4 Oct)"
@@ -368,10 +372,15 @@ def test_needs_attention_names_each_requirement_and_line(out: dict) -> None:
     assert attention["conflicts"] == [
         ["mandatory_evidence_does_not_fit", "req-000001", "the evidence for Postgres in production does not fit 2 pages: 1 line was cut", ["b-000002"]],
         ["pinned_line_does_not_fit", None, "2 pinned lines do not fit 2 pages", ["b-000007", "b-000008"]],
-        ["skills_do_not_fit", None, "your Skills section does not fit 2 pages whole: some groups were cut", []],
-        ["over_page_limit", None, "the resume is over 2 pages and nothing more can be cut", []],
         ["lost_mandatory_evidence", "req-000002", "the resume no longer shows the evidence for Kubernetes in production", ["b-000003"]],
-    ], "the conflicts come first"
+    ], "the conflicts come first; the page-driven ones of an older pick (skills_do_not_fit, over_page_limit) are not shown (0.1.11.5 item 1c)"
+    # A pick of 0.1.11.5 knows no page limit: its two conflicts are about the bullets it holds, never about pages.
+    assert attention["capped"] == [
+        ["mandatory_evidence_does_not_fit", "the evidence for Postgres in production is not among the 20 bullets this resume shows: 1 line was left out"],
+        ["pinned_line_does_not_fit", "2 pinned lines are not among the 20 bullets this resume shows"],
+        ["lost_mandatory_evidence", "the resume no longer shows the evidence for Kubernetes in production"],
+    ]
+    assert attention["pageOnly"] == [], "a resume over its pages is never 'needs attention': the page is the user's to fit"
     assert attention["ready"] == [] and attention["none"] == []
 
 
@@ -380,7 +389,7 @@ def test_picked_changed_skills_and_proposed(out: dict) -> None:
         "supports req-000001",
         "added by Scout: the only evidence for Postgres in production · supports req-000001",
         "added by Scout: a recent role always shows at least one line · supports req-000002",
-        "room left on the page",
+        "room left on the resume",
         "the stored sentence",
     ]
     assert out["pickedKept"] == "you added it to this resume · supports req-000001"

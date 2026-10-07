@@ -7,19 +7,29 @@ tools/pick_probe.py`` with ``PYTHONPATH=<old tree>/src`` reads a JSON payload on
 answer on stdout (``run_in_tree``).  That is how ``tools/pick_report.py --baseline`` and
 ``tests/evals/run_pick_eval.py --baseline`` compare an old selector with the current one.
 
-The paths (each is deterministic code, after the length cuts):
+PAGES AND THE CAP (0.1.11.5 item 1c).  A tree from ``sel-7`` on makes a selection by score up to a cap of bullets
+(``master_selection.MAX_PICK_BULLETS``) and counts no page: for its ``select``, ``fallback`` and ``settle`` paths the
+answer's ``pages`` is ``None`` (not counted) and ``bullets`` / ``max_bullets`` say what the cap held.  An older tree
+has no cap (``max_bullets`` ``None``) and its ``pages`` are measured, as before.  ``tailor_copy`` mirrors what the
+PRODUCT makes of a tailor call's answer (``MasterTailoring.finish``): from ``sel-7`` on that is fitted to no page
+(``tailor_master.whole_selection``), so its ``pages`` is ``None`` too, and its ``max_bullets`` is ``None`` because
+no cap applies to it (a tailoring shows every line the model showed: the candidate set is the pick BEFORE its cap);
+in an older tree it is the page fit (``fit_selected``), measured.
 
-- ``select``: ``master_selection.select``, the 2-page selection ``gigai scout resume master selection show
+The paths (each is deterministic code):
+
+- ``select``: ``master_selection.select``, the selection ``gigai scout resume master selection show
   --job-url`` prints and a profile's view is made of.
 - ``fallback``: ``tailor_master.code_only``, the tailored resume that is stored when no model answers (the
-  selection put through the validator, the no-loss pass, the Skills rules and the fit).
+  selection put through the validator, the no-loss pass and the Skills rules; before ``sel-7`` the page fit too).
 - ``tailor_copy``: the tailor path with a model that copies every candidate line in the order listed
-  (``job_candidates`` -> settled -> ``fit_selected``): the fit alone decides what stays.
+  (``job_candidates`` -> settled -> what the tree's ``MasterTailoring.finish`` does: ``whole_selection`` from
+  ``sel-7`` on, so every candidate line stays; ``fit_selected`` before, where the fit alone decided what stays).
 - ``settle`` (0.1.11, asked for by name: a tree before 0.1.11 has no such function and answers an error):
   ``pick.settle``, the ONE function the product makes a job's selection with.  The posting's cited rows are the
   assessment's rows with their ``sources``.  The pick is the case's own (``posting.pick``: line ids, best first)
   or, for a posting that carries cited rows and no pick, a stand-in: every line of the selector's pick before its
-  page fit, in the selector's own order of worth (a model that ranks as the code does).  With no cited rows and no
+  cap (an older tree: its page fit), in the selector's own order of worth (a model that ranks as the code does).  With no cited rows and no
   pick there is no pick: ``settle`` answers the code selector's selection (``no_pick``).
 
 A posting may carry ``cited``: the rows of its stored assessment that cite master lines (``{"id", "text",
@@ -73,6 +83,20 @@ def _duplicates(selected) -> dict[str, str]:
     return dict(getattr(selected, "duplicates", None) or {}) if selected is not None else {}
 
 
+def _cap():
+    """The tree's cap of bullets (``sel-7`` on), or ``None`` for a tree whose selection is fitted to pages."""
+
+    from gigai.scout import master_selection as ms
+
+    return getattr(ms, "MAX_PICK_BULLETS", None)
+
+
+def _bullets(master, entries: dict[str, list[str]]) -> int:
+    """What the cap counts: the bullets shown under roles and projects."""
+
+    return sum(len(bullets) for entry_id, bullets in entries.items() if entry_id in master.entries and master.entries[entry_id].section in ("experience", "projects"))
+
+
 def _title_entries(selected) -> dict[str, str]:
     """``role or project the posting's title names -> its best line`` (a tree without the rule, ``sel-3`` and older: none)."""
 
@@ -93,8 +117,10 @@ def _from_selected(master, selected) -> dict[str, object]:
     return {
         "selector_version": selected.selector_version,
         "summary": list(selected.summary), "entries": entries, "other": list(selected.other), "skills": list(selected.skills),
-        # Measured again from the final markdown, not taken from the selector's own word.
-        "pages": measure_markdown(selected.markdown, spacing_scale=ms.FIT_SCALE)[0], "max_pages": selected.max_pages,
+        # A tree that fits to pages: measured again from the final markdown, not taken from the selector's own word.
+        # A tree with a cap counts no page.
+        "pages": measure_markdown(selected.markdown, spacing_scale=ms.FIT_SCALE)[0] if _cap() is None else None, "max_pages": selected.max_pages,
+        "bullets": _bullets(master, entries), "max_bullets": getattr(selected, "max_bullets", None),
         "empty_entries": empty, "date_order": in_order,
         # ``roles_dropped``: the roles not on the resume at all; ``earlier``: the ones listed by their heading line alone.
         "cuts": len(selected.cut_for_length), "roles_dropped": [role for role in selected.roles_dropped if role not in selected.earlier],
@@ -107,7 +133,9 @@ def _from_selected(master, selected) -> dict[str, object]:
     }
 
 
-def _from_result(master, result, record=None, selected=None) -> dict[str, object]:
+def _from_result(master, result, record=None, selected=None, *, capped: bool = True) -> dict[str, object]:
+    """``capped`` ``False`` (``tailor_copy``): the result is under no cap of bullets, so ``max_bullets`` is ``None``."""
+
     from gigai.scout import master_selection as ms
     from gigai.scout import tailor_master as tm
     from gigai.scout.master_resume import skill_names
@@ -133,7 +161,8 @@ def _from_result(master, result, record=None, selected=None) -> dict[str, object
     return {
         "selector_version": ms.SELECTOR_VERSION,
         "summary": summary, "entries": entries, "other": other, "skills": skills,
-        "pages": tm.measure_pages(result), "max_pages": ms.MAX_PAGES,
+        "pages": tm.measure_pages(result) if _cap() is None else None, "max_pages": ms.MAX_PAGES,
+        "bullets": _bullets(master, entries), "max_bullets": _cap() if capped else None,
         "empty_entries": empty, "date_order": in_order,
         "cuts": (len(length.cut) + sum(len(role.bullets) for role in length.trimmed)) if length is not None else 0,
         "roles_dropped": [tm.line_item_id(role.entry.heading[0]) or "" for role in length.cut] if length is not None else [],
@@ -162,7 +191,10 @@ def _settle(master, profile, posting, today: date, lines: list[str] | None) -> d
         for row in posting.cited
     )
     if lines is None and rows:
-        before_fit = ms.select(master, profile, posting, today=today, measure=lambda _markdown: (1, 0.0), max_pages=10**6, fill=False)
+        if _cap() is None:  # a tree that fits to pages: its pick before the fit
+            before_fit = ms.select(master, profile, posting, today=today, measure=lambda _markdown: (1, 0.0), max_pages=10**6, fill=False)
+        else:
+            before_fit = ms.select(master, profile, posting, today=today, max_bullets=None, fill=False)
         offered = [*(bullet for entry_id, bullets in before_fit.entries.items() if master.entries[entry_id].section != "education" for bullet in bullets), *before_fit.other]
         lines = sorted(offered, key=lambda item_id: -before_fit.values.get(item_id, 0.0))[:MAX_PICK_LINES]
     chosen = None if lines is None else AssessmentPick(None, ("experience", "projects"), tuple(lines))
@@ -195,8 +227,10 @@ def _one(master, profile, posting, path: str, today: date, lines: list[str] | No
     if path == "tailor_copy":
         ctx = candidates.context()
         settled = finish_tailoring(apply_no_loss(validate_tailored_output(candidates.copy_all(), job, ctx), job, ctx, today=today), job, ctx)
-        fitted = tm.fit_selected(tm.ensure_skills_line(settled, candidates, ctx), candidates, master, today=today)
-        return _from_result(master, fitted, tm.selection_record(master, candidates, fitted, today=today), candidates.selected)
+        shown = tm.ensure_skills_line(settled, candidates, ctx)
+        # What the tree's own ``MasterTailoring.finish`` does: no page fit from ``sel-7`` on, the page fit before.
+        final = tm.whole_selection(shown) if hasattr(tm, "whole_selection") else tm.fit_selected(shown, candidates, master, today=today)
+        return _from_result(master, final, tm.selection_record(master, candidates, final, today=today), candidates.selected, capped=False)
     raise ValueError(f"unknown path {path}")
 
 

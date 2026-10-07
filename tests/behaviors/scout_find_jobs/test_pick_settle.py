@@ -2,15 +2,16 @@
 
 No model: every pick here is hand-written, the way the eval's fixtures are.  Two masters, both synthetic:
 
-- a small one written here, with ids a person can read (``a1`` .. ``a6``, ``b1`` .. ``b6``), settled with a page
-  measure that COUNTS lines instead of laying them out, so the cut order of 3.2 is checked line by line;
-- the pick eval's medium master (``tests/evals/fixtures/pick``, an invented person), settled with the shipped layout:
+- a small one written here, with ids a person can read (``a1`` .. ``a6``, ``b1`` .. ``b6``), settled under a small
+  CAP of bullets (``max_bullets``), so the order of 3.2 is checked line by line;
+- the pick eval's medium master (``tests/evals/fixtures/pick``, an invented person), under the shipped cap:
   the seven picks the spec names (a good one, unknown ids, Skills lines, the current role omitted, only old lines,
-  three pages long, empty).
+  every line of the master, empty).
 
-What is pinned: V1 to V8, what code fixes whatever the model returned, the protected lines and the cut order, the Other
-lines and the Skills in that order, the conflict codes, the fill, every fallback code, and that every line of a
-selection is a copy of a master line.
+What is pinned: V1 to V8, what code fixes whatever the model returned, the protected lines and the order lines are
+left out in, that the Other lines, the Skills and the roles' heading lines are never left out, the conflict codes, the
+fill, every fallback code, that every line of a selection is a copy of a master line, and (0.1.11.5 item 1c) that a
+selection counts no page and needs no renderer.
 """
 
 from __future__ import annotations
@@ -113,18 +114,10 @@ def _skills(result) -> list[str]:
     return [name for section in result.sections if section.heading == "skills" for line in section.lines for name in skill_names(line.text.lstrip("-*• ").strip())[1]]
 
 
-def _counted(budget: int, *, other: bool = True, skills: bool = False):
-    """A page measure that counts: one page while the bullets (and Other lines, and skills) number at most ``budget``."""
+def _settle(lines: tuple[str, ...] | None, cap: int = 99, *, profile: ms.SelectionProfile = PROFILE, **body):
+    """The selection of a pick under a cap of ``cap`` bullets (0.1.11.5: the cap is the only limit; no page is counted)."""
 
-    def measure(result) -> int:
-        units = len(_bullets(result)) + (len(_others(result)) if other else 0) + (len(_skills(result)) if skills else 0)
-        return 1 if units <= budget else 2
-
-    return measure
-
-
-def _settle(lines: tuple[str, ...] | None, budget: int = 99, *, profile: ms.SelectionProfile = PROFILE, counted: dict[str, bool] | None = None, **body):
-    return pick.settle(MASTER, _body(lines, **body), None, TODAY, profile=profile, posting=POSTING, measure=_counted(budget, **(counted or {})), max_pages=1)
+    return pick.settle(MASTER, _body(lines, **body), None, TODAY, profile=profile, posting=POSTING, max_bullets=cap)
 
 
 def _validated(lines: tuple[str, ...], *, summary: str | None = "sum-a", order: tuple[str, ...] = ("experience", "projects"), rows=ROWS, **more):
@@ -212,7 +205,7 @@ def test_a_pinned_line_the_pick_left_out_is_added() -> None:
 
 def test_a_good_pick_is_the_selection_every_line_a_copy_roles_in_date_order() -> None:
     lines = ("b3", "p1", "a2", "a1", "b6", "a5", "c1", "o2", "b1", "a4", "b2")
-    settled = _settle(lines, 11, order=("projects", "experience"))  # ten bullets and one Other line: the page is full, nothing is cut
+    settled = _settle(lines, 10, order=("projects", "experience"))  # ten bullets, a cap of ten: nothing is left out, nothing added
     assert (settled.picked_by, settled.fallback, settled.draft, settled.problems, settled.conflicts) == ("model", None, False, (), ())
     result = settled.result
     # The model orders the two sections; roles print newest first whatever the list says; inside a role, the model's order.
@@ -239,88 +232,88 @@ def test_a_good_pick_is_the_selection_every_line_a_copy_roles_in_date_order() ->
     stored = settled.selection_json(made_at="2026-10-05T10:00:00Z", result_digest="sha256:" + "0" * 64, master_revision_id="revision_1")
     assert stored["picked_by"] == "model" and stored["pick_rules_version"] == pick.PICK_RULES_VERSION == "pick-rules:1"
     assert stored["model_pick"] == {"summary": "sum-a", "section_order": ["projects", "experience"], "lines": list(lines)}
-    assert stored["line_marks"][0] == {"id": "sum-a", "mark": MASTER.items["sum-a"].mark} and stored["pages"] == 1 and stored["max_pages"] == 1
+    assert stored["line_marks"][0] == {"id": "sum-a", "mark": MASTER.items["sum-a"].mark} 
+    # No page is counted: ``pages`` stays in the record (null) for older readers, ``max_pages`` is the resume's limit.
+    assert stored["pages"] is None and stored["max_pages"] == 2 and stored["max_bullets"] == 10
     assert set(stored) == {
         "picked_by", "fallback", "draft", "pick_rules_version", "selector_version", "made_at", "made_from", "model_pick", "problems", "added_by_code",
-        "line_marks", "pages", "max_pages", "conflicts", "resume",
+        "line_marks", "pages", "max_pages", "max_bullets", "conflicts", "resume",
     }
     checks = pick.checks(MASTER, settled, suggestions.requirement_rows(ROWS))
     assert (checks.lost, checks.weak, checks.omitted, checks.empty_entries, checks.roles_in_date_order, checks.fits) == ((), (), (), (), True, True)
 
 
-# --- the fit (3.2): what is protected, and the order of everything else ----------------------------------------------
+# --- the cap (3.2): what is protected, and the order of everything else ------------------------------------------------
 
 
 @pytest.mark.parametrize(
-    ("budget", "cut"),
+    ("cap", "left_out"),
     [
-        (16, ()),
-        # 1. lines that are the source of no row, the model's last-ranked first (an old role that loses its last line goes whole;
-        #    the one line of a project stays).
-        (15, ("c1",)),
-        (12, ("c1", "b5", "b4", "b2")),
-        (8, ("c1", "b5", "b4", "b2", "b1", "a6", "a4", "a3")),
+        (14, ()),
+        # 1. lines that are the source of no row, the model's last-ranked first (an old role that loses its last line keeps
+        #    its heading line; the one line of a project stays).
+        (13, ("c1",)),
+        (10, ("c1", "b5", "b4", "b2")),
+        (6, ("c1", "b5", "b4", "b2", "b1", "a6", "a4", "a3")),
         # 2. then a further source of a row: the optional row's line and the weaker second line of Go.
-        (7, ("c1", "b5", "b4", "b2", "b1", "a6", "a4", "a3", "a1")),
-        (6, ("c1", "b5", "b4", "b2", "b1", "a6", "a4", "a3", "a1", "b6")),
-        (5, ("c1", "b5", "b4", "b2", "b1", "a6", "a4", "a3", "a1", "b6", "a5")),
+        (5, ("c1", "b5", "b4", "b2", "b1", "a6", "a4", "a3", "a1")),
+        (4, ("c1", "b5", "b4", "b2", "b1", "a6", "a4", "a3", "a1", "b6")),
+        (3, ("c1", "b5", "b4", "b2", "b1", "a6", "a4", "a3", "a1", "b6", "a5")),
     ],
 )
-def test_the_fit_cuts_what_supports_nothing_first_the_models_last_ranked_first(budget: int, cut: tuple[str, ...]) -> None:
-    settled = _settle(EVERY_LINE, budget)
-    assert set(_bullets(settled.result)) == set(EVERY_LINE[:14]) - set(cut)
+def test_the_cap_leaves_out_what_supports_nothing_first_the_models_last_ranked_first(cap: int, left_out: tuple[str, ...]) -> None:
+    settled = _settle(EVERY_LINE, cap)
+    assert set(_bullets(settled.result)) == set(EVERY_LINE[:14]) - set(left_out) and len(_bullets(settled.result)) == cap
     assert _others(settled.result) == ["o1", "o2"] and settled.conflicts == () and settled.check.ready
     # The last printed source of a met mandatory row is never among them.
     assert {"a2", "b3", "p1"} <= set(settled.printed)
     left = {line.id: line.code for line in settled.record.left_out}
-    assert all(left[item_id] in ("cut_lowest_value", "cut_role_dropped") for item_id in cut)
-    assert [item.id for item in settled.record.cut_for_length if item.kind == "role"] == (["r-gamma"] if cut else [])
-    # What was cut is on the result, so one Restore puts it back.
-    assert (settled.result.length is not None) == bool(cut)
+    assert all(left[item_id] == "over_cap" for item_id in left_out)
+    # Nothing is "cut for length" (0.1.11.5): no cut on the record, no length record on the result; what is over the cap is
+    # under Left out, where the job page adds a line back.
+    assert settled.record.cut_for_length == () and settled.result.length is None and settled.pages is None
+    # The old role that lost its one line is still listed, by its heading alone.
+    roles = next(section for section in settled.result.sections if section.heading == "experience").entries
+    assert [tm.line_item_id(entry.heading[0]) for entry in roles] == ["r-alpha", "r-beta", "r-gamma"]
+    assert [len(entry.bullets) for entry in roles][2] == (0 if left_out else 1)
 
 
-def test_other_lines_go_after_every_line_that_is_not_protected_the_last_ranked_first() -> None:
-    settled = _settle(EVERY_LINE, 4)
-    assert set(_bullets(settled.result)) == {"a2", "b3", "p1"} and _others(settled.result) == ["o1"]
-    assert {line.id: line.code for line in settled.record.left_out}["o2"] == "cut_for_length"
-    assert settled.conflicts == () and settled.check.ready and len(_skills(settled.result)) == 6
-    assert _others(_settle(EVERY_LINE, 3).result) == []
+def test_the_other_lines_the_skills_and_the_heading_lines_are_never_left_out_for_the_cap() -> None:
+    """Until 0.1.11.5 the page fit dropped Other lines, then Skills (``skills_do_not_fit``), then heading lines. None counts toward the cap."""
+
+    settled = _settle(EVERY_LINE, 3)
+    assert set(_bullets(settled.result)) == {"a2", "b3", "p1"} and _others(settled.result) == ["o1", "o2"]
+    assert sorted(_skills(settled.result)) == sorted(MASTER.skills()) and len(_skills(settled.result)) == 6
+    assert settled.record.skills_left_out == () and settled.conflicts == () and settled.check.ready
+    assert "o2" not in {line.id for line in settled.record.left_out}
+    assert "Engineer, Gamma Data | Jun 2012 - Jun 2015" in settled.markdown  # the role with no line left: its one heading line
 
 
-def test_a_pinned_line_is_cut_only_after_everything_that_is_not_protected() -> None:
+def test_a_pinned_line_is_left_out_only_after_everything_that_is_not_protected() -> None:
     pinned = ms.SelectionProfile(titles=PROFILE.titles, pins=("b5",))
-    settled = _settle(EVERY_LINE, 12, profile=pinned)
+    settled = _settle(EVERY_LINE, 10, profile=pinned)
     assert set(EVERY_LINE[:14]) - set(_bullets(settled.result)) == {"c1", "b4", "b2", "b1"} and "b5" in settled.printed
 
 
-def test_skills_are_cut_after_the_lines_and_the_other_lines_and_the_cut_is_a_conflict() -> None:
-    # Bullets, Other lines and skill names all count: 3 protected bullets and 6 skills are left when every other line is gone.
-    settled = _settle(EVERY_LINE, 7, counted={"skills": True})
-    assert set(_bullets(settled.result)) == {"a2", "b3", "p1"} and _others(settled.result) == []
-    kept = _skills(settled.result)
-    assert len(kept) == 4 and {"Go", "Kafka"} <= set(kept) and "COBOL" not in kept  # what the posting asks for stays longest
-    assert [conflict.to_json() for conflict in settled.conflicts] == [{"code": "skills_do_not_fit", "requirement": None, "lines": [], "cut": True}]
-    assert not settled.check.ready and [reason.code for reason in settled.check.reasons] == ["selection_conflict"]
-    assert sorted(skill.name for skill in settled.record.skills_left_out) == sorted(set(MASTER.skills()) - set(kept))
-
-
-def test_when_the_protected_lines_alone_do_not_fit_one_is_cut_and_the_loss_is_a_conflict() -> None:
+def test_when_the_protected_lines_alone_are_over_the_cap_one_is_left_out_and_the_loss_is_a_conflict() -> None:
     rows = (_row(GO, "Go in production", "hard", ("a2",)), _row(KAFKA, "Kafka at scale", "askable", ("b3",)), _row(UPGRADES, "Kubernetes upgrades", "hard", ("a4",)))
-    settled = _settle(EVERY_LINE, 3, rows=rows, counted={"other": False})
-    # Alpha Systems held two protected lines; the model's lower-ranked one went. The page limit holds; nothing is silent.
-    assert set(_bullets(settled.result)) == {"a2", "b3", "p1"} and settled.pages == 1
+    settled = _settle(EVERY_LINE, 3, rows=rows)
+    # Alpha Systems held two protected lines; the model's lower-ranked one went. The cap holds; nothing is silent.
+    assert set(_bullets(settled.result)) == {"a2", "b3", "p1"} and settled.pages is None
     conflicts = [conflict.to_json() for conflict in settled.conflicts]
-    assert {"code": "mandatory_evidence_does_not_fit", "requirement": UPGRADES, "lines": ["a4"], "cut": True} in conflicts
-    assert {"code": "skills_do_not_fit", "requirement": None, "lines": [], "cut": True} in conflicts
+    assert conflicts == [{"code": "mandatory_evidence_does_not_fit", "requirement": UPGRADES, "lines": ["a4"], "cut": True}]  # no page-driven code
     assert not settled.check.ready and ("lost_mandatory_evidence", UPGRADES) in [(reason.code, reason.requirement) for reason in settled.check.reasons]
     checks = pick.checks(MASTER, settled, suggestions.requirement_rows(rows))
     assert checks.lost == (UPGRADES,) and checks.fits
     assert {line.id: line.code for line in settled.record.left_out}["a4"] == "cut_conflict"
+    # A must-cover line is never left out for a better-ranked line that is not one: at 4 every protected line is in.
+    roomier = _settle(EVERY_LINE, 4, rows=rows)
+    assert {"a2", "a4", "b3"} <= set(_bullets(roomier.result)) and roomier.conflicts == () and roomier.check.ready
 
 
-def test_a_pick_that_leaves_room_is_filled_with_the_unpicked_evidence_first() -> None:
+def test_a_pick_under_the_cap_is_filled_with_the_unpicked_evidence_first() -> None:
     lines = ("a1", "a2", "a3", "b1", "b2", "b3", "p1", "c1")
-    assert set(_bullets(_settle(lines, 8).result)) == set(lines)  # no room: the pick as it is
+    assert set(_bullets(_settle(lines, 8).result)) == set(lines)  # at the cap: the pick as it is
     settled = _settle(lines, 9)
     assert set(_bullets(settled.result)) == {*lines, "a5"}  # the unpicked line a mandatory row names, before any other
     assert settled.added_by_code == (pick.Added("a5", "room_left"),)
@@ -338,7 +331,7 @@ def test_no_pick_a_pick_too_small_and_a_draft_are_the_code_selectors_selection_w
     none = pick.settle(MASTER, _body(None), None, TODAY, profile=PROFILE, posting=POSTING)
     assert (none.picked_by, none.fallback, none.draft, none.model_pick) == ("code", "no_pick", False, None)
     assert (none.record.picked_by, none.record.candidates, none.record.fallback) == ("code", "view", "no_pick")
-    assert none.pages is not None and none.pages <= 2 and none.check.ready and pick.checks(MASTER, none, rows).fits
+    assert none.pages is None and none.result.length is None and none.check.ready and pick.checks(MASTER, none, rows).fits
     assert {"a2", "b3"} <= set(none.printed)  # the rows' sources are the selector's citations
     small = pick.settle(MASTER, _body(("a1", "b-zzzzzz", "b3")), None, TODAY, profile=PROFILE, posting=POSTING)
     assert (small.picked_by, small.fallback) == ("code", "pick_too_small") and small.model_pick is not None and small.model_pick.lines == ("a1", "b-zzzzzz", "b3")
@@ -356,16 +349,29 @@ def test_a_pick_that_cannot_be_settled_never_fails_the_job(monkeypatch: pytest.M
 
     monkeypatch.setattr(pick, "_pick_selection", broken)
     settled = pick.settle(MASTER, _body(EVERY_LINE), None, TODAY, profile=PROFILE, posting=POSTING)
-    assert (settled.picked_by, settled.fallback) == ("code", "pick_failed") and settled.model_pick is not None and settled.pages is not None
+    assert (settled.picked_by, settled.fallback) == ("code", "pick_failed") and settled.model_pick is not None and settled.printed
 
 
-def test_without_a_renderer_no_selection_is_made_and_the_error_says_so() -> None:
-    with pytest.raises(pick.PickError) as refused:
-        pick.settle(MASTER, _body(EVERY_LINE), None, TODAY, profile=PROFILE, posting=POSTING, measure=lambda _result: None)
-    assert refused.value.code == "pages_unmeasured"
+def test_a_selection_needs_no_renderer_nothing_is_laid_out(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Until 0.1.11.5 a pick with no renderer was refused (``pages_unmeasured``); now no page is counted at all."""
+
+    from gigai.scout import resume_pdf
+
+    def no_layout(*_args: object, **_kwargs: object):
+        raise AssertionError("a selection must not lay out a page")
+
+    for name in ("pages_at", "measure_markdown", "fewest_pages", "_estimate", "_render"):
+        monkeypatch.setattr(resume_pdf, name, no_layout)
+    monkeypatch.setattr(tm, "measure_pages", no_layout)
+    picked = pick.settle(MASTER, _body(EVERY_LINE), None, TODAY, profile=PROFILE, posting=POSTING)
+    assert (picked.picked_by, picked.fallback, picked.pages, picked.layouts) == ("model", None, None, 0) and len(_bullets(picked.result)) == 14
+    capped = _settle(EVERY_LINE, 6)
+    assert len(_bullets(capped.result)) == 6 and capped.pages is None
+    code = pick.settle(MASTER, _body(None), None, TODAY, profile=PROFILE, posting=POSTING)
+    assert (code.picked_by, code.fallback, code.pages) == ("code", "no_pick", None)
 
 
-# --- the seven picks of the spec, on the eval's medium master, with the shipped layout ---------------------------------
+# --- the seven picks of the spec, on the eval's medium master, under the shipped cap -----------------------------------
 
 
 def _eval_case():
@@ -387,7 +393,7 @@ def _eval_case():
     )
 
 
-def test_the_seven_picks_each_end_in_two_pages_with_no_empty_role_and_nothing_silent() -> None:
+def test_the_seven_picks_each_end_within_the_cap_with_no_empty_role_and_nothing_silent() -> None:
     master, matrix, profile, posting, today = _eval_case()
     rows = suggestions.requirement_rows(matrix)
     by_entry = {entry.id: list(entry.bullets) for entry in master.entries.values() if entry.section in ("experience", "projects")}
@@ -404,16 +410,19 @@ def test_the_seven_picks_each_end_in_two_pages_with_no_empty_role_and_nothing_si
         "skills_lines": AssessmentPick(None, ("experience", "projects"), (*(item.id for item in master.in_section("skills")), *good)),
         "current_role_omitted": AssessmentPick(None, ("experience", "projects"), tuple(bullet for bullet in bullets if bullet not in current.bullets)[:30]),
         "only_old_lines": AssessmentPick(None, ("experience", "projects"), tuple(bullet for entry in old for bullet in entry.bullets)),
-        "three_pages": AssessmentPick(None, ("projects", "experience"), tuple(bullets)),
+        "every_line": AssessmentPick(None, ("projects", "experience"), tuple(bullets)),
         "empty": None,
     }
-    expected = {"good": None, "unknown_ids": None, "skills_lines": None, "current_role_omitted": None, "only_old_lines": None, "three_pages": None, "empty": "no_pick"}
+    expected = {"good": None, "unknown_ids": None, "skills_lines": None, "current_role_omitted": None, "only_old_lines": None, "every_line": None, "empty": "no_pick"}
     for name, chosen in picks.items():
         body = AssessmentBody(matrix, (), (), verdict=Verdict.MATCHED_ABOVE_THRESHOLD, pick=chosen)
         settled = pick.settle(master, body, None, today, profile=profile, posting=posting)
         checks = pick.checks(master, settled, rows)
         assert settled.fallback == expected[name], (name, settled.fallback, [problem.to_json() for problem in settled.problems])
-        assert settled.pages is not None and settled.pages <= 2 and checks.fits, (name, checks.to_json())
+        shown = sum(len(entry.bullets) for section in settled.result.sections if section.heading in ("experience", "projects") for entry in section.entries)
+        assert shown <= ms.MAX_PICK_BULLETS and settled.pages is None and settled.result.length is None and checks.fits, (name, shown, checks.to_json())
+        if name == "every_line":
+            assert shown == ms.MAX_PICK_BULLETS == 20, shown  # more lines than the cap: exactly the cap is shown
         assert all(item_id in master.items for item_id in settled.printed), name
         # No met mandatory row loses every line it names unless a conflict says so.
         assert not checks.lost or settled.conflicts, (name, checks.lost)
@@ -432,8 +441,8 @@ def test_the_seven_picks_each_end_in_two_pages_with_no_empty_role_and_nothing_si
 
 
 @pytest.mark.parametrize("budget", [99, 8, 6])
-def test_the_order_the_model_gives_is_the_order_printed_inside_a_role_even_after_a_cut(budget: int) -> None:
-    """The v9.1 prompt promises it: within one role the lines print in the pick's order; a cut removes lines, never reorders."""
+def test_the_order_the_model_gives_is_the_order_printed_inside_a_role_even_under_the_cap(budget: int) -> None:
+    """The v9.1 prompt promises it: within one role the lines print in the pick's order; the cap leaves lines out, never reorders."""
 
     lines = ("a4", "a1", "a5", "a2", "b6", "b3", "b1", "a3")
     reversed_lines = tuple(reversed(lines))
@@ -445,7 +454,7 @@ def test_the_order_the_model_gives_is_the_order_printed_inside_a_role_even_after
         for role in ("r-alpha", "r-beta"):
             in_pick = [item for item in given if MASTER.items[item].entry_id == role]
             shown = printed[role]
-            # The picked lines print in the pick's order. A line CODE adds (room left on the page, coverage) is not the
+            # The picked lines print in the pick's order. A line CODE adds (room left under the cap, coverage) is not the
             # model's and comes after them: the promise is about the lines the model gave.
             assert [item for item in shown if item in in_pick] == [item for item in in_pick if item in shown], (budget, role, shown, in_pick)
 
@@ -458,7 +467,7 @@ def _row_optional(row_id: str, requirement: str, sources: tuple[str, ...]) -> Re
 
 
 def _c1(lines: tuple[str, ...], rows: tuple[RequirementMatrixRow, ...], budget: int, *, profile: ms.SelectionProfile = PROFILE):
-    return pick.settle(MASTER, _body(lines, rows=rows), None, TODAY, profile=profile, posting=POSTING, measure=_counted(budget, other=False), max_pages=1)
+    return pick.settle(MASTER, _body(lines, rows=rows), None, TODAY, profile=profile, posting=POSTING, max_bullets=budget)
 
 
 C1_ROWS = (_row(GO, "Go in production", "hard", ("a2", "a5")),)

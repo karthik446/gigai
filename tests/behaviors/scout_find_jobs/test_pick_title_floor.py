@@ -21,7 +21,7 @@ def _select(**kwargs):
     master = parse_master(pick_eval.master_case("large", "base").markdown)
     post = pick_eval.postings()["titlematch"]
     posting = SelectionPosting(post["title"], post["text"], post["company"], post["location"])
-    return select(master, SelectionProfile(titles=("Staff Software Engineer",)), posting, today=TODAY, measure=lambda _markdown: (1, 0.0), max_pages=10**6, fill=False, **kwargs)
+    return select(master, SelectionProfile(titles=("Staff Software Engineer",)), posting, today=TODAY, max_bullets=None, fill=False, **kwargs)
 
 
 def test_the_code_selector_keeps_the_best_line_of_an_entry_the_title_names() -> None:

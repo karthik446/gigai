@@ -471,7 +471,8 @@ def test_the_call_cap_is_hard_and_the_code_selector_is_measured(tmp_path: Path) 
     # After one call, the second case's call and its one retry no longer fit under the cap of 2: it is skipped, not half run.
     assert [row["case"] for row in report["rows"]] == ["m06-backend"] and report["run"]["skipped"] == ["l14-backend"] and report["run"]["calls_made"] == 1
     selection = report["rows"][0]["code_selection"]
-    assert selection["page_fit"] and selection["pages"] <= 2 and selection["cited_rows"] >= 3
+    # The code selector's selection: the shape and the cap of bullets (it counts no page; ``pages`` is not read).
+    assert selection["page_fit"] and 0 < selection["bullets"] <= runner.MAX_PICK_BULLETS == 20 and selection["cited_rows"] >= 3
     # The search-engine must-have is evidenced only by the oldest relevant role: the selector keeps that line.
     assert selection["lost"] == [] and "pel-01" in selection["shown"]
     assert report["rows"][0]["model_selection"] is None or "lost" in report["rows"][0]["model_selection"]
@@ -489,6 +490,8 @@ def test_the_v9_shape_runs_through_a_tree_that_has_the_pick(tmp_path: Path) -> N
     matched = by_case["m05-agentic"]
     assert matched["labels"]["has_sources"] and matched["labels"]["pick"]["unknown"] == [] and matched["resume_ids_in_prompt"]
     assert matched["model_selection"]["page_fit"] and matched["model_selection"]["picked_by"] in ("model", "code") and "lost" in matched["model_selection"]
+    # The stored selection says its cap and counts no page (0.1.11.5 item 1c).
+    assert matched["model_selection"]["pages"] is None and 0 < matched["model_selection"]["bullets"] <= matched["model_selection"]["max_bullets"] == 20
     # The job with a confirmed gap: Matched by the model, held by the gate, and no pick is kept (OD1).
     held = by_case["m12-answered-backend"]
     assert held["answer"]["resume_gate"]["decision"] == runner.GATE_HOLD_UNMET and held["answer"]["pick"] is None and held["boundary"]["pick_dropped"]

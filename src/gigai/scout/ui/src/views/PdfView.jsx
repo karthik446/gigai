@@ -1,8 +1,7 @@
 import { useEffect, useState } from "react";
-import { getTailoredResumes, postJobResumePick, postResumePdf, postTailoredResumePdf } from "../api.js";
+import { getTailoredResumes, postResumePdf, postTailoredResumePdf } from "../api.js";
 import GeneratePdfForm from "../components/GeneratePdfForm.jsx";
 import { atCompany } from "../display.js";
-import { pickErrorText, shortenedText } from "../jobResumeModel.js";
 import { latestStored } from "../tailoredResumeModel.js";
 import { parsePdfTarget } from "../routing.js";
 import { TAILORED_WORDING } from "../wording.js";
@@ -77,11 +76,6 @@ export default function PdfView({ target }) {
               </p>
               <GeneratePdfForm
                 render={(header) => postTailoredResumePdf({ profileId: profileId || stored.resume.profile_id, jobIdentity, header })}
-                shorten={() =>
-                  postJobResumePick({ jobUrl: jobIdentity, profileId: profileId || stored.resume.profile_id, action: "shorten" }).then(shortenedText, (err) => {
-                    throw new Error(pickErrorText(err));
-                  })
-                }
               />
             </>
           )}

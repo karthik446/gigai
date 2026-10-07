@@ -17,6 +17,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import socket
 import sqlite3
@@ -101,7 +102,7 @@ def test_the_report_reads_a_home_prints_counts_and_ids_only_and_leaves_every_fil
 
     assert alone.returncode == 0 and beside.returncode == 0, (alone.stderr[-800:], beside.stderr[-800:])
     for out in (alone.stdout, beside.stdout):
-        assert out.startswith("Pick report: master revision 1 (") and "selector sel-6" in out
+        assert out.startswith("Pick report: master revision 1 (") and "selector sel-7" in out
         assert "Nothing was written, no model was called, no request was made." in out
         assert "Each posting was selected WITH the rows its stored assessment cites" in out
         assert out.count("## Profile profile_") == 2, "the newest assessed postings of EACH profile"
@@ -114,7 +115,9 @@ def test_the_report_reads_a_home_prints_counts_and_ids_only_and_leaves_every_fil
         # How the SQLite files were opened is the last line: read-only every one, and the pipeline's file not at all.
         last = out.rstrip().splitlines()[-1]
         assert last.startswith("SQLite files opened, every one read-only (URI mode=ro): ") and "registry.sqlite x" in last and last.endswith("pipeline.sqlite was not opened.")
-        assert "pages 2/2 fits" in out and "lines picked " in out and "left out " in out
+        # 0.1.11.5 (c): the selection counts no page ("pages 2/2 fits" until then); the report says what its cap held.
+        assert re.search(r"pages not counted, bullets \d+/20 fits \|", out) and "DOES NOT FIT" not in out
+        assert "lines picked " in out and "left out " in out
         # Counts, ids and requirement text only: no line of the master, no path under the home.
         assert not [text for text in _master_lines(home) if text in out]
         assert str(home) not in out and str(built) not in out and "/quick_assess/" not in out
@@ -183,6 +186,12 @@ def test_each_check_gets_its_own_verdict_and_a_real_loss_on_a_mandatory_row_is_w
     assert (better["mandatory coverage"], better["overall"]) == (pick_report.BETTER, pick_report.BETTER)
     over = pick_report.verdicts(posting, old, _checked(covered=("r1", "r2", "r3"), skills=6, pages=3))
     assert (over["page fit"], over["overall"]) == (pick_report.WORSE, pick_report.WORSE)
+    # 0.1.11.5 (c): a tree whose selection counts no page fits when it is within its cap of bullets, whatever a tree
+    # that fits to pages measured; past the cap it does not.
+    capped = pick_report.Checked(**{**old.__dict__, "pages": None, "bullets": 20, "max_bullets": 20})
+    assert capped.fits and pick_report.verdicts(posting, old, capped)["page fit"] == pick_report.SAME
+    assert "pages not counted, bullets 20/20 fits" in pick_report._line("select", capped) and "pages 2/2 fits" in pick_report._line("select", old)
+    assert not pick_report.Checked(**{**old.__dict__, "pages": None, "bullets": 21, "max_bullets": 20}).fits
 
 
 def test_a_role_or_project_the_title_names_that_shows_no_line_is_counted_and_has_its_own_verdict() -> None:

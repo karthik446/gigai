@@ -534,15 +534,13 @@ def _echo_selection(master, selected, heading: str, revision: int) -> None:  # n
     reasons = {line.id: line for line in selected.lines}
     picked = sum(line.picked for line in selected.lines)
     left = len(selected.lines) - picked
-    fit = (
-        f"{_n(selected.pages, 'page')} ({selected.pages_before_fit} before the fit), the last page {round(selected.last_page_fill * 100)}% full"
-        if selected.fits
-        else f"DOES NOT FIT {_n(selected.max_pages, 'page')}: {_n(selected.pages, 'page')} after every cut the rules allow"
-    )
-    click.echo(f"Selection for {heading}: {fit}.")
+    bullets = sum(len(lines) for entry_id, lines in selected.entries.items() if master.entries[entry_id].section != "education")
+    cap = f" of at most {selected.max_bullets}" if selected.max_bullets is not None else ""
+    over = f"; {_n(len(selected.over_cap), 'line')} left out as over that" if selected.over_cap else ""
+    click.echo(f"Selection for {heading}: {_n(bullets, 'bullet')}{cap}{over}. No page is counted: the spacing of a job's preview fits the page.")
     click.echo(
         f"Picked {_n(picked, 'line')} and {_n(len(selected.skills), 'skill')}; left out {_n(left, 'line')} and "
-        f"{_n(sum(not skill.picked for skill in selected.skill_reasons), 'skill')}; {_n(len(selected.cut_for_length), 'cut')} for length. "
+        f"{_n(sum(not skill.picked for skill in selected.skill_reasons), 'skill')}. "
         f"Selector {selected.selector_version}, master revision {revision}."
     )
 
@@ -615,9 +613,11 @@ def selection_show_command(
     """Show what a resume made from the master would show: Picked / Left out, each line with its reason.
 
     Without a job: the profile's standing pick. With --job-url or --job-text:
-    the pick for that posting, made from the WHOLE master. Recent roles
-    always appear; for length the oldest roles are shortened, then dropped,
-    first; nothing is reworded. The selection is not stored.
+    the pick for that posting, made from the WHOLE master: its best lines,
+    at most 20 bullets. Recent roles always appear, and a role with no line
+    shown is listed by its heading; no page is counted (the spacing of a
+    job's preview fits the page); nothing is reworded. The selection is
+    not stored.
     """
 
     from .find_jobs.contracts import FindJobsContractError

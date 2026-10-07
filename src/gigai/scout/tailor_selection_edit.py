@@ -11,16 +11,18 @@ or puts a left-out line ON it (``add``), by master id.
   it was (its sources kept); any other line is a copy of the master line as
   the master words it NOW, under its role (a role or project the resume did
   not show comes with its heading).
-* **The fit runs again** when an Add pushes a resume that fitted over the
-  page limit.  The lines that would go to make room are the fit's own next
-  cuts (``tailor_master.cut_order``: the oldest roles first, then the
-  lowest-value last line of a recent role; never the added line, nor one
-  the user added before), the fewest that fit.  With ``fit="ask"`` (the default) NOTHING is stored and
-  the answer names those lines (``would_cut``); the caller then sends the
-  same Add with ``fit="cut"`` (make room) or ``fit="keep"`` (keep both: the
-  resume is over the limit and says so).  What is cut goes onto the
-  resume's own length record (``TailoredResume.length``), so the "Cut for
-  length" line shows it and Restore puts it back.
+* **An Add always applies, and nothing else moves** (0.1.11.5 item 1c).  No
+  page is counted and nothing is rendered: the page is the user's to fit,
+  with the spacing of the job's preview, and the preview says how many pages
+  the resume now prints on.  (Until 0.1.11.5 an Add that pushed a resume past
+  its page limit stored NOTHING and asked which lines to cut to make room:
+  ``needs_choice`` / ``would_cut``, the ``fit`` of the request.  ``fit`` is
+  still accepted, and ignored; ``needs_choice`` is always false, ``would_cut``
+  and ``cut`` always empty, ``pages`` null.)  An Add may take a resume past
+  the pick's cap of bullets: the cap is the pick's, not the user's.
+* What an older pick had cut for length stays on the resume's own length
+  record (``TailoredResume.length``) through an Add or a Remove, so Restore
+  still puts it back.
 
 The stored resume's ``updated_at`` is unchanged, as for a line choice: it is
 the same tailoring.  The resume is then the user's (the pipeline's tailor
@@ -33,18 +35,14 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
-from datetime import date
 from pathlib import Path
-import sqlite3
 
 from .master_resume import KIND_BULLET, KIND_OTHER, KIND_SUMMARY, Master, MasterItem
 from .master_selection import MAX_PAGES
 from .tailor_length import (
     STATUS_CUT,
-    STATUS_OVER,
     STATUS_RESTORED,
     LengthFit,
-    Measure,
     TrimmedRole,
     _heading_id,
     _left_out,
@@ -52,21 +50,17 @@ from .tailor_length import (
     shown_whole,
 )
 from .tailor_master import (
-    MasterTailoring,
     SelectedLine,
     SelectionCut,
     TailorSelection,
     _entry_id,
-    cut_order,
     line_item_id,
-    measure_pages,
 )
 from .tailored_resume import (
     ENTRY_SECTIONS,
     LineAlternative,
     SourceRef,
     TailorError,
-    TailorJob,
     TailorResponse,
     TailoredEntry,
     TailoredLine,
@@ -75,7 +69,6 @@ from .tailored_resume import (
     list_tailored_resumes,
     render_markdown,
     save_tailor_response,
-    shown_text,
     tailored_resume_path,
     tailored_resume_write_lock,
 )
@@ -109,10 +102,9 @@ class RoomCut:
 class SelectionEdit:
     """What one Add or Remove did.
 
-    ``applied`` false: nothing was stored (an Add that needs room, asked
-    with ``fit="ask"``): ``would_cut`` names what making room would cut.
-    ``cut``: what was cut to make room (``fit="cut"``).  ``pages``: the
-    resume as it is now (or would be, with the line and nothing cut).
+    ``applied`` is always true and ``would_cut`` / ``cut`` always empty since
+    0.1.11.5 (an Add never needs room: no page is counted), and ``pages`` is
+    ``None``; the fields stay for callers of the route.
     """
 
     response: TailorResponse
@@ -265,20 +257,18 @@ def _role_of(whole: TailoredResume, line_id: str) -> tuple[str | None, TailoredE
 # --- one change --------------------------------------------------------------------------------
 
 
-def _record(
-    shown: TailoredResume, cut: tuple, trimmed: tuple[TrimmedRole, ...], *, before: LengthFit | None, pages: int | None,
-    full_pages: int | None, max_pages: int,
-) -> TailoredResume:
-    """``shown`` with the length record that says what it now leaves out (none when it fits with nothing left out)."""
+def _record(shown: TailoredResume, cut: tuple, trimmed: tuple[TrimmedRole, ...], *, before: LengthFit | None) -> TailoredResume:
+    """``shown`` with the length record that says what an OLDER pick still leaves out of it (none when nothing is).
+
+    No page is counted (0.1.11.5): the record keeps the page numbers it had, for the sentence that says what was cut."""
 
     if cut or trimmed:
-        return replace(shown, length=LengthFit(max_pages, pages, full_pages, STATUS_CUT, cut, trimmed))
+        return replace(shown, length=LengthFit(
+            before.max_pages if before is not None else MAX_PAGES, before.pages if before is not None else None,
+            before.full_pages if before is not None else None, STATUS_CUT, cut, trimmed,
+        ))
     if before is not None and before.status == STATUS_RESTORED:
-        return replace(shown, length=replace(before, full_pages=pages))
-    if pages is not None and pages > max_pages:
-        return replace(shown, length=LengthFit(max_pages, pages, pages, STATUS_OVER))
-    if pages is None and before is not None:
-        return replace(shown, length=before if not before.leaves_out() else None)
+        return replace(shown, length=before)
     return replace(shown, length=None)
 
 
@@ -312,16 +302,11 @@ def _selection_after(
     return replace(selection, picked=tuple(picked), left_out=tuple(left), cut_for_length=tuple(cuts))
 
 
-def edit_selection(
-    stored: TailorResponse, master: Master, *, use: str, item_id: str, fit: str = FIT_ASK, tailoring: MasterTailoring | None = None,
-    measure: Measure | None = None, today: date | None = None, max_pages: int = MAX_PAGES,
-) -> SelectionEdit:
+def edit_selection(stored: TailorResponse, master: Master, *, use: str, item_id: str, fit: str = FIT_ASK) -> SelectionEdit:
     """One Add or Remove on a stored resume that was tailored from the master (see the module text). Pure: the caller stores it.
 
-    ``master`` is the master as it is now (an added line's wording);
-    ``tailoring`` is the job's candidate set (``tailor_master.master_tailoring``),
-    whose values order the cuts that make room; without it an Add that
-    needs room can only keep both.
+    ``master`` is the master as it is now (an added line's wording).  ``fit`` is accepted and ignored (the module
+    text): nothing is laid out, and an Add always applies.
     """
 
     if use not in SELECTION_USES:
@@ -331,34 +316,28 @@ def edit_selection(
     selection = stored.selection
     if selection is None:
         raise TailorError("selection_unavailable", "this resume was not tailored from a master resume: it has no Picked / Left out to change")
-    measure = measure or measure_pages
     result = stored.result
-    before_pages = measure(result)
     whole, left = _open(result)
-    room: list[tuple[str, str]] = []
-    room_cuts: list[RoomCut] = []
     back: list[str] = []  # a role the Add brought back (it was cut whole)
 
-    def done(shown: TailoredResume, cut: tuple, trimmed: tuple[TrimmedRole, ...], pages: int | None, *, added: str | None, removed: str | None) -> SelectionEdit:
-        full_pages = measure(whole) if (cut or trimmed) else pages
-        final = _record(shown, cut, trimmed, before=result.length, pages=pages, full_pages=full_pages, max_pages=max_pages)
+    def done(shown: TailoredResume, cut: tuple, trimmed: tuple[TrimmedRole, ...], *, added: str | None, removed: str | None) -> SelectionEdit:
+        final = _record(shown, cut, trimmed, before=result.length)
         response = replace(
             stored, result=final, markdown=render_markdown(final),
-            selection=_selection_after(selection, master, added=added, removed=removed, room=room, back=back),
+            selection=_selection_after(selection, master, added=added, removed=removed, room=(), back=back),
         )
-        return SelectionEdit(response, use, item_id, True, True, pages, max_pages, cut=tuple(room_cuts))
+        return SelectionEdit(response, use, item_id, True, True, None, MAX_PAGES)
 
     if use == "remove":
         line = _find(replace(result, length=None), item_id)
         if line is None or line.id is None:
             raise TailorError("selection_line_not_shown", f"this resume does not show master line {item_id!r}")
         whole = _without(whole, line.id)
-        shown, cut, trimmed = _close(whole, left)
-        return done(shown, cut, trimmed, measure(shown), added=None, removed=item_id)
+        return done(*_close(whole, left), added=None, removed=item_id)
 
     if _find(replace(result, length=None), item_id) is not None:
-        return SelectionEdit(stored, use, item_id, True, False, before_pages, max_pages)  # already shown: idempotent
-    held = _find(whole, item_id)  # a line the fit cut for length: it comes back as it was
+        return SelectionEdit(stored, use, item_id, True, False, None, MAX_PAGES)  # already shown: idempotent
+    held = _find(whole, item_id)  # a line an older pick cut for length: it comes back as it was
     if held is not None and held.id is not None:
         heading, entry = _role_of(whole, held.id)
         if heading in left.roles and entry is not None:  # its role was cut whole: the role comes back with this one line
@@ -370,7 +349,6 @@ def edit_selection(
         elif heading in left.lines:
             ids, records = left.lines[heading]
             left.lines[heading] = ([line_id for line_id in ids if line_id != held.id], records)
-        added_line_id = held.id
     else:
         item = master.items.get(item_id)
         if item is None:
@@ -379,81 +357,18 @@ def edit_selection(
             raise TailorError("selection_line_unsupported", "a Skills line is not added by id: the skills shown follow the lines shown")
         maker = _Maker(whole, stored.sources.resume_line_count)
         whole = _put(whole, master, item, maker)
-        added_line_id = _find(whole, item_id).id  # type: ignore[union-attr]
-    shown, cut, trimmed = _close(whole, left)
-    pages = measure(shown)
-    fitted = before_pages is not None and before_pages <= max_pages
-    if not (fitted and pages is not None and pages > max_pages) or fit == FIT_KEEP:
-        return done(shown, cut, trimmed, pages, added=item_id, removed=None)
-
-    # The resume fitted and the added line pushes it over: the fit's own next cuts, the fewest that fit, never the added line.
-    order: list[tuple[str, str]] = []
-    if tailoring is not None:
-        order = cut_order(shown, tailoring.candidates, tailoring.master, today=today or tailoring.today or date.today())[0]
-    by_id = {line.id: line for section in shown.sections for line in section.all_lines() if line.id is not None}
-    yours = {line.id for line in selection.picked if line.code == ADDED[0]}  # lines the user added earlier stay, like this one
-    trial, trial_cut, trial_trimmed, trial_pages = shown, cut, trimmed, pages
-    mine: dict[str, list[str]] = {}  # heading id -> the lines this loop cut: they go with their role when it is cut whole
-    for kind, target in order:
-        if trial_pages is None or trial_pages <= max_pages:
-            break
-        if kind == "bullet":
-            if target == added_line_id or line_item_id(by_id[target]) in yours:
-                continue
-            heading, entry = _role_of(whole, target)
-            if heading is None or entry is None:
-                continue
-            ids, records = left.lines.get(heading, ([], ()))
-            left.lines[heading] = ([*ids, target], records)
-            mine.setdefault(heading, []).append(target)
-            line = by_id[target]
-            room_cuts.append(RoomCut(line_item_id(line), "bullet", shown_text(line), role_label(entry)))
-            if line_item_id(line) is not None:
-                room.append((line_item_id(line), "bullet"))  # type: ignore[arg-type]
-        else:
-            entry = next((entry for section in trial.sections for entry in section.entries if _heading_id(entry) == target), None)
-            if entry is None or entry.bullets:
-                continue  # a role goes whole only once every line of it is cut (the added line keeps its role)
-            left.roles.append(target)
-            ids, records = left.lines.get(target, ([], ()))
-            left.lines[target] = ([line_id for line_id in ids if line_id not in mine.get(target, ())], records)
-            room_cuts.append(RoomCut(_entry_id(entry), "role", role_label(entry), role_label(entry)))
-            if _entry_id(entry) is not None:
-                room.append((_entry_id(entry), "role"))  # type: ignore[arg-type]
-        trial, trial_cut, trial_trimmed = _close(whole, left)
-        trial_pages = measure(trial)
-    if fit == FIT_ASK:
-        return SelectionEdit(stored, use, item_id, False, False, pages, max_pages, would_cut=tuple(room_cuts))
-    return done(trial, trial_cut, trial_trimmed, trial_pages, added=item_id, removed=None)
+    # The line is shown, and nothing else moves: no page is counted, so nothing is ever cut to make room.
+    return done(*_close(whole, left), added=item_id, removed=None)
 
 
 # --- the stored resume -----------------------------------------------------------------------------
 
 
-def _held_posting(home_root: Path, target: Path, stored: TailorResponse) -> TailorJob:
-    """The job as the selector reads it, with the posting text Scout already holds (the index, else the stored assessment); no request."""
-
-    text = ""
-    try:
-        from .find_jobs.job_source import index_posting
-        from .quick_assess import find_quick_assessment_by_job_identity
-
-        job = index_posting(home_root, target, stored.job.job_identity)
-        if job is not None and job.text.strip():
-            text = job.text
-        else:
-            assessed = find_quick_assessment_by_job_identity(home_root, target, stored.job.job_identity)
-            text = (assessed.posting_text or "") if assessed is not None else ""
-    except (ValueError, RuntimeError, OSError, LookupError, sqlite3.Error):  # the posting only orders the cuts: without it the profile's prior does
-        text = ""
-    return TailorJob(stored.job.title, stored.job.company, stored.job.location, text)
-
-
 def change_stored_selection(
     home_root: Path, target: Path, *, profile_id: str, job_identity: str, use: str, item_id: str, fit: str = FIT_ASK,
-    updated_at: str | None = None, measure: Measure | None = None,
+    updated_at: str | None = None,
 ) -> SelectionEdit:
-    """Add or Remove one master line on a stored tailored resume, and store the result (unless the Add asks first).
+    """Add or Remove one master line on a stored tailored resume, and store the result. No model, no layout.
 
     ``updated_at`` (the API's revision check) must be the stored one, else
     ``tailored_resume_changed``.  The read, the check and the write happen
@@ -464,8 +379,7 @@ def change_stored_selection(
     """
 
     from ..workpad import WorkpadError, resolve_workpad
-    from . import profile_records
-    from .tailor_master import master_tailoring, stored_master
+    from .tailor_master import stored_master
 
     if use not in SELECTION_USES:
         raise TailorError("invalid_value", "use must be add or remove")
@@ -491,17 +405,7 @@ def change_stored_selection(
         held = stored_master(home_root, target, resolved=resolved)
         if held is None:
             raise TailorError("master_not_found", "there is no master resume to take the line from")
-        tailoring = None
-        if use == "add":
-            try:
-                profile = next((record for record in profile_records.list_profiles(resolved) if record.profile_id == profile_id and record.state != "deleted"), None)
-                tailoring = master_tailoring(
-                    home_root=home_root, target=target, profile=profile, job=_held_posting(home_root, target, stored), resolved=resolved,
-                    job_identity=job_identity,
-                )
-            except (ValueError, RuntimeError, OSError):
-                tailoring = None  # the cuts then cannot be ordered: an Add that needs room can only keep both
-        edit = edit_selection(stored, held.master, use=use, item_id=item_id, fit=fit, tailoring=tailoring, measure=measure)
+        edit = edit_selection(stored, held.master, use=use, item_id=item_id, fit=fit)
         if edit.applied and edit.changed:
             save_tailor_response(edit.response, home_root=home_root)
             from .suggestions import drop_proposal_after_edit

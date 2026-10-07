@@ -783,7 +783,8 @@ def load_yours(home_root: Path, target: Path, job_url: str, profile_id: str | No
     from ..workpad import WorkpadError, resolve_workpad
     from . import jobs_folder, profile_records
     from .assessment_basis import BasisCheck, assessment_notice
-    from .tailor_master import BASIS_MASTER, measure_pages, stored_master, tailoring_basis
+    from .tailor_master import BASIS_MASTER, stored_master, tailoring_basis
+    from .tailored_resume_edit import _pages as _handback_pages  # the hand-back's own page count: the brief says the same number
     from .tailored_resume import LENGTH_RULE, read_tailored_resume, tailor_sources, tailored_resume_path
 
     home_root, target = Path(home_root), Path(target)
@@ -804,9 +805,10 @@ def load_yours(home_root: Path, target: Path, job_url: str, profile_id: str | No
     reason = BasisCheck(home_root=home_root, target=target, resolved=resolved).reason(assessment)  # type: ignore[arg-type]
     stale = record_store.stale_for(home_root, target, job.profile_id, job.job_identity, assessment_stale=reason, resolved=resolved)
     questions = open_questions(home_root, target, assessment)
-    pages = measure_pages(resume.result) if resume is not None else None
-    if pages is None and selection is not None and type(selection.get("pages")) is int:
-        pages = selection["pages"]  # type: ignore[assignment]
+    # The pages a hand-back is checked on (``tailored_resume_edit``): as printed, at the tightest spacing the PDF may
+    # choose.  (Until 0.1.11.5 this was the pick's own page budget, which a 20-bullet pick now runs past: an agent
+    # must not be told to cut a resume the hand-back takes as it is.)
+    pages = _handback_pages(resume.markdown) if resume is not None else None
     return YoursInputs(
         job_identity=job.job_identity,
         profile_id=job.profile_id,

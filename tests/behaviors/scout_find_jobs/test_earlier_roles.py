@@ -7,11 +7,13 @@ as the master resume has them) under "Earlier experience", at the end of the Exp
 
 THE END OUTCOME, read from the job resume's markdown and from the PDF that comes back (pypdf reads its text):
 
-- a pick that cuts every line of an old role prints that role's heading line, in the markdown and in the PDF;
-- the same pick still prints on its 2 pages WITH a header at its largest (the fit counts the heading lines);
+- a pick that shows no line of an old role prints that role's heading line, in the markdown and in the PDF;
+- the PDF with a header at its largest says its real pages (0.1.11.5 item 1c: the pick counts no page, so "the
+  pick's pages" is no longer a thing to compare with);
 - the heading lines are newest first, after the roles that show lines;
 - a role with a line kept prints as before: its own heading, once, and no line in the block;
-- heading lines that cannot fit are cut the oldest first, and the pick's conflicts say so in a plain sentence;
+- a heading line is NEVER left out, whatever the cap of bullets (until 0.1.11.5 the page fit could cut one, oldest
+  first, with an ``earlier_roles`` conflict: no pick makes that conflict now);
 - no employer, title or date is invented: every part of a heading line is a part of the master's own entry (the
   selector's golden picks included), and the stored result holds the master's heading lines word for word, in the
   shape a reader of before this release already reads.
@@ -31,13 +33,10 @@ import pytest
 
 from gigai.scout import assessment_core, postings
 from gigai.scout import master_selection as ms
-from gigai.scout import tailor_master as tm
 from gigai.scout.master_resume import Master, assign_ids, build_master, draft_master, parse_master
-from gigai.scout.master_selection import FIT_SCALE
-from gigai.scout.master_store import import_master, load_master
+from gigai.scout.master_store import import_master
 from gigai.scout.pipeline.settings import PIPELINE_ENV
-from gigai.scout.resume_display import DisplaySettings, save_display
-from gigai.scout.resume_pdf import ResumeMarkdownError, measure_markdown, pages_at, parse_resume_markdown, printed_text
+from gigai.scout.resume_pdf import ResumeMarkdownError, parse_resume_markdown, printed_text
 from gigai.scout.tailor_length import restore_cut
 from gigai.scout.tailored_resume import EARLIER_HEADING, TailorResponse, heading_only, heading_only_line, read_tailored_resume, render_markdown, tailored_resume_path
 from gigai.scout.tailored_resume_edit import HandbackRefused, handback_result
@@ -55,8 +54,10 @@ from tests.behaviors.scout_find_jobs.test_pick_header_room import (
     TERRAFORM_LINE,
     _answer,
     _assess,
-    _cli,
+    _assess_under,
+    _bullets,
     _cli_pdf,
+    _no_layout_in_the_pick,
     _header_lines,
     _line,
     _ok,
@@ -83,8 +84,9 @@ OLD = ROLES[3:]
 #: The lines the must-have rows rest on: all in the three recent roles, so no line of an old role is anything's evidence.
 MUST = (PYTHON_LINE, KUBERNETES_LINE, TERRAFORM_LINE, REACT_LINE)
 MUST_AT = {0: (PYTHON_LINE, REACT_LINE), 1: (KUBERNETES_LINE,), 2: (TERRAFORM_LINE,)}
-#: A line of an old role a must-have row can rest on (the second test's).
-OLD_MUST = "Role 4 line 1: built the scheduling and billing pipeline that moved 40 million records a day across four regions with no data loss."
+#: A line of an old role a must-have row can rest on (the second test's): the second line of the middle old role, and short,
+#: as a line an assessment quotes whole is.
+OLD_MUST = "Shipped the React forms the border posts file their ledgers with."
 HEADING_LINES = tuple(f"{title}, {employer} | {dates}" for employer, title, dates, _lines in OLD)
 
 
@@ -93,7 +95,7 @@ def master_markdown() -> str:
     for role, (employer, title, dates, lines) in enumerate(ROLES):
         must = MUST_AT.get(role, ())
         out += [f"### {employer}", f"{title} | {dates}", ""]
-        out += [f"- {_line(role, line)}" for line in range(lines - len(must))]
+        out += [f"- {OLD_MUST if (role, line) == (4, 1) else _line(role, line)}" for line in range(lines - len(must))]
         out += [f"- {line}" for line in must] + [""]
     out += ["## Skills", "", f"- {SKILLS}", "", "## Education", "", "### Example State University", "BS Computer Science | 2008 - 2012", ""]
     return "\n".join(out)
@@ -123,7 +125,6 @@ def fx(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptur
     source = tmp_path / "master.md"
     source.write_text(MASTER, encoding="utf-8")
     assert import_master(home_root=fixture.home_root, target=fixture.target, source=source, gig_id=base.gig.resolved.gig_id).status == "created"
-    save_display(fixture.home_root, DisplaySettings(spacing_scale=FIT_SCALE, auto_fit=False))
     caplog.set_level(logging.WARNING, logger="gigai.scout.server")
     return fixture
 
@@ -159,14 +160,16 @@ def _stored(fx: PostingsFixture) -> TailorResponse:
 # --- the end outcome: the roles are on the page ------------------------------------------------------------------
 
 
-def test_a_role_whose_lines_are_all_cut_still_prints_its_heading_and_the_resume_fits_two_pages_with_the_header(
-    fx: PostingsFixture, tmp_path: Path, server: _Server,
+def test_a_role_none_of_whose_lines_is_shown_still_prints_its_heading_in_the_markdown_and_the_pdf(
+    fx: PostingsFixture, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, server: _Server,
 ) -> None:
+    _no_layout_in_the_pick(monkeypatch)
     _assess(fx, _answer(fx, must=MUST))
     view = _view(fx)
     markdown = view["resume"]["markdown"]
-    # The pick needed the fit, and it cut EVERY line of the three old roles (nothing rests on them).
-    assert view["resume"]["counts"]["cut_for_length"] > 0 and view["picked"]["picked_by"] == "model" and view["conflicts"] == []
+    # The pick held more than its 20 bullets, and EVERY line of the three old roles is past them (nothing rests on them).
+    assert len(_bullets(markdown)) == ms.MAX_PICK_BULLETS and view["picked"]["picked_by"] == "model" and view["conflicts"] == []
+    assert view["resume"]["counts"]["cut_for_length"] == 0 and view["picked"]["pages"] is None  # nothing is "cut for length", no page counted
     assert not any(f"Role {role} line" in markdown for role in (3, 4, 5)), "the fixture kept a line of an old role"
     assert all(line in markdown for line in MUST)
 
@@ -182,23 +185,24 @@ def test_a_role_whose_lines_are_all_cut_still_prints_its_heading_and_the_resume_
     for employer, _title, _dates, _lines in OLD:
         assert f"### {employer}" not in markdown and markdown.count(employer) == 1, "an old role is printed twice, or under its own heading with no line"
 
-    # THE END OUTCOME, the PDF with a header at its largest: the pick's 2 pages at the pick's own spacing (the fit
-    # counted the heading lines), and the three roles are in its text, newest first.
+    # THE END OUTCOME, the PDF with a header at its largest, at the automatic fit: it says its REAL pages (the pick
+    # counted none), and the three roles are in its text, newest first.
     payload, pages = _cli_pdf(fx, tmp_path)
     text = "\n".join(pages)
     assert len(_header_lines(pages[0])) == 3, f"the header is not at its largest: {_header_lines(pages[0])}"
-    assert len(pages) == payload["pages"] == view["picked"]["pages"] == 2, f"the PDF with the header is {len(pages)} pages; the pick says {view['picked']['pages']}"
-    assert payload["spacing_scale"] == FIT_SCALE and payload["note"] is None, "the render had to tighten the spacing to hold the pick's pages"
+    assert len(pages) == payload["pages"] >= 2, f"the PDF with the header is {len(pages)} pages; it says {payload['pages']}"
     assert EARLIER_HEADING.upper() in text
     places = [text.index(f"{title}, {employer}") for employer, title, _dates, _lines in OLD]
     assert places == sorted(places) and text.index("QUILLSHIRE FREIGHT") < places[0] < text.index("SKILLS")
     assert all(dates in text for _employer, _title, dates, _lines in OLD)
     assert all(text.count(employer.upper()) + text.count(employer) == 1 for employer, _title, _dates, _lines in ROLES), "an employer is printed twice, or not at all"
-    # ... and the page's Generate PDF, over HTTP, with the form: the same 2 pages, the same roles.
+    # ... and the page's Generate PDF, over HTTP, with the form: the same pages, the same roles.
     response = server.pdf()
     assert response.status_code == 200, response.text
     served = _pages(response.content)
-    assert len(served) == 2 and "x-gigai-fit-note" not in response.headers and all(f"{title}, {employer}" in "\n".join(served) for employer, title, _dates, _lines in OLD)
+    assert len(served) == len(pages) and all(f"{title}, {employer}" in "\n".join(served) for employer, title, _dates, _lines in OLD)
+    # However many pages that is, the resume is ready: the page count is never a reason.
+    assert view["gate"]["ready"] is True
 
     # THE STORED RESULT: each such role is an Experience entry with the master's own heading lines, word for word,
     # and no bullet. Nothing is invented, and the shape is the one a reader of before 0.1.11.4 reads: no new key.
@@ -211,14 +215,16 @@ def test_a_role_whose_lines_are_all_cut_still_prints_its_heading_and_the_resume_
     assert set(raw) <= {"schema_version", "header", "sections", "length"}
     assert all(set(entry) <= {"heading", "bullets", "dropped"} for section in raw["sections"] for entry in section.get("entries", ()))
     assert TailorResponse.from_json(json.loads(json.dumps(stored.to_json()))) == stored
-    # The pages the pick stored are the pages of the resume WITH those lines.
-    assert pages_at(stored.result, FIT_SCALE) == 2 and stored.result.length is not None and stored.result.length.cut == ()
-    # The record: each such role is one "role" cut; its lines say why they are not shown; no conflict.
+    # Nothing was cut for length: no length record (so nothing to Restore), no cut and no conflict on the selection.
+    assert stored.result.length is None and restore_cut(stored.result) == stored.result
     selection = stored.to_json()["selection"]
-    assert [cut["id"] for cut in selection["cut_for_length"] if cut["kind"] == "role"] and "conflicts" not in selection
-    # One Restore puts the lines back under the role's own heading.
-    restored = restore_cut(stored.result)
-    assert not any(heading_only(section) for section in restored.sections)
+    assert selection["cut_for_length"] == [] and "conflicts" not in selection
+    # The old roles' lines are under Left out, each with why: past an old role's 3 lines, or past the 20 bullets.
+    master = _plain_master()
+    old_lines = {item.id for item in master.items.values() if item.kind == "bullet" and (item.text.startswith(("Role 3 ", "Role 4 ", "Role 5 ")) or item.text == OLD_MUST)}
+    left = {line["id"]: line["code"] for line in selection["left_out"]}
+    assert len(old_lines) == 15 and {left[item_id] for item_id in old_lines} == {"old_role_limit", "over_cap"}
+    assert sum(left[item_id] == "old_role_limit" for item_id in old_lines) == 6  # 5 lines each, at most 3 offered
 
 
 def test_an_old_role_with_a_line_kept_prints_as_before_and_only_the_others_are_listed_by_their_heading(fx: PostingsFixture) -> None:
@@ -235,36 +241,23 @@ def test_an_old_role_with_a_line_kept_prints_as_before_and_only_the_others_are_l
     assert plain.index("### Border Ledger Office") < plain.index(f"### {EARLIER_HEADING}")
 
 
-def test_heading_lines_that_cannot_fit_go_the_oldest_first_and_the_conflicts_say_so(fx: PostingsFixture, monkeypatch: pytest.MonkeyPatch) -> None:
-    """A page budget with room for ONE heading line: the newest of the three stays, and the answer says two are not listed."""
+def test_a_heading_line_is_never_left_out_however_small_the_cap(fx: PostingsFixture, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Until 0.1.11.5 a page with room for one heading line kept the newest and said "2 older roles are not listed"
+    (``earlier_roles_do_not_fit``). A heading line is not a bullet: no cap leaves one out, and no pick makes that conflict."""
 
-    real = tm.measure_pages
-
-    def one_heading_line(result):  # noqa: ANN001, ANN202
-        listed = sum(len(heading_only(section)) for section in result.sections)
-        return max(real(result) or 3, 3 if listed > 1 else 0)
-
-    monkeypatch.setattr(tm, "measure_pages", one_heading_line)
-    _assess(fx, _answer(fx, must=MUST))
+    _no_layout_in_the_pick(monkeypatch)
+    _assess_under(fx, monkeypatch, len(MUST), answer=_answer(fx, must=MUST))  # room for the four must-have lines only
     view = _view(fx)
     markdown = view["resume"]["markdown"]
 
-    assert _block(markdown) == [HEADING_LINES[0]], "the newest role's heading line is the one that stays"
-    assert all(line in markdown for line in MUST), "a must-have line went before a heading line did"
-    conflict = next(item for item in view["conflicts"] if item["code"] == "earlier_roles_do_not_fit")
-    assert conflict["message"].startswith("2 older roles are not listed on this resume, not even by a single heading line")
-    assert not re.search(r"\b[rb]-[0-9a-z]{4,}\b|max_pages|cut_for_length|earlier_roles", conflict["message"])
-    # The record names the two roles, and the plain CLI line says the sentence.
+    assert _block(markdown) == list(HEADING_LINES), "a heading line was left out"
+    assert sorted(_bullets(markdown)) == sorted(MUST), "a must-have line went, or another line stayed in its place"
+    assert view["conflicts"] == [] and view["gate"]["ready"] is True
     stored = _stored(fx)
-    record = next(item for item in stored.to_json()["selection"]["conflicts"] if item["kind"] == "earlier_roles")
-    master = load_master(home_root=fx.home_root, target=fx.target, gig_id=fx.base.gig.resolved.gig_id).master  # type: ignore[union-attr]
-    assert [master.entries[entry_id].heading for entry_id in record["ids"]] == ["Border Ledger Office", "Fennimore Imaging"]
-    shown = _cli(fx, "resume", "pick", "--job-url", _URL, as_json=False)
-    assert shown.exit_code == 0 and "2 older roles are not listed on this resume" in shown.output
-    # A re-pick with the page as it is lists all three again.
-    monkeypatch.setattr(tm, "measure_pages", real)
+    assert "conflicts" not in stored.to_json()["selection"] and stored.result.length is None
+    # A re-pick under the shipped cap lists all three still.
     again = _ok(fx, "resume", "pick", "--job-url", _URL, "--refresh")
-    assert _block(again["resume"]["markdown"]) == list(HEADING_LINES) and again["conflicts"] == []
+    assert _block(again["resume"]["markdown"]) == list(HEADING_LINES) and again["conflicts"] == [] and len(_bullets(again["resume"]["markdown"])) == 20
 
 
 def _plain_master() -> Master:
@@ -275,7 +268,7 @@ def _plain_master() -> Master:
     return build_master(draft)
 
 
-# --- the selector (a profile's own resume, the fallback): the same lines, in its page budget --------------------------
+# --- the selector (a profile's own resume, the fallback): the same lines, under its cap -------------------------------
 
 
 def _golden_posting(posting_id: str) -> ms.SelectionPosting:
@@ -284,7 +277,7 @@ def _golden_posting(posting_id: str) -> ms.SelectionPosting:
     return ms.SelectionPosting(meta["title"], body.strip() + "\n", meta["company"], meta.get("location", ""))
 
 
-def test_the_code_selector_lists_a_role_it_shows_no_line_of_and_counts_the_line_in_its_pages() -> None:
+def test_the_code_selector_lists_a_role_it_shows_no_line_of_and_counts_no_page() -> None:
     """The selector's own selection (a profile's resume, the fallback), on the synthetic master of its golden picks."""
 
     master = parse_master((GOLDEN / "master.md").read_text(encoding="utf-8"))
@@ -292,13 +285,14 @@ def test_the_code_selector_lists_a_role_it_shows_no_line_of_and_counts_the_line_
     profile = ms.SelectionProfile(tuple(raw["titles"]), tuple(raw["focus_tags"]), None, raw["profile_id"], raw["label"])
     selected = ms.select(master, profile, _golden_posting("p1-staff-ai-agent-platform"), today=date(2026, 10, 3))
 
-    assert selected.selector_version == "sel-6" and selected.pages_before_fit > 2 and selected.fits and selected.conflicts == ()
+    assert selected.selector_version == "sel-7" and selected.over_cap and selected.conflicts == ()
+    assert (selected.pages, selected.pages_before_fit, selected.layout_queries, selected.cut_for_length) == (None, None, 0, ())
+    assert sum(len(bullets) for entry_id, bullets in selected.entries.items() if master.entries[entry_id].section != "education") == ms.MAX_PICK_BULLETS
     bare = [master.entries[entry_id] for entry_id in selected.earlier]
     assert bare and all(entry.id not in selected.entries for entry in bare)
-    # One line each, newest first, and the page measured is the page WITH them.
+    # One line each, newest first.
     assert _block(selected.markdown) == [heading_only_line((entry.heading, *entry.sublines)) for entry in bare]
     assert [entry.end or 0 for entry in bare] == sorted((entry.end or 0 for entry in bare), reverse=True)
-    assert measure_markdown(selected.markdown, spacing_scale=FIT_SCALE)[0] == 2
     # Every role of the master is on the page: under its own heading, or in the block.
     assert {entry.id for entry in master.entries_in("experience")} == {entry_id for entry_id in selected.entries if master.entries[entry_id].section == "experience"} | set(selected.earlier)
     # A stored selection keeps them (an entry id with no line of its own), and prints the same markdown again.
@@ -309,23 +303,19 @@ def test_the_code_selector_lists_a_role_it_shows_no_line_of_and_counts_the_line_
     assert EARLIER_HEADING not in ms.render_selection(master, before, selected.skills)
 
 
-def test_the_code_selector_says_which_roles_are_not_listed_when_even_a_heading_line_does_not_fit() -> None:
+def test_the_code_selector_lists_every_role_however_small_its_cap() -> None:
+    """Until ``sel-7`` a page with room for one heading line gave an ``earlier_roles`` conflict naming the two that went."""
+
     master = _plain_master()
     posting = ms.SelectionPosting("Staff Software Engineer, Fullstack", _POSTING, "Thistledown")
-
-    def room_for_one(markdown: str) -> tuple[int, float]:
-        return (3 if len(_block(markdown)) > 1 or markdown.count("\n- Role ") > 6 else 2), 0.5
-
-    selected = ms.select(master, ms.SelectionProfile(), posting, today=date(2026, 10, 6), measure=room_for_one)
-    assert selected.fits and [master.entries[entry_id].heading for entry_id in selected.earlier] == ["Pinecrest Agency"]
-    (conflict,) = [conflict for conflict in selected.conflicts if conflict.kind == "earlier_roles"]
-    assert [master.entries[entry_id].heading for entry_id in conflict.ids] == ["Border Ledger Office", "Fennimore Imaging"]
-    assert conflict.reason == (
-        "2 older roles are not listed on this resume, not even by a single heading line: there was no room left on 2 pages beside the lines "
-        "your must-have requirements and pins rest on"
-    )
-    assert [cut.kind for cut in selected.cut_for_length if cut.id in conflict.ids and cut.kind == "heading"] == ["heading", "heading"]
-    assert selected.to_json(master)["earlier"] == list(selected.earlier)
+    for cap in (20, 6, 3):
+        selected = ms.select(master, ms.SelectionProfile(), posting, today=date(2026, 10, 6), max_bullets=cap)
+        shown = {entry_id for entry_id, bullets in selected.entries.items() if master.entries[entry_id].section == "experience" and bullets}
+        assert shown | set(selected.earlier) == {entry.id for entry in master.entries_in("experience")} and not shown & set(selected.earlier), cap
+        assert [conflict for conflict in selected.conflicts if conflict.kind in ("earlier_roles", "over_budget")] == [] and selected.cut_for_length == (), cap
+        assert len(_block(selected.markdown)) == len(selected.earlier) and selected.to_json(master)["earlier"] == list(selected.earlier), cap
+    # At a cap of one line a recent role, the three old roles are all listed by their heading, newest first.
+    assert [master.entries[entry_id].heading for entry_id in selected.earlier] == ["Pinecrest Agency", "Border Ledger Office", "Fennimore Imaging"]
 
 
 # --- the markdown reads back: the PDF of a file, and a hand-back -------------------------------------------------------

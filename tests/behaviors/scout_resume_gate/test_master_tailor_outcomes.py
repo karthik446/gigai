@@ -166,10 +166,29 @@ def _only_in_the_newer_resume(on_disk: dict) -> list[str]:
     return [text for line in _body_lines(on_disk) if (text := line["text"].removeprefix("- ")) in newer and text not in older]
 
 
-def test_with_a_master_the_older_profiles_tailoring_shows_what_only_the_newer_resume_held_on_two_pages_with_its_recent_roles(home: _Home, monkeypatch: pytest.MonkeyPatch) -> None:
+def _no_layout(monkeypatch: pytest.MonkeyPatch) -> None:
+    """From here on a page count or a layout made while a tailoring is settled fails the test (0.1.11.5 item 1c)."""
+
+    from gigai.scout import tailor_length_store, tailor_master
+
+    def refuse(*_args: object, **_kwargs: object) -> int:
+        raise AssertionError("a tailoring from the master was laid out or its pages counted")
+
+    monkeypatch.setattr(tailor_master, "measure_pages", refuse)
+    monkeypatch.setattr(tailor_length_store, "measure_pages", refuse)
+    for name in ("pages_at", "measure_markdown", "fewest_pages"):
+        monkeypatch.setattr(f"gigai.scout.resume_pdf.{name}", refuse)
+
+
+def test_with_a_master_the_older_profiles_tailoring_shows_what_only_the_newer_resume_held_with_every_role_and_no_page_fit(home: _Home, monkeypatch: pytest.MonkeyPatch) -> None:
+    """0.1.11.5 (c): a tailoring from the master is fitted to NO page (the user fits the page with the spacing of the
+    job's preview).  Until then this test was ``..._on_two_pages_with_its_recent_roles`` and pinned ``pages <= 2`` and
+    the two oldest roles cut down to their heading line."""
+
     assert NEWER_PROJECT not in SWE_RESUME.read_text(encoding="utf-8") and NEWER_PROJECT in AI_RESUME.read_text(encoding="utf-8")
     home.migrate()
     _install_model(monkeypatch, copies_what_it_is_shown)
+    _no_layout(monkeypatch)
 
     response, on_disk = home.tailor(home.swe_id)
 
@@ -177,16 +196,21 @@ def test_with_a_master_the_older_profiles_tailoring_shows_what_only_the_newer_re
     # the profile's own resume holds. (Which ones is the selector's call for the posting: with sel-2 the newer
     # PROJECT's first line ranks just under what fits here, a heading and a line being dearer than a line.)
     assert len(_only_in_the_newer_resume(on_disk)) >= 3, "the tailoring must be able to show lines only the newer resume held"
-    # It prints on 2 pages, and not by dropping every role but the newest: the recent roles are all there.
-    assert home.pages(home.swe_id) <= 2
+    # Nothing was cut for a page: no length record, nothing "cut for length", no page-driven conflict.
+    assert on_disk["result"].get("length") is None and on_disk["selection"]["cut_for_length"] == []
+    assert not {conflict["kind"] for conflict in on_disk["selection"].get("conflicts", [])} & {"earlier_roles", "over_budget"}
+    # No employer is dropped (0.1.11.4 item 9): every role of the master is on the resume, the recent ones with lines,
+    # any other by its lines or by its one line under "Earlier experience".
     roles = _roles(on_disk)
     assert all(any(role.startswith(recent) for role in roles) for recent in RECENT_ROLES), roles
-    # The two oldest roles hold no evidence for this posting: every line of theirs went, and each is still listed, on
-    # one line under "Earlier experience" (0.1.11.4 item 9: no employer is dropped silently).
-    bare = [entry["heading"][0]["text"].removeprefix("### ") for entry in _sections(on_disk)["experience"]["entries"] if not entry["bullets"]]
-    assert all(any(role.startswith(old) for role in bare) for old in OLDEST_ROLES), bare
-    block = response.markdown.split("### Earlier experience", 1)[1].split("\n## ", 1)[0]
-    assert all(old in block and f"### {old}" not in response.markdown for old in OLDEST_ROLES)
+    experience = _sections(on_disk)["experience"]["entries"]
+    assert all(any(role.startswith(old) for role in roles) for old in OLDEST_ROLES), roles
+    for entry in experience:
+        name = entry["heading"][0]["text"].removeprefix("### ")
+        if entry["bullets"]:
+            assert f"### {name}" in response.markdown
+        else:
+            assert f"### {name}" not in response.markdown and name in response.markdown.split("### Earlier experience", 1)[1].split("\n## ", 1)[0]
     # The posting's must-haves the master can show are on the resume.
     posting = _posting()
     keywords = extract_keywords(posting["text"], title=posting["title"], skills=home.master()["skills"])
@@ -237,53 +261,46 @@ def test_the_skills_line_is_assembled_by_code_and_is_shown_even_when_the_model_l
 
     (line,) = _sections(on_disk)["skills"]["lines"]
     shown = [name.strip() for name in line["text"].removeprefix("- ").split(",")]
-    # The Skills section is kept whole up to what prints whole (0110-10-15): never the handful sel-1 showed.
-    assert min(len(master["skills"]), 40) <= len(shown) <= len(master["skills"]) and set(shown) <= set(master["skills"]), shown
+    # The Skills section is kept WHOLE (0.1.11.5 (c), sel-7: no name is cut for a page; until then the names past 40
+    # that nothing asked for were the first thing cut for length).
+    assert sorted(shown) == sorted(master["skills"]), shown
     # The posting's must-haves the master lists lead the line, in the posting's order.
     posting = _posting()
     keywords = extract_keywords(posting["text"], title=posting["title"], skills=master["skills"])
     asked = [skill for term in keywords.must for skill in master["skills"] if mentions(skill, term)]
     assert asked and set(shown[: len(dict.fromkeys(asked))]) == set(asked)
-    # Every skill left out is on the record as cut for length, and none of them is one the posting asks for.
-    left_out = on_disk["selection"]["skills"]["left_out"]
-    assert {skill["code"] for skill in left_out} <= {"cut_for_length"} and not {skill["name"] for skill in left_out} & set(asked)
-    assert len(shown) + len(left_out) == len(master["skills"])
+    # No skill is left out, so none is on the record as cut for length.
+    assert on_disk["selection"]["skills"]["left_out"] == []
     assert line["kind"] == "copy"
 
 
 # --- the fit: lowest value for the posting first, shown, restorable; the tailoring's order is what prints ---
 
 
-def test_what_the_fit_left_out_is_on_the_record_and_one_restore_puts_it_back(home: _Home, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_tailoring_is_cut_for_no_page_so_it_carries_no_length_record_and_restore_has_nothing_to_put_back(home: _Home, monkeypatch: pytest.MonkeyPatch) -> None:
+    """0.1.11.5 (c).  Until then (``test_what_the_fit_left_out_is_on_the_record_and_one_restore_puts_it_back``) the
+    tailor call's answer was cut to 2 pages, the cut was on ``result.length`` and one Restore put it back.  Now every
+    line the tailoring showed is on the resume, there is no length record, and Restore / cut change nothing.  (The
+    record and its Restore on a resume that HAS one are pinned in test_tailor_length.py and test_tailor_master.py.)"""
+
     home.migrate()
     port = _install_model(monkeypatch, copies_what_it_is_shown)
+    _no_layout(monkeypatch)
     response, on_disk = home.tailor(home.swe_id)
 
-    # The candidate set was more than fits: the fit left roles and lines out, whole, and says which.
-    length = on_disk["result"]["length"]
-    assert length["status"] == "cut" and length["pages"] <= 2 < length["full_pages"]
-    # Only an old role ever loses every line (none of its lines is evidence for this posting), and it keeps its heading
-    # (0.1.11.4 item 9: no role is removed whole); a recent role keeps a line.
-    assert length["cut"] == []
-    bare = [entry["heading"][0]["text"].removeprefix("### ") for entry in _sections(on_disk)["experience"]["entries"] if not entry["bullets"]]
-    assert bare and all(any(role.startswith(old) for old in (*OLDEST_ROLES, "Cascade Data")) for role in bare), bare
-    assert {role["heading"] for role in length["trimmed"]} >= {entry["heading"][0]["id"] for entry in _sections(on_disk)["experience"]["entries"] if not entry["bullets"]}
+    assert on_disk["result"].get("length") is None and response.result.length is None
+    assert on_disk["selection"]["cut_for_length"] == [] and on_disk["selection"]["counts"]["cut_for_length"] == 0
+    assert "Cut for length" not in response.markdown
+    # Everything the tailoring was offered and copied is shown: nothing went for a page.
     offered = [text for _number, text in _listed(port.prompts[0]) if text.startswith("- ")]
     shown = {line["text"] for line in _body_lines(on_disk)}
-    assert len(offered) > len(shown)
+    assert offered and set(offered) <= shown
 
     base = ["scout", "resume", "length", "--job-url", response.job.job_identity, "--home", str(home.home), "--target", str(home.scout), "--json"]
-    restored = CliRunner().invoke(cli, [*base, "--restore"])
-    assert restored.exit_code == 0, restored.output
-    whole = home.stored(home.swe_id)
-    assert whole.result.length is not None and whole.result.length.status == "restored"
-    # Everything the tailoring was offered is back, and the resume is over 2 pages again.
-    back = {line.text for section in whole.result.sections for line in section.all_lines()}
-    assert set(offered) <= back and home.pages(home.swe_id) > 2
-
-    again = CliRunner().invoke(cli, [*base, "--cut"])
-    assert again.exit_code == 0, again.output
-    assert home.stored(home.swe_id).result == response.result
+    for use in ("--restore", "--cut"):
+        done = CliRunner().invoke(cli, [*base, use])
+        assert done.exit_code == 0, done.output
+        assert home.stored(home.swe_id).result == response.result, "there is nothing left out to put back or cut again"
 
 
 def test_the_tailoring_s_order_is_what_prints_and_the_posting_decides_which_lines_stay(home: _Home, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -315,8 +332,9 @@ def test_the_tailoring_s_order_is_what_prints_and_the_posting_decides_which_line
 def test_a_job_with_a_stored_assessment_keeps_the_line_the_assessment_cites_in_the_final_resume(home: _Home, monkeypatch: pytest.MonkeyPatch) -> None:
     """The END outcome on the tailor path (what the pipeline's tailor step runs): the stored tailored resume.
 
-    By words alone a line is cut for length. When the job's stored assessment for the profile cites that line for a
-    requirement (by meaning: the requirement shares no word with it), the same tailoring shows it."""
+    By words alone a line is not among the lines offered to the tailoring. When the job's stored assessment for the
+    profile cites that line for a requirement (by meaning: the requirement shares no word with it), the same
+    tailoring shows it.  (Until 0.1.11.5 (c) the line was one the page fit had cut; nothing is cut for a page now.)"""
 
     from types import SimpleNamespace
 
@@ -327,8 +345,11 @@ def test_a_job_with_a_stored_assessment_keeps_the_line_the_assessment_cites_in_t
     _install_model(monkeypatch, copies_what_it_is_shown)
     response, before = home.tailor(home.swe_id)
     master = home.master()
-    line = next(cut["id"] for cut in before["selection"]["cut_for_length"] if cut["kind"] == "bullet" and len(master["items"][cut["id"]]) > 40)
-    assert line not in [item["id"] for item in before["selection"]["picked"]]
+    line = next(
+        item["id"] for item in before["selection"]["left_out"]
+        if master["kinds"][item["id"]] == "bullet" and item["code"] == "role_limit" and len(master["items"][item["id"]]) > 40
+    )
+    assert line not in [item["id"] for item in before["selection"]["picked"]] and before["selection"]["cut_for_length"] == []
 
     asked: list[tuple[str | None, str]] = []
 
@@ -346,7 +367,7 @@ def test_a_job_with_a_stored_assessment_keeps_the_line_the_assessment_cites_in_t
     assert line in picked and picked[line]["code"] == "requirement_evidence" and picked[line]["reason"].startswith("the line your assessment cites for: Zymurgy qualifications")
     shown = [ref["item_id"] for item in _body_lines(after) for ref in item["refs"] if "item_id" in ref]
     assert line in shown and master["items"][line] in after["markdown"]
-    assert "conflicts" not in after["selection"] and home.pages(home.swe_id) <= 2
+    assert "conflicts" not in after["selection"] and after["result"].get("length") is None
     # The code-only fallback (no model answers) keeps it too.
     _install_model(monkeypatch, lambda _prompt: "this is not the JSON a tailoring answers with")
     _response, fallback = home.tailor(home.swe_id)
@@ -363,7 +384,7 @@ def test_the_stored_tailoring_says_what_was_picked_what_was_left_out_and_why(hom
     master = home.master()
 
     selection = on_disk["selection"]
-    assert (selection["picked_by"], selection["fallback"], selection["selector_version"]) == ("model", None, "sel-6")
+    assert (selection["picked_by"], selection["fallback"], selection["selector_version"]) == ("model", None, "sel-7")
     picked = [line["id"] for line in selection["picked"]]
     left = [line["id"] for line in selection["left_out"]]
     # Picked is exactly what the resume shows; with Left out it is every line of the master, each once.
@@ -374,13 +395,10 @@ def test_the_stored_tailoring_says_what_was_picked_what_was_left_out_and_why(hom
     assert all(line["code"] and line["reason"] for line in (*selection["picked"], *selection["left_out"]))
     assert selection["counts"] == {"picked": len(picked), "left_out": len(left), "cut_for_length": len(selection["cut_for_length"])}
     assert "conflicts" not in selection, "nothing mandatory was left without a line: the record carries no conflict"
-    # What the fit cut is left out for that reason: the lowest value for the posting, or its old role went whole.
-    cut = selection["cut_for_length"]
-    assert cut and {item["code"] for item in cut} <= {"cut_role_dropped", "cut_lowest_value"}
-    reasons = {line["id"]: line["code"] for line in selection["left_out"]}
-    assert all(reasons[item["id"]] == item["code"] for item in cut if item["kind"] == "bullet")
-    roles = [item["id"] for item in cut if item["kind"] == "role"]
-    assert roles and all(master["entries"][role].startswith((*OLDEST_ROLES, "Cascade Data")) for role in roles)
+    # 0.1.11.5 (c): nothing is cut for a page, so no line is left out "for length" (until then the fit's cuts were
+    # listed here as ``cut_lowest_value`` / ``cut_role_dropped``) and the resume carries no length record.
+    assert selection["cut_for_length"] == [] and on_disk["result"].get("length") is None
+    assert not [line for line in selection["left_out"] if line["code"].startswith("cut_") or "cut for length" in line["reason"]]
     # Skills: picked and left out by name, each with its reason.
     skills = selection["skills"]
     assert {skill["name"] for skill in skills["picked"]} | {skill["name"] for skill in skills["left_out"]} == set(master["skills"])

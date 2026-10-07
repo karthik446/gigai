@@ -148,19 +148,19 @@ def evidence_text(
     return evidence_view(master, prior, SelectionPosting(title, posting_text, company, location), today=today, cap=EVIDENCE_CAP, ids=ids)
 
 
-#: The pick asked of a model holds a quarter more lines than the code selector fits on the pages, so the fit has something to cut.
+#: The pick asked of a model holds a quarter more lines than the code selector shows under its cap, so the cap has something to leave out.
 PICK_HEADROOM = 1.25
-#: What is asked for when the pages cannot be measured (no renderer): the pick is validated and fitted later all the same.
+#: What is asked for when the selector's own selection cannot be made: the pick is validated and capped later all the same.
 PICK_LINES_UNMEASURED = 40
 
 
 def pick_line_count(master: Master, prior: SelectionProfile, posting: SelectionPosting, *, today: date | None = None) -> int:
-    """How many lines the prompt asks a pick to hold: what the code selector fits for this posting, plus a quarter (SPEC 1.6 item 7)."""
+    """How many lines the prompt asks a pick to hold: what the code selector shows for this posting, plus a quarter (SPEC 1.6 item 7)."""
 
     try:
         selected = select(master, prior, posting, today=today)
     except (ImportError, OSError, RuntimeError, ValueError):
-        return PICK_LINES_UNMEASURED  # no renderer to measure pages with
+        return PICK_LINES_UNMEASURED
     shown = len(selected.other) + sum(len(bullets) for entry_id, bullets in selected.entries.items() if master.entries[entry_id].section != "education")
     return max(1, min(MAX_PICK_LINES, -(-int(shown * PICK_HEADROOM * 100) // 100)))
 

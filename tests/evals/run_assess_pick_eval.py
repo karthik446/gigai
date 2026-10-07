@@ -976,6 +976,26 @@ def _shown(final: Mapping[str, Any]) -> frozenset[str]:
     return frozenset([*final["summary"], *(line for lines in final["entries"].values() for line in lines), *final["other"]])
 
 
+#: The cap of a selection (0.1.11.5 item 1c: a selection counts bullets, never pages); 20 for a tree without one.
+MAX_PICK_BULLETS: int = pick_eval.MAX_PICK_BULLETS
+
+
+def capped_bullets(master: Any, shown: Any) -> int:
+    """What a selection's cap counts among the line ids ``shown``: the bullets of ``master``'s roles and projects."""
+
+    return sum(1 for item_id in shown if (item := master.items.get(item_id)) is not None and item.kind == "bullet" and item.section in ("experience", "projects"))
+
+
+def selection_fit(master: Any, selection: Mapping[str, Any], shown: Any) -> dict[str, Any]:
+    """``{bullets, max_bullets, page_fit}`` of a STORED selection: within its cap of bullets (``max_bullets``, stored since
+    0.1.11.5: no page is counted); a selection stored before it is read by its pages, as it was made."""
+
+    bullets, cap = capped_bullets(master, shown), selection.get("max_bullets")
+    if isinstance(cap, int):
+        return {"bullets": bullets, "max_bullets": cap, "page_fit": bullets <= cap}
+    return {"bullets": bullets, "max_bullets": None, "page_fit": selection.get("pages") is not None and selection.get("pages") <= (selection.get("max_pages") or 2)}
+
+
 def stored_selection(home_root: Path, home: TargetHome, profile_id: str, job_identity: str) -> dict[str, Any] | None:
     """What ``run_quick_assessment`` stored as the job's selection (the suggestion record of a tree with N3), else ``None``."""
 
@@ -1077,8 +1097,10 @@ def run_case(
         else:
             shown = _shown(final)
             row["code_selection"] = {
-                "lines": len(shown), "pages": final["pages"], "empty_entries": list(final["empty_entries"]),
-                "date_order": bool(final["date_order"]), "page_fit": final["pages"] is not None and final["pages"] <= 2 and not final["empty_entries"] and bool(final["date_order"]),
+                # ``page_fit``: the shape and the cap (no page is counted for a selection; ``pages`` is what the probe says, unread).
+                "lines": len(shown), "pages": final["pages"], "bullets": capped_bullets(home.master, shown), "empty_entries": list(final["empty_entries"]),
+                "date_order": bool(final["date_order"]),
+                "page_fit": capped_bullets(home.master, shown) <= MAX_PICK_BULLETS and not final["empty_entries"] and bool(final["date_order"]),
                 "conflicts": len(final["conflicts"]), "cited_rows": len(cited), "seconds": round(time.monotonic() - started, 1), "shown": sorted(shown),
             }
     stored = stored_selection(home_root, home, profile_id, posting["url"]) if settle else None
@@ -1091,8 +1113,7 @@ def run_case(
         if selection:
             shown = frozenset(stored.get("printed") or ())
             row["model_selection"].update({
-                "lines": len(shown), "pages": selection.get("pages"), "max_pages": selection.get("max_pages"),
-                "page_fit": selection.get("pages") is not None and selection.get("pages") <= (selection.get("max_pages") or 2),
+                "lines": len(shown), "pages": selection.get("pages"), "max_pages": selection.get("max_pages"), **selection_fit(home.master, selection, shown),
                 "picked_by": selection.get("picked_by"), "fallback": selection.get("fallback"), "problems": selection.get("problems"),
                 "added_by_code": selection.get("added_by_code"), "conflicts": selection.get("conflicts"), "shown": sorted(shown),
             })

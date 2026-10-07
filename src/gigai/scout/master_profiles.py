@@ -19,11 +19,12 @@ STICKY (the operator's decision 5). A selection changes only when
   master, with the lines the profile shows now as the prior. THE RE-MAKE
   RULE (0110-10-15, ``master_selection.compare_selections``): the selection
   the profile holds and the new one are checked against the same current
-  master, requirements and page limit on separate checks. The new one is
+  master and requirements on separate checks (no page is counted: a
+  selection is the selector's pick up to its cap of bullets). The new one is
   stored when it regresses on none of them; the one held is KEPT when it is
   still valid and the new one regresses; when the new one regresses and the
-  one held cannot be kept (it shows a retired or corrected line, or no
-  longer fits) NOTHING is stored and the change says so (``unresolved``):
+  one held cannot be kept (it shows a retired or corrected line) NOTHING is
+  stored and the change says so (``unresolved``):
   the caller shows it, and ``accept=True`` stores the new one all the same.
 
 Lines the master gained since the selection was made are only OFFERED
@@ -73,7 +74,6 @@ from .master_resume import KIND_SKILLS, Master, MasterResumeError
 from .master_selection import (
     REMAKE_NEW,
     SELECTOR_VERSION,
-    Measure,
     Remake,
     Selected,
     SelectionPosting,
@@ -381,6 +381,8 @@ class SelectionChange:
 
 
 def _pages(markdown: str) -> int:
+    """The page estimate of a view printed again from the master (``sync_views``): what the change SAYS, never a limit."""
+
     from .master_selection import _shipped_measure  # lazy: the layout engine is a large native library
 
     return _shipped_measure(markdown)[0]
@@ -510,8 +512,7 @@ def index_stand_in(home_root: Path, target: Path, profile: ProfileRecord, master
 
 @one_operation()
 def refresh_selection(
-    *, home_root: Path, target: Path, profile_id: str, dry_run: bool = False, today: date | None = None, measure: Measure | None = None,
-    accept: bool = False,
+    *, home_root: Path, target: Path, profile_id: str, dry_run: bool = False, today: date | None = None, accept: bool = False,
 ) -> SelectionChange:
     """Select again from the whole master for one profile and, unless ``dry_run``, store the view and the selection.
 
@@ -536,11 +537,11 @@ def refresh_selection(
         titles=tuple(profile.titles), base_ids=tuple(before.item_ids) if before is not None and attached else None,
         profile_id=profile.profile_id, label=profile.label, pins=tuple(before.pins) if before is not None else (),
     )
-    selected = select(current.master, prior, posting, today=today, measure=measure)
+    selected = select(current.master, prior, posting, today=today)
     # A selection is its own prior from the next refresh on. It is settled here, so that the same refresh again
     # makes the same selection: selected again with what it shows as the prior until nothing changes.
     for _again in range(REFRESH_SETTLE_TRIES):
-        settled = select(current.master, replace(prior, base_ids=selection_ids(selected)), posting, today=today, measure=measure)
+        settled = select(current.master, replace(prior, base_ids=selection_ids(selected)), posting, today=today)
         if (selection_ids(settled), settled.skills) == (selection_ids(selected), selected.skills):
             break
         selected = settled
@@ -549,7 +550,7 @@ def refresh_selection(
         # Both selections against the same current sources. A line the master corrected or retired since the
         # view was last brought up to date makes the one held invalid.
         remake = compare_selections(
-            current.master, selected, before.item_ids, before.skills, stale=(*status.changed, *status.retired), pins=before.pins, measure=measure,
+            current.master, selected, before.item_ids, before.skills, stale=(*status.changed, *status.retired), pins=before.pins,
         )
     item_ids, skills = selection_ids(selected), tuple(selected.skills)
     markdown = render_selection(current.master, item_ids, skills)

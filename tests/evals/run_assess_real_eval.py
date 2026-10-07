@@ -368,6 +368,7 @@ def write_model_selection(home_root: Path, home: pe.TargetHome, profile_id: str,
     out.update({
         "picked_by": selection.get("picked_by"), "fallback": selection.get("fallback"), "problems": selection.get("problems"), "added_by_code": selection.get("added_by_code"),
         "conflicts": selection.get("conflicts"), "pages": selection.get("pages"), "max_pages": selection.get("max_pages"), "lines": len(shown), "shown": sorted(shown),
+        **pe.selection_fit(home.master, selection, shown),
         **coverage(answer["matrix"], shown),
     })
     resume = selection.get("resume") or {}
@@ -412,7 +413,9 @@ def write_code_selection(home: pe.TargetHome, profile: int, data: Mapping[str, A
     except Exception:  # noqa: BLE001 - the ids file above is the record; the markdown is a convenience
         pass
     return {
-        "lines": len(shown), "pages": final["pages"], "page_fit": final["pages"] is not None and final["pages"] <= 2 and not final["empty_entries"] and bool(final["date_order"]),
+        # ``page_fit``: the shape and the cap of bullets (0.1.11.5 item 1c: no page is counted for a selection).
+        "lines": len(shown), "pages": final["pages"], "bullets": pe.capped_bullets(home.master, shown),
+        "page_fit": pe.capped_bullets(home.master, shown) <= pe.MAX_PICK_BULLETS and not final["empty_entries"] and bool(final["date_order"]),
         "empty_entries": list(final["empty_entries"]), "conflicts": len(final["conflicts"]), "cited_rows": len(cited), "seconds": round(time.monotonic() - started, 1),
         "shown": sorted(shown), **coverage(answer["matrix"], shown),
     }
@@ -460,7 +463,7 @@ def summarize(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
             "model_selection_lost": sum(len(row["model_selection"].get("lost") or ()) for row in done if row.get("model_selection") and row["model_selection"].get("lines")),
             "code_selection_lost_same_cases": sum(len(row["code_selection"].get("lost") or ()) for row in done if row.get("model_selection") and row["model_selection"].get("lines") and row.get("code_selection") and "lost" in row["code_selection"]),
             "code_selection_lost_all": sum(len(row["code_selection"].get("lost") or ()) for row in done if row.get("code_selection") and "lost" in row["code_selection"]),
-            "not_page_fit": sum(1 for row in done if row.get("model_selection") and row["model_selection"].get("lines") and not (row["model_selection"].get("pages") or 9) <= (row["model_selection"].get("max_pages") or 2)),
+            "not_page_fit": sum(1 for row in done if row.get("model_selection") and row["model_selection"].get("lines") and not row["model_selection"].get("page_fit")),
             "pdf_rendered": sum(bool(row.get("model_selection") and row["model_selection"].get("pdf_bytes")) for row in done),
             "unknown_sources": sum(len((row.get("extras") or {}).get("unknown_sources") or ()) for row in done),
             "capped_questions": sum(len((row.get("extras") or {}).get("capped_questions") or ()) for row in done),

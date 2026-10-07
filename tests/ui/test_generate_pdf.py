@@ -49,9 +49,8 @@ SENT = {**HEADER, "work_authorization": WORK_AUTHORIZATION}
 #: The server's own sentence for a resume that does not fit its pages (`resume_pdf.over_limit_note`, pinned in
 #: tests/behaviors/scout_find_jobs/test_pdf_fits_page_limit.py), laid over a real response where a test needs it.
 OVER_LIMIT_NOTE = (
-    "This resume takes 3 pages: it does not fit on 2 pages even with the tightest spacing. To get 2 pages, shorten it automatically "
-    "(the Shorten automatically button on the job's page, or `gigai scout resume pick --job-url URL --shorten`; no model call), "
-    "then generate the PDF again. Or keep it at 3 pages."
+    "This resume takes 3 pages: it does not fit on 2 pages even with the tightest spacing. To get 2 pages, remove a point or two on the "
+    "job's page, then generate the PDF again. Or keep it at 3 pages."
 )
 PDF_WALL_SECONDS = FIRST_LOAD_WALL_SECONDS  # a render, not a click: 0.08 to 0.10 s measured on a three-line resume
 PDF_CPU_SECONDS = 5.0  # 0.07 measured; the renderer's first run on a machine reads its fonts
@@ -177,29 +176,29 @@ def test_generate_pdf_stays_on_the_page_limit_and_shows_the_servers_note_when_it
         ui.page.locator('[data-role="generate-pdf"]').click()
     shown = ui.page.locator('[data-role="pdf-fit-note"]')
     shown.wait_for()
-    # 0.1.11.3 item 15: on this page (a stored job's resume) the note carries the "Shorten automatically" button.
-    assert (shown.text_content() or "").strip() == note + " Shorten automatically"
+    # 0.1.11.5: the note is the server's sentence and nothing else ("Shorten automatically" is retired).
+    assert (shown.text_content() or "").strip() == note
     ui.page.unroute("**/api/tailored-resumes/pdf")
     ui.assert_clean()
 
 
-def test_shorten_automatically_asks_the_server_once_and_shows_its_sentence(ui, scout_server) -> None:
-    """0.1.11.3 item 15, in the browser: when Generate PDF says the resume does not fit, the form offers "Shorten
-    automatically" (never "edit it by hand"). The click is ONE `POST /api/job-resumes/pick` `{action: "shorten"}`,
-    answered by the real server; the form shows what it left out in the server's own sentence, and a refusal in the
-    page's own words by its code (never the server's text, which names commands).
+def test_the_over_limit_note_offers_no_shorten_button_and_asks_the_server_nothing(ui, scout_server) -> None:
+    """0.1.11.5 (item 1c, the coordinator's decision): "Shorten automatically" is RETIRED. A pick has no page budget to
+    tighten; the person fits the page with the spacing slider beside the preview and removes a point there.
 
-    The small home's resume is a few lines. So the note is laid over the real PDF response (as in the test above),
-    and the REAL answer to the click is the server's plain refusal for a resume that is short already; then the
-    answer a long resume gets ("Left out 2 lines: ...") is laid over the real route to see the form show it and drop
-    the note. The step itself, on a resume that really overflows, over HTTP on the real server and through the CLI:
-    tests/behaviors/scout_find_jobs/test_pick_header_room.py."""
+    In the browser: when Generate PDF says the resume does not fit (the note laid over the real PDF response, as in
+    the test above), the form shows the server's sentence, which names removing a point, with NO button, and no
+    `POST /api/job-resumes/pick` is ever sent. (Until 0.1.11.5 this test,
+    `test_shorten_automatically_asks_the_server_once_and_shows_its_sentence`, pinned the button, its one request and
+    the two sentences it could show.) What the server answers to an older caller that still sends the action:
+    tests/behaviors/scout_find_jobs/test_pick_cap.py."""
 
     demo = scout_server.demo
     ui.goto("/#/pdf/" + quote(demo.hero_profile_id, safe="") + "/" + quote(demo.hero_job, safe=""))
     ui.page.locator('[data-role="generate-pdf-form"]').wait_for()
     ui.page.fill("#generate-pdf-name", HEADER["name"])
-    assert ui.page.locator('[data-action="shorten-resume"]').count() == 0, "the button is offered only with the note"
+    sent: list[dict] = []
+    ui.page.on("request", lambda request: sent.append(request.post_data_json) if request.url.endswith("/api/job-resumes/pick") else None)
 
     def over_limit(route) -> None:
         response = route.fetch()
@@ -208,40 +207,12 @@ def test_shorten_automatically_asks_the_server_once_and_shows_its_sentence(ui, s
     ui.page.route("**/api/tailored-resumes/pdf", over_limit)
     with ui.page.expect_download():
         ui.page.locator('[data-role="generate-pdf"]').click()
-    button = ui.page.locator('[data-role="pdf-fit-note"] [data-action="shorten-resume"]')
-    button.wait_for()
-    assert (button.text_content() or "").strip() == "Shorten automatically"
-    assert "by hand" not in (ui.page.locator('[data-role="pdf-fit-note"]').text_content() or "")
-
-    # The real server's answer for THIS resume: it is short already, said in plain words; nothing is changed.
-    sent: list[dict] = []
-    ui.page.on("request", lambda request: sent.append(request.post_data_json) if request.url.endswith("/api/job-resumes/pick") else None)
-    with ui.page.expect_response("**/api/job-resumes/pick") as answered:
-        button.click()
-    assert answered.value.status == 409 and answered.value.json()["error"]["code"] == "resume_short_already"
-    assert sent == [{"job_url": demo.hero_job, "profile_id": demo.hero_profile_id, "action": "shorten"}]
-    refused = ui.page.locator('[data-role="pdf-shorten-error"]')
-    refused.wait_for()
-    said = (refused.text_content() or "").strip()
-    assert said == "The resume was not shortened. This resume already fits its pages with most of a page to spare, so nothing was left out."
-    assert not any(word in said for word in ("resume_short_already", "pick.", "settle", "Traceback"))
-
-    # A resume that was shortened: the server's sentence is shown as it is, and the note is gone until the next PDF.
-    message = 'Left out 2 lines: "Ran the weekly on-call review."; "Wrote the runbook for the billing export.". Generate the PDF again.'
-
-    def shortened(route) -> None:
-        route.fulfill(status=200, json={"action": "shorten", "shortened": {"left_out": ["a", "b"], "must_have_cut": False, "waiting": False, "message": message}})
-
-    ui.page.route("**/api/job-resumes/pick", shortened)
-    button.click()
-    done = ui.page.locator('[data-role="pdf-shortened"]')
-    done.wait_for()
-    assert (done.text_content() or "").strip() == message
-    assert ui.page.locator('[data-role="pdf-fit-note"]').count() == 0 and ui.page.locator('[data-role="pdf-shorten-error"]').count() == 0
-    ui.page.unroute("**/api/job-resumes/pick")
+    note = ui.page.locator('[data-role="pdf-fit-note"]')
+    note.wait_for()
+    said = (note.text_content() or "").strip()
+    assert said == OVER_LIMIT_NOTE and "remove a point" in said and "Shorten automatically" not in said and "--shorten" not in said
+    assert note.locator("button").count() == 0 and ui.page.locator('[data-action="shorten-resume"]').count() == 0
+    assert ui.page.get_by_text("Shorten automatically").count() == 0
+    assert sent == [], "nothing asks the server to shorten a resume"
     ui.page.unroute("**/api/tailored-resumes/pdf")
-    # The one refusal above (asked for) is the only thing the browser saw go wrong: it is taken off the list.
-    assert ui.problems() and all("409" in problem for problem in ui.problems()), ui.problems()
-    ui.network.console_errors.clear()
-    ui.network.http_errors.clear()
     ui.assert_clean()

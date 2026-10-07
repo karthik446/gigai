@@ -223,7 +223,8 @@ def test_the_master_resume_over_http(tmp_path: Path, monkeypatch: pytest.MonkeyP
         refreshed = client.post("/api/master/selection", json={"profile_id": swe.profile_id, "use": "refresh"}, headers=browser)
         assert refreshed.status_code == 200, refreshed.text
         change = refreshed.json()["changes"][0]
-        assert (change["action"], change["written"], change["pages"], change["fits"]) == ("refreshed", True, 2, True)
+        # 0.1.11.5 (c): a selection counts no page (``pages`` was 2), so the page count is never why a refresh does not fit.
+        assert (change["action"], change["written"], change["pages"], change["fits"]) == ("refreshed", True, None, True)
         now = {item["profile_id"]: item for item in client.get("/api/profiles").json()["profiles"]}
         assert now[swe.profile_id]["resume_ref"] == change["resume_ref"] != after[swe.profile_id]["resume_ref"]  # its resume is the selection
         assert now[default.profile_id]["resume_ref"] == after[default.profile_id]["resume_ref"]
@@ -260,7 +261,7 @@ def test_the_master_resume_over_http(tmp_path: Path, monkeypatch: pytest.MonkeyP
         removed = removed.json()
         assert removed["selection_change"] == {
             "use": "remove", "item_id": victim, "applied": True, "changed": True, "needs_choice": False,
-            "pages": removed["selection_change"]["pages"], "max_pages": 2, "would_cut": [], "cut": [],
+            "pages": None, "max_pages": 2, "would_cut": [], "cut": [],  # 0.1.11.5 (c): an Add or a Remove counts no page
         }
         assert texts[victim] not in removed["markdown"] and removed["updated_at"] == tailored.updated_at
         assert {line["id"]: line["code"] for line in removed["selection"]["left_out"]}[victim] == "removed_by_you"

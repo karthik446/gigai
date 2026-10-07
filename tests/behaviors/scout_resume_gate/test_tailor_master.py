@@ -111,7 +111,8 @@ def test_every_numbered_line_of_a_candidate_set_is_the_master_line_its_id_names(
     # The same ids reach the tailoring's context, so a ref to a line carries its master id.
     ctx = candidates.context()
     assert dict(ctx.line_ids) == candidates.line_ids and ctx.withheld == frozenset()
-    assert candidates.skills_line is not None and ms.SKILLS_WHOLE <= len(candidates.skills) <= len(master.skills())
+    # 0.1.11.5 (c): the Skills section is offered whole (no name is cut for a page any more).
+    assert candidates.skills_line is not None and sorted(candidates.skills) == sorted(master.skills())
 
 
 def test_the_three_candidate_sets_are_the_view_the_pick_before_its_fit_and_the_evidence_bullets(master: Master) -> None:
@@ -119,21 +120,22 @@ def test_the_three_candidate_sets_are_the_view_the_pick_before_its_fit_and_the_e
     view, shortlist, evidence = (tm.job_candidates(master, profile, posting, mode=mode, today=TODAY) for mode in tm.CANDIDATE_MODES)
     selected = ms.select(master, profile, posting, today=TODAY)
 
-    # view: exactly the selector's 2-page selection. A role it shows by its heading alone (0.1.11.4 item 9) is in the
+    # view: exactly the selector's selection (0.1.11.5 (c): its best lines up to the cap of bullets, no page fit). A role it shows by its heading alone (0.1.11.4 item 9) is in the
     # set as its own heading with no line under it, so a settled copy lists it; what the copy PRINTS is the selection.
     assert view.item_ids() == frozenset(selected.item_ids()) and selected.earlier
+    assert view.bullet_count == ms.MAX_PICK_BULLETS and tm.job_candidates(master, profile, posting, mode=tm.MODE_VIEW, today=TODAY, max_bullets=12).bullet_count == 12
     assert view.markdown == ms.render_selection(master, selected.stored_ids(), selected.skills, candidates=True)
     assert [role for role, bullets in view.entries.items() if not bullets and master.entries[role].section == "experience"] == list(selected.earlier)
     copied, _ctx = _copied(view)
     assert printed_text(render_markdown(copied)) == printed_text(selected.markdown)
-    # shortlist: the selector's pick before its page fit: every role, under the caps it picks under (a line the
-    # posting's requirements are about passes the cap for general lines, up to the hard cap), about twice what fits.
+    # shortlist: the selector's pick before its cap: every role, under the caps it picks under (a line the
+    # posting's requirements are about passes the cap for general lines, up to the hard cap), about twice what the view shows.
     assert set(shortlist.entries) >= set(OLD_ROLES) | set(RECENT_ROLES)
     assert all(len(shortlist.entries[role]) >= min(ms.PICK_CAPS[index], len(master.entries[role].bullets)) for index, role in enumerate(RECENT_ROLES))
     assert all(set(view.entries.get(role, ())) <= set(shortlist.entries[role]) for role in RECENT_ROLES)
     assert all(len(shortlist.entries[role]) == 3 for role in OLD_ROLES)
     assert shortlist.bullet_count > 1.5 * view.bullet_count
-    # The projects, the Other lines and the skills offered are the ones the 2-page selection shows: the fit cannot remove them.
+    # The projects, the Other lines and the skills offered are the ones the selection shows: the fit cannot remove them.
     assert {entry for entry in shortlist.entries if master.entries[entry].section == "projects"} == {entry for entry in selected.entries if master.entries[entry].section == "projects"}
     assert (shortlist.other, shortlist.skills) == (selected.other, selected.skills)
     # evidence: the evidence view's bullets for every role, under the same summary, skills, Other lines and projects.
@@ -162,48 +164,82 @@ def test_a_copy_of_every_candidate_line_is_a_valid_tailoring_and_each_ref_carrie
 # --- decision 2 in a wider set, and the fit ---------------------------------------------------------
 
 
+def _no_layout(monkeypatch: pytest.MonkeyPatch) -> None:
+    """From here on any page count or layout fails the test."""
+
+    def refuse(*_args: object, **_kwargs: object) -> int:
+        raise AssertionError("a tailoring's result was laid out or its pages counted")
+
+    monkeypatch.setattr(tm, "measure_pages", refuse)
+    for name in ("pages_at", "measure_markdown", "fewest_pages", "_estimate"):
+        monkeypatch.setattr(f"gigai.scout.resume_pdf.{name}", refuse)
+
+
+def _finished(master: Master, candidates: tm.JobCandidates) -> tuple[TailoredResume, tm.TailorSelection]:
+    """What the product makes of a tailor call that copied every candidate line (``MasterTailoring.finish``)."""
+
+    settled, ctx = _copied(candidates)
+    plan = tm.MasterTailoring(master=master, source=tm.MasterSource("revision_0", 1, "sha256:" + "a" * 64), candidates=candidates, today=TODAY)
+    return plan.finish(settled, ctx)
+
+
+def _count_fit(per_two_pages: int):
+    """A stand-in for the layout, for ``fit_selected`` as a function: 2 pages hold this many role and project bullets."""
+
+    def measure(result: TailoredResume) -> int:
+        bullets = sum(len(entry.bullets) for section in result.sections if section.heading in ("experience", "projects") for entry in section.entries)
+        return 2 if bullets <= per_two_pages else 3
+
+    return measure
+
+
 @pytest.mark.parametrize("profile_id", ["profile-ai", "profile-swe"])
-def test_a_requirements_evidence_is_offered_and_stays_through_the_fit_wherever_its_role_stands(master: Master, profile_id: str) -> None:
+def test_a_requirements_evidence_is_offered_and_is_in_the_finished_tailoring_wherever_its_role_stands(
+    master: Master, profile_id: str, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """0.1.11.5 (c): the product path is ``MasterTailoring.finish``, which fits to NO page.  (Until then this test ran
+    ``fit_selected`` with the real renderer and pinned "2 pages, evidence kept"; fitted to 2 pages the candidate set
+    of today, which holds the whole Skills section, loses role headings and evidence, so the product no longer does.)"""
+
     # Core infrastructure asks for Linux: lines of a recent role name it as strongly as an old role's, so a recent
-    # one is its evidence. It is offered, it is shown, and the old line is not needed for it.
+    # one is its evidence. It is offered, and it is shown.
     infra = tm.job_candidates(master, _profile(profile_id), _posting(POSTINGS[1]), mode=tm.MODE_SHORTLIST, today=TODAY)
     assert infra.stand_ins == {}, "job-candidates:1's stand-ins are gone: the evidence is in the selector's pick itself"
     asked = next(requirement for requirement in infra.selected.requirements if requirement.text == "Linux")
     evidence = asked.supporters[0]
     assert master.items[evidence].entry_id in RECENT_ROLES and evidence in infra.entries[master.items[evidence].entry_id or ""]
-    settled, ctx = _copied(infra)
-    fitted = tm.fit_selected(tm.ensure_skills_line(settled, infra, ctx), infra, master, today=TODAY)
-    assert tm.measure_pages(fitted) == 2 and evidence in _shown_ids(fitted) and mentions(render_markdown(fitted), "Linux")
-    record = tm.selection_record(master, infra, fitted, today=TODAY)
-    assert record.conflicts == () and next(line for line in record.picked if line.id == evidence).code == "requirement_evidence"
-
-    # The ML platform posting asks for SQL: only an old role's line names it. That line stays, its role with it,
-    # while lines of recent roles that are worth less for the posting are cut.
+    # The ML platform posting asks for SQL: only an old role's line names it. It is offered too.
     only_old = tm.job_candidates(master, _profile(profile_id), _posting(POSTINGS[2]), mode=tm.MODE_SHORTLIST, today=TODAY)
-    asked = next(requirement for requirement in only_old.selected.requirements if requirement.text == "SQL")
-    assert asked.supporters == ("b-cas-08",) and "b-cas-08" in only_old.entries["r-cas"]
-    settled, ctx = _copied(only_old)
-    fitted = tm.fit_selected(tm.ensure_skills_line(settled, only_old, ctx), only_old, master, today=TODAY)
-    roles = _roles(fitted)
-    assert tm.measure_pages(fitted) == 2 and [role for role in roles if role in OLD_ROLES and roles[role]] == ["r-cas"] and "b-cas-08" in roles["r-cas"]
-    # The other old roles lost every line and are still listed, by their heading alone (0.1.11.4 item 9).
-    assert roles["r-bri"] == [] == roles["r-tes"] and fitted.length is not None and fitted.length.cut == ()
-    record = tm.selection_record(master, only_old, fitted, today=TODAY)
-    assert record.conflicts == ()
-    recent_cut = [cut.id for cut in record.cut_for_length if cut.kind == "bullet" and master.items[cut.id].entry_id in RECENT_ROLES]
-    assert recent_cut and all(only_old.selected.values[item] < only_old.selected.values["b-cas-08"] for item in recent_cut)
+    sql = next(requirement for requirement in only_old.selected.requirements if requirement.text == "SQL")
+    assert sql.supporters == ("b-cas-08",) and "b-cas-08" in only_old.entries["r-cas"]
+
+    _no_layout(monkeypatch)
+    for candidates, line in ((infra, evidence), (only_old, "b-cas-08")):
+        finished, record = _finished(master, candidates)
+        # Nothing is cut for a page: no length record, every offered line shown, every role there (by lines or heading).
+        assert finished.length is None and record.cut_for_length == () and record.conflicts == ()
+        assert set(_shown_ids(finished)) >= candidates.item_ids() - set(master.entries)
+        assert set(_roles(finished)) == set(OLD_ROLES) | set(RECENT_ROLES)
+        assert line in _shown_ids(finished) and next(item for item in record.picked if item.id == line).code == "requirement_evidence"
+        assert not any(item.code.startswith("cut_") for item in record.left_out)
+    assert mentions(render_markdown(_finished(master, infra)[0]), "Linux") and "b-cas-08" in _roles(_finished(master, only_old)[0])["r-cas"]
 
 
 @pytest.mark.parametrize("mode", [tm.MODE_SHORTLIST, tm.MODE_EVIDENCE])
 @pytest.mark.parametrize("posting_id", POSTINGS)
-def test_the_fit_reaches_two_pages_lowest_value_first_with_every_recent_role_present_and_no_empty_role(master: Master, mode: str, posting_id: str) -> None:
+def test_fit_selected_cuts_lowest_value_first_with_every_recent_role_present_and_no_role_removed(master: Master, mode: str, posting_id: str) -> None:
+    """``fit_selected`` AS A FUNCTION (no product path calls it since 0.1.11.5 (c)): its cut order and its record, on the
+    eval master, with a measure that COUNTS bullets (2 pages hold 16).  Until then this test used the real renderer
+    and was named ``..._the_fit_reaches_two_pages_...``: the page was the product's limit then."""
+
     candidates = tm.job_candidates(master, _profile("profile-swe"), _posting(posting_id), mode=mode, today=TODAY)
     settled, ctx = _copied(candidates)
     whole = tm.ensure_skills_line(settled, candidates, ctx)
     cuts, refill = tm.cut_order(whole, candidates, master, today=TODAY)
-    fitted = tm.fit_selected(whole, candidates, master, today=TODAY)
+    measure = _count_fit(16)
+    fitted = tm.fit_selected(whole, candidates, master, today=TODAY, measure=measure)
 
-    assert tm.measure_pages(fitted) == 2 and fitted.length is not None and fitted.length.status == STATUS_CUT
+    assert measure(fitted) == 2 and fitted.length is not None and fitted.length.status == STATUS_CUT
     assert fitted.length.pages == 2 < fitted.length.full_pages  # type: ignore[operator]
     roles = _roles(fitted)
     for index, role in enumerate(RECENT_ROLES):
@@ -238,11 +274,31 @@ def test_the_fit_reaches_two_pages_lowest_value_first_with_every_recent_role_pre
     assert sorted(_shown_ids(restored)) == answered and cut_again(restored) == fitted
 
 
-def test_a_tailoring_of_the_two_page_view_is_not_cut_and_a_missing_skills_line_is_put_back(master: Master) -> None:
+def test_the_code_s_own_selection_is_laid_out_by_nobody_and_cut_for_no_page_and_a_missing_skills_line_is_put_back(
+    master: Master, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """0.1.11.5 (c).  Until then ``code_only`` fitted the view to 2 pages (``fit_selected``), one PDF layout a trial.
+    Now the view IS the selection (the cap of bullets) and the fallback renders nothing: no length record, every
+    line of the view shown."""
+
     candidates = tm.job_candidates(master, _profile(), _posting(POSTINGS[0]), mode=tm.MODE_VIEW, today=TODAY)
     settled, ctx = _copied(candidates)
-    assert tm.fit_selected(settled, candidates, master, today=TODAY) == settled and settled.length is None
     assert tm.ensure_skills_line(settled, candidates, ctx) == settled
+
+    def no_layout(*_args: object, **_kwargs: object) -> int:
+        raise AssertionError("the code's own selection laid out a page")
+
+    monkeypatch.setattr(tm, "measure_pages", no_layout)
+    monkeypatch.setattr("gigai.scout.resume_pdf.pages_at", no_layout)
+    monkeypatch.setattr("gigai.scout.resume_pdf.measure_markdown", no_layout)
+    result, view = tm.code_only(master, candidates, _job(candidates.posting), today=TODAY)
+    assert view is candidates and result.length is None
+    assert sorted(_shown_ids(result)) == sorted(candidates.item_ids() - set(master.entries)) and len(_shown_ids(result)) == len(set(_shown_ids(result)))
+    assert sum(len(bullets) for bullets in _roles(result).values()) + sum(
+        len(entry.bullets) for section in result.sections if section.heading == "projects" for entry in section.entries
+    ) == ms.MAX_PICK_BULLETS
+    record = tm.selection_record(master, view, result, picked_by=tm.PICKED_BY_CODE, fallback="model_unavailable", today=TODAY)
+    assert record.cut_for_length == () and not any(line.code.startswith("cut_") or "cut for length" in line.reason for line in record.left_out)
 
     without = TailoredResume(settled.header, tuple(section for section in settled.sections if section.heading != "skills"))
     shown = tm.ensure_skills_line(without, candidates, ctx)
@@ -449,20 +505,23 @@ def test_a_tailoring_made_again_is_compared_with_the_stored_one_on_separate_chec
     master = parse_master(SMALL)
     candidates = tm.job_candidates(master, ms.SelectionProfile(titles=("Staff Platform Engineer",)), SMALL_POSTING, mode=tm.MODE_SHORTLIST, today=TODAY)
     settled, _ctx = _copied(candidates)
-    pages = lambda _markdown: (2, 0.5)  # noqa: E731 - both selections print on 2 pages here
     good = tm.selection_record(master, candidates, tm.fit_selected(settled, candidates, master, today=TODAY, measure=_by_bullets(9)), today=TODAY)
     thin = tm.selection_record(master, candidates, tm.fit_selected(settled, candidates, master, today=TODAY, measure=lambda _result: 3), today=TODAY)
     assert "b-o1" in [line.id for line in good.picked] and "b-o1" not in [line.id for line in thin.picked]
 
-    same = tm.compare_tailorings(master, candidates, good, good, measure=pages)
+    same = tm.compare_tailorings(master, candidates, good, good)
     assert (same.decision, same.regressions) == ("new", ())
-    kept = tm.compare_tailorings(master, candidates, good, thin, measure=pages)
+    kept = tm.compare_tailorings(master, candidates, good, thin)
     assert kept.decision == "previous" and kept.regressions[0].startswith("mandatory coverage: 2 requirement(s) with no line now") and kept.problems == ()
-    better = tm.compare_tailorings(master, candidates, thin, good, measure=pages)
+    better = tm.compare_tailorings(master, candidates, thin, good)
     assert better.decision == "new" and better.previous.lost and better.new.lost == ()
     # The stored tailoring shows a line the master corrected since: it cannot be kept, and the new one regresses: unresolved.
-    stuck = tm.compare_tailorings(master, candidates, good, thin, stale=("b-n2",), measure=pages)
+    stuck = tm.compare_tailorings(master, candidates, good, thin, stale=("b-n2",))
     assert stuck.decision == "unresolved" and "b-n2" in stuck.problems[0] and stuck.regressions
+    # 0.1.11.5 (c): no page is counted for either selection, and the page count is never a regression or a problem.
+    for remake in (same, kept, better, stuck):
+        assert remake.previous.pages is None and remake.new.pages is None and remake.previous.fits and remake.new.fits
+        assert not any("page" in text for text in (*remake.regressions, *remake.problems))
 
 
 def test_room_the_last_cut_left_goes_back_to_a_recent_roles_line() -> None:

@@ -26,7 +26,7 @@ ACTION_REFRESH = "refresh"
 ACTION_DRAFT = "draft"
 ACTIONS: tuple[str, ...] = (ACTION_REFRESH, ACTION_DRAFT)
 #: 0.1.11.3 item 15, "Shorten automatically": ``pick.<this>(home_root, target, profile_id, job_identity, *, now)
-#: -> pick.Shortened``: the same pick under a tighter page budget, and what it left out. No model call.
+#: ``: retired in 0.1.11.5, it only raises ``PickError`` ``shorten_retired`` with the sentence for the user.
 SHORTEN_STORED = "shorten_stored"
 ACTION_SHORTEN = "shorten"
 

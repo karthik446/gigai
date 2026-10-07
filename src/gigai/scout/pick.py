@@ -4,11 +4,12 @@ ONE ENTRY, ``settle(master, assessment, requirements, today)``: what
 ``quick_assess.run_quick_assessment``, the pipeline's ``pick`` step, the
 re-pick action (``settle_stored``, at the end of this module) and the pick
 eval (``tools/pick_probe.py``) all call.  It never
-calls a model.  Pure except the page measurement (the shipped template at the
-selector's spacing, ``tailor_master.measure_pages``).
+calls a model.  Pure: NOTHING IS LAID OUT AND NO PAGE IS COUNTED (0.1.11.5
+item 1c).  The selection does not know the page limit; the user fits the page
+with the spacing of the job's preview.
 
 WHAT IS REUSED, AND WHAT IS NEW.  The tree already holds a selector and a fit
-(0.1.10.9 master P2/P4, ``sel-4``; ``sel-5`` keeps room for the PDF's header, ``sel-6`` lists a role with no line by its heading), and this module adds no second one:
+(0.1.10.9 master P2/P4; ``sel-6`` lists a role with no line by its heading, ``sel-7`` caps the bullets and knows no page), and this module adds no second one:
 
 - the code selector (``master_selection.select``): the requirement rows of an
   assessment as ``SelectionPosting.cited`` (a row's supporters are exactly the
@@ -20,18 +21,17 @@ WHAT IS REUSED, AND WHAT IS NEW.  The tree already holds a selector and a fit
 - the checks a tailoring's answer goes through and the settled result
   (``validate_tailored_output``, ``apply_no_loss``, ``finish_tailoring``,
   ``ensure_skills_line``): every line of a selection is a COPY of a master line;
-- the fit and its record (``tailor_master.cut_order``, ``tailor_length.fit_by_cuts``):
-  the fewest cuts that fit, a recent role keeps its best line, an old role
-  that loses its last line keeps its heading line, what was cut is on the result
-  (``TailoredResume.length``) so one Restore puts it back;
+- the order lines are left out in (``tailor_master.cut_order``): a recent role
+  keeps its best line, a project one line, an old role that loses its last
+  line keeps its heading line;
 - Picked / Left out (``tailor_master.selection_record``) and its conflicts;
-- the fallback (``tailor_master.code_only``): the selector's own 2-page selection.
+- the fallback (``tailor_master.code_only``): the selector's own selection.
 
-New here: the validation of a model's pick (V1 to V8), the order the fit cuts a
-PICK in (3.2: the model's ranking and the rows' sources, where the selector's
-own fit reads its own scores), the Other lines and the Skills in that order,
-the conflict codes of 3.3, the fill of a pick that leaves room, and the choice
-between the pick and the fallback.
+New here: the validation of a model's pick (V1 to V8), the order a PICK's
+lines are left out in when it holds more than the cap (3.2: the model's
+ranking and the rows' sources, where the selector reads its own scores), the
+conflict codes of 3.3, the fill of a pick under the cap, and the choice between
+the pick and the fallback.
 
 VALIDATING THE PICK (3.1), against the master revision the assessment read.
 Every finding is a ``Problem`` (a code and the id); nothing here raises.
@@ -55,40 +55,49 @@ order, newest first (the model's order decides the lines inside an entry and
 the order of the projects); the Skills section whole; every degree; nothing
 reworded.
 
-THE 2-PAGE FIT (3.2).  Page fit is a constraint, measured, never estimated.
-PROTECTED, cut only when nothing else can go: the last printed source of a
-``met`` mandatory row, then the profile's pins.  Everything else, first cut
-first:
+THE CAP (3.2; 0.1.11.5 item 1c).  A selection shows at most
+``master_selection.MAX_PICK_BULLETS`` bullets under its roles and projects, and
+that is the only limit: no page is counted, nothing is rendered, no room is
+kept for a header.  (Until 0.1.11.5 the pick was fitted to 2 pages with one PDF
+layout for each trial, and real picks stopped at 14 bullets "cut for length".)
+The summary, the Other lines, the whole Skills section, every degree and the
+heading line of a role with no bullet do not count and are never left out for
+the cap.  When the validated pick holds more bullets than the cap, the ones
+over it are LEFT OUT (``over_cap`` under Left out, where the job page can add
+one back), first left out first:
 
-1. lines that are the source of no requirement row, the model's last-ranked first;
-2. lines that are a further source of a row, the weakest evidence first
-   (stated, then quantified, then backed), then the model's last-ranked first;
-3. between two lines equal on all of that, the one from the older role;
-4. Other lines, the model's last-ranked first;
-5. Skills, what nothing asks for first (``skills_do_not_fit``).
+1. a line code added that the model did not pick (never a pin, never the
+   current role's line, never a must-cover line);
+2. lines that are the source of no requirement row, the model's last-ranked first;
+3. the line code gave a recent role the pick left out (``recent_role_present``);
+4. lines that are a further source of a row, the model's last-ranked first;
+   between two lines equal on all of that, the one from the older role;
+5. PROTECTED, left out only when nothing else can go: the profile's pins, then
+   the MUST-COVER lines (the last shown source of a ``met`` mandatory row).  A
+   must-cover line is never left out for a better-ranked line that is not one.
 
-A project left with no line stops printing.  NO EMPLOYER IS DROPPED SILENTLY
-(0.1.11.4 item 9): every role of the master is in the selection.  A role with
-no line in the pick, or none left after the fit, is an Experience entry with
-its heading and no bullet, and prints as ONE line (title, employer, dates)
-under ``tailored_resume.EARLIER_HEADING``, after the roles that show lines,
-newest first.  Those lines are measured with the page, so the fit cuts one
-more line when a heading needs its room.  A heading line is cut only after
-the Other lines and the Skills (6 below), the oldest role's first, and then it
-is a conflict.
+A recent role keeps its best line and a shown project one line.  AN OLD ROLE
+shows at most ``LENGTH_RULE.old_role_bullets`` lines (``old_role_limit``), the
+must-cover ones and the pins first, and those whatever their number.  A project
+left with no line stops printing.  NO EMPLOYER IS DROPPED SILENTLY (0.1.11.4
+item 9): every role of the master is in the selection.  A role with no line in
+the pick, or none left under the cap, is an Experience entry with its heading
+and no bullet, and prints as ONE line (title, employer, dates) under
+``tailored_resume.EARLIER_HEADING``, after the roles that show lines, newest
+first.  That line is never left out.
 
-6. the heading lines of the roles with no line left, the oldest first
-   (``earlier_roles_do_not_fit``); then the protected lines.
+FILL: a pick under the cap gets, up to the cap, the unpicked source lines of
+mandatory rows, then the selector's best unpicked lines of the recent roles
+(``room_left``).
 
-FILL: a pick that leaves
-room on the last page gets the unpicked source lines of mandatory rows, then
-the selector's best unpicked lines of the recent roles (``room_left``).
-
-CONFLICTS (3.3).  When the protected lines alone do not fit, the selection is
-still cut to the page limit and each loss is a ``PickConflict``:
-``mandatory_evidence_does_not_fit``, ``pinned_line_does_not_fit``,
-``skills_do_not_fit``, ``earlier_roles_do_not_fit``.  A conflict makes the resume not ready
-(``suggestions.check_selection``) and is never resolved silently.
+CONFLICTS (3.3).  When the protected lines alone are more than the cap, the
+selection still holds the cap and each loss is a ``PickConflict``:
+``mandatory_evidence_does_not_fit``, ``pinned_line_does_not_fit``.  A conflict
+makes the resume not ready (``suggestions.check_selection``) and is never
+resolved silently.  THE PAGE-DRIVEN CODES ARE NOT MADE ANY MORE
+(``skills_do_not_fit``, ``earlier_roles_do_not_fit``, ``over_page_limit``): a
+selection stored before 0.1.11.5 may still hold one, and it no longer makes a
+resume "not ready" (``suggestions.PAGE_CONFLICTS``).
 
 THE FALLBACK (3.4): the code selector's own selection, with the reason:
 ``no_pick`` (a Matched answer with no usable pick), ``pick_too_small`` (V6),
@@ -115,10 +124,11 @@ from pathlib import Path
 from . import suggestions
 from . import tailor_master as tm
 from .find_jobs.assess_contracts import PICK_SECTIONS, AssessmentPick
-from .job_resume_port import ACTION_DRAFT, ACTION_SHORTEN
+from .job_resume_port import ACTION_DRAFT
 from .master_resume import KIND_BULLET, KIND_OTHER, KIND_SKILLS, KIND_SUMMARY, Master
 from .master_selection import (
     MAX_PAGES,
+    MAX_PICK_BULLETS,
     SELECTOR_VERSION,
     LineReason,
     Requirement,
@@ -129,7 +139,6 @@ from .master_selection import (
     render_selection,
     select,
 )
-from .tailor_length import STATUS_UNMEASURED, Measure, fit_by_cuts
 from .tailored_resume import LENGTH_RULE, TailorJob, TailoredResume, apply_no_loss, render_markdown, tailor_sources, validate_tailored_output
 
 _logger = logging.getLogger("gigai.scout.server")
@@ -138,7 +147,7 @@ _logger = logging.getLogger("gigai.scout.server")
 PICK_RULES_VERSION = "pick-rules:1"
 #: V6: a pick that keeps fewer bullets than this is refused whole (a master with fewer bullets: all of them).
 MIN_PICK = 8
-#: How many lines the fill offers a pick that leaves room.
+#: How many lines the fill offers a pick under the cap.
 FILL_LINES = 12
 
 PRODUCER_CALLABLE = "scout.pick"
@@ -166,21 +175,25 @@ FALLBACKS: tuple[str, ...] = (FALLBACK_NO_PICK, FALLBACK_TOO_SMALL, FALLBACK_MAS
 
 CONFLICT_EVIDENCE = "mandatory_evidence_does_not_fit"
 CONFLICT_PIN = "pinned_line_does_not_fit"
+#: The page-driven codes of a selection stored before 0.1.11.5 (``suggestions.PAGE_CONFLICTS``): read, never made.
 CONFLICT_SKILLS = "skills_do_not_fit"
 CONFLICT_OVER = "over_page_limit"
-#: 0.1.11.4 item 9: one or more roles are not listed even by their heading line.
 CONFLICT_HEADINGS = "earlier_roles_do_not_fit"
+
+#: Left out, and why (``LineReason.code``): over the cap, or past an old role's own limit.
+LEFT_OVER_CAP = "over_cap"
+LEFT_PROTECTED = "cut_conflict"
+LEFT_OLD_ROLE = "old_role_limit"
 
 #: ``resume.origin`` of a selection: who made the stored job resume it names.
 ORIGIN_PICK = "pick"
 
 _STRENGTH = {"backed": 3, "quantified": 2, "stated": 1}
-_UNFITTED = 10**6
 _CODE_ORDER = PICK_SECTIONS
 
 
 class PickError(RuntimeError):
-    """No selection could be made (no renderer to measure pages with); ``code`` is recorded, the assessment stays stored."""
+    """No selection could be made, or a step on a stored job's resume is refused; ``code`` is recorded or answered, the assessment stays stored."""
 
     def __init__(self, code: str, message: str) -> None:
         super().__init__(message)
@@ -212,13 +225,13 @@ class Added:
 
 @dataclass(frozen=True)
 class PickConflict:
-    """Something the page limit kept out although the rules say it stays (3.3): shown first, never silent."""
+    """Something the cap kept out although the rules say it stays (3.3): shown first, never silent."""
 
     code: str
     requirement: str | None = None
     lines: tuple[str, ...] = ()
     cut: bool = True
-    #: What a person reads, for a conflict that has its own sentence (``earlier_roles_do_not_fit``); in the JSON only then.
+    #: What a person reads, for a conflict that has its own sentence (a stored ``earlier_roles_do_not_fit``); in the JSON only then.
     message: str | None = None
 
     def to_json(self) -> dict[str, object]:
@@ -262,7 +275,7 @@ def validate_pick(
     master: Master, pick: AssessmentPick, requirements: Sequence[suggestions.RequirementRow], *, today: date, code_summary: str | None = None,
     values: Mapping[str, float] | None = None, pins: Sequence[str] = (),
 ) -> Validated:
-    """V1 to V8 (the module text). Pure: nothing is measured here.
+    """V1 to V8 (the module text). Pure.
 
     ``code_summary``: the summary the selector would show (V4). ``values``:
     the selector's worth of every line (V8 picks a role's best line by it).
@@ -338,11 +351,11 @@ def validate_pick(
     return Validated(summary, section_order, tuple(lines), tuple(problems), tuple(added))
 
 
-# --- the candidate set of a pick, and its fit (3.2) ---------------------------------------------------------------
+# --- the candidate set of a pick, and its cap (3.2) ---------------------------------------------------------------
 
 
 def _requirements(master: Master, rows: Sequence[suggestions.RequirementRow], texts: Mapping[str, str], rank: Mapping[str, int]) -> tuple[Requirement, ...]:
-    """The rows as the fit reads them: each row's master-line sources, strongest first; only a ``met`` mandatory row protects one."""
+    """The rows as the cap reads them: each row's master-line sources, strongest first; only a ``met`` mandatory row protects one."""
 
     out: list[Requirement] = []
     for row in rows:
@@ -355,7 +368,7 @@ def _requirements(master: Master, rows: Sequence[suggestions.RequirementRow], te
 
 
 def _values(master: Master, lines: Sequence[str], requirements: Sequence[Requirement], rank: Mapping[str, int]) -> dict[str, float]:
-    """Each line's place in the cut order of 3.2: a smaller number is cut first (``tailor_master.cut_order`` reads it).
+    """Each line's place in the order of 3.2: a smaller number is left out first (``tailor_master.cut_order`` reads it).
 
     0.1.11 (C1): a line a row rests on outlives the lines that support nothing, and among those the model's order decides;
     the line's strength no longer reorders them (the judge's T20: a nice-to-have's defining line, 7th in the pick, went while
@@ -376,9 +389,13 @@ def _values(master: Master, lines: Sequence[str], requirements: Sequence[Require
 
 
 def _reasons(
-    master: Master, shown: Sequence[str], requirements: Sequence[Requirement], added: Sequence[Added], *, dropped_other: Sequence[str] = (),
+    master: Master, shown: Sequence[str], requirements: Sequence[Requirement], added: Sequence[Added], *, left: Mapping[str, tuple[str, str]] | None = None,
 ) -> tuple[LineReason, ...]:
-    """Why every line of the master is in the pick or not, in the words the job page shows (SPEC section 6, Picked / Left out)."""
+    """Why every line of the master is in the pick or not, in the words the job page shows (SPEC section 6, Picked / Left out).
+
+    ``left``: a line of the pick that the cap or an old role's limit left out -> its ``(code, reason)``."""
+
+    left = left or {}
 
     supports: dict[str, list[str]] = {}
     for requirement in requirements:
@@ -399,7 +416,7 @@ def _reasons(
             elif extra is not None and extra.code == ADDED_PINNED:
                 reason = LineReason(item.id, True, ADDED_PINNED, "added by Scout: pinned on this profile")
             elif extra is not None:
-                reason = LineReason(item.id, True, ADDED_ROOM_LEFT, "added by Scout: room left on the page")
+                reason = LineReason(item.id, True, ADDED_ROOM_LEFT, "added by Scout: room left under the most bullets a resume shows")
             elif item.id in supports:
                 reason = LineReason(item.id, True, "supports_requirement", "supports " + ", ".join(supports[item.id]))
             elif item.kind == KIND_SUMMARY:
@@ -407,8 +424,8 @@ def _reasons(
             else:
                 reason = LineReason(item.id, True, "picked_by_assessment", "picked by the assessment")
             out.append(reason)
-        elif item.id in dropped_other:
-            out.append(LineReason(item.id, False, "cut_for_length", "cut for length: Other lines go before any line that is a requirement's evidence"))
+        elif item.id in left:
+            out.append(LineReason(item.id, False, *left[item.id]))
         elif item.kind == KIND_SUMMARY:
             out.append(LineReason(item.id, False, "summary_other_variant", "another summary is shown for this job"))
         else:
@@ -425,7 +442,7 @@ class _Built:
 
 def _candidates(
     master: Master, base: Selected, profile: SelectionProfile, posting: SelectionPosting, *, summary: str | None, lines: Sequence[str], skills: Sequence[str],
-    requirements: Sequence[Requirement], added: Sequence[Added], rank: Mapping[str, int], old: set[str], dropped_other: Sequence[str] = (),
+    requirements: Sequence[Requirement], added: Sequence[Added], rank: Mapping[str, int], left: Mapping[str, tuple[str, str]] | None = None,
 ) -> tm.JobCandidates:
     """The candidate set of a pick: its lines under their entries, every role and degree, the Skills section; numbered like any resume.
 
@@ -440,11 +457,6 @@ def _candidates(
             other.append(item_id)
         else:
             entries.setdefault(item.entry_id or "", []).append(item_id)
-    protecting = {requirement.supporters[0] for requirement in requirements if requirement.mandatory}
-    for entry_id, bullets in entries.items():
-        # An old role prints at most ``LENGTH_RULE.old_role_bullets`` lines: the ones a mandatory row rests on first.
-        if entry_id in old and len(bullets) > LENGTH_RULE.old_role_bullets:
-            entries[entry_id] = sorted(bullets, key=lambda bullet: bullet not in protecting)
     summary_ids = [summary] if summary else []
     item_ids = [*summary_ids, *(item for entry_id, bullets in entries.items() for item in (entry_id, *bullets)), *other]
     markdown = render_selection(master, item_ids, skills, candidates=True)
@@ -454,13 +466,9 @@ def _candidates(
     selected = replace(
         base,
         summary=tuple(summary_ids), entries={entry_id: tuple(entries[entry_id]) for entry_id in printed}, skills=tuple(skills), other=tuple(other),
-        lines=_reasons(master, shown, requirements, added, dropped_other=dropped_other),
+        lines=_reasons(master, shown, requirements, added, left=left),
         values=_values(master, [item_id for item_id in lines if item_id in master.items], requirements, rank),
         requirements=tuple(requirements), evidence_for={}, conflicts=(), title_entries={},
-        skill_reasons=tuple(
-            reason if reason.name in skills else replace(reason, picked=False, code="cut_for_length", reason="cut for length: the Skills section did not fit")
-            for reason in base.skill_reasons
-        ),
     )
     return tm.JobCandidates(
         mode=tm.MODE_EVIDENCE, profile=profile, posting=posting, selected=selected, summary=tuple(summary_ids),
@@ -492,7 +500,7 @@ def _settled(candidates: tm.JobCandidates, job: TailorJob, validated: Validated,
         first, second = names.index("experience"), names.index("projects")
         sections[first], sections[second] = sections[second], sections[first]
     settled = finish_tailoring(apply_no_loss(validate_tailored_output(answer, job, ctx), job, ctx, today=today), job, ctx)
-    return _Built(candidates, ctx, tm.ensure_skills_line(settled, candidates, ctx))
+    return _Built(candidates, ctx, tm.whole_selection(tm.ensure_skills_line(settled, candidates, ctx)))
 
 
 def _printed(result: TailoredResume) -> tuple[str, ...]:
@@ -505,39 +513,6 @@ def _printed(result: TailoredResume) -> tuple[str, ...]:
             if item_id is not None and item_id not in out:
                 out.append(item_id)
     return tuple(out)
-
-
-def _skill_cut_order(base: Selected) -> list[str]:
-    """The Skills, first cut first: what nothing asks for and no line names, then what a line names, then what the posting asks for."""
-
-    weight = {"listed": 0, "named_by_line": 1, "posting_nice": 2, "posting_must": 3}
-    names = [reason.name for reason in base.skill_reasons if reason.picked]
-    return sorted(names, key=lambda name: (weight.get(next(reason.code for reason in base.skill_reasons if reason.name == name), 0), -names.index(name)))
-
-
-class _Pages:
-    """The page measure, each layout made once and counted."""
-
-    def __init__(self, measure: Measure) -> None:
-        self._measure = measure
-        self._known: dict[str, int | None] = {}
-        self.layouts = 0
-
-    def __call__(self, result: TailoredResume) -> int | None:
-        key = render_markdown(result)
-        if key not in self._known:
-            self.layouts += 1
-            self._known[key] = self._measure(result)
-        return self._known[key]
-
-
-def _over(result: TailoredResume, pages: _Pages, max_pages: int) -> bool:
-    if result.length is not None and result.length.status == STATUS_UNMEASURED:
-        raise PickError("pages_unmeasured", "the pages could not be measured (no renderer); no selection was made")
-    found = pages(result)
-    if found is None:
-        raise PickError("pages_unmeasured", "the pages could not be measured (no renderer); no selection was made")
-    return found > max_pages
 
 
 @dataclass(frozen=True)
@@ -559,11 +534,15 @@ class Settled:
     printed: tuple[str, ...]
     #: Each printed line's mark at the time (``MasterItem.mark``): what ``picked_line_changed`` compares.
     line_marks: Mapping[str, str]
+    #: INFORMATIONAL (kept for readers of the stored record): a selection counts no page, so ``pages`` is ``None``;
+    #: ``max_pages`` is the resume's page limit, which the PREVIEW reads, never the selection.
     pages: int | None
     max_pages: int
     check: suggestions.SelectionCheck
-    #: Page layouts this selection cost (the bound of SPEC 1.7 is on the seconds they take).
+    #: Page layouts this selection cost: always 0 since 0.1.11.5 (kept for the pick eval's report).
     layouts: int = 0
+    #: The cap this selection was made under.
+    max_bullets: int = MAX_PICK_BULLETS
 
     @property
     def markdown(self) -> str:
@@ -586,12 +565,13 @@ class Settled:
             "line_marks": suggestions.marks_json(self.line_marks),
             "pages": self.pages,
             "max_pages": self.max_pages,
+            "max_bullets": self.max_bullets,
             "conflicts": [conflict.to_json() for conflict in self.conflicts],
             "resume": None if resume is None else dict(resume),
         }
 
 
-def _conflicts(record: tm.TailorSelection, skills_cut: bool, rows: Sequence[suggestions.RequirementRow]) -> tuple[PickConflict, ...]:
+def _conflicts(record: tm.TailorSelection, rows: Sequence[suggestions.RequirementRow]) -> tuple[PickConflict, ...]:
     """The record's conflicts under the codes of 3.3; a requirement is named only when it is a row of the assessment."""
 
     known = {row.id for row in rows}
@@ -601,36 +581,29 @@ def _conflicts(record: tm.TailorSelection, skills_cut: bool, rows: Sequence[sugg
             out.append(PickConflict(CONFLICT_EVIDENCE, conflict.requirement_id if conflict.requirement_id in known else None, tuple(conflict.ids)))
         elif conflict.kind == "must_keep":
             out.append(PickConflict(CONFLICT_PIN, None, tuple(conflict.ids)))
-        elif conflict.kind == "earlier_roles":
-            # (``lines`` are master LINE ids, read against the printed lines; the roles are named by the record's conflict.)
-            out.append(PickConflict(CONFLICT_HEADINGS, message=conflict.reason))
-        elif conflict.kind == "over_budget":
-            out.append(PickConflict(CONFLICT_OVER, None, (), cut=False))
-    if skills_cut:
-        out.append(PickConflict(CONFLICT_SKILLS))
     return tuple(out)
 
 
 def _finish(
-    master: Master, built: _Built, fitted: TailoredResume, rows: Sequence[suggestions.RequirementRow], *, picked_by: str, fallback: str | None, draft: bool,
+    master: Master, built: _Built, rows: Sequence[suggestions.RequirementRow], *, picked_by: str, fallback: str | None, draft: bool,
     pick: AssessmentPick | None, problems: Sequence[Problem], added: Sequence[Added], pins: Sequence[str], excludes: Sequence[str], today: date,
-    pages: _Pages, max_pages: int, skills_cut: bool = False, selector_layouts: int = 0,
+    max_bullets: int,
 ) -> Settled:
-    record = tm.selection_record(master, built.candidates, fitted, picked_by=picked_by, fallback=fallback, pins=pins, excludes=excludes, today=today)
-    conflicts = _conflicts(record, skills_cut, rows)
-    printed = _printed(fitted)
+    result = built.settled
+    record = tm.selection_record(master, built.candidates, result, picked_by=picked_by, fallback=fallback, pins=pins, excludes=excludes, today=today)
+    conflicts = _conflicts(record, rows)
+    printed = _printed(result)
     shown = set(printed)
     return Settled(
-        result=fitted, record=record, candidates=built.candidates, context=built.context, picked_by=picked_by, fallback=fallback, draft=draft,
+        result=result, record=record, candidates=built.candidates, context=built.context, picked_by=picked_by, fallback=fallback, draft=draft,
         model_pick=pick, problems=tuple(problems), added_by_code=tuple(item for item in added if item.id in shown), conflicts=conflicts,
         printed=printed, line_marks={item_id: master.items[item_id].mark for item_id in printed if item_id in master.items},
-        pages=pages(fitted), max_pages=max_pages, check=suggestions.check_selection(rows, printed, conflicts=conflicts),
-        layouts=pages.layouts + selector_layouts,
+        pages=None, max_pages=MAX_PAGES, check=suggestions.check_selection(rows, printed, conflicts=conflicts), max_bullets=max_bullets,
     )
 
 
 def _fill_lines(master: Master, validated: Validated, rows: Sequence[suggestions.RequirementRow], base: Selected, old: set[str]) -> list[str]:
-    """What a pick that leaves room is offered, best first: unpicked source lines of mandatory rows, then the selector's best lines of the recent roles."""
+    """What a pick under the cap is offered, best first: unpicked source lines of mandatory rows, then the selector's best lines of the recent roles."""
 
     taken = set(validated.lines)
     out: list[str] = []
@@ -680,15 +653,86 @@ def _unpicked_cuts(
     return frozenset(gone), [cut for _worth, cut in sorted(cuts, key=lambda pair: pair[0])], [cut for _worth, cut in sorted(recent, key=lambda pair: pair[0])]
 
 
+def _bullets(master: Master, lines: Sequence[str]) -> list[str]:
+    """What the cap counts among ``lines``: the bullets of roles and projects."""
+
+    return [item_id for item_id in lines if master.items[item_id].kind == KIND_BULLET and master.items[item_id].section in ("experience", "projects")]
+
+
+def _old_role_limit(
+    master: Master, lines: Sequence[str], requirements: Sequence[Requirement], pins: Sequence[str], old: set[str],
+) -> tuple[list[str], dict[str, tuple[str, str]]]:
+    """``(lines, left)``: an old role shows at most ``LENGTH_RULE.old_role_bullets`` lines, the must-cover ones and the pins first.
+
+    A must-cover line or a pin is never the one that goes: an old role that holds more of those than the limit shows them all."""
+
+    limit = LENGTH_RULE.old_role_bullets
+    # A row's must-cover line is its strongest source AMONG THE LINES OF THE PICK (``tailor_master.shown_evidence``'s rule).
+    taken = set(lines)
+    protecting = {
+        found for requirement in requirements if requirement.mandatory
+        if (found := next((item_id for item_id in requirement.supporters if item_id in taken), None)) is not None
+    } | set(pins)
+    left: dict[str, tuple[str, str]] = {}
+    for entry_id in old:
+        mine = [item_id for item_id in lines if master.items[item_id].entry_id == entry_id]
+        keep = [item_id for item_id in mine if item_id in protecting]
+        keep += [item_id for item_id in mine if item_id not in protecting][: max(0, limit - len(keep))]
+        for item_id in mine:
+            if item_id not in keep:
+                left[item_id] = (LEFT_OLD_ROLE, f"an older role shows at most {limit} lines, and the ones shown rank higher for this posting")
+    return [item_id for item_id in lines if item_id not in left], left
+
+
+def _over_cap(master: Master, built: _Built, added: Sequence[Added], pins: Sequence[str], over: int, *, today: date) -> dict[str, tuple[str, str]]:
+    """The ``over`` bullets of a settled pick that the cap leaves out, in the order of 3.2 (the module text) -> why each is left out.
+
+    The order is the tailor fit's own (``tailor_master.cut_order``: the model's ranking and the rows' sources, a
+    recent role's best line and a project's one line kept), with C1 in front (a line the model did not pick goes
+    before any line it did) and the PROTECTED lines last: the pins, then the last shown source of each ``met``
+    mandatory row.  Nothing is laid out: each line left out takes one off the count."""
+
+    settled, selected = built.settled, built.candidates.selected
+    cuts = [cut for cut in tm.cut_order(settled, built.candidates, master, today=today)[0] if cut[0] != "heading"]
+    unpicked, first, recent = _unpicked_cuts(master, settled, added, pins, selected.values)
+    entries = [entry for section in settled.sections if section.heading in ("experience", "projects") for entry in section.entries if entry.heading]
+    items = {line.id: tm.line_item_id(line) for entry in entries for line in entry.bullets}
+    kept = set(tm.shown_evidence([item for item in items.values() if item is not None], selected)) | set(pins)
+    of_role = {entry.heading[0].id: [line.id for line in entry.bullets] for entry in entries}
+    rests = {item for requirement in selected.requirements for item in requirement.supporters}
+
+    def touches(cut: tuple[str, str], group: set[str]) -> bool:
+        return bool(({items.get(cut[1])} if cut[0] == "bullet" else {items.get(line_id) for line_id in of_role.get(cut[1], ())}) & group)
+
+    rest = [cut for cut in cuts if cut not in first and cut[1] not in unpicked]
+    free = [*first, *(cut for cut in rest if not touches(cut, rests)), *recent, *(cut for cut in rest if touches(cut, rests))]
+    order = [*(cut for cut in free if not touches(cut, kept)), *(cut for cut in cuts if touches(cut, kept))]
+    best = f"its {len(items) - over} best lines"
+    left: dict[str, tuple[str, str]] = {}
+    gone: set[str] = set()
+    for kind, target in order:
+        # A role named whole (its last line, or a role that holds nothing but lines code gave it): one line at a time.
+        for line_id in ([target] if kind == "bullet" else sorted(of_role.get(target, ()), key=lambda line_id: selected.values.get(items.get(line_id) or "", 0.0))):
+            item_id = items.get(line_id)
+            if len(left) == over or line_id in gone or item_id is None:
+                continue
+            gone.add(line_id)
+            left[item_id] = (
+                (LEFT_PROTECTED, f"left out although the rules say it stays: the resume shows {best} and this one is past them (see conflicts)")
+                if item_id in kept else (LEFT_OVER_CAP, f"the resume shows {best} for this posting, and this one ranks lower")
+            )
+    return left
+
+
 def _pick_selection(
     master: Master, pick: AssessmentPick, rows: Sequence[suggestions.RequirementRow], texts: Mapping[str, str], *, profile: SelectionProfile,
-    posting: SelectionPosting, job: TailorJob, answers: object, excludes: Sequence[str], today: date, pages: _Pages, max_pages: int,
+    posting: SelectionPosting, job: TailorJob, answers: object, excludes: Sequence[str], today: date, max_bullets: int,
 ) -> Settled | Validated:
-    """The selection of a model's pick, or the ``Validated`` that refuses it (V6)."""
+    """The selection of a model's pick, or the ``Validated`` that refuses it (V6). Nothing is laid out."""
 
-    # The selector's own pick BEFORE its page fit: no layout is run. Its summary, Skills order, reasons and values are read.
+    # The selector's own pick before its cap. Its summary, Skills order, reasons and values are read.
     # 0.1.11 (orchestrator #35): the title-entry floor of the code selector is NOT applied to a model's pick.
-    base = select(master, profile, posting, today=today, measure=lambda _markdown: (1, 0.0), max_pages=_UNFITTED, fill=False, title_floor=False)
+    base = select(master, profile, posting, today=today, max_bullets=None, fill=False, title_floor=False)
     validated = validate_pick(
         master, pick, rows, today=today, code_summary=base.summary[0] if base.summary else None, values=base.values, pins=profile.pins,
     )
@@ -697,123 +741,53 @@ def _pick_selection(
     roles, old = _roles(master, today)
     rank = {entry.id: index for index, entry in enumerate(roles)}
     requirements = _requirements(master, rows, texts, rank)
+    skills = list(base.skills)  # the whole Skills section, in the selector's order: never cut
 
-    def build(lines: Sequence[str], skills: Sequence[str], added: Sequence[Added], dropped_other: Sequence[str] = ()) -> _Built:
+    def build(lines: Sequence[str], added: Sequence[Added], left: Mapping[str, tuple[str, str]] | None = None) -> _Built:
         candidates = _candidates(
             master, base, profile, posting, summary=validated.summary, lines=lines, skills=skills, requirements=requirements, added=added, rank=rank,
-            old=old, dropped_other=dropped_other,
+            left=left,
         )
         return _settled(candidates, job, validated, answers=answers, today=today)
 
-    def fit(built: _Built, *, protected: bool) -> TailoredResume:
-        cuts, refill = tm.cut_order(built.settled, built.candidates, master, today=today)
-        # The heading lines of the roles with no line left (0.1.11.4 item 9) go only in the last stage (``protected``),
-        # after the Other lines and the Skills: they are placed below, after every line that is not protected.
-        headings = [cut for cut in cuts if cut[0] == "heading"]
-        cuts = [cut for cut in cuts if cut[0] != "heading"]
-        every = list(cuts)
-        unpicked, first, recent = _unpicked_cuts(master, built.settled, added, profile.pins, built.candidates.selected.values)
-        if not protected or headings:
-            # Protected: the last printed source of a met mandatory row, and the pins. A role that holds one is not cut whole.
-            shown = [item for section in built.settled.sections for entry in section.entries for line in entry.bullets if (item := tm.line_item_id(line)) is not None]
-            kept = set(tm.shown_evidence(shown, built.candidates.selected)) | set(profile.pins)
-            line_item = {line.id: tm.line_item_id(line) for section in built.settled.sections for entry in section.entries for line in entry.bullets}
-            holds = {
-                entry.heading[0].id for section in built.settled.sections for entry in section.entries
-                if entry.heading and any(tm.line_item_id(line) in kept for line in entry.bullets)
-            }
-            free = [cut for cut in cuts if (cut[1] not in holds if cut[0] == "role" else line_item.get(cut[1]) not in kept)]
-            cuts = free if not protected else cuts
-        # 0.1.11 (C1): a line the model did not pick goes before any line it did pick; those cuts are never refilled. The line given
-        # to a recent role goes after the picked lines no row rests on (a gap between two printed roles is the worse loss), before the rest.
-        rest = [cut for cut in cuts if cut not in first and cut[1] not in unpicked]
-        rests = {item for requirement in built.candidates.selected.requirements for item in requirement.supporters}
-        items = {line.id: tm.line_item_id(line) for section in built.settled.sections for entry in section.entries for line in entry.bullets}
-        roles_items = {
-            entry.heading[0].id: {items.get(line.id) for line in entry.bullets}
-            for section in built.settled.sections for entry in section.entries if entry.heading
-        }
-        bare = [cut for cut in rest if not ({items.get(cut[1])} if cut[0] == "bullet" else roles_items.get(cut[1], {None})) & rests]
-        cuts = [*first, *bare, *recent, *(cut for cut in rest if cut not in bare)]
-        if protected and headings:
-            held = set(every) - set(free)
-            after = max((place for place, cut in enumerate(cuts) if cut not in held), default=-1) + 1
-            cuts[after:after] = headings
-        return fit_by_cuts(built.settled, cuts, measure=pages, max_pages=max_pages, refill=refill - unpicked)
-
-    all_skills = list(base.skills)
-    lines = list(validated.lines)
     added = list(validated.added)
-    built = build(lines, all_skills, added)
-    # FILL: a pick that leaves room is offered more lines, best first; the fewest are taken back out.
-    if not _over(built.settled, pages, max_pages):
-        offered = _fill_lines(master, validated, rows, base, old)
-        if offered:
-            trial = build([*lines, *offered], all_skills, [*added, *(Added(item_id, ADDED_ROOM_LEFT) for item_id in offered)])
-            line_of = {tm.line_item_id(line): line.id for section in trial.settled.sections for entry in section.entries for line in entry.bullets}
-            back = [("bullet", line_id) for item_id in reversed(offered) if (line_id := line_of.get(item_id)) is not None]
-            fitted_trial = fit_by_cuts(trial.settled, back, measure=pages, max_pages=max_pages)
-            if not _over(fitted_trial, pages, max_pages):
-                stayed = [item_id for item_id in offered if item_id in _printed(fitted_trial)]
-                if stayed:
-                    lines = [*lines, *stayed]
-                    added = [*added, *(Added(item_id, ADDED_ROOM_LEFT) for item_id in stayed)]
-                    built = build(lines, all_skills, added)
-    fitted = fit(built, protected=False)
-    dropped_other: list[str] = []
-    skills_cut = False
-    if _over(fitted, pages, max_pages):
-        # 4. Other lines, the model's last-ranked first.
-        other = [item_id for item_id in lines if master.items[item_id].kind == KIND_OTHER]
-        for item_id in reversed(other):
-            dropped_other.append(item_id)
-            built = build([line for line in lines if line not in dropped_other], all_skills, added, dropped_other)
-            fitted = fit(built, protected=False)
-            if not _over(fitted, pages, max_pages):
+    lines, left = _old_role_limit(master, validated.lines, requirements, profile.pins, old)
+    count = len(_bullets(master, lines))
+    if count < max_bullets:
+        # FILL: a pick under the cap is offered more lines, best first, up to the cap.
+        shown_of = {entry_id: sum(1 for item_id in lines if master.items[item_id].entry_id == entry_id) for entry_id in old}
+        for item_id in _fill_lines(master, validated, rows, base, old):
+            entry_id = master.items[item_id].entry_id or ""
+            if count == max_bullets:
                 break
-    if _over(fitted, pages, max_pages):
-        # 5. Skills, what nothing asks for first: the fewest that fit.
-        order = _skill_cut_order(base)
-        skills_cut = bool(order)
-        kept_lines = [line for line in lines if line not in dropped_other]
-
-        def without(count: int) -> tuple[_Built, TailoredResume]:
-            gone = set(order[:count])
-            trial = build(kept_lines, [name for name in all_skills if name not in gone], added, dropped_other)
-            return trial, fit(trial, protected=False)
-
-        low, high = 1, len(order)
-        built, fitted = without(high) if order else (built, fitted)
-        if order and not _over(fitted, pages, max_pages):
-            while low < high:
-                middle = (low + high) // 2
-                if _over(without(middle)[1], pages, max_pages):
-                    low = middle + 1
-                else:
-                    high = middle
-            built, fitted = without(low)
-        elif _over(fitted, pages, max_pages):
-            # 3.3: the protected lines alone do not fit. They are cut, weakest first, and each loss is a conflict.
-            fitted = fit(built, protected=True)
+            if item_id in lines or item_id in left or shown_of.get(entry_id, 0) >= LENGTH_RULE.old_role_bullets:
+                continue
+            lines.append(item_id)
+            added.append(Added(item_id, ADDED_ROOM_LEFT))
+            count += 1
+            if entry_id in shown_of:
+                shown_of[entry_id] += 1
+    elif count > max_bullets:
+        left = {**left, **_over_cap(master, build(lines, added), added, profile.pins, count - max_bullets, today=today)}
+        lines = [item_id for item_id in lines if item_id not in left]
     return _finish(
-        master, built, fitted, rows, picked_by=tm.PICKED_BY_MODEL, fallback=None, draft=False, pick=pick, problems=validated.problems, added=added,
-        pins=profile.pins, excludes=excludes, today=today, pages=pages, max_pages=max_pages, skills_cut=skills_cut,
+        master, build(lines, added, left), rows, picked_by=tm.PICKED_BY_MODEL, fallback=None, draft=False, pick=pick, problems=validated.problems,
+        added=added, pins=profile.pins, excludes=excludes, today=today, max_bullets=max_bullets,
     )
 
 
 def _code_selection(
     master: Master, rows: Sequence[suggestions.RequirementRow], *, profile: SelectionProfile, posting: SelectionPosting, job: TailorJob, answers: object,
-    excludes: Sequence[str], today: date, pages: _Pages, max_pages: int, code: str, draft: bool, pick: AssessmentPick | None, problems: Sequence[Problem],
+    excludes: Sequence[str], today: date, max_bullets: int, code: str, draft: bool, pick: AssessmentPick | None, problems: Sequence[Problem],
 ) -> Settled:
     """The fallback (3.4): the code selector's own selection, through the same record and the same final check."""
 
-    candidates = tm.job_candidates(master, profile, posting, mode=tm.MODE_VIEW, today=today)
-    result, view = tm.code_only(master, candidates, job, answers=answers, today=today, measure=pages)  # type: ignore[arg-type]
-    _over(result, pages, max_pages)  # no renderer: no selection, said by its code
+    candidates = tm.job_candidates(master, profile, posting, mode=tm.MODE_VIEW, today=today, max_bullets=max_bullets)
+    result, view = tm.code_only(master, candidates, job, answers=answers, today=today)  # type: ignore[arg-type]
     built = _Built(view, view.context(answers=answers), result)  # type: ignore[arg-type]
     return _finish(
-        master, built, result, rows, picked_by=tm.PICKED_BY_CODE, fallback=code, draft=draft, pick=pick, problems=problems, added=(), pins=profile.pins,
-        excludes=excludes, today=today, pages=pages, max_pages=max_pages, selector_layouts=view.selected.layout_queries,
+        master, built, rows, picked_by=tm.PICKED_BY_CODE, fallback=code, draft=draft, pick=pick, problems=problems, added=(), pins=profile.pins,
+        excludes=excludes, today=today, max_bullets=max_bullets,
     )
 
 
@@ -829,10 +803,9 @@ def settle(
     excludes: Sequence[str] = (),
     fallback: str | None = None,
     draft: bool = False,
-    measure: Measure | None = None,
-    max_pages: int = MAX_PAGES,
+    max_bullets: int = MAX_PICK_BULLETS,
 ) -> Settled:
-    """The selection for one assessed job (the module text): the model's pick validated and fitted, or the code selector's.
+    """The selection for one assessed job (the module text): the model's pick validated and capped, or the code selector's.
 
     ``master``: the master revision the assessment read. ``assessment``: the
     stored assessment (``AssessResponse``) or its answer (``AssessmentBody``):
@@ -843,9 +816,10 @@ def settle(
     job and posting text). ``answers``: what a line may cite besides the
     master (``tailored_resume.tailor_sources``). ``fallback``: a reason to
     use the code selector whatever the pick is (``draft_requested`` with
-    ``draft``, ``master_revision_unreadable``).
+    ``draft``, ``master_revision_unreadable``).  ``max_bullets``: the cap
+    (``master_selection.MAX_PICK_BULLETS``).
 
-    Raises ``PickError`` only when the pages cannot be measured at all.
+    No page is counted and nothing is rendered: this needs no PDF renderer.
     """
 
     today = today or date.today()
@@ -865,7 +839,6 @@ def settle(
 
         posting = replace(posting, cited=cited_requirements(master, matrix))
     job = TailorJob(posting.title, posting.company, posting.location, posting.text)
-    pages = _Pages(measure or tm.measure_pages)
     pick: AssessmentPick | None = getattr(body, "pick", None)
     problems: tuple[Problem, ...] = ()
     code = fallback
@@ -875,8 +848,8 @@ def settle(
         assert pick is not None
         try:
             found = _pick_selection(
-                master, pick, rows, texts, profile=profile, posting=posting, job=job, answers=answers, excludes=excludes, today=today, pages=pages,
-                max_pages=max_pages,
+                master, pick, rows, texts, profile=profile, posting=posting, job=job, answers=answers, excludes=excludes, today=today,
+                max_bullets=max_bullets,
             )
         except PickError:
             raise
@@ -888,7 +861,7 @@ def settle(
             code, problems = found.refused, found.problems
     assert code is not None
     return _code_selection(
-        master, rows, profile=profile, posting=posting, job=job, answers=answers, excludes=excludes, today=today, pages=pages, max_pages=max_pages,
+        master, rows, profile=profile, posting=posting, job=job, answers=answers, excludes=excludes, today=today, max_bullets=max_bullets,
         code=code, draft=draft, pick=pick, problems=problems,
     )
 
@@ -910,8 +883,9 @@ REFUSED_HELD = "resume_held"
 REFUSED_DRAFT_NOT_NEEDED = "draft_not_needed"
 REFUSED_UNMEASURED = "pages_unmeasured"
 REFUSED_FAILED = "pick_failed"
-REFUSED_NOTHING_TO_SHORTEN = "no_resume_to_shorten"
-REFUSED_SHORT_ALREADY = "resume_short_already"
+#: 0.1.11.5: "Shorten automatically" is retired; what every shorten request answers. (Its two refusals of 0.1.11.3,
+#: ``no_resume_to_shorten`` and ``resume_short_already``, went with it.)
+REFUSED_SHORTEN_RETIRED = "shorten_retired"
 
 _REASSESS = "`gigai scout jobs assess URL --again` (a job assessed by its URL: `gigai scout assess --job-url URL`; one model call, on your yes)"
 MESSAGES: Mapping[str, str] = {
@@ -930,12 +904,15 @@ MESSAGES: Mapping[str, str] = {
         "make a draft anyway: `gigai scout resume pick --job-url URL --draft`."
     ),
     REFUSED_DRAFT_NOT_NEEDED: "A resume is suggested for this job already; a draft is for a job that is held. Pick it again: `gigai scout resume pick --job-url URL --refresh`.",
+    # (Not raised since 0.1.11.5: a pick measures no page. Kept for a record that stored this code as its ``selection_error``.)
     REFUSED_UNMEASURED: (
         "The resume could not be picked: its pages could not be measured on this computer (the PDF renderer did not start). Nothing was "
         "changed. Try again; if it keeps happening, run `gigai doctor`."
     ),
-    REFUSED_NOTHING_TO_SHORTEN: "There is no resume stored for this job yet, so there is nothing to shorten. Pick one first: `gigai scout resume pick --job-url URL --refresh`.",
-    REFUSED_SHORT_ALREADY: "This resume already fits its pages with most of a page to spare, so nothing was left out. If its PDF runs long, look at the spacing you chose for it.",
+    REFUSED_SHORTEN_RETIRED: (
+        "Shortening a resume automatically is no longer part of GigAI, and nothing was changed. To fit the page, open the job's page and move "
+        "the spacing slider beside the resume's preview; to make the resume shorter, remove a point there."
+    ),
     REFUSED_FAILED: f"The resume could not be picked for this job. Nothing was changed. Try again, or re-assess the job to get a new pick: {_REASSESS}.",
 }
 
@@ -986,7 +963,7 @@ def pick_inputs(home_root: Path, target: Path, *, stored: object, prior: Selecti
 
 def settle_and_store(
     home_root: Path, target: Path, assessment: object, *, job: object, inputs: PickInputs | None, now: str, fallback: str | None = None,
-    draft: bool = False, repick: bool = False, selection_error: str | None = None, measure: Measure | None = None,
+    draft: bool = False, repick: bool = False, selection_error: str | None = None, max_bullets: int = MAX_PICK_BULLETS,
 ) -> tuple[suggestions.SuggestionRecord, str | None]:
     """Settle one job's selection (with ``inputs``) and write the suggestion record and the job resume. No model call.
 
@@ -996,8 +973,7 @@ def settle_and_store(
     be made is RECORDED (``selection: null`` with its error code), never
     raised: the answer is ``(the record, the error code or None)``.  A resume
     the user changed is kept; the new selection then waits as ``proposed``
-    (``suggestions.store_assessed``).  ``measure``: the page measure of a
-    tighter budget (``shorten_stored``); ``None``: the selector's own.
+    (``suggestions.store_assessed``).  ``max_bullets``: the cap.
     """
 
     settled: Settled | None = None
@@ -1005,7 +981,7 @@ def settle_and_store(
         try:
             settled = settle(
                 inputs.master, assessment, None, None, profile=inputs.profile, answers=inputs.answers, posting=inputs.posting, excludes=inputs.excludes,
-                fallback=fallback, draft=draft, measure=measure,
+                fallback=fallback, draft=draft, max_bullets=max_bullets,
             )
         except PickError as exc:
             selection_error = exc.code
@@ -1054,7 +1030,7 @@ def _stored_inputs(home_root: Path, target: Path, assessment: object) -> PickInp
 
 
 def settle_stored(
-    home_root: Path, target: Path, profile_id: str | None, job_identity: str, *, action: str, now: str, measure: Measure | None = None,
+    home_root: Path, target: Path, profile_id: str | None, job_identity: str, *, action: str, now: str, max_bullets: int = MAX_PICK_BULLETS,
 ) -> suggestions.SuggestionRecord:
     """Pick a STORED job's resume again (``action``: refresh) or make its draft (draft), and write the record. No model call.
 
@@ -1064,22 +1040,20 @@ def settle_stored(
     holds, picked by the code selector and marked as a draft.  A stored job
     resume that is the user's is kept: the new selection waits as
     ``proposed``.  A job with no suggestion record yet (its assessment could
-    not write one) gets it here.  ``measure``: a tighter page budget
-    (``shorten_stored``, which is this with ``action`` shorten).
+    not write one) gets it here.  ``max_bullets``: the cap.
 
     Raises ``PickError`` with a plain message (:data:`MESSAGES`):
     ``assessment_missing``, ``no_master``, ``profile_resume_in_use``,
-    ``profile_not_found``, ``resume_held``, ``draft_not_needed``,
-    ``pages_unmeasured`` (recorded as the record's ``selection_error``) and
+    ``profile_not_found``, ``resume_held``, ``draft_not_needed`` and
     ``pick_failed``.  Whether the stored assessment is stale is the caller's
     rule (``job_actions.pick_action`` refuses a refresh then).
     """
 
-    return _settle_stored(Path(home_root), Path(target), profile_id, job_identity, action=action, now=now, measure=measure)[0]
+    return _settle_stored(Path(home_root), Path(target), profile_id, job_identity, action=action, now=now, max_bullets=max_bullets)[0]
 
 
 def _settle_stored(
-    home_root: Path, target: Path, profile_id: str | None, job_identity: str, *, action: str, now: str, measure: Measure | None,
+    home_root: Path, target: Path, profile_id: str | None, job_identity: str, *, action: str, now: str, max_bullets: int,
 ) -> tuple[suggestions.SuggestionRecord, PickInputs]:
     from .quick_assess import read_quick_assessment
     from .resume_gate import SUGGEST, gate
@@ -1102,7 +1076,7 @@ def _settle_stored(
     try:
         record, error = settle_and_store(
             home_root, target, assessment, job=assessment.job, inputs=inputs, now=now, fallback=FALLBACK_DRAFT if drafting else None, draft=drafting,
-            repick=True, measure=measure,
+            repick=True, max_bullets=max_bullets,
         )
     except Exception as exc:  # noqa: BLE001 - whatever stopped the pick, the user is told in plain words what to do; the cause is in the log
         _logger.warning("a stored job's resume could not be picked", exc_info=True)
@@ -1112,113 +1086,18 @@ def _settle_stored(
     return record, inputs
 
 
-# --- "Shorten automatically" (0.1.11.3 item 15) -------------------------------------------------------------------------
+# --- "Shorten automatically" (0.1.11.3 item 15): RETIRED in 0.1.11.5 -----------------------------------------------------
 #
-# When the PDF still does not fit its page limit (``resume_pdf.over_limit_note``) the user is not told to edit by hand:
-# the same pick is made again under a TIGHTER page budget, so the same fit drops the next lines of the SAME cut order
-# (3.2: a line no requirement rests on first; the last source of a met must-have and a pin only when nothing else can
-# go, and then it is a conflict and the answer says so).  No model call, and nothing of the PDF's header is read: the
-# budget is tightened in header lines (``resume_pdf.pages_at``'s ``header_lines``), the unit the estimate keeps room in.
-
-#: One shorten makes room for this many more lines than the stored resume needs to run past its pages.
-SHORTEN_STEP_LINES = 1
-#: A resume that still fits with this many header lines kept blank (most of a page) is not shortened (``resume_short_already``).
-_SHORTEN_MOST_LINES = 36
-_SHOWN_CHARS = 90
+# It made the same pick again under a tighter PAGE budget, which a pick no longer has (item 1c).  The user fits the page
+# with the spacing slider beside the preview and takes a point off there (part (b)); nothing shortens a resume for
+# them.  The action, the CLI flag and this entry stay so that a caller of 0.1.11.3 gets ONE plain sentence, not an
+# unknown-action error.  Nothing is read and nothing is written.
 
 
-@dataclass(frozen=True)
-class Shortened:
-    """What one shorten did: the record as stored, and what a person is told (``message``)."""
+def shorten_stored(home_root: Path, target: Path, profile_id: str | None, job_identity: str, *, now: str) -> None:
+    """Refused, always: ``PickError`` ``shorten_retired`` with the sentence that says what to do in its place."""
 
-    record: suggestions.SuggestionRecord
-    #: The text of each line the shorter resume leaves out, in the resume's order.
-    left_out: tuple[str, ...]
-    #: A line that backs a must-have requirement (or a pinned line) had to go: nothing else was left.
-    must_have_cut: bool
-    #: The stored resume is the user's and was kept; the shorter one waits as the new suggested resume.
-    waiting: bool
-
-    @property
-    def message(self) -> str:
-        if not self.left_out:
-            text = "Nothing more could be left out of this resume, so it is as it was."
-        else:
-            count = len(self.left_out)
-            text = f"Left out {count} line{'' if count == 1 else 's'}: " + "; ".join(f'"{line}"' for line in self.left_out) + "."
-            if self.must_have_cut:
-                text += " Nothing else was left to cut, so a line that backs a must-have requirement (or a line you pinned) was left out too."
-        if self.waiting:
-            return text + " The resume you edited was kept as it is; the shorter one is waiting as the new suggested resume."
-        return text + (" Generate the PDF again." if self.left_out else "")
-
-    def to_json(self) -> dict[str, object]:
-        return {"left_out": list(self.left_out), "must_have_cut": self.must_have_cut, "waiting": self.waiting, "message": self.message}
-
-
-def _tighter_measure(current: TailoredResume, max_pages: int) -> Measure:
-    """The page measure of the next tighter budget: room for ``SHORTEN_STEP_LINES`` more header lines than ``current`` can take."""
-
-    from .master_selection import FIT_SCALE
-    from .resume_pdf import HEADER_RESERVE_LINES, pages_at
-
-    try:
-        over = next((count for count in range(HEADER_RESERVE_LINES, _SHORTEN_MOST_LINES) if pages_at(current, FIT_SCALE, header_lines=count) > max_pages), None)
-    except Exception as exc:  # noqa: BLE001 - no renderer (Typst missing or failing): nothing is measured, nothing is changed
-        raise refusal(REFUSED_UNMEASURED) from exc
-    if over is None:
-        raise refusal(REFUSED_SHORT_ALREADY)
-    lines = over + SHORTEN_STEP_LINES
-
-    def measure(result: TailoredResume) -> int | None:
-        try:
-            return pages_at(result, FIT_SCALE, header_lines=lines)
-        except Exception:  # noqa: BLE001 - as ``tailor_master.measure_pages``: the length is flagged, never guessed
-            return None
-
-    return measure
-
-
-def shorten_stored(home_root: Path, target: Path, profile_id: str | None, job_identity: str, *, now: str) -> Shortened:
-    """Make a STORED job's resume shorter (the text above) and write the record. No model call.
-
-    Raises ``PickError`` as ``settle_stored`` does, ``no_resume_to_shorten`` for a job with no stored resume and
-    ``resume_short_already`` for one that fits its pages with most of a page to spare."""
-
-    from .tailored_resume import read_tailored_resume, tailored_resume_path
-
-    home_root, target = Path(home_root), Path(target)
-    stored = read_tailored_resume(tailored_resume_path(home_root, target, profile_id, job_identity))
-    if stored is None:
-        raise refusal(REFUSED_NOTHING_TO_SHORTEN)
-    length = getattr(stored.result, "length", None)
-    max_pages = length.max_pages if length is not None else MAX_PAGES
-    before = _printed(stored.result)
-    previous = suggestions.read_suggestions(home_root, target, profile_id, job_identity)
-    record, inputs = _settle_stored(
-        home_root, target, profile_id, job_identity, action=ACTION_SHORTEN, now=now, measure=_tighter_measure(stored.result, max_pages),
-    )
-    waiting = record.proposed is not None and (previous is None or record.proposed != previous.proposed)
-    made = record.proposed if waiting else record.selection
-    after = set(suggestions.recorded_marks(made))
-    protected = {CONFLICT_EVIDENCE, CONFLICT_PIN}
-
-    def conflicts(selection: Mapping[str, object] | None) -> set[tuple[object, ...]]:
-        found = (selection or {}).get("conflicts")
-        return {
-            (item.get("code"), item.get("requirement"), *item.get("ids", ()))
-            for item in (found if type(found) is list else ()) if type(item) is dict and item.get("code") in protected
-        }
-
-    def shown(item_id: str) -> str:
-        item = inputs.master.items.get(item_id)
-        text = " ".join(item.text.split()) if item is not None else "a line that is no longer in your master resume"
-        return text if len(text) <= _SHOWN_CHARS else text[: _SHOWN_CHARS - 3].rstrip() + "..."
-
-    return Shortened(
-        record=record, left_out=tuple(shown(item_id) for item_id in before if item_id not in after),
-        must_have_cut=bool(conflicts(made) - conflicts(previous.selection if previous is not None else None)), waiting=waiting,
-    )
+    raise refusal(REFUSED_SHORTEN_RETIRED)
 
 
 # --- the checks a selection is judged on (3.5) --------------------------------------------------------------------
@@ -1234,7 +1113,8 @@ class Checks:
     weak: tuple[str, ...]
     #: 3. pinned lines (and, in an eval, labelled must-keep lines) that are not printed.
     omitted: tuple[str, ...]
-    #: 4. the page constraint.
+    #: 4. the shape of the page: no project without a line, roles in date order.  ``pages`` is ``None`` since 0.1.11.5
+    #: (a selection counts no page; the field stays for readers) and is not part of ``fits``.
     pages: int | None
     max_pages: int
     empty_entries: tuple[str, ...]
@@ -1242,7 +1122,7 @@ class Checks:
 
     @property
     def fits(self) -> bool:
-        return self.pages is not None and self.pages <= self.max_pages and not self.empty_entries and self.roles_in_date_order
+        return not self.empty_entries and self.roles_in_date_order
 
     def to_json(self) -> dict[str, object]:
         return {
@@ -1252,7 +1132,7 @@ class Checks:
 
 
 def checks(master: Master, settled: Settled, requirements: Sequence[suggestions.RequirementRow], *, must_keep: Sequence[str] = ()) -> Checks:
-    """``settled`` on the four checks (the eval's, and the re-pick rule's). Pure: the pages are the ones ``settle`` measured."""
+    """``settled`` on the four checks (the eval's, and the re-pick rule's). Pure."""
 
     shown = set(settled.printed)
     lost: list[str] = []
@@ -1325,10 +1205,9 @@ __all__ = [
     "REFUSED_HELD",
     "REFUSED_NO_ASSESSMENT",
     "REFUSED_NO_MASTER",
-    "REFUSED_NOTHING_TO_SHORTEN",
     "REFUSED_NO_PROFILE",
     "REFUSED_PROFILE_RESUME",
-    "REFUSED_SHORT_ALREADY",
+    "REFUSED_SHORTEN_RETIRED",
     "REFUSED_UNMEASURED",
     "Added",
     "Checks",
@@ -1336,9 +1215,7 @@ __all__ = [
     "PickError",
     "PickInputs",
     "Problem",
-    "SHORTEN_STEP_LINES",
     "Settled",
-    "Shortened",
     "Validated",
     "checks",
     "pick_inputs",

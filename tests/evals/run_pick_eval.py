@@ -13,7 +13,11 @@ The checks, per cell:
 2. ``strength``: for every supportable requirement, the level of the best line kept: 2 a ``strong`` line,
    1 a ``support`` line, 0 none.  ``weak`` names the mandatory ones below the best level the master offers.
 3. ``must_keep``: the reviewer's must-keep groups with no line shown (``omitted``).
-4. ``page_fit``: at most 2 pages, no role or project printed without a bullet, roles in date order.
+4. ``page_fit`` (THE SHAPE, and THE CAP; 0.1.11.5 item 1c): no project printed without a bullet, roles in date order,
+   and at most ``master_selection.MAX_PICK_BULLETS`` bullets under roles and projects (``Checks.bullets``).  NO PAGE
+   IS COUNTED for a selection (``select``, ``fallback``, ``settle``): it knows no page limit, and its ``pages`` is not
+   read here.  ``tailor_copy`` (a tailor call's answer that copies every candidate line: ``MasterTailoring.finish``
+   fits nothing since 0.1.11.5) has NO cap and no page either: the shape alone (``UNCAPPED``).
 
 Reported beside them, never part of a verdict on 1-3: the skill groups shown, the conflicts the result reports and
 the roles and projects of the master shown with NO line (``zero_entries``; most are irrelevant ones, as they should be).
@@ -27,7 +31,7 @@ grouped differently.  The hard tests (``test_pick_eval.py``):
 - H3 a permuted master gives the same pick; the same skills grouped differently read the same keywords from the
   posting, show the same skills and lower none of checks 1-3 (the Skills line prints at another length, so the last
   line that fits may differ);
-- H4 every cell fits the page constraint.
+- H4 every cell has the shape and is within the cap (check 4).
 
 WITH AN ASSESSMENT (``--assessed``; ``assessments.json``; the real-data gate of 0.1.10.11).  A stored assessment
 maps a requirement to master lines BY MEANING: the line it cites may share no word with the requirement.  In this
@@ -101,6 +105,12 @@ PATHS = pick_probe.PATHS
 #: 0.1.11: ``pick.settle``, the product's one entry, asked for by name (``--path settle``): the model's pick validated
 #: and fitted, with every posting's assessment (``--assessed``) and a stand-in pick that ranks as the code does.
 SETTLE = pick_probe.SETTLE
+#: The one path with no cap: a tailor call's answer that copies every candidate line (``MasterTailoring.finish`` fits
+#: nothing since 0.1.11.5: no page, no cap).  H4 is the shape alone for it.
+UNCAPPED = "tailor_copy"
+#: The cap of a selection (0.1.11.5 item 1c); 20 for a baseline tree whose selector has none.
+MAX_PICK_BULLETS: int = getattr(__import__("gigai.scout.master_selection", fromlist=["x"]), "MAX_PICK_BULLETS", 20)
+H4 = "H4 the shape and the cap"
 LEVELS = {"strong": 2, "support": 1}
 
 _ID = re.compile(r"\s*<!-- id:(\S+) -->\s*\Z")
@@ -411,6 +421,7 @@ class Checks:
     weak: tuple[str, ...]
     kept_groups: frozenset[str]
     omitted: tuple[str, ...]
+    #: What the path says its pages are: ``None`` for a selection (it counts none); read for ``tailor_copy`` only.
     pages: int | None
     empty: tuple[str, ...]
     date_order: bool
@@ -437,10 +448,21 @@ class Checks:
     title_entries: tuple[str, ...] = ()
     title_dropped: tuple[str, ...] = ()
     title_silent: tuple[str, ...] = ()
+    #: The bullets shown under roles and projects: what the selection's cap counts.
+    bullets: int = 0
 
     @property
     def page_fit(self) -> bool:
-        return self.error is None and self.pages is not None and self.pages <= 2 and not self.empty and self.date_order
+        """THE SHAPE (no page is counted): nothing raised, no project without a bullet, roles in date order."""
+
+        return self.error is None and not self.empty and self.date_order
+
+    def over(self, path: str) -> list[str]:
+        """Why this cell of ``path`` is past its limit (check 4): the cap for a selection; nothing for ``UNCAPPED``."""
+
+        if path == UNCAPPED:
+            return []  # every candidate line stays: no cap, and no page is counted
+        return [f"{self.bullets} bullets; at most {MAX_PICK_BULLETS}"] if self.bullets > MAX_PICK_BULLETS else []
 
 
 def atoms(names: list[str]) -> frozenset[str]:
@@ -501,6 +523,7 @@ def check(posting: str, case: MasterCase, final: dict[str, object], rows: list[d
         title_entries=titled,
         title_dropped=tuple(entry for entry in titled if entry in zero),
         title_silent=tuple(entry for entry in titled if entry in zero and entry not in reported),
+        bullets=sum(len(final["entries"].get(entry, ())) for entry in case.entries),  # type: ignore[union-attr]
     )
 
 
@@ -599,7 +622,7 @@ def hard_failures(results: dict[tuple[str, str, str, str], Checks]) -> dict[str,
     """The failures of each hard test over ``results`` (empty lists: all pass)."""
 
     failures: dict[str, list[str]] = {
-        "H1 lost mandatory coverage": [], "H2 adding lines lowered a check": [], "H3 order or grouping changed the pick": [], "H4 page constraint": [],
+        "H1 lost mandatory coverage": [], "H2 adding lines lowered a check": [], "H3 order or grouping changed the pick": [], H4: [],
         "H5 a met mandatory row lost every line it cites, with no conflict reported": [],
         "H6 an entry the posting's title names shows no line, with no conflict reported": [],
     }
@@ -607,7 +630,7 @@ def hard_failures(results: dict[tuple[str, str, str, str], Checks]) -> dict[str,
     for (posting, size, variation, path), checks in sorted(results.items()):
         name = f"{posting}/{size}/{variation}/{path}"
         if checks.error:
-            failures["H4 page constraint"].append(f"{name}: raised {checks.error}")
+            failures[H4].append(f"{name}: raised {checks.error}")
             continue
         if checks.lost:
             failures["H1 lost mandatory coverage"].append(f"{name}: {', '.join(checks.lost)}")
@@ -615,11 +638,11 @@ def hard_failures(results: dict[tuple[str, str, str, str], Checks]) -> dict[str,
             failures["H5 a met mandatory row lost every line it cites, with no conflict reported"].append(f"{name}: {', '.join(checks.cited_silent)}")
         if checks.title_silent:
             failures["H6 an entry the posting's title names shows no line, with no conflict reported"].append(f"{name}: {', '.join(checks.title_silent)}")
-        if not checks.page_fit:
-            why = [f"{checks.pages} pages"] if (checks.pages or 99) > 2 else []
-            why += [f"no bullet under {', '.join(checks.empty)}"] if checks.empty else []
-            why += [] if checks.date_order else ["roles out of date order"]
-            failures["H4 page constraint"].append(f"{name}: {'; '.join(why)}")
+        why = checks.over(path)
+        why += [f"no bullet under {', '.join(checks.empty)}"] if checks.empty else []
+        why += [] if checks.date_order else ["roles out of date order"]
+        if why:
+            failures[H4].append(f"{name}: {'; '.join(why)}")
     for posting, size, path in cells:
         base = results.get((posting, size, "base", path))
         if base is None:
@@ -655,13 +678,13 @@ def hard_failures(results: dict[tuple[str, str, str, str], Checks]) -> dict[str,
 # --- printing ----------------------------------------------------------------------------------------
 
 
-def _cell(checks: Checks, mandatory: int, groups: int, skill_groups: int) -> str:
+def _cell(checks: Checks, mandatory: int, groups: int, skill_groups: int, path: str = "") -> str:
     if checks.error:
         return f"ERROR {checks.error}"
-    fit = "yes" if checks.page_fit else "NO"
+    fit = "yes" if checks.page_fit and not checks.over(path) else "NO"
     return (
         f"{mandatory - len(checks.lost)}/{mandatory} | {mandatory - len(checks.weak)}/{mandatory} | {groups - len(checks.omitted)}/{groups} | "
-        f"{checks.pages}p {fit} | {checks.lines} | {checks.skills}/{skill_groups} | {checks.conflicts} | "
+        f"{checks.bullets}b{f' {checks.pages}p' if checks.pages is not None else ''} {fit} | {checks.lines} | {checks.skills}/{skill_groups} | {checks.conflicts} | "
         + (f"{len(checks.cited_met) - len(checks.cited_lost)}/{len(checks.cited_met)}" if checks.cited_met else "-")
         + " | " + (f"{len(checks.title_entries) - len(checks.title_dropped)}/{len(checks.title_entries)}" if checks.title_entries else "-")
         + f" | {len(checks.zero_entries)}"
@@ -671,7 +694,7 @@ def _cell(checks: Checks, mandatory: int, groups: int, skill_groups: int) -> str
 def table(results: dict[tuple[str, str, str, str], Checks], *, path: str, variation: str = "base", title: str = "") -> str:
     """One row per posting x size for one path and one variation."""
 
-    out = [f"### {title or path}: variation `{variation}`", "", "| posting | size | mandatory covered | strongest kept | must-keep kept | pages, fits | lines | skills shown | conflicts | cited rows kept | title entries shown | entries with 0 lines | lost / weak / omitted / cited rows lost / title entries dropped |", "|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
+    out = [f"### {title or path}: variation `{variation}`", "", "| posting | size | mandatory covered | strongest kept | must-keep kept | bullets (pages), within the limit | lines | skills shown | conflicts | cited rows kept | title entries shown | entries with 0 lines | lost / weak / omitted / cited rows lost / title entries dropped |", "|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
     for posting in sorted({key[0] for key in results}):
         for size in SIZES:
             checks = results.get((posting, size, variation, path))
@@ -688,7 +711,7 @@ def table(results: dict[tuple[str, str, str, str], Checks], *, path: str, variat
                 "(not met or nice: " + ",".join(checks.cited_other_lost) + ")" if checks.cited_other_lost else "",
                 "title dropped " + ",".join(checks.title_dropped) if checks.title_dropped else "",
             ) if part)
-            out.append(f"| {posting} | {size} | {_cell(checks, mandatory, len(groups), skill_groups)} | {detail or '-'} |")
+            out.append(f"| {posting} | {size} | {_cell(checks, mandatory, len(groups), skill_groups, path)} | {detail or '-'} |")
     return "\n".join(out)
 
 
@@ -731,7 +754,7 @@ def main(argv: list[str] | None = None) -> int:
         dump = {
             name: {
                 "/".join(key): {
-                    "lost": checks.lost, "weak": checks.weak, "omitted": checks.omitted, "pages": checks.pages, "page_fit": checks.page_fit, "lines": checks.lines,
+                    "lost": checks.lost, "weak": checks.weak, "omitted": checks.omitted, "pages": checks.pages, "bullets": checks.bullets, "page_fit": checks.page_fit and not checks.over(key[3]), "lines": checks.lines,
                     "skills": checks.skills, "skills_left_out": checks.skills_left_out, "conflicts": checks.conflicts, "shown": sorted(checks.shown), "error": checks.error,
                     "cited_met": checks.cited_met, "cited_lost": checks.cited_lost, "cited_silent": checks.cited_silent, "cited_other_lost": checks.cited_other_lost,
                     "zero_entries": checks.zero_entries, "title_entries": checks.title_entries, "title_dropped": checks.title_dropped, "title_silent": checks.title_silent,

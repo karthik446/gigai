@@ -6,7 +6,9 @@ variations x 3 paths = 486 final selections, each checked on separate checks aga
 - H1 no mandatory requirement the master can support is left without a supporting line, in any cell;
 - H2 adding lines to a master never lowers mandatory coverage, evidence strength or the must-keep lines shown;
 - H3 the same lines in another order give the same pick; the same skills grouped differently change no check;
-- H4 every cell fits 2 pages, with no role printed without a bullet and the roles in date order.
+- H4 every cell has the shape (no project printed without a bullet, the roles in date order) and is within its limit:
+  a SELECTION (``select``, ``fallback``) holds at most ``master_selection.MAX_PICK_BULLETS`` bullets and counts no page
+  (0.1.11.5 item 1c); ``tailor_copy`` (every candidate line copied; the tailor call fits nothing now) has no cap.
 
 Regression protection on these cases, not a proof.  The baseline (``sel-1``, 0.1.10.10) fails all four: the worker's
 report holds the table (``python -m tests.evals.run_pick_eval --baseline <a git archive of v0.1.10.10>``).
@@ -167,46 +169,37 @@ def test_a_grid_is_made_in_short_lived_children_and_leaves_this_process_s_memory
 
 
 H2 = "H2 adding lines lowered a check"
-#: 0.1.11.3 item 15 (``sel-5``): the page estimate keeps room for the PDF's header (one more line than ``sel-4``), so
-#: a pick prints one line less. In ONE place the line that goes is a line the labels say to keep: with the "useful"
-#: lines added to the large master, ``loom-01`` (no mandatory requirement loses its coverage: H1 holds). A recorded
-#: exception, by the coordinator's decision (2026-10-06): the cut order is unchanged here; protecting a label-strong
-#: line in the cut order is a follow-up ticket.
-KNOWN_HEADER_ROOM = {f"agentic/large/base -> useful/{path}: must-keep dropped: loom-01" for path in ("select", "fallback", "tailor_copy")}
+H3 = "H3 order or grouping changed the pick"
+#: The two paths that are a SELECTION (``master_selection.select``; ``tailor_master.code_only``): a cap of bullets, no page.
+SELECTION_PATHS = ("select", "fallback")
+#: 0.1.11.5 item 1c (``sel-7``).  NOTHING IS A RECORDED EXCEPTION ANY MORE, on any path.  The cells that p15's header
+#: reserve (``sel-5``: agentic large base -> useful, ``loom-01``) and H1's heading lines (``sel-6``: titlematch with its
+#: assessment, ``qui-01`` and T2's strength) once moved are clean, because nothing takes a bullet's place: a selection
+#: is a cap of bullets, and the tailor call's answer (``tailor_copy``) is no longer fitted to a page at all
+#: (``MasterTailoring.finish``: every candidate line stays, no cut, no conflict).  The tests below say so by EQUALITY,
+#: so a cell that moves again is seen.
 
 
-#: 0.1.11.4 item 9 (``sel-6``): a role with no line left keeps its one heading line ("Earlier experience"), counted in
-#: the page, so a pick with such roles prints a line or two less. WITH AN ASSESSMENT, in the titlematch posting, the
-#: line that goes in four cells is ``qui-01``, which the labels call the strong line of T2 (T2 stays covered by a line
-#: its row cites: H1 and H5 hold, no conflict). The same family as ``KNOWN_HEADER_ROOM`` (p15's ``qui-01`` under settle),
-#: recorded for the same follow-up ticket: protect a row's label-strong source in the cut order.
-KNOWN_HEADING_ROOM_ASSESSED = {
-    f"titlematch/{step}/{path}: {what}"
-    for step, paths in (("medium -> large/base", ("select", "fallback", "tailor_copy")), ("medium/base -> useful", ("tailor_copy",)))
-    for path in paths
-    for what in ("weaker evidence: T2", "must-keep dropped: qui-01")
-}
-#: The cells whose own checks show it (the title test reads cells, not steps): with an assessment, every cell of the
-#: LARGE master on the three selector paths (9 variations x 3: its three old roles are listed by their heading), and
-#: the medium master with the "useful" lines added on ``tailor_copy``.  28 of 81.  Nowhere else, and never ``lost``.
+def _hard(posting: str, results: dict[tuple[str, str, str, str], ev.Checks]) -> None:
+    """Every hard test over one posting's 81 cells, with no exception: nothing fails, lowers a check or needs a conflict."""
 
-
-def _heading_room_cell(size: str, variation: str, path: str) -> bool:
-    return size == "large" or (size, variation, path) == ("medium", "useful", "tailor_copy")
+    assert len(results) == len(ev.SIZES) * len(ev.VARIATIONS) * len(ev.PATHS) == 81
+    assert not any(checks.error for checks in results.values())
+    failures = ev.hard_failures(results)
+    assert failures == {name: [] for name in failures}, "\n".join(item for found in failures.values() for item in found)
+    for (_posting, size, variation, path), checks in results.items():
+        assert (checks.lost, checks.weak, checks.omitted, checks.conflicts) == ((), (), (), 0), (size, variation, path)
+        if path in SELECTION_PATHS:
+            # A SELECTION: exactly the cap (these masters hold more lines than it).
+            assert checks.bullets == ms.MAX_PICK_BULLETS == 20, (size, variation, path)
+        else:
+            # ``tailor_copy``: every candidate line, so never fewer than the selection shows; no cap.
+            assert path == ev.UNCAPPED and checks.bullets >= ms.MAX_PICK_BULLETS, (size, variation, path)
 
 
 @pytest.mark.parametrize("posting", POSTINGS)
 def test_the_hard_tests_hold_in_every_cell_of_a_posting(posting: str) -> None:
-    results = _results(posting)
-    assert len(results) == len(ev.SIZES) * len(ev.VARIATIONS) * len(ev.PATHS) == 81
-    assert not any(checks.error for checks in results.values())
-    failures = ev.hard_failures(results)
-    assert set(failures[H2]) <= KNOWN_HEADER_ROOM, "\n".join(failures[H2])
-    assert {name: found for name, found in failures.items() if name != H2} == {name: [] for name in failures if name != H2}, "\n".join(
-        item for found in failures.values() for item in found
-    )
-    # No conflict was needed anywhere: everything mandatory fitted.
-    assert all(checks.conflicts == 0 for checks in results.values())
+    _hard(posting, _results(posting))
 
 
 @pytest.mark.parametrize(("posting", "requirement", "line", "sizes"), [
@@ -220,7 +213,7 @@ def test_an_older_role_that_holds_the_only_evidence_keeps_that_line(posting: str
         for path in ev.PATHS:
             checks = results[(posting, size, "base", path)]
             assert line in checks.shown and checks.levels[requirement] == 2, (size, path)
-            # ... while, in a master that does not fit two pages, lines of recent roles and projects were left out.
+            # ... while, in a master with more lines than a resume shows, lines of recent roles and projects were left out.
             if size != "small":
                 newer = {item for item in ev.master_case(size, "base").ids if item.startswith(("hal-", "qui-", "bra-", "loom-", "eval-", "pgq-", "trail-", "relay-"))}
                 assert len(newer - checks.shown) >= 5, (size, path)
@@ -245,7 +238,7 @@ def test_the_same_probe_runs_in_another_checkout_s_tree() -> None:
     request = ev.payload(["weakfit"], ["small"], ["base"], ["select"])
     here = ev.pick_probe.probe(request)
     there = ev.pick_probe.run_in_tree(request, ev.REPO)
-    assert there == json.loads(json.dumps(here)) and there["selector_version"] == "sel-6"
+    assert there == json.loads(json.dumps(here)) and there["selector_version"] == "sel-7"
     with pytest.raises(ValueError, match="holds no src/gigai"):
         ev.pick_probe.run_in_tree(request, ev.FIXTURES)
 
@@ -309,14 +302,9 @@ def test_the_synthetic_assessments_cite_master_lines_and_hold_the_five_cases_the
 @pytest.mark.parametrize("posting", POSTINGS)
 def test_with_an_assessment_no_met_mandatory_row_loses_every_line_it_cites_and_the_four_hard_tests_still_hold(posting: str) -> None:
     results = _results(posting, assessed=True)
-    assert len(results) == 81 and not any(checks.error for checks in results.values())
-    failures = ev.hard_failures(results)
-    assert set(failures[H2]) <= (KNOWN_HEADING_ROOM_ASSESSED if posting == "titlematch" else set()), "\n".join(failures[H2])
-    assert {name: found for name, found in failures.items() if name != H2} == {name: [] for name in failures if name != H2}, "\n".join(
-        item for found in failures.values() for item in found
-    )
-    # Stronger than H5 on this grid: every met mandatory row keeps a cited line in every cell, and no conflict was needed.
-    assert all(checks.cited_met and not checks.cited_lost and checks.conflicts == 0 for checks in results.values())
+    _hard(posting, results)
+    # Stronger than H5 on this grid: every met mandatory row keeps a cited line in every cell, on every path.
+    assert all(checks.cited_met and not checks.cited_lost for checks in results.values())
 
 
 def test_each_of_the_five_cases_keeps_its_cited_line_on_every_path() -> None:
@@ -330,12 +318,20 @@ def test_each_of_the_five_cases_keeps_its_cited_line_on_every_path() -> None:
                     assert case["line"] in results[(case["posting"], size, case["variation"], path)].shown, (name, size, path)
                     checked += 1
     assert checked == 39
-    # Without the assessment the same master and posting do NOT show those lines (the cases are real: matching by
-    # words cuts them), in the largest master of each case.
-    for name, cases in spec["shapes"].items():
-        for case in cases:
-            plain = _results(case["posting"], sizes=(case["sizes"][-1],), variations=(case["variation"],))[(case["posting"], case["sizes"][-1], case["variation"], "select")]
-            assert case["line"] not in plain.shown, (name, "the case would pass without the fix")
+    # Without the assessment the same master and posting do NOT show these lines (the cases are real: matching by
+    # words leaves them out), in the largest master of each case.  Since the cap (0.1.11.5 item 1c) a selection holds
+    # 20 bullets where 2 pages held about 15, so two of the cited lines are now shown without the assessment too, as
+    # general lines there was room for (``pel-01``, which shares no word with its requirement, and the long line
+    # ``long-04``): for those the case no longer tells the two selectors apart, and that is said here by name.
+    left_out = {
+        (name, case["line"])
+        for name, cases in spec["shapes"].items() for case in cases
+        if case["line"] not in _results(case["posting"], sizes=(case["sizes"][-1],), variations=(case["variation"],))[(case["posting"], case["sizes"][-1], case["variation"], "select")].shown
+    }
+    assert left_out == {("older_role_only", "pel-10"), ("same_word_one_cited", "pel-06"), ("one_line_four_rows", "pel-10")}, "the cases that would pass without the fix"
+    assert {(name, case["line"]) for name, cases in spec["shapes"].items() for case in cases} - left_out == {
+        ("no_shared_words", "pel-01"), ("older_role_only", "pel-01"), ("long_line", "long-04"),
+    }
 
 
 def test_a_selector_that_does_not_read_citations_fails_the_cited_check() -> None:
@@ -344,7 +340,8 @@ def test_a_selector_that_does_not_read_citations_fails_the_cited_check() -> None
     case = ev.master_case("large", "base")
     plain = ev.pick_probe.probe(ev.payload(["leadership"], ["large"], ["base"], ["select"]))["results"][ev.cell_key("leadership", "large", "base")]["select"]
     checks = ev.check("leadership", case, plain, ev.cited("leadership", case))
-    assert len(checks.cited_lost) == 2 and checks.cited_silent == checks.cited_lost
+    # (One row, ``r4``: the other row this selection lost while it was fitted to 2 pages cites a line the cap has room for.)
+    assert checks.cited_lost == ("r4",) and checks.cited_silent == checks.cited_lost
     failures = ev.hard_failures({("leadership", "large", "base", "select"): checks})
     assert len(failures["H5 a met mandatory row lost every line it cites, with no conflict reported"]) == 1
 
@@ -383,8 +380,7 @@ def test_an_entry_the_posting_s_title_names_keeps_a_line_in_every_cell_and_no_co
         # The first project's best line is the one that says what the title says (a copy of it, where the master holds a better twin).
         assert {"loom-01", "near-06"} & checks.shown, (size, variation, path)
         # It costs no requirement its line: the checks the grid already had hold beside it.
-        known = assessed and _heading_room_cell(size, variation, path) and (checks.weak, checks.omitted) == (("T2",), ("qui-01",))
-        assert (checks.lost, checks.cited_lost) == ((), ()) and (known or (checks.weak, checks.omitted) == ((), ())), (size, variation, path)
+        assert (checks.lost, checks.cited_lost, checks.weak, checks.omitted) == ((), (), (), ()), (size, variation, path)
     # The agentic posting's title names the same projects; they were shown before and still are.
     assert not any(checks.title_dropped for checks in _results("agentic", assessed=assessed).values())
 

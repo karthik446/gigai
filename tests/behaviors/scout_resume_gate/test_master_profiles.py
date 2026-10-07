@@ -37,7 +37,7 @@ from gigai.scout import profile_records
 from gigai.scout.find_jobs.contracts import PinnedResume
 from gigai.scout.find_jobs.resume_input import resume_for_profile
 from gigai.scout.master_resume import MasterResumeError, parse_master
-from gigai.scout.master_selection import SelectionProfile, render_selection, select
+from gigai.scout.master_selection import MAX_PICK_BULLETS, SelectionProfile, render_selection, select
 from gigai.scout.master_store import load_master
 from gigai.scout.resume_import import import_resume_file
 from gigai.scout.resume_pdf import measure_markdown, parse_resume_markdown
@@ -248,7 +248,7 @@ def test_each_profiles_first_selection_is_its_own_resume_and_the_resume_is_not_r
         # The profile keeps its resume, its revision and its content digest: one more write, nothing a reader sees.
         assert (new.resume_ref, new.revision, new.content_digest, new.titles, new.queries) == (old.resume_ref, old.revision, old.content_digest, old.titles, old.queries)
         assert new.seq == old.seq + 1 and two.resume_text(profile_id) == texts[profile_id]
-        assert (selection.source, selection.selector_version, selection.pins, selection.excludes) == ("migration", "sel-6", (), ())
+        assert (selection.source, selection.selector_version, selection.pins, selection.excludes) == ("migration", "sel-7", (), ())
         assert selection.master_revision_id == selection.synced_revision_id == master.revision.revision_id
         assert selection.resume_revision_id == old.resume_ref.revision_id
         # The selection is the old resume in the master's ids: every one of its lines, in its own order.
@@ -559,7 +559,7 @@ def test_a_resume_replaced_by_hand_is_left_alone(two: _Home, tmp_path: Path) -> 
 # --- refresh, and what the readers read --------------------------------------------------------
 
 
-def test_a_refresh_makes_the_two_page_view_the_profiles_resume(two: _Home) -> None:
+def test_a_refresh_makes_the_selectors_view_the_profiles_resume(two: _Home) -> None:
     two.migrate("a")
     before = two.profile(two.swe_id)
     assert measure_markdown(two.resume_text(two.swe_id), spacing_scale=0.9)[0] > 2  # the older resume is over 2 pages
@@ -567,19 +567,22 @@ def test_a_refresh_makes_the_two_page_view_the_profiles_resume(two: _Home) -> No
     assert preview["dry_run"] is True and preview["profiles"][0]["written"] is False and two.profile(two.swe_id) == before
 
     done = _master(two.home, "selection", "refresh", "--profile", two.swe_id)["profiles"][0]
-    assert (done["action"], done["source"], done["written"], done["fits"], done["pages"]) == ("refreshed", "refresh", True, True, 2)
+    # No page is counted for a selection (0.1.11.5 item 1c): ``pages`` is null, and ``fits`` is always true.
+    assert (done["action"], done["source"], done["written"], done["fits"], done["pages"]) == ("refreshed", "refresh", True, True, None)
     assert {key: done[key] for key in ("added", "removed", "shown", "skills")} == {key: preview["profiles"][0][key] for key in ("added", "removed", "shown", "skills")}
-    assert done["removed"], "a resume over 2 pages was fitted to 2 and left nothing out"
+    assert done["removed"], "a resume of more bullets than the cap was selected again and left nothing out"
     after = two.profile(two.swe_id)
     selection = after.master_selection
     assert after.resume_ref.to_json() == done["resume_ref"] and after.resume_ref.record_id == mp.view_record_id(two.resolved, two.swe_id)
     assert after.revision == before.revision + 1 and selection.source == "refresh" and selection.resume_revision_id == after.resume_ref.revision_id
     assert set(selection.item_ids) - set(before.master_selection.item_ids) == set(done["added"])
-    # What a reader of the profile's resume reads is the selection's view: master lines only, 2 pages.
+    # What a reader of the profile's resume reads is the selection's view: master lines only, at most the cap of bullets
+    # (the page is fitted where it is printed: the old 2-page estimate may say 2 or 3).
     master = two.master().master
     view = two.resume_text(two.swe_id)
     assert view == render_selection(master, selection.item_ids, selection.skills)
-    assert measure_markdown(view, spacing_scale=0.9)[0] == 2
+    shown = [item for item in selection.item_ids if item in master.items and master.items[item].kind == "bullet" and master.items[item].section in ("experience", "projects")]
+    assert len(shown) == MAX_PICK_BULLETS and measure_markdown(view, spacing_scale=0.9)[0] in (2, 3)
     known = {item.text for item in master.items.values()}
     assert all(line in known or set(line.split(", ")) <= set(master.skills()) for line in _lines(view))
     # The other profile is not touched, and the same refresh again writes nothing new.
@@ -624,9 +627,9 @@ def test_a_refresh_keeps_the_selection_held_when_the_new_one_regresses_and_says_
     assert done["remake"]["regressions"] == [] and done["remake"]["new"]["lost"] == [] and done["remake"]["new"]["fits"] is True
     held, head = two.profile(two.swe_id), two.journal_head()
 
-    # Now the selector makes a selection that lost a mandatory requirement's evidence (it is given a page nothing fits).
+    # Now the selector makes a selection that lost a mandatory requirement's evidence (it is given a cap of no bullet).
     real = mp.select
-    monkeypatch.setattr(mp, "select", lambda *args, **kwargs: real(*args, **{**kwargs, "measure": lambda _markdown: (3, 0.5)}))
+    monkeypatch.setattr(mp, "select", lambda *args, **kwargs: real(*args, **{**kwargs, "max_bullets": 0}))
     kept = _master(two.home, "selection", "refresh", "--profile", two.swe_id)["profiles"][0]
     assert (kept["action"], kept["written"], kept["added"], kept["removed"]) == ("kept", False, [], [])
     assert kept["remake"]["decision"] == "previous" and any(text.startswith("mandatory coverage") for text in kept["remake"]["regressions"])
@@ -688,7 +691,7 @@ def test_a_new_profiles_first_selection_comes_from_the_postings_its_titles_match
     made = mp.first_selection(home_root=home, target=target, profile_id=created.profile_id)
     assert made is not None and made.resume_ref != default.resume_ref and made.resume_ref.record_id == mp.view_record_id(resolved, created.profile_id)
     selection = made.master_selection
-    assert (selection.source, selection.selector_version) == ("index", "sel-6")
+    assert (selection.source, selection.selector_version) == ("index", "sel-7")
     # The selection IS the job selection against the stand-in posting, for this profile's titles.
     expected = select(master, SelectionProfile(titles=created.titles, profile_id=created.profile_id, label="AI"), posting)
     assert selection.item_ids == mp.selection_ids(expected) and selection.skills == expected.skills
@@ -929,7 +932,7 @@ def test_an_unreadable_resume_stops_the_migration_and_names_the_profile(tmp_path
 
 def test_a_stored_selection_renders_as_the_selector_rendered_it() -> None:
     master = parse_master((FIXTURES / "master.md").read_text(encoding="utf-8"))
-    selected = select(master, SelectionProfile(titles=("Staff AI Engineer",)), None, measure=lambda markdown: (1 + markdown.count("\n- ") // 14, 0.5))
+    selected = select(master, SelectionProfile(titles=("Staff AI Engineer",)), None)
     assert render_selection(master, mp.selection_ids(selected), selected.skills) == selected.markdown
     # A retired line and a skill the master no longer lists are left out; an unknown id is ignored.
     ids = mp.selection_ids(selected)

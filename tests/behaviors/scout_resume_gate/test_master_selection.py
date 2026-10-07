@@ -1,15 +1,16 @@
 """0.1.10.9 master P2: the code selector, on the SYNTHETIC master of the master-resume spike.
 
-``master_selection.select`` picks the lines a resume shows from the whole master and fits them to 2
-pages by measuring with the shipped PDF template; ``gigai scout resume master selection show`` is its
-CLI. Everything here is synthetic (``tests/evals/fixtures/master``: an invented person, 2 profiles, 3
+``master_selection.select`` picks the lines a resume shows from the whole master BY SCORE UP TO A CAP of
+``MAX_PICK_BULLETS`` bullets (0.1.11.5 item 1c, ``sel-7``: it lays out nothing and knows no page limit; until then
+it fitted the pick to 2 pages by measuring with the shipped PDF template); ``gigai scout resume master selection
+show`` is its CLI. Everything here is synthetic (``tests/evals/fixtures/master``: an invented person, 2 profiles, 3
 postings) and nothing calls a model: the one model-shaped thing, a stored assessment's posting, is
 made with the scripted test transport. Every CLI test runs against a temp ``--home``.
 
 The golden cases pin ``today`` to 2026-10-03 (which roles are "old" depends on the year); what they
-expect is ``selection-golden.json``, written for ``SELECTOR_VERSION`` ``sel-6`` (0110-10-15: requirement
+expect is ``selection-golden.json``, written for ``SELECTOR_VERSION`` ``sel-7`` (0110-10-15: requirement
 coverage, then evidence strength, then pins, recency only as the tie-break; the Skills section kept whole;
-a role or project the posting's title names keeps its best line).
+a role or project the posting's title names keeps its best line; at most 20 bullets, no page counted).
 The labelled eval of that rule is ``tests/evals/run_pick_eval.py`` (``test_pick_eval.py``).
 """
 
@@ -17,7 +18,6 @@ from __future__ import annotations
 
 from datetime import date, datetime, timezone
 import json
-import math
 from pathlib import Path
 import re
 import subprocess
@@ -74,7 +74,7 @@ _SELECTED: dict[tuple[str, str | None], ms.Selected] = {}
 
 
 def _selected(master: Master, profile_id: str, posting_id: str | None) -> ms.Selected:
-    """One real selection (the shipped template measures it), made once per module."""
+    """One real selection (the shipped rules, the cap of ``MAX_PICK_BULLETS``), made once per module."""
 
     key = (profile_id, posting_id)
     if key not in _SELECTED:
@@ -82,35 +82,40 @@ def _selected(master: Master, profile_id: str, posting_id: str | None) -> ms.Sel
     return _SELECTED[key]
 
 
-def _by_bullets(per_page: int) -> ms.Measure:
-    """A stand-in for the layout: ``per_page`` bullet lines to a page. No renderer, same answer everywhere."""
+def _bullets(master: Master, selected: ms.Selected) -> list[str]:
+    """What the cap counts: the bullets shown under roles and projects (never a degree's detail, an Other line or a heading)."""
 
-    def measure(markdown: str) -> tuple[int, float]:
-        bullets = sum(line.startswith("- ") for line in markdown.splitlines())
-        pages = max(1, math.ceil(bullets / per_page))
-        return pages, (bullets - (pages - 1) * per_page) / per_page
+    return [bullet for entry_id, bullets in selected.entries.items() if master.entries[entry_id].section != "education" for bullet in bullets]
 
-    return measure
+
+def _candidates(master: Master, selected: ms.Selected) -> list[str]:
+    """Every bullet of a role or a project that is not left out as a near duplicate: what a selection can show."""
+
+    return [
+        bullet for section in ("experience", "projects") for entry in master.entries_in(section) for bullet in entry.bullets
+        if bullet not in selected.duplicates
+    ]
 
 
 def _shown_lines(markdown: str) -> list[str]:
     return [line[2:] for line in markdown.splitlines() if line.startswith("- ")]
 
 
-# --- golden: 2 profiles x 3 postings fit 2 pages ----------------------------------------------
+# --- golden: 2 profiles x 3 postings, each the best 20 bullets ---------------------------------
 
 
 @pytest.mark.parametrize("profile_id", PROFILE_IDS)
 @pytest.mark.parametrize("posting_id", POSTING_IDS)
-def test_a_job_selection_from_the_whole_master_fits_two_pages(master: Master, golden: dict, profile_id: str, posting_id: str) -> None:
+def test_a_job_selection_from_the_whole_master_holds_its_twenty_best_bullets(master: Master, golden: dict, profile_id: str, posting_id: str) -> None:
     selected = _selected(master, profile_id, posting_id)
 
-    # The END outcome: the PDF the shipped renderer makes of this markdown (auto fit, as a user's PDF) has 2 pages.
-    assert selected.pages_before_fit > 2, "the pick must have needed the fit, or this proves nothing"
-    assert selected.fits and selected.pages == 2
-    rendered = render_markdown_pdf(selected.markdown, None, timestamp=STAMP)
-    assert rendered.pages == 2
-    assert rendered.spacing_scale >= ms.FIT_SCALE, "the budget is 2 pages at 0.9x spacing or looser"
+    # THE CAP: this master offers far more bullets than a resume shows, and the selection holds exactly the cap.
+    assert len(_candidates(master, selected)) > 100 and len(_bullets(master, selected)) == ms.MAX_PICK_BULLETS == 20 == selected.max_bullets
+    # No page is counted: nothing was laid out, nothing is "cut for length", and no page limit can be missed.
+    assert (selected.pages, selected.pages_before_fit, selected.layout_queries, selected.cut_for_length) == (None, None, 0, ())
+    assert selected.fits and selected.max_pages == 2
+    # The page is the user's to fit: the shipped renderer prints this pick (auto fit, as a user's PDF) and says its pages.
+    assert render_markdown_pdf(selected.markdown, None, timestamp=STAMP).pages in (2, 3)
 
     # Exactly the golden pick (a change here is a selector change: bump SELECTOR_VERSION, regenerate the file).
     expected = golden[f"{profile_id}/{posting_id}"]
@@ -118,24 +123,20 @@ def test_a_job_selection_from_the_whole_master_fits_two_pages(master: Master, go
     assert {key: list(value) for key, value in selected.entries.items()} == expected["entries"]
     assert list(selected.other) == expected["other"]
     assert list(selected.skills) == expected["skills"]
-    assert [cut.id for cut in selected.cut_for_length] == expected["cut_for_length"]
-    assert selected.pages_before_fit == expected["pages_before_fit"]
+    assert list(selected.over_cap) == expected["over_cap"] and list(selected.earlier) == expected["earlier"]
+    assert len(_bullets(master, selected)) == expected["bullets"]
 
     # Nothing is reworded: every printed line is a master line, word for word, under its own id.
     texts = {item.text for item in master.items.values()}
     printed = [line for line in _shown_lines(selected.markdown) if line != ", ".join(selected.skills)]
     assert printed and all(line in texts for line in printed)
     assert [master.items[item_id].text for item_id in selected.item_ids()] == printed
-    # The Skills section: this master lists 79 names, more than prints whole (``SKILLS_WHOLE``). What the posting
-    # asks for and what the shown lines name are all there; only names past that count that nothing asks for
-    # were cut, and each cut is on the record.
-    left_out = [skill for skill in selected.skill_reasons if not skill.picked]
-    assert set(selected.skills) <= set(master.skills()) and ms.SKILLS_WHOLE <= len(selected.skills) < 79
-    assert left_out and {skill.code for skill in left_out} == {"cut_for_length"}
-    assert {skill.name for skill in left_out} == {cut.id for cut in selected.cut_for_length if cut.kind == "skill"}
-    assert {skill.code for skill in selected.skill_reasons if skill.picked and skill.code != "listed"} <= {"posting_must", "posting_nice", "named_by_line"}
-    shown_text = " ".join(master.items[item_id].text for item_id in selected.item_ids())
-    assert not any(mentions(shown_text, skill.name) or mentions(_posting(posting_id).text, skill.name) for skill in left_out)
+    # The Skills section is WHOLE (this master lists 79 names): no name is left out for a page, each has its reason.
+    assert sorted(selected.skills) == sorted(master.skills()) and len(selected.skills) == 79
+    assert all(skill.picked for skill in selected.skill_reasons)
+    assert {skill.code for skill in selected.skill_reasons} <= {"posting_must", "posting_nice", "named_by_line", "listed"}
+    # The Other lines are not bullets: the best few are shown whatever the cap.
+    assert len(selected.other) == ms.MAX_OTHER
     assert selected.conflicts == () and [conflict for conflict in expected["conflicts"]] == []
     assert {key: list(value) for key, value in selected.evidence_for.items()} == expected["evidence_for"]
     # Every must-have of the posting that the master can show at all is on the resume.
@@ -144,14 +145,15 @@ def test_a_job_selection_from_the_whole_master_fits_two_pages(master: Master, go
 
 
 @pytest.mark.parametrize("profile_id", PROFILE_IDS)
-def test_a_profiles_standing_selection_fits_two_pages(master: Master, golden: dict, profile_id: str) -> None:
+def test_a_profiles_standing_selection_holds_its_twenty_best_bullets(master: Master, golden: dict, profile_id: str) -> None:
     selected = _selected(master, profile_id, None)
 
-    assert selected.pages_before_fit > 2 and selected.fits
-    assert render_markdown_pdf(selected.markdown, None, timestamp=STAMP).pages == 2
+    assert len(_bullets(master, selected)) == ms.MAX_PICK_BULLETS and selected.pages is None and selected.fits and selected.cut_for_length == ()
+    assert render_markdown_pdf(selected.markdown, None, timestamp=STAMP).pages in (2, 3)
     expected = golden[f"{profile_id}/base"]
     assert list(selected.summary) == expected["summary"]
     assert {key: list(value) for key, value in selected.entries.items()} == expected["entries"]
+    assert list(selected.over_cap) == expected["over_cap"]
     assert selected.keywords is None and selected.coverage == {}
 
 
@@ -165,7 +167,7 @@ def test_the_same_input_gives_the_same_selection(master: Master) -> None:
 
 @pytest.mark.parametrize("profile_id", PROFILE_IDS)
 def test_most_of_a_job_selection_is_not_in_the_profiles_standing_selection(master: Master, profile_id: str) -> None:
-    """Why a job selection starts from the whole master (DESIGN 4.1): the profile's 2 pages do not hold it."""
+    """Why a job selection starts from the whole master (DESIGN 4.1): the profile's own 20 bullets do not hold it."""
 
     base = set(_selected(master, profile_id, None).item_ids())
     for posting_id in POSTING_IDS:
@@ -186,7 +188,7 @@ def test_the_ai_agent_posting_gets_the_ai_summary_not_the_infrastructure_one(mas
     for profile_id in PROFILE_IDS:
         # The fault's cause is present in this fixture: counted by the posting's keywords alone, the
         # infrastructure summary names more of them (weighted: a must-have 2, a nice-to-have 1).
-        keywords = ms.select(master, _profile(profile_id), posting, today=TODAY, measure=_by_bullets(40)).keywords
+        keywords = ms.select(master, _profile(profile_id), posting, today=TODAY).keywords
         assert keywords is not None
         must, nice = keywords.must, keywords.nice
 
@@ -216,7 +218,7 @@ def test_each_posting_gets_the_summary_its_title_names(master: Master) -> None:
     assert _selected(master, "profile-swe", None).summary == ("sum-backend",)
 
 
-# --- the cut order (0110-10-15: value for the posting, never age alone) ------------------------
+# --- the order lines are left out in (0110-10-15: value for the posting, never age alone) -----
 
 
 @pytest.mark.parametrize("profile_id", PROFILE_IDS)
@@ -224,71 +226,73 @@ def test_each_posting_gets_the_summary_its_title_names(master: Master) -> None:
 def test_recent_roles_always_appear_and_what_supports_nothing_goes_first(master: Master, profile_id: str, posting_id: str) -> None:
     selected = _selected(master, profile_id, posting_id)
 
-    # The page constraint: every recent role is present, and no role or project is printed without a bullet.
+    # Every recent role is present, and no project is printed without a bullet.
     for index, role in enumerate(RECENT_ROLES):
         assert len(selected.entries[role]) >= ms.FLOORS[index] >= 1, role
     assert all(bullets for entry_id, bullets in selected.entries.items() if master.entries[entry_id].section != "education")
-    # No requirement's evidence was cut, and nothing mandatory is left without a line: no conflict.
-    cut = {item.id for item in selected.cut_for_length}
+    # No requirement's evidence is over the cap, and nothing mandatory is left without a line: no conflict.
+    cut = set(selected.over_cap)
     evidence = {requirement.supporters[0] for requirement in selected.requirements if requirement.mandatory and requirement.supporters}
     assert evidence and not evidence & cut and evidence <= set(selected.item_ids())
     assert selected.conflicts == ()
-    # The bullets were cut lowest value first (``values``: a line's place in the keep order), so every bullet cut
+    # The bullets were left out lowest value first (``values``: a line's place in the keep order), so every one of them
     # is worth less than any requirement's evidence; a line that supports no requirement at all was among them.
-    bullets = [item.id for item in selected.cut_for_length if item.kind == "bullet"]
+    bullets = list(selected.over_cap)
+    assert bullets and all(master.items[item_id].kind == "bullet" for item_id in bullets), "only bullets count: no Other line, skill or heading is left out for the cap"
     places = [selected.values[item_id] for item_id in bullets]
     assert places == sorted(places) and max(places) < min(selected.values[item_id] for item_id in evidence)
     supports = {item_id for requirement in selected.requirements for item_id in requirement.supporters}
     assert any(item_id not in supports for item_id in bullets)
-    # Whatever is shown beyond the evidence is worth more than whatever of the same kind was cut for length.
-    shown_bullets = [item_id for entry_id, shown in selected.entries.items() if master.entries[entry_id].section == "projects" for item_id in shown]
-    cut_projects = [item_id for item_id in bullets if master.entries[master.items[item_id].entry_id].section == "projects" and master.items[item_id].entry_id in selected.entries]
-    assert not shown_bullets or not cut_projects or min(selected.values[item_id] for item_id in shown_bullets) > max(selected.values[item_id] for item_id in cut_projects)
-    # An old role goes whole when none of its lines is evidence; each cut says why, in the words the user reads.
+    # Whatever is shown is worth more than whatever was left out for the cap (a recent role's one line aside).
+    floor_lines = {selected.entries[role][0] for role in RECENT_ROLES if len(selected.entries[role]) == 1}
+    assert min(selected.values[item_id] for item_id in _bullets(master, selected) if item_id not in floor_lines) > max(places)
+    # An old role with no line of evidence shows no line and is LISTED by its heading (never dropped); each line says why.
     for role in selected.roles_dropped:
         assert role in OLD_ROLES and role not in selected.entries
         assert not set(master.entries[role].bullets) & evidence
+    assert selected.earlier == selected.roles_dropped and {"r-tes", "r-bri"} <= set(selected.earlier)
+    assert "### Earlier experience" in selected.markdown and "### Tessel Robotics" not in selected.markdown
     reasons = {line.id: line for line in selected.lines}
-    assert {"r-tes", "r-bri"} <= set(selected.roles_dropped)
-    assert all(reasons[bullet].code in {"cut_role_dropped", "role_dropped"} for bullet in master.entries["r-tes"].bullets)
-    assert {item.code for item in selected.cut_for_length} <= {"cut_role_dropped", "cut_lowest_value", "cut_for_length"}
-    assert {item.kind for item in selected.cut_for_length if item.code == "cut_for_length"} == {"skill"}
+    assert all(reasons[bullet].code == "role_dropped" for bullet in master.entries["r-tes"].bullets)
+    assert {reasons[item_id].code for item_id in bullets} <= {"over_cap", "role_dropped"}
+    assert all(reasons[item_id].reason and "cut for length" not in reasons[item_id].reason for item_id in bullets)
 
 
-def test_a_tighter_budget_only_applies_more_of_the_same_cut_order(master: Master) -> None:
-    """One fixed order: what a looser budget cut is the start of what a tighter one cuts."""
+def test_a_smaller_cap_only_leaves_out_more_of_the_same_order(master: Master) -> None:
+    """One fixed order: what a larger cap leaves out is the start of what a smaller one leaves out."""
 
     profile, posting = _profile("profile-swe"), _posting("p2-staff-swe-core-infrastructure")
-    cuts = [
-        [(cut.kind, cut.id) for cut in ms.select(master, profile, posting, today=TODAY, measure=_by_bullets(per_page), fill=False).cut_for_length if cut.kind != "role"]
-        for per_page in (30, 22, 16, 12)
-    ]
+    cuts = [list(ms.select(master, profile, posting, today=TODAY, max_bullets=cap, fill=False).over_cap) for cap in (30, 20, 14, 8)]
 
     assert [len(item) for item in cuts] == sorted(len(item) for item in cuts) and len(cuts[0]) < len(cuts[-1])
     for looser, tighter in zip(cuts, cuts[1:]):
         assert tighter[: len(looser)] == looser
+    # Each line left out takes exactly one bullet off the count: the selection holds the cap, never fewer.
+    for cap in (30, 20, 14, 8):
+        assert len(_bullets(master, ms.select(master, profile, posting, today=TODAY, max_bullets=cap, fill=False))) == cap
 
 
-def test_a_pick_that_cannot_fit_says_so_keeps_every_recent_role_and_reports_the_conflict(master: Master) -> None:
-    selected = ms.select(master, _profile("profile-ai"), _posting("p1-staff-ai-agent-platform"), today=TODAY, measure=lambda _markdown: (3, 0.5))
+def test_a_cap_smaller_than_the_must_cover_lines_says_so_and_keeps_every_recent_role(master: Master) -> None:
+    selected = ms.select(master, _profile("profile-ai"), _posting("p1-staff-ai-agent-platform"), today=TODAY, max_bullets=0)
 
-    assert not selected.fits and selected.pages == 3 and selected.to_json(master)["fits"] is False
-    assert selected.added_to_fill == ()
-    # Every cut the rules allow was made: each recent role keeps its one best line, the old roles, the projects,
-    # the Other lines and the skills are gone.
+    assert selected.added_to_fill == () and selected.fits and selected.pages is None and selected.to_json(master)["fits"] is True
+    # Every bullet the rules allow is left out: each recent role keeps its one best line, the old roles are listed by
+    # their heading, the projects are gone. What is not a bullet stays: the Other lines, the whole Skills section.
     assert {role: len(selected.entries[role]) for role in RECENT_ROLES} == {role: 1 for role in RECENT_ROLES}
     assert set(selected.entries) == set(RECENT_ROLES) | {entry.id for entry in master.entries_in("education")}
-    assert selected.other == () and selected.skills == ()
-    assert {skill.code for skill in selected.skill_reasons} == {"cut_for_length"}
-    # Nothing mandatory went silently: the result names every requirement that lost its evidence, and the page count.
-    kinds = [conflict.kind for conflict in selected.conflicts]
-    assert kinds.count("over_budget") == 1 and "mandatory_evidence" in kinds
+    assert selected.earlier == ("r-cas", "r-bri", "r-tes") and len(selected.other) == ms.MAX_OTHER and len(selected.skills) == 79
+    assert all(skill.picked for skill in selected.skill_reasons)
+    # Nothing mandatory went silently: the result names every requirement that lost its evidence. No page-driven conflict exists.
+    kinds = {conflict.kind for conflict in selected.conflicts}
+    assert "mandatory_evidence" in kinds and not kinds & {"over_budget", "earlier_roles"}
     lost = [conflict for conflict in selected.conflicts if conflict.kind == "mandatory_evidence"]
     assert all(conflict.requirement and conflict.ids and conflict.ids[0] not in selected.item_ids() for conflict in lost)
     assert any(not conflict.covered for conflict in lost)
+    assert all("page" not in conflict.reason for conflict in selected.conflicts)
     out = selected.to_json(master)
     assert out["counts"]["conflicts"] == len(selected.conflicts) and out["conflicts"][0]["reason"]
-    assert {cut.code for cut in selected.cut_for_length} >= {"cut_conflict", "cut_for_length"}
+    assert out["cut_for_length"] == [] and out["max_bullets"] == 0 and out["over_cap"] == list(selected.over_cap)
+    assert {line.code for line in selected.lines if line.id in selected.over_cap} >= {"cut_conflict", "over_cap", "role_dropped"}
 
 
 # --- a requirement's evidence stays, wherever its role stands in time -------------------------
@@ -304,12 +308,13 @@ def test_an_old_roles_line_that_is_the_only_evidence_is_kept_and_its_role_stays(
         assert selected.keywords is not None and "SQL" in selected.keywords.must
         asked = next(requirement for requirement in selected.requirements if requirement.text == "SQL")
         assert asked.mandatory and asked.supporters == ("b-cas-08",)
-        # The old role is shown for that line while recent lines that support nothing were cut; the older two roles went.
-        assert "b-cas-08" in selected.entries["r-cas"] and selected.roles_dropped == ("r-bri", "r-tes")
+        # The old role is shown for that line while recent lines that support nothing are over the cap; the older two
+        # roles show no line and are listed by their heading.
+        assert "b-cas-08" in selected.entries["r-cas"] and selected.roles_dropped == ("r-bri", "r-tes") == selected.earlier
         assert asked.id in selected.evidence_for["b-cas-08"]
         reason = next(line for line in selected.lines if line.id == "b-cas-08")
         assert reason.picked and reason.code == "requirement_evidence" and reason.reason == "the strongest evidence for: SQL"
-        cut = [item.id for item in selected.cut_for_length]
+        cut = list(selected.over_cap)
         assert "b-cas-08" not in cut
         recent_cut = [item_id for item_id in cut if item_id in master.items and master.items[item_id].entry_id in RECENT_ROLES]
         assert recent_cut and all(selected.values[item_id] < selected.values["b-cas-08"] for item_id in recent_cut)
@@ -350,10 +355,11 @@ def test_every_line_of_the_master_is_picked_or_left_out_with_a_reason(master: Ma
         "requirement_evidence", "names_keywords", "posting_wording", "profile_focus", "strongest_remaining", "general", "room_left",
         "summary_variant", "pinned", "title_entry", "posting_title",
     }
-    # Every skill of the master is accounted for too, once: shown, or cut for length and said so.
+    # Every skill of the master is accounted for too, once, and shown: the Skills section is whole.
     assert sorted(skill.name for skill in selected.skill_reasons) == sorted(master.skills())
     assert [skill.name for skill in selected.skill_reasons if skill.picked] == list(selected.skills)
-    assert len(selected.skills) >= ms.SKILLS_WHOLE and {skill.code for skill in selected.skill_reasons if not skill.picked} <= {"cut_for_length"}
+    assert len(selected.skills) == 79 and all(skill.picked for skill in selected.skill_reasons)
+    assert not any("cut for length" in line.reason for line in selected.lines)
 
     out = selected.to_json(master)
     assert [row["id"] for row in out["picked"]] == list(selected.item_ids())
@@ -367,7 +373,7 @@ def test_the_skills_section_is_kept_whole_what_the_posting_asks_for_first(master
     assert selected.keywords is not None
     shown_text = " ".join(master.items[bullet].text for bullets in selected.entries.values() for bullet in bullets)
 
-    assert len(master.skills()) == 79 > len(selected.skills) >= ms.SKILLS_WHOLE
+    assert len(master.skills()) == 79 == len(selected.skills)
     for skill in (skill for skill in selected.skill_reasons if skill.picked):
         atoms = ms.skill_atoms(skill.name)
         if skill.code == "posting_must":
@@ -383,10 +389,11 @@ def test_the_skills_section_is_kept_whole_what_the_posting_asks_for_first(master
     order = ["posting_must", "posting_nice", "named_by_line", "listed"]
     asked = [code for code in codes if code in order[:2]]
     assert asked == sorted(asked, key=order.index) and codes[: len(asked)] == asked
-    # Too long to print whole: the names cut are ones nothing asks for and no picked line names, never another.
-    cut = [skill for skill in selected.skill_reasons if not skill.picked]
-    assert cut and all(skill.code == "cut_for_length" for skill in cut)
-    assert not any(mentions(atom, term) for skill in cut for atom in ms.skill_atoms(skill.name) for term in (*selected.keywords.must, *selected.keywords.nice))
+    # No name is left out, however long the section (0.1.11.5: no row is cut for a page), and what nothing asks for
+    # stands after what the posting asks for, by name.
+    assert [skill for skill in selected.skill_reasons if not skill.picked] == []
+    rest = [skill.name for skill in selected.skill_reasons if skill.code in ("named_by_line", "listed")]
+    assert rest == sorted(rest, key=str.casefold) and list(selected.skills)[len(asked):] == rest
 
 
 _GROUPED = """<!-- gigai-master:1 -->
@@ -415,8 +422,8 @@ def test_a_skill_is_matched_inside_its_group_whatever_the_master_groups() -> Non
     flat = parse_master(_GROUPED.replace("Python/Go/TypeScript · PostgreSQL/Redis", "Python, Go, TypeScript, PostgreSQL, Redis"))
     posting = ms.SelectionPosting("Staff Engineer", "Requirements:\n- Go services in production.\n- Redis.\n\nNice to have:\n- MCP.\n")
 
-    one = ms.select(grouped, ms.SelectionProfile(), posting, today=TODAY, measure=_by_bullets(40))
-    two = ms.select(flat, ms.SelectionProfile(), posting, today=TODAY, measure=_by_bullets(40))
+    one = ms.select(grouped, ms.SelectionProfile(), posting, today=TODAY)
+    two = ms.select(flat, ms.SelectionProfile(), posting, today=TODAY)
     assert one.keywords == two.keywords and one.keywords is not None
     assert one.keywords.must == ("Go", "Redis") and one.keywords.nice == ("MCP",)
     # In the posting's order (Go, Redis, then the nice-to-have MCP), then the rest; each group printed whole.
@@ -425,7 +432,7 @@ def test_a_skill_is_matched_inside_its_group_whatever_the_master_groups() -> Non
     assert one.item_ids() == two.item_ids()
 
 
-# --- the pure rules, on small inputs (no renderer) --------------------------------------------
+# --- the pure rules, on small inputs ----------------------------------------------------------
 
 _SMALL = """<!-- gigai-master:1 -->
 
@@ -461,42 +468,47 @@ Engineer | Jan 2010 - Dec 2013
 def test_a_profile_is_just_its_titles_when_it_has_no_focus_tags() -> None:
     small = parse_master(_SMALL)
 
-    assert ms.select(small, ms.SelectionProfile(titles=("Staff Data Engineer",)), None, today=TODAY, measure=_by_bullets(40)).summary == ("sum-data",)
-    assert ms.select(small, ms.SelectionProfile(titles=("Staff Backend Engineer",)), None, today=TODAY, measure=_by_bullets(40)).summary == ("sum-platform",)
+    assert ms.select(small, ms.SelectionProfile(titles=("Staff Data Engineer",)), None, today=TODAY).summary == ("sum-data",)
+    assert ms.select(small, ms.SelectionProfile(titles=("Staff Backend Engineer",)), None, today=TODAY).summary == ("sum-platform",)
     # A stored selection (P3) is the prior when a profile has one.
     stored = ms.SelectionProfile(titles=("Staff Backend Engineer",), base_ids=("sum-data",))
-    assert ms.select(small, stored, None, today=TODAY, measure=_by_bullets(40)).summary == ("sum-data",)
+    assert ms.select(small, stored, None, today=TODAY).summary == ("sum-data",)
 
 
-def test_an_old_role_goes_whole_unless_one_of_its_lines_is_evidence_and_recency_only_breaks_ties() -> None:
+def test_an_old_role_keeps_only_its_heading_unless_one_of_its_lines_is_evidence_and_recency_only_breaks_ties() -> None:
     small = parse_master(_SMALL)
     profile = ms.SelectionProfile(titles=("Staff Backend Engineer",))
     plain = ms.SelectionPosting("Staff Engineer", "Requirements:\n- Kubernetes in production.\n- On-call experience.\n")
     fortran = ms.SelectionPosting("Staff Engineer", "Requirements:\n- Kubernetes in production.\n- Fortran.\n")
-    tight = _by_bullets(3)  # 9 bullet lines in the first pick: 3 pages
 
-    dropped = ms.select(small, profile, plain, today=TODAY, measure=tight, fill=False)
-    assert dropped.pages_before_fit == 3 and dropped.fits
+    # Six bullets in the first pick, a cap of three.
+    dropped = ms.select(small, profile, plain, today=TODAY, max_bullets=3, fill=False)
+    assert dropped.pages_before_fit is None and dropped.fits and dropped.cut_for_length == ()
     # Lines that support nothing go first: the stated ones before the quantified one (strength), and of two stated
-    # lines the old role's before the recent role's (recency, the tie-break). No heading is left without a bullet.
-    assert [(cut.kind, cut.id) for cut in dropped.cut_for_length] == [("bullet", "b-old-2"), ("bullet", "b-new-3"), ("bullet", "b-old-1"), ("role", "r-old")]
-    assert "r-old" not in dropped.entries and dropped.roles_dropped == ("r-old",)
-    assert "### Oldco" not in dropped.markdown
+    # lines the old role's before the recent role's (recency, the tie-break).
+    assert dropped.over_cap == ("b-old-2", "b-new-3", "b-old-1")
+    # The old role shows no line: it is listed by its one heading line, never dropped.
+    assert "r-old" not in dropped.entries and dropped.roles_dropped == ("r-old",) == dropped.earlier
+    assert "### Oldco" not in dropped.markdown and "### Earlier experience\n\nEngineer, Oldco | Jan 2010 - Dec 2013\n" in dropped.markdown
+    reasons = {line.id: line for line in dropped.lines}
+    assert (reasons["b-new-3"].code, reasons["b-old-1"].code, reasons["b-old-2"].code) == ("over_cap", "role_dropped", "role_dropped")
+    assert reasons["b-new-3"].reason == "the resume shows its 3 best lines for this posting, and this one scores lower"
     # The evidence of both requirements is shown.
     assert dropped.evidence_for.keys() == {"b-new-1", "b-new-2"} and dropped.conflicts == ()
 
-    kept = ms.select(small, profile, fortran, today=TODAY, measure=tight, fill=False)
+    kept = ms.select(small, profile, fortran, today=TODAY, max_bullets=3, fill=False)
     asked = next(requirement for requirement in kept.requirements if requirement.text == "Fortran")
     assert asked.mandatory and asked.supporters == ("b-old-1",)
-    # The old role holds the only line that names Fortran: it stays while recent lines that support nothing are cut.
+    # The old role holds the only line that names Fortran: it stays while recent lines that support nothing are left out.
     assert kept.entries["r-old"] == ("b-old-1",) and kept.roles_dropped == ()
     assert kept.evidence_for["b-old-1"] == (asked.id,)
-    assert [(cut.kind, cut.id) for cut in kept.cut_for_length] == [("bullet", "b-old-2"), ("bullet", "b-new-3"), ("bullet", "b-new-4")]
+    assert kept.over_cap == ("b-old-2", "b-new-3", "b-new-4")
     assert len(kept.entries["r-new"]) == 2 >= ms.FLOORS[0]
 
-    # With room for everything nothing is cut.
-    roomy = ms.select(small, profile, plain, today=TODAY, measure=_by_bullets(40), fill=False)
-    assert roomy.cut_for_length == () and set(roomy.entries["r-old"]) == {"b-old-1", "b-old-2"}
+    # With no cap, and under a cap the pick does not reach, nothing is left out.
+    for cap in (None, ms.MAX_PICK_BULLETS):
+        roomy = ms.select(small, profile, plain, today=TODAY, max_bullets=cap, fill=False)
+        assert roomy.over_cap == () and set(roomy.entries["r-old"]) == {"b-old-1", "b-old-2"}
 
 
 def test_a_pin_is_kept_when_everything_else_that_supports_nothing_goes_and_reported_when_it_cannot_be() -> None:
@@ -504,13 +516,17 @@ def test_a_pin_is_kept_when_everything_else_that_supports_nothing_goes_and_repor
     posting = ms.SelectionPosting("Staff Engineer", "Requirements:\n- Kubernetes in production.\n- On-call experience.\n")
     pinned = ms.SelectionProfile(titles=("Staff Backend Engineer",), pins=("b-old-2",))
 
-    kept = ms.select(small, pinned, posting, today=TODAY, measure=_by_bullets(3), fill=False)
+    kept = ms.select(small, pinned, posting, today=TODAY, max_bullets=3, fill=False)
     assert "b-old-2" in kept.entries["r-old"] and kept.conflicts == ()
     assert next(line for line in kept.lines if line.id == "b-old-2").code == "pinned"
-    # With no room even for the requirements' evidence and the pin, the pin goes before the evidence and the result says so.
-    none = ms.select(small, pinned, posting, today=TODAY, measure=lambda markdown: (3 if "Kept the build green" in markdown else 2, 0.5), fill=False)
-    assert "b-old-2" not in none.item_ids() and none.fits
+    # A better-scored line (quantified, where the pin is only stated) is left out before the pin is.
+    assert kept.values["b-old-1"] < kept.values["b-old-2"] and "b-old-1" in kept.over_cap
+    # With a cap that holds the requirements' evidence alone, the pin goes before the evidence and the result says so.
+    none = ms.select(small, pinned, posting, today=TODAY, max_bullets=2, fill=False)
+    assert "b-old-2" not in none.item_ids() and none.over_cap[-1] == "b-old-2"
     assert [(conflict.kind, conflict.ids) for conflict in none.conflicts] == [("must_keep", ("b-old-2",))]
+    assert none.conflicts[0].reason == "these pinned lines are not among the 2 bullets a resume shows, beside the requirements' evidence"
+    assert next(line for line in none.lines if line.id == "b-old-2").code == "cut_conflict"
     assert none.evidence_for.keys() == {"b-new-1", "b-new-2"}
 
 
@@ -525,40 +541,43 @@ def test_a_line_the_assessment_cites_is_kept_whatever_words_it_shares_and_report
     small = parse_master(_SMALL)
     profile = ms.SelectionProfile(titles=("Staff Backend Engineer",))
     text = "Requirements:\n- Kubernetes in production.\n- On-call experience.\n"
-    tight = _by_bullets(3)
 
-    # BY WORDS (no assessment): the lines that share the requirements' words are the evidence, and the old role goes.
-    by_words = ms.select(small, profile, ms.SelectionPosting("Staff Engineer", text), today=TODAY, measure=tight, fill=False)
+    # BY WORDS (no assessment): the lines that share the requirements' words are the evidence, and the old role shows no line.
+    by_words = ms.select(small, profile, ms.SelectionPosting("Staff Engineer", text), today=TODAY, max_bullets=3, fill=False)
     assert by_words.evidence_for.keys() == {"b-new-1", "b-new-2"} and by_words.roles_dropped == ("r-old",)
     assert not {"b-new-3", "b-old-2"} & set(by_words.item_ids()) and not any(requirement.cited for requirement in by_words.requirements)
 
     # THE ASSESSMENT cites, by meaning, a line that shares NO word with "On-call experience" and an OLD role's line
     # that shares none with "Kubernetes in production": each is the only evidence of its row.
     cited = (_cited("r1", "Kubernetes in production.", "b-old-2"), _cited("r2", "On-call experience.", "b-new-3"))
-    assessed = ms.select(small, profile, ms.SelectionPosting("Staff Engineer", text, cited=cited), today=TODAY, measure=tight, fill=False)
-    assert assessed.selector_version == "sel-6" and assessed.fits and assessed.conflicts == ()
+    assessed = ms.select(small, profile, ms.SelectionPosting("Staff Engineer", text, cited=cited), today=TODAY, max_bullets=3, fill=False)
+    assert assessed.selector_version == "sel-7" and assessed.fits and assessed.conflicts == ()
     # The requirements ARE the assessment's rows, each supported by exactly the line it cites: the posting's two lines
     # and its Kubernetes keyword are not matched by words at all, so no other line is "the evidence" in their place.
     assert [(requirement.id, requirement.cited, requirement.supporters) for requirement in assessed.requirements] == [("r1", True, ("b-old-2",)), ("r2", True, ("b-new-3",))]
     assert assessed.evidence_for == {"b-old-2": ("r1",), "b-new-3": ("r2",)}
     assert {"b-new-3", "b-old-2"} <= set(assessed.item_ids()) and assessed.roles_dropped == ()
-    # What went for length is what the assessment did not cite, the lines that share the words included.
-    cut = {cut.id for cut in assessed.cut_for_length}
+    # What is over the cap is what the assessment did not cite, the lines that share the words included.
+    cut = set(assessed.over_cap)
     assert len(cut) == 3 and cut <= {"b-old-1", "b-new-1", "b-new-2", "b-new-4"} and {"b-new-2", "b-old-1"} <= cut
     reason = next(line for line in assessed.lines if line.id == "b-old-2")
     assert (reason.picked, reason.code) == (True, "requirement_evidence") and reason.reason == "the line your assessment cites for: Kubernetes in production."
     as_json = assessed.to_json(small)["requirements"]
     assert [(row["id"], row["cited"], row["shown"]) for row in as_json] == [("r1", True, ["b-old-2"]), ("r2", True, ["b-new-3"])]
 
-    # When a cited line cannot be shown within the page limit, the result says so; it is never dropped silently.
-    none = ms.select(
-        small, profile, ms.SelectionPosting("Staff Engineer", text, cited=cited), today=TODAY,
-        measure=lambda markdown: (3 if "Kept the build green" in markdown else 2, 0.5), fill=False,
-    )
+    # MUST-COVER OVER SCORE: under a cap of two the two cited lines stay, and every other line goes first, the
+    # quantified line that shares the requirement's words included.
+    two = ms.select(small, profile, ms.SelectionPosting("Staff Engineer", text, cited=cited), today=TODAY, max_bullets=2, fill=False)
+    assert set(_bullets(small, two)) == {"b-old-2", "b-new-3"} and two.conflicts == () and "b-new-1" in two.over_cap
+    assert small.items["b-new-1"].strength == "quantified" and small.items["b-old-2"].strength == "stated"
+
+    # When a cited line is over the cap (here: a cap of one, and the recent role keeps its line), the result says so;
+    # it is never dropped silently.
+    none = ms.select(small, profile, ms.SelectionPosting("Staff Engineer", text, cited=cited), today=TODAY, max_bullets=1, fill=False)
     assert "b-old-2" not in none.item_ids() and "b-new-3" in none.item_ids()
     (conflict,) = none.conflicts
     assert (conflict.kind, conflict.ids, conflict.requirement_id, conflict.covered) == ("mandatory_evidence", ("b-old-2",), "r1", False)
-    assert conflict.reason.startswith("the line the assessment cites for this requirement does not fit the page limit") and conflict.reason.endswith("no line it cites is shown now")
+    assert conflict.reason.startswith("the line the assessment cites for this requirement is not among the 1 bullets a resume shows") and conflict.reason.endswith("no line it cites is shown now")
 
 
 def test_cited_rows_come_first_a_met_mandatory_one_last_to_be_cut_and_words_only_add_what_no_row_is_about() -> None:
@@ -571,7 +590,7 @@ def test_cited_rows_come_first_a_met_mandatory_one_last_to_be_cut_and_words_only
         _cited("r4", "Incident reviews.", "b-new-3", mandatory=False),
         _cited("r5", "A line the master no longer holds.", "b-gone"),
     )
-    selected = ms.select(small, profile, ms.SelectionPosting("Staff Engineer", text, cited=cited), today=TODAY, measure=_by_bullets(40), fill=False)
+    selected = ms.select(small, profile, ms.SelectionPosting("Staff Engineer", text, cited=cited), today=TODAY, fill=False)
 
     by_id = {requirement.id: requirement for requirement in selected.requirements}
     # The assessment's rows in its order, then what the posting asks for that no cited row is about: Fortran (matched
@@ -598,7 +617,7 @@ def test_a_row_the_shown_summary_covers_needs_no_line_and_a_repeated_line_is_sto
     master = parse_master(twice)
     profile = ms.SelectionProfile(titles=("Staff Backend Engineer",))
     text = "Requirements:\n- Payments experience.\n- On-call experience.\n- Pipelines.\n"
-    plain = ms.select(master, profile, ms.SelectionPosting("Platform Engineer", text), today=TODAY, measure=_by_bullets(40), fill=False)
+    plain = ms.select(master, profile, ms.SelectionPosting("Platform Engineer", text), today=TODAY, fill=False)
     assert plain.summary == ("sum-platform",) and plain.duplicates == {"b-new-9": "b-new-2"}
 
     cited = (
@@ -606,7 +625,7 @@ def test_a_row_the_shown_summary_covers_needs_no_line_and_a_repeated_line_is_sto
         _cited("r2", "On-call experience.", "b-new-9"),  # a line a better line repeats: that line stands for it
         _cited("r3", "Pipelines.", "sum-data"),  # only a summary this resume does not show
     )
-    selected = ms.select(master, profile, ms.SelectionPosting("Platform Engineer", text, cited=cited), today=TODAY, measure=_by_bullets(40), fill=False)
+    selected = ms.select(master, profile, ms.SelectionPosting("Platform Engineer", text, cited=cited), today=TODAY, fill=False)
     by_id = {requirement.id: requirement for requirement in selected.requirements}
     assert selected.summary == ("sum-platform",)
     assert by_id["r1"].supporters == ("sum-platform", "b-new-4") and "b-new-4" not in selected.evidence_for
@@ -617,7 +636,7 @@ def test_a_row_the_shown_summary_covers_needs_no_line_and_a_repeated_line_is_sto
     assert "cites a summary this resume does not show" in selected.conflicts[0].reason
     # The re-make checks read a cited row like any requirement: covered by the summary, by a line, or lost.
     shown = (*selected.summary, *(item for entry_id, bullets in selected.entries.items() for item in (entry_id, *bullets)), *selected.other)
-    checks = ms.check_selection(master, selected.requirements, shown, selected.skills, measure=_by_bullets(40))
+    checks = ms.check_selection(master, selected.requirements, shown, selected.skills)
     assert set(checks.covered) >= {"r1", "r2"} and checks.lost == ("r3",)
 
 
@@ -703,35 +722,36 @@ def test_a_project_the_posting_s_title_names_keeps_its_best_line_while_lines_tha
     profile = ms.SelectionProfile(titles=("Staff Backend Engineer",))
     untitled = ms.SelectionPosting("Staff Backend Engineer", _TITLED_TEXT)
     titled = ms.SelectionPosting("Staff Backend Engineer, Agent Runtime", _TITLED_TEXT)
-    tight = _by_bullets(3)  # 12 bullet lines in the first pick: 4 pages
+    tight = 4  # 12 bullets in the first pick, a cap of four
 
     # A TITLE THAT NAMES NO ENTRY: the project's lines cover nothing and state no number, so they are the first three
-    # cuts (strength before recency), and the project goes whole. (This is every pick ``sel-3`` made, title or not.)
-    before = ms.select(master, profile, untitled, today=TODAY, measure=tight, fill=False)
-    assert before.title_entries == {} and [cut.id for cut in before.cut_for_length][:3] == ["l-3", "l-2", "l-1"]
+    # left out (strength before recency), and the project goes whole. (This is every pick ``sel-3`` made, title or not.)
+    before = ms.select(master, profile, untitled, today=TODAY, max_bullets=tight, fill=False)
+    assert before.title_entries == {} and list(before.over_cap)[:3] == ["l-3", "l-2", "l-1"]
     assert "p-loom" not in before.entries and before.conflicts == () and before.fits
 
     # THE TITLE NAMES THE PROJECT (its heading holds "agent" and "runtime"): its best line stays, the one that
     # holds most of the title's words, while every line that is not a requirement's evidence goes.
-    after = ms.select(master, profile, titled, today=TODAY, measure=tight, fill=False)
+    after = ms.select(master, profile, titled, today=TODAY, max_bullets=tight, fill=False)
     assert after.title_entries == {"p-loom": "l-3"} and after.entries["p-loom"] == ("l-3",)
     assert after.fits and after.conflicts == () and after.evidence_for.keys() == {"n-1", "n-2"}
     assert next(line for line in after.lines if line.id == "l-3").code == "title_entry"
-    # What went instead: the other project and the old role whole, and the recent roles down to their evidence or
-    # their one line. Neither that project nor that role is named by the title ("40 support agents" is one line of two).
+    # What went instead: the other project whole, every line of the old role (it is listed by its heading), and the
+    # recent roles down to their evidence or their one line. Neither that project nor that role is named by the title
+    # ("40 support agents" is one line of two).
     assert set(after.entries) == {"r-new", "r-mid", "p-loom"} and after.entries["r-new"] == ("n-1", "n-2") and len(after.entries["r-mid"]) == ms.FLOORS[1]
-    assert "p-loom" not in after.roles_dropped and after.roles_dropped == ("r-old",)
+    assert "p-loom" not in after.roles_dropped and after.roles_dropped == ("r-old",) == after.earlier
     # The keep order: evidence, then the entry's one line, then the project's other line that holds a word of the
     # title (before the quantified lines of every role), then the rest as before. A title word in a line of an entry
     # the title does not name counts for nothing (o-2).
     rank = after.values
     assert sorted(rank, key=rank.__getitem__, reverse=True) == ["n-1", "n-2", "l-3", "l-2", "n-3", "g-1", "m-1", "m-2", "o-1", "o-2", "g-2", "l-1"]
-    assert next(line for line in ms.select(master, profile, titled, today=TODAY, measure=_by_bullets(40), fill=False).lines if line.id == "l-2").code == "posting_title"
+    assert next(line for line in ms.select(master, profile, titled, today=TODAY, fill=False).lines if line.id == "l-2").code == "posting_title"
     as_json = after.to_json(master)
     assert as_json["title_entries"] == [{"id": "p-loom", "line": "l-3", "shown": True}]
 
     # A profile's standing pick has no posting, so no title: nothing changes there.
-    assert ms.select(master, profile, None, today=TODAY, measure=tight, fill=False).title_entries == {}
+    assert ms.select(master, profile, None, today=TODAY, max_bullets=tight, fill=False).title_entries == {}
 
 
 def test_the_one_line_of_an_entry_the_title_names_goes_before_any_evidence_and_the_result_says_so() -> None:
@@ -739,17 +759,19 @@ def test_the_one_line_of_an_entry_the_title_names_goes_before_any_evidence_and_t
     profile = ms.SelectionProfile(titles=("Staff Backend Engineer",), pins=("m-2",))
     titled = ms.SelectionPosting("Staff Backend Engineer, Agent Runtime", _TITLED_TEXT, cited=(_cited("r1", "Kubernetes in production.", "o-1"),))
 
-    # No page takes the project's best line: it is cut after every line that is not evidence or a pin, BEFORE the pin
-    # and before the line the assessment cites, and the result carries the conflict. Nothing cited is dropped for it.
-    none = ms.select(master, profile, titled, today=TODAY, measure=lambda markdown: (3 if "Built a local agent runtime" in markdown else 2, 0.5), fill=False)
+    # A cap of three holds the cited line, the pin and the recent role's one line, and not the project's best line: it
+    # is left out after every line that is not evidence or a pin, BEFORE the pin and before the line the assessment
+    # cites, and the result carries the conflict. Nothing cited is dropped for it.
+    none = ms.select(master, profile, titled, today=TODAY, max_bullets=3, fill=False)
     assert none.fits and "p-loom" not in none.entries and none.title_entries == {"p-loom": "l-3"}
     (conflict,) = none.conflicts
     assert (conflict.kind, conflict.ids, conflict.requirement_id) == ("title_entry", ("p-loom", "l-3"), "")
     assert conflict.reason.startswith("the posting's title names this role or project")
     assert {"o-1", "m-2"} <= set(none.item_ids()) and none.evidence_for["o-1"] == ("r1",)
-    cut = [cut for cut in none.cut_for_length if cut.id == "l-3"]
-    assert [(item.kind, item.code) for item in cut] == [("bullet", "cut_conflict")] and none.cut_for_length[-1].id == "l-3"
+    assert none.over_cap[-1] == "l-3" and none.over_cap.count("l-3") == 1
     assert next(line for line in none.lines if line.id == "l-3").code == "cut_conflict"
+    # One bullet more of room and it is shown: the line is a conflict only because of the cap.
+    assert ms.select(master, profile, titled, today=TODAY, max_bullets=4, fill=False).entries["p-loom"] == ("l-3",)
     # In the keep order it stands below the cited line and the pin, above everything else.
     rank = none.values
     assert rank["o-1"] > rank["m-2"] > rank["l-3"] > max(value for item, value in rank.items() if item not in ("o-1", "m-2", "l-3", "n-2"))
@@ -761,32 +783,32 @@ def test_the_title_names_a_role_by_its_own_title_and_an_entry_by_half_its_lines(
     master = parse_master(roles)
     profile = ms.SelectionProfile(titles=("Staff Backend Engineer",))
     posting = ms.SelectionPosting("Staff Backend Engineer, Agent Runtime (Remote, US)", _TITLED_TEXT)
-    kept = ms.select(master, profile, posting, today=TODAY, measure=_by_bullets(4), fill=False)
+    kept = ms.select(master, profile, posting, today=TODAY, max_bullets=6, fill=False)
     # The project has a bare name now, and two of its three lines hold a word of the title: it is named by its lines.
     assert kept.title_entries == {"r-old": "o-2", "p-loom": "l-3"}
-    # Both keep a line, the old role too (it would have gone whole), while the garden project goes whole and the
+    # Both keep a line, the old role too (it would have shown none), while the garden project goes whole and the
     # recent roles lose the lines that cover nothing.
     assert kept.entries["r-old"] == ("o-2",) and "l-3" in kept.entries["p-loom"] and "p-plot" not in kept.entries
     assert kept.roles_dropped == () and kept.fits and kept.conflicts == ()
-    assert {cut.id for cut in kept.cut_for_length} == {"l-1", "g-1", "g-2", "o-1", "m-2", "n-3"}
-    # One line less of room: the entries' lines go last of what is not evidence, the one lower in the keep order
-    # first, and the result names the entry it could not show.
-    tighter = ms.select(master, profile, posting, today=TODAY, measure=_by_bullets(3), fill=False)
-    assert tighter.entries["p-loom"] == ("l-3",) and "r-old" not in tighter.entries and tighter.fits
+    assert set(kept.over_cap) == {"l-1", "g-1", "g-2", "o-1", "m-2", "n-3"}
+    # Two bullets less of room: the entries' lines go last of what is not evidence, the one lower in the keep order
+    # first, and the result names the entry it could not show (the old role is then listed by its heading).
+    tighter = ms.select(master, profile, posting, today=TODAY, max_bullets=4, fill=False)
+    assert tighter.entries["p-loom"] == ("l-3",) and "r-old" not in tighter.entries and tighter.earlier == ("r-old",) and tighter.fits
     assert [(conflict.kind, conflict.ids) for conflict in tighter.conflicts] == [("title_entry", ("r-old", "o-2"))]
     # What a title is ABOUT: no rank word, no place, no level ("Remote" and "US" name nothing).
     assert ms._title_subject("Staff Backend Engineer, Agent Runtime (Remote, US)") == {"backend", "agent", "runtim"}  # noqa: SLF001
     assert ms._title_subject("Senior Software Engineering Lead II") == set()  # noqa: SLF001
 
     # ONE line of several that happens to hold the word names nothing: "support agents" in one line of two.
-    assert "r-old" not in ms.select(parse_master(_TITLED), profile, posting, today=TODAY, measure=_by_bullets(3), fill=False).title_entries
+    assert "r-old" not in ms.select(parse_master(_TITLED), profile, posting, today=TODAY, max_bullets=4, fill=False).title_entries
 
 
 def test_a_line_that_supports_by_words_what_a_cited_row_answered_stays_before_a_stronger_or_more_recent_one() -> None:
     master = parse_master(_TITLED.replace("- Added a watering calendar. <!-- id:g-2 -->", "- Wrote the on-call guide for the garden club. <!-- id:g-2 -->"))
     profile = ms.SelectionProfile(titles=("Staff Backend Engineer",))
     cited = (_cited("r1", "Kubernetes in production.", "n-1"), _cited("r2", "On-call experience.", "n-2"))
-    assessed = ms.select(master, profile, ms.SelectionPosting("Staff Backend Engineer", _TITLED_TEXT, cited=cited), today=TODAY, measure=_by_bullets(40), fill=False)
+    assessed = ms.select(master, profile, ms.SelectionPosting("Staff Backend Engineer", _TITLED_TEXT, cited=cited), today=TODAY, fill=False)
     # The assessment answered "On-call experience" with n-2. g-2 shares the requirement's words: it covers nothing
     # (it is no requirement's supporter), and it is still about the posting, so among the lines that cover nothing
     # it stays before the lines that state a number and before the more recent ones.
@@ -795,7 +817,7 @@ def test_a_line_that_supports_by_words_what_a_cited_row_answered_stays_before_a_
     rest = [item for item in sorted(rank, key=rank.__getitem__, reverse=True) if item not in ("n-1", "n-2")]
     assert rest[0] == "g-2" and next(line for line in assessed.lines if line.id == "g-2").code == "posting_wording"
     # Without the assessment the same line is a second line for that requirement, as it always was.
-    plain = ms.select(master, profile, ms.SelectionPosting("Staff Backend Engineer", _TITLED_TEXT), today=TODAY, measure=_by_bullets(40), fill=False)
+    plain = ms.select(master, profile, ms.SelectionPosting("Staff Backend Engineer", _TITLED_TEXT), today=TODAY, fill=False)
     assert "g-2" in next(requirement for requirement in plain.requirements if requirement.text == "On-call experience.").supporters
 
 
@@ -804,7 +826,7 @@ def test_a_line_that_says_what_a_better_line_says_is_left_out() -> None:
         "- Ran the on-call rotation for 4 teams. <!-- id:b-new-2 -->",
         "- Ran the on-call rotation for 4 teams. <!-- id:b-new-2 -->\n- Ran the on-call rotation for all 4 teams. <!-- id:b-new-9 -->\n- Ran the on-call rotation for 9 teams. <!-- id:b-new-8 -->",
     )
-    selected = ms.select(parse_master(twice), ms.SelectionProfile(), None, today=TODAY, measure=_by_bullets(40))
+    selected = ms.select(parse_master(twice), ms.SelectionProfile(), None, today=TODAY)
 
     # The same words and the same numbers: one of the two is shown. Another number is another fact.
     assert selected.duplicates == {"b-new-9": "b-new-2"}
@@ -813,17 +835,22 @@ def test_a_line_that_says_what_a_better_line_says_is_left_out() -> None:
     assert not reason.picked and reason.code == "near_duplicate"
 
 
-def test_room_left_on_the_page_goes_to_recent_roles() -> None:
+def test_room_left_under_the_cap_goes_to_recent_roles() -> None:
     lines = "\n".join(f"- Shipped service number {n} to production. <!-- id:b-new-{n} -->" for n in range(1, 13))
     small = parse_master(f"<!-- gigai-master:1 -->\n\n## Experience\n\n### Newco <!-- id:r-new -->\nStaff Engineer | Jun 2021 - Present\n{lines}\n")
     profile = ms.SelectionProfile()
 
-    filled = ms.select(small, profile, None, today=TODAY, measure=_by_bullets(40))
-    assert len(filled.entries["r-new"]) == ms.HARD_CAPS[0] and len(filled.added_to_fill) == ms.HARD_CAPS[0] - ms.PICK_CAPS[0]
+    # Twelve lines in one role, fewer than the cap: the role's own cap, then its hard cap, then every line that is left.
+    filled = ms.select(small, profile, None, today=TODAY)
+    assert len(filled.entries["r-new"]) == 12 > ms.HARD_CAPS[0] and len(filled.added_to_fill) == 12 - ms.PICK_CAPS[0]
     assert {line.code for line in filled.lines if line.id in filled.added_to_fill} == {"room_left"}
-    assert len(ms.select(small, profile, None, today=TODAY, measure=_by_bullets(40), fill=False).entries["r-new"]) == ms.PICK_CAPS[0]
-    # No room: the page holds exactly the first pick.
-    full = ms.select(small, profile, None, today=TODAY, measure=_by_bullets(ms.PICK_CAPS[0]), max_pages=1)
+    assert all(line.reason.endswith("(room left under the cap)") for line in filled.lines if line.id in filled.added_to_fill)
+    assert len(ms.select(small, profile, None, today=TODAY, fill=False).entries["r-new"]) == ms.PICK_CAPS[0]
+    # The fill stops at the cap, best first: one bullet of room takes the best line the role's own cap left out.
+    one = ms.select(small, profile, None, today=TODAY, max_bullets=ms.PICK_CAPS[0] + 1)
+    assert len(one.entries["r-new"]) == ms.PICK_CAPS[0] + 1 and one.added_to_fill == (max((item for item in filled.added_to_fill), key=one.values.__getitem__),)
+    # No room: the resume holds exactly the first pick.
+    full = ms.select(small, profile, None, today=TODAY, max_bullets=ms.PICK_CAPS[0])
     assert full.fits and full.added_to_fill == () and len(full.entries["r-new"]) == ms.PICK_CAPS[0]
 
 
@@ -836,18 +863,18 @@ def test_the_same_lines_in_another_order_give_the_same_pick() -> None:
     lines[first : last + 1] = reversed(lines[first : last + 1])
     turned = parse_master("\n".join(lines) + "\n")
     posting = ms.SelectionPosting("Staff Engineer", "Requirements:\n- Kubernetes in production.\n- On-call experience.\n")
-    for measure in (_by_bullets(3), _by_bullets(4), _by_bullets(40)):
-        one = ms.select(small, ms.SelectionProfile(), posting, today=TODAY, measure=measure, fill=False)
-        two = ms.select(turned, ms.SelectionProfile(), posting, today=TODAY, measure=measure, fill=False)
+    for cap in (2, 3, 4, None):
+        one = ms.select(small, ms.SelectionProfile(), posting, today=TODAY, max_bullets=cap, fill=False)
+        two = ms.select(turned, ms.SelectionProfile(), posting, today=TODAY, max_bullets=cap, fill=False)
         assert set(one.item_ids()) == set(two.item_ids()) and one.skills == two.skills
-        assert [cut.id for cut in one.cut_for_length] == [cut.id for cut in two.cut_for_length]
+        assert one.over_cap == two.over_cap
 
 
 def test_a_posting_written_as_prose_is_read_whole() -> None:
     small = parse_master(_SMALL)
     prose = ms.SelectionPosting("Engineer", "We need someone to run the on-call rotation and write incident review guides for our teams.\n")
 
-    selected = ms.select(small, ms.SelectionProfile(), prose, today=TODAY, measure=_by_bullets(40))
+    selected = ms.select(small, ms.SelectionProfile(), prose, today=TODAY)
     reasons = {line.id: line for line in selected.lines}
     assert reasons["b-new-2"].code == "posting_wording" and reasons["b-new-3"].code == "posting_wording"
 
@@ -886,7 +913,7 @@ def test_a_selection_is_resume_markdown_the_shipped_parser_reads(master: Master)
     assert parse_resume_markdown(selected.markdown_with_ids) == parse_resume_markdown(selected.markdown)
 
 
-def test_a_pick_too_large_for_the_renderer_counts_as_over_any_budget(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_markdown_too_large_for_the_renderer_is_estimated_as_a_count_no_resume_has(monkeypatch: pytest.MonkeyPatch) -> None:
     import gigai.scout.resume_pdf as renderer
 
     def too_large(_markdown: str, **_kwargs: object) -> tuple[int, float]:
@@ -913,7 +940,7 @@ def test_the_evidence_view_holds_the_most_relevant_lines_within_the_assess_cap(m
     texts = {item.text for item in master.items.values()}
     assert all(line in texts for line in _shown_lines(view.markdown) if line != ", ".join(view.skills))
     parse_resume_markdown(view.markdown)
-    # It evidences at least the must-haves the 2-page selection evidences, outside the skills line.
+    # It evidences at least the must-haves the capped selection evidences, outside the skills line.
     selected = _selected(master, profile_id, posting_id)
     assert selected.keywords is not None
     must = selected.keywords.must
@@ -985,9 +1012,12 @@ def test_selection_show_for_a_job_lists_picked_and_left_out_with_reasons(tmp_pat
     out = _show(home, *_AI, "--job-text", str(posting), "--title", title, "--company", company)
 
     selection = out["selection"]
-    assert out["ok"] is True and selection["selector_version"] == "sel-6"
-    assert selection["fits"] is True and selection["pages"] == 2 and selection["pages_before_fit"] > 2 and selection["max_pages"] == 2
-    assert render_markdown_pdf(selection["markdown"], None, timestamp=STAMP).pages == 2
+    assert out["ok"] is True and selection["selector_version"] == "sel-7"
+    # The cap, and no page: the page fields stay in the JSON for older readers and say nothing was counted.
+    assert selection["max_bullets"] == 20 and selection["counts"]["bullets"] == 20 and len(selection["over_cap"]) > 20
+    assert selection["fits"] is True and selection["pages"] is None and selection["pages_before_fit"] is None and selection["max_pages"] == 2
+    assert selection["cut_for_length"] == [] and selection["counts"]["cut_for_length"] == 0 and selection["layout_queries"] == 0
+    assert render_markdown_pdf(selection["markdown"], None, timestamp=STAMP).pages in (2, 3)
     assert selection["master"]["revision"] == 1 and selection["master"]["content_sha256"].startswith("sha256:")
     assert selection["profile"] == {"profile_id": None, "label": "Staff AI Engineer", "titles": ["Staff AI Engineer", "Principal AI Engineer"], "focus_tags": ["ai", "llm", "agents"]}
     assert selection["job"]["title"] == title and selection["job"]["company"] == company and selection["job"]["source"] == "text"
@@ -998,10 +1028,12 @@ def test_selection_show_for_a_job_lists_picked_and_left_out_with_reasons(tmp_pat
     assert all(row["reason"] and row["code"] and row["text"] for row in (*picked, *left))
     assert selection["summary"] == ["sum-ai"]
     assert {"r-lum", "r-kes", "r-hex"} <= {entry["id"] for entry in selection["entries"] if entry["shown"]}
-    assert selection["cut_for_length"] and all(cut["reason"].startswith("cut for length") for cut in selection["cut_for_length"])
+    by_id = {row["id"]: row for row in left}
+    assert all(by_id[item_id]["code"] in ("over_cap", "role_dropped") for item_id in selection["over_cap"])
+    assert not any("cut for length" in row["reason"] for row in left)
     assert selection["keywords"]["must_missing"] == [] and "Python" in selection["keywords"]["must"]
     # The Skills section is kept whole; what the posting asks for, and its evidence, are listed; no conflict.
-    assert len(selection["skills"]["picked"]) >= 40 and {skill["code"] for skill in selection["skills"]["left_out"]} == {"cut_for_length"}
+    assert len(selection["skills"]["picked"]) == 79 and selection["skills"]["left_out"] == []
     asked = selection["requirements"]
     assert asked and all(row["id"] and row["text"] and isinstance(row["mandatory"], bool) for row in asked)
     assert all(row["shown"] for row in asked if row["mandatory"] and row["supporters"])
@@ -1013,12 +1045,16 @@ def test_selection_show_for_a_job_lists_picked_and_left_out_with_reasons(tmp_pat
         "scout", "resume", "master", "selection", "show", *_AI, "--job-text", str(posting), "--title", title, "--company", company, "--home", str(home),
     ])
     assert plain.exit_code == 0, plain.output
-    assert plain.output.startswith(f"Selection for {title} at {company}, profile Staff AI Engineer: 2 pages (")
-    assert "Picked " in plain.output and "left out " in plain.output and "Selector sel-6, master revision 1." in plain.output
+    first, second = plain.output.splitlines()[:2]
+    assert first.startswith(f"Selection for {title} at {company}, profile Staff AI Engineer: 20 bullets of at most 20; ")
+    assert first.endswith(" left out as over that. No page is counted: the spacing of a job's preview fits the page.")
+    assert "Picked " in second and "left out " in second and second.endswith("Selector sel-7, master revision 1.")
+    assert "for length" not in plain.output and "DOES NOT FIT" not in plain.output
     assert "    + sum-ai  Staff engineer with 16 years" in plain.output
     assert "    - sum-backend  " in plain.output and "another summary fits this posting better" in plain.output
     assert "r-tes  Tessel Robotics" in plain.output and ": not shown" in plain.output
-    assert "cut for length: no line of this older role is evidence for this posting" in plain.output
+    assert "no line of this role is among its 20 best lines for this posting; the role is listed by its heading" in plain.output
+    assert "the resume shows its 20 best lines for this posting, and this one scores lower" in plain.output
     assert "the strongest evidence for: " in plain.output
     assert "## Skills: " in plain.output and "the posting asks for it" in plain.output
 
@@ -1039,7 +1075,7 @@ def test_selection_show_without_a_job_is_the_profiles_standing_pick(tmp_path: Pa
     bare = _show(home)["selection"]
     assert bare["profile"] is None and bare["fits"] is True
     plain = CliRunner().invoke(cli, ["scout", "resume", "master", "selection", "show", "--home", str(home)])
-    assert plain.output.startswith("Selection for no profile, no posting (the profile's standing pick): 2 pages")
+    assert plain.output.startswith("Selection for no profile, no posting (the profile's standing pick): 20 bullets of at most 20; ")
 
 
 def test_selection_show_evidence_is_the_view_an_assessment_would_read(tmp_path: Path) -> None:
@@ -1159,7 +1195,7 @@ def test_selection_show_job_url_reads_the_posting_scout_already_holds(tmp_path: 
     # 0110-10-15: the job's stored assessment for the profile says which lines evidence a requirement. Here it cites
     # nothing of the master (the fixture model quotes the profile's resume), so the pick above was made by words.
     assert not any(row["cited"] for row in from_index["requirements"])
-    left = next(line for line in from_index["left_out"] if line["kind"] == "bullet" and line["code"] in ("cut_lowest_value", "role_limit", "cut_role_dropped") and len(line["text"]) > 40)
+    left = next(line for line in from_index["left_out"] if line["kind"] == "bullet" and line["code"] in ("over_cap", "role_limit", "role_dropped") and len(line["text"]) > 40)
     path = Path(stored.stored_path)
     record = json.loads(path.read_text(encoding="utf-8"))
     record["result"]["matrix"][0].update({"resume_evidence": [left["text"][:40]], "status": "met"})
@@ -1186,60 +1222,198 @@ def test_a_pick_made_again_replaces_the_previous_one_only_when_it_regresses_on_n
     small = parse_master(_SMALL)
     profile = ms.SelectionProfile(titles=("Staff Backend Engineer",))
     posting = ms.SelectionPosting("Staff Engineer", "Requirements:\n- Kubernetes in production.\n- On-call experience.\n")
-    page = _by_bullets(3)
-    good = ms.select(small, profile, posting, today=TODAY, measure=page, fill=False)
+    good = ms.select(small, profile, posting, today=TODAY, max_bullets=3, fill=False)
     assert good.fits and good.conflicts == () and {"b-new-1", "b-new-2"} <= set(good.item_ids())
 
     # The same selection made again: nothing regresses, the new one stands.
-    same = ms.compare_selections(small, good, _stored(good), good.skills, measure=page)
+    same = ms.compare_selections(small, good, _stored(good), good.skills)
     assert (same.decision, same.regressions, same.problems) == ("new", (), ())
     assert same.previous.valid and same.previous.fits and same.previous.lost == () == same.new.lost and same.new.weak == ()
+    # No page is counted for either selection.
+    assert same.previous.pages is None and same.new.pages is None
 
-    # A new selection that lost the evidence of a mandatory requirement (here: made under a budget nothing fits), while
-    # the previous one is still valid and still fits: the previous one is kept, and the result says on which check.
-    worse = ms.select(small, profile, posting, today=TODAY, measure=lambda _markdown: (3, 0.5), fill=False)
+    # A new selection that lost the evidence of a mandatory requirement (here: made under a cap of one bullet), while
+    # the previous one is still valid: the previous one is kept, and the result says on which check.
+    worse = ms.select(small, profile, posting, today=TODAY, max_bullets=1, fill=False)
     assert "b-new-2" not in worse.item_ids() and any(conflict.kind == "mandatory_evidence" for conflict in worse.conflicts)
-    kept = ms.compare_selections(small, worse, _stored(good), good.skills, measure=page)
+    kept = ms.compare_selections(small, worse, _stored(good), good.skills)
     assert kept.decision == "previous" and kept.problems == ()
     assert len(kept.regressions) == 1 and kept.regressions[0].startswith("mandatory coverage: no line now for On-call experience.")
     # No blended score: the worse selection is not saved by anything else it has more of. Give the previous one no skill at all.
-    assert ms.compare_selections(small, worse, _stored(good), (), measure=page).decision == "previous"
+    assert ms.compare_selections(small, worse, _stored(good), ()).decision == "previous"
 
     # The previous one cannot be kept when it shows a line the master corrected since, or one the master no longer
-    # has, or when it no longer fits: then neither is chosen, and the result says what is unresolved.
-    corrected = ms.compare_selections(small, worse, _stored(good), good.skills, stale=("b-new-2",), measure=page)
+    # has: then neither is chosen, and the result says what is unresolved.
+    corrected = ms.compare_selections(small, worse, _stored(good), good.skills, stale=("b-new-2",))
     assert corrected.decision == "unresolved" and corrected.regressions and "b-new-2" in corrected.problems[0]
-    retired = ms.compare_selections(small, worse, (*_stored(good), "b-gone"), good.skills, measure=page)
+    retired = ms.compare_selections(small, worse, (*_stored(good), "b-gone"), good.skills)
     assert retired.decision == "unresolved" and retired.previous.invalid == ("b-gone",)
-    too_long = ms.compare_selections(small, worse, _stored(ms.select(small, profile, posting, today=TODAY, measure=_by_bullets(40))), good.skills, measure=lambda markdown: (3 if "Oldco" in markdown else 2, 0.5))
-    assert too_long.decision == "unresolved" and "no longer meets the page limit" in too_long.problems[0]
+    # HOW LONG the previous one is makes no difference (until 0.1.11.5 a previous selection over the page limit could
+    # not be kept): one that shows every line of the master is kept like any other.
+    whole = _stored(ms.select(small, profile, posting, today=TODAY, max_bullets=None))
+    long = ms.compare_selections(small, worse, whole, good.skills)
+    assert long.decision == "previous" and long.problems == () and long.previous.fits
     # A previous selection that is invalid is still replaced when the new one regresses on nothing.
-    assert ms.compare_selections(small, good, (*_stored(good), "b-gone"), good.skills, measure=page).decision == "new"
+    assert ms.compare_selections(small, good, (*_stored(good), "b-gone"), good.skills).decision == "new"
 
     out = kept.to_json()
     assert out["decision"] == "previous" and out["previous"]["lost"] == [] and out["new"]["lost"] and out["new"]["fits"] is True
+    assert out["new"]["pages"] is None and out["previous"]["pages"] is None and out["new"]["max_pages"] == 2
 
 
 def test_a_pick_made_again_is_checked_for_strength_and_pins_too() -> None:
     small = parse_master(_SMALL)
     posting = ms.SelectionPosting("Staff Engineer", "Requirements:\n- Kubernetes in production.\n")
-    roomy = _by_bullets(40)
-    new = ms.select(small, ms.SelectionProfile(pins=("b-new-4",)), posting, today=TODAY, measure=roomy)
+    new = ms.select(small, ms.SelectionProfile(pins=("b-new-4",)), posting, today=TODAY)
     evidence = next(requirement for requirement in new.requirements if requirement.mandatory).supporters[0]
     assert evidence == "b-new-1"
 
-    checks = ms.check_selection(small, new.requirements, ("r-new", "b-new-2", "o-cka"), ("Kubernetes",), pins=("b-new-4",), measure=roomy)
+    checks = ms.check_selection(small, new.requirements, ("r-new", "b-new-2", "o-cka"), ("Kubernetes",), pins=("b-new-4",))
     # The certification names Kubernetes, so the requirement is covered; its strongest line and the pin are not shown.
     assert checks.lost == () and checks.weak and checks.pins_missing == ("b-new-4",) and checks.fits and checks.valid
-    # Against a previous selection that showed the pin, a new one that had no room for it regresses on that check
+    # Against a previous selection that showed the pin, a new one whose cap had no room for it regresses on that check
     # (and says so itself: a conflict), so the previous one is kept.
-    thin = ms.select(small, ms.SelectionProfile(pins=("b-new-4",)), posting, today=TODAY, measure=lambda markdown: (3 if "Mentored" in markdown else 2, 0.5), fill=False)
+    thin = ms.select(small, ms.SelectionProfile(pins=("b-new-4",)), posting, today=TODAY, max_bullets=1, fill=False)
     assert "b-new-4" not in thin.item_ids() and [conflict.kind for conflict in thin.conflicts] == ["must_keep"]
-    again = ms.compare_selections(small, thin, _stored(new), new.skills, pins=("b-new-4",), measure=roomy)
+    again = ms.compare_selections(small, thin, _stored(new), new.skills, pins=("b-new-4",))
     assert again.decision == "previous" and again.regressions == ("must-keep lines no longer shown: b-new-4",)
     # A previous selection that showed only a weaker line for the requirement loses nothing to a new one that shows the strongest.
-    assert ms.compare_selections(small, new, ("r-new", "b-new-2", "o-cka"), ("Kubernetes",), measure=roomy).decision == "new"
+    assert ms.compare_selections(small, new, ("r-new", "b-new-2", "o-cka"), ("Kubernetes",)).decision == "new"
     # A ROLE named with none of its lines is its one heading line (``sel-6``, 0.1.11.4 item 9): not an empty entry.
-    listed = ms.check_selection(small, new.requirements, ("r-new", "r-old", "b-new-1"), (), measure=roomy)
+    listed = ms.check_selection(small, new.requirements, ("r-new", "r-old", "b-new-1"), ())
     assert listed.empty_entries == () and listed.fits
     assert "### Earlier experience\n\nEngineer, Oldco | Jan 2010 - Dec 2013\n" in ms.render_selection(small, ("r-new", "r-old", "b-new-1"), ())
+    # A PROJECT named with no line is the one thing a selection cannot print: the only thing ``fits`` still reads.
+    titled = parse_master(_TITLED)
+    empty = ms.check_selection(titled, (), ("r-new", "n-1", "p-loom"), ())
+    assert empty.empty_entries == ("p-loom",) and not empty.fits and empty.pages is None
+
+
+# --- the cap (0.1.11.5 item 1c, sel-7): by score up to MAX_PICK_BULLETS, and no page -------------------------------
+
+
+def _wide(roles: int, per_role: int, *, old: int = 0) -> str:
+    """A master of ``roles`` recent roles (and ``old`` old ones) with ``per_role`` lines each, every line with words of its own."""
+
+    things = ("ledger", "router", "scheduler", "indexer", "gateway", "notifier", "exporter", "planner", "resolver", "archiver", "throttle", "compiler")
+    verbs = ("Rebuilt", "Designed", "Migrated", "Hardened", "Scaled", "Automated", "Replaced", "Instrumented", "Untangled", "Consolidated", "Introduced", "Retired")
+    gains = ("halving", "doubling", "tripling", "trimming", "lifting", "easing", "ending", "freeing", "saving", "raising", "calming", "clearing")
+    nouns = ("latency", "throughput", "uptime", "toil", "coverage", "pager noise", "the freeze", "disk", "cost", "accuracy", "alerts", "backlog")
+    out = ["<!-- gigai-master:1 -->", "", "## Summary", "", "- Engineer who builds back office systems. <!-- id:sum-1 -->", "", "## Experience", ""]
+    for role in range(roles + old):
+        start = 2024 - 2 * role if role < roles else 2012 - 2 * (role - roles)
+        end = "Present" if role == 0 else f"Dec {start + 1}"
+        out += [f"### Company {chr(65 + role)} <!-- id:r-{role} -->", f"Engineer | Jan {start} - {end}"]
+        for line in range(per_role):
+            n = role * per_role + line
+            out.append(
+                f"- {verbs[(n * 5 + role) % 12]} the {things[(n * 7 + 3) % 12]} for site {chr(97 + role)}{line}, "
+                f"{gains[(n * 11 + 1) % 12]} {nouns[n % 12]} {role}{line}. <!-- id:w-{role}-{line} -->"
+            )
+        out.append("")
+    out += ["## Skills", "", "- Languages: Python, Go <!-- id:s-1 -->", ""]
+    return "\n".join(out)
+
+
+def test_a_master_with_more_candidates_than_the_cap_holds_exactly_the_cap_and_the_lowest_scored_are_left_out() -> None:
+    master = parse_master(_wide(4, 12, old=2))
+    selected = ms.select(master, ms.SelectionProfile(), None, today=TODAY)
+
+    candidates = _candidates(master, selected)
+    assert selected.duplicates == {} and len(candidates) == 72 > ms.MAX_PICK_BULLETS
+    shown = _bullets(master, selected)
+    assert len(shown) == ms.MAX_PICK_BULLETS == selected.max_bullets and selected.conflicts == ()
+    # By score: every bullet over the cap is worth less than every bullet shown (a recent role's one line aside).
+    floor_lines = {bullets[0] for entry_id, bullets in selected.entries.items() if len(bullets) == 1}
+    assert selected.over_cap and max(selected.values[item] for item in selected.over_cap) < min(selected.values[item] for item in shown if item not in floor_lines)
+    # Left out, each with a reason a person reads; none says "cut for length" and none is lost: all 72 are accounted for.
+    reasons = {line.id: line for line in selected.lines}
+    assert all(not reasons[item].picked and reasons[item].code in ("over_cap", "role_dropped") for item in selected.over_cap)
+    assert {reasons[item].picked for item in candidates} == {True, False} and sum(reasons[item].picked for item in candidates) == 20
+    assert not any("cut for length" in line.reason or "page" in line.reason for line in selected.lines)
+    # Every recent role shows a line; the two old roles show none and are listed by their heading; nothing else moved.
+    assert all(selected.entries[f"r-{role}"] for role in range(4)) and selected.earlier == ("r-4", "r-5")
+    assert selected.skills == ("Go", "Python") and selected.cut_for_length == () and selected.pages is None
+
+
+def test_a_master_with_fewer_candidates_than_the_cap_holds_them_all() -> None:
+    # One long current role (more lines than its own caps) and two short ones: 18 bullets in all.
+    lines = "\n".join(f"- Shipped service number {n} to production. <!-- id:n-{n} -->" for n in range(1, 13))
+    master = parse_master(
+        "<!-- gigai-master:1 -->\n\n## Experience\n\n### Newco <!-- id:r-new -->\nStaff Engineer | Jun 2021 - Present\n" + lines
+        + "\n\n### Midco <!-- id:r-mid -->\nEngineer | Jan 2018 - May 2021\n- Ran the billing export for 200 merchants. <!-- id:m-1 -->\n"
+        "- Halved the nightly batch from 6 hours to 3. <!-- id:m-2 -->\n- Wrote the pager handbook. <!-- id:m-3 -->\n"
+        "\n## Projects\n\n### Plotwise <!-- id:p-plot -->\n- Drew 300 planting plans from soil and frost data. <!-- id:g-1 -->\n"
+        "- Added a watering calendar. <!-- id:g-2 -->\n- Mapped 40 allotments. <!-- id:g-3 -->\n"
+    )
+    for posting in (None, ms.SelectionPosting("Staff Engineer", "Requirements:\n- Billing.\n")):
+        selected = ms.select(master, ms.SelectionProfile(), posting, today=TODAY)
+        candidates = _candidates(master, selected)
+        assert len(candidates) == 18 < ms.MAX_PICK_BULLETS and selected.duplicates == {}
+        assert sorted(_bullets(master, selected)) == sorted(candidates), "a master with fewer bullets than the cap shows them all"
+        assert selected.over_cap == () and selected.conflicts == () and all(line.picked for line in selected.lines)
+    # (An old role is the one exception, by its own rule and not the cap's: it shows at most ``old_role_bullets`` lines.)
+    aged = parse_master(_wide(1, 4, old=1).replace("- Languages", "- Tools"))
+    old_lines = [bullet for bullet in aged.entries["r-1"].bullets]
+    shown = ms.select(aged, ms.SelectionProfile(), None, today=TODAY)
+    assert len(old_lines) == 4 and len(shown.entries["r-1"]) == 3 and len(_bullets(aged, shown)) == 7
+
+
+def test_a_must_cover_line_is_never_left_out_for_a_better_scored_line_and_a_pin_stays_too() -> None:
+    """The cap's order of precedence: the must-cover lines (each requirement's evidence), then the pins, then score."""
+
+    master = parse_master(_wide(3, 10))
+    # Three requirements whose evidence, by the assessment's citations, are plain lines of the OLDEST role, and one pin there.
+    cited = tuple(_cited(f"r{n}", f"Requirement number {n}.", f"w-2-{n + 5}") for n in range(1, 4))
+    profile = ms.SelectionProfile(pins=("w-2-9",))
+    posting = ms.SelectionPosting("Engineer", "Requirements:\n- Requirement number 1.\n- Requirement number 2.\n- Requirement number 3.\n", cited=cited)
+    selected = ms.select(master, profile, posting, today=TODAY)
+
+    shown = set(_bullets(master, selected))
+    must_cover = {"w-2-6", "w-2-7", "w-2-8"}
+    assert len(shown) == ms.MAX_PICK_BULLETS and must_cover <= shown and "w-2-9" in shown and selected.conflicts == ()
+    assert selected.evidence_for.keys() == must_cover
+    # By score alone none of the four is shown: the same master and posting with no citation and no pin.
+    by_score = ms.select(master, ms.SelectionProfile(), ms.SelectionPosting("Engineer", posting.text), today=TODAY)
+    assert not (must_cover | {"w-2-9"}) & set(_bullets(master, by_score)) and len(_bullets(master, by_score)) == ms.MAX_PICK_BULLETS
+    # A smaller cap leaves out lines of the NEWEST role, which score higher, while those four stay.
+    ten = ms.select(master, profile, posting, today=TODAY, max_bullets=10)
+    assert must_cover | {"w-2-9"} <= set(_bullets(master, ten)) and [item for item in ten.over_cap if item.startswith("w-0-")] and ten.conflicts == ()
+    assert all(ten.values[item] < min(ten.values[line] for line in must_cover | {"w-2-9"}) for item in ten.over_cap)
+    # Six bullets hold the four and a line of each other recent role. One fewer: the PIN goes, and it is said. One fewer
+    # again: only then a must-cover line, and that is said too.
+    six, five, four = (ms.select(master, profile, posting, today=TODAY, max_bullets=cap) for cap in (6, 5, 4))
+    assert set(six.entries["r-2"]) == must_cover | {"w-2-9"} and six.conflicts == ()
+    assert set(five.entries["r-2"]) == must_cover and [conflict.kind for conflict in five.conflicts] == ["must_keep"]
+    assert len(four.entries["r-2"]) == 2 and set(four.entries["r-2"]) < must_cover
+    assert [conflict.kind for conflict in four.conflicts] == ["mandatory_evidence", "must_keep"]
+    assert all(len(pick.entries[role]) == 1 for pick in (six, five, four) for role in ("r-0", "r-1")), "a recent role keeps its line"
+
+
+def test_a_selection_lays_out_nothing_and_needs_no_renderer(master: Master, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The selection does not know the page limit: with every layout entry point made to raise, it is the same selection."""
+
+    import gigai.scout.resume_pdf as renderer
+
+    expected = {key: _selected(master, *key) for key in (("profile-ai", POSTING_IDS[0]), ("profile-swe", None))}
+    calls: list[str] = []
+
+    def refuse(name: str):
+        def raiser(*_args: object, **_kwargs: object) -> None:
+            calls.append(name)
+            raise AssertionError(f"a selection must not call {name}")
+
+        return raiser
+
+    for name in ("measure_markdown", "pages_at", "fewest_pages", "render_markdown_pdf", "_estimate", "_render", "_compile"):
+        if hasattr(renderer, name):
+            monkeypatch.setattr(renderer, name, refuse(name))
+    monkeypatch.setattr(ms, "_shipped_measure", refuse("_shipped_measure"))
+
+    for (profile_id, posting_id), was in expected.items():
+        again = ms.select(master, _profile(profile_id), _posting(posting_id) if posting_id else None, today=TODAY)
+        assert again == was and again.layout_queries == 0
+    checks = ms.check_selection(master, was.requirements, was.stored_ids(), was.skills)
+    assert checks.pages is None and checks.fits
+    assert ms.compare_selections(master, was, was.stored_ids(), was.skills).decision == "new"
+    assert calls == []

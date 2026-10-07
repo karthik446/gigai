@@ -423,7 +423,9 @@ def _pick_lines(view: dict[str, object]) -> list[str]:
         lines.append(f"Resume: {resume['lines']} lines, {who}; yours, kept as it is" if resume["replaceable"] is False else f"Resume: {resume['lines']} lines, {who}")
         if isinstance(resume["counts"], dict):
             counts = resume["counts"]
-            lines.append(f"  Picked {counts['picked']}, left out {counts['left_out']}, cut for length {counts['cut_for_length']}.")
+            # (``cut_for_length``: only a resume picked before 0.1.11.5 holds any; a pick knows no page limit now.)
+            cut = f", cut for length {counts['cut_for_length']}" if counts.get("cut_for_length") else ""
+            lines.append(f"  Picked {counts['picked']}, left out {counts['left_out']}{cut}.")
         if isinstance(picked, dict) and picked.get("pages") is not None:
             lines.append(f"  Pages: {picked['pages']} of {picked['max_pages']}.")
         if resume["folder_path"]:
@@ -453,7 +455,7 @@ def _pick_lines(view: dict[str, object]) -> list[str]:
 @_PROFILE
 @click.option("--refresh", "refresh", is_flag=True, help="Pick again from the stored assessment against your master as it is now. No model call.")
 @click.option("--draft", "draft", is_flag=True, help="Make a draft for a job whose gate holds (an open must-have question, a gap, not a match). No model call.")
-@click.option("--shorten", "shorten", is_flag=True, help="Make the stored resume shorter when its PDF does not fit its pages: the weakest lines go first, and the output says which. No model call.")
+@click.option("--shorten", "shorten", is_flag=True, help="Retired in 0.1.11.5: it changes nothing and says what to do instead (the spacing slider on the job's page, or remove a point there).")
 @click.option("--use-proposed", "use_proposed", is_flag=True, help="Replace the stored job resume with the new suggested one that is waiting.")
 @click.option("--dismiss-proposed", "dismiss_proposed", is_flag=True, help="Drop the new suggested resume that is waiting; the stored one stays.")
 @_options
@@ -465,10 +467,10 @@ def resume_pick_command(
 
     Without a flag nothing is recomputed and nothing is written. --refresh
     picks again in code (refused while the assessment is old: re-assess
-    instead); --draft makes a draft for a held job; --shorten leaves out the
-    next weakest lines when the PDF does not fit its pages (a line that backs
-    a must-have requirement only when nothing else is left, and it says so)
-    and prints what it left out; --use-proposed takes the
+    instead); --draft makes a draft for a held job; a pick holds at most 20
+    bullets and counts no page (the spacing slider beside the preview on
+    the job's page fits the page, and a point can be removed there), so
+    --shorten is retired and only says so; --use-proposed takes the
     new suggested resume that waits beside a resume you edited, and
     --dismiss-proposed drops it. A resume you edited is never replaced by
     anything but --use-proposed, and --use-proposed is refused when the
@@ -500,8 +502,7 @@ def resume_pick_command(
     if as_json:
         _emit({"ok": True, **view})
         return
-    shortened = view.get("shortened")
-    click.echo("\n".join([*([str(shortened["message"])] if isinstance(shortened, dict) else []), *_pick_lines(view)]))
+    click.echo("\n".join(_pick_lines(view)))
 
 
 # --- suggestions ---------------------------------------------------------------------------------------------------

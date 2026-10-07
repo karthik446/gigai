@@ -18,8 +18,8 @@ and a waiting proposal.  ``pick_action`` is the five explicit steps:
 ``refresh``         the code-only re-pick. Refused (``assessment_stale``) while the stored assessment is stale:
                     a new selection never sits beside scores made on other evidence; the step then is Re-assess
 ``draft``           the explicit draft for a job whose gate holds. Refused when the gate suggests a resume
-``shorten``         0.1.11.3 item 15: the same pick under a tighter page budget, for a PDF that still does not
-                    fit its pages. The answer's ``shortened`` says in plain words what it left out. Not refused
+``shorten``         RETIRED in 0.1.11.5 (a pick has no page budget to tighten): always refused, ``shorten_retired``, with
+                    one plain sentence (the spacing slider, removing a point); nothing is read or written. Not refused
                     for an old assessment: it is the stored pick, cut further, not a new reading of the job
 ``use_proposed``    the waiting selection REPLACES the stored job resume: the one step that does
 ``dismiss_proposed``  the waiting selection is dropped; the stored job resume is not touched
@@ -411,7 +411,9 @@ def pick_view(home_root: Path, target: Path, job_url: str, *, profile_id: str | 
         # 0.1.11.4 E1: a file IS stored for this job and cannot be read. It is the user's: no pick writes over it.
         "resume_unreadable": resume is None and store.stored_unreadable(resume_path),
         "picked": None if selection is None else {
-            key: selection.get(key) for key in ("picked_by", "fallback", "draft", "made_at", "pages", "max_pages", "pick_rules_version", "selector_version")
+            # (``pages``: null for a pick of 0.1.11.5, which counts no page; ``max_bullets``: the most bullets it holds, null before.)
+            key: selection.get(key)
+            for key in ("picked_by", "fallback", "draft", "made_at", "pages", "max_pages", "max_bullets", "pick_rules_version", "selector_version")
         },
         "problems": list(selection.get("problems", ())) if selection is not None else [],  # type: ignore[arg-type]
         "added_by_code": list(selection.get("added_by_code", ())) if selection is not None else [],  # type: ignore[arg-type]
@@ -419,7 +421,7 @@ def pick_view(home_root: Path, target: Path, job_url: str, *, profile_id: str | 
         "selection_error": record.get("selection_error"),
         # What the page's Compare needs: the master line ids each side prints (names are the master's, by id).
         "proposed": None if proposed is None else {
-            **{key: proposed.get(key) for key in ("picked_by", "fallback", "draft", "made_at", "pages", "max_pages", "conflicts")},
+            **{key: proposed.get(key) for key in ("picked_by", "fallback", "draft", "made_at", "pages", "max_pages", "max_bullets", "conflicts")},
             "lines": list(store.recorded_marks(proposed)),
         },
         "selected_lines": list(store.recorded_marks(selection)),
@@ -440,6 +442,14 @@ def pick_action(home_root: Path, target: Path, job_url: str, action: str, *, pro
 
     if action not in PICK_ACTIONS:
         raise JobActionError("invalid_value", "action must be one of: " + ", ".join(PICK_ACTIONS))
+    if action == ACTION_SHORTEN:
+        # Retired in 0.1.11.5: said before anything is read. (The sentence is ``scout.pick``'s when it is built.)
+        try:
+            job_resume_port.shorten_stored()(home_root, target, profile_id, job_url, now=now or "")
+        except NotBuilt:
+            raise
+        except RuntimeError as exc:
+            raise _refused(exc) from exc
     home_root, target = Path(home_root), Path(target)
     before = pick_view(home_root, target, job_url, profile_id=profile_id)
     pair = (str(before["profile_id"]), str(before["job_identity"]))
@@ -472,13 +482,9 @@ def pick_action(home_root: Path, target: Path, job_url: str, action: str, *, pro
                 "draft_not_needed",
                 "A resume is suggested for this job already; a draft is for a job that is held. Pick it again: `gigai scout resume pick --job-url URL --refresh`.",
             )
-        # ``shorten`` (0.1.11.3 item 15): the same pick under a tighter page budget; the answer says what it left out.
-        settle = job_resume_port.shorten_stored() if action == ACTION_SHORTEN else job_resume_port.settle_stored()
+        settle = job_resume_port.settle_stored()
         try:
-            if action == ACTION_SHORTEN:
-                extra = {"shortened": settle(home_root, target, *pair, now=when).to_json()}
-            else:
-                settle(home_root, target, *pair, action=action, now=when)
+            settle(home_root, target, *pair, action=action, now=when)
         except NotBuilt:
             raise
         except ValueError as exc:  # the pick's and the record's own typed refusals (``PickError`` is a RuntimeError, below)

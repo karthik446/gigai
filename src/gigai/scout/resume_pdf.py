@@ -288,13 +288,11 @@ def over_limit_note(pages: int, max_pages: int, at_spacing: float | None = None)
     if at_spacing is not None and at_spacing > SPACING_MIN:
         return (
             f"This resume takes {pages} pages at spacing {at_spacing:.2f}: its limit is {limit}. "
-            f"Move the spacing slider on the job's page down, or shorten it automatically (the Shorten automatically button on the job's page, or "
-            f"`gigai scout resume pick --job-url URL --shorten`; no model call), then generate the PDF again. Or keep it at {pages} pages."
+            f"Move the spacing slider on the job's page down, or remove a point there, then generate the PDF again. Or keep it at {pages} pages."
         )
     return (
         f"This resume takes {pages} pages: it does not fit on {limit} even with the tightest spacing. "
-        f"To get {limit}, shorten it automatically (the Shorten automatically button on the job's page, or "
-        f"`gigai scout resume pick --job-url URL --shorten`; no model call), then generate the PDF again. Or keep it at {pages} pages."
+        f"To get {limit}, remove a point or two on the job's page, then generate the PDF again. Or keep it at {pages} pages."
     )
 
 

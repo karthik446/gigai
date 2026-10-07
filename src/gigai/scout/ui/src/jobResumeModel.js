@@ -438,7 +438,7 @@ const FALLBACK_WORDS = {
   no_pick: "the assessment gave no pick",
   pick_too_small: "too few lines",
   master_revision_unreadable: "the master revision it read could not be loaded",
-  pick_failed: "it could not be fitted",
+  pick_failed: "it could not be put together",
 };
 
 // The ONE provenance line over the resume: {origin, pickedBy, draft, text}.
@@ -485,31 +485,36 @@ export function provenanceLine({ stored = null, record = null, origin = null } =
 const LOST_EVIDENCE = "lost_mandatory_evidence";
 const SELECTION_CONFLICT = "selection_conflict";
 
+// 0.1.11.5 (item 1c): the conflicts a pick made BEFORE 0.1.11.5 holds because of the page limit. A pick no longer
+// knows the page limit (it holds its best lines, 20 bullets at most, and the preview's spacing fits the page), so
+// these are never "needs attention": a stored one is not shown.
+const PAGE_CONFLICTS = new Set(["skills_do_not_fit", "earlier_roles_do_not_fit", "over_page_limit"]);
+
 // The banner over the resume: [{code, requirement, text, lines}], the conflicts first (SPEC 3.3: "the first thing
-// the job page shows above the resume"). `lines` are master line ids: what was cut, or what to put back.
+// the job page shows above the resume"). `lines` are master line ids: what was left out, or what to put back.
 export function attentionItems({ record = null, assessment = null, stored = null } = {}) {
   const rows = rowsById(assessment);
   const coverage = coverageRows({ record, assessment, stored });
   const items = [];
   const selection = object(record && record.selection) || {};
-  list(selection.conflicts).filter(object).forEach((conflict) => {
+  const conflicts = list(selection.conflicts).filter((conflict) => object(conflict) && !PAGE_CONFLICTS.has(conflict.code));
+  // A pick of 0.1.11.5 says how many bullets it holds at most (`max_bullets`); one made before it was cut to its pages.
+  const room = Number.isInteger(selection.max_bullets)
+    ? `the ${selection.max_bullets} bullets this resume shows`
+    : `${Number.isInteger(selection.max_pages) ? selection.max_pages : 2} pages`;
+  const capped = Number.isInteger(selection.max_bullets);
+  conflicts.forEach((conflict) => {
     const requirement = text(conflict.requirement) || null;
     const lines = list(conflict.lines).filter((id) => typeof id === "string");
     const about = requirement ? requirementText(rows, requirement) : "";
-    const max = Number.isInteger(selection.max_pages) ? selection.max_pages : 2;
     let line;
     if (conflict.code === "mandatory_evidence_does_not_fit") {
-      line = `the evidence for ${about || "a must-have requirement"} does not fit ${max} pages${lines.length ? `: ${plural(lines.length, "line was", "lines were")} cut` : ""}`;
+      const gone = lines.length ? `: ${plural(lines.length, "line was", "lines were")} ${capped ? "left out" : "cut"}` : "";
+      line = capped ? `the evidence for ${about || "a must-have requirement"} is not among ${room}${gone}` : `the evidence for ${about || "a must-have requirement"} does not fit ${room}${gone}`;
     } else if (conflict.code === "pinned_line_does_not_fit") {
-      line = `${plural(lines.length || 1, "pinned line does", "pinned lines do")} not fit ${max} pages`;
-    } else if (conflict.code === "skills_do_not_fit") {
-      line = `your Skills section does not fit ${max} pages whole: some groups were cut`;
-    } else if (conflict.code === "earlier_roles_do_not_fit") {
-      // 0.1.11.4 item 9: an old role that is not listed even by its one heading line. The pick's own sentence when it
-      // carries one ("2 older roles are not listed on this resume, not even by a single heading line: ...").
-      line = text(conflict.message) || `some earlier roles could not be listed on ${max} pages: there was no room left for their heading lines`;
-    } else if (conflict.code === "over_page_limit") {
-      line = `the resume is over ${max} pages and nothing more can be cut`;
+      line = capped
+        ? `${plural(lines.length || 1, "pinned line is", "pinned lines are")} not among ${room}`
+        : `${plural(lines.length || 1, "pinned line does", "pinned lines do")} not fit ${room}`;
     } else {
       line = text(conflict.code).replace(/_/g, " ");
     }
@@ -526,7 +531,7 @@ export function attentionItems({ record = null, assessment = null, stored = null
         text: `the resume no longer shows the evidence for ${requirement ? requirementText(rows, requirement) : "a must-have requirement"}`,
         lines: found ? found.putBack : [],
       });
-    } else if (reason.code === SELECTION_CONFLICT && list(selection.conflicts).length === 0) {
+    } else if (reason.code === SELECTION_CONFLICT && conflicts.length === 0) {
       items.push({ code: SELECTION_CONFLICT, requirement: text(reason.requirement) || null, text: "the selection has a conflict", lines: [] });
     }
   });
@@ -541,7 +546,7 @@ export function attentionItems({ record = null, assessment = null, stored = null
 const ADDED_WORDS = {
   recent_role_present: "added by Scout: a recent role always shows at least one line",
   pinned_line: "pinned by this profile",
-  room_left: "room left on the page",
+  room_left: "room left on the resume",
 };
 
 // line id -> {supports: [row id], added: {code, requirement} | null}, from the record.
@@ -831,16 +836,9 @@ const PICK_ERRORS = {
   // 0.1.11.4 E1: a suggestion is taken only over the resume it was made beside; a file nobody can read is never written over.
   proposal_stale: "The resume changed after this suggestion was made, so it was not used. Pick again to get a new one.",
   stored_resume_unreadable: "The stored resume could not be read; it was left as it is.",
-  // 0.1.11.3 item 15: "Shorten automatically" (the Generate PDF form).
-  no_resume_to_shorten: "There is no resume stored for this job yet, so there is nothing to shorten. Pick one first.",
-  resume_short_already: "This resume already fits its pages with most of a page to spare, so nothing was left out.",
+  // 0.1.11.5: "Shorten automatically" is retired (no page asks for it; the server answers this to an older caller).
+  shorten_retired: "Shortening a resume automatically is no longer part of GigAI. Move the spacing slider beside the preview, or remove a point.",
 };
-
-// "Shorten automatically": the server's own sentence about what the shorter resume leaves out (it holds the lines'
-// text and no command); a refusal is said in this page's words, by its code, like every refused pick.
-export function shortenedText(view) {
-  return (view && view.shortened && text(view.shortened.message)) || "The resume was shortened. Generate the PDF again.";
-}
 
 // One sentence for a refused or failed POST /api/job-resumes/pick. A request that never reached the server says so.
 export function pickErrorText(err) {

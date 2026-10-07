@@ -1,13 +1,13 @@
 """The master resume's selector (0.1.10.9 master P2): which lines a resume shows, by code alone.
 
 ``select`` picks the lines of the master (``master_resume.Master``) that one
-resume shows, for a profile alone (its standing pick) or for one posting, and
-fits the pick to ``LENGTH_RULE.max_pages`` pages. ``evidence_view`` picks the
+resume shows, for a profile alone (its standing pick) or for one posting, BY
+SCORE UP TO A CAP of ``MAX_PICK_BULLETS`` bullets. ``evidence_view`` picks the
 lines most relevant to one posting under a character budget instead (what an
 assessment would read). Nothing here calls a model, reads a file or writes:
 the same master, profile, posting and day give the same ids.
 
-The rules (0110-10-15, the pick's objective; ``SELECTOR_VERSION`` ``sel-6``).  For a posting the
+The rules (0110-10-15, the pick's objective; ``SELECTOR_VERSION`` ``sel-7``).  For a posting the
 selection maximises, in this order, and a lower term never buys back a higher one:
 
 1. MANDATORY REQUIREMENT COVERAGE.  The posting's requirements are its list lines (``Requirement``; a
@@ -16,7 +16,7 @@ selection maximises, in this order, and a lower term never buys back a higher on
    its rarer words.  Every mandatory requirement the master can support keeps a supporting line.
 2. EVIDENCE STRENGTH.  The line kept for a requirement is its strongest: among the lines that support it
    well, a backed line before a quantified one before a stated one.  That line is the requirement's
-   EVIDENCE and the fit does not cut it while anything else can go.
+   EVIDENCE and the cap does not leave it out while anything else can go.
 3. MUST-KEEP LINES: the profile's pins (``SelectionProfile.pins``), cut only after everything else.
 4. RECENCY only breaks ties between lines of equal coverage and strength.  An older role's line that is
    the evidence of a requirement stays while recent lines that support nothing are cut.
@@ -33,7 +33,7 @@ first line.  Matching by words (1 above) only ADDS: it supports what the posting
 about (a row the assessment found no line for, a line of the posting it has no row for), and everything when
 there is no assessment.  A posting line or keyword that a cited row is about is not matched by words at all.
 
-WHAT IS LEFT OF THE PAGE (``sel-4``), once every requirement has its line and the pins are in, goes to the lines
+WHAT IS LEFT OF THE CAP (``sel-4``), once every requirement has its line and the pins are in, goes to the lines
 that are ABOUT THE POSTING before the lines that are only strong or recent.  THE POSTING'S TITLE says what the job is
 about (its words without rank, place or level: ``_title_subject``), and it NAMES a role or a project whose heading
 or own title holds one of those words, or ``TITLE_LINES_SHARE`` of whose lines do.  Among the lines that add nothing
@@ -44,22 +44,23 @@ assessment cited another line; it is still about the job).  Recency still only b
 AN ENTRY THE TITLE NAMES KEEPS ITS BEST LINE (``Selected.title_entries``): it is not dropped whole.  Its best line
 is in the pick whatever a cap says and is cut only after every line that is not a requirement's evidence or a pin
 (so every other old role and project goes whole first, and every recent role is down to its one line); when even
-that cannot fit, the result carries a ``title_entry`` conflict.  It never costs a requirement its evidence, and the
-Skills section is not cut for it.
+that is over the cap, the result carries a ``title_entry`` conflict.  It never costs a requirement its evidence.
 
-PAGE FIT IS A CONSTRAINT, not a term: ``LENGTH_RULE.max_pages`` pages, measured with the shipped PDF
-template (``measure_markdown``) WITH ROOM FOR THE HEADER (``sel-5``, 0.1.11.3 item 15: the estimate keeps the
-header's block at its largest, ``resume_pdf.HEADER_RESERVE_LINES``, and never reads the header; ``sel-4`` kept two
-lines in all, so a pick that filled its last page ran onto another once the name and contact line were printed), no project printed without a bullet, roles in date order, every
-recent role present (``FLOORS``).
+THE CAP IS A COUNT OF BULLETS, NOT A PAGE (``sel-7``, 0.1.11.5 item 1c).  A resume shows at most
+``MAX_PICK_BULLETS`` bullets under its roles and projects.  THE SELECTION DOES NOT KNOW THE PAGE LIMIT: it lays out
+nothing, counts no page and keeps no room for a header.  How many pages the pick prints on is the user's to settle,
+with the spacing of the job's preview (``resume_pdf``); a pick of 20 bullets that prints on 3 pages at its automatic
+spacing is a good pick, and the preview says "3 pages".  (``sel-2`` to ``sel-6`` fitted the pick to
+``LENGTH_RULE.max_pages`` pages with one layout for each trial, and real picks stopped at 14 bullets "cut for
+length".)  What does NOT count toward the cap and is never left out for it: the summary, the Skills section (whole,
+in its order), every degree, the Other lines (``MAX_OTHER``) and the heading line of a role that shows no bullet.
+Still held: no project printed without a bullet, roles in date order, every recent role present (``FLOORS``).
 
 NO EMPLOYER IS DROPPED SILENTLY (``sel-6``, 0.1.11.4 item 9).  A role none of whose lines is shown still prints, as ONE
 line (its title, its employer and its dates, as the master has them: ``tailored_resume.heading_only_line``) in a block
 at the end of the Experience section (``EARLIER_HEADING``), newest first (``Selected.earlier``).  Until ``sel-5`` the
-role went whole, so a career of 14 years read as 8.  Those lines are part of the page that is measured, so the page
-limit holds with them: the fit cuts one more line when a heading needs its room.  A heading line goes only after
-every line that is not a pin or a requirement's evidence, and after the Skills: the oldest role's first, and then the
-result says which roles are not listed (an ``earlier_roles`` conflict).  A project that loses its last line still
+role went whole, so a career of 14 years read as 8.  Since ``sel-7`` a heading line is never left out: every role of
+the master is on the resume, by its lines or by that one line.  A project that loses its last line still
 goes whole: a project is not an employer, and leaves no gap in the dates.
 
 The steps:
@@ -71,29 +72,27 @@ The steps:
 - PICK: one summary variant (the posting's title and the profile decide what kind of engineer it names),
   the best bullets per role under a cap (``PICK_CAPS``; an old role, by ``LENGTH_RULE``, gets
   ``old_role_bullets``), the best ``MAX_PROJECTS`` projects, ``MAX_OTHER`` Other lines, every degree; a
-  requirement's evidence is in the pick whatever the caps say.  THE SKILLS SECTION IS KEPT WHOLE when it
-  fits: what the posting asks for first (in the posting's order), then the rest by name.
-- FIT: cuts are applied lowest value first until the pick fits, the fewest that fit found by binary
-  search.  THE CUT ORDER (``_keys``): bullets that add nothing the posting asks for (the ones the
-  profile does not show first, then unusually long ones, the weakest, the oldest), then the Other lines
-  that name nothing it asks for; then a third line of a mandatory requirement, a second line of a
-  nice-to-have, the first line of one, a second line of a mandatory requirement; then the Other lines
-  that name a keyword or support a requirement; then the best line of an entry the title names (a conflict).
-  Cutting the last line of a project removes it whole; an old role that loses its last line keeps its one heading
-  line.  SKILLS are cut last, what nothing
-  asks for first, and only when no line is left to cut;
-  except in a master whose Skills section is too long to print whole (more than ``SKILLS_WHOLE`` names),
-  where the names past that count that nothing asks for and no picked line names are the first thing cut.  Every cut skill is recorded.  Last of all: the heading lines of the roles with no line left (the oldest first), then pins, then requirements' evidence.
-- CONFLICTS (``Selected.conflicts``): when a requirement's evidence, a pin, the one line of an entry the
-  title names or a role's heading line could not be shown within the page budget the result says which and why.
-  Nothing mandatory is dropped silently.
-- FILL: room left on the last page goes back to the best lines cut, then to the best unshown bullets of
-  the recent roles (up to ``HARD_CAPS``).
+  requirement's evidence is in the pick whatever the caps say.  THE SKILLS SECTION IS KEPT WHOLE: what the
+  posting asks for first (in the posting's order), then the rest by name.
+- CAP: while the pick holds more than ``MAX_PICK_BULLETS`` bullets, the lowest-valued one is left out.  THE
+  ORDER (``_keys``): bullets that add nothing the posting asks for (the ones the profile does not show
+  first, then unusually long ones, the weakest, the oldest); then a third line of a mandatory requirement, a
+  second line of a nice-to-have, the first line of one, a second line of a mandatory requirement; then the
+  best line of an entry the title names, then pins, then requirements' evidence (each of those three is a
+  conflict).  A MUST-COVER LINE (a requirement's evidence) is therefore never left out for a better-scored
+  line that is not one.  A recent role keeps its best line (``FLOORS``).  Leaving out the last line of a
+  project removes it whole; a role that loses its last line keeps its one heading line.
+- CONFLICTS (``Selected.conflicts``): when a requirement's evidence, a pin or the one line of an entry the
+  title names is over the cap the result says which and why.  Nothing mandatory is dropped silently.
+- FILL: a pick under the cap takes the best lines not shown, best first: the bullets of the recent roles
+  and of the shown projects (up to ``HARD_CAPS``), and then, while it is still under the cap, any other
+  line of the master that is not a near duplicate (an old role never more than ``old_role_bullets``).  So a
+  master with fewer candidate bullets than the cap shows them all.
 - Nothing is reworded: every shown line is a master line, by id, and every line of the master, shown or
   not, carries the reason (``LineReason``).  The same lines in another order give the same pick.
 
 RE-MAKING A PICK (``compare_selections``): a stored selection and a new one are checked against the
-same current master, requirements and page budget on separate checks; see that function.
+same current master and requirements on separate checks; see that function.
 
 Caps and the support thresholds are set by hand on the synthetic pick eval (``tests/evals/run_pick_eval.py``:
 5 postings x 3 master sizes x 9 variations); ``SELECTOR_VERSION`` names them, so changing one is a
@@ -115,28 +114,28 @@ from .tailor_no_loss import OWNERSHIP_FAMILIES, normalize
 from .tailored_resume import EARLIER_HEADING, LENGTH_RULE, heading_only_line
 
 #: Names the scoring weights, caps, floors and cut order below; stored with a selection.
-SELECTOR_VERSION = "sel-6"
+SELECTOR_VERSION = "sel-7"
+#: THE CAP (0.1.11.5 item 1c): the most bullets a resume shows under its roles and projects.  The selection knows no
+#: page limit; the user fits the page with the spacing of the job's preview.
+MAX_PICK_BULLETS = 20
+#: A resume's page limit.  INFORMATIONAL for a selection since ``sel-7``: carried on a result (``Selected.max_pages``)
+#: for readers of the stored JSON, read by nothing that chooses a line.
 MAX_PAGES = LENGTH_RULE.max_pages
-#: The page budget is "fits ``MAX_PAGES`` at this spacing or looser" (the renderer's own floor is 0.7).
+#: The spacing of the page ESTIMATE (``_shipped_measure``, ``tailor_master.measure_pages``): what a printed profile
+#: view and an agent's brief say a resume's pages are.  No selection is measured at it since ``sel-7``.
 FIT_SCALE = 0.9
 
 #: Bullets per experience role in the first pick, by recency rank (0 = newest); an old role gets
-#: ``LENGTH_RULE.old_role_bullets``. The fit cuts from here; the fill adds up to ``HARD_CAPS``.
+#: ``LENGTH_RULE.old_role_bullets``. The cap leaves out from here; the fill adds up to ``HARD_CAPS``.
 PICK_CAPS = (9, 6, 6, 5)
 HARD_CAPS = (11, 8, 8, 6)
-#: A recent role is always present with at least this many bullets (the page constraint: no role without a bullet).
+#: A recent role is always present with at least this many bullets (no recent role without a bullet).
 FLOORS = (1, 1, 1, 1)
 MAX_PROJECTS = 3
 PROJECT_BULLETS = 3
 #: A shown project holds at most this many lines, and more than ``PROJECT_BULLETS`` only of lines the posting's requirements are about.
 PROJECT_HARD_BULLETS = 6
 MAX_OTHER = 4
-#: The Skills section is kept whole. A master that lists more names than this has a section "too long": the names
-#: past this count that no posting asks for and no picked line names are the first thing cut for length, before
-#: any line (and they come back last, when room is left). Up to this count a skill is cut only when no line is left to cut.
-SKILLS_WHOLE = 40
-#: How many lines the fill tries to put into the room the last cut left.
-FILL_TRIES = 12
 #: A line supports a requirement when it holds this share of what the requirement says: its words, and (counted
 #: ``TERM_WEIGHT`` times each) the keywords it names; and it names one of those keywords or shares ``SUPPORT_WORDS``
 #: words.  Only the requirement and the line are read, so adding lines to a master never ends another line's support.
@@ -145,7 +144,7 @@ SUPPORT_WORDS = 2
 TERM_WEIGHT = 2
 #: A requirement's evidence is chosen among the lines that support it at least this share as well as its best one.
 EVIDENCE_SHARE = 0.8
-#: A line longer than this (about four printed lines) costs the page what two or three lines do: of two lines that
+#: A line longer than this (about four printed lines) takes the room of two or three lines: of two lines that
 #: support a requirement equally well the other one is its evidence, and among lines that add nothing it goes first.
 LONG_LINE_CHARS = 400
 #: Two lines are one (the weaker is left out) when this share of their words is common to both.
@@ -161,7 +160,7 @@ TITLE_LINES_SHARE = 0.5
 #: The evidence view's budget: the assess prompt's own cap on resume text.
 EVIDENCE_CAP = 12_000
 
-#: The page count reported for a pick too large for the renderer to lay out at all (only ever before the fit).
+#: The page count ``_shipped_measure`` reports for markdown too large for the renderer to lay out at all.
 UNMEASURED_PAGES = 99
 
 #: ``(last page, fill of that page 0..1)`` for resume markdown.
@@ -610,6 +609,9 @@ def _render(master: Master, pick: _Pick, *, ids: bool, notes: bool = False, comp
 
 
 def _shipped_measure(markdown: str) -> tuple[int, float]:
+    """The page ESTIMATE of resume markdown at ``FIT_SCALE``: what a printed profile view says its pages are
+    (``master_profiles``).  No selection calls it (``sel-7``: the selection knows no page limit)."""
+
     from .resume_pdf import ResumeMarkdownError, measure_markdown  # lazy: the layout engine is a large native library
 
     try:
@@ -617,7 +619,7 @@ def _shipped_measure(markdown: str) -> tuple[int, float]:
     except ResumeMarkdownError as exc:
         if exc.code != "resume_markdown_too_large":
             raise
-        # More markdown than the renderer takes is far over any page budget; the fit cuts on from here.
+        # More markdown than the renderer takes: said by a count no real resume has.
         return UNMEASURED_PAGES, 1.0
 
 
@@ -664,13 +666,14 @@ class Requirement:
 
 @dataclass(frozen=True)
 class Conflict:
-    """Something the page budget kept out although the rules say it stays: shown to the user, never silent.
+    """Something the cap kept out although the rules say it stays: shown to the user, never silent.
 
     ``kind``: ``mandatory_evidence`` (a mandatory requirement's evidence line is not shown; ``covered`` says
-    whether a weaker line still covers the requirement), ``must_keep`` (a pinned line is not shown),
+    whether a weaker line still covers the requirement), ``must_keep`` (a pinned line is not shown) or
     ``title_entry`` (no line is shown of a role or project the posting's title names; ``ids``: the entry and
-    its best line), ``earlier_roles`` (``ids``: the roles that are not listed even by their one heading line) or
-    ``over_budget`` (every cut the rules allow was made and the resume is still over the page limit).
+    its best line).  Two more kinds are READ from a selection stored before ``sel-7`` and never made now, because
+    they came from the page limit the selection no longer knows: ``earlier_roles`` (roles not listed even by their
+    heading line) and ``over_budget`` (still over the page limit after every cut).
     """
 
     kind: str
@@ -689,8 +692,8 @@ class Conflict:
 
 @dataclass(frozen=True)
 class LengthCut:
-    """One cut the fit made, in the order it was made. ``kind`` is ``bullet``, ``role``, ``other``, ``skill`` or
-    ``heading`` (the one heading line of a role with no line left: the role is then not listed at all)."""
+    """One cut the page fit of ``sel-2`` to ``sel-6`` made (``Selected.cut_for_length``, empty since ``sel-7``).
+    ``kind`` is ``bullet``, ``role``, ``other``, ``skill`` or ``heading``."""
 
     id: str
     kind: str
@@ -718,9 +721,11 @@ class Selected:
     #: Every line of the master except its Skills lines, in the master's order.
     lines: tuple[LineReason, ...]
     skill_reasons: tuple[SkillReason, ...]
+    #: INFORMATIONAL since ``sel-7`` (kept for readers of the JSON): the selection counts no page, so ``pages`` and
+    #: ``pages_before_fit`` are ``None``, ``last_page_fill`` 0, ``layout_queries`` 0 and ``cut_for_length`` empty.
     max_pages: int
-    pages_before_fit: int
-    pages: int
+    pages_before_fit: int | None
+    pages: int | None
     last_page_fill: float
     layout_queries: int
     cut_for_length: tuple[LengthCut, ...]
@@ -739,7 +744,7 @@ class Selected:
     requirements: tuple[Requirement, ...] = ()
     #: A shown line that is the evidence of a requirement -> the ids of those requirements.
     evidence_for: dict[str, tuple[str, ...]] = field(default_factory=dict)
-    #: What the page budget kept out although the rules say it stays (empty: nothing).
+    #: What the cap kept out although the rules say it stays (empty: nothing).
     conflicts: tuple[Conflict, ...] = ()
     #: A line left out because a better line says the same: id -> that line's id.
     duplicates: dict[str, str] = field(default_factory=dict)
@@ -747,10 +752,16 @@ class Selected:
     title_entries: dict[str, str] = field(default_factory=dict)
     #: The roles shown by their heading alone (no line of theirs is shown), newest first: one line each, printed.
     earlier: tuple[str, ...] = ()
+    #: The cap this selection was made under (``MAX_PICK_BULLETS``; ``None``: every candidate line, no cap).
+    max_bullets: int | None = None
+    #: The bullets left out because the pick held more than the cap, the first left out first.
+    over_cap: tuple[str, ...] = ()
 
     @property
     def fits(self) -> bool:
-        return self.pages <= self.max_pages
+        """Always true since ``sel-7`` (kept for readers): a selection has no page limit to miss."""
+
+        return True
 
     def item_ids(self) -> tuple[str, ...]:
         """The ids of the lines shown, in the order the resume prints them (entry headings are in ``entries``)."""
@@ -787,6 +798,7 @@ class Selected:
                 })
         out: dict[str, object] = {
             "selector_version": self.selector_version,
+            "max_bullets": self.max_bullets, "over_cap": list(self.over_cap),
             "max_pages": self.max_pages, "pages": self.pages, "pages_before_fit": self.pages_before_fit,
             "last_page_fill": self.last_page_fill, "fits": self.fits, "layout_queries": self.layout_queries,
             "counts": {
@@ -1146,8 +1158,7 @@ def select(
     posting: SelectionPosting | None = None,
     *,
     today: date | None = None,
-    measure: Measure | None = None,
-    max_pages: int = MAX_PAGES,
+    max_bullets: int | None = MAX_PICK_BULLETS,
     fill: bool = True,
     title_floor: bool = True,
 ) -> Selected:
@@ -1158,8 +1169,9 @@ def select(
     (``pick.settle``): a valid pick is not overridden by a word-match of the title ("Agent Platform" in a job about
     endpoint agents); the code selector's own selection keeps the rule.
 
-    ``measure`` lays out resume markdown and answers ``(last page, fill)``; the default is the shipped
-    template at ``FIT_SCALE``. ``today`` decides which roles are old (default: today's date).
+    ``max_bullets``: the cap (the module text); ``None`` leaves nothing out for it (the pick the caps of each role
+    and project make, which a candidate set offers).  ``fill`` ``False`` adds nothing to a pick under the cap.
+    ``today`` decides which roles are old (default: today's date).  NOTHING IS LAID OUT and no page is counted.
     """
 
     today = today or date.today()
@@ -1283,8 +1295,8 @@ def select(
         if item_id not in chosen_other:
             out[item_id] = ("other_limit", f"over the limit of {MAX_OTHER} Other lines; the lines shown score higher for {subject}")
 
-    # 6. Skills: the whole section. What the posting asks for first (matched inside a group), then what the
-    #    picked lines name, then the rest; the order is settled here, before the fit, so a cut never moves a skill.
+    # 6. Skills: the whole section, always. What the posting asks for first (matched inside a group, in the posting's
+    #    order), then the rest by name.
     all_skills = master.skills()
     atoms = {skill: skill_atoms(skill) for skill in all_skills}
     asked_kind: dict[str, str] = {}
@@ -1294,8 +1306,6 @@ def select(
                 for skill in all_skills:
                     if skill not in asked_kind and any(mentions(atom, term) for atom in atoms[skill]):
                         asked_kind[skill] = kind
-    picked_text = " ".join(master.items[i].text for i in pick.bullet_ids())
-    named_by_pick = {skill for skill in all_skills if skill not in asked_kind and any(mentions(picked_text, atom) for atom in atoms[skill])}
     # What the posting asks for in the posting's own order, then by name: never in the order the master lists
     # its skills, so the same skills listed or grouped another way print in the same places.
     asked_at: dict[str, tuple[int, int]] = {}
@@ -1318,16 +1328,14 @@ def select(
                 shown.entries[entry_id] = sorted(bullets, key=key.__getitem__, reverse=True)
         return shown
 
-    measured: dict[str, tuple[int, float]] = {}
-    lay_out = measure or _shipped_measure
+    def counted(trial: _Pick) -> int:
+        """What the cap counts: the bullets under roles and projects (never a degree's detail, an Other line or a heading)."""
 
-    def end_of(trial: _Pick) -> tuple[int, float]:
-        markdown = _render(master, view(trial), ids=False, compact=True)
-        if markdown not in measured:
-            measured[markdown] = lay_out(markdown)
-        return measured[markdown]
+        return sum(len(bullets) for entry_id, bullets in trial.entries.items() if master.entries[entry_id].section != "education")
 
-    # 7. FIT: the cuts in the one order they may be applied (the module text): lowest value first.
+    # 7. THE CAP: the bullets in the one order they are left out (the module text), lowest value first.  Nothing is
+    #    laid out and no page is counted: the Other lines, the Skills and the roles' heading lines are not bullets
+    #    and are never left out here.
     recent = {entry.id for entry in roles if entry.id not in old}
     floors = {entry.id: _rank(index, FLOORS) for index, entry in enumerate(roles) if entry.id in recent}
     remaining = {entry_id: len(bullets) for entry_id, bullets in pick.entries.items()}
@@ -1335,191 +1343,106 @@ def select(
 
     def cut_lines(ids: Iterable[str], *, forced_cut: bool) -> None:
         for item_id in sorted(ids, key=key.__getitem__):
-            item = master.items[item_id]
-            if item.kind == KIND_OTHER:
-                cuts.append(_Cut("other", item_id, forced_cut))
-                continue
-            entry_id = item.entry_id or ""
+            entry_id = master.items[item_id].entry_id or ""
             if remaining[entry_id] <= floors.get(entry_id, 0):
                 continue  # a recent role keeps its best line
             remaining[entry_id] -= 1
             cuts.append(_Cut("bullet", item_id, forced_cut))
 
-    cuttable = [*(bullet for entry_id, bullets in pick.entries.items() if master.entries[entry_id].section != "education" for bullet in bullets), *pick.other]
+    cuttable = [bullet for entry_id, bullets in pick.entries.items() if master.entries[entry_id].section != "education" for bullet in bullets]
     kept_for_last = set(keys.evidence) | set(pins) | title_lines
-    # What adds nothing the posting asks for goes first: bullets, then the Other lines that name nothing it asks
-    # for. Then the rest by value; an Other line that names a keyword or supports a requirement (a certification
-    # the posting asks for, a talk on its subject: one short line each) goes after the bullets.
+    # What adds nothing the posting asks for goes first, then the rest by value.
     free = [item_id for item_id in cuttable if item_id not in kept_for_last]
-    other_about = {item_id for item_id in free if master.items[item_id].kind == KIND_OTHER and keys.supports.get(item_id)}
-    # A Skills section too long to print whole (``SKILLS_WHOLE``): the names past that count that nothing asks for
-    # and no picked line names are worth less than any line, and go first.
-    plain = [skill for skill in skill_order if skill not in asked_kind and skill not in named_by_pick]
-    surplus = plain[max(0, SKILLS_WHOLE - (len(skill_order) - len(plain))):]
-    cuts += [_Cut("skill", skill) for skill in reversed(surplus)]
-    cut_lines((item_id for item_id in free if keys.klass(item_id) == 0 and master.items[item_id].kind == KIND_BULLET), forced_cut=False)
-    cut_lines((item_id for item_id in free if master.items[item_id].kind == KIND_OTHER and item_id not in other_about), forced_cut=False)
-    cut_lines((item_id for item_id in free if keys.klass(item_id) > 0 and master.items[item_id].kind == KIND_BULLET), forced_cut=False)
-    cut_lines(other_about, forced_cut=False)
-    # Then the one line of an entry the posting's title names: every line that is not evidence or a pin went first.
+    cut_lines((item_id for item_id in free if keys.klass(item_id) == 0), forced_cut=False)
+    cut_lines((item_id for item_id in free if keys.klass(item_id) > 0), forced_cut=False)
+    # Then, each one a conflict: the one line of an entry the posting's title names, the pins, and last of all the
+    # MUST-COVER lines (a requirement's evidence): never left out while any other line can go.
     cut_lines((item_id for item_id in cuttable if item_id in title_lines and item_id not in keys.evidence and item_id not in pins), forced_cut=True)
-    gone = set(surplus)
-    # THE HEADING LINES of the roles with no line left by now (``sel-6``): the oldest role's first.  They are cut only
-    # after the Skills below, when nothing is left but pins and requirements' evidence, and each one is a conflict.
-    heading_cuts = [_Cut("heading", entry.id, True) for entry in reversed(roles) if not remaining.get(entry.id)]
-    # The rest of the Skills section only when no line is left to cut: what nothing asks for and no picked line
-    # names first, what the posting asks for last.
-    kept_skills = [skill for skill in skill_order if skill not in gone]
-    cuts += [_Cut("skill", skill) for skill in sorted(kept_skills, key=lambda skill: (skill in asked_kind, skill in named_by_pick, -skill_order.index(skill)))]
-    cuts += heading_cuts
     cut_lines((item_id for item_id in cuttable if item_id in pins and item_id not in keys.evidence), forced_cut=True)
     cut_lines((item_id for item_id in cuttable if item_id in keys.evidence), forced_cut=True)
 
     def without(gone: Iterable[_Cut]) -> _Pick:
         trial = pick.copy()
-        unlisted: set[str] = set()
         for cut in gone:
-            if cut.kind == "bullet":
-                entry_id = master.items[cut.id].entry_id or ""
-                trial.entries[entry_id] = [b for b in trial.entries[entry_id] if b != cut.id]
-            elif cut.kind == "other":
-                trial.other = [i for i in trial.other if i != cut.id]
-            elif cut.kind == "heading":
-                unlisted.add(cut.id)
-            else:
-                trial.skills = [name for name in trial.skills if name != cut.id]
+            entry_id = master.items[cut.id].entry_id or ""
+            trial.entries[entry_id] = [b for b in trial.entries[entry_id] if b != cut.id]
         # A project whose lines all went goes whole.  A ROLE whose lines all went keeps its one heading line
-        # (``sel-6``: no employer is dropped silently), unless that line was cut too.
+        # (``sel-6``: no employer is dropped silently).
         for entry_id in [entry_id for entry_id, bullets in trial.entries.items() if not bullets]:
-            section = master.entries[entry_id].section
-            if section == "projects" or (section == "experience" and entry_id in unlisted):
+            if master.entries[entry_id].section == "projects":
                 del trial.entries[entry_id]
         return trial
 
-    before = end_of(pick)
-    applied: list[_Cut] = []
-    if before[0] > max_pages:
-        low, high = 0, len(cuts)  # the fewest cuts that fit; every cut applied is the most the rules allow
-        while low < high:
-            mid = (low + high) // 2
-            if end_of(without(cuts[:mid]))[0] <= max_pages:
-                high = mid
-            else:
-                low = mid + 1
-        applied = list(cuts[:low])
+    over = 0 if max_bullets is None else max(0, counted(pick) - max_bullets)
+    applied: list[_Cut] = list(cuts[:over])  # each one takes exactly one bullet off the count
     fitted = without(applied)
 
-    # 8. FILL: room left on the last page goes to the best lines not shown: the ones just cut, and the
-    #    bullets of the recent roles and of the shown projects that a cap left out. Best first; an old role's
-    #    line that supports nothing never comes back.
+    # 8. FILL: a pick under the cap takes the best lines not shown, best first.  First the bullets of the recent roles
+    #    and of the shown projects that a cap of their own left out (up to ``HARD_CAPS``; an old role's line that
+    #    supports nothing is not one of them).  Then, still under the cap, any other candidate line of the master, so
+    #    a master with fewer lines than the cap shows them all; an old role never more than its ``old_role_bullets``.
     added_to_fill: list[str] = []
-
-    def with_fill(gone: Iterable[_Cut], added: Iterable[str]) -> _Pick:
-        trial = without(gone)
-        for item_id in added:
-            entry_id = master.items[item_id].entry_id or ""
-            trial.entries.setdefault(entry_id, []).append(item_id)
-            if master.entries[entry_id].section == "projects":
-                trial.entries[entry_id].sort(key=lambda bullet: master.items[bullet].order)
-        return trial
-
-    # A heading line that was cut on the way to a cut further on (a pin, a requirement's evidence) comes back when the
-    # result has room for it after all, the newest role's first: with or without the fill, no employer goes needlessly.
-    if end_of(fitted)[0] <= max_pages:
-        for cut in [cut for cut in reversed(applied) if cut.kind == "heading"]:
-            trial = with_fill([item for item in applied if item != cut], added_to_fill)
-            if end_of(trial)[0] <= max_pages:
-                applied.remove(cut)
-                fitted = trial
-
-    if fill and end_of(fitted)[0] <= max_pages:
-        def skills_back(names: set[str]) -> None:
-            nonlocal fitted
-            for cut in [cut for cut in reversed(applied) if cut.kind == "skill" and cut.id in names]:
-                trial = with_fill([item for item in applied if item != cut], added_to_fill)
-                if end_of(trial)[0] <= max_pages:
-                    applied.remove(cut)
-                    fitted = trial
-
-        skills_back(set(skill_order) - gone)  # the Skills section proper first: it is kept whole when it fits
-        cut_back = {cut.id: cut for cut in applied if cut.kind in ("bullet", "other")}
-        in_pick = set(cuttable)
+    if fill and max_bullets is not None and not applied:
         limits = {**{entry.id: hard[entry.id] for entry in roles if entry.id in recent}, **{entry_id: PROJECT_HARD_BULLETS for entry_id in shown_projects}}
-        extras = [bullet for entry_id in limits for bullet in master.entries[entry_id].bullets if bullet in key and bullet not in in_pick]
-        tries = 0
-        for item_id in best_first([*cut_back, *extras]):
-            if tries == FILL_TRIES:
+        in_pick = set(cuttable)
+        entry_lines = [entry for section in ("experience", "projects") for entry in master.entries_in(section)]
+        unshown = best_first(bullet for entry in entry_lines for bullet in entry.bullets if bullet in key and bullet not in in_pick)
+
+        def add(item_id: str) -> None:
+            entry_id = master.items[item_id].entry_id or ""
+            fitted.entries.setdefault(entry_id, []).append(item_id)
+            if master.entries[entry_id].section == "projects":
+                fitted.entries[entry_id].sort(key=lambda bullet: master.items[bullet].order)
+            added_to_fill.append(item_id)
+
+        for item_id in unshown:
+            if counted(fitted) >= max_bullets:
                 break
-            item = master.items[item_id]
-            if item.kind == KIND_BULLET and item.entry_id in old and keys.klass(item_id) == 0:
+            entry_id = master.items[item_id].entry_id or ""
+            if entry_id in limits and len(fitted.entries.get(entry_id, ())) < limits[entry_id]:
+                add(item_id)
+        for item_id in unshown:
+            if counted(fitted) >= max_bullets:
+                break
+            entry_id = master.items[item_id].entry_id or ""
+            if item_id in added_to_fill or (entry_id in old and len(fitted.entries.get(entry_id, ())) >= LENGTH_RULE.old_role_bullets):
                 continue
-            if item_id in cut_back:
-                trial = with_fill([cut for cut in applied if cut is not cut_back[item_id]], added_to_fill)
-            else:
-                if len(fitted.entries.get(item.entry_id or "", ())) >= limits[item.entry_id or ""]:
-                    continue
-                trial = with_fill(applied, [*added_to_fill, item_id])
-            tries += 1
-            if end_of(trial)[0] > max_pages:
-                continue
-            fitted = trial
-            if item_id in cut_back:
-                applied.remove(cut_back[item_id])
-            else:
-                added_to_fill.append(item_id)
-        skills_back(gone)  # last, the names of a too-long Skills section that nothing asks for
+            add(item_id)
 
     final = view(fitted)
-    pages, last_fill = end_of(fitted)
 
     # The reasons: every line of the master, shown or not.
     shown_ids = set(final.summary) | set(final.bullet_ids()) | set(final.other)
-    # A role with no line shown: listed by its heading alone (``earlier``), or not at all (``unlisted``: a conflict).
+    # A role with no line shown is listed by its heading alone (``earlier``); none is left out.
     dropped = [entry for entry in roles if not final.entries.get(entry.id)]
-    earlier = tuple(entry.id for entry in dropped if entry.id in final.entries)
-    unlisted = tuple(entry.id for entry in dropped if entry.id not in final.entries)
+    earlier = tuple(entry.id for entry in dropped)
     dropped_ids = {entry.id for entry in dropped}
+    best = "its best lines" if max_bullets is None else f"its {max_bullets} best lines"
     why: dict[str, tuple[str, str]] = {}
     for item_id in shown_ids:
         why[item_id] = reason_for(master.items[item_id])
     if summary is not None:
         why[summary.id] = reason_for(summary) if scores.hits.get(summary.id) else ("summary_variant", f"the summary that fits {subject} best")
-    length_cuts: list[LengthCut] = []
-    role_cut: set[str] = set()
     for cut in applied:
-        if cut.kind == "skill":
-            length_cuts.append(LengthCut(cut.id, "skill", "cut_for_length", "cut for length: the Skills section did not fit"))
-            continue
-        if cut.kind == "heading":
-            if cut.id in unlisted:
-                length_cuts.append(LengthCut(cut.id, "heading", "cut_conflict", "cut for length although the rules say it stays: even this role's one heading line does not fit the page limit (see conflicts)"))
-            continue
         entry_id = master.items[cut.id].entry_id or ""
         if cut.forced:
-            code, reason = "cut_conflict", "cut for length although the rules say it stays: it does not fit the page limit (see conflicts)"
+            out[cut.id] = ("cut_conflict", f"left out although the rules say it stays: the resume shows {best} and this one is past them (see conflicts)")
         elif entry_id in dropped_ids:
-            code, reason = "cut_role_dropped", f"cut for length: no line of this older role is evidence for {subject}"
+            out[cut.id] = ("role_dropped", f"no line of this role is among {best} for {subject}; the role is listed by its heading")
         else:
-            code, reason = "cut_lowest_value", f"cut for length: lowest value for {subject}"
-        length_cuts.append(LengthCut(cut.id, cut.kind, code, reason))
-        out[cut.id] = (code, reason)
-        if entry_id in dropped_ids and entry_id not in role_cut and not any(b in shown_ids for b in master.entries[entry_id].bullets):
-            if all(b in {c.id for c in applied[: applied.index(cut) + 1]} for b in pick.entries[entry_id]):
-                role_cut.add(entry_id)
-                length_cuts.append(LengthCut(entry_id, "role", "cut_role_dropped", f"cut for length: no line of this older role is evidence for {subject}"))
+            out[cut.id] = ("over_cap", f"the resume shows {best} for {subject}, and this one scores lower")
     for entry in dropped:
         for bullet in entry.bullets:
             if out.get(bullet, ("role_limit",))[0] == "role_limit":
-                out[bullet] = ("role_dropped", "its role was cut for length")
+                out[bullet] = ("role_dropped", f"no line of this role is among {best} for {subject}; the role is listed by its heading")
     for item_id in added_to_fill:
         code, reason = reason_for(master.items[item_id])
-        why[item_id] = ("room_left", f"{reason} (room left on the page)")
+        why[item_id] = ("room_left", f"{reason} (room left under the cap)")
 
     lines = tuple(
         LineReason(item.id, item.id in shown_ids, *(why[item.id] if item.id in shown_ids else out.get(item.id, ("not_picked", f"scores lower for {subject} than the lines shown"))))
         for item in master.items.values() if item.kind in (KIND_SUMMARY, KIND_BULLET, KIND_OTHER)
     )
-    shown_skills = set(final.skills)
     final_text = " ".join(master.items[i].text for i in fitted.bullet_ids())
     skill_reasons: list[SkillReason] = []
     for skill in final.skills:
@@ -1531,38 +1454,32 @@ def select(
             skill_reasons.append(SkillReason(skill, True, "named_by_line", "a shown line names it"))
         else:
             skill_reasons.append(SkillReason(skill, True, "listed", "your master lists it; the Skills section is kept whole"))
-    skill_reasons += [
-        SkillReason(skill, False, "cut_for_length", "cut for length: the Skills section did not fit") for skill in all_skills if skill not in shown_skills
-    ]
 
-    # What the page budget kept out although the rules say it stays.
+    # What the cap kept out although the rules say it stays.
+    cap = f"the {max_bullets} bullets a resume shows"
     conflicts: list[Conflict] = []
     for requirement in keys.requirements:
         if not requirement.mandatory or not requirement.supporters or requirement.supporters[0] in shown_ids:
             continue
         covered = any(item_id in shown_ids for item_id in requirement.supporters)
         if not requirement.cited:
-            why = "the strongest evidence for this requirement does not fit the page limit beside the other requirements' evidence" + (
+            why = f"the strongest evidence for this requirement is not among {cap}, beside the other requirements' evidence" + (
                 "; a weaker line still covers it" if covered else "; no line covers it now")
         elif master.items[requirement.supporters[0]].kind == KIND_SUMMARY:
             why = "the assessment cites a summary this resume does not show; no line it cites is shown"
         else:
-            why = "the line the assessment cites for this requirement does not fit the page limit beside the other requirements' evidence" + (
+            why = f"the line the assessment cites for this requirement is not among {cap}, beside the other requirements' evidence" + (
                 "; another line it cites is shown" if covered else "; no line it cites is shown now")
         conflicts.append(Conflict("mandatory_evidence", (requirement.supporters[0],), why, requirement.id, requirement.text, covered))
     for entry_id, item_id in keys.title_floor.items():
         if not final.entries.get(entry_id):
             conflicts.append(Conflict(
                 "title_entry", (entry_id, item_id),
-                "the posting's title names this role or project, and its best line does not fit the page limit beside the requirements' evidence",
+                f"the posting's title names this role or project, and its best line is not among {cap}, beside the requirements' evidence",
             ))
     missing_pins = tuple(item_id for item_id in pins if item_id in key and item_id not in shown_ids)
     if missing_pins:
-        conflicts.append(Conflict("must_keep", missing_pins, "these pinned lines do not fit the page limit beside the requirements' evidence"))
-    if unlisted:
-        conflicts.append(Conflict("earlier_roles", unlisted, unlisted_roles_reason(len(unlisted), max_pages)))
-    if pages > max_pages:
-        conflicts.append(Conflict("over_budget", (), f"{pages} pages after every cut the rules allow; the limit is {max_pages}"))
+        conflicts.append(Conflict("must_keep", missing_pins, f"these pinned lines are not among {cap}, beside the requirements' evidence"))
 
     markdown = _render(master, final, ids=False, compact=True)
     coverage: dict[str, tuple[str, ...]] = {}
@@ -1587,12 +1504,12 @@ def select(
         markdown_with_ids=_render(master, final, ids=True, compact=True),
         lines=lines,
         skill_reasons=tuple(skill_reasons),
-        max_pages=max_pages,
-        pages_before_fit=before[0],
-        pages=pages,
-        last_page_fill=round(last_fill, 2),
-        layout_queries=len(measured),
-        cut_for_length=tuple(length_cuts),
+        max_pages=MAX_PAGES,
+        pages_before_fit=None,
+        pages=None,
+        last_page_fill=0.0,
+        layout_queries=0,
+        cut_for_length=(),
         added_to_fill=tuple(added_to_fill),
         only_evidence={},
         shown_instead={},
@@ -1606,11 +1523,16 @@ def select(
         duplicates=dict(keys.duplicates),
         title_entries=dict(keys.title_floor),
         earlier=earlier,
+        max_bullets=max_bullets,
+        over_cap=tuple(cut.id for cut in applied),
     )
 
 
 def unlisted_roles_reason(count: int, max_pages: int) -> str:
-    """The sentence of an ``earlier_roles`` conflict: what a person reads when a role's heading line could not stay."""
+    """The sentence of an ``earlier_roles`` conflict: what a person reads when a role's heading line could not stay.
+
+    For a resume cut to its pages by a fit that still runs on a stored resume (an Add that makes room on one picked
+    before ``sel-7``); no selection makes this conflict now."""
 
     roles = "1 older role is" if count == 1 else f"{count} older roles are"
     pages = f"{max_pages} page{'' if max_pages == 1 else 's'}"
@@ -1674,12 +1596,13 @@ def render_selection(master: Master, item_ids: Iterable[str], skills: Iterable[s
 
 @dataclass(frozen=True)
 class SelectionChecks:
-    """One selection (the ids and skills it shows) against the CURRENT master, requirements and page budget.
+    """One selection (the ids and skills it shows) against the CURRENT master and requirements.
 
     Separate checks, never one score: ``lost`` (mandatory requirements the master supports with no line
-    shown), ``weak`` (those whose evidence, the strongest line, is not shown), ``pins_missing``, and the page
-    constraint (``pages``, ``empty_entries``).  ``invalid`` names the ids that are not current lines of the
-    master: a retired line, or one corrected since the selection was made."""
+    shown), ``weak`` (those whose evidence, the strongest line, is not shown), ``pins_missing``, and
+    ``empty_entries`` (a project named with no line).  ``invalid`` names the ids that are not current lines of the
+    master: a retired line, or one corrected since the selection was made.  ``pages`` is ``None`` and ``fits``
+    reads ``empty_entries`` alone since ``sel-7``: a selection has no page limit (the fields stay for readers)."""
 
     invalid: tuple[str, ...]
     covered: tuple[str, ...]
@@ -1688,7 +1611,7 @@ class SelectionChecks:
     weak: tuple[str, ...]
     pins_shown: tuple[str, ...]
     pins_missing: tuple[str, ...]
-    pages: int
+    pages: int | None
     max_pages: int
     empty_entries: tuple[str, ...]
 
@@ -1698,7 +1621,7 @@ class SelectionChecks:
 
     @property
     def fits(self) -> bool:
-        return self.pages <= self.max_pages and not self.empty_entries
+        return not self.empty_entries
 
     def to_json(self) -> dict[str, object]:
         return {
@@ -1710,7 +1633,7 @@ class SelectionChecks:
 
 def check_selection(
     master: Master, requirements: Iterable[Requirement], item_ids: Iterable[str], skills: Iterable[str], *, stale: Iterable[str] = (),
-    pins: Iterable[str] = (), measure: Measure | None = None, max_pages: int = MAX_PAGES,
+    pins: Iterable[str] = (),
 ) -> SelectionChecks:
     """``item_ids`` and ``skills`` (a stored selection, or a ``Selected``'s) checked against the current sources.
 
@@ -1732,7 +1655,6 @@ def check_selection(
         (covered if shown & set(requirement.supporters) else lost).append(requirement.id)
         (strongest if requirement.supporters[0] in shown else weak).append(requirement.id)
     pinned = [item_id for item_id in dict.fromkeys(pins) if item_id in master.items]
-    markdown = render_selection(master, wanted, skills)
     named = {item_id for item_id in wanted if item_id in master.entries} | {master.items[item_id].entry_id or "" for item_id in shown}
     # (A role named with no line of its own is its one heading line, ``sel-6``: only a project can be empty.)
     empty = tuple(
@@ -1743,7 +1665,7 @@ def check_selection(
     return SelectionChecks(
         invalid=invalid, covered=tuple(covered), lost=tuple(lost), strongest=tuple(strongest), weak=tuple(weak),
         pins_shown=tuple(item_id for item_id in pinned if item_id in shown), pins_missing=tuple(item_id for item_id in pinned if item_id not in shown),
-        pages=(measure or _shipped_measure)(markdown)[0], max_pages=max_pages, empty_entries=tuple(sorted(empty)),
+        pages=None, max_pages=MAX_PAGES, empty_entries=tuple(sorted(empty)),
     )
 
 
@@ -1777,21 +1699,21 @@ class Remake:
 
 def compare_selections(
     master: Master, new: Selected, previous_ids: Iterable[str], previous_skills: Iterable[str], *, stale: Iterable[str] = (),
-    pins: Iterable[str] = (), measure: Measure | None = None,
+    pins: Iterable[str] = (),
 ) -> Remake:
     """The re-make rule (0110-10-15): which of a stored selection and the one just made stands.
 
-    Both are checked against the SAME current sources (the master as it is, ``new``'s requirements, the page
-    budget) on the separate checks of ``SelectionChecks``; nothing is added up, so a lost requirement is
+    Both are checked against the SAME current sources (the master as it is, ``new``'s requirements) on the
+    separate checks of ``SelectionChecks``; nothing is added up, so a lost requirement is
     never offset by more skills or lines.  The previous selection is kept only when it is still valid (it
-    shows no retired line and none in ``stale``, the ids corrected since it was made), still meets the page
-    constraint, AND the new one regresses on a check.  When the new one regresses and the previous one
+    shows no retired line and none in ``stale``, the ids corrected since it was made), names no project with no
+    line, AND the new one regresses on a check.  No page is counted for either (``sel-7``).  When the new one regresses and the previous one
     cannot be kept, the answer is ``unresolved``: the caller shows the problem and picks neither silently.
     """
 
     pins = tuple(pins)
-    was = check_selection(master, new.requirements, previous_ids, previous_skills, stale=stale, pins=pins, measure=measure, max_pages=new.max_pages)
-    now = check_selection(master, new.requirements, new.stored_ids(), new.skills, pins=pins, measure=measure, max_pages=new.max_pages)
+    was = check_selection(master, new.requirements, previous_ids, previous_skills, stale=stale, pins=pins)
+    now = check_selection(master, new.requirements, new.stored_ids(), new.skills, pins=pins)
     by_id = {requirement.id: requirement.text for requirement in new.requirements}
     regressions: list[str] = []
     gone = [req for req in was.covered if req not in now.covered]
@@ -1804,14 +1726,14 @@ def compare_selections(
     if unpinned:
         regressions.append("must-keep lines no longer shown: " + ", ".join(unpinned))
     if was.fits and not now.fits:
-        regressions.append(f"page fit: {now.pages} pages" + (f", no bullet under {', '.join(now.empty_entries)}" if now.empty_entries else ""))
+        regressions.append(f"no bullet under {', '.join(now.empty_entries)}")
     if not regressions:
         return Remake(REMAKE_NEW, was, now)
     problems: list[str] = []
     if was.invalid:
         problems.append("the previous selection shows lines the master has retired or corrected: " + ", ".join(was.invalid))
     if not was.fits:
-        problems.append(f"the previous selection no longer meets the page limit ({was.pages} pages)")
+        problems.append(f"the previous selection names a project with no line: {', '.join(was.empty_entries)}")
     if not problems:
         return Remake(REMAKE_PREVIOUS, was, now, tuple(regressions))
     return Remake(REMAKE_UNRESOLVED, was, now, tuple(regressions), tuple(problems))
@@ -1927,6 +1849,7 @@ __all__ = [
     "LineReason",
     "MAX_OTHER",
     "MAX_PAGES",
+    "MAX_PICK_BULLETS",
     "MAX_PROJECTS",
     "Measure",
     "NOTE_LABEL",
@@ -1939,7 +1862,6 @@ __all__ = [
     "Remake",
     "Requirement",
     "SELECTOR_VERSION",
-    "SKILLS_WHOLE",
     "Selected",
     "SelectionChecks",
     "SelectionPosting",

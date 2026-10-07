@@ -12,6 +12,7 @@ from pathlib import Path
 import pytest
 
 from gigai.scout import assess_master
+from gigai.scout import master_selection as ms
 from gigai.scout.master_selection import EVIDENCE_CAP
 from tests.evals import run_master_assess_eval as runner
 
@@ -31,14 +32,16 @@ def test_the_cases_are_the_spikes_six_and_the_matrix_postings_for_the_infrastruc
         runner.plan(["whole"], found, 1)
 
 
-def test_the_view_is_the_profiles_two_pages_and_the_evidence_view_is_what_the_product_builds() -> None:
+def test_the_view_is_the_profiles_selection_and_the_evidence_view_is_what_the_product_builds() -> None:
     master = runner.load_master()
     for profile in runner.load_profiles():
         view = runner.profile_view(master, profile)
-        assert view.pages == 2 and view.fits
+        # The profile's standing selection: its best lines up to the cap; it counts no page (0.1.11.5 item 1c).
+        bullets = sum(len(lines) for entry_id, lines in view.entries.items() if master.entries[entry_id].section != "education")
+        assert view.pages is None and view.fits and bullets == view.max_bullets == ms.MAX_PICK_BULLETS
         for posting in runner.load_postings():
             text, holds = runner.resume_text(runner.VARIANT_VIEW, master, profile, posting, view)
-            assert text == view.markdown and holds["pages"] == 2
+            assert text == view.markdown and holds["pages"] is None
             text, holds = runner.resume_text(runner.VARIANT_EVIDENCE, master, profile, posting, view)
             # The product's own builder, with the prior a profile on that view has.
             built = assess_master.evidence_text(

@@ -1,24 +1,22 @@
-"""0.1.11.3 item 15: a pick keeps room for the PDF's header, and a resume that still does not fit is shortened for the user.
+"""The pick and the page (0.1.11.3 item 15, rewritten for 0.1.11.5 item 1c): the pick holds its 20 bullets and counts
+no page; the PDF says its real pages; Shorten leaves out one more bullet.
 
-The operator's case (a job whose pick said "2 pages of 2"), on synthetic data: the pick's page estimate kept a
-two-line header's block and its fill packed page 2 to the last line, so the PDF with the name and contact details
-on it ran to a 3rd page, and Generate PDF said "does not fit on 2 pages even with the tightest spacing".
+Until 0.1.11.5 the pick was fitted to 2 pages with room kept for the PDF's header (``sel-5``), and this file pinned
+"the pick's pages are the PDF's pages", and "Shorten automatically". The pick no longer knows the page limit: the user
+fits the page with the spacing of the job's preview, or removes a point there; Shorten is RETIRED. What is pinned now, on synthetic data (a master of 56 long lines, a pick of all of them):
 
-THE END OUTCOME, read from the PDF that comes back (pypdf counts its pages):
-
-- a pick that needed the fit (the master is 3+ pages) and fills its 2 pages prints on 2 pages WITH a header at its
-  largest (the name, a contact line that wraps once), at the pick's own spacing: no tightening, no compact chips, no
-  note; with a saved title's line on top of that it is still 2 pages. Through the CLI with the person's header file and through ``POST /api/tailored-resumes/pdf``
-  with the form. The PDF's pages are the pick's (``picked.pages``);
-- a resume the PDF cannot put on its pages (a pick made with no room for a header, the way picks before this were
-  made) gets the plain sentence, and that sentence names the way out: Shorten automatically;
-- ``gigai scout resume pick --shorten`` (the button's own request, ``POST /api/job-resumes/pick`` ``shorten``) picks
-  again under a tighter page budget with NO model call: the PDF then fits, the answer says which lines it left out
-  in plain words (the lines' text, never an id), and no line that backs a must-have requirement is among them while
-  another line could go;
-- when nothing but must-have lines is left, one of them goes and the answer says so;
-- a resume the user edited is kept: the shorter one waits as the new suggested resume, and the answer says that;
-- a job with no stored resume, and a resume that already fits with most of a page to spare, are refused in plain words.
+- the pick holds exactly ``MAX_PICK_BULLETS`` bullets, every must-have line among them, every role listed (an old role
+  by at most 3 lines), nothing "cut for length", no page count on the record;
+- the PDF of it at the automatic fit (the CLI with the person's header file, and ``POST /api/tailored-resumes/pdf``
+  with the form) reports its REAL page count, here 3: the plain sentence names the way out, and the resume is still
+  READY (the page count is never a reason);
+- a re-pick of a job whose stored pick is shorter (made under a smaller cap, as picks before 0.1.11.5 stopped at 14)
+  holds the 20;
+- must-cover lines are the last to go under a smaller cap, and when one does the pick says so (a conflict, not ready);
+- a re-pick leaves a resume the user edited untouched: the new pick waits as the suggested one;
+- ``gigai scout resume pick --shorten`` and ``POST /api/job-resumes/pick`` ``shorten`` are RETIRED (the coordinator's
+  decision in 0.1.11.5: the slider and Remove-a-point replace them): refused with ``shorten_retired`` and one plain
+  sentence, nothing read, nothing written.
 
 A fake model (the pipeline fixture's scripted one), one synthetic profile, an invented master. The pipeline is off.
 """
@@ -39,16 +37,15 @@ import httpx
 import pytest
 from pypdf import PdfReader
 
-from gigai.scout import assessment_core, pick, postings, suggestions
+from gigai.scout import assessment_core, pick, postings, resume_pdf, suggestions
 from gigai.scout import tailor_master as tm
 from gigai.scout.find_jobs.assess_contracts import AssessJobInput, AssessRequest, AssessResumeInput
 from gigai.scout.find_jobs.contracts import normalize_url
-from gigai.scout.master_selection import FIT_SCALE
+from gigai.scout.master_selection import MAX_PICK_BULLETS
 from gigai.scout.master_store import import_master, load_master
 from gigai.scout.pipeline.settings import PIPELINE_ENV
 from gigai.scout.quick_assess import run_quick_assessment
-from gigai.scout.resume_display import DisplaySettings, form_header, parse_header_form, save_display
-from gigai.scout.resume_pdf import _body, _render, pages_at
+from gigai.scout.resume_display import DisplaySettings, save_display
 from gigai.scout.scout_cli import scout_group
 from gigai.scout.tailored_resume import TailorEdit, read_tailored_resume, save_tailor_response, tailored_resume_path
 
@@ -67,10 +64,10 @@ _POSTING = (
 )
 REQUIREMENTS = ("5+ years of Python in production", "Kubernetes", "Terraform modules for every cluster", "React in production")
 ROLES = (("Thistledown Market", "2024 - Present"), ("Harborlight Health", "2022 - 2024"), ("Quillshire Freight", "2020 - 2022"), ("Lanternfish Labs", "2013 - 2015"))
-#: The last role ended long ago: an OLD role, which the fit may drop whole (a recent role always keeps its best line).
+#: The last role ended long ago: an OLD role (at most 3 lines; listed by its heading when none is left; a recent role always keeps its best line).
 OLD_ROLE_LINE = "Shipped the React storefront used by two million shoppers."
 LINES_PER_ROLE = 14
-#: The lines the assessment's must-have rows rest on: each the LAST line of its role, where a cut by rank alone comes first.
+#: The lines the assessment's must-have rows rest on: each the LAST line of its role, where a cap by rank alone leaves it out first.
 PYTHON_LINE = "Built Python services for six years; cut p99 latency by 40%."
 KUBERNETES_LINE = "Operated Kubernetes clusters backed by PostgreSQL."
 TERRAFORM_LINE = "Wrote the Terraform modules every Kubernetes cluster is built from."
@@ -85,11 +82,22 @@ FORM = {
     "links": [{"label": "GitHub", "url": "github.com/zora-quillfeather"}],
 }
 HEADER_FILE = {key: value for key, value in FORM.items() if key != "linkedin"} | {"links": [*FORM["links"], {"label": "LinkedIn", "url": FORM["linkedin"]}]}
-_INTERNAL = re.compile(r"\bb-[0-9a-z]{4,}\b|req-[0-9a-f]+|max_pages|header_lines|cut_for_length|mandatory_evidence|settle|Traceback")
+_INTERNAL = re.compile(r"\bb-[0-9a-z]{4,}\b|req-[0-9a-f]+|max_pages|max_bullets|header_lines|cut_for_length|mandatory_evidence|settle|Traceback")
+
+
+_NUMBERS = re.compile(r"\s*<!-- R\d+ -->")
+_NUMBER = re.compile(r"\s*<!-- R\d+ -->\Z")  # a stored resume's markdown numbers each line
 
 
 def _line(role: int, line: int) -> str:
-    return f"Role {role} line {line}: built the scheduling and billing pipeline that moved {line + 3}0 million records a day across four regions with no data loss."
+    # Long on purpose (about six printed lines): a pick of twenty bullets does not print on 2 pages at any spacing.
+    return (
+        f"Role {role} line {line}: built the scheduling and billing pipeline that moved {line + 3}0 million records a day across four regions with no data "
+        "loss, then ran the migration of every tenant onto it over nine months with the old and the new system reconciled row by row each night, "
+        "and wrote the runbook, the dashboards and the paging rules the on-call engineers of three teams have used since the first week; "
+        "trained two new teams on it, handed the service over with no open incident, and stayed on its review rota for the following year, "
+        "during which the monthly close fell from six working days to two and no customer invoice had to be reissued."
+    )
 
 
 def master_markdown() -> str:
@@ -126,8 +134,6 @@ def fx(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptur
     source = tmp_path / "master.md"
     source.write_text(MASTER, encoding="utf-8")
     assert import_master(home_root=fixture.home_root, target=fixture.target, source=source, gig_id=base.gig.resolved.gig_id).status == "created"
-    # The operator's layout: the spacing the pick is measured at, auto fit off.
-    save_display(fixture.home_root, DisplaySettings(spacing_scale=FIT_SCALE, auto_fit=False))
     caplog.set_level(logging.WARNING, logger="gigai.scout.server")
     return fixture
 
@@ -165,14 +171,30 @@ def _assess(fx: PostingsFixture, answer: str | None = None) -> None:
     assert stored.result.verdict.value == "matched_above_threshold" and stored.resume_gate.decision == "suggest"
 
 
-def _assess_the_old_way(fx: PostingsFixture, monkeypatch: pytest.MonkeyPatch, *, answer: str | None = None) -> None:
-    """A stored pick the PDF cannot put on its pages: a pick whose page count said "2 pages" whatever it held, so
-    nothing was cut from it. (0.1.11.5: below 1.0 the PDF's body lines tighten too, so a pick measured with no room
-    for a header at the tightest spacing, the way this was made before, now fits; the whole master does not.)"""
+def _assess_under(fx: PostingsFixture, monkeypatch: pytest.MonkeyPatch, cap: int, *, answer: str | None = None) -> None:
+    """A stored pick made under another cap than the shipped one (a pick of before 0.1.11.5 stopped at about 14 bullets)."""
 
     with monkeypatch.context() as old:
-        old.setattr(tm, "measure_pages", lambda result: 2)
+        old.setitem(pick.settle_and_store.__kwdefaults__, "max_bullets", cap)
         _assess(fx, answer)
+
+
+def _no_layout_in_the_pick(monkeypatch: pytest.MonkeyPatch) -> None:
+    """From here on the page ESTIMATES raise: a pick, a re-pick and a shorten lay out nothing (the PDF's own render is untouched)."""
+
+    def refuse(*_args: object, **_kwargs: object):
+        raise AssertionError("the pick must not lay out a page")
+
+    for name in ("pages_at", "measure_markdown", "fewest_pages", "_estimate"):
+        monkeypatch.setattr(resume_pdf, name, refuse)
+    monkeypatch.setattr(tm, "measure_pages", refuse)
+
+
+def _bullets(markdown: str) -> list[str]:
+    """The bullets a resume's markdown shows under its roles."""
+
+    body = markdown.split("## Experience", 1)[1].split("## Skills", 1)[0]
+    return [_NUMBER.sub("", line[2:]) for line in body.splitlines() if line.startswith("- ")]
 
 
 def _cli(fx: PostingsFixture, *args: str, as_json: bool = True):
@@ -246,180 +268,153 @@ def _header_lines(page: str) -> list[str]:
     return [line.strip() for line in page.split("SUMMARY")[0].splitlines() if line.strip()]
 
 
-# --- the pick keeps room for the header ------------------------------------------------------------------------------
+# --- the pick holds its bullets and counts no page; the PDF says its real pages ------------------------------------------
 
 
-def test_a_pick_that_fills_two_pages_prints_on_two_pages_with_the_header_on(fx: PostingsFixture, tmp_path: Path, server: _Server) -> None:
+def test_a_pick_holds_twenty_bullets_and_the_pdf_says_its_real_pages(
+    fx: PostingsFixture, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, server: _Server,
+) -> None:
+    _no_layout_in_the_pick(monkeypatch)
     _assess(fx)
     view = _view(fx)
     counts = view["resume"]["counts"]
-    # The pick needed the fit (the master does not fit 2 pages) and every must-have line is printed.
-    assert counts["cut_for_length"] > 0 and view["picked"]["picked_by"] == "model" and view["conflicts"] == []
-    assert (view["picked"]["pages"], view["picked"]["max_pages"]) == (2, 2)
-    assert all(line in view["resume"]["markdown"] for line in MUST_LINES)
-
-    # What the pick counted is what prints: laid out at the pick's own spacing with the header on and NO fit of the
-    # render's own, the resume is on the pick's 2 pages (before: 3, the pick had kept no room for the header).
+    markdown = view["resume"]["markdown"]
+    # The pick: the model's (all 56 lines of the master) capped at 20 bullets, every must-have line among them.
+    assert view["picked"]["picked_by"] == "model" and view["conflicts"] == []
+    assert len(_bullets(markdown)) == MAX_PICK_BULLETS == 20 and all(line in markdown for line in MUST_LINES)
+    # Nothing is "cut for length" and no page was counted: the record keeps the fields, informational.
+    assert counts["cut_for_length"] == 0 and (view["picked"]["pages"], view["picked"]["max_pages"]) == (None, 2)
     stored = read_tailored_resume(tailored_resume_path(fx.home_root, fx.target, fx.default_profile_id, _JOB))
-    assert stored is not None
-    header = form_header(parse_header_form(FORM), "")
-    plain = _render(_body(stored.result), header, company="", timestamp=STAMP, spacing_scale=FIT_SCALE, auto_fit=False, count_pages=True)
-    assert plain.pages == len(_pages(plain.pdf)) == view["picked"]["pages"], f"the pick says {view['picked']['pages']} pages; with the header it prints on {plain.pages}"
+    assert stored is not None and stored.result.length is None and stored.selection is not None
+    left = {line.id: line.code for line in stored.selection.left_out}
+    assert sorted(set(left.values())) == ["old_role_limit", "over_cap", "summary_other_variant"] or sorted(set(left.values())) == ["old_role_limit", "over_cap"]
+    # Every role is on the page; the old one by at most 3 lines, its must-have line among them.
+    assert all(f"### {company}" in markdown for company, _dates in ROLES)
+    old_role = markdown.split("### Lanternfish Labs", 1)[1].split("## ", 1)[0]
+    assert 1 <= len(_bullets("## Experience" + old_role + "## Skills")) <= 3 and OLD_ROLE_LINE in old_role
 
-    # THE END OUTCOME, the CLI with the person's header file: the pick's pages, at the pick's spacing, nothing tightened.
+    # THE END OUTCOME, the CLI with the person's header file at the automatic fit: the PDF's REAL pages, said plainly.
     payload, pages = _cli_pdf(fx, tmp_path)
     assert len(_header_lines(pages[0])) == 3, f"the header is not at its largest (name, two contact lines): {_header_lines(pages[0])}"
-    assert len(pages) == payload["pages"] == view["picked"]["pages"] == 2, f"the PDF with the header is {len(pages)} pages; the pick says {view['picked']['pages']}"
-    assert payload["spacing_scale"] == FIT_SCALE and payload["note"] is None, "the render had to tighten the spacing to hold the pick's pages"
+    assert len(pages) == payload["pages"] == 3, f"the fixture is not a pick that prints on 3 pages: {len(pages)}"
+    assert payload["note"] and payload["note"].startswith("This resume takes 3 pages") and "remove a point" in payload["note"]
 
-    # ... and the page's Generate PDF, over HTTP, with the form.
+    # ... and the page's Generate PDF, over HTTP, with the form: the same pages.
     response = server.pdf()
     assert response.status_code == 200, response.text
     served = _pages(response.content)
-    assert len(_header_lines(served[0])) == 3
-    assert len(served) == view["picked"]["pages"] == 2 and "x-gigai-fit-note" not in response.headers
-    assert "Role" in served[1] and "EDUCATION" in served[1], "page 2 is the resume's own second page"
+    assert len(_header_lines(served[0])) == 3 and len(served) == 3 and response.headers["x-gigai-pages"] == "3"
+    assert "x-gigai-fit-note" in response.headers
 
-    # A saved title is one more header line than the pick keeps room for: still the pick's pages, and no note.
-    save_display(fx.home_root, DisplaySettings(titles={fx.default_profile_id: TITLE}, spacing_scale=FIT_SCALE, auto_fit=False))
+    # A pick that prints on 3 pages is still READY: the page count is the user's to settle, never a reason.
+    assert view["gate"]["decision"] == "suggest" and view["gate"]["ready"] is True and view["gate"]["reasons"] == []
+    record = suggestions.read_suggestions(fx.home_root, fx.target, fx.default_profile_id, _JOB)
+    assert record is not None and record.selection["conflicts"] == [] and record.selection["pages"] is None and record.selection["max_bullets"] == 20
+
+    # A saved title is one more header line: the same pick, the same pages.
+    save_display(fx.home_root, DisplaySettings(titles={fx.default_profile_id: TITLE}))
     titled = server.pdf()
-    assert _header_lines(_pages(titled.content)[0])[1] == TITLE and len(_pages(titled.content)) == 2 and "x-gigai-fit-note" not in titled.headers
+    assert _header_lines(_pages(titled.content)[0])[1] == TITLE and len(_pages(titled.content)) == 3
 
 
-def test_a_re_pick_of_a_job_picked_with_no_room_for_a_header_makes_it_fit(fx: PostingsFixture, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """An old stored pick stays as it is (the render's own fit still applies); ``resume pick --refresh`` makes it fit."""
+def test_a_re_pick_of_a_job_picked_under_a_smaller_cap_holds_the_twenty(fx: PostingsFixture, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A stored pick stays as it is until it is picked again; ``resume pick --refresh`` then holds up to 20 bullets (they stopped at 14)."""
 
-    _assess_the_old_way(fx, monkeypatch)
+    _assess_under(fx, monkeypatch, 14)
     before = _view(fx)
-    payload, pages = _cli_pdf(fx, tmp_path, "before.pdf")
-    assert len(pages) == 3 and payload["note"], "the fixture is not a resume the PDF cannot fit"
+    assert len(_bullets(before["resume"]["markdown"])) == 14 and all(line in before["resume"]["markdown"] for line in MUST_LINES)
+    _no_layout_in_the_pick(monkeypatch)
     after = _ok(fx, "resume", "pick", "--job-url", _URL, "--refresh")
-    assert after["resume"]["lines"] < before["resume"]["lines"] and after["conflicts"] == []
-    payload, pages = _cli_pdf(fx, tmp_path, "after.pdf")
-    assert len(pages) == 2 and payload["note"] is None and payload["spacing_scale"] == FIT_SCALE
+    assert len(_bullets(after["resume"]["markdown"])) == 20 and after["conflicts"] == [] and after["gate"]["ready"] is True
+    assert set(_bullets(before["resume"]["markdown"])) < set(_bullets(after["resume"]["markdown"])), "the larger cap only adds lines"
 
 
-# --- Shorten automatically -------------------------------------------------------------------------------------------
+# --- must-cover lines last; an edited resume is never re-picked in place ----------------------------------------------
 
 
-def test_a_resume_the_pdf_cannot_fit_is_shortened_and_the_answer_says_what_was_left_out(
-    fx: PostingsFixture, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, server: _Server,
-) -> None:
-    _assess_the_old_way(fx, monkeypatch)
-    before = _view(fx)
-    over = server.pdf()
-    note = over.headers["x-gigai-fit-note"]
-    assert len(_pages(over.content)) == 3
-    # The sentence names the way out, and never tells the person to edit by hand.
-    assert note == (
-        "This resume takes 3 pages: it does not fit on 2 pages even with the tightest spacing. To get 2 pages, shorten it automatically "
-        "(the Shorten automatically button on the job's page, or `gigai scout resume pick --job-url URL --shorten`; no model call), "
-        "then generate the PDF again. Or keep it at 3 pages."
-    )
-    assert "remove a few lines" not in note and note.isascii()
-    calls = len(fx.base.model.assess_prompts)
-
-    # The button's own request.
-    response = server.client.post("/api/job-resumes/pick", json={"job_url": _URL, "profile_id": fx.default_profile_id, "action": "shorten"})
-    assert response.status_code == 200, response.text
-    answer = response.json()
-    shortened = answer["shortened"]
-    assert answer["action"] == "shorten" and len(fx.base.model.assess_prompts) == calls, "shortening calls no model"
-
-    # What it left out, in plain words: the lines' own text, never an id.
-    left_out, message = shortened["left_out"], shortened["message"]
-    assert left_out and len(left_out) == before["resume"]["lines"] - answer["resume"]["lines"]
-    assert message.startswith(f"Left out {len(left_out)} line{'' if len(left_out) == 1 else 's'}: \"Role ") and message.endswith(" Generate the PDF again.")
-    assert not _INTERNAL.search(message), message
-    for line in left_out:
-        assert line.startswith("Role ") and line.removesuffix("...") in MASTER and line.removesuffix("...") not in answer["resume"]["markdown"]
-    # No line a must-have requirement rests on went while another line could go.
-    assert shortened["must_have_cut"] is False and shortened["waiting"] is False and answer["conflicts"] == []
-    assert all(line in answer["resume"]["markdown"] for line in MUST_LINES)
-    assert not any(must[:40] in line for line in left_out for must in MUST_LINES)
-
-    # THE END OUTCOME: the PDF now fits, with the header on, and says nothing.
-    again = server.pdf()
-    assert len(_pages(again.content)) == 2 and "x-gigai-fit-note" not in again.headers
-    payload, pages = _cli_pdf(fx, tmp_path)
-    assert len(pages) == 2 and payload["note"] is None
-
-
-def test_the_cli_shortens_and_prints_what_it_left_out_first(fx: PostingsFixture, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    _assess_the_old_way(fx, monkeypatch)
-    payload, pages = _cli_pdf(fx, tmp_path, "before.pdf")
-    assert len(pages) == 3 and "gigai scout resume pick --job-url URL --shorten" in payload["note"]
-    result = _cli(fx, "resume", "pick", "--job-url", _URL, "--shorten", as_json=False)
-    assert result.exit_code == 0, result.output
-    first = result.output.splitlines()[0]
-    assert re.fullmatch(r'Left out \d+ lines?: "Role .*"\. Generate the PDF again\.', first), first
-    assert not _INTERNAL.search(first)
-    payload, pages = _cli_pdf(fx, tmp_path, "after.pdf")
-    assert len(pages) == 2 and payload["note"] is None
-
-    # Again shortens further: at least one more line each time, a must-have line never before another line.
-    lines = _view(fx)["resume"]["lines"]
-    further = _ok(fx, "resume", "pick", "--job-url", _URL, "--shorten")
-    assert further["resume"]["lines"] < lines and further["shortened"]["left_out"] and further["shortened"]["must_have_cut"] is False
-    assert all(line in further["resume"]["markdown"] for line in MUST_LINES)
-
-
-def test_when_only_must_have_lines_are_left_one_goes_and_the_answer_says_so(fx: PostingsFixture, monkeypatch: pytest.MonkeyPatch) -> None:
-    """A page budget so tight that the lines the must-haves rest on do not all fit: nothing else is left to cut.
+def test_when_only_must_have_lines_are_left_under_a_smaller_cap_one_goes_and_the_pick_says_so(fx: PostingsFixture, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A cap of four holds exactly the four must-have lines; a cap of three loses one, and that is a conflict.
 
     A recent role always keeps its best line, so the line that goes is the old role's: the role is then listed by
     its heading alone (0.1.11.4 item 9: no employer is dropped silently)."""
 
-    _assess_the_old_way(fx, monkeypatch)
-    real = pick._tighter_measure  # noqa: SLF001 - the budget is the thing under test
-
-    def one_page_less(current, max_pages):  # noqa: ANN001, ANN202
-        real(current, max_pages)  # the refusals of the real one still apply
-        return lambda result: (pages_at(result, FIT_SCALE, header_lines=40) or 0) + 1
-
-    monkeypatch.setattr(pick, "_tighter_measure", one_page_less)
-    answer = _ok(fx, "resume", "pick", "--job-url", _URL, "--shorten")
-    shortened = answer["shortened"]
-    markdown = answer["resume"]["markdown"]
-    assert OLD_ROLE_LINE not in markdown, "the fixture left room for every must-have line"
-    assert "### Lanternfish Labs" not in markdown and "### Earlier experience\n\nStaff Engineer, Lanternfish Labs | 2013 - 2015" in markdown
-    assert all(line in markdown for line in MUST_LINES[:3])
-    # ... and it went LAST: nothing is printed but the lines each recent role always keeps.
-    assert sum(line.startswith("- Role ") for line in markdown.splitlines()) <= len(ROLES) - 1, "a must-have line went while another line could go"
-    assert shortened["must_have_cut"] is True
-    assert "Nothing else was left to cut, so a line that backs a must-have requirement (or a line you pinned) was left out too." in shortened["message"]
-    assert any(conflict["code"] == "mandatory_evidence_does_not_fit" for conflict in answer["conflicts"]) and not _INTERNAL.search(shortened["message"])
+    _no_layout_in_the_pick(monkeypatch)
+    _assess_under(fx, monkeypatch, len(MUST_LINES))
+    four = _view(fx)
+    assert sorted(_bullets(four["resume"]["markdown"])) == sorted(MUST_LINES), "a must-have line went while another line could go"
+    assert four["conflicts"] == [] and four["gate"]["ready"] is True
+    with monkeypatch.context() as tighter:  # the re-pick's own cap (``settle_stored`` passes it on)
+        tighter.setitem(pick.settle_stored.__kwdefaults__, "max_bullets", len(MUST_LINES) - 1)
+        three = _ok(fx, "resume", "pick", "--job-url", _URL, "--refresh")
+    markdown = three["resume"]["markdown"]
+    assert OLD_ROLE_LINE not in markdown and sorted(_bullets(markdown)) == sorted(MUST_LINES[:3])
+    assert "### Lanternfish Labs" not in markdown and "### Earlier experience\n\nStaff Engineer, Lanternfish Labs | 2013 - 2015" in _NUMBERS.sub("", markdown)
+    assert [conflict["code"] for conflict in three["conflicts"]] == ["mandatory_evidence_does_not_fit"]
+    assert three["gate"]["ready"] is False  # a lost must-have line IS a reason (the page count never is)
 
 
-def test_a_resume_the_user_edited_is_kept_and_the_shorter_one_waits(fx: PostingsFixture, monkeypatch: pytest.MonkeyPatch) -> None:
-    _assess_the_old_way(fx, monkeypatch)
+def test_a_re_pick_leaves_a_resume_the_user_edited_untouched_and_the_new_pick_waits(fx: PostingsFixture, monkeypatch: pytest.MonkeyPatch) -> None:
+    _assess_under(fx, monkeypatch, 14)
     path = tailored_resume_path(fx.home_root, fx.target, fx.default_profile_id, _JOB)
     stored = read_tailored_resume(path)
     assert stored is not None
     save_tailor_response(replace(stored, edited=TailorEdit("operator", "2026-10-06T10:00:00Z", "my own wording")))
     kept = path.read_bytes()
-    answer = _ok(fx, "resume", "pick", "--job-url", _URL, "--shorten")
-    shortened = answer["shortened"]
+    answer = _ok(fx, "resume", "pick", "--job-url", _URL, "--refresh")
     assert path.read_bytes() == kept and answer["resume"]["replaceable"] is False and answer["proposed"] is not None
-    assert shortened["waiting"] is True and shortened["left_out"]
-    assert shortened["message"].endswith("The resume you edited was kept as it is; the shorter one is waiting as the new suggested resume.")
+    assert len(_bullets(answer["resume"]["markdown"])) == 14, "the edited resume was re-picked in place"
     record = suggestions.read_suggestions(fx.home_root, fx.target, fx.default_profile_id, _JOB)
-    assert record is not None and len(suggestions.recorded_marks(record.proposed)) < len(suggestions.recorded_marks(record.selection))
+    assert record is not None and len(suggestions.recorded_marks(record.proposed)) == len(suggestions.recorded_marks(record.selection)) + 6  # the 20 wait
 
 
-def test_shorten_is_refused_in_plain_words_when_there_is_nothing_to_shorten(fx: PostingsFixture, monkeypatch: pytest.MonkeyPatch) -> None:
-    # No assessment, no resume.
-    assert _refused(fx, "resume", "pick", "--job-url", _URL, "--shorten")["code"] in ("assessment_missing", "no_resume_to_shorten")
-    # A resume that fits its 2 pages with most of a page to spare: nothing is left out, nothing is written.
-    ids = _ids(fx)
-    few = json.loads(_answer(fx))
-    few["pick"]["lines"] = [ids[line] for line in MUST_LINES] + [ids[_line(0, n)] for n in range(8)]
-    with monkeypatch.context() as no_fill:
-        no_fill.setattr(pick, "FILL_LINES", 0)
-        _assess(fx, json.dumps(few))
-    path = tailored_resume_path(fx.home_root, fx.target, fx.default_profile_id, _JOB)
-    kept = path.read_bytes()
+# --- "Shorten automatically" is retired (0.1.11.5, the coordinator's decision) ---------------------------------------------
+
+
+def _home(fx: PostingsFixture) -> dict[str, bytes]:
+    return {str(path.relative_to(fx.home_root)): path.read_bytes() for path in sorted(fx.home_root.rglob("*")) if path.is_file() and ".git" not in path.parts and "cache" not in path.parts}
+
+
+RETIRED = (
+    "Shortening a resume automatically is no longer part of GigAI, and nothing was changed. To fit the page, open the job's page and move "
+    "the spacing slider beside the resume's preview; to make the resume shorter, remove a point there."
+)
+
+
+def test_the_shorten_route_is_retired_says_what_to_do_instead_and_writes_nothing(fx: PostingsFixture, server: _Server) -> None:
+    _assess(fx)
+    over = server.pdf()
+    note = over.headers["x-gigai-fit-note"]
+    # The over-limit sentence no longer names the button or the command: it names removing a point.
+    assert note == (
+        "This resume takes 3 pages: it does not fit on 2 pages even with the tightest spacing. "
+        "To get 2 pages, remove a point or two on the job's page, then generate the PDF again. Or keep it at 3 pages."
+    )
+    assert "shorten" not in note.lower() and note.isascii()
+    _view(fx)  # one read first: a scratch cache may be written by the first read of a home
+    before, calls = _home(fx), len(fx.base.model.assess_prompts)
+    response = server.client.post("/api/job-resumes/pick", json={"job_url": _URL, "profile_id": fx.default_profile_id, "action": "shorten"})
+    assert response.status_code == 409, response.text
+    error = response.json()["error"]
+    assert error["code"] == "shorten_retired" == pick.REFUSED_SHORTEN_RETIRED and error["message"] == RETIRED == pick.MESSAGES["shorten_retired"]
+    assert not _INTERNAL.search(error["message"])
+    assert _home(fx) == before and len(fx.base.model.assess_prompts) == calls, "a retired step read or wrote something"
+    # A job with nothing stored gets the same answer: nothing is read first.
+    other = server.client.post("/api/job-resumes/pick", json={"job_url": job_url(_SLUG, 2), "profile_id": fx.default_profile_id, "action": "shorten"})
+    assert other.status_code == 409 and other.json()["error"]["code"] == "shorten_retired"
+
+
+def test_the_cli_shorten_flag_is_retired_says_what_to_do_instead_and_writes_nothing(fx: PostingsFixture) -> None:
+    # With no assessment at all: the same refusal (nothing is read first).
+    assert _refused(fx, "resume", "pick", "--job-url", _URL, "--shorten")["code"] == "shorten_retired"
+    _assess(fx)
+    _view(fx)
+    before = _home(fx)
     error = _refused(fx, "resume", "pick", "--job-url", _URL, "--shorten")
-    assert error["code"] == "resume_short_already" and "nothing was left out" in str(error["message"]) and path.read_bytes() == kept
-    # Only one step at a time.
+    assert error["code"] == "shorten_retired" and error["message"] == RETIRED and _home(fx) == before
+    plain = _cli(fx, "resume", "pick", "--job-url", _URL, "--shorten", as_json=False)
+    assert plain.exit_code == 1 and RETIRED in plain.output and _home(fx) == before
+    with pytest.raises(pick.PickError) as refused:
+        pick.shorten_stored(fx.home_root, fx.target, fx.default_profile_id, _JOB, now="2026-10-06T10:00:00Z")
+    assert refused.value.code == "shorten_retired" and _home(fx) == before
+    # Only one step at a time, still.
     assert _refused(fx, "resume", "pick", "--job-url", _URL, "--shorten", "--refresh")["code"] == "invalid_value"

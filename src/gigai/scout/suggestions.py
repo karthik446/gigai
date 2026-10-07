@@ -28,7 +28,11 @@ sources and none is printed), ``answer_only`` (its only sources are answers or
 stories: no line of the master states it) or ``none`` (it came back without a
 usable source).  ``ready`` is false, with a reason per row, when a MANDATORY
 row is ``lost`` or the selection has a conflict.  ``ready: false`` never
-removes the resume.  An assessment must not approve evidence the resume no
+removes the resume.  THE PAGE COUNT IS NEVER A REASON (0.1.11.5 item 1c): a
+resume that prints on 3 pages at its automatic spacing is ready, and the user
+fits the page with the spacing of the job's preview.  A conflict a selection
+stored before 0.1.11.5 holds because of the page limit
+(``PAGE_CONFLICTS``) is kept in the record and is no reason either.  An assessment must not approve evidence the resume no
 longer shows.
 
 THE STALE LIST (2.4), ``stale``: derived when the records are READ.  Nothing
@@ -91,6 +95,10 @@ COVERAGES: tuple[str, ...] = (COVERAGE_KEPT, COVERAGE_LOST, COVERAGE_ANSWER_ONLY
 #: ``gate.reasons`` codes the final-selection check adds to the gate's own.
 REASON_LOST_EVIDENCE = "lost_mandatory_evidence"
 REASON_CONFLICT = "selection_conflict"
+#: The conflict codes the page limit made in a selection picked before 0.1.11.5 (``pick``: the Skills cut for the page,
+#: a role's heading line cut for it, still over the limit).  No selection makes one now, and one that is stored never
+#: makes a resume "not ready": the page is the user's to fit.
+PAGE_CONFLICTS: frozenset[str] = frozenset({"skills_do_not_fit", "earlier_roles_do_not_fit", "over_page_limit"})
 
 STATUS_OPEN = "open"
 STATUS_DONE = "done"
@@ -248,7 +256,8 @@ def check_selection(requirements: Iterable[RequirementRow], printed: Iterable[st
     ``printed``: the master line ids the job resume shows (a copied line's
     own id; a line changed in chat counts for every master id it cites).
     ``conflicts``: the selection's conflicts (``pick.PickConflict``); any one
-    makes the resume not ready, named by its own code's row when it has one.
+    makes the resume not ready, named by its own code's row when it has one,
+    except a page-driven one (``PAGE_CONFLICTS``), which is no reason.
     """
 
     shown = set(printed)
@@ -272,6 +281,8 @@ def check_selection(requirements: Iterable[RequirementRow], printed: Iterable[st
         if coverage == COVERAGE_LOST and row.mandatory:
             reasons.append(CheckReason(REASON_LOST_EVIDENCE, row.id))
     for conflict in conflicts:
+        if getattr(conflict, "code", None) in PAGE_CONFLICTS:
+            continue
         requirement = getattr(conflict, "requirement", None)
         reasons.append(CheckReason(REASON_CONFLICT, requirement if isinstance(requirement, str) and requirement else None))
     return SelectionCheck(tuple(rows), not reasons, tuple(reasons))
@@ -280,9 +291,10 @@ def check_selection(requirements: Iterable[RequirementRow], printed: Iterable[st
 def live_selection(selection: Mapping[str, object] | None, printed: Iterable[str]) -> tuple[Mapping[str, object] | None, tuple[CheckReason, ...]]:
     """``selection`` with the conflicts the resume STILL has, and those as check reasons (SPEC 2.3, 10.2 item 5). Pure.
 
-    A conflict names the master lines the page limit kept out; it is gone once every one of them prints again (a
-    hand-back that brought the line back).  A conflict with no lines (``skills_do_not_fit``) cannot be read off the
-    printed ids and stays until a re-pick: never resolved silently.
+    A conflict names the master lines the cap kept out; it is gone once every one of them prints again (a
+    hand-back or an Add that brought the line back).  A page-driven conflict of a selection stored before 0.1.11.5
+    (``PAGE_CONFLICTS``) stays in the record until a re-pick and is no reason: the page count never makes a resume
+    "not ready".
     """
 
     if selection is None:
@@ -292,7 +304,7 @@ def live_selection(selection: Mapping[str, object] | None, printed: Iterable[str
         item for item in selection.get("conflicts", ())  # type: ignore[union-attr]
         if isinstance(item, Mapping) and (not item.get("lines") or any(line not in shown for line in item["lines"]))  # type: ignore[union-attr]
     ]
-    reasons = tuple(CheckReason(REASON_CONFLICT, item.get("requirement")) for item in kept)
+    reasons = tuple(CheckReason(REASON_CONFLICT, item.get("requirement")) for item in kept if item.get("code") not in PAGE_CONFLICTS)
     return {**selection, "conflicts": kept}, reasons
 
 
@@ -410,7 +422,7 @@ class SuggestionRecord:
     selection: Mapping[str, object] | None = None
     proposed: Mapping[str, object] | None = None
     suggestions: tuple[Suggestion, ...] = ()
-    #: Why no selection could be made although the gate suggests one (no renderer to measure pages with): an error code.
+    #: Why no selection could be made although the gate suggests one: an error code.
     selection_error: str | None = None
 
     def to_json(self) -> dict[str, object]:
@@ -701,14 +713,43 @@ def proposed_resume_path(record_path: Path) -> Path:
     return record_path.with_name(f"{record_path.stem}.proposed-resume.json")
 
 
+def without_page_reasons(record: SuggestionRecord) -> SuggestionRecord:
+    """``record`` with a gate the page limit is no reason of (0.1.11.5 item 1c). Pure; nothing is written.
+
+    A selection picked before 0.1.11.5 may hold page-driven conflicts (``PAGE_CONFLICTS``), and its stored gate then
+    says ``ready: false`` with one ``selection_conflict`` reason for each.  Those reasons are taken off here, where a
+    record is READ, and ``ready`` is true again when no other reason of the check is left: the page count never makes
+    a resume "not ready".  The selection keeps its conflicts as they were stored (a re-pick drops them).
+    """
+
+    selection, gate = record.selection, record.gate
+    if not isinstance(selection, Mapping) or gate.get("decision") != "suggest" or gate.get("ready") is not False:
+        return record
+    found = selection.get("conflicts")
+    page = sum(1 for item in (found if isinstance(found, list) else ()) if isinstance(item, Mapping) and item.get("code") in PAGE_CONFLICTS)
+    if not page:
+        return record
+    reasons: list[object] = []
+    for reason in gate.get("reasons", ()):  # type: ignore[union-attr]
+        if page and isinstance(reason, Mapping) and reason.get("code") == REASON_CONFLICT and not reason.get("requirement"):
+            page -= 1  # a page-driven conflict names no requirement row
+            continue
+        reasons.append(reason)
+    check = [reason for reason in reasons if isinstance(reason, Mapping) and reason.get("code") in (REASON_LOST_EVIDENCE, REASON_CONFLICT)]
+    return replace(record, gate={**gate, "reasons": reasons, "ready": not check})
+
+
 def read_record(path: Path) -> SuggestionRecord | None:
-    """The record stored at ``path``, or ``None`` (no file, or one that no longer parses)."""
+    """The record stored at ``path``, or ``None`` (no file, or one that no longer parses).
+
+    Read through ``without_page_reasons``: every reader (the job page, the CLI, an agent's brief, the pipeline) sees a
+    gate that the page limit of an older pick does not hold."""
 
     path = Path(path)
     if path.is_symlink() or not path.is_file():
         return None
     try:
-        return SuggestionRecord.from_json(parse_json_bytes(path.read_bytes()))
+        return without_page_reasons(SuggestionRecord.from_json(parse_json_bytes(path.read_bytes())))
     except (OSError, ValueError):
         return None
 
@@ -1070,6 +1111,8 @@ __all__ = [
     "is_replaceable",
     "job_resume",
     "live_selection",
+    "PAGE_CONFLICTS",
+    "without_page_reasons",
     "marks_json",
     "merged",
     "printed_ids",

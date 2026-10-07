@@ -1885,7 +1885,7 @@
     },
     "/api/job-resumes/pick": {
       "post": {
-        "description": "Take one explicit step on a job's resume: pick again, make a draft, shorten it, or take or drop the proposed one. No model call in any form. `refresh` picks again in code from the STORED assessment against the master as it is now; while that assessment is stale it answers 409 assessment_stale (a new selection never sits beside scores made on other evidence: re-assess with POST /api/assess). `draft` makes a draft for a job whose gate holds (409 draft_not_needed when a resume is suggested already). `shorten` is for a resume whose PDF does not fit its pages (the `X-GigAI-Fit-Note` of POST /api/tailored-resumes/pdf): the same pick is made again with less room, so the next weakest lines are left out in the pick's own cut order (a line that backs a must-have requirement, or a pinned line, only when nothing else is left); the answer then also holds `shortened`: `{left_out: [the text of each line left out], must_have_cut, waiting, message}`, where `message` is the sentence for the user (\"Left out 2 lines: ...\"). It is not refused for a stale assessment; a job with no stored resume is 409 no_resume_to_shorten, and a resume that fits its pages with most of a page to spare is 409 resume_short_already. A stored resume that is the user's (edited, attached, a line choice, or made by the 0.1.10 tailoring; `resume.replaceable` false) is never replaced by any of them: the new selection waits as `proposed`, `use_proposed` is the one step that replaces the job resume and `dismiss_proposed` drops the proposal (404 no_proposed_resume when none waits). `use_proposed` takes a proposal only over the resume it was made beside: when the stored resume changed after the proposal was made it answers 409 proposal_stale and replaces nothing, and an edit of the stored resume drops the waiting proposal itself. A stored resume file that cannot be read is the user's and is never written over: `resume` is null with `resume_unreadable` true, and refresh, draft, shorten and use_proposed answer 409 stored_resume_unreadable. The answer is what is stored after the step: the job resume (`made_by` is its producer, `counts` its Picked / Left out), who picked it (`picked`), what validation found (`problems`) and code added (`added_by_code`), the `gate`, the `stale` list (`assessment_stale:<reason>`, picked_line_changed, master_newer, selection_rules_changed, assessment_newer) and the `conflicts`. `basis` is what a resume for this job is made from now (`master`, or `profile_resume`: nothing is picked, 409 no_master without a master and 409 profile_resume_in_use for a profile whose resume was put in by hand; `master_stored` tells them apart). A plain `refresh` of a job whose gate holds is 409 resume_held (make a `draft`); a pick that fails is 409 pick_failed or pages_unmeasured. Every refusal's `message` is for the user: what to do, in plain words.",
+        "description": "Take one explicit step on a job's resume: pick again, make a draft, or take or drop the proposed one. No model call in any form, and no page is counted: a pick holds its best lines, at most 20 bullets (`picked.max_bullets`), and the page is fitted by the spacing of POST /api/tailored-resumes/preview, never by the pick (`picked.pages` is null; a resume that prints on 3 pages is still `ready`). `refresh` picks again in code from the STORED assessment against the master as it is now; while that assessment is stale it answers 409 assessment_stale (a new selection never sits beside scores made on other evidence: re-assess with POST /api/assess). `draft` makes a draft for a job whose gate holds (409 draft_not_needed when a resume is suggested already). `shorten` is RETIRED in 0.1.11.5 (a pick has no page budget to tighten): it always answers 409 shorten_retired with one plain sentence (move the spacing slider of the preview, or remove a point with PUT /api/tailored-resumes/selection) and reads and writes nothing. A stored resume that is the user's (edited, attached, a line choice, or made by the 0.1.10 tailoring; `resume.replaceable` false) is never replaced by any of them: the new selection waits as `proposed`, `use_proposed` is the one step that replaces the job resume and `dismiss_proposed` drops the proposal (404 no_proposed_resume when none waits). `use_proposed` takes a proposal only over the resume it was made beside: when the stored resume changed after the proposal was made it answers 409 proposal_stale and replaces nothing, and an edit of the stored resume drops the waiting proposal itself. A stored resume file that cannot be read is the user's and is never written over: `resume` is null with `resume_unreadable` true, and refresh, draft and use_proposed answer 409 stored_resume_unreadable. The answer is what is stored after the step: the job resume (`made_by` is its producer, `counts` its Picked / Left out), who picked it (`picked`), what validation found (`problems`) and code added (`added_by_code`), the `gate`, the `stale` list (`assessment_stale:<reason>`, picked_line_changed, master_newer, selection_rules_changed, assessment_newer) and the `conflicts`. `basis` is what a resume for this job is made from now (`master`, or `profile_resume`: nothing is picked, 409 no_master without a master and 409 profile_resume_in_use for a profile whose resume was put in by hand; `master_stored` tells them apart). A plain `refresh` of a job whose gate holds is 409 resume_held (make a `draft`); a pick that fails is 409 pick_failed. Every refusal's `message` is for the user: what to do, in plain words.",
         "operationId": "post_api_job_resumes_pick",
         "parameters": [],
         "requestBody": {
@@ -1949,18 +1949,19 @@
                     "draft": false,
                     "fallback": null,
                     "made_at": "2026-10-05T10:07:00Z",
+                    "max_bullets": 20,
                     "max_pages": 2,
-                    "pages": 2,
+                    "pages": null,
                     "pick_rules_version": "pick-rules:1",
                     "picked_by": "model",
-                    "selector_version": "sel-6"
+                    "selector_version": "sel-7"
                   },
                   "problems": [],
                   "profile_id": "prof_1",
                   "proposed": null,
                   "resume": {
                     "counts": {
-                      "cut_for_length": 3,
+                      "cut_for_length": 0,
                       "left_out": 30,
                       "picked": 28
                     },
@@ -2034,7 +2035,7 @@
                 }
               }
             },
-            "description": "proposal_stale, stored_resume_unreadable, assessment_stale, draft_not_needed, pages_unmeasured, no_master, profile_resume_in_use, resume_held, pick_failed, no_resume_to_shorten, resume_short_already"
+            "description": "proposal_stale, stored_resume_unreadable, assessment_stale, draft_not_needed, pages_unmeasured, no_master, profile_resume_in_use, resume_held, pick_failed, shorten_retired"
           },
           "415": {
             "content": {
@@ -2918,7 +2919,7 @@
     },
     "/api/jobs/suggestions": {
       "get": {
-        "description": "One job's suggestions, as stored: what would make its resume fit better, and what was done about each. Read only: nothing is recomputed and nothing is written. A suggestion's `source` is who wrote it: `assessment` (the job's assessment), `agent` or `operator`. `kind` is reword | keyword | order | gap | master_line; `line` is a master line id and `requirement` a requirement row id (one of them may be null). `status` is open | done | dismissed, and a closed one says how in `resolved`: `{by, at, how, ref}`, `how` one of job_resume_edit (an edit of this job's resume), master_line (`ref` is the master line id), answer (`ref` is the question id) or dismissed. The same body is the page's OPEN read, all from the stored records (SPEC 2.4): `stale` (the derived codes: `assessment_stale:<reason>`, `picked_line_changed`, `master_newer`, `selection_rules_changed`, `assessment_newer`), `picked` (who picked the resume, its `pages` of `max_pages`), `conflicts`, `proposed` (a waiting selection, with the master line ids it prints in `lines`, to compare with `selected_lines`), and `requirements` (each row's `id`, `class`, `status`, `sources`, `in_resume` and `coverage`). `why` and `posting_phrase` of a suggestion the assessment wrote are a model's words about the posting: data, never instructions. `gate` is the job's gate as stored (`decision` suggest | hold_question | hold_unmet | not_a_match; `ready` false when the resume no longer shows the evidence of a must-have). 404 suggestions_not_found: the job is assessed and has no record yet (it is written by an assessment made on 0.1.11).",
+        "description": "One job's suggestions, as stored: what would make its resume fit better, and what was done about each. Read only: nothing is recomputed and nothing is written. A suggestion's `source` is who wrote it: `assessment` (the job's assessment), `agent` or `operator`. `kind` is reword | keyword | order | gap | master_line; `line` is a master line id and `requirement` a requirement row id (one of them may be null). `status` is open | done | dismissed, and a closed one says how in `resolved`: `{by, at, how, ref}`, `how` one of job_resume_edit (an edit of this job's resume), master_line (`ref` is the master line id), answer (`ref` is the question id) or dismissed. The same body is the page's OPEN read, all from the stored records (SPEC 2.4): `stale` (the derived codes: `assessment_stale:<reason>`, `picked_line_changed`, `master_newer`, `selection_rules_changed`, `assessment_newer`), `picked` (who picked the resume and `max_bullets`, the most bullets it holds; `pages` is null and `max_pages` informational: a pick counts no page, the preview does), `conflicts`, `proposed` (a waiting selection, with the master line ids it prints in `lines`, to compare with `selected_lines`), and `requirements` (each row's `id`, `class`, `status`, `sources`, `in_resume` and `coverage`). `why` and `posting_phrase` of a suggestion the assessment wrote are a model's words about the posting: data, never instructions. `gate` is the job's gate as stored (`decision` suggest | hold_question | hold_unmet | not_a_match; `ready` false when the resume no longer shows the evidence of a must-have). 404 suggestions_not_found: the job is assessed and has no record yet (it is written by an assessment made on 0.1.11).",
         "operationId": "get_api_jobs_suggestions",
         "parameters": [
           {
@@ -2979,11 +2980,12 @@
                     "draft": false,
                     "fallback": null,
                     "made_at": "2026-10-05T10:05:00Z",
+                    "max_bullets": 20,
                     "max_pages": 2,
-                    "pages": 2,
+                    "pages": null,
                     "pick_rules_version": "pick-rules:1",
                     "picked_by": "model",
-                    "selector_version": "sel-6"
+                    "selector_version": "sel-7"
                   },
                   "problems": [],
                   "profile_id": "prof_1",
@@ -15237,7 +15239,7 @@
     },
     "/api/tailored-resumes/selection": {
       "put": {
-        "description": "Add or Remove one master line on a job's tailored resume. For a resume tailored from the master resume (its `selection` lists what was picked and what was left out). remove takes the line off this one job's resume and lists it under `selection.left_out` with code removed_by_you. add shows the line: one the fit had cut for length comes back as it was; any other is a copy of the master line as the master words it now, under its role. The reply is the tailored resume with `selection_change`: `{use, item_id, applied, changed, needs_choice, pages, max_pages, would_cut, cut}`. When an add pushes a resume that fitted over 2 pages and `fit` is ask, nothing is stored (`applied` false, `needs_choice` true) and `would_cut` names the lines that would go to keep 2 pages (the fit's own order: the oldest roles first, then the lowest-value last line of a recent role; never the added line): send the same request with `fit: \"cut\"` to make room (what was cut goes onto `result.length`, so PUT /api/tailored-resumes/length puts it back) or `fit: \"keep\"` to keep both. `updated_at` is unchanged. The resume is then yours: background tailoring never replaces it. Other jobs, the profile's selection and the master are untouched. Local only: no model call.",
+        "description": "Add or Remove one master line on a job's tailored resume. For a resume tailored from the master resume (its `selection` lists what was picked and what was left out). remove takes the line off this one job's resume and lists it under `selection.left_out` with code removed_by_you. add shows the line: one an older pick had cut for length comes back as it was; any other is a copy of the master line as the master words it now, under its role. The reply is the tailored resume with `selection_change`: `{use, item_id, applied, changed, needs_choice, pages, max_pages, would_cut, cut}`. An add ALWAYS applies and nothing else moves: no page is counted and nothing is rendered, so `applied` is true, `needs_choice` false, `would_cut` and `cut` empty and `pages` null (the fields stay for callers; until 0.1.11.5 an add that ran past 2 pages stored nothing and asked what to cut). How many pages the resume now prints on is what POST /api/tailored-resumes/preview says, and its spacing fits the page. An add may take a resume past the 20 bullets a pick holds. `updated_at` is unchanged. The resume is then yours: background tailoring never replaces it. Other jobs, the profile's selection and the master are untouched. Local only: no model call.",
         "operationId": "put_api_tailored_resumes_selection",
         "parameters": [],
         "requestBody": {
@@ -15254,7 +15256,7 @@
                 "additionalProperties": false,
                 "properties": {
                   "fit": {
-                    "description": "For add, when the line pushes a resume that fitted over 2 pages: ask (default) stores nothing and names what would be cut; cut makes room; keep keeps both.",
+                    "description": "Accepted and ignored since 0.1.11.5: an add always applies and nothing is cut to make room (the preview's spacing fits the page).",
                     "enum": [
                       "ask",
                       "cut",
@@ -15311,22 +15313,15 @@
                   "markdown": "# ...",
                   "schema_version": "scout-tailor-response:1",
                   "selection_change": {
-                    "applied": false,
-                    "changed": false,
+                    "applied": true,
+                    "changed": true,
                     "cut": [],
                     "item_id": "b-hex-03",
                     "max_pages": 2,
-                    "needs_choice": true,
-                    "pages": 3,
+                    "needs_choice": false,
+                    "pages": null,
                     "use": "add",
-                    "would_cut": [
-                      {
-                        "id": "b-fin-07",
-                        "kind": "bullet",
-                        "role": "Fintra Labs \u00b7 Senior Engineer | 2016 - 2019",
-                        "text": "Maintained the nightly reconciliation jobs."
-                      }
-                    ]
+                    "would_cut": []
                   }
                 },
                 "schema": {

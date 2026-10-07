@@ -191,8 +191,11 @@ def test_an_entry_with_no_bullet_in_a_resume_not_made_from_the_master_prints_in_
     ]
 
 
-def test_the_earlier_roles_conflict_reads_as_a_plain_sentence(out: dict) -> None:
+def test_a_stored_earlier_roles_conflict_is_no_longer_shown_as_needing_attention(out: dict) -> None:
+    """0.1.11.5 item 1c: the conflict came from the page limit a pick no longer knows (every role is listed now, by its
+    lines or its heading). A pick stored before that may still hold it; the page does not raise it. (Until 0.1.11.5 it
+    read as the pick's own sentence, or "some earlier roles could not be listed on 2 pages".)"""
+
     with_message, without, unknown = out["conflict"]
-    assert with_message == [["earlier_roles_do_not_fit", MESSAGE, []]]
-    assert without == [["earlier_roles_do_not_fit", "some earlier roles could not be listed on 2 pages: there was no room left for their heading lines", []]]
-    assert unknown == [["some_new_code", "some new code", []]]
+    assert with_message == [] and without == []
+    assert unknown == [["some_new_code", "some new code", []]], "a code the page has no sentence for still reads as its words"

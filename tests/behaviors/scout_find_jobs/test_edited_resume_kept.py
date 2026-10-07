@@ -208,7 +208,7 @@ def test_the_incident_a_fitted_edit_then_a_master_line_then_every_pick_step_by_c
         try:
             job_actions.pick_action(fx.home_root, fx.target, _URL, action)
         except job_actions.JobActionError:
-            pass  # a refused step (draft_not_needed, resume_short_already ...) writes nothing either
+            pass  # a refused step (draft_not_needed, shorten_retired ...) writes nothing either
         assert _state(fx) == mine, f"POST /api/job-resumes/pick {action} replaced a resume the user edited"
     kept = read_tailored_resume(_resume_path(fx))
     assert kept.edited is not None and kept.producer.callable != "scout.pick" and KUBERNETES_LINE not in kept.markdown
@@ -262,10 +262,14 @@ def test_a_stored_resume_that_cannot_be_read_is_never_written_over(fx: PostingsF
     def kept() -> bool:
         return (path.read_bytes(), path.stat().st_mtime_ns) == before
 
-    for step in ("--refresh", "--shorten", "--use-proposed"):
+    for step in ("--refresh", "--use-proposed"):
         error = _refused(fx, "resume", "pick", "--job-url", _URL, step)
         assert kept(), f"{step} wrote over a stored resume it could not read"
         assert error["code"] == "stored_resume_unreadable" and _UNREADABLE in error["message"], error
+    # 0.1.11.5: --shorten is retired. It reads and writes nothing, and says what to do in its place in plain words.
+    retired = _refused(fx, "resume", "pick", "--job-url", _URL, "--shorten")
+    assert kept() and retired["code"] == "shorten_retired", retired
+    assert "spacing slider" in retired["message"] and "remove a point" in retired["message"] and "`" not in retired["message"]
     _assess(fx, _v9_answer(fx))
     assert kept(), "a new assessment wrote over a stored resume it could not read"
     view = _pick(fx)

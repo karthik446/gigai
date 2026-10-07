@@ -87,21 +87,19 @@ def calls(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, tuple[object, ...]
 
 
 def _eval_markdowns() -> list[str]:
-    """Every markdown the shipped selector lays out for the pick eval's postings on its three master sizes."""
+    """Resume markdowns of the size and shape a layout is asked for: the shipped selector's selections for the pick
+    eval's postings on its three master sizes, under a range of caps.  (Until 0.1.11.5 these were the markdowns the
+    selector itself laid out to fit a page; it lays out nothing now, so they are made here and measured by the test.)"""
 
     today = ev.date_of(ev._load("sizes.json")["today"])
     seen: dict[str, None] = {}
-
-    def recording(markdown: str) -> tuple[int, float]:
-        seen[markdown] = None
-        return ms._shipped_measure(markdown)
-
     for size in ev.SIZES:
         master = parse_master(ev.master_case(size, "base").markdown)
         raw = ev.profile(size)
         profile = ms.SelectionProfile(titles=tuple(raw["titles"]), base_ids=tuple(raw["base_ids"]), profile_id=raw["profile_id"], label=raw["label"])  # type: ignore[arg-type]
         for post in ev.postings().values():
-            ms.select(master, profile, ms.SelectionPosting(post["title"], post["text"]), today=today, measure=recording)
+            for cap in range(4, 34, 2):
+                seen[ms.select(master, profile, ms.SelectionPosting(post["title"], post["text"]), today=today, max_bullets=cap).markdown] = None
     return list(seen)
 
 

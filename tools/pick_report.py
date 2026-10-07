@@ -333,8 +333,12 @@ class Checked:
     strength: dict[str, int] = field(default_factory=dict)
     shown_per_row: dict[str, tuple[str, ...]] = field(default_factory=dict)
     pins_missing: tuple[str, ...] = ()
+    #: ``None``: the tree counts no page for a selection (``sel-7`` on, 0.1.11.5 item 1c); then ``bullets`` of
+    #: ``max_bullets`` say what its cap held.  ``max_bullets`` ``None``: a tree that fits to pages.
     pages: int | None = None
     max_pages: int = 2
+    bullets: int | None = None
+    max_bullets: int | None = None
     empty: tuple[str, ...] = ()
     date_order: bool = True
     picked: int = 0
@@ -358,7 +362,15 @@ class Checked:
 
     @property
     def fits(self) -> bool:
-        return self.error is None and self.pages is not None and self.pages <= self.max_pages and not self.empty and self.date_order
+        """No project with no bullet, roles in date order, and within the limit the tree has: its pages when it counts
+        them, else its cap of bullets (a selection under a cap has no page limit to miss)."""
+
+        if self.error is not None or self.empty or not self.date_order:
+            return False
+        if self.pages is not None:
+            return self.pages <= self.max_pages
+        # (Neither a page count nor a cap: ``tailor_copy`` from ``sel-7`` on, which is under no limit.)
+        return self.max_bullets is None or (self.bullets is not None and self.bullets <= self.max_bullets)
 
     def state(self, row: str) -> str:
         return IN if row in self.covered else (SUPPORTED if row in self.supported else LOST)
@@ -408,7 +420,8 @@ def check(master, posting: Posting, pins: tuple[str, ...], final: dict[str, obje
     return Checked(
         error=None, covered=tuple(covered), supported=supported, lost=tuple(lost), mandatory=mandatory,
         strength=strength, shown_per_row=per_row, pins_missing=tuple(item_id for item_id in pins if item_id in master.items and item_id not in shown),
-        pages=final["pages"], max_pages=int(final.get("max_pages") or 2), empty=tuple(final["empty_entries"]), date_order=bool(final["date_order"]),  # type: ignore[arg-type]
+        pages=final["pages"], max_pages=int(final.get("max_pages") or 2), bullets=final.get("bullets"), max_bullets=final.get("max_bullets"),  # type: ignore[arg-type]
+        empty=tuple(final["empty_entries"]), date_order=bool(final["date_order"]),  # type: ignore[arg-type]
         picked=len(shown), left_out=total - len(shown), by_entry=by_entry, skills=len(final["skills"]), skills_total=len(master.skills()),  # type: ignore[arg-type]
         conflicts=tuple(final.get("conflicts") or ()),  # type: ignore[arg-type]
         titled=tuple(entry_id for entry_id in titled if entry_id in by_entry),
@@ -471,8 +484,11 @@ def _line(name: str, checked: Checked) -> str:
         return f"    {name}: the selection could not be made ({checked.error})"
     roles = ", ".join(f"{entry_id} {shown}/{held}" for entry_id, (shown, held) in checked.by_entry.items() if shown or held)
     fit = "fits" if checked.fits else "DOES NOT FIT" + (f" (no bullet under {', '.join(checked.empty)})" if checked.empty else "") + ("" if checked.date_order else " (roles out of date order)")
+    size = f"pages {checked.pages}/{checked.max_pages}" if checked.pages is not None else (
+        f"pages not counted, bullets {checked.bullets}" + (f"/{checked.max_bullets}" if checked.max_bullets is not None else " (no cap)")
+    )
     return (
-        f"    {name}: pages {checked.pages}/{checked.max_pages} {fit} | lines picked {checked.picked}, left out {checked.left_out} | "
+        f"    {name}: {size} {fit} | lines picked {checked.picked}, left out {checked.left_out} | "
         f"requirement rows: cited line in {checked.count(IN)}, cited line cut but another shown line supports it {checked.count(SUPPORTED)}, "
         f"REAL LOSS {checked.count(LOST)} (mandatory: in {checked.count(IN, mandatory=True)}, supported {checked.count(SUPPORTED, mandatory=True)}, "
         f"REAL LOSS {checked.count(LOST, mandatory=True)}) | "

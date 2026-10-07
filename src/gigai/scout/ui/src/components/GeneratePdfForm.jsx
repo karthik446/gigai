@@ -45,16 +45,15 @@ function saveBlob(blob, fileName) {
 // address; the file's shorthand keys fill them, Save writes them back as the
 // shorthand, and the PDF prints github.com/<id> and linkedin.com/in/<id>.
 //
-// 0.1.11.3 item 15: when the server says the PDF does not fit its pages
-// (`note`) and the caller gives `shorten` (a stored job's resume), the note
-// has one button, "Shorten automatically". `shorten()` answers the server's
-// own sentence about what was left out; the person then generates again.
+// When the server says the PDF does not fit its pages (`note`), the note is
+// shown as it comes: it names the spacing slider and removing a point. (The
+// "Shorten automatically" button of 0.1.11.3 is retired in 0.1.11.5.)
 //
 // 0.1.11.5 (a): `onValues(values)` tells the job page what is in the form
 // (once the header file was read, then on every edit), so its preview shows
 // the header this PDF will have. No request is made for it here, and the
 // values stay in memory: the page keeps them only while the form is open.
-export default function GeneratePdfForm({ render, disabled = false, visaRequired = false, shorten = null, onValues = null }) {
+export default function GeneratePdfForm({ render, disabled = false, visaRequired = false, onValues = null }) {
   const [values, setValues] = useState(() => startValues({ visaRequired }));
   const held = useRef(values); // what the form holds now, for `onValues`
   const [source, setSource] = useState(null);
@@ -63,9 +62,6 @@ export default function GeneratePdfForm({ render, disabled = false, visaRequired
   const [error, setError] = useState(null);
   const [savedAs, setSavedAs] = useState(null);
   const [note, setNote] = useState(null);
-  const [shortening, setShortening] = useState(false);
-  const [shortened, setShortened] = useState(null);
-  const [shortenError, setShortenError] = useState(null);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(null);
 
@@ -131,8 +127,6 @@ export default function GeneratePdfForm({ render, disabled = false, visaRequired
     setError(null);
     setSavedAs(null);
     setNote(null);
-    setShortened(null);
-    setShortenError(null);
     try {
       const { blob, fileName, note: fitNote } = await render(headerBody(values));
       saveBlob(blob, fileName);
@@ -142,20 +136,6 @@ export default function GeneratePdfForm({ render, disabled = false, visaRequired
       setError(err.detail || err.message || String(err));
     } finally {
       setBusy(false);
-    }
-  }
-
-  async function shortenNow() {
-    setShortening(true);
-    setShortenError(null);
-    try {
-      setShortened(await shorten());
-      setNote(null);
-      setSavedAs(null);
-    } catch (err) {
-      setShortenError(err.message || String(err));
-    } finally {
-      setShortening(false);
     }
   }
 
@@ -283,24 +263,6 @@ export default function GeneratePdfForm({ render, disabled = false, visaRequired
       {note && (
         <div className="callout warn" role="status" data-role="pdf-fit-note">
           {note}
-          {shorten && (
-            <>
-              {" "}
-              <button type="button" className="button small" disabled={shortening || busy} data-action="shorten-resume" onClick={shortenNow}>
-                {shortening ? "Shortening…" : "Shorten automatically"}
-              </button>
-            </>
-          )}
-        </div>
-      )}
-      {shortenError && (
-        <div className="callout danger" role="alert" data-role="pdf-shorten-error">
-          The resume was not shortened. {shortenError}
-        </div>
-      )}
-      {shortened && (
-        <div className="callout" role="status" data-role="pdf-shortened">
-          {shortened}
         </div>
       )}
       <div className="actions">

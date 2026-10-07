@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
-import { postJobResumePick, postTailoredResumePdf } from "../api.js";
-import { APPLY_LABEL, applyState, pickErrorText, shortenedText } from "../jobResumeModel.js";
+import { postTailoredResumePdf } from "../api.js";
+import { APPLY_LABEL, applyState } from "../jobResumeModel.js";
 import GeneratePdfForm from "./GeneratePdfForm.jsx";
 
 // 0.1.11 N6 (SPEC section 6, item 7; D7: "Apply = the PDF. Nothing after
@@ -44,19 +44,6 @@ export default function ApplyPanel({ state, items, reassess, visaRequired = fals
     (header) => postTailoredResumePdf({ profileId: state.profileId, jobIdentity: state.jobIdentity, header, spacingScale: spacing }),
     [state.profileId, state.jobIdentity, spacing],
   );
-  // 0.1.11.3 item 15: the form's "Shorten automatically"; the page then reads the job's resume again.
-  const shorten = useCallback(async () => {
-    let view;
-    try {
-      view = await postJobResumePick({ jobUrl: state.jobIdentity, profileId: state.profileId, action: "shorten" });
-    } catch (err) {
-      throw new Error(pickErrorText(err));
-    }
-    if (state.reload) {
-      state.reload();
-    }
-    return shortenedText(view);
-  }, [state]);
   if (!apply.available) {
     return null;
   }
@@ -103,7 +90,7 @@ export default function ApplyPanel({ state, items, reassess, visaRequired = fals
           ))}
         </div>
       )}
-      {open && <GeneratePdfForm render={renderPdf} visaRequired={visaRequired} shorten={shorten} onValues={onHeader} />}
+      {open && <GeneratePdfForm render={renderPdf} visaRequired={visaRequired} onValues={onHeader} />}
     </div>
   );
 }

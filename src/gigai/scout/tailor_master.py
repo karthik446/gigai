@@ -3,10 +3,21 @@
 When a master resume is stored (``master_store``), one tailoring no longer
 reads the profile's own 2-page resume.  Its input is the JOB'S CANDIDATE SET:
 lines code picks for that posting from the WHOLE master
-(``master_selection``), with the profile as the prior.  Today's one tailor
-call orders and words inside that set, code fits the result to
-``LENGTH_RULE.max_pages`` pages, and when the call fails or no model is
-available the code's own selection is the resume (the fallback).
+(``master_selection``), with the profile as the prior.  The 0.1.10.9 tailor
+call (``MasterTailoring``) orders and words inside that set; when the call
+fails or no model is available the code's own selection is the resume (the
+fallback, ``code_only``).
+
+THE CODE'S OWN SELECTION KNOWS NO PAGE LIMIT (0.1.11.5 item 1c, ``sel-7``): it
+is the selector's pick by score up to ``master_selection.MAX_PICK_BULLETS``
+bullets, laid out by nobody and cut for no page.  ``code_only``, a job's
+pick (``pick.settle``) and a tailor call's answer (``MasterTailoring.finish``)
+therefore carry no length record (``TailoredResume.length`` is ``None``): what
+the cap left out is under Left out, and the user fits the page with the
+spacing of the job's preview.  ``cut_order`` below is the ORDER a pick's lines
+are left out in under its cap (``pick``); ``fit_selected`` (that order applied
+until a page count is met) is kept for a caller that measures pages itself
+and is called by nothing in the product.
 
 Without a master nothing here runs: ``master_tailoring`` answers ``None`` and
 ``tailored_resume.run_tailored_resume`` does exactly what it did.
@@ -29,7 +40,7 @@ Picked / Left out line read that record.
 THE CANDIDATE SET (``job_candidates``; ``CANDIDATES`` names the one a
 tailoring uses, settled by the P4 live eval):
 
-- ``view``: the selector's 2-page selection for the posting.
+- ``view``: the selector's selection for the posting (up to its cap of bullets).
 - ``shortlist``: the selector's pick BEFORE its page fit (about twice what
   fits), so the tailor call orders and words more lines than the page holds.
 - ``evidence``: the bullets of the evidence view (the lines most relevant to
@@ -55,7 +66,7 @@ line the assessment CITES (``assess_master.stored_citations``,
 all follow the citations, so a cited line is never cut because another line
 shares the requirement's words.
 
-THE FIT (``fit_selected``; 0110-10-15, the selector's objective).  The page
+THE FIT (``fit_selected``; 0110-10-15; no product caller since 0.1.11.5).  The page
 limit is a constraint: at most ``LENGTH_RULE.max_pages`` pages, every recent
 role present, and no employer dropped silently (0.1.11.4 item 9: a role with
 no line left keeps its heading, printed as one line under
@@ -81,7 +92,7 @@ stands in time.  A line comes back when the last cut left room for it (not an
 old role's line that supports nothing).  What was cut is recorded on the
 result exactly as the 0110-10-05 length rule records it
 (``TailoredResume.length``), so it is shown and one Restore puts it back.  The
-pages are measured at ``master_selection.FIT_SCALE``, the selector's own budget.
+pages are measured at ``master_selection.FIT_SCALE``.
 
 WHAT WAS PICKED (``selection_record``): the stored tailored resume carries
 ``selection``: every line of the master except its Skills lines, picked or
@@ -118,6 +129,7 @@ from .master_selection import (
     FIT_SCALE,
     FLOORS,
     MAX_PAGES,
+    MAX_PICK_BULLETS,
     REMAKE_NEW,
     REMAKE_PREVIOUS,
     REMAKE_UNRESOLVED,
@@ -184,7 +196,6 @@ PICKED_BY: tuple[str, ...] = (PICKED_BY_MODEL, PICKED_BY_CODE)
 
 #: A project always keeps this many lines once shown (the selector's rule).
 _PROJECT_FLOOR = 1
-_UNFITTED = 10**6
 _ID_COMMENT = re.compile(r"\s*<!-- id:(\S+) -->\s*\Z")
 _KEY = re.compile(r"\A[a-z][a-z0-9_.:-]{0,63}\Z")
 
@@ -311,26 +322,30 @@ def job_candidates(
     *,
     mode: str = CANDIDATES,
     today: date | None = None,
+    max_bullets: int | None = MAX_PICK_BULLETS,
 ) -> JobCandidates:
-    """The candidate set of one posting from the whole master (see the module text). No model, no file."""
+    """The candidate set of one posting from the whole master (see the module text). No model, no file, no layout.
+
+    ``max_bullets``: the cap of the selector's own selection (``view``, and what the other modes take their
+    projects, Other lines and skills from)."""
 
     if mode not in CANDIDATE_MODES:
         raise ValueError(f"mode must be one of {', '.join(CANDIDATE_MODES)}")
     today = today or date.today()
     if mode == MODE_VIEW:
-        selected = select(master, profile, posting, today=today)
+        selected = select(master, profile, posting, today=today, max_bullets=max_bullets)
         entries = {entry_id: list(bullets) for entry_id, bullets in selected.entries.items()}
         # 0.1.11.4 item 9: a role the selection shows by its heading alone is in the set, with no line under it.
         entries.update({entry_id: [] for entry_id in selected.earlier})
         other, skills, skill_reasons = tuple(selected.other), tuple(selected.skills), selected.skill_reasons
     else:
-        # The selector's pick before its page fit: with no page limit nothing is cut, and no layout is run.
-        selected = select(master, profile, posting, today=today, measure=lambda _markdown: (1, 0.0), max_pages=_UNFITTED, fill=False)
+        # The selector's pick before its cap: nothing is left out for it.
+        selected = select(master, profile, posting, today=today, max_bullets=None, fill=False)
         entries = {entry_id: list(bullets) for entry_id, bullets in selected.entries.items()}
         # The fit below shortens roles and projects and removes an old role whole; it cannot remove a project, an
-        # Other line or a skill. So those offered are the ones the selector's own 2-page selection shows: a
+        # Other line or a skill. So those offered are the ones the selector's own selection shows: a
         # project, an Other line or a skill that supports nothing never holds a bullet's place.
-        fitted = select(master, profile, posting, today=today)
+        fitted = select(master, profile, posting, today=today, max_bullets=max_bullets)
         other, skills, skill_reasons = tuple(fitted.other), tuple(fitted.skills), fitted.skill_reasons
         entries = {entry_id: bullets for entry_id, bullets in entries.items() if master.entries[entry_id].section != "projects" or entry_id in fitted.entries}
         if mode == MODE_EVIDENCE:
@@ -398,7 +413,10 @@ def ensure_skills_line(result: TailoredResume, candidates: JobCandidates, ctx: T
 
 
 def measure_pages(result: TailoredResume) -> int | None:
-    """The pages ``result`` prints on at the selector's spacing (``FIT_SCALE``); ``None`` when the renderer cannot say."""
+    """The page ESTIMATE of ``result`` at ``FIT_SCALE``; ``None`` when the renderer cannot say.
+
+    What the tailor call's fit, an Add that makes room on a resume cut to its pages and an agent's brief read.
+    NO SELECTION CALLS IT (0.1.11.5 item 1c): ``code_only`` and ``pick.settle`` lay out nothing."""
 
     try:
         from .resume_pdf import pages_at
@@ -547,14 +565,16 @@ def fit_selected(
 
 def code_only(
     master: Master, candidates: JobCandidates, job: TailorJob, *, answers: Mapping[str, AnswerSource] | None = None,
-    matrix: tuple[MatrixRow, ...] = (), today: date | None = None, measure: Measure | None = None,
+    matrix: tuple[MatrixRow, ...] = (), today: date | None = None,
 ) -> tuple[TailoredResume, JobCandidates]:
-    """The fallback: the code's own 2-page selection as a settled tailored resume, and the candidate set it is made of.
+    """The fallback: the code's own selection as a settled tailored resume, and the candidate set it is made of.
 
     Every line is a copy of a master line, in the selector's order, put
     through the checks a model's answer goes through (the validator, the
     no-loss pass, the Skills rules: an answer that satisfies a posting skill
-    is still shown), then the fit.  No model is called.
+    is still shown).  No model is called, NOTHING IS LAID OUT and nothing is
+    cut for a page (0.1.11.5 item 1c): the selection is already the
+    selector's pick up to its cap, so the result carries no length record.
     """
 
     from .tailor_skills import finish_tailoring
@@ -562,7 +582,19 @@ def code_only(
     view = candidates if candidates.mode == MODE_VIEW else job_candidates(master, candidates.profile, candidates.posting, mode=MODE_VIEW, today=today)
     ctx = view.context(answers=answers, matrix=matrix)
     settled = finish_tailoring(apply_no_loss(validate_tailored_output(view.copy_all(withheld=ctx.withheld), job, ctx), job, ctx, today=today), job, ctx)
-    return fit_selected(ensure_skills_line(settled, view, ctx), view, master, today=today, measure=measure), view
+    return whole_selection(ensure_skills_line(settled, view, ctx)), view
+
+
+def whole_selection(result: TailoredResume) -> TailoredResume:
+    """A settled SELECTION with every line it was made of shown and no length record.
+
+    ``apply_no_loss`` keeps an old role's first ``LENGTH_RULE.old_role_bullets`` bullets and records the rest as
+    left out for length.  A selection has chosen its lines already (an old role holds more than that only for a
+    must-cover line or a pin), so those lines are put back: nothing of a selection is "cut for length"."""
+
+    from .tailor_length import shown_whole
+
+    return shown_whole(result)
 
 
 # --- what was picked, and what was left out -------------------------------------------------------
@@ -828,6 +860,8 @@ def selection_record(
                     cut[item_id] = why
                     cuts.append(SelectionCut(item_id, "bullet", *why))
     offered = candidates.item_ids()
+    #: The lines a selection's cap left out (``master_selection``'s and ``pick``'s codes): said in a conflict's sentence.
+    capped = {line.id for line in candidates.selected.lines if not line.picked and line.code in ("over_cap", "cut_conflict")}
 
     picked: list[SelectedLine] = []
     for item_id in shown:
@@ -858,9 +892,11 @@ def selection_record(
         if not requirement.mandatory or not requirement.supporters or final & set(requirement.supporters):
             continue
         was_cut = any(item_id in cut for item_id in requirement.supporters)
+        why = "the page limit left no room for one" if was_cut else "the tailoring did not show one"
+        if any(item_id in capped for item_id in requirement.supporters):
+            why = "the most bullets a resume shows left no room for one"
         conflicts.append(Conflict(
-            "mandatory_evidence", tuple(requirement.supporters[:3]),
-            "no line that supports this requirement is shown: " + ("the page limit left no room for one" if was_cut else "the tailoring did not show one"),
+            "mandatory_evidence", tuple(requirement.supporters[:3]), "no line that supports this requirement is shown: " + why,
             requirement.id, requirement.text, False,
         ))
     shown_entries = {master.items[item_id].entry_id for item_id in final}
@@ -897,18 +933,16 @@ def selection_record(
 
 def compare_tailorings(
     master: Master, candidates: JobCandidates, previous: TailorSelection, new: TailorSelection, *, stale: Sequence[str] = (),
-    measure=None,
 ) -> Remake:
     """The re-make rule for a job's tailoring (0110-10-15): the stored selection beside the one just made.
 
-    Both are checked against the same current sources: the master as it is, the requirements the selector
-    reads from the posting NOW (``candidates.selected.requirements``) and the page limit, on the separate
+    Both are checked against the same current sources: the master as it is and the requirements the selector
+    reads from the posting NOW (``candidates.selected.requirements``), on the separate
     checks of ``master_selection.SelectionChecks`` (lost mandatory coverage is never offset by more lines or
     skills).  ``previous`` is kept only when it shows no line the master retired and none in ``stale`` (ids
-    corrected since it was made, or lines an outdated answer backed: the caller knows both), still meets the
-    page limit, AND ``new`` regresses on a check; ``unresolved`` when ``new`` regresses and ``previous``
-    cannot be kept.  The pages of each are those of its picked master lines and skills as the master words
-    them now (a tailoring's own wording can print a line longer or shorter).  Pure: nothing is stored here.
+    corrected since it was made, or lines an outdated answer backed: the caller knows both), names no project
+    with no line, AND ``new`` regresses on a check; ``unresolved`` when ``new`` regresses and ``previous``
+    cannot be kept.  No page is counted for either (0.1.11.5 item 1c).  Pure: nothing is stored here.
     """
 
     requirements = candidates.selected.requirements
@@ -919,7 +953,7 @@ def compare_tailorings(
         entries = [master.items[item_id].entry_id for item_id in ids if item_id in master.items and master.items[item_id].entry_id]
         return check_selection(
             master, requirements, [*dict.fromkeys(item for item in entries if item), *ids], [skill.name for skill in selection.skills_picked],
-            stale=gone, pins=pins, measure=measure,
+            stale=gone, pins=pins,
         )
 
     was, now = checks(previous, stale), checks(new, ())
@@ -934,14 +968,14 @@ def compare_tailorings(
     if unpinned:
         regressions.append("must-keep lines no longer shown: " + ", ".join(unpinned))
     if was.fits and not now.fits:
-        regressions.append(f"page fit: {now.pages} pages")
+        regressions.append(f"no bullet under {', '.join(now.empty_entries)}")
     if not regressions:
         return Remake(REMAKE_NEW, was, now)
     problems: list[str] = []
     if was.invalid:
         problems.append("the stored tailoring shows lines the master has retired or corrected: " + ", ".join(was.invalid))
     if not was.fits:
-        problems.append(f"the stored tailoring no longer meets the page limit ({was.pages} pages)")
+        problems.append(f"the stored tailoring names a project with no line: {', '.join(was.empty_entries)}")
     return Remake(REMAKE_UNRESOLVED if problems else REMAKE_PREVIOUS, was, now, tuple(regressions), tuple(problems))
 
 
@@ -1088,9 +1122,14 @@ class MasterTailoring:
         return self.candidates.context(answers=answers, matrix=matrix)
 
     def finish(self, result: TailoredResume, ctx: TailorContext) -> tuple[TailoredResume, TailorSelection]:
-        """The model's settled answer with the code's Skills line shown, fitted; and what was picked."""
+        """The model's settled answer with the code's Skills line shown; and what was picked.
 
-        fitted = fit_selected(ensure_skills_line(result, self.candidates, ctx), self.candidates, self.master, today=self.today)
+        NOT FITTED TO A PAGE (0.1.11.5 item 1c): like a pick, a tailoring shows what was chosen and the user fits
+        the page with the spacing of the job's preview.  (The candidate set now offers the whole Skills section and
+        the selection's Other lines and projects, which a page fit cannot cut: fitted to 2 pages it lost role
+        headings and must-cover lines.)"""
+
+        fitted = whole_selection(ensure_skills_line(result, self.candidates, ctx))
         return fitted, selection_record(self.master, self.candidates, fitted, pins=self.pins, excludes=self.excludes, today=self.today)
 
     def fall_back(self, job: TailorJob, ctx: TailorContext, code: str) -> tuple[TailoredResume, TailorSelection, TailorContext]:
@@ -1212,4 +1251,5 @@ __all__ = [
     "stored_master",
     "tailoring_basis",
     "tailoring_for_resume",
+    "whole_selection",
 ]

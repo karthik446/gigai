@@ -212,10 +212,10 @@ def test_a_resume_that_cannot_fit_says_so_in_plain_words(fx: PipelineFixture, tm
     note = payload["note"]
     assert note == (
         "This resume takes 4 pages: it does not fit on 2 pages even with the tightest spacing. "
-        "To get 2 pages, shorten it automatically (the Shorten automatically button on the job's page, or "
-        "`gigai scout resume pick --job-url URL --shorten`; no model call), then generate the PDF again. Or keep it at 4 pages."
+        "To get 2 pages, remove a point or two on the job's page, then generate the PDF again. Or keep it at 4 pages."
     )
-    assert "by hand" not in note and "remove a few lines" not in note, "the user is not told to edit: Shorten automatically does it"
+    # 0.1.11.5: "Shorten automatically" is retired; the sentence names what replaced it (Remove a point on the job's page).
+    assert "--shorten" not in note and "Shorten automatically" not in note and "remove a few lines" not in note
     assert note.isascii() and "\n" not in note
     for internal in ("max_pages", "spacing_scale", "auto_fit", "over_page_limit", "LengthFit", "scout.pick", "Typst", "_"):
         assert internal not in note, internal
