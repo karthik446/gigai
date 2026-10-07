@@ -83,7 +83,7 @@ from ..untrusted_text import UNTRUSTED_POSTING_RULE, fence_untrusted_posting
 from . import model_rank
 from .posting_tags import FUNCTIONS, normalize_title
 from .tag_store import TagStore
-from .title_query import open_tag_store, tag_query_for_roles
+from .title_query import function_levels_for_roles, open_tag_store
 
 #: tag-v2 (0.1.10.7 P5): the title lines are fenced as untrusted and the prompt states the rule
 #: (``untrusted_text``). A function a model set is stored with the version that set it
@@ -337,9 +337,9 @@ class Demand:
 
     @property
     def levels(self) -> tuple[str, ...]:
-        """The rules levels a tag query for these roles can match (a role with no function has none)."""
+        """The rules levels where a function tag decides a match for these roles (a role with no function has none)."""
 
-        return tuple(sorted({level for level, _function in tag_query_for_roles(self.roles).pairs}))
+        return function_levels_for_roles(self.roles)
 
 
 def load_demand(home_root: Path, target: Path) -> Demand:

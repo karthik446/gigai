@@ -18,7 +18,20 @@ A posting matches when EITHER
   Software Development" come in.
 
 A role whose tag has no function (the rules found no family) takes no part in
-the tag query and keeps the plain rule only. A title the rule REJECTED (the
+the tag query and keeps the plain rule only. So does (0.1.11.5, TITLE-01)
+
+* a role of a WIDE family (``WIDE_FUNCTIONS``: every family but ``software``).
+  A (level, function) pair says "the same job" only where the family is one
+  job. "Forward Deployed Engineer" is mid + solutions, and so are "Solutions
+  Architect", "Implementation Consultant" and "Field Architect": the pair
+  listed them all for that role;
+* a role with a QUALIFIER (``role_qualifier``: "Staff Software Engineer, Agent
+  Infrastructure", "Software Engineer (Backend)"). The tag knows nothing of the
+  qualifier, so the pair staff + software listed every "Staff Software
+  Engineer" there is. Rule only, the qualifier's words must be in the title.
+
+Both still say which FUNCTIONS the profile wants (the generic-title veto
+below reads the tag of every role). A title the rule REJECTED (the
 role's words are all there, as another role: "Staff Training Engineer" for
 "Staff Engineer", ``role_fit`` is ``False``) is never matched by a tag: the
 rules tag it staff + software like the role itself, and the tag must not bring
@@ -67,10 +80,11 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
+import re
 import sqlite3
 
-from .ats_board_clients import _SENIORITY_WORDS, _WORD_RE, _words, matches_roles, role_fit
-from .posting_tags import _LEVEL_RES, default_store, normalize_title, tag_title
+from .ats_board_clients import _LEVEL_WORDS, _SENIORITY_WORDS, _WORD_RE, _words, matches_roles, role_fit
+from .posting_tags import _LEVEL_RES, FUNCTIONS, default_store, normalize_title, tag_title
 from .tag_store import TagStore
 
 #: The bare role nouns (as the rule stems them: "engineering" is "engineer"): a role that is only one of these plus level
@@ -78,8 +92,42 @@ from .tag_store import TagStore
 GENERIC_ROLE_WORDS = frozenset({"engineer", "developer", "programmer"})
 
 
+#: The ONE family whose (level, function) pair is one job, so a role of it takes part in the tag query. The tag table
+#: (``posting_tags._FUNCTION_RULES``) tries every look-alike family first, and ``software`` is what is left: an
+#: engineering noun with no other family's word ("Dir. of Engineering", "Director, Software Development").
+TAG_QUERY_FUNCTIONS = frozenset({"software"})
+#: The WIDE families (0.1.11.5, TITLE-01): a role of one takes NO part in the tag query, it keeps the rule only. Each is
+#: either several jobs under one name (``solutions``: sales / solutions / customer / field / implementation / forward
+#: deployed x engineer / architect / consultant; ``customer``, ``hardware``, ``operations``, ``sales``, ``marketing``,
+#: ``people``, ``finance``, ``legal``, ``healthcare``, ``research``, ``design``) or keyed on a TOPIC word that any job
+#: may carry (``ai_ml``: "ai" or "ml" anywhere, so an AI security lead, designer or account executive; ``data``,
+#: ``security_it``, ``product``).
+WIDE_FUNCTIONS = frozenset(FUNCTIONS) - TAG_QUERY_FUNCTIONS
+
+#: Where a role's qualifier starts: , ; : | @, a bracket, a dash or slash of its own (" - ", " / "), an en or em dash.
+_QUALIFIER_RE = re.compile(r"[,;:|()\[\]{}@]|\s[-/]+\s|[\u2013\u2014]")
+
+
 def _is_level_word(word: str) -> bool:
     return any(pattern.fullmatch(word) for _name, pattern in _LEVEL_RES)
+
+
+def role_qualifier(role: str) -> tuple[str, ...]:
+    """The words of ``role``'s QUALIFIER (as the rule stems them), ``()`` when it has none.
+
+    The qualifier is what follows the first comma, colon, bracket, pipe or dash of its own: ", Agent Infrastructure",
+    " - Payments", "(Backend)". Level words there are no qualifier ("Software Engineer, Staff"), and a separator with
+    nothing in front of it starts none ("(Senior) Software Engineer").
+    """
+
+    if type(role) is not str:
+        return ()
+    head, *rest = _QUALIFIER_RE.split(role, maxsplit=1)
+    if not rest or not _words(head):
+        return ()
+    return tuple(
+        word for word in _words(rest[0]) if word not in _SENIORITY_WORDS and word not in _LEVEL_WORDS and not _is_level_word(word)
+    )
 
 
 def is_generic_role(role: str) -> bool:
@@ -134,16 +182,27 @@ class TagQuery:
 
 
 def tag_query_for_roles(roles: Sequence[str]) -> TagQuery:
-    """Tag each role phrase; a role with no function contributes nothing."""
+    """Tag each role phrase; a role with no function, of a wide family or with a qualifier contributes nothing."""
 
     pairs: set[tuple[str, str]] = set()
     for role in roles:
         if type(role) is not str or not role.strip():
             continue
         tag = tag_title(role)
-        if tag.function is not None:
+        if tag.function in TAG_QUERY_FUNCTIONS and not role_qualifier(role):
             pairs.add((tag.level, tag.function))
     return TagQuery(frozenset(pairs))
+
+
+def function_levels_for_roles(roles: Sequence[str]) -> tuple[str, ...]:
+    """The levels of the roles that name a function: where a posting's function tag can decide a match.
+
+    Wider than the tag query on purpose: a wide or qualified role adds no tag match, but its function still decides
+    the generic-title veto, so a title of its level with no function yet is still worth a model's tag.
+    """
+
+    tags = (tag_title(role) for role in roles if type(role) is str and role.strip())
+    return tuple(sorted({tag.level for tag in tags if tag.function is not None}))
 
 
 @dataclass(slots=True)
@@ -213,14 +272,17 @@ class TitleMatcher:
         self.roles = tuple(str(role) for role in roles)
         self._avoid = avoid_phrases(avoid)
         self.query = tag_query_for_roles(self.roles) if store is not None else TagQuery(frozenset())
-        self._store = store if self.query else None
+        #: The functions the profile's roles name: of EVERY role, also one that takes no part in the tag query.
+        self._functions = frozenset(
+            function for function in (tag_title(role).function for role in self.roles if role.strip()) if function is not None
+        )
+        self._store = store if self._functions else None
         self.counts = TitleMatchCounts()
         generic = tuple(role for role in self.roles if is_generic_role(role))
         names_a_function = any(role not in generic and tag_title(role).function is not None for role in self.roles)
         #: The generic titles a known function tag can veto: only with a store, and only next to a function-specific title.
         self.generic_roles = generic if self._store is not None and names_a_function else ()
         self._specific_roles = tuple(role for role in self.roles if role not in self.generic_roles)
-        self._functions = frozenset(function for _level, function in self.query.pairs)
 
     def _rule_only(self) -> None:
         """The store cannot be read: from here on exactly the rule (no tag match, no veto)."""
@@ -275,13 +337,17 @@ def title_matches(title: str, roles: Sequence[str], store: TagStore | None = Non
 
 __all__ = [
     "GENERIC_ROLE_WORDS",
+    "TAG_QUERY_FUNCTIONS",
     "TagQuery",
     "TitleDecision",
     "TitleMatchCounts",
     "TitleMatcher",
+    "WIDE_FUNCTIONS",
     "avoid_phrases",
+    "function_levels_for_roles",
     "is_generic_role",
     "open_tag_store",
+    "role_qualifier",
     "tag_query_for_roles",
     "title_avoided",
     "title_matches",

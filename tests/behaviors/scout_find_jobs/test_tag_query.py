@@ -55,7 +55,9 @@ def _store(home: Path, titles) -> TagStore:
 
 
 def test_the_tag_query_for_a_role_is_its_level_and_function() -> None:
-    assert tag_query_for_roles(("Director of Engineering", "Director of AI")).pairs == {("director", "software"), ("director", "ai_ml")}
+    assert tag_query_for_roles(("Director of Engineering", "Senior Backend Developer")).pairs == {("director", "software"), ("senior", "software")}
+    # 0.1.11.5 (TITLE-01): a wide family or a qualified role has no tag query either.
+    assert tag_query_for_roles(("Director of AI", "Director of Engineering, Platform")).pairs == set()
     # No function found in the role: no tag query, the plain rule only.
     assert not tag_query_for_roles(("zzz",))
     assert not tag_query_for_roles(("",))

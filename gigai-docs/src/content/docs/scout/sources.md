@@ -119,6 +119,23 @@ titles **as a whole role**, not when the title's words merely appear:
   Security Engineer" is a "Security Engineer"), and unless your own title
   says that word.
 
+A title tag adds postings for one kind of title only. A title of yours that
+is plain software engineering and has no qualifier ("Director of
+Engineering", "Staff Software Engineer") also lists a posting whose tag has
+the same level and the software function, though a word of yours is missing
+from its title: "Dir. of Engineering", "Director, Software Development". Every
+other title matches by its words alone:
+
+- A title of another function ("Forward Deployed Engineer", "Staff AI
+  Engineer", "Product Manager"). Those functions hold many different jobs, so
+  "Forward Deployed Engineer" does not list "Solutions Architect" or
+  "Implementation Consultant".
+- A title with a qualifier after a comma, a colon, a bracket or a dash ("Staff
+  Software Engineer, AI Platform", "Software Engineer (Backend)"). The
+  qualifier's words must be in the posting's title, so it does not list every
+  "Staff Software Engineer". A level there is no qualifier ("Software
+  Engineer, Staff").
+
 **Titles to avoid** (setup, and each profile's settings) take postings out of
 that profile's list. An entry is a word or a phrase; a posting whose title
 holds it is not listed at all. Whole words only, any case, no word stemming:
