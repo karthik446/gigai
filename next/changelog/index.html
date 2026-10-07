@@ -122,7 +122,9 @@ one line each.</li>
 three roles or fewer; Skills are at most four plain lines (the posting’s terms first, no duplicates, a long list
 is cut at the end); the Summary is a paragraph. A project’s tech line sits on its title line, no page holds only
 Education or Skills, and below 1.0 the gaps tighten faster, so a 20-point resume with every block reaches two
-pages around 0.85.</li>
+pages around 0.85.
+A role or a project can now split across two pages (its heading stays with its first bullet, and a bullet of up to
+four lines stays whole), so a page no longer ends with a wide empty band before the next block.</li>
 <li><strong>Fit and rank at a glance.</strong> The Jobs list shows a Fit chip (“Fit 92% · 19/22”, green for a match) and a Rank
 chip (“Rank 92”) under each title, and an assessed job page shows its fit and rank in the top-right box.</li>
 <li><strong>Assess all can be cancelled and shows progress.</strong> The dialog closes when the batch starts; the page shows
@@ -131,6 +133,9 @@ kept, nothing else starts). <code dir="auto">gigai scout jobs assess --cancel</c
 its own model calls. The button says what it will do (“Assess top 50 of 177”), and the dialog says the estimate and
 what the low-rank checkbox does (“Include the 105 low-ranked ones in the pool (still 50 per run)”). A row listed
 for another profile has a link, “Or assess as” and that profile’s name.</li>
+<li><strong>Jobs you applied to leave the list.</strong> After <strong>Mark applied</strong> a job (and the ones that moved on: interview, offer,
+rejected, withdrawn) is left out of the Jobs list, its counts and “Assess top 50”, and out of <code dir="auto">gigai scout jobs list</code> and <code dir="auto">gigai scout new</code> (they say how many). The <strong>Applied</strong> chip shows the count (“Applied 7”) and lists them;
+opening or assessing one by its address still works.</li>
 <li><strong>Fewer wrong titles.</strong> A job title that names a broad family (“Forward Deployed Engineer”, “Staff AI Engineer”)
 or carries a qualifier (“Staff Software Engineer, AI Platform”) now matches by its own words, not every posting
 of the same function.</li>
