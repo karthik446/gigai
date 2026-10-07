@@ -1689,6 +1689,14 @@ table.data-table th {
 }
 .profile-tag.shown { background: var(--quick-bg); color: var(--quick); border-color: transparent; }
 .posting-score { font-size: 0.86rem; color: var(--text); }
+/* 0.1.11.5 (UI-01): the fit and rank chips under the title, beside the profile tags */
+.score-chip { display: inline-flex; align-items: center; font-size: 0.78rem; font-weight: 700; padding: 2px 9px; border-radius: 999px; border: 1px solid var(--border); background: var(--chip-bg); color: var(--text); white-space: nowrap; }
+.score-chip.fit { border-color: var(--ok); background: var(--ok-bg); color: var(--ok); }
+/* the job page's box top right for an assessed job: the fit, then the rank under it */
+.score-box { display: flex; flex-direction: column; align-items: center; min-width: 96px; padding: 8px 12px; border-radius: 10px; border: 1px solid var(--border); text-align: center; line-height: 1.2; }
+.score-box-fit { font-size: 1.7rem; font-weight: 700; color: var(--ok); }
+.score-box-label { font-size: 0.74rem; color: var(--muted); }
+.score-box-rank { margin-top: 6px; font-size: 0.95rem; font-weight: 700; color: var(--text); }
 .posting-chips { display: flex; flex-wrap: wrap; gap: 6px; align-content: flex-start; }
 .posting-actions { display: flex; flex-direction: column; gap: 6px; align-items: flex-end; text-align: right; }
 .posting-actions .link-button { font-size: 0.82rem; }

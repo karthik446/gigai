@@ -294,6 +294,67 @@ export function scoreText(row) {
   return row.score_kind === "assessment" ? `${row.score}% of requirements met` : `rank ${row.score}`;
 }
 
+// 0.1.11.5 (UI-01): the two numbers a person sorts by, as chips under the title: "Fit 92% · 19/22" and "Rank 92". The
+// data is on the row already (`fit`, `assessment.met` / `.requirements`, `rank_score`): nothing is read again. A not
+// assessed row has the rank chip alone ("Not ranked yet" when it has no rank); a thin posting has no fit (the server sends
+// `fit` null for it).
+function assessedCounts(row) {
+  const found = row && row.assessment;
+  const met = found && typeof found.met === "number" ? found.met : null;
+  const total = found && typeof found.requirements === "number" && found.requirements > 0 ? found.requirements : null;
+  return met !== null && total !== null ? { met, total } : null;
+}
+
+export function fitText(row) {
+  if (!row || row.state === "not_assessed" || row.thin_posting === true || typeof row.fit !== "number") {
+    return null;
+  }
+  const counts = assessedCounts(row);
+  return { percent: `${row.fit}%`, requirements: counts ? `${counts.met} of ${counts.total} requirements` : null, short: counts ? `${row.fit}% · ${counts.met}/${counts.total}` : `${row.fit}%` };
+}
+
+export function scoreChips(row) {
+  const chips = [];
+  const fit = fitText(row);
+  if (fit) {
+    chips.push({ kind: "fit", label: `Fit ${fit.short}`, testId: "fit-chip", title: `${fit.requirements ? `${fit.requirements} met. ` : ""}Fit counts the must-have requirements twice.` });
+  }
+  if (row && typeof row.rank_score === "number") {
+    chips.push({ kind: "rank", label: `Rank ${row.rank_score}`, testId: "rank-chip", title: "Rank is a first guess from the posting and your resume; it is not a verdict." });
+  } else if (row) {
+    chips.push({ kind: "rank", label: "Not ranked yet", testId: "rank-chip", title: "This posting has no rank yet. Rank now (above the list) ranks it." }); // the old sentence said so too
+  }
+  return chips;
+}
+
+// The job page's box top right for an ASSESSED job: {fit: {percent, requirements} | null, rank: "Rank 92" | null};
+// null when the row is not assessed (the rank tile of the page stays what it was) or has neither number.
+export function scoreBox(row) {
+  if (!row || row.state === "not_assessed" || !row.state) {
+    return null;
+  }
+  const fit = fitText(row);
+  const rank = typeof row.rank_score === "number" ? `Rank ${row.rank_score}` : null;
+  return fit || rank ? { fit, rank } : null;
+}
+
+// The middle column of a row: the state in the server's words (its `score_text`) without the numbers the chips carry,
+// and at most "3 minor gaps" (the gap names stay on the job page). null when the row says nothing more.
+const NUMBER_PART = /^(fit \d+%|\d+ of \d+ requirements|rank \d+|not ranked yet)$/;
+
+export function stateText(row) {
+  if (typeof row.score_text !== "string" || !row.score_text.trim()) {
+    return null;
+  }
+  const parts = row.score_text.split(" · ").filter((part) => !NUMBER_PART.test(part));
+  const matched = (typeof row.state !== "string" || row.state === "matched") && row.thin_posting !== true;
+  const gaps = matched && typeof row.minor_gap_text === "string" ? /^\d+ minor gaps?/.exec(row.minor_gap_text.trim()) : null;
+  if (gaps) {
+    parts.push(gaps[0]);
+  }
+  return parts.join(" · ") || null;
+}
+
 // 0110-10-12: why an assessment is old, in the SERVER's words (scout_new._STALE_WORDS): the row, the job page and the
 // terminal say the same reason. The row used to say two ("old assessment: older prompt" and "Stale: older settings").
 export const STALE_WORDS = {
