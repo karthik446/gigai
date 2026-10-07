@@ -2520,7 +2520,7 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
             "batch (`here`: this server; false: a terminal's `gigai scout jobs assess --yes` or `gigai scout new --yes`): no store, "
             "posting or journal read, so it costs the same on a small and on a very large home. `last` is how the last batch this "
             "server ran ended (`status` done, cancelled or failed; `requested`, `assessed`, `failed`, `not_started`, `failed_codes`), "
-            "or null. System data only: ids, codes and counts; `pending` holds posting URLs."
+            "or null. Ids, codes and counts, and `pending`, which holds posting URLs: the answer is labelled public-untrusted for them."
         ),
     ),
     RouteSpec(
@@ -2923,8 +2923,8 @@ _LABELS: dict[tuple[str, str], tuple[str, ...]] = {
     ("GET", "/api/postings/status"): _NONE,  # a state, a phase and counts
     ("GET", "/api/postings/ranking"): _NONE,  # the ranking block and the rank job
     ("POST", "/api/postings/assess"): _UNTRUSTED,
-    ("GET", "/api/postings/assess/status"): _NONE,  # counts, codes and ids (`pending`: job identities)
-    ("POST", "/api/postings/assess/cancel"): _NONE,
+    ("GET", "/api/postings/assess/status"): _UNTRUSTED,  # counts and codes; `pending` lists posting URLs (a public page's text)
+    ("POST", "/api/postings/assess/cancel"): _UNTRUSTED,  # the same status object, with `pending`
     ("POST", "/api/postings/rank"): _NONE,  # the switch, counters, counts and the job: ids and codes
     ("POST", "/api/runs/import"): _NONE,
     ("GET", "/api/metrics"): _NONE,

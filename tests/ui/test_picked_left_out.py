@@ -49,6 +49,15 @@ CHANGE_WALL_SECONDS = INTERACTIVE_WALL_SECONDS  # Add, Remove: 0.2 s measured (a
 SAVE_WALL_SECONDS = 20.0  # one master write and the profiles' views printed again: 2.9 to 4.4 s measured
 EDITED = "Led a zero-downtime Postgres migration of the 4 TB primary."
 
+def _changes(ui, step: str) -> list[str]:
+    """What the page wrote after a step, without the preview's render.
+
+    0.1.11.5: the job page opens on Preview ALWAYS (a resume with a changed line opened on "Show changes"), and the
+    preview is rendered again after every change of the resume. A render stores nothing."""
+
+    return [write for write in ui.writes_after(step) if write != "POST /api/tailored-resumes/preview"]
+
+
 
 def tailored_from_the_master(ui, demo) -> dict:
     """The hero job's stored resume, tailored from the master (again, through the real route, when it was not)."""
@@ -115,8 +124,10 @@ def test_picked_and_left_out_are_shown_with_reasons_and_a_line_is_removed_added_
     assert (header.locator('[data-role="provenance"]').text_content() or "").startswith("Made by the tailoring of 0.1.10"), header.text_content()
     assert header.get_attribute("data-basis") == under.get_attribute("data-basis") == "master"
     ui.settle()
-    # Closed, the lists ask the server nothing: the master is read when one is opened.
-    assert ui.requests_after("start", "/api/master") == 0 and ui.writes_after("start") == []
+    # Closed, the lists ask the server nothing: the master is read when one is opened. 0.1.11.5: the page opens on
+    # Preview ALWAYS (this resume has reworded lines: it opened on "Show changes"), so the one POST is the preview's
+    # render; it stores nothing.
+    assert ui.requests_after("start", "/api/master") == 0 and ui.writes_after("start") == ["POST /api/tailored-resumes/preview"]
     ui.cpu_budget("job page with Picked / Left out, cold page (small home)", JOB_PAGE_CPU_SECONDS, "start", "shown")
     ui.wall_budget("job page with Picked / Left out, cold page (small home)", JOB_PAGE_WALL_SECONDS, "start", "shown")
 
@@ -164,7 +175,7 @@ def test_picked_and_left_out_are_shown_with_reasons_and_a_line_is_removed_added_
     gone = next(line for line in listed(ui, "left-out") if line["id"] == victim)
     assert (gone["code"], gone["reason"], gone["text"]) == ("removed_by_you", "you removed it from this resume", master[victim]["text"])
     ui.settle()
-    assert ui.writes_after("shown") == ["PUT /api/tailored-resumes/selection", "PUT /api/tailored-resumes/selection"]
+    assert _changes(ui, "shown") == ["PUT /api/tailored-resumes/selection", "PUT /api/tailored-resumes/selection"]
     assert ui.requests_after("shown", "/api/master") == 1, "the master is read once, however many lists are opened"
     ui.wall_budget("Remove a line from the tailored resume (small home)", CHANGE_WALL_SECONDS, "before-remove", "removed")
     on_server = ui.server_json(f"/api/tailored-resumes?profile_id={quote(demo.hero_profile_id, safe='')}&job_identity={quote(demo.hero_job, safe='')}")["items"][0]
@@ -213,6 +224,9 @@ def test_picked_and_left_out_are_shown_with_reasons_and_a_line_is_removed_added_
     ui.reload()
     ui.wait_for_job_page()
     ui.page.locator(VIEW).wait_for()
+    # 0.1.11.5: the page opens on Preview; the per-line controls are under "Show changes", one click away.
+    assert ui.page.locator(f'{PANEL} [data-action="view-clean"]').get_attribute("aria-pressed") == "true"
+    ui.page.locator(f'{PANEL} [data-action="view-changes"]').click()
     save = ui.page.locator(f'{PANEL} .line-controls[data-line-id="{line["id"]}"] [data-action="save-wording"]')
     save.wait_for()
     assert ui.page.locator(f'{PANEL} [data-action="save-wording"]').count() == 1, "only the edited line offers it"
@@ -228,6 +242,6 @@ def test_picked_and_left_out_are_shown_with_reasons_and_a_line_is_removed_added_
     assert after["revision"] == revision + 1 and after["written_by"] == "operator"
     assert next(item for item in after["items"] if item["id"] == victim)["text"] == EDITED
     ui.settle()
-    assert ui.writes_after("before-save") == ["PUT /api/master/lines"]
+    assert _changes(ui, "before-save") == ["PUT /api/master/lines"]
     ui.wall_budget("Save a wording to the master (small home)", SAVE_WALL_SECONDS, "before-save", "saved")
     ui.assert_clean()  # zero console errors, page errors, HTTP >= 400, failed requests

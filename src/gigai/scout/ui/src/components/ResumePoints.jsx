@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { getMaster, getTailoredResumes, putTailoredResumeLine, putTailoredResumeSelection } from "../api.js";
+import { getMaster, getTailoredResumes, putMasterLine, putTailoredResumeLine, putTailoredResumeSelection } from "../api.js";
 import { latestStored } from "../tailoredResumeModel.js";
 import {
   EMPTY_TEXT,
@@ -8,11 +8,16 @@ import {
   NO_MATCH_TEXT,
   NO_SELECTION_TEXT,
   SAVED_TEXT,
+  SAVE_TO_MASTER_LABEL,
   SAVING_TEXT,
   SEARCH_FROM,
   canMovePoints,
   editOf,
   leftOutChoices,
+  masterSaveErrorText,
+  masterSavedText,
+  masterWording,
+  needsMaster,
   pointCount,
   pointErrorText,
   pointGroups,
@@ -32,13 +37,62 @@ import {
 //            out, by role (the master is read once, when the list is first
 //            opened); one click puts a line on, under its own role
 //
+//   master   0.1.11.5 (b++): an EDITED point whose words are not the master's
+//            carries ONE action, "Save this wording to my master". It opens a
+//            confirm under the point: what the master says now, what it will
+//            say, "Change my master" and "Cancel". Only the confirm's button
+//            writes, and only that ONE line (PUT /api/master/lines, the write
+//            of the Changed tab's "Save this wording to your master"), with
+//            the revision the confirm showed. Nothing reaches the master
+//            without it: not an edit, not a Remove, not an Add.
+//
 // Every change is ONE request to a route that was there already, saved at once
 // for this job's resume (no Save button) and never written to the master. The
 // answer is the stored resume: `state.setStored` holds it, so the preview is
 // made again and the page count follows (JobResumePanel hands the preview the
 // stored resume's text). Changes are sent one after the other, in the order
 // they were made.
-function Point({ line, label, movable, onEdit, onRemove }) {
+function MasterConfirm({ ask, label, busy, onConfirm, onCancel }) {
+  const cancel = useRef(null);
+  useEffect(() => {
+    if (cancel.current) {
+      cancel.current.focus(); // the safe answer is the one under the hand
+    }
+  }, []);
+  return (
+    <div
+      className="resume-point-master"
+      role="group"
+      aria-label={`Save the wording of ${label} to your master`}
+      data-role="master-confirm"
+      onKeyDown={(event) => {
+        if (event.key === "Escape") {
+          onCancel();
+        }
+      }}
+    >
+      <p className="small">This changes one line of your master. Nothing else in it changes, and nothing changes until you say so.</p>
+      <div className="label">Your master says now</div>
+      <p className="small resume-point-master-old" data-role="master-old">
+        {ask.from}
+      </p>
+      <div className="label">It will say</div>
+      <p className="small resume-point-master-new" data-role="master-new">
+        {ask.to}
+      </p>
+      <button type="button" className="button small" data-action="confirm-master" disabled={busy} onClick={() => onConfirm(ask)}>
+        {busy ? "Saving" : "Change my master"}
+      </button>{" "}
+      <button type="button" className="button small secondary" data-action="cancel-master" ref={cancel} disabled={busy} onClick={onCancel}>
+        Cancel
+      </button>
+    </div>
+  );
+}
+
+// `wording` is masterWording() for this point ({id, from, to}, or null: no action); `ask` the open confirm, when it
+// is this point's and still says what the point and the master say.
+function Point({ line, label, movable, wording, ask, masterBusy, onEdit, onRemove, onAskMaster, onConfirmMaster, onCancelMaster }) {
   const [draft, setDraft] = useState(line.text);
   const sent = useRef(null); // the words last sent for this point: Enter then leaving the box is one request
   useEffect(() => {
@@ -84,12 +138,18 @@ function Point({ line, label, movable, onEdit, onRemove }) {
             Your words
           </span>
         )}
+        {wording && !ask && (
+          <button type="button" className="link-button" data-action="save-to-master" aria-label={`${SAVE_TO_MASTER_LABEL}: ${label}`} disabled={masterBusy} onClick={() => onAskMaster(line, wording)}>
+            {SAVE_TO_MASTER_LABEL}
+          </button>
+        )}
         {movable && line.itemId && (
           <button type="button" className="link-button" data-action="remove-point" aria-label={`Remove ${label}`} onClick={() => onRemove(line)}>
             Remove
           </button>
         )}
       </span>
+      {ask && <MasterConfirm ask={ask} label={label} busy={masterBusy} onConfirm={onConfirmMaster} onCancel={onCancelMaster} />}
     </li>
   );
 }
@@ -105,9 +165,15 @@ export default function ResumePoints({ stored, state }) {
   const queue = useRef(Promise.resolve());
   const waiting = useRef(0);
   const movable = canMovePoints(stored);
+  // (b++) the confirm that is open: {lineId, id, from, to, revision}; `masterBusy` while its write is on its way.
+  const [asking, setAsking] = useState(null);
+  const [masterBusy, setMasterBusy] = useState(false);
+  // The master is read once: when "Add a point" is first opened, or for a resume with an edited point (whether the
+  // point carries "Save this wording to my master" depends on what the master says now).
+  const wantsMaster = movable && (adding || needsMaster(stored));
 
   useEffect(() => {
-    if (!adding || master || !movable) {
+    if (!wantsMaster || master) {
       return undefined;
     }
     let current = true;
@@ -117,7 +183,7 @@ export default function ResumePoints({ stored, state }) {
     return () => {
       current = false;
     };
-  }, [adding, master, movable]);
+  }, [wantsMaster, master]);
 
   // One change of the stored resume: `make(stored, key)` is the request. Sent after the ones before it.
   const send = useCallback((make) => {
@@ -163,13 +229,41 @@ export default function ResumePoints({ stored, state }) {
   );
   const move = useCallback((use, itemId) => send((key) => putTailoredResumeSelection({ ...key, use, itemId, fit: use === "add" ? "keep" : undefined })), [send]);
 
+  // (b++) the ONE write of the master, from the confirm's own button: that line, the words the confirm showed, on
+  // the revision it showed. The answer is the master as it is now; a master that changed meanwhile is refused and
+  // read again, so the next confirm shows what is there.
+  const saveToMaster = useCallback((ask) => {
+    setMasterBusy(true);
+    putMasterLine({ revision: ask.revision, id: ask.id, use: "edit", text: ask.to })
+      .then((response) => {
+        if (response.master) {
+          setMaster(response.master);
+        }
+        setStatus({ kind: "master-saved", text: masterSavedText(response) });
+        latest.current.state.reloadRecord(); // the page's stale list follows the master's revision
+      })
+      .catch((err) => {
+        setStatus({ kind: "error", text: masterSaveErrorText(err) });
+        if (err && (err.code === "revision_conflict" || err.code === "master_item_not_found")) {
+          return getMaster()
+            .then((response) => response.master && setMaster(response.master))
+            .catch(() => {});
+        }
+        return undefined;
+      })
+      .finally(() => {
+        setAsking(null);
+        setMasterBusy(false);
+      });
+  }, []);
+
   const groups = pointGroups(stored);
   const choices = adding && master ? leftOutChoices(stored, master, query) : null;
   return (
     <div className="resume-points" data-testid="resume-points" data-points={pointCount(groups)} data-state={status ? status.kind : "idle"}>
       <h4 className="resume-points-title">Points ({pointCount(groups)})</h4>
       <p className="muted small" data-role="points-help">
-        Change a point's words, take it off, or add one. Each change is saved for this job only: your master is never changed.
+        Change a point's words, take it off, or add one. Each change is saved for this job only. Your master changes only when you ask: a point you reworded offers "{SAVE_TO_MASTER_LABEL}".
       </p>
       <p className={status && status.kind === "error" ? "callout danger small" : "muted small"} role={status && status.kind === "error" ? "alert" : "status"} aria-live="polite" data-role="points-status">
         {status ? status.text : ""}
@@ -219,9 +313,27 @@ export default function ResumePoints({ stored, state }) {
         <div key={group.key} data-role="point-group">
           <div className="resume-points-role">{group.label}</div>
           <ul className="story-list">
-            {group.lines.map((line, index) => (
-              <Point key={line.id || `${group.key}-${index}`} line={line} label={pointLabel(group, index)} movable={movable} onEdit={edit} onRemove={(removed) => move("remove", removed.itemId)} />
-            ))}
+            {group.lines.map((line, index) => {
+              const wording = movable ? masterWording(line, master) : null;
+              // The confirm stays open only while it says what the point and the master say (an edit meanwhile closes it).
+              const ask = asking && wording && asking.lineId === line.id && asking.id === wording.id && asking.from === wording.from && asking.to === wording.to ? asking : null;
+              return (
+                <Point
+                  key={line.id || `${group.key}-${index}`}
+                  line={line}
+                  label={pointLabel(group, index)}
+                  movable={movable}
+                  wording={wording}
+                  ask={ask}
+                  masterBusy={masterBusy}
+                  onEdit={edit}
+                  onRemove={(removed) => move("remove", removed.itemId)}
+                  onAskMaster={(asked, found) => setAsking({ lineId: asked.id, ...found, revision: master.revision })}
+                  onConfirmMaster={saveToMaster}
+                  onCancelMaster={() => setAsking(null)}
+                />
+              );
+            })}
           </ul>
         </div>
       ))}

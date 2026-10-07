@@ -45,6 +45,9 @@ out.minutes = [1728, 60, 30, 0, null, 9000].map((s) => b.aboutMinutes(s));
 out.estimateFor = [b.estimateFor(1728, 50), b.estimateFor(null, 50)];
 out.lines = [b.batchProgressLine(running, profiles), b.batchProgressLine(failing, profiles), b.batchProgressLine(cancelling, profiles), b.batchProgressLine(idle, profiles), b.batchProgressLine(null)];
 out.progress = [b.batchProgress(running, profiles), b.batchProgress(cancelling, profiles), b.batchProgress(cancellingOne, profiles)];
+const cancellingNone = { ...running, batch: { ...running.batch, status: "cancelling", in_flight: 0 } };
+// B3b: Cancel was clicked and the next status is not read yet: the page says it from the status it holds.
+out.cancelSent = [b.batchProgress(running, profiles, { cancelSent: true }), b.batchProgress(cancellingNone, profiles), b.batchProgress(idle, profiles, { cancelSent: true })];
 out.running = [b.batchRunning(running), b.batchRunning(idle), b.batchRunning(null), b.batchRunning({ running: true, batch: {} })];
 out.started = [b.isBatchStarted({ ...running, status: "started" }), b.isBatchStarted(running), b.isBatchStarted({ status: "assessed", schema_version: "scout-postings-assess:1" })];
 out.end = [
@@ -135,14 +138,20 @@ def test_the_progress_says_how_many_of_how_many_the_estimate_and_the_profile(out
     assert out["lines"] == [
         "Assessing: 12 of 50 assessed · about 29 min for 50 · Platform track",
         "Assessing: 12 of 50 assessed, 1 failed",  # no estimate, a profile that is not listed: neither is made up
-        "Cancelling: 14 of 50 assessed · Platform track",
+        "Cancelling: finishing the 4 in flight · 14 of 50 assessed · Platform track",
         None, None,
     ]
     first, cancelling, one = out["progress"]
     assert (first["line"], first["estimate"], first["profile"], first["canCancel"], first["waiting"]) == ("12 of 50 assessed", "about 29 min for 50", "Platform track", True, None)
     assert cancelling["canCancel"] is False
-    assert cancelling["waiting"] == "Cancelling: no further model call starts. Waiting for the 4 calls in flight; what finished is kept."
-    assert one["waiting"] == "Cancelling: no further model call starts. Waiting for the 1 call in flight; what finished is kept."
+    # 0.1.11.5 B3b: never a bare "Cancelling…": the page says how many calls it is finishing (the status's `in_flight`).
+    assert (first["cancelling"], first["cancelLine"]) == (False, None)
+    assert cancelling["cancelLine"] == "Cancelling: finishing the 4 in flight"
+    assert one["cancelLine"] == "Cancelling: finishing the 1 in flight"
+    assert cancelling["waiting"] == one["waiting"] == "No further model call starts. What finished is kept."
+    sent, none_flying, no_batch = out["cancelSent"]
+    assert (sent["cancelling"], sent["canCancel"], sent["cancelLine"]) == (True, False, "Cancelling: finishing the 4 in flight"), "between the click and the next status the page said nothing of the calls in flight"
+    assert none_flying["cancelLine"] == "Cancelling: no call is in flight" and no_batch is None
     assert out["running"] == [True, False, False, False]
     assert out["started"] == [True, False, False]
 

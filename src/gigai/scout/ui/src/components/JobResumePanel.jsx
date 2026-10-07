@@ -67,7 +67,10 @@ import { Preview } from "./TailoredResumePanel.jsx";
 //            on a resume put in by hand: the profile's own resume is used as
 //            it is, and the page says how to get one picked (no dead button);
 //            a suggested resume that is not stored: "Pick it now"; a pick
-//            that is refused: one plain sentence by its code
+//            that is refused: one plain sentence by its code. The resume
+//            ALWAYS opens on "Preview" (0.1.11.5: the rendered pages with the
+//            points beside them), changed lines or not; "Show changes" is one
+//            click away
 //   writes   only on a click, and never through a model: POST
 //            /api/job-resumes/pick (re-pick, draft, use / dismiss proposed),
 //            the per-line Restore, the length Restore, Add and Remove
@@ -575,7 +578,7 @@ export default function JobResumePanel({ state, assessment, gate, items, reasses
             response={stored}
             provenance={provenance}
             promptFor={promptFor}
-            initialView={changed.length > 0 ? "changes" : "clean"}
+            initialView="clean"
             onChooseLine={chooseLine}
             choiceBusy={busy}
             choiceError={choiceError}

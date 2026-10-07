@@ -8942,12 +8942,14 @@
         ],
         "x-gigai-effect": "write",
         "x-gigai-external": "none",
-        "x-gigai-labels": []
+        "x-gigai-labels": [
+          "public-untrusted"
+        ]
       }
     },
     "/api/postings/assess/status": {
       "get": {
-        "description": "How far the running assess batch is, and how the last one ended. 0.1.11.5: what the Jobs page and a job page poll while an assess batch runs. `batch` is the live batch of this project, or null: `total`, `assessed`, `failed`, `in_flight` (model calls running now), `profile_id` (the profile of the call started last), `estimate_seconds` (what the question estimated for the batch), `pending` (the job identities with no result yet) and `status` running or cancelling. It is read from the batch's own marker file, whichever process runs the batch (`here`: this server; false: a terminal's `gigai scout jobs assess --yes` or `gigai scout new --yes`): no store, posting or journal read, so it costs the same on a small and on a very large home. `last` is how the last batch this server ran ended (`status` done, cancelled or failed; `requested`, `assessed`, `failed`, `not_started`, `failed_codes`), or null. System data only: ids, codes and counts; `pending` holds posting URLs.",
+        "description": "How far the running assess batch is, and how the last one ended. 0.1.11.5: what the Jobs page and a job page poll while an assess batch runs. `batch` is the live batch of this project, or null: `total`, `assessed`, `failed`, `in_flight` (model calls running now), `profile_id` (the profile of the call started last), `estimate_seconds` (what the question estimated for the batch), `pending` (the job identities with no result yet) and `status` running or cancelling. It is read from the batch's own marker file, whichever process runs the batch (`here`: this server; false: a terminal's `gigai scout jobs assess --yes` or `gigai scout new --yes`): no store, posting or journal read, so it costs the same on a small and on a very large home. `last` is how the last batch this server ran ended (`status` done, cancelled or failed; `requested`, `assessed`, `failed`, `not_started`, `failed_codes`), or null. Ids, codes and counts, and `pending`, which holds posting URLs: the answer is labelled public-untrusted for them.",
         "operationId": "get_api_postings_assess_status",
         "parameters": [],
         "responses": {
@@ -9051,7 +9053,9 @@
         "x-gigai-effect": "read",
         "x-gigai-external": "none",
         "x-gigai-host-checked": true,
-        "x-gigai-labels": []
+        "x-gigai-labels": [
+          "public-untrusted"
+        ]
       }
     },
     "/api/postings/rank": {

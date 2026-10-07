@@ -60,6 +60,15 @@ LABEL = f"{PAGE} {tid('step-timeline')} {tid('scout-label-chip')}"
 RESUME_STALE = f'{PAGE} #job-resume [data-role="resume-stale"]'
 SETTLED_TIMELINE = f"{PAGE} {tid('step-timeline')}" + "".join(f':not([data-state="{state}"])' for state in ("not_started", "running", "waiting"))
 
+def _changes(ui, step: str) -> list[str]:
+    """What the page wrote after a step, without the preview's render.
+
+    0.1.11.5: the job page opens on Preview ALWAYS (a resume with a changed line opened on "Show changes"), and the
+    preview is rendered again when the stored resume changes. A render stores nothing."""
+
+    return [write for write in ui.writes_after(step) if write != "POST /api/tailored-resumes/preview"]
+
+
 
 def stored_assessment(ui, job: dict) -> dict:
     """The job as the server holds it: its newest assessment, its state, its tailored resume."""
@@ -127,7 +136,7 @@ def test_a_jobs_row_says_an_assessment_is_old_once(ui) -> None:
         assert score.count(row["stale_label"]) == 1, score
         assert listed.locator('[data-kind="stale"]').count() == 0, f"a second label beside the score column's: {whole!r}"
         assert whole.count(OLD) == 1 and "stale" not in whole and "older settings" not in whole, whole
-        assert ui.writes_after("start") == []
+        assert _changes(ui, "start") == []
         ui.assert_clean()
 
 
@@ -164,7 +173,7 @@ def test_re_assess_an_old_assessment_from_its_job_page(ui) -> None:
         assert [(button.get_attribute("data-action"), (button.text_content() or "").strip()) for button in stale.locator("button").all()] == [("reassess-stale", "Re-assess · 1 model call")]
         assert ui.page.locator(ASSESSED_AT).get_attribute("data-at") == old_at
         ui.settle()
-        assert ui.writes_after("start") == [], "the page only read so far"
+        assert _changes(ui, "start") == [], "the page only read so far"
 
         # Re-assess: ONE request, for this job; no answer is written.
         ui.step("ready")
@@ -175,7 +184,7 @@ def test_re_assess_an_old_assessment_from_its_job_page(ui) -> None:
         made = answered.value.json()
         assert answered.value.status in (200, 201)
         assert answered.value.request.post_data_json == {"job": {"job_url": job["job_url"]}, "origin": "job_page"}
-        assert ui.writes_after("ready") == ["POST /api/assess"]
+        assert _changes(ui, "ready") == ["POST /api/assess"]
         assert made["basis_stale"] is False and made["updated_at"] > old_at and made["created_at"] < made["updated_at"]
         ui.cpu_budget("re-assess an old assessment (fixture model)", REASSESS_CPU_SECONDS, "ready", "reassessed")
         ui.wall_budget("re-assess an old assessment (fixture model)", REASSESS_WALL_SECONDS, "ready", "reassessed")
@@ -222,5 +231,5 @@ def test_re_assess_an_old_assessment_from_its_job_page(ui) -> None:
         legacy = not any(step["name"] in ("assess", "pick") for step in pipeline["steps"])  # as above: this tree's pipeline is the 0.1.10 one
         assert ui.page.locator(LABEL).get_attribute("data-legacy" if legacy else "data-older") == "true"
         assert ui.page.locator(f'{RESUME_STALE} li[data-stale="assessment_newer"]').count() == 1
-        assert ui.writes_after("reassessed") == []
+        assert _changes(ui, "reassessed") == []
         ui.assert_clean()  # zero console errors, page errors, HTTP >= 400, failed requests

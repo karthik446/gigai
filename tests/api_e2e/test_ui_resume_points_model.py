@@ -178,7 +178,10 @@ def test_the_preview_follows_the_stored_resume_from_one_place_and_the_list_keeps
     assert 'content={stored.markdown || ""}' in panel and "postResumePreview" not in panel and "postResumePreview" not in points
     # The list writes through the two routes that were there, and an Add never asks for a cut.
     assert points.count("putTailoredResumeLine(") == 1 and points.count("putTailoredResumeSelection(") == 1 and 'fit: use === "add" ? "keep" : undefined' in points
-    assert "putMasterLine" not in points and "/api/master/" not in points, "the list never writes the master"
+    # 0.1.11.5 (b++): the list writes the master in ONE place, the confirm of "Save this wording to my master"
+    # (test_ui_resume_points_master_model.py pins that write); an edit, a Remove and an Add never do.
+    assert points.count("putMasterLine(") == 1 and "const saveToMaster = useCallback((ask) =>" in points and "/api/master/" not in points, "the list writes the master outside the confirm"
+    assert "putMasterLine" not in points.split("const saveToMaster = useCallback((ask) =>")[0].split("export default function ResumePoints")[1], "an edit, a Remove or an Add writes the master"
     for source in (points, model):
         for kept in ("localStorage", "sessionStorage", "document.cookie", "indexedDB", "location.hash", "history.", "console.", "dangerouslySetInnerHTML"):
             assert kept not in source, kept

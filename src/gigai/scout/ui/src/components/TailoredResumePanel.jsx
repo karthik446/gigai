@@ -247,7 +247,8 @@ function PreviewLine({ line, index, open, onToggle, promptFor, showChanges, onCh
 }
 
 // `provenance` is JobResumePanel's one line ("Picked by the assessment from your master (revision 5) · 27 lines ·
-// 2 pages"); `initialView` is "clean" (the resume as it will print) unless the caller has changed lines to show.
+// 2 pages"); `initialView` is the view it opens on: the job page passes "clean" always (0.1.11.5: it opens on the
+// preview, changed lines or not).
 // 0.1.11.5 (a): `rendered` is the job page's rendered preview (ResumePreview.jsx: the resume as the PDF prints it,
 // with the spacing slider). It takes the clean copy's place: `rendered(text)` gets the clean copy as the text behind
 // the pictures. Without it (a caller with no stored job) the clean copy shows as text, as before.

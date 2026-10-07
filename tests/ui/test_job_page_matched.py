@@ -76,6 +76,15 @@ HEADER = {"name": "Zephyrine Quillfeather", "email": "zephyrine.quillfeather@exa
 WHY_REWORD = "This line could lead with what the posting asks for, in words the line already supports."
 WHY_MASTER = "An answer or a story supports this requirement, and no line of your master resume states it. Add a line to your master so a resume can show it."
 
+def _changes(ui, step: str) -> list[str]:
+    """What the page wrote after a step, without the preview's render.
+
+    0.1.11.5: the job page opens on Preview ALWAYS (a resume with a changed line opened on "Show changes"), and the
+    preview is rendered again after every change of the resume. A render stores nothing."""
+
+    return [write for write in ui.writes_after(step) if write != "POST /api/tailored-resumes/preview"]
+
+
 
 def lines_of(stored: dict) -> list[dict]:
     return [line for section in stored["result"]["sections"] for line in [*section.get("lines", []), *(bullet for entry in section.get("entries", []) for bullet in entry["bullets"])]]
@@ -174,7 +183,8 @@ def test_a_matched_job_shows_its_picked_resume_and_apply_gives_the_pdf_and_nothi
         assert "Nice to have: Met" in chips, chips
         assert not any("ask" in chip.lower() or "must-have" in chip.lower() for chip in chips), chips
         ui.settle()
-        assert ui.writes_after("start") == [], "opening the job writes nothing and picks nothing"
+        # (0.1.11.5: the page opens on Preview always; the one POST is the preview's render, which stores nothing.)
+        assert ui.writes_after("start") == ["POST /api/tailored-resumes/preview"], "opening the job writes nothing and picks nothing"
         assert fixture.reads == 1 and fixture.picks == [], "the record is read once, and nothing is refreshed by itself"
         assert ui.requests_after("start", "/api/master") == 0
         ui.wall_budget("open a Matched job with its picked resume (small home)", JOB_PAGE_WALL_SECONDS, "start", "shown")
@@ -197,7 +207,7 @@ def test_a_matched_job_shows_its_picked_resume_and_apply_gives_the_pdf_and_nothi
         assert ui.page.locator(PANEL).get_attribute("data-origin") == "edited"
         assert (ui.page.locator(f'{PANEL} [data-role="provenance"]').text_content() or "").strip() == "Your edited resume"
         assert master[victim]["text"] in (stored_resume(ui, demo.hero_profile_id, demo.hero_job) or {})["markdown"], "the Add is the real store's"
-        assert ui.writes_after("before-add") == ["PUT /api/tailored-resumes/selection"]
+        assert _changes(ui, "before-add") == ["PUT /api/tailored-resumes/selection"]
         ui.wall_budget("Add the line a requirement lost (small home)", CHANGE_WALL_SECONDS, "before-add", "added")
 
         # --- Picked: the requirements a line supports, and what Scout added ---
@@ -233,7 +243,7 @@ def test_a_matched_job_shows_its_picked_resume_and_apply_gives_the_pdf_and_nothi
         assert sent.value.post_data_json == {**key, "line_id": line["id"], "use": "original"}
         restored = stored_resume(ui, demo.hero_profile_id, demo.hero_job) or {}
         assert EDITED not in restored["markdown"] and master[victim]["text"] in restored["markdown"]
-        assert ui.writes_after("before-restore") == ["PUT /api/tailored-resumes/lines"]
+        assert _changes(ui, "before-restore") == ["PUT /api/tailored-resumes/lines"]
         ui.wall_budget("Restore a line changed in chat (small home)", CHANGE_WALL_SECONDS, "before-restore", "restored")
 
         # --- Suggestions (0.1.11.3 item 9): ONE line, closed by default, below the resume card; a click or the keyboard opens it ---
@@ -257,7 +267,7 @@ def test_a_matched_job_shows_its_picked_resume_and_apply_gives_the_pdf_and_nothi
         assert card.get_attribute("data-expanded") == "false"
         toggle.click()  # a click opens it
         rows.first.wait_for()
-        assert ui.writes_after("restored") == [], "opening the list writes nothing"
+        assert _changes(ui, "restored") == [], "opening the list writes nothing"
         assert rows.evaluate_all("(items) => items.map((item) => [item.dataset.suggestionId, item.dataset.kind, item.dataset.status])") == [
             ["sg-1", "reword", "open"], ["sg-2", "master_line", "open"], ["sg-3", "keyword", "done"],
         ]
@@ -292,7 +302,7 @@ def test_a_matched_job_shows_its_picked_resume_and_apply_gives_the_pdf_and_nothi
         who = {"job_url": demo.hero_job, "profile_id": demo.hero_profile_id, "actor": "operator"}
         assert fixture.actions == [{**who, "action": "dismiss", "suggestion_id": "sg-2"}, {**who, "action": "resolve", "suggestion_id": "sg-1", "how": "job_resume_edit"}]
         ui.settle()
-        assert ui.writes_after("before-suggestions") == ["POST /api/jobs/suggestions", "POST /api/jobs/suggestions"], "a suggestion is closed by one request, and nothing is rewritten"
+        assert _changes(ui, "before-suggestions") == ["POST /api/jobs/suggestions", "POST /api/jobs/suggestions"], "a suggestion is closed by one request, and nothing is rewritten"
 
         # --- Apply: one button, the PDF, and nothing follows ---
         apply = ui.page.locator(APPLY)
@@ -317,7 +327,7 @@ def test_a_matched_job_shows_its_picked_resume_and_apply_gives_the_pdf_and_nothi
         pdf = Path(download.path()).read_bytes()
         assert pdf.startswith(b"%PDF-") and len(pdf) > 2000 and download.suggested_filename.endswith(".pdf")
         ui.settle()
-        assert ui.writes_after("before-pdf") == ["POST /api/tailored-resumes/pdf"], "Apply is the PDF and nothing after it"
+        assert _changes(ui, "before-pdf") == ["POST /api/tailored-resumes/pdf"], "Apply is the PDF and nothing after it"
         assert ui.requests_after("before-pdf") == 1, "after the PDF the page asks the server for nothing"
         assert ui.page.url == url_before and len(ui.page.context.pages) == 1, "no posting is opened"
         assert ui.page.locator(f"{PAGE} button").count() == buttons_before, "no new button or prompt after the PDF"

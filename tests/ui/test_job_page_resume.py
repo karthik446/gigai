@@ -162,7 +162,8 @@ def test_a_stale_job_says_so_and_re_pick_is_one_request_with_no_model_call(ui, s
     assert panel.locator(".md-preview, .clean-wrap").count() == 1, "a stale resume stays visible"
     ui.settle()
     # Nothing refreshes by itself: the page read the resume and the record once each, and wrote nothing.
-    assert fixture.picks == [] and ui.writes_after("start") == []
+    # (0.1.11.5: the page opens on Preview always; the one POST is the preview's render, which stores nothing.)
+    assert fixture.picks == [] and ui.writes_after("start") == ["POST /api/tailored-resumes/preview"]
     assert fixture.reads == OPEN_READS and ui.requests_after("start", "/api/tailored-resumes") == OPEN_READS
     shot(ui, evidence_folder(), "stale-1-label-and-re-pick")
 
@@ -243,7 +244,8 @@ def test_a_job_tailored_by_0_1_10_keeps_its_resume_and_says_who_made_it(ui, scou
     assert ui.page.locator(REASSESS).count() == 1
     no_tailoring(ui)
     ui.settle()
-    assert ui.writes_after("start") == [], "opening a 0.1.10 job writes nothing and tailors nothing"
+    # (0.1.11.5: a resume with reworded lines opens on Preview too: its render is the one POST; it stores nothing.)
+    assert [write for write in ui.writes_after("start") if write != "POST /api/tailored-resumes/preview"] == [], "opening a 0.1.10 job writes nothing and tailors nothing"
     ui.wall_budget("open a job tailored by 0.1.10 (small home)", JOB_PAGE_WALL_SECONDS, "start", "shown")
     shot(ui, evidence_folder(), "legacy-1-job-tailored-by-0.1.10")
 
