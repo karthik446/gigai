@@ -252,6 +252,61 @@ def find_quick_assessment_by_job_identity(
     return None
 
 
+@dataclass(frozen=True)
+class ReassessTarget:
+    """What a re-assessment by ``job_identity`` acts on (:func:`reassess_target`).
+
+    ``previous`` is the stored assessment that names the posting (``None``: nothing stored for this job);
+    ``profile_id`` the profile the new assessment is made for; ``own`` says ``previous`` is that profile's own
+    stored assessment (not another holder's, read only for the posting's address).
+    """
+
+    previous: AssessResponse | None
+    profile_id: str | None
+    own: bool
+
+
+def reassess_target(home_root: Path, target: Path, job_identity: str, *, profile_id: str | None = None) -> ReassessTarget:
+    """Which profile a re-assessment of ``job_identity`` is for (0.1.11.6: a job held by two profiles).
+
+    One read of the store. With ``profile_id`` the answer is that profile, whoever else holds the job; an id that is
+    no profile of this gig (or a deleted one) raises ``profile_not_found``. Its own stored assessment names the
+    posting; when it has none, another holder's does (``own`` is false).
+
+    Without ``profile_id`` (callers older than 0.1.11.6): the one profile that holds the job, as before. A job
+    assessed for MORE than one active profile raises ``reassess_profile_required`` rather than picking one (until
+    0.1.11.6 the newest assessment's profile was taken, which re-assessed a job for a profile the caller was not
+    looking at). Assessments of a pasted resume and of profiles that are no longer active do not make a job ambiguous.
+    """
+
+    items = [item for item in list_quick_assessments(home_root, target) if item.job.job_identity == job_identity]
+    if profile_id is not None:
+        if profile_id not in _profile_ids(home_root, target, states=("active", "archived")):
+            raise QuickAssessError("profile_not_found", f"profile {profile_id!r} is not committed in this gig")
+        own = next((item for item in items if item.resume.profile_id == profile_id), None)
+        return ReassessTarget(own or (items[0] if items else None), profile_id, own is not None)
+    held = [item for item in items if item.resume.profile_id is not None]
+    if len({item.resume.profile_id for item in held}) > 1:
+        active = _profile_ids(home_root, target, states=("active",))
+        held = [item for item in held if item.resume.profile_id in active] or held
+        holders = sorted({str(item.resume.profile_id) for item in held})
+        if len(holders) > 1:
+            raise QuickAssessError(
+                "reassess_profile_required",
+                f"this job is assessed for {len(holders)} profiles ({', '.join(holders)}); say which one to assess again: "
+                'reassess.profile_id (CLI: --profile)',
+            )
+        return ReassessTarget(held[0], held[0].resume.profile_id, True)
+    previous = held[0] if held else (items[0] if items else None)
+    return ReassessTarget(previous, None if previous is None else previous.resume.profile_id, previous is not None)
+
+
+def _profile_ids(home_root: Path, target: Path, *, states: tuple[str, ...]) -> frozenset[str]:
+    from . import profile_records
+
+    return frozenset(record.profile_id for record in profile_records.list_profiles(_resolve_workpad(home_root, target)) if record.state in states)
+
+
 # --- model binding observation --------------------------------------------------------
 
 
@@ -1100,6 +1155,7 @@ __all__ = [
     "TRIGGER_REASSESS",
     "AssessVariant",
     "QuickAssessError",
+    "ReassessTarget",
     "candidate_location_and_work_mode",
     "find_quick_assessment_by_job_identity",
     "list_quick_assessments",
@@ -1107,6 +1163,7 @@ __all__ = [
     "quick_assess_path",
     "read_quick_assessment",
     "read_tailored_variant",
+    "reassess_target",
     "resume_key",
     "run_quick_assessment",
     "tailored_variant_path",

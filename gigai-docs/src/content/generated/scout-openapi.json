@@ -237,7 +237,7 @@
         ]
       },
       "post": {
-        "description": "Save an answer; with reassess the job is assessed again. Answers 201 with the saved `answer`. Storing it is local; the model runs only when `reassess` is given. The answer is the user's: every profile's later assessment reuses it, for the same question id and for the same fact worded differently. A new id creates the answer; an existing id replaces its text (send `revision` to be safe against another writer: 409 revision_conflict carries the current `answer`). Text holding an email, phone, link or street address is refused with 422 personal_info_refused. Example, an agent saves a factual reply from a chat and the next posting that asks it is not asked again: POST this route with the request example; then POST /api/assess for another posting that requires GCP: the answer has no question for it and its resume_evidence reads `Story bank cloud:gcp: ...`. 0.1.10.7: the write also queues the background pipeline (tailored resume, assessment against it, Scout ATS score, Scout label) for every job of an active profile whose stored assessment left open a question this answers; at most `pipeline.auto_jobs_per_trigger` (10) jobs run, the rest wait for an approval (GET /api/pipeline/approvals). The pipeline's tailoring replaces only a tailored resume the pipeline itself made: one tailored on demand (POST /api/tailored-resumes) or with a line chosen or edited (PUT /api/tailored-resumes/lines) is kept as it is, its `updated_at` unchanged, and the assessment, the Scout ATS score and the Scout label are made against it. Read what was queued with GET /api/pipeline.",
+        "description": "Save an answer; with reassess the job is assessed again. Answers 201 with the saved `answer`. Storing it is local; the model runs only when `reassess` is given. `reassess.profile_id` (0.1.11.6) names the profile the new assessment is made for and stored under; a job page sends its own. Left out, the one profile that has assessed the job is taken; a job assessed for more than one active profile answers 409 reassess_profile_required, and an unknown id 404 profile_not_found, both before anything is saved. The answer is the user's: every profile's later assessment reuses it, for the same question id and for the same fact worded differently. A new id creates the answer; an existing id replaces its text (send `revision` to be safe against another writer: 409 revision_conflict carries the current `answer`). Text holding an email, phone, link or street address is refused with 422 personal_info_refused. Example, an agent saves a factual reply from a chat and the next posting that asks it is not asked again: POST this route with the request example; then POST /api/assess for another posting that requires GCP: the answer has no question for it and its resume_evidence reads `Story bank cloud:gcp: ...`. 0.1.10.7: the write also queues the background pipeline (tailored resume, assessment against it, Scout ATS score, Scout label) for every job of an active profile whose stored assessment left open a question this answers; at most `pipeline.auto_jobs_per_trigger` (10) jobs run, the rest wait for an approval (GET /api/pipeline/approvals). The pipeline's tailoring replaces only a tailored resume the pipeline itself made: one tailored on demand (POST /api/tailored-resumes) or with a line chosen or edited (PUT /api/tailored-resumes/lines) is kept as it is, its `updated_at` unchanged, and the assessment, the Scout ATS score and the Scout label are made against it. Read what was queued with GET /api/pipeline.",
         "operationId": "post_api_answers",
         "parameters": [],
         "requestBody": {
@@ -278,7 +278,7 @@
                     "type": "string"
                   },
                   "reassess": {
-                    "description": "`{\"job_identity\": \"<id>\"}`: a job to assess again with the answer.",
+                    "description": "`{\"job_identity\": \"<id>\", \"profile_id\": \"<id>\"}`: a job to assess again with the answer, and the profile to assess it for (optional: left out, the one profile that has assessed the job).",
                     "type": "object"
                   },
                   "revision": {
@@ -383,7 +383,7 @@
                 }
               }
             },
-            "description": "reassess_not_found, not_found, target_unavailable"
+            "description": "reassess_not_found, profile_not_found, not_found, target_unavailable"
           },
           "409": {
             "content": {
@@ -399,7 +399,7 @@
                 }
               }
             },
-            "description": "revision_conflict"
+            "description": "revision_conflict, reassess_profile_required"
           },
           "415": {
             "content": {

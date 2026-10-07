@@ -25,6 +25,9 @@
 // run knows answers 404 reassess_not_found AFTER recording the answer; the
 // job page passes a fallback that runs POST /api/assess {job_url} instead.
 //
+// 0.1.11.6 AN1: `profileId` is the profile of the page that holds the boxes: the last POST names it beside the job
+// (`reassess: {job_identity, profile_id}`), so the re-assessment is that profile's, whoever else holds the job.
+//
 // 0110-10-12: `stale` is why the assessment shown is old, in words ("older
 // prompt"), or null. With no box filled, Re-assess then assesses the posting
 // again as it is (`onReassessUnavailable`, the same POST /api/assess: ONE
@@ -34,7 +37,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { ApiError, getAnswerMatch, postAnswer } from "./api.js";
 import { answerRequests, answerStates, reassessErrorText, reassessGate } from "./answersModel.js";
 
-export function useAnswerDrafts({ assessment, jobIdentity, priorAnswers, onAnswered, onReassessUnavailable, stale = null }) {
+export function useAnswerDrafts({ assessment, jobIdentity, profileId = null, priorAnswers, onAnswered, onReassessUnavailable, stale = null }) {
   const [drafts, setDrafts] = useState({});
   const [saved, setSaved] = useState({});
   const [suggestions, setSuggestions] = useState(() => new Map());
@@ -110,7 +113,7 @@ export function useAnswerDrafts({ assessment, jobIdentity, priorAnswers, onAnswe
   );
 
   const reassess = useCallback(async () => {
-    const requests = answerRequests(states, jobIdentity);
+    const requests = answerRequests(states, jobIdentity, profileId);
     if (busy) {
       return;
     }
@@ -165,7 +168,7 @@ export function useAnswerDrafts({ assessment, jobIdentity, priorAnswers, onAnswe
     } finally {
       setBusy(null);
     }
-  }, [states, jobIdentity, busy, onAnswered, onReassessUnavailable, stale]);
+  }, [states, jobIdentity, profileId, busy, onAnswered, onReassessUnavailable, stale]);
 
   return { questions, states, gate, busy, error, setDraft, valueFor, reassess, suggestionFor, applySuggestion, canReassess: Boolean(jobIdentity) };
 }

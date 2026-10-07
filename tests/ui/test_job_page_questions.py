@@ -139,7 +139,7 @@ def test_answer_a_question_on_the_job_page_and_the_pipeline_runs(ui) -> None:
     section.wait_for(state="detached", timeout=60_000)
     ui.step("reassessed")
     sent = saved.value.request.post_data_json
-    assert (sent["question_id"], sent["answer"], sent["reassess"]) == (question["question_id"], ANSWER, {"job_identity": job["job_identity"]})
+    assert (sent["question_id"], sent["answer"], sent["reassess"]) == (question["question_id"], ANSWER, {"job_identity": job["job_identity"], "profile_id": profile_id})  # 0.1.11.6 AN1: the page's profile
     assert saved.value.status in (200, 201) and saved.value.json()["reassessed"], "the answer was saved but the job was not re-assessed"
     assert ui.writes_after("typed") == ["POST /api/answers"]
     assert ui.requests_after("typed", "/api/answers/match") == 0, "the answered question was looked up again"

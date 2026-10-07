@@ -1700,6 +1700,7 @@ def assess_command(
 @click.option("--answer-text", "answer_text", help="Answer text inline.")
 @click.option("--answer-file", "answer_file", help="Answer text FILE (or - for stdin).")
 @click.option("--reassess", "reassess", help="Job URL or job_identity to re-assess with this answer applied.")
+@click.option("--profile", "profile_id", help="With --reassess: the Scout profile ID to re-assess the job for (default: the one profile that has assessed it; required when more than one has).")
 @click.option("--question", "question_text", help="The question's own words, kept with the answer.")
 @click.option("--tag", "tag", help="Your own tag; default: a tag from the question.")
 @click.option("--revision", "revision", type=click.IntRange(min=0), help="The revision of the answer you read; the write is refused when it changed since.")
@@ -1713,6 +1714,7 @@ def answer_command(
     answer_text: str | None,
     answer_file: str | None,
     reassess: str | None,
+    profile_id: str | None,
     question_text: str | None,
     tag: str | None,
     revision: int | None,
@@ -1734,8 +1736,10 @@ def answer_command(
     records who writes (an agent passes --as agent) and --source, in free
     text, where the answer came from. Pass
     --reassess JOB_URL_OR_ID to re-run the whole assessment for that job
-    immediately, with this answer applied. `gigai scout answers save` is the
-    same write without the re-assessment.
+    immediately, with this answer applied; --profile PROFILE_ID says for
+    which profile when more than one has assessed the job (refused with
+    reassess_profile_required otherwise, before anything is saved).
+    `gigai scout answers save` is the same write without the re-assessment.
     """
 
     from ..private_records import PrivateRecordError
@@ -1743,8 +1747,11 @@ def answer_command(
     from .find_jobs.api.story_bank import ANSWERS_SCHEMA
     from .find_jobs.assess_contracts import AssessJobInput, AssessRequest, AssessResumeInput
     from .find_jobs.contracts import FindJobsContractError
-    from .quick_assess import QuickAssessError, find_quick_assessment_by_job_identity, run_quick_assessment
+    from .quick_assess import QuickAssessError, reassess_target, run_quick_assessment
 
+    if profile_id and not reassess:
+        _fail(ValueError("--profile goes with --reassess"), as_json=as_json, fallback="invalid_value")
+        return
     if bool(answer_text) == bool(answer_file):
         _fail(ValueError("pass exactly one of --answer-text or --answer-file"), as_json=as_json, fallback="answer_invalid")
         return
@@ -1763,16 +1770,19 @@ def answer_command(
         return
 
     # The job to re-assess is looked up first, so the answer names the posting that asked.
+    # 0.1.11.6: and for WHICH profile (--profile, else the one profile that holds the job; refused when two do).
     previous = None
+    plan = None
     if reassess:
         try:
-            previous = find_quick_assessment_by_job_identity(home_root, target, reassess)
-            if previous is None:
+            plan = reassess_target(home_root, target, reassess, profile_id=profile_id)
+            if plan.previous is None:
                 # Accept a raw job URL too (not only a stored job_identity):
                 # normalize it the same way resolve_job would.
                 from .find_jobs.contracts import normalize_url
 
-                previous = find_quick_assessment_by_job_identity(home_root, target, normalize_url(reassess))
+                plan = reassess_target(home_root, target, normalize_url(reassess), profile_id=profile_id)
+            previous = plan.previous
         except (QuickAssessError, FindJobsContractError) as exc:
             _fail(exc, as_json=as_json, fallback="scout_answer_failed")
             return
@@ -1804,7 +1814,7 @@ def answer_command(
                 raise QuickAssessError("reassess_unavailable", "this job was assessed from pasted text, which is never stored; run `gigai scout assess` again")
             request = AssessRequest(
                 job=AssessJobInput(job_url=previous.job.source_url, title=previous.job.title or None, company=previous.job.company or None),
-                resume=AssessResumeInput(profile_id=previous.resume.profile_id),
+                resume=AssessResumeInput(profile_id=plan.profile_id if plan is not None else previous.resume.profile_id),
             )
             response = run_quick_assessment(request, home_root=home_root, target=target)
         except (QuickAssessError, FindJobsContractError) as exc:

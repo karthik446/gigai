@@ -142,7 +142,7 @@ export default function AssessmentBody({
   structuredSuggestions = false,
 }) {
   // With a controller this component's own state is not used: it gets no assessment, so it looks nothing up.
-  const own = useAnswerDrafts({ assessment: controller ? null : assessment, jobIdentity, priorAnswers, onAnswered, onReassessUnavailable });
+  const own = useAnswerDrafts({ assessment: controller ? null : assessment, jobIdentity, profileId, priorAnswers, onAnswered, onReassessUnavailable });
   const answers = controller || own;
   const { rows: questionsByRow, unplaced } = placeQuestions(assessment.matrix, answers.questions);
   const stateFor = new Map(answers.states.map((state) => [state.question_id, state]));

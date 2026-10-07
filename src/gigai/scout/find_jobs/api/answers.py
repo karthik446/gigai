@@ -52,6 +52,19 @@ shape. ``GET /api/answers`` lists every answer in that shape (``q`` and
 ``tag`` narrow it). One answer, the edit, the delete and the near match are
 ``/api/answers/{question_id}`` and ``/api/answers/match`` (``api/story_bank.py``).
 
+0.1.11.6 AN1: WHICH PROFILE the re-assessment is for. ``reassess`` takes an
+optional ``profile_id`` beside ``job_identity`` (the job page sends its own);
+the new assessment is made for and stored under that profile, whoever else
+holds the job (``quick_assess.reassess_target``). An id that is no profile of
+this gig answers ``404 profile_not_found``. Without it the one profile that
+holds the job is taken, as before; a job assessed for more than one active
+profile answers ``409 reassess_profile_required`` (until 0.1.11.6 the profile
+of the NEWEST stored assessment was taken: an answer given on one profile's
+page re-assessed the job for another). Both refusals come BEFORE the answer
+is saved: nothing is written and no model is called. A named profile with no
+stored assessment of its own is assessed from the address another holder's
+(or a run's) names, and that first item is the job page's (``job_page``).
+
 Origin (assess-origin-field): a re-assessment keeps the stored item's
 ``origin`` (the request names none, so ``quick_assess._origin_for`` leaves it
 as it is); the run-only posting above has no stored item yet and its first
@@ -72,7 +85,8 @@ from ..contracts import AcquireOutput, FindJobsContractError, PostingRow, normal
 from ...quick_assess import (
     TRIGGER_ANSWER_PREFIX,
     QuickAssessError,
-    find_quick_assessment_by_job_identity,
+    ReassessTarget,
+    reassess_target,
     run_quick_assessment,
 )
 from ..assess_contracts import ORIGIN_JOB_PAGE, AssessJobInput, AssessRequest, AssessResumeInput
@@ -85,6 +99,7 @@ _ANSWER_ERROR_STATUS: dict[str, HTTPStatus] = {
     "invalid_value": HTTPStatus.UNPROCESSABLE_ENTITY,
     "reassess_unavailable": HTTPStatus.UNPROCESSABLE_ENTITY,
     "reassess_not_found": HTTPStatus.NOT_FOUND,
+    "reassess_profile_required": HTTPStatus.CONFLICT,
     "target_unavailable": HTTPStatus.NOT_FOUND,
     "profile_not_found": HTTPStatus.NOT_FOUND,
     **ERROR_STATUS,
@@ -177,11 +192,13 @@ class AnswersRoutesMixin:
             return
         reassess = body.get("reassess")
         job_identity: str | None = None
+        profile_id: str | None = None
         if reassess is not None:
-            if not isinstance(reassess, dict) or set(reassess) != {"job_identity"} or not isinstance(reassess.get("job_identity"), str):
-                self._error(HTTPStatus.UNPROCESSABLE_ENTITY, "invalid_value", 'reassess must be {"job_identity": "<id>"} or null')
+            shaped = isinstance(reassess, dict) and {"job_identity"} <= set(reassess) <= {"job_identity", "profile_id"}
+            if not shaped or not isinstance(reassess.get("job_identity"), str) or not isinstance(reassess.get("profile_id"), str | None):
+                self._error(HTTPStatus.UNPROCESSABLE_ENTITY, "invalid_value", 'reassess must be {"job_identity": "<id>"}, with an optional "profile_id", or null')
                 return
-            job_identity = reassess["job_identity"]
+            job_identity, profile_id = reassess["job_identity"], reassess.get("profile_id")
 
         for key in ("question", "tag", "from_bank", "actor", "source"):
             if body.get(key) is not None and not isinstance(body[key], str):
@@ -193,13 +210,22 @@ class AnswersRoutesMixin:
             return
         home_root = self._backend.home_root
 
+        # 0.1.11.6: which profile the re-assessment is for, settled before anything is written (one read of the store).
+        plan: ReassessTarget | None = None
+        if job_identity is not None:
+            try:
+                plan = reassess_target(home_root, target, job_identity, profile_id=profile_id)
+            except QuickAssessError as exc:
+                self._error(_status_for(exc.code), exc.code, str(exc))
+                return
+
         # Who writes (operator, or an agent), which revision it read, and which posting asked.
         try:
             actor = self._story_bank_actor(body.get("actor"))
             entry = story_bank.save_answer(
                 home_root=home_root, target=target, question_id=question_id, answer=answer,
                 question=body.get("question"), tag=body.get("tag"),
-                job=self._answer_job(target, job_identity), confirmed_from=body.get("from_bank"), actor=actor,
+                job=self._answer_job(target, job_identity, plan), confirmed_from=body.get("from_bank"), actor=actor,
                 source=body.get("source"),
                 expected_revision=story_bank.revision_value(body.get("revision")),
             )
@@ -218,9 +244,9 @@ class AnswersRoutesMixin:
         asked = pipeline_triggers.pending_answer(home_root, target, entry, job_identity=job_identity)
         reassessed: dict[str, object] | None = None
         try:
-            if job_identity is not None:
+            if job_identity is not None and plan is not None:
                 try:
-                    reassessed = self._reassess(target, job_identity, trigger=TRIGGER_ANSWER_PREFIX + normalized_question_id)
+                    reassessed = self._reassess(target, job_identity, plan, trigger=TRIGGER_ANSWER_PREFIX + normalized_question_id)
                 except QuickAssessError as exc:
                     write_assess_error(self, _status_for(exc.code), exc)  # 0110-10-13: the typed cause's facts
                     return
@@ -239,13 +265,13 @@ class AnswersRoutesMixin:
             },
         )
 
-    def _answer_job(self, target, job_identity: str | None) -> dict[str, object] | None:
+    def _answer_job(self, target, job_identity: str | None, plan: ReassessTarget | None) -> dict[str, object] | None:
         """The posting an answer is tied to (its ``jobs``): the ``reassess`` job, ``None`` without one."""
 
         if job_identity is None:
             return None
         home_root = self._backend.home_root
-        previous = find_quick_assessment_by_job_identity(home_root, target, job_identity)
+        previous = None if plan is None else plan.previous
         if previous is not None:
             return {"job_identity": job_identity, "title": previous.job.title, "company": previous.job.company, "url": previous.job.source_url}
         run_posting = find_run_posting(home_root, target, job_identity)
@@ -254,20 +280,21 @@ class AnswersRoutesMixin:
             return {"job_identity": job_identity, "title": row.title, "company": row.company, "url": row.url}
         return {"job_identity": job_identity, "title": "", "company": "", "url": None}
 
-    def _reassess(self, target, job_identity: str, *, trigger: str) -> dict[str, object]:
-        """Re-run the whole assessment for ``job_identity`` and return the
-        new ``AssessResponse`` JSON. Raises ``QuickAssessError``
+    def _reassess(self, target, job_identity: str, plan: ReassessTarget, *, trigger: str) -> dict[str, object]:
+        """Re-run the whole assessment for ``job_identity``, for ``plan``'s
+        profile, and return the new ``AssessResponse`` JSON. Raises ``QuickAssessError``
         (``reassess_not_found`` if nothing was ever assessed for this
         identity; ``reassess_unavailable`` for a pasted-text job with no
         URL to re-fetch). ``trigger`` (Q4a) is recorded in the stored
         verdict history: ``answer:<question_id>``."""
 
-        previous = find_quick_assessment_by_job_identity(self._backend.home_root, target, job_identity)
+        previous = plan.previous
         if previous is None:
             run_posting = find_run_posting(self._backend.home_root, target, job_identity)
             if run_posting is None:
                 raise QuickAssessError("reassess_not_found", f"no stored assessment for job_identity {job_identity!r}")
             posting, profile_id = run_posting
+            profile_id = plan.profile_id or profile_id  # the profile the caller named, else the run's own
             request = AssessRequest(
                 job=AssessJobInput(job_url=posting.url, title=posting.title or None, company=posting.company or None),
                 resume=AssessResumeInput(profile_id=profile_id),
@@ -281,7 +308,9 @@ class AnswersRoutesMixin:
                 )
             request = AssessRequest(
                 job=AssessJobInput(job_url=previous.job.source_url, title=previous.job.title or None, company=previous.job.company or None),
-                resume=AssessResumeInput(profile_id=previous.resume.profile_id),
+                resume=AssessResumeInput(profile_id=plan.profile_id),
+                # A profile with no stored assessment of its own (the address is another holder's): its first is the job page's.
+                origin=None if plan.own else ORIGIN_JOB_PAGE,
             )
         response = run_quick_assessment(request, home_root=self._backend.home_root, target=target, trigger=trigger)
         return story_bank.attach_suggestions(response.to_json(), home_root=self._backend.home_root, target=target)

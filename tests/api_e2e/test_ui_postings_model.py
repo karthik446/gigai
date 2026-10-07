@@ -122,6 +122,8 @@ out.askBodies = {
   noFilter: m.assessAskBody({ filter: m.EMPTY_FILTER, rows }),
   twoProfiles: m.assessAskBody({ filter: { ...m.EMPTY_FILTER, profileIds: ["p1", "p2"] }, rows: rows.slice(0, 2) }),
   asProfile: m.assessAskBody({ selectedIds: [data.bothUrl], profileId: data.secondId }),
+  tickedOneChip: m.assessAskBody({ selectedIds: [data.bothUrl], filter: { ...m.EMPTY_FILTER, profileIds: [data.secondId] }, rows }),
+  tickedTwoChips: m.assessAskBody({ selectedIds: [data.bothUrl], filter: { ...m.EMPTY_FILTER, profileIds: ["p1", "p2"] }, rows }),
 };
 out.askHasApprove = Object.values(out.askBodies).some((body) => "approve" in body);
 out.dialog = m.approvalDialog(ask, profiles);
@@ -308,6 +310,9 @@ def test_assess_these_asks_first_and_approve_sends_the_servers_own_body(out: dic
         "noFilter": {},
         "twoProfiles": {"jobs": [row["job_identity"] for row in data["search"]["postings"]["rows"][:2]]},
         "asProfile": {"jobs": [data["bothUrl"]], "profile_id": data["secondId"]},
+        # 0.1.11.6 AN1: ticked rows under ONE profile chip are that profile's; under two the rows say whose they are.
+        "tickedOneChip": {"jobs": [data["bothUrl"]], "profile_id": data["secondId"]},
+        "tickedTwoChips": {"jobs": [data["bothUrl"]]},
     }
     assert out["askHasApprove"] is False, "the ask never approves: nothing is assessed before the dialog's Approve"
     dialog, question = out["dialog"], data["ask"]["question"]

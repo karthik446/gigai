@@ -494,12 +494,28 @@ export default function JobPage({
   const assessOrigin = assessOriginFor(job);
   const assessByUrl = useCallback(() => postAssess({ job: { job_url: jobUrl }, ...assessResume(profileId), origin: assessOrigin }), [jobUrl, profileId, assessOrigin]);
 
+  // 0.1.11.6 AN1: an assessment made from this page replaces the one shown only when it is this page's profile's.
+  // Another profile's (a server older than the page) is never shown as this profile's: the stored ones are read again.
+  const showAssessed = useCallback(
+    (item) => {
+      const made = item && item.resume ? item.resume.profile_id : null;
+      if (made && profileId && made !== profileId) {
+        batchChanged.current && batchChanged.current();
+        return;
+      }
+      onQuickUpdated(item);
+    },
+    [profileId, onQuickUpdated],
+  );
+
   // Hooks run on every render, a missing job included (its state is empty).
   const answerDrafts = useAnswerDrafts({
     assessment,
     jobIdentity: posting ? posting.normalized_url : null,
+    // 0.1.11.6 AN1: the re-assessment an answer starts is this page's profile's (a pasted-resume assessment has none).
+    profileId: job && job.pastedResume ? null : profileId,
     priorAnswers,
-    onAnswered: onQuickUpdated,
+    onAnswered: showAssessed,
     onReassessUnavailable: jobUrl ? assessByUrl : undefined,
     stale: staleReasonWords(job),
   });
@@ -698,7 +714,7 @@ export default function JobPage({
             {!assessment && (
               <div className="callout info" style={{ margin: "12px 0 0" }} title={job.notAssessedReason ? notAssessedReasonDetail(job.notAssessedReason) : undefined}>
                 {notAssessedLine(job)}.
-                {!jobWaitsInBatch(batch.status, batchJob.current) && job.status !== "assessing" && (job.status !== "acquired" || job.runEnded) && <AssessNow posting={posting} profileId={profileId} origin={assessOrigin} onAssessed={onQuickUpdated} />}
+                {!jobWaitsInBatch(batch.status, batchJob.current) && job.status !== "assessing" && (job.status !== "acquired" || job.runEnded) && <AssessNow posting={posting} profileId={profileId} origin={assessOrigin} onAssessed={showAssessed} />}
               </div>
             )}
           </div>

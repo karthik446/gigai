@@ -183,6 +183,7 @@ process.stdout.write(JSON.stringify({{
   typed: answers.answerRequests(typed, null),
   plainStates: plain,
   plainRequests: answers.answerRequests(plain, "https://jobs.example.test/b"),
+  pageRequests: answers.answerRequests(plain, "https://jobs.example.test/b", "profile_b"),
 }}));
 """
 
@@ -230,6 +231,9 @@ def test_a_near_match_is_offered_then_confirmed_and_no_request_names_a_profile()
         {"question_id": "tooling:cloud_google_platform", "answer": "My own words.", "reassess": None},
         {"question_id": "years:python", "answer": "Six.", "reassess": {"job_identity": "https://jobs.example.test/b"}},
     ]
+    # 0.1.11.6 AN1: the answer is still the user's; the RE-ASSESSMENT it starts names the profile of the page that asked.
+    assert [body["reassess"] for body in out["pageRequests"]] == [None, {"job_identity": "https://jobs.example.test/b", "profile_id": "profile_b"}]
+    assert all("profile_id" not in body for body in out["pageRequests"])
 
 
 def _code(path: Path) -> str:
@@ -282,4 +286,4 @@ def test_the_page_is_read_only_and_the_0_1_10_5_forms_are_gone() -> None:
     assert body.count("onUseSuggestion={answers.applySuggestion}") == 2, "both layouts (in the table, and questions first)"
     drafts = (SRC / "answerDrafts.js").read_text(encoding="utf-8")
     assert "getAnswerMatch({ questionId: question.question_id, question: question.question })" in drafts
-    assert "answerRequests(states, jobIdentity)" in drafts and "unsavedAnswerRequests" not in drafts  # 0.1.11: no "save before tailoring" step
+    assert "answerRequests(states, jobIdentity, profileId)" in drafts and "unsavedAnswerRequests" not in drafts  # 0.1.11: no "save before tailoring" step

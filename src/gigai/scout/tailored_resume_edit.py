@@ -824,7 +824,7 @@ def attach_edited_resume(
         path = tailored_resume_path(home_root, target, resume.profile_id, job.job_identity)
     except Exception as exc:  # noqa: BLE001 - the same typed failure a tailoring gives for a folder with no project
         raise TailorError("target_unavailable", "this folder is not bound to a GigAI project") from exc
-    matrix, assessment_path = _stored_matrix(home_root, target, job.job_identity)
+    matrix, assessment_path = _stored_matrix(home_root, target, job.job_identity, resume.profile_id)
     ctx = tailor_context(resume.text, answers=answers, matrix=matrix)
     tailor_job = TailorJob(title=job.title, company=job.company, location=job.location, posting_text=job.text)
     # 0.1.11 N2: a profile whose resumes are made from the master is checked against the master, every line by id.

@@ -101,12 +101,16 @@ function bankFields(state) {
 
 // The POST /api/answers bodies for one "Re-assess": every filled box, in
 // question order, re-assessing on the last one only.
-export function answerRequests(states, jobIdentity) {
+// 0.1.11.6 AN1: `profileId` is the profile of the page that asks. The re-assessment is made for it: without it the
+// server takes the one profile that holds the job and refuses a job two profiles hold (it used to take the newest
+// assessment's profile, which re-assessed the job for a profile the page did not show).
+export function answerRequests(states, jobIdentity, profileId = null) {
   const filled = (states || []).filter((state) => state.filled);
+  const reassess = jobIdentity ? { job_identity: jobIdentity, ...(profileId ? { profile_id: profileId } : {}) } : null;
   return filled.map((state, index) => ({
     question_id: state.question_id,
     answer: state.value,
-    reassess: jobIdentity && index === filled.length - 1 ? { job_identity: jobIdentity } : null,
+    reassess: index === filled.length - 1 ? reassess : null,
     ...bankFields(state),
   }));
 }

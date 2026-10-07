@@ -593,9 +593,13 @@ export function isNew(row, anchor) {
 // The body of the ASK (never `approve`). A selection names its postings;
 // else the filter selects them. The route takes one profile, so with several
 // profile chips on, the rows on the page are named instead.
+// 0.1.11.6 AN1: ticked rows with ONE profile chip on are that profile's rows: the ask names it. Without it the server
+// assessed each ticked job for its best-matching profile, which for a job two profiles hold may be the other one.
 export function assessAskBody({ selectedIds = [], filter = EMPTY_FILTER, rows = [], profileId = null } = {}) {
   if (selectedIds.length > 0) {
-    return profileId ? { jobs: selectedIds.slice(), profile_id: profileId } : { jobs: selectedIds.slice() };
+    const chips = filter.profileIds || [];
+    const only = profileId || (chips.length === 1 ? chips[0] : null);
+    return only ? { jobs: selectedIds.slice(), profile_id: only } : { jobs: selectedIds.slice() };
   }
   if (profileId) {
     return { profile_id: profileId };

@@ -1052,7 +1052,7 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
         schema_version="scout-answers-response:1",
         params=(
             _b("question_id", "string", "The question's id (`<category>:<value>`).", required=True), _b("answer", "string", "The answer.", required=True),
-            _b("reassess", "object", '`{"job_identity": "<id>"}`: a job to assess again with the answer.'),
+            _b("reassess", "object", '`{"job_identity": "<id>", "profile_id": "<id>"}`: a job to assess again with the answer, and the profile to assess it for (optional: left out, the one profile that has assessed the job).'),
             _b("question", "string", "The question's own words, kept with the answer."),
             _b("tag", "string", "Your own tag (lowercase, at most 40 characters); omitted = a tag from the question."),
             _b("from_bank", "string", "When the answer confirms a `bank_suggestions` near match: that suggestion's `bank_question_id`."),
@@ -1063,9 +1063,12 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
             "question_id": "cloud:gcp", "question": "Do you have GCP experience?", "answer": "Yes, 4 years, GKE + BigQuery", "actor": "agent",
             "source": "from the user's repo infra-charts, at the user's request",
         },
-        errors=(_UNKNOWN_KEY, _WRONG_TYPE, _INVALID, (422, "answer_invalid"), (422, "personal_info_refused"), _REVISION_CONFLICT, (422, "reassess_unavailable"), (404, "reassess_not_found"), _NOT_FOUND, _NO_TARGET),
+        errors=(_UNKNOWN_KEY, _WRONG_TYPE, _INVALID, (422, "answer_invalid"), (422, "personal_info_refused"), _REVISION_CONFLICT, (422, "reassess_unavailable"), (404, "reassess_not_found"), (404, "profile_not_found"), (409, "reassess_profile_required"), _NOT_FOUND, _NO_TARGET),
         description=(
-            "Answers 201 with the saved `answer`. Storing it is local; the model runs only when `reassess` is given. The answer is the user's: "
+            "Answers 201 with the saved `answer`. Storing it is local; the model runs only when `reassess` is given. `reassess.profile_id` "
+            "(0.1.11.6) names the profile the new assessment is made for and stored under; a job page sends its own. Left out, the one "
+            "profile that has assessed the job is taken; a job assessed for more than one active profile answers 409 "
+            "reassess_profile_required, and an unknown id 404 profile_not_found, both before anything is saved. The answer is the user's: "
             "every profile's later assessment reuses it, for the same question id and for the same fact worded differently. A new id creates "
             "the answer; an existing id replaces its text (send `revision` to be safe against another writer: 409 revision_conflict carries "
             "the current `answer`). Text holding an email, phone, link or street address is refused with 422 personal_info_refused. "

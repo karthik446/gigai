@@ -137,6 +137,7 @@ from .quick_assess import (
     _resolve_binding,
     _resolve_workpad,
     find_quick_assessment_by_job_identity,
+    read_quick_assessment,
     resume_key,
 )
 
@@ -2533,11 +2534,15 @@ def list_tailored_resumes(
 # --- the tailoring ------------------------------------------------------------------------
 
 
-def _stored_matrix(home_root: Path, target: Path, job_identity: str) -> tuple[tuple[MatrixRow, ...], str | None]:
+def _stored_matrix(home_root: Path, target: Path, job_identity: str, profile_id: str | None = None) -> tuple[tuple[MatrixRow, ...], str | None]:
     """The stored quick assessment's matrix for this job (context only), tolerantly."""
 
     try:
-        stored = find_quick_assessment_by_job_identity(home_root, target, job_identity)
+        # 0.1.11.6 AN1: the profile's OWN assessment first. A job two profiles hold has two, and the newest by identity
+        # alone may be the other profile's: its rows are not this resume's.
+        stored = read_quick_assessment(home_root, target, profile_id, job_identity) if profile_id is not None else None
+        if stored is None:
+            stored = find_quick_assessment_by_job_identity(home_root, target, job_identity)
     except Exception:
         return (), None
     if stored is None:
@@ -2706,7 +2711,7 @@ def run_tailored_resume(
     except Exception as exc:
         raise TailorError("target_unavailable", "this folder is not bound to a GigAI project") from exc
     previous = _read_stored(path)
-    matrix, assessment_path = _stored_matrix(home_root, target, job.job_identity)
+    matrix, assessment_path = _stored_matrix(home_root, target, job.job_identity, resume.profile_id)
 
     # 5. Model target -> adapter (C1/C11), then the shared loop.
     model_target = request.model_target or _default_model_target(target)
