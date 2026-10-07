@@ -199,7 +199,7 @@ def test_the_resume_card_says_no_education_only_when_neither_the_master_nor_the_
             link = notice.locator("a")
             assert (link.get_attribute("href"), (link.text_content() or "").strip()) == ("#/master", "add it on the Master page")
             shot(ui, "job-resume-no-education")
-        assert ui.requests_after("start", "/api/master") == 0, "the notice needs no read of the master"
+        assert ui.requests_after("start", "/api/master") == 1, "the notice needs no read of its own: the card reads the master once at load (a resume picked from it)"
         assert ui.writes_after("start") in ([], [PREVIEW_READ])
     finally:
         ui.page.unroute_all()

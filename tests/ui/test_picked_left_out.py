@@ -124,9 +124,9 @@ def test_picked_and_left_out_are_shown_with_reasons_and_a_line_is_removed_added_
     assert (header.locator('[data-role="provenance"]').text_content() or "").startswith("Made by the tailoring of 0.1.10"), header.text_content()
     assert header.get_attribute("data-basis") == under.get_attribute("data-basis") == "master"
     ui.settle()
-    # Closed, the lists ask the server nothing: the master is read when one is opened. 0.1.11.5: the card has the one
+    # Closed, the lists ask the server nothing more: the master is read ONCE, when the card loads. 0.1.11.5: the card has the one
     # view, so the one POST is the preview's render; it stores nothing.
-    assert ui.requests_after("start", "/api/master") == 0 and ui.writes_after("start") == ["POST /api/tailored-resumes/preview"]
+    assert ui.requests_after("start", "/api/master") == 1 and ui.writes_after("start") == ["POST /api/tailored-resumes/preview"]
     ui.cpu_budget("job page with Picked / Left out, cold page (small home)", JOB_PAGE_CPU_SECONDS, "start", "shown")
     ui.wall_budget("job page with Picked / Left out, cold page (small home)", JOB_PAGE_WALL_SECONDS, "start", "shown")
 
