@@ -385,6 +385,20 @@ HEADER_RESERVE_LINES = 2
 HEADERLESS_LINES = 1
 
 
+#: 0.1.11.5 PH: what the job page's PREVIEW prints where the person's header will be when it has no header of theirs
+#: to show: a name line and ONE contact line, the size of a real header, set in a lighter grey (the template's
+#: ``placeholder``).  Invented values on a reserved domain; nothing of the person.  NEVER in a PDF: ``_render``.
+PLACEHOLDER_NAME = "Your Name"
+PLACEHOLDER_CONTACT = ("City, State", "email@example.com", "555-0100", "github.com/you")
+
+
+def placeholder_header(title: str = "") -> PdfHeader:
+    """The preview's stand-in header (``PdfHeader.placeholder``), with the profile's saved ``title`` line when there
+    is one: a real header prints that line too, so the stand-in is as tall as the header the PDF will have."""
+
+    return PdfHeader(PLACEHOLDER_NAME, title, tuple(ContactItem(text, None) for text in PLACEHOLDER_CONTACT), placeholder=True)
+
+
 def _data(sections: list[dict[str, object]], header: PdfHeader | None, company: str, *, blank_lines: int = HEADERLESS_LINES) -> dict[str, object]:
     """What the template reads; ``header`` ``None`` reserves a blank block of the header's height (``blank_lines`` under the name).
 
@@ -395,7 +409,7 @@ def _data(sections: list[dict[str, object]], header: PdfHeader | None, company: 
     contact = [c for c in shown.contact if c.text.strip()]
     if shown.work_authorization.strip():
         contact.insert(min(1, len(contact)), ContactItem(shown.work_authorization.strip(), None))
-    return {
+    data: dict[str, object] = {
         "doc_title": " ".join(part for part in ("Resume", company.strip()) if part),
         "name": shown.name,
         "title": shown.title,
@@ -404,6 +418,9 @@ def _data(sections: list[dict[str, object]], header: PdfHeader | None, company: 
         "blank_lines": blank_lines,
         "sections": sections,
     }
+    if shown.placeholder:
+        data["placeholder"] = True  # only ever set for the preview's pictures; a PDF's data never has the key
+    return data
 
 
 def _estimate(sections: list[dict[str, object]], spacing_scale: float, header_lines: int, *, printed: bool = False) -> tuple[int, float]:
@@ -459,7 +476,11 @@ def _render(
     ``fixed`` (0.1.11.5): ``spacing_scale`` is the person's own choice for THIS job (the job page's slider) and is
     used as given: nothing tightens it; over its limit there, the note.  ``images``: the same document as one PNG a
     page (the job page's preview) in place of the PDF.  ONE definition: the preview and the PDF go through this
-    function, so at the same header and spacing they are the same layout and the same pages."""
+    function, so at the same header and spacing they are the same layout and the same pages.
+
+    A placeholder header (0.1.11.5 PH, ``placeholder_header``) is the preview's pictures' only: ``ValueError`` for a PDF."""
+    if header is not None and header.placeholder and not images:
+        raise ValueError("the placeholder header is the preview's only: a PDF never prints it")
     root = resources.files("gigai.scout").joinpath("data", "resume")
     with ExitStack() as stack:
         directory = str(stack.enter_context(resources.as_file(root)))
@@ -729,7 +750,7 @@ def layout(settings: DisplaySettings, spacing_scale: float | None = None, auto_f
 def stored_resume_pdf(
     stored: TailorResponse, *, home_root: Path, form: dict[str, object] | None = None, spacing_scale: float | None = None,
     auto_fit: bool | None = None, count_pages: bool = False, today: date | None = None, fixed: bool = False, images: bool = False,
-    target: Path | None = None,
+    target: Path | None = None, placeholder: bool = False,
 ) -> tuple[RenderedPdf, str]:
     """``(the PDF, its file name)`` for one stored tailored resume: what ``POST /api/tailored-resumes/pdf`` serves.
 
@@ -739,7 +760,14 @@ def stored_resume_pdf(
     slider) is used, as saved, when the caller names no layout; the saved display layout (auto fit by default)
     applies only to a job with none.  ``fixed``: the ``spacing_scale`` given is such a choice (the slider's value
     in this request).  ``images``: the preview's page pictures in place of the PDF (``_render``).  ``target``
-    (every product caller passes it) finds the job's spacing in THIS home's store (``stored_job_path``)."""
+    (every product caller passes it) finds the job's spacing in THIS home's store (``stored_job_path``).
+
+    ``placeholder`` (0.1.11.5 PH; the preview's pictures only, ``ValueError`` without ``images``): with no ``form``
+    the pictures show ``placeholder_header`` in place of the blank block, so the pages are the ones a PDF with a
+    header of that size has."""
+
+    if placeholder and not images:
+        raise ValueError("the placeholder header is the preview's only: a PDF never prints it")
 
     profile_id = stored.resume.profile_id or "ephemeral"
     settings = load_display(home_root) or DisplaySettings()
@@ -757,8 +785,11 @@ def stored_resume_pdf(
     company = company_display_name(home_root, stored.job.company) or stored.job.company
     # 0.1.11.3: the PDF stays on the page limit the resume was fitted to (its length record's, else the rule's).
     length = getattr(stored.result, "length", None)
+    header = pdf_header(settings, profile_id, form)
+    if header is None and placeholder:
+        header = placeholder_header(profile_title(settings, profile_id))
     rendered = _render(
-        _body(stored.result), pdf_header(settings, profile_id, form), company=company, timestamp=stamp,
+        _body(stored.result), header, company=company, timestamp=stamp,
         spacing_scale=scale, auto_fit=fit, count_pages=count_pages, max_pages=length.max_pages if length is not None else LENGTH_RULE.max_pages,
         fixed=fixed and not fit, images=images,
     )
@@ -895,6 +926,9 @@ __all__ = [
     "parse_resume_markdown",
     "pdf_file_name",
     "pdf_header",
+    "placeholder_header",
+    "PLACEHOLDER_CONTACT",
+    "PLACEHOLDER_NAME",
     "printed_text",
     "render_markdown_pdf",
     "render_pdf",

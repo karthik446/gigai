@@ -14,7 +14,10 @@ Pinned, on what the page shows and on the PDF the browser downloads:
   gone while the next ones are made, and only the answer to the LAST move is shown;
 - the move is SAVED for this job with no Save button: after a reload the slider is where it was left;
 - Generate PDF downloads the same render: its request carries the slider's spacing, and the PDF has as many pages
-  as the preview shows, with the header typed into the form (which the preview shows too once it is typed).
+  as the preview shows, with the header typed into the form (which the preview shows too once it is typed);
+- 0.1.11.5 PH: the preview always shows a header and one line says whose: "Placeholder header: add yours in Generate
+  PDF" with no header file, nothing while the form's own values are shown, and "Showing your header from header.json"
+  once the person's file is there (the page itself holds no value of it: they are in the pictures only).
 """
 
 from __future__ import annotations
@@ -34,6 +37,7 @@ from gigai.scout.pipeline.settings import PIPELINE_ENV
 from gigai.scout.scout_cli import scout_group
 from gigai.scout.tailored_resume import TailorResponse, list_tailored_resumes
 
+from tests.behaviors.scout_find_jobs.test_pdf_header_file import FILE, MARKERS
 from tests.support.pipeline_fixtures import JOB, build_pipeline_fixture
 from tests.support.resume_spacing_fixture import resume
 from tests.ui import support
@@ -47,6 +51,7 @@ SLIDER = f'{PREVIEW} [data-role="preview-spacing"]'
 PAGES = f'{PREVIEW} [data-role="preview-page"]'
 COUNT = f'{PREVIEW} [data-role="preview-pages"]'
 FORM = f'{PANEL} [data-role="generate-pdf-form"]'
+HEADER_NOTE = f'{PREVIEW} [data-role="preview-header-note"]'
 ROUTE = "/api/tailored-resumes/preview"
 NAME = "Zephyrine Quillfeather"
 #: Set GIGAI_UI_PREVIEW_SHOT to a folder to keep pictures of the panel (hand check only).
@@ -141,7 +146,13 @@ def _pdf_pages(path: Path) -> list[str]:
     return [page.extract_text() for page in PdfReader(io.BytesIO(path.read_bytes())).pages]
 
 
-def test_the_job_page_previews_the_resume_and_the_slider_sets_and_saves_its_spacing(ui, job) -> None:
+def _header_note(ui) -> tuple[str | None, str | None]:
+    """(whose header the preview shows, the line under it or None)."""
+    note = ui.page.locator(HEADER_NOTE)
+    return ui.page.locator(PREVIEW).get_attribute("data-header-shown"), (note.text_content() or "").strip() if note.count() else None
+
+
+def test_the_job_page_previews_the_resume_and_the_slider_sets_and_saves_its_spacing(ui, job, scout_server) -> None:
     stored = lambda: json.loads(job.stored_path.read_text(encoding="utf-8"))  # noqa: E731
     layout = job.stored_path.with_suffix(".layout")
     saved = lambda: json.loads(layout.read_text(encoding="utf-8"))["spacing_percent"] if layout.exists() else None  # noqa: E731
@@ -160,6 +171,9 @@ def test_the_job_page_previews_the_resume_and_the_slider_sets_and_saves_its_spac
     assert ui.page.locator(f"{PANEL} .md-preview").count() == 0, "the markdown is shown in place of the rendered pages"
     assert "Led the redesign of scheduling service 0" in (ui.page.locator(PREVIEW).text_content() or ""), "the pictures have no text behind them"
     assert ui.requests_after("open", ROUTE) == 1, "the preview is asked for once when the panel opens"
+    header_file = scout_server.home / "Documents" / "GigAI" / "header.json"
+    assert not header_file.exists(), "the synthetic home starts without a header file"
+    assert _header_note(ui) == ("placeholder", "Placeholder header: add yours in Generate PDF")
     assert saved() is None, "opening the page saved a spacing"
     _shot(ui, "1-opened")
     # Nothing more by itself: the page's own polls do not ask for the preview again.
@@ -215,6 +229,7 @@ def test_the_job_page_previews_the_resume_and_the_slider_sets_and_saves_its_spac
     ui.settle()
     with_header = _shown(ui)
     assert with_header["pages"] == 2 and with_header["spacing"] == "0.80", with_header
+    assert _header_note(ui) == ("form", None), "the typed header is on screen: no line about a placeholder"
     _shot(ui, "3-with-header")
     ui.step("generate")
     with ui.page.expect_download() as waiting:
@@ -233,3 +248,44 @@ def test_the_job_page_previews_the_resume_and_the_slider_sets_and_saves_its_spac
     kept = stored()
     assert kept == first and kept["edited"]["written_by"] == "agent" and saved() == 80, "the job's stored resume was written"
     assert NAME not in job.stored_path.read_text(encoding="utf-8")
+
+    # --- 0.1.11.5 PH: with the person's header file the preview shows THEIR header, and says so without a value ---
+    header_file.parent.mkdir(parents=True, exist_ok=True)
+    header_file.write_text(json.dumps(FILE), encoding="utf-8")
+    os.chmod(header_file, 0o600)
+    try:
+        ui.step("with-file")
+        ui.reload()
+        ui.wait_for_job_page()
+        ui.page.locator(f'{PREVIEW}[data-state="ready"][data-header-shown="file"]').wait_for()
+        ui.settle()
+        assert _header_note(ui) == ("file", "Showing your header from header.json")
+        mine = _shown(ui)
+        assert (mine["pages"], mine["spacing"]) == (2, "0.80"), mine
+        picture = ui.page.locator(PAGES).first.get_attribute("src")
+        _shot(ui, "4-header-file")
+        # The page holds the header as a picture only: no value in its text, its markup, its address or its storage.
+        held = ui.page.evaluate(
+            "() => [document.documentElement.outerHTML.replace(/src=\"data:image[^\"]*\"/g, ''), location.href, JSON.stringify(localStorage), JSON.stringify(sessionStorage), document.cookie].join('\\n')"
+        )
+        assert "Showing your header from header.json" in held
+        for marker in MARKERS:
+            assert marker not in held, f"the page holds {marker!r} outside the preview's pictures"
+        assert ui.requests_after("with-file", "/api/pdf-header") == 0, "the page read the header file's values itself"
+        # Without the file it is the placeholder again, another picture of the same pages.
+        header_file.unlink()
+        ui.reload()
+        ui.wait_for_job_page()
+        ui.page.locator(f'{PREVIEW}[data-state="ready"][data-header-shown="placeholder"]').wait_for()
+        assert _header_note(ui) == ("placeholder", "Placeholder header: add yours in Generate PDF")
+        assert _shown(ui)["pages"] == mine["pages"] and ui.page.locator(PAGES).first.get_attribute("src") != picture
+    finally:
+        header_file.unlink(missing_ok=True)
+    leaked = sorted(
+        f"{path.relative_to(scout_server.home)}: {marker}"
+        for path in scout_server.home.rglob("*")
+        if path.is_file() and not path.is_symlink()
+        for marker in MARKERS
+        if marker.encode() in path.read_bytes()
+    )
+    assert leaked == [], f"the server's home holds a value of the header file: {leaked}"

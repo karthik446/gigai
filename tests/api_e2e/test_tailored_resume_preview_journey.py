@@ -50,7 +50,9 @@ def test_tailored_resume_preview_journey(tmp_path: Path, monkeypatch: pytest.Mon
         assert first.status_code == 200, first.text
         assert first.headers["content-type"].startswith("application/json")
         opened = first.json()
-        assert sorted(opened) == ["image_type", "images", "max_pages", "note", "pages", "saved", "spacing", "spacing_scale"]
+        assert sorted(opened) == ["header_shown", "image_type", "images", "max_pages", "note", "pages", "saved", "spacing", "spacing_scale"]
+        # 0.1.11.5 PH: no header sent and no Origin (an agent): the placeholder header, never cached.
+        assert opened["header_shown"] == "placeholder" and first.headers["cache-control"] == "no-store"
         pictures = [base64.b64decode(image) for image in opened["images"]]
         assert opened["image_type"] == "image/png" and pictures and all(picture.startswith(b"\x89PNG\r\n") for picture in pictures)
         pdf = client.post("/api/tailored-resumes/pdf", json=key)
@@ -68,6 +70,7 @@ def test_tailored_resume_preview_journey(tmp_path: Path, monkeypatch: pytest.Mon
         for marker in _MARKERS:
             assert marker not in shown, marker
         assert with_header.json()["images"] != opened["images"], "the header was not drawn"
+        assert with_header.json()["header_shown"] == "form"
         assert stored_file.read_bytes() == before
 
         # (c) the slider: saved for this job, and used from then on.

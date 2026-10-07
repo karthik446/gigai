@@ -1771,7 +1771,7 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
     ),
     RouteSpec(
         "POST", "/api/tailored-resumes/preview", "Show the stored tailored resume as it will print (page pictures), and save this job's spacing.", "write", "none",
-        {"pages": 2, "max_pages": 2, "spacing_scale": 0.85, "saved": True, "note": None, "spacing": {"min": 0.7, "max": 1.4, "step": 0.05}, "image_type": "image/png", "images": ["iVBORw0KGgo..."]},
+        {"pages": 2, "max_pages": 2, "spacing_scale": 0.85, "saved": True, "note": None, "spacing": {"min": 0.7, "max": 1.4, "step": 0.05}, "header_shown": "placeholder", "image_type": "image/png", "images": ["iVBORw0KGgo..."]},
         params=(
             _b("profile_id", "string", "The resume identity.", required=True), _b("job_identity", "string", "The job identity.", required=True),
             _HEADER_PARAM,
@@ -1785,7 +1785,12 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
             "this job (`saved` true), else the saved layout's (auto fit: the loosest spacing on the fewest pages). `max_pages` is the resume's page limit; "
             "when `pages` is over it `note` says so in one plain sentence. Sending `spacing_scale` writes ONE small file beside this job's stored resume and "
             "nothing else: the stored resume itself (its lines, `edited`, `updated_at`) is not written, nor the master, nor the saved layout "
-            "(PUT /api/resume-display); a later pick of the job's resume keeps it. `header` is used for these pictures only and is never stored. " + _HEADER_NOTE
+            "(PUT /api/resume-display); a later pick of the job's resume keeps it. `header` is used for these pictures only and is never stored. "
+            "0.1.11.5: the pictures always show a header, and `header_shown` says which, never a value: `form` (the `header` you sent); `placeholder` "
+            "(no `header`: \"Your Name\" and one invented contact line in a lighter grey, as tall as a real header, so `pages` is the count of a PDF "
+            "with a header; an agent always gets this one); `file` (the person's own header file, shown ONLY to Scout's own browser page, a request "
+            "with this server's Origin: NOT for agents). The placeholder is the preview's alone: no PDF ever prints it, and the PDF routes are "
+            "unchanged (no `header`, no header). The answer is Cache-Control: no-store. " + _HEADER_NOTE
         ),
     ),
     RouteSpec(

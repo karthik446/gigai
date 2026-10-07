@@ -60,7 +60,9 @@ console.log(JSON.stringify({
   search: flat(choices(input.picked, "role 2 LINE 5:")).map((line) => line.text),
   searchRole: choices(input.picked, "lanternfish").groups.map((group) => group.label),
   searchNone: choices(input.picked, "zebra"),
-  addLabels: [points.addPointLabel(input.picked, null), points.addPointLabel(input.picked, choices(input.picked)), points.addPointLabel(input.picked, { total: 0, groups: [] }), points.addPointLabel({ selection: { picked: [], left_out: [] }, result: input.picked.result }, null), points.addPointLabel({ selection: { picked: [], left_out: ["x-1", "x-2", "x-3"].map((id) => ({ id, code: "not_picked", reason: "" })) }, result: { sections: [] } }, null)],
+  addLabels: [points.addPointLabel(null), points.addPointLabel(choices(input.picked)), points.addPointLabel({ total: 0, groups: [] }), points.addPointLabel({ total: 3, groups: [] })],
+  offers: [points.canOfferAdditions(input.picked), points.canOfferAdditions({ ...input.picked, edited: { at: "x" } }), points.canOfferAdditions({ result: input.picked.result }), points.canOfferAdditions(null)],
+  retiredLabel: (() => { const first = points.leftOutChoices(input.picked, input.master).groups[0]; if (!first) return null; const gone = first.lines[0].id; const m = { ...input.master, items: input.master.items.filter((item) => item.id !== gone) }; const c = points.leftOutChoices(input.picked, m); return { label: points.addPointLabel(c), rows: c.groups.reduce((n, g) => n + g.lines.length, 0), total: c.total, before: points.leftOutChoices(input.picked, input.master).total }; })(),
   addHeading: points.ADD_HEADING,
   restoredChoices: choices(input.restored).total,
   edits: [points.editOf({ text: "As it is." }, "As it is."), points.editOf({ text: "As it is." }, "  As it   is. "), points.editOf({ text: "As it is." }, "   "), points.editOf({ text: "As it is." }, " New\\n words. ")],
@@ -150,11 +152,14 @@ def test_add_a_point_offers_the_left_out_lines_by_role_newest_first(out: dict) -
 
 def test_the_add_button_says_how_many_left_out_lines_it_offers(out: dict) -> None:
     left = out["choices"]["total"]
-    before_open, after_open, none_after_open, none_stored, three = out["addLabels"]
-    assert after_open == f"Add a left-out point ({left})" and left > 0, "the opened picker's own total is the label"
-    assert before_open == f"Add a left-out point ({out['picked']['leftOut']})", "before the master is read the label is the selection's Left out count"
-    assert none_after_open == none_stored == "Nothing left out"
+    no_master, after_open, none_after_open, three = out["addLabels"]
+    assert after_open == f"Add a left-out point ({left})" and left > 0, "the picker's own total is the label, exact from the first render"
+    assert no_master == "Add a left-out point", "with no master read the label has no number (never a wrong one)"
+    assert none_after_open == "Nothing left out"
     assert three == "Add a left-out point (3)", "a resume with three left-out lines says (3)"
+    assert out["offers"] == [True, False, False, False], "only a picked, not hand-edited resume reads the master for additions"
+    retired = out["retiredLabel"]
+    assert retired["total"] == retired["rows"] == retired["before"] - 1 and retired["label"] == f"Add a left-out point ({retired['rows']})", "a line the master retired after the pick is not counted"
     assert out["addHeading"] == "Left out of this resume: add one"
 
 

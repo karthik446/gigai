@@ -70,6 +70,9 @@ class PdfHeader:
     title: str = ""
     contact: tuple[ContactItem, ...] = ()
     work_authorization: str = ""
+    #: 0.1.11.5 PH: not a person's header but the job page preview's stand-in for one (``resume_pdf.placeholder_header``):
+    #: set in a lighter grey, and never printed in a PDF (``resume_pdf._render`` refuses it).
+    placeholder: bool = False
 
 
 class HeaderFormError(ValueError):

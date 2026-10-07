@@ -37,6 +37,9 @@ console.log(JSON.stringify({
   headerUnnamed: m.previewHeader({ name: "", email: "zora.q@example.invalid" }),
   keys: [m.headerKey(null), m.headerKey({ name: "A" }) === m.headerKey({ name: "A" }), m.headerKey({ name: "A" }) === m.headerKey({ name: "B" })],
   texts: [m.UPDATING_TEXT, m.LOADING_TEXT],
+  headerLines: ["placeholder", "file", "form", "Zora Quillfeather", undefined].map((shown) => m.headerLine(m.previewOf(answer(2, 0.85, { header_shown: shown })))),
+  headerShown: ["placeholder", "file", "form", "Zora Quillfeather", undefined].map((shown) => m.previewOf(answer(2, 0.85, { header_shown: shown })).headerShown),
+  noPreviewLine: m.headerLine(null),
   waits: [m.SLIDER_DEBOUNCE_MS, m.HEADER_DEBOUNCE_MS],
 }));
 """
@@ -69,6 +72,19 @@ def test_the_answer_is_read_into_pictures_a_spacing_and_the_slider_range() -> No
     assert out["headerNamed"] == {"name": "Zora Quillfeather", "email": ""} and out["headerUnnamed"] is None
     assert out["keys"] == ["", True, False]
     assert 0 < out["waits"][0] <= 500 and 0 < out["waits"][1] <= 1000, "the slider and the form are debounced, briefly"
+
+
+def test_the_line_under_the_preview_says_whose_header_it_shows_and_never_a_value() -> None:
+    """0.1.11.5 PH: a placeholder header says so and where to add the real one; the person's own says which file; a typed one needs no line."""
+    out = _run()
+    assert out["headerLines"] == ["Placeholder header: add yours in Generate PDF", "Showing your header from header.json", None, None, None]
+    assert out["headerShown"] == ["placeholder", "file", "form", None, None], "only the three words the server answers are read: nothing else reaches the page"
+    assert out["noPreviewLine"] is None
+    preview = (UI_SRC / "components" / "ResumePreview.jsx").read_text(encoding="utf-8")
+    assert "const headerNote = headerLine(preview);" in preview and '<p className="muted small" data-role="preview-header-note">' in preview
+    for source in (UI_SRC / "resumePreviewModel.js", UI_SRC / "components" / "ResumePreview.jsx", UI_SRC / "components" / "JobResumePanel.jsx"):
+        text = source.read_text(encoding="utf-8")
+        assert "Shown without your name and contact details" not in text and "NO_HEADER_TEXT" not in text and "postPdfHeader" not in text, f"{source.name}: the old wording, or the page reading the header file's values itself"
 
 
 def test_the_preview_is_asked_for_by_one_effect_and_keeps_nothing() -> None:

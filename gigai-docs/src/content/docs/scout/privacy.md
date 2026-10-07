@@ -12,7 +12,8 @@ The limits of that promise, plainly:
   file, a log or a reply. Your browser may offer to remember them for autofill. That is your
   browser's own store, not GigAI's.
 - **You may keep them in a file of your own instead.** `~/Documents/GigAI/header.json` is yours:
-  GigAI only reads it to fill the Generate PDF form or a PDF you make with
+  GigAI only reads it to fill the Generate PDF form, to show your header in the resume preview
+  on a job's page in your own browser, or for a PDF you make with
   `gigai scout resume pdf --out`, and never copies it into its store, a log or a model prompt.
   It writes that file only when you press "Save these details" in the Generate PDF form.
   See [Your header file](../resume/#your-header-file).

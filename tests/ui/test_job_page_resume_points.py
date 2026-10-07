@@ -191,7 +191,14 @@ def test_a_point_is_edited_removed_and_added_beside_the_preview_and_the_preview_
     assert opened["count"] == _count(opened["pages"]), opened
     assert opened["points"] == _printed(first) == ui.page.locator(POINT).count() and opened["tabs"] == _tabs(first), opened
     assert ui.requests_after("open", PREVIEW_ROUTE) == 1 and ui.writes_after("open") == [f"POST {PREVIEW_ROUTE}"], "opening the page wrote something"
-    assert ui.requests_after("open", "/api/master") == 0, "the master is read when 'Add a left-out point' is opened or a point is edited, not before"
+    assert ui.requests_after("open", "/api/master") == 1, "the master is read ONCE when the card loads (a resume that can offer additions): the label's N is the picker's own count"
+    pre_label = ui.page.locator(f'{POINTS} [data-action="add-point"]').inner_text().strip()
+    ui.page.locator(f'{POINTS} [data-action="add-point"]').click()
+    ui.page.locator(CHOICE).first.wait_for()
+    rows = ui.page.locator(CHOICE).count()
+    assert pre_label == f"Add a left-out point ({rows})", f"N before opening ({pre_label}) is not the rows the picker lists ({rows})"
+    ui.page.locator(f'{POINTS} [data-action="add-point"]').click()
+    assert ui.requests_after("open", "/api/master") == 1, "opening the picker read the master again"
     _shot(ui, "1-opened")
 
     # --- the slider is left at 0.85: saved for the job, and the count below is at that spacing ---
@@ -248,8 +255,8 @@ def test_a_point_is_edited_removed_and_added_beside_the_preview_and_the_preview_
     assert FIRST in edited["text"] and was_one not in edited["text"] and edited["pictures"] != again["pictures"], "the preview does not show the edit"
     assert one.get_attribute("data-edited") == "true" and one.locator("textarea").input_value() == FIRST
     assert ui.writes_after("edit") == [LINES, f"POST {PREVIEW_ROUTE}"], "Enter then nothing else: one write, one preview"
-    # 0.1.11.5 (b++): with an edited point the master is read, once (does the point's wording differ from the master's?).
-    assert ui.requests_after("edit", "/api/master") == 1
+    # 0.1.11.5 (LC): the master was read when the card loaded: an edit reads it no second time.
+    assert ui.requests_after("edit", "/api/master") == 0
     # 0.1.11.5 (b++): an edited point's actions, in reading order: "Save this wording to my master", then Remove.
     one.locator('[data-action="save-to-master"]').wait_for()
     ui.page.keyboard.press("Tab")
@@ -294,7 +301,7 @@ def test_a_point_is_edited_removed_and_added_beside_the_preview_and_the_preview_
     ui.settle()
     assert ui.page.locator(f'{POINTS} [data-role="add-heading"]').inner_text().strip() == "Left out of this resume: add one"
     assert ui.page.locator(f'{POINTS} [data-action="add-point"]').inner_text().strip() == f"Add a left-out point ({left_out_now})"
-    assert ui.requests_after("choices", "/api/master") == 0 and ui.writes_after("choices") == [], "the master was read at the first edit: 'Add a left-out point' reads it no second time"
+    assert ui.requests_after("choices", "/api/master") == 0 and ui.writes_after("choices") == [], "the master was read when the card loaded: 'Add a left-out point' reads it no second time"
     offered = ui.page.locator(CHOICE).evaluate_all("(items) => items.map((item) => [item.dataset.itemId, item.dataset.removed, item.querySelector('button').textContent, item.querySelector('[data-role=\"choice-text\"]').textContent])")
     assert len(offered) == len(first["selection"]["left_out"]) + 1 and all(text == master[item_id].text for item_id, _removed, _label, text in offered)
     assert offered[0] == [victim_id, "true", "Put back", master[victim_id].text] and all(row[1:3] == ["false", "Add"] for row in offered[1:])
@@ -375,4 +382,37 @@ def test_a_point_is_edited_removed_and_added_beside_the_preview_and_the_preview_
     assert layout.read_bytes() == spacing, "a change of a job's points wrote the job's saved spacing"
     on_disk = json.loads(stored_file.read_text(encoding="utf-8"))
     assert FIRST in on_disk["markdown"] and on_disk["updated_at"] == first["updated_at"] and NAME not in stored_file.read_text(encoding="utf-8")
+    ui.assert_clean()
+
+
+def test_the_add_label_count_is_the_pickers_own_rows_from_the_first_render_and_follows_a_retired_master_line(page) -> None:  # noqa: ANN001
+    """0.1.11.5 (LC): N before opening == the rows after opening (no Skills lines, none the master no longer has);
+    one master read per job page open; a retire of a master line shows on the next card load."""
+
+    ui = page
+    button = f'{POINTS} [data-action="add-point"]'
+    ui.step("open")
+    _open(ui)
+    assert ui.requests_after("open", "/api/master") == 1, "more than one master read for a job page open"
+    label = ui.page.locator(button).inner_text().strip()
+    ui.page.locator(button).click()
+    ui.page.locator(CHOICE).first.wait_for()
+    rows = ui.page.locator(CHOICE).evaluate_all("(items) => items.map((item) => item.dataset.itemId)")
+    selection = _held(ui)["selection"]
+    assert label == f"Add a left-out point ({len(rows)})", (label, len(rows))
+    assert len(rows) < len(selection["left_out"]) or len(rows) == len(selection["left_out"]), "the rows are never more than the selection's Left out"
+
+    # A master line the resume left out is retired AFTER the pick: the selection still names it, the picker cannot list it.
+    master = ui.api.client.get("/api/master").json()["master"]
+    done = ui.api.client.put("/api/master/lines", json={"revision": master["revision"], "id": rows[0], "use": "retire"})
+    assert done.status_code == 200, done.text
+    ui.step("reload")
+    ui.reload()
+    _open(ui)
+    assert ui.requests_after("reload", "/api/master") == 1
+    after = ui.page.locator(button).inner_text().strip()
+    ui.page.locator(button).click()
+    ui.page.locator(CHOICE).first.wait_for()
+    now = ui.page.locator(CHOICE).count()
+    assert after == f"Add a left-out point ({len(rows) - 1})" == f"Add a left-out point ({now})", (after, now)
     ui.assert_clean()

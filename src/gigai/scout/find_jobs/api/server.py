@@ -1706,7 +1706,7 @@ def _make_handler(
             _logger.info("client closed the connection: %s %s", self.command or "-", path)
             self.close_connection = True
 
-        def _write_json(self, status: int, payload: dict[str, object]) -> None:
+        def _write_json(self, status: int, payload: dict[str, object], headers: dict[str, str] | None = None) -> None:
             # 0110-007: an unknown_key 422 names the keys the route allows (openapi.py's table).
             path = urlsplit(self.path).path
             payload = with_allowed_keys(self.command or "", path, payload)
@@ -1721,6 +1721,8 @@ def _make_handler(
             # P4: the labels of what this route can return, from its entry in openapi.py's table.
             self.send_header(LABELS_HEADER, response_labels_header(self.command or "", path))
             self.send_header("Content-Length", str(len(body)))
+            for name, value in (headers or {}).items():
+                self.send_header(name, value)
             self.end_headers()
             self.wfile.write(body)
 
