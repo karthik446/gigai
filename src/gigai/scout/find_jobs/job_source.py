@@ -28,6 +28,12 @@ here). In order:
    the same text and digest (both are the board's ``content``), and the kind
    the grid joins the index posting's rank, pay and work mode on.
 3. The URL (``resolve_job``), for a posting the index does not hold.
+   0.1.11.4 S3: step 2 can also end with nothing for a posting the index
+   DOES hold (no stored description, and its board gave none). Its URL is
+   then the board's text, written by strangers, not the user's:
+   ``resolve_job`` is told so (``trust=TRUST_STORED``) and asks the page
+   only at a public ``https`` address, every redirect hop vetted. A URL the
+   posting store does not hold is the user's own and is fetched as given.
 4. NEVER A DOWNGRADE. When step 3 could only scrape a page (``generic``) and
    a stored assessment of this job holds the ATS text it was made on, that
    stored posting is used again, as the pipeline's steps do. A failed fetch
@@ -71,14 +77,18 @@ def resolve_job_for_assessment(
     home_root: Path,
     target: Path,
     open_client: Callable[[], "httpx.Client"],
-    resolve: Callable[[AssessJobInput, "httpx.Client"], ResolvedJob],
+    resolve: Callable[..., ResolvedJob],
 ) -> ResolvedJob:
     """``job`` resolved from the source Scout already holds for it; see the module docstring.
 
     ``open_client`` and ``resolve`` are the caller's ``job_fetch_client`` and
     ``resolve_job`` (a client is opened only when a request is needed).
+    ``resolve`` is called with ``trust=TRUST_STORED`` (S3) when the posting
+    store holds this URL, and with the job and the client alone otherwise.
     Raises what ``resolve_job`` raises.
     """
+
+    from .job_input import TRUST_STORED
 
     if job.job_url is None:
         return resolve(job, None)  # type: ignore[arg-type] - pasted text: no request, no client
@@ -86,11 +96,39 @@ def resolve_job_for_assessment(
     indexed = index_posting(home_root, target, normalized, open_client=open_client)
     if indexed is not None:
         return indexed
+    # S3: the one branch here that requests a URL the posting store holds (``index_posting``'s own request goes to the
+    # board's API host). Decided before a client is opened.
+    stored = index_holds(home_root, target, normalized)
     with open_client() as client:
-        fetched = resolve(job, client)
+        fetched = resolve(job, client, trust=TRUST_STORED) if stored else resolve(job, client)
     if fetched.fetch_kind != "generic":
         return fetched
     return stored_ats_posting(home_root, target, normalized) or fetched
+
+
+def index_holds(home_root: Path, target: Path, job_identity: str) -> bool:
+    """True when the posting store has a row for ``job_identity`` (a posting its board no longer lists included).
+
+    One keyed read, no request, nothing created. An unbound folder, a
+    project with no posting store or an unreadable one is ``False``: not
+    known here.
+    """
+
+    from ...workpad import WorkpadError
+    from .. import postings
+    from ..pipeline.store import PipelineStoreError, pipeline_path
+
+    home_root, target = Path(home_root), Path(target)
+    try:
+        if not pipeline_path(home_root, target).is_file():
+            return False
+        store = postings.open_store(home_root, target)
+        try:
+            return bool(store.postings(jobs={job_identity}, live=False))
+        finally:
+            store.close()
+    except (PipelineStoreError, FindJobsContractError, WorkpadError, sqlite3.Error, OSError, ValueError):
+        return False
 
 
 def stored_ats_posting(home_root: Path, target: Path, job_identity: str) -> ResolvedJob | None:
@@ -206,4 +244,4 @@ def index_job(home_root: Path, target: Path, job_identity: str, *, profile_id: s
     return IndexJob(row=row, rows=tuple(rows), text=text, grid=grid)
 
 
-__all__ = ["ATS_FETCH_KINDS", "IndexJob", "index_job", "index_posting", "resolve_job_for_assessment", "stored_ats_posting"]
+__all__ = ["ATS_FETCH_KINDS", "IndexJob", "index_holds", "index_job", "index_posting", "resolve_job_for_assessment", "stored_ats_posting"]

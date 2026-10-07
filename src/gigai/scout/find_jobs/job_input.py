@@ -17,6 +17,14 @@ v0.1.9 plan (§P4, operator answer 6):
    ``ATSBoardClients`` and match the row by normalized URL (or, for
    Greenhouse, by job id).  Lever/Ashby always take this path when their
    pages are shells; there is no known single-job JSON for them (S30 Q1).
+   0.1.11.4 S3: that page fetch is told whose URL it has (``trust``). A URL the
+   user typed or an agent passed (``TRUST_USER``, the default) is fetched as
+   it always was: a local-network page is the user's own to ask for. A URL
+   the posting store holds (``TRUST_STORED``, set by ``job_source`` alone) is
+   a board's text, written by strangers: ``_read_capped_stored`` asks it
+   only over ``https`` at a public address, and vets every redirect hop the
+   same way (``outbound_guard``). A stored address that is refused is a
+   posting with no text here (``job_text_unavailable``), never a request.
 5. A page with no posting text fails ``job_text_unavailable`` (the caller is
    told to pass ``--job-text``); a network/HTTP failure with nothing to fall
    back on fails ``job_fetch_failed``.  Messages are redacted like
@@ -36,7 +44,7 @@ import json
 from pathlib import Path
 import re
 from typing import TYPE_CHECKING
-from urllib.parse import parse_qsl, urlsplit
+from urllib.parse import parse_qsl, urljoin, urlsplit
 
 from ...canonical import digest_imported_bytes
 from .assess_contracts import AssessJobInput, ResolvedJob, text_identity
@@ -51,7 +59,7 @@ from .contracts import (
 )
 from .company_index import CompanyIndex
 from .market_acquisition import job_id_from_url
-from .outbound_guard import safe_path_segment
+from .outbound_guard import pinned_stream, safe_path_segment, safe_public_target
 
 if TYPE_CHECKING:  # pragma: no cover - imported only by static type checkers
     import httpx
@@ -66,6 +74,12 @@ MAX_BODY_BYTES = 2 * 1024 * 1024
 MIN_POSTING_TEXT_CHARS = 400
 
 _MAX_REDIRECTS = 5
+
+#: Whose URL the page fetch has (0.1.11.4 S3). ``user``: typed by the user or passed by an agent, fetched as given.
+#: ``stored``: a posting's URL as the posting store holds it (a board's text), asked only at a public ``https`` address.
+TRUST_USER = "user"
+TRUST_STORED = "stored"
+_NOT_PUBLIC = "not_public"  # ``_FetchFailure.code``: the stored URL, or a redirect of it, was refused and not requested
 _GREENHOUSE_JOB_URL = "https://boards-api.greenhouse.io/v1/boards/{token}/jobs/{job_id}?content=true"
 _TITLE_TAG = re.compile(r"<title[^>]*>(.*?)</title>", re.IGNORECASE | re.DOTALL)
 # ``job_id_from_url`` is a dedupe heuristic that only trusts 4+ digit path
@@ -129,7 +143,9 @@ def job_fetch_client() -> "httpx.Client":
     )
 
 
-def resolve_job(job: AssessJobInput, *, client: "httpx.Client", home_root: Path | None = None) -> ResolvedJob:
+def resolve_job(
+    job: AssessJobInput, *, client: "httpx.Client", home_root: Path | None = None, trust: str = TRUST_USER
+) -> ResolvedJob:
     """Resolve ``job`` to its plain text and identity; see the module docstring.
 
     Raises ``FindJobsContractError`` with code ``job_text_unavailable`` (the
@@ -142,8 +158,16 @@ def resolve_job(job: AssessJobInput, *, client: "httpx.Client", home_root: Path 
     API, never scraped; see ``_embedded_greenhouse_token``.  ``home_root``
     is where the company index is read from; without it only an explicit
     ``for=<token>`` on the URL identifies the board.
+
+    0.1.11.4 S3: ``trust`` is ``TRUST_STORED`` only when the URL is one the
+    posting store holds (``job_source``). The page is then asked only at a
+    public ``https`` address, every redirect hop included; a stored address
+    that is refused fails ``job_text_unavailable`` (the posting has no text
+    here) and nothing is requested.
     """
 
+    if trust not in (TRUST_USER, TRUST_STORED):
+        raise ValueError("trust must be TRUST_USER or TRUST_STORED")
     if job.job_text is not None:
         return _pasted(job.job_text)
     assert job.job_url is not None  # AssessJobInput guarantees exactly one
@@ -154,6 +178,7 @@ def resolve_job(job: AssessJobInput, *, client: "httpx.Client", home_root: Path 
     if job_id is None and board is not None and board[0] == "greenhouse":
         job_id = _greenhouse_path_job_id(url)
     failures: list[str] = []
+    refused = False  # S3: the stored URL (or a redirect of it) is not a public https address; it was not requested
 
     page: _Page | None = None
     page_fetched = False
@@ -163,9 +188,10 @@ def resolve_job(job: AssessJobInput, *, client: "httpx.Client", home_root: Path 
             # BLOCK1: the company's own page names the board it embeds (the one fetch is kept for the page path below).
             page_fetched = True
             try:
-                page = _fetch_page(client, url)
+                page = _fetch_page(client, url, trust=trust)
             except _FetchFailure as exc:
                 failures.append(f"page fetch ({exc})")
+                refused = exc.code == _NOT_PUBLIC
             else:
                 token = embedded_greenhouse_token_in_page(page.html)
         if token is not None:
@@ -187,9 +213,10 @@ def resolve_job(job: AssessJobInput, *, client: "httpx.Client", home_root: Path 
 
     if not page_fetched:
         try:
-            page = _fetch_page(client, url)
+            page = _fetch_page(client, url, trust=trust)
         except _FetchFailure as exc:
             failures.append(f"page fetch ({exc})")
+            refused = exc.code == _NOT_PUBLIC
 
     if board is not None and (page is None or len(page.text) < MIN_POSTING_TEXT_CHARS):
         provider, token = board
@@ -218,6 +245,12 @@ def resolve_job(job: AssessJobInput, *, client: "httpx.Client", home_root: Path 
         raise FindJobsContractError(
             "job_text_unavailable",
             "the page at this URL carries no posting text (a script-only page, or a posting that is no longer listed); pass --job-text with the posting text instead",
+        )
+    if refused:
+        raise FindJobsContractError(
+            "job_text_unavailable",
+            "this posting has no description here: its board gave none, and the address the posting is stored with is not a public "
+            "https page, so it was not read; pass --job-text with the posting text instead",
         )
     raise FindJobsContractError(
         "job_fetch_failed",
@@ -333,6 +366,19 @@ def _host_of(url: str) -> str:
         return "<unknown host>"
 
 
+def _capped_body(response: "httpx.Response") -> bytes:
+    chunks: list[bytes] = []
+    received = 0
+    for chunk in response.iter_bytes():
+        room = MAX_BODY_BYTES - received
+        if room <= 0:
+            break
+        piece = chunk[:room]
+        chunks.append(piece)
+        received += len(piece)
+    return b"".join(chunks)
+
+
 def _read_capped(client: "httpx.Client", url: str) -> tuple[bytes, str | None]:
     """GET ``url`` reading at most ``MAX_BODY_BYTES``; returns (body, charset)."""
 
@@ -343,20 +389,55 @@ def _read_capped(client: "httpx.Client", url: str) -> tuple[bytes, str | None]:
         with client.stream("GET", url) as response:
             if response.status_code != 200:
                 raise _FetchFailure("http_error", host, f"HTTP {response.status_code}", response.status_code)
-            chunks: list[bytes] = []
-            received = 0
-            for chunk in response.iter_bytes():
-                room = MAX_BODY_BYTES - received
-                if room <= 0:
-                    break
-                piece = chunk[:room]
-                chunks.append(piece)
-                received += len(piece)
-            return b"".join(chunks), response.charset_encoding
+            return _capped_body(response), response.charset_encoding
     except httpx.TooManyRedirects:
         raise _FetchFailure("too_many_redirects", host, "too many redirects") from None
     except httpx.HTTPError as exc:
         raise _FetchFailure("network_error", host, f"network error ({type(exc).__name__})") from None
+
+
+def _read_capped_stored(client: "httpx.Client", url: str) -> tuple[bytes, str | None]:
+    """``_read_capped`` for a STORED posting URL (S3): each hop is vetted, then asked at its vetted address.
+
+    A hop is the URL itself, then each redirect's ``Location`` (at most
+    ``_MAX_REDIRECTS``, the client's own redirect following is off). Every
+    hop goes through ``outbound_guard.safe_public_target``: plain ``https``,
+    default port, no login, a name resolved ONCE whose every address is
+    public; the connection goes to that address (``pinned_stream``), so no
+    second lookup can answer differently. A hop that is refused stops the
+    fetch (``_NOT_PUBLIC``): it is not requested, and nothing was read from
+    the hops before it (a redirect's body is never read).
+    """
+
+    import httpx
+
+    current = url
+    host = _host_of(current)
+    for _hop in range(_MAX_REDIRECTS + 1):
+        host = _host_of(current)
+        target = safe_public_target(current)
+        if target is None:
+            raise _FetchFailure(_NOT_PUBLIC, host, "not a public https address; not requested")
+        try:
+            with pinned_stream(client, target) as response:
+                if response.has_redirect_location:
+                    current = _redirect_target(current, response.headers.get("location", ""))
+                    continue
+                if response.status_code != 200:
+                    raise _FetchFailure("http_error", host, f"HTTP {response.status_code}", response.status_code)
+                return _capped_body(response), response.charset_encoding
+        except httpx.HTTPError as exc:
+            raise _FetchFailure("network_error", host, f"network error ({type(exc).__name__})") from None
+    raise _FetchFailure("too_many_redirects", host, "too many redirects")
+
+
+def _redirect_target(current: str, location: str) -> str:
+    """Where a redirect from ``current`` points (relative to the posting's URL, never to the vetted address); ``""`` when unreadable."""
+
+    try:
+        return urljoin(current, location.strip())
+    except ValueError:
+        return ""
 
 
 def _decode(body: bytes, charset: str | None) -> str:
@@ -482,8 +563,8 @@ def _posting_text(html: str) -> str:
     return whole
 
 
-def _fetch_page(client: "httpx.Client", url: str) -> _Page:
-    body, charset = _read_capped(client, url)
+def _fetch_page(client: "httpx.Client", url: str, *, trust: str = TRUST_USER) -> _Page:
+    body, charset = _read_capped_stored(client, url) if trust == TRUST_STORED else _read_capped(client, url)
     html = _decode(body, charset)
     return _Page(title=_page_title(html), text=_posting_text(html), html=html)
 
@@ -625,6 +706,8 @@ __all__ = [
     "MAX_BODY_BYTES",
     "MIN_POSTING_TEXT_CHARS",
     "PostingTextUnavailable",
+    "TRUST_STORED",
+    "TRUST_USER",
     "fetch_missing_description",
     "job_fetch_client",
     "resolve_job",

@@ -2547,7 +2547,7 @@ def resolve_tailor_job(
             # 0110-10-04: the same posting the assessment read (``job_source``), never a scrape of the company's page.
             job = resolve_job_for_assessment(
                 request.job, home_root=home_root, target=target, open_client=lambda: job_fetch_client(),
-                resolve=lambda job_input_, client: resolve_job(job_input_, client=client, home_root=home_root),
+                resolve=lambda job_input_, client, **stored: resolve_job(job_input_, client=client, home_root=home_root, **stored),
             )
     except FindJobsContractError as exc:
         raise TailorError(exc.code, str(exc)) from exc
