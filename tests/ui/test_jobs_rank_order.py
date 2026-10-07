@@ -185,7 +185,7 @@ def test_jobs_come_by_rank_ranked_low_postings_are_listed_under_a_divider_and_as
     assert ui.page.locator(tid("ranked-low-line")).count() == 0 and ui.page.locator('[data-action="toggle-ranked-low"]').count() == 0
     assert "weak fits, ranked low" not in (ui.page.locator("body").text_content() or "")
     assert _text(ui, f"{waiting} [data-role='not-assessed-count']") == "63 not assessed"
-    assert _text(ui, tid("assess-all")) == "Assess all" and ui.page.locator(tid("assess-these")).count() == 1  # select-and-assess stays
+    assert _text(ui, tid("assess-all")) == "Assess top 50 of 63" and ui.page.locator(tid("assess-these")).count() == 1  # select-and-assess stays
     assert _text(ui, tid("ranking-line")) == RANKING_WORDS
 
     # The ranked-low postings ARE in the list, where their rank puts them: after the other ranked ones, under a plain
@@ -239,7 +239,7 @@ def test_jobs_come_by_rank_ranked_low_postings_are_listed_under_a_divider_and_as
     # Approve: the server's own yes. The 50 are assessed, and the line says what is left.
     ui.page.click('[data-action="approval-approve"]')
     notice.wait_for()
-    assert answers.bodies[-1] == {"approve": True, "states": ["not_assessed"]}
+    assert answers.bodies[-1] == {"approve": True, "states": ["not_assessed"], "background": True}  # 0.1.11.5: the approval starts the batch
     assert _text(ui, '[data-role="assess-notice"]') == 'Assessed 50 of 50. 10 more not assessed yet: 50 at a time, "Assess these" again takes the next.'
     ui.page.wait_for_function(
         """() => ((document.querySelector('[data-role="not-assessed-count"]') || {}).textContent || '') === '13 not assessed'"""

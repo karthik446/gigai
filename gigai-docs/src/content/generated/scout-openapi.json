@@ -8476,6 +8476,10 @@
                     "description": "true: assess (one model call per posting). Left out or false: only ask.",
                     "type": "boolean"
                   },
+                  "background": {
+                    "description": "With `approve`: true starts the batch and answers 202 at once with the GET /api/postings/assess/status object (`status: started`); the batch runs on. Left out: the request answers when the batch is done.",
+                    "type": "boolean"
+                  },
                   "include_low_rank": {
                     "description": "true: also the postings whose rank score is below `fit.assess_min_rank` (50). Left out: they are skipped and counted (`low_rank`).",
                     "type": "boolean"
@@ -8806,6 +8810,248 @@
         "x-gigai-labels": [
           "public-untrusted"
         ]
+      }
+    },
+    "/api/postings/assess/cancel": {
+      "post": {
+        "description": "Cancel the running assess batch: no further model call; what finished is kept. 0.1.11.5: stops the live assess batch of this project. No further model call starts. THE CALLS IN FLIGHT FINISH and their assessments are stored like any other (at most 4; their tokens are spent already), then the batch ends: `batch.status` is cancelling until then, and GET /api/postings/assess/status then says `last.status` cancelled with how many were assessed and how many were never started. Every assessment already stored stays. `cancel_requested` is how many batches were asked (0: none runs, nothing changed). A batch started in a terminal is cancelled the same way; the command is `gigai scout jobs assess --cancel`. Stopping the server (`gigai scout stop`) is different: it ends the model processes the server started, and what they would have answered is lost.",
+        "operationId": "post_api_postings_assess_cancel",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "example": {},
+              "schema": {
+                "additionalProperties": false,
+                "properties": {},
+                "required": [],
+                "type": "object"
+              }
+            }
+          },
+          "required": false
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "batch": {
+                    "assessed": 12,
+                    "estimate_seconds": 1730.0,
+                    "failed": 1,
+                    "here": true,
+                    "id": "batch_5f0c2d9a41e84b6f9d3f2a7c1b0e6d58",
+                    "in_flight": 4,
+                    "pending": [
+                      "https://boards.greenhouse.io/acme/jobs/101"
+                    ],
+                    "profile_id": "prof_1",
+                    "started_at": "2026-10-06T09:30:00Z",
+                    "status": "cancelling",
+                    "total": 50
+                  },
+                  "cancel_requested": 1,
+                  "last": {
+                    "assessed": 14,
+                    "error_code": null,
+                    "failed": 0,
+                    "failed_codes": [],
+                    "finished_at": "2026-10-06T09:12:40Z",
+                    "id": "batch_0d1e7c55a3b94c1e8a6f4b2d9c7e3f10",
+                    "more_after": 55,
+                    "not_started": 36,
+                    "requested": 50,
+                    "status": "cancelled"
+                  },
+                  "running": true,
+                  "schema_version": "scout-assess-batch:1"
+                },
+                "schema": {
+                  "additionalProperties": true,
+                  "properties": {
+                    "schema_version": {
+                      "const": "scout-assess-batch:1"
+                    }
+                  },
+                  "required": [
+                    "schema_version"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden / forbidden_origin: loopback peer and Host `127.0.0.1:<port>` or `localhost:<port>` only (Origin too on writes)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "target_unavailable",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "target_unavailable"
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "unsupported_media_type: writes need Content-Type: application/json."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "unknown_key",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "unknown_key"
+          }
+        },
+        "summary": "Cancel the running assess batch",
+        "tags": [
+          "Jobs"
+        ],
+        "x-gigai-effect": "write",
+        "x-gigai-external": "none",
+        "x-gigai-labels": []
+      }
+    },
+    "/api/postings/assess/status": {
+      "get": {
+        "description": "How far the running assess batch is, and how the last one ended. 0.1.11.5: what the Jobs page and a job page poll while an assess batch runs. `batch` is the live batch of this project, or null: `total`, `assessed`, `failed`, `in_flight` (model calls running now), `profile_id` (the profile of the call started last), `estimate_seconds` (what the question estimated for the batch), `pending` (the job identities with no result yet) and `status` running or cancelling. It is read from the batch's own marker file, whichever process runs the batch (`here`: this server; false: a terminal's `gigai scout jobs assess --yes` or `gigai scout new --yes`): no store, posting or journal read, so it costs the same on a small and on a very large home. `last` is how the last batch this server ran ended (`status` done, cancelled or failed; `requested`, `assessed`, `failed`, `not_started`, `failed_codes`), or null. System data only: ids, codes and counts; `pending` holds posting URLs.",
+        "operationId": "get_api_postings_assess_status",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "batch": {
+                    "assessed": 12,
+                    "estimate_seconds": 1730.0,
+                    "failed": 1,
+                    "here": true,
+                    "id": "batch_5f0c2d9a41e84b6f9d3f2a7c1b0e6d58",
+                    "in_flight": 4,
+                    "pending": [
+                      "https://boards.greenhouse.io/acme/jobs/101"
+                    ],
+                    "profile_id": "prof_1",
+                    "started_at": "2026-10-06T09:30:00Z",
+                    "status": "running",
+                    "total": 50
+                  },
+                  "last": {
+                    "assessed": 14,
+                    "error_code": null,
+                    "failed": 0,
+                    "failed_codes": [],
+                    "finished_at": "2026-10-06T09:12:40Z",
+                    "id": "batch_0d1e7c55a3b94c1e8a6f4b2d9c7e3f10",
+                    "more_after": 55,
+                    "not_started": 36,
+                    "requested": 50,
+                    "status": "cancelled"
+                  },
+                  "running": true,
+                  "schema_version": "scout-assess-batch:1"
+                },
+                "schema": {
+                  "additionalProperties": true,
+                  "properties": {
+                    "schema_version": {
+                      "const": "scout-assess-batch:1"
+                    }
+                  },
+                  "required": [
+                    "schema_version"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden / forbidden_origin: loopback peer and Host `127.0.0.1:<port>` or `localhost:<port>` only (Origin too on writes)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "target_unavailable",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "target_unavailable"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "unknown_key",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "unknown_key"
+          }
+        },
+        "summary": "Get how far the assess batch is",
+        "tags": [
+          "Jobs"
+        ],
+        "x-gigai-effect": "read",
+        "x-gigai-external": "none",
+        "x-gigai-host-checked": true,
+        "x-gigai-labels": []
       }
     },
     "/api/postings/rank": {

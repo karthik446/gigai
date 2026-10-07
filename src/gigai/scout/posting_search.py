@@ -93,7 +93,7 @@ from .assess_causes import failure_lines
 from .evaluated_models import notice_lines
 from .assess_preview import model_input_summary, summary_lines
 from .data_labels import ENVELOPE_KEY, UNTRUSTED_TEXT_RULE, labels_envelope
-from .pipeline.busy import assess_batch
+from .pipeline.busy import LiveBatch, assess_batch
 from .pipeline.store import (
     EPHEMERAL_PROFILE,
     LEASE_ASSESS_BATCH,
@@ -107,6 +107,7 @@ from .postings import PostingModelError, PostingModelPreparing, ProfileView
 from .scout_new import (
     FIRST_USE_DAYS,
     POSTINGS_LABELS,
+    STOPPED_CANCELLED,
     _assess,
     _calls,
     _grouped,
@@ -595,8 +596,17 @@ def assess_these(
     config: object | None = None,
     include_low_rank: bool = False,
     model_wait: float | None = None,
+    on_live: Callable[[LiveBatch], None] | None = None,
 ) -> dict[str, object]:
     """"Assess these": ask first (count and estimate), assess on approval. The ``scout-postings-assess:1`` response.
+
+    0.1.11.5 (ASSESS-01): ``on_live`` is called once with the approved batch's marker (``pipeline.busy.LiveBatch``)
+    when it is live and says its total, before the first model call: the server's background job answers its request
+    then and the batch runs on (``assess_batch_job``). The batch can be cancelled through the marker
+    (``pipeline.busy.request_cancel``): the calls in flight finish, what finished is kept, ``assessed.stopped`` is
+    ``cancelled``. ``low_rank.included`` says what ``include_low_rank`` would do to THIS run: the low-ranked ones
+    join the pool, and one approval is still the top 50 by rank of the whole pool, so ``changes_batch`` is false
+    when none of them would be among the 50.
 
     ``jobs`` names the postings (job identities); without it the filter
     (``query``, ``states``, ``window``, ``profile_id``) selects them. A
@@ -693,6 +703,10 @@ def assess_these(
                 body["include_low_rank"] = True
             low_rank: dict[str, object] | None = None
             if low:
+                # 0.1.11.5: what the yes below really assesses: the top of the WHOLE pool, the low-ranked ones in it.
+                pool, _none = split_low_rank(candidates, ranks, setting, include=True)
+                with_low, with_low_later = top_ranked_batch(pool, ranks, dates)
+                joined = len(set(with_low) - set(pairs))
                 low_estimate = _estimate(low_batch, home_root, target)[1]
                 low_tokens = low_estimate["tokens"]
                 low_cost = f", ~{low_tokens / 1000:.0f}k tokens" if isinstance(low_tokens, (int, float)) and low_tokens >= 1000 else ""
@@ -700,6 +714,10 @@ def assess_these(
                 low_rank = {
                     "kind": "assess_low_rank", "skipped": len(low), "min_rank": setting.assess_min_rank, "estimate": low_estimate,
                     "batch": len(low_batch), "more_after": low_later,
+                    "included": {
+                        "pool": len(pool), "batch": len(with_low), "more_after": with_low_later, "low_ranked_in_batch": joined,
+                        "changes_batch": set(with_low) != set(pairs), "estimate": _estimate(with_low, home_root, target)[1],
+                    },
                     "text": (
                         f"{len(low)} low-ranked {'one is' if one else 'ones are'} skipped (rank below {setting.assess_min_rank}); "
                         f"assess {f'the top {len(low_batch)} by rank of ' if low_later else ''}{'that' if one else 'those'} too? "
@@ -731,6 +749,10 @@ def assess_these(
                 # (pipeline.busy). The lease above only keeps a second batch out.
                 try:
                     with assess_batch(home_root, target) as live:
+                        seconds = estimate["seconds"]
+                        live.begin([job for job, _owner in pairs], estimate_seconds=seconds if isinstance(seconds, (int, float)) else None)
+                        if on_live is not None:
+                            on_live(live)  # 0.1.11.5: the batch is live and says its total; the server answers its request now
                         # The audit of the batch (DESIGN 10.2): who approved, when, how many, the estimate. Never pending.
                         approval_id = store.create_approval(
                             trigger="assess_these", jobs=len(pairs), est_calls=int(estimate["calls"]),  # type: ignore[call-overload]
@@ -739,7 +761,9 @@ def assess_these(
                         store.decide_approval(approval_id, approved=True, decided_by=decided_by)
                         renewer.start()
                         texts = postings.posting_texts(home_root, [row for _group, row in selection.shown])
-                        assessed = _assess(pairs, texts, home_root=home_root, target=target, config=config, live=live)
+                        assessed = _assess(pairs, texts, home_root=home_root, target=target, config=config, live=live,
+                            estimate_seconds=seconds if isinstance(seconds, (int, float)) else None,
+                        )
                 finally:
                     renew_stop.set()
                     if renewer.is_alive():
@@ -823,6 +847,8 @@ def render(response: Mapping[str, object]) -> str:
                 lines.append(f"  {running}")
             lines.append("  Nothing was assessed. Yes: run the same command with --yes.")
         elif isinstance(assessed, Mapping):
+            if assessed.get("stopped") == STOPPED_CANCELLED:  # 0.1.11.5
+                lines.append(f"Cancelled: {assessed.get('not_started', 0)} not started. What finished is kept; the same command again takes the rest.")
             lines.append(f"Assessed {assessed['assessed']} of {assessed['requested']}." + (f" Fetched {assessed['fetched_on_demand']} missing description(s) first." if assessed.get("fetched_on_demand") else ""))
             from .find_jobs.posting_live import closed_skipped_text
 

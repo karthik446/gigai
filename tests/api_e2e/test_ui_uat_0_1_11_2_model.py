@@ -89,6 +89,8 @@ def test_the_company_lists_save_sends_the_other_preferences_back(out: dict) -> N
 
 
 def test_the_running_dialog_says_assessing_n_postings(out: dict) -> None:
-    assert out["lines"][0].startswith("Assessing 2 postings…") and out["lines"][1].startswith("Assessing 1 posting…")
-    assert out["lines"][2].startswith("Assessing postings, the low-ranked ones included…") and out["lines"][3].startswith("Assessing 2 postings…")
+    # 0.1.11.5 ASSESS-01: the approval STARTS the batch and the dialog closes; the line is seen for a moment.
+    assert out["lines"][0].startswith("Starting 2 postings.") and out["lines"][1].startswith("Starting 1 posting.")
+    assert out["lines"][2].startswith("Starting the batch, the low-ranked ones in the pool.") and out["lines"][3].startswith("Starting 2 postings.")
+    assert all("can take a minute" not in line and "the page then shows how far it is, with Cancel" in line for line in out["lines"])
     assert "Nothing has been assessed" not in " ".join(out["lines"])

@@ -198,6 +198,8 @@ class AssessAnswers:
             "low_rank": {
                 "kind": "assess_low_rank", "skipped": 2, "min_rank": 50, "estimate": {**estimate, "calls": 2},
                 "text": "2 low-ranked ones are skipped (rank below 50); assess those too? ~2 calls",
+                # 0.1.11.5 ASSESS-01: what the box would do to this run (the server's own pool logic).
+                "included": {"pool": 5, "batch": 5, "more_after": 0, "low_ranked_in_batch": 2, "changes_batch": True, "estimate": {**estimate, "calls": 5}},
                 "yes": {"api": {"method": "POST", "path": "/api/postings/assess", "body": {"approve": True, "include_low_rank": True}}},
             },
         }
@@ -222,6 +224,10 @@ class AssessAnswers:
         route.fulfill(status=200, content_type="application/json", body=json.dumps(answer))
 
 
+def _estimate(ui) -> str:
+    return (ui.page.locator('[data-role="approval-estimate"]').text_content() or "").split(" (no recorded")[0].strip()
+
+
 def test_assess_these_asks_about_the_low_ranked_separately(ui) -> None:
     ui.page.route("**/api/postings*", PostingsAnswers())
     asked = AssessAnswers()
@@ -237,14 +243,15 @@ def test_assess_these_asks_about_the_low_ranked_separately(ui) -> None:
     ui.page.wait_for_selector(tid("approval-dialog"))
     assert ui.page.locator("#assess-approval-title").text_content() == "Assess 3 postings?"
     line = (ui.page.locator(tid("approval-low-rank")).text_content() or "").strip()
-    assert line == "2 low-ranked ones are skipped (rank below 50). Assess those too? ~2 model calls"
+    assert line == "Include the 2 low-ranked ones (rank below 50): 5 postings in this run instead of 3."  # 0.1.11.5: what the box does, never "assess those too"
+    assert _estimate(ui) == "Estimate: ~3 model calls"
     assert not box.is_checked()
     assert asked.bodies == [{}]  # the ask itself approves nothing
 
     # Approve with the box off: the server's own yes, nothing about the low-ranked.
     ui.page.click('[data-action="approval-approve"]')
     notice.wait_for()
-    assert asked.bodies[-1] == {"approve": True}
+    assert asked.bodies[-1] == {"approve": True, "background": True}  # 0.1.11.5: the approval starts the batch
     assert notice.text_content() == "Assessed 3 of 3. 2 low-ranked ones were skipped (rank below 50)."
 
     # Again, the box ticked: the body the server named for the low-ranked too.
@@ -252,8 +259,9 @@ def test_assess_these_asks_about_the_low_ranked_separately(ui) -> None:
     ui.page.wait_for_selector(tid("approval-dialog"))
     assert not box.is_checked()  # off again for every new question
     box.check()
+    assert _estimate(ui) == "Estimate: ~5 model calls"  # the run with the low-ranked ones in the pool
     ui.page.click('[data-action="approval-approve"]')
     ui.page.wait_for_function("""() => (document.querySelector('[data-role="assess-notice"]') || {}).textContent === 'Assessed 5 of 5.'""")
-    assert asked.bodies[-1] == {"approve": True, "include_low_rank": True}
+    assert asked.bodies[-1] == {"approve": True, "include_low_rank": True, "background": True}
 
     ui.assert_clean()

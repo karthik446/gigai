@@ -53,6 +53,11 @@ def _listed(ui) -> list[dict]:
           href: row.querySelector('[data-action="open-job"]').getAttribute('href'),
           state: row.dataset.state,
           fit: Array.from(row.querySelectorAll('[data-role="profile-tags"] [data-testid="fit-chip"]')).map((chip) => chip.textContent),
+          fitTone: Array.from(row.querySelectorAll('[data-role="profile-tags"] [data-testid="fit-chip"]')).map((chip) => chip.dataset.tone),
+          fitGreen: Array.from(row.querySelectorAll('[data-role="profile-tags"] [data-testid="fit-chip"]')).map((chip) => chip.classList.contains('tone-ok')),
+          fitColours: Array.from(row.querySelectorAll('[data-role="profile-tags"] [data-testid="fit-chip"]')).map((chip) => getComputedStyle(chip).color),
+          rankTone: Array.from(row.querySelectorAll('[data-role="profile-tags"] [data-testid="rank-chip"]')).map((chip) => chip.dataset.tone),
+          rankColours: Array.from(row.querySelectorAll('[data-role="profile-tags"] [data-testid="rank-chip"]')).map((chip) => getComputedStyle(chip).color),
           rank: Array.from(row.querySelectorAll('[data-role="profile-tags"] [data-testid="rank-chip"]')).map((chip) => chip.textContent),
           score: row.querySelector('[data-role="score"]').textContent,
         }))"""
@@ -69,6 +74,7 @@ def test_every_row_has_its_fit_and_rank_chips_with_the_servers_numbers(ui, scout
     listed = _listed(ui)
     assert listed, "the demo home lists no row"
     seen = {"assessed": 0, "not_assessed": 0}
+    tones: dict[str, set[str]] = {}
     for entry in listed:
         job = next(row for identity, row in served.items() if entry["href"] == "#/jobs/" + quote(identity, safe=""))
         if job["state"] == "not_assessed":
@@ -82,10 +88,18 @@ def test_every_row_has_its_fit_and_rank_chips_with_the_servers_numbers(ui, scout
             else:
                 met, total = job["assessment"]["met"], job["assessment"]["requirements"]
                 assert entry["fit"] == [f"Fit {job['fit']}% · {met}/{total}"], (entry, job["score_text"])
+                # 0.1.11.5 (B1 review): green ONLY on a matched row; neutral, like the rank chip, on every other state
+                # (needs your answers at Fit 50% must not read as "good fit").
+                green = job["state"] in ("matched", "tailored")
+                tones.setdefault(job["state"], set()).add(entry["fitTone"][0])
+                assert entry["fitTone"] == ["ok" if green else "plain"] and entry["fitGreen"] == [green], (job["state"], entry)
+                assert (entry["fitColours"] == entry["rankColours"]) is (not green), (job["state"], entry)
+        assert entry["rankTone"] == ["plain"], entry
         assert entry["rank"] == [f"Rank {ranks[job['job_identity']]}"], entry
         # The middle column keeps the state, never the numbers the chips carry.
         assert "%" not in entry["score"] and "rank" not in entry["score"].lower() and " of " not in entry["score"], entry["score"]
     assert seen["assessed"] and seen["not_assessed"], seen
+    assert any(state not in ("matched", "tailored") for state in tones), f"the home lists no assessed row that is not a match: {tones}"
     ui.page.evaluate("() => document.querySelector('[data-testid=\"job-row\"]').scrollIntoView()")
     shot(ui, "jobs-list-fit-and-rank-chips")
     ui.assert_clean()

@@ -3091,12 +3091,13 @@ def jobs_list_command(
 @click.option("--again", "again", is_flag=True, help="Also the postings whose assessment is current.")
 @click.option("--include-low-rank", "include_low_rank", is_flag=True, help="Also the low-ranked postings (rank below fit.assess_min_rank, 50), which are left out by default.")
 @click.option("--actor", "actor", type=click.Choice(["operator", "agent"]), default="operator", show_default=True, help="Who approves the batch.")
+@click.option("--cancel", "cancel", is_flag=True, help="Cancel the assess batch that is running (here, in another terminal or in the Scout server): no further model call starts, the calls in flight finish and what finished is kept. Assesses nothing.")
 @click.option("--home", "home_value", type=click.Path(path_type=Path, file_okay=False))
 @click.option("--target", "target_value", type=click.Path(path_type=Path, file_okay=False))
 @click.option("--json", "as_json", is_flag=True)
 def jobs_assess_command(
     jobs: tuple[str, ...], profile_id: str | None, query: str | None, states: tuple[str, ...], window: str | None, yes: bool,
-    again: bool, include_low_rank: bool, actor: str, home_value: Path | None, target_value: Path | None, as_json: bool,
+    again: bool, include_low_rank: bool, actor: str, cancel: bool, home_value: Path | None, target_value: Path | None, as_json: bool,
 ) -> None:
     """Assess these postings: the ones named (posting URLs), or the ones the filter selects.
 
@@ -3109,7 +3110,11 @@ def jobs_assess_command(
 
     Postings ranked below 50 (the fit.assess_min_rank setting) are left out
     and counted; they are asked about separately, and --include-low-rank
-    assesses them with the rest.
+    puts them in the pool (one approval is still the top 50 by rank).
+
+    A batch that runs can be cancelled: --cancel (from another terminal, or
+    for a batch the Jobs page started). The calls in flight finish and every
+    assessment already stored is kept; the same command again takes the rest.
     """
 
     import sys
@@ -3119,6 +3124,30 @@ def jobs_assess_command(
     from .posting_search import STATUS_ASK, assess_these, render
 
     home_root = home_value or default_home_root()
+    if cancel:
+        # 0.1.11.5 (ASSESS-01): the batch is asked through its marker, whichever process runs it.
+        from .pipeline import busy
+
+        if jobs or yes or again or include_low_rank or profile_id or query or states or window:
+            _fail(click.UsageError("--cancel takes no posting, filter or approval option"), as_json=as_json, fallback="invalid_value")
+            return
+        try:
+            target = _pipeline_target(target_value, home_root, as_json=as_json)
+        except _jobs_errors() as exc:
+            _fail(exc, as_json=as_json, fallback="scout_jobs_failed")
+            return
+        asked = busy.request_cancel(home_root, target)
+        batch = busy.batch_status(home_root, target)
+        answer: dict[str, object] = {"schema_version": "scout-assess-batch:1", "cancel_requested": asked, "running": batch is not None, "batch": batch}
+        if asked and batch is not None:
+            text = (
+                f"Cancelling the assess batch: {batch['assessed']} of {batch['total']} assessed so far. No further model call starts; "
+                f"{batch['in_flight']} in flight finish{'es' if batch['in_flight'] == 1 else ''} and what finished is kept."
+            )
+        else:
+            text = "No assess batch is running: nothing to cancel."
+        _emit(answer, as_json, "" if as_json else text)
+        return
 
     def call(approve: bool, low_rank: bool = include_low_rank) -> dict[str, object]:
         return assess_these(

@@ -54,11 +54,11 @@ out.listedStates = data.everything.postings.rows.map((row) => row.state);
 
 // The approval dialog: the low-ranked postings are a second question.
 out.dialog = m.approvalDialog(data.ask, data.ask.profiles);
-out.line = m.lowRankLine(out.dialog.lowRank);
+out.line = m.lowRankLine(out.dialog.lowRank, out.dialog.count);
 out.bodies = [m.approvalBody(out.dialog, false), m.approvalBody(out.dialog, true)];
 out.onlyLow = m.approvalDialog(data.onlyLow, data.onlyLow.profiles);
 out.onlyLowBodies = [m.approvalBody(out.onlyLow, false), m.approvalBody(out.onlyLow, true)];
-out.onlyLowLine = m.lowRankLine(out.onlyLow.lowRank);
+out.onlyLowLine = m.lowRankLine(out.onlyLow.lowRank, out.onlyLow.count);
 out.noLow = [m.lowRankLine(null), m.approvalBody(null, true)];
 out.outcome = [
   m.assessOutcomeLine({ status: "assessed", assessed: { requested: 3, assessed: 3, failed: [] }, low_rank: { skipped: 2, min_rank: 50 } }),
@@ -131,14 +131,15 @@ def test_the_approval_dialog_asks_about_the_low_ranked_separately(out: dict) -> 
     dialog = out["dialog"]
     assert (dialog["count"], dialog["calls"]) == (3, 3)
     assert (dialog["lowRank"]["count"], dialog["lowRank"]["minRank"], dialog["lowRank"]["calls"]) == (2, 50, 2)
-    assert out["line"].startswith("2 low-ranked ones are skipped (rank below 50). Assess those too? ~2 model calls")
+    # 0.1.11.5 ASSESS-01: the box says what it does to this run (the server's `low_rank.included`), never "assess those too".
+    assert out["line"] == "Include the 2 low-ranked ones (rank below 50): 5 postings in this run instead of 3."
     plain, both = out["bodies"]
     assert plain == {"approve": True, "jobs": sorted(ranked.values())} == data["ask"]["question"]["yes"]["api"]["body"]
     assert both == {"approve": True, "jobs": sorted(ranked.values()), "include_low_rank": True}
     # Only low-ranked postings selected: nothing to approve until the box is ticked.
     assert (out["onlyLow"]["count"], out["onlyLow"]["lowRank"]["count"]) == (0, 1)
     assert out["onlyLowBodies"] == [None, {"approve": True, "jobs": [ranked["r20"]], "include_low_rank": True}]
-    assert out["onlyLowLine"].startswith("1 low-ranked one is skipped (rank below 50). Assess that too? ~1 model call")
+    assert out["onlyLowLine"] == "Include the low-ranked one (rank below 50): 1 posting in this run."
     assert out["noLow"] == [None, None]
     assert out["outcome"] == [
         "Assessed 3 of 3. 2 low-ranked ones were skipped (rank below 50).",
@@ -152,7 +153,7 @@ def test_the_jobs_page_draws_the_chip_count_the_row_fit_and_the_dialogs_box() ->
     assert "stateChips(filter.states, counts).map((chip) => (" in view and "data-state={chip.value}" in view
     assert 'data-role="chip-count"' in view and 'data-fit={typeof row.fit === "number" ? row.fit : undefined}' in view
     # The header tile is by_state.needs_answers (a weak fit is another state), and Approve sends the body the box chose.
-    assert "needsAnswers: needsAnswers(counts)" in view and "postAssessThese(approvalBody(approval.dialog, includeLowRank))" in view
+    assert "needsAnswers: needsAnswers(counts)" in view and "postAssessThese(approvalBody(approval.dialog, includeLowRank), { background: true })" in view
     dialog = (UI_SRC / "components" / "AssessApprovalDialog.jsx").read_text(encoding="utf-8")
     assert 'data-testid="approval-low-rank"' in dialog and "checked={includeLowRank}" in dialog
     assert "disabled={submitting || !approvalBody(dialog, includeLowRank)}" in dialog

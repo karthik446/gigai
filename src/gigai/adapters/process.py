@@ -8,6 +8,8 @@ import os
 from pathlib import Path
 import signal
 import subprocess
+import threading
+import time
 from typing import Mapping, Sequence
 
 from .port import (
@@ -56,6 +58,58 @@ def allowed_environment(
     }
 
 
+# 0.1.11.5 (ASSESS-01): the model processes THIS process started and has not reaped yet. Each child is the leader of
+# its own session (``start_new_session``), so a signal to the parent never reaches it: a server that was stopped left
+# its `claude -p` calls running under pid 1. A process that ends ends these itself (:func:`terminate_children`).
+# Only a child in this table is ever signalled, and only while it is unreaped (its pid cannot have been reused).
+_CHILDREN: dict[int, "subprocess.Popen[str]"] = {}
+_CHILDREN_LOCK = threading.Lock()
+
+
+def live_children() -> tuple[int, ...]:
+    """The pids of the model processes this process started that are still running."""
+
+    with _CHILDREN_LOCK:
+        return tuple(sorted(pid for pid, process in _CHILDREN.items() if process.returncode is None))
+
+
+def terminate_children(*, grace_seconds: float = 2.0) -> int:
+    """End every model process this process started: SIGTERM to each one's own group, SIGKILL after ``grace_seconds``.
+
+    Returns how many were signalled. Never touches a process this module did not start. Safe from a signal handler:
+    it does not reap (the thread that started a child does, in :func:`run_json_process`), it only signals.
+    """
+
+    # No lock: this may run in a signal handler, on a thread that holds it. A copy of the table is one atomic step.
+    children = [process for process in list(_CHILDREN.values()) if process.returncode is None]
+    for process in children:
+        _signal_group(process, signal.SIGTERM)
+    deadline = time.monotonic() + max(0.0, grace_seconds)
+    while time.monotonic() < deadline and any(_group_alive(process) for process in children):
+        time.sleep(0.05)
+    for process in children:
+        if _group_alive(process):
+            _signal_group(process, signal.SIGKILL)
+    return len(children)
+
+
+def _signal_group(process: "subprocess.Popen[str]", signum: int) -> None:
+    try:
+        os.killpg(process.pid, signum)
+    except (ProcessLookupError, PermissionError):
+        return
+
+
+def _group_alive(process: "subprocess.Popen[str]") -> bool:
+    try:
+        os.killpg(process.pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
 def run_json_process(
     argv: Sequence[str],
     *,
@@ -87,16 +141,22 @@ def run_json_process(
         shell=False,
         start_new_session=True,
     )
+    with _CHILDREN_LOCK:
+        _CHILDREN[process.pid] = process
     try:
-        stdout, stderr = process.communicate(prompt, timeout=timeout_seconds)
-    except subprocess.TimeoutExpired as exc:
-        _terminate_process_group(process, force=True)
-        process.communicate()
-        raise ModelInvocationError("CLI model invocation timed out") from exc
-    except KeyboardInterrupt as exc:
-        _terminate_process_group(process, force=False)
-        process.communicate()
-        raise ModelInvocationCancelled("CLI model invocation cancelled") from exc
+        try:
+            stdout, stderr = process.communicate(prompt, timeout=timeout_seconds)
+        except subprocess.TimeoutExpired as exc:
+            _terminate_process_group(process, force=True)
+            process.communicate()
+            raise ModelInvocationError("CLI model invocation timed out") from exc
+        except KeyboardInterrupt as exc:
+            _terminate_process_group(process, force=False)
+            process.communicate()
+            raise ModelInvocationCancelled("CLI model invocation cancelled") from exc
+    finally:
+        with _CHILDREN_LOCK:
+            _CHILDREN.pop(process.pid, None)
 
     result = ProcessOutput(stdout=stdout, stderr=stderr, returncode=process.returncode)
     if result.returncode != 0:
@@ -142,4 +202,4 @@ def _raise_structured_authentication_failure(output: ProcessOutput) -> None:
             )
 
 
-__all__ = ["ProcessOutput", "allowed_environment", "run_json_process"]
+__all__ = ["ProcessOutput", "allowed_environment", "live_children", "run_json_process", "terminate_children"]

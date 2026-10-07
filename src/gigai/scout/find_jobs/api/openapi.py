@@ -434,6 +434,19 @@ _POSTINGS_RANKING_EXAMPLE: dict[str, object] = {
     "job": None,
 }
 
+# 0.1.11.5 (ASSESS-01): GET /api/postings/assess/status while a batch of 50 runs (and how the batch before it ended).
+_ASSESS_BATCH_EXAMPLE: dict[str, object] = {
+    "schema_version": "scout-assess-batch:1", "running": True,
+    "batch": {
+        "id": "batch_5f0c2d9a41e84b6f9d3f2a7c1b0e6d58", "status": "running", "total": 50, "assessed": 12, "failed": 1, "in_flight": 4,
+        "profile_id": "prof_1", "estimate_seconds": 1730.0, "started_at": "2026-10-06T09:30:00Z", "pending": [_JOB_URL], "here": True,
+    },
+    "last": {
+        "id": "batch_0d1e7c55a3b94c1e8a6f4b2d9c7e3f10", "status": "cancelled", "requested": 50, "assessed": 14, "failed": 0, "not_started": 36,
+        "error_code": None, "failed_codes": [], "more_after": 55, "finished_at": "2026-10-06T09:12:40Z",
+    },
+}
+
 _POSTINGS_ASSESS_EXAMPLE: dict[str, object] = {
     "schema_version": "scout-postings-assess:1", "status": "ask", "checked_at": "2026-10-03T09:30:00.000000Z",
     "question": {
@@ -2495,6 +2508,38 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
         ),
     ),
     RouteSpec(
+        "GET", "/api/postings/assess/status", "How far the running assess batch is, and how the last one ended.", "read", "none",
+        _ASSESS_BATCH_EXAMPLE,
+        schema_version="scout-assess-batch:1",
+        errors=(_UNKNOWN_KEY, _NO_TARGET),
+        description=(
+            "0.1.11.5: what the Jobs page and a job page poll while an assess batch runs. `batch` is the live batch of this "
+            "project, or null: `total`, `assessed`, `failed`, `in_flight` (model calls running now), `profile_id` (the profile of the "
+            "call started last), `estimate_seconds` (what the question estimated for the batch), `pending` (the job identities with no "
+            "result yet) and `status` running or cancelling. It is read from the batch's own marker file, whichever process runs the "
+            "batch (`here`: this server; false: a terminal's `gigai scout jobs assess --yes` or `gigai scout new --yes`): no store, "
+            "posting or journal read, so it costs the same on a small and on a very large home. `last` is how the last batch this "
+            "server ran ended (`status` done, cancelled or failed; `requested`, `assessed`, `failed`, `not_started`, `failed_codes`), "
+            "or null. System data only: ids, codes and counts; `pending` holds posting URLs."
+        ),
+    ),
+    RouteSpec(
+        "POST", "/api/postings/assess/cancel", "Cancel the running assess batch: no further model call; what finished is kept.", "write", "none",
+        {**_ASSESS_BATCH_EXAMPLE, "batch": {**_ASSESS_BATCH_EXAMPLE["batch"], "status": "cancelling"}, "cancel_requested": 1},  # type: ignore[dict-item]
+        schema_version="scout-assess-batch:1",
+        errors=(_UNKNOWN_KEY, _NO_TARGET),
+        request_example={},
+        description=(
+            "0.1.11.5: stops the live assess batch of this project. No further model call starts. THE CALLS IN FLIGHT FINISH and "
+            "their assessments are stored like any other (at most 4; their tokens are spent already), then the batch ends: "
+            "`batch.status` is cancelling until then, and GET /api/postings/assess/status then says `last.status` cancelled with how "
+            "many were assessed and how many were never started. Every assessment already stored stays. `cancel_requested` is how "
+            "many batches were asked (0: none runs, nothing changed). A batch started in a terminal is cancelled the same way; the "
+            "command is `gigai scout jobs assess --cancel`. Stopping the server (`gigai scout stop`) is different: it ends the model "
+            "processes the server started, and what they would have answered is lost."
+        ),
+    ),
+    RouteSpec(
         "POST", "/api/postings/assess", "Assess these: ask first (count and estimate), assess the postings on approval.", "write", "model",
         _POSTINGS_ASSESS_EXAMPLE,
         schema_version="scout-postings-assess:1",
@@ -2508,6 +2553,7 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
             _b("again", "boolean", "true: also the postings whose assessment is current."),
             _b("include_low_rank", "boolean", "true: also the postings whose rank score is below `fit.assess_min_rank` (50). Left out: they are skipped and counted (`low_rank`)."),
             _b("actor", "string", "Who approves: operator (default) or agent.", enum=("operator", "agent")),
+            _b("background", "boolean", "With `approve`: true starts the batch and answers 202 at once with the GET /api/postings/assess/status object (`status: started`); the batch runs on. Left out: the request answers when the batch is done."),
         ),
         errors=(_INVALID, _WRONG_TYPE, _UNKNOWN_KEY, _NO_TARGET, (404, "profile_not_found"), (409, "assess_batch_running"), (409, "config_unavailable")),
         request_example={"jobs": [_JOB_URL], "approve": True},
@@ -2752,6 +2798,8 @@ _META: dict[tuple[str, str], tuple[str, str]] = {
     ("GET", "/api/postings/status"): ("Get how the stored postings are being prepared", "Jobs"),
     ("GET", "/api/postings/ranking"): ("Get how far the ranking is", "Jobs"),
     ("POST", "/api/postings/assess"): ("Assess these postings, on approval", "Jobs"),
+    ("GET", "/api/postings/assess/status"): ("Get how far the assess batch is", "Jobs"),
+    ("POST", "/api/postings/assess/cancel"): ("Cancel the running assess batch", "Jobs"),
     ("POST", "/api/postings/rank"): ("Rank the postings now, or re-rank the latest 100", "Jobs"),
     ("POST", "/api/runs/import"): ("Import what old runs assessed", "Runs"),
     ("GET", "/api/metrics"): ("Get the model call averages", "Settings"),
@@ -2875,6 +2923,8 @@ _LABELS: dict[tuple[str, str], tuple[str, ...]] = {
     ("GET", "/api/postings/status"): _NONE,  # a state, a phase and counts
     ("GET", "/api/postings/ranking"): _NONE,  # the ranking block and the rank job
     ("POST", "/api/postings/assess"): _UNTRUSTED,
+    ("GET", "/api/postings/assess/status"): _NONE,  # counts, codes and ids (`pending`: job identities)
+    ("POST", "/api/postings/assess/cancel"): _NONE,
     ("POST", "/api/postings/rank"): _NONE,  # the switch, counters, counts and the job: ids and codes
     ("POST", "/api/runs/import"): _NONE,
     ("GET", "/api/metrics"): _NONE,

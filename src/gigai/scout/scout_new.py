@@ -178,6 +178,9 @@ WEAK_FIT_COMMAND = "gigai scout jobs list --state weak_fit"
 #: States that still want something from the user (a posting Scout labelled recommended is left out by the query).
 _ATTENTION_STATES = ("needs_answers", "matched", "assessed", "tailored", "not_assessed")
 _NOT_ASSESSED = "not_assessed"
+_NOT_STARTED = "not_started"
+#: 0.1.11.5 (ASSESS-01): ``stopped`` of a batch someone cancelled; what finished is kept, the rest was never started.
+STOPPED_CANCELLED = "cancelled"
 _WAITING_STATES = frozenset({"blocked", "ready", "awaiting_approval"})
 _AWAITING_APPROVAL = "awaiting_approval"
 
@@ -528,9 +531,16 @@ def _evidence(row: PostingRecord, item: object | None) -> dict[str, object] | No
 
 def _assess(
     pairs: Sequence[tuple[str, str]], texts: Mapping[str, PostingText], *, home_root: Path, target: Path, config: object | None,
-    live: LiveBatch | None = None, progress: "BatchProgress | None" = None,
+    live: LiveBatch | None = None, progress: "BatchProgress | None" = None, estimate_seconds: float | None = None,
 ) -> dict[str, object]:
     """Assess each ``(job, profile)`` through the job page's path, from the stored posting text.
+
+    0.1.11.5 (ASSESS-01): the batch can be CANCELLED (``pipeline.busy.request_cancel``, from any process). No
+    further model call starts; the calls in flight finish and every result is stored as usual. ``stopped`` is then
+    :data:`STOPPED_CANCELLED`, the postings never started are counted in ``not_started`` (they are not failures) and
+    ``assessed`` is what finished. The marker says how far the batch is (``pipeline.busy.batch_status``);
+    ``estimate_seconds`` is what the question estimated for it. A batch interrupted from the keyboard ends the model
+    processes it started (each is its own session and would otherwise be left running).
 
     0110-8-02: a posting with NO stored description is fetched on demand, ONE request for that posting alone
     (``job_input.fetch_missing_description``: public board API, the existing body cap, paced like the board clients), before it is
@@ -585,9 +595,19 @@ def _assess(
         )
 
     def one(pair: tuple[str, str]) -> tuple[str, str | None] | None:
+        job, profile_id = pair
+        if not stop and live.cancelled():
+            stop.append(STOPPED_CANCELLED)  # 0.1.11.5: no further model call; the ones in flight finish
+        begun = not stop and job not in closed
+        if begun:
+            live.started(profile_id)
+        done: list[tuple[str, str | None] | None] = []
         try:
-            return assess_one(pair)
+            done.append(assess_one(pair))
+            return done[0]
         finally:
+            unstarted = bool(done) and done[0] is not None and done[0][0] == _NOT_STARTED
+            live.finished(job, assessed=bool(done) and done[0] is None, counted=not unstarted, was_started=begun)
             live.beat()
             if progress is not None:
                 progress.done()
@@ -597,7 +617,7 @@ def _assess(
         if job in closed:
             return (ERROR_POSTING_CLOSED, None)  # 0.1.11.4 R1: its board no longer lists it; no model call
         if stop:
-            return ("not_started", None)
+            return (_NOT_STARTED, None)
         text = texts.get(job)
         if text is None:
             return ("job_text_unavailable", job_input.REASON_NO_TEXT)
@@ -644,25 +664,42 @@ def _assess(
             # 0.1.11.4 R1: only the postings of THIS batch are asked about (one request each, none within the hour);
             # a closed one is marked removed and not assessed. A board that does not answer changes nothing.
             closed.update(job for job, answer in jobs_liveness(home_root, target, [job for job, _profile in pairs]).items() if answer.closed)
+            live.begin([job for job, _profile in pairs], estimate_seconds=estimate_seconds)
             if progress is not None:
                 progress.start()
             with ThreadPoolExecutor(max_workers=max(1, assess_concurrency()), thread_name_prefix="scout-new-assess") as pool:
-                outcomes = list(pool.map(one, pairs))
+                try:
+                    outcomes = list(pool.map(one, pairs))
+                except KeyboardInterrupt:
+                    # 0.1.11.5: Ctrl-C reaches this thread only. Nothing further starts, and the model processes this
+                    # process started are ended (each is its own session: the terminal's signal never reaches them).
+                    from ..adapters.process import terminate_children
+
+                    stop.append("interrupted")
+                    terminate_children()
+                    raise
     finally:
         for client in clients:
             client.close()  # type: ignore[attr-defined]
+    cancelled = bool(stop) and stop[0] == STOPPED_CANCELLED
+    not_started = 0
     for (job, profile_id), outcome in zip(pairs, outcomes):
         if outcome is not None:
             code, reason = outcome
+            if cancelled and code == _NOT_STARTED:
+                not_started += 1  # a cancelled batch: never started is not a failure
+                continue
             failure: dict[str, object] = {"job_identity": job, "profile_id": profile_id, "error_code": code}
             if reason is not None:
                 failure["reason"] = reason
             failure.update(cause_fields(code))  # 0110-10-13: did a model call start, may it have used tokens, what next
             failed.append(failure)
     batch: dict[str, object] = {
-        "requested": len(pairs), "assessed": len(pairs) - len(failed), "failed": failed, "stopped": stop[0] if stop else None,
-        "fetched_on_demand": len(fetched),
+        "requested": len(pairs), "assessed": len(pairs) - len(failed) - not_started, "failed": failed,
+        "stopped": stop[0] if stop else None, "fetched_on_demand": len(fetched),
     }
+    if cancelled:
+        batch["not_started"] = not_started  # omitted unless the batch was cancelled
     if closed:
         batch["closed_skipped"] = len({job for job, _profile in pairs if job in closed})  # omitted when no posting of the batch was closed
     if thin:

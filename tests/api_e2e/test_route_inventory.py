@@ -73,6 +73,8 @@ JOURNEYS: dict[Route, str] = {
     Route("GET", "/api/postings/status"): "test_postings_journey.py",
     Route("GET", "/api/postings/ranking"): "test_postings_ranking_route.py (0.1.11.3: the light poll while a rank runs)",
     Route("POST", "/api/postings/assess"): "test_postings_journey.py",
+    Route("GET", "/api/postings/assess/status"): "test_assess_batch_routes.py (0.1.11.5: the light poll while an assess batch runs)",
+    Route("POST", "/api/postings/assess/cancel"): "test_assess_batch_routes.py (0.1.11.5: cancel keeps what finished)",
     Route("POST", "/api/postings/rank"): "test_postings_journey.py (0.1.11.2: the read, the ask, the yes and the refusals)",
     Route("POST", "/api/runs/import"): "test_postings_journey.py",
     Route("GET", "/api/runs"): "test_runs_list_journey.py",

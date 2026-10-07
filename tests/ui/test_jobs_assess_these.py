@@ -29,6 +29,7 @@ pytestmark = pytest.mark.ui
 UI_ORDER = 10  # changes the shared home: after the flows that only read it
 
 ASSESS = "/api/postings/assess"
+BATCH_STATUS = "/api/postings/assess/status"
 ASK_WALL_SECONDS = INTERACTIVE_WALL_SECONDS
 APPROVE_WALL_SECONDS = 15.0  # two model calls on the fixture model: 0.73 to 0.77 s measured
 APPROVE_CPU_SECONDS = 3.0  # 0.47 to 0.49 measured
@@ -89,17 +90,21 @@ def test_assess_these_asks_first_and_approve_assesses(ui) -> None:
     assert ui.writes_after("asked") == [] and states(ui, picks) == {pick: "not_assessed" for pick in picks}
 
     # Asked again and approved: the body the server named for the yes, and the two rows are assessed in place.
+    # 0.1.11.5 (ASSESS-01): the approval STARTS the batch (`background`): 202 at once, the dialog closes, the page
+    # reads how far the batch is and says how it ended.
     yes = ask(ui, "asked-again").json()["question"]["yes"]["api"]["body"]
     with ui.page.expect_response(lambda response: response.request.method == "POST" and urlsplit(response.url).path == ASSESS, timeout=60_000) as approved:
         dialog.locator('[data-action="approval-approve"]').click()
+    assert approved.value.status == 202 and approved.value.json()["status"] == "started"
+    dialog.wait_for(state="detached")
     notice = ui.page.locator('[data-role="assess-notice"]')
-    notice.wait_for()
+    notice.wait_for(timeout=60_000)
     ui.step("assessed")
-    assert approved.value.request.post_data_json == yes and yes["approve"] is True and yes["jobs"] == picks
-    done = approved.value.json()
-    assert done["status"] == "assessed" and done["assessed"]["assessed"] == 2 and done["assessed"]["failed"] == []
+    assert approved.value.request.post_data_json == {**yes, "background": True} and yes["approve"] is True and yes["jobs"] == picks
+    done = ui.server_json(BATCH_STATUS)["last"]
+    assert (done["status"], done["requested"], done["assessed"], done["failed"]) == ("done", 2, 2, 0), done
     assert notice.text_content() == "Assessed 2 of 2."
-    assert dialog.count() == 0
+    assert dialog.count() == 0 and ui.page.locator(tid("assess-batch")).count() == 0
     for pick in picks:
         ui.page.locator(f'{tid("job-row")}:not([data-state="not_assessed"]):has(a[href="#/jobs/{quote(pick, safe="")}"])').wait_for()
     after = states(ui, picks)
@@ -109,7 +114,9 @@ def test_assess_these_asks_first_and_approve_assesses(ui) -> None:
     ui.settle()
     ui.step("settled")
     assert ui.writes_after("asked-again") == [f"POST {ASSESS}"]
-    assert ui.requests_between("asked-again", "settled", "/api/postings") == 1, "the rows are refreshed in place by one list read"
+    # The rows are refreshed in place: one list read when the batch ended, and at most one more when a poll saw the first result.
+    assert 1 <= ui.requests_between("asked-again", "settled", "/api/postings") <= 2
+    assert ui.requests_between("asked-again", "settled", BATCH_STATUS) <= 10, "the status is read every 2 s, and only while the batch runs"
     ui.no_more_than_one_in_flight("/api/postings")
     ui.cpu_budget("approve and assess two postings (fixture model)", APPROVE_CPU_SECONDS, "asked-again", "assessed")
     ui.wall_budget("approve and assess two postings (fixture model)", APPROVE_WALL_SECONDS, "asked-again", "assessed")

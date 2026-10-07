@@ -865,6 +865,10 @@ export default function FindJobsView({
           applicationsState.reload();
         }}
         onTailored={handleTailored}
+        onBatchChanged={() => {
+          expireJobsList(); // 0.1.11.5: an assess batch gave this posting its result: the kept list and the assessments are read again
+          loadQuickItems();
+        }}
       />
     );
   }

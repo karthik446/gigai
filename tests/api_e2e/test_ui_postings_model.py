@@ -143,7 +143,7 @@ out.noDialog = [m.approvalDialog(nothing, profiles), m.approvalDialog(null, prof
     numbers: [dialog.count, dialog.total, dialog.moreAfter, dialog.calls, dialog.lowRank.count, dialog.lowRank.batch, dialog.lowRank.moreAfter],
     title: [m.approvalTitle(dialog), m.approvalTitle(out.dialog), m.approvalTitle({ count: 1, moreAfter: 0 }), m.approvalTitle({ count: 0, moreAfter: 0, lowRank: {} })],
     batch: [m.approvalBatchLine(dialog), m.approvalBatchLine(out.dialog), m.approvalBatchLine({ count: 50, moreAfter: 3 })],
-    low: m.lowRankLine(dialog.lowRank),
+    low: m.lowRankLine(dialog.lowRank, dialog.count),
     outcome: [
       m.assessOutcomeLine({ status: "assessed", assessed: { requested: 50, assessed: 50, failed: [] }, counts: { more_after: 70 } }),
       m.assessOutcomeLine({ status: "assessed", assessed: { requested: 3, assessed: 3, failed: [] }, counts: { more_after: 0 } }),
@@ -342,7 +342,7 @@ def test_the_approval_says_the_top_50_by_rank_the_total_and_what_is_left(out: di
         'the top 50 by rank now, never more in one go. 3 more after these 50: "Assess these" again takes the next 3.',
     ]
     assert capped["low"] == (
-        "112 low-ranked ones are skipped (rank below 50). Assess the top 50 by rank of those too? ~50 model calls (62 more after these 50)"
+        "Include the 112 low-ranked ones in the pool (still 50 per run)."  # 0.1.11.5 ASSESS-01: it used to read as 50 MORE calls
     )
     assert capped["outcome"] == [
         'Assessed 50 of 50. 70 more not assessed yet: 50 at a time, "Assess these" again takes the next.',
@@ -387,7 +387,7 @@ def test_the_jobs_page_wiring_and_test_ids() -> None:
     assert "store.show(filter, { ...options, force: true });\n      store.peekNew({ force: true });" in store
     # The ask opens the dialog; only the dialog's Approve sends the approving body.
     # 0110-10-02: the body is the server's yes, or (the dialog's low-rank box ticked) the one it names for those too.
-    assert view.count("postAssessThese(") == 2 and "postAssessThese(approvalBody(approval.dialog, includeLowRank))" in view
+    assert view.count("postAssessThese(") == 2 and "postAssessThese(approvalBody(approval.dialog, includeLowRank), { background: true })" in view  # 0.1.11.5: the approval starts the batch
     assert "approve: true" not in view and "onApprove={approve}" in view
     # A profile is a filter here: the top bar's dropdown is not drawn on Jobs.
     assert 'const switcher = currentView === "jobs" ? null :' in (UI_SRC / "components" / "TopBar.jsx").read_text(encoding="utf-8")

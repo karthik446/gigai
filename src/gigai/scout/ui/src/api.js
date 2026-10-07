@@ -899,8 +899,21 @@ export function postMarkAllSeen() {
   return request("POST", "/api/new/seen", {});
 }
 
-export function postAssessThese(body) {
+// 0.1.11.5: `background` (with an approving body): the server starts the batch and answers 202 at once.
+export function postAssessThese(sent, { background = false } = {}) {
+  const body = background ? { ...sent, background: true } : sent;
   return request("POST", "/api/postings/assess", body);
+}
+
+// 0.1.11.5 (ASSESS-01): the assess batch. GET .../status is the light read a page polls while a batch runs (the
+// batch's marker file on the server: flat cost); POST .../cancel starts no further model call (the calls in flight
+// finish, what finished is kept). An approval with `background: true` answers 202 with the same object.
+export function getAssessBatchStatus(options) {
+  return request("GET", "/api/postings/assess/status", undefined, options);
+}
+
+export function postAssessBatchCancel() {
+  return request("POST", "/api/postings/assess/cancel", {});
 }
 
 // 0.1.11.2 RANKUI: POST /api/postings/rank. {} reads the state; {mode} asks (the calls: no model call);

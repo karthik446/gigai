@@ -63,9 +63,36 @@ _TEST_HTTP_ENV = "GIGAI_SCOUT_FIND_JOBS_TEST_HTTP"
 _TEST_MODEL_ENV = "GIGAI_SCOUT_FIND_JOBS_TEST_MODEL"
 
 
+def _end_model_calls_on_stop() -> None:
+    """0.1.11.5 (ASSESS-01): a server that is stopped ends the model processes it started.
+
+    ``gigai scout stop`` sends SIGTERM. Each model call (``adapters.process``) is the leader of its own session, so
+    the signal never reached it: four `claude -p` calls were left running under pid 1 after a stop. The handler ends
+    this server's own model processes (only those it started and has not reaped), then lets the signal end the
+    server as it always did. Installed by ``_run_forever`` (the real server process), on its main thread only.
+    """
+
+    import signal
+
+    def on_stop(signum: int, _frame: object) -> None:
+        from ...adapters.process import terminate_children
+
+        try:
+            ended = terminate_children(grace_seconds=1.0)
+            if ended:
+                _logger.info("scout server stopping: ended %d model call(s) it had started", ended)
+        finally:
+            signal.signal(signum, signal.SIG_DFL)
+            os.kill(os.getpid(), signum)
+
+    signal.signal(signal.SIGTERM, on_stop)
+
+
 def _run_forever(bind: tuple[str, int], *, backend: Backend | None = None) -> None:
     import threading
 
+    if threading.current_thread() is threading.main_thread():
+        _end_model_calls_on_stop()
     # 0110-025: the real server also runs the hourly sources refresh thread.
     server = serve(backend=backend, bind=bind, background_refresh=True)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
