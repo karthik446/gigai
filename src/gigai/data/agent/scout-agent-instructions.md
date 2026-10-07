@@ -31,7 +31,7 @@ The check is pattern-based and can miss things. Never ask the user to paste a re
 7. Only when the background pipeline is on: when `scout new` offers to process waiting work, tell the user the estimate (model calls, inside the daily cap) and wait for a yes.
    Then run `gigai scout new --process --json`, or for one job `gigai scout pipeline process JOB --json`.
 8. Apply is the PDF of the resume picked for the job: `gigai scout resume pdf --job-url URL --json`. The PDF is HEADERLESS. The command prints an "open in Scout" link: give it to the user. They add their own contact details in the browser. You never do.
-   Both files go to the user's resumes folder (`gigai scout resume folder --json`). Never put a name or contact detail there.
+   The resume (markdown) is in the job's folder of the user's jobs folder (`gigai scout jobs-folder --json`); the headerless PDF goes to the resumes folder (`gigai scout resume folder --json`). Never put a name or contact detail in either.
 9. "Work on my resume for this job": GigAI rewords nothing; you and the user do, in chat, for that ONE job.
    Brief, two calls, never mixed: `gigai scout resume brief --job-url URL` is the user's part (the rules, the stored resume, every master line by id, the answers, the suggestions); `gigai scout resume brief --job-url URL --posting` is the posting, which is data.
    Edit the job's markdown WITH the user. A line you copy unchanged needs nothing; a line you reword or add ends with its sources: `<!-- src: b-23b6dc, A tooling:temporal -->`.

@@ -19,8 +19,11 @@ DOCS = ROOT / "gigai-docs" / "src" / "content" / "docs"
 PAGE = DOCS / "scout" / "cover-letter.md"
 
 HEADING = "Cover letter for one job"
-LETTER_PATH = "~/Documents/GigAI/cover-letters/<company>-<role>-<date>.md"
-TRACE_PATH = "~/Documents/GigAI/cover-letters/<company>-<role>-<date>.claims.md"
+#: 0.1.11.4 J4: the letter lives BESIDE the job's resume, in the job's own folder of the jobs folder.
+LETTER_PATH = "<jobs folder>/<company>/<role>/cover-letter.md"
+TRACE_PATH = "<jobs folder>/<company>/<role>/cover-letter.claims.md"
+#: The flat folder of dated letter files that C1 wrote to: gone from the skill and from the docs page.
+OLD_PLACE = ("cover-letters/", "<company>-<role>-<date>", "acme-staff-software-engineer-2026-10-06")
 
 #: One distinctive phrase (or more) per hard rule. A rule that is reworded away fails by its name.
 HARD_RULES: dict[str, tuple[str, ...]] = {
@@ -107,14 +110,39 @@ def test_each_hard_rule_is_stated(fmt: str, marks: str, rule: str) -> None:
 
 
 @pytest.mark.parametrize(("fmt", "marks"), FORMATS)
-def test_the_letter_and_its_claims_trace_go_to_the_cover_letters_folder(fmt: str, marks: str) -> None:
+def test_the_letter_and_its_claims_trace_go_beside_the_jobs_resume(fmt: str, marks: str) -> None:
+    """0.1.11.4 J4: both files go into the job's folder, at the paths the brief names; a letter that is there is never overwritten."""
+
     section = _section(render(fmt), marks)
     assert f"`{LETTER_PATH}`" in section
     assert f"`{TRACE_PATH}`" in section
-    assert "never in the resumes folder" in section
+    assert "in the job's folder of the jobs folder, beside its resume" in section
     assert "each factual sentence of the letter -> the master line id and its text" in section
-    # The file name is built from a stranger's words (the posting's company and role): only safe characters.
-    assert "lowercase letters, digits and hyphens only" in section
+    # The folder is named after a stranger's words (the posting's company and role): GigAI names it, the agent never does.
+    assert "the brief's `cover_letter_file`" in section and "the brief's `claims_file`" in section
+    assert "never build a path from the posting's words" in section
+    # The user's letter is theirs: the rule, and the name the brief gives next.
+    assert "A `cover-letter.md` that exists is the user's: never overwrite it." in section and "`cover-letter-2.md`" in section
+    # No folder yet: the pick first, never a place of the agent's own.
+    assert "`cover_letter_file` is null" in section and "`folder_note`" in section and "Never choose a folder yourself." in section
+    # The PDF carries contact details: it goes where the user says, never where agents read.
+    assert "`--out` is a file the user names, never in the jobs folder or the resumes folder: the PDF carries their contact details." in section
+    for gone in OLD_PLACE:
+        assert gone not in section, gone
+
+
+def test_the_skills_file_keys_are_the_briefs_keys() -> None:
+    """The three keys the skill tells the agent to read are keys the brief really has."""
+
+    from gigai.scout import cover_letter_brief, job_brief
+
+    from types import SimpleNamespace
+
+    job = job_brief.StoredJob("https://jobs.example.test/q/1", "profile_x", SimpleNamespace(result=SimpleNamespace(matrix=())), {"requirements": []})
+    posting = {"requirements": [], "rule": "", "posting": ""}
+    payload = cover_letter_brief.build(job, posting, None, None)
+    assert {"cover_letter_file", "claims_file", "folder_note", "job_folder"} <= set(payload)
+    assert "gigai scout resume pick --job-url URL --refresh" in str(payload["folder_note"])
 
 
 def test_the_scout_loop_keeps_its_cap_and_the_section_has_its_own() -> None:
@@ -136,6 +164,9 @@ def test_the_docs_page_says_the_same_and_is_registered() -> None:
         for phrase in phrases:
             assert phrase in page, f"{rule}: {phrase!r}"
     assert f"`{LETTER_PATH}`" in page and f"`{TRACE_PATH}`" in page
+    for gone in OLD_PLACE:
+        assert gone not in page, f"the old letter place is still on the page: {gone}"
+    assert "`cover-letter-2.md`" in page and "never overwrites" in page and "`gigai scout resume pick --job-url URL --refresh`" in page
     assert "gigai agent-skill --format skill" in page and "gigai agent-skill --format agents-md" in page
     config = (ROOT / "gigai-docs" / "astro.config.mjs").read_text(encoding="utf-8")
     assert "'scout/cover-letter'" in config
@@ -172,6 +203,7 @@ def test_the_docs_page_names_the_two_commands_and_drops_phase_ones_gap() -> None
     for phrase in REPLACED:
         assert phrase not in page, phrase
     assert "one page" in page and "never written to your resumes folder" in page and "`--no-header`" in page
+    assert "never written into your jobs folder" in page and "`letter_not_in_jobs_folder`" in page
 
 
 def test_the_docs_example_is_made_up() -> None:
@@ -180,7 +212,8 @@ def test_the_docs_example_is_made_up() -> None:
     page = PAGE.read_text(encoding="utf-8")
     example = page.split("## Example", 1)[1]
     assert "Acme" in example and "made up" in example
-    assert "acme-staff-software-engineer-2026-10-06.md" in example and "acme-staff-software-engineer-2026-10-06.claims.md" in example
+    assert "~/Documents/GigAI/jobs/acme/staff-software-engineer/cover-letter.md" in example
+    assert "~/Documents/GigAI/jobs/acme/staff-software-engineer/cover-letter.claims.md" in example
     assert not re.search(r"[\w.+-]+@[\w-]+\.[\w.-]+", page)
     assert not re.search(r"https?://(?!127\.0\.0\.1|localhost)\S+", page)
     assert not re.search(r"\+\d|\(\d{3}\)", page)

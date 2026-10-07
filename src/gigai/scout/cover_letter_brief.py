@@ -8,7 +8,9 @@ requirement rows, the whole master, the rows' sources); the brief is the one tha
   the assessment cited for it (``sources``);
 - those master lines, each by id with its text word for word and the entry (employer, title, dates) it sits under;
 - the rows no master line was cited for, by id;
-- one line that restates the hard rules (``REMINDER``).
+- one line that restates the hard rules (``REMINDER``);
+- 0.1.11.4 J4: where the letter goes: the job's own folder of the jobs folder (``job_folder``), the letter's file
+  there (``cover_letter_file``) and its claims trace (``claims_file``).
 
 It needs a stored assessment (``job_brief.BriefError`` ``assessment_missing`` names the command to run).  It reads
 the master and writes nothing, calls no model and fetches nothing.
@@ -20,6 +22,13 @@ side.  So the reply is labelled with BOTH labels (``labels``), every field that 
 The posting and the rows' words are built by ``job_brief.posting_part``, the same builder, fence and labels as
 ``resume brief --posting``.
 
+THE BRIEF NAMES THE FILE, THE AGENT WRITES IT.  The folder is ``<jobs>/<company>/<role>``, made by the pick and named
+after the posting's company and role (a stranger's words): so the agent is GIVEN the path and never builds one, and
+the three paths are labelled ``public-untrusted`` like ``job_brief``'s ``resume_file``.  The file is the first free
+name (``jobs_folder.next_cover_letter``): a ``cover-letter.md`` that exists is the user's and is never named again.
+A job with no folder yet gets no path, and one sentence that names the pick to run (``NO_FOLDER``).  GigAI itself
+writes no letter and makes no folder here.
+
 NO CONTACT DATA.  The master holds none (a write that looks like one is refused), and this module never touches
 the user's header file: that is read only when a PDF is made (``pdf_header_cli``).
 """
@@ -27,6 +36,7 @@ the user's header file: that is read only when a PDF is made (``pdf_header_cli``
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 
 from . import job_brief
@@ -44,6 +54,21 @@ NOT_MASTER_LINES = (
     "The assessment cited no master line for any row (it was made from a profile's own resume, or before rows named their sources): "
     "re-assess the job (`gigai scout jobs assess URL --again`, one model call, on the user's yes), or read the master (`gigai scout resume master show --json`)."
 )
+NO_FOLDER = (
+    "This job has no folder in your jobs folder yet, so the letter has no place: run the pick first "
+    "(`gigai scout resume pick --job-url URL --refresh`, no model call), then this brief again. Never choose a folder yourself."
+)
+NO_FREE_NAME = "This job's folder has no free name left for a letter: ask the user which letter file there to replace. Never choose one yourself."
+#: The rule of the letter's file, in one line (the skill states it in full).
+LETTER_RULE = "Write the letter and its claims trace to exactly these files. A letter that is already in the folder is the user's: never overwrite it."
+
+
+@dataclass(frozen=True)
+class LetterPlace:
+    """Where the letter of one job goes: the job's folder as the user types it, and the first free letter name there (``None``: none is free)."""
+
+    folder: str
+    letter: str | None
 
 
 def _entry(master: object, entry_id: str | None) -> str | None:
@@ -53,8 +78,15 @@ def _entry(master: object, entry_id: str | None) -> str | None:
     return None if entry is None else " | ".join([entry.heading, *entry.sublines])
 
 
-def build(job: job_brief.StoredJob, posting: Mapping[str, object], master: object | None, master_revision: int | None) -> dict[str, object]:
-    """The brief as one JSON object.  Pure: ``job`` is the stored assessment, ``posting`` its ``job_brief.posting_part``."""
+def build(
+    job: job_brief.StoredJob, posting: Mapping[str, object], master: object | None, master_revision: int | None, place: LetterPlace | None = None,
+) -> dict[str, object]:
+    """The brief as one JSON object.  Pure: ``job`` is the stored assessment, ``posting`` its ``job_brief.posting_part``.
+
+    ``place``: the job's folder and the letter's free name there; ``None`` when the job has no folder yet.
+    """
+
+    from .jobs_folder import claims_name
 
     words = {str(row["id"]): row for row in posting["requirements"]}  # type: ignore[union-attr]
     items = getattr(master, "items", {})
@@ -79,6 +111,7 @@ def build(job: job_brief.StoredJob, posting: Mapping[str, object], master: objec
             entry = entries[source]
             evidence.append({"id": source, "kind": "entry", "section": entry.section, "entry": None, "text": _entry(master, source), "requirements": row_ids})
     note = NO_MASTER if master is None else (NOT_MASTER_LINES if rows and not evidence else None)
+    letter = None if place is None or place.letter is None else f"{place.folder}/{place.letter}"
     payload: dict[str, object] = {
         "schema_version": SCHEMA_VERSION,
         "labels": list(normalized([USER_PRIVATE, PUBLIC_UNTRUSTED])),
@@ -91,10 +124,16 @@ def build(job: job_brief.StoredJob, posting: Mapping[str, object], master: objec
         "no_master_line": [str(row["id"]) for row in rows if not row["sources"]],
         "master": None if master is None else {"revision": master_revision},
         "note": note,
+        "job_folder": None if place is None else place.folder,
+        "cover_letter_file": letter,
+        "claims_file": None if letter is None else claims_name(letter),
+        "folder_note": NO_FOLDER if place is None else (NO_FREE_NAME if letter is None else None),
     }
     payload[ENVELOPE_KEY] = labels_envelope({
         "/posting/text": PUBLIC_UNTRUSTED, "/requirements/*/text": PUBLIC_UNTRUSTED,
         "/evidence/*/text": USER_PRIVATE, "/evidence/*/entry": USER_PRIVATE,
+        # The folder's name is made of the posting's company and role, like `job_brief`'s `resume_file`.
+        "/job_folder": PUBLIC_UNTRUSTED, "/cover_letter_file": PUBLIC_UNTRUSTED, "/claims_file": PUBLIC_UNTRUSTED,
     })
     return payload
 
@@ -112,10 +151,21 @@ def brief(home_root: Path, target: Path, job_url: str, *, profile_id: str | None
         resolved = resolve_workpad(home_root=home_root, requested_target=target, gig_id=None, allow_semantic_state=True)
     except WorkpadError as exc:
         raise job_brief.BriefError("target_unavailable", "this folder is not bound to a GigAI project") from exc
+    place = letter_place(home_root, target, job)
     stored = stored_master(home_root, target, resolved=resolved)
     if stored is None:
-        return build(job, posting, None, None)
-    return build(job, posting, stored.master, stored.revision.revision)  # type: ignore[attr-defined]
+        return build(job, posting, None, None, place)
+    return build(job, posting, stored.master, stored.revision.revision, place)  # type: ignore[attr-defined]
+
+
+def letter_place(home_root: Path, target: Path, job: job_brief.StoredJob) -> LetterPlace | None:
+    """The folder the pick made for ``job`` and the first free letter name there; ``None`` when it has no folder.  Reads only."""
+
+    from . import jobs_folder
+    from .tailored_resume import tailored_resume_path
+
+    folder = jobs_folder.stored_job_folder(home_root, tailored_resume_path(home_root, target, job.profile_id, job.job_identity))
+    return None if folder is None else LetterPlace(folder.shown, jobs_folder.next_cover_letter(folder.path))
 
 
 def _or_none(items: Sequence[object]) -> str:
@@ -155,7 +205,15 @@ def render(payload: Mapping[str, object]) -> str:
     out += ["", f"ROWS WITH NO MASTER LINE: {_or_none(payload['no_master_line'])}"]  # type: ignore[arg-type]
     if payload.get("note"):
         out += ["", str(payload["note"])]
+    out += ["", "WHERE THE LETTER GOES (the job's folder of your jobs folder; it is named after the posting's company and role)"]
+    if payload.get("cover_letter_file"):
+        out += [LETTER_RULE, fence_untrusted_posting(f"letter: {payload['cover_letter_file']}\nclaims trace: {payload['claims_file']}")]
+    else:
+        out.append(str(payload.get("folder_note") or NO_FOLDER))
     return "\n".join(out) + "\n"
 
 
-__all__ = ["NOT_MASTER_LINES", "NO_MASTER", "REMINDER", "SCHEMA_VERSION", "brief", "build", "render"]
+__all__ = [
+    "LETTER_RULE", "NOT_MASTER_LINES", "NO_FOLDER", "NO_FREE_NAME", "NO_MASTER", "REMINDER", "SCHEMA_VERSION", "LetterPlace", "brief", "build",
+    "letter_place", "render",
+]

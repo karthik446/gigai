@@ -27,6 +27,11 @@ scans the folder.
 nothing with the PDF header's name or contact details, and no PDF, is ever written into it (a
 generated PDF goes where the user saves it).
 
+**The letter is the agent's to write, never GigAI's.**  ``next_cover_letter`` only NAMES the
+file (0.1.11.4 J4): the first of ``cover-letter.md``, ``cover-letter-2.md``, ... that is not there.
+GigAI writes no letter, so it has no digest to tell its own file from the user's: every letter
+(and every claims trace) that exists is the user's, and its name is never given out again.
+
 **Never the user's file.**  ``resume.md`` is replaced only when its bytes are exactly what GigAI
 last wrote there (the digest is in the index: folder names, file names and digests, no text).
 A ``resume.md`` the user changed, or one GigAI did not write, is left alone and the new resume
@@ -77,6 +82,8 @@ JOB_SCHEMA = "scout-jobs-folder-job:1"
 RESUME_NAME = "resume.md"
 #: Reserved: the cover-letter skill writes it beside the resume.  GigAI never creates it.
 COVER_LETTER_NAME = "cover-letter.md"
+#: What a letter's claims trace ends with, beside it (``cover-letter.claims.md``; ``cover_letter.CLAIMS_SUFFIX``).  The skill writes it too.
+CLAIMS_SUFFIX = ".claims.md"
 #: Reserved: the interview package's folder, there only once prep exists.  GigAI never creates it empty.
 INTERVIEW_DIR = "interview"
 #: The record of which job a folder is (GigAI's own; ids, the posting's address and names, a date).
@@ -465,6 +472,26 @@ def job_folder(home_root: Path, key: str) -> JobFolder | None:
     return JobFolder(directory, relative, resume)
 
 
+def claims_name(letter: str) -> str:
+    """The claims trace of a letter file, beside it: ``cover-letter-2.md`` -> ``cover-letter-2.claims.md``."""
+
+    return os.path.splitext(letter)[0] + CLAIMS_SUFFIX
+
+
+def next_cover_letter(directory: Path) -> str | None:
+    """The first free letter name in a job's folder: ``cover-letter.md``, then ``cover-letter-2.md``, and so on.
+
+    Free: neither that file nor its claims trace is there (a file, a folder or a link).  A letter that exists
+    is the user's and is never named again.  ``None`` when no name is free.  Reads only, and never a file's bytes.
+    """
+
+    for attempt in range(1, _MAX_NAME_TRIES + 1):
+        candidate = _numbered(COVER_LETTER_NAME, attempt)
+        if not _taken(directory / candidate) and not _taken(directory / claims_name(candidate)):
+            return candidate
+    return None
+
+
 def stored_job_folder(home_root: Path, stored_path: str | os.PathLike[str]) -> JobFolder | None:
     """``job_folder`` of the job whose resume the store keeps at ``stored_path`` (``tailored_resume_path``)."""
 
@@ -474,6 +501,7 @@ def stored_job_folder(home_root: Path, stored_path: str | os.PathLike[str]) -> J
 
 
 __all__ = [
+    "CLAIMS_SUFFIX",
     "COVER_LETTER_NAME",
     "INDEX_SCHEMA",
     "INTERVIEW_DIR",
@@ -489,11 +517,13 @@ __all__ = [
     "JobsFolder",
     "JobsFolderError",
     "SavedJobFile",
+    "claims_name",
     "company_slug",
     "default_folder",
     "index_path",
     "job_folder",
     "jobs_folder",
+    "next_cover_letter",
     "role_slug",
     "save_resume",
     "set_jobs_folder",
