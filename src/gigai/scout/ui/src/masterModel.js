@@ -457,15 +457,36 @@ export function pickedLeftOut(response, master) {
     });
     return out;
   };
-  const picked = groups(list(selection.picked), (id, item) => shown.get(id) || (item ? { text: item.text, section: item.section, entry: null } : null));
-  const leftOut = groups(list(selection.left_out), (_id, item) => (item ? { text: item.text, section: item.section, entry: null } : null));
+  // 0.1.11.5 (b): the two lists follow the STORED resume. The selection is the pick's record, and a change that
+  // is not an Add or a Remove (Restore / Cut for length again) moves lines without writing it: a line the resume
+  // prints is Picked and one it does not print is Left out, whichever list the pick recorded it in.
+  const printed = printedItemIds(response.result);
+  const now = { picked: [], leftOut: [] };
+  list(selection.picked).forEach((line) => (printed.has(line.id) ? now.picked.push(line) : now.leftOut.push({ ...line, ...NOT_SHOWN })));
+  list(selection.left_out).forEach((line) => (printed.has(line.id) ? now.picked.push({ ...line, ...SHOWN_AGAIN }) : now.leftOut.push(line)));
+  const picked = groups(now.picked, (id, item) => shown.get(id) || (item ? { text: item.text, section: item.section, entry: null } : null));
+  const leftOut = groups(now.leftOut, (_id, item) => (item ? { text: item.text, section: item.section, entry: null } : null));
   return {
     available: true,
     pickedBy: selection.picked_by === "code" ? "code" : "model",
     picked,
     leftOut,
-    counts: { picked: list(selection.picked).length, leftOut: list(selection.left_out).length },
+    counts: { picked: now.picked.length, leftOut: now.leftOut.length },
   };
+}
+
+// What Picked / Left out says of a line the stored resume shows, or does not show, against the pick's own record.
+export const SHOWN_AGAIN = { code: "shown_again", reason: "put back on this resume after the pick" };
+export const NOT_SHOWN = { code: "not_shown", reason: "not on this resume now: it was cut for length after the pick" };
+
+// The master line ids a stored resume prints: a copied or edited line's own id, every id a reworded line cites.
+export function printedItemIds(result) {
+  const ids = new Set();
+  shownLines(result).forEach(({ line }) => {
+    const base = line && line.kind === "custom" && line.edited_from ? line.edited_from : line;
+    list(base && base.refs).forEach((ref) => ref && ref.kind === "resume" && ref.item_id && ids.add(ref.item_id));
+  });
+  return ids;
 }
 
 // What a STORED tailored resume was made from, as it recorded it (never

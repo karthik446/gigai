@@ -35,13 +35,19 @@ import {
 // headerless PDF, with the blank block it keeps for the header.
 // `onSpacing(value)` tells the panel the spacing on screen, which Generate PDF
 // sends.
-export default function ResumePreview({ profileId, jobIdentity, header = null, onSpacing = null, children = null }) {
+// 0.1.11.5 (b): `content` is the stored resume's text as the panel holds it.
+// ANY change of it (a point edited, removed or added, Restore, Cut for length
+// again, a line choice) asks for the preview again AT ONCE, from this one
+// place: no button has to. It sends no spacing of its own, so it saves none.
+// `side` is shown under the slider (the list of points, ResumePoints.jsx).
+export default function ResumePreview({ profileId, jobIdentity, header = null, onSpacing = null, content = "", side = null, children = null }) {
   const [preview, setPreview] = useState(null);
   const [slider, setSlider] = useState(null); // the slider's value while the person moves it; null: the server's
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
   const sequence = useRef(0);
   const asked = useRef(false);
+  const shownContent = useRef(content);
   const wanted = headerKey(header);
   const headerRef = useRef(header);
   headerRef.current = header;
@@ -55,7 +61,9 @@ export default function ResumePreview({ profileId, jobIdentity, header = null, o
     const mine = ++sequence.current;
     const controller = typeof AbortController === "function" ? new AbortController() : null;
     // The first preview is asked at once; a slider move or a typed header value waits until it rests.
-    const wait = !asked.current ? 0 : slider !== null ? SLIDER_DEBOUNCE_MS : HEADER_DEBOUNCE_MS;
+    const rewritten = shownContent.current !== content; // the resume's lines changed: nothing to wait for
+    shownContent.current = content;
+    const wait = !asked.current || rewritten ? 0 : slider !== null ? SLIDER_DEBOUNCE_MS : HEADER_DEBOUNCE_MS;
     setBusy(true);
     const timer = setTimeout(() => {
       asked.current = true;
@@ -89,7 +97,7 @@ export default function ResumePreview({ profileId, jobIdentity, header = null, o
         controller.abort();
       }
     };
-  }, [profileId, jobIdentity, wanted, slider]);
+  }, [profileId, jobIdentity, wanted, slider, content]);
 
   const range = sliderRange(preview);
   const value = slider !== null ? slider : preview ? preview.spacing : null;
@@ -104,7 +112,7 @@ export default function ResumePreview({ profileId, jobIdentity, header = null, o
   };
 
   return (
-    <div className="resume-preview" data-testid="resume-preview" data-state={state} data-pages={preview ? preview.pages : undefined} data-spacing={preview ? preview.spacing.toFixed(2) : undefined} data-header={header ? "true" : "false"}>
+    <div className="resume-preview" data-testid="resume-preview" data-state={state} data-with-points={side ? "true" : undefined} data-pages={preview ? preview.pages : undefined} data-spacing={preview ? preview.spacing.toFixed(2) : undefined} data-header={header ? "true" : "false"}>
       <div className="resume-preview-side">
         <div className="form-group" data-role="preview-spacing-control">
           <label className="form-label" htmlFor="resume-preview-spacing">
@@ -150,6 +158,7 @@ export default function ResumePreview({ profileId, jobIdentity, header = null, o
             The preview could not be made. {error}
           </div>
         )}
+        {side}
       </div>
       <div className="resume-preview-pages clean-wrap" data-role="preview-sheets" aria-busy={state === "updating" || state === "loading"}>
         {preview &&
