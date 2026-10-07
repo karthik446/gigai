@@ -56,11 +56,14 @@ FORM = {
 }
 #: Where the 20-bullet resume ends (page, fill of that page) at 1.0 and above.  Before 0.1.11.5 (d) the template
 #: measured (3, 0.3604...), (3, 0.3851...), (3, 0.4098...) and part (a) pinned those; part (d) moved them on purpose
-#: (measured 2026-10-07).
-BEFORE = {1.0: (2, 0.9829624277456647), 1.2: (3, 0.04132947976878614), 1.4: (3, 0.19315317919075148)}
+#: (measured 2026-10-07).  0.1.11.5 PE (the orphan rule) moved 1.2 and 1.4 on purpose: their 3rd page held the last
+#: lines of the Skills alone (0.0413...) or the Skills alone (0.1931...); it now holds the project, Education and the
+#: Skills, kept together.  1.0 (2 pages) is as it was.
+BEFORE = {1.0: (2, 0.9829624277456647), 1.2: (3, 0.382820809248555), 1.4: (3, 0.4104971098265896)}
 #: Role bullets that fit on 2 pages, with the header's room kept (measured 2026-10-07 after part (d); part (a):
 #: 28 / 20 / 14 / 11; before 0.1.11.5: 19 at 0.7, 14 at 1.0).
-ROOM = {0.7: 30, 0.85: 25, 1.0: 21, 1.4: 17}
+#: 0.1.11.5 PE (the gaps tighten faster below 1.0): 0.7 holds 36 (was 30) and 0.85 holds 26 (was 25); 1.0 and 1.4 as before.
+ROOM = {0.7: 36, 0.85: 26, 1.0: 21, 1.4: 17}
 
 
 def _pages(pdf: bytes) -> int:

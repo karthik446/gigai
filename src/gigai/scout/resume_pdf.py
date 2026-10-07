@@ -176,7 +176,13 @@ def _entry(section: str, texts: list[str], bullets: list[str]) -> dict[str, obje
     degree = _degree_heading(texts) if section == "education" else None
     if degree is not None:
         return {"heading": degree, "bullets": bullets, "oneline": True}
-    return {"heading": [_heading_line(text) for text in texts], "bullets": bullets}
+    lines = [_heading_line(text) for text in texts]
+    if section == "projects" and len(lines) == 2 and not lines[0]["dates"]:
+        # 0.1.11.5 PE: a project's title and the ONE line under it (its technologies) are one line when they fit the
+        # page (the template's ``joined``); when they do not, the two lines print as they always did.
+        title, second = lines
+        return {"heading": [{"text": title["text"], "detail": second["text"], "dates": second["dates"]}], "bullets": bullets, "oneline": True, "two_lines": True}
+    return {"heading": lines, "bullets": bullets}
 
 
 def _earlier_entry(roles: list[str]) -> dict[str, object]:

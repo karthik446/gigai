@@ -66,6 +66,12 @@ Skills are plain comma-separated lines, four at most, with what the posting asks
 skill twice. A Skills list too long for four lines is first set a little smaller; if it is still
 too long, the skills at the end of the list are not printed (your master keeps them all).
 
+A degree with a long name stays on one line when it can: the degree's name is set a little
+smaller (the school and the years are not). When that is not enough, the years go to a second
+line. A project's line of technologies is set on the project's title line when both fit. And no
+page holds only Education, only the Skills or only the roles listed by their heading: the end of
+the block before them moves to that page with them, at every spacing.
+
 The panel also says where the file is. Each job's resume (markdown) is saved in the job's own folder of your jobs folder
 (`~/Documents/GigAI/jobs` unless you chose another with `gigai scout jobs-folder --set PATH`):
 `<company>/<role>/resume.md`, for example `thrive-market/staff-software-engineer-fullstack/resume.md`.

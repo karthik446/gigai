@@ -96,12 +96,14 @@ def resume(long_lines: int = 0, short_lines: int = 3, roles: int = 5) -> str:
 #: The failing size: 2 pages where the fit measures (spacing 0.9), a 3rd page of skills at the saved spacing 1.0.
 #: (0.1.11.5 (d): the Skills are plain lines and a degree is one line, so every size here is longer than it was.)
 FAILING = resume(long_lines=2)
+#: (0.1.11.5 PE: below 1.0 the gaps tighten faster, so the three sizes below are longer again: 8 / 14 / 18 extra
+#: lines, were 7 / 9 / 13.)
 #: Longer: 3 pages at every spacing above the floor (0.8), 2 pages there.
-NEEDS_FLOOR = resume(long_lines=7, short_lines=3)
+NEEDS_FLOOR = resume(long_lines=8, short_lines=3)
 #: Longer: 2 pages only at the tightest spacing.
-NEEDS_TIGHTEST = resume(long_lines=9, short_lines=3)
+NEEDS_TIGHTEST = resume(long_lines=14, short_lines=3)
 #: Longer still: 3 pages whatever is done.
-TOO_LONG = resume(long_lines=13, short_lines=3)
+TOO_LONG = resume(long_lines=18, short_lines=3)
 #: The master: nine roles, 4 pages. ``FAILING`` is its first five roles, line for line.
 LONG = resume(long_lines=2, roles=9)
 
@@ -152,8 +154,10 @@ def test_the_fixture_is_the_failing_size(fx: PipelineFixture) -> None:
     pages = _pages(unfitted.pdf)
     assert unfitted.pages == len(pages) == 3
     assert _is_the_four_line_header(pages[0]), "the header is not four lines"
-    # ... and the 3rd page holds nothing but the end of the Skills.
-    assert pages[2].strip().startswith("SKILLS") and pages[2].strip().endswith(LAST_SKILL) and len(pages[2].strip().splitlines()) <= 4
+    # ... and the 3rd page holds the end of the resume: the Skills are never alone on a page (0.1.11.5 PE, the orphan
+    # rule), so the last two bullets and Education come with them.  (Before it: nothing but the end of the Skills.)
+    last = pages[2].strip()
+    assert last.startswith("•") and "EDUCATION" in last and "SKILLS" in last and last.endswith(LAST_SKILL) and len(last.splitlines()) <= 12
 
 
 def test_cli_pdf_of_the_stored_job_resume_stays_on_two_pages(fx: PipelineFixture, tmp_path: Path) -> None:

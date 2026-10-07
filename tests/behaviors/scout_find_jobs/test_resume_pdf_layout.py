@@ -234,6 +234,10 @@ def test_every_vertical_gap_is_a_multiple_of_the_spacing_unit() -> None:
         # 0.1.11.5: below 1.0 the BODY's line box tightens in a straight line from 14.3pt down to 11.5pt at 0.7 (an
         # organisation line keeps at least 13pt); the header's lines keep 14.3pt, and at 1.0 and above nothing moved.
         lh = 14.3 if scale >= 1.0 else max(11.5, 14.3 - (14.3 - 11.5) * (1.0 - scale) / 0.3)
+        # 0.1.11.5 PE: below 1.0 the gap unit shrinks twice as fast as the scale (``gap-tighten`` in resume.typ): 0.85
+        # has the gaps 0.70 had, 0.70 has 0.40 of the unit; at 1.0 and above the unit is the scale's, as before.
+        gap_scale = scale if scale >= 1.0 else 1.0 - 2.0 * (1.0 - scale)
+        assert {0.7: 0.4, 0.85: 0.7}.get(scale, scale) == pytest.approx(gap_scale)
         body, entry = _box(9.5, lh), _box(10.7, max(lh, 13.0))
         assert (scale < 1.0) or (body, entry) == (BODY, ORG)
         pairs = (  # (upper line, lower line, upper box, lower box, units)
@@ -250,7 +254,7 @@ def test_every_vertical_gap_is_a_multiple_of_the_spacing_unit() -> None:
         )
         for upper, lower, a, b, units in pairs:
             gap = page[upper][0] - page[lower][0]
-            expected = a[1] + units * UNIT * scale + b[0]
+            expected = a[1] + units * UNIT * gap_scale + b[0]
             assert abs(gap - expected) <= 0.1, f"scale {scale}: {texts[upper][:20]!r} -> {texts[lower][:20]!r} is {gap:.2f}pt, expected {units}s = {expected:.2f}pt"
 
 

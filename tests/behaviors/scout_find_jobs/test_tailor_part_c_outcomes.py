@@ -252,7 +252,9 @@ def test_what_was_left_out_for_length_is_recorded_whole_and_one_restore_puts_it_
     assert all(not entry.dropped for entry in experience.entries)
     ids = [line.id for section in stored.result.sections for line in section.all_lines()]
     assert all(ids) and len(ids) == len(set(ids))
-    assert _pages(fx) == 3
+    # 0.1.11.5 PE: restored in full it PRINTS on 2 pages (was 3): below 1.0 the gaps tighten faster.  The length rule's
+    # own count is the page estimate (plain gaps), which did not move: cutting again leaves the same things out (below).
+    assert _pages(fx) == 2
 
     # Restoring again changes nothing; cutting again leaves exactly the same things out.
     assert change_stored_length(fx.home_root, fx.target, profile_id=None, job_identity=job, use="restore") == restored

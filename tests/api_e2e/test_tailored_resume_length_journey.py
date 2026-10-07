@@ -96,7 +96,10 @@ def test_length_journey(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None
         assert shown() == payload
         markdown = Path(payload["markdown_path"]).read_text(encoding="utf-8")
         assert markdown == payload["markdown"] and "Dunmore Telecom" in markdown and "Bellweather Retail" in markdown
-        assert pdf_pages() == 3
+        # 0.1.11.5 PE: the restored resume PRINTS on 2 pages (was 3): below 1.0 the gaps tighten faster and auto fit goes
+        # down to 0.7.  The length rule's own count (``full_pages`` above: 3) is the page ESTIMATE, which keeps the
+        # plain gaps and the full line height, so it did not move.
+        assert pdf_pages() == 2 and payload["result"]["length"]["full_pages"] == 3
 
         # (b) the same action again changes nothing.
         again = client.put(url, json=body)
