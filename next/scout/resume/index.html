@@ -258,6 +258,16 @@ states a number, or stated. Only your own facts belong here; an agent writes wit
 <code dir="auto">gigai scout resume master add</code>, <code dir="auto">edit</code> and <code dir="auto">remove</code> (see <a href="../agents/#6-your-master-resume">For agents</a>) or
 through the API (<code dir="auto">POST</code> and <code dir="auto">PUT /api/master/lines</code>), under the same rules, and sends the
 revision it read, so a change that crosses yours is refused instead of overwriting it.</p>
+<p><strong>Education.</strong> A resume picked from the master prints your education only when the master
+holds it. When it holds none, Scout says so: “Your master has no education” on the Master
+page (with <strong>Add education</strong>, which opens the form for a school), on a job’s resume card when
+that resume prints none, and in <code dir="auto">gigai scout resume master show</code>. From a terminal, add it with
+<code dir="auto">gigai scout resume master add --heading SCHOOL --role "DEGREE | YEAR" --section education</code>.
+When <code dir="auto">master init</code> reads a resume whose lines look like education (a degree with a school and
+a year, or a line that is only the word Education inside another section) and none of them
+became an Education entry, it says which lines, by number, and which section holds them. It
+moves nothing and never makes up an entry: the lines stay where it read them until you add
+the degree yourself.</p>
 <p><a href="../../media/master-lines-dark.png"><img class="light:sl-hidden" src="../../media/master-lines-dark.png" alt="The same page further down: every role and line of the master, each marked backed, stating a number, or stated." loading="lazy" /></a>
 <a href="../../media/master-lines-light.png"><img class="dark:sl-hidden" src="../../media/master-lines-light.png" alt="The same page further down: every role and line of the master, each marked backed, stating a number, or stated." loading="lazy" /></a></p>
 <p><strong>The file.</strong> Your master is also a file you can open: <code dir="auto">master.md</code> in your resumes folder
