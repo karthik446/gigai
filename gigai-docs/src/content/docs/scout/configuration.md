@@ -47,7 +47,10 @@ pick the target for one run).
 in this release; leave it `false`. `countries` is a list of ISO-3166 alpha-2
 codes to filter postings by; a posting whose location resolves to a
 region-only label (e.g. `AMER`, `EMEA`) with no specific country never
-matches. `visa_sponsorship_required` says you need a visa. It is a label and
+matches. A new profile starts on `["US"]`. A location that names a region or a
+country outside your list ("Europe", "Remote (Germany)", "London / Remote") is
+not listed; one that says only "Remote" or "Anywhere" is read as the US.
+`visa_sponsorship_required` says you need a visa. It is a label and
 never a filter: a posting that says it does not sponsor is kept and marked
 "No sponsorship", in a run, in the Jobs list, in ranking and in an assessment.
 Acquire also caps results to at

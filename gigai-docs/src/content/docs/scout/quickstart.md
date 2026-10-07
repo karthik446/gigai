@@ -84,17 +84,95 @@ your roles, location and work mode. Then:
    New since last check, 7 days, 30 days, state) and the search box to narrow
    the list.
 3. **Assess these**: pick postings (or use the filter) and Scout asks first,
-   with the count and an estimate; it assesses only when you approve.
+   with the count and an estimate; it assesses only when you approve. See
+   [Assess a batch](#assess-a-batch) below.
 4. A posting's page shows the resume picked from your master for that posting,
-   word for word (the assessment picks the lines; nothing is rewritten). Review every line. **Generate PDF** opens a small
+   word for word (the assessment picks the lines; nothing is rewritten), as a
+   preview of the printed pages with a spacing slider and the list of its
+   points beside it ([Resume and PDF](../resume/#the-preview-and-the-spacing-slider)).
+   Review every line. **Generate PDF** opens a small
    form for your name and contact details and saves the PDF; GigAI does not
    keep what you type there. Under Settings > Profiles, **Resume display**
-   holds the title under your name and the PDF layout.
+   holds the title under your name and the PDF layout. A job's own spacing is
+   set with the slider on its page.
 
 Prefer to work from your own AI agent? `gigai scout new` is the daily entry
 point: see [For agents](../agents/), or give your agent [Start here](../agents/start/)
 and let it do the setup. [Your first 10 minutes](../first-10-minutes/) walks through a
 first session.
+
+## 5. The Jobs page
+
+### Fit and rank on each job
+
+Under each title the Jobs list shows two chips:
+
+- **Fit**, for an assessed job: "Fit 92% · 19/22" is the fit and how many of the posting's
+  requirements are met (19 of 22). Fit counts the must-have requirements twice. The chip is
+  green only on a job that is a match (Matched, or Resume ready); on a job that needs your
+  answers, has a gap or is not a match it is grey, whatever the number.
+- **Rank**: "Rank 92", or "Not ranked yet". Rank is a first guess from the posting and your
+  resume; it is not a verdict.
+
+An assessed job's page shows the same two numbers in a box at the top right: the fit, "19 of
+22 requirements" and "Rank 92". [What Scout's numbers and labels mean](../numbers/) says how
+each is made.
+
+A row can also carry **New**, **Applied · Oct 6** (after **Mark applied** on the job's page;
+it becomes Interview, Offer, Rejected or Withdrawn as you record those) and **Closed**. The
+**Applied** chip above the list shows only the jobs you applied to.
+
+### Assess a batch
+
+Above the list, "177 not assessed" has a button beside it. One approval assesses at most 50
+postings, the top 50 by rank, so the button reads **Assess top 50 of 177**; with 50 or fewer
+left it reads **Assess all 12**. **Assess these** does the same for the rows you ticked, or
+for the filter.
+
+Either button asks first. No model is called until you approve. The dialog says:
+
+- the title, for example "Assess the top 50 by rank of 177 postings?";
+- how many per profile, and "50 at a time": how many are left after these 50;
+- **Estimate**: "~50 model calls, ~950k tokens, ~29 min", from your own earlier calls (with
+  none recorded yet it says so);
+- **Model**: the model the calls go to;
+- when some postings rank too low to be in the count, a checkbox: "Include the 105 low-ranked
+  ones in the pool (still 50 per run): 12 of them would be in this run." Ticking it does not
+  add calls: the run is still the top 50, now chosen from all of them, and the estimate
+  follows. When ticking it would change nothing, there is no box, and a line says why;
+- "Nothing has been assessed yet. Assessing starts only when you approve."
+
+**Approve and assess** starts the batch and the dialog closes. The Jobs page then shows a
+progress row: "Assessing: 12 of 50 assessed · about 29 min for 50", the profile, a bar and
+**Cancel**. The list fills in as each posting gets its result. You can keep using Scout; the
+assess buttons are off until this batch ends or you cancel it.
+
+- **Cancel** reads "Cancelling: finishing the 2 in flight". The calls already running finish
+  and their results are kept; no other call starts. Then the page says, for example,
+  "Cancelled: 14 of 50 assessed. What finished is kept; 36 were not started."
+- From a terminal, `gigai scout jobs assess --cancel` cancels the running batch the same
+  way. `gigai scout stop` stops Scout and ends the model calls it started.
+- When the batch ends: "Assessed 50 of 50. 127 more not assessed yet: 50 at a time, "Assess
+  all" takes the next."
+- A job's page says where that job is while a batch runs: "Assessing… this posting is in the
+  running batch (12 of 50 assessed)." or "An assess batch is running (12 of 50 assessed).
+  This posting is not waiting in it." A job that waits in the batch has no Assess button of
+  its own until its result is in.
+
+A row that also matches another of your profiles has a link for that one: **Or assess as
+Platform track** (the profile's name). It asks the same way.
+
+### Closed postings
+
+When you open a job, assess it, make its PDF or mark it applied, Scout checks that the
+posting is still on its board. A posting the board no longer lists is marked **Closed**, is
+left out of the list and of batches (the **Removed** chip lists them), and its page says:
+"This posting is closed. Its board no longer lists it." with a link, "Open the posting to
+confirm".
+
+When the company's own page for an open job does not answer, the job's page says "The
+company page for this job is down; the job is still open on the board." with **Open on the
+job board**.
 
 `gigai scout stop` stops Scout; `gigai scout run --port 9000` picks another
 port if 8765 is taken. More detail for scripts and agents is under

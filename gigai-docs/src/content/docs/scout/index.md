@@ -47,8 +47,8 @@ Grounding (src/gigai/scout/...): Update sources = find_jobs/sources_update.py (o
 board; Greenhouse/Lever/Ashby via find_jobs/ats_board_clients.py), stored in find_jobs/company_index.py
 (<home>/cache/scout/companies/). Find jobs: filters = find_jobs/filters.py; rank = find_jobs/model_rank.py +
 find_jobs/rank_run.py on the run's model target; assessment of top-ranked / all new = find_jobs/selection.py,
-find_jobs/assess_all.py, proposal_execution.py. Job page state = find_jobs/job_state.py. Tailor = tailored_resume.py
-(copy by default) + tailor_no_loss.py lost_items (no-loss check) + ui/src/tailoredResumeModel.js ("Keep original").
+find_jobs/assess_all.py, proposal_execution.py. Job page state = find_jobs/job_state.py. Resume = pick.py (picked from the master at
+assessment, word for word) + ui/src/components/JobResumePanel.jsx, ResumePreview.jsx, ResumePoints.jsx (tailoring is off by default).
 PDF = resume_pdf.py render_pdf; the header comes from the Generate PDF form (ui/src/components/GeneratePdfForm.jsx), used for that one render and never stored (0110-046).
 Jobs page = posting_search.py search_postings (no run); background = pipeline/runner.py, pipeline/steps.py, pipeline/rank_lane.py.
 Privacy edge to the model = resume_privacy.py model_resume (name and contact lines removed) for assess, tailor;
@@ -60,7 +60,7 @@ flowchart TB
     Boards["Update sources<br/>public ATS boards to the local company store"]
     Run["Jobs<br/>your filters, background rank,<br/>assessments you approve"]
     Page["Job page<br/>requirements, questions, state"]
-    Tailor["Tailor<br/>copy by default, no-loss check,<br/>Keep original per line"]
+    Tailor["Resume<br/>picked from your master, word for word;<br/>you edit points on the job page"]
     Pdf["PDF<br/>your details typed in the form,<br/>used once, never stored"]
     Kept["Never leaves: the PDF, stored data.<br/>Never stored: name and contact details"]
     Boards --> Run --> Page --> Tailor --> Pdf
@@ -68,11 +68,10 @@ flowchart TB
   end
   subgraph Sent["Sent to the model provider you picked"]
     RankIn["Ranking: one short line per posting<br/>and a compact resume digest"]
-    TextIn["Assessment and tailoring: posting text and<br/>resume text with name and contact lines removed"]
+    TextIn["Assessment: posting text and<br/>resume text with name and contact lines removed"]
   end
   Run -- "ranking" --> RankIn
   Run -- "assessment" --> TextIn
-  Tailor -- "tailoring" --> TextIn
 ```
 
 ## Where to go next

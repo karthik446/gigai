@@ -6,8 +6,8 @@ It works through the model you already use: Codex, Claude Code, Ollama or OpenRo
 
 **Scout** is its first Gig, for a job search. It keeps a local store of public job
 postings, ranks them against your resume, assesses the ones you approve, asks you the
-questions a posting leaves open, remembers your answers and stories, and drafts a
-tailored resume you download as a PDF. You use it from the browser, or from your own AI
+questions a posting leaves open, remembers your answers and stories, and picks a
+resume from your master, word for word, that you download as a PDF. You use it from the browser, or from your own AI
 agent.
 
 ![An agent runs gigai scout new: what is new, and the cost, before anything is assessed.](https://raw.githubusercontent.com/karthik446/gigai/main/gigai-docs/public/media/terminal-new.png)
@@ -34,8 +34,8 @@ agent.
 
    The setup wizard asks for your model, your resume (`.md` or `.txt`) and your
    roles. Then **Update sources** fills the store, the **Jobs** page lists what
-   matches, **Assess these** assesses what you approve, and **Tailor resume**
-   drafts a resume for one job. Update later with `uv tool upgrade gigai`.
+   matches, **Assess these** assesses what you approve, and each assessed job's
+   page shows the resume picked from your master, with a spacing slider and **Generate PDF**. Update later with `uv tool upgrade gigai`.
    You can turn the background checks off under Settings > Background updates.
 
 ## Let your agent set it up
@@ -64,8 +64,8 @@ gigai scout new            # what is new since your last check
 2. Scout asks before it assesses: you see the count and an estimate, and say yes or no.
 3. The agent asks you each job's open questions and saves your answers. A longer reply
    becomes a story, if you agree.
-4. Jobs you answered are tailored and scored in the background, within daily limits
-   (10 jobs per trigger, 40 model calls a day; more waits for your approval).
+4. The resume for a job is picked from your master when the job is assessed. Nothing is
+   tailored in the background by default.
 5. For a PDF the agent gives you an "open in Scout" link. You add your name and contact
    details there, in your browser. The agent never gets them.
 

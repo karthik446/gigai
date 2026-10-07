@@ -70,30 +70,11 @@ def _jobs(page, demo: DemoHome) -> None:
     _top_of(page, "#jobs-filter-search", closest=".panel")
 
 
-def _jobs_new(page, demo: DemoHome) -> None:
-    _open_jobs(page, demo)
-    page.click(_tid("time-chip-new"))
-    page.wait_for_function(
-        f"document.querySelectorAll('{_tid('job-row')}').length === {persona.posting_count(wave=2)}", timeout=WAIT_MS
-    )
-    _settle(page)
-
-
-def _approval_dialog(page, demo: DemoHome) -> None:
-    _jobs_new(page, demo)
-    page.click(_tid("assess-these"))
-    page.wait_for_selector(_tid("approval-dialog"), timeout=WAIT_MS)
-
-
 def _open_job(page, demo: DemoHome) -> None:
     page.goto(demo.url + "/#/jobs/" + quote(demo.hero_job, safe=""))
     page.wait_for_selector(f'{_tid("step-timeline")}[data-state="done"]', timeout=WAIT_MS)
     page.wait_for_selector(f'{_tid("step-timeline")} {_tid("scout-label-chip")}', timeout=WAIT_MS)
     _settle(page)
-
-
-def _job_page(page, demo: DemoHome) -> None:
-    _open_job(page, demo)
 
 
 def _job_pipeline(page, demo: DemoHome) -> None:
@@ -180,12 +161,9 @@ def _background(page, demo: DemoHome) -> None:
 
 
 SHOTS: tuple[Shot, ...] = (
-    Shot("jobs", "The Jobs page: every stored posting your profiles match, with filter chips, profile tags and Scout's chips.", _jobs),
-    Shot("jobs-new", "The Jobs page filtered to what is new since the last check.", _jobs_new),
-    Shot("approval-dialog", "The approval dialog: Scout says how many postings and what it costs before it assesses anything.", _approval_dialog),
-    Shot("job-page", "A job page: the posting, its verdict and the requirements against your resume and answers.", _job_page),
-    Shot("job-pipeline", "The same job page further down: the background pipeline's steps, the Scout label and the Scout ATS score, then the tailored resume.", _job_pipeline),
-    Shot("job-resume", "The tailored resume on the job page, with where its file is in your jobs folder.", _job_resume),
+    Shot("jobs", "The Jobs page: every stored posting your profiles match, with filter chips, profile tags and the Fit and Rank chips under each title.", _jobs),
+    Shot("job-pipeline", "The same job page further down: the end of the resume card with its Points list, then the background pipeline's steps, the Scout ATS score and the Scout label.", _job_pipeline),
+    Shot("job-resume", "The resume card on a job page: Generate PDF, where the file is in your jobs folder, the preview with the spacing slider and the page count, and the Points list.", _job_resume),
     Shot("job-picked", "Picked: the lines of your master resume this job's resume shows, each with why.", _job_picked),
     Shot("job-left-out", "Left out: the other lines of your master resume, each with why, and Add to show one on this resume.", _job_left_out),
     Shot("master", "The Master resume page: its revision, the file you can edit in your resumes folder, and each profile's selection of it.", _master),
