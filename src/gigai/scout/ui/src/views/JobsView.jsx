@@ -35,9 +35,10 @@ import {
   profileTags,
   rankingLine,
   rowChips,
-  scoreText,
+  scoreChips,
   secondProfiles,
   stateChips,
+  stateText,
   timeChips,
   toggleProfile,
   toggleState,
@@ -170,10 +171,15 @@ function PostingRow({ row, profiles, anchor, selected, onSelect, onOpen, onAsses
               {tag.label}
             </span>
           ))}
+          {scoreChips(row).map((chip) => (
+            <span key={chip.kind} className={`score-chip ${chip.kind}`} data-testid={chip.testId} title={chip.title}>
+              {chip.label}
+            </span>
+          ))}
         </div>
       </div>
       <div className="posting-score" data-role="score">
-        {scoreText(row)}
+        {stateText(row)}
       </div>
       <div className="posting-chips" data-role="state-chips">
         {(h1bLabel(row.h1b) || (row.sponsorship && row.sponsorship !== "unknown")) && <SponsorshipBadge sponsorship={row.sponsorship} h1b={row.h1b} />}

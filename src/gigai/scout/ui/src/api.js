@@ -515,13 +515,15 @@ export function getTailoredResumes(params) {
 // /api/tailored-resumes/lines). `updatedAt` is the updated_at of the resume
 // the caller is looking at; a newer stored resume answers 409
 // tailored_resume_changed. Answers the updated TailorResponse.
-export function putTailoredResumeLine({ profileId, jobIdentity, updatedAt, lineId, use }) {
+// 0.1.11.5 (b): `use: "custom"` with `text` shows the person's own words on the line (the points list).
+export function putTailoredResumeLine({ profileId, jobIdentity, updatedAt, lineId, use, text }) {
   return request("PUT", "/api/tailored-resumes/lines", {
     profile_id: profileId,
     job_identity: jobIdentity,
     updated_at: updatedAt,
     line_id: lineId,
     use,
+    ...(use === "custom" ? { text } : {}),
   });
 }
 

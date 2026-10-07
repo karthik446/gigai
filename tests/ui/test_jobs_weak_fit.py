@@ -56,6 +56,7 @@ def _row(template: dict, index: int, spec: tuple[str, str, int | None, int, int]
         "stale_reason": None, "stale_label": None, "sort_group": "not_assessed" if state == "not_assessed" else "current",
         # A weak fit asks no question: the server sends none for it.
         "open_questions": [] if state == "weak_fit" else asked,
+        "assessment": None if fit is None else {"verdict": None, "met": round(fit * 20 / 100), "requirements": 20, "percent": fit, "assessed_at": "2026-10-06T10:00:00Z"},
         "score_text": f"rank {rank} · not assessed" if fit is None else f"{_WORDS[state]} · fit {fit}% · rank {rank}",
     })
     return row
@@ -107,6 +108,7 @@ def _rows(ui) -> list[dict[str, str | None]]:
           fit: row.dataset.fit === undefined ? null : row.dataset.fit,
           rank: row.dataset.rank === undefined ? null : row.dataset.rank,
           score: row.querySelector('[data-role="score"]').textContent,
+          numbers: Array.from(row.querySelectorAll('[data-role="profile-tags"] [data-testid="fit-chip"], [data-role="profile-tags"] [data-testid="rank-chip"]')).map((chip) => chip.textContent),
           chips: Array.from(row.querySelectorAll('[data-role="state-chips"] .state-pill')).map((chip) => chip.textContent),
         }))"""
     )
@@ -142,9 +144,11 @@ def test_weak_fits_are_hidden_until_their_chip_is_on_and_rows_come_by_fit(ui) ->
     for state in ("matched", "needs_answers"):
         keys = [(int(row["fit"] or -1), int(row["rank"] or -1)) for row in rows if row["state"] == state]
         assert keys == sorted(keys, reverse=True), (state, keys)
-    # One fit number per assessed row, in its score; the 100% fit leads although its rank (61) is the lowest but one.
-    assert [row["score"] for row in rows[:2]] == ["Matched · fit 100% · rank 61", "Matched · fit 80% · rank 95"]
-    assert rows[-1]["score"] == "rank 99 · not assessed" and "fit" not in rows[-1]["score"]  # type: ignore[operator]
+    # One fit number per assessed row, as a chip under the title (0.1.11.5 UI-01), the rank beside it; the middle column
+    # keeps the state. The 100% fit leads although its rank (61) is the lowest but one.
+    assert [row["numbers"] for row in rows[:2]] == [["Fit 100% · 20/20", "Rank 61"], ["Fit 80% · 16/20", "Rank 95"]]
+    assert [row["score"] for row in rows[:2]] == ["Matched", "Matched"]
+    assert rows[-1]["numbers"] == ["Rank 99"] and rows[-1]["score"] == "not assessed"  # a not assessed row: the rank chip alone
     assert rows[3]["chips"][0] == "Needs your answers (2)"  # type: ignore[index]
 
     # The chip lists the weak fits: their own chip, no question count, and the address carries the state.
@@ -158,7 +162,7 @@ def test_weak_fits_are_hidden_until_their_chip_is_on_and_rows_come_by_fit(ui) ->
     assert all(row["chips"][0] == "Weak fit" for row in weak), weak  # type: ignore[index]
     assert not any("Needs your answers" in label for row in weak for label in row["chips"])  # type: ignore[union-attr]
     assert ui.page.locator(tid("weak-fit-chip")).count() == len(WEAK)
-    assert weak[0]["score"] == "Weak fit · fit 14% · rank 39"
+    assert weak[0]["score"] == "Weak fit" and weak[0]["numbers"] == ["Fit 14% · 3/20", "Rank 39"]
     # The header counts stay the unfiltered totals: the weak fits never join "Need your answers".
     assert ui.page.locator('.stat-tile:has-text("Need your answers") .stat-value').first.text_content() == "2"
 

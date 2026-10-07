@@ -279,7 +279,7 @@ def test_the_row_chips_say_the_state_the_scout_label_stale_and_removed(out: dict
     rank = {"current": 0, "stale": 1, "not_assessed": 2}
     assert [rank[group] for group in out["serverOrder"]] == sorted(rank[group] for group in out["serverOrder"])
     jobs_view = (UI_SRC / "views" / "JobsView.jsx").read_text(encoding="utf-8")
-    assert ".sort(" not in jobs_view and "scoreText(row)" in jobs_view
+    assert ".sort(" not in jobs_view and "stateText(row)" in jobs_view and "scoreChips(row)" in jobs_view
     assert out["detail"][0].startswith("Acme · Remote - United States · Remote") and out["detail"][1] == "Acme"
     assert out["isNew"] == [True, False, False, False]
     assert out["count"] == ["Showing 1-4 of 4 postings", "Showing 1-50 of 120 postings", "Showing 1 of 1 posting", "Showing 0 of 0 postings"]
