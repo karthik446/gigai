@@ -2,14 +2,17 @@
 
 The job page lists the points of the job's resume beside its preview; each change is ONE request to a route that was
 there already and is saved at once for THIS job's resume. On the pick fixture of ``test_pick_header_room.py`` (a job
-assessed against an invented 56-line master; its resume picked by the assessment, on 2 pages, the rest cut for
-length), through the real routes of a real server:
+assessed against an invented 56-line master; its resume picked by the assessment: its 20 best bullets, the rest under
+Left out), through the real routes of a real server. THE PICK COUNTS NO PAGE (0.1.11.5 item 1c), so no page count is
+written into this test: the BASELINE is what the preview says for the pick at the job's saved spacing (several pages
+on this fixture's long lines; read again after the edit, whose shorter words can end the resume a page earlier), and
+every count after it is that baseline or one page more:
 
 - an EDIT (``PUT /api/tailored-resumes/lines`` ``use: custom``) prints the new words in the PDF and no longer the old;
 - an ADD of a left-out line (``PUT /api/tailored-resumes/selection`` ``use: add``, ``fit: keep``: nothing is cut to
   make room, the person fits the page with the slider) prints the line under its own role, last in it; enough of
-  them and the preview says "3 pages", and the PDF has 3;
-- a REMOVE takes the line off: the preview and the PDF are back on 2 pages and the line's words are gone;
+  them and the preview says one page more than the baseline, and the PDF has as many;
+- a REMOVE takes the line off: the preview and the PDF are back on the baseline's pages and the line's words are gone;
 - the preview and the PDF agree after every change, and a fresh read of the store (a reload) shows the saved state;
 - NOTHING but this job's resume is written: the master's files and the job's saved spacing (its ``.layout`` file) are
   byte for byte what they were;
@@ -99,7 +102,10 @@ def test_an_edit_an_add_and_a_remove_each_show_in_the_preview_and_the_pdf_and_on
     first = _held(server)
     master = {item.id: item for item in _master(fx).items.values()}
     assert first["selection"] and first.get("edited") is None
-    start = " ".join(_same(server, 2))
+    # THE BASELINE: the pick's pages as the preview counts them at the saved spacing (the pick itself counts none).
+    base = _preview(server)["pages"]
+    assert base >= 1 and _preview(server)["spacing_scale"] == 0.9
+    start = " ".join(_same(server, base))
 
     # --- EDIT: the new words print, the old ones do not ---
     line = _bullets(first)[0]
@@ -107,14 +113,18 @@ def test_an_edit_an_add_and_a_remove_each_show_in_the_preview_and_the_pdf_and_on
     assert old in start and EDITED not in start
     answer = _put(server, LINES, first, line_id=line["id"], use="custom", text=EDITED)
     assert answer.status_code == 200, answer.text
-    edited = " ".join(_same(server, 2))
+    # The new words are far shorter than the line they replace, so the resume may now end a page earlier: the count is
+    # read again (preview and PDF still agree on it), and it is the baseline of the Adds and Removes below.
+    picked, base = base, _preview(server)["pages"]
+    assert base in (picked, picked - 1), "an edit to shorter words made the resume longer, or shorter by more than a page"
+    edited = " ".join(_same(server, base))
     assert EDITED in edited and old not in edited, "the edit is not what the PDF prints"
 
     # --- ADD: left-out lines go on under their own role, last in it; nothing is cut to make room; the count follows ---
     left = [entry["id"] for entry in first["selection"]["left_out"] if master[entry["id"]].kind == "bullet"]
     assert len(left) >= 12
     added: list[str] = []
-    pages = 2
+    pages = base
     for item_id in left:
         answer = _put(server, SELECTION, _held(server), use="add", item_id=item_id, fit="keep")
         assert answer.status_code == 200, answer.text
@@ -122,10 +132,11 @@ def test_an_edit_an_add_and_a_remove_each_show_in_the_preview_and_the_pdf_and_on
         assert (change["applied"], change["changed"], change["cut"]) == (True, True, []), "an Add with fit keep cut a line to make room"
         added.append(item_id)
         pages = _preview(server)["pages"]
-        if pages == 3:
+        assert pages in (base, base + 1), "one added point moved the count by more than a page"
+        if pages == base + 1:
             break
-    assert pages == 3, "adding points never moved the page count"
-    grown = " ".join(_same(server, 3))
+    assert pages == base + 1, "adding points never moved the page count"
+    grown = " ".join(_same(server, base + 1))
     assert all(master[item_id].text in grown for item_id in added) and EDITED in grown
     held = _held(server)
     last = added[-1]
@@ -137,7 +148,7 @@ def test_an_edit_an_add_and_a_remove_each_show_in_the_preview_and_the_pdf_and_on
     for item_id in added:
         answer = _put(server, SELECTION, _held(server), use="remove", item_id=item_id)
         assert answer.status_code == 200, answer.text
-    shrunk = " ".join(_same(server, 2))
+    shrunk = " ".join(_same(server, base))
     assert not any(master[item_id].text in shrunk for item_id in added) and EDITED in shrunk
     held = _held(server)
     assert {entry["id"]: entry["code"] for entry in held["selection"]["left_out"]}[last] == "removed_by_you"

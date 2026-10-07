@@ -4,8 +4,13 @@ off, add one. Each change is saved at once and the preview follows.
 Real Chromium against a REAL server of its own (the product's own handler, served from this process on a free
 port), nothing stubbed, on a synthetic home: the pick fixture of
 `tests/behaviors/scout_find_jobs/test_pick_header_room.py` (a job assessed against an invented 56-line master; its
-resume picked by the assessment onto 2 pages, the other half of the master cut for length). The shared small home is
-not used: its resume is half a page and has nothing cut for length, so neither the page count nor Restore can move.
+resume picked by the assessment). SINCE 0.1.11.5 (item 1c) A PICK COUNTS NO PAGE AND IS NEVER CUT FOR LENGTH, so the
+stored resume is put in the shape a pick BEFORE 0.1.11.5 stored (`_stored_as_before_0_1_11_5`: twelve of its bullets
+shown, the others cut for length on its length record, with Restore): that is the only resume Restore still shows
+for, and the re-check below is about it. No page count is written into this test: the BASELINE is what the preview
+says at the spacing the person left (read again after an edit, whose shorter words can end the resume a page
+earlier), and every count is that baseline, or more pages after Restore and after enough Adds. The shared small home
+is not used: its resume is half a page and has nothing cut for length, so neither the page count nor Restore can move.
 ONE answer is the test's: `GET /api/setup`. The fixture home was never through the setup interview, so the app would
 open the interview in place of the job page; the route's own pre-fill is answered as the saved preferences. Every
 route this flow is about (the stored resume, its lines, its selection, its length, the preview, the PDF, the master)
@@ -14,7 +19,7 @@ is the real server's.
 Pinned, on what the page shows WITHOUT A RELOAD and on the PDF the browser downloads:
 
 - ANY CHANGE OF THE LINES RE-RENDERS THE PREVIEW AT ONCE (the orchestrator's re-check of part (a): after Restore the
-  preview kept the old "2 pages"): Restore asks for the preview once, the pages on screen are new pictures and the
+  preview kept the old page count): Restore asks for the preview once, the pages on screen are new pictures and the
   count says what the PDF will have; "Cut for length again" brings it back;
 - PICKED / LEFT OUT FOLLOW THE STORED RESUME (the same re-check: the buttons stayed at the pick's numbers): after
   Restore, after a Remove and after an Add the two counts are what the resume prints;
@@ -24,7 +29,7 @@ Pinned, on what the page shows WITHOUT A RELOAD and on the PDF the browser downl
 - REMOVE takes the point off (the list, the preview and the counts follow); under "Add a point" it is first in its
   role, as "Put back";
 - ADD: the lines left out, by role, with a search; one click puts a line on, under its role; enough of them and the
-  preview says "3 pages" in plain words, with the slider where the person left it;
+  preview says one page more in plain words, with the slider where the person left it;
 - a reload shows the saved state, and the downloaded PDF is the preview: the edited words, the added lines, not the
   removed one, as many pages;
 - the master's files are byte for byte what they were; the job's saved spacing is the slider's; no id is shown.
@@ -42,8 +47,12 @@ from urllib.parse import quote, urlsplit
 
 import pytest
 
+from dataclasses import replace
+
+from gigai.scout import tailor_master as tm
 from gigai.scout.resume_pdf import job_layout_path
-from gigai.scout.tailored_resume import tailored_resume_path
+from gigai.scout.tailor_length import fit_by_cuts
+from gigai.scout.tailored_resume import read_tailored_resume, render_markdown, save_tailor_response, tailored_resume_path
 
 from tests.behaviors.scout_find_jobs.test_pick_header_room import _JOB, _Server, _assess, _master, _pipeline_off, fx, server  # noqa: F401 - the fixtures
 from tests.ui import support
@@ -88,6 +97,7 @@ def page(request: pytest.FixtureRequest, ui_browser, ui_artifacts: Path, fx, ser
     """`ui` on this test's own server: the pick fixture's job, assessed, its resume picked from the master."""
 
     _assess(fx)
+    _stored_as_before_0_1_11_5(fx)
     log = tmp_path / "server.log"
     log.write_text("", encoding="utf-8")
     own = SimpleNamespace(url=f"http://127.0.0.1:{server.server.server_address[1]}", pid=os.getpid(), log_path=str(log))
@@ -96,6 +106,46 @@ def page(request: pytest.FixtureRequest, ui_browser, ui_artifacts: Path, fx, ser
         session.fx, session.api = fx, server
         session.page.route("**/api/setup", lambda route: route.fulfill(status=200, content_type="application/json", body=json.dumps({"prefs": prefill})))
         yield session
+
+
+#: How many bullets the resume shows once it is stored the way a pick before 0.1.11.5 stored it.
+KEPT = 12
+
+
+def _stored_as_before_0_1_11_5(fixture) -> None:  # noqa: ANN001
+    """The job's stored resume as a pick BEFORE 0.1.11.5 left it: ``KEPT`` bullets shown, the others cut for length.
+
+    A pick of 0.1.11.5 holds its 20 best bullets with no length record. The fit of before (``fit_by_cuts``: the last
+    lines of each role in turn, a role never emptied) is applied to it with a measure that COUNTS bullets, and the
+    record says so the way it did: the cut lines on ``result.length`` (Restore puts them back) and under Left out."""
+
+    path = tailored_resume_path(fixture.home_root, fixture.target, fixture.default_profile_id, _JOB)
+    stored = read_tailored_resume(path)
+    assert stored is not None and stored.result.length is None and stored.selection is not None, "a pick of 0.1.11.5 carries no length record"
+    roles = [list(entry.bullets) for section in stored.result.sections if section.heading == "experience" for entry in section.entries]
+    cuts: list[tuple[str, str]] = []
+    while any(len(lines) > 1 for lines in roles):
+        cuts += [("bullet", lines.pop().id) for lines in roles if len(lines) > 1]
+
+    def count(result) -> int:  # noqa: ANN001
+        return sum(len(entry.bullets) for section in result.sections for entry in section.entries)
+
+    fitted = fit_by_cuts(stored.result, cuts, measure=lambda result: 2 if count(result) <= KEPT else 3, max_pages=2)
+    assert fitted.length is not None and fitted.length.status == "cut" and count(fitted) == KEPT < count(stored.result)
+    gone = {tm.line_item_id(line) for role in fitted.length.trimmed for line in role.bullets}
+    selection = stored.selection
+    why = ("cut_lowest_value", "cut for length: lowest value for this posting")
+    selection = replace(
+        selection,
+        picked=tuple(line for line in selection.picked if line.id not in gone),
+        left_out=(*selection.left_out, *(tm.SelectedLine(line.id, *why) for line in selection.picked if line.id in gone)),
+        cut_for_length=tuple(tm.SelectionCut(line.id, "bullet", *why) for line in selection.picked if line.id in gone),
+    )
+    save_tailor_response(replace(stored, result=fitted, markdown=render_markdown(fitted), selection=selection), home_root=fixture.home_root)
+
+
+def _count(pages: int) -> str:
+    return f"{pages} page{'' if pages == 1 else 's'}"
 
 
 def _ready(ui, *, pages: int | None = None) -> None:
@@ -179,7 +229,7 @@ def test_a_point_is_edited_removed_and_added_beside_the_preview_and_the_preview_
     ui.step("open")
     _open(ui)
     opened = _shown(ui)
-    assert (opened["pages"], opened["count"]) == (2, "2 pages"), opened
+    assert opened["count"] == _count(opened["pages"]), opened
     assert opened["points"] == _printed(first) == ui.page.locator(POINT).count() and opened["tabs"] == _tabs(first), opened
     assert ui.requests_after("open", PREVIEW_ROUTE) == 1 and ui.writes_after("open") == [f"POST {PREVIEW_ROUTE}"], "opening the page wrote something"
     assert ui.requests_after("open", "/api/master") == 0, "the master is read when 'Add a point' is opened, not before"
@@ -192,27 +242,30 @@ def test_a_point_is_edited_removed_and_added_beside_the_preview_and_the_preview_
         ui.page.keyboard.press("ArrowRight")
     ui.page.locator(f'{PREVIEW}[data-state="ready"][data-spacing="0.90"]').wait_for()
     ui.settle()
-    assert _shown(ui)["pages"] == 2 and json.loads(layout.read_text(encoding="utf-8")) == {"spacing_percent": 90}
+    assert json.loads(layout.read_text(encoding="utf-8")) == {"spacing_percent": 90}
     spacing = layout.read_bytes()
+    # THE BASELINE: the pages of the resume as it is stored, at the spacing the person left. The pick counted none.
+    base = _shown(ui)["pages"]
+    assert base >= 2 and _shown(ui)["count"] == _count(base), "the fixture's resume must fill pages, or no count below proves anything"
 
     # --- RESTORE (not a button of the list): the preview is made again at once, and the counts follow the resume ---
     before = _shown(ui)
     ui.step("restore")
     ui.page.locator(f'{PANEL} [data-action="length-restore"]').click()
-    ui.page.locator(f'{PREVIEW}[data-state="ready"]:not([data-pages="2"])').wait_for()
+    ui.page.locator(f'{PREVIEW}[data-state="ready"]:not([data-pages="{base}"])').wait_for()
     ui.settle()
     restored, held = _shown(ui), _held(ui)
     assert held["result"]["length"]["status"] == "restored" and _printed(held) > _printed(first)
-    assert restored["pages"] >= 3 and restored["count"] == f"{restored['pages']} pages" and restored["over"] == "true", f"after Restore the preview still says {restored['count']}"
+    assert restored["pages"] > base and restored["count"] == _count(restored["pages"]) and restored["over"] == "true", f"after Restore the preview still says {restored['count']}"
     assert restored["pictures"] != before["pictures"] and len(restored["pictures"]) == restored["pages"], "the pages on screen are the old render"
     assert restored["tabs"] == _tabs(held) != before["tabs"], f"after Restore the buttons say {restored['tabs']}, the resume prints {_printed(held)} lines"
     assert restored["points"] == _printed(held)
     assert ui.requests_after("restore", PREVIEW_ROUTE) == 1 and ui.writes_after("restore") == ["PUT /api/tailored-resumes/length", f"POST {PREVIEW_ROUTE}"]
     ui.step("cut-again")
     ui.page.locator(f'{PANEL} [data-action="length-cut"]').click()
-    _ready(ui, pages=2)
+    _ready(ui, pages=base)
     again = _shown(ui)
-    assert (again["tabs"], again["points"], again["count"]) == (opened["tabs"], opened["points"], "2 pages") and ui.requests_after("cut-again", PREVIEW_ROUTE) == 1
+    assert (again["tabs"], again["points"], again["count"]) == (opened["tabs"], opened["points"], _count(base)) and ui.requests_after("cut-again", PREVIEW_ROUTE) == 1
 
     # --- EDIT by keyboard: Enter saves; Tab goes to Remove, then to the next point; leaving a box saves it too ---
     boxes = ui.page.locator(f'{POINT} [data-role="point-text"]')
@@ -227,8 +280,10 @@ def test_a_point_is_edited_removed_and_added_beside_the_preview_and_the_preview_
     ui.page.keyboard.press("Enter")
     _saved(ui)
     ui.page.wait_for_function("([selector, words]) => (document.querySelector(selector)?.textContent || '').includes(words)", arg=[f"{PREVIEW} .visually-hidden", FIRST])
-    _ready(ui, pages=2)
+    _ready(ui)
     edited = _shown(ui)
+    # (The new words are far shorter than the line they replace: the resume may end a page earlier, never later.)
+    assert edited["pages"] in (base, base - 1) and edited["count"] == _count(edited["pages"])
     assert FIRST in edited["text"] and was_one not in edited["text"] and edited["pictures"] != again["pictures"], "the preview does not show the edit"
     assert one.get_attribute("data-edited") == "true" and one.locator("textarea").input_value() == FIRST
     assert ui.writes_after("edit") == [LINES, f"POST {PREVIEW_ROUTE}"], "Enter then nothing else: one write, one preview"
@@ -242,7 +297,8 @@ def test_a_point_is_edited_removed_and_added_beside_the_preview_and_the_preview_
     ui.page.keyboard.press("Tab")  # leaving the box saves it
     _saved(ui)
     ui.page.wait_for_function("([selector, words]) => (document.querySelector(selector)?.textContent || '').includes(words)", arg=[f"{PREVIEW} .visually-hidden", SECOND])
-    _ready(ui, pages=2)
+    _ready(ui)
+    assert _shown(ui)["pages"] <= edited["pages"] and _shown(ui)["count"] == _count(_shown(ui)["pages"])
     assert SECOND in _shown(ui)["text"] and was_two not in _shown(ui)["text"] and ui.writes_after("edit-two") == [LINES, f"POST {PREVIEW_ROUTE}"]
     assert boxes.count() == again["points"], "an edit changed how many points there are"
     _shot(ui, "2-edited")
@@ -279,9 +335,10 @@ def test_a_point_is_edited_removed_and_added_beside_the_preview_and_the_preview_
     assert 1 <= len(found) < len(offered) and all(all(word in text.lower() for word in ("role", "1", "line", "9:")) for text in found), found
     ui.page.locator(f'{POINTS} [data-role="point-search"]').fill("")
     before = _shown(ui)
+    base = before["pages"]  # the baseline of the Adds: the resume as it is now (two edits and a Remove later)
     added: list[str] = []
     ui.step("add")
-    for _ in range(14):
+    for _ in range(20):
         choice = ui.page.locator(CHOICE).nth(1)  # not the removed one: that stays off
         item_id = choice.get_attribute("data-item-id")
         choice.locator('[data-action="add-choice"]').click()
@@ -291,10 +348,12 @@ def test_a_point_is_edited_removed_and_added_beside_the_preview_and_the_preview_
         ui.page.wait_for_function("([selector, words]) => (document.querySelector(selector)?.textContent || '').includes(words)", arg=[f"{PREVIEW} .visually-hidden", master[item_id].text])
         _ready(ui)
         added.append(item_id)
-        if _shown(ui)["pages"] == 3:
+        assert _shown(ui)["pages"] in (base, base + 1), "one added point moved the count by more than a page"
+        if _shown(ui)["pages"] == base + 1:
             break
     grown, held = _shown(ui), _held(ui)
-    assert (grown["pages"], grown["count"], grown["over"], grown["spacing"]) == (3, "3 pages", "true", "0.90"), f"{len(added)} added points did not move the page count: {grown['count']}"
+    assert base + 1 > 2, "the grown resume must be over its 2 pages, or the 'over' sentence below proves nothing"
+    assert (grown["pages"], grown["count"], grown["over"], grown["spacing"]) == (base + 1, _count(base + 1), "true", "0.90"), f"{len(added)} added points did not move the page count: {grown['count']}"
     assert "Move the slider left to reach 2 pages." in (ui.page.locator(COUNT).text_content() or "")
     assert all(master[item_id].text in grown["text"] for item_id in added) and victim_text not in grown["text"]
     assert grown["points"] == before["points"] + len(added) == _printed(held) and grown["tabs"] == _tabs(held)
@@ -312,9 +371,9 @@ def test_a_point_is_edited_removed_and_added_beside_the_preview_and_the_preview_
     preview = ui.page.locator(f'{PANEL} [data-action="view-clean"]')
     if preview.get_attribute("aria-pressed") != "true":
         preview.click()
-    _ready(ui, pages=3)
+    _ready(ui, pages=base + 1)
     reloaded = _shown(ui)
-    assert (reloaded["count"], reloaded["spacing"], reloaded["points"], reloaded["tabs"]) == ("3 pages", "0.90", grown["points"], grown["tabs"]), reloaded
+    assert (reloaded["count"], reloaded["spacing"], reloaded["points"], reloaded["tabs"]) == (_count(base + 1), "0.90", grown["points"], grown["tabs"]), reloaded
     texts = ui.page.locator(f'{POINT} [data-role="point-text"]').evaluate_all("(boxes) => boxes.map((box) => box.value)")
     assert FIRST in texts and SECOND in texts and victim_text not in texts and all(master[item_id].text in texts for item_id in added)
     assert ui.writes_after("reloaded") == [f"POST {PREVIEW_ROUTE}"], "a reload wrote something"
