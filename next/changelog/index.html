@@ -86,23 +86,34 @@ operator-visible capability and must link to the relevant release or evidence.</
 <div class="sl-heading-wrapper level-h3"><h3 id="01115">0.1.11.5</h3><a class="sl-anchor-link" href="#01115"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “0.1.11.5”</span></a></div>
 <p><strong>After you upgrade</strong> (<code dir="auto">uv tool upgrade gigai</code>): the first read matches your stored postings once more against the
 new title rules, so the first Jobs page can take a little longer. Resumes you picked before this version keep their
-lines and are shown as they are; use “Re-pick” on a job (or <code dir="auto">gigai scout resume pick --job-url URL --refresh</code>) to get
-the new pick of up to 20 points, and open the job page to set the spacing yourself.</p>
+lines and are shown as they are; use “Re-pick · no model call” on a job (it is under “Stale: Scout’s rules for
+picking changed after this resume was picked”), or <code dir="auto">gigai scout resume pick --job-url URL --refresh</code>, to get the new
+pick of up to 20 points, and open the job page to set the spacing yourself. If the job’s assessment is old, re-assess
+it instead (“Re-assess · 1 model call”, or <code dir="auto">gigai scout jobs assess URL --again</code>). If you edited the resume, it is not
+replaced: the new pick waits at the top of the card (“A new resume is ready for this job.”, with Compare, Use it and
+Dismiss). <code dir="auto">resume pick --shorten</code> is retired and only says so.</p>
 <ul>
-<li><strong>The resume is a preview you can set.</strong> On a job page the resume card opens on <strong>Preview</strong>: the resume as the PDF
+<li><strong>The resume is a preview you can set.</strong> On a job page the resume card shows the resume as the PDF
 prints it, one spacing slider beside it and a live page count (“2 pages”, or “3 pages” with a hint to move the
 slider left). The slider’s whole range changes how many points fit: below 1.0 it also tightens the line height
 (never the type size), so a 20-point resume that is 3 pages at 1.0 reaches 2 pages lower down. What you set is
-saved for that job (in a small <code dir="auto">.layout</code> file beside the job’s resume; older versions ignore it), the preview and
+saved for that job (in a small <code dir="auto">.layout</code> file in GigAI’s own store, not in your jobs folder; older versions ignore it), the preview and
 the downloaded PDF are the same render, and nothing else is written.
 The preview shows a header too: yours, from <code dir="auto">header.json</code>, when that file has your name (read for the
 pictures on your own page only, never stored), and otherwise a grey placeholder (“Your Name”) of the same
-size, so the page count is the one your PDF will have. A PDF never contains the placeholder.</li>
+size, so the page count is the one your PDF will have. A PDF never contains the placeholder.
+“Show changes” and “Clean copy” are gone: a changed point is marked “Your words”, and the Changed tab lists the
+changes with Restore.</li>
 <li><strong>Edit, remove or add a point beside the preview.</strong> A list of the picked points: change a point’s words, remove it,
 or add one from the lines your master left out. Each change is saved to this job’s resume straight away, the
 preview re-renders, and the page count follows. Nothing reaches your master unless you ask: an edited point has
 “Save this wording to my master”, which shows the old and the new words and changes that one master line after
-one confirm (other jobs take the new wording on their next pick).</li>
+one confirm (other jobs take the new wording on their next pick). The button says how many lines are left out,
+“Add a left-out point (N)”, or “Nothing left out”.</li>
+<li><strong>A new resume waits, and a stale line is named.</strong> When a new pick waits beside a resume you edited, the first line
+of the card says “A new resume is ready for this job.” with Compare, Use it (it lists the edited points it would
+drop) and Dismiss. When your master retired or reworded a line the resume prints, the card names that line with
+“Remove it from this resume” or “Use the new wording”; neither calls a model.</li>
 <li><strong>The pick no longer counts pages.</strong> It takes up to 20 points by score (must-cover lines first) and leaves the
 page to you and the slider, so picks are no longer stopped at 14 points “cut for length”. “Shorten
 automatically” is gone (the slider and Remove a point replace it). Older roles with no point still appear as
@@ -116,8 +127,10 @@ pages around 0.85.</li>
 chip (“Rank 92”) under each title, and an assessed job page shows its fit and rank in the top-right box.</li>
 <li><strong>Assess all can be cancelled and shows progress.</strong> The dialog closes when the batch starts; the page shows
 “12 of 50 assessed” and a Cancel (“Cancelling: finishing the N in flight”: calls already running finish and are
-kept, nothing else starts). Stopping Scout ends its own model calls. The dialog says the estimate, “Assess top 50
-of 177”, and what the low-rank checkbox does.</li>
+kept, nothing else starts). <code dir="auto">gigai scout jobs assess --cancel</code> does the same from a terminal. Stopping Scout ends
+its own model calls. The button says what it will do (“Assess top 50 of 177”), and the dialog says the estimate and
+what the low-rank checkbox does (“Include the 105 low-ranked ones in the pool (still 50 per run)”). A row listed
+for another profile has a link, “Or assess as” and that profile’s name.</li>
 <li><strong>Fewer wrong titles.</strong> A job title that names a broad family (“Forward Deployed Engineer”, “Staff AI Engineer”)
 or carries a qualifier (“Staff Software Engineer, AI Platform”) now matches by its own words, not every posting
 of the same function.</li>

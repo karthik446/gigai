@@ -102,6 +102,9 @@ somewhere</strong>: your answers and stories, your application notes, and the bo
 <li><strong>GigAI’s own model calls send your resume (without the contact lines) and your answers to the
 model you picked</strong> (Codex -&gt; OpenAI, Claude -&gt; Anthropic, OpenRouter -&gt; your provider). With
 Ollama the resume stays on this machine. The sections below list exactly what is sent.</li>
+<li><strong>The spacing you set for a job is stored, and it is one number.</strong> It is kept in a small
+<code dir="auto">.layout</code> file in GigAI’s store, beside the stored copy of that job’s resume (not in your
+jobs folder). It stays when the job is picked again and goes when the profile is deleted.</li>
 <li><strong>Your search settings are not contact data, and they are stored.</strong> The city or area you set
 for the search, your work mode, the countries you can work from and whether you need
 sponsorship are saved as settings and go to your model with an assessment.</li>

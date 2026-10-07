@@ -140,6 +140,10 @@ the posting. Pattern removal can miss an unusual name or contact format, so it i
 guarantee. A profile id is not contact data. With codex_cli or claude_cli the model target is
 your own login.</p>
 </blockquote>
+<p><strong>Cancel and stop.</strong> <code dir="auto">gigai scout jobs assess --cancel</code> stops the batch that is running, also
+one the Jobs page started: no further model call starts, the calls in flight finish, and what
+is assessed is kept. The same assess command again takes the rest. <code dir="auto">gigai scout stop</code> stops
+the server and ends the model calls it started.</p>
 <p><strong>The preview says it exactly.</strong> Without <code dir="auto">--yes</code> the reply is <code dir="auto">status: "ask"</code>: no model call was
 made, and <code dir="auto">model_input_summary</code> says what the postings asked about would send and where. For
 each profile: its id and label, and <code dir="auto">resume_source</code> (<code dir="auto">master_evidence</code>: the lines of your master
@@ -346,7 +350,7 @@ never printed and never a fact.</li>
 <li><strong>A changed line cites its sources.</strong> A line copied unchanged needs nothing. A line that is
 reworded or added ends with the master lines and answers it comes from:
 <code dir="auto">&lt;!-- src: b-23b6dc, A tooling:temporal --&gt;</code>. Every number stays exactly; “worked on” never
-becomes “led”; entry headings are copied unchanged; no name and no contact details; two pages.</li>
+becomes “led”; entry headings are copied unchanged; no name and no contact details; two pages at the tightest spacing.</li>
 <li><strong>The hand-back is checked, then stored</strong>, marked edited with who wrote it. A refusal stores
 nothing and lists every problem by line number with its own fix: keep the cited line’s
 number, cite the line that states the thing, or drop the claim. Saving an answer is the fix
@@ -363,7 +367,8 @@ suggested for the job and what was done about each; <code dir="auto">gigai scout
 shows the resume picked for the job as it is stored: who picked it, whether a resume is suggested
 at all, and what is stale. A resume you edited is never replaced by a new pick: the new one waits
 beside it, and <code dir="auto">gigai scout resume pick --job-url &lt;job-url&gt; --use-proposed</code> is the one step that
-takes it.</p>
+takes it. On the job’s page the card’s first line then reads “A new resume is ready for this
+job.” with <strong>Compare</strong>, <strong>Use it</strong> and <strong>Dismiss</strong> (<code dir="auto">--dismiss-proposed</code> from a terminal).</p>
 <div class="sl-heading-wrapper level-h3"><h3 id="6-your-master-resume">6. Your master resume</h3><a class="sl-anchor-link" href="#6-your-master-resume"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “6. Your master resume”</span></a></div>
 <p>Your master resume is the one document that holds every role, line and skill you have; each
 profile’s resume, and each job’s, is a selection of it. An agent keeps it up to date from the
@@ -624,10 +629,10 @@ needs no handling and the build's link check covers them. Each image links to it
 <p>It asks your open questions, saves your answer, and offers to turn an experience into a story.</p>
 <p><a href="../../media/terminal-answer.png"><img src="../../media/terminal-answer.png" alt="The agent asks a question, saves your answer, and offers to make it a story." loading="lazy" /></a></p>
 <p>The same jobs in the Scout UI. (The screenshots below were taken with the pipeline enabled: the Scout label and Scout ATS score appear only in a home that enabled it; it is off by default in 0.1.11.)</p>
-<p><a href="../../media/jobs-dark.png"><img class="light:sl-hidden" src="../../media/jobs-dark.png" alt="The Jobs page: every stored posting your profiles match, with filter chips, profile tags and Scout's chips." loading="lazy" /></a>
-<a href="../../media/jobs-light.png"><img class="dark:sl-hidden" src="../../media/jobs-light.png" alt="The Jobs page: every stored posting your profiles match, with filter chips, profile tags and Scout's chips." loading="lazy" /></a></p>
-<p><a href="../../media/job-pipeline-dark.png"><img class="light:sl-hidden" src="../../media/job-pipeline-dark.png" alt="The same job page further down: the background pipeline's steps, the Scout label and the Scout ATS score, then the tailored resume." loading="lazy" /></a>
-<a href="../../media/job-pipeline-light.png"><img class="dark:sl-hidden" src="../../media/job-pipeline-light.png" alt="The same job page further down: the background pipeline's steps, the Scout label and the Scout ATS score, then the tailored resume." loading="lazy" /></a></p>
+<p><a href="../../media/jobs-dark.png"><img class="light:sl-hidden" src="../../media/jobs-dark.png" alt="The Jobs page: every stored posting your profiles match, with filter chips, profile tags and the Fit and Rank chips under each title." loading="lazy" /></a>
+<a href="../../media/jobs-light.png"><img class="dark:sl-hidden" src="../../media/jobs-light.png" alt="The Jobs page: every stored posting your profiles match, with filter chips, profile tags and the Fit and Rank chips under each title." loading="lazy" /></a></p>
+<p><a href="../../media/job-pipeline-dark.png"><img class="light:sl-hidden" src="../../media/job-pipeline-dark.png" alt="The same job page further down: the end of the resume card with its Points list, then the background pipeline's steps, the Scout ATS score and the Scout label." loading="lazy" /></a>
+<a href="../../media/job-pipeline-light.png"><img class="dark:sl-hidden" src="../../media/job-pipeline-light.png" alt="The same job page further down: the end of the resume card with its Points list, then the background pipeline's steps, the Scout ATS score and the Scout label." loading="lazy" /></a></p>
 <p>Jobs over the per-trigger limit wait for your approval.</p>
 <p><a href="../../media/background-dark.png"><img class="light:sl-hidden" src="../../media/background-dark.png" alt="The Background pipeline panel, with jobs waiting for your approval." loading="lazy" /></a>
 <a href="../../media/background-light.png"><img class="dark:sl-hidden" src="../../media/background-light.png" alt="The Background pipeline panel, with jobs waiting for your approval." loading="lazy" /></a></p>
@@ -635,7 +640,7 @@ needs no handling and the build's link check covers them. Each image links to it
 <p><a href="../../media/answers-dark.png"><img class="light:sl-hidden" src="../../media/answers-dark.png" alt="Answers: what you told Scout or your agent, kept once and reused." loading="lazy" /></a>
 <a href="../../media/answers-light.png"><img class="dark:sl-hidden" src="../../media/answers-light.png" alt="Answers: what you told Scout or your agent, kept once and reused." loading="lazy" /></a></p>
 <p>The agent’s PDF has no name or contact details. It hands you a link, and you add yours in the browser.</p>
-<p><a href="../../media/terminal-pdf.png"><img src="../../media/terminal-pdf.png" alt="The agent renders the tailored resume as a headerless PDF and hands you the link to finish it in Scout." loading="lazy" /></a></p>
+<p><a href="../../media/terminal-pdf.png"><img src="../../media/terminal-pdf.png" alt="The agent renders the job's resume as a headerless PDF and hands you the link to finish it in Scout." loading="lazy" /></a></p>
 <p><a href="../../media/pdf-dark.png"><img class="light:sl-hidden" src="../../media/pdf-dark.png" alt="Generate PDF: you add your own name and contact details in the browser; GigAI stores none." loading="lazy" /></a>
 <a href="../../media/pdf-light.png"><img class="dark:sl-hidden" src="../../media/pdf-light.png" alt="Generate PDF: you add your own name and contact details in the browser; GigAI stores none." loading="lazy" /></a></p>
 <p>Your master resume, from the terminal: every role and line once, each with its id. On your OK
@@ -683,8 +688,8 @@ already has a stored (picked) resume:</p>
 <ul>
 <li>An edited line is marked <code dir="auto">kind: custom</code> with <code dir="auto">origin: user</code>. It cites no source (<code dir="auto">refs</code> is
 empty) and the no-loss check does not cover it: it is your text. <code dir="auto">edited_from</code> keeps the line it
-replaced, so <code dir="auto">"use": "original"</code> or <code dir="auto">"use": "rewritten"</code> brings that back. The UI shows the line as
-edited, with the same way back.</li>
+replaced, so <code dir="auto">"use": "original"</code> or <code dir="auto">"use": "rewritten"</code> brings that back. The UI marks the point
+“Your words”; <strong>Restore</strong> on the Changed tab brings the master line back.</li>
 <li><code dir="auto">text</code> is one line of at most 400 characters. Body lines only (a summary, skills or other line, or
 an entry’s bullet), never an entry heading.</li>
 <li>A text that looks like a name line or a contact detail (email, phone, link, street address) is
@@ -705,7 +710,7 @@ Education an entry starts with <code dir="auto">### &lt;employer, project or sch
 heading lines (<code dir="auto">Staff Engineer | Jun 2020 - Present</code>), and lists <code dir="auto">- </code> bullets. Trailing
 <code dir="auto">&lt;!-- ... --&gt;</code> comments are dropped and lines above the first <code dir="auto">## </code> are not printed. Text prints
 as written (inline markdown such as <code dir="auto">**bold**</code> is not interpreted). Summary lines print as one
-paragraph and Skills as tags, so a summary or other line that was a bullet in your original
+paragraph and Skills as plain comma-separated lines, four at most, so a summary or other line that was a bullet in your original
 resume can print differently from the stored tailored resume’s PDF; use <code dir="auto">--tailored</code> (or
 <code dir="auto">POST /api/tailored-resumes/pdf</code>) when you want exactly that PDF.</li>
 <li>Errors are 422s that say what is wrong: <code dir="auto">resume_markdown_invalid</code> names the line number and the

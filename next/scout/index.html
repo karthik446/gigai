@@ -111,8 +111,8 @@ Grounding (src/gigai/scout/...): Update sources = find_jobs/sources_update.py (o
 board; Greenhouse/Lever/Ashby via find_jobs/ats_board_clients.py), stored in find_jobs/company_index.py
 (<home>/cache/scout/companies/). Find jobs: filters = find_jobs/filters.py; rank = find_jobs/model_rank.py +
 find_jobs/rank_run.py on the run's model target; assessment of top-ranked / all new = find_jobs/selection.py,
-find_jobs/assess_all.py, proposal_execution.py. Job page state = find_jobs/job_state.py. Tailor = tailored_resume.py
-(copy by default) + tailor_no_loss.py lost_items (no-loss check) + ui/src/tailoredResumeModel.js ("Keep original").
+find_jobs/assess_all.py, proposal_execution.py. Job page state = find_jobs/job_state.py. Resume = pick.py (picked from the master at
+assessment, word for word) + ui/src/components/JobResumePanel.jsx, ResumePreview.jsx, ResumePoints.jsx (tailoring is off by default).
 PDF = resume_pdf.py render_pdf; the header comes from the Generate PDF form (ui/src/components/GeneratePdfForm.jsx), used for that one render and never stored (0110-046).
 Jobs page = posting_search.py search_postings (no run); background = pipeline/runner.py, pipeline/steps.py, pipeline/rank_lane.py.
 Privacy edge to the model = resume_privacy.py model_resume (name and contact lines removed) for assess, tailor;
@@ -123,7 +123,7 @@ rank digest = find_jobs/rank_digest.py (compact digest). Wording = scout/privacy
     Boards[&quot;Update sources&lt;br/&gt;public ATS boards to the local company store&quot;]
     Run[&quot;Jobs&lt;br/&gt;your filters, background rank,&lt;br/&gt;assessments you approve&quot;]
     Page[&quot;Job page&lt;br/&gt;requirements, questions, state&quot;]
-    Tailor[&quot;Tailor&lt;br/&gt;copy by default, no-loss check,&lt;br/&gt;Keep original per line&quot;]
+    Tailor[&quot;Resume&lt;br/&gt;picked from your master, word for word;&lt;br/&gt;you edit points on the job page&quot;]
     Pdf[&quot;PDF&lt;br/&gt;your details typed in the form,&lt;br/&gt;used once, never stored&quot;]
     Kept[&quot;Never leaves: the PDF, stored data.&lt;br/&gt;Never stored: name and contact details&quot;]
     Boards --&gt; Run --&gt; Page --&gt; Tailor --&gt; Pdf
@@ -131,11 +131,10 @@ rank digest = find_jobs/rank_digest.py (compact digest). Wording = scout/privacy
   end
   subgraph Sent[&quot;Sent to the model provider you picked&quot;]
     RankIn[&quot;Ranking: one short line per posting&lt;br/&gt;and a compact resume digest&quot;]
-    TextIn[&quot;Assessment and tailoring: posting text and&lt;br/&gt;resume text with name and contact lines removed&quot;]
+    TextIn[&quot;Assessment: posting text and&lt;br/&gt;resume text with name and contact lines removed&quot;]
   end
   Run -- &quot;ranking&quot; --&gt; RankIn
-  Run -- &quot;assessment&quot; --&gt; TextIn
-  Tailor -- &quot;tailoring&quot; --&gt; TextIn</pre>
+  Run -- &quot;assessment&quot; --&gt; TextIn</pre>
 <div class="sl-heading-wrapper level-h2"><h2 id="where-to-go-next">Where to go next</h2><a class="sl-anchor-link" href="#where-to-go-next"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “Where to go next”</span></a></div>
 <ul>
 <li><a href="first-10-minutes/">Your first 10 minutes</a>: install, set up a profile, ask your agent what is new, make a PDF.</li>

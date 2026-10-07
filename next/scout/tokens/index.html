@@ -86,7 +86,8 @@ your agent’s usage. GigAI does not see or measure it.</li>
 <ul>
 <li><strong>It asks before it assesses.</strong> <code dir="auto">gigai scout new</code> (and <strong>Assess these</strong> in the UI) gives the
 count and an estimate from your own past calls, and assesses only on a yes. One model call per
-posting.</li>
+posting, at most 50 postings per approval, and a running batch can be cancelled
+(<a href="../quickstart/#assess-a-batch">Assess a batch</a>).</li>
 <li><strong><code dir="auto">gigai scout metrics</code> shows the averages</strong> once the first calls are recorded: tokens,
 seconds and error rate per kind of call and per model. A token estimate is shown only after a
 call has been measured.</li>
