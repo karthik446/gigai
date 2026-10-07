@@ -1,7 +1,9 @@
 ---
-title: How accurate is the picked resume (0.1.11)
+title: How accurate is the picked resume
 description: The standard, the method and the measured results of the 0.1.11 accuracy test on one real person's resume and real postings, and how to run it again.
 ---
+
+*Measured on GigAI 0.1.11. Later releases change the picker; the numbers here are the ones that were measured, not a promise for the version you run.*
 
 A resume is livelihood for the person it belongs to. We need it accurate, not usually accurate. This
 page says what "accurate" means here, what was measured on 15 postings the prompt and the code had
