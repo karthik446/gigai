@@ -58,6 +58,13 @@ function CleanCopy({ lines }) {
         if (line.kind === "blank") {
           return null;
         }
+        if (line.kind === "heading" && line.level === 3) {
+          return (
+            <h5 className="clean-entry" key={index} data-role={line.earlier ? "earlier-heading" : undefined}>
+              {line.text}
+            </h5>
+          );
+        }
         if (line.kind === "heading") {
           return (
             <h4 className="clean-section" key={index}>
@@ -87,7 +94,7 @@ function CleanCopy({ lines }) {
           );
         }
         return (
-          <p className="clean-text" key={index}>
+          <p className="clean-text" key={index} data-role={line.earlier ? "earlier-role" : undefined}>
             <Inline text={line.plain} />
           </p>
         );
@@ -163,7 +170,7 @@ function PreviewLine({ line, index, open, onToggle, promptFor, showChanges, onCh
   }
   if (line.kind === "heading") {
     return (
-      <div className="md-line heading">
+      <div className="md-line heading" data-role={line.earlier ? "earlier-heading" : undefined}>
         <span className="prov blank">·</span>
         <span>{line.display}</span>
       </div>
@@ -186,6 +193,7 @@ function PreviewLine({ line, index, open, onToggle, promptFor, showChanges, onCh
       tabIndex={0}
       aria-expanded={open}
       data-line-index={index}
+      data-role={line.earlier ? "earlier-role" : undefined}
       onClick={() => onToggle(index)}
       onKeyDown={(event) => {
         if (event.key === "Enter" || event.key === " ") {

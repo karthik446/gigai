@@ -163,7 +163,7 @@ def _missing(job: job_brief.StoredJob) -> JobActionError:
 
 
 #: What the OPEN read adds to the suggestions (``GET /api/jobs/suggestions``, the page): ``pick_view``'s stored view.
-OPEN_KEYS: tuple[str, ...] = ("verdict", "basis", "master_stored", "stale", "picked", "problems", "added_by_code", "conflicts", "selection_error", "proposed", "selected_lines", "requirements")
+OPEN_KEYS: tuple[str, ...] = ("verdict", "basis", "master_stored", "master_education", "stale", "picked", "problems", "added_by_code", "conflicts", "selection_error", "proposed", "selected_lines", "requirements")
 
 
 def list_suggestions(
@@ -342,25 +342,28 @@ def _resume_view(home_root: Path, resume: object | None, replaceable: bool) -> d
     }
 
 
-def _basis(home_root: Path, target: Path, check: object, profile_id: str, resolved: object | None) -> tuple[str | None, bool]:
-    """``(basis, master_stored)`` for the job's profile as it is now.
+def _basis(home_root: Path, target: Path, check: object, profile_id: str, resolved: object | None) -> tuple[str | None, bool, bool | None]:
+    """``(basis, master_stored, master_education)`` for the job's profile as it is now.
 
     ``basis``: ``master`` | ``profile_resume`` (the brief's own rule, ``tailor_master.tailoring_basis``), or ``None``:
     no gig, or the profile is gone.  Only ``master`` is picked from; ``profile_resume`` with a master stored is a
     profile whose resume was put there by hand.  ``check``: the view's ``BasisCheck``, which has read the profiles
-    for the stale check already (nothing is read twice).
+    for the stale check already (nothing is read twice).  ``master_education`` (0.1.11.4 item 9d): the stored master
+    has at least one Education entry; ``None`` with no master.  Read from the master this function loads anyway.
     """
 
     from .tailor_master import stored_master, tailoring_basis
 
     if resolved is None:
-        return None, False
-    has_master = stored_master(home_root, target, resolved=resolved) is not None
+        return None, False, None
+    stored = stored_master(home_root, target, resolved=resolved)
+    has_master = stored is not None
+    education = None if stored is None else any(entry.section == "education" for entry in stored.master.entries.values())
     try:
         profile = check._profile(profile_id)  # type: ignore[attr-defined]  # noqa: SLF001 - the profiles this request already read
     except Exception:  # noqa: BLE001 - a view never fails on what it cannot read: the basis is then unknown
-        return None, has_master
-    return (None if profile is None else tailoring_basis(home_root, profile, master_stored=has_master)), has_master
+        return None, has_master, education
+    return (None if profile is None else tailoring_basis(home_root, profile, master_stored=has_master)), has_master, education
 
 
 def pick_view(home_root: Path, target: Path, job_url: str, *, profile_id: str | None = None) -> dict[str, object]:
@@ -391,7 +394,7 @@ def pick_view(home_root: Path, target: Path, job_url: str, *, profile_id: str | 
         gate = {"decision": stored_gate.decision, "ready": None, "reasons": [reason.to_json() for reason in stored_gate.reasons]}
     questions = job_brief.open_questions(home_root, target, job.assessment)
     asked = {str(item["row"]): str(item["question_id"]) for item in questions if item["row"]}
-    basis, master_stored = _basis(home_root, target, check, job.profile_id, resolved)
+    basis, master_stored, master_education = _basis(home_root, target, check, job.profile_id, resolved)
     return {
         "schema_version": PICK_SCHEMA,
         "job_identity": job.job_identity,
@@ -399,6 +402,8 @@ def pick_view(home_root: Path, target: Path, job_url: str, *, profile_id: str | 
         # What a resume for this job is made from NOW (``tailor_master.tailoring_basis``): only ``master`` is picked from.
         "basis": basis,
         "master_stored": master_stored,
+        # 0.1.11.4 item 9d: the master holds an Education entry (null: no master). The page says "no education" from it.
+        "master_education": master_education,
         "verdict": job_brief._word(getattr(job.assessment.result, "verdict", None)),  # type: ignore[attr-defined]  # noqa: SLF001 - the brief's own reading of an enum
         "gate": None if gate is None else dict(gate),
         "stale": stale,

@@ -68,6 +68,17 @@ export function masterSections(master) {
   });
 }
 
+// 0.1.11.4 item 9d: a master with no school in it. A resume picked from it prints no education, so the page says so
+// (the CLI's `master show` says the same words) and offers the form that adds one.
+export const NO_EDUCATION_TEXT = "Your master has no education.";
+export const NO_EDUCATION_WHY = "A resume picked from it prints no degree.";
+export const ADD_EDUCATION_LABEL = "Add education";
+
+// True when the master holds no Education entry (false with no master: there is nothing to say yet).
+export function masterHasNoEducation(master) {
+  return Boolean(master) && !list(master.entries).some((entry) => entry && entry.section === "education");
+}
+
 // "Staff Software Engineer | Jun 2019 - Jan 2023" under a heading.
 export function entryWhen(entry) {
   return list(entry && entry.sublines).join(" · ");
@@ -332,6 +343,23 @@ export function leftOutRows(payload) {
         reason: text(row.reason),
         why: text(row.why),
       });
+    });
+  });
+  return rows;
+}
+
+// 0.1.11.4 item 9d: the lines of a resume that LOOK like education and did not become an Education entry, when the
+// master would have none (`source_lines.resumes[].education`): [{key, section, text}]. `text` is the server's own
+// sentence ("education: lines 31-32 of the resume of Staff Engineer were kept in Other, not as a degree"): line
+// numbers and a section, never the text of a line.
+export function educationRows(payload) {
+  const lines = payload && payload.migration && payload.migration.source_lines;
+  const rows = [];
+  list(lines && lines.resumes).forEach((resume, index) => {
+    list(resume.education).forEach((row) => {
+      if (row && text(row.message)) {
+        rows.push({ key: `${index}:${row.first}-${row.last}`, section: text(row.section), text: text(row.message) });
+      }
     });
   });
   return rows;
