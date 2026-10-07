@@ -42,6 +42,12 @@ A refusal names line numbers and the number or skill, never a line's text.
 0.1.11.5: ``POST /api/tailored-resumes/preview`` answers the stored job resume as page pictures (the PDF's own
 render) and saves the job page's slider as THIS job's spacing; ``POST /api/tailored-resumes/pdf`` uses that
 spacing, or the ``spacing_scale`` its body names.
+
+0.1.11.5 PH: the preview always shows a header.  With no ``header`` in the body it is the person's own, from their
+header file, for Scout's own browser page only (a request with this server's ``Origin``:
+``PdfHeaderRoutesMixin._preview_file_header``), and for every other caller, or with no usable file, a PLACEHOLDER
+header of the same size in a lighter grey.  ``header_shown`` says which (``form`` | ``file`` | ``placeholder``), never a
+value; the answer is ``Cache-Control: no-store``.  The PDF routes are unchanged: no ``header``, no header.
 """
 
 from __future__ import annotations
@@ -268,7 +274,11 @@ class TailoredResumesRoutesMixin:
         header, spacing and fit), so the pages here are the PDF's pages.  No model call.  ``spacing_scale`` is the
         job page's slider: it is SAVED as this job's spacing (``save_job_spacing``: a small file beside this job's
         stored resume, nothing else) and the PDF uses it from then on.  ``header`` is used for these pictures only
-        and dropped, as for the PDF."""
+        and dropped, as for the PDF.
+
+        0.1.11.5 PH: without ``header`` the pictures show the person's header file to Scout's own page (this server's
+        ``Origin``), else the placeholder header: as tall as a real one, so ``pages`` is the count of a PDF with a
+        header.  The file's values are in the pictures only: not stored, not logged, not in any other key."""
 
         import base64
 
@@ -280,8 +290,12 @@ class TailoredResumesRoutesMixin:
         if spacing is not None and save_job_spacing(home_root, target, stored.resume.profile_id, stored.job.job_identity, spacing) is None:
             self._error(HTTPStatus.NOT_FOUND, "tailored_resume_not_found", "no stored tailored resume for that profile and job")
             return
+        shown = "form"
+        if form is None:
+            form = self._preview_file_header()
+            shown = "file" if form is not None else "placeholder"
         try:
-            rendered, _file_name = stored_resume_pdf(stored, home_root=home_root, target=target, form=form, images=True)
+            rendered, _file_name = stored_resume_pdf(stored, home_root=home_root, target=target, form=form, images=True, placeholder=form is None)
         except Exception:  # noqa: BLE001 - a render failure is typed, and never echoes the resume or the form
             self._error(HTTPStatus.INTERNAL_SERVER_ERROR, "pdf_render_failed", "the preview could not be rendered")
             return
@@ -292,9 +306,10 @@ class TailoredResumesRoutesMixin:
             "saved": job_spacing(stored_job_path(stored, home_root, target)) is not None,
             "note": rendered.note,
             "spacing": {"min": SPACING_MIN, "max": SPACING_MAX, "step": 0.05},
+            "header_shown": shown,
             "image_type": "image/png",
             "images": [base64.b64encode(image).decode("ascii") for image in rendered.page_images],
-        })
+        }, {"Cache-Control": "no-store"})
 
     def _refuse_large_body(self) -> bool:
         """True (and a 422 written) when the request body is too large to be resume markdown."""

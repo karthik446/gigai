@@ -13,12 +13,17 @@ returns a value; nothing on disk).  Here:
 0.1.11.3 item 14: the form's Save button is the ONE writer of the file (``pdf_header_save``, called by one route
 handler); its request's values reach no log and no model prompt either.
 
+0.1.11.5 PH: the job page's resume preview is a THIRD reader, added on purpose: it shows the header the PDF will have,
+as page pictures, to Scout's own page only (``_preview_file_header``: the same Origin rule, checked before the file is
+opened).  Its request reaches no log and no model prompt, and its answer holds the values in the pictures alone.
+
 Synthetic values and tmp homes only.
 """
 
 from __future__ import annotations
 
 import ast
+import base64
 import json
 import logging
 import os
@@ -40,11 +45,17 @@ from tests.behaviors.scout_find_jobs.test_pdf_header_file import FILE, MARKERS
 
 SRC = Path(gigai.__file__).resolve().parent
 READER = "pdf_header_file"
-#: The two places that may read the user's header file, and the function of each that does.
+#: The places that may read the user's header file, and the functions of each that do.
 READERS = {
-    "scout/find_jobs/api/pdf_header.py": "_handle_post_pdf_header",  # the Generate PDF form's prefill: Scout's own page only
-    "scout/pdf_header_cli.py": "header_for_pdf",  # a PDF COMMAND's header: the values go into the one PDF at --out (0.1.11.4 C2: one reading, two commands)
+    "scout/find_jobs/api/pdf_header.py": {
+        "_handle_post_pdf_header",  # the Generate PDF form's prefill: Scout's own page only
+        "_preview_file_header",  # 0.1.11.5 PH (reviewed, deliberate): the job page's preview pictures, Scout's own page only
+    },
+    "scout/pdf_header_cli.py": {"header_for_pdf"},  # a PDF COMMAND's header: the values go into the one PDF at --out (0.1.11.4 C2: one reading, two commands)
 }
+#: 0.1.11.5 PH: the one handler that asks for the preview's reading (``POST /api/tailored-resumes/preview``).
+PREVIEW_READER = "_preview_file_header"
+PREVIEW_CALLS = {"scout/find_jobs/api/tailored_resumes.py": {"_handle_post_tailored_resume_preview"}}
 #: 0.1.11.4 C2: the commands that may ask for that reading, and the function of each that does. Each writes ONE PDF to --out.
 COMMAND_READER = "header_for_pdf"
 COMMANDS = {
@@ -99,8 +110,45 @@ def test_only_the_form_route_and_the_pdf_command_can_read_the_file() -> None:
             if isinstance(function, (ast.FunctionDef, ast.AsyncFunctionDef))
             and any(isinstance(node, ast.Call) and ast.unparse(node.func).endswith("read_header_file") for node in ast.walk(function))
         }
-        assert calls == {READERS[relative]}, f"{relative}: the file is read in {sorted(calls)}"
-        assert holders <= {READERS[relative]}, f"{relative}: {sorted(holders)} use the reader module"
+        assert calls == READERS[relative], f"{relative}: the file is read in {sorted(calls)}"
+        assert holders <= READERS[relative], f"{relative}: {sorted(holders)} use the reader module"
+
+
+def test_only_the_preview_route_asks_for_the_previews_reading_and_only_for_scouts_own_page() -> None:
+    """0.1.11.5 PH: one handler calls ``_preview_file_header``; the caller is checked before the file is opened; the
+    values go to the renderer and into no key of the answer, no log and no file."""
+    callers = {}
+    for path in sorted(SRC.rglob("*.py")):
+        relative = path.relative_to(SRC).as_posix()
+        source = path.read_text(encoding="utf-8")
+        if PREVIEW_READER not in source:
+            continue
+        calls = {
+            function.name
+            for function in ast.walk(ast.parse(source))
+            if isinstance(function, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and any(isinstance(node, ast.Call) and ast.unparse(node.func).endswith(PREVIEW_READER) for node in ast.walk(function))
+        }
+        if calls:  # a mention in words (a docstring) is fine
+            callers[relative] = calls
+    assert callers == PREVIEW_CALLS, callers
+    route = (SRC / "scout" / "find_jobs" / "api" / "pdf_header.py").read_text(encoding="utf-8")
+    reading = route[route.index(f"def {PREVIEW_READER}"):route.index("def _handle_post_pdf_header_save")]
+    assert reading.index('if not self.headers.get("Origin"):\n            return None') < reading.index("read_header_file("), "the caller is checked before the file is opened"
+    for banned in ("_log", "self._write", "self._error", "open(", "write_text", "write_bytes"):
+        assert banned not in reading, f"the preview's reading must not {banned}"
+    handlers = (SRC / "scout" / "find_jobs" / "api" / "tailored_resumes.py").read_text(encoding="utf-8")
+    handler = handlers[handlers.index("def _handle_post_tailored_resume_preview"):handlers.index("def _refuse_large_body")]
+    code = handler.split('"""')[2]  # past the docstring
+    # What is read goes into ``form`` and from there to the renderer alone: every use of it is "is it there" or the render's own argument.
+    function = next(node for node in ast.walk(ast.parse(handlers)) if isinstance(node, ast.FunctionDef) and node.name == "_handle_post_tailored_resume_preview")
+    uses = [node for node in ast.walk(function) if isinstance(node, ast.Name) and node.id == "form" and isinstance(node.ctx, ast.Load)]
+    asked = {id(node.left) for node in ast.walk(function) if isinstance(node, ast.Compare) and all(isinstance(op, (ast.Is, ast.IsNot)) for op in node.ops)}
+    rendered = {id(keyword.value) for node in ast.walk(function) if isinstance(node, ast.Call) and ast.unparse(node.func) == "stored_resume_pdf" for keyword in node.keywords if keyword.arg == "form"}
+    assert len(rendered) == 1 and uses and all(id(node) in asked | rendered for node in uses), "the header's values go somewhere else than the render"
+    answer = code[code.index("self._write_json(HTTPStatus.OK"):]
+    assert "form" not in answer and '"header_shown": shown' in answer and '{"Cache-Control": "no-store"}' in answer
+    assert "placeholder=form is None" in code, "with no header of the person's the pictures show the placeholder, never a blank or an error"
 
 
 def test_only_the_two_pdf_commands_ask_for_the_header_and_neither_prints_it() -> None:
@@ -262,6 +310,21 @@ def test_no_model_prompt_and_no_log_holds_a_value_of_the_file(running) -> None:
     tailored = client.post("/api/tailored-resumes", json={"job": _JOB})
     assert tailored.status_code == 200, tailored.text
 
+    # 0.1.11.5 PH: the job page's preview reads the file too, for Scout's own page; any other caller gets the placeholder.
+    key = {"profile_id": tailored.json()["resume"]["profile_id"], "job_identity": tailored.json()["job"]["job_identity"]}
+    shown = client.post("/api/tailored-resumes/preview", json=key, headers=page)
+    other = client.post("/api/tailored-resumes/preview", json=key)
+    assert shown.status_code == 200 and other.status_code == 200, (shown.text, other.text)
+    assert (shown.json()["header_shown"], other.json()["header_shown"]) == ("file", "placeholder")
+    assert shown.headers["cache-control"] == "no-store" and other.headers["cache-control"] == "no-store"
+    assert base64.b64decode(shown.json()["images"][0]) != base64.b64decode(other.json()["images"][0]), "the two callers got the same header"
+    for answer in (shown, other):
+        said = json.dumps({name: value for name, value in answer.json().items() if name != "images"}) + "\n" + "\n".join(f"{name}: {value}" for name, value in answer.headers.items())
+        for marker in MARKERS:
+            assert marker not in said, f"the preview's answer holds {marker!r} outside its pictures"
+    # ... and the model is called once more after it.
+    assert client.post("/api/assess", json={"job": {**_JOB, "title": "Staff Engineer II"}}).status_code == 200
+
     prompts = [request for request in sent if b"Northwind" in request or b"Staff Engineer" in request]
     assert len(prompts) >= 2, f"the model requests were recorded ({len(sent)} requests, {len(prompts)} with the resume or the posting)"
     for request in sent:
@@ -272,5 +335,6 @@ def test_no_model_prompt_and_no_log_holds_a_value_of_the_file(running) -> None:
     assert "/api/pdf-header" in logged, "the route's requests are in the log (so the scan reads something)"
     assert "forbidden_origin: the header file is read for Scout's own page only" in logged
     assert "/api/pdf-header/save" in logged and "forbidden_origin: the header file is written for Scout's own page only" in logged
+    assert logged.count("/api/tailored-resumes/preview") >= 2, "the preview's requests are in the log"
     for marker in MARKERS:
         assert marker not in logged, f"a log line holds {marker!r}"

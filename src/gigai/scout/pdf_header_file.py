@@ -28,10 +28,11 @@ read as the id.  ``website`` takes a host or a URL.  Each prints without ``https
 clickable link to the full URL.  ``links`` keeps working beside them; a link both name prints once.  A
 shorthand value that still starts with ``REPLACE`` is a placeholder like any other (item 14, below).
 
-**GigAI only READS it, at PDF time.**  ``read_header_file`` is called from exactly two places: the
-Generate PDF form's prefill (``api/pdf_header.py``, the browser page's own route) and ``gigai scout
-resume pdf`` when it renders a PDF with a header.  The values go into that one form or that one PDF
-and nowhere else: this module writes nothing, logs nothing, and its errors and warnings name a field
+**GigAI only READS it, at PDF time.**  ``read_header_file`` is called from exactly three places: the
+Generate PDF form's prefill and the job page's resume preview (both in ``api/pdf_header.py``, both for the
+browser page alone: 0.1.11.5 PH, the preview's page pictures show the header the PDF will have) and a PDF
+command when it renders a PDF with a header (``pdf_header_cli``).  The values go into that one form, those
+pictures or that one PDF and nowhere else: this module writes nothing, logs nothing, and its errors and warnings name a field
 and a rule, never a value.  Nothing here is imported by the store, the journal, a record, a brief, a
 suggestion or a model prompt (``tests/behaviors/scout_find_jobs/test_pdf_header_file_privacy.py``).
 

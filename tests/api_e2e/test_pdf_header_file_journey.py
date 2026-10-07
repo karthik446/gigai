@@ -12,12 +12,16 @@ home other than ``~/.gigai``).  The journey:
    resume and no headerless PDF holds a value of it.  The CLI's brief does not either.
 5. ``gigai scout resume pdf --out`` makes the full PDF from the same file, the profile's sponsorship answer filling the
    work authorization line when the file has no such key.
+   0.1.11.5 PH: the job page's PREVIEW shows that header, as page pictures, to Scout's own page only: the same request
+   without this server's ``Origin`` (an agent) gets the placeholder header, byte for byte the pictures of a home with no
+   header file, and no key or header of either answer holds a value.
 6. NOWHERE ON DISK but the file itself: the store, the journal (every git object), the logs, the records, the
    suggestions, ``master.md``, the job resume's markdown and JSON, the resumes folder, the target, the workpad.
 """
 
 from __future__ import annotations
 
+import base64
 import io
 import json
 import os
@@ -75,6 +79,18 @@ def _answer(response: httpx.Response) -> str:
     headers = "\n".join(f"{name}: {value}" for name, value in response.headers.items())
     body = "\n".join(page.extract_text() for page in PdfReader(io.BytesIO(response.content)).pages) if response.content.startswith(b"%PDF") else response.text
     return headers + "\n" + body
+
+
+def _preview(client: httpx.Client, key: dict[str, str], headers: dict[str, str] | None = None, **body: object) -> tuple[str, list[bytes]]:
+    """``(header_shown, the page pictures)`` of one preview; nothing of the answer but the pictures holds a value."""
+    response = client.post("/api/tailored-resumes/preview", json={**key, **body}, headers=headers or {})
+    assert response.status_code == 200, response.text
+    assert response.headers["cache-control"] == "no-store"
+    payload = response.json()
+    pictures = [base64.b64decode(image) for image in payload["images"]]
+    assert pictures and all(picture.startswith(b"\x89PNG") for picture in pictures)
+    _silent("the preview's answer outside its pictures", "\n".join(f"{name}: {value}" for name, value in response.headers.items()), json.dumps({name: value for name, value in payload.items() if name != "images"}))
+    return payload["header_shown"], pictures
 
 
 def _write_header(path: Path, content: object = FILE, mode: int = 0o600) -> None:
@@ -206,6 +222,29 @@ def test_the_header_file_fills_the_form_and_the_pdf_and_reaches_nobody_else(tmp_
             _silent(name, _answer(response))
         stored = client.post("/api/tailored-resumes/pdf", json={**key, "header": values}, headers=page)
         assert stored.status_code == 200 and _pdf_text(stored.content).startswith(_squeeze("ZORA QUILLFEATHER", CONTACT))
+
+        # 0.1.11.5 PH: the job page's preview. Scout's own page sees the file's header: the very pictures of the form's
+        # values, with the pages of the PDF just made from them ...
+        mine = _preview(client, key, page)
+        typed = _preview(client, key, page, header=values)
+        assert mine[0] == "file" and typed[0] == "form" and mine[1] == typed[1], "Scout's own page does not see the header of the file"
+        assert len(mine[1]) == len(PdfReader(io.BytesIO(stored.content)).pages)
+        # ... and an agent (no Origin) the placeholder: the pictures this home has with NO header file at all.
+        agent = _preview(client, key)
+        assert agent[0] == "placeholder" and agent[1][0] != mine[1][0], "a caller without this server's Origin got the person's header"
+        header_file.unlink()
+        assert _preview(client, key, page) == agent == _preview(client, key), "without the file every caller sees the placeholder, the agent's pictures"
+        _write_header(header_file)
+        for foreign in ("http://evil.example.invalid", "http://127.0.0.1:1"):
+            refused = client.post("/api/tailored-resumes/preview", json=key, headers={"Origin": foreign})
+            assert refused.status_code == 403, refused.text
+            _silent("a foreign Origin's preview", _answer(refused))
+        # No work_authorization key in the file: the line is the profile's sponsorship answer, as in the form and the command.
+        _write_header(header_file, {key_: value for key_, value in FILE.items() if key_ != "work_authorization"})
+        defaulted_preview = _preview(client, key, page)
+        assert defaulted_preview[0] == "file" and defaulted_preview[1] != mine[1]
+        assert defaulted_preview[1] == _preview(client, key, page, header={**values, "work_authorization": "Requires visa sponsorship"})[1]
+        _write_header(header_file)
 
         folder = Path(client.get("/api/resumes-folder").json()["path"])
         workpad = resolve_workpad_path(home, target)

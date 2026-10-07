@@ -5,11 +5,11 @@ import {
   AUTO_TEXT,
   HEADER_DEBOUNCE_MS,
   LOADING_TEXT,
-  NO_HEADER_TEXT,
   SAVED_TEXT,
   SLIDER_DEBOUNCE_MS,
   UPDATING_TEXT,
   headerKey,
+  headerLine,
   pagesLine,
   previewOf,
   sliderRange,
@@ -31,8 +31,11 @@ import {
 //            longer wanted is cancelled.
 //
 // `header` is what Generate PDF would send now (the open form's values), or
-// null while the form is closed or has no name: the preview is then the
-// headerless PDF, with the blank block it keeps for the header.
+// null while the form is closed or has no name. 0.1.11.5 PH: the server then
+// shows the person's own header file (to this page only), or a placeholder
+// header of the same size in a lighter grey; one line under the slider says
+// which (resumePreviewModel.headerLine). The page never holds those values:
+// they are in the pictures only.
 // `onSpacing(value)` tells the panel the spacing on screen, which Generate PDF
 // sends.
 // 0.1.11.5 (b): `content` is the stored resume's text as the panel holds it.
@@ -102,6 +105,7 @@ export default function ResumePreview({ profileId, jobIdentity, header = null, o
   const range = sliderRange(preview);
   const value = slider !== null ? slider : preview ? preview.spacing : null;
   const line = pagesLine(preview);
+  const headerNote = headerLine(preview);
   const state = error ? "error" : !preview ? "loading" : busy ? "updating" : "ready";
   const move = (event) => {
     const next = clampSpacing(event.target.value);
@@ -112,7 +116,7 @@ export default function ResumePreview({ profileId, jobIdentity, header = null, o
   };
 
   return (
-    <div className="resume-preview" data-testid="resume-preview" data-state={state} data-with-points={side ? "true" : undefined} data-pages={preview ? preview.pages : undefined} data-spacing={preview ? preview.spacing.toFixed(2) : undefined} data-header={header ? "true" : "false"}>
+    <div className="resume-preview" data-testid="resume-preview" data-state={state} data-with-points={side ? "true" : undefined} data-pages={preview ? preview.pages : undefined} data-spacing={preview ? preview.spacing.toFixed(2) : undefined} data-header={header ? "true" : "false"} data-header-shown={preview && preview.headerShown ? preview.headerShown : undefined}>
       <div className="resume-preview-side">
         <div className="form-group" data-role="preview-spacing-control">
           <label className="form-label" htmlFor="resume-preview-spacing">
@@ -148,9 +152,9 @@ export default function ResumePreview({ profileId, jobIdentity, header = null, o
             {preview.saved || slider !== null ? SAVED_TEXT : AUTO_TEXT}
           </p>
         )}
-        {!header && preview && (
-          <p className="muted small" data-role="preview-no-header">
-            {NO_HEADER_TEXT}
+        {headerNote && (
+          <p className="muted small" data-role="preview-header-note">
+            {headerNote}
           </p>
         )}
         {error && (

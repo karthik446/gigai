@@ -43,6 +43,9 @@ the new pick of up to 20 points, and open the job page to set the spacing yourse
   (never the type size), so a 20-point resume that is 3 pages at 1.0 reaches 2 pages lower down. What you set is
   saved for that job (in a small `.layout` file beside the job's resume; older versions ignore it), the preview and
   the downloaded PDF are the same render, and nothing else is written.
+  The preview shows a header too: yours, from `header.json`, when that file has your name (read for the
+  pictures on your own page only, never stored), and otherwise a grey placeholder ("Your Name") of the same
+  size, so the page count is the one your PDF will have. A PDF never contains the placeholder.
 - **Edit, remove or add a point beside the preview.** A list of the picked points: change a point's words, remove it,
   or add one from the lines your master left out. Each change is saved to this job's resume straight away, the
   preview re-renders, and the page count follows. Nothing reaches your master unless you ask: an edited point has

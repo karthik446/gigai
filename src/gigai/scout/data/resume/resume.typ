@@ -61,7 +61,11 @@
 #let desc = 0.2412109375
 #let edges(size, lh) = (top-edge: (lh + (asc - desc) * size) / 2, bottom-edge: -(lh - (asc - desc) * size) / 2)
 #let t(body, size: 9.5pt, lh: 14.3pt, weight: 300, fill: ink, tracking: 0pt) = text(size: size, weight: weight, fill: fill, tracking: tracking, ..edges(size, lh), body)
-#set document(title: d.doc_title, author: if d.name == "" { () } else { d.name })
+// A PLACEHOLDER HEADER (0.1.11.5 PH; the job page's preview only, never a PDF: resume_pdf._render): "Your Name" and
+// one contact line stand where the person's own header will print, the same lines in the same boxes, in a lighter grey.
+#let placeholder = d.at("placeholder", default: false)
+#let faint = rgb("#A6A8AD")
+#set document(title: d.doc_title, author: if d.name == "" or placeholder { () } else { d.name })
 #set text(font: "Inter", size: 9.5pt, weight: 300, fill: ink, lang: "en", ..edges(9.5pt, 14.3pt))
 #set par(leading: 0pt, spacing: 0pt)
 #set block(spacing: 0pt)
@@ -105,14 +109,14 @@
   head-name(block(height: 16.6pt))
   for _ in range(int(d.at("blank_lines", default: 1))) { head-line(block(height: 14.3pt)) }
 }
-#if d.name != "" { head-name(t(upper(d.name), size: 16.6pt, lh: 16.6pt, weight: 600, tracking: 0.77pt)) }
-#if d.title != "" { head-line(d.title) }
+#if d.name != "" { head-name(t(upper(d.name), size: 16.6pt, lh: 16.6pt, weight: 600, tracking: 0.77pt, fill: if placeholder { faint } else { ink })) }
+#if d.title != "" { head-line(if placeholder { text(fill: faint, d.title) } else { d.title }) }
 // SHRINK BEFORE WRAP (item 16): a contact line too long for the page is set smaller, a step at a time down to the
 // last of `contact-sizes` (never below it), in the same 14.3pt line box, so the header is
 // as tall as before.  Only a line that is too long even there wraps, at the full size.
 #let contact-sizes = (9.5pt, 9pt, 8.5pt, 8pt)
 #let contact-line(items) = layout(avail => {
-  let made(size) = t(items.map(item).join([ | ]), size: size, fill: soft)
+  let made(size) = t(items.map(item).join([ | ]), size: size, fill: if placeholder { faint } else { soft })
   let fits = contact-sizes.find(size => measure(made(size)).width <= avail.width)
   made(if fits == none { contact-sizes.first() } else { fits })
 })

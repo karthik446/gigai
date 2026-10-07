@@ -359,7 +359,8 @@ export default function JobResumePanel({ state, assessment, gate, items, reasses
   const storedStamp = stored ? `${stored.updated_at}|${stored.markdown ? stored.markdown.length : 0}` : "";
   // 0.1.11.5 (a): the rendered preview. Its header is what Generate PDF would send: the form's values while the
   // form is open (`formHeader`; the page holds them no longer than the form does). With the form closed the preview
-  // is the headerless PDF: the header's space is kept blank. `previewSpacing` is the spacing on screen.
+  // shows the header the server has for it (0.1.11.5 PH: the person's header file, else a placeholder header of the
+  // same size); the page holds none of it. `previewSpacing` is the spacing on screen.
   const [formHeader, setFormHeader] = useState(undefined);
   const [previewSpacing, setPreviewSpacing] = useState(null);
   useEffect(() => {

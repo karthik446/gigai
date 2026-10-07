@@ -157,9 +157,11 @@ details): `~/Documents/GigAI/header.json` (a GigAI home other than `~/.gigai`:
   key out and it starts from your profile's sponsorship answer; set it to `""` to leave it out.
 - What prints is decided in this order: what you edit in the form, then the file, then the
   profile's sponsorship answer.
-- Scout reads the file only to fill the form or make a PDF with
-  `gigai scout resume pdf`, and writes it only when you press the Save button described
-  below. It is never copied into GigAI's store, a log, a record, a suggestion, a job brief,
+- Scout reads the file only to fill the form, to show your header in the resume preview on a
+  job's page, or to make a PDF with `gigai scout resume pdf`, and writes it only when you press
+  the Save button described below. The preview shows it to your own browser only, as page
+  pictures: an agent that asks for the preview gets a grey placeholder header ("Your Name")
+  instead, and so do you until the file has a name. The placeholder is never in a PDF. It is never copied into GigAI's store, a log, a record, a suggestion, a job brief,
   the resumes folder or a model prompt, and Scout's agent API does not return it.
 - Keep it to yourself: `chmod 600 ~/Documents/GigAI/header.json`. The form and the command
   say so when other users of the computer can read it.

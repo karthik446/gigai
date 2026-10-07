@@ -18,7 +18,23 @@ export const UPDATING_TEXT = "Updating the preview";
 export const LOADING_TEXT = "Making the preview";
 export const SAVED_TEXT = "Saved for this job. Generate PDF uses this spacing.";
 export const AUTO_TEXT = "Fitted automatically. Move the slider to set this job's spacing; it is saved for this job.";
-export const NO_HEADER_TEXT = "Shown without your name and contact details: the space for them is kept. Open Generate PDF to see them here.";
+// 0.1.11.5 PH: the preview always shows a header, and ONE line under it says whose (the server's `header_shown`).
+//   placeholder  no header of the person's to show (no header file, or one with no usable name; any caller that is
+//                not Scout's own page): "Your Name" and an invented contact line in a lighter grey, as tall as a
+//                real header, so the page count is the PDF's. It is never in a downloaded PDF.
+//   file         the person's own header file, read by the server for these pictures only. The line names the
+//                file, never a value of it.
+//   form         what the open Generate PDF form holds: the person is looking at those values; no line.
+export const PLACEHOLDER_HEADER_TEXT = "Placeholder header: add yours in Generate PDF";
+export const FILE_HEADER_TEXT = "Showing your header from header.json";
+
+// The line under the preview for the header it shows, or null.
+export function headerLine(preview) {
+  if (!preview) {
+    return null;
+  }
+  return preview.headerShown === "placeholder" ? PLACEHOLDER_HEADER_TEXT : preview.headerShown === "file" ? FILE_HEADER_TEXT : null;
+}
 
 // "1 page" / "2 pages".
 export function pagesLabel(pages) {
@@ -44,6 +60,7 @@ export function previewOf(answer) {
     spacing: clampSpacing(answer.spacing_scale),
     saved: answer.saved === true,
     note: typeof answer.note === "string" && answer.note ? answer.note : null,
+    headerShown: ["form", "file", "placeholder"].includes(answer.header_shown) ? answer.header_shown : null,
     images: answer.images.filter((image) => typeof image === "string" && image).map((image) => `data:${type};base64,${image}`),
     range: sliderRange(answer),
   };

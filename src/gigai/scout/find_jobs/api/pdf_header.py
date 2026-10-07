@@ -29,6 +29,12 @@ the file: ``pdf_header_save``, once per click, 0600, atomic, never over an exist
 ``replace`` (the form asks first).  The request's values go into that file and nowhere else: this handler does not
 log them, and its answer (``state``, the path, one plain sentence) holds none of them, so it leaves through the
 ordinary ``_write_json``.
+
+0.1.11.5 PH: the job page's PREVIEW (``POST /api/tailored-resumes/preview``) shows the person's header from the same
+file, read by ``_preview_file_header`` below for that one render: the same caller rule (this server's own ``Origin``,
+checked before the file is opened), the same reader and its skipping rules, and the command's rule that a header
+needs a name.  The values go into the page PICTURES of that one answer and nowhere else; any other caller, and a
+file that cannot make a header, gets the preview's placeholder header, never an error.
 """
 
 from __future__ import annotations
@@ -39,7 +45,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from ...data_labels import LABELS_HEADER
-from ...pdf_header_file import default_path, prefill_response, read_header_file
+from ...pdf_header_file import HeaderFileError, default_path, prefill_response, read_header_file, render_form
 from ...pdf_header_save import SAVED_FIELDS, HeaderSaveError, save_header_file
 from .openapi import response_labels_header
 
@@ -68,6 +74,30 @@ class PdfHeaderRoutesMixin:
             HTTPStatus.OK, "application/json", payload,
             {LABELS_HEADER: response_labels_header(self.command or "", urlsplit(self.path).path), "Cache-Control": "no-store"},
         )
+
+    def _preview_file_header(self) -> dict[str, object] | None:
+        """The header file's values for ONE preview render (0.1.11.5 PH), or ``None``: the preview shows the placeholder.
+
+        ``None`` for a caller that is not Scout's own page (no ``Origin``: curl, a script, the user's agent; the file is
+        then not opened), and for a file that is missing, invalid, all placeholders or has no usable name.  Nobody edits
+        a form here, so the values are the command's (``pdf_header_file.render_form``): the file, then the profile's
+        sponsorship answer for the work authorization line.  Nothing is written or logged, and the caller returns
+        page pictures only."""
+
+        if not self.headers.get("Origin"):
+            return None
+        home_root, target = getattr(self._backend, "home_root", None), getattr(self._backend, "target", None)
+        if home_root is None:
+            return None
+        found = read_header_file(default_path(home_root))
+        if not found.filled:
+            return None
+        from ..resume_input import read_config_preferences
+
+        try:
+            return render_form(found, visa_required=read_config_preferences(target)[0] if target is not None else False)
+        except HeaderFileError:
+            return None
 
     def _handle_post_pdf_header_save(self) -> None:
         if not self.headers.get("Origin"):
