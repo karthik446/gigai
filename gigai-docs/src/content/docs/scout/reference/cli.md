@@ -842,7 +842,7 @@ The resume picked for ONE job, as stored: who picked it, the gate, what is stale
 
 `gigai scout resume pick [OPTIONS]`
 
-effect: `write` · external: `none` · output: Human-readable text; --json emits one JSON object: {ok, schema_version, job_identity, profile_id, basis, master_stored, master_education, verdict, gate, stale, resume, resume_unreadable, picked, problems, added_by_code, conflicts, selection_error, proposed} (and action after a step).
+effect: `write` · external: `none` · output: Human-readable text; --json emits one JSON object: {ok, schema_version, job_identity, profile_id, basis, master_stored, master_education, verdict, gate, stale, stale_lines, resume, resume_unreadable, picked, problems, added_by_code, conflicts, selection_error, proposed} (and action after a step).
 
 Example:
 

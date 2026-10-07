@@ -42,6 +42,8 @@ stored assessment, this record and the kept master, and writes no file).
 ==========================  ==================================================================
 ``assessment_stale:<why>``  the stored assessment's own stale reason (``assessment_basis``)
 ``picked_line_changed``     a printed line's mark is not the recorded one, or the line is retired
+                            (``changed_lines``: only a line the stored resume STILL prints, a
+                            reworded one only while it shows the master's old words)
 ``master_newer``            the master's revision is not the one the selection was made from, and
                             no printed line changed (a note, not a warning)
 ``selection_rules_changed`` ``pick_rules_version`` or ``selector_version`` is not the shipped one
@@ -650,10 +652,58 @@ def resolve_suggestion(record: SuggestionRecord, suggestion_id: str, *, by: str,
 # --- the stale list (2.4) ------------------------------------------------------------------------------------------
 
 
+#: ``changed_lines``'s ``change``: the master no longer holds the line, or holds it with other words.
+CHANGE_RETIRED = "retired"
+CHANGE_REWORDED = "reworded"
+
+
+def printed_copies(result: object) -> dict[str, bool]:
+    """Master line id -> whether the stored job resume prints it in the MASTER'S words (a copy), for each line it shows.
+
+    ``False``: the resume shows the line only in the user's own words (a point they edited).  Pure.
+    """
+
+    from .tailored_resume import replaced_line
+
+    out: dict[str, bool] = {}
+    for section in result.sections:  # type: ignore[attr-defined]
+        for line in section.body_lines():
+            own = line.kind == "custom"
+            for ref in (*line.refs, *replaced_line(line).refs):
+                item_id = getattr(ref, "item_id", None)
+                if ref.kind == "resume" and item_id is not None:
+                    out[item_id] = out.get(item_id, False) or not own
+    return out
+
+
+def changed_lines(
+    selection: Mapping[str, object] | None, marks_now: Mapping[str, str] | None, printed: Mapping[str, bool] | None = None,
+) -> tuple[dict[str, str], ...]:
+    """The picked lines the master changed since the pick: ``{"id", "change": retired | reworded}`` each. Pure.
+
+    ``marks_now``: the master as it is (line id -> mark; a missing id is a retired line); ``None``: nothing is compared.
+    ``printed`` (``printed_copies`` of the job resume as it is STORED now): only a line the resume still prints
+    counts, a reworded one only while the resume shows the master's old words.  So taking a retired line off the
+    resume, or putting the new wording on it, settles the line with no new pick.  ``None``: every recorded line counts.
+    """
+
+    if marks_now is None:
+        return ()
+    found: list[dict[str, str]] = []
+    for item_id, mark in recorded_marks(selection).items():
+        now = marks_now.get(item_id)
+        if now == mark:
+            continue
+        if printed is not None and (item_id not in printed or (now is not None and not printed[item_id])):
+            continue
+        found.append({"id": item_id, "change": CHANGE_RETIRED if now is None else CHANGE_REWORDED})
+    return tuple(found)
+
+
 def stale(
     record: SuggestionRecord | None, *, assessment_stale: str | None = None, result_digest_now: str | None = None,
     master_revision_id: str | None = None, marks_now: Mapping[str, str] | None = None, pick_rules_version: str | None = None,
-    selector_version: str | None = None,
+    selector_version: str | None = None, printed: Mapping[str, bool] | None = None,
 ) -> tuple[str, ...]:
     """The stale codes of one job, from what is STORED and what is shipped now (the module text's table). Pure.
 
@@ -662,7 +712,8 @@ def stale(
     assessment's answer digest.  ``master_revision_id`` / ``marks_now``: the
     master as it is (``marks_now``: line id -> mark; a missing id is a retired
     line).  ``pick_rules_version`` / ``selector_version``: the shipped ones.
-    A value left ``None`` is not compared.
+    A value left ``None`` is not compared.  ``printed``: what the stored job
+    resume prints now (``changed_lines``); ``None``: every recorded line counts.
     """
 
     found: list[str] = []
@@ -673,9 +724,7 @@ def stale(
         return tuple(found)
     made_from = selection.get("made_from")
     made_from = made_from if isinstance(made_from, Mapping) else {}
-    recorded = recorded_marks(selection)
-    changed = marks_now is not None and any(marks_now.get(item_id) != mark for item_id, mark in recorded.items())
-    if changed:
+    if changed_lines(selection, marks_now, printed):
         found.append(STALE_PICKED_LINE)
     elif master_revision_id is not None and made_from.get("master_revision_id") not in (None, master_revision_id):
         found.append(STALE_MASTER_NEWER)
@@ -781,13 +830,17 @@ def save_record(record: SuggestionRecord) -> None:
     atomic_write(Path(record.stored_path), json.dumps(record.to_json(), indent=2, sort_keys=True).encode("utf-8"))
 
 
-def stale_for(
+def stale_view(
     home_root: Path, target: Path, profile_id: str | None, job_identity: str, *, assessment_stale: str | None = None, resolved: object | None = None,
-) -> tuple[str, ...]:
-    """The stale list of one job as it is stored NOW (2.4): three reads, nothing recomputed, nothing written.
+    resume: object | None = None,
+) -> tuple[tuple[str, ...], tuple[dict[str, str], ...]]:
+    """``(stale list, changed lines)`` of one job as it is stored NOW (2.4): three reads, nothing recomputed, nothing written.
 
     ``assessment_stale``: the stored assessment's own stale reason when the
-    caller has it (``assessment_basis.BasisCheck.reason``).
+    caller has it (``assessment_basis.BasisCheck.reason``).  ``resume``: the
+    stored job resume when the caller has read it (nothing is read for it
+    here): ``picked_line_changed`` and the changed lines are then about the
+    lines it still prints (``changed_lines``).
     """
 
     from .master_selection import SELECTOR_VERSION
@@ -799,11 +852,22 @@ def stale_for(
     assessment = read_quick_assessment(home_root, target, profile_id, job_identity)
     master = stored_master(Path(home_root), Path(target), resolved=resolved)
     marks = None if master is None else {item.id: item.mark for item in master.master.items.values()}  # type: ignore[attr-defined]
-    return stale(
+    printed = None if resume is None else printed_copies(resume.result)  # type: ignore[attr-defined]
+    codes = stale(
         record, assessment_stale=assessment_stale, result_digest_now=None if assessment is None else result_digest(assessment),
         master_revision_id=None if master is None else master.revision.revision_id, marks_now=marks,  # type: ignore[attr-defined]
-        pick_rules_version=PICK_RULES_VERSION, selector_version=SELECTOR_VERSION,
+        pick_rules_version=PICK_RULES_VERSION, selector_version=SELECTOR_VERSION, printed=printed,
     )
+    return codes, changed_lines(record.selection if record is not None else None, marks, printed)
+
+
+def stale_for(
+    home_root: Path, target: Path, profile_id: str | None, job_identity: str, *, assessment_stale: str | None = None, resolved: object | None = None,
+    resume: object | None = None,
+) -> tuple[str, ...]:
+    """The stale list of one job as it is stored NOW: ``stale_view``'s first part."""
+
+    return stale_view(home_root, target, profile_id, job_identity, assessment_stale=assessment_stale, resolved=resolved, resume=resume)[0]
 
 
 # --- the job resume and the record, written together (1.7 step 4; 2.4 "user edits are preserved") ----------------------
@@ -1075,6 +1139,8 @@ def dismiss_proposed(home_root: Path, target: Path, profile_id: str | None, job_
 
 __all__ = [
     "ANSWER_ONLY_WHY",
+    "CHANGE_RETIRED",
+    "CHANGE_REWORDED",
     "COVERAGES",
     "COVERAGE_ANSWER_ONLY",
     "COVERAGE_KEPT",
@@ -1103,6 +1169,7 @@ __all__ = [
     "SuggestionRecord",
     "add_suggestion",
     "basis_of",
+    "changed_lines",
     "check_selection",
     "dismiss_proposed",
     "drop_proposal_after_edit",
@@ -1115,6 +1182,7 @@ __all__ = [
     "without_page_reasons",
     "marks_json",
     "merged",
+    "printed_copies",
     "printed_ids",
     "proposal_is_stale",
     "proposed_resume_path",
@@ -1129,6 +1197,7 @@ __all__ = [
     "save_record",
     "stale",
     "stale_for",
+    "stale_view",
     "store_assessed",
     "stored_unreadable",
     "suggestions_dir",

@@ -56,7 +56,7 @@ SHOT = os.environ.get("GIGAI_UI_P2B_SHOT")
 def _changes(ui, step: str) -> list[str]:
     """What the page wrote after a step, without the preview's render.
 
-    0.1.11.5: the job page opens on Preview ALWAYS (a resume with a changed line opened on "Show changes"), and the
+    0.1.11.5: the job page's resume is the preview only (no "Show changes" view), and the
     preview is rendered again after every change of the resume. A render stores nothing."""
 
     return [write for write in ui.writes_after(step) if write != "POST /api/tailored-resumes/preview"]
@@ -162,8 +162,7 @@ def test_generate_pdf_is_in_the_suggested_resume_card_and_prints_the_work_author
         ui.page.fill("#generate-pdf-name", NAME)
         body, pdf = generate(ui, form, "before-pdf-with-the-line")
         assert body["header"]["work_authorization"] == EDITED, "the edited wording is what the PDF request carries"
-        # 0.1.11.5: the card opens on Preview always, so the PDF is asked for at the spacing the preview shows
-        # (a resume with a reworded line opened on "Show changes" and sent none).
+        # 0.1.11.5: the card is the preview only, so the PDF is asked for at the spacing the preview shows.
         assert set(body) == {"profile_id", "job_identity", "header", "spacing_scale"} and body["job_identity"] == job["job_identity"]
         assert f"{body['spacing_scale']:.2f}" == ui.page.locator(f'{PANEL} [data-testid="resume-preview"]').get_attribute("data-spacing")
         text = pdf_text(pdf)

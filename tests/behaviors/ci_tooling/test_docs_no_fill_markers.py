@@ -39,7 +39,7 @@ def test_sidebar_lists_the_real_run_page_right_after_accuracy() -> None:
 
 def test_page_exists_with_its_title() -> None:
     text = (DOCS / f"{PAGE}.md").read_text(encoding="utf-8")
-    assert "title: Real-run check and timings (0.1.11)" in text
+    assert "title: Real-run check and timings" in text
 
 
 def test_changelog_and_accuracy_page_link_to_the_page_slug() -> None:

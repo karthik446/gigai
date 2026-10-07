@@ -221,10 +221,12 @@ def test_a_job_tailored_by_0_1_10_keeps_its_resume_and_says_who_made_it(ui, scou
     assert (panel.locator('[data-role="provenance"]').text_content() or "").strip() == "Made by the tailoring of 0.1.10"
     assert (panel.locator("h3").first.text_content() or "").strip() == "Your resume for this job"
     assert panel.locator(".md-preview, .clean-wrap").count() == 1
+    # 0.1.11.5: no "Show changes" view: the reworded lines are the Changed tab's (marked "Reworded by the old tailor").
+    assert panel.locator('[data-action="view-changes"], .md-preview [data-role="old-tailor"]').count() == 0
     if reworded:
-        panel.locator('[data-action="view-changes"]').click()
-        marks = panel.locator('.md-preview [data-role="old-tailor"]')
-        assert marks.count() == len(reworded) and set(marks.all_text_contents()) == {"reworded by the old tailor"}
+        panel.locator('[data-action="show-changed"]').click()
+        marks = panel.locator('[data-role="changed"] [data-role="line-sources"]')
+        assert marks.count() == len(reworded) and all((text or "").strip().startswith("Reworded by the old tailor") for text in marks.all_text_contents())
 
     # The pipeline panel: four rows, no "after tailoring" line, the 0.1.10 label and "Check again".
     timeline = ui.page.locator(TIMELINE)

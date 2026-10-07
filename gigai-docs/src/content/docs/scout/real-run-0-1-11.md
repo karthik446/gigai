@@ -1,7 +1,9 @@
 ---
-title: Real-run check and timings (0.1.11)
+title: Real-run check and timings
 description: A real install of the 0.1.11 release candidate on a real home. What was installed, the machine, the size of the home, and the seconds and model calls of each step.
 ---
+
+*Measured on the GigAI 0.1.11 release candidate. Later releases change the timings; these are the numbers that were measured.*
 
 The [accuracy page](../accuracy-0-1-11/) says how accurate the picked resume is on postings the
 product had never seen. This page is the other check: the release candidate installed from git on a

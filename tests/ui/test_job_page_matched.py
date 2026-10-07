@@ -79,7 +79,7 @@ WHY_MASTER = "An answer or a story supports this requirement, and no line of you
 def _changes(ui, step: str) -> list[str]:
     """What the page wrote after a step, without the preview's render.
 
-    0.1.11.5: the job page opens on Preview ALWAYS (a resume with a changed line opened on "Show changes"), and the
+    0.1.11.5: the job page's resume is the preview only (no "Show changes" view), and the
     preview is rendered again after every change of the resume. A render stores nothing."""
 
     return [write for write in ui.writes_after(step) if write != "POST /api/tailored-resumes/preview"]
@@ -186,7 +186,7 @@ def test_a_matched_job_shows_its_picked_resume_and_apply_gives_the_pdf_and_nothi
         # (0.1.11.5: the page opens on Preview always; the one POST is the preview's render, which stores nothing.)
         assert ui.writes_after("start") == ["POST /api/tailored-resumes/preview"], "opening the job writes nothing and picks nothing"
         assert fixture.reads == 1 and fixture.picks == [], "the record is read once, and nothing is refreshed by itself"
-        assert ui.requests_after("start", "/api/master") == 0
+        assert ui.requests_after("start", "/api/master") == 1  # the card reads the master once at load (picked from it)
         ui.wall_budget("open a Matched job with its picked resume (small home)", JOB_PAGE_WALL_SECONDS, "start", "shown")
         shot(ui, evidence_folder(), "matched-1-needs-attention")
 

@@ -7,6 +7,7 @@ import {
   ADD_HEADING,
   NOTHING_LEFT_TEXT,
   addPointLabel,
+  canOfferAdditions,
   NO_MATCH_TEXT,
   NO_SELECTION_TEXT,
   SAVED_TEXT,
@@ -170,9 +171,10 @@ export default function ResumePoints({ stored, state }) {
   // (b++) the confirm that is open: {lineId, id, from, to, revision}; `masterBusy` while its write is on its way.
   const [asking, setAsking] = useState(null);
   const [masterBusy, setMasterBusy] = useState(false);
-  // The master is read once: when "Add a point" is first opened, or for a resume with an edited point (whether the
+  // The master is read once, when the card loads, for a resume that can offer additions (the label's N is the picker's
+  // own count); or when "Add a point" is opened / for a resume with an edited point (whether the
   // point carries "Save this wording to my master" depends on what the master says now).
-  const wantsMaster = movable && (adding || needsMaster(stored));
+  const wantsMaster = canOfferAdditions(stored) || (movable && (adding || needsMaster(stored)));
 
   useEffect(() => {
     if (!wantsMaster || master) {
@@ -260,9 +262,10 @@ export default function ResumePoints({ stored, state }) {
   }, []);
 
   const groups = pointGroups(stored);
-  const choices = adding && master ? leftOutChoices(stored, master, query) : null;
-  const addLabel = addPointLabel(stored, choices);
+  const choices = master && canOfferAdditions(stored) ? leftOutChoices(stored, master, adding ? query : "") : null;
+  const addLabel = addPointLabel(choices);
   const nothingLeft = addLabel === "Nothing left out";
+  const listing = adding && choices;
   return (
     <div className="resume-points" data-testid="resume-points" data-points={pointCount(groups)} data-state={status ? status.kind : "idle"}>
       <h4 className="resume-points-title">Points ({pointCount(groups)})</h4>
@@ -284,7 +287,7 @@ export default function ResumePoints({ stored, state }) {
               {masterError}
             </p>
           )}
-          {choices && (
+          {listing && (
             <div className="resume-points-choices" data-role="left-out-choices" data-total={choices.total}>
               {choices.total >= SEARCH_FROM && (
                 <input type="search" className="resume-points-search" data-role="point-search" aria-label="Search the lines left out" placeholder="Search the lines left out" value={query} onChange={(event) => setQuery(event.target.value)} />

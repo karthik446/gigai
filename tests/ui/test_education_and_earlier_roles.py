@@ -199,7 +199,7 @@ def test_the_resume_card_says_no_education_only_when_neither_the_master_nor_the_
             link = notice.locator("a")
             assert (link.get_attribute("href"), (link.text_content() or "").strip()) == ("#/master", "add it on the Master page")
             shot(ui, "job-resume-no-education")
-        assert ui.requests_after("start", "/api/master") == 0, "the notice needs no read of the master"
+        assert ui.requests_after("start", "/api/master") == 1, "the notice needs no read of its own: the card reads the master once at load (a resume picked from it)"
         assert ui.writes_after("start") in ([], [PREVIEW_READ])
     finally:
         ui.page.unroute_all()
@@ -226,32 +226,30 @@ def test_a_role_with_no_line_shown_is_listed_under_earlier_experience_and_a_stor
         _open(ui, demo)
         panel = ui.page.locator(PANEL)
 
-        # --- the block, in both views of the preview: one heading, one line for the role, after the roles that show lines ---
-        for view in ("clean", "changes"):
-            ui.page.click(f'{PANEL} [data-action="view-{view}"]')
-            heading = panel.locator('[data-role="earlier-heading"]')
-            heading.wait_for()
-            assert heading.count() == 1 and EARLIER_HEADING in (heading.text_content() or "")
-            roles = panel.locator('[data-role="earlier-role"]')
-            assert roles.count() == 1 and one_line in " ".join((roles.first.text_content() or "").split())
-            lines = [" ".join(text.split()) for text in panel.locator(".clean-resume > *, .md-preview .md-line").all_text_contents()]
-            lines = [text.lstrip("·R ").strip() for text in lines if text.strip(" · ")]
-            at = next(place for place, text in enumerate(lines) if text.removeprefix("### ") == EARLIER_HEADING)
-            assert lines[at + 1] == one_line, lines[at:at + 3]
-            # The role is not ALSO printed as a bare heading in its place.
-            assert not [text for text in lines if text.removeprefix("### ") == employer], lines
-            # The block closes Experience: the next thing is the next section.
-            first_role = next(place for place, text in enumerate(lines) if text.removeprefix("## ").lower() == "experience")
-            assert first_role < at and lines[at + 2].removeprefix("## ").lower() in {"skills", "education", "projects", "other"}, lines[at:at + 4]
-            shot(ui, f"job-resume-earlier-experience-{view}")
-            # --- the stored conflict (0.1.11.5 FX): the page loaded it with its sentence, and says nothing of it.
-            # Only a pick BEFORE 0.1.11.5 made it (the page limit left a role's line out); since item 1c the page
-            # limit is no reason and the job page does not show a stored one (`jobResumeModel` PAGE_CONFLICTS; the
-            # rule is pinned in `test_education_earlier_roles_model.py`). This test waited for it under "Needs
-            # attention" and so was red; the block above is what the role's line is now.
-            said = panel.inner_text()
-            assert panel.locator('[data-role="needs-attention"] li[data-code="earlier_roles_do_not_fit"]').count() == 0
-            assert MESSAGE not in said and "earlier roles do not fit" not in said and "the selection has a conflict" not in said, said
+        # --- the block, in the preview (its one view): one heading, one line for the role, after the roles that show lines ---
+        heading = panel.locator('[data-role="earlier-heading"]')
+        heading.wait_for()
+        assert heading.count() == 1 and EARLIER_HEADING in (heading.text_content() or "")
+        roles = panel.locator('[data-role="earlier-role"]')
+        assert roles.count() == 1 and one_line in " ".join((roles.first.text_content() or "").split())
+        lines = [" ".join(text.split()) for text in panel.locator(".clean-resume > *").all_text_contents()]
+        lines = [text.lstrip("·R ").strip() for text in lines if text.strip(" · ")]
+        at = next(place for place, text in enumerate(lines) if text.removeprefix("### ") == EARLIER_HEADING)
+        assert lines[at + 1] == one_line, lines[at:at + 3]
+        # The role is not ALSO printed as a bare heading in its place.
+        assert not [text for text in lines if text.removeprefix("### ") == employer], lines
+        # The block closes Experience: the next thing is the next section.
+        first_role = next(place for place, text in enumerate(lines) if text.removeprefix("## ").lower() == "experience")
+        assert first_role < at and lines[at + 2].removeprefix("## ").lower() in {"skills", "education", "projects", "other"}, lines[at:at + 4]
+        shot(ui, f"job-resume-earlier-experience-clean")
+        # --- the stored conflict (0.1.11.5 FX): the page loaded it with its sentence, and says nothing of it.
+        # Only a pick BEFORE 0.1.11.5 made it (the page limit left a role's line out); since item 1c the page
+        # limit is no reason and the job page does not show a stored one (`jobResumeModel` PAGE_CONFLICTS; the
+        # rule is pinned in `test_education_earlier_roles_model.py`). This test waited for it under "Needs
+        # attention" and so was red; the block above is what the role's line is now.
+        said = panel.inner_text()
+        assert panel.locator('[data-role="needs-attention"] li[data-code="earlier_roles_do_not_fit"]').count() == 0
+        assert MESSAGE not in said and "earlier roles do not fit" not in said and "the selection has a conflict" not in said, said
         ui.settle()
         assert ui.writes_after("start") in ([], [PREVIEW_READ])
     finally:

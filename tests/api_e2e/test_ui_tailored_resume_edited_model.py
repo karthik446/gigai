@@ -8,7 +8,7 @@ refs and ``edited_from`` (the line it replaced).  What is pinned:
 * the ways back are the versions the replaced line has: ``Use original`` and, when it kept a
   rewrite, ``Use rewrite`` -- the same PUT the other buttons send;
 * a resume with no edited line counts and reads exactly as before (no ``edited`` key);
-* the panel renders the "Edited" note, the mark and the buttons; the clean copy has none.
+* the panel (0.1.11.5: ONE view) draws no per-line note, mark or button; the points list and the Changed tab own them.
 
 LOUD skip when ``node`` or the ui ``node_modules`` is missing.
 """
@@ -136,36 +136,24 @@ await build({{ root: process.cwd(), logLevel: "silent", plugins: [react()], buil
 const {{ Preview }} = await import(path.join(out, "panel.mjs"));
 const React = (await import("react")).default;
 const {{ renderToStaticMarkup }} = await import("react-dom/server");
-const render = (response, view, handler) => renderToStaticMarkup(React.createElement(Preview, {{ response, profileLabel: "p1", promptFor: () => null, initialView: view, onChooseLine: handler ? () => {{}} : null }}));
-process.stdout.write(JSON.stringify({{
-  changes: render(input.edited, "changes", true), clean: render(input.edited, "clean", true),
-  readonly: render(input.edited, "changes", false), unedited: render(input.unedited, "changes", true),
-}}));
+const render = (response) => renderToStaticMarkup(React.createElement(Preview, {{ response, profileLabel: "p1", onLength: () => {{}}, rendered: (text) => text }}));
+process.stdout.write(JSON.stringify({{ edited: render(input.edited), unedited: render(input.unedited) }}));
 fs.rmSync(out, {{ recursive: true, force: true }});
 """
 
 
-def test_the_panel_shows_edited_and_a_way_back() -> None:
+def test_the_panel_shows_the_edited_text_in_the_one_view() -> None:
+    """0.1.11.5: the preview is ONE view; an edited point is marked "Your words" in the points list (ResumePoints) and the
+    ways back are the Changed tab's Restore: the preview draws no per-line markers or buttons."""
     if not (UI / "node_modules" / "vite").is_dir():
         pytest.skip("ui/node_modules missing; panel render check not run")
     evil = _response([_custom(EVIL, FALLBACK), _custom(EDIT_TWO, PLAIN_COPY)])
     out = _run(SSR_SCRIPT, {"edited": evil, "unedited": UNEDITED})
-    changes = out["changes"]
-    assert changes.count('data-role="edited"') == 2 and "Edited: your own text, no source cited." in changes
-    assert changes.count('data-role="edited-mark"') == 2
-    assert changes.count('data-action="original"') == 2 and ">Use original</button>" in changes
-    assert changes.count('data-action="rewritten"') == 1 and ">Use rewrite</button>" in changes
-    assert "0 of 2 lines rewritten · 0 copied · 2 edited" in changes
-    assert 'class="md-line original"' in changes and ORIGINAL[2:] in changes, "the line the edit replaced is shown above it"
-    assert "<script>" not in changes and "&lt;script&gt;alert(1)&lt;/script&gt;" in changes
-    assert "edited: your own text, no source cited" in changes  # the legend entry
-
-    clean = out["clean"]
-    assert EDIT_TWO in clean and "Use original" not in clean and 'data-role="edited"' not in clean
-    assert "<script>" not in clean and "&lt;script&gt;" in clean
-    assert "<button type=\"button\" class=\"button small secondary\" data-action=" not in out["readonly"], "no handler: no buttons"
-    assert 'data-role="edited"' in out["readonly"]
-
+    edited = out["edited"]
+    assert "0 of 2 lines rewritten · 0 copied · 2 edited" in edited
+    assert EDIT_TWO in edited
+    assert "<script>" not in edited and "&lt;script&gt;" in edited
+    for gone in ('data-role="edited"', 'data-role="edited-mark"', 'data-action="original"', "Use original", 'class="md-line', "resume-legend"):
+        assert gone not in edited
     unedited = out["unedited"]
-    assert 'data-role="edited' not in unedited and "Use original" not in unedited and ">Use rewrite anyway</button>" in unedited
-    assert "edited: your own text" not in unedited, "the legend entry shows only when a line is edited"
+    assert "Use original" not in unedited and "Use rewrite anyway" not in unedited and 'data-role="edited' not in unedited
