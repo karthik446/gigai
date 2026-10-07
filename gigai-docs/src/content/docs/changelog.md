@@ -46,7 +46,9 @@ the new pick of up to 20 points, and open the job page to set the spacing yourse
   one line each.
 - **A tighter page.** Education is one line per degree; "Earlier experience" has no title of its own when it lists
   three roles or fewer; Skills are at most four plain lines (the posting's terms first, no duplicates, a long list
-  is cut at the end); the Summary is a paragraph.
+  is cut at the end); the Summary is a paragraph. A project's tech line sits on its title line, no page holds only
+  Education or Skills, and below 1.0 the gaps tighten faster, so a 20-point resume with every block reaches two
+  pages around 0.85.
 - **Fit and rank at a glance.** The Jobs list shows a Fit chip ("Fit 92% · 19/22", green for a match) and a Rank
   chip ("Rank 92") under each title, and an assessed job page shows its fit and rank in the top-right box.
 - **Assess all can be cancelled and shows progress.** The dialog closes when the batch starts; the page shows
