@@ -19,7 +19,12 @@ import GeneratePdfForm from "./GeneratePdfForm.jsx";
 // After the PDF: nothing. This button opens no posting, asks nothing about
 // having applied and writes no application record. (The State line's own
 // "Mark applied" is the existing Applications feature, untouched.)
-export default function ApplyPanel({ state, items, reassess, visaRequired = false }) {
+//
+// 0.1.11.5 (a): the PDF is rendered at the spacing the preview shows
+// (`spacing`: the job page's slider), and the form tells the panel its values
+// as they are typed (`onHeader`), so the preview shows the header this PDF
+// will have. Closing the form takes them from the preview again.
+export default function ApplyPanel({ state, items, reassess, visaRequired = false, spacing = null, onHeader = null }) {
   const { stored } = state;
   const [open, setOpen] = useState(false);
   const [asking, setAsking] = useState(false);
@@ -29,9 +34,15 @@ export default function ApplyPanel({ state, items, reassess, visaRequired = fals
     setOpen(false);
     setAsking(false);
   }, [key]);
+  // The form is closed: the preview no longer holds its values.
+  useEffect(() => {
+    if (!open && onHeader) {
+      onHeader(undefined);
+    }
+  }, [open, onHeader]);
   const renderPdf = useCallback(
-    (header) => postTailoredResumePdf({ profileId: state.profileId, jobIdentity: state.jobIdentity, header }),
-    [state.profileId, state.jobIdentity],
+    (header) => postTailoredResumePdf({ profileId: state.profileId, jobIdentity: state.jobIdentity, header, spacingScale: spacing }),
+    [state.profileId, state.jobIdentity, spacing],
   );
   // 0.1.11.3 item 15: the form's "Shorten automatically"; the page then reads the job's resume again.
   const shorten = useCallback(async () => {
@@ -92,7 +103,7 @@ export default function ApplyPanel({ state, items, reassess, visaRequired = fals
           ))}
         </div>
       )}
-      {open && <GeneratePdfForm render={renderPdf} visaRequired={visaRequired} shorten={shorten} />}
+      {open && <GeneratePdfForm render={renderPdf} visaRequired={visaRequired} shorten={shorten} onValues={onHeader} />}
     </div>
   );
 }

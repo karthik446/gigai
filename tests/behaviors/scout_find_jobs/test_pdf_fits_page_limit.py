@@ -95,12 +95,13 @@ def resume(long_lines: int = 0, short_lines: int = 3, roles: int = 5) -> str:
 
 #: The failing size: 2 pages where the fit measures (spacing 0.9), a 3rd page of skills at the saved spacing 1.0.
 FAILING = resume()
-#: One long line more: 3 pages at every spacing down to the floor with the chips as they are, 2 with them compact.
-NEEDS_COMPACT = resume(long_lines=1, short_lines=3)
+#: Longer: 3 pages at every spacing down to the floor with the chips as they are, 2 with them compact.
+#: (0.1.11.5: below 1.0 the spacing also tightens the body's lines, so each of these three is longer than it was.)
+NEEDS_COMPACT = resume(long_lines=6, short_lines=2)
 #: Longer: 2 pages only with the chips compact AND the tightest spacing.
-NEEDS_TIGHTEST = resume(long_lines=2, short_lines=3)
+NEEDS_TIGHTEST = resume(long_lines=9, short_lines=3)
 #: Longer still: 3 pages whatever is done.
-TOO_LONG = resume(long_lines=2, short_lines=4)
+TOO_LONG = resume(long_lines=12, short_lines=3)
 #: The master: nine roles, 4 pages. ``FAILING`` is its first five roles, line for line.
 LONG = resume(roles=9)
 
@@ -237,7 +238,7 @@ def test_skills_go_compact_before_a_page_holds_only_chips_and_a_fitting_resume_i
     fitted = render(NEEDS_COMPACT, 1.0, 2)
     pages = _pages(fitted.pdf)
     # ... so the Skills are laid out compactly: 2 pages, every skill still printed, in order, and no note.
-    assert fitted.pages == len(pages) == 2 and fitted.note is None and fitted.spacing_scale == 0.95
+    assert fitted.pages == len(pages) == 2 and fitted.note is None and fitted.spacing_scale == 0.85
     printed = pages[1][pages[1].index("SKILLS"):].replace("\n", " ")
     assert [part.strip() for part in printed.removeprefix("SKILLS").split("·")] == [skill.strip() for skill in SKILLS.split(",")]
     # A longer one takes the tightest spacing too; a longer one still is rendered as saved, with the sentence.

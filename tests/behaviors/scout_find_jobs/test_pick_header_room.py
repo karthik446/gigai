@@ -166,12 +166,12 @@ def _assess(fx: PostingsFixture, answer: str | None = None) -> None:
 
 
 def _assess_the_old_way(fx: PostingsFixture, monkeypatch: pytest.MonkeyPatch, *, answer: str | None = None) -> None:
-    """A stored pick the PDF cannot put on its pages: measured with NO room for a header at the tightest spacing, the
-    way a resume that "fits nowhere" is. (Before this packet a pick kept two lines; the render's own fit absorbs
-    most of those, and the operator's did not fit.)"""
+    """A stored pick the PDF cannot put on its pages: a pick whose page count said "2 pages" whatever it held, so
+    nothing was cut from it. (0.1.11.5: below 1.0 the PDF's body lines tighten too, so a pick measured with no room
+    for a header at the tightest spacing, the way this was made before, now fits; the whole master does not.)"""
 
     with monkeypatch.context() as old:
-        old.setattr(tm, "measure_pages", lambda result: pages_at(result, 0.7, header_lines=0))
+        old.setattr(tm, "measure_pages", lambda result: 2)
         _assess(fx, answer)
 
 

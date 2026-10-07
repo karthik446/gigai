@@ -9,10 +9,20 @@
 // tag rows 3s, after the name 6s, after a section title 8s, between entries 7s, between sections 15s.
 // Block spacing collapses to the larger of the two neighbours (Typst's weak spacing).
 //
+// BODY LINE HEIGHT (0.1.11.5): BELOW 1.0 the scale also tightens the body's line box (bullets, paragraphs, role
+// lines), in a straight line from 14.3pt at 1.0 down to `lh-tight` at 0.7, because the gaps alone are too little
+// room (0.85 -> 0.70 bought one two-line bullet).  At 1.0 and above the line box is 14.3pt as before: only the gaps
+// grow, so a resume at 1.0 or looser prints exactly as it did.  READABILITY FLOOR: `lh-tight` is 11.5pt, the 9.5pt
+// body's own single-spaced line (Inter's ascender + descender = 1.21 x the size = 11.49pt): at the floor a line's
+// descenders end where the next line's ascenders begin, and they never overlap.  The type SIZE never changes (the
+// line box alone gives the room), an entry heading (10.7pt) keeps a line box of at least its own 13pt, and the
+// header's lines, the section titles and the Skills chips keep theirs.  `fixed_lines` (a page ESTIMATE:
+// resume_pdf._estimate) keeps 14.3pt at every scale: the pick and the length rule budget as they did, and the PDF
+// never takes more pages than they counted.
+//
 // AUTO FIT (resume_pdf.fit_scale): the renderer queries <fit-end> below at a few scales and keeps the largest
-// that still ends on the fewest pages.  Range limit: gaps are ~20% of a page's height, so 0.7x..1.4x moves the
-// end by only ~0.2 page -- content up to ~1.1 pages at 1.0x fits one page; a two-page resume reaches a page 2
-// >= 80% full only from ~1.6 pages at 1.0x (a 1.5-page one ends near 70%).  Type sizes and margins never change.
+// that still ends on the fewest pages.  Range: above 1.0 only the gaps grow (~20% of a page's height); below it the
+// body's lines tighten too, so 0.7x holds about a quarter more text than 1.0x.  Type sizes and margins never change.
 //
 // PAGE RULES (0110-015): an entry heading and role line stay with the first bullet (sticky), the first bullet
 // stays with the second, and the second-to-last stays with the last, so a page break never leaves ONE bullet of
@@ -20,6 +30,10 @@
 #let d = json(bytes(sys.inputs.data))
 #let scale = float(sys.inputs.at("scale", default: "1.0"))
 #let s = 1.71pt * scale
+#let lh-full = 14.3pt
+#let lh-tight = 11.5pt
+// The line box of the body's text (`t`'s default, 14.3pt, stays the header's).
+#let lh-body = if scale >= 1.0 or d.at("fixed_lines", default: false) { lh-full } else { calc.max(lh-tight, lh-full - (lh-full - lh-tight) * (1.0 - scale) / 0.3) }
 #let accent = rgb(d.at("accent", default: "#1F65F5"))
 #let ink = rgb("#323336")
 #let soft = rgb("#434343")
@@ -43,8 +57,8 @@
 #let compact = d.at("compact_tags", default: false)
 #let chip(x) = box(fill: tag-fill, inset: if compact { (x: 5pt, y: 1.5pt) } else { (x: 10.7pt, y: 3pt) }, t(x, size: 8.3pt, lh: 12.5pt))
 #let sec(x) = block(above: 15 * s, below: 8 * s, sticky: true, t(x, size: 7.1pt, lh: 7.1pt, weight: 600, fill: accent, tracking: 0.71pt))
-#let bullet(x, keep: false) = block(below: s, sticky: keep, pad(left: 17.8pt, {place(left, dx: -11.8pt, [•]); x}))
-#let para(x) = block(below: 2 * s, t(x, fill: soft))
+#let bullet(x, keep: false) = block(below: s, sticky: keep, pad(left: 17.8pt, {place(left, dx: -11.8pt, t([•], lh: lh-body)); t(x, lh: lh-body)}))
+#let para(x) = block(below: 2 * s, t(x, lh: lh-body, fill: soft))
 
 // THE HEADER (0.1.11.3 item 15) is COMPACT: the name line, the optional title line, then ONE contact line whose items
 // are joined with " | " (the renderer orders them: location, work authorization, links, email, phone) and which wraps
@@ -79,10 +93,10 @@
   }
   for e in x.entries {
     // Sticky heading + role line keep the first bullet with them (a heading is never stranded at a page end).
-    if e.heading.len() > 0 { block(above: 7 * s, sticky: true, t(if x.caps { upper(e.heading.at(0).text) } else { e.heading.at(0).text }, size: 10.7pt, weight: 600, tracking: 0.75pt)) }
+    if e.heading.len() > 0 { block(above: 7 * s, sticky: true, t(if x.caps { upper(e.heading.at(0).text) } else { e.heading.at(0).text }, size: 10.7pt, lh: calc.max(lh-body, 13pt), weight: 600, tracking: 0.75pt)) }
     for h in e.heading.slice(calc.min(1, e.heading.len())) {
       let role = if h.dates != "" { grid(columns: (1fr, auto), h.text, h.dates) } else { h.text }
-      block(below: 2 * s, sticky: true, t(role, weight: 400, fill: soft))
+      block(below: 2 * s, sticky: true, t(role, lh: lh-body, weight: 400, fill: soft))
     }
     let n = e.bullets.len()
     for (i, b) in e.bullets.enumerate() { bullet(b, keep: n >= 2 and (i == 0 or i == n - 2)) }

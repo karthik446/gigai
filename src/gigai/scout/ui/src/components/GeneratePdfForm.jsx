@@ -49,8 +49,14 @@ function saveBlob(blob, fileName) {
 // (`note`) and the caller gives `shorten` (a stored job's resume), the note
 // has one button, "Shorten automatically". `shorten()` answers the server's
 // own sentence about what was left out; the person then generates again.
-export default function GeneratePdfForm({ render, disabled = false, visaRequired = false, shorten = null }) {
+//
+// 0.1.11.5 (a): `onValues(values)` tells the job page what is in the form
+// (once the header file was read, then on every edit), so its preview shows
+// the header this PDF will have. No request is made for it here, and the
+// values stay in memory: the page keeps them only while the form is open.
+export default function GeneratePdfForm({ render, disabled = false, visaRequired = false, shorten = null, onValues = null }) {
   const [values, setValues] = useState(() => startValues({ visaRequired }));
+  const held = useRef(values); // what the form holds now, for `onValues`
   const [source, setSource] = useState(null);
   const touched = useRef(false);
   const [busy, setBusy] = useState(false);
@@ -89,6 +95,10 @@ export default function GeneratePdfForm({ render, disabled = false, visaRequired
       const typed = touched.current;
       if (!typed) {
         setValues(startValues({ visaRequired, file }));
+        held.current = startValues({ visaRequired, file });
+      }
+      if (onValues) {
+        onValues(held.current);
       }
       const said = headerSource(file);
       // Typed over: the path stays (the Save button names it), the claim that the file filled the form does not.
@@ -103,7 +113,11 @@ export default function GeneratePdfForm({ render, disabled = false, visaRequired
 
   function edit(change) {
     touched.current = true;
-    setValues(change);
+    held.current = change(held.current);
+    setValues(held.current);
+    if (onValues) {
+      onValues(held.current);
+    }
   }
 
   const linkRows = Array.isArray(values.links) ? values.links : [];

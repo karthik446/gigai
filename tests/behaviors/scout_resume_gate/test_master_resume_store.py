@@ -407,8 +407,10 @@ def test_the_stored_master_is_a_printable_resume_in_the_shipped_format(tmp_path:
     _name, sections = parse_resume_markdown(markdown)
     assert [section["heading"] for section in sections] == ["SUMMARY", "EXPERIENCE", "PROJECTS", "SKILLS", "EDUCATION", "OTHER"]
     assert "id:" not in json.dumps(sections), "the shipped parser drops the id comments"
-    # The spike measured the synthetic master at 8 pages with the shipped template (DESIGN.md 3.1).
-    assert render_markdown_pdf(markdown, None, timestamp=datetime(2026, 1, 1, tzinfo=timezone.utc)).pages == 8
+    # The spike measured the synthetic master at 8 pages with the shipped template (DESIGN.md 3.1): still 8 at spacing
+    # 1.0. Auto fit ends it on 7 since 0.1.11.5 (below 1.0 the spacing also tightens the body's lines).
+    assert render_markdown_pdf(markdown, None, timestamp=datetime(2026, 1, 1, tzinfo=timezone.utc), spacing_scale=1.0, auto_fit=False).pages == 8
+    assert render_markdown_pdf(markdown, None, timestamp=datetime(2026, 1, 1, tzinfo=timezone.utc)).pages == 7
     assert "<!--" not in stored.master.markdown(ids=False)
 
 

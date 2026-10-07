@@ -25,7 +25,9 @@ import { recordedBasis, saveWordingTarget } from "../masterModel.js";
 //   preview  tailoredResumeModel.previewLines(result): every content line is
 //            the stored resume's own text, with its refs (the master line /
 //            the answer text) on hover and on click. Nothing is made up here.
-//   views    "Clean copy" is the resume as it will print; "Show changes"
+//   views    "Preview" is the resume as it will print (0.1.11.5: the PDF's
+//            own render, ResumePreview.jsx; "Clean copy", the same lines as
+//            text, where there is no stored job to render); "Show changes"
 //            marks each line: R copied word for word, a pencil for a line
 //            whose wording was changed (in chat by the user's agent, which
 //            cites its sources; or by the tailoring of 0.1.10, labelled
@@ -246,7 +248,10 @@ function PreviewLine({ line, index, open, onToggle, promptFor, showChanges, onCh
 
 // `provenance` is JobResumePanel's one line ("Picked by the assessment from your master (revision 5) · 27 lines ·
 // 2 pages"); `initialView` is "clean" (the resume as it will print) unless the caller has changed lines to show.
-export function Preview({ response, provenance = null, promptFor, initialView = "changes", onChooseLine = null, choiceBusy = false, choiceError = null, onLength = null, onSaveWording = null, wordingSaved = null }) {
+// 0.1.11.5 (a): `rendered` is the job page's rendered preview (ResumePreview.jsx: the resume as the PDF prints it,
+// with the spacing slider). It takes the clean copy's place: `rendered(text)` gets the clean copy as the text behind
+// the pictures. Without it (a caller with no stored job) the clean copy shows as text, as before.
+export function Preview({ response, provenance = null, promptFor, initialView = "changes", onChooseLine = null, choiceBusy = false, choiceError = null, onLength = null, onSaveWording = null, wordingSaved = null, rendered = null }) {
   const [open, setOpen] = useState(() => new Set());
   const [view, setView] = useState(initialView); // "changes" | "clean"
   const lines = previewLines(response.result, response.markdown);
@@ -285,7 +290,7 @@ export function Preview({ response, provenance = null, promptFor, initialView = 
             Show changes
           </button>
           <button type="button" data-action="view-clean" className={`button small ${view === "clean" ? "" : "secondary"}`} aria-pressed={view === "clean"} onClick={() => setView("clean")}>
-            Clean copy
+            {rendered ? "Preview" : "Clean copy"}
           </button>
         </div>
       </div>
@@ -328,6 +333,8 @@ export function Preview({ response, provenance = null, promptFor, initialView = 
             <PreviewLine key={index} line={line} index={index} open={open.has(index)} onToggle={toggle} promptFor={promptFor} showChanges onChoose={onChooseLine} busy={choiceBusy} onSaveWording={onSaveWording} saved={wordingSaved} />
           ))}
         </div>
+      ) : rendered ? (
+        rendered(<CleanCopy lines={lines} />)
       ) : (
         <div className="clean-wrap" data-tailored-lines={stats.total}>
           <CleanCopy lines={lines} />

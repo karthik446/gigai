@@ -38,6 +38,10 @@ model call; a changed or new line is checked (no name or contact detail, every n
 resume or an answer) and the resume is marked ``edited`` with who wrote it.  The job is then queued in
 the pipeline (``recheck``): the re-assessment, the Scout ATS score and the Scout label run against it.
 A refusal names line numbers and the number or skill, never a line's text.
+
+0.1.11.5: ``POST /api/tailored-resumes/preview`` answers the stored job resume as page pictures (the PDF's own
+render) and saves the job page's slider as THIS job's spacing; ``POST /api/tailored-resumes/pdf`` uses that
+spacing, or the ``spacing_scale`` its body names.
 """
 
 from __future__ import annotations
@@ -67,7 +71,10 @@ from ...resume_pdf import (
     ResumeMarkdownError,
     finish_url,
     markdown_resume_pdf,
+    job_spacing,
     parse_resume_markdown,
+    save_job_spacing,
+    stored_job_path,
     stored_resume_pdf,
 )
 from ...tailored_resume_edit import attach_edited_resume, queue_recheck
@@ -101,7 +108,7 @@ def _status_for(code: str) -> HTTPStatus:
 
 
 class TailoredResumesRoutesMixin:
-    """``Handler`` mixin: ``POST``/``GET``/``PUT /api/tailored-resumes``, ``PUT /api/tailored-resumes/lines``, and the two PDF routes."""
+    """``Handler`` mixin: ``POST``/``GET``/``PUT /api/tailored-resumes``, ``PUT /api/tailored-resumes/lines``, the two PDF routes and the preview."""
 
     def _tailor_target(self):
         backend = self._backend
@@ -194,34 +201,53 @@ class TailoredResumesRoutesMixin:
     def _finish_url(self, profile_id: str | None = None, job_identity: str | None = None) -> str:
         return finish_url(f"http://127.0.0.1:{self._bound_port()}", profile_id, job_identity)
 
-    def _handle_post_tailored_resume_pdf(self) -> None:
+    def _stored_pdf_request(self):
+        """``(stored resume, the form's values or None, spacing or None)`` of a stored resume's render request, or
+        ``None`` with the refusal written.  Body: ``profile_id``, ``job_identity``, plus ``header`` and ``spacing_scale``."""
+
         body = self._read_json_body()
         if body is None:
-            return
-        if type(body) is not dict or not _TAILORED_PDF_KEYS <= set(body) <= _TAILORED_PDF_KEYS | {"header"}:
-            self._error(HTTPStatus.UNPROCESSABLE_ENTITY, "invalid_value", "body must be exactly profile_id and job_identity (plus header from the Generate PDF form)")
-            return
+            return None
+        if type(body) is not dict or not _TAILORED_PDF_KEYS <= set(body) <= _TAILORED_PDF_KEYS | {"header", "spacing_scale"}:
+            self._error(
+                HTTPStatus.UNPROCESSABLE_ENTITY, "invalid_value",
+                "body must be exactly profile_id and job_identity (plus header from the Generate PDF form, and spacing_scale)",
+            )
+            return None
         profile_id, job_identity = body["profile_id"], body["job_identity"]
         if not isinstance(profile_id, str) or not profile_id or not isinstance(job_identity, str) or not job_identity:
             self._error(HTTPStatus.UNPROCESSABLE_ENTITY, "invalid_value", "profile_id and job_identity must be non-empty strings")
-            return
+            return None
+        spacing = body.get("spacing_scale")
+        if spacing is not None and not valid_spacing(spacing):
+            self._error(HTTPStatus.UNPROCESSABLE_ENTITY, "invalid_value", f"spacing_scale must be a number between {SPACING_MIN} and {SPACING_MAX}")
+            return None
         ok, form = self._header_form(body)
         if not ok:
-            return
+            return None
         target = self._tailor_target()
         if target is None:
-            return
-        home_root = self._backend.home_root
+            return None
         try:
-            items = list_tailored_resumes(home_root, target, profile_id=profile_id, job_identity=job_identity)
+            items = list_tailored_resumes(self._backend.home_root, target, profile_id=profile_id, job_identity=job_identity)
         except QuickAssessError as exc:
             self._error(_status_for(exc.code), exc.code, str(exc))
-            return
+            return None
         if not items:
             self._error(HTTPStatus.NOT_FOUND, "tailored_resume_not_found", "no stored tailored resume for that profile and job")
+            return None
+        return items[0], form, spacing
+
+    def _handle_post_tailored_resume_pdf(self) -> None:
+        request = self._stored_pdf_request()
+        if request is None:
             return
+        stored, form, spacing = request
+        home_root, target = self._backend.home_root, self._backend.target
+        profile_id, job_identity = stored.resume.profile_id or "ephemeral", stored.job.job_identity
         try:
-            rendered, file_name = stored_resume_pdf(items[0], home_root=home_root, form=form)
+            # 0.1.11.5: ``spacing_scale`` is the job page's slider as it stands: used as given for this PDF, not saved here.
+            rendered, file_name = stored_resume_pdf(stored, home_root=home_root, target=target, form=form, spacing_scale=spacing, fixed=spacing is not None)
         except Exception:  # noqa: BLE001 - a render failure is typed, and never echoes the resume or the form
             self._error(HTTPStatus.INTERNAL_SERVER_ERROR, "pdf_render_failed", "the PDF could not be rendered")
             return
@@ -229,10 +255,46 @@ class TailoredResumesRoutesMixin:
         from ..posting_live import job_liveness
 
         note = job_liveness(home_root, target, job_identity).note
+        extra = {"X-GigAI-Pages": str(rendered.pages), "X-GigAI-Spacing-Scale": f"{rendered.spacing_scale:g}"}
         self._write_pdf(
-            rendered, file_name, {"X-GigAI-Posting-Note": note} if note else None,
+            rendered, file_name, {**extra, "X-GigAI-Posting-Note": note} if note else extra,
             finish=None if form is not None else self._finish_url(profile_id, job_identity),
         )
+
+    def _handle_post_tailored_resume_preview(self) -> None:
+        """``POST /api/tailored-resumes/preview`` (0.1.11.5): the stored job resume as it will print, one picture a page.
+
+        The same render as ``POST /api/tailored-resumes/pdf`` (``resume_pdf.stored_resume_pdf``: the same template,
+        header, spacing and fit), so the pages here are the PDF's pages.  No model call.  ``spacing_scale`` is the
+        job page's slider: it is SAVED as this job's spacing (``save_job_spacing``: a small file beside this job's
+        stored resume, nothing else) and the PDF uses it from then on.  ``header`` is used for these pictures only
+        and dropped, as for the PDF."""
+
+        import base64
+
+        request = self._stored_pdf_request()
+        if request is None:
+            return
+        stored, form, spacing = request
+        home_root, target = self._backend.home_root, self._backend.target
+        if spacing is not None and save_job_spacing(home_root, target, stored.resume.profile_id, stored.job.job_identity, spacing) is None:
+            self._error(HTTPStatus.NOT_FOUND, "tailored_resume_not_found", "no stored tailored resume for that profile and job")
+            return
+        try:
+            rendered, _file_name = stored_resume_pdf(stored, home_root=home_root, target=target, form=form, images=True)
+        except Exception:  # noqa: BLE001 - a render failure is typed, and never echoes the resume or the form
+            self._error(HTTPStatus.INTERNAL_SERVER_ERROR, "pdf_render_failed", "the preview could not be rendered")
+            return
+        self._write_json(HTTPStatus.OK, {
+            "pages": rendered.pages,
+            "max_pages": rendered.max_pages,
+            "spacing_scale": rendered.spacing_scale,
+            "saved": job_spacing(stored_job_path(stored, home_root, target)) is not None,
+            "note": rendered.note,
+            "spacing": {"min": SPACING_MIN, "max": SPACING_MAX, "step": 0.05},
+            "image_type": "image/png",
+            "images": [base64.b64encode(image).decode("ascii") for image in rendered.page_images],
+        })
 
     def _refuse_large_body(self) -> bool:
         """True (and a 422 written) when the request body is too large to be resume markdown."""

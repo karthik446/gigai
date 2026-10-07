@@ -49,9 +49,13 @@ from gigai.scout.tailored_resume import (
     heading_only,
     heading_only_line,
     is_earlier_heading,
+    read_tailored_resume,
     replaced_line,
     shown_text,
+    tailored_resume_path,
+    tailored_resume_write_lock,
 )
+from gigai.scout.find_jobs.discovery.storage import atomic_write
 
 def pdf_file_name(company: str, role: str, day: date) -> str:
     """``<company>-<role>-<YYYY-MM-DD>.pdf`` (lowercase ASCII, hyphens, each part length-capped);
@@ -182,6 +186,24 @@ def _compile(template: bytes, directory: str, data: dict[str, object], scale: fl
     )
 
 
+#: The preview's page pictures: pixels per inch (a US Letter page is 1360 pixels wide: sharp at the width the job
+#: page shows it, on a dense screen too).
+PREVIEW_PPI = 160.0
+
+
+def _compile_images(template: bytes, directory: str, data: dict[str, object], scale: float) -> tuple[bytes, ...]:
+    """The same document as ``_compile`` (template, data, scale), one PNG a page: what the job page's preview shows.
+
+    A picture holds no text and no link, so the header's values are in it only as they print."""
+    import typst
+
+    pages = typst.compile(
+        template, format="png", ppi=PREVIEW_PPI, font_paths=[directory], ignore_system_fonts=True,
+        sys_inputs={"data": json.dumps(data, ensure_ascii=False), "scale": repr(scale)},
+    )
+    return tuple(pages) if isinstance(pages, list) else (pages,)
+
+
 def _end(template: bytes, directory: str, data: dict[str, object], scale: float) -> tuple[int, float]:
     """(last page, fill of that page 0..1) where the content ends at ``scale``: Typst's own layout, via query."""
     import typst
@@ -228,7 +250,8 @@ def _evict_layout_cache() -> None:
 def fit_scale(measure: Callable[[float], tuple[int, float]]) -> float:
     """Auto fit: the LARGEST scale on the grid that still ends on the fewest pages any scale reaches.
 
-    Content close to one page is pulled onto one page (down to 0.7x, never smaller type); content that needs
+    Content close to one page is pulled onto one page (down to 0.7x, where the body's lines are tighter too
+    (0.1.11.5, ``resume.typ``); never smaller type); content that needs
     two pages spreads to the loosest spacing that does not start a third, so page 2 is as full as the range
     allows.  Pages only grow with the scale, so a binary search needs at most 6 measurements (0.7x, 1.4x, 4
     between); the result is a pure function of the content.
@@ -256,9 +279,18 @@ def clamp_scale(value: float) -> float:
 FIT_FLOOR = 0.8
 
 
-def over_limit_note(pages: int, max_pages: int) -> str:
-    """What a person reads when the resume cannot be put on ``max_pages`` pages: plain words, ASCII (a header value)."""
+def over_limit_note(pages: int, max_pages: int, at_spacing: float | None = None) -> str:
+    """What a person reads when the resume cannot be put on ``max_pages`` pages: plain words, ASCII (a header value).
+
+    ``at_spacing`` (0.1.11.5): the spacing was the person's own (the job page's slider) and a tighter one exists, so
+    the sentence names the slider first."""
     limit = f"{max_pages} page{'' if max_pages == 1 else 's'}"
+    if at_spacing is not None and at_spacing > SPACING_MIN:
+        return (
+            f"This resume takes {pages} pages at spacing {at_spacing:.2f}: its limit is {limit}. "
+            f"Move the spacing slider on the job's page down, or shorten it automatically (the Shorten automatically button on the job's page, or "
+            f"`gigai scout resume pick --job-url URL --shorten`; no model call), then generate the PDF again. Or keep it at {pages} pages."
+        )
     return (
         f"This resume takes {pages} pages: it does not fit on {limit} even with the tightest spacing. "
         f"To get {limit}, shorten it automatically (the Shorten automatically button on the job's page, or "
@@ -274,6 +306,10 @@ class RenderedPdf:
     spacing_scale: float
     #: ``over_limit_note`` when the resume has a page limit and no spacing puts it there; else ``None``.
     note: str | None = None
+    #: The page limit the render was held to (``_render``'s ``max_pages``); ``None`` when it had none.
+    max_pages: int | None = None
+    #: One PNG a page, when the caller asked for the preview's pictures (``images``) instead of the PDF; ``pdf`` is then empty.
+    page_images: tuple[bytes, ...] = ()
 
 
 #: The header lines under the name that a page ESTIMATE keeps room for (0.1.11.3 item 15): the ONE contact line, and
@@ -308,17 +344,23 @@ def _data(sections: list[dict[str, object]], header: PdfHeader | None, company: 
     }
 
 
-def _estimate(sections: list[dict[str, object]], spacing_scale: float, header_lines: int) -> tuple[int, float]:
+def _estimate(sections: list[dict[str, object]], spacing_scale: float, header_lines: int, *, printed: bool = False) -> tuple[int, float]:
     """``(last page, fill)`` of ``sections`` under a blank header of ``header_lines`` lines: THE page estimate.
 
     One definition for every side that fits a resume to a page limit without a header in hand (the pick's fit,
     the tailoring's length rule, an edit's page count): the PDF's own template and layout, the header's block at
-    its largest (``HEADER_RESERVE_LINES``).  No PDF is compiled."""
+    its largest (``HEADER_RESERVE_LINES``).  No PDF is compiled.
+
+    0.1.11.5: an estimate keeps the body's FULL line height at every spacing (the template's ``fixed_lines``), as
+    it did before the spacing scale also tightened the lines: what a pick or the length rule budgets does not move,
+    and the PDF, whose lines do tighten below 1.0, never takes more pages than the estimate counted.  ``printed``
+    measures as the PDF prints instead."""
     root = resources.files("gigai.scout").joinpath("data", "resume")
     with ExitStack() as stack:
         directory = str(stack.enter_context(resources.as_file(root)))
         template = (Path(directory) / "resume.typ").read_bytes()
-        return _end(template, directory, _data(sections, None, "", blank_lines=header_lines), clamp_scale(spacing_scale))
+        data = _data(sections, None, "", blank_lines=header_lines)
+        return _end(template, directory, data if printed else {**data, "fixed_lines": True}, clamp_scale(spacing_scale))
 
 
 def fewest_pages(result: TailoredResume) -> int:
@@ -329,19 +371,19 @@ def fewest_pages(result: TailoredResume) -> int:
     return _estimate(_body(result), SPACING_MIN, HEADER_RESERVE_LINES)[0]
 
 
-def pages_at(result: TailoredResume, spacing_scale: float, *, header_lines: int = HEADER_RESERVE_LINES) -> int:
+def pages_at(result: TailoredResume, spacing_scale: float, *, header_lines: int = HEADER_RESERVE_LINES, printed: bool = False) -> int:
     """The pages ``result`` prints on at ``spacing_scale``: ``fewest_pages``'s estimate at a spacing the caller names.
 
     What the master resume's fit reads (0.1.10.9 master P4, ``tailor_master``): the selector's own page budget
     is 2 pages at ``master_selection.FIT_SCALE``, and a tailoring of its candidates is held to the same one.
     ``header_lines``: the header lines kept blank under the name; more than the default is a tighter budget
-    (``pick.shorten_stored``)."""
-    return _estimate(_body(result), spacing_scale, header_lines)[0]
+    (``pick.shorten_stored``).  ``printed``: as the PDF prints (``_estimate``)."""
+    return _estimate(_body(result), spacing_scale, header_lines, printed=printed)[0]
 
 
 def _render(
     sections: list[dict[str, object]], header: PdfHeader | None, *, company: str, timestamp: datetime, spacing_scale: float, auto_fit: bool,
-    count_pages: bool = False, max_pages: int | None = None,
+    count_pages: bool = False, max_pages: int | None = None, fixed: bool = False, images: bool = False,
 ) -> RenderedPdf:
     """``header`` ``None``: no header, a blank block of the header's height reserved (an agent's PDF).
 
@@ -352,7 +394,13 @@ def _render(
     with a two-line header's block; a saved spacing may be looser than the estimate's 0.9; a contact line may wrap
     twice): this is where those are absorbed.
     A resume that already fits renders exactly as before.  One that cannot be put there renders as its layout
-    says, with ``RenderedPdf.note``."""
+    says, with ``RenderedPdf.note``.
+
+    ``fixed`` (0.1.11.5): ``spacing_scale`` is the person's own choice for THIS job (the job page's slider) and is
+    used as given: nothing tightens it.  A resume over its limit there still gets the compact Skills at that same
+    spacing, else the note.  ``images``: the same document as one PNG a page (the job page's preview) in place of
+    the PDF.  ONE definition: the preview and the PDF go through this function, so at the same header and spacing
+    they are the same layout and the same pages."""
     root = resources.files("gigai.scout").joinpath("data", "resume")
     with ExitStack() as stack:
         directory = str(stack.enter_context(resources.as_file(root)))
@@ -370,7 +418,7 @@ def _render(
             if max_pages is None:
                 # Auto fit already measured the scale it chose; otherwise the count costs one layout query, only on request.
                 return scale, measured[scale][0] if scale in measured else (measure(scale)[0] if count_pages else None)
-            if not auto_fit and measure(scale)[0] > max_pages:  # auto fit already ends on the fewest pages any spacing reaches
+            if not auto_fit and not fixed and measure(scale)[0] > max_pages:  # auto fit already ends on the fewest pages any spacing reaches
                 tighter = [candidate for candidate in _GRID if floor <= candidate < scale]  # loosest first
                 if tighter and measure(tighter[-1])[0] <= max_pages:
                     scale = next(candidate for candidate in tighter if measure(candidate)[0] <= max_pages)
@@ -381,14 +429,17 @@ def _render(
         note = None
         if max_pages is not None and pages is not None and pages > max_pages:
             compact = {**data, "compact_tags": True} if any(section["tags"] for section in sections) else data
-            for floor in (FIT_FLOOR, SPACING_MIN)[compact is data:]:
+            for floor in (() if compact is data else (FIT_FLOOR,)) + (() if fixed else (SPACING_MIN,)):
                 tight_scale, tight_pages = placed(compact, floor)
                 if tight_pages is not None and tight_pages <= max_pages:
                     data, scale, pages = compact, tight_scale, tight_pages
                     break
             else:
-                note = over_limit_note(pages, max_pages)
-        return RenderedPdf(_compile(template, directory, data, scale, timestamp), pages, scale, note)
+                note = over_limit_note(pages, max_pages, scale if fixed else None)
+        if images:
+            pictures = _compile_images(template, directory, data, scale)
+            return RenderedPdf(b"", len(pictures), scale, note, max_pages, pictures)
+        return RenderedPdf(_compile(template, directory, data, scale, timestamp), pages, scale, note, max_pages)
 
 
 def render_pdf(
@@ -573,15 +624,18 @@ def render_markdown_pdf(
     return _render(sections, header, company=company, timestamp=timestamp, spacing_scale=spacing_scale, auto_fit=auto_fit, count_pages=True)
 
 
-def measure_markdown(markdown: str, *, spacing_scale: float = SPACING_DEFAULT, header_lines: int = HEADER_RESERVE_LINES) -> tuple[int, float]:
+def measure_markdown(
+    markdown: str, *, spacing_scale: float = SPACING_DEFAULT, header_lines: int = HEADER_RESERVE_LINES, printed: bool = False,
+) -> tuple[int, float]:
     """``(last page, fill of that page 0..1)`` where resume markdown ends at ``spacing_scale``: one layout query.
 
     The page estimate (``_estimate``): no header is read, the header's block is reserved at its largest
     (``header_lines``), and no PDF is compiled.  This is how the master resume's selector fits a pick to the
-    page budget (0.1.10.9 master P2)."""
+    page budget (0.1.10.9 master P2).  ``printed`` (0.1.11.5): where the PDF itself ends at that spacing (below
+    1.0 its body lines are tighter than the estimate's: ``_estimate``)."""
 
     _name, sections = parse_resume_markdown(markdown)
-    return _estimate(sections, spacing_scale, header_lines)
+    return _estimate(sections, spacing_scale, header_lines, printed=printed)
 
 
 # --- the header and layout both entry points use ---------------------------------------------
@@ -611,18 +665,29 @@ def layout(settings: DisplaySettings, spacing_scale: float | None = None, auto_f
 
 def stored_resume_pdf(
     stored: TailorResponse, *, home_root: Path, form: dict[str, object] | None = None, spacing_scale: float | None = None,
-    auto_fit: bool | None = None, count_pages: bool = False, today: date | None = None,
+    auto_fit: bool | None = None, count_pages: bool = False, today: date | None = None, fixed: bool = False, images: bool = False,
+    target: Path | None = None,
 ) -> tuple[RenderedPdf, str]:
     """``(the PDF, its file name)`` for one stored tailored resume: what ``POST /api/tailored-resumes/pdf`` serves.
 
-    ``form`` ``None``: headerless (an agent's or the CLI's render)."""
+    ``form`` ``None``: headerless (an agent's or the CLI's render).
+
+    THE JOB'S OWN SPACING (0.1.11.5): a spacing saved for this job (``job_spacing``: the job page's
+    slider) is used, as saved, when the caller names no layout; the saved display layout (auto fit by default)
+    applies only to a job with none.  ``fixed``: the ``spacing_scale`` given is such a choice (the slider's value
+    in this request).  ``images``: the preview's page pictures in place of the PDF (``_render``).  ``target``
+    (every product caller passes it) finds the job's spacing in THIS home's store (``stored_job_path``)."""
 
     profile_id = stored.resume.profile_id or "ephemeral"
     settings = load_display(home_root) or DisplaySettings()
     stamp = datetime.fromisoformat(stored.updated_at.replace("Z", "+00:00"))
     if stamp.tzinfo is None:
         stamp = stamp.replace(tzinfo=timezone.utc)
-    scale, fit = layout(settings, spacing_scale, auto_fit)
+    fixed = fixed and spacing_scale is not None
+    saved = job_spacing(stored_job_path(stored, home_root, target))
+    if spacing_scale is None and auto_fit is None and saved is not None:
+        spacing_scale, fixed = saved, True
+    scale, fit = layout(settings, spacing_scale, False if fixed else auto_fit)
     # 0110-8-11: the file and the document are named for the company (the index's name), not its board token.
     from .find_jobs.company_names import company_display_name
 
@@ -632,8 +697,88 @@ def stored_resume_pdf(
     rendered = _render(
         _body(stored.result), pdf_header(settings, profile_id, form), company=company, timestamp=stamp,
         spacing_scale=scale, auto_fit=fit, count_pages=count_pages, max_pages=length.max_pages if length is not None else LENGTH_RULE.max_pages,
+        fixed=fixed and not fit, images=images,
     )
     return rendered, pdf_file_name(company, stored.job.title, today or date.today())
+
+
+# --- one job's own spacing (0.1.11.5): a small file beside the job's stored resume ---------------------------
+
+#: The suffix of the file that holds ONE job's PDF spacing, beside the job's stored resume (``<digest>.json`` ->
+#: ``<digest>.layout``).  A second small file per job, and not a field of the stored resume, so that a GigAI
+#: older than 0.1.11.5 opened on the same home reads every stored resume as before: its reader refuses a resume
+#: with a key it does not know, and it only looks at ``*.json`` there, so it never sees this file.
+JOB_LAYOUT_SUFFIX = ".layout"
+
+
+def job_layout_path(stored_path: Path | str) -> Path:
+    """Where the spacing of the job whose resume is stored at ``stored_path`` is kept."""
+
+    return Path(stored_path).with_suffix(JOB_LAYOUT_SUFFIX)
+
+
+def stored_job_path(stored: object, home_root: Path, target: Path | None) -> Path | None:
+    """Where THIS home's store keeps ``stored``'s resume: the file its spacing sits beside.
+
+    Worked out from the home, the project and the job (``tailored_resume_path``: where ``save_job_spacing`` writes),
+    never read from the resume's own recorded ``stored_path``: that names the home the resume was first written in,
+    which is another folder once a home has been copied or moved, and the saved spacing was then not found.
+    Without ``target`` (a caller with no project in hand) the recorded path is all there is."""
+
+    resume, job = getattr(stored, "resume", None), getattr(stored, "job", None)
+    if target is not None and resume is not None and job is not None:
+        try:
+            return tailored_resume_path(home_root, target, resume.profile_id, job.job_identity)
+        except Exception:  # noqa: BLE001 - a folder that is not bound to a project has no store: no spacing is saved there
+            return None
+    recorded = getattr(stored, "stored_path", None)
+    return Path(recorded) if recorded else None
+
+
+def job_spacing(stored_path: Path | str | None) -> float | None:
+    """The spacing saved for the job whose resume is stored at ``stored_path``, or ``None``.
+
+    Tolerant: no file, a symlink, a file that is not ``{"spacing_percent": <whole number>}`` or a value outside the
+    slider's range all read as "none saved" (the render then takes the saved display layout: auto fit)."""
+
+    if not stored_path:
+        return None
+    path = job_layout_path(stored_path)
+    try:
+        if path.is_symlink() or not path.is_file():
+            return None
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    percent = raw.get("spacing_percent") if type(raw) is dict else None
+    if type(percent) is not int:
+        return None
+    spacing = round(percent / 100, 2)
+    return spacing if valid_spacing(spacing) else None
+
+
+def save_job_spacing(home_root: Path, target: Path, profile_id: str | None, job_identity: str, spacing_scale: float) -> float | None:
+    """Save ``spacing_scale`` as ONE job's PDF spacing (the job page's slider); ``None`` when the job has no stored resume.
+
+    Written to ``job_layout_path`` (atomically, under the store's write lock for that folder) and nowhere else:
+    the job's stored resume, its markdown, the jobs folder, the master and the saved display layout are not
+    opened for writing.  It stays when the job's resume is picked or stored again (the file is the job's, not
+    one pick's), and goes with the profile's folder when the profile is deleted.  ``ValueError`` when the
+    spacing is outside the slider's range."""
+
+    if not valid_spacing(spacing_scale):
+        raise ValueError(f"spacing must be between {SPACING_MIN} and {SPACING_MAX}")
+    spacing = round(float(spacing_scale), 2)
+    path = tailored_resume_path(home_root, target, profile_id, job_identity)
+    with tailored_resume_write_lock(path):
+        if read_tailored_resume(path) is None:
+            return None
+        layout = job_layout_path(path)
+        if layout.is_symlink():
+            raise OSError("the job's layout path is a symlink")
+        if job_spacing(path) != spacing:
+            atomic_write(layout, (json.dumps({"spacing_percent": round(spacing * 100)}) + "\n").encode("utf-8"))
+    return spacing
 
 
 #: Shown with every headerless PDF (0110-046): the page that finishes it.
@@ -668,6 +813,7 @@ def markdown_resume_pdf(
 __all__ = [
     "MAX_MARKDOWN_BYTES",
     "MAX_MARKDOWN_LINES",
+    "PREVIEW_PPI",
     "ContactItem",
     "FIT_FLOOR",
     "HEADER_RESERVE_LINES",
@@ -689,5 +835,10 @@ __all__ = [
     "printed_text",
     "render_markdown_pdf",
     "render_pdf",
+    "save_job_spacing",
+    "job_spacing",
+    "job_layout_path",
+    "stored_job_path",
+    "JOB_LAYOUT_SUFFIX",
     "stored_resume_pdf",
 ]

@@ -645,7 +645,7 @@ def _pages(markdown: str) -> int | None:
     try:
         from .resume_pdf import SPACING_MIN, measure_markdown
 
-        return measure_markdown(markdown, spacing_scale=SPACING_MIN)[0]
+        return measure_markdown(markdown, spacing_scale=SPACING_MIN, printed=True)[0]
     except Exception:  # noqa: BLE001 - no renderer (Typst missing or failing) or markdown the format check refuses next: the length is not checked, never guessed
         return None
 

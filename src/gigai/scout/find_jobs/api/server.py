@@ -2087,6 +2087,9 @@ def _make_handler(
                 if path == "/api/tailored-resumes/pdf":
                     self._handle_post_tailored_resume_pdf()
                     return
+                if path == "/api/tailored-resumes/preview":
+                    self._handle_post_tailored_resume_preview()
+                    return
                 if path == "/api/jobs/suggestions":
                     self._handle_post_job_suggestions()
                     return

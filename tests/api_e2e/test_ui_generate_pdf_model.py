@@ -170,9 +170,12 @@ def test_the_form_keeps_nothing_and_sends_the_values_only_in_the_render_request(
     assert form.count("postPdfHeaderSave(") == 1 and form.count("saveDetails(") == 3, "the save function, called by the Save and the Replace buttons only"
     assert "onClick={() => saveDetails(false)}" in form and "onClick={() => saveDetails(true)}" in form
     assert "useEffect(() => {" in form and form.count("useEffect(") == 1, "nothing but the prefill runs without a click"
-    # The only fetches that carry `header` are the two PDF routes.
-    assert re.findall(r"body\.header = header", api) == ["body.header = header", "body.header = header"]
+    # The only fetches that carry `header` are the two PDF routes and (0.1.11.5) the job page's preview of that PDF.
+    assert re.findall(r"body\.header = header", api) == ["body.header = header"] * 3
     assert 'postPdf("/api/tailored-resumes/pdf", body)' in api and 'postPdf("/api/resume/pdf", body)' in api
+    assert 'request("POST", "/api/tailored-resumes/preview", body, { signal })' in api
+    # The form tells the job page its values (for that preview) without a request or an effect of its own.
+    assert form.count("onValues(held.current)") == 2 and "fetch(" not in form
 
 
 

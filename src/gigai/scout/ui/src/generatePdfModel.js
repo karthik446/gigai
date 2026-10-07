@@ -2,8 +2,10 @@
 // tests/api_e2e/test_ui_generate_pdf_model.py can run it under node.
 //
 // GigAI never stores the user's name or contact details. The values live
-// in the form's React state while it is open and travel ONLY in the one render
-// request (POST /api/tailored-resumes/pdf or POST /api/resume/pdf, `header`);
+// in the form's React state while it is open and travel ONLY in a render
+// request (POST /api/tailored-resumes/pdf or POST /api/resume/pdf, `header`;
+// 0.1.11.5: and, while the form is open on a job page, POST
+// /api/tailored-resumes/preview, the same render as pictures of the pages);
 // the server fills the PDF's header and drops them. Nothing here, or in the
 // form, writes them to localStorage, sessionStorage, a cookie or the URL. The
 // `autocomplete` tokens let the BROWSER offer its own autofill, if the user

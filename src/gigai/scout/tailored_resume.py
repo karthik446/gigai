@@ -2439,13 +2439,32 @@ def tailored_resume_path(home_root: Path, target: Path, profile_id: str | None, 
     return tailored_resume_dir(home_root, target) / resume_key(profile_id) / f"{digest}.json"
 
 
+def _same_file(recorded: str, path: Path) -> bool:
+    try:
+        return os.path.samefile(recorded, path)
+    except OSError:
+        return False
+
+
 def _read_stored(path: Path) -> TailorResponse | None:
+    """The resume stored at ``path``; its ``stored_path`` / ``markdown_path`` are where it IS.
+
+    A stored resume records the paths it was first written at.  In a home that was copied or moved those name the
+    ORIGINAL home, and every later write of the resume (a line choice, Restore of what was cut for length) goes to
+    the recorded path: it changed the original home's file, and the page of the copy said "restored" and showed the
+    old resume again on the next read (0.1.11.5, found on a copy of a real home).  A resume read from another file
+    than the one it records is therefore given the paths of the file it was read from, with the ``.md`` beside it.
+    """
+
     if path.is_symlink() or not path.is_file():
         return None
     try:
-        return TailorResponse.from_json(parse_json_bytes(path.read_bytes()))
+        stored = TailorResponse.from_json(parse_json_bytes(path.read_bytes()))
     except Exception:
         return None
+    if not _same_file(stored.stored_path, path):
+        stored = replace(stored, stored_path=str(path), markdown_path=str(path.with_suffix(".md")))
+    return stored
 
 
 def list_tailored_resumes(

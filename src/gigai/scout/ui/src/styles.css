@@ -1477,6 +1477,20 @@ table.data-table th {
 .clean-resume .clean-bullet { padding-left: 1.2em; text-indent: -0.9em; }
 .clean-resume .clean-bullet::before { content: "• "; }
 .resume-stats { font-size: 0.78rem; color: var(--muted); margin-top: 8px; }
+/* 0.1.11.5 (a): the rendered preview (ResumePreview.jsx): the pages as the PDF prints them, the spacing slider
+   and the page count beside them (under them when the card is narrow: the row wraps). The pages are pictures on
+   white paper in both themes. */
+.resume-preview { display: flex; flex-flow: row-reverse wrap; gap: 16px; align-items: flex-start; }
+.resume-preview-side { flex: 1 0 200px; max-width: 260px; position: sticky; top: 76px; }
+.resume-preview-side input[type="range"] { width: 100%; }
+.resume-preview-ends { display: flex; justify-content: space-between; }
+.resume-preview-count { margin: 8px 0 4px; font-size: 1rem; }
+.resume-preview-count[data-over="true"] strong { color: var(--danger); }
+.resume-preview-count [data-role="preview-pages-hint"] { display: block; font-size: 0.8rem; color: var(--muted); }
+.resume-preview-pages { flex: 4 1 420px; min-width: 0; position: relative; display: flex; flex-direction: column; gap: 12px; padding: 12px; background: var(--chip-bg); }
+.resume-preview-pages[aria-busy="true"] .resume-preview-page { opacity: 0.6; }
+.resume-preview-page { display: block; width: 100%; height: auto; background: white; border: 1px solid var(--border); box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12); transition: opacity 120ms; }
+.resume-preview-wait { min-height: 240px; display: flex; align-items: center; justify-content: center; }
 .tailor-error { margin: 0 0 10px; font-size: 0.85rem; }
 
 

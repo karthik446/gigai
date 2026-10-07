@@ -763,12 +763,30 @@ export function postPdfHeaderSave(details, { replace = false } = {}) {
   return request("POST", "/api/pdf-header/save", replace ? { ...details, replace: true } : details);
 }
 
-export function postTailoredResumePdf({ profileId, jobIdentity, header }) {
+// 0.1.11.5: `spacingScale` is the job page's slider as it stands (the preview's spacing): this PDF is rendered at it.
+export function postTailoredResumePdf({ profileId, jobIdentity, header, spacingScale = null }) {
   const body = { profile_id: profileId, job_identity: jobIdentity };
   if (header) {
     body.header = header;
   }
+  if (typeof spacingScale === "number") {
+    body.spacing_scale = spacingScale;
+  }
   return postPdf("/api/tailored-resumes/pdf", body);
+}
+
+// 0.1.11.5 (a): the job's resume as it will print, one picture a page (the
+// PDF's own render; no model call). `spacingScale` (the slider) is SAVED by
+// the server as this job's spacing. `header` is used for the pictures only.
+export function postResumePreview({ profileId, jobIdentity, header = null, spacingScale = null, signal } = {}) {
+  const body = { profile_id: profileId, job_identity: jobIdentity };
+  if (header) {
+    body.header = header;
+  }
+  if (typeof spacingScale === "number") {
+    body.spacing_scale = spacingScale;
+  }
+  return request("POST", "/api/tailored-resumes/preview", body, { signal });
 }
 
 export function postResumePdf({ markdown, profileId, header }) {

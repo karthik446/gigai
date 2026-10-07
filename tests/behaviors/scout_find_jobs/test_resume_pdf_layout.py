@@ -218,7 +218,7 @@ def _index(page: list[tuple[float, float, str, float]], start: int, test: object
 
 def test_every_vertical_gap_is_a_multiple_of_the_spacing_unit() -> None:
     """Baseline to baseline = the upper line's box below its baseline + k units + the lower line's box above."""
-    for scale in (0.7, 1.0, 1.4):
+    for scale in (0.7, 0.85, 1.0, 1.4):
         page = _lines(_pdf(_result(), spacing_scale=scale, auto_fit=False))[0]
         texts = [t.strip() for _, _, t, _ in page]
         summary, experience = texts.index("SUMMARY"), texts.index("EXPERIENCE")
@@ -226,17 +226,22 @@ def test_every_vertical_gap_is_a_multiple_of_the_spacing_unit() -> None:
         first_bullet = _index(page, org, lambda line: line[2].startswith("•"))
         second_bullet = _index(page, first_bullet + 1, lambda line: line[2].startswith("•"))
         next_org = _index(page, second_bullet, lambda line: abs(line[3]) > 10.5)  # the organisation size
+        # 0.1.11.5: below 1.0 the BODY's line box tightens in a straight line from 14.3pt down to 11.5pt at 0.7 (an
+        # organisation line keeps at least 13pt); the header's lines keep 14.3pt, and at 1.0 and above nothing moved.
+        lh = 14.3 if scale >= 1.0 else max(11.5, 14.3 - (14.3 - 11.5) * (1.0 - scale) / 0.3)
+        body, entry = _box(9.5, lh), _box(10.7, max(lh, 13.0))
+        assert (scale < 1.0) or (body, entry) == (BODY, ORG)
         pairs = (  # (upper line, lower line, upper box, lower box, units)
             (0, 1, NAME, BODY, 6),  # after the name
             (1, 2, BODY, BODY, 2),  # after the title
             (2, summary, BODY, SECTION, 15),  # between sections (the header is the first)
-            (summary, summary + 1, SECTION, BODY, 8),  # after a section title
-            (experience - 1, experience, BODY, SECTION, 15),
-            (experience, org, SECTION, ORG, 8),
-            (org, org + 1, ORG, BODY, 0),  # the role line sits directly under the organisation
-            (org + 1, first_bullet, BODY, BODY, 2),  # after the role line
-            (second_bullet - 1, second_bullet, BODY, BODY, 1),  # between bullets
-            (next_org - 1, next_org, BODY, ORG, 7),  # between entries
+            (summary, summary + 1, SECTION, body, 8),  # after a section title
+            (experience - 1, experience, body, SECTION, 15),
+            (experience, org, SECTION, entry, 8),
+            (org, org + 1, entry, body, 0),  # the role line sits directly under the organisation
+            (org + 1, first_bullet, body, body, 2),  # after the role line
+            (second_bullet - 1, second_bullet, body, body, 1),  # between bullets
+            (next_org - 1, next_org, body, entry, 7),  # between entries
         )
         for upper, lower, a, b, units in pairs:
             gap = page[upper][0] - page[lower][0]

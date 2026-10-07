@@ -769,7 +769,7 @@ _register_cover_letter_commands(scout_group)
 @click.option("--job-url", "job_url", help="The posting URL whose stored resume (picked or edited) to render.")
 @click.option("--out", "out_file", type=click.Path(path_type=Path, dir_okay=False), help="Write the PDF to FILE (default: <company>-<role>-<YYYY-MM-DD>.pdf, or resume-<YYYY-MM-DD>.pdf, in your resumes folder).")
 @click.option("--profile", "profile_id", help="With --tailored: the Scout profile ID the resume was tailored for (default: the newest).")
-@click.option("--spacing", "spacing", type=float, help="Spacing scale 0.7-1.4 for this render (turns auto fit off unless --auto-fit is given). Default: the saved setting. A stored job resume is tightened when that keeps it on its page limit.")
+@click.option("--spacing", "spacing", type=float, help="Spacing scale 0.7-1.4 for this render (turns auto fit off unless --auto-fit is given); below 1.0 the body's lines tighten too. Default: the spacing saved for the job on its page in Scout, else the saved setting. A stored job resume is tightened when that keeps it on its page limit.")
 @click.option("--auto-fit/--no-auto-fit", "auto_fit", default=None, help="Pick the spacing that ends the content near a page boundary. Default: the saved setting.")
 @click.option("--header", "header_value", type=click.Path(path_type=Path, dir_okay=False), help="With --out: fill the PDF's header (name, contact line, work authorization) from this JSON FILE of yours. Default: ~/Documents/GigAI/header.json when it exists. GigAI only reads it.")
 @click.option("--no-header", "no_header", is_flag=True, help="Make the PDF without a header even when your header file exists.")
@@ -889,7 +889,7 @@ def resume_pdf_command(
             items = list_tailored_resumes(home_root, target, profile_id=profile_id or None, job_identity=normalize_job_identity(job_url))
             if not items:
                 raise QuickAssessError("tailored_resume_not_found", "no stored tailored resume for that job; run `gigai scout resume tailor --job-url ...` first")
-            rendered, file_name = stored_resume_pdf(items[0], home_root=home_root, form=form, spacing_scale=spacing, auto_fit=auto_fit, count_pages=True)
+            rendered, file_name = stored_resume_pdf(items[0], home_root=home_root, target=target, form=form, spacing_scale=spacing, auto_fit=auto_fit, count_pages=True)
             finish_ids = (items[0].resume.profile_id or "ephemeral", items[0].job.job_identity)
             folder_key, printed = resumes_folder.job_key(home_root, items[0].stored_path), items[0].markdown
         else:

@@ -14951,7 +14951,7 @@
     },
     "/api/tailored-resumes/pdf": {
       "post": {
-        "description": "Render the stored tailored resume as a PDF (binary). Returns application/pdf with Content-Disposition: attachment; filename=`<company>-<role>-<YYYY-MM-DD>.pdf` (never your name); changes nothing. GigAI stores no name or contact details: without header the PDF has no header (a blank block keeps the page layout) and the response carries X-GigAI-Finish-Url, the local Scout page where the person adds their details in the Generate PDF form and downloads; an agent cannot finish that step unless it drives that person's browser. The PDF stays on the resume's page limit: a saved spacing that would run past it is tightened (to 0.8), then the Skills are laid out compactly, then the spacing goes to 0.7 at most; when no spacing fits, the PDF is rendered as saved and X-GigAI-Fit-Note says so in one plain sentence (page counts and what to do; nothing of the resume). 0.1.11.4: when the posting's board no longer lists it the PDF is made all the same and X-GigAI-Posting-Note says \"This posting looks closed: check it before you apply\" (GET /api/jobs `liveness`: one board request at most, none within the hour).",
+        "description": "Render the stored tailored resume as a PDF (binary). Returns application/pdf with Content-Disposition: attachment; filename=`<company>-<role>-<YYYY-MM-DD>.pdf` (never your name); changes nothing. X-GigAI-Pages and X-GigAI-Spacing-Scale say what was rendered. 0.1.11.5: a job whose spacing was saved (the job page's slider, POST /api/tailored-resumes/preview) is rendered at that spacing as saved; below 1.0 the spacing also tightens the body's line height (14.3pt at 1.0 down to 11.5pt at 0.7; the type size never changes), so 0.7 holds about a quarter more text than 1.0. GigAI stores no name or contact details: without header the PDF has no header (a blank block keeps the page layout) and the response carries X-GigAI-Finish-Url, the local Scout page where the person adds their details in the Generate PDF form and downloads; an agent cannot finish that step unless it drives that person's browser. The PDF stays on the resume's page limit: a saved spacing that would run past it is tightened (to 0.8), then the Skills are laid out compactly, then the spacing goes to 0.7 at most; when no spacing fits, the PDF is rendered as saved and X-GigAI-Fit-Note says so in one plain sentence (page counts and what to do; nothing of the resume). 0.1.11.4: when the posting's board no longer lists it the PDF is made all the same and X-GigAI-Posting-Note says \"This posting looks closed: check it before you apply\" (GET /api/jobs `liveness`: one board request at most, none within the hour).",
         "operationId": "post_api_tailored_resumes_pdf",
         "parameters": [],
         "requestBody": {
@@ -14975,6 +14975,10 @@
                   "profile_id": {
                     "description": "The resume identity.",
                     "type": "string"
+                  },
+                  "spacing_scale": {
+                    "description": "The spacing for this PDF, 0.7 to 1.4, used as given (nothing tightens it) and not saved. Default: the spacing saved for this job, else the saved layout.",
+                    "type": "number"
                   }
                 },
                 "required": [
@@ -15073,6 +15077,157 @@
           "Tailored resumes"
         ],
         "x-gigai-effect": "read",
+        "x-gigai-external": "none",
+        "x-gigai-labels": [
+          "user-private",
+          "public-untrusted"
+        ]
+      }
+    },
+    "/api/tailored-resumes/preview": {
+      "post": {
+        "description": "Show the stored tailored resume as it will print (page pictures), and save this job's spacing. The job page's preview: the same render as POST /api/tailored-resumes/pdf (same template, header, spacing and fit; no model call), as one base64 PNG a page in `images`, so `pages` is the PDF's page count. `spacing_scale` in the reply is the spacing rendered: the one saved for this job (`saved` true), else the saved layout's (auto fit: the loosest spacing on the fewest pages). `max_pages` is the resume's page limit; when `pages` is over it `note` says so in one plain sentence. Sending `spacing_scale` writes ONE small file beside this job's stored resume and nothing else: the stored resume itself (its lines, `edited`, `updated_at`) is not written, nor the master, nor the saved layout (PUT /api/resume-display); a later pick of the job's resume keeps it. `header` is used for these pictures only and is never stored. GigAI stores no name or contact details: without header the PDF has no header (a blank block keeps the page layout) and the response carries X-GigAI-Finish-Url, the local Scout page where the person adds their details in the Generate PDF form and downloads; an agent cannot finish that step unless it drives that person's browser.",
+        "operationId": "post_api_tailored_resumes_preview",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "example": {
+                "job_identity": "https://boards.greenhouse.io/acme/jobs/101",
+                "profile_id": "prof_1"
+              },
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "header": {
+                    "description": "The Generate PDF form: {name, email, phone, location, github, linkedin, website, link, work_authorization}, each an optional string of at most 200 characters. `github` and `linkedin` take the id alone and `website` a site address (a profile address there is read as the id); they print as links. The header is the name and ONE contact line: location | work_authorization (e.g. `VISA: H1B`, as written) | the links | email | phone; an empty field leaves no separator, and a line too long for the page is set smaller before it wraps. Optional links: at most 6 more links, each {label, url}; a link prints without `https://` or `www.` and its target is the full URL. Fills this one PDF's header; never stored, logged or returned. Left out: the PDF has no header. Details an agent sends here went through that agent and its model provider; the default for an agent is the headerless PDF and the person finishing it in Scout.",
+                    "type": "object"
+                  },
+                  "job_identity": {
+                    "description": "The job identity.",
+                    "type": "string"
+                  },
+                  "profile_id": {
+                    "description": "The resume identity.",
+                    "type": "string"
+                  },
+                  "spacing_scale": {
+                    "description": "The job page's spacing slider, 0.7 to 1.4: SAVED as this job's spacing, then used for the preview and for the PDF. Leave it out to read the preview and save nothing.",
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "profile_id",
+                  "job_identity"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "image_type": "image/png",
+                  "images": [
+                    "iVBORw0KGgo..."
+                  ],
+                  "max_pages": 2,
+                  "note": null,
+                  "pages": 2,
+                  "saved": true,
+                  "spacing": {
+                    "max": 1.4,
+                    "min": 0.7,
+                    "step": 0.05
+                  },
+                  "spacing_scale": 0.85
+                },
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden / forbidden_origin: loopback peer and Host `127.0.0.1:<port>` or `localhost:<port>` only (Origin too on writes)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "tailored_resume_not_found",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "tailored_resume_not_found, target_unavailable"
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "unsupported_media_type: writes need Content-Type: application/json."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "invalid_value",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "invalid_value, wrong_type, unknown_key"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": {
+                    "code": "pdf_render_failed",
+                    "message": "..."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "pdf_render_failed"
+          }
+        },
+        "summary": "Preview a tailored resume's pages and save the job's spacing",
+        "tags": [
+          "Tailored resumes"
+        ],
+        "x-gigai-effect": "write",
         "x-gigai-external": "none",
         "x-gigai-labels": [
           "user-private",

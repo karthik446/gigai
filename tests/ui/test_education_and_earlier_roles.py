@@ -43,6 +43,9 @@ pytestmark = pytest.mark.ui
 UI_ORDER = 47  # may store a master and the hero job's resume on the shared home: after the Master page and the job-page flows that make them
 
 MASTER_PAGE = '[data-role="master-page"]'
+#: 0.1.11.5: the resume card asks for its rendered preview once when it shows a stored resume. The request names no
+#: spacing, so it saves nothing: a read sent as a POST (it can carry the Generate PDF form's header).
+PREVIEW_READ = "POST /api/tailored-resumes/preview"
 PANEL = f".job-page {tid('job-resume')}"
 NOTICE = '[data-role="no-education"]'
 EDUCATION = f'{MASTER_PAGE} [data-master-section="education"]'
@@ -196,7 +199,7 @@ def test_the_resume_card_says_no_education_only_when_neither_the_master_nor_the_
             assert (link.get_attribute("href"), (link.text_content() or "").strip()) == ("#/master", "add it on the Master page")
             shot(ui, "job-resume-no-education")
         assert ui.requests_after("start", "/api/master") == 0, "the notice needs no read of the master"
-        assert ui.writes_after("start") == []
+        assert ui.writes_after("start") in ([], [PREVIEW_READ])
     finally:
         ui.page.unroute_all()
     ui.assert_clean()
@@ -246,7 +249,7 @@ def test_a_role_with_no_line_shown_is_listed_under_earlier_experience_and_the_co
             assert first_role < at and lines[at + 2].removeprefix("## ").lower() in {"skills", "education", "projects", "other"}, lines[at:at + 4]
             shot(ui, f"job-resume-earlier-experience-{view}")
         ui.settle()
-        assert ui.writes_after("start") == []
+        assert ui.writes_after("start") in ([], [PREVIEW_READ])
     finally:
         ui.page.unroute_all()
     ui.assert_clean()

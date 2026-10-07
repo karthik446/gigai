@@ -38,6 +38,9 @@ import {
   unpickable,
 } from "../jobResumeModel.js";
 import { MASTER_HASH } from "../routing.js";
+import { headerBody } from "../generatePdfModel.js";
+import { previewHeader } from "../resumePreviewModel.js";
+import ResumePreview from "./ResumePreview.jsx";
 import ApplyPanel from "./ApplyPanel.jsx";
 import PickedLeftOut from "./PickedLeftOut.jsx";
 import { Preview } from "./TailoredResumePanel.jsx";
@@ -350,6 +353,16 @@ export default function JobResumePanel({ state, assessment, gate, items, reasses
   const [folderFile, setFolderFile] = useState("");
   const [folderNote, setFolderNote] = useState("");
   const storedStamp = stored ? `${stored.updated_at}|${stored.markdown ? stored.markdown.length : 0}` : "";
+  // 0.1.11.5 (a): the rendered preview. Its header is what Generate PDF would send: the form's values while the
+  // form is open (`formHeader`; the page holds them no longer than the form does). With the form closed the preview
+  // is the headerless PDF: the header's space is kept blank. `previewSpacing` is the spacing on screen.
+  const [formHeader, setFormHeader] = useState(undefined);
+  const [previewSpacing, setPreviewSpacing] = useState(null);
+  useEffect(() => {
+    setPreviewSpacing(null);
+    setFormHeader(undefined);
+  }, [state.profileId, state.jobIdentity]);
+  const onFormValues = useCallback((values) => setFormHeader(values === undefined ? undefined : previewHeader(headerBody(values))), []);
   useEffect(() => {
     let current = true;
     setFolderFile("");
@@ -468,7 +481,7 @@ export default function JobResumePanel({ state, assessment, gate, items, reasses
       <div className="resume-toolbar">
         <h3>{heading}</h3>
       </div>
-      <ApplyPanel state={state} items={items} reassess={reassess} visaRequired={visaRequired} />
+      <ApplyPanel state={state} items={items} reassess={reassess} visaRequired={visaRequired} spacing={previewSpacing} onHeader={onFormValues} />
       {state.error && (
         <div className="callout danger" role="alert" data-role="pick-error">
           {state.error}
@@ -568,6 +581,16 @@ export default function JobResumePanel({ state, assessment, gate, items, reasses
             onLength={changeLength}
             onSaveWording={stored.selection ? saveWording : null}
             wordingSaved={wordingSaved}
+            rendered={(text) => (
+              <ResumePreview
+                profileId={state.profileId}
+                jobIdentity={state.jobIdentity}
+                header={formHeader || null}
+                onSpacing={setPreviewSpacing}
+              >
+                {text}
+              </ResumePreview>
+            )}
           />
         </>
       )}
