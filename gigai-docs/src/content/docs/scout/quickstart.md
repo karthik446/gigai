@@ -118,9 +118,13 @@ An assessed job's page shows the same two numbers in a box at the top right: the
 22 requirements" and "Rank 92". [What Scout's numbers and labels mean](../numbers/) says how
 each is made.
 
-A row can also carry **New**, **Applied · Oct 6** (after **Mark applied** on the job's page;
-it becomes Interview, Offer, Rejected or Withdrawn as you record those) and **Closed**. The
-**Applied** chip above the list shows only the jobs you applied to.
+A row can also carry **New** and **Closed**. After **Mark applied** on a job's page the job
+reads **Applied · Oct 6** (it becomes Interview, Offer, Rejected or Withdrawn as you record
+those), and it leaves the list: jobs you have already applied to (and the ones that moved on
+from there) are left out of the Jobs list, its counts and "Assess top 50". The **Applied** chip
+above the list shows how many there are ("Applied 7") and lists only them; opening or
+assessing one by its address still works. `gigai scout jobs list` and `gigai scout new` leave
+them out too and say how many, and `gigai scout jobs list --state applied` lists them.
 
 ### Assess a batch
 
