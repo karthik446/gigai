@@ -84,7 +84,7 @@ def test_an_edited_point_is_saved_to_the_master_only_after_the_confirm_and_the_p
     ui.goto("/#/jobs/" + quote(_JOB, safe=""))
     _opens_on_preview(ui)
     assert ui.page.locator(f"{POINT} {ACTION}").count() == 0, "a point as the master has it offers to save its wording"
-    assert ui.requests_after("open", "/api/master") == 0, "the master is read for a resume with an edited point (or for 'Add a left-out point'), not before"
+    assert ui.requests_after("open", "/api/master") == 1, "the master is read once when the card loads (the label's count)"
 
     # --- an edit is saved for THIS JOB only: the master is not written ---
     role_points = ui.page.locator(f'{POINTS} [data-role="point-group"]').nth(1).locator('[data-role="point"]')
@@ -95,7 +95,7 @@ def test_an_edited_point_is_saved_to_the_master_only_after_the_confirm_and_the_p
     _type(ui, one.locator("textarea"), NEW)
     one.locator(ACTION).wait_for()
     ui.settle()
-    assert ui.writes_after("edit") == [LINES, f"POST {PREVIEW_ROUTE}"] and ui.requests_after("edit", "/api/master") == 1, "an edit wrote more than this job's resume"
+    assert ui.writes_after("edit") == [LINES, f"POST {PREVIEW_ROUTE}"] and ui.requests_after("edit", "/api/master") == 0, "an edit wrote more than this job's resume"
     assert _files(fixture.home_root) == files and _master(ui) == before_master, "an edit of a point wrote the master"
     assert (one.locator(ACTION).text_content() or "").strip() == "Save this wording to my master"
     assert ui.page.locator(f"{POINT} {ACTION}").count() == 1, "a point that was not edited offers to save its wording"

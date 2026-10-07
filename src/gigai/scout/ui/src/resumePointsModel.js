@@ -148,12 +148,19 @@ export function leftOutChoices(stored, master, query = "") {
   return { total, groups: groups.map(({ at: _at, ...group }) => group) };
 }
 
-// The "Add a left-out point (N)" button. N is the picker's own total once the master is read (`choices`); before that
-// it is the selection's Left out count (the page has no master yet), which can be higher: it also counts Skills
-// lines and lines the master no longer has, which the picker does not list.
-export function addPointLabel(stored, choices) {
-  const count = choices ? choices.total : pickedLeftOut(stored, null).counts.leftOut;
-  return count > 0 ? `Add a left-out point (${count})` : "Nothing left out";
+// The "Add a left-out point (N)" button. N is the picker's own total (`choices`, leftOutChoices of the master read
+// when the card loads), so it is exact from the first render: no Skills lines, no lines the master no longer has,
+// no "Earlier experience" line. With no master read there is no number (never a wrong one).
+export function addPointLabel(choices) {
+  if (!choices) {
+    return "Add a left-out point";
+  }
+  return choices.total > 0 ? `Add a left-out point (${choices.total})` : "Nothing left out";
+}
+
+// True when the resume can offer additions: picked from the master and not handed back whole (`edited`).
+export function canOfferAdditions(stored) {
+  return canMovePoints(stored) && !(stored && stored.edited);
 }
 
 // What a refused change says, in the page's own words (never an id, never the server's sentence).
