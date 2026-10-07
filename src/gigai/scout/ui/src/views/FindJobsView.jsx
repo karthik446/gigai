@@ -764,8 +764,11 @@ export default function FindJobsView({
   // newest run and the stored assessments do not carry: one read of the Jobs
   // list finds its row, once the run and the store have been read.
   const settled = !resultsLoading && !pagesLoading && !quickLoading && !newestLoading;
+  // 0.1.11.5 (UI-01): a loaded job (an assessment) opened by its link has no Jobs row either; its page's fit and rank
+  // box is of that row, so the same one read finds it (a job a run or an assessment carries is not looked for under Removed).
+  const rowKnown = jobRouteId === null || postingRows.has(jobRouteId);
   useEffect(() => {
-    if (jobRouteId === null || jobInLoaded || !settled || postingLookup.id === jobRouteId) {
+    if (jobRouteId === null || rowKnown || !settled || postingLookup.id === jobRouteId) {
       return;
     }
     setPostingLookup({ id: jobRouteId, done: false });
@@ -776,7 +779,7 @@ export default function FindJobsView({
         addPostingRows(found);
         // 0.1.11.4: a stored address is matched the way the API reads it (a slash before the query, tracking parameters).
         const wanted = normalizeJobAddress(jobRouteId);
-        if (found.some((row) => row.job_identity === jobRouteId || (wanted !== null && normalizeJobAddress(row.job_identity) === wanted))) {
+        if (jobInLoaded || found.some((row) => row.job_identity === jobRouteId || (wanted !== null && normalizeJobAddress(row.job_identity) === wanted))) {
           return undefined;
         }
         // 0.1.11.4 R1: a posting its board no longer lists is under Removed; its page still opens and says it is closed.
@@ -786,7 +789,7 @@ export default function FindJobsView({
       })
       .catch(() => {})
       .finally(() => setPostingLookup((current) => (current.id === jobRouteId ? { id: jobRouteId, done: true } : current)));
-  }, [jobRouteId, jobInLoaded, settled, postingLookup.id, addPostingRows]);
+  }, [jobRouteId, jobInLoaded, rowKnown, settled, postingLookup.id, addPostingRows]);
   const anyRanked = useMemo(() => runJobs.some((job) => isRanked(job.rank)), [runJobs]);
   const assessmentsWaiting = useMemo(() => needAnswersCount(assessed), [assessed]);
   useEffect(() => {

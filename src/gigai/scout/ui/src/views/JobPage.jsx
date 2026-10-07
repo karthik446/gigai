@@ -18,7 +18,7 @@ import PipelineTimeline from "../components/PipelineTimeline.jsx";
 import { useAnswerDrafts } from "../answerDrafts.js";
 import { assessSendsLine, assessSummaryLines, reassessErrorText, reassessGate } from "../answersModel.js";
 import { REASSESS_LABEL, coverageRows, gateOf, headerChip, staleCodes, staleItems } from "../jobResumeModel.js";
-import { applicationBadge, boardLink, closedBanner, postedLine, postingDate } from "../postingsModel.js";
+import { applicationBadge, boardLink, closedBanner, postedLine, postingDate, scoreBox } from "../postingsModel.js";
 import { displayCompanyName, notAssessedReasonDetail, thinPostingLine, unchangedSinceLabel } from "../display.js";
 import {
   ORIGIN_JOB_PAGE,
@@ -553,6 +553,7 @@ export default function JobPage({
   const gate = assessment ? gateOf({ record: resume.record, quick: job.assessmentSource === "quick" ? job.quick : null, assessment }) : null;
   const staleList = staleItems(staleCodes({ served: resume.stale, job, stored: resume.stored, assessedAt: assessedTime }));
   const chip = headerChip(fit, { assessment, gate });
+  const box = scoreBox(listedRow); // 0.1.11.5 (UI-01): an assessed job's fit and rank, from the Jobs row it was opened from
   const coverage = coverageRows({ assessment, record: resume.record, stored: resume.stored });
   // The page's ONE Re-assess, as the stale label and Apply offer it too.
   const reassess = { enabled: Boolean(assessment) && answerDrafts.gate.enabled && !answerDrafts.busy, reason: answerDrafts.gate.reason, onClick: answerDrafts.reassess };
@@ -670,7 +671,25 @@ export default function JobPage({
             )}
           </div>
           <div className="header-side">
-            <RankBadge rank={job.rank} detail hideWhenNone={job.status === "on_demand"} />
+            {box ? (
+              <div className="score-box" data-testid="score-box" title="Fit counts the must-have requirements twice. Rank is a first guess from the posting and your resume; it is not a verdict.">
+                {box.fit && (
+                  <>
+                    <span className="score-box-fit" data-role="score-box-fit">
+                      {box.fit.percent}
+                    </span>
+                    <span className="score-box-label">fit{box.fit.requirements ? ` · ${box.fit.requirements}` : ""}</span>
+                  </>
+                )}
+                {box.rank && (
+                  <span className="score-box-rank" data-role="score-box-rank">
+                    {box.rank}
+                  </span>
+                )}
+              </div>
+            ) : (
+              <RankBadge rank={job.rank} detail hideWhenNone={job.status === "on_demand"} />
+            )}
           </div>
         </div>
         <div className="job-actions">

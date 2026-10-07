@@ -143,6 +143,7 @@ def _rows(ui) -> list[dict]:
           state: row.dataset.state,
           rank: row.dataset.rank === undefined ? null : Number(row.dataset.rank),
           score: row.querySelector('[data-role="score"]').textContent,
+          numbers: Array.from(row.querySelectorAll('[data-role="profile-tags"] [data-testid="rank-chip"]')).map((chip) => chip.textContent),
           chips: Array.from(row.querySelectorAll('[data-role="state-chips"] .state-pill')).map((chip) => chip.textContent),
         }))"""
     )
@@ -176,7 +177,7 @@ def test_jobs_come_by_rank_ranked_low_postings_are_listed_under_a_divider_and_as
 
     # The rows are the server's, in its order: best rank first. The first page is the 50 best ranked.
     rows = _rows(ui)
-    assert [row["rank"] for row in rows] == RANKS[:50] and rows[0]["score"] == "rank 99 · not assessed"
+    assert [row["rank"] for row in rows] == RANKS[:50] and rows[0]["score"] == "not assessed" and rows[0]["numbers"] == ["Rank 99"]
     assert [row["rank"] for row in rows] == sorted((row["rank"] for row in rows), reverse=True)
     assert all("state=" not in query for query in answers.listed), answers.listed  # the default list asks for no state
 
@@ -196,9 +197,8 @@ def test_jobs_come_by_rank_ranked_low_postings_are_listed_under_a_divider_and_as
     assert _list(ui) == ["50"] * 8 + ["Ranked low (3)", "49", "31", "12", "Not ranked yet", "-", "-"]
     assert ui.page.locator(low_divider).count() == 1 and ui.page.locator(unranked_divider).count() == 1
     assert [row["chips"] for row in last] == [["Not assessed"]] * 8 + [["Not assessed", "Ranked low"]] * 3 + [["Not assessed"]] * 2, last
-    assert [row["score"] for row in last[8:]] == [
-        "rank 49 · not assessed", "rank 31 · not assessed", "rank 12 · not assessed", "not ranked yet · not assessed", "not ranked yet · not assessed",
-    ]
+    assert [row["score"] for row in last[8:]] == ["not assessed"] * 5
+    assert [row["numbers"] for row in last[8:]] == [["Rank 49"], ["Rank 31"], ["Rank 12"], ["Not ranked yet"], ["Not ranked yet"]]
     ui.step("ranked-low-listed")
 
     # A ranked-low row is a row like any other: it can be ticked (the select-and-assess count moves) ...
