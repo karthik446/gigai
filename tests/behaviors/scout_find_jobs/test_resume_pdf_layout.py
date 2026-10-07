@@ -178,27 +178,39 @@ def _kinds(page: list[tuple[float, float, str, float]]) -> list[str]:
     return ["bullet" if t.startswith("•") else "wrap" if x > 75 and size < 10.5 else "other" for _, x, t, size in page]
 
 
-def test_no_entry_split_leaves_one_bullet_alone() -> None:
+def test_an_entry_splits_between_two_bullets_and_never_inside_one_or_after_its_heading() -> None:
+    """0.1.11.5 PB5: an entry breaks wherever the page ends.  (Before: its first two and its last two bullets stayed
+    together, so a page break never left ONE bullet alone, and the page ended early to keep them.)"""
     splits = 0
+    sizes: set[tuple[int, int]] = set()
     for count in range(0, 40):
         pages = _lines(_pdf(_filled(count, long_entry=True)))
         for before, after in zip(pages, pages[1:]):
             kinds_after = _kinds(after)
+            kinds_before = _kinds(before)
+            # A heading or a role line is never the last line of a page (it stays with the first bullet).
+            stranded = abs(before[-1][3]) > 10.5 or (len(before) > 1 and abs(before[-2][3]) > 10.5 and kinds_before[-1] == "other")
+            assert not stranded, f"count={count}: the heading {before[-2][2]!r} / {before[-1][2]!r} ends the page"
             if not kinds_after or kinds_after[0] not in ("bullet", "wrap"):
                 continue  # the page break falls between entries
             splits += 1
+            # A bullet is one piece: the page starts with a bullet's first line, never with its second.
+            assert kinds_after[0] == "bullet" and kinds_before[-1] in ("bullet", "wrap"), f"count={count}: a page break falls inside a bullet or right after a heading"
             head = 0
             for kind in kinds_after:
                 if kind == "other":
                     break
                 head += kind == "bullet"
             tail = 0
-            for kind in reversed(_kinds(before)):
+            for kind in reversed(kinds_before):
                 if kind == "other":
                     break
                 tail += kind == "bullet"
-            assert head >= 2 and tail >= 2, f"count={count}: an entry splits {tail} | {head} bullets across the page break"
+            assert head >= 1 and tail >= 1, f"count={count}: an entry splits {tail} | {head} bullets across the page break"
+            sizes.add((min(tail, 2), min(head, 2)))
     assert splits, "no fixture size split an entry across pages"
+    # One bullet may end a page, and one may start the next.
+    assert {(1, 2), (2, 1)} <= sizes, sizes
 
 
 # --- 0110-017: one spacing unit, the slider, auto fit ----------------------------------------------------
@@ -292,12 +304,18 @@ def _last_fill(data: bytes) -> tuple[int, float]:
 
 
 def test_auto_fit_spreads_a_long_two_page_resume_to_fill_page_two() -> None:
-    """(a) ~1.65 pages at 1.0x: auto fit fills page 2 to >= 80% (or everything lands on one page)."""
+    """(a) ~1.65 pages at 1.0x: auto fit fills page 2 to >= 70% (or everything lands on one page).
+
+    0.1.11.5 PB5: 72% at 1.4x, with page 1 full to 96%.  Before, page 2 was 82% full because a whole role had left
+    page 1, which ended at 85%: the same content, the empty band in another place."""
     result = _sized(3, 21)
     pages, fill = _last_fill(_pdf(result, spacing_scale=1.0, auto_fit=False))
     assert pages == 2 and 0.55 <= fill <= 0.75, f"fixture drifted: {pages} pages, page 2 {fill:.2f} full at 1.0x"
-    pages, fill = _last_fill(_pdf(result))
-    assert pages == 1 or fill >= 0.8, f"auto fit left page 2 only {fill:.2f} full"
+    data = _pdf(result)
+    pages, fill = _last_fill(data)
+    assert pages == 1 or fill >= 0.7, f"auto fit left page 2 only {fill:.2f} full"
+    first = _lines(data)[0]
+    assert (PAGE_H - MARGIN_Y - first[-1][0]) / (PAGE_H - 2 * MARGIN_Y) >= 0.95, "page 1 ends early"
 
 
 def test_auto_fit_pulls_a_just_over_one_page_resume_onto_one_page() -> None:
@@ -311,13 +329,16 @@ def test_auto_fit_pulls_a_just_over_one_page_resume_onto_one_page() -> None:
 
 def test_auto_fit_range_limit_on_a_one_and_a_half_page_resume() -> None:
     """(c) ~1.5 pages at 1.0x: the loosest spacing (1.4x) is chosen and page 2 fills more than at 1.0x, but the
-    range (gaps are ~20% of a page) cannot reach 80% -- the documented limit, never smaller type."""
+    range (gaps are ~20% of a page) cannot reach 80% -- the documented limit, never smaller type.
+
+    0.1.11.5 PB5: page 2 is 9 points of a hundred fuller than at 1.0x (52% against 43%).  Before it was 19 (61%):
+    a role had left page 1, which ended at 87%; page 1 is now full to 98%."""
     result = _sized(2, 22)
     at_one = _last_fill(_pdf(result, spacing_scale=1.0, auto_fit=False))
     auto = _pdf(result)
     assert auto == _pdf(result, spacing_scale=1.4, auto_fit=False)
     pages, fill = _last_fill(auto)
-    assert at_one[0] == pages == 2 and fill > at_one[1] + 0.1, (at_one, fill)
+    assert at_one[0] == pages == 2 and fill > at_one[1] + 0.05, (at_one, fill)
 
 
 def test_auto_fit_is_deterministic_and_bounded(monkeypatch: pytest.MonkeyPatch) -> None:

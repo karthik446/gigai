@@ -63,7 +63,8 @@ BEFORE = {1.0: (2, 0.9829624277456647), 1.2: (3, 0.382820809248555), 1.4: (3, 0.
 #: Role bullets that fit on 2 pages, with the header's room kept (measured 2026-10-07 after part (d); part (a):
 #: 28 / 20 / 14 / 11; before 0.1.11.5: 19 at 0.7, 14 at 1.0).
 #: 0.1.11.5 PE (the gaps tighten faster below 1.0): 0.7 holds 36 (was 30) and 0.85 holds 26 (was 25); 1.0 and 1.4 as before.
-ROOM = {0.7: 36, 0.85: 26, 1.0: 21, 1.4: 17}
+#: 0.1.11.5 PB5 (an entry splits across pages): 0.85 holds 27 (was 26: a role's last bullets no longer leave the page together).
+ROOM = {0.7: 36, 0.85: 27, 1.0: 21, 1.4: 17}
 
 
 def _pages(pdf: bytes) -> int:
@@ -114,7 +115,9 @@ def test_the_slider_range_moves_a_twenty_bullet_resume_by_many_bullets() -> None
     # The 20-bullet resume: 3 pages at 1.2, 2 pages inside the range.
     assert measure_markdown(PICKED, spacing_scale=1.2, printed=True)[0] == 3 and measure_markdown(PICKED, spacing_scale=0.85, printed=True)[0] == 2
     # A page ESTIMATE (what a pick and the length rule budget with) keeps the full line height: it counts as it did.
-    assert {spacing: measure_markdown(PICKED, spacing_scale=spacing) for spacing in (0.7, 0.85)} == {0.7: (2, pytest.approx(0.9080881502890178)), 0.85: (2, pytest.approx(0.9455252890173411))}
+    # 0.1.11.5 PB5: the estimate breaks its pages by the PDF's own rules, so at 0.7 it ends higher on page 2 (was
+    # 0.9080881502890178: a role had left page 1 whole); at 0.85 no block had left a page early and nothing moved.
+    assert {spacing: measure_markdown(PICKED, spacing_scale=spacing) for spacing in (0.7, 0.85)} == {0.7: (2, pytest.approx(0.8202398843930637)), 0.85: (2, pytest.approx(0.9455252890173411))}
 
 
 def _invoke(fx: PipelineFixture, *args: str) -> dict:

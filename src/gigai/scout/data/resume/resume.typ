@@ -31,10 +31,14 @@
 // (`untitled`: plain lines after the last role); the Skills are plain comma-separated lines, at most
 // `skill-max-lines` (`skills` below).  Everything else is set as before.
 //
-// PAGE RULES (0110-015): an entry heading and role line stay with the first bullet (sticky), the first bullet
-// stays with the second, and the second-to-last stays with the last, so a page break never leaves ONE bullet of
-// an entry alone at the bottom of a page or the top of the next.  And no page holds a short block alone (Education,
-// the Skills, the roles shown by their heading alone): `short` below.
+// PAGE RULES (0.1.11.5 PB5: an entry SPLITS across pages; before, a role of two or three bullets was one piece and
+// left a wide empty band at the foot of the page it did not fit on):
+// - an entry's heading (the employer and its role lines; a project's title and its line of technologies) stays with
+//   its FIRST bullet: a heading is never the last line of a page;
+// - a bullet of up to four printed lines is one piece (`bullet`): a page never breaks inside it;
+// - otherwise a page breaks wherever it ends: between any two bullets, or between two entries;
+// - a section title stays with the first block under it (`sec`);
+// - no page holds a short block alone (Education, the Skills, the roles shown by their heading alone): `short` below.
 #let d = json(bytes(sys.inputs.data))
 #let scale = float(sys.inputs.at("scale", default: "1.0"))
 // A page ESTIMATE (resume_pdf._estimate): the full line height and the plain gap unit at every scale.
@@ -93,7 +97,20 @@
   }
 })
 #let sec(x) = block(above: 15 * s, below: 8 * s, sticky: true, t(x, size: 7.1pt, lh: 7.1pt, weight: 600, fill: accent, tracking: 0.71pt))
-#let bullet(x, keep: false) = block(below: s, sticky: keep, pad(left: 17.8pt, {place(left, dx: -11.8pt, t([•], lh: lh-body)); t(x, lh: lh-body)}))
+// A BULLET IS ONE PIECE: a page never breaks inside a bullet of up to `whole-lines` printed lines (a resume point is
+// two or three).  A longer one may break, with two lines or more on each side (Typst's own rule), as it always could:
+// kept whole, a point of six lines left up to six lines empty at the foot of a page, and a resume of such points took
+// a page more.  The lines are measured, at the width the bullet prints at, and only for a bullet of more than
+// `whole-chars` characters (a shorter one is not five lines of ordinary text; measuring every bullet made a layout half
+// as slow again, and a pick asks for many).
+#let whole-lines = 4
+#let whole-chars = 330
+#let bullet(x, keep: false) = {
+  let body = pad(left: 17.8pt, {place(left, dx: -11.8pt, t([•], lh: lh-body)); t(x, lh: lh-body)})
+  if x.len() <= whole-chars { block(below: s, sticky: keep, breakable: false, body) } else {
+    context block(below: s, sticky: keep, breakable: measure(block(width: page.width - 2 * margin-x, body)).height > whole-lines * lh-body + 0.01pt, body)
+  }
+}
 #let para(x, keep: false) = block(below: 2 * s, sticky: keep, t(x, lh: lh-body, fill: soft))
 
 // THE HEADER (0.1.11.3 item 15) is COMPACT: the name line, the optional title line, then ONE contact line whose items
@@ -146,34 +163,40 @@
     if alone != none and head.dates != "" { block(left(alone)); block(width: 100%, align(right, dates)) } else { left(join-sizes.first()); if head.dates != "" { h(1fr); dates } }
   }
 })
-// NO PAGE OF A SHORT BLOCK ALONE (0.1.11.5 PE, the orphan rule).  A section is SHORT when it has no bullet and no
-// paragraph of its own: the Skills, and Education (its degrees are heading lines).  The short sections that END the
-// resume are kept with what is before them: the last block before them is sticky, each of them is in one piece (its
-// degrees stay together, the Skills' lines are never split), so a page break can only fall before the last two
-// bullets (or the last block) of the section in front of them, never between that and Education or the Skills.  The
-// same for the roles shown by their heading alone ("Earlier experience"): the last bullet of the role before them
-// stays with them.  This is a rule of where a page BREAKS: on a page that holds the blocks anyway nothing moves.
+// NO PAGE OF A SHORT BLOCK ALONE (0.1.11.5 PE, the orphan rule; PB5 made what it holds together as small as the rule
+// allows).  A section is SHORT when it has no bullet and no paragraph of its own: the Skills, and Education (its
+// degrees are heading lines).  THE TAIL is what ENDS the resume with no bullet in it: the short sections at the end,
+// and before them (or alone) the roles shown by their heading alone ("Earlier experience") when they end their
+// section.  The tail is in one piece (its degrees stay together, the Skills' lines are never split) and ONE block
+// stays with it: the last bullet (or paragraph) before it.  So the last page always holds a bullet, and a page break
+// can fall anywhere before that one bullet: the entry it ends (a project, a role) splits like any other.  Before PB5
+// the last TWO bullets, and with them a whole entry of up to three, moved with the tail.
+// Short blocks that do NOT end the resume (Earlier experience before Projects, Education before Experience) follow
+// the plain rules: a title stays with its first line, and the lines break where the page ends.
+// This is a rule of where a page BREAKS: on a page that holds the blocks anyway nothing moves.
 #let short(x) = x.lines.len() == 0 and x.entries.all(e => e.bullets.len() == 0)
 #let ends-short(i) = i < d.sections.len() and d.sections.slice(i).all(short)
 #for (si, x) in d.sections.enumerate() {
   // What ends this section stays with the next one (a short section that ends the resume).
   let keep = ends-short(si + 1)
   let whole = ends-short(si)
+  // The entries from `i` on are part of the tail: none has a bullet, and nothing but short sections follows them.
+  let tail(i) = (keep or si == d.sections.len() - 1) and x.entries.slice(i).all(e => e.bullets.len() == 0)
   sec(x.heading)
   for (i, l) in x.lines.enumerate() {
     let last = keep and i == x.lines.len() - 1 and x.tags.len() == 0 and x.entries.len() == 0
     if l.bullet { bullet(l.text, keep: last) } else { para(l.text, keep: last) }
   }
-  if x.tags.len() > 0 { block(below: 2 * s, breakable: false, sticky: keep and x.entries.len() == 0, skills(x.tags)) }
+  if x.tags.len() > 0 { block(below: 2 * s, breakable: not whole, sticky: keep and x.entries.len() == 0, skills(x.tags)) }
   for (ei, e) in x.entries.enumerate() {
     let oneline = e.at("oneline", default: false)
     let untitled = e.at("untitled", default: false)
     let two-lines = e.at("two_lines", default: false)
     let lh-head = calc.max(lh-body, 13pt)
     let last-entry = ei == x.entries.len() - 1
-    // The entry's end stays with what follows: the next short section, the next degree of a short section that ends
-    // the resume, or the roles shown by their heading alone.
-    let stay = if last-entry { keep } else { whole or x.entries.at(ei + 1).bullets.len() == 0 }
+    // The entry's end stays with what follows when that is the tail: the next short section, the next degree of a
+    // short section that ends the resume, or the roles shown by their heading alone that end it.
+    let stay = if last-entry { keep } else { tail(ei + 1) }
     let n = e.bullets.len()
     if oneline {
       // A degree on ONE line: the school as an entry heading, its degree after it in the role line's type (on the
@@ -187,13 +210,15 @@
     let under = if untitled { e.heading } else { e.heading.slice(calc.min(1, e.heading.len())) }
     for (i, h) in under.enumerate() {
       let role = if h.dates != "" { grid(columns: (1fr, auto), h.text, h.dates) } else { h.text }
-      // A heading's line stays with the entry's first bullet.  The LAST line of an entry with no bullet (the roles
-      // shown by their heading alone) may end a page, unless a short section that ends the resume follows it.
-      let stick = n > 0 or i < under.len() - 1 or stay
+      // A heading's line stays with the entry's first bullet.  The lines of an entry with no bullet (the roles shown
+      // by their heading alone) stay together only in the tail, and its LAST line may end a page unless a short
+      // section that ends the resume follows it.
+      let stick = n > 0 or stay or (i < under.len() - 1 and tail(ei))
       // An untitled block (roles shown by their heading alone, fewer than four) starts with the gap between entries.
       if untitled and i == 0 { block(above: 7 * s, below: 2 * s, sticky: stick, t(role, lh: lh-body, weight: 400, fill: soft)) } else { block(below: 2 * s, sticky: stick, t(role, lh: lh-body, weight: 400, fill: soft)) }
     }
-    for (i, b) in e.bullets.enumerate() { bullet(b, keep: (n >= 2 and (i == 0 or i == n - 2)) or (stay and i == n - 1)) }
+    // Only the bullet before the tail stays with what follows it; every other bullet may end a page.
+    for (i, b) in e.bullets.enumerate() { bullet(b, keep: stay and i == n - 1) }
   }
 }
 // Where the content ends, for auto fit (read with `typst query`, never printed).

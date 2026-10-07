@@ -95,7 +95,8 @@ def resume(long_lines: int = 0, short_lines: int = 3, roles: int = 5) -> str:
 
 #: The failing size: 2 pages where the fit measures (spacing 0.9), a 3rd page of skills at the saved spacing 1.0.
 #: (0.1.11.5 (d): the Skills are plain lines and a degree is one line, so every size here is longer than it was.)
-FAILING = resume(long_lines=2)
+#: (0.1.11.5 PB5: a role splits across pages, so the two-line size no longer needs a 3rd page at 1.0; three extra lines do.)
+FAILING = resume(long_lines=3)
 #: (0.1.11.5 PE: below 1.0 the gaps tighten faster, so the three sizes below are longer again: 8 / 14 / 18 extra
 #: lines, were 7 / 9 / 13.)
 #: Longer: 3 pages at every spacing above the floor (0.8), 2 pages there.
@@ -105,7 +106,7 @@ NEEDS_TIGHTEST = resume(long_lines=14, short_lines=3)
 #: Longer still: 3 pages whatever is done.
 TOO_LONG = resume(long_lines=18, short_lines=3)
 #: The master: nine roles, 4 pages. ``FAILING`` is its first five roles, line for line.
-LONG = resume(long_lines=2, roles=9)
+LONG = resume(long_lines=3, roles=9)
 
 
 def _pages(pdf: bytes) -> list[str]:
@@ -270,7 +271,7 @@ def test_every_size_the_fit_accepts_is_on_its_pages_with_the_four_line_header_at
 
     header = form_header(FORM, TITLE)
     accepted = 0
-    for long_lines in range(3):
+    for long_lines in range(4):
         for short_lines in range(5):
             markdown = resume(long_lines, short_lines)
             if measure_markdown(markdown, spacing_scale=FIT_SCALE)[0] > 2:

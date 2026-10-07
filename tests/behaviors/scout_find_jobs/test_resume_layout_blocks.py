@@ -275,7 +275,10 @@ def test_the_summary_is_a_plain_paragraph_at_the_left_margin() -> None:
 
 #: Where the 20 bullets of the spacing fixture under their five roles, and the project, end (page, fill of that page)
 #: as the template BEFORE this change measured it (HEAD 3f1c134f, 2026-10-07).
-UNMOVED = {1.0: (2, 0.45052023121387297), 1.2: (2, 0.6041618497109827), 1.4: (2, 0.6239306358381504)}
+#: 0.1.11.5 PB5 (an entry splits across pages) moved 1.2 on purpose, from (2, 0.6041618497109827): there a role had left
+#: page 1 whole and page 2 began with it; page 1 now runs to its foot and page 2 ends higher.  1.0 and 1.4, where no
+#: block had left a page early, are as they were to the last digit.
+UNMOVED = {1.0: (2, 0.45052023121387297), 1.2: (2, 0.5126069364161852), 1.4: (2, 0.6239306358381504)}
 
 
 def test_at_one_and_above_the_roles_their_bullets_and_the_project_end_where_they_did() -> None:
@@ -291,9 +294,11 @@ def test_at_one_and_above_the_roles_their_bullets_and_the_project_end_where_they
 
 #: With the header on: pages at four spacings and the automatic spacing.  BEFORE this change (HEAD 3f1c134f): the
 #: spacing fixture 3 pages at 1.0 and automatic 0.85; the pick fixture 3 pages at 1.0 and automatic 0.95.
+#: 0.1.11.5 PB5 (an entry splits across pages): the pick fixture's automatic spacing is 1.25 (was 1.0: from 1.05 up a
+#: role that did not fit page 1 left it whole, and the resume ran to a 3rd page).
 PAGES = {
     "spacing_fixture": ({1.0: 2, 0.85: 2, 0.75: 2, 0.7: 2}, 1.05),
-    "pick_cap_fixture": ({1.0: 2, 0.85: 2, 0.75: 2, 0.7: 2}, 1.0),
+    "pick_cap_fixture": ({1.0: 2, 0.85: 2, 0.75: 2, 0.7: 2}, 1.25),
 }
 
 
