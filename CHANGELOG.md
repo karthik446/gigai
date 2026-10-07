@@ -30,6 +30,23 @@ mechanics here. Those belong in the internal changelog.
 
 ## Released versions
 
+### 0.1.11.6
+
+Two fixes for a job that two of your profiles hold (and one for jobs far down the list). Nothing to do after
+you upgrade (`uv tool upgrade gigai`).
+
+- **A job you applied to always opens.** After **Mark applied**, a job page opened from its address, or from the
+  Applications page, could say "We have no stored posting at this address" when the profile on the page had not
+  assessed the job, and you could not record Interview, Offer, Rejected or Withdrawn. The page now reads the one
+  posting by its address, so an applied job, a weak fit, a closed one, and a job past the first 200 rows all
+  open. The Jobs list still leaves applied jobs out unless you choose the **Applied** filter.
+- **Answering a question re-assesses the profile you are on.** Answering an open question on one profile's page
+  could re-assess the job for your other profile, and the page kept showing the old assessment. The re-assessment
+  now runs for the profile on the page and the page shows it. `gigai scout answer --reassess` takes
+  `--profile`; with no profile on a job two profiles hold, it asks which one instead of guessing, and nothing is
+  saved. "Assess these" on the Jobs page with one profile chip on now assesses for that profile, and the tailor
+  step reads the requirement rows of the profile it works for.
+
 ### 0.1.11.5
 
 **After you upgrade** (`uv tool upgrade gigai`): the first read matches your stored postings once more against the
