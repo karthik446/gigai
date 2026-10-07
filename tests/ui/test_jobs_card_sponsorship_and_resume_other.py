@@ -83,6 +83,9 @@ def test_the_stored_resume_preview_shows_the_other_section(ui, scout_server) -> 
     ui.wait_for_job_page()
     ui.settle()
     panel = ui.page.locator('[data-testid="job-resume"]')
+    # 0.1.11.5: the page opens on Preview always (this resume has a reworded line: it opened on "Show changes").
+    assert panel.locator('[data-action="view-clean"]').get_attribute("aria-pressed") == "true"
+    panel.locator('[data-action="view-changes"]').click()
     text = panel.inner_text()
     assert "Other" in text and "Earlier experience: Staff scheduling engineer" in text, text
     ui.page.click('[data-action="view-clean"]')

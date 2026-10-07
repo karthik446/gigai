@@ -86,7 +86,8 @@ def test_the_job_page_shows_the_model_notice_under_the_verdict_and_nothing_witho
         " return Boolean(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING); }"
     )
     assert below, "the notice line follows the verdict wording"
-    assert ui.writes_after("start") == []
+    # (0.1.11.5: the resume card opens on Preview always: the one POST is its render, which stores nothing.)
+    assert [write for write in ui.writes_after("start") if write != "POST /api/tailored-resumes/preview"] == []
     ui.wall_budget("open a job page with a model notice (small home)", INTERACTIVE_WALL_SECONDS * 4, "start", "shown")
     shot(ui, evidence_folder(), "uinotice-1-job-page-with-the-notice")
 
@@ -113,7 +114,8 @@ def test_the_job_page_shows_the_requirements_note_by_the_requirements_table_and_
         " return Boolean(t) && Boolean(n.compareDocumentPosition(t) & Node.DOCUMENT_POSITION_FOLLOWING); }"
     )
     assert before_table, "the note line sits just above the requirements table"
-    assert ui.writes_after("start") == []
+    # (0.1.11.5: the resume card opens on Preview always: the one POST is its render, which stores nothing.)
+    assert [write for write in ui.writes_after("start") if write != "POST /api/tailored-resumes/preview"] == []
     shot(ui, evidence_folder(), "uinotice-2-job-page-with-the-requirements-note")
 
     _lay(ui, demo, None, None)

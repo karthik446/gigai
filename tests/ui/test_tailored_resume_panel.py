@@ -98,7 +98,8 @@ def test_the_panel_says_where_the_resume_is_in_the_jobs_folder(ui, scout_server)
     ui.settle()
     assert ui.requests_after("start", "/api/jobs-folder") == 1 and ui.requests_after("start", "/api/tailored-resumes") == 1
     assert ui.requests_after("start", "/api/resumes-folder") == 0
-    assert ui.writes_after("start") == []
+    # (0.1.11.5: the card opens on Preview always, also for a resume with reworded lines: the one POST is its render.)
+    assert [write for write in ui.writes_after("start") if write != "POST /api/tailored-resumes/preview"] == []
     ui.cpu_budget("job page with its tailored resume, cold page (small home)", JOB_PAGE_CPU_SECONDS, "start", "shown")
     ui.wall_budget("job page with its tailored resume, cold page (small home)", JOB_PAGE_WALL_SECONDS, "start", "shown")
     ui.assert_clean()  # zero console errors, page errors, HTTP >= 400, failed requests
@@ -155,7 +156,7 @@ def test_cut_for_length_is_said_and_restore_puts_it_back(ui, scout_server) -> No
     ui.step("restored")
     key = {"profile_id": demo.hero_profile_id, "job_identity": demo.hero_job, "updated_at": stamp}
     assert server.puts == [{**key, "use": "restore"}]
-    assert ui.writes_after("before-restore") == ["PUT /api/tailored-resumes/length"]
+    assert [write for write in ui.writes_after("before-restore") if write != "POST /api/tailored-resumes/preview"] == ["PUT /api/tailored-resumes/length"]
     said = note.locator("span").first.text_content() or ""
     assert said == f"Put back (was cut for length): {CUT_ROLES[0]}; {CUT_ROLES[1]}; 3 older bullets (3 of {TRIMMED_ROLE}). The resume is now 3 pages, over the 2-page limit."
     again = note.locator('[data-action="length-cut"]')

@@ -17,8 +17,20 @@
 // fits the page with the spacing slider and sees the page count beside it.
 // There is no route for a point typed from nothing, so the list offers none:
 // a line is added from the master, then its words are changed.
+//
+// 0.1.11.5 (b++): the master changes only when the person asks. An EDITED
+// point whose words are not the master's carries ONE action, "Save this
+// wording to my master" (`masterWording`): the page shows what the master says
+// now and what it will say, and on the confirm sends the write the Changed
+// tab's "Save this wording to your master" sends, for that ONE line:
+//
+//   master   PUT /api/master/lines  {revision, id, use: "edit", text}
+//
+// `revision` is the one the confirm showed: a master that changed since is
+// refused (409 revision_conflict), never written over. Not for a removed or
+// an added point, and never for more than one line.
 import { ENTRY_SECTIONS, SECTION_LABELS, pickedLeftOut, lineItemId } from "./masterModel.js";
-import { displayText } from "./tailoredResumeModel.js";
+import { EARLIER_HEADING, displayText } from "./tailoredResumeModel.js";
 
 const text = (value) => (typeof value === "string" ? value : "");
 const list = (value) => (Array.isArray(value) ? value : []);
@@ -40,6 +52,9 @@ export const EMPTY_TEXT = "Not saved: a point cannot be empty. Use Remove to tak
 export const NO_SELECTION_TEXT = "This resume was not picked from your master: its points can be reworded here, not added or removed.";
 export const NOTHING_LEFT_TEXT = "Every line of your master is on this resume.";
 export const NO_MATCH_TEXT = "No left-out line has those words.";
+export const SAVE_TO_MASTER_LABEL = "Save this wording to my master";
+// The kinds of master line a point stands for (a Skills line is not a point).
+const WORDING_KINDS = new Set(["summary", "bullet", "other"]);
 
 // A line's words as the box shows them: a copied line without its own markers, anything else as written.
 function shown(line) {
@@ -90,11 +105,24 @@ export function canMovePoints(stored) {
   return Boolean(stored && stored.selection && typeof stored.selection === "object");
 }
 
+// The master's own one-line list of earlier roles: an Other line that starts with the name of the resume's block
+// ("Earlier experience: Senior ... (...); ..."; it came with the person's resume file). The resume prints its earlier
+// roles itself, one line a role, as part of its layout (EARLIER_HEADING), so that line is not a point to add.
+export function isEarlierRolesLine(item) {
+  if (!item || item.kind !== "other") {
+    return false;
+  }
+  const words = displayText(item.text).toLowerCase();
+  const name = EARLIER_HEADING.toLowerCase();
+  return words === name || words.startsWith(`${name}:`);
+}
+
 // The master's lines this resume leaves out, for the "Add a point" picker:
 //   {total, groups: [{key, label, lines: [{id, text, removed}]}]}
 // By role, the roles in the master's own order (its newest first); in a role, a line the person took off this
 // resume comes first (`removed`: its button says "Put back"). `query` keeps the lines that hold every word of it,
-// in the line or in its role's name. `total` counts the lines before the search.
+// in the line or in its role's name. `total` counts the lines before the search. The master's one-line list of
+// earlier roles is not among them (isEarlierRolesLine).
 export function leftOutChoices(stored, master, query = "") {
   const items = new Map(list(master && master.items).map((item) => [item.id, item]));
   const order = new Map(list(master && master.entries).map((entry, index) => [entry.id, index]));
@@ -106,7 +134,7 @@ export function leftOutChoices(stored, master, query = "") {
   let total = 0;
   const groups = pickedLeftOut(stored, master)
     .leftOut.map((group) => {
-      const lines = group.lines.filter((line) => line.known && ADDABLE_KINDS.has(text(items.get(line.id) && items.get(line.id).kind)));
+      const lines = group.lines.filter((line) => line.known && ADDABLE_KINDS.has(text(items.get(line.id) && items.get(line.id).kind)) && !isEarlierRolesLine(items.get(line.id)));
       total += lines.length;
       const kept = lines
         .filter((line) => words.every((word) => `${line.text} ${group.label}`.toLowerCase().includes(word)))
@@ -149,4 +177,51 @@ export function pointErrorText(err) {
 export function editOf(line, draft) {
   const next = text(draft).split(/\s+/).filter(Boolean).join(" ");
   return next === "" || next === text(line && line.text) ? null : next;
+}
+
+const spaced = (value) => text(value).split(/\s+/).filter(Boolean).join(" ");
+
+// "Save this wording to my master" for one point of pointGroups(): {id, from, to}, or null when the point carries
+// no such action. `id` is the master line it would change, `from` what the master says NOW, `to` the point's words.
+// Only an edited point that stands for a line the master holds, and only while its words are not the master's (as
+// written, or as the box shows them: without the line's own markers). `master` is GET /api/master's `master`: with
+// none read there is nothing to show before the change, so there is no action.
+export function masterWording(line, master) {
+  if (!line || !line.edited || !line.itemId || !master) {
+    return null;
+  }
+  const item = list(master.items).find((candidate) => candidate && candidate.id === line.itemId);
+  const to = spaced(line.text);
+  if (!item || !WORDING_KINDS.has(text(item.kind)) || to === "") {
+    return null;
+  }
+  const from = text(item.text).trim();
+  return to === spaced(from) || to === spaced(displayText(from)) ? null : { id: item.id, from, to };
+}
+
+// True when the list needs the master read for its points: an edited point stands for a master line, and whether
+// it carries the action depends on what the master says now.
+export function needsMaster(stored) {
+  return canMovePoints(stored) && pointGroups(stored).some((group) => group.lines.some((line) => line.edited && line.itemId));
+}
+
+// What the page says after the master took the wording (PUT /api/master/lines' answer).
+export function masterSavedText(response) {
+  if (response && response.status === "unchanged") {
+    return "Your master already says this. Nothing was changed.";
+  }
+  const revision = response && response.master && response.master.revision;
+  return `Saved to your master${revision ? ` (revision ${revision})` : ""}: that one line. This job's resume already has these words; other jobs take the new wording on their next pick.`;
+}
+
+const MASTER_REFUSALS = {
+  revision_conflict: "Not saved: your master changed after this page read it. It is shown as it is now; look at the change again before you save it.",
+  master_item_not_found: "Not saved: that line is no longer in your master. Nothing was changed.",
+  personal_info_refused: "Not saved: a line of your master cannot hold a name or contact details. Nothing was changed.",
+  master_line_exists: "Not saved: your master already has a line with exactly these words. Nothing was changed.",
+  master_not_found: "Not saved: there is no master resume to save it to.",
+};
+
+export function masterSaveErrorText(err) {
+  return MASTER_REFUSALS[text(err && err.code)] || "Not saved: your master could not be changed. Nothing was changed; try again.";
 }

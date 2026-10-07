@@ -160,7 +160,9 @@ def test_answer_a_question_on_the_job_page_and_the_pipeline_runs(ui) -> None:
     assert rows[0][1] in ("done", "not_started")
     assert timeline.locator('[data-role="tailored-variant"]').count() == 0, 'the "before -> after tailoring" line is gone'
     assert timeline.locator(tid("scout-label-chip")).count() == 1 and timeline.locator(tid("ats-chip")).count() == 1
-    assert ui.writes_after("reassessed") == [], "the pipeline ran by itself: the page asked for nothing"
+    # (0.1.11.5: the card opens on Preview always, also for this resume with reworded lines: the resume the pipeline
+    # stored is rendered again, and a render stores nothing.)
+    assert [write for write in ui.writes_after("reassessed") if write != "POST /api/tailored-resumes/preview"] == [], "the pipeline ran by itself: the page asked for nothing"
     ui.wall_budget("the background pipeline finishes the job (fixture model)", PIPELINE_WALL_SECONDS, "reassessed", "pipeline-done")
 
     # The page shows the resume the pipeline stored: the panel, its folder line, the one Apply button, "Resume ready".
@@ -178,7 +180,7 @@ def test_answer_a_question_on_the_job_page_and_the_pipeline_runs(ui) -> None:
     assert ui.requests_after("typed", "/api/tailored-resumes") == 2
     assert ui.requests_after("pipeline-done", "/api/pipeline/job") == 0, "the timeline was read again for the resume the pipeline stored"
     assert timeline.get_attribute("data-state") == "done"
-    assert ui.writes_after("reassessed") == []
+    assert [write for write in ui.writes_after("reassessed") if write != "POST /api/tailored-resumes/preview"] == []
 
     # The server agrees: the answer is the user's, and the job no longer waits.
     recorded = next(item for item in ui.server_json("/api/answers")["answers"] if item["question_id"] == question["question_id"])

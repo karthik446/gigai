@@ -24,8 +24,8 @@ Pinned, on what the page shows WITHOUT A RELOAD and on the PDF the browser downl
 - PICKED / LEFT OUT FOLLOW THE STORED RESUME (the same re-check: the buttons stayed at the pick's numbers): after
   Restore, after a Remove and after an Add the two counts are what the resume prints;
 - EDIT, by keyboard: type in a point's box, Enter saves it ("Saved for this job. Your master is unchanged."); Tab
-  goes to its Remove, Tab again to the next point's box, and leaving a box saves it too; each is ONE request and the
-  preview shows the new words;
+  goes to the edited point's "Save this wording to my master" (0.1.11.5 (b++)), then to its Remove, then to the next
+  point's box, and leaving a box saves it too; each is ONE request and the preview shows the new words;
 - REMOVE takes the point off (the list, the preview and the counts follow); under "Add a point" it is first in its
   role, as "Put back";
 - ADD: the lines left out, by role, with a search; one click puts a line on, under its role; enough of them and the
@@ -156,9 +156,7 @@ def _ready(ui, *, pages: int | None = None) -> None:
 def _open(ui) -> None:
     ui.goto("/#/jobs/" + quote(_JOB, safe=""))
     ui.page.locator(f'{PANEL}[data-state="stored"]').wait_for()
-    preview = ui.page.locator(f'{PANEL} [data-action="view-clean"]')
-    if preview.get_attribute("aria-pressed") != "true":
-        preview.click()  # a resume with a changed line opens on "Show changes"
+    assert ui.page.locator(f'{PANEL} [data-action="view-clean"]').get_attribute("aria-pressed") == "true", "the job page did not open on Preview"
     _ready(ui)
 
 
@@ -232,7 +230,7 @@ def test_a_point_is_edited_removed_and_added_beside_the_preview_and_the_preview_
     assert opened["count"] == _count(opened["pages"]), opened
     assert opened["points"] == _printed(first) == ui.page.locator(POINT).count() and opened["tabs"] == _tabs(first), opened
     assert ui.requests_after("open", PREVIEW_ROUTE) == 1 and ui.writes_after("open") == [f"POST {PREVIEW_ROUTE}"], "opening the page wrote something"
-    assert ui.requests_after("open", "/api/master") == 0, "the master is read when 'Add a point' is opened, not before"
+    assert ui.requests_after("open", "/api/master") == 0, "the master is read when 'Add a point' is opened or a point is edited, not before"
     _shot(ui, "1-opened")
 
     # --- the slider is left at 0.85: saved for the job, and the count below is at that spacing ---
@@ -289,8 +287,14 @@ def test_a_point_is_edited_removed_and_added_beside_the_preview_and_the_preview_
     assert FIRST in edited["text"] and was_one not in edited["text"] and edited["pictures"] != again["pictures"], "the preview does not show the edit"
     assert one.get_attribute("data-edited") == "true" and one.locator("textarea").input_value() == FIRST
     assert ui.writes_after("edit") == [LINES, f"POST {PREVIEW_ROUTE}"], "Enter then nothing else: one write, one preview"
+    # 0.1.11.5 (b++): with an edited point the master is read, once (does the point's wording differ from the master's?).
+    assert ui.requests_after("edit", "/api/master") == 1
+    # 0.1.11.5 (b++): an edited point's actions, in reading order: "Save this wording to my master", then Remove.
+    one.locator('[data-action="save-to-master"]').wait_for()
     ui.page.keyboard.press("Tab")
-    assert ui.page.evaluate("() => document.activeElement.dataset.action") == "remove-point", "Tab from a point's box does not reach its Remove"
+    assert ui.page.evaluate("() => document.activeElement.dataset.action") == "save-to-master", "Tab from an edited point's box does not reach its master action"
+    ui.page.keyboard.press("Tab")
+    assert ui.page.evaluate("() => document.activeElement.dataset.action") == "remove-point", "Tab does not reach the point's Remove"
     ui.page.keyboard.press("Tab")
     assert ui.page.evaluate("() => document.activeElement === document.querySelectorAll('#job-resume [data-role=\"point-group\"]')[1].querySelectorAll('textarea')[1]"), "Tab does not reach the next point"
     ui.step("edit-two")
@@ -325,7 +329,7 @@ def test_a_point_is_edited_removed_and_added_beside_the_preview_and_the_preview_
     ui.page.locator(f'{POINTS} [data-action="add-point"]').click()
     ui.page.locator(CHOICE).first.wait_for()
     ui.settle()
-    assert ui.requests_after("choices", "/api/master") == 1 and ui.writes_after("choices") == []
+    assert ui.requests_after("choices", "/api/master") == 0 and ui.writes_after("choices") == [], "the master was read at the first edit: 'Add a point' reads it no second time"
     offered = ui.page.locator(CHOICE).evaluate_all("(items) => items.map((item) => [item.dataset.itemId, item.dataset.removed, item.querySelector('button').textContent, item.querySelector('[data-role=\"choice-text\"]').textContent])")
     assert len(offered) == len(first["selection"]["left_out"]) + 1 and all(text == master[item_id].text for item_id, _removed, _label, text in offered)
     assert offered[0] == [victim_id, "true", "Put back", master[victim_id].text] and all(row[1:3] == ["false", "Add"] for row in offered[1:])
@@ -370,9 +374,8 @@ def test_a_point_is_edited_removed_and_added_beside_the_preview_and_the_preview_
     ui.step("reloaded")
     ui.reload()
     ui.page.locator(f'{PANEL}[data-state="stored"]').wait_for()
-    preview = ui.page.locator(f'{PANEL} [data-action="view-clean"]')
-    if preview.get_attribute("aria-pressed") != "true":
-        preview.click()
+    # 0.1.11.5: the page opens on Preview ALWAYS, also for a resume with changed points (it reopened on "Show changes").
+    assert ui.page.locator(f'{PANEL} [data-action="view-clean"]').get_attribute("aria-pressed") == "true", "a resume with a changed point did not reopen on Preview"
     _ready(ui, pages=base + 1)
     reloaded = _shown(ui)
     assert (reloaded["count"], reloaded["spacing"], reloaded["points"], reloaded["tabs"]) == (_count(base + 1), "0.85", grown["points"], grown["tabs"]), reloaded

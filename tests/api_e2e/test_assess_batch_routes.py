@@ -197,3 +197,23 @@ def test_the_command_cancels_a_batch_of_another_process_through_its_marker(serve
     gate.release()
     done = _until(lambda: _call(url + STATUS)[1], lambda found: not found["running"])
     assert (done["last"]["status"], done["last"]["assessed"], done["last"]["not_started"]) == ("cancelled", 2, 4)
+
+
+def test_the_status_and_the_cancel_are_labelled_public_untrusted_because_pending_holds_posting_urls(served) -> None:
+    """0.1.11.5 B3b: `batch.pending` lists posting URLs (text of a public page), so the answer is not label-free."""
+
+    from gigai.scout import data_labels
+    from gigai.scout.find_jobs.api import openapi
+
+    _fx, url, _gate = served
+    with urllib.request.urlopen(url + STATUS, timeout=30) as response:
+        assert response.status == 200
+        assert response.headers[data_labels.LABELS_HEADER] == data_labels.PUBLIC_UNTRUSTED, response.headers[data_labels.LABELS_HEADER]
+    assert openapi.response_labels_header("GET", STATUS) == data_labels.PUBLIC_UNTRUSTED
+    # The cancel answers the same status object (with `pending` while the batch ends): the same label.
+    request = urllib.request.Request(url + CANCEL, data=b"{}", headers={"Content-Type": "application/json"}, method="POST")
+    with urllib.request.urlopen(request, timeout=30) as response:
+        body = json.loads(response.read())
+        assert response.status == 200 and set(body) >= {"batch", "last", "cancel_requested"}, body
+        assert response.headers[data_labels.LABELS_HEADER] == data_labels.PUBLIC_UNTRUSTED, response.headers[data_labels.LABELS_HEADER]
+    assert openapi.response_labels_header("POST", CANCEL) == data_labels.PUBLIC_UNTRUSTED

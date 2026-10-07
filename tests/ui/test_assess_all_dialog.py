@@ -172,9 +172,12 @@ def test_the_dialog_closes_at_the_start_the_page_shows_progress_and_cancel_keeps
     with ui.page.expect_response(lambda r: r.request.method == "POST" and urlsplit(r.url).path == CANCEL) as cancelled:
         progress.locator(tid("assess-batch-cancel")).click()
     assert cancelled.value.status == 200 and cancelled.value.json()["cancel_requested"] == 1
-    waiting_line = progress.locator('[data-role="assess-batch-waiting"]')
-    waiting_line.wait_for()
-    assert (waiting_line.text_content() or "") == "Cancelling: no further model call starts. Waiting for the 2 calls in flight; what finished is kept."
+    # 0.1.11.5 B3b: the row says how many calls it is finishing (the status's `in_flight`), never a bare "Cancelling…".
+    cancelling_line = progress.locator('[data-role="assess-batch-cancelling"]')
+    cancelling_line.wait_for()
+    assert (cancelling_line.text_content() or "") == "Cancelling: finishing the 2 in flight"
+    assert (progress.locator('[data-role="assess-batch-waiting"]').text_content() or "") == "No further model call starts. What finished is kept."
+    assert "Cancelling…" not in (progress.text_content() or "") and (progress.locator(tid("assess-batch-cancel")).text_content() or "").strip() == "Cancel"
     assert progress.get_attribute("data-status") == "cancelling" and progress.locator(tid("assess-batch-cancel")).is_disabled()
     time.sleep(0.5)
     assert all(alive(pid) for pid in first), "cancel killed a call in flight"

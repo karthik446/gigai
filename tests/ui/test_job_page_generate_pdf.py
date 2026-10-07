@@ -53,6 +53,15 @@ NAME = "Zephyrine Quillfeather"
 #: Set GIGAI_UI_P2B_SHOT to a file path to keep a picture of the resume card with the form open (hand check only).
 SHOT = os.environ.get("GIGAI_UI_P2B_SHOT")
 
+def _changes(ui, step: str) -> list[str]:
+    """What the page wrote after a step, without the preview's render.
+
+    0.1.11.5: the job page opens on Preview ALWAYS (a resume with a changed line opened on "Show changes"), and the
+    preview is rendered again after every change of the resume. A render stores nothing."""
+
+    return [write for write in ui.writes_after(step) if write != "POST /api/tailored-resumes/preview"]
+
+
 
 def pdf_text(path: Path) -> str:
     from pypdf import PdfReader
@@ -98,7 +107,7 @@ def generate(ui, form, step: str) -> tuple[dict, Path]:
     download = waiting.value
     ui.page.locator(f'{APPLY} [data-role="pdf-saved"]').wait_for()
     ui.settle()
-    assert ui.writes_after(step) == ["POST /api/tailored-resumes/pdf"]
+    assert _changes(ui, step) == ["POST /api/tailored-resumes/pdf"]
     return sent.value.post_data_json, Path(download.path())
 
 
@@ -122,7 +131,8 @@ def test_generate_pdf_is_in_the_suggested_resume_card_and_prints_the_work_author
     heading = (ui.page.locator(f"{PANEL} > .resume-toolbar h3").text_content() or "").strip()
     assert heading in ("Suggested resume", "Your resume for this job"), heading
     top = lambda selector: ui.page.locator(selector).first.bounding_box()["y"]  # noqa: E731
-    assert top(f"{PANEL} > .resume-toolbar h3") < top(BUTTON) < top(f"{PANEL} .md-preview"), "the button is at the top of the card, above the resume"
+    # (0.1.11.5: the card opens on Preview always: the resume is the rendered pages, not the marked-up text.)
+    assert top(f"{PANEL} > .resume-toolbar h3") < top(BUTTON) < top(f'{PANEL} [data-testid="resume-preview"]'), "the button is at the top of the card, above the resume"
     below = [selector for selector in (f"{PAGE} {tid('job-suggestions')}", TIMELINE) if ui.page.locator(selector).count()]
     assert TIMELINE in below and all(top(BUTTON) < top(selector) for selector in below), "the button is above the Suggestions card and the pipeline"
     assert top(BUTTON) - top(f"{PANEL} > .resume-toolbar h3") < 120, "right under the card's heading"
@@ -152,7 +162,10 @@ def test_generate_pdf_is_in_the_suggested_resume_card_and_prints_the_work_author
         ui.page.fill("#generate-pdf-name", NAME)
         body, pdf = generate(ui, form, "before-pdf-with-the-line")
         assert body["header"]["work_authorization"] == EDITED, "the edited wording is what the PDF request carries"
-        assert set(body) == {"profile_id", "job_identity", "header"} and body["job_identity"] == job["job_identity"]
+        # 0.1.11.5: the card opens on Preview always, so the PDF is asked for at the spacing the preview shows
+        # (a resume with a reworded line opened on "Show changes" and sent none).
+        assert set(body) == {"profile_id", "job_identity", "header", "spacing_scale"} and body["job_identity"] == job["job_identity"]
+        assert f"{body['spacing_scale']:.2f}" == ui.page.locator(f'{PANEL} [data-testid="resume-preview"]').get_attribute("data-spacing")
         text = pdf_text(pdf)
         assert text.count(EDITED) == 1 and EDITED in text.split("\n")[:4], text[:300]
         assert text.split("\n")[0] == NAME.upper(), "the header starts with the name; the line is one of its lines"

@@ -62,39 +62,42 @@ function countsText(batch) {
   return `${whole(batch.assessed)} of ${whole(batch.total)} assessed${failed ? `, ${failed} failed` : ""}`;
 }
 
-// The Jobs page's progress: {line, profile, estimate, cancelling, canCancel} or null when no batch runs.
-//   line      "12 of 50 assessed" (", 1 failed")
-//   profile   the label of the profile of the call started last, or null
-//   estimate  "about 29 min for 50", or null
-export function batchProgress(status, profiles = []) {
+// The Jobs page's progress: {line, profile, estimate, cancelling, cancelLine, waiting, canCancel} or null when no
+// batch runs.
+//   line        "12 of 50 assessed" (", 1 failed")
+//   profile     the label of the profile of the call started last, or null
+//   estimate    "about 29 min for 50", or null
+//   cancelling  the batch is being cancelled: the status says so, or Cancel was clicked on this page (`cancelSent`)
+//               and the next status is not read yet
+//   cancelLine  "Cancelling: finishing the 2 in flight" (the status's `in_flight`: the calls still running), never a
+//               bare "Cancelling…"; null while it is not cancelling
+export function batchProgress(status, profiles = [], { cancelSent = false } = {}) {
   if (!batchRunning(status)) {
     return null;
   }
   const batch = status.batch;
   const found = (profiles || []).find((profile) => profile && profile.profile_id === batch.profile_id);
-  const cancelling = batch.status === "cancelling";
+  const cancelling = batch.status === "cancelling" || cancelSent === true;
   const flying = whole(batch.in_flight);
   return {
     line: countsText(batch),
     profile: found ? found.label : null,
     estimate: estimateFor(batch.estimate_seconds, whole(batch.total)),
     cancelling,
-    waiting: cancelling
-      ? flying > 0
-        ? `Cancelling: no further model call starts. Waiting for the ${flying} ${plural(flying, "call", "calls")} in flight; what finished is kept.`
-        : "Cancelling: no further model call starts; what finished is kept."
-      : null,
+    cancelLine: cancelling ? (flying > 0 ? `Cancelling: finishing the ${flying} in flight` : "Cancelling: no call is in flight") : null,
+    waiting: cancelling ? "No further model call starts. What finished is kept." : null,
     canCancel: !cancelling,
   };
 }
 
-// One line for the progress: "Assessing: 12 of 50 assessed · about 29 min for 50 · Staff Engineer".
-export function batchProgressLine(status, profiles = []) {
-  const progress = batchProgress(status, profiles);
+// One line for the progress: "Assessing: 12 of 50 assessed · about 29 min for 50 · Staff Engineer"; while it is
+// cancelled, "Cancelling: finishing the 2 in flight · 14 of 50 assessed · Staff Engineer".
+export function batchProgressLine(status, profiles = [], options = {}) {
+  const progress = batchProgress(status, profiles, options);
   if (!progress) {
     return null;
   }
-  const parts = [`${progress.cancelling ? "Cancelling" : "Assessing"}: ${progress.line}`];
+  const parts = progress.cancelling ? [progress.cancelLine, progress.line] : [`Assessing: ${progress.line}`];
   if (progress.estimate && !progress.cancelling) {
     parts.push(progress.estimate);
   }

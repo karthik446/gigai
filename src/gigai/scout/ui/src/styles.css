@@ -1499,7 +1499,11 @@ table.data-table th {
 .resume-points-role { margin: 10px 0 2px; font-weight: 600; font-size: 0.85rem; }
 .resume-point { padding: 4px 0; }
 .resume-point-text { display: block; width: 100%; box-sizing: border-box; font: inherit; font-size: 0.82rem; line-height: 1.35; padding: 4px 6px; resize: vertical; field-sizing: content; min-height: 2.6em; }
-.resume-point-actions { display: flex; justify-content: flex-end; gap: 10px; font-size: 0.8rem; }
+.resume-point-actions { display: flex; justify-content: flex-end; gap: 10px; font-size: 0.8rem; flex-wrap: wrap; }
+/* 0.1.11.5 (b++): "Save this wording to my master": what the master says now and what it will say, before the write. */
+.resume-point-master { margin: 6px 0 4px; padding: 6px 8px; border: 1px solid var(--border); background: var(--chip-bg); font-size: 0.82rem; }
+.resume-point-master p { margin: 2px 0 6px; overflow-wrap: anywhere; }
+.resume-point-master-old { text-decoration: line-through; opacity: 0.75; }
 .resume-points-choices { margin: 6px 0; padding: 6px 8px; border: 1px solid var(--border); background: var(--chip-bg); max-height: 45vh; overflow-y: auto; }
 .resume-points-search { width: 100%; box-sizing: border-box; margin-bottom: 4px; }
 .resume-point-choice { display: flex; gap: 8px; align-items: flex-start; justify-content: space-between; padding: 4px 0; border-top: 1px solid var(--border); font-size: 0.82rem; }

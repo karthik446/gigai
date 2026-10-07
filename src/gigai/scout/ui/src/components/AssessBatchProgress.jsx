@@ -2,9 +2,10 @@ import { batchProgress } from "../assessBatchModel.js";
 
 // 0.1.11.5 (ASSESS-01): the running assess batch on the Jobs page: "12 of 50 assessed", the estimate ("about 29 min
 // for 50"), the profile of the call started last, and Cancel. Cancel starts no further model call; the calls in
-// flight finish and what finished is kept (the line says so while it waits for them).
+// flight finish and what finished is kept. From the click on, the row says "Cancelling: finishing the 2 in flight"
+// (B3b: the count of calls still running, never a bare "Cancelling…").
 export default function AssessBatchProgress({ batch, profiles }) {
-  const progress = batchProgress(batch.status, profiles);
+  const progress = batchProgress(batch.status, profiles, { cancelSent: batch.cancelSent });
   if (!progress) {
     return null;
   }
@@ -13,7 +14,15 @@ export default function AssessBatchProgress({ batch, profiles }) {
   return (
     <div className="callout info assess-batch" role="status" data-testid="assess-batch" data-status={progress.cancelling ? "cancelling" : "running"}>
       <div className="assess-batch-row">
-        <strong>{progress.cancelling ? "Cancelling" : "Assessing"}:</strong> <span data-role="assess-batch-count">{progress.line}</span>
+        {progress.cancelling ? (
+          <>
+            <strong data-role="assess-batch-cancelling">{progress.cancelLine}</strong>
+            {" · "}
+          </>
+        ) : (
+          <strong>Assessing: </strong>
+        )}
+        <span data-role="assess-batch-count">{progress.line}</span>
         {progress.estimate && !progress.cancelling && (
           <span className="muted" data-role="assess-batch-estimate">
             {" · "}
@@ -30,11 +39,11 @@ export default function AssessBatchProgress({ batch, profiles }) {
           type="button"
           className="button small secondary"
           data-testid="assess-batch-cancel"
-          disabled={!progress.canCancel || batch.cancelSent}
+          disabled={!progress.canCancel}
           title="Stops the batch: no further model call starts. The calls in flight finish and what finished is kept."
           onClick={batch.cancel}
         >
-          {progress.cancelling || batch.cancelSent ? "Cancelling…" : "Cancel"}
+          Cancel
         </button>
       </div>
       <progress className="assess-batch-bar" max={Math.max(1, total)} value={Math.min(done, total)} aria-label="Assessed so far" />
