@@ -101,7 +101,7 @@ await build({{ root: process.cwd(), logLevel: "silent", plugins: [react()], buil
 const {{ Preview }} = await import(path.join(out, "panel.mjs"));
 const React = (await import("react")).default;
 const {{ renderToStaticMarkup }} = await import("react-dom/server");
-const render = (response) => renderToStaticMarkup(React.createElement(Preview, {{ response, profileLabel: "p1", promptFor: () => null, initialView: "changes" }}));
+const render = (response) => renderToStaticMarkup(React.createElement(Preview, {{ response, profileLabel: "p1", rendered: (text) => text }}));
 process.stdout.write(JSON.stringify({{ edited: render(input.edited), tailored: render(input.tailored) }}));
 fs.rmSync(out, {{ recursive: true, force: true }});
 """

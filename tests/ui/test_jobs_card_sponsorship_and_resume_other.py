@@ -7,8 +7,7 @@ tests/behaviors/scout_find_jobs.
 
 - item 6: a stated "no sponsorship" with no H-1B figure shows red "No sponsorship" on the card; "Sponsors visas" with a
   figure shows "Sponsors visas · 32 H-1B approvals"; an unknown posting with no figure shows no sponsorship chip at all;
-- item 11: the job page's stored-resume preview shows an `## Other` section the stored markdown holds, in "Show
-  changes" and in "Clean copy".
+- item 11: the job page's stored-resume preview shows an `## Other` section the stored markdown holds (the preview is one view since 0.1.11.5).
 """
 
 from __future__ import annotations
@@ -83,12 +82,8 @@ def test_the_stored_resume_preview_shows_the_other_section(ui, scout_server) -> 
     ui.wait_for_job_page()
     ui.settle()
     panel = ui.page.locator('[data-testid="job-resume"]')
-    # 0.1.11.5: the page opens on Preview always (this resume has a reworded line: it opened on "Show changes").
-    assert panel.locator('[data-action="view-clean"]').get_attribute("aria-pressed") == "true"
-    panel.locator('[data-action="view-changes"]').click()
-    text = panel.inner_text()
-    assert "Other" in text and "Earlier experience: Staff scheduling engineer" in text, text
-    ui.page.click('[data-action="view-clean"]')
+    # 0.1.11.5: the preview is the one view (no Show changes / Clean copy toggle).
+    assert panel.locator('[data-action="view-clean"], [data-action="view-changes"]').count() == 0
     clean = ui.page.locator(".clean-resume")
     assert clean.locator("h4", has_text="Other").count() == 1
     assert "Earlier experience: Staff scheduling engineer" in clean.inner_text()

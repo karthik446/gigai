@@ -31,7 +31,6 @@ import {
   jdExcerpt,
   notAssessedLine,
   payLabel,
-  questionPromptIndex,
   showQuickAssessChip,
   storedOrigin,
   workModeLabel,
@@ -559,15 +558,6 @@ export default function JobPage({
 
   const mode = workModeLabel(posting);
   const pay = payLabel(posting.pay);
-  // A question is shown by its prompt wherever it appears (the job
-  // resume's answer refs); the id is secondary detail. Prompts come from
-  // the recorded answers and the assessments' own questions.
-  const questionPrompts = questionPromptIndex({
-    answers,
-    assessment,
-    assessments: [job.row && job.row.assessment, job.quick && job.quick.result],
-  });
-
   const pasted = Boolean(job.quick && job.quick.job && job.quick.job.fetch_kind === "pasted" && job.status === "on_demand");
   const state = job.state || jobStateFor(job, null, tailoredJobId ? [tailoredJobId] : null);
   const applicationLabel = isApplicationState(state.state) ? applicationBadge(state) : null; // 0.1.11.3: "Applied · Oct 6", the latest status
@@ -782,7 +772,6 @@ export default function JobPage({
         gate={gate}
         items={staleList}
         reassess={reassess}
-        questionPrompts={questionPrompts}
         hasQuestions={answerDrafts.questions.length > 0}
         visaRequired={visaRequired}
       />

@@ -6,8 +6,8 @@ answer that is the test's is `GET /api/setup`, as there).
 
 Pinned, on what the page shows and on the master the server holds:
 
-- THE JOB PAGE OPENS ON "PREVIEW", also for a resume with a changed point (before: it reopened on "Show changes",
-  the marked-up text); "Show changes" is one click away and Preview one click back;
+- THE JOB PAGE'S RESUME IS THE PREVIEW AND ONLY THE PREVIEW, also for a resume with a changed point (before: it
+  reopened on "Show changes", the marked-up text); there is no toggle between two views;
 - NOTHING REACHES THE MASTER UNLESS THE PERSON ASKS: an edit writes this job's resume only; the master's files are
   byte for byte what they were;
 - only an EDITED point whose words are not the master's carries the action: one button on the whole list after one
@@ -42,8 +42,7 @@ POINT = f'{POINTS} [data-role="point"]'
 STATUS = f'{POINTS} [data-role="points-status"]'
 ACTION = '[data-action="save-to-master"]'
 CONFIRM = '[data-role="master-confirm"]'
-PREVIEW_BUTTON = f'{PANEL} [data-action="view-clean"]'
-CHANGES_BUTTON = f'{PANEL} [data-action="view-changes"]'
+TOGGLE = f'{PANEL} [data-action="view-clean"], {PANEL} [data-action="view-changes"], {PANEL} .view-toggle[aria-label="Resume view"]'
 MASTER_WRITE = "PUT /api/master/lines"
 LINES = "PUT /api/tailored-resumes/lines"
 PREVIEW_ROUTE = "/api/tailored-resumes/preview"
@@ -65,9 +64,8 @@ def _type(ui, box, words: str) -> None:
 
 def _opens_on_preview(ui) -> None:
     ui.page.locator(f'{PANEL}[data-state="stored"]').wait_for()
-    ui.page.locator(f'{PANEL} [data-testid="resume-preview"], {PANEL} .md-preview').first.wait_for()
-    assert ui.page.locator(PREVIEW_BUTTON).get_attribute("aria-pressed") == "true", "the job page did not open on Preview"
-    assert ui.page.locator(CHANGES_BUTTON).get_attribute("aria-pressed") == "false" and ui.page.locator(f"{PANEL} .md-preview").count() == 0
+    ui.page.locator(f'{PANEL} [data-testid="resume-preview"]').first.wait_for()
+    assert ui.page.locator(TOGGLE).count() == 0 and ui.page.locator(f"{PANEL} .md-preview").count() == 0, "the card offers a second view"
     _ready(ui)
 
 
@@ -100,19 +98,16 @@ def test_an_edited_point_is_saved_to_the_master_only_after_the_confirm_and_the_p
     assert (one.locator(ACTION).text_content() or "").strip() == "Save this wording to my master"
     assert ui.page.locator(f"{POINT} {ACTION}").count() == 1, "a point that was not edited offers to save its wording"
 
-    # --- a reload opens on PREVIEW (the resume has a changed point), and the other view is one click away ---
+    # --- a reload shows the same ONE preview (the resume has a changed point) ---
     ui.step("reloaded")
     ui.reload()
     _opens_on_preview(ui)
     one = ui.page.locator(f'{POINT}[data-item-id="{item_id}"]')
     one.locator(ACTION).wait_for()
     assert one.get_attribute("data-edited") == "true" and one.locator("textarea").input_value() == NEW
-    ui.page.locator(CHANGES_BUTTON).click()
-    ui.page.locator(f'{PANEL} .md-preview[data-view="changes"]').wait_for()
-    ui.page.locator(PREVIEW_BUTTON).click()
     _ready(ui)
     ui.settle()
-    assert set(ui.writes_after("reloaded")) == {f"POST {PREVIEW_ROUTE}"}, "a reload or a change of view wrote something"
+    assert set(ui.writes_after("reloaded")) == {f"POST {PREVIEW_ROUTE}"}, "a reload wrote something"
     held = _held(ui)
     resume_bytes = stored_file.read_bytes()
 

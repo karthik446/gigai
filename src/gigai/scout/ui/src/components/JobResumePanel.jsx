@@ -6,7 +6,6 @@ import {
   openJobsFolder,
   getTailoredResumes,
   postJobResumePick,
-  putMasterLine,
   putTailoredResumeLength,
   putTailoredResumeLine,
   putTailoredResumeSelection,
@@ -14,7 +13,7 @@ import {
 import { jobFilePath, openFolderNote } from "../resumesFolderModel.js";
 import { TAILORED_WORDING } from "../wording.js";
 import { latestStored, newerStored } from "../tailoredResumeModel.js";
-import { NO_EDUCATION_TEXT, conflictOf } from "../masterModel.js";
+import { NO_EDUCATION_TEXT } from "../masterModel.js";
 import {
   DRAFT_LABEL,
   NO_MASTER_TEXT,
@@ -78,9 +77,9 @@ import { Preview } from "./TailoredResumePanel.jsx";
 //            it is, and the page says how to get one picked (no dead button);
 //            a suggested resume that is not stored: "Pick it now"; a pick
 //            that is refused: one plain sentence by its code. The resume
-//            ALWAYS opens on "Preview" (0.1.11.5: the rendered pages with the
-//            points beside them), changed lines or not; "Show changes" is one
-//            click away
+//            is ONE view (0.1.11.5: the rendered pages with the
+//            points beside them); there is no "Show changes" toggle: a changed
+//            point says "Your words" and the Changed tab lists the changes
 //   writes   only on a click, and never through a model: POST
 //            /api/job-resumes/pick (re-pick, draft, use / dismiss proposed),
 //            the per-line Restore, the length Restore, Add and Remove
@@ -395,8 +394,7 @@ function scrollToQuestions() {
 
 // `gate` is jobResumeModel.gateOf(), `items` staleItems(); `reassess` is the page's ONE Re-assess
 // ({enabled, reason, onClick}: the stale label's "Re-assess · 1 model call" is the same action).
-export default function JobResumePanel({ state, assessment, gate, items, reassess, questionPrompts, hasQuestions = false, visaRequired = false }) {
-  const promptFor = (id) => (questionPrompts && questionPrompts.get(id)) || null;
+export default function JobResumePanel({ state, assessment, gate, items, reassess, hasQuestions = false, visaRequired = false }) {
   const { stored, record, origin, picking } = state;
   const [choosing, setChoosing] = useState(false);
   const [choiceError, setChoiceError] = useState(null);
@@ -491,34 +489,6 @@ export default function JobResumePanel({ state, assessment, gate, items, reasses
       }),
     [change, stored, state],
   );
-
-  // 0.1.10.9 master P5: "Save this wording to your master". The master is
-  // read for its revision, then the line is written on top of it; when the
-  // agent wrote the master in between, the write is refused and says so.
-  const [wordingSaved, setWordingSaved] = useState(null);
-  const saveWording = useCallback((lineId, wording) => {
-    setChoosing(true);
-    setChoiceError(null);
-    setWordingSaved(null);
-    getMaster()
-      .then((body) => {
-        if (!body.master) {
-          throw new Error("There is no master resume to save it to.");
-        }
-        return putMasterLine({ revision: body.master.revision, id: wording.id, use: "edit", text: wording.text });
-      })
-      .then((response) =>
-        setWordingSaved({
-          lineId,
-          text: response.status === "unchanged" ? "Your master already says this." : `Saved to your master (revision ${response.master.revision}). Other jobs and profiles use it from now on.`,
-        }),
-      )
-      .catch((err) => {
-        const conflict = conflictOf(err);
-        setChoiceError(conflict ? "Not saved: your master changed a moment ago. Try again." : err.detail || err.message || String(err));
-      })
-      .finally(() => setChoosing(false));
-  }, []);
 
   if (!assessment || state.loadingStored || !state.profileId) {
     return null; // nothing is suggested for a job that is not assessed; the page says that above
@@ -649,14 +619,9 @@ export default function JobResumePanel({ state, assessment, gate, items, reasses
             key={stored.updated_at || stored.stored_path}
             response={stored}
             provenance={provenance}
-            promptFor={promptFor}
-            initialView="clean"
-            onChooseLine={chooseLine}
             choiceBusy={busy}
             choiceError={choiceError}
             onLength={changeLength}
-            onSaveWording={stored.selection ? saveWording : null}
-            wordingSaved={wordingSaved}
             rendered={(text) => (
               <ResumePreview
                 profileId={state.profileId}

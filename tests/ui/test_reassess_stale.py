@@ -63,7 +63,7 @@ SETTLED_TIMELINE = f"{PAGE} {tid('step-timeline')}" + "".join(f':not([data-state
 def _changes(ui, step: str) -> list[str]:
     """What the page wrote after a step, without the preview's render.
 
-    0.1.11.5: the job page opens on Preview ALWAYS (a resume with a changed line opened on "Show changes"), and the
+    0.1.11.5: the job page's resume is the preview only (no "Show changes" view), and the
     preview is rendered again when the stored resume changes. A render stores nothing."""
 
     return [write for write in ui.writes_after(step) if write != "POST /api/tailored-resumes/preview"]

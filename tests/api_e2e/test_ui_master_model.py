@@ -303,11 +303,13 @@ def test_the_pages_are_wired_to_the_routes() -> None:
     # 0.1.11 (SPEC 5.4): two more writes, a note on a line and on an entry, each ONE PUT that sends the note alone.
     assert page.count("write((revision) =>") == 9 and "call(revision)" in page and "dangerouslySetInnerHTML" not in page
     assert 'putMasterLine({ revision, id: item.id, use: "edit", note })' in page and 'putMasterEntry({ revision, id: entry.id, use: "edit", note })' in page
-    # 0.1.11: the panel around the preview is JobResumePanel (the suggested resume); the preview keeps the line's button.
+    # 0.1.11: the panel around the preview is JobResumePanel (the suggested resume); 0.1.11.5: the preview has no per-line
+    # buttons (its "Show changes" view is gone): "Save this wording to my master" is the points list's (ResumePoints).
     preview = (SRC / "components" / "TailoredResumePanel.jsx").read_text(encoding="utf-8")
     panel = (SRC / "components" / "JobResumePanel.jsx").read_text(encoding="utf-8")
-    assert "<PickedLeftOut stored={stored} state={state}" in panel and 'data-action="save-wording"' in preview
-    assert "putMasterLine({ revision: body.master.revision, id: wording.id, use: \"edit\", text: wording.text })" in panel
+    points = (SRC / "components" / "ResumePoints.jsx").read_text(encoding="utf-8")
+    assert "<PickedLeftOut stored={stored} state={state}" in panel and 'data-action="save-wording"' not in preview
+    assert "Save this wording to my master" in points and 'putMasterLine({ revision: ask.revision, id: ask.id, use: "edit", text: ask.to })' in points
     picked = (SRC / "components" / "PickedLeftOut.jsx").read_text(encoding="utf-8")
     assert "putTailoredResumeSelection({ profileId: state.profileId, jobIdentity: state.jobIdentity, updatedAt: stored.updated_at, use, itemId, fit })" in picked
     assert "dangerouslySetInnerHTML" not in picked

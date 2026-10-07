@@ -117,7 +117,7 @@ def _ready(ui, *, pages: int | None = None) -> None:
 def _open(ui) -> None:
     ui.goto("/#/jobs/" + quote(_JOB, safe=""))
     ui.page.locator(f'{PANEL}[data-state="stored"]').wait_for()
-    assert ui.page.locator(f'{PANEL} [data-action="view-clean"]').get_attribute("aria-pressed") == "true", "the job page did not open on Preview"
+    assert ui.page.locator(f'{PANEL} [data-action="view-clean"], {PANEL} [data-action="view-changes"]').count() == 0, "the card offers a second view"
     _ready(ui)
 
 
@@ -346,8 +346,8 @@ def test_a_point_is_edited_removed_and_added_beside_the_preview_and_the_preview_
     ui.step("reloaded")
     ui.reload()
     ui.page.locator(f'{PANEL}[data-state="stored"]').wait_for()
-    # 0.1.11.5: the page opens on Preview ALWAYS, also for a resume with changed points (it reopened on "Show changes").
-    assert ui.page.locator(f'{PANEL} [data-action="view-clean"]').get_attribute("aria-pressed") == "true", "a resume with a changed point did not reopen on Preview"
+    # 0.1.11.5: one view, also for a resume with changed points (it reopened on "Show changes").
+    assert ui.page.locator(f'{PANEL} [data-action="view-clean"], {PANEL} [data-action="view-changes"]').count() == 0, "a resume with a changed point reopened on a second view"
     _ready(ui, pages=base + 1)
     reloaded = _shown(ui)
     assert (reloaded["count"], reloaded["spacing"], reloaded["points"], reloaded["tabs"]) == (_count(base + 1), "0.85", grown["points"], grown["tabs"]), reloaded

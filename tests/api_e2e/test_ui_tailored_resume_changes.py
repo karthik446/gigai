@@ -4,10 +4,11 @@
   shows ``### Role``) and gives every rewritten line the resume lines it cites
   (``original``) plus a word diff;
 * ``changeSummary`` counts come from the same rewritable lines (N + kept + copied == M; headings excluded);
-* the panel (server-rendered through vite's SSR build, real React) defaults to
-  Show changes with the originals struck above the new lines, its Clean copy
-  view renders formatted text and escapes model text (``<script>`` reaches the
-  page as ``&lt;script&gt;``), and the panel source has no innerHTML.
+* the panel (server-rendered through vite's SSR build, real React) is ONE view
+  (0.1.11.5: no "Show changes" / "Clean copy" toggle): the change summary, then
+  the page's rendered preview given the clean copy, which renders formatted text
+  and escapes model text (``<script>`` reaches the page as ``&lt;script&gt;``);
+  the panel source has no innerHTML.
 
 LOUD skip when ``node`` or the ui ``node_modules`` is missing.
 """
@@ -131,30 +132,23 @@ await build({{ root: process.cwd(), logLevel: "silent", plugins: [react()], buil
 const {{ Preview }} = await import(path.join(out, "panel.mjs"));
 const React = (await import("react")).default;
 const {{ renderToStaticMarkup }} = await import("react-dom/server");
-const render = (view) => renderToStaticMarkup(React.createElement(Preview, {{ response: input.response, profileLabel: "p1", promptFor: () => null, initialView: view }}));
-process.stdout.write(JSON.stringify({{ def: renderToStaticMarkup(React.createElement(Preview, {{ response: input.response, profileLabel: "p1", promptFor: () => null }})), changes: render("changes"), clean: render("clean") }}));
+const render = (props) => renderToStaticMarkup(React.createElement(Preview, {{ response: input.response, profileLabel: "p1", rendered: (text) => React.createElement("div", {{ "data-role": "rendered" }}, text), ...props }}));
+process.stdout.write(JSON.stringify({{ one: render({{}}), withHandler: render({{ onLength: () => {{}}, choiceBusy: false }}) }}));
 fs.rmSync(out, {{ recursive: true, force: true }});
 """
 
 
-def test_the_panel_defaults_to_show_changes_toggles_to_a_clean_escaped_copy() -> None:
+def test_the_panel_is_one_view_with_a_clean_escaped_copy() -> None:
     if not (UI / "node_modules" / "vite").is_dir():
         pytest.skip("ui/node_modules missing; panel render check not run")
-    out = _run(SSR_SCRIPT, {"response": RESPONSE})
-    changes = out["changes"]
-    assert out["def"] == changes  # the default view is Show changes
-    assert 'aria-pressed="true">Show changes' in changes and 'aria-pressed="false">Clean copy' in changes
-    assert "2 of 3 lines rewritten · 1 copied" in changes
-    assert 'class="md-line original"' in changes and "Led a team of five engineers." in changes
-    assert '<mark class="diff-added">Kubernetes</mark>' in changes
-    assert "### EXAMPLE CORP" in changes and "### ###" not in changes
-    assert "<script>" not in changes and "&lt;script&gt;" in changes
-    clean = out["clean"]
-    assert 'aria-pressed="true">Clean copy' in clean
-    assert 'data-view="clean"' in clean and 'class="md-line' not in clean
-    assert "<h5" in clean and "EXAMPLE CORP" in clean and "###" not in clean and "# Riley" not in clean
-    assert "<strong>bold</strong>" in clean
-    assert "<script>" not in clean and "&lt;script&gt;alert(1)&lt;/script&gt;" in clean
+    out = _run(SSR_SCRIPT, {"response": RESPONSE})["one"]
+    assert "2 of 3 lines rewritten · 1 copied" in out
+    assert "Show changes" not in out and "Clean copy" not in out and "view-toggle" not in out and 'aria-label="Resume view"' not in out
+    assert 'class="md-line' not in out and 'data-view="changes"' not in out and "diff-added" not in out
+    assert 'data-role="rendered"' in out and 'data-view="clean"' in out
+    assert "<h5" in out and "EXAMPLE CORP" in out and "###" not in out and "# Riley" not in out
+    assert "<strong>bold</strong>" in out
+    assert "<script>" not in out and "&lt;script&gt;alert(1)&lt;/script&gt;" in out
 
 
 def test_the_panel_never_sets_inner_html() -> None:
@@ -238,27 +232,18 @@ def test_a_copied_bullet_never_shows_a_doubled_marker() -> None:
     assert not any("- - " in shown for shown in displays)
 
 
-def test_the_panel_renders_the_controls_and_the_dropped_items_and_none_for_an_older_line() -> None:
+def test_the_panel_draws_no_per_line_controls_any_more() -> None:
+    """The per-line controls (Keep original / Use rewrite anyway / Undo) lived in the removed "Show changes" view; Restore
+    is the Changed tab's (PickedLeftOut), "Save this wording to my master" the points list's (ResumePoints)."""
     if not (UI / "node_modules" / "vite").is_dir():
         pytest.skip("ui/node_modules missing; panel render check not run")
-    with_handler = SSR_SCRIPT.replace("initialView: view }", "initialView: view, onChooseLine: () => {} }").replace(
-        "initialView: view })", "initialView: view, onChooseLine: () => {} })"
-    )
-    out = _run(with_handler, {"response": CHOICES_RESPONSE})
-    changes, clean = out["changes"], out["clean"]
-    assert ">Keep original</button>" in changes and ">Use rewrite anyway</button>" in changes and ">Undo</button>" in changes
-    assert changes.count("<button type=\"button\" class=\"button small secondary\" data-action=") == 3
-    assert "for M3: event-driven" in changes
-    assert "Kept your line: the rewrite dropped ownership: own; scope: end to end." in changes
-    assert "1 of 4 lines rewritten · 1 kept as your original (the rewrite dropped facts) · 2 copied" in changes
-    assert "Keep original" not in clean and "Use rewrite anyway" not in clean  # the clean copy has no controls
-    # Without a handler (a read-only preview) no button is drawn.
-    plain = _run(SSR_SCRIPT, {"response": CHOICES_RESPONSE})["changes"]
-    assert "<button type=\"button\" class=\"button small secondary\" data-action=" not in plain
+    out = _run(SSR_SCRIPT, {"response": CHOICES_RESPONSE})["withHandler"]
+    for gone in ("Keep original", "Use rewrite anyway", ">Undo<", "Kept your line", "line-controls", "save-wording"):
+        assert gone not in out
+    assert "1 of 4 lines rewritten · 1 kept as your original (the rewrite dropped facts) · 2 copied" in out
 
 
 def test_the_panel_puts_the_choice_and_reloads_on_a_409() -> None:
-    panel = PANEL_JSX.read_text(encoding="utf-8")
     api = (UI / "src" / "api.js").read_text(encoding="utf-8")
     assert 'request("PUT", "/api/tailored-resumes/lines"' in api
     for key in ("profile_id: profileId", "job_identity: jobIdentity", "updated_at: updatedAt", "line_id: lineId", "use,"):
