@@ -5,7 +5,7 @@ Real Chromium against a REAL server of its own (the product's own handler, serve
 port), nothing stubbed, on a synthetic home: the pick fixture of
 `tests/behaviors/scout_find_jobs/test_pick_header_room.py` (a job assessed against an invented 56-line master; its
 resume picked by the assessment). SINCE 0.1.11.5 (item 1c) A PICK COUNTS NO PAGE AND IS NEVER CUT FOR LENGTH, so the
-stored resume is put in the shape a pick BEFORE 0.1.11.5 stored (`_stored_as_before_0_1_11_5`: twelve of its bullets
+stored resume is put in the shape a pick BEFORE 0.1.11.5 stored (`tests/support/old_pick_fixture.py`: twelve of its bullets
 shown, the others cut for length on its length record, with Restore): that is the only resume Restore still shows
 for, and the re-check below is about it. No page count is written into this test: the BASELINE is what the preview
 says at the spacing the person left (read again after an edit, whose shorter words can end the resume a page
@@ -47,14 +47,11 @@ from urllib.parse import quote, urlsplit
 
 import pytest
 
-from dataclasses import replace
-
-from gigai.scout import tailor_master as tm
 from gigai.scout.resume_pdf import job_layout_path
-from gigai.scout.tailor_length import fit_by_cuts
-from gigai.scout.tailored_resume import read_tailored_resume, render_markdown, save_tailor_response, tailored_resume_path
+from gigai.scout.tailored_resume import tailored_resume_path
 
 from tests.behaviors.scout_find_jobs.test_pick_header_room import _JOB, _Server, _assess, _master, _pipeline_off, fx, server  # noqa: F401 - the fixtures
+from tests.support.old_pick_fixture import stored_as_before_0_1_11_5
 from tests.ui import support
 from tests.ui.conftest import _ui_session
 
@@ -97,7 +94,7 @@ def page(request: pytest.FixtureRequest, ui_browser, ui_artifacts: Path, fx, ser
     """`ui` on this test's own server: the pick fixture's job, assessed, its resume picked from the master."""
 
     _assess(fx)
-    _stored_as_before_0_1_11_5(fx)
+    stored_as_before_0_1_11_5(fx, _JOB)
     log = tmp_path / "server.log"
     log.write_text("", encoding="utf-8")
     own = SimpleNamespace(url=f"http://127.0.0.1:{server.server.server_address[1]}", pid=os.getpid(), log_path=str(log))
@@ -106,42 +103,6 @@ def page(request: pytest.FixtureRequest, ui_browser, ui_artifacts: Path, fx, ser
         session.fx, session.api = fx, server
         session.page.route("**/api/setup", lambda route: route.fulfill(status=200, content_type="application/json", body=json.dumps({"prefs": prefill})))
         yield session
-
-
-#: How many bullets the resume shows once it is stored the way a pick before 0.1.11.5 stored it.
-KEPT = 12
-
-
-def _stored_as_before_0_1_11_5(fixture) -> None:  # noqa: ANN001
-    """The job's stored resume as a pick BEFORE 0.1.11.5 left it: ``KEPT`` bullets shown, the others cut for length.
-
-    A pick of 0.1.11.5 holds its 20 best bullets with no length record. The fit of before (``fit_by_cuts``: the last
-    lines of each role in turn, a role never emptied) is applied to it with a measure that COUNTS bullets, and the
-    record says so the way it did: the cut lines on ``result.length`` (Restore puts them back) and under Left out."""
-
-    path = tailored_resume_path(fixture.home_root, fixture.target, fixture.default_profile_id, _JOB)
-    stored = read_tailored_resume(path)
-    assert stored is not None and stored.result.length is None and stored.selection is not None, "a pick of 0.1.11.5 carries no length record"
-    roles = [list(entry.bullets) for section in stored.result.sections if section.heading == "experience" for entry in section.entries]
-    cuts: list[tuple[str, str]] = []
-    while any(len(lines) > 1 for lines in roles):
-        cuts += [("bullet", lines.pop().id) for lines in roles if len(lines) > 1]
-
-    def count(result) -> int:  # noqa: ANN001
-        return sum(len(entry.bullets) for section in result.sections for entry in section.entries)
-
-    fitted = fit_by_cuts(stored.result, cuts, measure=lambda result: 2 if count(result) <= KEPT else 3, max_pages=2)
-    assert fitted.length is not None and fitted.length.status == "cut" and count(fitted) == KEPT < count(stored.result)
-    gone = {tm.line_item_id(line) for role in fitted.length.trimmed for line in role.bullets}
-    selection = stored.selection
-    why = ("cut_lowest_value", "cut for length: lowest value for this posting")
-    selection = replace(
-        selection,
-        picked=tuple(line for line in selection.picked if line.id not in gone),
-        left_out=(*selection.left_out, *(tm.SelectedLine(line.id, *why) for line in selection.picked if line.id in gone)),
-        cut_for_length=tuple(tm.SelectionCut(line.id, "bullet", *why) for line in selection.picked if line.id in gone),
-    )
-    save_tailor_response(replace(stored, result=fitted, markdown=render_markdown(fitted), selection=selection), home_root=fixture.home_root)
 
 
 def _count(pages: int) -> str:

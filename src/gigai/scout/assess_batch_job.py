@@ -10,7 +10,9 @@ the batch on a thread of the server and answers as soon as the batch is live
   (``scout-assess-batch:1``): ``batch`` is the live batch of the project, read
   from its marker alone (``pipeline.busy.batch_status``: one small folder,
   never a store or a posting read, so the cost is flat), whichever process
-  runs it; ``last`` is how the last batch this server ran ended.
+  runs it; ``last`` is how the last batch this server ran ended. A batch of
+  this server is ``running`` until its ``last`` is known: its marker goes
+  first, and in between the batch is answered from its own counts.
 * :func:`cancel` is ``POST /api/postings/assess/cancel``: the batch starts no
   further model call. THE CALLS IN FLIGHT FINISH and their results are stored
   like any other (their tokens are spent already); the batch then ends
@@ -109,9 +111,15 @@ def start(home_root: Path, target: Path, call: Callable[[Callable[[LiveBatch], N
     """
 
     job = BatchJob()
+    key = _key(home_root, target)
+    with _LOCK:
+        previous = _JOBS.get(key)
+    job.previous_last = previous.last if previous is not None else None
 
     def on_live(live: LiveBatch) -> None:
         job.live = live
+        with _LOCK:
+            _JOBS[key] = job  # before the request is back: a status read never finds the job of the batch before
         job.ready.set()
 
     def run() -> None:
@@ -126,10 +134,6 @@ def start(home_root: Path, target: Path, call: Callable[[Callable[[LiveBatch], N
             job.done.set()
             job.ready.set()
 
-    key = _key(home_root, target)
-    with _LOCK:
-        previous = _JOBS.get(key)
-    job.previous_last = previous.last if previous is not None else None
     job.thread = threading.Thread(target=run, name="scout-assess-these-batch", daemon=True)
     job.thread.start()
     job.ready.wait(wait)
@@ -152,10 +156,19 @@ def status(home_root: Path, target: Path) -> dict[str, object]:
 
     with _LOCK:
         job = _JOBS.get(_key(home_root, target))
-    last = None
+    last, ending = None, None
     if job is not None:
-        last = job.last if job.last is not None else job.previous_last
+        # ``done`` is read first and ``last`` is set before it: a job that is done has its end.
+        if job.done.is_set():
+            last = job.last if job.last is not None else job.previous_last
+        else:
+            last, ending = job.previous_last, job.live
     batch = busy.batch_status(Path(home_root), Path(target))
+    if batch is None and ending is not None:
+        # The batch's marker is removed INSIDE its call and ``last`` is set when the call has returned: read in
+        # between, the batch is ending, not over. It is still the running batch (from its own counts), so the page
+        # never sees a batch end with no ``last`` or with the ``last`` of the batch before it.
+        batch = ending.view()
     return {"schema_version": SCHEMA_VERSION, "running": batch is not None, "batch": batch, "last": last}
 
 

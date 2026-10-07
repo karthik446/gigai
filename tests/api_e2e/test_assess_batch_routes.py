@@ -217,3 +217,65 @@ def test_the_status_and_the_cancel_are_labelled_public_untrusted_because_pending
         assert response.status == 200 and set(body) >= {"batch", "last", "cancel_requested"}, body
         assert response.headers[data_labels.LABELS_HEADER] == data_labels.PUBLIC_UNTRUSTED, response.headers[data_labels.LABELS_HEADER]
     assert openapi.response_labels_header("POST", CANCEL) == data_labels.PUBLIC_UNTRUSTED
+
+
+def test_a_batch_whose_marker_is_gone_but_whose_call_has_not_returned_is_still_running_never_over_with_no_end(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """0.1.11.5 FX: the window between the marker's removal and the end of the batch's call, held open.
+
+    The marker is removed inside the call (``busy.assess_batch``), ``last`` is set when the call has returned. Read in
+    between, the status said ``{running: false, last: null}`` (or the batch BEFORE's ``last``): the page's watch ended
+    the batch with no notice, or with the old one. The call here stops in that window until the test lets it go.
+    """
+
+    from gigai.scout import assess_batch_job
+    from gigai.scout.pipeline import busy
+
+    fx = build_postings_fixture(tmp_path, monkeypatch, deleted=False)  # a bound project: the marker is written
+    home, target = fx.home_root, fx.target
+
+    def batch(job_name: str, hold: threading.Event, in_window: threading.Event, *, cancelled: bool = False):
+        def call(on_live):
+            with busy.assess_batch(home, target) as live:
+                live.begin([job_name])
+                on_live(live)
+                if cancelled:
+                    live.cancel()
+                else:
+                    live.started("prof_1")
+                    live.finished(job_name, assessed=True)
+            in_window.set()  # the marker is gone, the call has not returned
+            assert hold.wait(30)
+            done = {"requested": 1, "assessed": 0 if cancelled else 1, "failed": [], "stopped": "cancelled" if cancelled else None, "not_started": 1 if cancelled else 0}
+            return {"status": "assessed", "assessed": done}
+
+        return call
+
+    def run_one(job_name: str, *, cancelled: bool = False):
+        hold, in_window = threading.Event(), threading.Event()
+        job = assess_batch_job.start(home, target, batch(job_name, hold, in_window, cancelled=cancelled))
+        assert job.live is not None and in_window.wait(30)
+        assert busy.batch_status(home, target) is None and not job.done.is_set(), "not the window"
+        return job, hold, assess_batch_job.status(home, target)
+
+    first, hold, between = run_one("job-1")
+    assert first.live.batch_id, "the marker was not written"
+    assert between["running"] is True, f"over with no end: {between}"
+    assert between["last"] is None
+    live = between["batch"]
+    assert (live["id"], live["status"], live["total"], live["assessed"], live["failed"], live["in_flight"]) == (first.live.batch_id, "running", 1, 1, 0, 0), live
+    assert live["pending"] == [] and live["here"] is True and live["profile_id"] == "prof_1"
+    assert assess_batch_job.started_body(home, target)["running"] is True
+    hold.set()
+    assert assess_batch_job.wait_for_batch(home, target, timeout=30)
+    ended = assess_batch_job.status(home, target)
+    assert (ended["running"], ended["batch"]) == (False, None)
+    assert (ended["last"]["id"], ended["last"]["status"], ended["last"]["assessed"]) == (first.live.batch_id, "done", 1), ended
+
+    # A second batch, cancelled: in its window the answer is not "over" with the FIRST batch's end as its notice.
+    second, hold, between = run_one("job-2", cancelled=True)
+    assert between["running"] is True and between["batch"]["id"] == second.live.batch_id, f"the batch before's end as this one's: {between}"
+    assert between["batch"]["status"] == "cancelling" and between["last"]["id"] == first.live.batch_id
+    hold.set()
+    assert assess_batch_job.wait_for_batch(home, target, timeout=30)
+    ended = assess_batch_job.status(home, target)
+    assert ended["running"] is False and (ended["last"]["id"], ended["last"]["status"], ended["last"]["not_started"]) == (second.live.batch_id, "cancelled", 1), ended

@@ -100,6 +100,14 @@ def old_assessments(ui, *, renewed: bool = False) -> Iterator[tuple[dict, dict, 
 
     rows = ui.server_json("/api/postings?limit=50")["postings"]["rows"]
     job = next(row for row in rows if row["tailored"] and row["state"] == "matched" and not row["open_questions"])
+    if job["stale_reason"] is not None:
+        # 0.1.11.5 FX: a flow before this one may leave this assessment old in its OWN way: Picked / Left out saves a
+        # wording to the shared home's master (`resume_changed`). In the whole suite a flow in between assesses the
+        # job again; in a run of a few files none does, and this helper failed on a state it does not test. The job
+        # is assessed again here (the fixture model, as `renewed` does), so every flow starts from a current one.
+        assess_again(ui, job)
+        job = row_of(ui, job)
+        assert job["tailored"] and job["state"] == "matched" and not job["open_questions"], job
     assert job["stale_reason"] is None, "the small home's tailored job starts with a current assessment"
     prefs = {key: value for key, value in ui.server_json("/api/setup")["prefs"].items() if key != "schema_version"}
     try:

@@ -443,27 +443,29 @@ export default function JobPage({
   const askDates = askFullText || (Boolean(job) && !rowDated && !job.row && /^https?:\/\//.test(job.id || ""));
   // 0.1.11.4 R1: the same read says whether the board still lists the posting (`liveness`); every job with a link asks it.
   const askLive = Boolean(job) && /^https?:\/\//.test(job.id || "");
-  const [servedDates, setServedDates] = useState(null);
-  const [liveness, setLiveness] = useState(null);
+  // ONE read for both, asked again only for another job: a page opened by its link has no row until the list
+  // arrives, and the row arriving (it has the dates) must not read the job a second time.
+  const askJob = askDates || askLive;
+  const [served, setServed] = useState(null); // GET /api/jobs?url='s answer for this job
   useEffect(() => {
-    setServedDates(null);
-    setLiveness(null);
-    if (!askDates && !askLive) {
+    setServed(null);
+    if (!askJob) {
       return undefined;
     }
     let current = true;
     getJob(jobId)
       .then((response) => {
         if (current) {
-          setServedDates(askDates && response && response.posting ? response.posting : null);
-          setLiveness(response && response.liveness ? response.liveness : null);
+          setServed(response || null);
         }
       })
       .catch(() => {});
     return () => {
       current = false;
     };
-  }, [jobId, askDates, askLive]);
+  }, [jobId, askJob]);
+  const servedDates = askDates && served && served.posting ? served.posting : null;
+  const liveness = served && served.liveness ? served.liveness : null;
 
   const servedText = askFullText && servedDates && typeof servedDates.text === "string" && servedDates.text.trim() ? servedDates.text : null;
   const posting = useMemo(

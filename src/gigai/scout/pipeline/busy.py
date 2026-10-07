@@ -31,7 +31,7 @@ markers of one small folder, never a store read.
 
 from __future__ import annotations
 
-from collections.abc import Iterator, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from datetime import UTC, datetime
 import json
@@ -130,6 +130,17 @@ class LiveBatch:
             if job in self._pending:
                 self._pending.remove(job)
             self._write()
+
+    def view(self) -> dict[str, object]:
+        """The shape of :func:`batch_status`, from this object's own counts: for the process that runs the batch,
+        when its marker is gone already (the batch is ending) or was never written."""
+
+        with self._lock:
+            marker = {
+                **self._marker, "total": self.total, "assessed": self.assessed, "failed": self.failed, "in_flight": self.in_flight,
+                "pending": list(self._pending),
+            }
+        return _batch_view(self.batch_id, marker, cancelling=self._cancel.is_set(), here=True)
 
     def cancel(self) -> None:
         self._cancel.set()
@@ -238,18 +249,22 @@ def batch_status(home_root: Path, target: Path) -> dict[str, object] | None:
     if not markers:
         return None
     path, marker = min(markers, key=lambda item: str(item[1].get("started_at") or ""))
+    return _batch_view(path.stem, marker, cancelling=_cancel_path(path).exists(), here=marker.get("pid") == os.getpid())
+
+
+def _batch_view(batch_id: str | None, marker: Mapping[str, object], *, cancelling: bool, here: bool) -> dict[str, object]:
     estimate = marker.get("estimate_seconds")
     pending = marker.get("pending")
     return {
-        "id": path.stem,
-        "status": STATUS_CANCELLING if _cancel_path(path).exists() else STATUS_RUNNING,
+        "id": batch_id,
+        "status": STATUS_CANCELLING if cancelling else STATUS_RUNNING,
         "total": _whole(marker.get("total")), "assessed": _whole(marker.get("assessed")), "failed": _whole(marker.get("failed")),
         "in_flight": _whole(marker.get("in_flight")),
         "profile_id": marker.get("profile_id") if isinstance(marker.get("profile_id"), str) else None,
         "estimate_seconds": float(estimate) if isinstance(estimate, (int, float)) and not isinstance(estimate, bool) else None,
         "started_at": marker.get("started_at") if isinstance(marker.get("started_at"), str) else None,
         "pending": [job for job in pending if isinstance(job, str)] if isinstance(pending, list) else [],
-        "here": marker.get("pid") == os.getpid(),
+        "here": here,
     }
 
 

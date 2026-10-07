@@ -1,6 +1,6 @@
 """0110-10-14: a posting's date is on its Jobs row and on its job page, said as what it is.
 
-Real server, nothing stubbed, nothing written. The operator's Jobs rows and job page showed title, company, location,
+Real server, no answer stubbed (one read is held back for a moment, then served by the server), nothing written. The operator's Jobs rows and job page showed title, company, location,
 work mode and profiles, and no date. Two dates are stored and they are different facts: the BOARD's date
 (`published_at`, what the 7 / 30 days chips judge) and when Scout first stored the posting (`first_seen_at`, what "New
 since last check" judges). The page shows the board's date when there is one, with the word for what the board means
@@ -13,8 +13,11 @@ every row. The other two words are pinned in `tests/api_e2e/test_ui_stale_reasse
 
 Pinned: every row has ONE date, beside company and location; it is the server's `published_at` for that row (not its
 `first_seen_at`), worded "posted <how long ago>", with the exact day on hover; the job page's header says the same date
-with the exact day beside it, and asks nothing for it when it was opened from the list (the row has it); opened by its
-link (a reload), an assessed job's page asks for the job ONCE (`GET /api/jobs?url=`) and says the same date. No write.
+with the exact day beside it, FROM THE ROW when it was opened from the list: nothing reads a job before the click, and
+the page's one read of the job on open (`GET /api/jobs?url=`: 0.1.11.4 R1, whether the board still lists the posting,
+and the whole stored text) is held unanswered while the date is checked, then let go (0.1.11.5 FX: this test still
+said "asks nothing", which stopped being true with R1); opened by its link (a reload), an assessed job's page asks for
+the job ONCE and says the same date. No write.
 
 MEASURED (14-core laptop, 2026-10-04, three runs): the job page from the list 0.07 to 0.10 s; the reload until the date
 is shown 0.25 to 0.4 s.
@@ -106,9 +109,15 @@ def test_a_jobs_row_and_its_job_page_show_the_postings_date(ui) -> None:
     # More than one age is on the page: the dates are the postings' own, not the day of the read.
     assert len({item["text"] for item in shown.values()}) > 1
 
-    # Open an assessed job from the list: the header says the row's date with the exact day, and asks nothing for it.
+    # Open an assessed job from the list: the header says the row's date with the exact day, FROM THE ROW. The page
+    # does read the job once when it opens (0.1.11.4 R1: whether the board still lists the posting, and the whole
+    # stored text, both in `GET /api/jobs?url=`), so that read is HELD here until the date has been checked: the date
+    # on screen cannot be its answer. Nothing asked for a job before the click.
+    assert ui.requests_between("start", "listed", "/api/jobs") == 0, "a job was read before any row was opened"
     job = next(row for row in rows if row["state"] == "matched" and not row["tailored"])
     kind, instant = expected_date(job)
+    held: list = []
+    ui.page.route("**/api/jobs?url=*", lambda route: held.append(route))
     ui.page.locator(f"{tid('job-row')} [data-action='open-job']", has_text=job["title"]).first.click()
     ui.wait_for_job_page()
     header = ui.page.locator('.job-page .job-sub [data-role="posted"]')
@@ -122,9 +131,20 @@ def test_a_jobs_row_and_its_job_page_show_the_postings_date(ui) -> None:
     # The assessment's own date is beside it, and is a different thing.
     assessed = ui.page.locator('.job-page .job-sub [data-role="assessed-at"]')
     assert assessed.count() == 1 and assessed.get_attribute("data-at") == job["assessment"]["assessed_at"]
+    # The page's own read of the job, still unanswered: the date above is the row's. Let it go: the date stays.
+    for _ in range(100):
+        if held:
+            break
+        ui.page.wait_for_timeout(50)
+    assert len(held) == 1 and held[0].request.method == "GET", "the job page opened from the list reads the job once (its liveness and whole text)"
+    with ui.page.expect_response(lambda response: "/api/jobs?url=" in response.url) as answered:
+        held[0].continue_()
+    assert answered.value.status == 200
+    ui.page.unroute("**/api/jobs?url=*")
     ui.settle()
     ui.step("job-settled")
-    assert ui.requests_between("listed", "job-settled", "/api/jobs") == 0, "the row has the date: the page asked for the job anyway"
+    assert ui.requests_between("listed", "job-settled", "/api/jobs") == 1, "the job page opened from a row reads the job ONCE, never again for its date"
+    assert (header.get_attribute("data-kind"), header.get_attribute("data-at")) == (kind, instant) and header.text_content() == text
     ui.wall_budget("open a job and see its date (small home)", OPEN_JOB_WALL_SECONDS, "listed", "opened")
 
     # Opened by its link (a reload): the page has no row, so it asks for the job once, and says the same date.

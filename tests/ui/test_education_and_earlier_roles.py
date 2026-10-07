@@ -15,8 +15,9 @@ fetched by the route, with ONE thing laid over them):
   no education (`master_education: false` in the answer the page already loads) AND the stored resume prints none;
   not when the master has it, and not when the resume prints it;
 - the job page's resume: a role with no line shown is ONE line under "Earlier experience", after the roles that show
-  lines (the line the markdown and the PDF print), not a bare heading in its place; and the pick's conflict "earlier
-  roles do not fit" reads as the pick's own sentence under "Needs attention".
+  lines (the line the markdown and the PDF print), not a bare heading in its place; and the conflict "earlier roles
+  do not fit" that a pick BEFORE 0.1.11.5 stored (served here with its own sentence) is not said: since 0.1.11.5
+  item 1c the page limit is no reason and a stored page conflict is not "Needs attention".
 
 The rules behind the page are pinned without a browser in `test_education_earlier_roles_model.py`; what the server
 says in tests/behaviors (`test_master_education_report.py`, `test_pick_view_master_education.py`).
@@ -205,7 +206,7 @@ def test_the_resume_card_says_no_education_only_when_neither_the_master_nor_the_
     ui.assert_clean()
 
 
-def test_a_role_with_no_line_shown_is_listed_under_earlier_experience_and_the_conflict_is_a_sentence(ui, scout_server) -> None:
+def test_a_role_with_no_line_shown_is_listed_under_earlier_experience_and_a_stored_page_conflict_is_not_said(ui, scout_server) -> None:
     from gigai.scout import pick
 
     demo = scout_server.demo
@@ -224,11 +225,6 @@ def test_a_role_with_no_line_shown_is_listed_under_earlier_experience_and_the_co
     try:
         _open(ui, demo)
         panel = ui.page.locator(PANEL)
-        # --- the conflict: its own plain sentence, never the code's words ---
-        item = panel.locator('[data-role="needs-attention"] li[data-code="earlier_roles_do_not_fit"]')
-        item.wait_for()
-        assert " ".join((item.text_content() or "").split()) == MESSAGE
-        assert "earlier roles do not fit" not in panel.inner_text()
 
         # --- the block, in both views of the preview: one heading, one line for the role, after the roles that show lines ---
         for view in ("clean", "changes"):
@@ -248,6 +244,14 @@ def test_a_role_with_no_line_shown_is_listed_under_earlier_experience_and_the_co
             first_role = next(place for place, text in enumerate(lines) if text.removeprefix("## ").lower() == "experience")
             assert first_role < at and lines[at + 2].removeprefix("## ").lower() in {"skills", "education", "projects", "other"}, lines[at:at + 4]
             shot(ui, f"job-resume-earlier-experience-{view}")
+            # --- the stored conflict (0.1.11.5 FX): the page loaded it with its sentence, and says nothing of it.
+            # Only a pick BEFORE 0.1.11.5 made it (the page limit left a role's line out); since item 1c the page
+            # limit is no reason and the job page does not show a stored one (`jobResumeModel` PAGE_CONFLICTS; the
+            # rule is pinned in `test_education_earlier_roles_model.py`). This test waited for it under "Needs
+            # attention" and so was red; the block above is what the role's line is now.
+            said = panel.inner_text()
+            assert panel.locator('[data-role="needs-attention"] li[data-code="earlier_roles_do_not_fit"]').count() == 0
+            assert MESSAGE not in said and "earlier roles do not fit" not in said and "the selection has a conflict" not in said, said
         ui.settle()
         assert ui.writes_after("start") in ([], [PREVIEW_READ])
     finally:

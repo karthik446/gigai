@@ -38,6 +38,8 @@ import os
 from pathlib import Path
 from urllib.parse import parse_qs, quote, urlsplit
 
+from gigai.scout.suggestions import PAGE_CONFLICTS
+
 try:  # N3's module: not in this tree until it merges
     from gigai.scout import suggestions as _suggestions
 except ImportError:  # pragma: no cover - the state of this tree
@@ -90,7 +92,8 @@ def check_selection(rows: list[dict], printed: list[str], conflicts: list[dict])
             if entry["coverage"] == "lost" and row["class"] in ("hard", "askable", None):
                 reasons.append({"code": "lost_mandatory_evidence", "requirement": row["id"]})
         out.append(entry)
-    reasons += [{"code": "selection_conflict", "requirement": conflict.get("requirement")} for conflict in conflicts]
+    # As the server (0.1.11.5 item 1c): a conflict the page limit made in a pick before 0.1.11.5 is no reason.
+    reasons += [{"code": "selection_conflict", "requirement": conflict.get("requirement")} for conflict in conflicts if conflict.get("code") not in PAGE_CONFLICTS]
     return out, not reasons, reasons
 
 

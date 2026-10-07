@@ -29,7 +29,8 @@ import pytest
 
 from gigai.scout.find_jobs.api import static as static_module
 
-from tests.behaviors.scout_find_jobs.test_pick_header_room import _Server, _assess, _pipeline_off, fx, server  # noqa: F401 - the fixtures
+from tests.behaviors.scout_find_jobs.test_pick_header_room import _JOB, _Server, _assess, _pipeline_off, fx, server  # noqa: F401 - the fixtures
+from tests.support.old_pick_fixture import stored_as_before_0_1_11_5
 from tests.support.posting_fixtures import PostingsFixture
 
 UI_SRC = Path(static_module.__file__).resolve().parents[2] / "ui" / "src"
@@ -92,9 +93,14 @@ def _bullets(held: dict) -> list[dict]:
 
 @pytest.fixture
 def out(fx: PostingsFixture, server: _Server) -> dict:  # noqa: F811
-    """The model's answers on a real pick: as picked, after its first bullet is removed, and after Restore."""
+    """The model's answers on a real pick: as picked, after its first bullet is removed, and after Restore.
+
+    0.1.11.5 FX: the pick is stored the way a pick BEFORE 0.1.11.5 left it (lines cut for length, on its length
+    record). A pick of 0.1.11.5 counts no page and cuts nothing, so Restore had no line to put back and the proof
+    that the counts FOLLOW THE STORED RESUME after it could not move (``20 > 20``)."""
 
     _assess(fx)
+    stored_as_before_0_1_11_5(fx, _JOB)
     picked = _held(server)
     master = server.client.get("/api/master").json()["master"]
     key = {**server.key, "updated_at": picked["updated_at"]}
