@@ -281,7 +281,7 @@ def test_store_resolves_the_named_suggestions_and_checks_the_evidence_again(fx: 
     # The brief of the job says the same, by id.
     brief = _ok(fx, "resume", "brief", "--job-url", JOB)
     assert brief["state"]["gate"]["ready"] is True and brief["state"]["picked"] == {"picked_by": "model", "fallback": None, "draft": False}
-    assert {"id": REQ_PYTHON, "class": "hard", "status": "met", "sources": [ids[OWN]], "in_resume": [ids[OWN]], "coverage": "kept", "question_id": None} in brief["requirements"]
+    assert {"id": REQ_PYTHON, "class": "hard", "status": "met", "sources": [ids[OWN]], "in_resume": [ids[OWN]], "coverage": "kept", "question_id": None, "lab": False} in brief["requirements"]
     by_id = {item["id"]: item for item in brief["suggestions"]}
     assert by_id["sg-1"]["why"] is None and by_id["sg-1"]["status"] == "done" and by_id["sg-2"]["status"] == "open"
     posting = _ok(fx, "resume", "brief", "--job-url", JOB, "--posting")

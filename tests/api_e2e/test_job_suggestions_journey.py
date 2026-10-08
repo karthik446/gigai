@@ -72,7 +72,7 @@ def test_job_brief_suggestions_and_pick_journey(tmp_path: Path, monkeypatch: pyt
         assert yours.headers[_HEADER] == "user-private, public-untrusted"  # the operation's labels: it can answer either part
         assert len(mine["rules"]) == 9 and mine["commands"]["store"].startswith(f"gigai scout resume store --in FILE --job-url {_URL} --profile ")
         assert mine["state"]["verdict"] and mine["resume"] is None and mine["basis"] == "profile_resume" and mine["master"] is None
-        assert mine["requirements"] and all(set(row) == {"id", "class", "status", "sources", "in_resume", "coverage", "question_id"} for row in mine["requirements"])
+        assert mine["requirements"] and all(set(row) == {"id", "class", "status", "sources", "in_resume", "coverage", "question_id", "lab"} for row in mine["requirements"])
         private = yours.text
         assert posting["title"] not in private and posting["text"][:60] not in private
         assert all(str(row["requirement"]) not in private for row in job["assessments"][0]["matrix"])
