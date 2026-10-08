@@ -56,15 +56,13 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 import sqlite3
+import threading
 from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
 from . import search_index
 from .ats_board_clients import _words
-from .company_index import CompanyIndex
-from .filters import DEFAULT_MAX_AGE_DAYS, country_match, published_too_old
 from .search_index import IndexFilters, IndexQuery, IndexRow, _stamp, strict_title_match, words_match
-from .work_mode import work_mode_fit
 
 if TYPE_CHECKING:
     from .contracts import FindJobsConfig
@@ -236,6 +234,8 @@ def default_config(home_root: Path, target: Path) -> "FindJobsConfig":
 
 
 def _filters_json(config: "FindJobsConfig", filters: IndexFilters) -> dict[str, object]:
+    from .filters import DEFAULT_MAX_AGE_DAYS
+
     if config.published_after is not None:
         window = f"posted since {config.published_after[:10]}"
     else:
@@ -318,6 +318,10 @@ def _scan(
     home_root: Path, request: SearchRequest, config: "FindJobsConfig | None", accepts: Callable[[str], bool], now: datetime,
 ) -> tuple[list[IndexRow], int]:
     """Every company file through the same predicates: ``(the rows in order, how many match without the default filters)``."""
+
+    from .company_index import CompanyIndex
+    from .filters import country_match, published_too_old
+    from .work_mode import work_mode_fit
 
     index = CompanyIndex.for_home(home_root)
     places: dict[str, bool] = {}
@@ -408,22 +412,77 @@ def _read_model_rows(home_root: Path, target: Path, jobs: Sequence[str]) -> dict
     return found
 
 
-def _stored_assessment(home_root: Path, target: Path, job: str) -> dict[str, object] | None:
-    """The newest stored assessment of a job no profile's list holds as assessed (assessed by its address)."""
+def _stored_assessments(home_root: Path, target: Path, jobs: Sequence[str]) -> dict[str, dict[str, object]]:
+    """``job -> the newest stored assessment`` of each job no profile's list holds as assessed (assessed by its address).
 
+    ONE project lookup and ONE listing of the resume folders for all the jobs; then one file per (job, resume folder),
+    read only when it exists. Jobs with no profile assessment are left out. Same order and same pick as a per-job read
+    of every resume identity's item (newest ``updated_at`` first, a pasted resume skipped, an unassessed one skipped).
+    """
+
+    if not jobs:
+        return {}
+    from ...canonical import digest_imported_bytes
     from ..postings import stamp
-    from .api.agent_routes import job_quick_assessments
+    from ..quick_assess import _read_stored, quick_assess_path
     from .job_state import derive_job_state, quick_assessment_fact
 
-    for item in job_quick_assessments(home_root, target, job):
-        profile_id = item.resume.profile_id
-        if not profile_id:
-            continue  # a pasted resume: not a profile's assessment
-        state = derive_job_state(assessments=(quick_assessment_fact(item),)).state
-        if state == _NOT_ASSESSED:
-            continue
-        return {"state": state, "profile_id": str(profile_id), "assessed_at": stamp(item.updated_at or item.created_at)}
-    return None
+    by_key = quick_assess_path(home_root, target, None, jobs[0])  # raises when the folder is not bound: labels read nothing
+    try:
+        folders = sorted(folder for folder in by_key.parent.parent.iterdir() if folder.is_dir())
+    except OSError:
+        return {}
+    found: dict[str, dict[str, object]] = {}
+    for job in jobs:
+        name = digest_imported_bytes(job.encode("utf-8")).removeprefix("sha256:") + ".json"
+        items = [item for item in (_read_stored(folder / name) for folder in folders) if item is not None and item.job.job_identity == job]
+        items.sort(key=lambda item: (item.updated_at, item.stored_path), reverse=True)
+        for item in items:
+            profile_id = item.resume.profile_id
+            if not profile_id:
+                continue  # a pasted resume: not a profile's assessment
+            state = derive_job_state(assessments=(quick_assessment_fact(item),)).state
+            if state == _NOT_ASSESSED:
+                continue
+            found[job] = {"state": state, "profile_id": str(profile_id), "assessed_at": stamp(item.updated_at or item.created_at)}
+            break
+    return found
+
+
+class _ProfilesAhead:
+    """The profile list read on a thread that starts as soon as a row of the page is known to be in a profile's list.
+
+    Its mount probe and git reads then overlap the workpad, events and assessment reads of the other labels. The
+    caller always ``wait()``s (a thread left at exit would die inside its probe); ``result()`` raises what the read
+    raised (the labels turn that into "no label").
+    """
+
+    def __init__(self, home_root: Path, target: Path) -> None:
+        self._outcome: tuple[object, BaseException | None] = (None, None)
+        self._thread = threading.Thread(target=self._run, args=(home_root, target), name="free-search-profiles", daemon=True)
+        self._thread.start()
+
+    def _run(self, home_root: Path, target: Path) -> None:
+        try:
+            from ...workpad import committed_read_cache, resolve_workpad
+            from .. import profile_records
+
+            with committed_read_cache():
+                resolved = resolve_workpad(home_root=home_root, requested_target=target, gig_id=None, allow_semantic_state=True)
+                records = profile_records.list_profiles(resolved)
+                self._outcome = ((records, profile_records.default_profile(records)), None)
+        except BaseException as exc:  # noqa: BLE001 - handed to the caller of result(), which decides what it means
+            self._outcome = (None, exc)
+
+    def wait(self) -> None:
+        self._thread.join()
+
+    def result(self):
+        self.wait()
+        value, error = self._outcome
+        if error is not None:
+            raise error
+        return value
 
 
 def _labels(home_root: Path, target: Path | None, rows: Sequence[IndexRow]) -> tuple[list[RowLabels], dict[str, dict[str, object]], bool]:
@@ -438,12 +497,17 @@ def _labels(home_root: Path, target: Path | None, rows: Sequence[IndexRow]) -> t
     from ..posting_search import _applications
 
     jobs = [identity for identity in dict.fromkeys(identities) if identity is not None]
+    ahead: _ProfilesAhead | None = None
     try:
+        held = _read_model_rows(home_root, target, jobs)
+        if held:
+            ahead = _ProfilesAhead(home_root, target)  # the profile list is read while the rest of the labels are
         with committed_read_cache():
             resolved = resolve_workpad(home_root=home_root, requested_target=target, gig_id=None, allow_semantic_state=True)
-            held = _read_model_rows(home_root, target, jobs)
             applications = _applications(resolved)
             named = {profile_id for group in held.values() for profile_id, _state, _at in group}
+            unassessed = [job for job in jobs if next((1 for _p, state, _at in held.get(job, ()) if state != _NOT_ASSESSED), None) is None]
+            stored = _stored_assessments(home_root, target, unassessed)
             labelled: list[RowLabels] = []
             for identity in identities:
                 if identity is None:
@@ -455,7 +519,7 @@ def _labels(home_root: Path, target: Path | None, rows: Sequence[IndexRow]) -> t
                 if assessed is not None:
                     assessment = {"state": assessed[1], "profile_id": assessed[0], "assessed_at": assessed[2]}
                 else:
-                    assessment = _stored_assessment(home_root, target, identity)
+                    assessment = stored.get(identity)
                     if assessment is not None:
                         named.add(str(assessment["profile_id"]))
                 applied = applications.get(identity)
@@ -467,8 +531,11 @@ def _labels(home_root: Path, target: Path | None, rows: Sequence[IndexRow]) -> t
                 ))
             profiles: dict[str, dict[str, object]] = {}
             if named:
-                records = profile_records.list_profiles(resolved)
-                default = profile_records.default_profile(records)
+                if ahead is not None:
+                    records, default = ahead.result()
+                else:
+                    records = profile_records.list_profiles(resolved)
+                    default = profile_records.default_profile(records)
                 for record in records:
                     if record.profile_id in named:
                         profiles[record.profile_id] = {
@@ -476,6 +543,9 @@ def _labels(home_root: Path, target: Path | None, rows: Sequence[IndexRow]) -> t
                         }
     except Exception:  # noqa: BLE001 - labels are a display read: a store that cannot be read labels nothing
         return bare, {}, False
+    finally:
+        if ahead is not None:
+            ahead.wait()  # a thread left running at exit would die inside its mount probe and leave the probe file behind
     return labelled, profiles, True
 
 
@@ -523,6 +593,12 @@ def count(home_root: Path, request: SearchRequest, *, target: Path | None = None
 
     home_root = Path(home_root)
     moment, config, filters = _prepare(home_root, request, None if target is None else Path(target), now)
+    return _count_prepared(home_root, request, moment, config, filters)
+
+
+def _count_prepared(
+    home_root: Path, request: SearchRequest, moment: datetime, config: "FindJobsConfig | None", filters: IndexFilters | None,
+) -> tuple[int, int]:
     accepts = _rule(request.titles)
     totals = _index_totals(home_root, request, filters, accepts)
     if totals is None:
@@ -532,6 +608,14 @@ def count(home_root: Path, request: SearchRequest, *, target: Path | None = None
 
 
 def search(home_root: Path, request: SearchRequest, *, target: Path | None = None, now: datetime | None = None) -> SearchPage:
+    """One page of the free search (see :func:`_search`). Writes nothing."""
+
+    return _search(home_root, request, target, now)[0]
+
+
+def _search(
+    home_root: Path, request: SearchRequest, target: Path | None, now: datetime | None,
+) -> tuple[SearchPage, tuple[datetime, "FindJobsConfig | None", IndexFilters | None]]:
     """One page of the free search. See the module docstring. Writes nothing.
 
     ``target`` is the Scout folder: the default filters are read from its
@@ -563,7 +647,8 @@ def search(home_root: Path, request: SearchRequest, *, target: Path | None = Non
         source = SOURCE_INDEX
     page = found[request.offset:request.offset + request.limit]
     labels, profiles, labelled = _labels(home_root, target, page)
-    return SearchPage(
+
+    result = SearchPage(
         request=request,
         rows=tuple(SearchRow(row, label) for row, label in zip(page, labels, strict=True)),
         more=len(found) > request.offset + request.limit,
@@ -576,6 +661,7 @@ def search(home_root: Path, request: SearchRequest, *, target: Path | None = Non
         labelled=labelled,
         checked_at=stamp(moment),
     )
+    return result, (moment, config, filters)
 
 
 # ---------------------------------------------------------------------------
@@ -752,14 +838,14 @@ def answer_lines(
     from dataclasses import replace
 
     moment = now or datetime.now(UTC)
-    page = search(home_root, request, target=target, now=moment)
+    page, (_moment, config, filters) = _search(home_root, request, None if target is None else Path(target), moment)
     response = redact(to_json(page))
     if as_json:
         yield json.dumps(response, sort_keys=True, separators=(",", ":"))
         return
     yield render_page(response)
     if page.total is None:
-        total, total_all = count(home_root, request, target=target, now=moment)
+        total, total_all = _count_prepared(Path(home_root), request, _moment, config, filters)
         response = redact(to_json(replace(page, total=total, total_all=total_all)))
     yield render_total(response)
 
