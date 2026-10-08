@@ -207,7 +207,7 @@ class WatchlistUrlError(FindJobsContractError):
 
 
 def watchlist_entry_from_url(url: str, *, observed_at: str | None = None) -> WatchlistEntry:
-    """Pure: a Greenhouse / Lever / Ashby board URL (or a job URL on those
+    """Pure: a board URL on a hiring system Scout reads (or a job URL on those
     hosts) -> the ``WatchlistEntry`` it names. No I/O.
 
     ``contracts.parse_board_url`` is the ONLY host/token rule (the same one
@@ -260,7 +260,7 @@ def add_company_from_url(
     target: Path,
     gig_id: str | None = None,
 ) -> WatchlistEntry:
-    """Add the board a Greenhouse / Lever / Ashby URL names to the watchlist.
+    """Add the board a supported hiring system's URL names to the watchlist (``providers.py``).
 
     The ONE function behind ``gigai scout watchlist add <url>``, ``POST
     /api/watchlist`` and the UI's "Add company" form. Idempotent: the

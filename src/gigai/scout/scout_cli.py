@@ -2391,7 +2391,7 @@ def watchlist_group() -> None:
 @click.option("--home", "home_value", type=click.Path(path_type=Path, file_okay=False))
 @click.option("--json", "as_json", is_flag=True)
 def watchlist_add_command(url: str, target_value: Path | None, home_value: Path | None, as_json: bool) -> None:
-    """Add a company by its Greenhouse / Lever / Ashby board (or job) URL.
+    """Add a company by its board (or job) URL on any hiring system Scout reads (Greenhouse, Lever, Ashby, Workable, Rippling, Gem, Recruitee, Pinpoint, Breezy).
 
     Every later find-jobs run polls the board directly, so a posting no
     search engine surfaced (the UAT Kong case) is found as long as it is

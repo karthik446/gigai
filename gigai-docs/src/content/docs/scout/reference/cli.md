@@ -1170,7 +1170,7 @@ No model call. --how is job_resume_edit (an edit of this job's resume; 'gigai sc
 
 ## `gigai scout watchlist add`
 
-Add a company by its Greenhouse / Lever / Ashby board (or job) URL.
+Add a company by its board (or job) URL on any hiring system Scout reads (Greenhouse, Lever, Ashby, Workable, Rippling, Gem, Recruitee, Pinpoint, Breezy).
 
 `gigai scout watchlist add [OPTIONS] URL`
 

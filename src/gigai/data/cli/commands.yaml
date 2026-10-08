@@ -1479,7 +1479,7 @@
       "notes": "STORY_ID is the story's id from list. Read revision from here before a save or delete with --revision. The same body as GET /api/stories/{story_id}."
     },
     "scout watchlist add": {
-      "summary": "Add a company by its Greenhouse / Lever / Ashby board (or job) URL.",
+      "summary": "Add a company by its board (or job) URL on any hiring system Scout reads (Greenhouse, Lever, Ashby, Workable, Rippling, Gem, Recruitee, Pinpoint, Breezy).",
       "effect": "write",
       "external": "none",
       "output": "Human-readable text; --json emits one JSON object.",
