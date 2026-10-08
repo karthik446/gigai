@@ -70,6 +70,7 @@ from typing import Any
 
 from ...canonical import digest_imported_bytes
 from .contracts import ATSProvider, SourceKind, WatchlistEntry, WatchlistFirstSeen
+from .providers import catalog_aliases, registry
 
 #: Package-relative path of the shipped resource, under ``gigai.scout``.
 COMPANY_CATALOG_RESOURCE = "data/companies.json.gz"
@@ -93,18 +94,10 @@ COMPANY_CATALOG_SHA256 = "sha256:9bfdf50e910665e6b46b28094c600b666aa27c0ec77dd9e
 #: seed inside the wheel stays at or under 5 MB.
 COMPANY_CATALOG_SIZE_BUDGET_BYTES = 5 * 1024 * 1024
 
-_PROVIDER_ALIASES = {
-    "greenhouse": ATSProvider.GREENHOUSE,
-    "lever": ATSProvider.LEVER,
-    "ashby": ATSProvider.ASHBY,
-    "ashbyhq": ATSProvider.ASHBY,
-}
+#: 0.1.11.8: every registry provider and its spellings (``providers.catalog_aliases()``); the board page per provider.
+_PROVIDER_ALIASES = catalog_aliases()
 _SAFE_TOKEN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
-_BOARD_URL_TEMPLATES = {
-    ATSProvider.GREENHOUSE: "https://job-boards.greenhouse.io/{token}",
-    ATSProvider.LEVER: "https://jobs.lever.co/{token}",
-    ATSProvider.ASHBY: "https://jobs.ashbyhq.com/{token}",
-}
+_BOARD_URL_TEMPLATES = {item.provider: item.board_url for item in registry().values()}
 
 
 class CompanyCatalogError(ValueError):

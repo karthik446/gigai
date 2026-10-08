@@ -581,7 +581,11 @@ def _fetch_boards(
         for index, board in enumerate(ordered):
             provider = board.provider.value
             if provider not in executors:
-                limiters[provider] = _RateLimiter(limits.interval_for(provider_totals[provider]), stop=stop)
+                # 0.1.11.8: a provider that asks for a slower pace (``providers.ProviderSpec.min_interval_seconds``:
+                # one request a second to a company's own host) never runs at the default rate.
+                from .providers import interval_for as provider_interval
+
+                limiters[provider] = _RateLimiter(provider_interval(provider, limits.interval_for(provider_totals[provider])), stop=stop)
                 throttled[provider] = _ThrottledClient(client, limiters[provider]) if client is not None else None
                 executors[provider] = ThreadPoolExecutor(max_workers=workers, thread_name_prefix=f"scout-ats-{provider}")
             future = executors[provider].submit(
@@ -1641,13 +1645,9 @@ def _source_from_url(url: str) -> str:
     host = (urlsplit(url).hostname or "").lower()
     if "exa.ai" in host:
         return "exa"
-    if "greenhouse.io" in host:
-        return "greenhouse"
-    if "lever.co" in host:
-        return "lever"
-    if "ashbyhq.com" in host:
-        return "ashby"
-    return "other"
+    from .providers import source_from_host
+
+    return source_from_host(host) or "other"
 
 
 def _write_raw_payloads(resolved: ResolvedWorkpad, run_id: str, captured: Sequence[_CapturedResponse]) -> None:

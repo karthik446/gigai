@@ -820,6 +820,22 @@ def _test_model_handler(request: httpx.Request) -> httpx.Response:
     return httpx.Response(404, json={"error": "test fixture route not found"}, request=request)
 
 
+def user_agent() -> str:
+    """0.1.11.8: the one User-Agent every board request carries: who is asking, and where to write.
+
+    Before 0.1.11.8 the client sent httpx's default. A board operator who sees the requests can now name the
+    reader and reach its maintainer; the robots guard (``robots_guard.py``) reads rules for the same token.
+    """
+
+    import importlib.metadata
+
+    try:
+        version = importlib.metadata.version("gigai")
+    except importlib.metadata.PackageNotFoundError:
+        version = "dev"
+    return f"GigAI/{version} (+https://github.com/karthik446/gigai; job-board reader, one polite request per board)"
+
+
 def _http_client() -> httpx.Client:
     transport = httpx.MockTransport(_test_provider_handler) if _test_http_enabled() else None
     return httpx.Client(
@@ -827,6 +843,7 @@ def _http_client() -> httpx.Client:
         transport=transport,
         follow_redirects=False,
         trust_env=False,
+        headers={"User-Agent": user_agent()},
     )
 
 

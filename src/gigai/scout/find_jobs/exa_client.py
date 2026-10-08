@@ -72,6 +72,8 @@ from typing import TYPE_CHECKING
 from gigai import secrets_store
 
 from .contracts import (
+    BOARD_PATH_HOSTS,
+    BOARD_SUBDOMAIN_HOSTS,
     ATSProvider,
     FindJobsConfig,
     FindJobsContractError,
@@ -93,17 +95,12 @@ NUM_RESULTS = 25
 # (market_acquisition.py's U26 gzip cap) or the assess prompt (P2).
 EXA_TEXT_MAX_CHARACTERS = 8000
 
-ATS_INCLUDE_DOMAINS: tuple[str, ...] = (
-    "boards.greenhouse.io",
-    "job-boards.greenhouse.io",
-    "jobs.lever.co",
-    "jobs.ashbyhq.com",
-)
+#: 0.1.11.8: every board host the registry knows (``contracts.BOARD_PATH_HOSTS`` and the subdomain suffixes, which
+#: Exa's ``includeDomains`` reads as "this domain and its subdomains").
+ATS_INCLUDE_DOMAINS: tuple[str, ...] = tuple(BOARD_PATH_HOSTS) + tuple(BOARD_SUBDOMAIN_HOSTS)
 
-_PROVIDER_BY_NAME = {
-    "greenhouse": ATSProvider.GREENHOUSE,
-    "lever": ATSProvider.LEVER,
-    "ashby": ATSProvider.ASHBY,
+_PROVIDER_BY_NAME: dict[str, ATSProvider] = {name: ATSProvider(name) for name in BOARD_PATH_HOSTS.values()} | {
+    name: ATSProvider(name) for name in BOARD_SUBDOMAIN_HOSTS.values()
 }
 
 # Short, redacted reasons for the status codes Exa is documented to return

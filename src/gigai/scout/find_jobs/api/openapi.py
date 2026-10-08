@@ -596,7 +596,7 @@ _NEW_NOTE = (
     "in place of the verdict and the fit number and is listed after every posting that is not thin, and a match with no row about the job has the state `thin_posting`, listed last of all); "
     "A row has three dates, and they are different facts: `published_at` is the day the posting WENT UP on its board, the one "
     "`window: 7d | 30d` judges (null when the board gives none), and `published_kind` says what the date is: `posted` "
-    "(Greenhouse, Lever, Ashby), or `updated` for a board kind that only gives its last change (none today), so say "
+    "(every board kind that dates its postings; Pinpoint gives no date), or `updated` for a board kind that only gives its last change (none today), so say "
     "\"updated\", never \"posted\", for that. `updated_at` is the board's last change to the posting (null when it gives "
     "none): never the posting day. `first_seen_at` is when Scout first stored the posting, the date `new` "
     "judges (`first_seen` is the same value under its older name). "

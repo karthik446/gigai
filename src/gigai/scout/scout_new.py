@@ -268,7 +268,20 @@ _RECOMMENDED = "recommended"
 #: Greenhouse's ``first_published``, Lever's ``createdAt`` and Ashby's ``publishedAt`` are the day the posting went up.
 #: Served beside the date (``published_kind``) so a last change is never shown as "posted": a provider that can only
 #: give its last change is listed here as ``updated``, and one nobody listed reads ``updated`` too.
-PUBLISHED_KINDS = {"greenhouse": "posted", "lever": "posted", "ashby": "posted"}
+#: 0.1.11.8: the six new feeds date a posting the same way (``providers.published_kinds()`` is this table built from the
+#: registry; the test compares them). Pinpoint's feed carries no date at all, so its postings are undated and its
+#: entry is never read; it is listed so that every board kind says what its date would mean.
+PUBLISHED_KINDS = {
+    "greenhouse": "posted",
+    "lever": "posted",
+    "ashby": "posted",
+    "workable": "posted",
+    "rippling": "posted",
+    "gem": "posted",
+    "recruitee": "posted",
+    "pinpoint": "posted",
+    "breezy": "posted",
+}
 
 
 def sort_group(row: PostingRecord) -> str:

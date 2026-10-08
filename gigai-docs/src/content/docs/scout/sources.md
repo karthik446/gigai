@@ -192,8 +192,18 @@ it.
 
 ## Where the data comes from
 
-Company and title data comes from the public job boards of each company
-(Greenhouse, Lever, Ashby), read with plain public requests. The starter
+Company and title data comes from the public job boards of each company,
+read with plain public requests. Nine hiring systems are read: Greenhouse,
+Lever, Ashby, Workable, Rippling, Gem, Recruitee, Pinpoint and Breezy. Each
+request names GigAI in its `User-Agent` with the project address, and before
+the first request of the day to a board's host Scout reads that host's
+`robots.txt`; a board whose host disallows the feed is skipped and counted
+as `robots_disallowed` in `gigai scout sources status`. A Pinpoint board
+carries no posting date, so its postings read as undated. A Rippling board
+lists titles and locations only: the date and description of the postings
+whose titles match your profiles are fetched at the update, one small request
+each, like Greenhouse descriptions. A Breezy board lists titles, locations
+and dates; a posting's description is fetched when it is assessed. The starter
 snapshot redistributes only the metadata listed above, never an employer's
 description text. A company that wants its board left out of the snapshot can
 ask by opening an issue on the

@@ -123,10 +123,11 @@ export function closedBanner(liveness, ...carriers) {
 // `liveness.board_url`). {url, label, down, note} while there is one, else null: the page shows it as a second link
 // beside "Open posting", and first, with the server's sentence, when the company page is down and the job is open.
 export const BOARD_LINK_LABEL = "Open on the job board";
-const BOARD_PREFIXES = ["https://job-boards.greenhouse.io/", "https://jobs.lever.co/", "https://jobs.ashbyhq.com/"];
+// 0.1.11.8: every board host Scout reads (find_jobs/contracts.py BOARD_PATH_HOSTS and BOARD_SUBDOMAIN_HOSTS).
+const BOARD_HOST = /^https:\/\/(job-boards\.greenhouse\.io|boards\.greenhouse\.io|jobs\.lever\.co|jobs\.ashbyhq\.com|apply\.workable\.com|ats\.rippling\.com|jobs\.gem\.com|[a-z0-9-]+\.(workable\.com|recruitee\.com|pinpointhq\.com|breezy\.hr))\//i;
 export function boardLink(liveness) {
   const url = liveness && typeof liveness.board_url === "string" ? liveness.board_url : "";
-  if (!BOARD_PREFIXES.some((prefix) => url.startsWith(prefix))) {
+  if (!BOARD_HOST.test(url)) {
     return null;
   }
   const note = liveness.state === "open" && liveness.company_page === "down" && typeof liveness.company_page_note === "string" ? liveness.company_page_note.trim() : "";

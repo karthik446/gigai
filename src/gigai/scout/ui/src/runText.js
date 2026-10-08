@@ -10,7 +10,7 @@ export function formatCount(value) {
 // FindJobsConfig.sources keys (contracts.py SourceToggles) in plain words.
 const SOURCE_LABELS = {
   exa: "Exa web search",
-  ats: "Company job boards (Greenhouse, Lever, Ashby)",
+  ats: "Company job boards (Greenhouse, Lever, Ashby, Workable, Rippling, Gem, Recruitee, Pinpoint, Breezy)",
   hiringcafe: "hiring.cafe",
 };
 

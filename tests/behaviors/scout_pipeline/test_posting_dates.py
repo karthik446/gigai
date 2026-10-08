@@ -227,9 +227,15 @@ def test_every_board_kind_says_what_its_date_means() -> None:
 
     assert set(scout_new.PUBLISHED_KINDS) == {provider.value for provider in ATSProvider}
     assert set(scout_new.PUBLISHED_KINDS.values()) <= {"posted", "updated"}
-    # ats_board_clients: Greenhouse's `first_published`, Lever's `createdAt`, Ashby's `publishedAt`.
-    assert scout_new.PUBLISHED_KINDS == {"greenhouse": "posted", "lever": "posted", "ashby": "posted"}
-    # The table names the list field each date is read from; a provider nobody listed is the weaker claim.
-    assert set(ats_board_clients.PUBLISHED_FIELDS) == set(scout_new.PUBLISHED_KINDS)
-    unlisted = SimpleNamespace(board="workable:acme", published_at="2026-09-23T15:00:00.000000Z", first_seen="2026-10-02T15:00:00.000000Z")
+    # ats_board_clients: Greenhouse's `first_published`, Lever's `createdAt`, Ashby's `publishedAt`; 0.1.11.8: Workable's
+    # `published_on`, Rippling's `createdOn` (detail), Gem's `first_published_at`, Recruitee's `published_at`, Breezy's
+    # `published_date`; Pinpoint's feed has no date (its postings are undated, the entry is never read).
+    assert scout_new.PUBLISHED_KINDS == {
+        "greenhouse": "posted", "lever": "posted", "ashby": "posted", "workable": "posted", "rippling": "posted",
+        "gem": "posted", "recruitee": "posted", "pinpoint": "posted", "breezy": "posted",
+    }
+    # The table names the list field each date is read from (Pinpoint has none: no field, undated postings); a
+    # provider nobody listed is the weaker claim.
+    assert set(ats_board_clients.PUBLISHED_FIELDS) == set(scout_new.PUBLISHED_KINDS) - {"pinpoint"}
+    unlisted = SimpleNamespace(board="smartrecruiters:acme", published_at="2026-09-23T15:00:00.000000Z", first_seen="2026-10-02T15:00:00.000000Z")
     assert scout_new.posting_dates(unlisted)["published_kind"] == "updated"  # type: ignore[arg-type]

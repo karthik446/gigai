@@ -473,7 +473,18 @@ def posting_content_digest(title: str, text: str | None) -> str:
 
 #: 0110-10-14: the list field each provider's ``published_at`` is read from: the day the posting went up. A provider
 #: added here says so in ``scout_new.PUBLISHED_KINDS`` too (its test compares the two tables).
-PUBLISHED_FIELDS = {"greenhouse": "first_published", "lever": "createdAt", "ashby": "publishedAt"}
+#: 0.1.11.8: the six new feeds are here too (``providers.published_fields()`` is the same table, built from the
+#: registry; a test keeps the two equal). Pinpoint is absent: its feed carries no posted date.
+PUBLISHED_FIELDS = {
+    "greenhouse": "first_published",
+    "lever": "createdAt",
+    "ashby": "publishedAt",
+    "workable": "published_on",
+    "rippling": "createdOn",
+    "gem": "first_published_at",
+    "recruitee": "published_at",
+    "breezy": "published_date",
+}
 
 
 def _published_at_from_iso(value: object) -> str | None:
@@ -875,7 +886,9 @@ def list_lever_board(client: "httpx.Client", board_token: str, config: FindJobsC
     return _lever_rows(payload, board_token, config)  # type: ignore[arg-type]
 
 
-def _lever_rows(payload: list, board_token: str, config: FindJobsConfig, stats: "BoardFetchStats | None" = None) -> tuple[PostingRow, ...]:
+def _lever_rows(
+    payload: list, board_token: str, config: FindJobsConfig, stats: "BoardFetchStats | None" = None, detail_lookup: object = None
+) -> tuple[PostingRow, ...]:
     company = _company_from_token(board_token)
     rows: list[PostingRow] = []
     for job in payload:
@@ -980,7 +993,9 @@ def list_ashby_board(client: "httpx.Client", board_token: str, config: FindJobsC
     return _ashby_rows(payload["jobs"], board_token, config)  # type: ignore[index]
 
 
-def _ashby_rows(jobs: list, board_token: str, config: FindJobsConfig, stats: "BoardFetchStats | None" = None) -> tuple[PostingRow, ...]:
+def _ashby_rows(
+    jobs: list, board_token: str, config: FindJobsConfig, stats: "BoardFetchStats | None" = None, detail_lookup: object = None
+) -> tuple[PostingRow, ...]:
     company = _company_from_token(board_token)
     rows: list[PostingRow] = []
     for job in jobs:
@@ -1027,11 +1042,85 @@ def _ashby_rows(jobs: list, board_token: str, config: FindJobsConfig, stats: "Bo
     return tuple(rows)
 
 
+def _greenhouse_rows(
+    jobs: list, board_token: str, config: FindJobsConfig, stats: "BoardFetchStats | None" = None, detail_lookup: object = None
+) -> tuple[PostingRow, ...]:
+    """Greenhouse list items -> rows, in the common parser signature (0.1.11.8 registry).
+
+    The content is whatever the list item carries (``?content=true`` bodies have it, plain lists do not);
+    the two-phase detail fetch and the cached-detail lookup stay in ``fetch_greenhouse_board`` and
+    ``company_index`` (their ``updated_at`` marker rule is Greenhouse's own).
+    """
+
+    rows: list[PostingRow] = []
+    for job in jobs:
+        if type(job) is not dict:
+            continue
+        if stats is not None:
+            stats.listed += 1
+        title = job.get("title")
+        if type(title) is not str or not matches_roles(title, config.roles):
+            if stats is not None:
+                stats.prefiltered_out += 1
+            continue
+        absolute_url = job.get("absolute_url")
+        if type(absolute_url) is not str or not absolute_url:
+            continue
+        content = job.get("content")
+        rows.append(_greenhouse_row(job, title, absolute_url, content if type(content) is str else None, board_token))
+    return tuple(rows)
+
+
 _LISTERS = {
     "greenhouse": list_greenhouse_board,
     "lever": list_lever_board,
     "ashby": list_ashby_board,
 }
+
+
+def _lister_for(provider: str) -> "Callable[[httpx.Client, str, FindJobsConfig], tuple[PostingRow, ...]] | None":
+    """The single-request lister of ``provider``: the three hand-written ones, or the registry's generic one."""
+
+    lister = _LISTERS.get(provider)
+    if lister is not None:
+        return lister
+    from .providers import spec
+
+    found = spec(provider)
+    if found is None:
+        return None
+
+    def list_feed(client: "httpx.Client", board_token: str, config: FindJobsConfig) -> tuple[PostingRow, ...]:
+        return list_feed_board(client, provider, board_token, config)
+
+    return list_feed
+
+
+def list_feed_board(client: "httpx.Client", provider: str, board_token: str, config: FindJobsConfig) -> tuple[PostingRow, ...]:
+    """One uncached request to a registry provider's list endpoint -> its rows (the ``list_board`` path)."""
+
+    from .providers import jobs_from_payload, spec
+
+    found = spec(provider)
+    if found is None:
+        raise ATSBoardClientError("unsupported_provider", f"unsupported ATS provider {provider!r}")
+    payload = _request(client, found.list_url.format(token=board_token), provider, board_token)
+    jobs = jobs_from_payload(provider, payload)
+    if jobs is None:
+        _redacted_fail("bad_json", provider, board_token)
+        raise AssertionError("unreachable")
+    lookup = None
+    if found.detail_url is not None:
+        detail_url = found.detail_url
+
+        def lookup(job_id: str) -> dict[str, object] | None:
+            try:
+                detail = _request(client, detail_url.format(token=board_token, id=job_id), provider, board_token)
+            except ATSBoardClientError:
+                return None
+            return detail if isinstance(detail, dict) else None
+
+    return found.rows(jobs, board_token, config, None, lookup)
 
 
 # ---------------------------------------------------------------------------
@@ -1637,6 +1726,76 @@ def fetch_ashby_board(
     return BoardFetchResult(_ashby_rows(payload["jobs"], board_token, config, stats), stats)  # type: ignore[index]
 
 
+def fetch_feed_board(
+    client: "httpx.Client",
+    provider: str,
+    board_token: str,
+    config: FindJobsConfig,
+    *,
+    cache: BoardCache | None = None,
+    stats: BoardFetchStats | None = None,
+    title_filter: "Callable[[str], bool] | None" = None,
+) -> BoardFetchResult:
+    """The cached, prefiltered fetch of a registry provider's board (0.1.11.8: Workable, Rippling, Gem, Recruitee, Pinpoint, Breezy).
+
+    One conditional GET of the list (the same cache, validators and digest rule as the three older providers). A
+    two-phase provider (``detail_url`` set: Rippling) gets one cached detail request per listed job whose title
+    passes the prefilter, only when the detail is not cached yet (a detail has no change marker; the list has no
+    ``updated_at`` for it either, so a cached detail is kept until the posting leaves the list).
+
+    ``title_filter`` (the sources update's description gate, as Greenhouse's fill): the update lists with a config
+    that matches no title, so a two-phase provider's details are fetched for the jobs whose title passes THIS
+    filter instead, and the company index reads them from the cache. ``None``: the prefilter alone decides.
+    """
+
+    from .providers import jobs_from_payload, spec
+
+    found = spec(provider)
+    if found is None:
+        raise ATSBoardClientError("unsupported_provider", f"unsupported ATS provider {provider!r}")
+    stats = stats if stats is not None else BoardFetchStats()
+    body, status = _cached_request(client, found.list_url.format(token=board_token), provider, board_token, cache=cache, stats=stats)
+    stats.cache = "hit" if status == "unchanged" else status
+    if status == "unchanged":
+        return BoardFetchResult((), stats)
+    payload = _decode_json(body, provider, board_token)
+    jobs = jobs_from_payload(provider, payload)
+    if jobs is None:
+        _redacted_fail("bad_json", provider, board_token)
+        raise AssertionError("unreachable")
+    lookup = None
+    if found.detail_url is not None:
+        detail_url = found.detail_url
+
+        def lookup(job_id: str) -> dict[str, object] | None:
+            url = detail_url.format(token=board_token, id=job_id)
+            entry = cache.lookup(provider, url) if cache is not None else None
+            if entry is not None:
+                stats.detail_cached += 1
+                detail = _decode_json(entry.body, provider, board_token)
+                return detail if isinstance(detail, dict) else None
+            try:
+                detail_body, _detail_status = _cached_request(client, url, provider, board_token, cache=cache, stats=stats)
+            except ATSBoardClientError:
+                stats.detail_failed += 1
+                return None
+            stats.detail_fetched += 1
+            try:
+                detail = _decode_json(detail_body, provider, board_token)
+            except ATSBoardClientError:
+                return None
+            return detail if isinstance(detail, dict) else None
+
+        if title_filter is not None:
+            # The update's gate: warm the detail cache for the titles it names; the index reads them back.
+            for job in jobs:
+                title, job_id = job.get(found.title_key), job.get(found.id_key)
+                if type(title) is str and type(job_id) is str and job_id and title_filter(title):
+                    lookup(job_id)
+
+    return BoardFetchResult(found.rows(jobs, board_token, config, stats, lookup), stats)
+
+
 _FETCHERS = {
     "greenhouse": fetch_greenhouse_board,
     "lever": fetch_lever_board,
@@ -1644,13 +1803,48 @@ _FETCHERS = {
 }
 
 
+def _fetcher_for(provider: str) -> "Callable[..., BoardFetchResult] | None":
+    """The cached fetcher of ``provider``: the three hand-written ones, or the registry's generic one."""
+
+    fetcher = _FETCHERS.get(provider)
+    if fetcher is not None:
+        return fetcher
+    from .providers import spec
+
+    if spec(provider) is None:
+        return None
+
+    def fetch_feed(client: "httpx.Client", board_token: str, config: FindJobsConfig, *, cache: BoardCache | None = None, stats: BoardFetchStats | None = None) -> BoardFetchResult:
+        return fetch_feed_board(client, provider, board_token, config, cache=cache, stats=stats)
+
+    return fetch_feed
+
+
 class ATSBoardClients:
-    """Concrete ``ATSBoardClient`` implementing all three public providers."""
+    """Concrete ``ATSBoardClient`` implementing every registry provider (``providers.py``).
+
+    ``robots`` (0.1.11.8, the product's update and acquire paths): a ``robots_guard.RobotsGuard`` asked before
+    every board's list request; a host whose rules disallow the feed fails the board with ``robots_disallowed``
+    and no list request is made. ``None`` (tests, the single-posting lookups) asks nothing.
+    """
+
+    def __init__(self, robots: object = None) -> None:
+        self.robots = robots
+
+    def _guard(self, client: "httpx.Client", provider: str, board_token: str) -> None:
+        if self.robots is None:
+            return
+        from .providers import list_url
+
+        url = list_url(provider, board_token)
+        if url is not None:
+            self.robots.check(client, url, provider, board_token)  # type: ignore[attr-defined]
 
     def list_board(self, client: "httpx.Client", provider: str, board_token: str, config: FindJobsConfig) -> tuple[PostingRow, ...]:
-        lister = _LISTERS.get(provider)
+        lister = _lister_for(provider)
         if lister is None:
             raise ATSBoardClientError("unsupported_provider", f"unsupported ATS provider {provider!r}")
+        self._guard(client, provider, board_token)
         return lister(client, board_token, config)
 
     def fetch_board(
@@ -1671,11 +1865,15 @@ class ATSBoardClients:
         ``title_filter`` (the sources update only, 0110-8-03): which Greenhouse titles get a description request.
         """
 
-        fetcher = _FETCHERS.get(provider)
+        fetcher = _fetcher_for(provider)
         if fetcher is None:
             raise ATSBoardClientError("unsupported_provider", f"unsupported ATS provider {provider!r}")
+        self._guard(client, provider, board_token)
         if descriptions and provider == "greenhouse":
             return fetch_greenhouse_board(client, board_token, config, cache=cache, descriptions=True, title_filter=title_filter)
+        if descriptions and provider not in _FETCHERS:
+            # 0.1.11.8: a registry provider with a detail endpoint (Rippling) fetches the details the gate names.
+            return fetch_feed_board(client, provider, board_token, config, cache=cache, title_filter=title_filter)
         return fetcher(client, board_token, config, cache=cache)
 
 

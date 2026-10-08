@@ -291,6 +291,13 @@ def _no_snapshot_request(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture(autouse=True)
+def _no_robots_request(monkeypatch: pytest.MonkeyPatch) -> None:
+    """0.1.11.8: the sources update asks each board host for its robots.txt once a day: no fake board models that file, so no test counts its request. The guard's own tests build a guard explicitly."""
+
+    monkeypatch.setenv("GIGAI_SCOUT_ROBOTS", "0")
+
+
+@pytest.fixture(autouse=True)
 def _no_posting_liveness_request(monkeypatch: pytest.MonkeyPatch) -> None:
     """0.1.11.4 R1: opening or assessing a job asks its board whether the posting is still open: no test may reach a real board. The liveness tests switch it on with their own fake transport."""
 

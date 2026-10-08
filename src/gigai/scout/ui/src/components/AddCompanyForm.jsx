@@ -19,7 +19,7 @@ import { ApiError } from "../api.js";
 //                                 other host / an unusable URL.
 
 const FRIENDLY = {
-  unsupported_board_host: "Only Greenhouse (boards.greenhouse.io), Lever (jobs.lever.co) and Ashby (jobs.ashbyhq.com) URLs can be added.",
+  unsupported_board_host: "Only a board URL on Greenhouse, Lever, Ashby, Workable, Rippling, Gem, Recruitee, Pinpoint or Breezy can be added.",
   invalid_value: "That is not a usable http(s) URL.",
   forbidden_origin: "This action was refused by the local server.",
   not_found: "No Scout target is configured yet. Run `gigai scout install` first.",
@@ -142,7 +142,7 @@ export default function AddCompanyForm({ compact = false, onAdded }) {
     <section className="panel add-company-form">
       <h3>Add company</h3>
       <p className="muted">
-        Paste a Greenhouse, Lever or Ashby board or job URL. Scout polls that board on every run, even when no
+        Paste a board or job URL from Greenhouse, Lever, Ashby, Workable, Rippling, Gem, Recruitee, Pinpoint or Breezy. Scout polls that board on every run, even when no
         search engine surfaces its postings.
       </p>
       <form onSubmit={submit}>

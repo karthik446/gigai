@@ -73,6 +73,38 @@ class ATSProvider(StrEnum):
     GREENHOUSE = "greenhouse"
     LEVER = "lever"
     ASHBY = "ashby"
+    # 0.1.11.8 (more sources): six more hiring systems with a public, unauthenticated per-company feed
+    # (docs/followups/SPIKE-expand-reach.md section 3). Everything provider-specific beyond this enum and
+    # the board hosts below lives in ``find_jobs/providers.py``.
+    WORKABLE = "workable"
+    RIPPLING = "rippling"
+    GEM = "gem"
+    RECRUITEE = "recruitee"
+    PINPOINT = "pinpoint"
+    BREEZY = "breezy"
+
+
+#: A board's public page host -> provider, for hosts where the board token is the FIRST PATH SEGMENT
+#: (``https://jobs.lever.co/<token>``). ``parse_board_url`` reads this table; ``find_jobs/providers.py`` re-exports it.
+BOARD_PATH_HOSTS: dict[str, str] = {
+    "boards.greenhouse.io": "greenhouse",
+    "job-boards.greenhouse.io": "greenhouse",
+    "jobs.lever.co": "lever",
+    "jobs.ashbyhq.com": "ashby",
+    "apply.workable.com": "workable",
+    "ats.rippling.com": "rippling",
+    "jobs.gem.com": "gem",
+}
+#: A board's public page host SUFFIX -> provider, for hosts where the token is the SUBDOMAIN
+#: (``https://<token>.recruitee.com``). One label only: ``a.b.recruitee.com`` is not a board.
+BOARD_SUBDOMAIN_HOSTS: dict[str, str] = {
+    "workable.com": "workable",
+    "recruitee.com": "recruitee",
+    "pinpointhq.com": "pinpoint",
+    "breezy.hr": "breezy",
+}
+#: Subdomains of those suffixes that are the vendor's own sites, never a company board.
+_VENDOR_SUBDOMAINS = frozenset({"www", "app", "api", "apply", "docs", "help", "support", "status", "blog", "developer", "developers", "static", "assets", "cdn", "mail", "email", "jobs", "careers", "my", "admin", "login", "auth", "accounts", "account"})
 
 
 class RowOutcome(StrEnum):
@@ -2363,7 +2395,12 @@ class WatchlistClient(Protocol):
 
 
 def parse_board_url(url: str) -> tuple[str, str] | None:
-    """Extract an ATS provider/token from one of the four admitted domains."""
+    """Extract an ATS provider/token from a board's public page URL.
+
+    Path-token hosts (:data:`BOARD_PATH_HOSTS`): the token is the first path segment. Subdomain-token hosts
+    (:data:`BOARD_SUBDOMAIN_HOSTS`): the token is the one label before the vendor's suffix, never a vendor
+    subdomain such as ``www`` or ``app``. Greenhouse's ``embed/job_board?for=<token>`` form is read too.
+    """
 
     if type(url) is not str:
         return None
@@ -2375,17 +2412,17 @@ def parse_board_url(url: str) -> tuple[str, str] | None:
     if parsed.scheme not in {"http", "https"} or host is None or parsed.username is not None or parsed.password is not None:
         return None
     host = host.lower().rstrip(".")
-    provider_by_host = {
-        "boards.greenhouse.io": "greenhouse",
-        "job-boards.greenhouse.io": "greenhouse",
-        "jobs.lever.co": "lever",
-        "jobs.ashbyhq.com": "ashby",
-    }
-    provider = provider_by_host.get(host)
-    if provider is None:
-        return None
     parts = tuple(part for part in parsed.path.split("/") if part)
     if any(part in {".", ".."} for part in parts):
+        return None
+    provider = BOARD_PATH_HOSTS.get(host)
+    if provider is None:
+        for suffix, subdomain_provider in BOARD_SUBDOMAIN_HOSTS.items():
+            if host.endswith("." + suffix):
+                label = host[: -len(suffix) - 1]
+                if not label or "." in label or label in _VENDOR_SUBDOMAINS:
+                    return None
+                return subdomain_provider, label
         return None
     if parts and parts[0].lower() == "embed":
         if parts != ("embed", "job_board"):

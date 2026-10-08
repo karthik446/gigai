@@ -68,18 +68,14 @@ from urllib.parse import quote, unquote
 
 from ...canonical import digest_imported_bytes
 from .ats_board_clients import (
-    _ASHBY_URL,
     _GREENHOUSE_JOB_URL,
-    _GREENHOUSE_LIST_URL,
-    _LEVER_URL,
     BoardCache,
-    _ashby_rows,
     _greenhouse_row,
-    _lever_rows,
     _published_at_from_epoch_ms,
-    _published_at_from_iso,
 )
 from .contracts import PostingRow
+from .providers import jobs_from_payload, provider_names, registry
+from .providers import spec as provider_spec
 
 COMPANY_INDEX_SCHEMA = "scout-company-index:1"
 UPDATE_SUMMARY_SCHEMA = "scout-sources-update:1"
@@ -91,8 +87,9 @@ REMOVED_RETENTION_DAYS = 90
 #: says "run Update sources" instead of presenting old postings as current.
 DEFAULT_STALE_AFTER_HOURS = 24.0
 
-_PROVIDERS = ("greenhouse", "lever", "ashby")
-_LIST_URLS = {"greenhouse": _GREENHOUSE_LIST_URL, "lever": _LEVER_URL, "ashby": _ASHBY_URL}
+#: 0.1.11.8: every registry provider (``providers.py``); the three older ones first.
+_PROVIDERS = provider_names()
+_LIST_URLS = {name: item.list_url for name, item in registry().items()}
 
 #: ``CompanyChange.status`` values.
 STATUS_INDEXED = "indexed"  # first time this company is written (also a rebuild)
@@ -577,39 +574,69 @@ def _decode(body: bytes, ats: str, slug: str) -> object:
         raise CompanyIndexError("bad_json", f"{ats} company {slug!r} has an unreadable board body") from None
 
 
-def _job_id(job: Mapping[str, object], url: str) -> str:
-    value = job.get("id")
+def _job_id(job: Mapping[str, object], url: str, id_key: str = "id") -> str:
+    value = job.get(id_key)
     if isinstance(value, (int, str)) and not isinstance(value, bool) and str(value):
         return str(value)
     return f"url:{url}"
 
 
+def _id_key(ats: str) -> str:
+    found = provider_spec(ats)
+    return "id" if found is None else found.id_key
+
+
+def _list_url_key(ats: str) -> str:
+    found = provider_spec(ats)
+    return "url" if found is None else found.url_key
+
+
 def _jobs(ats: str, slug: str, body: bytes) -> list[dict[str, object]]:
     payload = _decode(body, ats, slug)
-    if ats == "lever":
-        jobs = payload
-    elif ats in ("greenhouse", "ashby"):
-        jobs = payload.get("jobs") if isinstance(payload, dict) else None
-    else:
+    if provider_spec(ats) is None:
         raise CompanyIndexError("unsupported_provider", f"unsupported ATS provider {ats!r}")
-    if type(jobs) is not list:
+    jobs = jobs_from_payload(ats, payload)
+    if jobs is None:
         raise CompanyIndexError("bad_json", f"{ats} company {slug!r} has an unreadable board body")
-    return [job for job in jobs if type(job) is dict]
+    return jobs
 
 
 def _updated_at(ats: str, job: Mapping[str, object]) -> str | None:
     if ats == "greenhouse":
         value = job.get("updated_at")
         return value if type(value) is str and value else None
-    value = job.get("updatedAt")
+    found = provider_spec(ats)
+    if found is None or found.updated_field is None:
+        return None
+    value = job.get(found.updated_field)
     if type(value) is str:
-        return _published_at_from_iso(value)
+        from .ats_feeds import published_at_from_text
+
+        return published_at_from_text(value)
     return _published_at_from_epoch_ms(value)
 
 
 def _row(ats: str, slug: str, job: dict[str, object], detail_lookup: DetailLookup | None) -> tuple[str, PostingRow, bool] | None:
     """``(posting id, row, has the description)`` for one job, or ``None`` when it has no title/URL."""
 
+    found = provider_spec(ats)
+    if found is None:
+        return None
+    if ats != "greenhouse":
+        title = job.get(found.title_key)
+        if type(title) is not str or not title.strip():
+            return None
+        url = job.get(found.url_key)
+        posting_id = _job_id(job, url if type(url) is str else "", found.id_key)
+        feed_lookup = None
+        if detail_lookup is not None and found.detail_url is not None:
+            def feed_lookup(job_id: str, _marker: object = None) -> Mapping[str, object] | None:
+                return detail_lookup(job_id, None)
+        rows = found.rows([job], slug, _EveryTitle(title), None, feed_lookup)
+        if not rows:
+            return None
+        row = rows[0]
+        return posting_id, row, row.text is not None
     if ats == "greenhouse":
         title, url = job.get("title"), job.get("absolute_url")
         if type(title) is not str or not title.strip() or type(url) is not str or not url:
@@ -625,14 +652,7 @@ def _row(ats: str, slug: str, job: dict[str, object], detail_lookup: DetailLooku
                 content = detail_content
                 detail = dict(found)
         return posting_id, _greenhouse_row(job, title, url, content, slug, detail), content is not None
-    title = job.get("text") if ats == "lever" else job.get("title")
-    if type(title) is not str:
-        return None
-    parser = _lever_rows if ats == "lever" else _ashby_rows
-    rows = parser([job], slug, _EveryTitle(title))  # type: ignore[arg-type]
-    if not rows:
-        return None
-    return _job_id(job, rows[0].url), rows[0], True
+    return None
 
 
 def parse_board_body(
@@ -668,14 +688,43 @@ def parse_board_body(
     return observed
 
 
-def cached_detail_lookup(cache: BoardCache, slug: str, *, allow_stale: bool = False) -> DetailLookup:
-    """Greenhouse job details from the board cache, only when they match the listed ``updated_at``.
+def _has_detail(ats: str) -> bool:
+    """Whether ``ats`` fetches a per-job detail (Greenhouse, and a registry provider with ``detail_url``)."""
+
+    found = provider_spec(ats)
+    return found is not None and found.detail_url is not None
+
+
+def cached_detail_lookup(cache: BoardCache, slug: str, *, allow_stale: bool = False, ats: str = "greenhouse") -> DetailLookup:
+    """Job details from the board cache: Greenhouse's only when they match the listed ``updated_at``.
 
     0110-026d: a posting the one-time ``?content=true`` fill brought in is read
     from that cached body when it has no detail entry of its own.
     ``allow_stale`` (the text index) accepts a description whose ``updated_at``
     no longer matches: stale text beats none.
+
+    0.1.11.8: for a registry provider with a detail endpoint (Rippling) the cached
+    detail is returned as is (its list has no change marker; the fetch keeps a
+    detail until the posting leaves the list).
     """
+
+    if ats != "greenhouse":
+        found = provider_spec(ats)
+        detail_url = found.detail_url if found is not None else None
+
+        def feed_lookup(job_id: str, marker: str | None) -> dict[str, object] | None:
+            if detail_url is None:
+                return None
+            entry = cache.lookup(ats, detail_url.format(token=slug, id=job_id))
+            if entry is None:
+                return None
+            try:
+                payload = json.loads(entry.body.decode("utf-8"))
+            except (UnicodeDecodeError, ValueError):
+                return None
+            return payload if isinstance(payload, dict) else None
+
+        return feed_lookup
 
     filled: dict[str, dict[str, object]] | None = None
 
@@ -722,15 +771,16 @@ def cached_posting_rows(cache: BoardCache, ats: str, slug: str, posting_ids: Ite
         jobs = _jobs(ats, slug, entry.body)
     except CompanyIndexError:
         return CachedRows({}, missing=wanted)
-    lookup = cached_detail_lookup(cache, slug, allow_stale=allow_stale) if ats == "greenhouse" else None
+    lookup = cached_detail_lookup(cache, slug, allow_stale=allow_stale, ats=ats) if _has_detail(ats) else None
     remaining = set(wanted)
     found: dict[str, PostingRow] = {}
     without_text: list[str] = []
+    url_key, id_key = _list_url_key(ats), _id_key(ats)
     for job in jobs:
         if not remaining:
             break
-        url = job.get("absolute_url") if ats == "greenhouse" else job.get("hostedUrl") if ats == "lever" else job.get("jobUrl")
-        if type(url) is not str or not url or _job_id(job, url) not in remaining:
+        url = job.get(url_key)
+        if type(url) is not str or not url or _job_id(job, url, id_key) not in remaining:
             continue
         parsed = _row(ats, slug, job, lookup)
         if parsed is None:
@@ -917,7 +967,10 @@ def refresh_company(
     same_body = previous is not None and previous.body_sha256 == digest
     if not same_body or previous.dates_pending:  # type: ignore[union-attr]
         # The same body again, for its dates only: the stored digests stand, so no description is looked up.
-        lookup = cached_detail_lookup(cache, slug) if details and ats == "greenhouse" and not same_body else None
+        # Greenhouse details are looked up only on a description fill (``details``); a registry provider with a
+        # detail endpoint (Rippling) caches its details during the fetch itself, so they are read whenever cached.
+        wants_details = (details and ats == "greenhouse") or (ats != "greenhouse" and _has_detail(ats))
+        lookup = cached_detail_lookup(cache, slug, ats=ats) if wants_details and not same_body else None
         try:
             observed = parse_board_body(ats, slug, entry.body, detail_lookup=lookup)
         except CompanyIndexError as exc:

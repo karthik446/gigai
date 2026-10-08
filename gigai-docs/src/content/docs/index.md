@@ -27,7 +27,7 @@ portable, reviewable units of work, not plugins the runtime depends on.
 
 ## Scout in four verbs
 
-- **Acquire**: pull public postings from Greenhouse, Lever and Ashby boards through
+- **Acquire**: pull public postings from Greenhouse, Lever, Ashby, Workable, Rippling, Gem, Recruitee, Pinpoint and Breezy boards through
   an auto-managed watchlist (plus Exa search, if you turn it on).
 - **Rank**: every posting that passes your filters is ranked by your model target.
   The order is honest but coarse: likely fits first, likely no-matches last.

@@ -47,7 +47,9 @@ import re
 import threading
 from urllib.parse import quote
 
-_PROVIDERS = ("greenhouse", "lever", "ashby")
+from .providers import provider_names
+
+_PROVIDERS = provider_names()
 _SLUG_LIKE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 _TOKEN_LIKE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 #: The index file is written with sorted keys, so ``company`` is in its first bytes, long before ``postings``.

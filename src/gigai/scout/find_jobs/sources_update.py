@@ -1150,7 +1150,13 @@ def _run_update(
         if full_refresh:
             for board in boards:  # a Full refresh redoes the one-time Greenhouse description fill
                 cache.clear_content_filled(board.provider.value, board.board_token)
-        clients = _with_fill(ats if ats is not None else ATSBoardClients(), _description_gate(config.roles, home_root))
+        if ats is None:
+            # 0.1.11.8: the product's update asks each board host's robots.txt once a day before its list
+            # (``None`` when GIGAI_SCOUT_ROBOTS=0: the test suite's default).
+            from .robots_guard import shared_guard
+
+            ats = ATSBoardClients(robots=shared_guard(cache.root))
+        clients = _with_fill(ats, _description_gate(config.roles, home_root))
         if trigger == TRIGGER_AUTO and callable(getattr(clients, "fetch_board", None)):
             clients = listener.backoff = _BackoffClients(clients, stop)
         _rows, _failures, summary = _fetch_boards(

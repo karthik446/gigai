@@ -75,6 +75,8 @@ from urllib.parse import quote, urlsplit
 from ...canonical import digest_imported_bytes
 from .contracts import FindJobsContractError, normalize_url, parse_board_url
 from .outbound_guard import pinned_stream, public_looking_host, safe_path_segment, safe_public_target
+from .providers import registry
+from .providers import spec as provider_spec
 
 if TYPE_CHECKING:  # pragma: no cover - imported only by static type checkers
     import httpx
@@ -116,13 +118,12 @@ COMPANY_PAGE_DOWN_NOTE = "The company page for this job is down; the job is stil
 
 _OFF = frozenset({"0", "false", "off", "no"})
 #: A URL on one of these is the board's own page, not a company site: no second link, no extra request.
-_BOARD_DOMAINS = ("greenhouse.io", "lever.co", "ashbyhq.com")
-_BOARD_JOB_URL = {
-    "greenhouse": "https://job-boards.greenhouse.io/{token}/jobs/{id}",
-    "lever": "https://jobs.lever.co/{token}/{id}",
-    "ashby": "https://jobs.ashbyhq.com/{token}/{id}",
-}
-_LIST_PROVIDERS = frozenset({"lever", "ashby"})
+#: 0.1.11.8: from the registry (``providers.py``): every board host suffix, each provider's public job page when the
+#: posting id alone names it, and the providers whose LIST answers a liveness check (every one but Greenhouse,
+#: whose single-job endpoint is asked instead).
+_BOARD_DOMAINS = tuple(sorted({fragment for item in registry().values() for fragment in item.source_hosts}))
+_BOARD_JOB_URL = {name: item.job_url for name, item in registry().items() if item.job_url is not None}
+_LIST_PROVIDERS = frozenset(name for name in registry() if name != "greenhouse")
 
 
 @dataclass(frozen=True)
@@ -325,26 +326,29 @@ def _ask_greenhouse(client: "httpx.Client", token: str, posting_id: str, url: st
 def _read_board(client: "httpx.Client", home_root: Path, provider: str, token: str) -> _Board | None:
     """The board's list as URLs and ids, or ``None`` when no successful list answered."""
 
-    from .ats_board_clients import _ASHBY_URL, _LEVER_URL, ATSBoardClientError, BoardCache, BoardFetchStats, _cached_request, _decode_json
+    from .ats_board_clients import ATSBoardClientError, BoardCache, BoardFetchStats, _cached_request, _decode_json
 
-    endpoint = (_LEVER_URL if provider == "lever" else _ASHBY_URL).format(token=token)
+    found = provider_spec(provider)
+    if found is None:
+        return None
+    endpoint = found.list_url.format(token=token)
     cache = BoardCache(_cache_root(home_root) / "boards", validator_source=lambda _provider, _url: None)
     try:
         body, _status = _cached_request(client, endpoint, provider, token, cache=cache, stats=BoardFetchStats())
         payload = _decode_json(body, provider, token)
     except (ATSBoardClientError, OSError):
         return None
-    jobs = payload if provider == "lever" else (payload.get("jobs") if type(payload) is dict else None)
+    jobs = payload if found.jobs_key is None else (payload.get(found.jobs_key) if type(payload) is dict else None)
     if type(jobs) is not list:
         return None
-    url_key = "hostedUrl" if provider == "lever" else "jobUrl"
+    url_key, id_key = found.url_key, found.id_key
     urls: set[str] = set()
     ids: set[str] = set()
     for job in jobs:
         if type(job) is not dict:
             return None  # not the list this provider sends: nothing is concluded from it
-        if isinstance(job.get("id"), (str, int)) and str(job["id"]):
-            ids.add(str(job["id"]).lower())
+        if isinstance(job.get(id_key), (str, int)) and str(job[id_key]):
+            ids.add(str(job[id_key]).lower())
         listed = job.get(url_key)
         if type(listed) is str and listed:
             try:
