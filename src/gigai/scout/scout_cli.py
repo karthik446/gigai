@@ -3118,6 +3118,48 @@ def jobs_list_command(
     _emit(response, as_json, "" if as_json else render(response))
 
 
+@jobs_group.command("search")
+@click.argument("titles", required=False)
+@click.option("--company", "company", multiple=True, help="A WHOLE word of the company name (repeatable; case and accents aside): `ai` finds Example AI, not Maintain.")
+@click.option("--location", "location", multiple=True, help="A WHOLE word of the posting's location (repeatable): `remote`, `denver`.")
+@click.option("--all", "show_all", is_flag=True, help="Any place, any date: drop the default profile's countries, posted window and work mode.")
+@click.option("--limit", "limit", type=click.IntRange(min=1, max=200), default=50, show_default=True)
+@click.option("--offset", "offset", type=click.IntRange(min=0), default=0)
+@click.option("--home", "home_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--target", "target_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--json", "as_json", is_flag=True)
+def jobs_search_command(
+    titles: str | None, company: tuple[str, ...], location: tuple[str, ...], show_all: bool, limit: int, offset: int,
+    home_value: Path | None, target_value: Path | None, as_json: bool,
+) -> None:
+    """Search EVERY stored posting by title, newest first. No profile, no rank, no model call; writes nothing.
+
+    TITLES is one or more titles, comma separated: "Senior Systems Engineer,
+    Staff Systems Engineer". Every typed word must be in the title, seniority
+    included ("senior engineer" lists only Senior or Sr. titles). Company and
+    location words match WHOLE words, not parts of a word.
+
+    The default profile's countries, posted window and work mode apply;
+    --all drops them. The page is printed first, the total after it. Read
+    from the local search index `gigai scout sources update` keeps; without
+    one, every company file is read (slower, same rows).
+    """
+
+    from .find_jobs import free_search
+    from .outbound_check import redact_payload
+
+    home_root = home_value or default_home_root()
+    try:
+        target = _pipeline_target(target_value, home_root, as_json=as_json)
+        request = free_search.SearchRequest.typed(
+            titles, company=company, location=location, show_all=show_all, limit=limit, offset=offset, count=as_json,
+        )
+        for line in free_search.answer_lines(home_root, request, target=target, as_json=as_json, redact=redact_payload):
+            click.echo(line)
+    except (*_jobs_errors(), free_search.FreeSearchError) as exc:
+        _fail(exc, as_json=as_json, fallback="scout_jobs_failed")
+
+
 @jobs_group.command("assess")
 @click.argument("jobs", nargs=-1)
 @click.option("--profile", "profile_id", help="Assess for this active profile instead of each posting's best profile.")

@@ -1610,6 +1610,7 @@ def _make_handler(
     from .rank import RankRoutesMixin
     from .resume_display import ResumeDisplayRoutesMixin
     from .resumes import ResumesRoutesMixin
+    from .search import SearchRoutesMixin
     from .jobs_folder import JobsFolderRoutesMixin
     from .resumes_folder import ResumesFolderRoutesMixin
     from .runs import RunRoutesMixin
@@ -1650,6 +1651,7 @@ def _make_handler(
         NewRoutesMixin,
         PipelineRoutesMixin,
         PostingsRoutesMixin,
+        SearchRoutesMixin,
         StoryBankRoutesMixin,
         JobSuggestionsRoutesMixin,
         TailoredResumesRoutesMixin,
@@ -2007,6 +2009,9 @@ def _make_handler(
                         return
                     if path == "/api/postings/assess/status":
                         self._handle_get_postings_assess_status()
+                        return
+                    if path == "/api/search":
+                        self._handle_get_search()
                         return
                     # run-reads-fast (uat-bug-022): with a query these two are
                     # the page-sized reads (``run_reads.py``); with none they

@@ -103,6 +103,7 @@ GET_REQUESTS: dict[str, str] = {
     "/api/postings": "/api/postings?limit=10",
     "/api/postings/status": "/api/postings/status",
     "/api/postings/ranking": "/api/postings/ranking",
+    "/api/search": "/api/search?title=staff+engineer&count=1",  # 0.1.11.7: the free search; reads no profile for its filters
     "/api/postings/assess/status": "/api/postings/assess/status",  # 0.1.11.5: the batch's marker file alone
     "/api/metrics": "/api/metrics",
     "/api/settings/background": "/api/settings/background",
