@@ -560,6 +560,12 @@ export default function JobPage({
               <code>{jobId}</code>
             </p>
           )}
+          {/* 0.1.11.7 FS2: a posting found by "Search all jobs" that no profile holds opens from its search row only. */}
+          {!loading && !onDemandHref && from !== "assessments" && (
+            <p className="muted" data-role="search-again-hint">
+              If you found this posting with Search all jobs, search for it again on the Jobs page and open it from the results.
+            </p>
+          )}
           {!loading && !onDemandHref && from !== "assessments" && (
             <p>
               <a href={JOBS_HASH} data-role="back-to-jobs">
@@ -600,6 +606,8 @@ export default function JobPage({
   const coverage = coverageRows({ assessment, record: resume.record, stored: resume.stored });
   // The page's ONE Re-assess, as the stale label and Apply offer it too.
   const reassess = { enabled: Boolean(assessment) && answerDrafts.gate.enabled && !answerDrafts.busy, reason: answerDrafts.gate.reason, onClick: answerDrafts.reassess };
+  // 0.1.11.7 FS2: a posting found by "Search all jobs" that no profile holds: its Assess says whose assessment it will be.
+  const searchAssessLabel = job.fromSearch && profileLabel ? `Assess · 1 model call · as ${profileLabel}` : undefined;
   const closed = closedBanner(liveness, listedRow, servedDates, posting);
   // 7b: the same read gives the posting's address on its board when the stored URL is the company's own page.
   const board = closed ? null : boardLink(liveness);
@@ -714,7 +722,7 @@ export default function JobPage({
             {!assessment && (
               <div className="callout info" style={{ margin: "12px 0 0" }} title={job.notAssessedReason ? notAssessedReasonDetail(job.notAssessedReason) : undefined}>
                 {notAssessedLine(job)}.
-                {!jobWaitsInBatch(batch.status, batchJob.current) && job.status !== "assessing" && (job.status !== "acquired" || job.runEnded) && <AssessNow posting={posting} profileId={profileId} origin={assessOrigin} onAssessed={showAssessed} />}
+                {!jobWaitsInBatch(batch.status, batchJob.current) && job.status !== "assessing" && (job.status !== "acquired" || job.runEnded) && <AssessNow posting={posting} profileId={profileId} origin={assessOrigin} onAssessed={showAssessed} label={searchAssessLabel} />}
               </div>
             )}
           </div>

@@ -3,6 +3,8 @@ import { getNewPeek, getPostings, getPostingsStatus, postAssessThese, postMarkAl
 import { assessAllLabel, assessAsLabel, batchEndLine, isBatchStarted } from "../assessBatchModel.js";
 import AssessApprovalDialog from "../components/AssessApprovalDialog.jsx";
 import AssessBatchProgress from "../components/AssessBatchProgress.jsx";
+import FreeSearchPanel from "../components/FreeSearchPanel.jsx";
+import { unheldPostingRow } from "../freeSearchModel.js";
 import { useAssessBatch } from "../useAssessBatch.js";
 import RankPanel from "../components/RankPanel.jsx";
 import SponsorshipBadge from "../components/SponsorshipBadge.jsx";
@@ -84,6 +86,10 @@ import { sourcesStrip } from "../sourcesStripModel.js";
 //                   (a board that gives only its last change) or "first seen
 //                   ..." (no board date), the exact day on hover
 //                   (postingsModel.postedLine)
+//
+// 0.1.11.7 FS2: "Search all jobs" (FreeSearchPanel) is above the filters: a search over EVERY stored posting, which
+// takes no profile. The profile chips and the selected profile do not change it, and opening one of its rows does not
+// switch the selected profile.
 //
 // Everything a row shows is the posting's own text, a code or a number, and
 // is drawn as text. Old find-jobs runs are history: "Past runs".
@@ -283,7 +289,7 @@ function Pager({ page, pages, size, onPage, onSize }) {
   );
 }
 
-export default function JobsView({ selectedProfileId, onSelectProfile, applicationsState, onRows, onCounts }) {
+export default function JobsView({ selectedProfileId, onSelectProfile, allProfiles, applicationsState, onRows, onCounts }) {
   // The page, its size and the filters, from the address.
   const [place, setPlace] = useState(() => currentView({ mounting: true }));
   const { filter, page, size } = place;
@@ -496,6 +502,22 @@ export default function JobsView({ selectedProfileId, onSelectProfile, applicati
     }
   };
 
+  // 0.1.11.7 FS2: a search row of a posting no profile's list holds has no row to read by its address: its job page
+  // is built from the search row, handed up like a list row. A posting a list holds reads its own row there.
+  const openSearchRow = (row) => {
+    const unheld = unheldPostingRow(row);
+    if (unheld) {
+      onRows([unheld]);
+    }
+  };
+  // A search row was assessed or marked applied: the list below and the application counts are read again.
+  const searchRowChanged = (_row, what) => {
+    postingsStore.refresh(placeRef.current.filter, { page: placeRef.current.page, size: placeRef.current.size });
+    if (what === "applied" && applicationsState.reload) {
+      applicationsState.reload();
+    }
+  };
+
   const strip = sourcesStrip(sources.status, { hasRun: true });
   const inProgress = useMemo(() => inProgressCount(applicationsState.applications || []), [applicationsState.applications]);
   const matched = counts ? counts.matched : 0;
@@ -550,6 +572,8 @@ export default function JobsView({ selectedProfileId, onSelectProfile, applicati
         </div>
         <SourcesStrip strip={strip} read={sources.read} status={sources.status} />
       </section>
+
+      <FreeSearchPanel profiles={allProfiles} onOpenRow={openSearchRow} onRowChanged={searchRowChanged} />
 
       <section className="panel" style={{ padding: "12px 16px" }}>
         <div className="filter-bar">

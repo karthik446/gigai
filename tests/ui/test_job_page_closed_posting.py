@@ -246,4 +246,9 @@ def test_a_page_route_without_the_slash_resolves_the_stored_address_and_an_unkno
     assert (back.get_attribute("href") or "") == "#/jobs" and "Jobs list" in (back.text_content() or "")
     shot(ui, "address-unknown-plain-page")
     ui.page.unroute_all()
+    # 0.1.11.7 FS2: an address no list holds is asked ONCE of the by-address job read (the company index may hold it).
+    # Nothing holds this one: that read answers 404, and it is the only problem of the page.
+    assert ui.network.http_errors == ["HTTP 404 GET /api/jobs"], ui.network.http_errors
+    ui.network.http_errors.clear()
+    ui.network.console_errors[:] = [line for line in ui.network.console_errors if "404" not in line]
     ui.assert_clean()

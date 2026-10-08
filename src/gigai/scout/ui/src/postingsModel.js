@@ -991,6 +991,8 @@ export function postingJob(row) {
     posting,
     row: null,
     fromPostings: true,
+    // 0.1.11.7 FS2: built from a "Search all jobs" row of a posting no profile's list holds (freeSearchModel.unheldPostingRow).
+    fromSearch: Boolean(row.from_search),
     status: "posting",
     notAssessedReason: null,
     fromRunDate: null,

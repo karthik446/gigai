@@ -87,3 +87,8 @@ def test_the_not_found_page_points_at_an_on_demand_assessment_and_says_plainly_w
     assert "Nothing is stored for" in (ui.page.locator(".panel .muted").first.text_content() or "")
     assert ui.page.locator("[data-role='back-to-jobs']").get_attribute("href") == "#/jobs"
     shot(ui, "not-found-plain")
+    # 0.1.11.7 FS2: an address no list holds is asked ONCE of the by-address job read (the company index may hold it).
+    # Nothing holds this one: that read answers 404, and it is the only problem of the page.
+    assert ui.network.http_errors == ["HTTP 404 GET /api/jobs"], ui.network.http_errors
+    ui.network.http_errors.clear()
+    ui.network.console_errors[:] = [line for line in ui.network.console_errors if "404" not in line]

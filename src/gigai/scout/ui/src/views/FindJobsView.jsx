@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   getAssessments,
+  getJob,
   getPostings,
   getRunProgress,
   JOBS_PAGE_ROWS,
@@ -37,6 +38,7 @@ import {
   staleLine,
 } from "../assessAllModel.js";
 import { postingByAddressQuery, postingJob } from "../postingsModel.js";
+import { servedPostingRow } from "../freeSearchModel.js";
 import { RUNS_HASH, SETTINGS_HASH, assessmentHash, runHash } from "../routing.js";
 import { onDemandItemFor, resolveJobId } from "../jobAddress.js";
 
@@ -134,6 +136,7 @@ const PROGRESS_POLL_INTERVAL_MS = 1500;
 export default function FindJobsView({
   route,
   profile,
+  profiles,
   profilesLoading,
   config,
   runsState,
@@ -780,10 +783,27 @@ export default function FindJobsView({
       return;
     }
     setPostingLookup({ id: jobRouteId, done: false });
+    // A job the run or the stored assessments already carry needs no second source (its page reads GET /api/jobs itself).
+    const carried = jobs.some((job) => job.id === jobRouteId) || assessed.some((job) => job.id === jobRouteId);
     getPostings(byAddress)
       // 0110-9-01: a 202 "preparing" answer has no rows yet. 0.1.11.4 R1: a posting its board no longer lists is in
       // the same answer (the row says `removed_at`); its page still opens and says it is closed.
-      .then((response) => addPostingRows(response.postings ? response.postings.rows : []))
+      .then((response) => {
+        const found = response.postings ? response.postings.rows : [];
+        addPostingRows(found);
+        if (found.length || carried) {
+          return undefined;
+        }
+        // 0.1.11.7 FS2: no profile's list holds it. A posting the company index holds (found by "Search all jobs",
+        // opened here by its address: a reload, a pasted link) is answered by the job read; its page is built from
+        // that. An address nothing holds answers 404 there and the page says so, as before.
+        return getJob(jobRouteId).then((served) => {
+          const row = servedPostingRow(served);
+          if (row) {
+            addPostingRows([row]);
+          }
+        });
+      })
       .catch(() => {})
       .finally(() => setPostingLookup((current) => (current.id === jobRouteId ? { id: jobRouteId, done: true } : current)));
   }, [jobRouteId, rowKnown, settled, postingLookup.id, addPostingRows]);
@@ -805,6 +825,7 @@ export default function FindJobsView({
       <JobsView
         selectedProfileId={profileId}
         onSelectProfile={onSelectProfile}
+        allProfiles={profiles}
         applicationsState={applicationsState}
         onRows={addPostingRows}
         onCounts={setPostingsWaiting}

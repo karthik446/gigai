@@ -293,6 +293,7 @@ export default function App() {
           <FindJobsView
             route={route}
             profile={selectedProfile}
+            profiles={profilesState.profiles}
             profilesLoading={profilesState.loading}
             config={configResponse}
             runsState={runsState}

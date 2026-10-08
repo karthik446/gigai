@@ -817,9 +817,9 @@ def test_the_pages_send_where_the_assessment_was_started(out: dict) -> None:
     assert "postAssess({ job, resume, origin: ORIGIN_QUICK_ASSESS })" in assess
     page = (UI_SRC / "views" / "JobPage.jsx").read_text(encoding="utf-8")
     assert "const assessOrigin = assessOriginFor(job);" in page
-    assert "postAssess({ job: { job_url: jobUrl }, origin: assessOrigin })" in page
-    assert "postAssess({ job: { job_url: posting.url }, origin })" in page
-    assert "<AssessNow posting={posting} origin={assessOrigin} onAssessed={onQuickUpdated} />" in page
+    assert "postAssess({ job: { job_url: jobUrl }, ...assessResume(profileId), origin: assessOrigin })" in page
+    assert "postAssess({ job: { job_url: posting.url }, ...assessResume(profileId), origin })" in page
+    assert "<AssessNow posting={posting} profileId={profileId} origin={assessOrigin}" in page
     assert page.count("postAssess(") == 2, "a new POST /api/assess on the job page must say its origin"
 
 

@@ -12,7 +12,9 @@ import {
   resumeDescription,
   sharedResumeNotes,
 } from "../profileResumeModel.js";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { draftSettingsLine } from "../freeSearchModel.js";
+import { dropProfileDraft, pendingProfileDraft } from "../freeSearchStore.js";
 import TagListInput from "../components/TagListInput.jsx";
 import { archiveProfile, createProfile, deleteProfile, updateProfile } from "../api.js";
 import { deleteBlockedReason, deleteConfirmText } from "../profileDeleteModel.js";
@@ -48,6 +50,9 @@ import { isAssessAll } from "../assessAllModel.js";
 // cadence/budget/model all live in find-jobs.json, not per profile (S25).
 // 0110-022: location, work mode, countries and the posted window are per
 // profile (ProfileSearchSettings); the default profile's are the setup's.
+// 0.1.11.7 FS2: "Save this search as a profile" (Jobs, "Search all jobs") opens the new-profile form with the typed
+// titles and a name filled in, and says what the profile starts with and that the profile rule can list more than
+// the search did. The resume is still chosen here; nothing is created before "Create profile".
 function RunHistoryTable({ profileId }) {
   const { loading, runs, error } = useRuns(profileId);
   if (loading) {
@@ -91,9 +96,26 @@ export default function ProfilesView({ profiles, selectedProfileId, onSelectProf
   const selected = profiles.find((profile) => profile.profile_id === selectedProfileId) || null;
   const sharedNotes = sharedResumeNotes(profiles);
 
-  const [creating, setCreating] = useState(false);
-  const [newLabel, setNewLabel] = useState("");
-  const [newTitles, setNewTitles] = useState([]);
+  const [searchDraft, setSearchDraft] = useState(() => pendingProfileDraft());
+  const [creating, setCreating] = useState(() => Boolean(searchDraft));
+  const [newLabel, setNewLabel] = useState(() => (searchDraft ? searchDraft.label : ""));
+  const [newTitles, setNewTitles] = useState(() => (searchDraft ? searchDraft.titles : []));
+  // The form a search opened is brought into view (after the app's own scroll to the top of a new page).
+  useEffect(() => {
+    if (!searchDraft) {
+      return undefined;
+    }
+    dropProfileDraft();
+    const timer = setTimeout(() => {
+      const field = document.getElementById("new-profile-label");
+      if (field) {
+        field.scrollIntoView({ block: "center" });
+        field.focus({ preventScroll: true });
+      }
+    }, 0);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [newResume, setNewResume] = useState(initialNewResume());
   const [resumeBlocked, setResumeBlocked] = useState(false);
   const [createError, setCreateError] = useState(null);
@@ -127,6 +149,7 @@ export default function ProfilesView({ profiles, selectedProfileId, onSelectProf
       setNewTitles([]);
       setNewResume(initialNewResume());
       setCreating(false);
+      setSearchDraft(null);
       reloadProfiles();
     } catch (error) {
       setCreateError(error.message || String(error));
@@ -233,7 +256,13 @@ export default function ProfilesView({ profiles, selectedProfileId, onSelectProf
         </div>
 
         {creating ? (
-          <form onSubmit={handleCreate} style={{ marginTop: 12 }}>
+          <form onSubmit={handleCreate} style={{ marginTop: 12 }} data-testid="new-profile-form" data-from-search={searchDraft ? "true" : undefined}>
+            {searchDraft && (
+              <div className="callout info" data-testid="profile-from-search">
+                From your search: the titles below are the ones you typed. {searchDraft.note} <span data-role="profile-from-search-settings">{draftSettingsLine(searchDraft)}</span>{" "}
+                Choose its resume below; nothing is created until you press Create profile.
+              </div>
+            )}
             <div className="form-group">
               <label className="form-label" htmlFor="new-profile-label">
                 Label
@@ -268,7 +297,15 @@ export default function ProfilesView({ profiles, selectedProfileId, onSelectProf
             </p>
             {createError && <div className="callout danger">{createError}</div>}
             <div className="actions">
-              <button type="button" className="button secondary" onClick={() => setCreating(false)} disabled={createSaving}>
+              <button
+                type="button"
+                className="button secondary"
+                onClick={() => {
+                  setCreating(false);
+                  setSearchDraft(null);
+                }}
+                disabled={createSaving}
+              >
                 Cancel
               </button>
               <button type="submit" className="button" disabled={createSaving || resumeBlocked || !canCreateProfile({ label: newLabel, titles: newTitles, resume: newResume })}>
@@ -283,7 +320,7 @@ export default function ProfilesView({ profiles, selectedProfileId, onSelectProf
                 {createNote}
               </div>
             )}
-            <button className="button small secondary" onClick={() => { setCreateNote(null); setCreating(true); }}>
+            <button className="button small secondary" data-action="add-profile" onClick={() => { setCreateNote(null); setCreating(true); }}>
               + Add profile
             </button>
           </div>

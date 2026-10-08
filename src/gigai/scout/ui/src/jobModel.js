@@ -480,6 +480,11 @@ export function assessOriginFor(job) {
   if (stored) {
     return stored;
   }
+  // 0.1.11.7 FS2: a posting found by "Search all jobs" that no profile's list holds is in no Jobs list: its
+  // assessment is an on-demand one, listed under Assessments, where it can be found again.
+  if (job && job.fromSearch) {
+    return ORIGIN_QUICK_ASSESS;
+  }
   // 0.1.10.7 M4b: a posting opened from the Jobs list (postingsModel.postingJob) is a job page's too.
   return job && (job.row || job.fromPostings) ? ORIGIN_JOB_PAGE : ORIGIN_QUICK_ASSESS;
 }

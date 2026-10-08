@@ -881,6 +881,13 @@ export function getPostings(query, options) {
   return request("GET", `/api/postings${query ? `?${query}` : ""}`, undefined, options);
 }
 
+// 0.1.11.7 FS2: GET /api/search, the free search over EVERY stored posting ("Search all jobs"). `query` is
+// freeSearchModel.searchQuery's: typed titles, company and location words, `all=1`, `limit`, `offset`, `count=1`.
+// It takes no profile. A read: no request to a board, no model call, nothing written.
+export function getFreeSearch(query, options) {
+  return request("GET", `/api/search?${query}`, undefined, options);
+}
+
 export function getNewPeek(options) {
   return request("GET", "/api/new?peek=1", undefined, options);
 }
