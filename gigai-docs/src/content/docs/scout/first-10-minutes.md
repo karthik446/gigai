@@ -11,7 +11,7 @@ Two things before you start.
 
 **Remove your name, email, phone, address and links from your resume before you give it to an agent.**
 
-**Run GigAI on your own computer and your own network, not a work laptop or office Wi-Fi.** Scout checks about 10,000 public job boards (Greenhouse, Lever, Ashby): thousands of requests, and it keeps checking 8 times a day. An employer can see that traffic.
+**Run GigAI on your own computer and your own network, not a work laptop or office Wi-Fi.** Scout checks over 10,000 public job boards (Greenhouse, Lever, Ashby and six more hiring systems): thousands of requests, and it keeps checking 8 times a day. An employer can see that traffic.
 
 You can turn the background checks off under **Settings > Background updates**.
 

@@ -138,7 +138,7 @@ def test_the_network_notice_is_one_constant_quoted_by_the_ui_the_readme_the_docs
     # The approved words. The lead is bold wherever it is shown; NETWORK_NOTICE is the Markdown form of the whole.
     assert wording.NETWORK_NOTICE == (
         "**Run GigAI on your own computer and your own network, not a work laptop or office Wi-Fi.** "
-        "Scout checks about 10,000 public job boards (Greenhouse, Lever, Ashby): thousands of requests, "
+        "Scout checks over 10,000 public job boards (Greenhouse, Lever, Ashby and six more hiring systems): thousands of requests, "
         "and it keeps checking 8 times a day. An employer can see that traffic."
     )
     assert wording.NETWORK_NOTICE == f"**{wording.NETWORK_NOTICE_LEAD}** {wording.NETWORK_NOTICE_BODY}"
