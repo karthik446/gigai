@@ -64,6 +64,7 @@ from dataclasses import dataclass, field
 import re
 
 from ..canonical import digest_imported_bytes
+from .master_lab import is_lab_ref, lab_refs, without_label
 from .tailored_resume import ENTRY_SECTIONS, MAX_HEADING_LINES, SECTION_HEADINGS, numeric_values
 
 #: The format version the first line names (``<!-- gigai-master:1 -->``).
@@ -94,7 +95,8 @@ _BULLET = re.compile(r"\A[-*•]\s+(.*)\Z")
 _CONTROL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 _ID = re.compile(r"\A[A-Za-z0-9][A-Za-z0-9_-]{0,63}\Z")
 _TAG = re.compile(r"\A[A-Za-z0-9][A-Za-z0-9_+#.-]{0,39}\Z")
-_BACKED = re.compile(r"\A(?:story|answer):[A-Za-z0-9][A-Za-z0-9_:.-]{0,119}\Z")
+# 0.1.11.7 T2: ``lab:YYYY-MM`` is the backing of a personal lab line (``master_lab``): it is not evidence, only a label.
+_BACKED = re.compile(r"\A(?:(?:story|answer):[A-Za-z0-9][A-Za-z0-9_:.-]{0,119}|lab:\d{4}-(?:0[1-9]|1[0-2]))\Z")
 _YEARS = re.compile(r"(?<!\d)(19[5-9]\d|20\d\d)(?!\d)")
 _ONGOING = re.compile(r"\b(?:present|current|now)\b", re.IGNORECASE)
 _SKILL_LABEL = re.compile(r"\A([^:,;|]{1,40}):\s*")
@@ -149,7 +151,7 @@ class MasterItem:
     kind: str
     text: str
     tags: tuple[str, ...] = ()
-    #: ``story:<id>`` / ``answer:<question_id>``: the evidence that backs the line.
+    #: ``story:<id>`` / ``answer:<question_id>``: the evidence that backs the line; ``lab:YYYY-MM`` marks a personal lab.
     backed: tuple[str, ...] = ()
     entry_id: str | None = None
     order: int = 0
@@ -157,10 +159,16 @@ class MasterItem:
     note: str | None = None
 
     @property
+    def lab(self) -> bool:
+        """A personal lab line (0.1.11.7 T2): it never counts as evidence, so it is not a ``backed`` line."""
+
+        return bool(lab_refs(self.backed))
+
+    @property
     def strength(self) -> str:
-        if self.backed:
+        if any(not is_lab_ref(ref) for ref in self.backed):
             return "backed"
-        return "quantified" if numeric_values(self.text) else "stated"
+        return "quantified" if numeric_values(without_label(self.text)) else "stated"
 
     @property
     def mark(self) -> str:
@@ -407,7 +415,7 @@ def _split(raw: str, number: int) -> tuple[str, _Fields]:
             elif key == "backed":
                 refs = tuple(ref for ref in value.split(",") if ref)
                 if not refs or not all(_BACKED.fullmatch(ref) for ref in refs):
-                    _bad(number, "backed names a story or an answer (backed:story:<id> or backed:answer:<question_id>)")
+                    _bad(number, "backed names a story, an answer or a lab (backed:story:<id>, backed:answer:<question_id> or backed:lab:YYYY-MM)")
                 fields.backed += tuple(ref for ref in refs if ref not in fields.backed)
             elif _MARKER.fullmatch(word):
                 fields.marker = int(_MARKER.fullmatch(word).group(1))  # type: ignore[union-attr]

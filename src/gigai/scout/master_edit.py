@@ -77,7 +77,7 @@ import threading
 
 from ..canonical import digest_imported_bytes
 from ..workpad import one_operation
-from . import master_resume
+from . import master_lab, master_resume
 from .master_migration import NEAR_DUPLICATE, near_duplicate
 from .master_resume import (
     KIND_BULLET,
@@ -365,12 +365,27 @@ def clean_backed(backed: Iterable[str]) -> tuple[str, ...]:
     for ref in backed:
         clean = str(ref).strip()
         if not master_resume._BACKED.fullmatch(clean):  # noqa: SLF001 - the format's own rule for a backed link
-            raise MasterEditError("master_backed_invalid", "a link names a story or an answer: story:<id> or answer:<question_id>")
+            raise MasterEditError("master_backed_invalid", "a link names a story, an answer or a lab: story:<id>, answer:<question_id> or lab:YYYY-MM")
         if clean not in found:
             found.append(clean)
     if len(found) > MAX_TAGS:
         raise MasterEditError("master_backed_invalid", f"a line has at most {MAX_TAGS} links")
     return tuple(found)
+
+
+def _lab_guard(text: str, backed: Iterable[str]) -> None:
+    """0.1.11.7 T2: a lab line (a ``lab:YYYY-MM`` link, or the lab label in its words) is REFUSED when it claims production
+    work, and a line with a ``lab:`` link must keep its label. One rule for ``add`` and ``edit``, so the routes get it too."""
+
+    labelled = master_lab.is_lab_text(text)
+    if not labelled and not master_lab.lab_refs(tuple(backed)):
+        return
+    try:
+        master_lab.refuse_production(text)
+    except master_lab.LabError as exc:
+        raise MasterEditError("master_lab_production", str(exc)) from None
+    if not labelled:
+        raise MasterEditError("master_lab_unlabelled", "a lab line ends with its label, like (personal lab, Oct 2026): add it with --lab --when")
 
 
 def clean_source(source: object) -> str | None:
@@ -739,10 +754,38 @@ def _backed(current: tuple[str, ...], evidence: tuple[Evidence, ...]) -> tuple[s
 # --- add ----------------------------------------------------------------------------------------
 
 
+def _lab_when(lab: bool, when: str | None) -> tuple[int, int] | None:
+    """``--lab`` needs ``--when``, and ``--when`` needs ``--lab``; the month, or a sentence."""
+
+    if not lab:
+        if when is not None:
+            raise MasterEditError("master_lab_invalid", "--when belongs to --lab: a personal lab line says when the lab was done")
+        return None
+    if when is None:
+        raise MasterEditError("master_lab_invalid", 'a lab is dated: pass --when "Oct 2026" with --lab')
+    try:
+        return master_lab.parse_when(when)
+    except master_lab.LabError as exc:
+        raise MasterEditError("master_lab_invalid", str(exc)) from None
+
+
+def _labelled(text: object, when: tuple[int, int]) -> str:
+    """The user's words with the lab label last; the production check runs on the words, before the label is added."""
+
+    if not isinstance(text, str):
+        raise MasterEditError("master_text_invalid", "the line must be text")
+    try:
+        master_lab.refuse_production(text)
+    except master_lab.LabError as exc:
+        raise MasterEditError("master_lab_production", str(exc)) from None
+    return master_lab.lab_text(text, when)
+
+
+
 def add_line(
     *, home_root: Path, target: Path, text: str, entry_id: str | None = None, section: str | None = None, tags: Iterable[str] = (),
     backed: Iterable[str] = (), evidence: tuple[Evidence, ...] = (), actor: str = "operator", revision: int | None = None,
-    source: str | None = None, force: bool = False,
+    source: str | None = None, force: bool = False, lab: bool = False, when: str | None = None,
 ) -> MasterEdit:
     """Add one line: a bullet under ``entry_id``, or a line of ``section`` (summary, skills, other).
 
@@ -750,12 +793,20 @@ def add_line(
     (``master_line_exists``); one it has worded differently is asked about
     (``status: near_duplicate``, nothing written) unless ``force``.
     ``evidence`` (``evidence_for``) links the line to a story or an answer
-    that is stored; ``backed`` sets links by name."""
+    that is stored; ``backed`` sets links by name. ``lab`` + ``when`` (0.1.11.7 T2): a personal lab line, see
+    ``master_lab`` (the text ends with the label, the line is backed ``lab:YYYY-MM``, a production word is refused)."""
 
+    lab_when = _lab_when(lab, when)
+    backed = (*backed, master_lab.lab_ref(lab_when)) if lab_when is not None else backed
+    if lab_when is not None:
+        text = _labelled(text, lab_when)
     # A bullet when it names an entry; the place itself is checked below.
     kind = KIND_BULLET if entry_id is not None or section is None else master_resume._kind(section)  # noqa: SLF001 - the format's own rule
     clean = _clean(text, what="the line", limit=line_limit(kind), bullet=True)
     wanted_tags, wanted_backed, kept_source = clean_tags(tags), clean_backed(backed), clean_source(source)
+    _lab_guard(clean, wanted_backed)
+    if lab_when is not None and kind == KIND_SKILLS:
+        raise MasterEditError("master_lab_invalid", "a skill is added with --skill NAME --lab --when: it is listed as NAME (lab)")
     if (entry_id is None) == (section is None):
         raise MasterEditError("master_place_invalid", "say where the line goes: --entry ENTRY_ID (a bullet) or --section summary, skills or other")
     if section is not None and (section not in SECTION_HEADINGS or section in ENTRY_SECTIONS):
@@ -837,6 +888,12 @@ def add_entry(
     return _revise(ACTION_ADD, home_root=home_root, target=target, actor=actor, revision=revision, source=kept_source, apply=apply)
 
 
+def master_lab_base(skill: str) -> str:
+    """A skill's name without its ``(lab)`` mark, folded."""
+
+    return re.sub(r"\s*\(lab\)\s*\Z", "", skill, flags=re.IGNORECASE).casefold()
+
+
 def _skill(value: str) -> str:
     name = _clean(value, what="a skill", limit=MAX_SKILL_CHARS).rstrip(".").strip()
     if skill_names(name) != ("", (name,)):
@@ -852,11 +909,16 @@ def _skills_text(label: str, names: Iterable[str]) -> str:
 def add_skills(
     *, home_root: Path, target: Path, names: Iterable[str], line_id: str | None = None, label: str | None = None,
     evidence: tuple[Evidence, ...] = (), actor: str = "operator", revision: int | None = None, source: str | None = None,
+    lab: bool = False, when: str | None = None,
 ) -> MasterEdit:
     """Add skills to a Skills line: ``line_id``, else the line labelled ``label`` (made when there is none), else the only one.
 
-    A skill the master already lists anywhere is not added again (``already_listed``)."""
+    A skill the master already lists anywhere is not added again (``already_listed``). ``lab`` + ``when`` (0.1.11.7 T2):
+    each skill is listed as ``NAME (lab)`` and its stamp in ``lines.json`` carries ``backed: lab:YYYY-MM``."""
 
+    lab_when = _lab_when(lab, when)
+    if lab_when is not None and evidence:
+        raise MasterEditError("master_lab_invalid", "a lab skill has no story or answer behind it: drop --from-story / --from-answer, or drop --lab")
     wanted = list(dict.fromkeys(_skill(name) for name in names))
     if not wanted:
         raise MasterEditError("master_skill_invalid", "name at least one skill")
@@ -869,10 +931,13 @@ def add_skills(
 
     def apply(stored: StoredMaster, draft: MasterDraft) -> _Plan:
         listed = {skill.casefold() for skill in stored.master.skills()}
+        # A lab skill is listed as "NAME (lab)"; one the master lists already (as itself, or as a lab) is not added again.
+        if lab_when is not None:
+            listed |= {master_lab_base(skill) for skill in stored.master.skills()}
         plan = _Plan.empty()
         plan.already_listed = tuple(name for name in wanted if name.casefold() in listed)
-        plan.skills_added = tuple(name for name in wanted if name.casefold() not in listed)
-        plan.backed = next((found.ref for found in evidence), None)
+        plan.skills_added = tuple(f"{name} (lab)" if lab_when is not None else name for name in wanted if name.casefold() not in listed)
+        plan.backed = master_lab.lab_ref(lab_when) if lab_when is not None else next((found.ref for found in evidence), None)
         lines = _section(draft, "skills", create=True).items  # type: ignore[union-attr]
         if line_id is not None:
             line = next((item for item in lines if item.id == line_id), None)
@@ -975,7 +1040,10 @@ def edit(
             plan.warnings = _number_warnings(clean, evidence)
         if wanted_tags is not None:
             item.tags = wanted_tags
-        item.backed = _backed(wanted_backed if wanted_backed is not None else item.backed, evidence)
+        final = _backed(wanted_backed if wanted_backed is not None else item.backed, evidence)
+        if item.section != "skills":
+            _lab_guard(item.text, final)  # 0.1.11.7 T2: an edit may not turn a lab line into a production claim
+        item.backed = final
         return plan
 
     return _revise(ACTION_EDIT, home_root=home_root, target=target, actor=actor, revision=revision, source=kept_source, apply=apply)

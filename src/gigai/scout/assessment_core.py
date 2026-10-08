@@ -80,6 +80,7 @@ from .resume_gate import (
     unasked_rows,
     uses_v9_rules,
 )
+from .master_lab import shows_lab
 from .resume_privacy import model_resume
 from .untrusted_text import fence_untrusted_posting
 
@@ -107,6 +108,9 @@ PLACEHOLDER_ID_EXAMPLE = "id_example"
 PLACEHOLDER_NOTE_EXAMPLE = "note_example"
 PLACEHOLDER_PICK_LINES = "pick_lines"
 PLACEHOLDER_REQUIREMENTS = "requirements"
+#: 0.1.11.7 T2: the personal-lab paragraph of ``assess.md``; in the prompt only when the RESUME block holds a lab line,
+#: so a master with none renders byte for byte as before.
+PLACEHOLDER_LAB_EXAMPLE = "lab_example"
 _ID_PLACEHOLDERS = (PLACEHOLDER_ID_EXAMPLE, PLACEHOLDER_PICK_LINES)
 REQUIREMENTS_BLOCK_HEADER = "REQUIREMENTS (id | class | requirement | the posting wording behind the class):"
 
@@ -477,6 +481,7 @@ def render_assess_prompt(job: AssessJob, ctx: AssessContext, validation_error: s
         PLACEHOLDER_ID_EXAMPLE: f"<!-- id:{ctx.resume_ids[0]} -->" if ctx.resume_ids else "",
         PLACEHOLDER_NOTE_EXAMPLE: "<!-- private note: ... -->",
         PLACEHOLDER_PICK_LINES: str(ctx.pick_lines),
+        PLACEHOLDER_LAB_EXAMPLE: "(personal lab, Oct 2026)",
         # The list's words are the posting's: inside a fence of their own, like the posting.
         PLACEHOLDER_REQUIREMENTS: fence_untrusted_posting(
             REQUIREMENTS_BLOCK_HEADER + "\n" + "\n".join(row.prompt_line() for row in ctx.requirements)
@@ -499,6 +504,7 @@ def render_assess_prompt(job: AssessJob, ctx: AssessContext, validation_error: s
         *(_ID_PLACEHOLDERS if not ctx.resume_ids else ()),
         *((PLACEHOLDER_NOTE_EXAMPLE,) if not (ctx.resume_ids and ctx.resume_notes) else ()),
         *((PLACEHOLDER_REQUIREMENTS,) if not ctx.requirements else ()),
+        *((PLACEHOLDER_LAB_EXAMPLE,) if not shows_lab(ctx.resume_text) else ()),
     ]
     for name in absent:
         blocks = [block for block in blocks if "{{" + name + "}}" not in block]

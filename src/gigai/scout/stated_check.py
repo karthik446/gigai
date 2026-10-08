@@ -88,6 +88,7 @@ from dataclasses import dataclass
 from datetime import date
 import re
 
+from .master_lab import is_lab_skill, is_lab_text
 from .requirements_list import is_eligibility_id
 from .resume_gate import is_authorization_row
 
@@ -201,6 +202,8 @@ def read_master(resume_text: str, *, today: date | None = None) -> MasterFacts:
 
     ``resume_text`` is the evidence view (``master_selection.evidence_view(ids=True)``) or a master in the same
     format. A note line (``<!-- private note: ... -->``) is the user's private guidance and is never read.
+    A personal lab line (``(personal lab, Oct 2026)``) and a ``NAME (lab)`` skill are left out (0.1.11.7 T2): a
+    lab never settles a requirement row.
     """
 
     from .master_resume import skill_names  # lazy: that module imports the assess core, which imports this one
@@ -245,7 +248,15 @@ def read_master(resume_text: str, *, today: date | None = None) -> MasterFacts:
             continue
         found = _ID_COMMENT.search(stripped)
         line = Line(found.group(1) if found else None, text, section)
+        if is_lab_text(text):
+            continue  # 0.1.11.7 T2: a personal lab line is never read as stated experience; the assess prompt rule handles it
         if section == "skills":
+            label, listed = skill_names(text)
+            real = [name for name in listed if not is_lab_skill(name)]
+            if len(real) != len(listed):  # 0.1.11.7 T2: "DNS (lab)" is not a skill the master states
+                if not real:
+                    continue
+                line = Line(line.id, f"{label}: {', '.join(real)}" if label else ", ".join(real), section)
             skills.append(line)
         elif line.id is not None and section != "education":
             lines.append(line)

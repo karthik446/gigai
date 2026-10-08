@@ -266,7 +266,7 @@ GOLDEN_BOUNDED_LEN = 54_463
 # (``requirement_weights``). The rules are every prompt's, so every golden above was re-captured (EXECUTED, from
 # ``render_assess_prompt`` on the same fixed inputs) and v7 became v8 for every work mode. Live eval, before and
 # after: ``tests/evals/run_assess_rules_eval.py --matrix``.
-SHIPPED_INSTRUCTIONS_DIGEST = "sha256:bf65bd8ab5405c4ef149356523212ad320f855dcc3986e155b00ae08154555ca"
+SHIPPED_INSTRUCTIONS_DIGEST = "sha256:4cce467f8fd5eacdbe659f0898afe8984275624f909769a47efbebc94efdc7de"
 SHIPPED_PROMPT_VERSION = "assess-prompt-v9"
 
 

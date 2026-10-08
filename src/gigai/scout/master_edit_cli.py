@@ -172,6 +172,12 @@ def _evidence(home_root: Path, target: Path, story_id: str | None, question_id: 
 @click.option("--restore", "restore_id", help="Put a retired line or entry back under its own id (see show --retired).")
 @click.option("--force", is_flag=True, help="With --text: add the line although the master has one that says nearly the same.")
 @click.option(
+    "--lab", "lab", is_flag=True,
+    help="With --text or --skill: something built to learn, never production. The line ends \"(personal lab, Oct 2026)\" (a skill: \"NAME (lab)\"); "
+    "a line that says operated, owned, production, at scale, led, years, a team or customers is refused. Needs --when.",
+)
+@click.option("--when", "when", help='With --lab: the month the lab was done, like "Oct 2026".')
+@click.option(
     "--revision", "revision", type=click.IntRange(min=1),
     help="The revision you read (show --json): refused with revision_conflict when the master changed since. Without it the line is added to the master as it is now.",
 )
@@ -181,7 +187,7 @@ def _evidence(home_root: Path, target: Path, story_id: str | None, question_id: 
 def master_add_command(
     text: str | None, entry_id: str | None, section: str | None, heading: str | None, sublines: tuple[str, ...], skills: tuple[str, ...],
     line_id: str | None, label: str | None, tags: tuple[str, ...], story_id: str | None, question_id: str | None, restore_id: str | None,
-    force: bool, revision: int | None, source: str | None, actor: str, target_value: Path | None, home_value: Path | None, as_json: bool,
+    force: bool, lab: bool, when: str | None, revision: int | None, source: str | None, actor: str, target_value: Path | None, home_value: Path | None, as_json: bool,
 ) -> None:
     """Add to the master: a line, a role / project / school, skills, or a retired line back.
 
@@ -190,6 +196,8 @@ def master_add_command(
                --text "..." --section summary|skills|other
     An entry:  --heading "Acme" --role "Staff Engineer | Jun 2022 - Present" --section experience
     Skills:    --skill Helm [--skill ArgoCD] [--to LINE_ID | --label Cloud]
+    A lab:     --text "Built a DNS resolver in Docker" --entry ENTRY_ID --lab --when "Oct 2026"
+               --skill DNS --lab --when "Oct 2026"        (listed as "DNS (lab)")
     Put back:  --restore ID
 
     The new line gets its id (the output shows it). Text that looks like
@@ -214,17 +222,18 @@ def master_add_command(
             )
         common = {"home_root": home_root, "target": target, "actor": actor, "revision": revision}
         if restore_id is not None:
-            if any((entry_id, section_name, sublines, line_id, label, tags, story_id, question_id, force, source)):
+            if any((entry_id, section_name, sublines, line_id, label, tags, story_id, question_id, force, source, lab, when)):
                 raise _InputError("master_add_invalid", "--restore ID takes only --revision and --as: the line comes back as it was")
             result = master_edit.restore(item_id=restore_id, **common)
         elif skills:
             if entry_id or sublines or tags or force or section_name not in (None, "skills"):
                 raise _InputError("master_add_invalid", "--skill takes --to LINE_ID or --label LABEL (and --from-answer, --from-story, --source)")
             result = master_edit.add_skills(
-                names=skills, line_id=line_id, label=label, evidence=_evidence(home_root, target, story_id, question_id), source=source, **common,
+                names=skills, line_id=line_id, label=label, evidence=_evidence(home_root, target, story_id, question_id), source=source,
+                lab=lab, when=when, **common,
             )
         elif heading is not None:
-            if entry_id or line_id or label or tags or story_id or question_id or force:
+            if entry_id or line_id or label or tags or story_id or question_id or force or lab or when:
                 raise _InputError("master_add_invalid", "--heading takes --section experience, projects or education and --role; tags and evidence belong to its lines")
             if section_name is None:
                 raise _InputError("master_add_invalid", "--heading needs --section experience, projects or education")
@@ -234,7 +243,7 @@ def master_add_command(
                 raise _InputError("master_add_invalid", "--text takes --entry ENTRY_ID or --section summary, skills or other")
             result = master_edit.add_line(
                 text=text or "", entry_id=entry_id, section=section_name, tags=tags, evidence=_evidence(home_root, target, story_id, question_id),
-                source=source, force=force, **common,
+                source=source, force=force, lab=lab, when=when, **common,
             )
     except (*_errors(), _InputError) as exc:
         _fail(_missing(exc), as_json=as_json)

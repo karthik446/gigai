@@ -43,13 +43,14 @@ Pure builders (``yours_part``, ``posting_part``, ``render``) and two loaders tha
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 from . import suggestions as record_store
 from .assess_preview import WHAT_ONE_ASSESSMENT_SENDS
 from .data_labels import ENVELOPE_KEY, PUBLIC_UNTRUSTED, USER_PRIVATE, LabelError, assert_not_mixed, labels_envelope
 from .handback_check import WHAT_THE_CHECK_IS, stated
+from .master_lab import is_lab_text
 from .master_resume import KIND_SKILLS, Master, note_of
 from .untrusted_text import fence_untrusted_posting
 
@@ -117,6 +118,8 @@ class RowIds:
     coverage: str | None = None
     #: The id of the OPEN question this row is asked by (``gigai scout answers save THIS``), or ``None``: the row asks nothing.
     question_id: str | None = None
+    #: 0.1.11.7 T2: the row rests ONLY on personal lab lines (every master line it cites is a lab line).
+    lab: bool = False
 
 
 @dataclass(frozen=True)
@@ -312,7 +315,7 @@ def _master_lines(inputs: YoursInputs, shown: frozenset[str]) -> tuple[list[dict
         lines.append({
             "id": item.id, "kind": item.kind, "section": item.section, "entry_id": item.entry_id, "strength": item.strength,
             "printed": printed, "left_out": None if printed else codes.get(item.id, _LEFT_OUT_UNKNOWN), "note": note_of(item),
-            "text": item.text,
+            "text": item.text, "lab": item.lab or is_lab_text(item.text),
         })
     return entries, lines, skills
 
@@ -374,7 +377,7 @@ def yours_part(inputs: YoursInputs) -> dict[str, object]:
         "requirements": [
             {
                 "id": row.id, "class": row.requirement_class, "status": row.status, "sources": list(row.sources), "in_resume": list(row.in_resume),
-                "coverage": row.coverage, "question_id": row.question_id,
+                "coverage": row.coverage, "question_id": row.question_id, "lab": row.lab,
             }
             for row in inputs.rows
         ],
@@ -517,7 +520,7 @@ def _render_yours(part: Mapping[str, object]) -> str:
             by_entry.setdefault(line.get("entry_id"), []).append(line)
 
         def shown(line: Mapping[str, object]) -> str:
-            text = f"{'*' if line['printed'] else ' '} {line['id']} {_STRENGTH_MARK.get(str(line['strength']), '[s]')} {line['text']}"
+            text = f"{'*' if line['printed'] else ' '} {line['id']} {_STRENGTH_MARK.get(str(line['strength']), '[s]')}{' [lab]' if line.get('lab') else ''} {line['text']}"
             if line["left_out"]:
                 text += f"   (left out: {line['left_out']})"
             return text + (f"   (note: {line['note']})" if line["note"] else "")
@@ -542,6 +545,7 @@ def _render_yours(part: Mapping[str, object]) -> str:
     rows: Sequence[Mapping[str, object]] = part["requirements"]  # type: ignore[assignment]
     for row in rows:
         asked = f"  asked: answers save {row['question_id']}" if row.get("question_id") else ""
+        asked += "  [lab: personal lab only, not production]" if row.get("lab") else ""
         out.append(f"{row['id']}  {row['class'] or '(no class)'}  {row['status']}  sources: {_or_none(row['sources'])}  in the resume: {'yes' if row['in_resume'] else 'no'}{asked}")  # type: ignore[arg-type]
     if not rows:
         out.append("(none)")
@@ -777,6 +781,21 @@ def _resume_text(profile: object | None, resolved: object, home_root: Path, targ
         return ""  # no readable resume: the answers are offered with their contact details redacted, as always
 
 
+def _with_lab(rows: tuple[RowIds, ...], master: Master | None) -> tuple[RowIds, ...]:
+    """Mark the rows that rest only on personal lab lines: every master line they cite is a lab line (an answer's id is not a line)."""
+
+    if master is None:
+        return rows
+    lab_ids = {item.id for item in master.items.values() if item.lab or is_lab_text(item.text)}
+    if not lab_ids:
+        return rows
+    out = []
+    for row in rows:
+        cited = [source for source in row.sources if source in master.items]
+        out.append(replace(row, lab=True) if cited and all(source in lab_ids for source in cited) and len(cited) == len(row.sources) else row)
+    return tuple(out)
+
+
 def load_yours(home_root: Path, target: Path, job_url: str, profile_id: str | None = None) -> YoursInputs:
     """What the private part reads for one job, from the stores as they are. Nothing is recomputed and nothing is written."""
 
@@ -818,7 +837,7 @@ def load_yours(home_root: Path, target: Path, job_url: str, profile_id: str | No
         conflicts=tuple(item for item in (selection or {}).get("conflicts", ()) if isinstance(item, Mapping)),  # type: ignore[union-attr]
         picked=None if selection is None else {key: selection.get(key) for key in ("picked_by", "fallback", "draft")},
         proposed=record.get("proposed") is not None,
-        rows=row_ids(job, shown, {str(item["row"]): str(item["question_id"]) for item in questions if item["row"]}),
+        rows=_with_lab(row_ids(job, shown, {str(item["row"]): str(item["question_id"]) for item in questions if item["row"]}), master),
         open_questions=questions,
         suggestions=tuple(_private_suggestion(item) for item in record.get("suggestions", ()) if isinstance(item, Mapping)),  # type: ignore[union-attr]
         master=master,
