@@ -150,7 +150,7 @@ def test_the_first_board_is_asked_and_counted_before_any_one_time_store_work(tmp
         store.close()
     # ... each stored company file was read once, and the text index was built once, after the boards.
     assert steps.stored_reads >= STORED_COMPANIES and steps.text_builds == 1
-    assert final["catch_up"] == {"tags": {"companies_done": STORED_COMPANIES, "companies_total": STORED_COMPANIES, "pending": False}, "text_index": None}
+    assert final["catch_up"] == {"tags": {"companies_done": STORED_COMPANIES, "companies_total": STORED_COMPANIES, "pending": False}, "text_index": None, "search_index": None}
     stats = text_index.stats(home)
     text_index.close(home)
     assert stats.available and stats.postings >= STORED_COMPANIES * POSTINGS_EACH
@@ -207,7 +207,7 @@ def test_a_stopped_update_leaves_the_catch_up_to_the_next_one(tmp_path: Path, mo
 
     assert stopped.status == STATUS_PARTIAL and stopped.to_json()["cancelled"] is True
     assert steps.now() == (0, 0, 0)  # nothing waited for the one-time work
-    assert stopped.to_json()["catch_up"] == {"tags": {"companies_done": 0, "companies_total": 200, "pending": True}, "text_index": "deferred"}
+    assert stopped.to_json()["catch_up"] == {"tags": {"companies_done": 0, "companies_total": 200, "pending": True}, "text_index": "deferred", "search_index": "deferred"}
     store = posting_tags.default_store(home)
     try:
         assert not store.rules_catch_up_done()

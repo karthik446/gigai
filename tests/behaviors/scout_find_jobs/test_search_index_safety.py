@@ -40,9 +40,25 @@ UNAVAILABLE = {
 }
 
 
+def unverify(home: Path) -> None:
+    """Forget the writer's ``meta.verified``: the reader then checks the file itself, as it did before SI2."""
+
+    search_index.close(home)
+    conn = sqlite3.connect(search_index.search_index_path(home))
+    try:
+        conn.execute("DELETE FROM meta WHERE key = 'verified'")
+        conn.commit()
+        conn.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchall()
+    finally:
+        conn.close()
+
+
 @pytest.fixture
 def home(tmp_path: Path):
+    """A built home whose index is NOT marked verified: the SI1 cases below are about the reader's own check."""
+
     path = make_home(tmp_path)
+    unverify(path)
     yield path
     search_index.close(path)
 
@@ -185,7 +201,7 @@ def test_quick_check_runs_once_per_open_and_after_a_stamp_change_never_per_query
     assert search_index.status(home).available
     assert (len(opened), checks()) == (1, 1)
     # The stamp changes (one company re-indexed): checked once more, on the same connection, and it passes there.
-    assert search_index.upsert_company(home, write_board(home, 1, round_=3))
+    assert search_index.upsert_company(home, write_board(home, 1, round_=3), verify=False)
     for _ in range(3):
         assert served(home) == truth(home)
     assert (len(opened), checks()) == (1, 2)
@@ -511,3 +527,122 @@ def test_is_built_reads_unable_to_open_as_not_built(home: Path) -> None:
         os.chmod(folder, mode)
     assert search_index.is_built(home)
     assert len(BOARDS) == search_index.status(home).boards
+
+
+# ---------------------------------------------------------------------------
+# The verified stamp (SI2): the writer runs quick_check, the reader skips it at that stamp
+# ---------------------------------------------------------------------------
+
+
+def trace_checks(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    """Every reader statement that is a ``quick_check``, from every connection the reader opens from now on."""
+
+    seen: list[str] = []
+    real = search_index._Store.reader
+
+    def traced(self: object) -> sqlite3.Connection:
+        conn = real(self)  # type: ignore[arg-type]
+        if not getattr(conn, "_si2_traced", False):
+            conn.set_trace_callback(lambda statement: seen.append(statement) if "quick_check" in statement else None)
+            try:
+                conn._si2_traced = True  # type: ignore[attr-defined]
+            except AttributeError:
+                pass
+        return conn
+
+    monkeypatch.setattr(search_index._Store, "reader", traced)
+    return seen
+
+
+def meta(home: Path) -> dict[str, str]:
+    search_index.close(home)
+    conn = sqlite3.connect(search_index.search_index_path(home))
+    try:
+        return dict(conn.execute("SELECT key, value FROM meta").fetchall())
+    finally:
+        conn.close()
+
+
+def test_a_build_records_the_stamp_it_verified_and_a_new_reader_skips_quick_check(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    built = make_home(tmp_path)
+    try:
+        values = meta(built)
+        assert values["verified"] == values["stamp"]
+        checks = trace_checks(monkeypatch)
+        search_index.close(built)
+        assert served(built) == truth(built) and search_index.status(built).available
+        assert checks == []
+    finally:
+        search_index.close(built)
+
+
+def test_a_changed_stamp_without_a_verify_makes_the_reader_check_and_verify_makes_it_stop(home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    checks = trace_checks(monkeypatch)
+    assert search_index.upsert_company(home, write_board(home, 2, round_=1), verify=False)
+    values = meta(home)
+    assert values.get("verified") != values["stamp"]
+    for _ in range(3):
+        assert served(home) == truth(home)
+    assert len(checks) == 1  # once for this stamp, never per query
+    search_index.close(home)
+    assert search_index.verify(home) is True
+    assert meta(home)["verified"] == meta(home)["stamp"]
+    del checks[:]
+    for _ in range(3):
+        assert served(home) == truth(home)
+    assert checks == []
+    # Every writer verifies unless told not to: an upsert, a removal and a refresh leave a verified stamp.
+    assert search_index.upsert_company(home, write_board(home, 1, round_=2))
+    assert meta(home)["verified"] == meta(home)["stamp"]
+    CompanyIndex.for_home(home).delete(*BOARDS[3][1:])
+    assert search_index.remove_company(home, f"{BOARDS[3][1]}:{BOARDS[3][2]}")
+    assert meta(home)["verified"] == meta(home)["stamp"]
+    write_board(home, 0, round_=5)
+    assert search_index.refresh(home)
+    assert meta(home)["verified"] == meta(home)["stamp"]
+    del checks[:]
+    assert served(home) == truth(home) and checks == []
+
+
+def test_verify_never_raises_never_builds_and_does_not_mark_a_state_it_did_not_check(tmp_path: Path) -> None:
+    empty = tmp_path / "nothing"
+    assert search_index.verify(empty) is False and not search_index.search_index_path(empty).exists()
+    unbuilt = make_home(tmp_path / "x", build=False)
+    assert search_index.verify(unbuilt) is False and not search_index.search_index_path(unbuilt).exists()
+    built = make_home(tmp_path / "y")
+    try:
+        path = settle(built)
+        data = path.read_bytes()
+        path.write_bytes(data[: len(data) // 2])
+        assert search_index.verify(built) is False
+    finally:
+        search_index.close(built)
+
+
+def test_a_noise_damaged_file_with_a_stale_verified_stamp_is_still_refused(home: Path) -> None:
+    assert search_index.upsert_company(home, write_board(home, 1, round_=4), verify=False)  # verified is now stale
+    path = settle(home)
+    healthy = path.read_bytes()
+    page = 4096
+    noise = random.Random(11708)
+    for start in (40, 44, 48, 52):
+        settle(home)
+        path.write_bytes(healthy[: start * page] + noise.randbytes(2 * page) + healthy[(start + 2) * page :])
+        got = served(home)
+        assert got == search_index.DAMAGED or got == truth(home), start
+    path.write_bytes(healthy[: 40 * page] + noise.randbytes(8 * page) + healthy[48 * page :])
+    assert_falls_back_then_rebuilds(home, {search_index.DAMAGED})
+
+
+def test_damage_after_a_verify_is_still_refused_by_any_query_that_touches_it(home: Path) -> None:
+    """The accepted trade-off: no quick_check at a verified stamp, so only a query on damaged pages notices."""
+
+    assert search_index.verify(home)
+    path = settle(home)
+    data = path.read_bytes()
+    path.write_bytes(b"\0" * 100 + data[100:])  # the header: every query touches it
+    assert_falls_back_then_rebuilds(home, {search_index.DAMAGED})
+    settle(home)
+    path.write_bytes(data[: len(data) // 2])  # the tail pages are gone: the query errors
+    assert_falls_back_then_rebuilds(home, {search_index.DAMAGED})
+    assert meta(home)["verified"] == meta(home)["stamp"]  # a rebuild verifies its own file

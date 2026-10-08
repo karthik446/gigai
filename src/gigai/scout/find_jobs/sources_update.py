@@ -48,6 +48,16 @@ snapshot's ``catch_up`` block says how far they are). No model call, no
 request; a failure there is counted in the snapshot's ``stores`` block and
 never fails the update.
 
+0.1.11.7 SI2 keeps the local search index (``search_index``, ``search.sqlite``)
+the same way: each company file written is upserted (``verify=False``: one
+``quick_check`` at the end of the update, not 0.5 s per board), and an index that does not exist yet is built
+once after the boards, never per board. A failed upsert marks the index
+unusable for the rest of the update, and the end-of-update ``refresh`` (which
+re-indexes every company file that differs from its stamp, then verifies) makes
+it current again. A reader is never blocked by these writes (WAL). Nothing
+here is counted in ``stores``; ``catch_up.search_index`` is ``deferred`` or
+``building`` like ``text_index``.
+
 One update at a time, across a tick's long quiet stretches too: a running
 update rewrites its snapshot at least every
 :data:`HEARTBEAT_INTERVAL_SECONDS`. A manual Full refresh started in the
@@ -385,6 +395,11 @@ class _PostingStores:
         self._text_usable = True
         self._text_rebuild_due = False
         self._text_deferred = False  # no text index file yet: built once, after the boards
+        self._search_usable = True
+        self._search_rebuild_due = False
+        self._search_deferred = False  # no search index yet: built once, after the boards
+        self._search_dirty = False  # an upsert/removal ran unverified, or failed: refresh + verify at the end
+        self.search_rebuilding = False
         self._pending: deque[tuple[str, str]] | None = None  # company files the rules catch-up has not read yet
         self.catch_up_total = 0
         self.catch_up_done = 0
@@ -450,6 +465,15 @@ class _PostingStores:
         except Exception as exc:  # noqa: BLE001 - the text index is a cache: counted, never fails the update
             self.text_failures += 1
             self._failed("text index", exc)
+        try:
+            from . import search_index
+
+            if not search_index.is_built(self._home) and next(iter(self._index.keys()), None) is not None:
+                self._search_rebuild_due = True
+                self._search_deferred = True
+        except Exception as exc:  # noqa: BLE001 - the search index is a cache: never fails the update
+            self._search_usable = False
+            self._failed("search index", exc)
 
     @property
     def catching_up(self) -> bool:
@@ -503,6 +527,7 @@ class _PostingStores:
             except Exception as exc:  # noqa: BLE001 - the tag store is a cache: counted, never fails the update
                 self.tag_failures += 1
                 self._failed("tag store", exc)
+        self._search_upsert(change.key)
         if not self._text_usable:
             return
         try:
@@ -529,8 +554,34 @@ class _PostingStores:
             self.text_failures += 1
             self._failed("text index", exc)
 
+    def _search_upsert(self, key: str) -> None:
+        """One company file was written: bring the search index in step. Never raises, never builds."""
+
+        if not self._search_usable or self._search_deferred:
+            return  # an index that does not exist is built once, after the boards
+        try:
+            from . import search_index
+
+            if not search_index.is_built(self._home):
+                self._search_rebuild_due = True  # deleted or other version since ``begin``: rebuilt at the end
+                return
+            if search_index.upsert_company(self._home, key, verify=False):
+                self._search_dirty = True
+            else:
+                self._search_usable = False
+                self._search_dirty = True  # the end-of-update refresh re-reads what this skipped
+                self._failed("search index", None)
+        except Exception as exc:  # noqa: BLE001 - the search index is a cache: never fails or slows the update
+            self._search_usable = False
+            self._search_dirty = True
+            self._failed("search index", exc)
+
     def boards_dropped(self, keys: Sequence[str]) -> None:
-        """Companies still indexed but no longer on the watchlist: out of the text index."""
+        """Companies still indexed but no longer on the watchlist: out of the text index.
+
+        Not out of the search index: that mirrors the company FOLDER, and an update leaves the file (only
+        ``snapshot.import`` deletes one, and the end-of-update refresh catches a file deleted by hand).
+        """
 
         if not keys or not self._text_usable:
             return
@@ -589,11 +640,43 @@ class _PostingStores:
         except Exception as exc:  # noqa: BLE001 - the text index is a cache: counted, never fails the update
             self.text_failures += 1
             self._failed("text index", exc)
+        self._finish_search(skipped(), progress)
         try:
             if self._tags is not None:
                 self._tags.close()
         except Exception as exc:  # noqa: BLE001 - closing a cache connection never fails the update
             self._failed("tag store", exc)
+
+    def _search_stale(self, search_index: Any) -> bool:
+        """Whether a built index no longer matches the company folder (a file written or deleted outside this update)."""
+
+        return search_index.status(self._home).reason == search_index.STALE
+
+    def _finish_search(self, skipped: bool, progress: Callable[[], object] | None) -> None:
+        """Build the missing search index once, or refresh it and record one ``quick_check``; then close this thread's connections."""
+
+        try:
+            from . import search_index
+
+            if not skipped:
+                if self._search_rebuild_due:
+                    self._search_rebuild_due = False
+                    self.search_rebuilding = True
+                    if progress is not None:
+                        progress()
+                    try:
+                        if not search_index.rebuild_from_index(self._home).available:
+                            self._failed("search index", None)
+                    finally:
+                        self.search_rebuilding = False
+                elif self._search_dirty or self._search_stale(search_index):
+                    # Files that changed outside, or in a skipped or failed upsert, are re-read; the state is verified once.
+                    if not search_index.refresh(self._home):
+                        self._failed("search index", None)
+                self._search_dirty = False
+            search_index.close(self._home)
+        except Exception as exc:  # noqa: BLE001 - the search index is a cache: never fails the update
+            self._failed("search index", exc)
 
     def to_json(self) -> dict[str, object]:
         return {
@@ -608,14 +691,17 @@ class _PostingStores:
         of ``companies_total``; ``pending`` until the last one is read).
         ``text_index``: ``deferred`` while a missing text index waits for
         the boards to be done, ``building`` while it is built, else ``None``.
+        ``search_index``: the same for the local search index (0.1.11.7).
         """
 
         text = "building" if self.text_rebuilding else "deferred" if self._text_rebuild_due and self._text_deferred else None
-        if self.catch_up_total == 0 and not self._text_deferred:
+        search = "building" if self.search_rebuilding else "deferred" if self._search_rebuild_due and self._search_deferred else None
+        if self.catch_up_total == 0 and not self._text_deferred and not self._search_deferred:
             return None
         return {
             "tags": {"companies_done": self.catch_up_done, "companies_total": self.catch_up_total, "pending": self._pending is not None},
             "text_index": text,
+            "search_index": search,
         }
 
 

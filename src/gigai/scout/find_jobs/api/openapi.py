@@ -2138,7 +2138,7 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
             "check left alone after a 429 (null: none), `stores` counts what the update wrote to the tag store and the text index "
             "(`stores.tags.titles_backfilled`: stored titles this update gave their first rules tag, a level, in its one-time "
             "catch-up; it is not the number of titles with a function), `catch_up` is that one-time work, done after boards settle "
-            "and never before the first request: `tags` {companies_done, companies_total, pending} and `text_index` (deferred until "
+            "and never before the first request: `tags` {companies_done, companies_total, pending} and `text_index` and `search_index` (each deferred until "
             "the boards are done, building, or null). `index` says whether a search can read the stored postings. `background` is "
             "the background refresh and the two stores: `auto_refresh` {enabled, source: default|setting|environment|settings_unreadable, active: a "
             "refresh thread runs in this server}; `state` is disabled, inactive, needs_first_update (run Update sources once: the "

@@ -38,7 +38,10 @@ read-write with ``PRAGMA query_only=1`` (a read-only connection cannot open a
 WAL file before its ``-shm`` exists), reopen it when it was deleted or
 replaced, and inside one read transaction check ``schema_version``, ``built``
 and the digest against the company folder. ``PRAGMA quick_check`` runs once
-per open and after every stamp change, never per query. The folder is scanned
+per open and after every stamp change, never per query, and only when the
+index was not verified at that stamp: the WRITERS verify (see below), because
+the check takes 0.5 to 0.6 s on 158.7 MB and a cold CLI process or a server
+that just saw an update must not pay it. The folder is scanned
 on every read, except while its own mtime has not moved since a scan (the
 company index replaces a file with ``os.replace``, which moves it): a file
 edited in place by hand is seen at the next scan.
@@ -48,6 +51,18 @@ plus SQLite's write lock), a connection per thread. A build or an update is
 ONE ``BEGIN IMMEDIATE`` in place (never a temp file + ``os.replace``: an open
 connection would keep the old file), followed by ``wal_checkpoint(TRUNCATE)``.
 Readers keep the rows from before the write until it commits.
+
+Verified stamp (0.1.11.7 SI2): after its commit a writer (:func:`rebuild_from_index`,
+:func:`refresh`, and :func:`upsert_company` / :func:`remove_company` unless the
+caller passes ``verify=False`` and calls :func:`verify` once at the end of a
+burst) runs ``PRAGMA quick_check`` itself and records ``meta.verified`` = the
+stamp it verified. A reader that finds ``verified == stamp`` skips the check;
+any other value (a write that was not verified, a hand edit) makes it run the
+check as before. ACCEPTED TRADE-OFF: a file damaged AFTER it was verified is
+no longer found by the reader's own ``quick_check``; any query that touches
+the damaged pages still raises, and that reads as ``damaged`` (the caller scans
+and the next :func:`rebuild_from_index` repairs it). Damage in pages no query
+touches is served around until the next write verifies again.
 
 Nothing here makes a request or writes outside its own file.
 """
@@ -628,11 +643,15 @@ def _drop_everything(conn: sqlite3.Connection) -> None:
             conn.execute(f'DROP TABLE IF EXISTS "{name}"')
 
 
-def _checkpoint(conn: sqlite3.Connection) -> None:
-    """Fold the WAL back into the file. A reader mid-query can make it partial: the next one finishes it."""
+def _checkpoint(conn: sqlite3.Connection, *, truncate: bool = True) -> None:
+    """Fold the WAL back into the file. A reader mid-query can make it partial: the next one finishes it.
+
+    ``truncate=False`` is PASSIVE: it never waits for a reader (TRUNCATE waits up to the busy timeout), for the
+    unverified writes of an update's burst; the verify at the end of the burst truncates.
+    """
 
     try:
-        conn.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchall()
+        conn.execute(f"PRAGMA wal_checkpoint({'TRUNCATE' if truncate else 'PASSIVE'})").fetchall()
     except sqlite3.Error:
         pass
 
@@ -682,6 +701,54 @@ def _rebuild(conn: sqlite3.Connection, index: CompanyIndex, progress: Callable[[
         raise
 
 
+def _quick_check_ok(conn: sqlite3.Connection) -> bool:
+    # One FTS read first: see the reader (a connection's first FTS read after another connection's write).
+    conn.execute("SELECT rowid FROM ft WHERE ft MATCH '\"0\"' LIMIT 1").fetchall()
+    return conn.execute("PRAGMA quick_check").fetchone()[0] == "ok"
+
+
+def _verify_conn(conn: sqlite3.Connection) -> bool:
+    """``quick_check`` the committed state and record ``meta.verified`` = its stamp. ``False``: not verified (nothing raised)."""
+
+    if not _is_current(conn):
+        return False
+    row = conn.execute("SELECT value FROM meta WHERE key = 'stamp'").fetchone()
+    if row is None or not _quick_check_ok(conn):
+        return False
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        now = conn.execute("SELECT value FROM meta WHERE key = 'stamp'").fetchone()
+        if now is None or now[0] != row[0]:
+            conn.execute("ROLLBACK")  # another process wrote in between: its own verify (or a reader) covers that state
+            return False
+        conn.execute("INSERT OR REPLACE INTO meta (key, value) VALUES ('verified', ?)", (row[0],))
+        conn.execute("COMMIT")
+    except BaseException:  # noqa: BLE001 - cleans up (rollback) and re-raises: nothing is swallowed
+        conn.execute("ROLLBACK")
+        raise
+    _checkpoint(conn)
+    return True
+
+
+def verify(home_root: Path) -> bool:
+    """Run ``quick_check`` on the index as it is and record it as verified, so readers skip their own.
+
+    For the end of a burst of ``upsert_company(..., verify=False)`` calls.
+    ``True`` when the state was checked and recorded; ``False`` for a missing,
+    unbuilt, other-version or failing file, or one written meanwhile (then a
+    reader runs the check itself). Never raises, never builds.
+    """
+
+    store = _store(home_root)
+    try:
+        if not store.path.is_file():
+            return False
+        with store.write_lock:
+            return _verify_conn(store.writer())
+    except _ERRORS:
+        return False
+
+
 def rebuild_from_index(home_root: Path, *, progress: Callable[[int, int], None] | None = None) -> IndexStatus:
     """Drop the index and refill it from the company files. The ONLY full build.
 
@@ -709,6 +776,7 @@ def rebuild_from_index(home_root: Path, *, progress: Callable[[int, int], None] 
                     _rebuild(conn, store.companies, progress)
                     _checkpoint(conn)
                     built = _counts(conn)
+                    _verify_conn(conn)  # a failure leaves no stamp: the first reader runs the check and says "damaged"
                     break
                 except sqlite3.OperationalError:
                     raise  # locked, no FTS5, disk: not a damaged file, never delete what another process is writing
@@ -724,7 +792,7 @@ def rebuild_from_index(home_root: Path, *, progress: Callable[[int, int], None] 
     return IndexStatus(True, *built)
 
 
-def _sync_files(home_root: Path, names: Callable[[sqlite3.Connection], Sequence[str]]) -> bool:
+def _sync_files(home_root: Path, names: Callable[[sqlite3.Connection], Sequence[str]], *, verify: bool = True) -> bool:
     """Make the index hold what the folder holds for the named company files, in one transaction."""
 
     store = _store(home_root)
@@ -750,21 +818,25 @@ def _sync_files(home_root: Path, names: Callable[[sqlite3.Connection], Sequence[
             except BaseException:  # noqa: BLE001 - cleans up (rollback) and re-raises: nothing is swallowed
                 conn.execute("ROLLBACK")
                 raise
-            _checkpoint(conn)
+            _checkpoint(conn, truncate=verify)
             store.folder_seen = None
+            if verify:
+                _verify_conn(conn)
     except _ERRORS:
         return False
     return True
 
 
-def upsert_company(home_root: Path, key: str) -> bool:
+def upsert_company(home_root: Path, key: str, *, verify: bool = True) -> bool:
     """Replace one company's postings with what its company file holds now. ``False`` when nothing was written.
 
     ``key`` is ``company_index.company_key``. Call it AFTER the company
     file was written. A company whose file is gone or unreadable loses its
     postings. Never builds: on a missing, unbuilt or other-version index the
     result is ``False`` (:func:`is_built` tells why) and the caller runs
-    :func:`rebuild_from_index` once, off the hot path.
+    :func:`rebuild_from_index` once, off the hot path. ``verify=False`` skips
+    the ``quick_check`` after the commit (0.5 s at real size): a caller writing
+    many companies calls :func:`verify` once at the end.
     """
 
     ats, _, slug = key.partition(":")
@@ -772,16 +844,16 @@ def upsert_company(home_root: Path, key: str) -> bool:
         name = CompanyIndex.for_home(home_root).path(ats, slug).name
     except CompanyIndexError:
         return False
-    return _sync_files(home_root, lambda _conn: (name,))
+    return _sync_files(home_root, lambda _conn: (name,), verify=verify)
 
 
-def remove_company(home_root: Path, key: str) -> bool:
+def remove_company(home_root: Path, key: str, *, verify: bool = True) -> bool:
     """Drop one company after its company file was deleted (``False`` as in :func:`upsert_company`).
 
     The index mirrors the folder: while the file is still there this is :func:`upsert_company`.
     """
 
-    return upsert_company(home_root, key)
+    return upsert_company(home_root, key, verify=verify)
 
 
 def refresh(home_root: Path) -> bool:
@@ -850,7 +922,9 @@ def _read(home_root: Path, run: Callable[[sqlite3.Connection], _T], *, reopen: b
             stamp = meta.get("stamp")
             if type(stamp) is not str or stamp != folder:
                 raise _Unavailable(STALE, "the company files changed since the index was written")
-            if getattr(store._local, "checked", None) != stamp:
+            if meta.get("verified") == stamp:
+                store._local.checked = stamp  # a writer ran quick_check at exactly this state
+            elif getattr(store._local, "checked", None) != stamp:
                 # Once per open and per stamp: a query alone does not notice damage in pages it does not touch.
                 # A connection that read the FTS table before another connection wrote it reports a false "malformed
                 # inverted index" when the check is its first FTS read since (SQLite 3.47, EXECUTED): one FTS read
@@ -1009,5 +1083,6 @@ __all__ = [
     "strict_title_match",
     "title_counts",
     "upsert_company",
+    "verify",
     "words_match",
 ]
