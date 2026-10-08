@@ -22,6 +22,32 @@ operator-visible capability and must link to the relevant release or evidence.
 
 ## Released versions
 
+### 0.1.11.7
+
+Search every stored posting, not only the ones your profiles hold. **After you upgrade** (`uv tool upgrade gigai`),
+run `gigai scout sources update` once so the search index is built.
+
+- **Search all jobs.** The Jobs page has a **Search all jobs** box, and `gigai scout jobs search "Senior Systems
+  Engineer, Staff Systems Engineer"` does the same from a terminal (`--company`, `--location`, `--all`, `--limit`,
+  `--offset`, `--json`; `GET /api/search`). It looks through every stored posting, newest first. Every word you
+  type has to be in the title, seniority included; company and location words are whole words. It keeps the
+  default profile's remote, US and 30-day filters until you choose **Show all** (`--all`). Results are not ranked.
+  The page of results comes first and the count after it. **Save this search as a profile** ranks and assesses
+  it. **Assess** on a result assesses it as the default profile (one model call, and Scout asks first), and
+  **Mark applied** works too. A search stores nothing and makes no model call.
+- **A local search index.** `cache/scout/search.sqlite` is built at the end of `gigai scout sources update` and
+  kept current. It is a cache: delete it and the search reads every company file instead, slower.
+- **A job page for any posting.** A posting that no profile holds, found by search, opens by its link and
+  survives a reload. Its description is not stored, so Assess fetches the page.
+- **Interview rehearsal per job.** `gigai scout story prep --job-url URL` lists, for one assessed job, the
+  questions to rehearse: open questions, a "Tell me about" for each of your lines a met requirement cites, and
+  the stories and answers it cites, marking what nothing answers yet. Read-only, no model call; `--profile`
+  when two profiles assessed the job.
+- **Personal-lab lines.** `gigai scout resume master add --lab --when "Oct 2026"` adds something you built to
+  learn. It is labelled "(personal lab, Oct 2026)", refused if it says operated, owned, production, at scale,
+  led, managed, years, a team size or customers, never settles a requirement as met by itself, and shows with a
+  lab mark in `gigai scout resume brief`.
+
 ### 0.1.11.6
 
 Two fixes for a job that two of your profiles hold (and one for jobs far down the list). Nothing to do after
