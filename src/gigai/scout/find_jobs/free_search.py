@@ -65,6 +65,7 @@ from .ats_board_clients import _words
 from .search_index import IndexFilters, IndexQuery, IndexRow, _stamp, strict_title_match, words_match
 
 if TYPE_CHECKING:
+    from .company_index import CompanyIndexEntry, IndexedPosting
     from .contracts import FindJobsConfig
 
 SCHEMA_VERSION = "scout-free-search:1"
@@ -386,6 +387,52 @@ def _job_identity(url: str) -> str | None:
         return normalize_job_identity(url)
     except FindJobsContractError:
         return None
+
+
+def find_posting(home_root: Path, identity: str) -> "tuple[CompanyIndexEntry, IndexedPosting] | None":
+    """``(entry, posting)`` of the company-index posting whose address is the job ``identity``, or ``None`` (FB1).
+
+    The by-address read for a posting no profile holds. Read only, no model, no
+    request, nothing created. The search index narrows by the address's path (or
+    host, for a bare one) and the exact test is ``normalize_job_identity`` of the
+    stored URL, so a tracking parameter or a trailing slash folds as it does
+    everywhere else. The posting itself is read from its company file (the index
+    keeps no removal stamp). An index that cannot answer (absent, stale, damaged)
+    is a scan of the company files by the same test; an index that answers and
+    holds no such address is ``None`` (the scan runs on that miss path only).
+    A live posting wins over a removed one with the same address.
+    """
+
+    from urllib.parse import urlsplit
+
+    from .company_index import CompanyIndex
+
+    parts = urlsplit(identity)
+    bare = parts.path in ("", "/")
+    part = (parts.hostname or "") if bare else parts.path
+    index = CompanyIndex.for_home(home_root)
+    found = search_index.rows_with_url_part(home_root, part, fold_case=bare)
+    if found.available:
+        for row in found.rows:
+            if _job_identity(row.url) != identity:
+                continue
+            ats, _, slug = row.board.partition(":")
+            entry = index.read(ats, slug)
+            posting = entry.postings.get(row.posting_id) if entry is not None else None
+            if entry is not None and posting is not None and _job_identity(posting.url) == identity:
+                return entry, posting
+        return None
+    best: tuple[CompanyIndexEntry, IndexedPosting] | None = None
+    for ats, slug in index.keys():
+        entry = index.read(ats, slug)
+        if entry is None:
+            continue
+        for posting in entry.postings.values():
+            if _job_identity(posting.url) == identity:
+                if not posting.removed:
+                    return entry, posting
+                best = best or (entry, posting)
+    return best
 
 
 def _read_model_rows(home_root: Path, target: Path, jobs: Sequence[str]) -> dict[str, list[tuple[str, str, str | None]]]:
@@ -851,6 +898,7 @@ def answer_lines(
 
 
 __all__ = [
+    "find_posting",
     "DEFAULT_LIMIT",
     "FreeSearchError",
     "MAX_LIMIT",

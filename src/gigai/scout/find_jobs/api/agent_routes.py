@@ -263,7 +263,7 @@ class AgentRoutesMixin:
         # 0.1.11.4 R1: is the posting still open? One request at most (none for a row already removed, none within the
         # hour); a closed one is marked removed before the job is read, so the read below serves it as removed.
         # 7b: an open posting stored under the company's own URL is asked once more, at that URL (`company_page`).
-        from ..posting_live import job_liveness
+        from ..posting_live import CLOSED, JobLiveness, job_liveness
 
         live = job_liveness(home_root, target, identity, company_page=True)
         try:
@@ -274,6 +274,11 @@ class AgentRoutesMixin:
         if body is None:
             self._error(HTTPStatus.NOT_FOUND, "not_found", "no run, assessment or tailored resume names that job")
             return
+        removed_at = (body.get("posting") or {}).get("removed_at")  # type: ignore[union-attr]
+        if removed_at and not live.closed and not body.get("index_posting"):
+            # FB1: a posting the company index marks removed is closed whatever one request said (the read model's own
+            # rows are marked by ``job_liveness`` itself).
+            live = JobLiveness(CLOSED, closed_at=removed_at)  # type: ignore[arg-type]
         body["liveness"] = live.to_json()
         self._write_json(HTTPStatus.OK, body)
 
@@ -352,6 +357,13 @@ class AgentRoutesMixin:
                 # The assessment's own posting stays; the index fills what it lacks (a page scrape has no location or pay).
                 posting = {**posting, **{key: value for key, value in held.items() if posting.get(key) in (None, "") and value not in (None, "")}}
             row = {key: index[key] for key in ("rank", "work_mode_fit", "h1b") if index[key] is not None}
+
+        # FB1: a posting no profile holds (and no run, assessment or index join named) is still in the company index:
+        # a job page opened by its address always resolves. Its description is not stored (``text`` is null).
+        if posting is None and not is_text_identity(identity):
+            from ..job_source import company_index_job
+
+            posting = company_index_job(home_root, identity)
 
         events = [dict(item) for item in sources.events_for(identity)] if resolved is not None else []
         if posting is None and not run_hits and not quick_items and not tailored_items and not events:

@@ -58,6 +58,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from pathlib import Path
 import sqlite3
+from types import SimpleNamespace
 from typing import TYPE_CHECKING, Callable
 
 from ...canonical import digest_imported_bytes
@@ -244,4 +245,38 @@ def index_job(home_root: Path, target: Path, job_identity: str, *, profile_id: s
     return IndexJob(row=row, rows=tuple(rows), text=text, grid=grid)
 
 
-__all__ = ["ATS_FETCH_KINDS", "IndexJob", "index_holds", "index_job", "index_posting", "resolve_job_for_assessment", "stored_ats_posting"]
+def company_index_job(home_root: Path, job_identity: str) -> dict[str, object] | None:
+    """FB1: the company index's posting for ``job_identity`` as the job read serves it, or ``None`` when no board holds it.
+
+    For a posting no profile holds (``index_job`` reads the read model only): the
+    row the free search shows, by its address. Read only, never raises. The index
+    keeps no description, so ``text`` is ``None`` (never an invented one); every
+    field that needs an assessment or a profile is absent. ``removed_at`` is the
+    board's own stamp when the posting is gone from it.
+    """
+
+    from ..scout_new import posting_dates
+    from . import free_search
+
+    try:
+        if job_identity.startswith("text:"):
+            return None
+        found = free_search.find_posting(Path(home_root), job_identity)
+    except (FindJobsContractError, sqlite3.Error, OSError, ValueError, LookupError):
+        return None
+    if found is None:
+        return None
+    entry, posting = found
+    dates = posting_dates(
+        SimpleNamespace(board=entry.key, published_at=posting.published_at, first_seen=posting.first_seen),  # type: ignore[arg-type]
+    )
+    return {
+        "job_identity": job_identity, "normalized_url": job_identity, "source_url": posting.url, "url": posting.url, "fetch_kind": "company_index",
+        "provider": entry.ats, "board_token": entry.slug, "first_seen": posting.first_seen, "removed_at": posting.removed_at,
+        **dates,
+        "title": posting.title, "company": entry.company, "location": posting.location,
+        "work_mode": None, "salary": None, "text": None,
+    }
+
+
+__all__ = ["ATS_FETCH_KINDS", "IndexJob", "index_holds", "company_index_job", "index_job", "index_posting", "resolve_job_for_assessment", "stored_ats_posting"]

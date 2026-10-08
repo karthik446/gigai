@@ -1038,6 +1038,29 @@ def candidates(home_root: Path, query: IndexQuery, *, limit: int | None = None, 
     return IndexResult(True, rows=tuple(IndexRow(*row[:10], removed=bool(row[10])) for row in rows), stamp=stamp)
 
 
+def rows_with_url_part(home_root: Path, part: str, *, fold_case: bool = False) -> IndexResult:
+    """Every posting whose stored URL contains ``part`` (``fold_case``: whatever its case), live ones first, then newest.
+
+    FB1: the by-address job read. The row table has no URL index (a schema bump
+    for one keyed read is not worth it), so this is one scan of ``p.url`` inside
+    SQLite (no row is built for a non-match). The caller names ``part`` from the
+    address it looks for (its path, or its host for a bare one) and applies the
+    exact test (``normalize_job_identity`` of the row's URL): the stored URL is
+    the board's own spelling, which the identity folds. ``available=False`` when
+    the index cannot answer: then the caller scans the company files.
+    """
+
+    if not part:
+        return IndexResult(True)
+    test = "instr(lower(p.url), lower(?))" if fold_case else "instr(p.url, ?)"  # a path keeps its case: the plain test is faster
+    sql = f"SELECT {_ROW_COLUMNS} FROM p AS p WHERE {test} > 0 ORDER BY p.removed, p.posted DESC, p.id DESC"
+    try:
+        rows, stamp = _read(home_root, lambda conn: conn.execute(sql, (part,)).fetchall())
+    except _Unavailable as error:
+        return _unavailable(error)
+    return IndexResult(True, rows=tuple(IndexRow(*row[:10], removed=bool(row[10])) for row in rows), stamp=stamp)
+
+
 def title_counts(home_root: Path, query: IndexQuery) -> IndexResult:
     """The count path: ``(title, candidates with that title)`` for ``query``, so the rule runs once per title."""
 
@@ -1077,6 +1100,7 @@ __all__ = [
     "plain_words",
     "rebuild_from_index",
     "refresh",
+    "rows_with_url_part",
     "remove_company",
     "search_index_path",
     "status",
