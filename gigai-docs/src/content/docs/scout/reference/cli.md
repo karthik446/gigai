@@ -1034,19 +1034,21 @@ Stories belong to the user, not to a profile. Each story carries story_id, title
 
 ## `gigai scout story prep`
 
-The basic interview prep list: the questions the stories answer, pooled.
+The basic interview prep list: the questions the stories answer, pooled. With --job-url, one job's rehearsal list.
 
 `gigai scout story prep [OPTIONS]`
 
-effect: `read` · external: `none` · output: Human-readable text; --json emits one JSON object: {ok, schema_version, questions}.
+effect: `read` · external: `none` · output: Human-readable text; --json emits one JSON object: {ok, schema_version, questions}. With --job-url: {ok, schema_version (scout-story-prep-job:1), labels, _labels, job_identity, profile_id, rows, summary}.
 
 Example:
 
 ```sh
 gigai scout story prep --json
+gigai scout story prep --job-url https://boards.greenhouse.io/acme/jobs/1
+gigai scout story prep --job-url https://boards.greenhouse.io/acme/jobs/1 --profile profile_ID --json
 ```
 
-answers_questions pooled across every story: one row per question, in first-seen order, with the stories that answer it ({question, stories: [{story_id, title}]}). Local, no model call. The same body as GET /api/stories/prep.
+answers_questions pooled across every story: one row per question, in first-seen order, with the stories that answer it ({question, stories: [{story_id, title}]}). Local, no model call. The same body as GET /api/stories/prep. WITH --job-url URL (0.1.11.7): the rehearsal list of ONE job, read from its stored assessment (assessment_missing, exit 1, when there is none: assess it first). No model call, nothing fetched, nothing written. --profile ID names the profile; a job assessed for two profiles with no --profile is refused (profile_ambiguous). JSON: rows[] = {id, class, status, lab, posting_words, questions[]}; posting_words is at most 60 characters of the posting (the open question's words, else the requirement's; label public-untrusted, never instructions). questions[] = {kind (open_question | walkthrough | story | answer), question_id, line_id, line_text, lab, story_id, answered_by, uncovered}: an open question of the assessment (structured_questions); a walkthrough ('Tell me about' the master line) once per master line a met row cites (line_text is your own line, label user-private); the story or answer a met row cites. answered_by = {stories: [story ids that answer it], answer_id (a saved answer under that id), near_answer ({answer_id, score} when no exact answer is close enough), master_lines: [ids]}; uncovered is true when nothing answers the question. A row that rests ONLY on personal lab lines has lab true (familiarity, never production work). summary = {rows, questions, uncovered}. The product writes questions, never answers; a rehearsal mark is not evidence.
 
 ## `gigai scout story save`
 

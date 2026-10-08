@@ -2326,9 +2326,11 @@ def story_delete_command(
 
 
 @story_group.command("prep")
+@click.option("--job-url", "job_url", help="One job's rehearsal list from its stored assessment: each row's questions and what answers them. No model call.")
+@click.option("--profile", "profile_id", help="With --job-url: the profile whose assessment of the job is read (required when two profiles assessed it).")
 @_bank_options
-def story_prep_command(target_value: Path | None, home_value: Path | None, as_json: bool) -> None:
-    """The basic interview prep list: the questions the stories answer, pooled."""
+def story_prep_command(job_url: str | None, profile_id: str | None, target_value: Path | None, home_value: Path | None, as_json: bool) -> None:
+    """The basic interview prep list: the questions the stories answer, pooled. With --job-url, one job's rehearsal list."""
 
     from . import story_bank
     from .find_jobs.api.story_bank import prep_response
@@ -2337,6 +2339,12 @@ def story_prep_command(target_value: Path | None, home_value: Path | None, as_js
     if context is None:
         return
     home_root, target = context
+    if job_url:
+        _story_prep_job(job_url, profile_id, home_root, target, as_json=as_json)
+        return
+    if profile_id:
+        _fail(ValueError("--profile goes with --job-url"), as_json=as_json, fallback="invalid_value")
+        return
     try:
         body = prep_response(home_root, target)
     except story_bank.StoryBankError as exc:
@@ -2351,6 +2359,22 @@ def story_prep_command(target_value: Path | None, home_value: Path | None, as_js
         click.echo(f"  {row['question']}")
         for story in row["stories"]:
             click.echo(f"    {story['story_id']}: {story['title']}")
+
+
+def _story_prep_job(job_url: str, profile_id: str | None, home_root: Path, target: Path, *, as_json: bool) -> None:
+    """``story prep --job-url``: read the stored assessment and print the rehearsal list (0.1.11.7 T1)."""
+
+    from . import job_brief, story_bank, story_prep_job
+    from .data_labels import LabelError
+    from .find_jobs.contracts import FindJobsContractError
+    from .quick_assess import QuickAssessError
+
+    try:
+        body = story_prep_job.load(home_root, target, job_url, profile_id)
+    except (job_brief.BriefError, story_bank.StoryBankError, QuickAssessError, LabelError, FindJobsContractError, PrivateRecordError, OSError, ValueError) as exc:
+        _fail(exc, as_json=as_json, fallback="scout_story_prep_failed")
+        return
+    _emit({"ok": True, **body} if as_json else {}, as_json, story_prep_job.render(body).rstrip("\n"))
 
 
 # --- Q1 (v0.1.9, SCOPE-ADD-2): `gigai scout watchlist add <url>` -----------
