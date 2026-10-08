@@ -126,6 +126,26 @@ above the list shows how many there are ("Applied 7") and lists only them; openi
 assessing one by its address still works. `gigai scout jobs list` and `gigai scout new` leave
 them out too and say how many, and `gigai scout jobs list --state applied` lists them.
 
+### Search all jobs
+
+The box **Search all jobs** on the Jobs page searches every posting Scout has stored, not only the ones
+your profiles hold. Type titles (a comma between two roles), and optionally a company or a location.
+Every typed word has to be in the title, seniority included: "senior engineer" lists only Senior or Sr.
+titles. Company and location words are whole words ("ai" finds Example AI, not Maintain). Results are
+newest first and not ranked; they keep the default profile's remote/US/last-30-days filters until you
+choose **Show all** (any place, any date). The page of results comes first and the count after it, and
+**Load more** shows the next page. A search stores nothing and makes no model call.
+
+- **Save this search as a profile** turns the words into a profile that ranks and assesses.
+- **Assess** on a result assesses it as the default profile: one model call, and Scout asks first.
+- **Mark applied** works on a result too. Its job page opens even when no profile holds the posting; the
+  description is not stored for such a posting, so Assess fetches the page.
+
+From a terminal: `gigai scout jobs search "Senior Systems Engineer, Staff Systems Engineer" [--company W]
+[--location W] [--all] [--limit N] [--offset N] [--json]` (the same as `GET /api/search`).
+After upgrading to 0.1.11.7, run `gigai scout sources update` once so the search index exists (see
+[Update sources](../sources/#the-search-index)).
+
 ### Assess a batch
 
 Above the list, "177 not assessed" has a button beside it. One approval assesses at most 50

@@ -44,11 +44,11 @@ The check is pattern-based and can miss things. Never ask the user to paste a re
 ## Command reference
 
 - `gigai scout new [--profile ID] [--yes | --no-assess] [--yours] [--peek] [--process] [--since TEXT] [--json]`: `--profile` and `--peek` look without moving the "new since" anchor; `--yours` never moves it.
-- `gigai scout jobs list [--query TEXT] [--state S] [--window new|7d|30d] [--limit N] [--json]`
+- `gigai scout jobs list [--query TEXT] [--state S] [--window new|7d|30d] [--limit N] [--json]`; `gigai scout jobs search "TITLES" [--company W] [--location W] [--all] [--limit N] [--offset N] [--json]` is a free search of every stored posting (every typed word must be in the title; whole-word company and location; default profile filters unless `--all`; newest first, not ranked, no model call, writes nothing).
 - `gigai scout jobs assess [URL...] [--yes] [--again] [--actor agent] [--json]` costs one model call per posting; without `--yes` it only asks. It works on the stored postings: a job assessed by URL (`gigai scout assess --job-url URL`, one model call, on the user's yes) is `not_found` there; assess it again the same way.
 - `gigai scout answers list|show|save|delete`: `show QUESTION_ID --json` gives the revision.
   `save ... --as agent [--source TEXT]`: who wrote it, and where the answer came from (free text).
-- `gigai scout story list|show|save|delete|prep`: `show STORY_ID --json` gives the revision.
+- `gigai scout story list|show|save|delete|prep`: `show STORY_ID --json` gives the revision. `prep --job-url URL [--profile ID]` is one job's read-only rehearsal list from its assessment (no model call).
 - (pipeline on only) `gigai scout pipeline status --json`, `gigai scout pipeline process JOB`, `gigai scout pipeline cancel JOB`, `gigai scout pipeline retry JOB`
 - `gigai scout pipeline approvals list --json`, then `approvals approve` / `approvals deny` on the user's word
 - `gigai scout metrics [--kind assess|rank|tag|tailor] [--json]`: average cost per call, for estimates.
@@ -56,7 +56,7 @@ The check is pattern-based and can miss things. Never ask the user to paste a re
 - `gigai scout resume pdf (--in FILE | --job-url URL) [--out FILE] [--json]`: without `--out` the PDF goes to the resumes folder; `--json` prints `pages`.
 - `gigai scout resume brief --job-url URL [--posting] [--json]`; `gigai scout resume store --in FILE --job-url URL --as agent [--source TEXT] [--resolves IDS] [--json]`; `gigai scout resume folder [--set PATH | --reset] [--json]`
 - `gigai scout resume pick --job-url URL [--refresh | --draft | --use-proposed] [--json]`: the resume picked for a job, its gate and what is stale; a resume the user edited is replaced only by `--use-proposed`. `gigai scout suggestions list|add|resolve|dismiss`: `--job-url URL`, writes with `--as agent`.
-- `gigai scout resume master show [--retired] [--json]`; `gigai scout resume master add|edit|remove`: `edit ID` and `remove ID` need `--revision N`; a removed line is retired, `add --restore ID` puts it back.
+- `gigai scout resume master show [--retired] [--json]`; `gigai scout resume master add|edit|remove`: `edit ID` and `remove ID` need `--revision N`; a removed line is retired, `add --restore ID` puts it back. `add --lab --when "Oct 2026"` is for something the user built to learn, never production (refused with production words; never settles a requirement by itself).
 - `gigai scout status --json`: is Scout running. `gigai agent-context --json`: the full manual.
 - `gigai scout run [--no-browser] --json` starts Scout and prints its URL (`http://127.0.0.1:8765`); it opens the browser unless `--no-browser`, which is a choice. A job's page is that URL + `#/jobs/` + the posting's URL percent-encoded: give the user that link.
 

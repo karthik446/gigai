@@ -160,6 +160,7 @@ connection does not say whether the assessment finished. Read the posting's row:
 
 ```sh
 gigai scout jobs list --query "WORDS" --json     # the row: assessment.assessed_at and stale_reason
+gigai scout jobs search "TITLES" --json         # free search of every stored posting: no model call, nothing stored
 ```
 
 A newer `assessment.assessed_at` with `stale_reason` null means it finished: report the
@@ -374,6 +375,7 @@ resume?", and on a yes it adds one line.
 gigai scout resume master show --json                          # every line with its id; the revision
 gigai scout resume master add --entry <entry-id> --text "..." --from-story <story-id> --as agent --source "from the chat" --json
 gigai scout resume master add --skill Helm --from-answer <question-id> --as agent --json
+gigai scout resume master add --entry <entry-id> --text "..." --lab --when "Oct 2026" --as agent --json   # personal lab, never production
 gigai scout resume master edit <line-id> --text "..." --revision <n> --as agent --json
 gigai scout resume master remove <line-id> --revision <n> --as agent --json
 ```
@@ -856,6 +858,7 @@ gigai scout story show story:60_acme_ci_cut_time --json
 gigai scout story save story:60_acme_ci_cut_time --period 2022-2023 --revision 1 --as agent --json
 gigai scout story delete story:60_acme_ci_cut_time --confirm --revision 2 --json
 gigai scout story prep --json                          # the interview questions your stories answer
+gigai scout story prep --job-url URL [--profile ID] --json   # one job's rehearsal list: read-only, no model call
 ```
 
 The routes: `GET` / `POST /api/answers`, `GET /api/answers/match`, `GET` / `PUT` / `DELETE
@@ -864,6 +867,11 @@ The routes: `GET` / `POST /api/answers`, `GET /api/answers/match`, `GET` / `PUT`
 
 What to know:
 
+- **`story prep --job-url URL`** reads the job's stored assessment (assess it first, or you get
+  `assessment_missing`); `--profile` is needed when two profiles assessed the job. Each row lists open
+  questions, a "Tell me about" walkthrough per master line a met row cites, and the stories or answers
+  it cites, with `uncovered` true when nothing answers a question. Rows that rest only on personal lab
+  lines carry `lab`. It writes questions, never answers.
 - **Answers from a job page land there too.** `POST /api/answers` with `reassess` (and `gigai
   scout answer --reassess`, and the job page's question box) saves the answer and assesses that
   job again. Send `question` (the question's own words) with it; they are kept with the answer.

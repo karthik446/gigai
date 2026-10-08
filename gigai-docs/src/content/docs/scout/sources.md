@@ -33,6 +33,14 @@ seen, changed or removed. It is a cache, not a record: it is safe to delete
 board responses already cached under `<home>/cache/scout/ats-boards/`.
 Nothing in it leaves the machine.
 
+## The search index
+
+At the end of an update Scout also builds and keeps current a small local index of every stored posting,
+`<home>/cache/scout/search.sqlite`. **Search all jobs** (`gigai scout jobs search`, `GET /api/search`) reads
+it. It is a cache like the company files: delete it and the search falls back to reading every company
+file, which gives the same rows, slower (the output says so). A search never builds it. After upgrading to
+0.1.11.7, run `gigai scout sources update` once to build it.
+
 ## Find jobs reads that store
 
 Find jobs does not check the boards itself. A search

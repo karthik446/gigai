@@ -375,6 +375,13 @@ states a number, or stated. Only your own facts belong here; an agent writes wit
 through the API (`POST` and `PUT /api/master/lines`), under the same rules, and sends the
 revision it read, so a change that crosses yours is refused instead of overwriting it.
 
+**Personal-lab lines.** Something you built to learn, never production, goes in with `gigai scout resume master add
+--entry ENTRY_ID --text "..." --lab --when "Oct 2026"` (or `--skill NAME --lab --when "Oct 2026"`). The line ends
+"(personal lab, Oct 2026)" and a skill is listed as "NAME (lab)". A lab line that says operated, owned,
+production, at scale, led, managed, years, a team size or customers is refused, naming the word. A lab line
+never settles a requirement as met by itself (it can support "met" only on a familiarity or hands-on
+requirement), and `gigai scout resume brief` shows it with a lab mark.
+
 **Education.** A resume picked from the master prints your education only when the master
 holds it. When it holds none, Scout says so: "Your master has no education" on the Master
 page (with **Add education**, which opens the form for a school), on a job's resume card when
