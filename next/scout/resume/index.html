@@ -367,6 +367,11 @@ states a number, or stated. Only your own facts belong here; an agent writes wit
 <code dir="auto">gigai scout resume master add</code>, <code dir="auto">edit</code> and <code dir="auto">remove</code> (see <a href="../agents/#6-your-master-resume">For agents</a>) or
 through the API (<code dir="auto">POST</code> and <code dir="auto">PUT /api/master/lines</code>), under the same rules, and sends the
 revision it read, so a change that crosses yours is refused instead of overwriting it.</p>
+<p><strong>Personal-lab lines.</strong> Something you built to learn, never production, goes in with <code dir="auto">gigai scout resume master add --entry ENTRY_ID --text "..." --lab --when "Oct 2026"</code> (or <code dir="auto">--skill NAME --lab --when "Oct 2026"</code>). The line ends
+“(personal lab, Oct 2026)” and a skill is listed as “NAME (lab)”. A lab line that says operated, owned,
+production, at scale, led, managed, years, a team size or customers is refused, naming the word. A lab line
+never settles a requirement as met by itself (it can support “met” only on a familiarity or hands-on
+requirement), and <code dir="auto">gigai scout resume brief</code> shows it with a lab mark.</p>
 <p><strong>Education.</strong> A resume picked from the master prints your education only when the master
 holds it. When it holds none, Scout says so: “Your master has no education” on the Master
 page (with <strong>Add education</strong>, which opens the form for a school), on a job’s resume card when
