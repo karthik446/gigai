@@ -29,15 +29,15 @@ The setup, in order (the full version of each step is on the Start here page bel
 
 ## Setup
 
-- [Start here](https://karthik446.github.io/gigai/0.1.11.5/scout/agents/start/): the full setup steps for an agent, with every command
-- [Your first 10 minutes](https://karthik446.github.io/gigai/0.1.11.5/scout/first-10-minutes/): the same path for a person
-- [For agents](https://karthik446.github.io/gigai/0.1.11.5/scout/agents/): the daily loop, per-agent setup (Claude Code, Codex, others), the security model
-- [Privacy and security](https://karthik446.github.io/gigai/0.1.11.5/scout/privacy/): what is stored, what is sent, and to whom
-- [Token usage](https://karthik446.github.io/gigai/0.1.11.5/scout/tokens/): measured tokens and time per step
+- [Start here](https://karthik446.github.io/gigai/0.1.11.6/scout/agents/start/): the full setup steps for an agent, with every command
+- [Your first 10 minutes](https://karthik446.github.io/gigai/0.1.11.6/scout/first-10-minutes/): the same path for a person
+- [For agents](https://karthik446.github.io/gigai/0.1.11.6/scout/agents/): the daily loop, per-agent setup (Claude Code, Codex, others), the security model
+- [Privacy and security](https://karthik446.github.io/gigai/0.1.11.6/scout/privacy/): what is stored, what is sent, and to whom
+- [Token usage](https://karthik446.github.io/gigai/0.1.11.6/scout/tokens/): measured tokens and time per step
 
 ## Optional
 
-- [Scout CLI reference](https://karthik446.github.io/gigai/0.1.11.5/scout/reference/cli/): every Scout command, with its options
-- [API reference](https://karthik446.github.io/gigai/0.1.11.5/scout/reference/api/): the local API, also served by a running Scout at `/api/openapi.json`
-- [What Scout's numbers and labels mean](https://karthik446.github.io/gigai/0.1.11.5/scout/numbers/): rank, verdict, Scout label, Scout ATS score
-- [Changelog](https://karthik446.github.io/gigai/0.1.11.5/changelog/): read "After you upgrade" before upgrading
+- [Scout CLI reference](https://karthik446.github.io/gigai/0.1.11.6/scout/reference/cli/): every Scout command, with its options
+- [API reference](https://karthik446.github.io/gigai/0.1.11.6/scout/reference/api/): the local API, also served by a running Scout at `/api/openapi.json`
+- [What Scout's numbers and labels mean](https://karthik446.github.io/gigai/0.1.11.6/scout/numbers/): rank, verdict, Scout label, Scout ATS score
+- [Changelog](https://karthik446.github.io/gigai/0.1.11.6/changelog/): read "After you upgrade" before upgrading
