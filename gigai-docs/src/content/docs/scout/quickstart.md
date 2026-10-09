@@ -73,7 +73,7 @@ your roles, location and work mode. Then:
 
 1. **Update sources** (in Settings): fills the company store from the public
    job boards. Before the very first one Scout shows this notice once:
-   **Run GigAI on your own computer and your own network, not a work laptop or office Wi-Fi.** Scout checks over 10,000 public job boards (Greenhouse, Lever, Ashby and six more hiring systems): thousands of requests, and it keeps checking 8 times a day. An employer can see that traffic.
+   **Run GigAI on your own computer and your own network, not a work laptop or office Wi-Fi.** Scout checks about 16,000 public job boards (Greenhouse, Lever, Ashby and six more hiring systems): thousands of requests, and it keeps checking 8 times a day. An employer can see that traffic.
    You can turn the background checks off under Settings > Background updates. The first update over the whole catalog runs in passes of up to
    20 minutes each (the default time budget) and continues where it stopped;
    later updates are a single short pass.

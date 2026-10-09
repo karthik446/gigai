@@ -16,7 +16,7 @@ agent.
 
 ## Quickstart
 
-**Run GigAI on your own computer and your own network, not a work laptop or office Wi-Fi.** Scout checks over 10,000 public job boards (Greenhouse, Lever, Ashby and six more hiring systems): thousands of requests, and it keeps checking 8 times a day. An employer can see that traffic.
+**Run GigAI on your own computer and your own network, not a work laptop or office Wi-Fi.** Scout checks about 16,000 public job boards (Greenhouse, Lever, Ashby and six more hiring systems): thousands of requests, and it keeps checking 8 times a day. An employer can see that traffic.
 
 1. **Requirements.** macOS or Linux with Python 3.11+, [`uv`](https://docs.astral.sh/uv/getting-started/installation/),
    and one model CLI installed and logged in: Codex (`codex login`) or Claude Code (`claude`, then `/login`).

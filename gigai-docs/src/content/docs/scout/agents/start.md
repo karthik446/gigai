@@ -17,7 +17,7 @@ Tell the user these before you start. They are GigAI's own words; do not reword 
 
 - **GigAI never stores your name, email, phone, address or links.** You type them only when you make a PDF, and GigAI forgets them right after.
 - **Anything GigAI gives your agent is sent to that agent's model provider. Agents get no contact data from GigAI, but an agent with shell access can read local files.**
-- **Run GigAI on your own computer and your own network, not a work laptop or office Wi-Fi.** Scout checks over 10,000 public job boards (Greenhouse, Lever, Ashby and six more hiring systems): thousands of requests, and it keeps checking 8 times a day. An employer can see that traffic.
+- **Run GigAI on your own computer and your own network, not a work laptop or office Wi-Fi.** Scout checks about 16,000 public job boards (Greenhouse, Lever, Ashby and six more hiring systems): thousands of requests, and it keeps checking 8 times a day. An employer can see that traffic.
 
 What the agent will see: the public job postings, the questions a posting leaves open, the
 user's answers and stories, the body of the resume if the agent reads the file, and everything
@@ -181,7 +181,7 @@ it prints a warning that a title alone matches very many postings (a generic tit
 
 Before the first update, say this to the user, in these words, and wait for a yes:
 
-> **Run GigAI on your own computer and your own network, not a work laptop or office Wi-Fi.** Scout checks over 10,000 public job boards (Greenhouse, Lever, Ashby and six more hiring systems): thousands of requests, and it keeps checking 8 times a day. An employer can see that traffic.
+> **Run GigAI on your own computer and your own network, not a work laptop or office Wi-Fi.** Scout checks about 16,000 public job boards (Greenhouse, Lever, Ashby and six more hiring systems): thousands of requests, and it keeps checking 8 times a day. An employer can see that traffic.
 
 On a yes:
 

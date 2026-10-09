@@ -138,7 +138,7 @@ def test_the_network_notice_is_one_constant_quoted_by_the_ui_the_readme_the_docs
     # The approved words. The lead is bold wherever it is shown; NETWORK_NOTICE is the Markdown form of the whole.
     assert wording.NETWORK_NOTICE == (
         "**Run GigAI on your own computer and your own network, not a work laptop or office Wi-Fi.** "
-        "Scout checks over 10,000 public job boards (Greenhouse, Lever, Ashby and six more hiring systems): thousands of requests, "
+        "Scout checks about 16,000 public job boards (Greenhouse, Lever, Ashby and six more hiring systems): thousands of requests, "
         "and it keeps checking 8 times a day. An employer can see that traffic."
     )
     assert wording.NETWORK_NOTICE == f"**{wording.NETWORK_NOTICE_LEAD}** {wording.NETWORK_NOTICE_BODY}"
@@ -197,9 +197,13 @@ def test_the_network_notice_states_what_the_code_does() -> None:
     from gigai.scout.find_jobs.company_catalog import load_company_catalog
     from gigai.scout.find_jobs.refresh_plan import DEFAULT_WEEKDAY_TIMES
 
-    summary = load_company_catalog().summary()
-    assert 9_500 <= summary["records"] <= 10_999, "about 10,000 public job boards"
-    assert sorted(summary["by_provider"]) == ["ashby", "greenhouse", "lever"], "(Greenhouse, Lever, Ashby)"  # type: ignore[call-overload]
+    catalog = load_company_catalog()
+    summary = catalog.summary()
+    # 0.1.11.8: "checks" counts what a US setup seeds: the records with hq_country US that are not staffing suspects
+    # (rev4 holds 21,034 records; a six-system board without a US posting stays in the catalog unadmitted).
+    checked = sum(1 for record in catalog.records if record.hq_country == "US" and not record.staffing_suspect)
+    assert 15_500 <= checked <= 16_999, "about 16,000 public job boards"
+    assert sorted(summary["by_provider"]) == ["ashby", "breezy", "gem", "greenhouse", "lever", "pinpoint", "recruitee", "rippling", "workable"], "(Greenhouse, Lever, Ashby and six more hiring systems)"  # type: ignore[call-overload]
     assert len(DEFAULT_WEEKDAY_TIMES) == 8, "it keeps checking 8 times a day (weekdays; weekend days have fewer)"
 
 
