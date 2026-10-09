@@ -611,6 +611,60 @@ def find_posting(home_root: Path, identity: str) -> "tuple[CompanyIndexEntry, In
     return best
 
 
+#: 0.1.11.8: path segments of a job page's address that are the system's route or an action on the posting
+#: (``/jobs/<id>``, ``/j/<code>/apply``, ``/o/<slug>/c/new``, ``/en/postings/<id>``), never the posting's own name.
+_ROUTE_SEGMENTS = frozenset({"jobs", "job", "j", "o", "p", "postings", "apply", "application", "c", "new", "en"})
+
+
+def find_posting_by_address(home_root: Path, identity: str) -> "tuple[CompanyIndexEntry, IndexedPosting] | None":
+    """``find_posting``, and when no stored URL is ``identity``: the posting the address is the PUBLIC JOB PAGE of.
+
+    0.1.11.8 (`gigai scout jobs assess <URL>`): the stored URL is the board feed's own spelling, and a system's
+    public page can be another address of the same posting: Workable stores ``apply.workable.com/j/<code>`` and
+    shows ``apply.workable.com/<board>/j/<code>/``; Recruitee stores the company's own careers domain and also
+    serves ``<board>.recruitee.com/o/<slug>``; Pinpoint stores ``/en/postings/<id>``; Greenhouse has two board
+    hosts; an apply page is one segment more. So: the address names a board (``parse_board_url``) the index holds,
+    and exactly ONE of that board's postings has its id, or the last segment of its stored URL, among the address's
+    own path segments (the board token and the route words aside). Two candidates is no answer. A live posting wins
+    over a removed one. Read only: one company file, no request. The identity to use from then on is the stored
+    URL's (``normalize_job_identity(posting.url)``).
+    """
+
+    from urllib.parse import urlsplit
+
+    from .company_index import CompanyIndex
+    from .contracts import parse_board_url
+
+    found = find_posting(home_root, identity)
+    if found is not None:
+        return found
+    where = parse_board_url(identity)
+    if where is None:
+        return None
+    ats, token = where
+    names = {part.casefold() for part in urlsplit(identity).path.split("/") if part} - _ROUTE_SEGMENTS - {token.casefold()}
+    if not names:
+        return None
+    index = CompanyIndex.for_home(home_root)
+    try:
+        entry = index.read(ats, token) or (index.read(ats, token.lower()) if token != token.lower() else None)
+    except ValueError:
+        return None  # not a board the index can name
+    if entry is None:
+        return None
+
+    def named(posting: "IndexedPosting") -> bool:
+        if posting.posting_id.casefold() in names:
+            return True
+        last = next((part for part in reversed(urlsplit(posting.url).path.split("/")) if part), "")
+        return bool(last) and last.casefold() in names and _job_identity(posting.url) is not None
+
+    matches = [posting for posting in entry.postings.values() if named(posting)]
+    live = [posting for posting in matches if not posting.removed]
+    chosen = live or matches
+    return (entry, chosen[0]) if len(chosen) == 1 else None
+
+
 def _read_model_rows(home_root: Path, target: Path, jobs: Sequence[str]) -> dict[str, list[tuple[str, str, str | None]]]:
     """``job -> [(profile_id, state, assessed_at)]``, best profile first, from the read model AS STORED (``mode=ro``)."""
 

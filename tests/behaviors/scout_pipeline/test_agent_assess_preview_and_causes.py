@@ -322,7 +322,8 @@ def test_each_typed_cause_says_its_three_facts_and_the_next_action_in_the_cli_js
 def test_each_typed_cause_is_on_the_failed_item_of_a_batch(code: str, fx: PostingsFixture, monkeypatch: pytest.MonkeyPatch) -> None:
     _break(code, fx, monkeypatch)
 
-    done = _json(fx, "jobs", "assess", _FIRST, "--yes", "--actor", "agent")
+    # 0.1.11.8: the one posting named was not assessed, so the command exits 1; the object is the same.
+    done = _json(fx, "jobs", "assess", _FIRST, "--yes", "--actor", "agent", exit_code=1)
 
     assert done["status"] == "assessed" and done["assessed"]["assessed"] == 0
     assert done["assessed"]["failed"] == [
@@ -351,7 +352,7 @@ def test_the_terminal_says_the_facts_and_the_next_action_under_the_message(fx: P
 
     _break("model_denied", fx, monkeypatch)
     batch = _invoke(fx, "jobs", "assess", _FIRST, "--yes")
-    assert batch.exit_code == 0
+    assert batch.exit_code == 1  # 0.1.11.8: every named posting failed
     assert f"  not assessed (model_denied): {_FIRST}" in batch.output
     assert (
         "  model_denied: No model call was made and no tokens were used. No new assessment was stored. Next: "

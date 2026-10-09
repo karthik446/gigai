@@ -60,6 +60,11 @@ others.
 - **The first `scout new` after the upgrade can list a backlog of the new boards.** Every matching posting on the
   new boards is new to you once, and a Pinpoint posting (no date) reads as posted on the day it was first seen, so it
   stays inside "last 30 days" for 30 days.
+- **Assess any job Search lists, by its link.** `gigai scout jobs assess <job URL>` now assesses a posting that is
+  in no profile's list (a job `gigai scout jobs search` finds whose title none of your profiles search): it is
+  assessed as your default profile, or `--profile`, and the question says so before any model call. The link can be
+  the job page's own address on any of the nine systems. The command exits with code 1 when every link you named
+  was not found or could not be assessed.
 
 ### 0.1.11.7
 

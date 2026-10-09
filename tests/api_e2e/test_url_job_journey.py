@@ -78,7 +78,7 @@ def test_a_job_assessed_by_url_works_end_to_end(tmp_path: Path, monkeypatch: pyt
         # ---- 3. F2: the index does not know the job ------------------------------------------------
         printed = run("jobs", "list")
         assert all(row.get("job_identity", row.get("url")) != _URL for row in printed["postings"]["rows"])
-        assessed_these = run("jobs", "assess", _URL)
+        assessed_these = run("jobs", "assess", _URL, ok=False)  # 0.1.11.8: every named URL not found is exit code 1, the same object
         assert assessed_these["counts"]["not_found"] == 1 and assessed_these["not_found"] == [_URL]
         assert _URL not in json.dumps(client.get("/api/postings").json()["postings"])
 

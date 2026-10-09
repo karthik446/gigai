@@ -798,6 +798,44 @@ def posting_rows(home_root: Path, rows: Iterable[PostingRecord]) -> list[object]
     return found
 
 
+def unlisted_records(
+    home_root: Path, target: Path, resolved: object, view: ProfileView, found: Iterable[tuple[str, object, object]], *, now: datetime,
+) -> list[PostingRecord]:
+    """0.1.11.8: rows for postings the company index holds and NO profile's list does, as ``view``'s. Never stored.
+
+    ``found`` is ``(job identity, CompanyIndexEntry, IndexedPosting)`` (``free_search.find_posting_by_address``). A
+    named posting is assessed for the profile the caller chose (`gigai scout jobs assess <URL>`: the default one),
+    through the same path as a list posting, so it needs the row a list posting has: the board, the dates, the
+    listing's digest when the cached body holds the description, and its facts as the stores hold them now (a
+    stored assessment of this job under this profile is its state, so it is not assessed twice). ``match_rank`` 1:
+    the only profile it is shown for. One company file and one cached body per board; no request.
+    """
+
+    from .find_jobs.model_rank import content_digest
+
+    built_at = stamp(now) or ""
+    rows: list[PostingRecord] = []
+    for job, entry, posting in found:
+        rows.append(PostingRecord(
+            job=job, profile_id=view.profile_id, board=entry.key, first_seen=stamp(posting.first_seen) or built_at,  # type: ignore[attr-defined]
+            published_at=stamp(posting.published_at), removed_at=stamp(posting.removed_at), listing_digest="",  # type: ignore[attr-defined]
+            listing_known=False, rank_score=None, match_rank=1, state="not_assessed", stale_code=None, assessed_at=None,
+            reqs_met=None, reqs_total=None, open_questions=0, tailored=False, label=None, ats_score=None,
+            pinned_digest=view.resume_digest, settings_digest=view.settings_digest, updated_at=built_at,
+        ))
+    if not rows:
+        return []
+    listed = {row.normalized_url: row for row in posting_rows(home_root, rows)}  # type: ignore[attr-defined]
+    facts = _Facts(home_root, target, resolved, view, rank_model_key(home_root, target))
+    records: list[PostingRecord] = []
+    for row in rows:
+        listing = listed.get(row.job)
+        if listing is not None:
+            row = replace(row, listing_digest=content_digest(listing), listing_known=bool(listing.content_sha256 and listing.text))  # type: ignore[attr-defined,arg-type]
+        records.append(facts.of(row))
+    return records
+
+
 class TagPending:
     """0110-8-05: is a served row matched by a GENERIC title alone while its posting's function tag is not known yet?
 
@@ -1642,4 +1680,5 @@ __all__ = [
     "refresh",
     "split_board",
     "stamp",
+    "unlisted_records",
 ]

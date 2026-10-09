@@ -3266,13 +3266,20 @@ def jobs_assess_command(
     A batch that runs can be cancelled: --cancel (from another terminal, or
     for a batch the Jobs page started). The calls in flight finish and every
     assessment already stored is kept; the same command again takes the rest.
+
+    A posting named by its URL need not be in a profile's list: one that
+    `gigai scout jobs search` lists is assessed as the default profile (or
+    --profile), and the question says so. The URL can be the job page's own
+    address. Exit code 1 when every named URL is not found or was not
+    assessed (the output is the same object and says which); 0 when at
+    least one was found and did not fail.
     """
 
     import sys
 
     from .outbound_check import redact_payload
     from .assess_preview import summary_lines
-    from .posting_search import STATUS_ASK, assess_these, render
+    from .posting_search import STATUS_ASK, assess_these, named_all_failed, render
 
     home_root = home_value or default_home_root()
     if cancel:
@@ -3330,6 +3337,8 @@ def jobs_assess_command(
         return
     response = redact_payload(response)
     _emit(response, as_json, "" if as_json else render(response))
+    if jobs and named_all_failed(response):
+        raise click.exceptions.Exit(1)  # 0.1.11.8: every posting named is not found or was not assessed
 
 
 @jobs_group.command("import-runs")

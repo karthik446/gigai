@@ -853,6 +853,37 @@ def _half_applied(selection: "_Selection", store: PipelineStore, named: Sequence
     )
 
 
+def _by_address(home_root: Path, jobs: Sequence[str]) -> tuple[dict[str, tuple[object, object]], dict[str, str]]:
+    """0.1.11.8: the company index's posting for each of ``jobs`` (named identities no profile's list holds).
+
+    ``({stored identity: (entry, posting)}, {named identity: stored identity})``; a job no board holds, or one its
+    board no longer lists, is in neither.
+    Read only: the search index (or the company files) and, for a public address, one company file. An index that
+    cannot be read finds nothing: the job is then ``not_found``, as before.
+    """
+
+    import sqlite3
+
+    from .find_jobs import free_search
+    from .find_jobs.contracts import FindJobsContractError
+
+    held: dict[str, tuple[object, object]] = {}
+    stored_as: dict[str, str] = {}
+    for job in jobs:
+        if job.startswith("text:"):
+            continue  # pasted text is not a posting of a board
+        try:
+            found = free_search.find_posting_by_address(home_root, job)
+            identity = None if found is None else free_search._job_identity(found[1].url)
+        except (FindJobsContractError, sqlite3.Error, OSError, ValueError, LookupError):
+            continue
+        if found is None or identity is None or found[1].removed:
+            continue  # a posting its board no longer lists is not assessed: not found, as before
+        held[identity] = found
+        stored_as[job] = identity
+    return held, stored_as
+
+
 def assess_these(
     home_root: Path,
     target: Path,
@@ -886,6 +917,16 @@ def assess_these(
     applies it (``us_only``; ``None``: the setup's default) and one posting per
     job (the row of its copies), so a job posted once per country is one model
     call. Named postings are assessed as named.
+
+    0.1.11.8 (the release blocker): a NAMED posting is looked up by its address,
+    not in the profiles' lists alone. One the company index holds and no
+    profile's list does (`gigai scout jobs search` lists it, its title is in no
+    profile) is assessed AS THE DEFAULT PROFILE, or as ``profile_id``, through
+    the same path and stored the same way; the question says so
+    (``question.text``), its row has ``profiles: []``. An address that is the
+    system's public job page and not the stored URL (``free_search.
+    find_posting_by_address``) names the stored posting: ``question.yes`` and
+    the rows carry the stored identity. A URL no board holds is ``not_found``.
 
     ``jobs`` names the postings (job identities); without it the filter
     (``query``, ``states``, ``window``, ``profile_id``) selects them. A
@@ -941,6 +982,41 @@ def assess_these(
                 )
             if selection.hidden_profiles:
                 raise PostingSearchError("profile_not_found", "no active Scout profile has this id")
+            # 0.1.11.8: a named posting no profile's list holds is read from the company index, by its address.
+            unlisted: dict[str, tuple[object, object]] = {}
+            unlisted_owner: ProfileView | None = None
+            missing = [job for job in named or () if job not in {row.job for _group, row in selection.shown}]
+            if missing:
+                unlisted, stored_as = _by_address(home_root, missing)
+                if any(stored_as.get(job, job) != job for job in missing):
+                    # An address that is another spelling of a stored posting: the stored identity from here on.
+                    named = list(dict.fromkeys(stored_as.get(job, job) for job in named or ()))
+                    selection = _Selection(
+                        home_root, target, store, profile_ids=(profile_id,) if profile_id else (), query=query, states=wanted_states,
+                        window=window, removed=False, jobs=named, moment=moment, us_only=us_on, collapse=collapse,
+                    )
+                unlisted_owner = next((view for view in selection.views if view.profile_id == profile_id), None) if profile_id else (
+                    next((view for view in selection.views if view.is_default), None)
+                )
+
+            def with_unlisted(chosen: "_Selection", jobs: Sequence[str]) -> set[str]:
+                """``chosen`` with a row (the owner profile's, not stored) for each of ``jobs`` only the index holds."""
+
+                held = {row.job for _group, row in chosen.shown}
+                wanted_ = [(job, *unlisted[job]) for job in jobs if job not in held and job in unlisted]
+                if not wanted_ or unlisted_owner is None:
+                    return set()
+                # A posting a profile's list holds and this selection leaves out (its board no longer lists it: a
+                # closed posting is marked in the read model, not in the index) is not an index-only one.
+                listed = {row.job for row in store.postings(jobs=[job for job, _entry, _posting in wanted_], live=False)}
+                wanted_ = [item for item in wanted_ if item[0] not in listed]
+                if not wanted_:
+                    return set()
+                rows = postings.unlisted_records(home_root, target, chosen.resolved, unlisted_owner, wanted_, now=moment)
+                chosen.shown = in_order([*chosen.shown, *(((), row) for row in rows)])
+                return {row.job for row in rows}
+
+            index_only = with_unlisted(selection, named or ())
             found = {row.job for _group, row in selection.shown}
             not_found = [job for job in named or () if job not in found]
             candidates = sorted(
@@ -972,6 +1048,12 @@ def assess_these(
                 + (f" ({named_profiles})" if named_profiles else "") + f"? {_calls(estimate['calls'])}{cost}"
                 + (f" ({later} more after these {len(pairs)})" if later else "")
             )
+            as_owner = sum(1 for job, _owner in pairs if job in index_only)
+            if as_owner and unlisted_owner is not None:
+                sentence += (
+                    f". {as_owner} {'is' if as_owner == 1 else 'are'} in no profile's list: assessed as {unlisted_owner.label}"
+                    + (" (the default profile)." if unlisted_owner.is_default else ".")
+                )
             body: dict[str, object] = {"approve": True}
             if named is not None:
                 body["jobs"] = named
@@ -1058,6 +1140,7 @@ def assess_these(
                     home_root, target, store, profile_ids=(profile_id,) if profile_id else (), query=None, states=(), window=None,
                     removed=False, jobs=[job for job, _owner in pairs], moment=moment,
                 )
+                with_unlisted(selection, [job for job, _owner in pairs])  # the rows of the index-only ones, as assessed
             # 0110-10-13: what the question's postings would send, by category (ids, labels, counts; no text). Only while
             # nothing was assessed: the low-ranked ones when only their question is left.
             summary: dict[str, object] | None = None
@@ -1096,6 +1179,28 @@ def assess_these(
             return response
         finally:
             store.close()
+
+
+def named_all_failed(response: Mapping[str, object]) -> bool:
+    """0.1.11.8: every posting NAMED to "assess these" is not found or was not assessed (the command's exit code 1).
+
+    For a response to named postings: none was found, or an approved batch assessed none and failed all it was
+    asked for. A posting whose assessment is current, a low-ranked one left out and a cancelled batch are not
+    failures; a question (nothing assessed yet) fails only when nothing was found.
+    """
+
+    counts, assessed = response.get("counts"), response.get("assessed")
+    if not isinstance(counts, Mapping):
+        return False
+    if not counts.get("selected"):
+        return bool(counts.get("not_found"))
+    if not isinstance(assessed, Mapping):
+        return False
+    failed = assessed.get("failed")
+    return (
+        isinstance(failed, list) and bool(failed) and not assessed.get("assessed")
+        and len(failed) == assessed.get("requested") == counts.get("selected")
+    )
 
 
 def applied_left_out_line(applied: object, filters: object = None) -> str | None:
@@ -1232,6 +1337,7 @@ __all__ = [
     "PostingModelPreparing",
     "PostingSearchError",
     "assess_these",
+    "named_all_failed",
     "render",
     "search_postings",
     "us_only_setting",
