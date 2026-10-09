@@ -23,6 +23,7 @@ from __future__ import annotations
 from pathlib import Path, PurePath
 
 from ..canonical import digest_imported_bytes
+from .find_jobs.discovery.storage import project_id
 
 #: The one folder of a per-job store.
 JOB_FOLDER = "job"
@@ -63,6 +64,35 @@ def job_store_path(store_dir: Path, job_identity: str, suffix: str = RECORD_SUFF
     return job_store_dir(store_dir) / f"{job_digest(job_identity)}{suffix}"
 
 
+#: 0.1.11.10 reservations: job-keyed stores that do not exist yet, each a NEW top-level folder of the scout
+#: project (a sibling of ``quick_assess``/``resumes``/``suggestions``, not a folder of one of them). Deliberately
+#: left out of ``JOB_STORES`` -- that would pull them into ``job_store_migration``'s scan/copy, which 0.1.11.9
+#: PJ5 does not do. Nothing is written, created, or migrated for either -- see ``job_pathways_path``/``job_prep_path``.
+PATHWAYS = "pathways"
+PREP = "prep"
+
+
+def job_pathways_path(home_root: Path, target: Path, job_identity: str) -> Path:
+    """0.1.11.10 reservation: where a job's pathways record WILL live, ``pathways/job/<sha256(job identity)>.json``.
+
+    Nothing is read or written here yet; this only reserves the path so 0.1.11.10 keys it the same way the other
+    job stores are keyed (``job_quick_assess_path``'s digest).
+    """
+
+    return job_store_path(home_root / "scout" / project_id(home_root, target) / PATHWAYS, job_identity)
+
+
+def job_prep_path(home_root: Path, target: Path, job_identity: str) -> Path:
+    """0.1.11.10 reservation: where a job's interview-prep record WILL live, ``prep/job/<sha256(job identity)>.json``.
+
+    This is a NEW job-keyed store, separate from ``interview_prep/`` (``interview_prep/storage.py``), which stays
+    keyed ``<profile_id>/<sha256(posting_id)>.json`` and is not touched by this reservation; 0.1.11.10 decides
+    whether/how the two relate. Nothing is read or written here yet.
+    """
+
+    return job_store_path(home_root / "scout" / project_id(home_root, target) / PREP, job_identity)
+
+
 def is_profile_folder(name: str) -> bool:
     """A folder of a store that holds ONE profile's records: any but the per-job one and a pasted resume's."""
 
@@ -84,6 +114,8 @@ __all__ = [
     "JOB_STORES",
     "LAYOUT_SUFFIX",
     "MARKDOWN_SUFFIX",
+    "PATHWAYS",
+    "PREP",
     "PROPOSED_RESUME_SUFFIX",
     "RECORD_SUFFIX",
     "RESUMES",
@@ -91,6 +123,8 @@ __all__ = [
     "is_profile_folder",
     "job_digest",
     "job_keyed",
+    "job_pathways_path",
+    "job_prep_path",
     "job_store_dir",
     "job_store_path",
 ]
