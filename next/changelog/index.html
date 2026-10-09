@@ -91,9 +91,10 @@ others.</p>
 <li><strong>Nine hiring systems.</strong> Scout reads the public job feeds of Workable, Rippling, Gem, Recruitee, Pinpoint and
 Breezy beside Greenhouse, Lever and Ashby. The catalog ships the 10,616 boards found and verified on them
 (Workable 2,843, Rippling 1,647, Gem 801, Recruitee 2,287, Pinpoint 565, Breezy 2,473; 245,570 postings,
-115,883 in the US); a US setup adds the 5,851 of them that list a US posting and are not a staffing agency by
-name, so the watchlist grows from about 10,300 to about 16,200 boards and the first update after the upgrade
-takes a few passes. <strong>Add company</strong> takes a board or job URL on any of the nine. A Pinpoint posting has no date; a
+115,883 in the US); a US setup adds the 4,441 of them that list two or more US postings and are not a staffing
+agency by name, so the watchlist grows from about 10,300 to about 14,800 boards and the first update after the
+upgrade takes a few passes. A board with a single US posting stays in the catalog and joins once a later catalog
+counts two; a board you add yourself is always watched. <strong>Add company</strong> takes a board or job URL on any of the nine. A Pinpoint posting has no date; a
 Rippling posting’s date and description are fetched at the update for the titles your profiles search, as
 Greenhouse descriptions are; a Breezy posting’s description is fetched when it is assessed.</li>
 <li><strong>Requests say who is asking.</strong> Every request to a job board carries the <code dir="auto">User-Agent</code>
@@ -107,6 +108,16 @@ to 10 seconds. Workable is asked at most once every two seconds (its host refuse
 own limit. A system that answers 429 is left alone for as long as its <code dir="auto">Retry-After</code> says (up to 10 minutes), on a
 manual update too; when that is longer than the update has left, the rest of that system’s boards wait for the
 next update (<code dir="auto">rate_limited</code>).</li>
+<li><strong>US only, and one row per job.</strong> Search all jobs and the Jobs list have a <strong>US only</strong> switch (<code dir="auto">--us-only/--no-us-only</code>,
+<code dir="auto">us_only=1|0</code>), on by default for a US setup. It hides only postings clearly outside the US; a posting whose
+place it cannot read (“Remote” alone, no location) stays listed and says “unclear location”. The same job posted
+once per country with the same description is one row listing its locations (“Remote: Estonia, Lithuania,
+Latvia +4”); <strong>Assess</strong> and <strong>Mark applied</strong> act on one posting of it, a US one if there is one (<code dir="auto">--no-collapse</code>,
+<code dir="auto">collapse=0</code> list every posting). The search index is rebuilt by the next <code dir="auto">gigai scout sources update</code>; until
+then a search reads every company file and is slower.</li>
+<li><strong>The first <code dir="auto">scout new</code> after the upgrade is long.</strong> Every matching posting on the new boards is new to you once,
+so it lists that backlog, and a Pinpoint posting (no date) reads as posted on the day it was first seen, so it
+stays inside “last 30 days” for 30 days.</li>
 </ul>
 <div class="sl-heading-wrapper level-h3"><h3 id="01117">0.1.11.7</h3><a class="sl-anchor-link" href="#01117"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “0.1.11.7”</span></a></div>
 <p>Search every stored posting, not only the ones your profiles hold. <strong>After you upgrade</strong> (<code dir="auto">uv tool upgrade gigai</code>),
