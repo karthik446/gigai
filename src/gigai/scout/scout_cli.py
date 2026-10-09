@@ -3305,10 +3305,11 @@ def jobs_assess_command(
     for a batch the Jobs page started). The calls in flight finish and every
     assessment already stored is kept; the same command again takes the rest.
 
-    A posting named by its URL need not be in a profile's list: one that
-    `gigai scout jobs search` lists is assessed as the default profile (or
-    --profile), and the question says so. The URL can be the job page's own
-    address. Exit code 1 when every named URL is not found or was not
+    A posting named by its URL need not be in a role's list: one that
+    `gigai scout jobs search` lists is assessed all the same, once, as the
+    job it is (no role is chosen for it), and the question says so. The URL
+    can be the job page's own address. A job posted once per country is one
+    job: any copy's URL assesses it once. Exit code 1 when every named URL is not found or was not
     assessed (the output is the same object and says which); 0 when at
     least one was found and did not fail.
     """
@@ -3710,12 +3711,13 @@ def pipeline_status_command(
 ) -> None:
     """Show what the pipeline is doing: each job's steps, why a step waits, and today's model calls against the cap."""
 
+    from .pipeline.job_identity import job_identity_for
     from .pipeline.runner import pipeline_status
 
     home_root = home_value or default_home_root()
     try:
         target = _pipeline_target(target_value, home_root, as_json=as_json)
-        identity = None if job is None else _pipeline_job(job)
+        identity = None if job is None else job_identity_for(_pipeline_job(job), home_root=home_root, target=target)
         profile = _pipeline_profile(profile_id, home_root, target) if identity is not None else profile_id
         status = pipeline_status(home_root, target, profile_id=profile, job=identity)
     except _pipeline_errors() as exc:
@@ -3726,7 +3728,7 @@ def pipeline_status_command(
 
 @pipeline_group.command("process")
 @click.argument("job")
-@click.option("--profile", "profile_id", help="Scout profile ID (default: the selected profile).")
+@click.option("--profile", "profile_id", help="The role that asks (default: the selected one). Recorded only: a job has one set of steps, whichever role asks.")
 @click.option("--force", "force", is_flag=True, help="Queue it again even when nothing its steps read has changed.")
 @click.option("--home", "home_value", type=click.Path(path_type=Path, file_okay=False))
 @click.option("--target", "target_value", type=click.Path(path_type=Path, file_okay=False))
@@ -3736,15 +3738,18 @@ def pipeline_process_command(
 ) -> None:
     """Put one assessed job through the pipeline now. Refused (pipeline_off) while the pipeline is off, the 0.1.11 default."""
 
+    from .pipeline.job_identity import job_identity_for
     from .pipeline.runner import pipeline_status, run_once
     from .pipeline.triggers import process_now
 
     home_root = home_value or default_home_root()
     try:
         target = _pipeline_target(target_value, home_root, as_json=as_json)
-        identity = _pipeline_job(job)
+        identity = job_identity_for(_pipeline_job(job), home_root=home_root, target=target)
         profile = _pipeline_profile(profile_id, home_root, target)
         queued = process_now(home_root, target, profile, identity, force=force)
+        # 0.1.11.9 PJ6: the job's ONE set of steps, under the role that asked for them first; --profile selects nothing.
+        profile = str(queued["profile_id"])
         drain = run_once(home_root, target, only=(profile, identity), force_enabled=True).to_json()
         status = pipeline_status(home_root, target, profile_id=profile, job=identity)
     except _pipeline_errors() as exc:
@@ -3794,18 +3799,21 @@ def pipeline_retry_command(
 def _pipeline_change(
     job: str, profile_id: str | None, home_value: Path | None, target_value: Path | None, as_json: bool, action: str, step: str | None
 ) -> None:
+    from .pipeline.job_identity import job_identity_for
     from .pipeline.store import PipelineStore, pipeline_path
 
     home_root = home_value or default_home_root()
     try:
         target = _pipeline_target(target_value, home_root, as_json=as_json)
-        identity = _pipeline_job(job)
+        identity = job_identity_for(_pipeline_job(job), home_root=home_root, target=target)
         profile = _pipeline_profile(profile_id, home_root, target)
         path = pipeline_path(home_root, target)
         changed = 0
         if path.is_file():
             store = PipelineStore(path)
             try:
+                # 0.1.11.9 PJ6: the job's ONE set of steps, under whichever role they are kept; --profile selects nothing.
+                profile = store.job_role(identity) or profile
                 changed = store.cancel(profile, identity) if action == "cancel" else store.retry(profile, identity, step)
             finally:
                 store.close()

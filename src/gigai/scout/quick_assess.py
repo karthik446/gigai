@@ -207,9 +207,10 @@ def quick_assess_write_path(home_root: Path, target: Path, profile_id: str | Non
     return write_record(quick_assess_dir(home_root, target), job_identity, home_root=home_root, target=target)
 
 
-#: 0.1.10.7 M2: assessments of a job against the profile's TAILORED resume, beside ``quick_assess/``
-#: (same ``<profile_id>/<sha256(job_identity)>.json``). A variant never replaces the base assessment:
-#: the base verdict stays the job's verdict.
+#: 0.1.10.7 M2: assessments of a job against its TAILORED resume, beside ``quick_assess/``. A variant never
+#: replaces the base assessment: the base verdict stays the job's verdict.
+#: 0.1.11.9 PJ6: ONE a job, ``quick_assess_tailored/job/<sha256(job_identity)>.json``, whichever role asked.
+#: Until then it was kept per role (``<profile_id>/<sha>.json``); such a file is read while the job has none.
 TAILORED_VARIANT_DIR = "quick_assess_tailored"
 
 
@@ -220,9 +221,33 @@ class AssessVariant:
     resume_text: str = field(repr=False)
 
 
+def _tailored_variant_dir(home_root: Path, target: Path) -> Path:
+    return home_root / "scout" / project_id(home_root, target) / TAILORED_VARIANT_DIR
+
+
 def tailored_variant_path(home_root: Path, target: Path, profile_id: str | None, job_identity: str) -> Path:
-    digest = digest_imported_bytes(job_identity.encode("utf-8")).removeprefix("sha256:")
-    return home_root / "scout" / project_id(home_root, target) / TAILORED_VARIANT_DIR / resume_key(profile_id) / f"{digest}.json"
+    """Where the tailored-variant assessment of ``job_identity`` IS (for a read): the job's one (0.1.11.9 PJ6).
+
+    ``profile_id`` only tells a pasted resume's (``None``: the ``ephemeral`` folder) from the job's. A job with
+    none in the ``job`` folder is read where a role's folder holds it (``pipeline.steps.job_record_path``: the
+    named role's first, then the newest). A WRITER takes :func:`tailored_variant_write_path`.
+    """
+
+    if is_pasted(profile_id):
+        digest = digest_imported_bytes(job_identity.encode("utf-8")).removeprefix("sha256:")
+        return _tailored_variant_dir(home_root, target) / EPHEMERAL_RESUME_KEY / f"{digest}.json"
+    from .pipeline.steps import job_record_path
+
+    return job_record_path(_tailored_variant_dir(home_root, target), profile_id, job_identity)
+
+
+def tailored_variant_write_path(home_root: Path, target: Path, profile_id: str | None, job_identity: str) -> Path:
+    """Where a tailored-variant assessment is WRITTEN: the job's own file, never a role's folder (a pasted
+    resume's where it always was)."""
+
+    if is_pasted(profile_id):
+        return tailored_variant_path(home_root, target, None, job_identity)
+    return job_store_path(_tailored_variant_dir(home_root, target), job_identity)
 
 
 def read_quick_assessment(home_root: Path, target: Path, profile_id: str | None, job_identity: str) -> AssessResponse | None:
@@ -233,7 +258,8 @@ def read_quick_assessment(home_root: Path, target: Path, profile_id: str | None,
 
 
 def read_tailored_variant(home_root: Path, target: Path, profile_id: str | None, job_identity: str) -> AssessResponse | None:
-    """The stored assessment of ``job_identity`` against ``profile_id``'s tailored resume, or ``None``."""
+    """The stored assessment of ``job_identity`` against its tailored resume, or ``None``: the job's one
+    (0.1.11.9 PJ6), whichever role ``profile_id`` names."""
 
     return _read_stored(tailored_variant_path(Path(home_root), Path(target), profile_id, job_identity))
 
@@ -292,13 +318,49 @@ def list_quick_assessments(
     return tuple(items)
 
 
+def job_store_key(home_root: Path, target: Path, job_identity: str) -> str:
+    """0.1.11.9 RB2: the identity ``job_identity``'s records are kept under (``find_jobs.job_key.job_key``): the job's
+    own, or, for a copy of a job posted once per country, the one all its copies share."""
+
+    from .find_jobs.job_key import job_key
+
+    return job_key(Path(home_root), Path(target), job_identity)
+
+
+def _kept_posting(
+    request: AssessRequest, resolved_job: ResolvedJob | None, home_root: Path, target: Path,
+) -> tuple[AssessRequest, ResolvedJob | None]:
+    """0.1.11.9 RB2: an assessment asked for by a COPY of a job (the same job posted once per country) is the job's:
+    made on the posting its records are kept under, so there is one assessment a job whichever copy is named.
+
+    The request then names that posting's address and it is resolved from what Scout holds, as any posting is.
+    A pasted posting, a posting with no copy and the job's own posting are left as they are.
+    """
+
+    from .find_jobs.contracts import normalize_url
+
+    named = resolved_job.job_identity if resolved_job is not None else request.job.job_url
+    if not named or request.resume.is_ephemeral:
+        return request, resolved_job  # a pasted resume's assessment is kept by the address it was given
+    try:
+        identity = normalize_url(named)
+    except FindJobsContractError:
+        return request, resolved_job
+    kept = job_store_key(home_root, target, identity)
+    if kept == identity:
+        return request, resolved_job
+    return replace(request, job=replace(request.job, job_url=kept)), None
+
+
 def job_quick_assessments(home_root: Path, target: Path, job_identity: str) -> tuple[AssessResponse, ...]:
     """What is stored for ONE job, newest first: the job's assessment and, when there is one, a pasted resume's.
     Two small file reads; the store is not listed."""
 
     home_root, target = Path(home_root), Path(target)
     found = (_read_stored(quick_assess_path(home_root, target, JOB_RECORD, job_identity)), _read_stored(quick_assess_path(home_root, target, None, job_identity)))
-    items = [item for item in found if item is not None and item.job.job_identity == job_identity]
+    # 0.1.11.9 RB2: a copy of a job posted once per country names the job's one record (kept under ``job_key``).
+    named = {job_identity, job_store_key(home_root, target, job_identity)}
+    items = [item for item in found if item is not None and item.job.job_identity in named]
     items.sort(key=lambda item: (item.updated_at, item.stored_path), reverse=True)
     return tuple(items)
 
@@ -898,6 +960,8 @@ def run_quick_assessment(
 
     home_root = Path(home_root)
     target = Path(target)
+    if variant is None:
+        request, resolved_job = _kept_posting(request, resolved_job, home_root, target)
 
     # 1. Job text (public data; network only for a URL).
     try:
@@ -957,13 +1021,15 @@ def run_quick_assessment(
     try:
         if variant is not None:
             resume = replace(resume, text=variant.resume_text)
-            path = tailored_variant_path(home_root, target, resume.profile_id, job.job_identity)
+            # 0.1.11.9 PJ6: the JOB's own variant, whichever role asked; a role folder's older one is what it reads first.
+            path = tailored_variant_write_path(home_root, target, resume.profile_id, job.job_identity)
+            previous_path = tailored_variant_path(home_root, target, resume.profile_id, job.job_identity)
         else:
             # 0.1.11.9: the JOB's own file, whichever role asked (its id is recorded inside, as before).
-            path = quick_assess_write_path(home_root, target, resume.profile_id, job.job_identity)
+            path = previous_path = quick_assess_write_path(home_root, target, resume.profile_id, job.job_identity)
     except Exception as exc:
         raise QuickAssessError("target_unavailable", "this folder is not bound to a GigAI project") from exc
-    previous = _read_stored(path)
+    previous = _read_stored(previous_path)
 
     # 4b. Prior answers (P3's Q&A loop), user-level since 0.1.10.7 C: every
     #     answer the user gave, for any profile and any posting, rendered
@@ -1218,4 +1284,5 @@ __all__ = [
     "resume_key",
     "run_quick_assessment",
     "tailored_variant_path",
+    "tailored_variant_write_path",
 ]

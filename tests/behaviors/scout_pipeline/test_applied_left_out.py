@@ -28,7 +28,7 @@ from gigai.scout.find_jobs import job_state
 from gigai.workpad import committed_read_cache
 
 from tests.support.fit_fixtures import weak_fixture
-from tests.support.posting_fixtures import NOW, PostingsFixture, build_postings_fixture, days_ago, job_url, lever_job
+from tests.support.posting_fixtures import NOW, PostingsFixture, build_postings_fixture, days_ago, freeze_scout_new_clock, job_url, lever_job
 
 SLUG = "acme-health"
 APPLIED, REJECTED, WITHDRAWN = 1, 2, 3  # the postings with an application; 4 and 5 have none
@@ -178,6 +178,7 @@ def test_jobs_list_says_how_many_are_left_out_and_how_to_show_them(fx: PostingsF
 
 
 def test_scout_new_leaves_them_out_of_what_is_new_and_of_its_batch(fx: PostingsFixture, monkeypatch: pytest.MonkeyPatch) -> None:
+    freeze_scout_new_clock(monkeypatch)  # the command reads the clock: the postings are seeded relative to NOW
     def new(**more: object) -> dict:
         return scout_new.scout_new(fx.home_root, fx.target, now=NOW, peek=True, **more)  # type: ignore[arg-type]
 

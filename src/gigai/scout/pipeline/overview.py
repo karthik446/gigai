@@ -164,14 +164,18 @@ def overview(
         answer["caps"] = caps(home_root, target, setting=setting, store=store, now=now)
         backoffs = {item.lane: item for item in store.lane_backoffs() if item.not_before > current}
         all_steps = store.steps()
+        # 0.1.11.9 PJ6: one entry a JOB. A file written before may hold a job under several roles: its newest set is listed.
+        roles = store.job_roles()
         running: dict[str, int] = {}
         jobs: dict[tuple[str, str], dict[str, Step]] = {}
         waits: dict[tuple[str, str], dict[str, str]] = {}
         for step in all_steps:
             key = (step.profile_id, step.job)
-            jobs.setdefault(key, {})[step.name] = step
             if step.state == STATE_RUNNING:
                 running[step.lane] = running.get(step.lane, 0) + 1
+            if roles.get(step.job) != step.profile_id:
+                continue
+            jobs.setdefault(key, {})[step.name] = step
             if step.state == STATE_READY:
                 if step.not_before > current and step.error_code == WAIT_DAILY_CAP:
                     waits.setdefault(key, {})[step.name] = WAIT_DAILY_CAP
@@ -248,7 +252,7 @@ def _ats(record: Mapping[str, object] | None) -> dict[str, object] | None:
 def job_detail(
     home_root: Path,
     target: Path,
-    profile_id: str,
+    profile_id: str | None,
     job: str,
     *,
     environ: Mapping[str, str] | None = None,
@@ -262,9 +266,16 @@ def job_detail(
     The ATS line and the missing skills are words of the posting
     (public-untrusted); everything else is ids, codes and numbers. Nothing
     the user wrote and no file path. Reads only.
+
+    0.1.11.9 PJ6: the JOB's one pipeline, whichever role's page asks.
+    ``profile_id`` selects nothing and may be ``None``; the answer's
+    ``profile_id`` is the role the job's steps are under (the one that asked
+    for them), else the one given.
     """
 
     status = pipeline_status(Path(home_root), Path(target), profile_id=profile_id, job=job, environ=environ, clock=clock)
+    held = [step["profile_id"] for step in status["steps"]]  # type: ignore[union-attr]
+    profile_id = str(held[0]) if held else profile_id
     last: dict[str, Mapping[str, object]] = {}
     for run in status.get("runs", ()):  # type: ignore[union-attr]
         last[str(run["name"])] = run  # oldest first: the last attempt of each step stays

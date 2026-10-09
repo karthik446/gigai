@@ -97,7 +97,8 @@ def _digests(fx: PipelineFixture) -> tuple[dict, dict, dict]:
     store = PipelineStore(fx.db)
     try:
         rows = store.steps()
-        assert len(rows) == 2 * len(_POSTINGS) * len(STEPS)
+        assert len(rows) == len(_POSTINGS) * len(STEPS)  # 0.1.11.9 PJ6: one set of steps a job, whichever roles asked
+        assert len({step.profile_id for step in rows}) == 2  # ... and both roles hold some, so both roles' digests are compared
         _forget_everything()
         per_job = {
             (step.profile_id, step.job, step.name): (
@@ -128,15 +129,17 @@ def _cli(fx: PipelineFixture, *args: str) -> None:
 
 def test_every_steps_digest_is_the_same_with_the_triggers_shared_inputs(fx: PipelineFixture, tmp_path: Path) -> None:
     default, second = two_profiles(fx.gig)
-    for profile_id in (default, second):
-        for url, text in _POSTINGS.items():
-            fx.model.assessed = pending(*_TERRAFORM)
-            run_quick_assessment(
-                AssessRequest(job=AssessJobInput(job_url=url), resume=AssessResumeInput(profile_id=profile_id)),
-                home_root=fx.home_root, target=fx.target, config=config(fx.home_root), resolved_job=resolved_job(url, text),
-            )
-            fx.model.assessed = assessment(met=2)
-            triggers.process_now(fx.home_root, fx.target, profile_id, url)
+    for index, (url, text) in enumerate(_POSTINGS.items()):
+        # 0.1.11.9 PJ6: both roles ask for every job; its ONE set of steps is under the role that asked first.
+        first_role, then = (default, second) if index % 2 == 0 else (second, default)
+        fx.model.assessed = pending(*_TERRAFORM)
+        run_quick_assessment(
+            AssessRequest(job=AssessJobInput(job_url=url), resume=AssessResumeInput(profile_id=first_role)),
+            home_root=fx.home_root, target=fx.target, config=config(fx.home_root), resolved_job=resolved_job(url, text),
+        )
+        fx.model.assessed = assessment(met=2)
+        assert triggers.process_now(fx.home_root, fx.target, first_role, url)["profile_id"] == first_role
+        assert triggers.process_now(fx.home_root, fx.target, then, url)["profile_id"] == first_role
     _drain(fx)
 
     def same(what: str, *, done: bool = True) -> dict:
@@ -148,7 +151,7 @@ def test_every_steps_digest_is_the_same_with_the_triggers_shared_inputs(fx: Pipe
         return per_job
 
     first = same("as the pipeline finished them")
-    assert len({digest for key, digest in first.items() if key[2] == "tailor"}) == 6  # one per job: no constant is compared with itself
+    assert len({digest for key, digest in first.items() if key[2] == "tailor"}) == 3  # one per job: no constant is compared with itself
     # The story matches the first posting only, so the tailor digests read different picks.
     bank = story_bank.assess_bank(home_root=fx.home_root, target=fx.target, profile_id=default)
     picked = {url: bank.for_job(title="Staff AI Engineer", text=text).job_stories for url, text in _POSTINGS.items()}

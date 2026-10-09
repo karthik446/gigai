@@ -103,6 +103,29 @@ class PostingsFixture:
         return ["scout", "new", *args, "--home", str(self.home_root), "--target", str(self.target)]
 
 
+class _FixtureClock(datetime):
+    """``datetime`` whose ``now`` is the fixture's :data:`NOW`."""
+
+    @classmethod
+    def now(cls, tz: object = None) -> "datetime":  # type: ignore[override]
+        return NOW.astimezone(tz) if tz is not None else NOW.replace(tzinfo=None)  # type: ignore[arg-type]
+
+
+def freeze_scout_new_clock(monkeypatch: pytest.MonkeyPatch) -> None:
+    """``gigai scout new`` reads the clock itself when a caller gives it no ``now`` (the command line never does).
+
+    The postings here are seeded relative to :data:`NOW` (``days_ago``), and a first ``scout new`` looks back seven
+    days: run against the real clock, a "new" posting stops being new a week after :data:`NOW` and a test of the
+    command goes red on a date (it did, on 2026-10-09). A test that runs the command over postings seeded with
+    ``days_ago`` calls this first: ``scout_new``'s own ``datetime.now`` then answers :data:`NOW`, as every test that
+    calls the function with ``now=NOW`` already has it. (A test that seeds relative to the real clock does not.)
+    """
+
+    from gigai.scout import scout_new
+
+    monkeypatch.setattr(scout_new, "datetime", _FixtureClock)
+
+
 def build_postings_fixture(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, deleted: bool = True) -> PostingsFixture:
     """The gig, a second active profile and (``deleted``) a deleted third one whose titles match everything the others do."""
 
@@ -137,6 +160,7 @@ __all__ = [
     "PostingsFixture",
     "build_postings_fixture",
     "days_ago",
+    "freeze_scout_new_clock",
     "job_url",
     "lever_job",
     "posting_text",

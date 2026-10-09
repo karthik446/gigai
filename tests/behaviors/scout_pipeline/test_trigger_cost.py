@@ -186,12 +186,16 @@ def test_a_roles_search_settings_write_reopens_nothing_and_the_trigger_after_it_
     write of `profile update` changes no step's inputs: nothing re-opens, for that role or the other.
 
     Until 0.1.11.9 this test proved that the save's own write is read by its trigger (that role's re-assessments
-    re-opened). No role setting changes a digest any more, so that is no longer shown HERE."""
+    re-opened). No role setting changes a digest any more, so that is no longer shown HERE.
+
+    0.1.11.9 PJ6: a job has ONE set of steps, under the role that asked first; the second role's ask is a no-op."""
 
     default, second = two_profiles(fx.gig)
     jobs = [_job(n) for n in range(3)]
     _finish(fx, jobs, default)
-    _finish(fx, jobs, second)
+    for job in jobs:
+        asked = triggers.process_now(fx.home_root, fx.target, second, job)
+        assert (asked["result"], asked["profile_id"]) == ("noop_unchanged", default)
     assert triggers.profile_changed(fx.home_root, fx.target).state == triggers.NOTHING  # everything read, and kept
 
     updated = CliRunner().invoke(
@@ -200,13 +204,12 @@ def test_a_roles_search_settings_write_reopens_nothing_and_the_trigger_after_it_
     )
     assert updated.exit_code == 0, updated.output
 
-    reopened = _DONE
-    assert _states(fx, second) == {job: reopened for job in jobs}
+    assert _states(fx, second) == {}
     assert _states(fx, default) == {job: _DONE for job in jobs}
     # ... and the trigger again, with the inputs as they now are, opens nothing more.
     again = triggers.profile_changed(fx.home_root, fx.target)
     assert again.state == triggers.NOTHING and not again.enqueued
-    assert _states(fx, second) == {job: reopened for job in jobs} and _states(fx, default) == {job: _DONE for job in jobs}
+    assert _states(fx, second) == {} and _states(fx, default) == {job: _DONE for job in jobs}
 
 
 def test_the_overview_looks_the_projects_folder_up_once_whatever_the_number_of_jobs(fx: PipelineFixture, spawns: list[str]) -> None:

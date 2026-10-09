@@ -1,7 +1,16 @@
 """0.1.10.7 PL5 (DESIGN 8): what puts a job into the pipeline, the caps on it, and the approvals over the cap.
 
 NO POSTING ENTERS THE PIPELINE BY ITSELF. A (posting, profile) pair is
-queued only when the user engaged with it:
+queued only when the user engaged with it.
+
+0.1.11.9 PJ6: A JOB HAS ONE SET OF STEPS, whichever and however many roles
+tag it. The role of a pair says who asked; it selects nothing. Every trigger
+first finds the role the job's steps are already under (:func:`job_role`)
+and queues THERE, so a second role that asks about the same job gets the
+answer of the first: one tailoring, one re-assessment, one ATS score and one
+label a job. Two pairs of one job in one trigger are one job. The role on a
+job's steps changes only when it is no longer an active role: the job is
+then queued under the role that asks now.
 
 ===============  ==============================================================================
 trigger          the pairs it queues
@@ -72,6 +81,7 @@ from pathlib import Path
 from ...workpad import committed_read_cache
 from ..call_metrics import lane_for
 from . import steps
+from .job_identity import job_identity_for
 from .settings import SOURCE_UNREADABLE, PipelineSetting, pipeline_setting
 from .store import (
     APPROVAL_PENDING,
@@ -196,6 +206,8 @@ class _Item:
     model_target: str | None
     downstream_lanes: Mapping[str, tuple[str, str | None]]
     force: bool = False
+    #: ``store.enqueue``'s: no second set of steps for a job that another writer queued under another role meanwhile.
+    sole: bool = True
 
     def to_json(self) -> dict[str, object]:
         return {"profile_id": self.profile_id, "job_identity": self.job, "step": self.name}
@@ -287,6 +299,7 @@ def _enqueue_items(
         result = store.enqueue(
             item.profile_id, item.job, item.name, input_digest=item.digest, trigger=trigger, lane=item.lane,
             model_target=item.model_target, downstream_lanes=item.downstream_lanes, approval_id=gate, force=item.force,
+            sole=item.sole,
         )
         if result != ENQUEUED:
             unchanged += 1  # another writer got there between the look and the write
@@ -318,6 +331,10 @@ def enqueue_pairs(
     The pipeline switched off, or settings that cannot be read: ``disabled``,
     nothing is queued. A pair that cannot enter the pipeline (no assessment,
     no stored posting text, no such profile) is ``skipped`` with its code.
+
+    0.1.11.9 PJ6: one job is queued once. Each pair is queued under the role
+    the job's steps are already under (:func:`_queue_role`), and a second
+    pair of the same job is dropped.
     """
 
     home_root, target = Path(home_root), Path(target)
@@ -327,6 +344,8 @@ def enqueue_pairs(
     wanted = list(dict.fromkeys(pairs))
     if not wanted:
         return TriggerResult(trigger)
+    queued = _job_pairs(home_root, target, wanted, store)
+    wanted = list(queued)
     ctx = steps.StepContext(home_root, target, setting=setting)
     tailor_model, reassess_model = steps.model_for(ctx, "tailor"), steps.model_for(ctx, "reassess")
     lanes = {"reassess": (lane_for(reassess_model), reassess_model)}
@@ -339,7 +358,7 @@ def enqueue_pairs(
         except Exception as exc:  # noqa: BLE001 - a pair whose inputs cannot be read is skipped with a bounded code, the others go on
             skipped.append(_skip(pair, exc))
             continue
-        items.append(_Item(pair[0], pair[1], "tailor", digest, lane_for(tailor_model), tailor_model, lanes))
+        items.append(_Item(pair[0], pair[1], "tailor", digest, lane_for(tailor_model), tailor_model, lanes, sole=queued[pair]))
     if not items:
         return TriggerResult(trigger, skipped=tuple(skipped))
     opened = store if store is not None else PipelineStore(pipeline_path(home_root, target))
@@ -353,23 +372,20 @@ def enqueue_pairs(
 # --- process now ----------------------------------------------------------------------------
 
 
-@_reads_journal
-def job_role(store: PipelineStore, profile_id: str, job: str) -> str:
-    """0.1.11.9: the role a job's pipeline steps are kept under, for a JOB PAGE that names ``profile_id``.
+def job_role(store: PipelineStore, profile_id: str | None, job: str) -> str | None:
+    """0.1.11.9: the role a job's pipeline steps are kept under; ``profile_id`` when the job has no step yet.
 
-    The steps stay keyed ``(role, job)``, and a job has ONE assessment and ONE resume. So a job that already has
-    step rows under another role is processed and read THERE, whichever role's page asks: one tailoring, one
-    re-assessment, one ATS score and one label a job, never a second set through a second role. ``profile_id`` when
-    the job has no step yet, or has some under it already. One keyed read, nothing written. Used by the job page's
-    two routes (``GET /api/pipeline/job``, ``POST /api/pipeline/process``); :func:`process_now` itself queues the
-    pair it is given.
+    A job has ONE set of steps, so a job that already has some is processed and read THERE, whichever role asks:
+    one tailoring, one re-assessment, one ATS score and one label a job, never a second set through a second
+    role. On a file written before 0.1.11.9 that holds a job under several roles it is the newest set's
+    (``PipelineStore.job_roles``). One keyed read, nothing written.
     """
 
-    held = {step.profile_id for step in store.steps(job=job)}
-    return profile_id if not held or profile_id in held else sorted(held)[0]
+    held = store.job_role(job)
+    return profile_id if held is None else held
 
 
-def stored_job_role(home_root: Path, target: Path, profile_id: str, job: str) -> str:
+def stored_job_role(home_root: Path, target: Path, profile_id: str | None, job: str) -> str | None:
     """:func:`job_role` for a caller with no store at hand; a project with no queue yet has no steps: ``profile_id``."""
 
     path = pipeline_path(Path(home_root), Path(target))
@@ -380,6 +396,54 @@ def stored_job_role(home_root: Path, target: Path, profile_id: str, job: str) ->
         return job_role(store, profile_id, job)
     finally:
         store.close()
+
+
+def _queue_role(
+    home_root: Path, target: Path, store: PipelineStore, profile_id: str, job: str, active: list[frozenset[str] | None]
+) -> tuple[str, bool]:
+    """``(role, sole)``: the role ``job`` is QUEUED under when ``profile_id`` asks, and ``store.enqueue``'s ``sole``.
+
+    The role its steps are under already; ``profile_id`` when it has none. One exception: a job whose steps are
+    under a role that is no longer active (archived or deleted since) is still the user's, so it is queued under
+    the role that asks now (``sole`` false: its old rows stay, and the new, newer set is the job's from then on).
+    ``active``: a one-slot cache of the active roles, read at most once a trigger and only when two roles differ.
+    """
+
+    held = store.job_role(job)
+    if held is None or held == profile_id:
+        return profile_id, True
+    if not active:
+        try:
+            active.append(_active_profile_ids(home_root, target))
+        except Exception:  # noqa: BLE001 - the roles cannot be read: the job stays where its steps are
+            active.append(None)
+    if active[0] is not None and held not in active[0] and profile_id in active[0]:
+        return profile_id, False
+    return held, True
+
+
+def _job_pairs(home_root: Path, target: Path, pairs: Sequence[Pair], store: PipelineStore | None) -> dict[Pair, bool]:
+    """``pairs`` as they are queued: each under its job's role (:func:`_queue_role`), one pair a job, in order.
+
+    ``pair -> sole``. With no queue file yet no job has a step: each job's first pair, as given.
+    """
+
+    path = pipeline_path(home_root, target)
+    opened = store if store is not None else (PipelineStore(path) if path.is_file() else None)
+    found: dict[Pair, bool] = {}
+    seen: set[str] = set()
+    active: list[frozenset[str] | None] = []
+    try:
+        for profile_id, job in pairs:
+            if job in seen:
+                continue
+            seen.add(job)
+            role, sole = (profile_id, True) if opened is None else _queue_role(home_root, target, opened, profile_id, job, active)
+            found[(role, job)] = sole
+    finally:
+        if store is None and opened is not None:
+            opened.close()
+    return found
 
 
 def process_now(
@@ -396,9 +460,15 @@ def process_now(
     The user named this job, so the per-trigger cap does not apply and a job
     waiting for an approval is taken out of it and opened. Raises
     ``StepError`` when the job cannot enter the pipeline.
+
+    0.1.11.9 PJ6: ``profile_id`` says who asked and selects nothing. A job
+    that already has steps is queued under THEIR role (:func:`_queue_role`),
+    so asking again from another role is a no-op while nothing the steps read
+    has changed. The answer's ``profile_id`` is the role the steps are under.
     """
 
     home_root, target = Path(home_root), Path(target)
+    job = job_identity_for(job, home_root=home_root, target=target)
     if not pipeline_setting(home_root, target).enabled:
         # 0.1.11: the pipeline is off (the default): this queues nothing and no model call follows.
         raise steps.StepError(steps.ERROR_PIPELINE_OFF, "the background pipeline is off; set pipeline.enabled in the settings file to use it")
@@ -407,10 +477,13 @@ def process_now(
         return steps.enqueue_job(profile_id, job, force=force, home_root=home_root, target=target, trigger=TRIGGER_PROCESS)
     opened = store if store is not None else PipelineStore(pipeline_path(home_root, target))
     try:
+        with committed_read_cache():
+            profile_id, sole = _queue_role(home_root, target, opened, profile_id, job, [])
         step = opened.step(profile_id, job, "tailor")
         waiting = step is not None and step.state == STATE_AWAITING_APPROVAL
         return steps.enqueue_job(
-            profile_id, job, force=force or waiting, home_root=home_root, target=target, trigger=TRIGGER_PROCESS, store=opened
+            profile_id, job, force=force or waiting, home_root=home_root, target=target, trigger=TRIGGER_PROCESS, store=opened,
+            sole=sole,
         )
     finally:
         if store is None:
@@ -465,20 +538,29 @@ def _weak_fits(home_root: Path, target: Path, pairs: Sequence[Pair]) -> frozense
     """0110-10-02: the ``pairs`` that are a weak fit now (``fit.is_weak_fit``).
 
     The verdict and the fit number are the stored assessment's as it is at
-    this moment; the rank score is the posting read model's row (a pair with
-    no row, or no rank score yet, is never a weak fit). No model, nothing written.
+    this moment; the rank score is the posting read model's (a job with no
+    row, or no rank score yet, is never a weak fit). No model, nothing written.
+
+    0.1.11.9 PJ6: at the JOB's best rank score, the highest any role that
+    tags it has (``job_state``'s rule for the lists). The verdict is the
+    job's and the rank a role's own, so the low score of the role that asked
+    never keeps out a job another role ranks well.
     """
 
     from .. import fit
     from ..quick_assess import read_quick_assessment
 
-    ranks = fit.stored_rank_scores(home_root, target) if pairs else {}
+    ranks: dict[str, int] = {}
+    if pairs:
+        for (_role, job), score in fit.stored_rank_scores(home_root, target).items():
+            if score is not None and score > ranks.get(job, -1):
+                ranks[job] = score
     if not ranks:
         return frozenset()
     setting = fit.fit_setting(home_root, target)
     weak: set[Pair] = set()
     for pair in pairs:
-        rank_score = ranks.get(pair)
+        rank_score = ranks.get(pair[1])
         if rank_score is None:
             continue
         if fit.assessment_is_weak_fit(read_quick_assessment(home_root, target, pair[0], pair[1]), rank_score, setting):
@@ -635,8 +717,10 @@ def profile_changed(home_root: Path, target: Path, profile_id: str | None = None
         store = PipelineStore(path)
         try:
             jobs: dict[Pair, dict[str, Step]] = {}
+            roles = store.job_roles()  # 0.1.11.9 PJ6: a job's ONE set; an older set under another role is not re-opened
             for step in store.steps(profile_id=profile_id):
-                jobs.setdefault((step.profile_id, step.job), {})[step.name] = step
+                if roles.get(step.job) == step.profile_id:
+                    jobs.setdefault((step.profile_id, step.job), {})[step.name] = step
             items: list[_Item] = []
             skipped: list[dict[str, object]] = []
             shared = steps.SharedInputs(ctx)  # 0.1.10.11 S2: what the jobs read alike is read once
@@ -874,6 +958,7 @@ __all__ = [
     "decide",
     "enqueue_pairs",
     "estimate_calls",
+    "job_role",
     "pending_answer",
     "pending_story",
     "process_now",
@@ -881,5 +966,6 @@ __all__ = [
     "rank_calls_today",
     "refund_rank_calls",
     "spend_rank_calls",
+    "stored_job_role",
     "today",
 ]

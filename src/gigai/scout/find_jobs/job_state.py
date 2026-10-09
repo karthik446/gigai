@@ -558,7 +558,15 @@ class JobStateSources:
     def events_for(self, job_identity: str) -> list[Mapping[str, object]]:
         if self._events is None:
             self._events = {} if self._resolved is None else read_application_events(self._resolved)
-        return list(self._events.get(job_identity, ()))
+        found = list(self._events.get(job_identity, ()))
+        if self._events:
+            # 0.1.11.9 RB2: an application on ANY copy of a job posted once per country is the job's.
+            from .job_key import copies_of
+
+            for copy in copies_of(self._home_root, job_identity):
+                if copy != job_identity:
+                    found.extend(self._events.get(copy, ()))
+        return found
 
     def _store(self, kind: str, resume: str) -> Path | None:
         if kind not in self._roots:
@@ -588,6 +596,11 @@ class JobStateSources:
         directory = self._store(kind, resume_key(None) if pasted else JOB_FOLDER)
         if directory is None:
             return None
+        if not pasted:
+            # 0.1.11.9 RB2: any copy of a job posted once per country reads the job's one record.
+            from .job_key import job_key
+
+            job_identity = job_key(self._home_root, self._target, job_identity)
         if directory not in self._names:
             self._names[directory] = _stored_names(directory)
         digest = _identity_digest(job_identity)

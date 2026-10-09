@@ -2451,11 +2451,13 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
         schema_version="scout-pipeline-job:1",
         params=(
             _q("job_identity", "string", "The job's identity: the posting's link (or `text:sha256:...`).", required=True),
-            _q("profile_id", "string", "The profile the job was processed for.", required=True),
+            _q("profile_id", "string", "The role whose page asks. Optional and selects nothing: a job has one pipeline, whichever role asks."),
         ),
         errors=(_UNKNOWN_KEY, (422, "invalid_value"), _NO_TARGET),
         description=(
-            "For a job page. `steps`: the job's steps in order (tailor, reassess, ats, label), each with its state, the model "
+            "For a job page. A job has ONE pipeline, whichever and however many roles tag it; `profile_id` in the answer is "
+            "the role that asked for it first (the one named, or null, when the job never entered the pipeline). "
+            "`steps`: the job's steps in order (tailor, reassess, ats, label), each with its state, the model "
             "target it runs with, why it waits and `last_run`, the numbers of its last attempt (model, tokens, seconds; null "
             "before the first). An empty list: the job never entered the pipeline (`state` null). `requirements_met`: what the "
             "job's own assessment (`base`) and the assessment of the tailored resume (`tailored`) found met; each null until it "
@@ -2501,8 +2503,8 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
         },
         schema_version="scout-pipeline-process:1",
         params=(
-            _b("job_identity", "string", "The posting's link (a job this profile already has an assessment for).", required=True),
-            _b("profile_id", "string", "The profile (default: the selected profile)."),
+            _b("job_identity", "string", "The posting's link (a job that already has an assessment).", required=True),
+            _b("profile_id", "string", "The role that asks (default: the selected role). Recorded on a job's first steps; it selects nothing."),
             _b("force", "boolean", "true: tailor again even when nothing the tailoring reads has changed."),
         ),
         errors=(
@@ -2734,10 +2736,12 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
             "assessment_not_stored) also carries `model_call_started`, `may_have_used_tokens`, `fresh_assessment_stored` and "
             "`next_action`. A posting whose assessment is current "
             "is left out (`counts.already_current`) unless `again`; `not_found` lists named postings that are not in the stored "
-            "postings. NAMED POSTINGS (0.1.11.8): a job in `jobs` need not be in a profile's list. One the company index holds "
-            "(GET /api/search lists it) is found by its address and assessed as the default profile, or as `profile_id`: "
-            "`question.text` says so, its row has `profiles: []` and `profile_id` is that profile, and the assessment is stored "
-            "under it like any other. An address that is the system's public job page and not the stored URL names the stored "
+            "postings. NAMED POSTINGS (0.1.11.8): a job in `jobs` need not be in a role's list. One the company index holds "
+            "(GET /api/search lists it) is found by its address and assessed all the same, once, as the job it is "
+            "(0.1.11.9: no role is chosen; `profile_id`, or the default role, is only recorded on the assessment as the role "
+            "that asked): `question.text` says it is in no role's list, its row has `profiles: []` and no `tags`, and the "
+            "assessment is the job's, stored like any other. A copy of a job posted once per country is assessed as the job: "
+            "one assessment whichever copy is named. An address that is the system's public job page and not the stored URL names the stored "
             "posting; the rows and `question.yes` carry the stored identity. Only a URL no stored board holds is `not_found`. "
             "`nothing_to_assess` when nothing is left. A posting whose rank score is below `fit.assess_min_rank` (50; one "
             "not ranked yet is not) is left out of the batch and counted (`counts.low_rank_skipped`); `low_rank` is then the "

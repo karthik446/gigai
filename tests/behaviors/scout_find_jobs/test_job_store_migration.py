@@ -20,6 +20,7 @@ resolve; and that an unfiltered list of the stores does not show a migrated job 
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
 import hashlib
 import json
 from pathlib import Path
@@ -33,9 +34,13 @@ from gigai.application_events import record_application
 from gigai.cli import cli
 from gigai.scout import job_store_migration as migration
 from gigai.scout import jobs_folder, tailored_resume
+from gigai.scout.find_jobs.ats_board_clients import BoardCache
+from gigai.scout.find_jobs.company_index import CompanyIndex, board_list_url, index_stamp, refresh_company
+from gigai.scout.find_jobs.job_key import copies_of
+from gigai.scout.find_jobs.job_key import job_key as job_identity_key
 from gigai.scout.find_jobs.discovery.storage import project_id
 from gigai.scout.job_store_layout import JOB_FOLDER, job_digest
-from gigai.scout.quick_assess import _read_stored, job_quick_assess_path, list_quick_assessments
+from gigai.scout.quick_assess import _read_stored, job_quick_assess_path, list_quick_assessments, quick_assess_dir, quick_assess_path
 from gigai.scout.resume_pdf import job_store_layout_path
 from gigai.scout.resumes_folder import job_key, job_store_key
 from gigai.scout.suggestions import job_suggestions_path, proposed_resume_path
@@ -451,3 +456,119 @@ def test_a_resume_list_reads_the_kept_resume_of_each_job(home: Home, monkeypatch
     home.apply()
     assert len(list_tailored_resumes(home.home, home.target)) == 5
     assert sorted(seen) == sorted(home.job_file("resumes", name) for name in kept)  # migrated: the per-job folder alone
+
+
+# --- 0.1.11.9 RB2: a job posted more than once keeps ONE posting's records ---------------------------------------
+
+
+def _lever(slug: str, n: int, title: str, location: str, minutes: int) -> dict[str, object]:
+    """One made-up Lever posting; every one has the same description, so two with one title are copies of one job."""
+
+    return {
+        "id": f"{slug}-{n:05d}", "text": title, "hostedUrl": f"https://jobs.lever.co/{slug}/{slug}-{n:05d}",
+        "categories": {"location": location}, "country": "US" if location.endswith(("CO", "TX")) else None, "workplaceType": "remote",
+        "descriptionPlain": "Own the platform services. Requirements: Python in production; Kubernetes.",
+        "createdAt": int((datetime(2026, 10, 1, 12, 0, tzinfo=UTC) + timedelta(minutes=minutes)).timestamp() * 1000),
+    }
+
+
+def _url(n: int) -> str:
+    return f"https://jobs.lever.co/copies-example/copies-example-{n:05d}"
+
+
+def test_a_job_posted_more_than_once_keeps_one_postings_records_and_the_others_are_superseded(tmp_path: Path) -> None:
+    built = Home(build_gig_with_resume(tmp_path, resume_text=RESUME))
+    a, b = built.a, built.b
+    # One company file: "Staff Engineer" in Denver (1: its US posting, the canonical one although the newest), Estonia
+    # (2) and Latvia (3); "Staff Engineer, Payments" in Estonia (4, the earliest) and Poland (5).
+    cache = BoardCache(built.home / "cache" / "scout" / "ats-boards", validator_source=lambda _provider, _url: None)
+    jobs = [
+        _lever("copies-example", 1, "Staff Engineer", "Denver, CO", 50), _lever("copies-example", 2, "Staff Engineer", "Remote Estonia", 10),
+        _lever("copies-example", 3, "Staff Engineer", "Remote Latvia", 20), _lever("copies-example", 4, "Staff Engineer, Payments", "Remote Estonia", 1),
+        _lever("copies-example", 5, "Staff Engineer, Payments", "Remote Poland", 2),
+    ]
+    cache.store("lever", board_list_url("lever", "copies-example"), body=json.dumps(jobs).encode("utf-8"), etag=None, last_modified=None, marker=None)
+    refresh_company(CompanyIndex.for_home(built.home), cache, ats="lever", slug="copies-example", observed_at=index_stamp(datetime(2026, 10, 2, 12, 0, tzinfo=UTC)))
+    us, estonia, latvia, payments, payments_pl = (_url(n) for n in range(1, 6))
+    assert copies_of(built.home, latvia) == (us, estonia, latvia) and copies_of(built.home, payments_pl) == (payments, payments_pl)
+
+    # "Staff Engineer": role B assessed the US posting (the newest record); role A assessed the Estonia copy and has a
+    # stored resume for it; role B assessed the Latvia copy too. The copy with a RESUME is the job's: Estonia.
+    built.assessed(b, us, _DAY3)
+    built.assessed(a, estonia, _DAY1)
+    built.resume(a, estonia, _DAY1_NOON)
+    built.assessed(b, latvia, _DAY2)
+    # "Staff Engineer, Payments": both copies only assessed (the Poland one by both roles): the first in the canonical
+    # order is the job's, the earliest posted. Role A's is the only record of it.
+    built.assessed(a, payments, _DAY1)
+    built.assessed(a, payments_pl, _DAY2)
+    built.assessed(b, payments_pl, _DAY3)
+    built.save_index()
+    assert job_identity_key(built.home, built.target, us) == estonia and job_identity_key(built.home, built.target, payments_pl) == payments
+
+    store = quick_assess_dir(built.home, built.target)
+
+    def read(job: str) -> tuple[object, object]:
+        """What the store's own path rule reads for ``job`` under role B: the record's posting, role and time."""
+
+        path = quick_assess_path(built.home, built.target, b, job)
+        item = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else None
+        resume = tailored_resume.tailored_resume_path(built.home, built.target, b, job)
+        return (None if item is None else (item["job"]["job_identity"], item["resume"]["profile_id"], item["updated_at"])), resume.exists()
+
+    def only_in_role_folders() -> list[str]:
+        """The jobs a LIST of the store adds from the roles' folders (``role_records``): one a job, never a superseded copy."""
+
+        found = migration.role_records(store, home_root=built.home, target=built.target)
+        return sorted(json.loads(path.read_text(encoding="utf-8"))["job"]["job_identity"] for path in found)
+
+    # Not migrated: every copy already reads the kept posting's record (the role's own file), and lists hold one a job.
+    before = {job: read(job) for job in (us, estonia, latvia, payments, payments_pl)}
+    assert before[us] == before[estonia] == before[latvia] == ((estonia, a, _DAY1), True)
+    assert before[payments] == before[payments_pl] == ((payments, a, _DAY1), False)
+    assert only_in_role_folders() == sorted([estonia, payments])
+    roles_before = _profile_folders(built)
+    scout_before = _tree(built.home / "scout")
+
+    dry = built.apply(apply=False)
+
+    assert dry.dry_run and _tree(built.home / "scout") == scout_before and not migration.record_path(built.home).exists()
+    counts = dry.counts
+    assert counts["jobs"] == 2 and counts["jobs_posted_more_than_once"] == {"jobs": 2, "superseded_postings": 3, "superseded_files": 8}
+    # 6 assessment files, 2 jobs: 2 kept, 4 superseded (3 under another posting, none under another role here).
+    assert counts["assessments"] == {"files": 6, "jobs": 2, "kept": 2, "superseded": 4}
+    assert counts["suggestions"] == {"files": 6, "jobs": 2, "kept": 2, "superseded": 4} and counts["resumes"] == {"files": 1, "jobs": 1, "kept": 1, "superseded": 0}
+    assert counts["jobs_held_by_several_roles"] == 0, "within the kept posting one role holds each job: no role rule ran"
+    report = {item["job"]: {copy["job"]: copy["files"] for copy in item["superseded"]} for item in dry.to_json()["copies"]}
+    assert set(report) == {job_digest(estonia), job_digest(payments)}
+    assert set(report[job_digest(estonia)]) == {job_digest(us), job_digest(latvia)} and set(report[job_digest(payments)]) == {job_digest(payments_pl)}
+    assert sorted(report[job_digest(payments)][job_digest(payments_pl)]) == sorted(
+        f"{built.project}/{store}/{role}/{job_digest(payments_pl)}.json" for store in ("quick_assess", "suggestions") for role in (a, b)
+    )
+    assert dry.to_json()["copies_rule"] == migration.COPIES_RULE
+    assert any(line.startswith("Jobs posted more than once with records under more than one posting: 2;") and "3 other posting(s), 8 file(s) superseded" in line for line in dry.lines())
+
+    done = built.apply()
+
+    # ONE of each a job, under the kept posting's key; nothing under another copy's; no identity inside was rewritten.
+    job_files = sorted(path.relative_to(built.project_dir).as_posix() for store in ("quick_assess", "resumes", "suggestions") for path in (built.project_dir / store / JOB_FOLDER).glob("*"))
+    assert job_files == sorted(
+        [f"{store}/job/{job_digest(job)}.json" for store in ("quick_assess", "suggestions") for job in (estonia, payments)]
+        + [f"resumes/job/{job_digest(estonia)}.json", f"resumes/job/{job_digest(estonia)}.md"]
+    )
+    kept = json.loads(job_quick_assess_path(built.home, built.target, estonia).read_text(encoding="utf-8"))
+    assert kept["job"]["job_identity"] == estonia and kept["resume"]["profile_id"] == a
+    assert done.counts["files"] == {"to_copy": 6, "copied": 6, "already": 0} and done.counts["deleted"] == 0
+    assert _profile_folders(built) == roles_before, "every role's folder is as it was: the superseded records stay"
+    # The same record is read after as before, by every copy; the lists hold one a job.
+    assert {job: read(job) for job in before} == before
+    assert only_in_role_folders() == [], "a superseded copy's record is not listed as a job of its own"
+    # The record says which postings were superseded, and by which rule.
+    record = json.loads(migration.record_path(built.home).read_text(encoding="utf-8"))["projects"][built.project]["jobs"]
+    assert set(record) == {job_digest(estonia), job_digest(payments)}
+    assert record[job_digest(estonia)]["copies"]["rule"] == migration.COPIES_RULE and record[job_digest(estonia)]["kept_profile_id"] == a
+    assert [copy["job"] for copy in record[job_digest(estonia)]["copies"]["superseded"]] == sorted([job_digest(us), job_digest(latvia)])
+    # A second run copies nothing and changes nothing.
+    tree = _tree(built.home / "scout")
+    again = built.apply()
+    assert again.counts["files"] == {"to_copy": 0, "copied": 0, "already": 6} and _tree(built.home / "scout") == tree

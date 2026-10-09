@@ -5,9 +5,12 @@ index, whose title is in no profile's list. ``jobs assess <its URL>`` answered
 ``nothing_to_assess`` / ``not_found`` with exit 0 and no model call: the named
 URL was looked up in the profiles' read model only.
 
-- a named URL the company index holds and no profile's list does is assessed AS
-  THE DEFAULT PROFILE (``--profile`` names another), through the same path as a
-  list posting; the question says so and nothing is assessed without the yes;
+- a named URL the company index holds and no role's list does is assessed
+  through the same path as a list posting; the question says so and nothing is
+  assessed without the yes. 0.1.11.9: it is the JOB that is assessed, ONCE. No
+  role is chosen for it: ``--profile`` (or the default role) is only recorded on
+  the assessment as the role that asked, and the one record is read whichever
+  role is named;
 - for each of the nine systems, the stored posting URL, its tracking-parameter /
   trailing-slash / host-case spellings and the system's public job page address
   all name the stored posting, with no model call;
@@ -36,6 +39,8 @@ from gigai.scout.quick_assess import read_quick_assessment
 
 from tests.support.posting_fixtures import NOW, TITLE_BOTH, PostingsFixture, build_postings_fixture, days_ago, job_url, lever_job, posting_text
 
+#: What the question says of a named posting no role's list holds (0.1.11.9: no "as the default profile").
+NO_ROLE_SENTENCE = "1 is in no role's list: the job is assessed all the same, once."
 #: A title in no profile's list.
 TITLE = "Office Coordinator"
 BOARD = "quiet-harbor"
@@ -184,11 +189,12 @@ def test_the_stored_url_of_each_system_resolves_without_a_model_call(fx: Posting
     assert ask["counts"] == {**ask["counts"], "selected": 1, "to_assess": 1, "not_found": 0, "batch": 1}
     (row,) = ask["postings"]["rows"]
     assert row["job_identity"] == identity and row["title"] == TITLE and row["state"] == "not_assessed"
-    # No profile's list holds it: it is assessed as the default profile, and the question says so.
-    assert row["profile_id"] == fx.default_profile_id and row["profiles"] == []
-    label = _default_label(ask)
+    # No role's list holds it: the job is assessed all the same, once, and the question says so. No role is chosen:
+    # the default one is only recorded as the role that asked, and the row has no tags.
+    assert row["profile_id"] == fx.default_profile_id and row["profiles"] == [] and row["tags"] == []
     assert ask["question"]["by_profile"] == [{"profile_id": fx.default_profile_id, "count": 1}]
-    assert f"as {label}" in ask["question"]["text"] and "no profile's list" in ask["question"]["text"]
+    assert ask["question"]["text"].endswith(NO_ROLE_SENTENCE), ask["question"]["text"]
+    assert "default profile" not in ask["question"]["text"] and "assessed as" not in ask["question"]["text"]
     assert ask["question"]["yes"]["api"]["body"] == {"approve": True, "jobs": [identity]}
     assert ask["model_input_summary"]["profiles"][0]["profile_id"] == fx.default_profile_id
     assert read_quick_assessment(fx.home_root, fx.target, fx.default_profile_id, identity) is None
@@ -219,7 +225,7 @@ def test_a_public_address_of_a_posting_a_profile_holds_is_that_profiles_row(fx: 
         assert ask["question"]["text"] == held["question"]["text"], spelled
 
 
-def test_the_terminal_asks_first_and_names_the_profile(fx: PostingsFixture, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_the_terminal_asks_first_and_says_the_job_is_in_no_roles_list(fx: PostingsFixture, monkeypatch: pytest.MonkeyPatch) -> None:
     url = _seed(fx, "rippling")
     _no_model(fx, monkeypatch)
 
@@ -228,12 +234,12 @@ def test_the_terminal_asks_first_and_names_the_profile(fx: PostingsFixture, monk
     assert result.exit_code == 0, result.output
     label = _default_label(_json(fx, url))
     assert f"Assess 1 posting ({label} 1)?" in result.output
-    assert f"1 is in no profile's list: assessed as {label} (the default profile)." in result.output
+    assert NO_ROLE_SENTENCE in result.output and "default profile" not in result.output
     assert "Nothing was assessed. Yes: run the same command with --yes." in result.output
     assert TITLE in result.output and "not in the stored postings" not in result.output
 
 
-def test_yes_assesses_the_index_only_posting_as_the_default_profile(fx: PostingsFixture) -> None:
+def test_yes_assesses_the_index_only_posting_once_as_the_job(fx: PostingsFixture) -> None:
     url = _seed(fx, "rippling")
     # Rippling's list has no description: the stored detail is what the model reads.
     from gigai.scout.find_jobs import providers
@@ -252,15 +258,19 @@ def test_yes_assesses_the_index_only_posting_as_the_default_profile(fx: Postings
     stored = read_quick_assessment(fx.home_root, fx.target, fx.default_profile_id, url)
     assert stored is not None and stored.origin == "job_page" and stored.job.fetch_kind == "ats_board"
     assert _TEXT in (stored.posting_text or "")
-    # The second profile was not asked for: nothing is stored under it.
-    assert read_quick_assessment(fx.home_root, fx.target, fx.second_profile_id, url) is None
-    # Assessed and current: the same command has nothing left, and it is not an error.
-    nothing = _json(fx, url)
-    assert nothing["status"] == "nothing_to_assess" and nothing["counts"]["already_current"] == 1 and nothing["not_found"] == []
-    assert [item["state"] for item in nothing["postings"]["rows"]] == [] and fx.base.model.calls == calls + 1
+    # 0.1.11.9: it is the JOB's assessment. One file, in the per-job folder; the same record whichever role reads it.
+    store = Path(stored.stored_path).parent.parent
+    assert sorted(path.relative_to(store).as_posix() for path in store.rglob("*.json")) == [f"job/{Path(stored.stored_path).name}"]
+    assert read_quick_assessment(fx.home_root, fx.target, fx.second_profile_id, url) == stored
+    # Assessed and current: the same command has nothing left, and it is not an error. Also when another role is named:
+    # a role selects nothing, so there is no second assessment to make.
+    for more in ((), ("--profile", fx.second_profile_id)):
+        nothing = _json(fx, url, *more)
+        assert nothing["status"] == "nothing_to_assess" and nothing["counts"]["already_current"] == 1 and nothing["not_found"] == [], more
+        assert [item["state"] for item in nothing["postings"]["rows"]] == [] and fx.base.model.calls == calls + 1, more
 
 
-def test_profile_names_the_profile_an_index_only_posting_is_assessed_as(fx: PostingsFixture, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_profile_only_records_the_role_that_asked_for_an_index_only_posting(fx: PostingsFixture, monkeypatch: pytest.MonkeyPatch) -> None:
     url = _seed(fx, "gem")
     _no_model(fx, monkeypatch)
 
@@ -268,8 +278,9 @@ def test_profile_names_the_profile_an_index_only_posting_is_assessed_as(fx: Post
 
     assert ask["status"] == "ask" and ask["question"]["by_profile"] == [{"profile_id": fx.second_profile_id, "count": 1}]
     assert ask["postings"]["rows"][0]["profile_id"] == fx.second_profile_id
-    second = next(item["label"] for item in ask["profiles"] if item["profile_id"] == fx.second_profile_id)
-    assert f"assessed as {second}." in ask["question"]["text"] and "default profile" not in ask["question"]["text"]
+    # The same question as with no role named: the role is recorded, it selects nothing.
+    assert ask["question"]["text"].endswith(NO_ROLE_SENTENCE) and "assessed as" not in ask["question"]["text"]
+    assert ask["postings"]["rows"][0]["tags"] == []
 
 
 def test_a_url_in_no_board_is_not_found_and_the_command_exits_non_zero(fx: PostingsFixture, monkeypatch: pytest.MonkeyPatch) -> None:

@@ -147,7 +147,9 @@ from .pipeline.store import PipelineStore, PostingBuild, PostingRecord, RunAsses
 MATCH_VERSION = "posting-match:10"
 # :3 is 0110-10-02: a row carries its fit number, and a weak fit has its own state.
 # :4 is 0.1.11.2: a match with no row about the job has the state ``thin_posting`` (stored rows get their facts again).
-FACTS_VERSION = "posting-facts:4"
+# :5 is 0.1.11.9: a row's assessment and resume are the JOB's (whichever role's row it is, and whichever copy of a
+# job posted once per country it is: ``find_jobs.job_key``), so stored rows get their facts again, once.
+FACTS_VERSION = "posting-facts:5"
 
 STATE_ACTIVE = "active"
 BUILD_FULL = "matched"
@@ -426,7 +428,12 @@ def _facts_stamp(home_root: Path, target: Path, view: ProfileView, rank_model: s
     ]
     # 0.1.11.9 PJ2: a job's assessment and resume are in the store's per-job folder (and, on a home that was not
     # migrated, still in ANY role's folder): every folder of those two stores counts.
-    stores += [_stat(folder) for name in ("quick_assess", "resumes") for folder in _job_store_folders(root / name)]
+    # 0.1.11.9 PJ6: the label, the ATS record and the tailored-variant assessment are the job's too.
+    stores += [
+        _stat(folder)
+        for name in ("quick_assess", "resumes", "label", "ats", "quick_assess_tailored")
+        for folder in _job_store_folders(root / name)
+    ]
     try:
         watched = [_stat(path) for path in _watched_files(home_root, target)]
     except Exception:  # noqa: BLE001 - an unbound folder has nothing to watch; the stores' own stamps still count
@@ -498,7 +505,8 @@ class _Facts:
         # jobs a role's list holds is unchanged).
         self._assessed = frozenset().union(*(_stored_names(folder) for folder in _job_store_folders(root / "quick_assess")))
         self._tailored = frozenset().union(*(_stored_names(folder) for folder in _job_store_folders(root / "resumes")))
-        self._labelled = _stored_names(root / "label" / view.profile_id)
+        # 0.1.11.9 PJ6: a job has ONE label (``label/job``; a role's folder on a home written before), whichever role asked.
+        self._labelled = frozenset().union(*(_stored_names(folder) for folder in _job_store_folders(root / "label")))
         # ``events={}``: application events are journal records, read when a response is built, not cached here.
         self._sources = JobStateSources(home_root=home_root, target=target, resolved=resolved, events={})
         self._rank_dir = cache_dir(home_root)
@@ -551,14 +559,18 @@ class _Facts:
     def of(self, row: PostingRecord) -> PostingRecord:
         """``row`` with its facts as the stores hold them now."""
 
+        from .find_jobs.job_key import job_key
         from .find_jobs.job_state import NOT_ASSESSED, _identity_digest, derive_job_state, quick_assessment_fact
         from .fit import fit_percent, plain_percent, shown_state, thin_state
         from .pipeline.steps import read_label
 
         profile_id = self.view.profile_id
-        key = _identity_digest(row.job)
-        item = self._sources.quick_assessment(row.job, profile_id) if key in self._assessed else None
-        tailored = key in self._tailored and self._sources.tailored_at(row.job, profile_id)[0]
+        # 0.1.11.9 RB2: a copy of a job posted once per country shows the JOB's assessment and resume: they are
+        # kept under one identity for all its copies (``job_key``; the row's own for a posting with no copy).
+        kept = job_key(self.home_root, self.target, row.job, board=row.board)
+        key = _identity_digest(kept)
+        item = self._sources.quick_assessment(kept, profile_id) if key in self._assessed else None
+        tailored = key in self._tailored and self._sources.tailored_at(kept, profile_id)[0]
         state, stale, assessed_at, met, requirements, questions = NOT_ASSESSED, None, None, None, None, 0
         fit: int | None = None
         if item is not None:

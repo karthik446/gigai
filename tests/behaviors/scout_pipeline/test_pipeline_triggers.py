@@ -571,17 +571,19 @@ def _entry(fx: PipelineFixture):
 
 def test_a_roles_own_search_settings_change_reopens_nothing(fx: PipelineFixture) -> None:
     """0.1.11.9: ONE set of candidate facts. A role's own location, work mode and countries are search filters only;
-    no assessment reads them, so changing them re-opens no step of either role. (0110-022 to 0.1.11.8: that role's
+    no assessment reads them, so changing them re-opens no step of the job. (0110-022 to 0.1.11.8: that role's
     re-assessments re-opened. That a changed CANDIDATE setting re-opens the re-assessment and not the tailoring is
-    the next test's.)"""
+    the next test's.)
+
+    0.1.11.9 PJ6: the job both roles ask for has ONE set of steps, under the role that asked first."""
 
     default, second = two_profiles(fx.gig)
     job = _job(1)
     for profile_id in (default, second):
         _ask(fx, job, profile_id=profile_id)
-        triggers.process_now(fx.home_root, fx.target, profile_id, job)
+        assert triggers.process_now(fx.home_root, fx.target, profile_id, job)["profile_id"] == default
     assert _runner(fx).drain().state == DRAIN_RAN
-    assert _steps(fx, job, default) == _DONE and _steps(fx, job, second) == _DONE
+    assert _steps(fx, job, default) == _DONE and _steps(fx, job, second) == {}
     calls = fx.model.calls
     assert triggers.profile_changed(fx.home_root, fx.target, second).state == "nothing"  # nothing changed: nothing re-opens
 
@@ -590,7 +592,7 @@ def test_a_roles_own_search_settings_change_reopens_nothing(fx: PipelineFixture)
     )
     assert updated.exit_code == 0, updated.output
 
-    assert _steps(fx, job, second) == _DONE and _steps(fx, job, default) == _DONE
+    assert _steps(fx, job, second) == {} and _steps(fx, job, default) == _DONE
     assert {step.trigger for step in _all_steps(fx)} == {"process_now"}  # nothing was re-opened by the update
     assert triggers.profile_changed(fx.home_root, fx.target).state == "nothing"
     assert _runner(fx).drain().state == DRAIN_IDLE and fx.model.calls == calls  # nothing to run, no model call

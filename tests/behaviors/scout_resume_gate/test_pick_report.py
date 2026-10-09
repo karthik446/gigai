@@ -427,7 +427,10 @@ def test_the_report_selects_each_posting_with_the_rows_its_assessment_cites(buil
 
     home = built / "home"
     path = sorted(home.glob("scout/*/quick_assess/job/*.json"))[0]
-    profile_id = next(p.name for p in (home / "scout").glob("*/quick_assess_tailored/profile_*") if p.is_dir())
+    # 0.1.11.9 PJ6: the tailored-variant assessments are the job's (`quick_assess_tailored/job`), no role's folder
+    # names the role any more: the assessment itself says which role asked.
+    profile_id = json.loads(path.read_bytes())["resume"]["profile_id"]
+    assert profile_id.startswith("profile_") and (home / "scout" / path.parents[2].name / "quick_assess_tailored" / "job").is_dir()
     original, stat = path.read_bytes(), path.stat()
     stored = tm.stored_master(home, home_scout_target(home))
     assert stored is not None

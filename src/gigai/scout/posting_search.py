@@ -133,7 +133,7 @@ next to ids, counts, codes and the profile tags, and nothing the user wrote.
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from functools import lru_cache
 from pathlib import Path
@@ -147,6 +147,7 @@ from .evaluated_models import notice_lines
 from .assess_preview import model_input_summary, summary_lines
 from .data_labels import ENVELOPE_KEY, PUBLIC_UNTRUSTED, UNTRUSTED_TEXT_RULE, labels_envelope
 from .find_jobs.canonical_job import canonical_order
+from .find_jobs.job_key import BoardPosting, board_postings, copies_of, job_key
 from .find_jobs.job_copies import (
     PLACE_OTHER,
     PLACE_UNCLEAR,
@@ -155,7 +156,6 @@ from .find_jobs.job_copies import (
     copy_key,
     distinct_locations,
     locations_text,
-    place_of,
     us_only_default,
 )
 from .pipeline.busy import LiveBatch, assess_batch
@@ -284,69 +284,23 @@ def _index_words(home_root: Path, rows: Iterable[PostingRecord]) -> dict[str, st
     return found
 
 
-@dataclass(frozen=True, slots=True)
-class _Place:
-    """What the company index says of one posting, for US only and the copies."""
-
-    title: str
-    company: str
-    location: str
-    #: ``job_copies.place_of``: ``us``, ``unclear`` or ``other``.
-    place: str
-    #: The digest of the title and the description (``None``: no description stored, never merged).
-    content: str | None
-    posting_id: str
-
-
-#: ``(home, board) -> (the company file's stamp, {job: its place})``.
-_PLACES: dict[tuple[str, str], tuple[object, dict[str, _Place]]] = {}
-_PLACES_LOCK = threading.Lock()
-_PLACES_BOARDS = 4096
+#: What the company index says of one posting, for US only and the copies (``job_key.BoardPosting``: the title, the
+#: company, the location, its place, the description's digest, the posting id).
+_Place = BoardPosting
 
 
 def _places(home_root: Path, rows: Iterable[PostingRecord]) -> dict[str, _Place]:
     """``job -> its place`` (title, company, location, where, description digest) from the company index.
 
     One company file per board that has a row here, read once and kept while the file's stamp (mtime, size) does not
-    move, so a server reads a board again only after an update wrote it. A board whose file cannot be read gives
-    nothing: its postings are kept by US only and are rows of their own.
+    move, so a server reads a board again only after an update wrote it (``job_key.board_postings``: the same read
+    names a job's copies for the stores). A board whose file cannot be read gives nothing: its postings are kept by
+    US only and are rows of their own.
     """
 
-    from .find_jobs.company_index import CompanyIndex
-    from .find_jobs.contracts import FindJobsContractError, normalize_url
-
-    boards = sorted({row.board for row in rows})
-    index = CompanyIndex.for_home(Path(home_root))
     found: dict[str, _Place] = {}
-    for board in boards:
-        try:
-            ats, slug = postings.split_board(board)
-            stat = postings._stat(index.path(ats, slug))
-        except ValueError:
-            continue  # not a board the index can name: it has no file
-        key = (str(home_root), board)
-        with _PLACES_LOCK:
-            kept = _PLACES.get(key)
-        if kept is None or kept[0] != stat:
-            entry = index.read(ats, slug)
-            facts: dict[str, _Place] = {}
-            if entry is not None:
-                company = entry.company if type(entry.company) is str else ""
-                for posting_id, posting in entry.postings.items():
-                    try:
-                        job = normalize_url(posting.url)
-                    except FindJobsContractError:
-                        continue
-                    facts[job] = _Place(
-                        posting.title, company, posting.location, place_of(posting.location, posting.countries),
-                        posting.content_sha256 or None, posting_id,
-                    )
-            kept = (stat, facts)
-            with _PLACES_LOCK:
-                if len(_PLACES) >= _PLACES_BOARDS and key not in _PLACES:
-                    del _PLACES[next(iter(_PLACES))]
-                _PLACES[key] = kept
-        found.update(kept[1])
+    for board in sorted({row.board for row in rows}):
+        found.update(board_postings(Path(home_root), board))
     return found
 
 
@@ -458,11 +412,15 @@ class _Selection:
         rows = store.postings(jobs=jobs, live=False) if jobs is not None else store.postings(live=False)
         # 0.1.11.6: ``removed`` None (a read of named postings) takes a posting whether its board still lists it or not.
         groups = _grouped(row for row in rows if removed is None or (row.removed_at is not None) == removed)
+        named = jobs is not None
+        wanted_roles = set(self.profile_ids)
+        #: 0.1.11.9 RB2: the copies of one job are ONE row tagged with the roles that found ANY copy, so a role filter
+        #: judges the row (after the collapse), not each posting.
+        filter_rows = bool(wanted_roles) and collapse and not named
         if self.hidden_profiles and not self.profile_ids:
             groups = {}  # only profiles with no live rows were asked for: nothing of an active profile is shown instead
-        elif self.profile_ids:
-            wanted = set(self.profile_ids)
-            groups = {job: group for job, group in groups.items() if any(row.profile_id in wanted for row in group)}
+        elif wanted_roles and not filter_rows:
+            groups = {job: group for job, group in groups.items() if any(row.profile_id in wanted_roles for row in group)}
         # 0.1.11.9: a role is a TAG. ``profile_ids`` filters the jobs (above: the ones a named role found); it never
         # picks whose row a job is shown by. That is the best tag's, so the state is the job's own.
         shown = [(group, _shown(group)) for group in groups.values()]
@@ -474,7 +432,13 @@ class _Selection:
         #: the list leaves out all use it.
         self.applications = dict(_applications(refreshed.resolved))
         applications = self.applications
-        named = jobs is not None
+        if applications:
+            # 0.1.11.9 RB2: an application on ANY copy of a job posted once per country is the job's: every copy's
+            # row says so, also when the copy applied to is one these filters do not select (the company index names
+            # the copies; only the boards of the jobs applied to are read for it).
+            for job, applied in list(applications.items()):
+                for copy in copies_of(home_root, job):
+                    applications.setdefault(copy, dict(applied))
 
         def low(row: PostingRecord) -> bool:
             return fit_rules.is_ranked_low(row.state, row.rank_score, setting)
@@ -495,10 +459,18 @@ class _Selection:
             if us_only:
                 # 0.1.11.8 N1: only a posting clearly outside the US is left out; one Scout cannot place (or with no file) stays.
                 kept = [pair for pair in shown if pair[1].job not in places or places[pair[1].job].place != PLACE_OTHER]
-                self.us_only_left_out = len(shown) - len(kept)
+                # Counted for the roles the call filters by (their own postings outside the US), as before the role
+                # filter moved after the collapse.
+                held = {id(pair) for pair in kept}
+                self.us_only_left_out = sum(
+                    1 for pair in shown
+                    if id(pair) not in held and (not filter_rows or any(item.profile_id in wanted_roles for item in pair[0]))
+                )
                 shown = kept
             if collapse:
                 shown = self._collapsed(shown, places, applications)
+        if filter_rows:
+            shown = [(group, row) for group, row in shown if any(item.profile_id in wanted_roles for item in group)]
         shown = [
             (group, row) for group, row in shown
             if _wanted(row, states, setting, applications) or row.state == weak or row.job in applications
@@ -556,7 +528,9 @@ class _Selection:
                     applied = next((applications[pair[1].job] for pair in members if pair[1].job in applications), None)
                     if applied is not None:
                         applications[canonical] = dict(applied)
-            rows.append(members[0])
+                rows.append((_tags_of_copies(members), members[0][1]))
+            else:
+                rows.append(members[0])
         return rows
 
     def copies_json(self, row: PostingRecord, text: PostingText | None) -> dict[str, object]:
@@ -590,6 +564,27 @@ class _Selection:
             }
             for view in self.views
         ]
+
+
+def _tags_of_copies(members: Sequence[tuple[Sequence[PostingRecord], PostingRecord]]) -> list[PostingRecord]:
+    """0.1.11.9 RB2: the tags of a row that stands for several copies: the roles that found ANY copy.
+
+    The canonical posting's own tags first, as they are; then each role that found only another copy, once, by its
+    best rank score there (a role's tag row of that copy, numbered after the canonical posting's).
+    """
+
+    group = list(members[0][0])
+    tagged = {item.profile_id for item in group}
+    others: dict[str, PostingRecord] = {}
+    for other, _row in members[1:]:
+        for item in other:
+            if item.profile_id in tagged:
+                continue
+            best = others.get(item.profile_id)
+            if best is None or (item.rank_score if item.rank_score is not None else -1) > (best.rank_score if best.rank_score is not None else -1):
+                others[item.profile_id] = item
+    extra = sorted(others.values(), key=lambda item: (-(item.rank_score if item.rank_score is not None else -1), item.profile_id))
+    return [*group, *(replace(item, match_rank=len(group) + place) for place, item in enumerate(extra, start=1))]
 
 
 @lru_cache(maxsize=1)
@@ -935,11 +930,15 @@ def assess_these(
     call. Named postings are assessed as named.
 
     0.1.11.8 (the release blocker): a NAMED posting is looked up by its address,
-    not in the profiles' lists alone. One the company index holds and no
-    profile's list does (`gigai scout jobs search` lists it, its title is in no
-    profile) is assessed AS THE DEFAULT PROFILE, or as ``profile_id``, through
-    the same path and stored the same way; the question says so
-    (``question.text``), its row has ``profiles: []``. An address that is the
+    not in the roles' lists alone. One the company index holds and no
+    role's list does (`gigai scout jobs search` lists it, its title is in no
+    role) is assessed through the same path and stored the same way: it is
+    the JOB that is assessed, once (0.1.11.9). No role is chosen for it:
+    ``profile_id``, or the default role when none is named, is only recorded
+    on the assessment as the role that asked. The question says that it is in
+    no role's list (``question.text``), its row has ``profiles: []`` and no
+    tags. A copy of a job posted once per country is assessed as the job
+    (``find_jobs.job_key``): one assessment whichever copy is named. An address that is the
     system's public job page and not the stored URL (``free_search.
     find_posting_by_address``) names the stored posting: ``question.yes`` and
     the rows carry the stored identity. A URL no board holds is ``not_found``.
@@ -1012,6 +1011,8 @@ def assess_these(
                         home_root, target, store, profile_ids=(profile_id,) if profile_id else (), query=query, states=wanted_states,
                         window=window, removed=False, jobs=named, moment=moment, us_only=us_on, collapse=collapse,
                     )
+                # The role RECORDED on the assessment (an assessment names the role that asked): the one named, else the
+                # default. It selects nothing: the job has one assessment whichever it is (0.1.11.9).
                 unlisted_owner = next((view for view in selection.views if view.profile_id == profile_id), None) if profile_id else (
                     next((view for view in selection.views if view.is_default), None)
                 )
@@ -1041,6 +1042,14 @@ def assess_these(
                 if again or row.state == _NOT_ASSESSED or row.stale_code is not None
             )
             current = len(selection.shown) - len(candidates)
+            # 0.1.11.9 RB2: one model call a JOB. Two named copies of a job posted once per country are one candidate
+            # (the posting its records are kept under when it is among them).
+            boards = {row.job: row.board for _group, row in selection.shown}
+            kept_as = {job: job_key(home_root, target, job, board=boards.get(job)) for job, _owner in candidates}
+            once: dict[str, tuple[str, str]] = {}
+            for pair in sorted(candidates, key=lambda pair: (kept_as[pair[0]] != pair[0], pair)):
+                once.setdefault(kept_as[pair[0]], pair)
+            candidates = sorted(once.values())
             # 0110-10-02: only a rank score of the threshold or more is assessed by default; the rest is its own question.
             setting = fit_rules.fit_setting(home_root, target)
             ranks = {(row.job, row.profile_id): row.rank_score for _group, row in selection.shown}
@@ -1065,12 +1074,9 @@ def assess_these(
                 + (f" ({named_profiles})" if named_profiles else "") + f"? {_calls(estimate['calls'])}{cost}"
                 + (f" ({later} more after these {len(pairs)})" if later else "")
             )
-            as_owner = sum(1 for job, _owner in pairs if job in index_only)
-            if as_owner and unlisted_owner is not None:
-                sentence += (
-                    f". {as_owner} {'is' if as_owner == 1 else 'are'} in no profile's list: assessed as {unlisted_owner.label}"
-                    + (" (the default profile)." if unlisted_owner.is_default else ".")
-                )
+            unlisted_count = sum(1 for job, _owner in pairs if job in index_only)
+            if unlisted_count:
+                sentence += f". {unlisted_count} {'is' if unlisted_count == 1 else 'are'} in no role's list: the job is assessed all the same, once."
             body: dict[str, object] = {"approve": True}
             if named is not None:
                 body["jobs"] = named

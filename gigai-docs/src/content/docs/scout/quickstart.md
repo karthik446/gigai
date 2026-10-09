@@ -140,7 +140,8 @@ short help line opens the whole rule; a result's job page leads back to the Sear
 still there (a reload clears them).
 
 - **Save this search as a profile** turns the words into a profile that ranks and assesses.
-- **Assess** on a result assesses it as the default profile: one model call, and Scout asks first.
+- **Assess** on a result assesses that job: one model call, and Scout asks first. The assessment is the
+  job's own, whichever of your roles lists it, or none.
 - **Mark applied** works on a result too. Its job page opens even when no profile holds the posting; the
   description is not stored for such a posting, so Assess fetches the page.
 
@@ -159,7 +160,7 @@ for the filter.
 Either button asks first. No model is called until you approve. The dialog says:
 
 - the title, for example "Assess the top 50 by rank of 177 postings?";
-- how many per profile, and "50 at a time": how many are left after these 50;
+- "50 at a time": how many are left after these 50;
 - **Estimate**: "~50 model calls, ~950k tokens, ~29 min", from your own earlier calls (with
   none recorded yet it says so);
 - **Model**: the model the calls go to;
@@ -186,8 +187,8 @@ assess buttons are off until this batch ends or you cancel it.
   This posting is not waiting in it." A job that waits in the batch has no Assess button of
   its own until its result is in.
 
-A row that also matches another of your profiles has a link for that one: **Or assess as
-Platform track** (the profile's name). It asks the same way.
+A job two of your roles found is one row, tagged with both. It has one assessment and one
+resume, whichever role you open it from; the role chips above the list only filter it.
 
 ### Closed postings
 

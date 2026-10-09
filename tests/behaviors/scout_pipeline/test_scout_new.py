@@ -31,6 +31,7 @@ from gigai.scout.pipeline.store import PipelineStore, pipeline_path
 
 from tests.support.pipeline_fixtures import EMAIL_SHAPE, MARKERS
 from tests.support.posting_fixtures import (
+    freeze_scout_new_clock,
     NOW,
     RECRUITER_EMAIL,
     SECOND_LABEL,
@@ -121,6 +122,7 @@ def _seed_week(fx: PostingsFixture) -> None:
 
 
 def test_a_each_new_posting_once_with_its_profile_tags_and_never_the_deleted_profile(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    freeze_scout_new_clock(monkeypatch)  # the command reads the clock: the postings are seeded relative to NOW
     fx = build_postings_fixture(tmp_path, monkeypatch)
     _seed_week(fx)
 
@@ -223,6 +225,7 @@ def test_b_the_anchor_rules(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> 
 
 
 def test_c_new_postings_are_asked_about_and_assessed_only_on_a_yes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    freeze_scout_new_clock(monkeypatch)  # the command reads the clock: the postings are seeded relative to NOW
     fx = build_postings_fixture(tmp_path, monkeypatch)
     _seed_week(fx)
     # A waiting pipeline job is offered, never started.

@@ -47,7 +47,7 @@ from gigai.scout.tailored_resume import TailorRequest, run_tailored_resume
 
 from tests.support.answers_stories_fixtures import config as fixture_config
 from tests.support.pipeline_fixtures import RESUME, assess_base, assessment, config, resolved_job
-from tests.support.posting_fixtures import NOW, PostingsFixture, build_postings_fixture, days_ago, job_url, lever_job
+from tests.support.posting_fixtures import NOW, PostingsFixture, build_postings_fixture, days_ago, freeze_scout_new_clock, job_url, lever_job
 
 _OLD_RUN = "run_20260930T100000Z"
 _PINNED = {"record_id": "rec_0001", "revision_id": "rev_0002", "content_sha256": "sha256:" + "9" * 64}
@@ -373,6 +373,7 @@ def test_08_only_old_assessments_are_their_own_question_and_yes_assesses_the_new
 
 def test_08_the_cli_flags_and_the_terminal_text(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     fx = build_postings_fixture(tmp_path, monkeypatch, deleted=False)
+    freeze_scout_new_clock(monkeypatch)  # the command reads the clock: the postings are seeded relative to NOW
     fx.seed("aged", [lever_job("aged", n) for n in (1, 2)], seen_at=days_ago(20))
     fx.seed("fresh", [lever_job("fresh", 1)], seen_at=days_ago(1))
     _old_run(fx, [job_url("aged", n) for n in (1, 2)])
@@ -520,6 +521,7 @@ def test_13_the_run_import_keeps_the_prompt_version_and_the_constraints_digest(t
 
 def test_14_a_batch_of_twelve_prints_rising_progress_to_stderr_and_stdout_stays_json(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     fx = build_postings_fixture(tmp_path, monkeypatch, deleted=False)
+    freeze_scout_new_clock(monkeypatch)  # the command reads the clock: the postings are seeded relative to NOW
     fx.seed("dozen", [lever_job("dozen", n) for n in range(1, 13)], seen_at=days_ago(1))
     jobs = [job_url("dozen", n) for n in range(1, 13)]
     _seed_rank(fx, monkeypatch, fx.default_profile_id, {job: 70 for job in jobs[:5]})

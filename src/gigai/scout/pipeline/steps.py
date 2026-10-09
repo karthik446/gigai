@@ -1,32 +1,39 @@
 """0.1.10.7 PL3: the four steps of one job's pipeline, and what each one's input digest is made of.
 
 The DAG is fixed (``store.DEPS``): ``tailor -> {reassess, ats} -> label``,
-per ``(profile, job)``. A job enters it through :func:`enqueue_job` (the one
-entry the triggers and ``gigai scout pipeline process <job>`` share), and only
-when it already has an assessment for that profile: the pipeline reads the
-posting from that stored assessment and never fetches anything.
+per JOB (0.1.11.9: one set of steps a job; the role on its rows is the one
+that asked first, whose resume is tailored, and selects nothing). A job
+enters it through :func:`enqueue_job` (the one entry the triggers and
+``gigai scout pipeline process <job>`` share), and only when it already has
+an assessment: the pipeline reads the posting from that stored assessment
+and never fetches anything.
 
 =========  ==================================================  ============================================
 step       input digest over                                   output (in the store it already uses)
 =========  ==================================================  ============================================
 tailor     the posting digest, the profile's id and its        the tailored-resume store:
-           resume's digest, every answer's revision, the       ``resumes/<profile>/<sha>.json`` + ``.md``
+           resume's digest, every answer's revision, the       ``resumes/job/<sha>.json`` + ``.md``
            matching stories' marks, the base assessment's
            matrix, the tailor instructions, the model target;
            with a master resume also its revision, the
            selector's version and the candidate rule
 reassess   the tailored markdown's digest, the posting         the TAILORED VARIANT of the assessment:
-           digest, the assess prompt version, the              ``quick_assess_tailored/<profile>/<sha>.json``
+           digest, the assess prompt version, the              ``quick_assess_tailored/job/<sha>.json``
            constraints digest, the answers-and-stories         (the base assessment is never written)
            digest, the model target
-ats        the tailored markdown's digest, the posting         ``ats/<profile>/<sha>.json``
+ats        the tailored markdown's digest, the posting         ``ats/job/<sha>.json``
            digest, the ATS rules version
-label      the reassess and ats output digests, the label      ``label/<profile>/<sha>.json``
+label      the reassess and ats output digests, the label      ``label/job/<sha>.json``
            rule version, the ATS minimum, whether the base
            assessment is stale
 =========  ==================================================  ============================================
 
-``<sha>`` is ``sha256(job identity)``, as in the quick-assess store. A
+``<sha>`` is ``sha256(job identity)``, as in the quick-assess store.
+0.1.11.9: each output is the JOB's, in the store's ``job`` folder
+(``job_store_layout``). Until then it was kept per role
+(``<store>/<profile>/<sha>.json``); such a file is still read when the job
+has none of its own (the role named first, then the newest of the others)
+and is never moved or removed. A
 digest is computed when the step is claimed, from its upstream OUTPUT
 digests: a re-tailoring that returns the same markdown leaves ``ats`` with
 the digest it was done with, and it finishes without running
@@ -44,7 +51,7 @@ tailored-resume store, which the user also writes: tailoring on demand
 (``POST /api/tailored-resumes``, ``gigai scout resume tailor``) and the
 per-line choices and edits (``PUT /api/tailored-resumes/lines``). The step
 replaces a stored resume only when it is the step's OWN last tailoring, byte
-for byte (``pipeline/tailor/<profile>/<sha>.json`` keeps that file's digest).
+for byte (``pipeline/tailor/job/<sha>.json`` keeps that file's digest).
 Any other stored resume is the user's: one tailored on demand, one with a line
 choice or an edited line. The step then calls no model, ADOPTS the stored
 resume as its output (the re-assessment, the ATS check and the label run
@@ -189,8 +196,61 @@ def _scout_root(home_root: Path, target: Path) -> Path:
     return pipeline_path(home_root, target).parent.parent
 
 
-def _record_path(ctx: StepContext, directory: str, profile_id: str, job: str) -> Path:
-    return _scout_root(ctx.home_root, ctx.target) / directory / profile_id / f"{_job_key(job)}.json"
+def _role_record(store_dir: Path, profile_id: str | None, name: str) -> Path | None:
+    """The file ``name`` a ROLE's folder of ``store_dir`` holds (written before 0.1.11.9), or ``None``.
+
+    ``profile_id``'s own first (the role the job's steps are under); else the newest of the other roles'.
+    """
+
+    from ..job_store_layout import is_profile_folder
+
+    if profile_id is not None and is_profile_folder(profile_id):
+        own = store_dir / profile_id / name
+        if own.is_file() and not own.is_symlink():
+            return own
+    found: list[tuple[float, str, Path]] = []
+    try:
+        folders = [folder for folder in store_dir.iterdir() if is_profile_folder(folder.name)]
+    except OSError:
+        return None
+    for folder in folders:
+        path = folder / name
+        try:
+            if path.is_file() and not path.is_symlink():
+                found.append((path.stat().st_mtime, folder.name, path))
+        except OSError:
+            continue
+    return max(found)[2] if found else None
+
+
+def job_record_path(store_dir: Path, profile_id: str | None, job: str) -> Path:
+    """Where the job's record of the per-job store at ``store_dir`` IS (for a read).
+
+    ``<store>/job/<sha256(job identity)>.json``; when the job has none there, the file a role's folder holds for
+    it (:func:`_role_record`); with neither, the per-job path. A WRITER takes :func:`_record_write_path`.
+    """
+
+    from ..job_store_layout import job_store_path
+
+    path = job_store_path(store_dir, job)
+    if path.is_symlink() or path.exists():
+        return path
+    held = _role_record(store_dir, profile_id, path.name)
+    return path if held is None else held
+
+
+def _record_path(ctx: StepContext, directory: str, profile_id: str | None, job: str) -> Path:
+    """Where the job's record of ``directory`` is READ (:func:`job_record_path`); ``profile_id`` selects nothing."""
+
+    return job_record_path(_scout_root(ctx.home_root, ctx.target) / directory, profile_id, job)
+
+
+def _record_write_path(ctx: StepContext, directory: str, job: str) -> Path:
+    """Where the job's record of ``directory`` is WRITTEN: the per-job folder, never a role's."""
+
+    from ..job_store_layout import job_store_path
+
+    return job_store_path(_scout_root(ctx.home_root, ctx.target) / directory, job)
 
 
 def _ref(ctx: StepContext, path: Path) -> str:
@@ -596,12 +656,12 @@ def _job_input(job: object):
     return AssessJobInput(job_url=job.source_url or job.job_identity)  # type: ignore[attr-defined]
 
 
-def _tailor_record(ctx: StepContext, profile_id: str, job: str) -> dict[str, object] | None:
+def _tailor_record(ctx: StepContext, profile_id: str | None, job: str) -> dict[str, object] | None:
     return _read_json(_record_path(ctx, TAILOR_DIR, profile_id, job))
 
 
 def _write_tailor_record(ctx: StepContext, claim: Claim, outcome: str, record_sha256: str | None) -> None:
-    path = _record_path(ctx, TAILOR_DIR, claim.profile_id, claim.job)
+    path = _record_write_path(ctx, TAILOR_DIR, claim.job)
     _write_json(
         path,
         {
@@ -728,8 +788,9 @@ def _ats(ctx: StepContext, claim: Claim, found: _Inputs) -> StepResult:
     rendered, file_name = stored_resume_pdf(tailored, home_root=ctx.home_root, form=None)
     keywords = extract_keywords(found.job.text, title=found.job.title, skills=skills_from_markdown(tailored.markdown))  # type: ignore[attr-defined]
     result = ats_score.score(rendered.pdf, tailored.result, keywords, file_name=file_name)
-    path = _record_path(ctx, ATS_DIR, claim.profile_id, claim.job)
-    previous = _read_json(path)
+    # 0.1.11.9: the JOB's record; ``profile_id`` inside it is the role that asked.
+    path = _record_write_path(ctx, ATS_DIR, claim.job)
+    previous = _read_json(_record_path(ctx, ATS_DIR, claim.profile_id, claim.job))
     now = _now()
     record = {
         "schema_version": ATS_RECORD_SCHEMA,
@@ -789,8 +850,8 @@ def _label(ctx: StepContext, claim: Claim, found: _Inputs) -> StepResult:
         verdict=verdict, open_questions=holding, ats=score, min_ats=ctx.setting.label_min_ats, stale_reason=stale
     )
     base = found.base
-    path = _record_path(ctx, LABEL_DIR, claim.profile_id, claim.job)
-    previous = _read_json(path)
+    path = _record_write_path(ctx, LABEL_DIR, claim.job)
+    previous = _read_json(_record_path(ctx, LABEL_DIR, claim.profile_id, claim.job))
     now = _now()
     record = {
         "schema_version": LABEL_RECORD_SCHEMA,
@@ -840,8 +901,13 @@ def enqueue_job(
     trigger: str = "process_now",
     setting: PipelineSetting | None = None,
     store: PipelineStore | None = None,
+    sole: bool = False,
 ) -> dict[str, object]:
     """Queue ``job``'s pipeline for ``profile_id`` and return ``{result, profile_id, job, input_digest}``.
+
+    0.1.11.9: a job has ONE set of steps; ``profile_id`` is the role they are under (``triggers.process_now``
+    finds it; the role a caller names only says who asked). ``sole``: ``store.enqueue``'s, so a job that
+    another writer queued under another role meanwhile gets no second set.
 
     ``result`` is ``store.enqueue``'s: ``enqueued``, or a no-op when the
     tailor step is already done, queued or failed with these inputs
@@ -863,6 +929,7 @@ def enqueue_job(
         result = opened.enqueue(
             profile_id, job, "tailor", input_digest=digest, trigger=trigger, lane=lane_for(tailor_model),
             model_target=tailor_model, downstream_lanes={"reassess": (lane_for(reassess_model), reassess_model)}, force=force,
+            sole=sole,
         )
     finally:
         if store is None:
@@ -873,44 +940,58 @@ def enqueue_job(
 # --- the read side --------------------------------------------------------------------------
 
 
-def read_variant(home_root: Path, target: Path, profile_id: str, job: str):
-    """The assessment of ``job`` against the tailored resume (``quick_assess.read_tailored_variant``)."""
+def _role(profile_id: str | None) -> str:
+    """What the job stores take where a role is asked and the caller names none: the job's own record."""
+
+    from ..quick_assess import JOB_RECORD
+
+    return JOB_RECORD if profile_id is None else profile_id
+
+
+def read_variant(home_root: Path, target: Path, profile_id: str | None, job: str):
+    """The assessment of ``job`` against the tailored resume (``quick_assess.read_tailored_variant``).
+
+    0.1.11.9: the job's one, whichever role ``profile_id`` names (``None``: none named).
+    """
 
     from ..quick_assess import read_tailored_variant
 
-    return read_tailored_variant(Path(home_root), Path(target), profile_id, job)
+    return read_tailored_variant(Path(home_root), Path(target), _role(profile_id), job)
 
 
-def read_ats(home_root: Path, target: Path, profile_id: str, job: str) -> dict[str, object] | None:
-    """The stored Scout ATS record of ``job``'s tailored resume, or ``None``."""
+def read_ats(home_root: Path, target: Path, profile_id: str | None, job: str) -> dict[str, object] | None:
+    """The stored Scout ATS record of ``job``'s tailored resume, or ``None``. The job's one (0.1.11.9)."""
 
     return _read_json(_record_path(StepContext(Path(home_root), Path(target)), ATS_DIR, profile_id, job))
 
 
 def read_label(
-    home_root: Path, target: Path, profile_id: str, job: str, *, scout_root: Path | None = None
+    home_root: Path, target: Path, profile_id: str | None, job: str, *, scout_root: Path | None = None
 ) -> dict[str, object] | None:
-    """The stored Scout label record of ``job``, or ``None``.
+    """The stored Scout label record of ``job``, or ``None``. The job's one (0.1.11.9), whichever role is named.
 
     ``scout_root``: the project's Scout folder (``pipeline_path(...).parent.parent``) when the caller holds it. A
     caller that lists many jobs passes it, so the bound project is looked up once and not once a job.
     """
 
     if scout_root is not None:
-        return _read_json(Path(scout_root) / LABEL_DIR / profile_id / f"{_job_key(job)}.json")
+        return _read_json(job_record_path(Path(scout_root) / LABEL_DIR, profile_id, job))
     return _read_json(_record_path(StepContext(Path(home_root), Path(target)), LABEL_DIR, profile_id, job))
 
 
-def job_outputs(home_root: Path, target: Path, profile_id: str, job: str) -> dict[str, object]:
-    """What the pipeline has stored for ``(profile_id, job)``: codes, numbers and paths, never a text."""
+def job_outputs(home_root: Path, target: Path, profile_id: str | None, job: str) -> dict[str, object]:
+    """What the pipeline has stored for ``job``: codes, numbers and paths, never a text.
+
+    0.1.11.9: the job's own records; ``profile_id`` (``None``: no role named) selects nothing.
+    """
 
     from ..quick_assess import read_quick_assessment
     from ..tailored_resume import list_tailored_resumes
 
     home_root, target = Path(home_root), Path(target)
-    base = read_quick_assessment(home_root, target, profile_id, job)
+    base = read_quick_assessment(home_root, target, _role(profile_id), job)
     variant = read_variant(home_root, target, profile_id, job)
-    tailored = list_tailored_resumes(home_root, target, profile_id=profile_id, job_identity=job)
+    tailored = list_tailored_resumes(home_root, target, profile_id=_role(profile_id), job_identity=job)
     ats = read_ats(home_root, target, profile_id, job)
     label = read_label(home_root, target, profile_id, job)
     tailor = _tailor_record(StepContext(home_root, target), profile_id, job)
@@ -966,6 +1047,7 @@ __all__ = [
     "error_code",
     "input_digest",
     "job_outputs",
+    "job_record_path",
     "label_for",
     "model_for",
     "read_ats",

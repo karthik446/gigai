@@ -49,7 +49,7 @@ from gigai.scout.scout_cli import scout_group
 
 from tests.support.answers_stories_fixtures import config as fixture_config
 from tests.support.pipeline_fixtures import build_pipeline_fixture
-from tests.support.posting_fixtures import NOW, PostingsFixture, days_ago, job_url, lever_job
+from tests.support.posting_fixtures import NOW, PostingsFixture, days_ago, freeze_scout_new_clock, job_url, lever_job
 
 _SLUG = "harborlight"
 _URL = job_url(_SLUG, 1)
@@ -314,6 +314,7 @@ def test_with_a_master_and_the_switch_on_the_profiles_view_the_assessment_reads_
 
 
 def test_assess_all_new_reads_the_evidence_view_too(fx: PostingsFixture, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    freeze_scout_new_clock(monkeypatch)  # the command reads the clock: the postings are seeded relative to NOW
     _switch(monkeypatch, assess_master.INPUT_EVIDENCE)
     _store_master(fx, tmp_path)
     fx.base.model.assessed = _answer(terraform=TERRAFORM_LINE)

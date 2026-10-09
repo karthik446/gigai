@@ -613,6 +613,7 @@ def _assess(
     from ..workpad import committed_read_cache
     from .find_jobs.market_acquisition import AcquireLimits
     from .assessment_basis import assessment_notice
+    from .find_jobs.job_key import job_key
     from .find_jobs.posting_live import ERROR_POSTING_CLOSED, jobs_liveness
     from .quick_assess import ERROR_NOT_STORED, QuickAssessError, run_quick_assessment
 
@@ -702,7 +703,12 @@ def _assess(
                 stop.append(exc.code)  # no model, no profile, no resume: the next call would fail the same way
             return (exc.code, exc.reason)  # 0110-10-11: which rule refused, for a code two rules share
         # 0110-8-09: "assessed" means a record the grid will read, under THIS job and profile; anything else is a named failure.
-        if stored.job.job_identity != job or stored.resume.profile_id != profile_id or not Path(stored.stored_path or "").is_file():
+        # 0.1.11.9 RB2: a copy of a job posted once per country is assessed as the job: its record names the posting
+        # the job's records are kept under (``job_key``), and every copy's row reads it.
+        if (
+            stored.job.job_identity not in (job, job_key(home_root, target, job, board=text.board))
+            or stored.resume.profile_id != profile_id or not Path(stored.stored_path or "").is_file()
+        ):
             return (ERROR_NOT_STORED, None)
         if stored.requirements_note is not None:
             thin[job] = {"job_identity": job, "profile_id": profile_id, "text": stored.requirements_note}
@@ -1173,6 +1179,21 @@ def _new_pairs(groups: Mapping[str, Sequence[PostingRecord]], profile_id: str | 
     return sorted(pairs)
 
 
+def _one_a_job(rows: Iterable[PostingRecord], home_root: Path, target: Path) -> list[PostingRecord]:
+    """0.1.11.9 RB2: ``rows`` with ONE row a job: the copies of a job posted once per country share one assessment
+    (``find_jobs.job_key``), so a batch asks for it once. The posting the job's records are kept under is the one
+    kept when it is among them, else the first by address. Rows of jobs with no copy pass as they are."""
+
+    from .find_jobs.job_key import job_key
+
+    kept: dict[str, PostingRecord] = {}
+    for row in sorted(rows, key=lambda item: item.job):
+        key = job_key(home_root, target, row.job, board=row.board)
+        if key not in kept or row.job == key:
+            kept[key] = row
+    return list(kept.values())
+
+
 def _stale_rows(store: PipelineStore, profile_id: str | None) -> list[PostingRecord]:
     """0110-8-08: the live postings with an assessment and no CURRENT one under any matching profile, each as the row of the profile whose old assessment is shown."""
 
@@ -1363,8 +1384,11 @@ def _scout_new(
             """``(new to assess, new low-ranked, stale to re-assess, stale low-ranked)`` as the stores are now (0110-10-02)."""
 
             ranks = {(row.job, row.profile_id): row.rank_score for group in groups.values() for row in group}
-            new_keep, new_low = split_low_rank(_new_pairs(groups, profile_id), ranks, setting, include=include_low_rank)
-            old = [row for row in _stale_rows(store, profile_id) if row.job not in applied]
+            # 0.1.11.9 RB2: one model call a JOB: the copies of a job posted once per country are one pair.
+            first = {(row.job, row.profile_id): row for group in groups.values() for row in group}
+            new_pairs = sorted((row.job, row.profile_id) for row in _one_a_job((first[pair] for pair in _new_pairs(groups, profile_id)), home_root, target))
+            new_keep, new_low = split_low_rank(new_pairs, ranks, setting, include=include_low_rank)
+            old = _one_a_job((row for row in _stale_rows(store, profile_id) if row.job not in applied), home_root, target)
             old_ranks = {(row.job, row.profile_id): row.rank_score for row in old}
             old_keep, old_low = split_low_rank(list(old_ranks), old_ranks, setting, include=include_low_rank)
             # 0110-10-11, 0.1.11.2: what the batch of 50 a yes acts on is ordered by: the rank score, then the newest.

@@ -292,8 +292,10 @@ def test_a_row_of_copies_has_its_copies_labels_together_and_the_command_has_both
     assert assessed["assessed"]["assessed"] == 1  # type: ignore[index]  # assessed through the FIRST copy
 
     each = _by_job(_search(fx, "staff ai engineer", collapse=False))
-    assert len(each) == 5 and each[job_url(WATCHED, 3)]["application"] is None and each[job_url(WATCHED, 3)]["assessment"] is None
+    assert len(each) == 5 and each[job_url(WATCHED, 3)]["application"] is None
     assert each[job_url(WATCHED, 2)]["application"]["status"] == "applied" and each[job_url(WATCHED, 1)]["assessment"] is not None
+    # 0.1.11.9: the assessment is the JOB's, so each copy's own row shows it (until then: only the copy it was made by).
+    assert each[job_url(WATCHED, 3)]["assessment"] == each[job_url(WATCHED, 2)]["assessment"] == each[job_url(WATCHED, 1)]["assessment"]
 
     found = _search(fx, "staff ai engineer")
     rows = _by_job(found)

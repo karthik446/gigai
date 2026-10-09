@@ -34,7 +34,7 @@ from gigai.scout.pipeline import triggers
 from gigai.scout.pipeline.store import PipelineStore, RunAssessment, pipeline_path
 
 from tests.support.fit_fixtures import TERRAFORM, assess_one, matrix_answer, ranked_new, seed_rank, weak_fixture
-from tests.support.posting_fixtures import NOW, PostingsFixture, build_postings_fixture, days_ago, job_url, lever_job
+from tests.support.posting_fixtures import NOW, PostingsFixture, build_postings_fixture, days_ago, freeze_scout_new_clock, job_url, lever_job
 
 
 # --- helpers --------------------------------------------------------------------------------
@@ -369,6 +369,7 @@ def test_scout_new_assesses_only_rank_50_or_more_and_asks_about_the_low_ranked_s
 
 def test_the_assess_threshold_is_a_setting_and_the_cli_takes_the_flag(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     fx = build_postings_fixture(tmp_path, monkeypatch, deleted=False)
+    freeze_scout_new_clock(monkeypatch)  # the command reads the clock: the postings are seeded relative to NOW
     jobs = ranked_new(fx, monkeypatch)
 
     _write_fit_setting(fx, assess_min_rank=60)

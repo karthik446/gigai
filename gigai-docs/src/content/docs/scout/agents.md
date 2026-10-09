@@ -868,7 +868,7 @@ The routes: `GET` / `POST /api/answers`, `GET /api/answers/match`, `GET` / `PUT`
 What to know:
 
 - **`story prep --job-url URL`** reads the job's stored assessment (assess it first, or you get
-  `assessment_missing`); `--profile` is needed when two profiles assessed the job. Each row lists open
+  `assessment_missing`); a job has one assessment, so no `--profile` is needed. Each row lists open
   questions, a "Tell me about" walkthrough per master line a met row cites, and the stories or answers
   it cites, with `uncovered` true when nothing answers a question. Rows that rest only on personal lab
   lines carry `lab`. It writes questions, never answers.

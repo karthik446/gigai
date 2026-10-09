@@ -19,6 +19,12 @@ What it holds (DESIGN 5.1):
 - ``step``: one row per ``(profile_id, job, name)``. The DAG is fixed in
   code (``DEPS``): ``tailor -> {reassess, ats} -> label``. ``label`` is the
   Scout label step (the operator's name for "ready to apply").
+  0.1.11.9: a JOB has one set of steps. ``profile_id`` is the role that asked
+  for them first (a record of who asked; it selects nothing), and every
+  writer finds the role a job's steps are under before it writes
+  (``job_role``). The key and the columns are what they were: a file written
+  before 0.1.11.9 may hold a job under several roles, and is read at its
+  newest set.
 - ``step_run``: one row per attempt, the metrics record (tokens, cost,
   seconds, outcome, error code). An attempt whose holder died is recorded
   as ``interrupted`` when it is reclaimed.
@@ -976,8 +982,13 @@ class PipelineStore:
         downstream_lanes: Mapping[str, tuple[str, str | None]] | None = None,
         approval_id: str | None = None,
         force: bool = False,
+        sole: bool = False,
     ) -> str:
         """Queue ``name`` for ``(profile_id, job)`` with its input digest; re-block what depends on it.
+
+        ``sole`` (0.1.11.9, every trigger): a job has ONE set of steps. When ``job`` has steps under another role
+        and none under ``profile_id``, nothing is written and the answer is ``noop_already_queued``: another
+        writer queued the job between the caller's look (``job_role``) and this write.
 
         Returns ``noop_unchanged`` (done with this digest), ``noop_already_queued``
         (queued with this digest), ``noop_failed`` (failed with this digest: ``retry``
@@ -1010,6 +1021,12 @@ class PipelineStore:
                 "SELECT state, input_digest, done_digest FROM step WHERE profile_id=? AND job=? AND name=?",
                 (profile_id, job, name),
             ).fetchone()
+            if sole and row is None and c.execute(
+                "SELECT 1 FROM step WHERE job=? AND profile_id<>? LIMIT 1", (job, profile_id)
+            ).fetchone() is not None and c.execute(
+                "SELECT 1 FROM step WHERE job=? AND profile_id=? LIMIT 1", (job, profile_id)
+            ).fetchone() is None:
+                return NOOP_ALREADY_QUEUED
             if row is not None and not force:
                 state, queued, done = row
                 if state == STATE_DONE and done == input_digest:
@@ -1391,6 +1408,34 @@ class PipelineStore:
         where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
         rows = self._conn().execute(f"SELECT {_STEP_COLUMNS} FROM step{where} ORDER BY profile_id, job, name", params)
         return tuple(_step(row) for row in rows.fetchall())
+
+    def job_roles(self, job: str | None = None) -> dict[str, str]:
+        """0.1.11.9: ``job -> the role its steps are kept under`` (every job with a step, or only ``job``).
+
+        A job has one set of steps, so this is the role on them. A file written before 0.1.11.9 may hold a job
+        under several roles: the answer is then the NEWEST set's role (the latest ``updated_at`` of its steps),
+        on a tie the one with more steps done, then the smaller id. Readers show that set and writers go on
+        writing it, so a job never gets one more.
+        """
+
+        where, params = ("", ()) if job is None else (" WHERE job=?", (_check("job", job, "job"),))
+        rows = self._conn().execute(
+            f"SELECT job, profile_id, MAX(updated_at), SUM(state=?) FROM step{where} GROUP BY job, profile_id",
+            (STATE_DONE, *params),
+        ).fetchall()
+        best: dict[str, tuple[str, int, str]] = {}
+        roles: dict[str, str] = {}
+        for found, profile_id, updated_at, done in sorted(rows, key=lambda row: (row[0], row[1])):
+            rank = (updated_at or "", int(done or 0))
+            if found not in best or rank > best[found][:2]:
+                best[found] = (*rank, profile_id)
+                roles[found] = profile_id
+        return roles
+
+    def job_role(self, job: str) -> str | None:
+        """:meth:`job_roles` for one job: the role its steps are kept under, or ``None`` when it has no step."""
+
+        return self.job_roles(job).get(job)
 
     def counts(self) -> dict[str, int]:
         """Steps per state."""

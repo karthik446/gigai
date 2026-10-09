@@ -18,6 +18,15 @@ profiles hold: the first rule of this order that names one (decision 4 of the 0.
 A job's three records come from that ONE profile.  A store the winner has nothing in is filled from the
 newest record another profile holds there (so no record is left behind).
 
+**A job posted more than once** (0.1.11.9 RB2).  The same job posted once per country is ONE job
+(``find_jobs/job_copies``: the same board, company, title and description), so its copies get ONE of each record
+too, under the identity ``find_jobs.job_key.job_key`` names for all of them: the first copy, in the canonical
+order (its US posting, else the earliest posted, then the posting id), that holds a stored resume, else the first
+that holds an assessment (``COPIES_RULE``).  The rule above then says which PROFILE's records of that posting are
+kept.  What the profiles hold under another copy's identity is superseded like a superseded profile's: left where
+it is, never copied, and listed with the kept job (``copies`` in the record and in the report).  No identity
+inside a record is rewritten.
+
 **An applied job where several profiles have a stored resume** cannot say which PDF was sent.  It is listed as
 ``ambiguous_applied_resume`` with every one of those resumes, and all of them stay readable.
 
@@ -85,6 +94,9 @@ RULE_ONLY_STORED_RESUME = "only_stored_resume"
 RULE_NEWEST = "newest"
 #: The order that decides a job several profiles hold.
 RULE_ORDER = (RULE_APPLICATION, RULE_EDITED_RESUME, RULE_ONLY_STORED_RESUME, RULE_NEWEST)
+
+#: Which posting's records a job posted more than once keeps (``find_jobs.job_key.kept_copy``), as the record says it.
+COPIES_RULE = "the first copy in the canonical order (US posting, else earliest posted, then posting id) with a stored resume, else the first with an assessment"
 
 _SHORT = 8
 _RECORD_KEYS = {ASSESSMENTS: "assessment", RESUMES: "resume", SUGGESTIONS: "suggestion"}
@@ -465,6 +477,9 @@ class Migration:
     ambiguous: tuple[dict[str, object], ...]
     #: ``{job, kept_profile_id, rule, profiles}`` per job several profiles hold.
     decided: tuple[dict[str, object], ...]
+    #: 0.1.11.9 RB2: ``{job, superseded: [{job, files}]}`` per job posted more than once whose copies hold records:
+    #: the kept posting's digest and each other copy's, with the files left where they are.
+    copies: tuple[dict[str, object], ...] = ()
 
     def to_json(self) -> dict[str, object]:
         return {
@@ -477,6 +492,8 @@ class Migration:
             "decided_by": self.rules,
             "ambiguous_applied_resume": list(self.ambiguous),
             "decided": list(self.decided),
+            "copies_rule": COPIES_RULE,
+            "copies": list(self.copies),
         }
 
     def lines(self) -> list[str]:
@@ -504,6 +521,13 @@ class Migration:
             kept = ", ".join(f"role ...{profile_id[-6:]} {count}" for profile_id, count in sorted(self.winners.items()))
             rules = ", ".join(f"{rule.replace('_', ' ')} {self.rules[rule]}" for rule in RULE_ORDER if self.rules.get(rule))
             lines.append(f"Jobs held by more than one role: {several}; kept: {kept}; decided by: {rules}")
+        if self.copies:
+            postings = sum(len(item["superseded"]) for item in self.copies)  # type: ignore[arg-type]
+            left = sum(len(copy["files"]) for item in self.copies for copy in item["superseded"])  # type: ignore[attr-defined,union-attr]
+            lines.append(
+                f"Jobs posted more than once with records under more than one posting: {len(self.copies)}; each keeps one posting's records "
+                f"(its US posting, else the earliest, that has a resume, else an assessment); {postings} other posting(s), {left} file(s) superseded (left where they are)"
+            )
         if self.ambiguous:
             shown = ", ".join(str(item["job"])[:_SHORT] for item in self.ambiguous)
             lines.append(
@@ -545,6 +569,33 @@ def _save_folder_index(home_root: Path, root: Path, index: dict) -> None:  # typ
         jobs_folder._save_index(home_root, root, index)
 
 
+def _kept_copies(home_root: Path, project_dir: Path, jobs: set[str]) -> dict[str, str]:
+    """``{job: the posting its job's records are kept under}`` for each of ``jobs`` that is a copy of a job posted more
+    than once (``find_jobs.job_key``); a posting with no copy is left out.  Reads the company index and file names."""
+
+    from .find_jobs.job_key import copies_of, kept_copy
+
+    found: dict[str, str] = {}
+    for job in sorted(jobs):
+        if job in found:
+            continue
+        copies = copies_of(home_root, job)
+        if len(copies) > 1:
+            kept = kept_copy(project_dir, copies)
+            found.update({copy: kept for copy in copies})
+    return found
+
+
+def _superseded_copy(home_root: Path, target: Path, store: str, path: Path) -> bool:
+    """A profile's record at ``path`` is of a posting whose JOB keeps another copy's records (so it is not the job's)."""
+
+    from .find_jobs.job_key import job_key
+
+    item = _read_json(path)
+    job = None if item is None else _job_of(store, item)
+    return job is not None and job_key(home_root, target, job) != job
+
+
 def _run(home_root: Path, project: str, applied: Mapping[str, str], *, write: bool) -> tuple[Migration, bool]:
     """Plan the copies and, with ``write``, make them.  One code path for both, so a dry run counts what a run does.
 
@@ -560,6 +611,25 @@ def _run(home_root: Path, project: str, applied: Mapping[str, str], *, write: bo
     root = jobs_folder.jobs_folder(home_root).path
     index = jobs_folder._load_index(home_root, root)
     index_before = json.dumps(index, sort_keys=True)
+
+    # 0.1.11.9 RB2: a job posted more than once keeps ONE posting's records (``job_key.kept_copy``). What the profiles
+    # hold under another copy is superseded: not planned, not copied, listed with the kept job.
+    kept_as = _kept_copies(home_root, project_dir, {job for found in held.values() for job in found})
+    superseded_copies: dict[str, dict[str, list[_Held]]] = {}
+    for store in JOB_STORES:
+        for job in [job for job in held[store] if kept_as.get(job, job) != job]:
+            superseded_copies.setdefault(kept_as[job], {}).setdefault(job, []).extend(held[store].pop(job).values())
+    copies_report = tuple(
+        {
+            "job": job_digest(kept),
+            "superseded": [
+                {"job": job_digest(copy), "files": sorted(_relative(home_root, item.path) for item in found)}
+                for copy, found in sorted(others.items(), key=lambda pair: job_digest(pair[0]))
+            ],
+        }
+        for kept, others in sorted(superseded_copies.items(), key=lambda pair: job_digest(pair[0]))
+    )
+    by_digest = {str(item["job"]): item["superseded"] for item in copies_report}
 
     jobs = sorted({job for found in held.values() for job in found}, key=job_digest)
     plans = [
@@ -584,6 +654,13 @@ def _run(home_root: Path, project: str, applied: Mapping[str, str], *, write: bo
             folders_to_add += added
             if plan.digest not in recorded or wrote:
                 recorded[plan.digest] = _entry(home_root, plan, folder)
+        for digest, others in by_digest.items():
+            # The kept posting's entry says which other postings of the job were superseded (also when the kept
+            # posting's own records are only in the per-job folder: written since, no profile holds them).
+            entry = dict(recorded.get(digest) or {})  # type: ignore[call-overload]
+            if entry.get("copies") != {"rule": COPIES_RULE, "superseded": others}:
+                entry["copies"] = {"rule": COPIES_RULE, "superseded": others}
+                recorded[digest] = entry
     finally:
         changed = bool(to_copy) or json.dumps(recorded, sort_keys=True) != before or json.dumps(index, sort_keys=True) != index_before
         if write:
@@ -594,7 +671,9 @@ def _run(home_root: Path, project: str, applied: Mapping[str, str], *, write: bo
                 _save_record(home_root, {**record, project: recorded})
 
     def store_counts(store: str) -> dict[str, int]:
-        files = sum(len(found) for found in held[store].values())
+        # Files and jobs as the profiles' folders hold them; a superseded copy's files are files of the kept job.
+        of_copies = sum(1 for others in superseded_copies.values() for found in others.values() for item in found if item.path.parent.parent.name == store)
+        files = sum(len(found) for found in held[store].values()) + of_copies
         return {"files": files, "jobs": len(held[store]), "kept": len(held[store]), "superseded": files - len(held[store])}
 
     def has_layout(item: _Held) -> bool:
@@ -614,6 +693,11 @@ def _run(home_root: Path, project: str, applied: Mapping[str, str], *, write: bo
         "jobs_folder": {"job_entries": sum(1 for key in index if key.startswith(job_prefix)), "to_add": folders_to_add},
         "jobs": len(plans),
         "jobs_held_by_several_roles": len(several),
+        "jobs_posted_more_than_once": {
+            "jobs": len(copies_report),
+            "superseded_postings": sum(len(item["superseded"]) for item in copies_report),  # type: ignore[arg-type]
+            "superseded_files": sum(len(copy["files"]) for item in copies_report for copy in item["superseded"]),  # type: ignore[attr-defined,union-attr]
+        },
         "ambiguous_applied_resume": sum(1 for plan in plans if plan.ambiguous),
         "files": {"to_copy": to_copy, "copied": copied, "already": already},
         "deleted": 0,
@@ -630,6 +714,7 @@ def _run(home_root: Path, project: str, applied: Mapping[str, str], *, write: bo
             for plan in plans if plan.ambiguous
         ),
         decided=tuple({"job": plan.digest, "kept_profile_id": plan.winner, "rule": plan.rule, "profiles": list(plan.holders)} for plan in several),
+        copies=copies_report,
     )
     return report, changed
 
@@ -653,7 +738,7 @@ def migrate(home_root: Path, target: Path, *, apply: bool = False, applied: Mapp
     try:
         plan, changed = _run(home_root, project, applied, write=False)
         if not apply or not changed:
-            return plan if not apply else Migration(False, plan.project_id, plan.record, plan.counts, plan.winners, plan.rules, plan.ambiguous, plan.decided)
+            return plan if not apply else Migration(False, plan.project_id, plan.record, plan.counts, plan.winners, plan.rules, plan.ambiguous, plan.decided, plan.copies)
         return _run(home_root, project, applied, write=True)[0]
     except (OSError, ValueError) as exc:
         if isinstance(exc, JobStoreMigrationError):
@@ -773,8 +858,14 @@ def stored_record(store_dir: Path, job_identity: str, *, home_root: Path, target
     written since) the record a profile's folder holds for it (``role_record``).  With neither, the per-job path.
 
     For READS.  A writer calls ``write_record`` and writes there.
+
+    0.1.11.9 RB2: ``job_identity`` may be ANY copy of a job posted more than once (once per country); the record is
+    the job's, under the one identity ``find_jobs.job_key.job_key`` names for all of them.
     """
 
+    from .find_jobs.job_key import job_key
+
+    job_identity = job_key(Path(home_root), Path(target), job_identity)
     path = job_store_dir(Path(store_dir)) / f"{job_digest(job_identity)}{RECORD_SUFFIX}"
     if path.is_symlink() or path.exists():
         return path
@@ -784,8 +875,13 @@ def stored_record(store_dir: Path, job_identity: str, *, home_root: Path, target
 
 def write_record(store_dir: Path, job_identity: str, *, home_root: Path, target: Path) -> Path:
     """Where a job's record of one store is WRITTEN: always the per-job folder.  What the profiles' folders hold for
-    the job is copied there first (``adopt_job``), so the writer reads the job's record as it was and writes over a copy."""
+    the job is copied there first (``adopt_job``), so the writer reads the job's record as it was and writes over a copy.
 
+    0.1.11.9 RB2: under the job's ONE identity (``find_jobs.job_key.job_key``), whichever copy of it is named."""
+
+    from .find_jobs.job_key import job_key
+
+    job_identity = job_key(Path(home_root), Path(target), job_identity)
     adopt_job(home_root, target, job_identity)
     return job_store_dir(Path(store_dir)) / f"{job_digest(job_identity)}{RECORD_SUFFIX}"
 
@@ -815,7 +911,8 @@ def role_records(store_dir: Path, *, home_root: Path, target: Path) -> list[Path
         plan = _plan_one(Path(home_root), Path(target), store_dir.parent, digest, write=False)
         if plan is not None and store_dir.name in plan.kept:
             found.append(plan.kept[store_dir.name].path)
-    return found
+    # 0.1.11.9 RB2: a record under another copy of a job posted more than once is superseded, not a job of its own.
+    return [path for path in found if not _superseded_copy(Path(home_root), Path(target), store_dir.name, path)]
 
 
 def adopt_job(home_root: Path, target: Path, job_identity: str) -> bool:
@@ -872,6 +969,7 @@ def adopt_job(home_root: Path, target: Path, job_identity: str) -> bool:
 
 
 __all__ = [
+    "COPIES_RULE",
     "MIGRATE_COMMAND",
     "RECORD_SCHEMA",
     "RESPONSE_SCHEMA",

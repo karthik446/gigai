@@ -564,3 +564,32 @@ def test_refund_gives_back_counted_calls_and_never_goes_below_zero(store: Pipeli
     assert store.used("pipeline_calls", "2026-10-02") == 0
     store.refund("pipeline_calls", "2026-10-03")  # a day with no count: nothing to give back
     assert store.used("pipeline_calls", "2026-10-03") == 0
+
+
+# --- 0.1.11.9 PJ6: a job has one set of steps; the role on them is who asked -----------------------------------------------
+
+
+def test_the_role_of_a_job_is_the_one_on_its_steps_and_the_newest_set_on_an_older_file(store: PipelineStore, clock: _Clock) -> None:
+    other = "https://jobs.example.test/acme/2"
+    assert store.job_role(_JOB) is None and store.job_roles() == {}
+    _enqueue(store)
+    assert store.job_role(_JOB) == _P and store.job_roles() == {_JOB: _P}
+
+    # A file written before 0.1.11.9 may hold one job under several roles (plain ``enqueue`` still writes what it is given).
+    clock.now += 60
+    assert store.enqueue("profile_b", _JOB, "tailor", input_digest=_digest(_JOB, "r1"), trigger="process_now", lane="claude_cli") == "enqueued"
+    store.enqueue("profile_b", other, "tailor", input_digest=_digest(other, "r1"), trigger="process_now", lane="claude_cli")
+    assert store.job_roles() == {_JOB: "profile_b", other: "profile_b"}  # the newest set
+    assert store.job_roles(_JOB) == {_JOB: "profile_b"} and store.job_role(other) == "profile_b"
+    # A newer write to the first role's set makes it the job's again.
+    clock.now += 60
+    _enqueue(store, digest=_digest(_JOB, "r2"))
+    assert store.job_role(_JOB) == _P
+
+
+def test_a_sole_enqueue_writes_no_second_set_for_a_job_another_role_holds(store: PipelineStore) -> None:
+    assert _enqueue(store, sole=True) == "enqueued"  # no step yet: the role that asks
+    assert store.enqueue("profile_b", _JOB, "tailor", input_digest=_digest(_JOB, "r1"), trigger="process_now", lane="claude_cli", sole=True) == "noop_already_queued"
+    assert {step.profile_id for step in store.steps(job=_JOB)} == {_P} and len(store.steps(job=_JOB)) == 4
+    assert _enqueue(store, digest=_digest(_JOB, "r2"), sole=True) == "enqueued"  # the role that holds it re-opens it as before
+    assert {step.profile_id for step in store.steps(job=_JOB)} == {_P}

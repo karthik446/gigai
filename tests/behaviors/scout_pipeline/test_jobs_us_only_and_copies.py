@@ -196,9 +196,10 @@ def test_any_copy_with_an_application_makes_the_row_applied(fx: PostingsFixture,
     applied = _search(fx, anywhere, us_only=False, states=["applied"])["postings"]["rows"]
     assert [(row["job_identity"], row["copies"], row["application"]["status"]) for row in applied] == [(job_url(SLUG, 1), 7, "applied")]
     assert applied[0]["application"]["since"] == "2026-10-02T10:00:00Z" and len(applied[0]["locations"]) == 7
-    # Every posting its own row: only the copy with the application is applied (what 0.1.11.7 showed: six more to apply to).
+    # Every posting its own row: the JOB is applied to, so each of its seven copies is (0.1.11.9: an application is the
+    # job's whichever copy it names; 0.1.11.8 listed the six others as still to apply to).
     each = _search(fx, anywhere, us_only=False, collapse=False)
-    assert each["counts"]["matched"] == POSTINGS - 1 and each["counts"]["applied"] == 1
+    assert each["counts"]["matched"] == POSTINGS - 7 and each["counts"]["applied"] == 7
 
 
 def test_assess_these_by_a_filter_is_one_posting_per_job(fx: PostingsFixture, anywhere: str) -> None:
@@ -213,9 +214,10 @@ def test_assess_these_by_a_filter_is_one_posting_per_job(fx: PostingsFixture, an
     # The default (US only on in this setup): the four jobs not clearly abroad; the yes does not pin a switch nobody set.
     default = ask()
     assert default["counts"]["selected"] == 4 and "us_only" not in default["question"]["yes"]["api"]["body"]
-    # Named postings are assessed as named, whatever the switch: two copies named are two postings asked about.
+    # Named postings are read as named, whatever the switch: two copies named are two postings found. They are ONE job,
+    # so one assessment is asked for (0.1.11.9: one model call a job, whichever copy is named).
     named = posting_search.assess_these(fx.home_root, fx.target, jobs=[job_url(SLUG, 1), job_url(SLUG, 2)], profile_id=anywhere, include_low_rank=True, now=NOW)
-    assert named["counts"]["selected"] == 2
+    assert named["counts"]["selected"] == 2 and named["counts"]["to_assess"] == 1
 
 
 def test_the_command_says_what_us_only_left_out_and_what_the_rows_stand_for(fx: PostingsFixture, anywhere: str) -> None:

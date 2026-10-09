@@ -36,6 +36,7 @@ from urllib.parse import parse_qs, urlsplit
 from ....private_records import PrivateRecordError
 from ....workpad import WorkpadError
 from ...pipeline import triggers
+from ...pipeline.job_identity import job_identity_for
 from ...pipeline.overview import job_detail, overview
 from ...pipeline.steps import StepError
 from ...pipeline.store import APPROVAL_STATES, DECIDED_BY, PipelineStoreError
@@ -131,14 +132,14 @@ class PipelineRoutesMixin:
             self._error(HTTPStatus.UNPROCESSABLE_ENTITY, "unknown_key", f"unknown query key: {unknown[0]}")
             return
         job, profile_id = (query.get("job_identity") or [""])[0].strip(), (query.get("profile_id") or [""])[0].strip()
-        if not job or not profile_id:
-            self._error(HTTPStatus.UNPROCESSABLE_ENTITY, "invalid_value", "job_identity and profile_id are required")
+        if not job:
+            self._error(HTTPStatus.UNPROCESSABLE_ENTITY, "invalid_value", "job_identity is required")
             return
         try:
             identity = job if job.startswith("text:sha256:") else normalize_url(job)
-            # 0.1.11.9: a job's steps are kept under ONE role; the page of another role that tags it reads the same ones.
-            profile_id = triggers.stored_job_role(self._backend.home_root, target, profile_id, identity)
-            body = job_detail(self._backend.home_root, target, profile_id, identity)
+            identity = job_identity_for(identity, home_root=self._backend.home_root, target=target)
+            # 0.1.11.9 PJ6: a job has ONE set of steps; `profile_id` is optional and selects nothing (`job_detail`).
+            body = job_detail(self._backend.home_root, target, profile_id or None, identity)
         except (StepError, PipelineStoreError, FindJobsContractError, WorkpadError, PrivateRecordError) as exc:
             self._pipeline_fail(exc)
             return
@@ -220,6 +221,10 @@ class PipelineRoutesMixin:
         home_root = self._backend.home_root
         try:
             identity = job if job.startswith("text:sha256:") else normalize_url(job)
+            identity = job_identity_for(identity, home_root=home_root, target=target)
+            # 0.1.11.9 PJ6: a job that already has steps is processed under THEIR role, whichever role asks
+            # (`process_now`); the answer's `profile_id` says which. A role is read only for a job with no step yet.
+            profile_id = triggers.stored_job_role(home_root, target, profile_id or None, identity)
             if not profile_id:
                 from ....workpad import resolve_workpad
                 from ... import profile_records
@@ -229,9 +234,6 @@ class PipelineRoutesMixin:
                 if selected is None:
                     raise StepError("profile_unavailable", "no scout profile is selected for this project; pass profile_id")
                 profile_id = selected.profile_id
-            # 0.1.11.9: a job that already has steps under another role is processed there (one job, one set of
-            # steps, whichever role's job page asks). The answer's `profile_id` says which.
-            profile_id = triggers.stored_job_role(home_root, target, profile_id, identity)
             queued = triggers.process_now(home_root, target, profile_id, identity, force=force)
         except (StepError, PipelineStoreError, FindJobsContractError, WorkpadError, PrivateRecordError) as exc:
             self._pipeline_fail(exc)

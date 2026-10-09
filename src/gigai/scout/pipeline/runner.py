@@ -671,8 +671,13 @@ def pipeline_status(
     """What the pipeline is doing: the settings, the steps and why a step waits. Reads only; never creates the file.
 
     Ids, codes, numbers and paths: no posting, resume or answer text. With
-    ``job`` (and its ``profile_id``) it also names that job's stored outputs
-    (``steps.job_outputs``).
+    ``job`` it also names that job's stored outputs (``steps.job_outputs``).
+
+    0.1.11.9 PJ6: a job has ONE set of steps. With ``job``, the steps, runs
+    and outputs are the job's, under whichever role they are kept
+    (``PipelineStore.job_role``); ``profile_id`` then selects nothing and may
+    be left out. Without ``job``, ``profile_id`` still lists the steps a role
+    asked for.
     """
 
     home_root = Path(home_root)
@@ -708,6 +713,8 @@ def pipeline_status(
                 {"lane": item.lane, "error_code": item.error_code, "retry_at": _iso(item.not_before)} for item in backoffs.values()
             ]
             rows = []
+            if job is not None:
+                profile_id = store.job_role(job) or profile_id
             for step in store.steps(profile_id=profile_id, job=job):
                 waiting = None
                 if step.state == STATE_READY:
@@ -738,7 +745,7 @@ def pipeline_status(
                 ]
         finally:
             store.close()
-    if job is not None and profile_id is not None:
+    if job is not None:
         answer["outputs"] = steps_module.job_outputs(home_root, target, profile_id, job)
     return answer
 

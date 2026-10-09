@@ -30,6 +30,46 @@ mechanics here. Those belong in the internal changelog.
 
 ## Released versions
 
+### 0.1.11.9
+
+One job, one assessment. Until now Scout kept an assessment, a tailored resume and its suggestions once per
+role, so a job two roles found could be assessed twice and show two different resumes. Now they belong to the
+job. **After you upgrade** (`uv tool upgrade gigai`) nothing has to be done: Scout reads what each role's folder
+holds until the job is next written. To copy everything over at once, run `gigai scout migrate-job-stores`
+(below).
+
+- **One job, one assessment, one resume.** A job has one assessment, one tailored resume (with its spacing and
+  your edits) and one set of suggestions, whichever role you open it from. Assess, re-assess after an answer,
+  the resume pick, line edits, length, spacing and suggestions all read and write that one record; a role named
+  on a command or a request (`--profile`, `profile_id`) is recorded as the role that asked and selects nothing.
+  An assessment reads your location and work mode from the setup settings, the same for every role; a role's own
+  location, countries and work mode still filter its search.
+- **A role is a tag.** The Jobs list, `gigai scout jobs list`, `gigai scout new` and their API responses list a
+  job once, with `tags`: each role that found it, with that role's own rank score, best first. `--profile` on
+  `jobs list` and `jobs assess` keeps the jobs that role found; it no longer changes which assessment or state a
+  row shows. A job is a weak fit by its best rank among its roles. `resume brief`, `resume pick`, `suggestions`
+  and `GET /api/jobs?url=` answer from the job; the commands they print name no role.
+- **The same job posted once per country is one job.** 0.1.11.8 listed it as one row; now it also has one
+  assessment and one resume. Assess, the resume commands and the job page work from any copy's URL and reach the
+  same record, which is kept under one posting of the job: its US posting when it has one, else the earliest
+  posted (a job that already has a record under another of its postings keeps it there). An application
+  recorded on any copy shows on the job's row, and the row's tags are the roles that found any copy; a role
+  filter keeps the row for a role that found only another copy. Two copies named to `gigai scout jobs assess` are
+  one model call.
+- **`gigai scout jobs assess <URL>` of a posting no role lists assesses the job.** The posting is found by its
+  address in the stored index and assessed once; the question says it is in no role's list. It no longer says,
+  or means, "as the default profile".
+- **`gigai scout migrate-job-stores`.** Copies each job's assessment, resume and suggestions out of the roles'
+  folders into the job's own. It is a dry run unless you add `--apply`: it prints how many files each store
+  holds, how many are kept and how many are superseded, and writes nothing. Where two roles hold the same job, the
+  kept records are those of the role whose resume went with an application, else the role whose resume you
+  edited, else the only role with a resume, else the newest assessment. It only copies: every role's folder is
+  left as it was, nothing is deleted, and a second run changes nothing. With `--apply` it writes what it kept and
+  what it superseded, per job, to `scout/job-stores-migration.json` in the GigAI home. An applied job with a
+  stored resume under more than one role cannot say which one was sent; the command lists those jobs, keeps every
+  one of their resumes readable, and the job page says so.
+- **The first Jobs list after the upgrade prepares once more**, so every row shows its job's assessment.
+
 ### 0.1.11.8
 
 Six more hiring systems, and the boards Scout could find on them. **After you upgrade** (`uv tool upgrade gigai`),
