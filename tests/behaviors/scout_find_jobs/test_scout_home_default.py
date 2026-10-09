@@ -200,6 +200,8 @@ _TARGET_COMMANDS: dict[str, tuple[str, ...]] = {
     "metrics": ("scout", "metrics"),
     "new": ("scout", "new", "--peek"),
     "jobs list": ("scout", "jobs", "list"),
+    # 0.1.11.7 FS1: the free title search (read-only; takes --home and --target like jobs list).
+    "jobs search": ("scout", "jobs", "search", "Python Engineer"),
     "jobs assess": ("scout", "jobs", "assess", "--window", "new"),
     "jobs import-runs": ("scout", "jobs", "import-runs"),
     "pipeline rank": ("scout", "pipeline", "rank"),

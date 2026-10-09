@@ -25,7 +25,7 @@ from tests.support.scout_profile_fixtures import uuids
 
 TITLE_DEFAULT = "Staff AI Engineer"  # the default profile's rule
 TITLE_SECOND_ONLY = "Staff Engineer"  # the second profile's rule only
-TITLE_TAG_ONLY = "Staff Machine Learning Scientist"  # no profile's rule; the default's function tag (staff, ai_ml)
+TITLE_TAG_ONLY = "Staff Backend Developer"  # no profile's whole-word rule; the second profile's tag pair (staff, software). commit 6f8a7fe2 narrowed the tag query to unqualified software titles, so an ai_ml title no longer qualifies
 TITLE_ARCHIVED_ONLY = "Marketing Manager"  # only the archived profile's rule
 TITLE_NONE = "Account Executive"
 
