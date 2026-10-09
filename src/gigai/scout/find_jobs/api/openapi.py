@@ -328,12 +328,14 @@ _NEW_SINCE = "2026-10-01T14:02:00.000000Z"
 _NEW_EXAMPLE: dict[str, object] = {
     "schema_version": "scout-new:1", "status": "ask", "since": _NEW_SINCE, "since_source": "anchor",
     "checked_at": "2026-10-03T09:30:00.000000Z", "peek": True, "profile_id": None,
+    "us_only": {"on": True, "default": True, "rule": US_ONLY_RULE},
     "anchor": {"last_checked_at": _NEW_SINCE, "advances": False},
     "counts": {
-        "new": 1, "to_assess": 1, "low_rank_skipped": 0, "only_stale": 2, "weak_fit": 0, "applied": 0, "ranked_low": 0, "shown": 1,
+        "new": 1, "postings": 2, "us_only_left_out": 0,
+        "to_assess": 1, "low_rank_skipped": 0, "only_stale": 2, "weak_fit": 0, "applied": 0, "ranked_low": 0, "shown": 1,
         "by_profile": [{"profile_id": "prof_1", "new": 1}],
     },
-    "message": "1 new posting since Thu 01 Oct 14:02.",
+    "message": "1 new job since Thu 01 Oct 14:02. They stand for 2 postings: the same job posted more than once is one row that lists its locations.",
     "question": {
         "kind": "assess_new", "new": 1, "to_assess": 1, "batch": 1, "more_after": 0, "low_rank_skipped": 0,
         "by_profile": [{"profile_id": "prof_1", "count": 1}],
@@ -347,7 +349,7 @@ _NEW_EXAMPLE: dict[str, object] = {
             "cli": f"gigai scout new --no-assess --since {_NEW_SINCE}",
             "api": {"method": "POST", "path": "/api/new", "body": {"assess": False, "since": _NEW_SINCE}},
         },
-        "text": "1 new posting (Staff Engineer 1). Assess them? ~1 call, ~20k tokens",
+        "text": "1 new job (Staff Engineer 1). Assess them? ~1 call, ~20k tokens",
     },
     "stale_question": {
         "kind": "reassess_stale", "to_reassess": 2, "batch": 2, "more_after": 0, "low_rank_skipped": 0,
@@ -376,11 +378,12 @@ _NEW_EXAMPLE: dict[str, object] = {
             "/rows/*/salary": "public-untrusted", "/rows/*/description": "public-untrusted",
             "/rows/*/unmet/*": "public-untrusted", "/rows/*/minor_gaps/*": "public-untrusted", "/rows/*/minor_gap_text": "public-untrusted",
             "/rows/*/open_questions/*/question": "public-untrusted",
+            "/rows/*/locations/*": "public-untrusted", "/rows/*/locations_text": "public-untrusted", "/rows/*/members/*/location": "public-untrusted",
         },
         "rule": UNTRUSTED_TEXT_RULE,
         "rows": [{
             "job_identity": _JOB_URL, "normalized_url": _JOB_URL, "job_url": _JOB_URL, "title": "Staff Engineer", "company": "Acme", "company_slug": "acme", "company_name": "Acme",
-            "location": "Remote - US", "work_mode": "remote", "salary": "USD 180,000-220,000 per year",
+            "location": "Remote - United States", "work_mode": "remote", "salary": "USD 180,000-220,000 per year",
             "description": "Acme is hiring a Staff Engineer to own its Python services…", "first_seen": "2026-10-02T08:00:00.000000Z",
             "published_at": "2026-09-24T16:00:00.000000Z", "published_kind": "posted", "updated_at": "2026-09-30T11:00:00.000000Z",
             "first_seen_at": "2026-10-02T08:00:00.000000Z",
@@ -392,6 +395,13 @@ _NEW_EXAMPLE: dict[str, object] = {
             "assessment_detail": None, "needs_tailoring": None, "unmet": [], "minor_gaps": [], "minor_gap_text": None, "rows_not_shown": 0,
             "open_questions": [], "label": None, "ats_score": None,
             "tag_pending": False,
+            # 0.1.11.9 NEW1: one row a job: the same job posted twice is this ONE row (its canonical posting).
+            "location_unclear": False,
+            "copies": 2, "locations": ["Remote - United States", "Austin, TX"], "locations_text": "Remote - United States; Austin, TX",
+            "members": [
+                {"job_identity": _JOB_URL, "job_url": _JOB_URL, "location": "Remote - United States"},
+                {"job_identity": _JOB_URL + "-2", "job_url": _JOB_URL + "-2", "location": "Austin, TX"},
+            ],
         }],
     },
     "profiles": [{"profile_id": "prof_1", "label": "Staff Engineer", "is_default": True, "resume": {"record_id": "rec_1", "revision_id": "rev_1"}}],
@@ -606,7 +616,17 @@ _POSTINGS_NOTE = (
 )
 _NEW_NOTE = (
     "Read from the stored index (no board request) across every active profile; a deleted or archived profile is never "
-    "listed. `status` is `ask` (new postings no profile has assessed: `question` has the count per profile and the estimate "
+    "listed. ONE ROW A JOB (0.1.11.9): the same company, the same title and the same description posted more than once "
+    "(only the location differs: once per country or city) is ONE new job, by GET /api/postings' rule: the row is its "
+    "canonical posting (the US one when it has one, else the earliest posted, then the posting id) and lists the others "
+    "(`copies`, `locations`, `locations_text`, `members`). EVERY COUNT IS OF JOBS, never of copies: `counts.new`, "
+    "`to_assess`, `only_stale`, `low_rank_skipped`, `by_profile`, the three questions and their estimates; a yes makes one "
+    "model call a job. `counts.postings` is how many postings the new jobs stand for. US ONLY (0.1.11.9): `us_only=1|0`, the "
+    "list's switch and default (left out: on for a US setup; `us_only` in the answer says `on`, `default` and the `rule`). On, "
+    "a posting clearly outside the US is left out before the copies become one row, so a job posted only outside the US is "
+    "not new, in no count and in no batch (`counts.us_only_left_out` counts those jobs), and a posting Scout cannot place "
+    "stays with `location_unclear: true`. A call that names the switch gets it back in every question's `yes`. "
+    "`status` is `ask` (new postings no profile has assessed: `question` has the count per profile and the estimate "
     "from the recorded model calls, and the rows are ranked only), `new` (the new postings; at most 50 are listed, and "
     "`counts.new` is all of them) or `nothing_new` (the 10 postings that still need attention). Rows are in one order "
     "(`sort_group`): a `current` assessment, then a `stale` one, then `not_assessed`; inside a group the verdict (matched, "
@@ -2265,6 +2285,7 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
             _q("profile_id", "string", "Only this active profile's postings."),
             _q("since", "string", "Measure \"new\" from this time (the since of an earlier response) instead of the anchor."),
             _q("peek", "string", "Accepted for symmetry with the CLI: a GET never moves the anchor.", enum=("0", "1", "true", "false")),
+            _q("us_only", "string", "0.1.11.9: US only, as GET /api/postings `us_only`. 1: a job posted only outside the US is not new and not counted. Left out: on for a US setup (the shared settings' countries hold the US), off otherwise.", enum=("0", "1", "true", "false")),
         ),
         errors=(_INVALID, _UNKNOWN_KEY, _NO_TARGET, (404, "profile_not_found"), (409, "config_unavailable")),
         description=_NEW_NOTE + " A GET never moves the \"new since\" anchor: POST /api/new and POST /api/new/seen do." + _PREPARING_NOTE,
@@ -2281,6 +2302,7 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
         params=(
             _q("profile_id", "string", "Only this active profile's postings."),
             _q("since", "string", "The since of the GET /api/new response this belongs to."),
+            _q("us_only", "string", "0.1.11.9: the `us_only` of the GET /api/new response this belongs to (left out: the setup's default).", enum=("0", "1", "true", "false")),
         ),
         errors=(_INVALID, _UNKNOWN_KEY, _NO_TARGET, (404, "profile_not_found"), (409, "config_unavailable")),
         description=(
@@ -2304,6 +2326,7 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
             _b("since", "string", "Measure \"new\" from this time (the since of the response that asked) instead of the anchor."),
             _b("profile_id", "string", "Only this active profile's postings. A filtered call never moves the anchor."),
             _b("peek", "boolean", "true: do not move the anchor."),
+            _b("us_only", "boolean", "0.1.11.9: US only, as GET /api/new `us_only` (the question's `yes` carries it when the call that asked named it). Left out: the setup's default."),
         ),
         errors=(_INVALID, _WRONG_TYPE, _UNKNOWN_KEY, _NO_TARGET, (404, "profile_not_found"), (409, "config_unavailable")),
         request_example={"assess": True},

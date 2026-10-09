@@ -54,15 +54,17 @@ class NewRoutesMixin:
 
     def _answer_new(
         self, target, *, profile_id, peek: bool, assess: bool | None, since, yours: bool = False, reassess_stale: bool = False,
-        model_wait: float | None = None, include_low_rank: bool = False,
+        model_wait: float | None = None, include_low_rank: bool = False, us_only: bool | None = None,
     ) -> None:
         try:
             if yours:
-                response = scout_new_yours(self._backend.home_root, target, profile_id=profile_id, since=since, model_wait=model_wait)
+                response = scout_new_yours(
+                    self._backend.home_root, target, profile_id=profile_id, since=since, model_wait=model_wait, us_only=us_only,
+                )
             else:
                 response = scout_new(
                     self._backend.home_root, target, profile_id=profile_id, peek=peek, assess=assess, since=since,
-                    reassess_stale=reassess_stale, model_wait=model_wait, include_low_rank=include_low_rank,
+                    reassess_stale=reassess_stale, model_wait=model_wait, include_low_rank=include_low_rank, us_only=us_only,
                 )
         except PostingModelPreparing as exc:
             # 0110-9-01: the first build of the posting read model is running (a GET only): how far it is, never a hang.
@@ -82,7 +84,7 @@ class NewRoutesMixin:
         if target is None:
             return
         query = parse_qs(urlsplit(self.path).query, keep_blank_values=False)
-        unknown = sorted(set(query) - ({"profile_id", "since"} if yours else {"peek", "profile_id", "since"}))
+        unknown = sorted(set(query) - ({"profile_id", "since", "us_only"} if yours else {"peek", "profile_id", "since", "us_only"}))
         if unknown:
             self._error(HTTPStatus.UNPROCESSABLE_ENTITY, "unknown_key", f"unknown query key: {unknown[0]}")
             return
@@ -90,10 +92,18 @@ class NewRoutesMixin:
         if peek not in _TRUE | _FALSE:
             self._error(HTTPStatus.UNPROCESSABLE_ENTITY, "invalid_value", "peek must be 1 or 0")
             return
+        # 0.1.11.9 NEW1: ``us_only`` as GET /api/postings reads it: absent is the setup's default (on for a US setup).
+        us_only: bool | None = None
+        if "us_only" in query:
+            raw = query["us_only"][0]
+            if raw not in _TRUE | _FALSE:
+                self._error(HTTPStatus.UNPROCESSABLE_ENTITY, "invalid_value", "us_only must be 1 or 0")
+                return
+            us_only = raw in _TRUE
         # A GET is a read: it never moves the anchor, whatever ``peek`` says (POST /api/new and /api/new/seen move it).
         self._answer_new(
             target, profile_id=(query.get("profile_id") or [None])[0], peek=True, assess=None,
-            since=(query.get("since") or [None])[0], yours=yours, model_wait=model_wait_seconds(),
+            since=(query.get("since") or [None])[0], yours=yours, model_wait=model_wait_seconds(), us_only=us_only,
         )
 
     def _handle_get_new_yours(self) -> None:
@@ -106,7 +116,7 @@ class NewRoutesMixin:
         if not isinstance(body, dict):
             self._error(HTTPStatus.UNPROCESSABLE_ENTITY, "wrong_type", "the body must be a JSON object")
             return
-        unknown = sorted(set(body) - {"assess", "include_low_rank", "peek", "profile_id", "reassess_stale", "since"})
+        unknown = sorted(set(body) - {"assess", "include_low_rank", "peek", "profile_id", "reassess_stale", "since", "us_only"})
         if unknown:
             self._error(HTTPStatus.UNPROCESSABLE_ENTITY, "unknown_key", f"unknown key: {unknown[0]}")
             return
@@ -122,12 +132,16 @@ class NewRoutesMixin:
         if any(value is not None and type(value) is not str for value in (profile_id, since)):
             self._error(HTTPStatus.UNPROCESSABLE_ENTITY, "wrong_type", "profile_id and since must be strings")
             return
+        us_only = body.get("us_only")  # 0.1.11.9 NEW1: left out, the setup's default
+        if us_only is not None and type(us_only) is not bool:
+            self._error(HTTPStatus.UNPROCESSABLE_ENTITY, "wrong_type", "us_only must be true or false")
+            return
         target = self._new_target()
         if target is None:
             return
         self._answer_new(
             target, profile_id=profile_id, peek=peek, assess=assess, since=since, reassess_stale=reassess_stale,
-            include_low_rank=include_low_rank,
+            include_low_rank=include_low_rank, us_only=us_only,
         )
 
     def _handle_post_new_seen(self) -> None:

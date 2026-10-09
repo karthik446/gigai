@@ -68,7 +68,13 @@ holds until the job is next written. To copy everything over at once, run `gigai
   what it superseded, per job, to `scout/job-stores-migration.json` in the GigAI home. An applied job with a
   stored resume under more than one role cannot say which one was sent; the command lists those jobs, keeps every
   one of their resumes readable, and the job page says so.
+- **`gigai scout new` shows one row per job.** `gigai scout new` and `GET /api/new` list the same job posted
+  once per country (or city) as one row, as the Jobs list does: its US posting when it has one, else the earliest
+  posted, with the other locations on the row. US only applies with the list's default (`--us-only` /
+  `--no-us-only`, `us_only`): a job posted only outside the US is not new. Every count counts jobs, not copies:
+  "N new jobs", the three questions and what a yes assesses.
 - **The first Jobs list after the upgrade prepares once more**, so every row shows its job's assessment.
+- Assess by URL no longer leaves a database connection open until garbage collection.
 
 ### 0.1.11.8
 

@@ -334,7 +334,7 @@ def test_scout_new_assesses_only_rank_50_or_more_and_asks_about_the_low_ranked_s
     since = str(ask["since"])
     assert (ask["status"], ask["counts"]["new"], ask["counts"]["to_assess"], ask["counts"]["low_rank_skipped"]) == ("ask", 5, 3, 2)  # type: ignore[index]
     assert (ask["question"]["to_assess"], ask["question"]["low_rank_skipped"]) == (3, 2)  # type: ignore[index]
-    assert "5 new postings" in ask["question"]["text"] and "Assess 3 of them (2 low-ranked ones are a separate question)?" in ask["question"]["text"]  # type: ignore[index]
+    assert "5 new jobs" in ask["question"]["text"] and "Assess 3 of them (2 low-ranked ones are a separate question)?" in ask["question"]["text"]  # type: ignore[index]
     question = ask["low_rank_question"]
     assert (question["kind"], question["skipped"], question["min_rank"], question["estimate"]["calls"]) == ("assess_low_rank", 2, 50, 2)  # type: ignore[index]
     assert str(question["text"]).startswith("2 low-ranked ones are skipped (rank below 50); assess those too? ~2 calls")  # type: ignore[index]

@@ -190,11 +190,11 @@ def test_scout_new_leaves_them_out_of_what_is_new_and_of_its_batch(fx: PostingsF
     assert ask["status"] == "ask"
     assert (ask["counts"]["new"], ask["counts"]["to_assess"], ask["counts"]["shown"], ask["counts"]["applied"]) == (2, 2, 2, 3)
     assert _jobs(ask) == LISTED
-    assert ask["message"].startswith("2 new postings since ")
-    assert ask["message"].endswith("3 new postings you already applied to are left out: gigai scout jobs list --state applied")
-    assert ask["question"]["text"].startswith("2 new postings ("), ask["question"]["text"]
+    assert ask["message"].startswith("2 new jobs since ")
+    assert ask["message"].endswith("3 new jobs you already applied to are left out: gigai scout jobs list --state applied")
+    assert ask["question"]["text"].startswith("2 new jobs ("), ask["question"]["text"]
     text = CliRunner().invoke(cli, fx.cli("--peek", "--no-assess"))
-    assert text.exit_code == 0 and "3 new postings you already applied to are left out" in text.output
+    assert text.exit_code == 0 and "3 new jobs you already applied to are left out" in text.output
     printed = CliRunner().invoke(cli, [*fx.cli("--peek", "--no-assess"), "--json"])
     assert printed.exit_code == 0 and json.loads(printed.output)["counts"]["applied"] == 3
     seen = _batches(monkeypatch, scout_new)

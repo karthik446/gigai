@@ -40,6 +40,23 @@ THE FLOW
   of the rows listed here (``counts.weak_fit`` says how many, the message how
   to list them), it is never one of the postings that "still need attention",
   and its row asks no question (``open_questions`` is empty).
+- ONE ROW A JOB (0.1.11.9 NEW1): the same company, title and description posted
+  more than once (only the location differs: once per country, or per city)
+  is ONE new job, by the Jobs list's rule (``job_copies.copy_key``,
+  ``canonical_job.pick_canonical``): the row is its canonical posting (the US
+  one, else the earliest posted, then the posting id) and lists every
+  location (``copies``, ``locations``, ``locations_text``, ``members``). Every
+  count is of JOBS: ``counts.new``, the three questions, ``by_profile`` (a job
+  is tagged with the roles that found ANY copy); ``counts.postings`` says how
+  many postings the new jobs stand for. A batch asks for one assessment a job.
+- US ONLY (0.1.11.9 NEW1, the Jobs list's switch and default:
+  ``posting_search.us_only_setting``, ON for a US setup): a posting clearly
+  outside the US is left out before the copies become one row, so a job
+  posted only outside the US is not new, not counted and never in a batch
+  (the old-assessment question too); ``counts.us_only_left_out`` says how
+  many JOBS that left out, ``us_only`` in the response ``on``, ``default`` and
+  the ``rule``. ``us_only=False`` (``--no-us-only``) shows them; a question's
+  yes then carries the same switch.
 - ALREADY APPLIED (0.1.11.5): a new posting with an application (applied and
   every later application state, a rejected or withdrawn one too) is left
   out of what is new: of ``counts.new``, the rows, the questions and every
@@ -147,6 +164,7 @@ from . import fit as fit_rules
 from . import postings
 from .assess_causes import cause_fields, failure_lines
 from .evaluated_models import notice_lines
+from .find_jobs.job_copies import US_ONLY_RULE
 from .data_labels import ENVELOPE_KEY, PUBLIC_UNTRUSTED, UNTRUSTED_TEXT_RULE, USER_PRIVATE, assert_not_mixed, labels_envelope
 from .pipeline.busy import LiveBatch, assess_batch
 from .pipeline.store import MODEL_STEPS, PipelineStore, PipelineStoreError, PostingRecord, pipeline_path
@@ -181,6 +199,7 @@ UPDATE_COUNTS_ALL = "(A sources update counts every new posting on every board, 
 WEAK_FIT_COMMAND = "gigai scout jobs list --state weak_fit"
 #: 0.1.11.5: how to list the postings with an application, which every other list leaves out.
 APPLIED_COMMAND = "gigai scout jobs list --state applied"
+NO_US_ONLY_COMMAND = "gigai scout new --no-us-only"
 
 #: States that still want something from the user (a posting Scout labelled recommended is left out by the query).
 _ATTENTION_STATES = ("needs_answers", "matched", "assessed", "tailored", "not_assessed")
@@ -203,6 +222,10 @@ POSTINGS_LABELS = {
     "/rows/*/minor_gaps/*": PUBLIC_UNTRUSTED,
     "/rows/*/minor_gap_text": PUBLIC_UNTRUSTED,
     "/rows/*/open_questions/*/question": PUBLIC_UNTRUSTED,
+    # 0.1.11.9 NEW1: one row a job: the locations of its copies.
+    "/rows/*/locations/*": PUBLIC_UNTRUSTED,
+    "/rows/*/locations_text": PUBLIC_UNTRUSTED,
+    "/rows/*/members/*/location": PUBLIC_UNTRUSTED,
 }
 YOURS_LABELS = {"/evidence/*/lines/*": USER_PRIVATE}
 YOURS_NOTE = "What matches, in your own words (resume lines, answers, stories), is a separate call: it is never sent next to posting text."
@@ -975,17 +998,32 @@ def _by_profile(pairs: Sequence[tuple[str, str]], views: Sequence[ProfileView]) 
     return [{"profile_id": view.profile_id, "count": per_profile[view.profile_id]} for view in views if view.profile_id in per_profile]
 
 
-def _answers(since: str, profile_id: str | None, *, flag: str, body: Mapping[str, object]) -> dict[str, object]:
-    """How a question is answered: the CLI command and the API call, for the same window (and profile)."""
+def _us_flag(us_only: bool | None) -> str:
+    """`` --us-only`` / `` --no-us-only`` when the call said either; ``""`` for the setup's default."""
+
+    return "" if us_only is None else (" --us-only" if us_only else " --no-us-only")
+
+
+def _answers(since: str, profile_id: str | None, *, flag: str, body: Mapping[str, object], us_only: bool | None = None) -> dict[str, object]:
+    """How a question is answered: the CLI command and the API call, for the same window (and profile).
+
+    ``us_only`` (0.1.11.9 NEW1): what the call that asked said of US only, so the yes selects what the question counted.
+    """
 
     profile = f" --profile {profile_id}" if profile_id is not None else ""
-    api_body = {**body, "since": since, **({"profile_id": profile_id} if profile_id is not None else {})}
-    return {"cli": f"gigai scout new {flag} --since {since}{profile}", "api": {"method": "POST", "path": "/api/new", "body": api_body}}
+    api_body = {
+        **body, "since": since, **({"profile_id": profile_id} if profile_id is not None else {}),
+        **({"us_only": bool(us_only)} if us_only is not None else {}),
+    }
+    return {
+        "cli": f"gigai scout new {flag} --since {since}{profile}{_us_flag(us_only)}",
+        "api": {"method": "POST", "path": "/api/new", "body": api_body},
+    }
 
 
 def _question(
     pairs: Sequence[tuple[str, str]], new_count: int, views: Sequence[ProfileView], since: str, *, home_root: Path, target: Path,
-    profile_id: str | None = None, low_rank: int = 0,
+    profile_id: str | None = None, low_rank: int = 0, us_only: bool | None = None,
 ) -> tuple[dict[str, object], str]:
     """The approval question: ids and numbers, and the sentence (it names the profile tags).
 
@@ -1007,7 +1045,7 @@ def _question(
     else:
         ask = "Assess them?" if len(pairs) == new_count else f"Assess the {len(pairs)} not assessed yet?"
     sentence = (
-        f"{new_count} new posting{plural}{across}. {ask} {_calls(found['calls'])}{_tokens(found['tokens'])}"
+        f"{new_count} new job{plural}{across}. {ask} {_calls(found['calls'])}{_tokens(found['tokens'])}"
         f"{_more_words(size, len(pairs))}"
     )
     question = {
@@ -1020,8 +1058,8 @@ def _question(
         "by_profile": by_profile,
         "model_target": model,
         "estimate": found,
-        "yes": _answers(since, profile_id, flag="--yes", body={"assess": True}),
-        "no": _answers(since, profile_id, flag="--no-assess", body={"assess": False}),
+        "yes": _answers(since, profile_id, flag="--yes", body={"assess": True}, us_only=us_only),
+        "no": _answers(since, profile_id, flag="--no-assess", body={"assess": False}, us_only=us_only),
         "text": sentence,
     }
     return question, sentence
@@ -1029,7 +1067,7 @@ def _question(
 
 def _stale_question(
     pairs: Sequence[tuple[str, str]], views: Sequence[ProfileView], since: str, *, home_root: Path, target: Path,
-    profile_id: str | None = None, low: Sequence[tuple[str, str]] = (), min_rank: int = 0,
+    profile_id: str | None = None, low: Sequence[tuple[str, str]] = (), min_rank: int = 0, us_only: bool | None = None,
 ) -> dict[str, object]:
     """0110-8-08: the postings that have only an old assessment, as their own question. Never answered by the assess-new yes.
 
@@ -1065,14 +1103,14 @@ def _stale_question(
         "by_profile": _by_profile(asked, views),
         "model_target": model,
         "estimate": found,
-        "yes": _answers(since, profile_id, flag=flag, body=body),
+        "yes": _answers(since, profile_id, flag=flag, body=body, us_only=us_only),
         "text": text,
     }
 
 
 def _low_rank_question(
     low: Sequence[tuple[str, str]], views: Sequence[ProfileView], since: str, setting: fit_rules.FitSetting, *, home_root: Path,
-    target: Path, profile_id: str | None = None,
+    target: Path, profile_id: str | None = None, us_only: bool | None = None,
 ) -> dict[str, object]:
     """0110-10-02: the new postings below the assess threshold, as their own question. Never answered by a plain yes."""
 
@@ -1088,7 +1126,7 @@ def _low_rank_question(
         "by_profile": _by_profile(low, views),
         "model_target": model,
         "estimate": found,
-        "yes": _answers(since, profile_id, flag="--yes --include-low-rank", body={"assess": True, "include_low_rank": True}),
+        "yes": _answers(since, profile_id, flag="--yes --include-low-rank", body={"assess": True, "include_low_rank": True}, us_only=us_only),
         "text": (
             f"{len(low)} low-ranked {'one is' if one else 'ones are'} skipped (rank below {setting.assess_min_rank}); "
             f"assess {f'the top {size} by rank of ' if size < len(low) else ''}{'that' if one else 'those'} too? {_calls(found['calls'])}{_tokens(found['tokens'])}"
@@ -1194,6 +1232,72 @@ def _one_a_job(rows: Iterable[PostingRecord], home_root: Path, target: Path) -> 
     return list(kept.values())
 
 
+_Pair = tuple[Sequence[PostingRecord], PostingRecord]
+
+
+class _JobRows:
+    """0.1.11.9 NEW1: postings as ONE ROW A JOB, by the Jobs list's own code (``posting_search._Selection``).
+
+    ``rows`` are ``(the row's tags, its canonical posting's row)`` in the order given (a job stands where its first
+    posting stood); ``left_out`` is how many JOBS US only left out (every posting of the job is clearly outside the
+    US); ``applied`` how many jobs an application on any copy left out; ``postings`` how many postings ``rows`` stand
+    for. ``json(row, text)`` is the row's additive keys (``copies``, ``locations``, ``locations_text``, ``members``,
+    ``location_unclear``). ``profile_id`` keeps the jobs that role tags (any copy), as the list's role filter does.
+    """
+
+    def __init__(
+        self, home_root: Path, pairs: Sequence[_Pair], *, us_only: bool, applications: Mapping[str, Mapping[str, object]],
+        profile_id: str | None = None,
+    ) -> None:
+        from . import posting_search as lists
+        from .find_jobs.job_copies import PLACE_OTHER
+
+        def collapsed(of: Sequence[_Pair]) -> tuple[list[_Pair], "lists._Selection", dict[str, dict[str, object]]]:
+            # The list's rule lives on its selection (``_collapsed`` fills ``copies``, ``copies_json`` reads ``places``):
+            # the same two methods are used here on a selection that holds nothing else, so the rule is written once.
+            view = object.__new__(lists._Selection)
+            view.copies, view.places = {}, places
+            held = {job: dict(found) for job, found in applications.items()}
+            rows = view._collapsed(of, places, held) if of else []
+            if profile_id is not None:
+                rows = [(group, row) for group, row in rows if any(item.profile_id == profile_id for item in group)]
+            return rows, view, held
+
+        places = lists._places(home_root, [row for _group, row in pairs]) if pairs else {}
+        every = list(pairs)
+        kept = [pair for pair in every if pair[1].job not in places or places[pair[1].job].place != PLACE_OTHER] if us_only else every
+        rows, self._view, held = collapsed(kept)
+        self.left_out = len(collapsed(every)[0]) - len(rows) if len(kept) != len(every) else 0
+        self.applied = sum(1 for _group, row in rows if row.job in held)
+        self.rows: list[_Pair] = [(group, row) for group, row in rows if row.job not in held]
+        self.postings = sum(len(self._view.copies.get(row.job, (None,))) for _group, row in self.rows)
+
+    def json(self, row: PostingRecord, text: PostingText | None) -> dict[str, object]:
+        return self._view.copies_json(row, text)
+
+
+def _kept_by_us_only(home_root: Path, rows: Sequence[PostingRecord]) -> list[PostingRecord]:
+    """``rows`` without the postings clearly outside the US (the list's US only: one Scout cannot place stays)."""
+
+    from . import posting_search as lists
+    from .find_jobs.job_copies import PLACE_OTHER
+
+    places = lists._places(home_root, rows) if rows else {}
+    return [row for row in rows if row.job not in places or places[row.job].place != PLACE_OTHER]
+
+
+def _applications(home_root: Path, applied: Iterable[str]) -> dict[str, dict[str, object]]:
+    """Each applied job AND its copies (``job_key.copies_of``: only the boards of the jobs applied to are read)."""
+
+    from .find_jobs.job_key import copies_of
+
+    found: dict[str, dict[str, object]] = {}
+    for job in sorted(applied):
+        for copy in copies_of(home_root, job):
+            found.setdefault(copy, {})
+    return found
+
+
 def _stale_rows(store: PipelineStore, profile_id: str | None) -> list[PostingRecord]:
     """0110-8-08: the live postings with an assessment and no CURRENT one under any matching profile, each as the row of the profile whose old assessment is shown."""
 
@@ -1273,8 +1377,13 @@ def scout_new(
     build_progress: Callable[[str, int, int], None] | None = None,
     include_low_rank: bool = False,
     advance: bool = True,
+    us_only: bool | None = None,
 ) -> dict[str, object]:
     """What is new since the last check, as the ``scout-new:1`` response. See the module docstring.
+
+    ``us_only`` (0.1.11.9 NEW1): the Jobs list's switch. ``None`` is the setup's
+    default (ON when the shared config's countries hold the US); either value
+    is carried by every question's yes.
 
     ``advance=False`` (0110-10-11): this call does not move the anchor,
     whatever else it is (``anchor.advances`` is false). For a caller that asks
@@ -1317,13 +1426,13 @@ def scout_new(
             Path(home_root), Path(target), profile_id=profile_id, peek=peek, assess=assess, since=since, now=now, config=config,
             yours=yours, process=process and not yours, decided_by=decided_by, reassess_stale=reassess_stale and not yours,
             progress=progress, model_wait=model_wait, build_progress=build_progress,
-            include_low_rank=include_low_rank and not yours, advance=advance,
+            include_low_rank=include_low_rank and not yours, advance=advance, us_only=us_only,
         )
 
 
 def scout_new_yours(
     home_root: Path, target: Path, *, profile_id: str | None = None, since: str | None = None, now: datetime | None = None,
-    model_wait: float | None = None,
+    model_wait: float | None = None, us_only: bool | None = None,
 ) -> dict[str, object]:
     """The user's own evidence of what matches, for the postings ``scout_new`` lists with the same filters.
 
@@ -1332,7 +1441,8 @@ def scout_new_yours(
     """
 
     return scout_new(
-        home_root, target, profile_id=profile_id, peek=True, assess=False, since=since, now=now, yours=True, model_wait=model_wait
+        home_root, target, profile_id=profile_id, peek=True, assess=False, since=since, now=now, yours=True, model_wait=model_wait,
+        us_only=us_only,
     )
 
 
@@ -1341,7 +1451,10 @@ def _scout_new(
     now: datetime | None, config: object | None, yours: bool, process: bool = False, decided_by: str = "operator",
     reassess_stale: bool = False, progress: Callable[[str], None] | None = None, model_wait: float | None = None,
     build_progress: Callable[[str, int, int], None] | None = None, include_low_rank: bool = False, advance: bool = True,
+    us_only: bool | None = None,
 ) -> dict[str, object]:
+    from .posting_search import us_only_setting
+
     # Before anything is read: what the steps store (a Scout label, a tailored resume) is in the rows below.
     processed = process_waiting(home_root, target, config=config, decided_by=decided_by) if process else None
     moment = (now or datetime.now(UTC)).astimezone(UTC)
@@ -1368,15 +1481,26 @@ def _scout_new(
 
         # 0.1.11.5: a posting with an application is left out of what is new, of its counts and of every batch
         # (``gigai scout jobs list --state applied`` lists them). The events are read once per request.
-        applied = _applied(refreshed.resolved)
+        # 0.1.11.9 NEW1: an application on ANY copy of a job is the job's.
+        applied = _applications(home_root, _applied(refreshed.resolved))
         applied_new = 0
+        # 0.1.11.9 NEW1: the Jobs list's US only, by its default; and one row a job (:class:`_JobRows`).
+        us_default = us_only_setting(home_root, target)
+        us_on = us_default if us_only is None else bool(us_only)
+        jobs: _JobRows | None = None
 
         def read_new() -> dict[str, list[PostingRecord]]:
-            nonlocal applied_new
-            selected = store.postings(since=since_at, profile_id=profile_id)
-            found = _grouped(selected) if profile_id is None else _grouped(store.postings(jobs={row.job for row in selected}))
-            applied_new = sum(1 for job in found if job in applied)
-            return {job: group for job, group in found.items() if job not in applied}
+            """The new JOBS: ``canonical posting -> the row's tags`` (the canonical posting's own first)."""
+
+            nonlocal applied_new, jobs
+            # Every role's new postings: a role filter judges the ROW (the roles that found any copy), as the list's does.
+            found = _grouped(store.postings(since=since_at))
+            jobs = _JobRows(
+                home_root, [(group, _shown(group)) for group in found.values()], us_only=us_on, applications=applied,
+                profile_id=profile_id,
+            )
+            applied_new = jobs.applied
+            return {row.job: list(group) for group, row in jobs.rows}
 
         setting = fit_rules.fit_setting(home_root, target)
 
@@ -1388,7 +1512,8 @@ def _scout_new(
             first = {(row.job, row.profile_id): row for group in groups.values() for row in group}
             new_pairs = sorted((row.job, row.profile_id) for row in _one_a_job((first[pair] for pair in _new_pairs(groups, profile_id)), home_root, target))
             new_keep, new_low = split_low_rank(new_pairs, ranks, setting, include=include_low_rank)
-            old = _one_a_job((row for row in _stale_rows(store, profile_id) if row.job not in applied), home_root, target)
+            stale = [row for row in _stale_rows(store, profile_id) if row.job not in applied]
+            old = _one_a_job(_kept_by_us_only(home_root, stale) if us_on else stale, home_root, target)
             old_ranks = {(row.job, row.profile_id): row.rank_score for row in old}
             old_keep, old_low = split_low_rank(list(old_ranks), old_ranks, setting, include=include_low_rank)
             # 0110-10-11, 0.1.11.2: what the batch of 50 a yes acts on is ordered by: the rank score, then the newest.
@@ -1444,7 +1569,7 @@ def _scout_new(
             assessed = batch(new_batch, [group[0] for group in groups.values()], done_word="assessed", doing_word="assessing")
             if new_later:  # only then: a batch that was all of them answers what it always did
                 assessed["more_after"] = new_later
-                assessed["next"] = _answers(since_at, profile_id, flag=f"--yes{low_flag}", body={"assess": True, **low_body})
+                assessed["next"] = _answers(since_at, profile_id, flag=f"--yes{low_flag}", body={"assess": True, **low_body}, us_only=us_only)
         elif pairs and assess is None:
             status = STATUS_ASK
         if approved_stale:
@@ -1456,6 +1581,7 @@ def _scout_new(
                 reassessed["more_after"] = stale_later
                 reassessed["next"] = _answers(
                     since_at, profile_id, flag=f"--reassess-stale{low_flag}", body={"assess": False, "reassess_stale": True, **low_body},
+                    us_only=us_only,
                 )
         if assessed is not None or reassessed is not None:
             postings.refresh(home_root, target, store=store, now=moment)
@@ -1464,23 +1590,29 @@ def _scout_new(
         if status == STATUS_ASK:
             question, sentence = _question(
                 pairs, new_count, views, since_at, home_root=home_root, target=target, profile_id=profile_id, low_rank=len(low_pairs),
+                us_only=us_only,
             )
         stale_question = (
             _stale_question(
                 stale_pairs, views, since_at, home_root=home_root, target=target, profile_id=profile_id, low=low_stale,
-                min_rank=setting.assess_min_rank,
+                min_rank=setting.assess_min_rank, us_only=us_only,
             )
             if stale_pairs or low_stale else None
         )
         low_rank_question = (
-            _low_rank_question(low_pairs, views, since_at, setting, home_root=home_root, target=target, profile_id=profile_id)
+            _low_rank_question(low_pairs, views, since_at, setting, home_root=home_root, target=target, profile_id=profile_id, us_only=us_only)
             if low_pairs else None
         )
 
         weak_fit = ranked_low = 0
+        assert jobs is not None
+        us_left_out, copies_of_new = jobs.left_out, jobs.postings
         if groups:
             shown = in_order((group, _shown(group, profile_id)) for group in groups.values())
-            message = f"{new_count} new posting{'s' if new_count != 1 else ''} since {_when(since_at)}."
+            message = f"{new_count} new job{'s' if new_count != 1 else ''} since {_when(since_at)}."
+            if copies_of_new > len(groups):
+                # 0.1.11.9 NEW1: the count is of jobs; the postings behind them are said once.
+                message += f" They stand for {copies_of_new} postings: the same job posted more than once is one row that lists its locations."
             # 0110-10-02: a weak fit is not listed; the count and how to list them are said instead.
             weak_fit = sum(1 for _group, row in shown if row.state == fit_rules.WEAK_FIT)
             shown = [(group, row) for group, row in shown if row.state != fit_rules.WEAK_FIT]
@@ -1495,14 +1627,15 @@ def _scout_new(
                     f" {WEAK_FIT_COMMAND}"
                 )
         else:
-            best = [
-                row for row in store.postings_by_score(states=_ATTENTION_STATES, profile_id=profile_id, limit=ATTENTION_LIMIT * 3)
-                if row.job not in applied
-            ][:ATTENTION_LIMIT]
+            best = store.postings_by_score(states=_ATTENTION_STATES, profile_id=profile_id, limit=ATTENTION_LIMIT * 3)
             tags = _grouped(store.postings(jobs={row.job for row in best}))
-            # 0.1.11.9: each job by its best tag's row (a role filter picks the jobs, never the row).
-            shown = [(group, _shown(group)) for group in (tags.get(row.job, [row]) for row in best)]
-            shown = [(group, row) for group, row in shown if row.state != fit_rules.WEAK_FIT]
+            # 0.1.11.9: each job by its best tag's row (a role filter picks the jobs, never the row). NEW1: one row a
+            # job here too, US only applied, a job with an application on any copy left out.
+            jobs = _JobRows(
+                home_root, [(group, _shown(group)) for group in (tags.get(row.job, [row]) for row in best)], us_only=us_on,
+                applications=applied,
+            )
+            shown = [(group, row) for group, row in jobs.rows[:ATTENTION_LIMIT] if row.state != fit_rules.WEAK_FIT]
             # 0110-10-11: what "new" counts is said, so "nothing new" after an update that stored hundreds of postings
             # is not a riddle: new is a posting your profiles MATCH that Scout first stored after the time named.
             if source == SINCE_FIRST_USE:
@@ -1514,8 +1647,13 @@ def _scout_new(
 
         if applied_new:
             message += (
-                f" {applied_new} new posting{'s' if applied_new != 1 else ''} you already applied to"
+                f" {applied_new} new job{'s' if applied_new != 1 else ''} you already applied to"
                 f" {'are' if applied_new != 1 else 'is'} left out: {APPLIED_COMMAND}"
+            )
+        if us_left_out:
+            message += (
+                f" {us_left_out} new job{'s' if us_left_out != 1 else ''} posted only outside the US"
+                f" {'are' if us_left_out != 1 else 'is'} left out (US only): {NO_US_ONLY_COMMAND}"
             )
 
         texts = postings.posting_texts(home_root, [row for _group, row in shown])
@@ -1529,6 +1667,7 @@ def _scout_new(
             text = texts.get(row.job)
             rows_json.append(_row_json(group, row, text, item, pending(tag_owner(group, row, profile_id), None if text is None else text.title), labels))
             rows_json[-1]["ranked_low"] = fit_rules.is_ranked_low(row.state, row.rank_score, setting)  # 0.1.11.2
+            rows_json[-1].update(jobs.json(row, text))  # 0.1.11.9 NEW1 (additive): copies, locations, members, location_unclear
             found = _evidence(row, item)
             if found is not None:
                 evidence.append(found)
@@ -1548,8 +1687,8 @@ def _scout_new(
             return answer
 
         hint_since = f" --since {since_at}"  # always: the yours call then reads exactly the postings listed here
-        hint_profile = f" --profile {profile_id}" if profile_id is not None else ""
-        query = f"since={since_at}" + (f"&profile_id={profile_id}" if profile_id else "")
+        hint_profile = (f" --profile {profile_id}" if profile_id is not None else "") + _us_flag(us_only)
+        query = f"since={since_at}" + (f"&profile_id={profile_id}" if profile_id else "") + ("" if us_only is None else f"&us_only={int(bool(us_only))}")
         per_profile: dict[str, int] = {}
         for group in groups.values():
             for row in group:
@@ -1564,9 +1703,15 @@ def _scout_new(
             "checked_at": checked_at,
             "peek": bool(peek),
             "profile_id": profile_id,
+            # 0.1.11.9 NEW1: the Jobs list's switch, as it is for this response.
+            "us_only": {"on": us_on, "default": us_default, "rule": US_ONLY_RULE},
             "anchor": {"last_checked_at": None if anchor is None else anchor.last_checked_at, "advances": advances},
             "counts": {
+                # 0.1.11.9 NEW1: every count here is of JOBS (the copies of a job are one).
                 "new": new_count,
+                # How many postings the new jobs stand for, and how many new jobs US only left out.
+                "postings": copies_of_new,
+                "us_only_left_out": us_left_out,
                 "to_assess": len(pairs),
                 "low_rank_skipped": len(low_pairs),
                 "only_stale": len(stale_pairs) + len(low_stale),
@@ -1756,6 +1901,8 @@ def render(response: Mapping[str, object]) -> str:
         lines.extend(_table_row([[heading] for heading in _HEADINGS]))
         lines.append(rule)
         counts = response.get("counts")
+        switch = response.get("us_only")
+        us_only = isinstance(switch, Mapping) and switch.get("on") is True
         before: Mapping[str, object] | None = None
         for row in rows:
             divider = divider_text(before, row, counts if isinstance(counts, Mapping) else {})  # 0.1.11.2: "Ranked low (N)"
@@ -1764,6 +1911,11 @@ def render(response: Mapping[str, object]) -> str:
             before = row
             tags = ", ".join(str(labels.get(item["profile_id"], item["profile_id"])) for item in row["profiles"])
             details = [f"{row['company_name'] or '?'}: {row['title'] or row['job_identity']}", str(row["work_mode"])]
+            copies = row.get("copies")
+            if type(copies) is int and copies > 1:
+                details.extend([str(row["locations_text"]), f"{copies} postings"])  # 0.1.11.9 NEW1: one row a job
+            if us_only and row.get("location_unclear"):
+                details.append("unclear location")  # US only kept it without knowing where it is
             if row["salary"]:
                 details.append(str(row["salary"]))
             if posted_text(row):

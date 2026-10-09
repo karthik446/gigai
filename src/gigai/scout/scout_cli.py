@@ -2992,12 +2992,13 @@ def metrics_command(
 @click.option("--peek", "peek", is_flag=True, help="Look without moving the \"new since\" anchor.")
 @click.option("--process", "process", is_flag=True, help="The yes to the pipeline offer: approve what waits for an approval and run the waiting pipeline steps now (model calls, within the daily cap; at most 50 steps in one call). Does not move the anchor.")
 @click.option("--since", "since", help="Measure \"new\" from this time: the since of the response that asked.")
+@click.option("--us-only/--no-us-only", "us_only", default=None, help="US only, as `gigai scout jobs list`: leave out a posting only when every place its location names is clearly outside the US, so a job posted only outside the US is not new and not counted. 'Remote' alone, no location or a place Scout cannot read stays, with an 'unclear location' label. Default: on when the countries of your setup include the US, off otherwise.")
 @click.option("--home", "home_value", type=click.Path(path_type=Path, file_okay=False))
 @click.option("--target", "target_value", type=click.Path(path_type=Path, file_okay=False))
 @click.option("--json", "as_json", is_flag=True)
 def new_command(
     profile_id: str | None, yes: bool, reassess_stale: bool, include_low_rank: bool, no_assess: bool, yours: bool, peek: bool,
-    process: bool, since: str | None, home_value: Path | None, target_value: Path | None, as_json: bool,
+    process: bool, since: str | None, us_only: bool | None, home_value: Path | None, target_value: Path | None, as_json: bool,
 ) -> None:
     """Show what is new since your last check, across all active profiles.
 
@@ -3005,6 +3006,13 @@ def new_command(
     assessed only on a yes: without --yes the command asks first (with the
     count and what it will cost) and shows them ranked. With nothing new it
     shows the 10 postings that still need your attention.
+
+    One row a job: the same company, title and description posted more than
+    once (only the location differs: one per country or city) is ONE new
+    job, as in `gigai scout jobs list`. The row is its US posting when it
+    has one, else the earliest posted, and lists the locations. Every count
+    ("N new jobs", each question) counts jobs, and a yes makes one model
+    call a job. US only applies as in the list (--us-only / --no-us-only).
 
     Postings that have only an OLD assessment (made by an old run, an older
     prompt or other settings) are a separate question with its own count and
@@ -3086,7 +3094,7 @@ def new_command(
     try:
         target = _pipeline_target(target_value, home_root, as_json=as_json)
         if yours:
-            response = scout_new_yours(home_root, target, profile_id=profile_id, since=since)
+            response = scout_new_yours(home_root, target, profile_id=profile_id, since=since, us_only=us_only)
         else:
             assess = True if yes else False if no_assess else None
             # 0110-10-11: a run that may ask holds the "new since" anchor until it has done its work (settle_anchor,
@@ -3096,17 +3104,17 @@ def new_command(
             response = scout_new(
                 home_root, target, profile_id=profile_id, peek=peek, assess=assess, since=since, process=process,
                 reassess_stale=reassess_stale, progress=progress, build_progress=build_progress,
-                include_low_rank=include_low_rank, advance=not asking,
+                include_low_rank=include_low_rank, advance=not asking, us_only=us_only,
             )
         first = response
         if is_preview(response) and asking:
             sentence = response["question"]["text"]  # type: ignore[index]
             if click.confirm(str(sentence).rstrip("?"), default=False):
-                click.echo("Assessing (one model call per posting; this can take a few minutes)...")
+                click.echo("Assessing (one model call per job; this can take a few minutes)...")
                 # The yes measures from the same since; the anchor moves when the run is done.
                 response = scout_new(
                     home_root, target, profile_id=profile_id, peek=peek, assess=True, since=str(response["since"]), progress=progress,
-                    advance=False,
+                    advance=False, us_only=us_only,
                 )
         low = response.get("low_rank_question")
         if isinstance(low, dict) and asking:
@@ -3114,7 +3122,7 @@ def new_command(
             if click.confirm(str(low["text"]).rstrip("?"), default=False):
                 response = scout_new(
                     home_root, target, profile_id=profile_id, peek=peek, assess=True, since=str(response["since"]),
-                    include_low_rank=True, progress=progress, advance=False,
+                    include_low_rank=True, progress=progress, advance=False, us_only=us_only,
                 )
         old = response.get("stale_question")
         if isinstance(old, dict) and asking:
@@ -3122,14 +3130,15 @@ def new_command(
             if click.confirm(str(old["text"]).rstrip("?"), default=False):
                 response = scout_new(
                     home_root, target, profile_id=profile_id, peek=peek, assess=False, since=str(response["since"]),
-                    reassess_stale=True, progress=progress, advance=False,
+                    reassess_stale=True, progress=progress, advance=False, us_only=us_only,
                 )
         offer = response.get("pipeline")
         if isinstance(offer, dict) and not process and asking:
             if click.confirm("Pipeline: " + str(offer["text"]).rstrip("?"), default=False):
                 click.echo("Processing (the waiting pipeline steps; this can take a few minutes)...")
                 response = scout_new(
-                    home_root, target, profile_id=profile_id, peek=True, assess=False, since=str(response["since"]), process=True
+                    home_root, target, profile_id=profile_id, peek=True, assess=False, since=str(response["since"]), process=True,
+                    us_only=us_only,
                 )
         if asking and not peek and profile_id is None and not process:
             # Every question is answered and acted on: now the anchor moves, to the time the FIRST call read the postings.

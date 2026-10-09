@@ -102,7 +102,7 @@ def test_no_assess_never_prompts_in_a_terminal_and_prints_the_offer(tmp_path: Pa
     assert "[y/N]" not in run.output, run.output
     assert "3 have only an old assessment; re-assess? ~3 calls" in run.output
     assert "Yes: gigai scout new --reassess-stale --since " in run.output
-    assert "2 new postings since " in run.output
+    assert "2 new jobs since " in run.output
 
     # Without a terminal: the same offer, the same exit.
     plain = subprocess.run(
@@ -125,7 +125,7 @@ def test_a_run_left_at_the_prompt_does_not_move_the_new_since_anchor(tmp_path: P
     # Ctrl-C at "Assess them? [y/N]".
     left = run_cli_in_pty(fx.cli(), steps=[("[y/N]", CTRL_C)], timeout=_WAIT)
     assert not left.timed_out and left.exit_code == 1, left.output
-    assert "2 new postings" in left.output and "Assess them?" in left.output and "Aborted" in left.output
+    assert "2 new jobs" in left.output and "Assess them?" in left.output and "Aborted" in left.output
     assert _anchor(fx) == original
     after = _peek(fx)
     assert (after["since"], after["since_source"], after["counts"]["new"]) == (original, "anchor", 2)  # type: ignore[index]
@@ -139,7 +139,7 @@ def test_a_run_left_at_the_prompt_does_not_move_the_new_since_anchor(tmp_path: P
     # Answered (no to both questions): the run did its work, and now the anchor moves.
     answered = run_cli_in_pty(fx.cli(), steps=[("~2 calls [y/N]", b"n\n"), ("~3 calls [y/N]", b"n\n")], timeout=_WAIT)
     assert not answered.timed_out and answered.exit_code == 0, answered.output
-    assert "2 new postings since " in answered.output
+    assert "2 new jobs since " in answered.output
     moved = _anchor(fx)
     assert moved is not None and moved > original
     later = _peek(fx)
@@ -210,7 +210,7 @@ def test_a_bare_yes_after_an_asking_call_assesses_exactly_what_the_ask_showed(
     asked = _cli_json(fx)
 
     assert (asked["status"], asked["since_source"], asked["counts"]["to_assess"]) == ("ask", source, 2)  # type: ignore[index]
-    assert _jobs(asked) == fresh and asked["question"]["text"].startswith("2 new postings")  # type: ignore[index]
+    assert _jobs(asked) == fresh and asked["question"]["text"].startswith("2 new jobs")  # type: ignore[index]
     assert fx.base.model.calls == calls  # asking calls no model
 
     # The next step as start.md and the shipped agent skill write it: a BARE --yes, no --since.
@@ -240,7 +240,7 @@ def test_an_asking_call_is_a_preview_asked_twice_it_shows_the_same_postings(tmp_
     text = CliRunner().invoke(cli, fx.cli())  # no terminal and no --json: the same preview, as text
     second = _cli_json(fx)
 
-    assert text.exit_code == 0 and "2 new postings since " in text.output and "Assess them?" in text.output, text.output
+    assert text.exit_code == 0 and "2 new jobs since " in text.output and "Assess them?" in text.output, text.output
     for reply in (first, second):
         assert (reply["status"], reply["since"], reply["since_source"]) == ("ask", original, "anchor")
         assert (reply["counts"]["new"], reply["counts"]["to_assess"]) == (2, 2)  # type: ignore[index]
@@ -407,7 +407,7 @@ def test_the_assess_new_yes_and_its_low_rank_question_are_the_newest_batch(tmp_p
     question, low_question = asked["question"], asked["low_rank_question"]
     assert (question["to_assess"], question["batch"], question["more_after"], question["low_rank_skipped"]) == (5, 3, 2, 5)  # type: ignore[index]
     assert question["estimate"]["calls"] == 3  # type: ignore[index]
-    assert str(question["text"]).startswith("10 new postings")  # type: ignore[index]
+    assert str(question["text"]).startswith("10 new jobs")  # type: ignore[index]
     assert "Assess the top 3 by rank of 5 not assessed yet (5 low-ranked ones are a separate question)? ~3 calls" in str(question["text"])  # type: ignore[index]
     assert str(question["text"]).endswith("(2 more after these 3)")  # type: ignore[index]
     assert (low_question["skipped"], low_question["batch"], low_question["more_after"]) == (5, 3, 2)  # type: ignore[index]

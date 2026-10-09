@@ -70,7 +70,7 @@ def test_first_seen_is_scouts_own_sighting_never_the_boards_date_and_a_later_cha
     assert (found["status"], found["counts"]["new"]) == ("ask", 1)  # type: ignore[index]
     row = found["postings"]["rows"][0]  # type: ignore[index]
     assert row["first_seen_at"] == "2026-10-02T15:00:00.000000Z" and str(row["published_at"]).startswith("2026-09-23")
-    assert str(found["message"]).startswith("1 new posting since ")
+    assert str(found["message"]).startswith("1 new job since ")
 
     # The user looks (the anchor moves); a later update then reads the same posting with a changed description.
     seen = scout_new.scout_new(fx.home_root, fx.target, now=NOW, assess=False)

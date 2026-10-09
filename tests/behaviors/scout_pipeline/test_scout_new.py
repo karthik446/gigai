@@ -143,7 +143,8 @@ def test_a_each_new_posting_once_with_its_profile_tags_and_never_the_deleted_pro
     assert all(set(item["resume"]) == {"record_id", "revision_id"} for item in tags)  # type: ignore[union-attr]
     assert (both["company_slug"], both["title"], both["work_mode"], both["salary"]) == ("acme", "Staff AI Engineer", "remote", "USD 180,000-220,000 per year")
     assert response["counts"] == {
-        "new": 2, "to_assess": 2, "low_rank_skipped": 0, "only_stale": 0, "weak_fit": 0, "applied": 0, "ranked_low": 0, "shown": 2,
+        "new": 2, "postings": 2, "us_only_left_out": 0,  # 0.1.11.9 NEW1: jobs, the postings they stand for, what US only left out
+        "to_assess": 2, "low_rank_skipped": 0, "only_stale": 0, "weak_fit": 0, "applied": 0, "ranked_low": 0, "shown": 2,
         "by_profile": [{"profile_id": fx.default_profile_id, "new": 1}, {"profile_id": fx.second_profile_id, "new": 2}],
     }
     _assert_labels(response)
@@ -248,7 +249,7 @@ def test_c_new_postings_are_asked_about_and_assessed_only_on_a_yes(tmp_path: Pat
     assert question["yes"]["cli"] == f"gigai scout new --yes --since {asked['since']}"  # type: ignore[index]
     sentence = question["text"]  # type: ignore[index]
     assert question["no"]["cli"] == f"gigai scout new --no-assess --since {asked['since']}"  # type: ignore[index]
-    assert sentence == f"2 new postings across 2 profiles (default 1, {SECOND_LABEL} 1). Assess them? ~2 calls, ~60 tokens"
+    assert sentence == f"2 new jobs across 2 profiles (default 1, {SECOND_LABEL} 1). Assess them? ~2 calls, ~60 tokens"
     assert all(row["score"] is None and row["assessment"] is None and row["needs_tailoring"] is None for row in _rows(asked))
     assert asked["pipeline"] == {
         "waiting": 1, "awaiting_approval": 0, "approvals": [], "est_calls": 2, "command": "gigai scout new --process",
