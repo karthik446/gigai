@@ -1,8 +1,9 @@
 """0.1.10.8 U3: the read-model / ``scout new`` UAT tickets, end outcomes on synthetic fixtures.
 
-``0110-8-01`` The best tag prefers a profile with a CURRENT assessment, and
-    ``to_assess`` counts the postings no profile has assessed. Neither moves
-    while the background rank fills in another profile's scores.
+``0110-8-01`` A job two roles found is ONE row tagged with both (0.1.11.9:
+    a role is a tag, the assessment is the job's), and ``to_assess`` counts
+    the jobs nothing has assessed. Neither the verdict nor the count moves
+    while the background rank fills in another role's scores.
 ``0110-8-04`` The grid orders current verdicts, then stale ones, then the
     not-assessed; inside a group by verdict, rank score, share of
     requirements met, recency. The score column says the verdict, "N of M"
@@ -10,8 +11,8 @@
 ``0110-8-08`` Postings that have only an old assessment are their OWN
     question, with the count and the estimate; ``--yes`` assesses the new
     ones only, ``--reassess-stale`` the old ones. A stale row is labelled.
-``0110-8-12`` A tailored posting keeps its verdict state and stays under the
-    profile that tailored it.
+``0110-8-12`` A tailored posting keeps its verdict state; it is one row,
+    whichever role ranks it higher.
 ``0110-8-13`` A run's prompt version and constraints digest survive the
     import; a run sealed before versions had names is named as such.
 ``0110-8-14`` A batch prints progress lines to stderr (stdout stays JSON) and
@@ -163,27 +164,54 @@ def _fail_for(fx: PostingsFixture, monkeypatch: pytest.MonkeyPatch, marker: str)
 # --- 0110-8-01 ------------------------------------------------------------------------------
 
 
-def test_01_the_best_tag_stays_with_the_profile_that_has_a_current_assessment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def _tags(row: dict[str, object]) -> list[tuple[str, object]]:
+    """A served row's role tags, best first: (role id, that role's own rank score)."""
+
+    return [(tag["profile_id"], tag["rank_score"]) for tag in row["tags"]]  # type: ignore[union-attr,index]
+
+
+def test_01_a_job_two_roles_found_is_one_row_tagged_with_both_and_shows_the_jobs_one_assessment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """0.1.11.9: a role is a TAG. (Until then the row was one role's: "the best tag stays with the profile that has a
+    current assessment", and a job assessed for role B was not assessed under role A.)"""
+
     fx = build_postings_fixture(tmp_path, monkeypatch)
     job = job_url("acme", 1)
-    fx.seed("acme", [lever_job("acme", 1)], seen_at=days_ago(1))  # both active profiles match it
-    _assess(fx, job, assessment(met=2), profile_id=fx.second_profile_id)  # assessed for profile B only
+    fx.seed("acme", [lever_job("acme", 1)], seen_at=days_ago(1))  # both active roles find it
+    _assess(fx, job, assessment(met=2), profile_id=fx.second_profile_id)  # asked through role B's filter
+    calls = fx.base.model.calls
+    both = {fx.default_profile_id, fx.second_profile_id}
 
     before = _new(fx, peek=True)
-    row = _rows(before)[0]
-    assert (row["profile_id"], row["state"], row["stale_reason"]) == (fx.second_profile_id, "matched", None)
+    (row,) = _rows(before)  # ONE row for the job
+    assert {role for role, _rank in _tags(row)} == both and {tag["label"] for tag in row["tags"]} == {"Platform track"} | {  # type: ignore[union-attr,index]
+        item["label"] for item in before["profiles"] if item["profile_id"] == fx.default_profile_id  # type: ignore[union-attr,index]
+    }
+    assert (row["state"], row["stale_reason"]) == ("matched", None)
     assert before["counts"]["to_assess"] == 0 and before["question"] is None  # type: ignore[index]
+    assessed_at = row["assessment"]["assessed_at"]  # type: ignore[index]
 
-    # The background rank scores the posting for profile A (the default), where nothing is assessed: higher than B's.
+    # Whichever role a call filters by, it is the same one row with the same one assessment: a filter, not a selector.
+    for role in (None, fx.default_profile_id, fx.second_profile_id):
+        (listed,) = _rows(_search(fx, profile_ids=[role] if role else None))
+        assert (listed["job_identity"], listed["state"], listed["assessment"]["assessed_at"]) == (job, "matched", assessed_at), role  # type: ignore[index]
+        assert {item for item, _rank in _tags(listed)} == both
+        (seen,) = _rows(_new(fx, peek=True, profile_id=role))
+        assert (seen["state"], seen["assessment"]["assessed_at"]) == ("matched", assessed_at)  # type: ignore[index]
+    # Nothing is left to assess for the other role: no second assessment of the job exists or is asked for.
+    again = posting_search.assess_these(fx.home_root, fx.target, jobs=[job], profile_id=fx.default_profile_id, now=NOW)
+    assert again["status"] == "nothing_to_assess" and again["counts"]["already_current"] == 1  # type: ignore[index]
+
+    # The background rank scores the posting for role A alone. Rank stays each role's own: the tags say so.
     _seed_rank(fx, monkeypatch, fx.default_profile_id, {job: 99})
 
     after = _new(fx, peek=True)
-    row = _rows(after)[0]
-    assert [(item["profile_id"], item["rank_score"]) for item in row["profiles"]] == [  # type: ignore[union-attr]
-        (fx.second_profile_id, None), (fx.default_profile_id, 99),
-    ]
-    assert (row["profile_id"], row["state"]) == (fx.second_profile_id, "matched")  # not flipped to A's unassessed row
+    (row,) = _rows(after)
+    assert _tags(row) == [(fx.default_profile_id, 99), (fx.second_profile_id, None)]  # best tag first
+    assert (row["state"], row["rank_score"], row["assessment"]["assessed_at"]) == ("matched", 99, assessed_at)  # type: ignore[index]
     assert after["counts"]["to_assess"] == 0 and after["question"] is None and after["status"] == "new"  # type: ignore[index]
+    assert fx.base.model.calls == calls  # reading never calls a model
 
 
 def test_01_to_assess_after_a_full_yes_is_the_failures_only_and_does_not_move_while_the_rank_runs(
@@ -208,8 +236,13 @@ def test_01_to_assess_after_a_full_yes_is_the_failures_only_and_does_not_move_wh
         _seed_rank(fx, monkeypatch, fx.second_profile_id, {job: 90 + index for index, job in enumerate(jobs[:done])})
         peek = _new(fx, peek=True, since=since)
         seen.append(peek["counts"]["to_assess"])  # type: ignore[index]
-        assessed = [row for row in _rows(peek) if row["job_identity"] != job_url("acme", 3)]
-        assert {(row["profile_id"], row["state"]) for row in assessed} == {(fx.default_profile_id, "matched")}
+        listed = _rows(peek)
+        assert sorted(row["job_identity"] for row in listed) == sorted(jobs)  # one row a job, whatever the rank has done
+        assessed = [row for row in listed if row["job_identity"] != job_url("acme", 3)]
+        # 0.1.11.9: every job keeps its ONE assessment and both role tags; only the tags' own rank scores move.
+        assert {row["state"] for row in assessed} == {"matched"}
+        assert all({role for role, _rank in _tags(row)} == {fx.default_profile_id, fx.second_profile_id} for row in listed)
+        assert sum(1 for row in listed if dict(_tags(row))[fx.second_profile_id] is not None) == done
         assert peek["question"]["to_assess"] == 1  # type: ignore[index]
     assert seen == [1, 1, 1]  # the failure only, whatever the rank has done so far
 
@@ -369,9 +402,13 @@ def test_08_the_cli_flags_and_the_terminal_text(tmp_path: Path, monkeypatch: pyt
 # --- 0110-8-12 ------------------------------------------------------------------------------
 
 
-def test_12_a_tailored_posting_keeps_its_verdict_and_shows_under_the_profile_that_tailored_it(
+def test_12_a_tailored_posting_keeps_its_verdict_and_is_one_row_whichever_role_ranks_it_higher(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """0110-8-12: a tailored resume is a flag beside the verdict. 0.1.11.9: the resume and the assessment are the JOB's,
+    so there is one row and no second assessment "for the other role" (until then the row stayed under the role that
+    tailored it, and the other role assessed the job again)."""
+
     fx = build_postings_fixture(tmp_path, monkeypatch, deleted=False)
     job = job_url("wheel", 1)
     fx.seed("wheel", [lever_job("wheel", 1)], seen_at=days_ago(1))
@@ -380,16 +417,22 @@ def test_12_a_tailored_posting_keeps_its_verdict_and_shows_under_the_profile_tha
         TailorRequest(job=AssessJobInput(job_url=job), resume=AssessResumeInput(profile_id=fx.default_profile_id)),
         home_root=fx.home_root, target=fx.target, config=config(fx.home_root), resolved_job=resolved_job(job),
     )
-    # The other profile ranks the posting higher, and has a current assessment of its own.
-    _assess(fx, job, assessment(met=2), profile_id=fx.second_profile_id)
+    calls = fx.base.model.calls
+    # The other role has nothing of its own to assess: the job IS assessed. No model call.
+    other = posting_search.assess_these(fx.home_root, fx.target, jobs=[job], profile_id=fx.second_profile_id, approve=True, now=NOW)
+    assert other["status"] == "nothing_to_assess" and other["assessed"] is None and fx.base.model.calls == calls
+    # The other role ranks the posting higher.
     _seed_rank(fx, monkeypatch, fx.second_profile_id, {job: 98})
     _seed_rank(fx, monkeypatch, fx.default_profile_id, {job: 96})
 
-    for response in (_new(fx, peek=True), _search(fx)):
-        row = _rows(response)[0]
-        assert (row["profile_id"], row["state"], row["tailored"]) == (fx.default_profile_id, "matched", True)
-        assert row["score_text"] == "thin posting, not enough requirements to score · 2 of 2 requirements · rank 96 · resume tailored"
-        assert [item["profile_id"] for item in row["profiles"]] == [fx.default_profile_id, fx.second_profile_id]  # type: ignore[union-attr]
+    responses = (_new(fx, peek=True), _search(fx), _search(fx, profile_ids=[fx.default_profile_id]), _search(fx, profile_ids=[fx.second_profile_id]))
+    for response in responses:
+        (row,) = _rows(response)
+        assert (row["state"], row["tailored"]) == ("matched", True)
+        # The row is the JOB's under either role's filter: its rank is the best tag's (a filter selected the role's own row).
+        assert row["score_text"] == "thin posting, not enough requirements to score · 2 of 2 requirements · rank 98 · resume tailored"
+    for response in responses:
+        assert _tags(_rows(response)[0]) == [(fx.second_profile_id, 98), (fx.default_profile_id, 96)]  # each role's own rank, best first
     # The state filter still finds it, by the verdict and by "tailored".
     assert [row["job_identity"] for row in _rows(_search(fx, states=["tailored"]))] == [job]
     assert [row["job_identity"] for row in _rows(_search(fx, states=["matched"]))] == [job]

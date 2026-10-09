@@ -1,8 +1,8 @@
 """0.1.11 N5 (SPEC 4.4, 5.1-5.3): the commands of the chat step, one job at a time.
 
-    gigai scout resume brief --job-url URL [--profile ID] [--posting] [--out FILE] [--json]
+    gigai scout resume brief --job-url URL [--posting] [--out FILE] [--json]
     gigai scout resume store --in FILE --job-url URL [--profile ID] --as agent [--source TEXT] [--resolves sg-1,sg-3] [--fit] [--json]
-    gigai scout resume pick  --job-url URL [--profile ID] [--refresh | --draft | --use-proposed | --dismiss-proposed] [--json]
+    gigai scout resume pick  --job-url URL [--refresh | --draft | --use-proposed | --dismiss-proposed] [--json]
     gigai scout suggestions list | add | resolve | dismiss --job-url URL ...
     gigai scout resume tailor --in FILE --job-url URL    (the old spelling of ``resume store``: it forwards, and says so in one line)
 
@@ -50,7 +50,9 @@ TAILORING_REMOVED_LINE = (
 TAILOR_IN_RENAMED_LINE = "`gigai scout resume tailor --in` is now `gigai scout resume store --in FILE --job-url URL`; the old spelling works for this release."
 
 _JOB_URL = click.option("--job-url", "job_url", required=True, help="The posting URL: the ONE job this is about.")
-_PROFILE = click.option("--profile", "profile_id", help="The Scout profile ID (default: the profile whose assessment of the job is newest).")
+# 0.1.11.9: a job has ONE assessment, resume and suggestion record. ``--profile`` is still accepted (old scripts and
+# agents pass it) and selects nothing.
+_PROFILE = click.option("--profile", "profile_id", help="Ignored since 0.1.11.9: a job has one assessment and one resume, whichever role found it. Accepted so older calls still work.")
 _ACTOR = click.option(
     "--as", "--actor", "actor", type=click.Choice(["operator", "agent"]), default="operator", show_default=True,
     help="Who is writing: recorded with the change. An agent passes --as agent.",
@@ -204,7 +206,7 @@ def store_resume(
         _fail(exc, as_json=as_json, fallback="input_file_unreadable")
         return
     try:
-        # ONE default for every command of the job: the profile of its newest assessment (``--profile`` names another).
+        # ONE default for every command of the job: the role recorded on the job's assessment (0.1.11.9: no guess).
         profile_id = job_actions.default_profile(home_root, target, job_url, profile_id)
         names = job_actions.suggestion_ids(resolves)
         # A hand-back that names a suggestion the job does not have stores nothing.
@@ -305,7 +307,7 @@ def store_resume(
 @click.command("store")
 @click.option("--in", "in_file", required=True, help="The edited resume markdown FILE (or - for stdin), in GigAI's resume format.")
 @_JOB_URL
-@click.option("--profile", "profile_id", help="The Scout profile ID the resume is for (default: the profile whose assessment of the job is newest).")
+@click.option("--profile", "profile_id", help="The Scout profile ID the resume is for (default: the role on the job's assessment; it names the role recorded on the resume, a job has one resume).")
 @_ACTOR
 @click.option("--source", "source", help="Where the edit came from, in your own words (one line).")
 @click.option("--resolves", "resolves", help="The suggestions this edit settles, by id: sg-1,sg-3. They are set to done once the resume is stored.")
@@ -352,7 +354,7 @@ def resume_store_command(
 @click.command("tailor")
 @click.option("--job-url", "job_url", help="The posting URL.")
 @click.option("--in", "in_file", help="Old spelling of `gigai scout resume store --in FILE --job-url URL`: store this edited resume markdown for the job.")
-@click.option("--profile", "profile_id", help="With --in: the Scout profile ID the resume is for (default: the profile whose assessment of the job is newest).")
+@click.option("--profile", "profile_id", help="With --in: the Scout profile ID the resume is for (default: the role on the job's assessment; it names the role recorded on the resume, a job has one resume).")
 @_ACTOR
 @click.option("--source", "source", help="With --in: where the edit came from, in your own words (one line).")
 @click.option("--out", "out_file", type=click.Path(path_type=Path, dir_okay=False), help="With --in: also write the stored markdown to FILE.")
@@ -402,7 +404,7 @@ def _why_none(view: dict[str, object]) -> str:
     if view.get("basis") == "profile_resume":
         return " " + pick.MESSAGES[pick.REFUSED_PROFILE_RESUME if view.get("master_stored") else pick.REFUSED_NO_MASTER]
     if isinstance(gate, dict) and gate.get("decision") == "suggest":
-        return f" Pick it: gigai scout resume pick --job-url {view['job_identity']} --profile {view['profile_id']} --refresh (no model call)."
+        return f" Pick it: gigai scout resume pick --job-url {view['job_identity']} --refresh (no model call)."
     return ""
 
 
@@ -446,7 +448,7 @@ def _pick_lines(view: dict[str, object]) -> list[str]:
     if asking:
         lines.append("Open questions (answer one with `gigai scout answers save QUESTION_ID`): " + ", ".join(asking))
     if view["proposed"] is not None:
-        lines.append(f"A new suggested resume is waiting: gigai scout resume pick --job-url {view['job_identity']} --profile {view['profile_id']} --use-proposed")
+        lines.append(f"A new suggested resume is waiting: gigai scout resume pick --job-url {view['job_identity']} --use-proposed")
     return lines
 
 

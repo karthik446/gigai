@@ -76,7 +76,9 @@ const byId = Object.fromEntries(rows.map((row) => [row.job_identity, row]));
 const both = byId[data.bothUrl];
 const only = byId[data.secondOnlyUrl];
 out.tags = { both: m.profileTags(both, profiles), only: m.profileTags(only, profiles), second: m.profileTags(second.postings.rows.find((row) => row.job_identity === data.bothUrl), second.profiles) };
-out.others = { both: m.secondProfiles(both, profiles).map((tag) => tag.label), only: m.secondProfiles(only, profiles) };
+out.others = [typeof m.secondProfiles, m.roleTagTitle(m.profileTags(both, profiles)[0]), m.roleTagTitle({ label: "Platform", rankScore: 81 })];
+// 0.1.11.9: a server older than the tags sends `profiles` on the row and the names apart: the same tags come out.
+out.oldServerTags = m.profileTags({ ...both, tags: undefined }, profiles);
 out.scores = [m.scoreText(both), m.scoreText({ score: 73, score_kind: "assessment" }), m.scoreText({ score: 81, score_kind: "rank" })];
 // 0110-8-04: the server's own score text wins; a 1-of-1 never reads as a bare 100%. Only an older server's row falls back.
 out.scoreTexts = [
@@ -121,7 +123,7 @@ out.askBodies = {
   filter: m.assessAskBody({ filter: { ...m.EMPTY_FILTER, profileIds: ["p1"], window: "7d", states: ["needs_answers"], query: " rust " }, rows }),
   noFilter: m.assessAskBody({ filter: m.EMPTY_FILTER, rows }),
   twoProfiles: m.assessAskBody({ filter: { ...m.EMPTY_FILTER, profileIds: ["p1", "p2"] }, rows: rows.slice(0, 2) }),
-  asProfile: m.assessAskBody({ selectedIds: [data.bothUrl], profileId: data.secondId }),
+  asProfile: m.assessAskBody({ selectedIds: [data.bothUrl], profileId: data.secondId }),  // 0.1.11.9: no such argument any more
   tickedOneChip: m.assessAskBody({ selectedIds: [data.bothUrl], filter: { ...m.EMPTY_FILTER, profileIds: [data.secondId] }, rows }),
   tickedTwoChips: m.assessAskBody({ selectedIds: [data.bothUrl], filter: { ...m.EMPTY_FILTER, profileIds: ["p1", "p2"] }, rows }),
 };
@@ -233,12 +235,17 @@ def test_the_profile_chips_are_a_filter_and_every_row_is_tagged_best_first(out: 
     assert out["kept"] == [data["secondId"]], "a remembered profile that is no longer active is dropped"
     both, only = out["tags"]["both"], out["tags"]["only"]
     assert {tag["profileId"] for tag in both} == {data["defaultId"], data["secondId"]}
-    assert [tag["best"] for tag in both] == [True, False] and [tag["shown"] for tag in both] == [True, False]
-    assert [(tag["profileId"], tag["best"], tag["shown"]) for tag in only] == [(data["secondId"], True, True)]
-    # With one profile chip on, the row shows that profile's state even where it is not the best tag.
-    shown = [tag["profileId"] for tag in out["tags"]["second"] if tag["shown"]]
-    assert shown == [data["secondId"]]
-    assert len(out["others"]["both"]) == 1 and out["others"]["only"] == [], "Assess as <profile>: only for another profile it matches"
+    assert [tag["best"] for tag in both] == [True, False]
+    assert [(tag["profileId"], tag["best"]) for tag in only] == [(data["secondId"], True)]
+    # 0.1.11.9: a role is a TAG. No tag is "the one shown" (the row is the job's), a tag carries the role's NAME and
+    # its own rank score, and with one role chip on the row has the same tags in the same order.
+    labels = {item["profile_id"]: item["label"] for item in data["search"]["profiles"]}
+    assert all("shown" not in tag and set(tag) == {"profileId", "label", "best", "rankScore"} for tag in both + only)
+    assert [tag["label"] for tag in both] == [labels[tag["profileId"]] for tag in both]
+    assert out["tags"]["second"] == both and out["oldServerTags"] == both
+    kind, title, ranked = out["others"]
+    assert kind == "undefined", "no \"Assess as <role>\": a job has one assessment"
+    assert title == f'The role "{both[0]["label"]}" found this job.' and ranked == 'The role "Platform" found this job. Its rank for this role: 81.'
 
 
 def test_the_query_each_filter_sends(out: dict) -> None:
@@ -310,9 +317,10 @@ def test_assess_these_asks_first_and_approve_sends_the_servers_own_body(out: dic
         "filter": {"profile_id": "p1", "query": "rust", "states": ["needs_answers"], "window": "7d"},
         "noFilter": {},
         "twoProfiles": {"jobs": [row["job_identity"] for row in data["search"]["postings"]["rows"][:2]]},
-        "asProfile": {"jobs": [data["bothUrl"]], "profile_id": data["secondId"]},
-        # 0.1.11.6 AN1: ticked rows under ONE profile chip are that profile's; under two the rows say whose they are.
-        "tickedOneChip": {"jobs": [data["bothUrl"]], "profile_id": data["secondId"]},
+        # 0.1.11.9: the ask names JOBS, never (job, role) pairs: ticked rows are named by their address alone, whatever
+        # role chips are on (0.1.11.6 AN1 named the one chip's role; "assess as <role>" named another).
+        "asProfile": {"jobs": [data["bothUrl"]]},
+        "tickedOneChip": {"jobs": [data["bothUrl"]]},
         "tickedTwoChips": {"jobs": [data["bothUrl"]]},
     }
     assert out["askHasApprove"] is False, "the ask never approves: nothing is assessed before the dialog's Approve"

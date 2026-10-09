@@ -24,11 +24,7 @@ export default function AssessApprovalDialog({ dialog, submitting, error, includ
       <div className="modal">
         <h2 id="assess-approval-title">{approvalTitle(dialog)}</h2>
         <ul className="approval-facts">
-          {dialog.byProfile.map((item) => (
-            <li key={item.label}>
-              <strong>{item.label}:</strong> {item.count}
-            </li>
-          ))}
+          {/* 0.1.11.9: no count per role. The batch is of JOBS; each is assessed once, whichever roles found it. */}
           {approvalBatchLine(dialog) && (
             <li data-role="approval-batch">
               <strong>50 at a time:</strong> {approvalBatchLine(dialog)}

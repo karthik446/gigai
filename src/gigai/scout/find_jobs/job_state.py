@@ -540,8 +540,9 @@ class JobStateSources:
         self._roots: dict[str, Path | None] = {}
         self._names: dict[Path, frozenset[str]] = {}
         self._basis: object | None = None
-        #: 0110-10-02: (profile_id, job) -> rank score and the fit setting, read once on the first needs-answers job.
-        self._ranks: dict[tuple[str, str], int | None] | None = None
+        #: 0110-10-02: job -> its BEST rank score among the roles that tag it (0.1.11.9) and the fit setting, read once
+        #: on the first needs-answers job.
+        self._ranks: dict[str, int] | None = None
         self._fit: object | None = None
 
     @property
@@ -669,15 +670,24 @@ class JobStateSources:
         return state
 
     def _weak_fit(self, job_identity: str, profile_id: str, item: AssessResponse) -> bool:
-        """0110-10-02: is this needs-answers assessment a weak fit at the profile's rank score (``scout/fit.py``)?"""
+        """0110-10-02: is this needs-answers assessment a weak fit (``scout/fit.py``)?
+
+        0.1.11.9: at the job's BEST rank score, the highest any role that tags it has. Rank stays a role's own
+        (a job two roles found has two scores), the verdict is the job's, so one role's low score never makes a
+        weak fit of a job another role ranks well. ``profile_id`` is not used: until 0.1.11.9 it chose the score.
+        """
 
         from .. import fit
 
+        del profile_id
         if self._ranks is None:
-            self._ranks = fit.stored_rank_scores(self._home_root, self._target)
+            best: dict[str, int] = {}
+            for (_role, job), score in fit.stored_rank_scores(self._home_root, self._target).items():
+                if score is not None and score > best.get(job, -1):
+                    best[job] = score
+            self._ranks = best
             self._fit = fit.fit_setting(self._home_root, self._target)
-        rank_score = self._ranks.get((profile_id, job_identity))
-        return fit.assessment_is_weak_fit(item, rank_score, self._fit)  # type: ignore[arg-type]
+        return fit.assessment_is_weak_fit(item, self._ranks.get(job_identity), self._fit)  # type: ignore[arg-type]
 
 
 __all__ = [

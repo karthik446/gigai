@@ -11,8 +11,9 @@ hides nothing; the list still leaves applied postings out.
 This flow CHANGES the shared home (application events are append-only), so it runs late (`UI_ORDER`); the selected
 profile is put back.
 
-- applied, assessed on the default profile, ALSO matched (never assessed) by the selected profile: the page opens by
-  its address and from the Applications page's link, shows "Applied" and the next states, and "Rejected" is recorded;
+- applied, assessed, ALSO found by the selected role (0.1.11.9: a job has one assessment, so "assessed on the default
+  profile and never by the selected one" no longer exists; the job is assessed, whichever role found it): the page opens
+  by its address and from the Applications page's link, shows "Applied" and the next states, and "Rejected" is recorded;
 - applied, assessed on the default profile, NOT matched by the selected profile: the page opens;
 - applied, assessed by no profile: the page opens (the default profile selected);
 - a posting the list's first 200 rows do not hold (every list answer has it taken out here): the page opens;
@@ -145,9 +146,10 @@ def selection(ui, scout_server):
         ui.server_json("/api/profiles/selection", {"profile_id": default})
 
 
-def test_applied_on_the_default_profile_and_matched_by_the_selected_one_opens_and_can_be_rejected(ui, scout_server, selection) -> None:
+def test_applied_assessed_and_also_found_by_the_selected_role_opens_and_can_be_rejected(ui, scout_server, selection) -> None:
     default, other = selection
-    job = _free(ui, scout_server, lambda states: states.get(default) not in (None, "not_assessed") and states.get(other) == "not_assessed")
+    # 0.1.11.9: an assessed job that BOTH roles found (each tag's row reads the job's one assessment).
+    job = _free(ui, scout_server, lambda states: states.get(default) not in (None, "not_assessed") and other in states)
     _apply(ui, job)
     _select(ui, other)
 

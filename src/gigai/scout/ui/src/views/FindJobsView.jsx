@@ -825,8 +825,6 @@ export default function FindJobsView({
     return (
       <JobsView
         tab={tabOf(route.params.tab)}
-        selectedProfileId={profileId}
-        onSelectProfile={onSelectProfile}
         allProfiles={profiles}
         applicationsState={applicationsState}
         onRows={addPostingRows}
@@ -879,7 +877,10 @@ export default function FindJobsView({
         runId={runId}
         listedRow={listed || null}
         loading={fromAssessments ? quickLoading : resultsLoading || pagesLoading || quickLoading || (newestLoading && !runId) || !(postingLookup.id === jobId && postingLookup.done)}
-        onQuickUpdated={handleQuickUpdated}
+        onQuickUpdated={(item) => {
+          expireJobsList(); // 0.1.11.9: the job's row on the Jobs list shows its ONE assessment: the kept list is read again
+          handleQuickUpdated(item);
+        }}
         onApplicationsChanged={() => {
           expireJobsList(); // the Jobs list's rows carry the application badge
           applicationsState.reload();

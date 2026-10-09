@@ -25,8 +25,9 @@
 // run knows answers 404 reassess_not_found AFTER recording the answer; the
 // job page passes a fallback that runs POST /api/assess {job_url} instead.
 //
-// 0.1.11.6 AN1: `profileId` is the profile of the page that holds the boxes: the last POST names it beside the job
-// (`reassess: {job_identity, profile_id}`), so the re-assessment is that profile's, whoever else holds the job.
+// `profileId` is the role selected on the page that holds the boxes: the last POST names it beside the job
+// (`reassess: {job_identity, profile_id}`). 0.1.11.9: it is the role recorded on the job's one new assessment and
+// selects nothing; a card with none (a past run's) re-assesses the same job.
 //
 // 0110-10-12: `stale` is why the assessment shown is old, in words ("older
 // prompt"), or null. With no box filled, Re-assess then assesses the posting

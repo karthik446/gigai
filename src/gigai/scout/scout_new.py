@@ -417,12 +417,38 @@ def _grouped(rows: Iterable[PostingRecord]) -> dict[str, list[PostingRecord]]:
     return groups
 
 
-def _shown(group: Sequence[PostingRecord], profile_id: str | None) -> PostingRecord:
-    """The row a posting is shown by: the filter profile's, else its best profile's."""
+def _shown(group: Sequence[PostingRecord], profile_id: str | None = None) -> PostingRecord:
+    """The row a job is shown by: its best tag's (``match_rank`` 1), whatever role a call filters by.
 
-    if profile_id is not None:
-        return next((row for row in group if row.profile_id == profile_id), group[0])
+    0.1.11.9: a role TAGS a job, it selects no record. A job has one assessment and one resume, so every tag's row
+    carries the same verdict; what differs is each role's rank score, and the best tag is the best-ranked one. So the
+    state shown is the job's, and its weak-fit state is the best rank's. ``profile_id`` is accepted and not used:
+    until 0.1.11.9 a call that named one role showed the job by that role's own row.
+    """
+
+    del profile_id
     return group[0]
+
+
+def tag_owner(group: Sequence[PostingRecord], row: PostingRecord, only: str | None) -> str:
+    """The role whose TAG a per-tag fact of a served row is about: the one role the call filters by when it tags the
+    job, else the best tag's. (A filter never changes the job's assessment or state: those are the job's.)"""
+
+    return only if only is not None and any(item.profile_id == only for item in group) else row.profile_id
+
+
+def tags_json(group: Sequence[PostingRecord], labels: Mapping[str, str] | None = None) -> list[dict[str, object]]:
+    """0.1.11.9: the roles that TAG a job (the saved searches that found it), best first, each with its own rank score.
+
+    Derived from the read model's ``(job, role)`` rows when a response is built: nothing is stored per job. ``label``
+    is the role's name (its id when the caller has no names at hand).
+    """
+
+    names = labels or {}
+    return [
+        {"profile_id": item.profile_id, "label": names.get(item.profile_id, item.profile_id), "match_rank": item.match_rank, "rank_score": item.rank_score}
+        for item in group
+    ]
 
 
 def _applied(resolved: object) -> frozenset[str]:
@@ -450,8 +476,14 @@ def _row_json(
     text: PostingText | None,
     item: object | None,
     tag_pending: bool = False,
+    labels: Mapping[str, str] | None = None,
 ) -> dict[str, object]:
-    """One posting of the grid. Posting text and what a model derived from it only: nothing of the user's."""
+    """One posting of the grid. Posting text and what a model derived from it only: nothing of the user's.
+
+    0.1.11.9: ``tags`` are the roles that found the job (:func:`tags_json`; ``labels``: role id -> name).
+    ``profile_id`` is the best tag's id and ``profiles`` the same tags as before 0.1.11.9: kept for a reader that
+    knows them, they select nothing.
+    """
 
     score, kind = _score(row)
     unmet: list[str] = []
@@ -498,6 +530,7 @@ def _row_json(
         **posting_dates(row, text),  # 0110-10-14: published_at (the day it went up), published_kind, updated_at, first_seen_at
         "removed_at": row.removed_at,
         "profile_id": row.profile_id,
+        "tags": tags_json(group, labels),
         "profiles": [
             {"profile_id": item_.profile_id, "match_rank": item_.match_rank, "rank_score": item_.rank_score, "state": item_.state}
             for item_ in group
@@ -1125,12 +1158,17 @@ def _current(row: PostingRecord) -> bool:
 
 
 def _new_pairs(groups: Mapping[str, Sequence[PostingRecord]], profile_id: str | None) -> list[tuple[str, str]]:
-    """0110-8-01: the new postings NO matching profile has assessed (with ``profile_id``: that this profile has not), each for the profile it is shown under."""
+    """0110-8-01: the new postings nothing has assessed, ONE pair a job: ``(job, the role recorded on its assessment)``.
 
+    0.1.11.9: that role is the job's best tag. ``profile_id`` only filters ``groups`` (the caller's read): a job
+    that is assessed is never a pair again because another role tags it too.
+    """
+
+    del profile_id
     pairs = []
     for group in groups.values():
-        row = _shown(group, profile_id)
-        if all(item.state == _NOT_ASSESSED for item in ([row] if profile_id is not None else group)):
+        row = _shown(group)
+        if all(item.state == _NOT_ASSESSED for item in group):
             pairs.append((row.job, row.profile_id))
     return sorted(pairs)
 
@@ -1139,7 +1177,11 @@ def _stale_rows(store: PipelineStore, profile_id: str | None) -> list[PostingRec
     """0110-8-08: the live postings with an assessment and no CURRENT one under any matching profile, each as the row of the profile whose old assessment is shown."""
 
     rows = []
-    for group in _grouped(store.postings(profile_id=profile_id)).values():
+    # 0.1.11.9: ``profile_id`` filters by tag; a job is judged by EVERY tag's row (one current row is a current job).
+    found = store.postings(profile_id=profile_id)
+    if profile_id is not None and found:
+        found = store.postings(jobs={row.job for row in found})
+    for group in _grouped(found).values():
         if any(_current(item) for item in group):
             continue
         old = next((item for item in group if item.state != _NOT_ASSESSED), None)
@@ -1434,7 +1476,9 @@ def _scout_new(
                 if row.job not in applied
             ][:ATTENTION_LIMIT]
             tags = _grouped(store.postings(jobs={row.job for row in best}))
-            shown = [(tags.get(row.job, [row]), row) for row in best]
+            # 0.1.11.9: each job by its best tag's row (a role filter picks the jobs, never the row).
+            shown = [(group, _shown(group)) for group in (tags.get(row.job, [row]) for row in best)]
+            shown = [(group, row) for group, row in shown if row.state != fit_rules.WEAK_FIT]
             # 0110-10-11: what "new" counts is said, so "nothing new" after an update that stored hundreds of postings
             # is not a riddle: new is a posting your profiles MATCH that Scout first stored after the time named.
             if source == SINCE_FIRST_USE:
@@ -1459,7 +1503,7 @@ def _scout_new(
         for group, row in shown:
             item = None if row.state == _NOT_ASSESSED else read_quick_assessment(home_root, target, row.profile_id, row.job)
             text = texts.get(row.job)
-            rows_json.append(_row_json(group, row, text, item, pending(row.profile_id, None if text is None else text.title)))
+            rows_json.append(_row_json(group, row, text, item, pending(tag_owner(group, row, profile_id), None if text is None else text.title), labels))
             rows_json[-1]["ranked_low"] = fit_rules.is_ranked_low(row.state, row.rank_score, setting)  # 0.1.11.2
             found = _evidence(row, item)
             if found is not None:

@@ -66,7 +66,7 @@ out.waits = [b.jobWaitsInBatch(running, "https://jobs.example/a/1"), b.jobWaitsI
 const later = { ...running, batch: { ...running.batch, assessed: 13, pending: ["https://jobs.example/a/2"] } };
 out.left = [b.jobLeftBatch(running, later, "https://jobs.example/a/1"), b.jobLeftBatch(running, later, "https://jobs.example/a/2"), b.jobLeftBatch(running, idle, "https://jobs.example/a/2"), b.jobLeftBatch(idle, idle, "x")];
 out.button = [177, 50, 51, 12, 1, 0, null].map((n) => b.assessAllLabel(n));
-out.assessAs = b.assessAsLabel("Staff Engineer");
+out.assessAs = typeof b.assessAsLabel;  // 0.1.11.9: gone (a job has one assessment: no "assess as <role>")
 
 // The approval dialog of the ticket's session: 72 above the threshold, 105 low-ranked, 50 a run.
 const estimate = { calls: 50, tokens: 1170000, seconds: 1728, basis_calls: 9 };
@@ -186,12 +186,13 @@ def test_the_low_rank_box_says_what_it_does_or_is_hidden_when_it_changes_nothing
     assert "{lowRankLine(low, dialog.count) && (" in dialog and 'data-testid="approval-low-rank-note"' in dialog
 
 
-def test_the_button_says_how_many_and_the_row_link_says_or(out: dict) -> None:
+def test_the_button_says_how_many_and_no_row_offers_to_assess_as_another_role(out: dict) -> None:
     assert out["button"] == ["Assess top 50 of 177", "Assess all 50", "Assess top 50 of 51", "Assess all 12", "Assess all 1", "Assess all", "Assess all"]
-    assert out["assessAs"] == "Or assess as Staff Engineer"
+    # 0.1.11.9: a job has ONE assessment, so a row has no "Or assess as <role>" link (until then: one per other role).
+    assert out["assessAs"] == "undefined"
     view = (UI_SRC / "views" / "JobsView.jsx").read_text(encoding="utf-8")
-    assert "{assessAllLabel(notAssessedCount(counts))}" in view and "{assessAsLabel(tag.label)}" in view
-    assert "Assess as {tag.label}" not in view
+    assert "{assessAllLabel(notAssessedCount(counts))}" in view
+    assert "assessAsLabel" not in view and 'data-action="assess-as"' not in view and "Assess as {tag.label}" not in view
 
 
 def test_how_a_batch_ended_is_one_line(out: dict) -> None:

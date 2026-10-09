@@ -202,10 +202,11 @@ def test_the_brief_is_two_calls_that_never_mix_and_it_calls_no_model_and_writes_
     # The answer is offered under the id a line cites it by; its question (the assessment's words) is in neither part.
     assert {"id": "A cloud:gcp", "kind": "answer", "text": ANSWER, "says_no": False, "denies": []} in yours["sources"]
     assert "Have you run workloads on GCP?" not in private + public
-    # The hand-back command names the job and the profile; the two calls name each other.
-    assert yours["commands"]["store"] == f"gigai scout resume store --in FILE --job-url {JOB} --profile {fx.profile_id} --as agent --json"
-    assert f"gigai scout resume brief --job-url {JOB} --profile {fx.profile_id} --posting" in yours_text.output
-    assert f"gigai scout resume brief --job-url {JOB} --profile {fx.profile_id}\n" in posting_text.output
+    # The hand-back command names the JOB alone (0.1.11.9: no role, a job has one resume); the two calls name each other.
+    assert yours["commands"]["store"] == f"gigai scout resume store --in FILE --job-url {JOB} --as agent --json"
+    assert f"gigai scout resume brief --job-url {JOB} --posting" in yours_text.output
+    assert f"gigai scout resume brief --job-url {JOB}\n" in posting_text.output
+    assert "--profile" not in yours_text.output + posting_text.output
 
 
 def test_brief_out_writes_the_part_to_the_named_file_only(fx: PipelineFixture, tmp_path: Path) -> None:

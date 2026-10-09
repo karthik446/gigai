@@ -194,7 +194,10 @@ class PostingInputs:
 
 
 def _pair(job_identity: str, profile_id: str) -> str:
-    return f"--job-url {job_identity} --profile {profile_id}"
+    """The options that name the job in a command. 0.1.11.9: the job alone; a role selects nothing, so none is named."""
+
+    del profile_id
+    return f"--job-url {job_identity}"
 
 
 def commands(job_identity: str, profile_id: str) -> dict[str, str]:
@@ -612,7 +615,8 @@ def render(part: Mapping[str, object]) -> str:
 
 @dataclass(frozen=True)
 class StoredJob:
-    """What both loaders start from: the stored assessment of one (profile, job) and its suggestion record as JSON."""
+    """What both loaders start from: the JOB's stored assessment and its suggestion record as JSON (``profile_id``: the
+    role recorded on that assessment)."""
 
     job_identity: str
     profile_id: str
@@ -621,57 +625,38 @@ class StoredJob:
     record: Mapping[str, object] | None = None
 
 
-def _one_profile_with_a_resume(home_root: Path, target: Path, identity: str) -> None:
-    """Refuse (``profile_ambiguous``) when two profiles each hold a resume for the job and none was named.
-
-    The default is the profile of the job's newest assessment; with two stored resumes that default would let a
-    ``--resolves`` be checked against one profile and applied to another, so the caller must say which.
-    """
-
-    from .find_jobs.api.agent_routes import job_tailored_resumes
-    from .tailored_resume import TailorError
-
-    try:
-        profiles = sorted({str(item.resume.profile_id) for item in job_tailored_resumes(home_root, target, identity) if item.resume.profile_id})
-    except TailorError as exc:
-        raise BriefError(exc.code, str(exc)) from exc
-    if len(profiles) > 1:
-        raise BriefError(
-            "profile_ambiguous",
-            f"profiles {' and '.join(profiles)} both have a resume for this job: name one with `--profile ID` (the API: `profile_id`)",
-        )
-
-
 def stored_job(home_root: Path, target: Path, job_url: str, profile_id: str | None = None) -> StoredJob:
-    """The stored assessment the brief is about. ``profile_id`` ``None``: the profile whose assessment of the job is newest.
+    """The stored assessment the brief is about: the JOB's one assessment (0.1.11.9).
+
+    ``profile_id`` is accepted and selects nothing: a job has one assessment, one resume and one suggestion record,
+    whichever role found it, so there is no role to guess and none to name. (Until 0.1.11.9 a call without it took
+    the role whose assessment was newest and refused, ``profile_ambiguous``, when two roles each held a resume.)
+    The one value that still means something is ``ephemeral``: the assessment made against a PASTED resume, which
+    is not the job's. ``StoredJob.profile_id`` is the role recorded on the assessment (the one that asked last).
 
     Reads files only (no profile is read, so nothing is migrated by this read).
     Raises ``BriefError``: ``invalid_value`` (not a posting link), ``assessment_missing``.
     """
 
-    from .find_jobs.api.agent_routes import job_quick_assessments
     from .find_jobs.contracts import FindJobsContractError
     from .find_jobs.job_state import normalize_job_identity
-    from .quick_assess import QuickAssessError, read_quick_assessment
+    from .quick_assess import EPHEMERAL_RESUME_KEY as EPHEMERAL_FOLDER, JOB_RECORD, QuickAssessError, read_quick_assessment
 
     try:
         identity = normalize_job_identity(job_url)
     except FindJobsContractError as exc:
         raise BriefError("invalid_value", "the job is named by its posting URL") from exc
+    pasted = profile_id == EPHEMERAL_FOLDER
     try:
-        if profile_id is not None:
-            assessment = read_quick_assessment(Path(home_root), Path(target), profile_id, identity)
-        else:
-            assessment = next((item for item in job_quick_assessments(Path(home_root), Path(target), identity) if item.resume.profile_id), None)
-            _one_profile_with_a_resume(Path(home_root), Path(target), identity)
+        assessment = read_quick_assessment(Path(home_root), Path(target), EPHEMERAL_FOLDER if pasted else JOB_RECORD, identity)
     except QuickAssessError as exc:
         raise BriefError(exc.code, str(exc)) from exc
-    if assessment is None:
+    if assessment is None or (not pasted and not assessment.resume.profile_id):
         raise BriefError(
             "assessment_missing",
-            "this job has no stored assessment" + (f" for profile {profile_id}" if profile_id else "") + "; assess it first: `gigai scout jobs assess URL` (one model call, on the user's yes)",
+            "this job has no stored assessment; assess it first: `gigai scout jobs assess URL` (one model call, on the user's yes)",
         )
-    profile = str(assessment.resume.profile_id)
+    profile = str(assessment.resume.profile_id or EPHEMERAL_FOLDER)
     stored = record_store.read_suggestions(Path(home_root), Path(target), profile, identity)
     return StoredJob(identity, profile, assessment, None if stored is None else stored.to_json())
 

@@ -185,7 +185,7 @@ def test_agent_api_journey(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> N
         assert "markdown" not in job["tailored_resumes"][0], "ids and links, not the resume text"
         line_link = job["tailored_resumes"][0]["links"]["line"]  # 0110-006: the per-line choice, beside pdf
         assert line_link["method"] == "PUT" and line_link["path"] == "/api/tailored-resumes/lines"
-        assert set(line_link["body"]) == {"profile_id", "job_identity", "updated_at", "line_id", "use"}
+        assert set(line_link["body"]) == {"job_identity", "updated_at", "line_id", "use"}  # 0.1.11.9: no link names a role
         assert line_link["body"]["updated_at"] == tailored.json()["updated_at"]
         # 0110-032: change one line with the link's body (use custom + text), then the same PDF link prints it;
         # the resume's own markdown renders through POST /api/resume/pdf. No model call in any of it.

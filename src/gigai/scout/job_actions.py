@@ -100,10 +100,11 @@ def _job(home_root: Path, target: Path, job_url: str, profile_id: str | None) ->
 
 
 def default_profile(home_root: Path, target: Path, job_url: str, profile_id: str | None = None) -> str | None:
-    """THE profile a job command acts on when none is named (brief, pick, suggestions AND resume store).
+    """The role RECORDED on what a job command writes when none is named (``resume store``).
 
-    ``profile_id`` given: it, unchanged.  Otherwise the profile whose assessment of the job is newest
-    (``job_brief.stored_job``); two profiles with a stored resume for the job refuse (``profile_ambiguous``).
+    ``profile_id`` given: it, unchanged.  Otherwise the role on the job's one assessment (``job_brief.stored_job``).
+    0.1.11.9: it selects no record (a job has one of each), so nothing is guessed and nothing is refused; until then
+    two roles with a stored resume for the job refused (``profile_ambiguous``).
     A job with no stored assessment answers ``None`` (the caller's own default and refusals stand).
     """
 

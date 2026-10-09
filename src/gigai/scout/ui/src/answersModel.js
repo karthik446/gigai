@@ -101,9 +101,10 @@ function bankFields(state) {
 
 // The POST /api/answers bodies for one "Re-assess": every filled box, in
 // question order, re-assessing on the last one only.
-// 0.1.11.6 AN1: `profileId` is the profile of the page that asks. The re-assessment is made for it: without it the
-// server takes the one profile that holds the job and refuses a job two profiles hold (it used to take the newest
-// assessment's profile, which re-assessed the job for a profile the page did not show).
+// 0.1.11.9: a job has ONE assessment and the re-assessment replaces it, whoever asks. `profileId` (the job page sends
+// its selected role) is only the role RECORDED on the new one; without it (a past run's card, PostingCard) the
+// server records the selected role. Nothing is refused and no role is guessed. (0.1.11.6 AN1: a job two roles held
+// was refused without it.)
 export function answerRequests(states, jobIdentity, profileId = null) {
   const filled = (states || []).filter((state) => state.filled);
   const reassess = jobIdentity ? { job_identity: jobIdentity, ...(profileId ? { profile_id: profileId } : {}) } : null;
@@ -169,14 +170,14 @@ export function assessSendsLine(target, label) {
 // The no-call preview's `model_input_summary` (POST /api/postings/assess without approve) as short lines.
 const RESUME_SOURCE_WORDS = {
   master_evidence: "the lines of your master resume picked for this posting",
-  profile_view: "this profile's own resume",
+  profile_view: "this role's own resume",
 };
 export function assessSummaryLines(summary) {
   if (!summary || !Array.isArray(summary.profiles)) {
     return [];
   }
   return [
-    ...summary.profiles.map((item) => `Profile ${item.label}: ${RESUME_SOURCE_WORDS[item.resume_source] || item.resume_source}.`),
+    ...summary.profiles.map((item) => `Role ${item.label}: ${RESUME_SOURCE_WORDS[item.resume_source] || item.resume_source}.`),
     `Saved answers: ${summary.answers_used ? summary.answers_saved : "none"}. Saved stories that can match: ${summary.stories_used ? summary.stories_saved : "none"}.`,
     summary.public_fetch_needed
       ? "The posting's text is not stored: it is fetched from its public board first."

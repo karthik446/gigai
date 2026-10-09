@@ -7,12 +7,22 @@ posting URL (raw or normalized; a pasted job's ``text:sha256:...`` identity work
 
 * the newest run that acquired the posting (its row: posting with text, rank, work-mode fit,
   H-1B) and the ids of every run that did;
-* every assessment of the job -- the run's own, the one carried forward, and each quick
-  assessment (one per resume) -- with the requirement matrix and questions;
-* ``open_questions``: the questions those assessments ask that no stored answer covers yet;
+* every assessment of the job -- the run's own, the one carried forward, the JOB's one stored
+  assessment and a pasted resume's -- with the requirement matrix and questions;
+* ``open_questions``: the questions the job's assessment asks that no stored answer covers yet;
 * the stored tailored resumes (ids and links, not their text);
 * ``job_state`` with the events it accepts next, and the job's application events;
 * ``links``: the calls that act on the job (assess, pick, the agent's brief, suggestions, PDF, mark applied).
+
+0.1.11.9 (one job, one assessment): a role is a TAG. ``tags`` lists the active roles whose saved
+search found the job, best first, each with its own rank score. The top-level ``job_state``,
+``rank`` and ``open_questions`` are the JOB's: from its one stored assessment (the run's own only
+while nothing is stored), ``rank`` the best tag's score. No link carries a ``profile_id`` (a pasted
+resume's keep ``ephemeral``, which is not a role). Until 0.1.11.9 they were the newest assessment's
+role's, the questions were the union across roles, and following ``links.pick`` / ``brief`` /
+``suggestions`` guessed a role. ``ambiguous_applied_resume`` is ``null``, or (a job the stores
+migration found applied with a stored resume under more than one role, so the PDF that was sent
+cannot be told) ``{"resumes": N, "text": "..."}``: every one of those resumes is kept.
 
 0110-039: each ``source: "quick"`` assessment carries ``basis_stale`` (true | false) and, when
 true, ``basis_stale_reason``: whether it was made with what its profile would be assessed with
@@ -95,7 +105,8 @@ def _index_join(home_root: Path, target: Path, identity: str, *, profile_id: str
     from ..job_source import index_job
     from ..work_mode import derive_work_mode, work_mode_fit
 
-    found = index_job(home_root, target, identity, profile_id=profile_id)
+    del profile_id  # 0.1.11.9: a role selects nothing; the row is the job's best tag's
+    found = index_job(home_root, target, identity)
     if found is None:
         return None
     row, text = found.row, found.text
@@ -138,7 +149,58 @@ def _index_join(home_root: Path, target: Path, identity: str, *, profile_id: str
         "work_mode_fit": fit,
         "h1b": h1b,
         "index_posting": found.grid,
+        "rows": found.rows,
     }
+
+
+AMBIGUOUS_RESUME_TEXT = (
+    "You applied to this job when it had a resume under more than one role, so Scout cannot tell which PDF you sent: "
+    "all of them are kept, and the one shown is the last stored before you applied."
+)
+
+
+def ambiguous_applied_resume(home_root: Path, target: Path, identity: str) -> dict[str, object] | None:
+    """0.1.11.9: what the stores migration recorded for an applied job whose sent PDF cannot be told, or ``None``.
+
+    Read from ``<home>/scout/job-stores-migration.json`` (``job_store_migration``'s record) when it is there: one
+    small file, no store is scanned. A home that was not migrated has no record and answers ``None``. Display only:
+    never raises. The answer holds a count and one fixed sentence, never a path.
+    """
+
+    import json
+
+    from ...job_store_layout import job_digest
+    from ...job_store_migration import RECORD_SCHEMA, record_path
+    from ..discovery.storage import project_id
+
+    try:
+        path = record_path(Path(home_root))
+        if path.is_symlink() or not path.is_file():
+            return None
+        raw = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(raw, dict) or raw.get("schema_version") != RECORD_SCHEMA:
+            return None
+        entry = raw["projects"][project_id(Path(home_root), Path(target))]["jobs"][job_digest(identity)]["ambiguous_applied_resume"]
+        resumes = entry["resumes"]
+    except Exception:  # noqa: BLE001 - display only: no record, another project's, or a shape this build does not know
+        return None
+    if not isinstance(resumes, list) or len(resumes) < 2:
+        return None
+    return {"resumes": len(resumes), "text": AMBIGUOUS_RESUME_TEXT}
+
+
+def job_tags(resolved, rows) -> list[dict[str, object]]:  # noqa: ANN001 - the gig, and the read model's rows of one job
+    """0.1.11.9: the roles that tag a job (``scout_new.tags_json``) with their names. Display only: ids when the
+    roles cannot be read."""
+
+    from ... import profile_records
+    from ...scout_new import tags_json
+
+    try:
+        labels = {record.profile_id: record.label for record in profile_records.list_profiles(resolved)}
+    except Exception:  # noqa: BLE001 - the tags still say which roles, by id
+        labels = {}
+    return tags_json(list(rows), labels)
 
 
 def job_quick_assessments(home_root: Path, target: Path, identity: str) -> list:
@@ -263,6 +325,16 @@ class AgentRoutesMixin:
         body["liveness"] = live.to_json()
         self._write_json(HTTPStatus.OK, body)
 
+    def _job_tags(self, identity: str, resolved, *, home_root: Path, target: Path) -> list[dict[str, object]]:  # noqa: ANN001
+        """The roles that tag a job a run also acquired (no index join was made for it): the stored rows, read only."""
+
+        from ..job_source import index_job
+
+        if is_text_identity(identity):
+            return []
+        found = index_job(home_root, target, identity)
+        return [] if found is None else job_tags(resolved, found.rows)
+
     def _job_aggregate(self, identity: str, *, home_root: Path, target: Path) -> dict[str, object] | None:
         from ....workpad import resolve_workpad
 
@@ -326,10 +398,7 @@ class AgentRoutesMixin:
         # 0110-10-03 (d): no run row -> the index posting, by the job identity (a company-site URL too).
         index: dict[str, object] | None = None
         if not row and not is_text_identity(identity):
-            index = _index_join(
-                home_root, target, identity, basis=sources.basis,
-                profile_id=next((item.resume.profile_id for item in quick_items if item.resume.profile_id), None),
-            )
+            index = _index_join(home_root, target, identity, basis=sources.basis, profile_id=None)
         if index is not None:
             held: dict[str, object] = index["posting"]  # type: ignore[assignment]
             if posting is None:
@@ -350,7 +419,11 @@ class AgentRoutesMixin:
         if posting is None and not run_hits and not quick_items and not tailored_items and not events:
             return None
 
-        assessments = [*run_assessments, *(_quick_entry(item, sources.basis) for item in quick_items)]
+        # 0.1.11.9: the JOB's one stored assessment (a pasted resume's has no role and is not the job's).
+        job_item = next((item for item in quick_items if item.resume.profile_id), None)
+        quick_entries = [(item, _quick_entry(item, sources.basis)) for item in quick_items]
+        job_entry = next((entry for item, entry in quick_entries if item is job_item), None) if job_item is not None else None
+        assessments = [*run_assessments, *(entry for _item, entry in quick_entries)]
         # 0.1.10.7 C: every assessment's questions are answered by the USER's
         # answers, whichever profile asked (one read, only when there is a question).
         entries: tuple[story_bank.BankEntry, ...] | None = None
@@ -372,22 +445,28 @@ class AgentRoutesMixin:
                 if prior is not None:
                     text = getattr(prior, "question", None) or getattr(prior, "prompt", "")
                     answered[normalized] = {"question_id": normalized, "prompt": text, "answer": prior.answer}  # type: ignore[attr-defined]
-                elif normalized not in seen:
+                elif normalized not in seen and (job_entry is None or entry is job_entry):
+                    # 0.1.11.9: what is OPEN is what the job's one assessment asks (a run's own only while nothing is stored).
                     seen.add(normalized)
                     open_questions.append(dict(question))  # type: ignore[arg-type]
                     bank_suggestions.extend(story_bank.suggestions_for([question], entries or ()))  # type: ignore[list-item]
 
-        profile_id = getattr(getattr(joins, "profile", None), "profile_id", None)
-        if profile_id is None and quick_items and quick_items[0].resume.profile_id:
-            profile_id = quick_items[0].resume.profile_id
+        # 0.1.11.9: the state is the JOB's, from its one stored assessment; the role on it is recorded, not chosen.
+        profile_id = job_item.resume.profile_id if job_item is not None else getattr(getattr(joins, "profile", None), "profile_id", None)
+        # (A run's row carries the state already: the run's joins read the same one stored assessment, with the run's posting text.)
         state = row.get("job_state") if isinstance(row.get("job_state"), dict) else None
         if state is None:
             try:
-                quick_for_profile = next((item for item in quick_items if item.resume.profile_id == profile_id), None)
-                state = sources.state_for(identity, profile_id=profile_id, quick=quick_for_profile).to_json()
+                state = sources.state_for(identity, profile_id=profile_id, quick=job_item).to_json()
             except Exception:  # noqa: BLE001 - display-only: no state beats a failed read
                 _logger.exception("job %s: state could not be derived", identity)
                 state = None
+
+        def named(item) -> dict[str, object]:  # noqa: ANN001 - a stored resume
+            """What names a stored resume in a link: the job alone (0.1.11.9); ``ephemeral`` too for a pasted resume's."""
+
+            pasted = {} if item.resume.profile_id else {"profile_id": "ephemeral"}
+            return {**pasted, "job_identity": item.job.job_identity}
 
         tailored = [
             {
@@ -398,13 +477,16 @@ class AgentRoutesMixin:
                 "created_at": item.created_at,
                 "updated_at": item.updated_at,
                 "links": {
-                    "pdf": _link("POST", "/api/tailored-resumes/pdf", {"profile_id": item.resume.profile_id or "ephemeral", "job_identity": item.job.job_identity}),
-                    "line": _link("PUT", "/api/tailored-resumes/lines", {"profile_id": item.resume.profile_id or "ephemeral", "job_identity": item.job.job_identity, "updated_at": item.updated_at, "line_id": "<L id from the resume>", "use": "original"}),
-                    "resume": _link("GET", f"/api/tailored-resumes?profile_id={quote(item.resume.profile_id or 'ephemeral', safe='')}&job_identity={quote(item.job.job_identity, safe='')}"),
+                    "pdf": _link("POST", "/api/tailored-resumes/pdf", named(item)),
+                    "line": _link("PUT", "/api/tailored-resumes/lines", {**named(item), "updated_at": item.updated_at, "line_id": "<L id from the resume>", "use": "original"}),
+                    "resume": _link("GET", "/api/tailored-resumes?" + ("" if item.resume.profile_id else "profile_id=ephemeral&") + f"job_identity={quote(item.job.job_identity, safe='')}"),
                 },
             }
             for item in tailored_items
         ]
+        tags = job_tags(resolved, index["rows"]) if index is not None else self._job_tags(identity, resolved, home_root=home_root, target=target)  # type: ignore[arg-type]
+        if index is not None and isinstance(index["index_posting"], dict):
+            index["index_posting"]["tags"] = tags  # the grid's own row, with the roles' names
 
         source_url = identity if not is_text_identity(identity) else None
         assess_job = {"job_url": source_url} if source_url else {"text": "<the pasted posting text>"}
@@ -433,6 +515,8 @@ class AgentRoutesMixin:
             "work_mode_fit": row.get("work_mode_fit"),
             "h1b": row.get("h1b"),
             "index_posting": None if index is None else index["index_posting"],
+            "tags": tags,
+            "ambiguous_applied_resume": ambiguous_applied_resume(home_root, target, identity) if not is_text_identity(identity) else None,
             "assessments": assessments,
             "open_questions": open_questions,
             "bank_suggestions": bank_suggestions,

@@ -3,10 +3,11 @@
 //
 // The page reads three routes and writes two:
 //   GET  /api/postings         the live search over the stored postings, across
-//                              the active profiles: `postings.rows` (one per
-//                              posting, shown for its best profile, or for the
-//                              one profile the filter names), `profiles` (the
-//                              tags), `counts` {matched, shown, new, by_state}
+//                              the active roles: `postings.rows` (one per
+//                              job, with the roles that found it in `tags`;
+//                              0.1.11.9: the row is the job's, whichever role a
+//                              filter names), `profiles` (the active roles),
+//                              `counts` {matched, shown, new, by_state}
 //   GET  /api/new?peek=1       the PEEK: `counts.new` is the "New since last
 //                              check (N)" chip's number. A GET never moves the
 //                              "new since" anchor
@@ -17,8 +18,8 @@
 //                              dialog shows that, and its Approve sends the
 //                              body the server itself names (`question.yes`)
 //
-// A profile is a FILTER here (chips), never a mode: every row carries the
-// tag of each active profile it matches, best first. Everything a row shows
+// A role (a profile) is a TAG here and a FILTER (chips), never a mode and never a
+// selector: every row carries the tag of each active role that found it, best first. Everything a row shows
 // is the posting's own text or a code or number about it; nothing the user
 // wrote is on this page, and every string is drawn as text.
 import { displayCompanyName } from "./display.js";
@@ -329,21 +330,27 @@ export function postingByAddressQuery(address) {
 
 // --- one row ----------------------------------------------------------------------------------
 
-// The profile tags of a row: every active profile it matches, best first
-// (the server's `match_rank`). `shown` marks the profile the row's state is of.
+// 0.1.11.9: the ROLE tags of a row: every active role whose saved search found the job, best first (the server's
+// `match_rank`). A role is a tag, never a selector: the job has one assessment and one resume, so no tag is "the one
+// shown". Each tag keeps its own rank score. Read from `row.tags` ({profile_id, label, match_rank, rank_score});
+// a server older than 0.1.11.9 sends `row.profiles` and the names in the response's `profiles`.
 export function profileTags(row, profiles) {
   const labels = new Map((profiles || []).map((profile) => [profile.profile_id, profile.label]));
-  return (row.profiles || [])
+  return ((row && (row.tags || row.profiles)) || [])
     .slice()
     .sort((a, b) => (a.match_rank || 0) - (b.match_rank || 0))
     .map((item, index) => ({
       profileId: item.profile_id,
-      label: labels.get(item.profile_id) || item.profile_id,
+      label: labels.get(item.profile_id) || item.label || item.profile_id,
       best: index === 0,
-      shown: item.profile_id === row.profile_id,
-      state: item.state || null,
       rankScore: typeof item.rank_score === "number" ? item.rank_score : null,
     }));
+}
+
+// The tooltip of a role tag on a row: which saved search found the job, and that role's own rank score.
+export function roleTagTitle(tag) {
+  const rank = tag && tag.rankScore !== null && tag.rankScore !== undefined ? ` Its rank for this role: ${tag.rankScore}.` : "";
+  return `The role "${tag ? tag.label : ""}" found this job.${rank}`;
 }
 
 // The score column, in the server's own words (0110-8-04, 0110-10-02, `score_text`):
@@ -643,11 +650,6 @@ export function postedLine(row, now = Date.now()) {
   return { kind: found.kind, at: found.at, text: `${DATE_WORDS[found.kind]} ${agoText(found.at, now)}`, date, title: titles[found.kind].trim(), updated };
 }
 
-// The matching profiles a row is NOT shown for: the "Assess as <profile>" actions.
-export function secondProfiles(row, profiles) {
-  return profileTags(row, profiles).filter((tag) => !tag.shown);
-}
-
 // True when the row's posting was first seen after the anchor the response names.
 export function isNew(row, anchor) {
   const since = anchor && anchor.since;
@@ -656,19 +658,14 @@ export function isNew(row, anchor) {
 
 // --- assess these: the question, then the approval --------------------------------------------
 
-// The body of the ASK (never `approve`). A selection names its postings;
-// else the filter selects them. The route takes one profile, so with several
-// profile chips on, the rows on the page are named instead.
-// 0.1.11.6 AN1: ticked rows with ONE profile chip on are that profile's rows: the ask names it. Without it the server
-// assessed each ticked job for its best-matching profile, which for a job two profiles hold may be the other one.
-export function assessAskBody({ selectedIds = [], filter = EMPTY_FILTER, rows = [], profileId = null } = {}) {
+// The body of the ASK (never `approve`). A selection names its postings; else the filter selects them.
+// 0.1.11.9: the ask names JOBS, never (job, role) pairs. A job has one assessment, so ticked rows are named by their
+// address alone, whatever role chips are on. A role chip is a filter on the tags: with ONE chip on and nothing ticked
+// the filter is sent (`profile_id`: the jobs that role found); the route takes one, so with several on the rows of
+// the page are named instead.
+export function assessAskBody({ selectedIds = [], filter = EMPTY_FILTER, rows = [] } = {}) {
   if (selectedIds.length > 0) {
-    const chips = filter.profileIds || [];
-    const only = profileId || (chips.length === 1 ? chips[0] : null);
-    return only ? { jobs: selectedIds.slice(), profile_id: only } : { jobs: selectedIds.slice() };
-  }
-  if (profileId) {
-    return { profile_id: profileId };
+    return { jobs: selectedIds.slice() };
   }
   const profiles = filter.profileIds || [];
   if (profiles.length > 1) {
@@ -700,7 +697,7 @@ function withUsOnly(body, filter) {
 
 // 0.1.11.2: the ASK of "Assess all" (beside "N not assessed"): every not-assessed posting the filter selects, whatever
 // is ticked. The server answers the top 50 by rank, the estimate and how many are left; the low-ranked ones are its
-// second question. Several profile chips: the page's rows, as above. 0.1.11.5: the same while "Applied" is on: a
+// second question. Several role chips: the page's rows, as above. 0.1.11.5: the same while "Applied" is on: a
 // filter never selects a job you applied to, so the ones the page lists are named.
 export function assessAllBody({ filter = EMPTY_FILTER, rows = [] } = {}) {
   const profiles = filter.profileIds || [];
@@ -728,7 +725,7 @@ export function assessAllBody({ filter = EMPTY_FILTER, rows = [] } = {}) {
 //   total           all the postings that are not assessed (`question.to_assess`)
 //   moreAfter       how many are left after this batch; "Assess these" again takes the next 50
 //   alreadyCurrent  selected postings whose assessment is current (left out)
-//   byProfile       [{label, count}]
+//   byProfile       [{label, count}]: the role recorded on each new assessment (0.1.11.9: not shown; a job is assessed once)
 //   calls / tokens / seconds   the estimate from the recorded model calls
 //                   (tokens and seconds null when the history cannot say)
 //   approveBody     the body the server names for the yes, sent as it is

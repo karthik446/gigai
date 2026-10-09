@@ -114,7 +114,8 @@ def test_a_live_search_returns_what_the_index_matches_per_active_profile_with_no
             found = _search(fx, profile_ids=[profile_id])
             assert _jobs(found) == expected  # the search == the index's own match
             assert {row.job for row in store.postings(profile_id=profile_id)} == expected  # == what the read model shows
-            assert {row["profile_id"] for row in found["postings"]["rows"]} == {profile_id}  # type: ignore[index]
+            # 0.1.11.9: the filter keeps the jobs this role TAGS; a row is the job's, whichever role is named.
+            assert all(profile_id in {tag["profile_id"] for tag in row["tags"]} for row in found["postings"]["rows"])  # type: ignore[index]
             _assert_public_only(found)
         assert _jobs(everything) == set().union(*matched.values()) == {row.job for row in store.postings()}
     finally:

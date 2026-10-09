@@ -307,9 +307,10 @@ def test_assess_is_as_the_default_profile_and_mark_applied_is_the_jobs(page) -> 
     assert answer.json()["resume"]["profile_id"] == fx.default_profile_id
     ui.settle()
     assert len(fx.base.model.assess_prompts) == 1, "one model call"
-    # The END outcome, on the server: the default profile has the assessment, the selected one has none.
-    stored = {profile: [item["job"]["job_identity"] for item in ui.server_json(f"/api/assessments?profile_id={profile}")["items"]] for profile in (fx.default_profile_id, fx.second_profile_id)}
-    assert stored == {fx.default_profile_id: [job], fx.second_profile_id: []}
+    # The END outcome, on the server: the JOB has its one assessment, with the default role recorded on it as the
+    # button said; either role's list reads that same one (0.1.11.9: until then the selected role's list had none).
+    stored = {profile: [(item["job"]["job_identity"], item["resume"]["profile_id"]) for item in ui.server_json(f"/api/assessments?profile_id={profile}")["items"]] for profile in (fx.default_profile_id, fx.second_profile_id)}
+    assert stored == {fx.default_profile_id: [(job, fx.default_profile_id)], fx.second_profile_id: [(job, fx.default_profile_id)]}
     labels = row.locator('[data-testid="search-label"][data-kind="assessment"]')
     labels.wait_for()
     assert labels.text_content().startswith("assessed: ")

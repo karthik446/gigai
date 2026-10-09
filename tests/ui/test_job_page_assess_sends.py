@@ -28,7 +28,7 @@ OPEN_WALL_SECONDS = INTERACTIVE_WALL_SECONDS
 SENDS = '.job-page [data-role="assess-sends"]'
 SOURCE_WORDS = {
     "master_evidence": "the lines of your master resume picked for this posting",
-    "profile_view": "this profile's own resume",
+    "profile_view": "this role's own resume",
 }
 
 
@@ -74,7 +74,7 @@ def test_the_job_page_says_what_one_assessment_sends_and_opens_to_the_no_call_pr
     summary = ui.server_json("/api/postings/assess", {"jobs": [job["job_identity"]], "again": True, "profile_id": job["profile_id"]})["model_input_summary"]
     (profile,) = summary["profiles"]
     assert facts.all_text_contents() == [
-        f"Profile {profile['label']}: {SOURCE_WORDS[profile['resume_source']]}.",
+        f"Role {profile['label']}: {SOURCE_WORDS[profile['resume_source']]}.",
         f"Saved answers: {summary['answers_saved'] if summary['answers_used'] else 'none'}. "
         f"Saved stories that can match: {summary['stories_saved'] if summary['stories_used'] else 'none'}.",
         "The posting's text is not stored: it is fetched from its public board first." if summary["public_fetch_needed"]

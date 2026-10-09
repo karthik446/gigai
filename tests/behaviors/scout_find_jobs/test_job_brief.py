@@ -313,7 +313,7 @@ def test_the_private_part_is_in_the_specs_order_with_the_nine_rules_and_the_hand
     ]
     places = [text.index(block) for block in blocks]
     assert places == sorted(places)
-    assert f"gigai scout resume store --in FILE --job-url {JOB} --profile {PROFILE} --as agent --json" in text
+    assert f"gigai scout resume store --in FILE --job-url {JOB} --as agent --json" in text  # 0.1.11.9: the job alone, no role
     assert "This check is a guard on numbers, names, ownership, entries and sources. It does not prove that a reworded line is true." in text
     assert "gate: suggest   ready: no   reasons: lost_mandatory_evidence req-77b0aa" in text
     assert "stale: master_newer" in text and "conflicts: skills_do_not_fit" in text
@@ -363,8 +363,11 @@ def test_a_profile_not_on_the_master_gets_no_master_blocks() -> None:
     assert "PICKED / LEFT OUT" not in text
 
 
-def test_the_commands_name_the_job_and_the_profile() -> None:
+def test_the_commands_name_the_job_and_no_role() -> None:
+    """0.1.11.9: a job has one assessment and one resume, so no command of the brief names a role (it named the profile)."""
+
     cmds = job_brief.commands(JOB, PROFILE)
-    assert cmds["posting"] == f"gigai scout resume brief --job-url {JOB} --profile {PROFILE} --posting"
-    assert cmds["yours"] == f"gigai scout resume brief --job-url {JOB} --profile {PROFILE}"
+    assert cmds["posting"] == f"gigai scout resume brief --job-url {JOB} --posting"
+    assert cmds["yours"] == f"gigai scout resume brief --job-url {JOB}"
+    assert all("--profile" not in command and PROFILE not in command for command in cmds.values())
     assert cmds["apply"] == f"gigai scout resume pdf --job-url {JOB} --json"

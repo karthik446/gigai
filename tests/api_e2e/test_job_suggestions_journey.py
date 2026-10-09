@@ -70,7 +70,7 @@ def test_job_brief_suggestions_and_pick_journey(tmp_path: Path, monkeypatch: pyt
         assert (mine["schema_version"], mine["part"], mine["label"]) == ("scout-job-brief:1", "yours", "user-private")
         assert set(mine["_labels"].values()) == {"user-private"} and mine["job_identity"] == _URL
         assert yours.headers[_HEADER] == "user-private, public-untrusted"  # the operation's labels: it can answer either part
-        assert len(mine["rules"]) == 9 and mine["commands"]["store"].startswith(f"gigai scout resume store --in FILE --job-url {_URL} --profile ")
+        assert len(mine["rules"]) == 9 and mine["commands"]["store"] == f"gigai scout resume store --in FILE --job-url {_URL} --as agent --json"  # 0.1.11.9: no role is named
         assert mine["state"]["verdict"] and mine["resume"] is None and mine["basis"] == "profile_resume" and mine["master"] is None
         assert mine["requirements"] and all(set(row) == {"id", "class", "status", "sources", "in_resume", "coverage", "question_id", "lab"} for row in mine["requirements"])
         private = yours.text

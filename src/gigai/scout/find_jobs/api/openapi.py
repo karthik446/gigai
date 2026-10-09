@@ -385,6 +385,7 @@ _NEW_EXAMPLE: dict[str, object] = {
             "published_at": "2026-09-24T16:00:00.000000Z", "published_kind": "posted", "updated_at": "2026-09-30T11:00:00.000000Z",
             "first_seen_at": "2026-10-02T08:00:00.000000Z",
             "removed_at": None, "profile_id": "prof_1",
+            "tags": [{"profile_id": "prof_1", "label": "Staff Engineer", "match_rank": 1, "rank_score": 82}],
             "profiles": [{"profile_id": "prof_1", "match_rank": 1, "rank_score": 82, "state": "not_assessed"}],
             "state": "not_assessed", "tailored": False, "stale_reason": None, "stale_label": None, "sort_group": "not_assessed",
             "score": 82, "score_kind": "rank", "score_text": "rank 82 · not assessed", "thin_posting": False, "ranked_low": False, "fit": None, "rank_score": 82, "assessment": None,
@@ -553,8 +554,12 @@ _PREPARING_NOTE = (
 _POSTINGS_NOTE = (
     "What \"Run find jobs\" searched, without a run: read from the stored index through the per-(posting, profile) read model, "
     "across every active profile (a deleted or archived profile is never listed). A changed setting (titles, countries, "
-    "work mode) is seen by the next call. Each posting is listed once, for its best profile (`profile_id`), with every "
-    "active profile it matches in `profiles`, best first; with one `profile_id` the row is that profile's own. Ordered like "
+    "work mode) is seen by the next call. 0.1.11.9: a role (a profile) is a TAG. Each posting is listed once, with the roles "
+    "whose saved search found it in `tags` (`{profile_id, label, match_rank, rank_score}`, best first: each role keeps its own "
+    "rank score). The row's assessment, resume and state are the JOB's (it has one of each), whichever role is named; its "
+    "weak-fit state is judged at the best tag's rank. `profile_id` on a row is the best tag's id and `profiles` the same tags "
+    "as before 0.1.11.9: both are kept for older readers and select nothing. The `profile_id` filter keeps the jobs that "
+    "role found. Ordered like "
     "GET /api/new: a current assessment, then a stale one, then not assessed; inside a group the verdict, then `fit` (the "
     "row's one fit number: the share of requirements met with the must-haves counted twice, 0 to 100, null when not "
     "assessed), then the rank score, then the newest. A posting whose state is `weak_fit` (it waits on answers, its `fit` "
@@ -623,9 +628,9 @@ _NEW_NOTE = (
     "After a yes that left some, `assessed` / `reassessed` also carry `more_after` and `next` (`{cli, api}`: the call for the "
     "next 50); neither key is there when the batch was all of them. `fit` at the top level is the three numbers in force (the `fit` block "
     "of the project's settings file; each 0 to 100, 0 switches that rule off). Each posting is listed "
-    "once, for its best profile (`profile_id`: the profile that tailored a resume for it, else one with a current "
-    "assessment, else one with a stale one, else the highest rank score), with every active profile it matches in "
-    "`profiles`, best first; the top-level `profiles` are the profile tags and each one's resume by id. `score_text` is the "
+    "once, with the roles that found it in `tags` (0.1.11.9: `{profile_id, label, match_rank, rank_score}`, best first; a role "
+    "is a tag, the assessment and the state are the job's). `profile_id` is the best tag's id (the best-ranked role; it selects "
+    "nothing) and `profiles` the same tags as before 0.1.11.9; the top-level `profiles` are the active roles and each one's resume by id. `score_text` is the "
     "score column (the verdict, \"fit N%\", \"N of M requirements\", the rank; a stale row says `stale_label`, never a bare percent; "
     "a row whose `thin_posting` is true, a match read from fewer than 4 requirement rows, says \"thin posting, not enough requirements to score\" "
     "in place of the verdict and the fit number and is listed after every posting that is not thin, and a match with no row about the job has the state `thin_posting`, listed last of all); "
@@ -836,6 +841,8 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
             "work_mode_fit": None,
             "h1b": None,
             "index_posting": None,
+            "tags": [{"profile_id": "prof_1", "label": "Staff Engineer", "match_rank": 1, "rank_score": 82}],
+            "ambiguous_applied_resume": None,
             "liveness": {
                 "state": "open", "checked_at": "2026-10-06T10:00:00Z", "closed_at": None, "note": None,
                 "company_page": "unknown", "company_page_note": None, "board_url": None,
@@ -847,7 +854,7 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
             }],
             "open_questions": [{"question_id": "auth:work_authorization", "question": "Are you authorized to work in the US?", "requirement": None}],
             "answers": [],
-            "tailored_resumes": [{"profile_id": "prof_1", "job_identity": _JOB_URL, "company": "Acme", "title": "Software Engineer", "created_at": "2026-09-29T10:05:00Z", "updated_at": "2026-09-29T10:05:00Z", "links": {"pdf": {"method": "POST", "path": "/api/tailored-resumes/pdf", "body": {"profile_id": "prof_1", "job_identity": _JOB_URL}}, "line": {"method": "PUT", "path": "/api/tailored-resumes/lines", "body": {"profile_id": "prof_1", "job_identity": _JOB_URL, "updated_at": "2026-09-29T10:05:00Z", "line_id": "<L id from the resume>", "use": "original"}}}}],
+            "tailored_resumes": [{"profile_id": "prof_1", "job_identity": _JOB_URL, "company": "Acme", "title": "Software Engineer", "created_at": "2026-09-29T10:05:00Z", "updated_at": "2026-09-29T10:05:00Z", "links": {"pdf": {"method": "POST", "path": "/api/tailored-resumes/pdf", "body": {"job_identity": _JOB_URL}}, "line": {"method": "PUT", "path": "/api/tailored-resumes/lines", "body": {"job_identity": _JOB_URL, "updated_at": "2026-09-29T10:05:00Z", "line_id": "<L id from the resume>", "use": "original"}}}}],
             "job_state": {"state": "tailored", "since": "2026-09-29T10:05:00Z", "next_events": ["applied"]},
             "application_events": [],
             "links": {
@@ -857,7 +864,7 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
                 "brief": {"method": "GET", "path": "/api/jobs/brief?url=...&part=yours"},
                 "brief_posting": {"method": "GET", "path": "/api/jobs/brief?url=...&part=posting"},
                 "suggestions": {"method": "GET", "path": "/api/jobs/suggestions?url=..."},
-                "pdf": {"method": "POST", "path": "/api/tailored-resumes/pdf", "body": {"profile_id": "prof_1", "job_identity": _JOB_URL}},
+                "pdf": {"method": "POST", "path": "/api/tailored-resumes/pdf", "body": {"job_identity": _JOB_URL}},
                 "mark_applied": {"method": "POST", "path": "/api/applications", "body": {"normalized_url": _JOB_URL, "event_kind": "applied"}},
                 "run_posting": {"method": "GET", "path": "/api/runs/run_20260929T100000Z/posting?url=..."},
             },
@@ -867,6 +874,13 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
         errors=(_INVALID, _UNKNOWN_KEY, _NOT_FOUND, _NO_TARGET, (403, "forbidden_origin")),
         host_checked=True,
         description=(
+            "0.1.11.9 (one job, one assessment): the job has ONE stored assessment, resume and suggestion record. `job_state`, "
+            "`rank` and `open_questions` are the job's (from that one assessment; the run's own only while nothing is stored), and "
+            "no link carries a `profile_id`: `links.pick`, `brief` and `suggestions` act on the job. A role (a profile) is a TAG: "
+            "`tags` lists the active roles whose saved search found the job, best first, each with its own `rank_score` "
+            "(`[{profile_id, label, match_rank, rank_score}]`; empty for a job no role found). `ambiguous_applied_resume` is null, or "
+            "`{resumes, text}` for a job the stores migration found applied with a stored resume under more than one role: the PDF "
+            "that was sent cannot be told and every one of those resumes is kept. "
             "Never calls a model. 0.1.11.4: `liveness` says whether the posting's board still lists it: `state` is open | closed | unknown, "
             "`checked_at` when the board was asked, `closed_at` since when it is closed, `note` one plain sentence for a closed one "
             "(null otherwise). That is ONE request to the posting's public board at most (Greenhouse: its single-job endpoint, 404 or "
@@ -1448,7 +1462,7 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
         params=(
             _q("url", "string", "The posting URL, raw or normalized.", required=True),
             _q("part", "string", "Which part. Default: yours.", enum=("yours", "posting")),
-            _q("profile_id", "string", "The profile. Default: the profile whose assessment of the job is newest."),
+            _q("profile_id", "string", "Optional and picks nothing (0.1.11.9: a job has one assessment, one suggestion record and one resume, whichever role asked)."),
         ),
         errors=(_INVALID, _UNKNOWN_KEY, (404, "assessment_missing"), _NO_TARGET),
         description=(
@@ -2565,7 +2579,7 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
         _POSTINGS_EXAMPLE,
         schema_version="scout-postings:1",
         params=(
-            _q("profile_id", "string", "Only postings this active profile matches; repeat it, or separate ids with commas. One id shows that profile's own row."),
+            _q("profile_id", "string", "A filter on the tags: only the jobs this active role found; repeat it, or separate ids with commas. It never picks which assessment a row shows (0.1.11.9)."),
             _q("q", "string", "Words that must all be in the title, company or location."),
             _q("state", "string", "Keep these states (repeat or separate with commas): not_assessed, needs_answers, matched, has_gap (matched, with a must-have confirmed unmet), not_a_match, tailored, assessed (any assessment), recommended (the Scout label), weak_fit (listed only when asked for), thin_posting (matched by verdict on no requirement row at all: never in matched), ranked_low (only the postings not assessed and ranked below `fit.weak_fit_below_rank`, 50; without it they are listed with the rest, lower by their rank), applied (0.1.11.3: the postings marked applied or beyond: interview, offer, rejected, withdrawn; 0.1.11.5: listed only when asked for)."),
             _q("window", "string", "new: first seen since the last check. 7d / 30d: posted (the day it went up; else first seen) in the last 7 or 30 days.", enum=("new", "7d", "30d")),
@@ -2685,7 +2699,7 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
         schema_version="scout-postings-assess:1",
         params=(
             _b("jobs", "array", "The postings to assess, by job identity (posting URL). Without it the filter below selects them."),
-            _b("profile_id", "string", "Assess for this active profile instead of each posting's best profile."),
+            _b("profile_id", "string", "A filter on the tags: only the jobs this active role found. A job is assessed once, whichever role is named (0.1.11.9)."),
             _b("query", "string", "Filter: words that must all be in the title, company or location."),
             _b("states", "array", "Filter: states to keep (as GET /api/postings `state`)."),
             _b("window", "string", "Filter: new, 7d or 30d (as GET /api/postings).", enum=("new", "7d", "30d")),

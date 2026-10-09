@@ -146,9 +146,9 @@ def test_a_each_new_posting_once_with_its_profile_tags_and_never_the_deleted_pro
     }
     _assert_labels(response)
 
-    # --profile shows that profile's own row, still with every tag.
+    # --profile is a filter on the tags (0.1.11.9): the two jobs that role found, each still with every tag.
     filtered = _cli(fx, "--profile", fx.second_profile_id, "--since", str(response["since"]))
-    assert {row["profile_id"] for row in _rows(filtered)} == {fx.second_profile_id} and len(_rows(filtered)) == 2
+    assert len(_rows(filtered)) == 2 and all(fx.second_profile_id in {tag["profile_id"] for tag in row["tags"]} for row in _rows(filtered))
     tagged = next(row for row in _rows(filtered) if row["job_identity"] == job_url("acme", 1))
     assert [item["profile_id"] for item in tagged["profiles"]] == [fx.default_profile_id, fx.second_profile_id]  # type: ignore[union-attr]
     # A deleted profile cannot be asked for: it is hidden.

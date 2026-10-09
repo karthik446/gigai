@@ -6,8 +6,11 @@ SEARCH (:func:`search_postings`). The postings every ACTIVE profile matches,
 from the stored company index through the posting read model
 (``postings.py``, which matches with ``index_search.read_indexed_boards``):
 no board is asked, no run is created, no model is called. Each posting once,
-tagged with every active profile it matches (best first) and shown for its
-best profile, or for the one profile the call filters to. Filters: profiles,
+tagged with every active role that found it (``tags``, best first: role id,
+name, its own rank score). 0.1.11.9: a role is a TAG, a filter and never a
+selector: the job has one assessment and one resume, its row shows them
+whichever role a call names, and its weak-fit state is the best tag's rank's.
+Filters: roles (the jobs a named role found),
 words in the title, company or location, states, a time window ("new since
 the last check", the last 7 or 30 days), postings the board no longer lists.
 The 7 and 30 days are counted from the day the posting WENT UP (its
@@ -64,8 +67,9 @@ no longer active are ``hidden``: they are listed only when asked for
 (``include_hidden``, or ``profile_id`` naming them), never by default.
 
 ASSESS THESE (:func:`assess_these`). The postings named (``jobs``) or the
-ones a filter selects, each for its best profile (or ``profile_id``), that
-have no current assessment. Nothing is assessed without approval: a call
+ones a filter selects (``profile_id``: the jobs that role found), each ONCE,
+that have no current assessment. The role recorded on a new assessment is the
+job's best tag; it selects nothing (0.1.11.9). Nothing is assessed without approval: a call
 without ``approve`` answers ``status: "ask"`` with the count and the estimate
 from the recorded model calls, and makes no model call; ``model_input_summary``
 (0110-10-13, ``assess_preview``) says what the postings asked about would send
@@ -183,6 +187,7 @@ from .scout_new import (
     in_order,
     posted_text,
     split_low_rank,
+    tag_owner,
     top_ranked_batch,
 )
 
@@ -458,8 +463,11 @@ class _Selection:
         elif self.profile_ids:
             wanted = set(self.profile_ids)
             groups = {job: group for job, group in groups.items() if any(row.profile_id in wanted for row in group)}
-        only = self.profile_ids[0] if len(self.profile_ids) == 1 else None
-        shown = [(group, _shown(group, only)) for group in groups.values()]
+        # 0.1.11.9: a role is a TAG. ``profile_ids`` filters the jobs (above: the ones a named role found); it never
+        # picks whose row a job is shown by. That is the best tag's, so the state is the job's own.
+        shown = [(group, _shown(group)) for group in groups.values()]
+        #: The ONE role a call filters by, if it names one: a tag's own flag (``tag_pending``) is then that role's.
+        self.only = self.profile_ids[0] if len(self.profile_ids) == 1 else None
         weak = fit_rules.WEAK_FIT
         setting = fit_rules.fit_setting(home_root, target)
         #: Item 12: the application of each job, read once; the "Applied" filter, the rows' badge and (0.1.11.5) what
@@ -606,9 +614,16 @@ def _rows_json(
     views: Sequence[ProfileView] = (), ranked_low: Callable[[PostingRecord], bool] | None = None,
     applications: Mapping[str, Mapping[str, object]] | None = None, selection: "_Selection | None" = None,
 ) -> list[dict[str, object]]:
-    """The grid rows: ``scout new``'s own row, plus where a row's assessment came from when it was a run's."""
+    """The grid rows: ``scout new``'s own row, plus where a row's assessment came from when it was a run's.
+
+    ``selection`` gives the row's 0.1.11.8 keys (its copies, an unclear location) and ``selection.only``: the one role
+    the call filters by. ``tag_pending`` is a fact about a TAG (was the job found by a generic title alone), so it is
+    said for that role's tag; without a filter, for the best tag.
+    """
 
     from .quick_assess import read_quick_assessment
+
+    only = None if selection is None else selection.only
 
     texts = postings.posting_texts(home_root, [row for _group, row in shown])
     ran: dict[tuple[str, str], RunAssessment] = {}
@@ -617,11 +632,12 @@ def _rows_json(
             ran.update({(item.profile_id, item.job): item for item in store.run_assessments(profile_id=profile_id, latest=True)})
     rows: list[dict[str, object]] = []
     pending = postings.TagPending(home_root, views)
+    labels = {view.profile_id: view.label for view in views}
     h1b = _h1b_index() if shown else {}  # once per request: a row looks its board up, never reads the catalog
     for group, row in shown:
         item = None if row.state == _NOT_ASSESSED else read_quick_assessment(home_root, target, row.profile_id, row.job)
         text = texts.get(row.job)
-        entry = _row_json(group, row, text, item, pending(row.profile_id, None if text is None else text.title))
+        entry = _row_json(group, row, text, item, pending(tag_owner(group, row, only), None if text is None else text.title), labels)
         # 0.1.11.3 (item 8): LABELS only (never a filter, sort key or hold). ``sponsorship`` is what the assessment read
         # from the posting (null: not stated / not assessed); ``h1b`` the company's catalog figure (null: none held).
         stated = None if item is None else getattr(item.result, "sponsorship", None)  # type: ignore[attr-defined]
@@ -930,7 +946,8 @@ def assess_these(
 
     ``jobs`` names the postings (job identities); without it the filter
     (``query``, ``states``, ``window``, ``profile_id``) selects them. A
-    posting is assessed for its best profile, or for ``profile_id``. One with
+    posting is assessed ONCE, whichever role is named (0.1.11.9: ``profile_id``
+    only filters, to the jobs that role found). One with
     a current assessment is left out unless ``again``. Nothing is assessed
     unless ``approve`` is true. 0110-10-02: a posting whose rank score is
     below the assess threshold is left out and counted (``low_rank``) unless

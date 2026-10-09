@@ -6,8 +6,8 @@ each model call of a batch can be held open: it is first a real child process th
 `claude -p` call), then the fixture model. Two calls at a time; a batch of FOUR postings. No network, no real model.
 
 Pinned, by the ticket's part:
-(5) the button beside "N not assessed" says how many ("Assess all N" / "Assess top 50 of N"), and a row shown for
-    another profile says "Or assess as <profile>";
+(5) the button beside "N not assessed" says how many ("Assess all N" / "Assess top 50 of N"). (Until 0.1.11.9 a row
+    shown for another profile also said "Or assess as <profile>": a job has one assessment now, so no row does.)
 (3) the dialog never says "This can take a minute";
 (4) with nothing ranked low the dialog has no low-rank box;
 (2) Approve answers at once (202) and THE DIALOG CLOSES while the batch runs; the page shows "0 of 4 assessed", the
@@ -115,12 +115,12 @@ def test_the_dialog_closes_at_the_start_the_page_shows_progress_and_cancel_keeps
     assert ui.page.locator(tid("assess-batch")).count() == 0  # no batch runs: no progress row, and no poll
     ui.step("listed")
 
-    # (5) the button says how many; the row link of another profile says "Or".
+    # (5) the button says how many. 0.1.11.9: no row offers "Or assess as <role>" (a job has one assessment).
     count = len(waiting)
     assert (ui.page.locator('[data-role="not-assessed-count"]').text_content() or "") == f"{count} not assessed"
     assert (ui.page.locator(tid("assess-all")).text_content() or "").strip() == (f"Assess top 50 of {count}" if count > 50 else f"Assess all {count}")
-    links = ui.page.locator('[data-action="assess-as"]').all_text_contents()
-    assert links and all(text.startswith("Or assess as ") for text in links), links
+    assert ui.page.locator('[data-action="assess-as"]').count() == 0
+    assert "Or assess as" not in (ui.page.locator(tid("jobs-list")).text_content() or "")
 
     for pick in picks:
         _row(ui, pick).locator("input[type='checkbox']").check()

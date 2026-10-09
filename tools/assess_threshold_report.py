@@ -21,9 +21,11 @@ it runs with any Python 3.10+ and needs no GigAI install::
     python3 tools/assess_threshold_report.py --day 2026-10-03     # only what was assessed that UTC day
     python3 tools/assess_threshold_report.py --db /path/to/pipeline.sqlite --thresholds 40,50,60 --json
 
-WHAT IS COUNTED. One row per (posting, profile) that has an assessment
-(``state`` is not ``not_assessed``), postings the board no longer lists
-included. ``--day`` / ``--from`` / ``--to`` keep the rows whose assessment was
+WHAT IS COUNTED. One row per JOB that has an assessment (``state`` is not
+``not_assessed``), postings the board no longer lists included. 0.1.11.9: a
+job has one assessment, whichever roles found it, so a job two roles tag is
+counted once, by its best tag's row (``match_rank`` 1: its best rank score);
+until then every (posting, profile) row was counted. ``--day`` / ``--from`` / ``--to`` keep the rows whose assessment was
 made in that UTC window (``assessed_at``); the "by day" table shows which days
 there are. The rank score is the one stored NOW: a posting ranked after it was
 assessed is counted with its rank of today. A row with no rank score is never
@@ -59,7 +61,7 @@ def find_db(home: Path) -> Path:
 
 
 def read_rows(path: Path) -> tuple[list[dict[str, object]], str]:
-    """Every assessed (posting, profile) row as numbers and codes, and how the file was opened. Never writes."""
+    """Every assessed JOB (its best tag's row) as numbers and codes, and how the file was opened. Never writes."""
 
     opened = "read-only"
     try:
@@ -73,7 +75,7 @@ def read_rows(path: Path) -> tuple[list[dict[str, object]], str]:
         columns = {row[1] for row in connection.execute("PRAGMA table_info(posting)")}
         fit = "fit" if "fit" in columns else "NULL"
         cursor = connection.execute(
-            f"SELECT state, rank_score, reqs_met, reqs_total, assessed_at, stale_code, {fit} FROM posting WHERE state != ?",
+            f"SELECT state, rank_score, reqs_met, reqs_total, assessed_at, stale_code, {fit} FROM posting WHERE state != ? AND match_rank = 1",
             (NOT_ASSESSED,),
         )
         rows = [

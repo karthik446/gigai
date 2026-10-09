@@ -76,7 +76,12 @@ def test_the_stale_flag_clears_with_no_model_call_and_a_real_change_still_reads_
     changed = posting_text(101, extra=" Now also requires Rust.")
     seed_greenhouse(fx, "acme", [job], seen_at=days_ago(0.5), details={101: (changed, UPDATED_LATER)})
     postings.refresh(fx.home_root, fx.target, now=NOW, force=True)
-    assert {row.profile_id: row.stale_code for row in _rows(fx, gh_url("acme", 101)) if row.state != "not_assessed"} == {fx.default_profile_id: "posting_changed"}
+    # 0.1.11.9: the job has ONE assessment, so every role that tags it reads the same "posting changed" (until then
+    # only the role that had assessed it had a row to say so).
+    changed_rows = _rows(fx, gh_url("acme", 101))
+    assert {row.profile_id for row in changed_rows} == {fx.default_profile_id, fx.second_profile_id}
+    assert [(row.state != "not_assessed", row.stale_code) for row in changed_rows] == [(True, "posting_changed")] * 2
+    assert len({row.assessed_at for row in changed_rows}) == 1  # one assessment, read by both tags
     assert fx.base.model.calls == calls
 
 

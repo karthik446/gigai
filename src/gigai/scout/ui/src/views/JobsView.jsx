@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { getNewPeek, getPostings, getPostingsStatus, postAssessThese, postMarkAllSeen } from "../api.js";
-import { assessAllLabel, assessAsLabel, batchEndLine, isBatchStarted } from "../assessBatchModel.js";
+import { assessAllLabel, batchEndLine, isBatchStarted } from "../assessBatchModel.js";
 import AssessApprovalDialog from "../components/AssessApprovalDialog.jsx";
 import AssessBatchProgress from "../components/AssessBatchProgress.jsx";
 import FreeSearchPanel from "../components/FreeSearchPanel.jsx";
@@ -43,10 +43,10 @@ import {
   postedLine,
   profileChips,
   profileTags,
+  roleTagTitle,
   rankingLine,
   rowChips,
   scoreChips,
-  secondProfiles,
   stateChips,
   stateText,
   timeChips,
@@ -64,12 +64,13 @@ import { APPLICATIONS_HASH, RUNS_HASH, jobHash } from "../routing.js";
 import { sourcesStrip } from "../sourcesStripModel.js";
 
 // 0.1.10.7 M4b: Jobs, by posting (#/jobs). No run: the rows are the stored
-// postings every active profile matches (GET /api/postings), each tagged with
-// the profiles it matches, best first, and shown for its best profile (or
-// the one profile the filter names).
+// postings every active role matches (GET /api/postings). 0.1.11.9: a job is
+// listed ONCE and carries the tag of each role whose saved search found it,
+// best first. A role is a tag: the row shows the job's one assessment, whatever
+// chip is on.
 //
-//   profile chips   a FILTER (several may be on), never a mode; remembered in
-//                   this browser only
+//   role chips      a FILTER on the tags (several may be on), never a mode;
+//                   remembered in this browser only
 //   time chips      "New since last check (N)" / "7 days" / "30 days", one at
 //                   a time; N is the PEEK's count (GET /api/new never moves
 //                   the anchor). "Mark all seen" moves it (POST /api/new/seen)
@@ -93,8 +94,8 @@ import { sourcesStrip } from "../sourcesStripModel.js";
 //   Assess these    the selected rows, else the filter. The server is asked
 //                   first (count and estimate); nothing is assessed until the
 //                   approval dialog's Approve
-//   per row         open its job page; "Assess as <profile>" for another
-//                   profile it matches (the same question and approval).
+//   per row         open its job page (0.1.11.9: no "Assess as <role>": a job
+//                   has one assessment, so there is no second one to ask for).
 //                   0110-10-14: its date, beside company and location:
 //                   "posted 10 days ago" (the board's date), "updated ..."
 //                   (a board that gives only its last change) or "first seen
@@ -148,9 +149,8 @@ function Tile({ label, value, href, testId }) {
   );
 }
 
-function PostingRow({ row, profiles, anchor, usOnly, selected, onSelect, onOpen, onAssessAs, busy }) {
+function PostingRow({ row, profiles, anchor, usOnly, selected, onSelect }) {
   const tags = profileTags(row, profiles);
-  const others = secondProfiles(row, profiles);
   const details = detailLine(row);
   const posted = postedLine(row);
   const copies = copiesTag(row);
@@ -173,7 +173,7 @@ function PostingRow({ row, profiles, anchor, usOnly, selected, onSelect, onOpen,
         onChange={(event) => onSelect(row.job_identity, event.target.checked)}
       />
       <div className="posting-main">
-        <a className="posting-title" href={jobHash(row.job_identity)} onClick={() => onOpen(row)} data-action="open-job">
+        <a className="posting-title" href={jobHash(row.job_identity)} data-action="open-job">
           {row.title || "(untitled posting)"}
         </a>
         {isNew(row, anchor) && (
@@ -204,10 +204,11 @@ function PostingRow({ row, profiles, anchor, usOnly, selected, onSelect, onOpen,
           {tags.map((tag) => (
             <span
               key={tag.profileId}
-              className={`profile-tag${tag.shown ? " shown" : ""}`}
+              className="profile-tag"
               data-testid="profile-chip"
+              data-role-id={tag.profileId}
               data-best={tag.best ? "true" : undefined}
-              title={tag.shown ? "This row shows this profile's state" : "This posting also matches this profile"}
+              title={roleTagTitle(tag)}
             >
               {tag.label}
             </span>
@@ -236,15 +237,9 @@ function PostingRow({ row, profiles, anchor, usOnly, selected, onSelect, onOpen,
         ))}
       </div>
       <div className="posting-actions">
-        <a className="button small secondary" href={jobHash(row.job_identity)} onClick={() => onOpen(row)}>
+        <a className="button small secondary" href={jobHash(row.job_identity)}>
           Open
         </a>
-        {!row.removed_at &&
-          others.map((tag) => (
-            <button key={tag.profileId} type="button" className="link-button" disabled={busy} data-action="assess-as" onClick={() => onAssessAs(row, tag.profileId)}>
-              {assessAsLabel(tag.label)}
-            </button>
-          ))}
       </div>
     </li>
   );
@@ -327,7 +322,7 @@ function Pager({ page, pages, size, onPage, onSize }) {
   );
 }
 
-export default function JobsView({ tab = TAB_YOURS, selectedProfileId, onSelectProfile, allProfiles, applicationsState, onRows, onCounts }) {
+export default function JobsView({ tab = TAB_YOURS, allProfiles, applicationsState, onRows, onCounts }) {
   // 0.1.11.8 N3: which tab the address names. On Search the list below is not drawn and the address is the tab's.
   const onSearch = tab === TAB_SEARCH;
   const tabRef = useRef(tab);
@@ -555,12 +550,8 @@ export default function JobsView({ tab = TAB_YOURS, selectedProfileId, onSelectP
   };
 
   const select = (id, on) => setSelectedIds((current) => (on ? (current.includes(id) ? current : current.concat(id)) : current.filter((item) => item !== id)));
-  const open = (row) => {
-    // A job page shows one profile's view of the job: the one this row shows.
-    if (row.profile_id && row.profile_id !== selectedProfileId) {
-      onSelectProfile(row.profile_id);
-    }
-  };
+  // 0.1.11.9: opening a row no longer switches the selected role. A job page shows the JOB (one assessment, one
+  // resume), whichever role is selected; the roles that found it are tags on the page.
 
   // 0.1.11.7 FS2: a search row of a posting no profile's list holds has no row to read by its address: its job page
   // is built from the search row, handed up like a list row. A posting a list holds reads its own row there.
@@ -658,7 +649,7 @@ export default function JobsView({ tab = TAB_YOURS, selectedProfileId, onSelectP
               <input id="jobs-filter-search" type="search" placeholder="Title, company, location…" value={search} onChange={(event) => setSearch(event.target.value)} />
             </div>
             <div className="filter-group" data-role="profile-filter">
-              <div className="chip-group-label">Profiles</div>
+              <div className="chip-group-label">Roles</div>
               <div className="chip-list">
                 {profileChips(profiles, filter.profileIds).map((chip) => (
                   <button
@@ -673,7 +664,7 @@ export default function JobsView({ tab = TAB_YOURS, selectedProfileId, onSelectP
                     {chip.matched !== null && <span className="chip-count"> {chip.matched}</span>}
                   </button>
                 ))}
-                {profiles.length === 0 && !loading && <span className="muted">No active profile</span>}
+                {profiles.length === 0 && !loading && <span className="muted">No active role</span>}
               </div>
             </div>
           </div>
@@ -838,9 +829,6 @@ export default function JobsView({ tab = TAB_YOURS, selectedProfileId, onSelectP
               usOnly={usOnly}
               selected={selectedIds.includes(item.row.job_identity)}
               onSelect={select}
-              onOpen={open}
-              onAssessAs={(target, profileId) => ask(assessAskBody({ selectedIds: [target.job_identity], profileId }))}
-              busy={busy}
             />
           ),
         )}
@@ -850,7 +838,7 @@ export default function JobsView({ tab = TAB_YOURS, selectedProfileId, onSelectP
               ? "No postings match these filters."
               : strip.kind === "empty"
                 ? "No postings are stored yet. Update sources above to download them."
-                : "No stored posting matches your profiles yet."}
+                : "No stored posting matches your roles yet."}
           </li>
         )}
       </ul>

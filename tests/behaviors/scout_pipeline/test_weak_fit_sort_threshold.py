@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import sqlite3
 
 from click.testing import CliRunner
 import pytest
@@ -475,6 +476,14 @@ def test_the_threshold_report_counts_what_a_threshold_would_have_skipped_and_wri
     result = tool.report(rows, (40, 50, 60))
 
     assert opened == "read-only"
+    # 0.1.11.9: ONE count a job. Both roles tag all nine jobs, and each role's row carries the job's one assessment
+    # (18 assessed rows in the table); the report counts the nine jobs, each at its best tag's rank.
+    table = sqlite3.connect(db)
+    try:
+        assessed_rows, jobs_assessed = table.execute("SELECT COUNT(*), COUNT(DISTINCT job) FROM posting WHERE state != 'not_assessed'").fetchone()
+    finally:
+        table.close()
+    assert (assessed_rows, jobs_assessed, len(rows)) == (18, 9, 9)
     assert (result["assessments"], result["ranked"], result["not_ranked"]) == (9, 7, 2)
     assert result["by_state"] == {"matched": 5, "needs_answers": 3, "weak_fit": 1}
     by_threshold = {row["threshold"]: row for row in result["thresholds"]}

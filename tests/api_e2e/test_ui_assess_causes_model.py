@@ -127,12 +127,12 @@ def test_the_line_beside_assess_says_what_one_assessment_sends(out: dict) -> Non
 def test_the_previews_summary_as_lines(out: dict) -> None:
     assert out["summary"] == [
         [
-            "Profile Staff Engineer: the lines of your master resume picked for this posting.",
+            "Role Staff Engineer: the lines of your master resume picked for this posting.",
             "Saved answers: 12. Saved stories that can match: none.",
             "The posting's text is stored: nothing is fetched.",
         ],
         [
-            "Profile Staff Engineer: this profile's own resume.",
+            "Role Staff Engineer: this role's own resume.",
             "Saved answers: none. Saved stories that can match: 3.",
             "The posting's text is not stored: it is fetched from its public board first.",
         ],

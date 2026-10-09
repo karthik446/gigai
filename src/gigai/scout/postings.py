@@ -5,6 +5,17 @@ company index that an ACTIVE profile matches (a deleted or archived profile
 has no rows). It is what ``gigai scout new`` reads, and what the Jobs page by
 posting will read.
 
+0.1.11.9 (one job, one assessment): A ROW IS A TAG. A role (a profile) is a
+saved search, and its row of a job says "this search found the job": the
+tag, with that role's own rank score. The assessment, the resume and the
+verdict state are the JOB's (one of each, in the stores' per-job folder), so
+every tag's row of a job carries the same ones. Nothing is stored per job
+here and the table's key is unchanged: a reader groups the rows by job, shows
+the job by its best tag's row (``match_rank`` 1: the best-ranked role, so the
+weak-fit state is the best rank's) and lists the tags (``scout_new.tags_json``).
+A role named by a caller filters the jobs (the ones that role found); it
+never selects whose row, assessment or resume is shown.
+
 WHERE IT LIVES: the ``posting`` table of the project's ``pipeline.sqlite``
 (DESIGN 10.1's cache), not a derive on every request. A request that derived
 it would read every company's index file and board body again; the cache

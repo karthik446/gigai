@@ -166,10 +166,6 @@ export function assessAllLabel(notAssessed) {
   return count > BATCH_CAP ? `Assess top ${BATCH_CAP} of ${count}` : `Assess all ${count}`;
 }
 
-// Part 5: the link on a row shown for another profile. "Or": the row's own state is that other profile's.
-export function assessAsLabel(label) {
-  return `Or assess as ${label}`;
-}
 
 // The read loop of one page: `read` every `intervalMs` WHILE a batch runs (the next only after the answer), never
 // when none does. `onStatus(status)` gets every answer; `onProgress()` when a posting of the batch got its result;

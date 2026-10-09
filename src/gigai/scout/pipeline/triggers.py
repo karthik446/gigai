@@ -354,6 +354,34 @@ def enqueue_pairs(
 
 
 @_reads_journal
+def job_role(store: PipelineStore, profile_id: str, job: str) -> str:
+    """0.1.11.9: the role a job's pipeline steps are kept under, for a JOB PAGE that names ``profile_id``.
+
+    The steps stay keyed ``(role, job)``, and a job has ONE assessment and ONE resume. So a job that already has
+    step rows under another role is processed and read THERE, whichever role's page asks: one tailoring, one
+    re-assessment, one ATS score and one label a job, never a second set through a second role. ``profile_id`` when
+    the job has no step yet, or has some under it already. One keyed read, nothing written. Used by the job page's
+    two routes (``GET /api/pipeline/job``, ``POST /api/pipeline/process``); :func:`process_now` itself queues the
+    pair it is given.
+    """
+
+    held = {step.profile_id for step in store.steps(job=job)}
+    return profile_id if not held or profile_id in held else sorted(held)[0]
+
+
+def stored_job_role(home_root: Path, target: Path, profile_id: str, job: str) -> str:
+    """:func:`job_role` for a caller with no store at hand; a project with no queue yet has no steps: ``profile_id``."""
+
+    path = pipeline_path(Path(home_root), Path(target))
+    if not path.is_file():
+        return profile_id
+    store = PipelineStore(path)
+    try:
+        return job_role(store, profile_id, job)
+    finally:
+        store.close()
+
+
 def process_now(
     home_root: Path,
     target: Path,

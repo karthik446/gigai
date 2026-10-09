@@ -77,6 +77,8 @@ function MarkAppliedButton({ normalizedUrl }) {
   );
 }
 
+// 0.1.11.9: the card's answer boxes re-assess by JOB (`reassess: {job_identity}`, no role): a job has one assessment,
+// so there is nothing to choose and the server refuses nothing (until 0.1.11.9 a job two roles held answered 409).
 export default function PostingCard({ row, profileId, showPrep }) {
   const { posting, status, assessment, notAssessedReason, fromRunDate } = row;
   const statusLabel = status === "carried_forward" ? unchangedSinceLabel(fromRunDate) : STATUS_LABELS[status] || status;

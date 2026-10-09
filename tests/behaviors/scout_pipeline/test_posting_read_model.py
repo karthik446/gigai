@@ -157,11 +157,16 @@ def test_a_row_carries_the_cached_rank_score_the_assessment_and_removed_at(tmp_p
     assert done.builds == {fx.default_profile_id: postings.BUILD_FACTS, fx.second_profile_id: postings.BUILD_FACTS}
     assert fx.base.model.calls == calls  # the read model never calls a model
     rows = {row.profile_id: row for row in _rows(fx, jobs=[job_url("acme", 1)])}
-    # 0110-8-01: the profile with a current assessment stays the best tag; another profile's rank score does not move it.
-    assert rows[fx.second_profile_id].rank_score == 91 and rows[fx.second_profile_id].match_rank == 2
-    assessed = rows[fx.default_profile_id]
-    assert assessed.match_rank == 1 and assessed.state == "matched" and (assessed.reqs_met, assessed.reqs_total) == (1, 2)
-    assert assessed.assessed_at is not None and not assessed.tailored
+    # 0.1.11.9: a role is a TAG. The rank score stays each role's own; the assessment is the JOB's, so BOTH tags' rows
+    # carry the one verdict, the same counts and the same instant. (Until then only the role that assessed had them,
+    # and it stayed the best tag whatever another role's rank said.)
+    assert (rows[fx.second_profile_id].rank_score, rows[fx.default_profile_id].rank_score) == (91, None)
+    for row in rows.values():
+        assert row.state == "matched" and (row.reqs_met, row.reqs_total) == (1, 2) and not row.tailored
+    assert rows[fx.default_profile_id].assessed_at is not None
+    assert rows[fx.default_profile_id].assessed_at == rows[fx.second_profile_id].assessed_at
+    # The best tag (the row a job is shown by) is the best-ranked role.
+    assert (rows[fx.second_profile_id].match_rank, rows[fx.default_profile_id].match_rank) == (1, 2)
 
     # The board stops listing posting 2: the row stays, with removed_at, and a live read leaves it out.
     fx.seed("acme", [lever_job("acme", 1)], seen_at=days_ago(0.5), watch=False)

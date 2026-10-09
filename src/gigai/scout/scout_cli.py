@@ -3163,7 +3163,7 @@ def _jobs_errors() -> tuple[type[BaseException], ...]:
 
 
 @jobs_group.command("list")
-@click.option("--profile", "profile_ids", multiple=True, help="Only postings this active profile matches (repeatable). With one profile, its own row is shown.")
+@click.option("--profile", "profile_ids", multiple=True, help="A filter on the tags: only the jobs this active role (profile ID) found (repeatable). A job is listed once and shows its one assessment, whichever role is named.")
 @click.option("--query", "query", help="Words that must all be in the title, company or location.")
 @click.option("--state", "states", multiple=True, help="Keep this state (repeatable): not_assessed, needs_answers, matched, has_gap, not_a_match, tailored, assessed, recommended, applied, weak_fit, ranked_low, thin_posting (matched on no requirement at all). A weak fit (waits on answers, few requirements met, low rank) is listed only with --state weak_fit. A posting you already applied to (applied and after: interview, offer, rejected, withdrawn) is listed only with --state applied. A posting not assessed yet and ranked below 50 is always listed, lower by its rank; --state ranked_low lists only those.")
 @click.option("--window", "window", type=click.Choice(["new", "7d", "30d"]), help="new: first seen since your last check. 7d / 30d: published in the last 7 or 30 days.")
@@ -3267,7 +3267,7 @@ def jobs_search_command(
 
 @jobs_group.command("assess")
 @click.argument("jobs", nargs=-1)
-@click.option("--profile", "profile_id", help="Assess for this active profile instead of each posting's best profile.")
+@click.option("--profile", "profile_id", help="A filter on the tags: only the jobs this active role (profile ID) found. A job is assessed once, whichever role is named.")
 @click.option("--query", "query", help="Without JOBS: words that must all be in the title, company or location.")
 @click.option("--state", "states", multiple=True, help="Without JOBS: keep this state (repeatable), as `gigai scout jobs list`.")
 @click.option("--window", "window", type=click.Choice(["new", "7d", "30d"]), help="Without JOBS: new, 7d or 30d, as `gigai scout jobs list`.")

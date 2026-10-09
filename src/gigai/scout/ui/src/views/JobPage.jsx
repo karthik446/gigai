@@ -18,7 +18,7 @@ import PipelineTimeline from "../components/PipelineTimeline.jsx";
 import { useAnswerDrafts } from "../answerDrafts.js";
 import { assessSendsLine, assessSummaryLines, reassessErrorText, reassessGate } from "../answersModel.js";
 import { REASSESS_LABEL, coverageRows, gateOf, headerChip, staleCodes, staleItems } from "../jobResumeModel.js";
-import { applicationBadge, boardLink, closedBanner, postedLine, postingDate, scoreBox } from "../postingsModel.js";
+import { applicationBadge, boardLink, closedBanner, postedLine, postingDate, profileTags, roleTagTitle, scoreBox } from "../postingsModel.js";
 import { displayCompanyName, notAssessedReasonDetail, thinPostingLine, unchangedSinceLabel } from "../display.js";
 import { jobBatchLine, jobLeftBatch, jobWaitsInBatch } from "../assessBatchModel.js";
 import { useAssessBatch } from "../useAssessBatch.js";
@@ -262,9 +262,9 @@ function JobDescription({ posting, pasted, board }) {
 // uat-bug-029: a posting whose requirements could not be read (POST
 // /api/assess 422 posting_requirements_unreadable) stays not assessed, and
 // the page says so as a note, not an error.
-// 0.1.11.5 SP: an assessment asked for on a job page names the page's profile. Without it the server assesses the
-// profile selected at that moment, which another tab or the CLI may have changed since the page was opened: the new
-// assessment (and a resume that waits beside an edited one) then landed on a profile this page does not show.
+// An assessment asked for on a job page names the role selected when the page was opened. 0.1.11.9: it is the role
+// RECORDED on the job's one assessment (whose own resume is read when there is no master); it selects no record,
+// so the page of any other role that found the job shows the same assessment.
 function assessResume(profileId) {
   return profileId && profileId !== PASTED_RESUME_KEY ? { resume: { profile_id: profileId } } : {};
 }
@@ -281,6 +281,7 @@ function AssessNow({ posting, profileId, origin, onAssessed, label = "Assess" })
       <button
         type="button"
         className="button small secondary"
+        data-action="assess-now"
         disabled={state === "saving"}
         style={{ marginLeft: 6 }}
         onClick={() => {
@@ -497,25 +498,15 @@ export default function JobPage({
   const assessOrigin = assessOriginFor(job);
   const assessByUrl = useCallback(() => postAssess({ job: { job_url: jobUrl }, ...assessResume(profileId), origin: assessOrigin }), [jobUrl, profileId, assessOrigin]);
 
-  // 0.1.11.6 AN1: an assessment made from this page replaces the one shown only when it is this page's profile's.
-  // Another profile's (a server older than the page) is never shown as this profile's: the stored ones are read again.
-  const showAssessed = useCallback(
-    (item) => {
-      const made = item && item.resume ? item.resume.profile_id : null;
-      if (made && profileId && made !== profileId) {
-        batchChanged.current && batchChanged.current();
-        return;
-      }
-      onQuickUpdated(item);
-    },
-    [profileId, onQuickUpdated],
-  );
+  // 0.1.11.9: a job has ONE assessment. Whatever role is recorded on the one this page just made, it is the job's and
+  // replaces the one shown. (0.1.11.6 AN1 read the stored ones again when the reply named another role: there were two.)
+  const showAssessed = useCallback((item) => onQuickUpdated(item), [onQuickUpdated]);
 
   // Hooks run on every render, a missing job included (its state is empty).
   const answerDrafts = useAnswerDrafts({
     assessment,
     jobIdentity: posting ? posting.normalized_url : null,
-    // 0.1.11.6 AN1: the re-assessment an answer starts is this page's profile's (a pasted-resume assessment has none).
+    // The role recorded on the re-assessment an answer starts (a pasted-resume assessment has none). It selects nothing.
     profileId: job && job.pastedResume ? null : profileId,
     priorAnswers,
     onAnswered: showAssessed,
@@ -559,7 +550,7 @@ export default function JobPage({
           )}
           {!loading && !onDemandHref && (
             <p className="muted" data-role="no-stored-posting">
-              {from === "assessments" ? "No assessment with this address for this profile: " : "Nothing is stored for: "}
+              {from === "assessments" ? "No assessment with this address: " : "Nothing is stored for: "}
               <code>{jobId}</code>
             </p>
           )}
@@ -612,6 +603,11 @@ export default function JobPage({
   // 0.1.11.7 FS2: a posting found by "Search all jobs" that no profile holds: its Assess says whose assessment it will be.
   const searchAssessLabel = job.fromSearch && profileLabel ? `Assess · 1 model call · as ${profileLabel}` : undefined;
   const closed = closedBanner(liveness, listedRow, servedDates, posting);
+  // 0.1.11.9: the roles whose saved search found this job, as TAGS (the job read's own `tags`, else the Jobs row's).
+  // They label the job; none of them decides which assessment or resume the page shows: there is one of each.
+  const roleTags = profileTags(served && Array.isArray(served.tags) ? { tags: served.tags } : listedRow || {}, []);
+  // The stores migration found this job applied with a resume under more than one role: which PDF was sent cannot be told.
+  const ambiguousResume = served && served.ambiguous_applied_resume && typeof served.ambiguous_applied_resume.text === "string" ? served.ambiguous_applied_resume.text : null;
   // 7b: the same read gives the posting's address on its board when the stored URL is the company's own page.
   const board = closed ? null : boardLink(liveness);
   const structured = Boolean(resume.record) || Boolean(assessment && Array.isArray(assessment.structured_suggestions) && assessment.structured_suggestions.length > 0);
@@ -669,6 +665,16 @@ export default function JobPage({
                 </span>
               )}
             </div>
+            {roleTags.length > 0 && (
+              <div className="posting-tags job-role-tags" data-testid="job-role-tags" aria-label="Roles that found this job">
+                <span className="muted">Found by</span>
+                {roleTags.map((tag) => (
+                  <span key={tag.profileId} className="profile-tag" data-testid="role-chip" data-role-id={tag.profileId} title={roleTagTitle(tag)}>
+                    {tag.label}
+                  </span>
+                ))}
+              </div>
+            )}
             <div className="job-facts">
               {mode && <span className="mode-chip">{mode}</span>}
               {pay && <span className="pay">{pay}</span>}
@@ -791,6 +797,12 @@ export default function JobPage({
           <RequirementActions reassess={{ ...reassessGate({ assessed: false, states: [] }), label: REASSESS_LABEL, helpName: "Re-assess", onClick: () => {} }} busy={Boolean(answerDrafts.busy)} />
           <p className="muted">Not assessed yet. The requirement table and its questions appear once the posting is assessed.</p>
         </section>
+      )}
+
+      {ambiguousResume && (
+        <p className="callout info" role="note" data-testid="ambiguous-resume-note" style={{ margin: "0 0 12px" }}>
+          {ambiguousResume}
+        </p>
       )}
 
       <JobResumePanel

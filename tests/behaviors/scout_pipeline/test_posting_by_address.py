@@ -85,7 +85,10 @@ def test_a_posting_with_an_application_is_found_by_its_address_and_the_list_stil
     assert _one(fx, plain)["application"] is None
     # Named with the profile that owns neither the application nor an assessment: still found (both profiles match it).
     assert set(item["profile_id"] for item in _one(fx, applied)["profiles"]) == {fx.default_profile_id, fx.second_profile_id}
-    assert _one(fx, applied, profile_ids=[fx.second_profile_id])["profile_id"] == fx.second_profile_id
+    # 0.1.11.9: a role filter keeps the jobs that role found; the row is the job's, the same one, with both tags.
+    filtered = _one(fx, applied, profile_ids=[fx.second_profile_id])
+    assert {tag["profile_id"] for tag in filtered["tags"]} == {fx.default_profile_id, fx.second_profile_id}
+    assert {key: value for key, value in filtered.items()} == {key: value for key, value in _one(fx, applied).items()}
     assert _jobs(_search(fx, jobs=[applied, rejected, plain])) == sorted([applied, rejected, plain]), "several addresses, one read"
     # The list is untouched by the new read.
     assert _jobs(_search(fx, limit=200)) == [plain] and _search(fx)["counts"]["applied"] == 2 and "jobs" not in _search(fx)["filters"]

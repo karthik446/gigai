@@ -136,6 +136,8 @@ class PipelineRoutesMixin:
             return
         try:
             identity = job if job.startswith("text:sha256:") else normalize_url(job)
+            # 0.1.11.9: a job's steps are kept under ONE role; the page of another role that tags it reads the same ones.
+            profile_id = triggers.stored_job_role(self._backend.home_root, target, profile_id, identity)
             body = job_detail(self._backend.home_root, target, profile_id, identity)
         except (StepError, PipelineStoreError, FindJobsContractError, WorkpadError, PrivateRecordError) as exc:
             self._pipeline_fail(exc)
@@ -227,6 +229,9 @@ class PipelineRoutesMixin:
                 if selected is None:
                     raise StepError("profile_unavailable", "no scout profile is selected for this project; pass profile_id")
                 profile_id = selected.profile_id
+            # 0.1.11.9: a job that already has steps under another role is processed there (one job, one set of
+            # steps, whichever role's job page asks). The answer's `profile_id` says which.
+            profile_id = triggers.stored_job_role(home_root, target, profile_id, identity)
             queued = triggers.process_now(home_root, target, profile_id, identity, force=force)
         except (StepError, PipelineStoreError, FindJobsContractError, WorkpadError, PrivateRecordError) as exc:
             self._pipeline_fail(exc)
