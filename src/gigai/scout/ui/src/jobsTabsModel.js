@@ -79,12 +79,12 @@ export const COPIES_SHORT = "One row per job: the same job posted in several pla
 export const SEARCH_SHORT = "Searches every stored posting, newest first. A comma separates titles.";
 
 export const SEARCH_RULES = [
-  "Searches every stored posting, in a profile's list or in none.",
+  "Searches every stored posting, in a role's list or in none.",
   "A comma separates titles; every word of a typed title must be in the posting's title.",
   "Company and location are whole words of the company's name or the posting's location.",
   "Your default profile's work mode, countries and posted window apply until you turn on Show all.",
   `Newest posted first. ${NOT_RANKED}`,
-  "The profile chips of Your jobs and the selected profile do not change it, and a search stores nothing.",
+  "The role chips of Your jobs and the selected role do not change it, and a search stores nothing.",
 ];
 
 // The paragraphs behind a "?": {label (what the button is for), paragraphs}.

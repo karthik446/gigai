@@ -131,7 +131,7 @@ function SearchRow({ row, names, defaultProfile, usOnly, onOpen, onChanged }) {
         )}
         {asking && (
           <div className="callout info search-ask" data-role="search-assess-ask">
-            Assess this posting as <strong>{defaultProfile.label}</strong>? One model call; the assessment is stored under that profile.{" "}
+            Assess this posting as <strong>{defaultProfile.label}</strong>? One model call; the assessment is stored under that role.{" "}
             <button type="button" className="button small" data-action="search-assess-confirm" onClick={assess}>
               Assess
             </button>{" "}
@@ -329,7 +329,7 @@ export default function FreeSearchPanel({ profiles, onOpenRow, onRowChanged, usO
           )}
           {!results.labelsRead && (
             <p className="muted small" data-role="free-search-no-labels">
-              The labels (profiles, assessment, application) could not be read for these rows.
+              The labels (roles, assessment, application) could not be read for these rows.
             </p>
           )}
 
@@ -361,10 +361,10 @@ export default function FreeSearchPanel({ profiles, onOpenRow, onRowChanged, usO
               className="button small secondary"
               data-testid="save-as-profile"
               disabled={!canSaveAsProfile(results)}
-              title={canSaveAsProfile(results) ? "Opens the new-profile form in Settings with these titles filled in. Nothing is created until you create it there." : "Type a title to save this search as a profile."}
+              title={canSaveAsProfile(results) ? "Opens the new-role form in Settings with these titles filled in. Nothing is created until you create it there." : "Type a title to save this search as a role."}
               onClick={saveAsProfile}
             >
-              Save this search as a profile
+              Save this search as a role
             </button>
           </div>
         </div>

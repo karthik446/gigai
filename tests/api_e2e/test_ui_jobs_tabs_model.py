@@ -127,8 +127,8 @@ def test_each_help_is_a_short_line_and_the_whole_rule(out: dict) -> None:
     assert "its US posting when it has one, else the earliest posted" in help_["listCopies"]["paragraphs"][1]
     rules = " ".join(help_["searchRules"]["paragraphs"])
     for words in (
-        "in a profile's list or in none", "every word of a typed title must be in the posting's title", "whole words of the company's name or the posting's location",
-        "work mode, countries and posted window apply until you turn on Show all", "Newest posted first. Not ranked. Save as a profile to rank.", "a search stores nothing",
+        "in a role's list or in none", "every word of a typed title must be in the posting's title", "whole words of the company's name or the posting's location",
+        "work mode, countries and posted window apply until you turn on Show all", "Newest posted first. Not ranked. Save as a role to rank.", "a search stores nothing",
     ):
         assert words in rules, words
     assert all(entry["label"] and entry["paragraphs"] and len(set(entry["paragraphs"])) == len(entry["paragraphs"]) for entry in help_.values())

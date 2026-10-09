@@ -11,23 +11,23 @@
 //                   `total_all` (the same search with no default filter) and `hidden`
 //   Load more       the next 50: `offset` = the rows read so far
 //
-// A row carries labels, never a rank: the profiles whose list holds it, its assessment state, its application.
-// What a row can do: open its job page, "Assess · 1 model call · as <default profile>" (POST /api/assess with the
-// default profile's id: on today's storage every assessment is a profile's), "Mark applied" (the job's own event).
-// Everything a row shows is the posting's own text, a code or a number, drawn as text.
+// A row carries labels, never a rank: the roles whose list holds it, its assessment state, its application.
+// What a row can do: open its job page, "Assess · 1 model call" (POST /api/assess with the default profile's id: on
+// today's storage every assessment is a profile's; the job is assessed once, no role named), "Mark applied" (the
+// job's own event). Everything a row shows is the posting's own text, a code or a number, drawn as text.
 import { applicationBadge, rowPlace, unclearLabel, usOnlyChecked } from "./postingsModel.js";
 import { ORIGIN_JOB_PAGE, ORIGIN_QUICK_ASSESS } from "./jobModel.js";
 
 export const SEARCH_PAGE = 50;
 // `usOnly` (0.1.11.8 N1): null until the box is touched (the server applies the setup's default), then true / false.
 export const EMPTY_FORM = { title: "", company: "", location: "", showAll: false, usOnly: null };
-export const NOT_RANKED = "Not ranked. Save as a profile to rank.";
+export const NOT_RANKED = "Not ranked. Save as a role to rank.";
 export const ANY_SCOPE = "any place, any date";
 // 0.1.11.8: how the two switches relate (the box's help line), and what a row of several copies is.
 export const US_ONLY_WITH_SHOW_ALL =
   "Show all drops the default work mode, countries and posted window; US only is a switch of its own and still applies with Show all until you turn it off. With US only off and Show all off, your default countries apply.";
 export const SEARCH_COPIES_RULE = "The counts are rows.";
-export const PROFILE_RULE_NOTE = "The profile matches by the profile rule, which can list more than this search.";
+export const PROFILE_RULE_NOTE = "The role matches by the role rule, which can list more than this search.";
 export const NO_DEFAULTS_TEXT =
   "There are no default filters to apply: Scout's setup has no readable search settings. Turn on Show all to search every stored posting.";
 
@@ -258,7 +258,7 @@ function humanCode(code) {
 }
 
 function labelOf(profileId, names) {
-  return names.get(profileId) || "a profile that is no longer active";
+  return names.get(profileId) || "a role that is no longer active";
 }
 
 // profile id -> label: the answer's own profiles first, then the app's (a profile the labels did not name).
@@ -270,8 +270,8 @@ export function profileNames(results, profiles) {
 }
 
 // The labels of a row, in order: [{kind, label, tone, title?, status?}].
-//   profile      each profile whose list holds the posting
-//   assessment   its assessment state, with the profile it was assessed as
+//   profile      each role (tag) whose list holds the posting
+//   assessment   its assessment state, with the role it was assessed as
 //   application  "Applied · Oct 6" (postingsModel.applicationBadge)
 //   removed      the board no longer lists it (only a search that asked for removed postings has such rows)
 //   place        0.1.11.8: "unclear location", first, on a row US only kept without knowing where it is (`usOnly`)
@@ -279,9 +279,9 @@ export function rowLabels(row, names, { usOnly = false } = {}) {
   const place = unclearLabel(row, usOnly);
   const labels = (place ? [place] : []).concat((row.profiles || []).map((item) => ({
     kind: "profile",
-    label: `in: ${labelOf(item.profile_id, names)}`,
+    label: `found by: ${labelOf(item.profile_id, names)}`,
     tone: "plain",
-    title: "This profile's list holds this posting",
+    title: "This role's list holds this posting",
   })));
   if (row.assessment && row.assessment.state) {
     const as = row.assessment.profile_id ? ` as ${labelOf(row.assessment.profile_id, names)}` : "";
@@ -309,8 +309,8 @@ export function defaultProfileOf(profiles) {
   return (profiles || []).find((profile) => profile.is_default) || null;
 }
 
-export function assessLabel(profile) {
-  return `Assess · 1 model call · as ${profile.label}`;
+export function assessLabel() {
+  return "Assess · 1 model call";
 }
 
 // Offered for a live posting the default profile has not assessed yet (its re-assessment is on its job page).

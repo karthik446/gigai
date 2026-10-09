@@ -600,8 +600,8 @@ export default function JobPage({
   const coverage = coverageRows({ assessment, record: resume.record, stored: resume.stored });
   // The page's ONE Re-assess, as the stale label and Apply offer it too.
   const reassess = { enabled: Boolean(assessment) && answerDrafts.gate.enabled && !answerDrafts.busy, reason: answerDrafts.gate.reason, onClick: answerDrafts.reassess };
-  // 0.1.11.7 FS2: a posting found by "Search all jobs" that no profile holds: its Assess says whose assessment it will be.
-  const searchAssessLabel = job.fromSearch && profileLabel ? `Assess · 1 model call · as ${profileLabel}` : undefined;
+  // 0.1.11.7 FS2: a posting found by "Search all jobs" that no profile holds: the job is assessed once, no role named.
+  const searchAssessLabel = job.fromSearch && profileLabel ? "Assess · 1 model call" : undefined;
   const closed = closedBanner(liveness, listedRow, servedDates, posting);
   // 0.1.11.9: the roles whose saved search found this job, as TAGS (the job read's own `tags`, else the Jobs row's).
   // They label the job; none of them decides which assessment or resume the page shows: there is one of each.

@@ -319,7 +319,7 @@ def test_the_help_is_one_short_line_and_a_question_mark_that_opens_and_closes(pa
     _closed(rules)
     button.click()
     said = _open(rules)
-    for words in ("every word of a typed title must be in the posting's title", "whole words", "until you turn on Show all", "Not ranked. Save as a profile to rank.", "a search stores nothing"):
+    for words in ("every word of a typed title must be in the posting's title", "whole words", "until you turn on Show all", "Not ranked. Save as a role to rank.", "a search stores nothing"):
         assert words in said, words
     button.click()
     _closed(rules)

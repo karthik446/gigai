@@ -422,7 +422,7 @@ def test_suggestions_the_brief_commands_apply_and_no_master(out: dict) -> None:
     assert old["offers"] == [{"use": "reassess", "label": "Re-assess first · 1 model call"}, {"use": "as_is", "label": "Use it as it is"}]
     assert newer["offers"] == [{"use": "as_is", "label": "Use it as it is"}] and missing["available"] is False
     assert out["noMaster"][:3] == [True, False, False]
-    assert out["noMaster"][3] == "This profile's own resume is used as it is. Build your master resume to get a resume picked for each job"
+    assert out["noMaster"][3] == "This role's own resume is used as it is. Build your master resume to get a resume picked for each job"
     both, only_suggestions, nothing, origin = out["answer"]
     # The two routes' answers, put in the shape of the stored record the rules read.
     assert both["stale"] == ["master_newer", "picked_line_changed"] and both["origin"] == "pick" and origin == "edited"
@@ -449,7 +449,7 @@ def test_a_refused_pick_and_a_profile_nothing_is_picked_for_are_said_in_plain_wo
 
     no_master, own_resume, on_master, picked, unknown, nothing, has_none, has_own, own_text = out["cannotPick"]
     assert (no_master, own_resume, on_master, picked, unknown, nothing) == ("no_master", "own_resume", None, None, None, None)
-    assert (has_none, has_own) == (True, False) and own_text.startswith("This profile uses the resume you put in by hand")
+    assert (has_none, has_own) == (True, False) and own_text.startswith("This role uses the resume you put in by hand")
     internal = re.compile(r"scout\.|settle_stored|pick_not_available|gigai |`|\b[a-z]+(?:_[a-z]+)+\b")
     sentences = dict(zip(PICK_CODES, out["pickErrors"]))
     for code, sentence in sentences.items():

@@ -597,7 +597,7 @@ export function attentionItems({ record = null, assessment = null, stored = null
 
 const ADDED_WORDS = {
   recent_role_present: "added by Scout: a recent role always shows at least one line",
-  pinned_line: "pinned by this profile",
+  pinned_line: "pinned by this role",
   room_left: "room left on the resume",
 };
 
@@ -888,9 +888,9 @@ export function applyState({ stored = null, items = [] } = {}) {
 
 // --- no master (SPEC A2), and a profile on its own resume ------------------------------------------------------
 
-export const NO_MASTER_TEXT = "This profile's own resume is used as it is. Build your master resume to get a resume picked for each job";
+export const NO_MASTER_TEXT = "This role's own resume is used as it is. Build your master resume to get a resume picked for each job";
 export const OWN_RESUME_TEXT =
-  "This profile uses the resume you put in by hand, so no resume is picked from your master for its jobs. To get one picked for each job, make this profile's resume from your master again";
+  "This role uses the resume you put in by hand, so no resume is picked from your master for its jobs. To get one picked for each job, make this role's resume from your master again";
 
 // Why NOTHING can be picked for this job's profile: "no_master" | "own_resume", or null (a resume can be picked).
 // The server says what a resume is made from now (`resume_basis`, `master_stored`); a record in the stored shape
@@ -932,8 +932,8 @@ const PICK_ERRORS = {
   assessment_missing: "This job is not assessed yet. Assess it first.",
   no_master: "There is no master resume to pick from. Build your master resume on the Master page to get a resume picked for each job.",
   profile_resume_in_use:
-    "This profile uses the resume you put in by hand, so no resume is picked from your master for its jobs. On the Master page, make this profile's resume from your master again.",
-  profile_not_found: "The profile this job was assessed for is no longer there. Assess the job again for a profile you have.",
+    "This role uses the resume you put in by hand, so no resume is picked from your master for its jobs. On the Master page, make this role's resume from your master again.",
+  profile_not_found: "The role this job was assessed for is no longer there. Assess the job again for a role you have.",
   resume_held: "No resume is suggested for this job yet: a must-have requirement is waiting for your answer or is not met. Answer its questions, or make a draft.",
   draft_not_needed: "A resume is suggested for this job already. Pick it instead of making a draft.",
   no_proposed_resume: "No new suggested resume is waiting for this job.",

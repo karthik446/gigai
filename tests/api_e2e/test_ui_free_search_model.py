@@ -317,12 +317,12 @@ def test_show_all_load_more_a_failed_count_and_the_newest_search_wins(out: dict)
 def test_a_rows_labels_and_what_its_actions_send(out: dict) -> None:
     ids, label = out["ids"], out["default_label"]
     held, applied, unheld = job_url(WATCHED, 1), job_url(WATCHED, 2), job_url(UNWATCHED, 1)
-    both = [f"in: {label}", f"in: {SECOND_LABEL}"]
+    both = [f"found by: {label}", f"found by: {SECOND_LABEL}"]
     assert out["labels"][held] == both and out["labelKinds"][held] == ["profile", "profile"]
     assert out["labels"][applied][:2] == both and re.fullmatch(r"Applied · \w{3} \d{1,2}", out["labels"][applied][2]) and out["labelKinds"][applied][2] == "application"
     assert out["labels"][unheld] == [], "a posting no profile holds has no label"
-    # Assess: always as the DEFAULT profile, said on the button.
-    assert out["defaultProfile"] == ids["default"] and out["assessLabel"] == f"Assess · 1 model call · as {label}"
+    # Assess: always as the DEFAULT profile, but the job is assessed once and no role is named on the button.
+    assert out["defaultProfile"] == ids["default"] and out["assessLabel"] == "Assess · 1 model call"
     assert out["assess"]["held"] == {"job": {"job_url": held}, "resume": {"profile_id": ids["default"]}, "origin": "job_page"}
     assert out["assess"]["unheld"] == {"job": {"job_url": unheld}, "resume": {"profile_id": ids["default"]}, "origin": "quick_assess"}, "no list holds it: listed under Assessments"
     assert out["canAssess"] == [True, False, False, False, True], "not without a default profile, not a removed posting, not one the default profile assessed"
@@ -352,7 +352,7 @@ def test_the_profile_draft_and_the_errors(out: dict) -> None:
     draft = out["draft"]
     assert draft["label"] == "Staff AI Engineer" and draft["titles"] == ["Staff AI Engineer", "Staff Engineer"]
     assert draft["settingsText"] == scope and draft["showAll"] is False and draft["wordsLeftOut"] == "quiet"
-    assert draft["note"] == "The profile matches by the profile rule, which can list more than this search."
+    assert draft["note"] == "The role matches by the role rule, which can list more than this search."
     assert out["draftLine"] == f"The profile starts with this search's settings: {scope}. The company and location words of the search (quiet) are not part of a profile."
     assert out["draftAll"].startswith("This search showed every posting (Show all). The profile starts with the default profile's")
     assert out["canSave"] == [True, False, False], "a search with no title has nothing to save as a profile"
@@ -384,5 +384,5 @@ def test_the_jobs_page_wiring_and_the_built_bundle() -> None:
     if not dist.is_dir():
         pytest.skip("ui/dist is not built on this checkout (vite build never ran); nothing is served")
     bundle = "".join(path.read_text(encoding="utf-8") for path in dist.glob("*.js"))
-    for words in ("Search all jobs", "Not ranked. Save as a profile to rank.", "Save this search as a profile", "/api/search?", "The profile matches by the profile rule, which can list more than this search."):
+    for words in ("Search all jobs", "Not ranked. Save as a role to rank.", "Save this search as a role", "/api/search?", "The role matches by the role rule, which can list more than this search."):
         assert words in bundle, f"the served ui/dist bundle lacks {words!r} (rebuild ui/dist)"

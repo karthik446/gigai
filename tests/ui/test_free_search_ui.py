@@ -1,4 +1,4 @@
-"""0.1.11.7 FS2: "Search all jobs" on the Jobs page, and "Save this search as a profile".
+"""0.1.11.7 FS2: "Search all jobs" on the Jobs page, and "Save this search as a role".
 
 0.1.11.8 N3: Search all jobs is the Jobs page's "Search" tab (`#/jobs/search`); the list and its profile chips are
 the "Your jobs" tab (`#/jobs`). The flows below open the Search tab (tests/ui/test_jobs_tabs_ui.py pins the tabs).
@@ -24,7 +24,7 @@ Pinned:
   is on and Show all keeps it); "Load more" asks for the next 50 and adds them;
 - "Assess · 1 model call · as <default profile>" asks first, then posts the DEFAULT profile's id (another profile is
   the selected one), one model call; "Mark applied" posts the job alone;
-- "Save this search as a profile" opens the new-profile form with the typed titles filled in and creates nothing;
+- "Save this search as a role" opens the new-profile form with the typed titles filled in and creates nothing;
   created from there, the profile has those titles;
 - a result opens its job page: a posting no profile holds and nothing assessed (built from its search row), one held
   by another profile than the selected one, one held by both;
@@ -240,13 +240,13 @@ def test_the_page_comes_first_then_the_total_with_labels_show_all_and_load_more(
     assert rows[0]["title"] == TITLE_BOTH and rows[0]["company"] and rows[0]["location"] == "Remote - United States"
     assert ui.page.locator(f"{PANEL} [data-testid='rank-chip'], {PANEL} [data-testid='fit-chip']").count() == 0
     by_job = {row["job"]: row for row in rows}
-    both = [f"in: {ui.default_label}", f"in: {SECOND_LABEL}"]
+    both = [f"found by: {ui.default_label}", f"found by: {SECOND_LABEL}"]
     assert by_job[job_url(WATCHED, 1)]["labels"] == both
     assert by_job[applied]["labels"][:2] == both and by_job[applied]["labels"][2].startswith("Applied")
     assert by_job[job_url(WATCHED, 3)]["labels"][:2] == both and by_job[job_url(WATCHED, 3)]["labels"][2].startswith("assessed: ")
     assert by_job[job_url(UNWATCHED, 1)]["labels"] == [], "a posting no profile holds has no label"
     assert TITLE_SECOND_ONLY not in {row["title"] for row in rows}, "every typed word must be in the title"
-    assert ui.page.locator(f'{PANEL} [data-role="free-search-not-ranked"]').text_content() == "Not ranked. Save as a profile to rank."
+    assert ui.page.locator(f'{PANEL} [data-role="free-search-not-ranked"]').text_content() == "Not ranked. Save as a role to rank."
 
     # What the default filters hid, and Show all.
     hidden = ui.page.locator(f'{PANEL} [data-testid="free-search-show-hidden"]')
@@ -285,7 +285,7 @@ def test_assess_is_as_the_default_profile_and_mark_applied_is_the_jobs(page) -> 
     job = job_url(WATCHED, 4)
     row = ui.page.locator(f'{ROW}[data-job="{job}"]')
     button = row.locator('[data-action="search-assess"]')
-    assert button.text_content() == f"Assess · 1 model call · as {ui.default_label}"
+    assert button.text_content() == "Assess · 1 model call"
 
     # The question first: nothing is sent before its Assess.
     ui.step("asked")
@@ -351,7 +351,7 @@ def test_save_this_search_as_a_profile_opens_the_form_filled_in(page) -> None:  
     assert form.locator("#new-profile-label").input_value() == "Staff AI Engineer"
     assert [text.rstrip("×").strip() for text in form.locator(".tag-removable").all_text_contents()] == ["Staff AI Engineer", "Staff Engineer"]
     note = form.locator('[data-testid="profile-from-search"]').text_content()
-    assert "The profile matches by the profile rule, which can list more than this search." in note
+    assert "The role matches by the role rule, which can list more than this search." in note
     assert f"The profile starts with this search's settings: {scope}." in note
     assert ui.page.evaluate("() => { const box = document.getElementById('new-profile-label').getBoundingClientRect(); return box.top >= 0 && box.bottom <= window.innerHeight; }"), "the form is not in view"
     assert ui.writes_after("save") == [], "opening the form creates nothing"
@@ -427,8 +427,8 @@ def test_a_result_opens_its_job_page(page) -> None:  # noqa: ANN001
     assert "Remote - United States" in ui.page.locator(".job-page .job-sub").text_content()
     assert ui.page.locator('.job-page [data-role="posted"]').count() == 1, "the posting's date, from the search row"
     assert ui.page.locator('.job-page [data-role="job-chip"]').get_attribute("data-fit")  # not assessed: a chip, and the Assess action
-    # Its Assess says whose assessment it will be: the page's profile (the selected one, here the default).
-    assert ui.page.locator(".job-page .callout.info button", has_text="Assess").all_text_contents() == [f"Assess · 1 model call · as {ui.default_label}"]
+    # The job is assessed once; no role is named on the button.
+    assert ui.page.locator(".job-page .callout.info button", has_text="Assess").all_text_contents() == ["Assess · 1 model call"]
     _back(ui)
 
     # 2. Held by ANOTHER profile than the selected one (the default is selected; only the second holds it).
