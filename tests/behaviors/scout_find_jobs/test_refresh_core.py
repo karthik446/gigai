@@ -40,6 +40,23 @@ from .test_sources_update import _add, _Boards, _installed, _update, _write_runn
 # --- R5: per-board failure codes ------------------------------------------------
 
 
+@pytest.fixture(autouse=True)
+def _a_backoff_wait_passes_at_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    """0.1.11.8 (review B3): a manual update now waits out a 429's ``Retry-After`` (30 s from ``_pushback``).
+
+    These tests count what failed, not how long the update held off (``test_politeness.py`` does that), so the
+    pause runs on a clock that the wait itself moves forward: the same decisions, no sleeping.
+    """
+
+    real = sources_update._BackoffClients
+
+    def instant(inner, stop, **kwargs):
+        now = [0.0]
+        return real(inner, stop, **{**kwargs, "clock": lambda: now[0], "wait": lambda seconds: now.__setitem__(0, now[0] + seconds)})
+
+    monkeypatch.setattr(sources_update, "_BackoffClients", instant)
+
+
 def _lever_jobs(token: str) -> list[dict]:
     return [{"id": f"{token}-1", "text": "Software Engineer", "hostedUrl": f"https://jobs.lever.co/{token}/1", "descriptionPlain": "Build."}]
 

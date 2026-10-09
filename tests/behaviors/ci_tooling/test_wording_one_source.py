@@ -138,8 +138,8 @@ def test_the_network_notice_is_one_constant_quoted_by_the_ui_the_readme_the_docs
     # The approved words. The lead is bold wherever it is shown; NETWORK_NOTICE is the Markdown form of the whole.
     assert wording.NETWORK_NOTICE == (
         "**Run GigAI on your own computer and your own network, not a work laptop or office Wi-Fi.** "
-        "Scout checks about 16,000 public job boards (Greenhouse, Lever, Ashby and six more hiring systems): thousands of requests, "
-        "and it keeps checking 8 times a day. An employer can see that traffic."
+        "Scout checks about 16,000 public job boards (Greenhouse, Lever, Ashby and six more hiring systems): "
+        "about 18,000 requests on the first update, and it keeps checking 8 times a day. An employer can see that traffic."
     )
     assert wording.NETWORK_NOTICE == f"**{wording.NETWORK_NOTICE_LEAD}** {wording.NETWORK_NOTICE_BODY}"
 
@@ -203,6 +203,14 @@ def test_the_network_notice_states_what_the_code_does() -> None:
     # (rev4 holds 21,034 records; a six-system board without a US posting stays in the catalog unadmitted).
     checked = sum(1 for record in catalog.records if record.hq_country == "US" and not record.staffing_suspect)
     assert 15_500 <= checked <= 16_999, "about 16,000 public job boards"
+    # 0.1.11.8 (review N8): the first update asks each board for its list once, and each host for its robots.txt once:
+    # one host per board on the systems where a company is its own host, one host for each of the others.
+    from gigai.scout.find_jobs.providers import registry
+
+    own_host = {name for name, spec in registry().items() if spec.list_url.startswith("https://{token}.")}
+    admitted = [record for record in catalog.records if record.hq_country == "US" and not record.staffing_suspect]
+    first_update = len(admitted) + sum(1 for record in admitted if record.provider.value in own_host) + len(set(registry()) - own_host)
+    assert 17_500 <= first_update <= 18_499, "about 18,000 requests on the first update (descriptions come on top)"
     assert sorted(summary["by_provider"]) == ["ashby", "breezy", "gem", "greenhouse", "lever", "pinpoint", "recruitee", "rippling", "workable"], "(Greenhouse, Lever, Ashby and six more hiring systems)"  # type: ignore[call-overload]
     assert len(DEFAULT_WEEKDAY_TIMES) == 8, "it keeps checking 8 times a day (weekdays; weekend days have fewer)"
 

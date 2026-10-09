@@ -44,10 +44,17 @@ others.
   takes a few passes. **Add company** takes a board or job URL on any of the nine. A Pinpoint posting has no date; a
   Rippling posting's date and description are fetched at the update for the titles your profiles search, as
   Greenhouse descriptions are; a Breezy posting's description is fetched when it is assessed.
-- **Requests say who is asking.** Every board request carries a `User-Agent` naming GigAI and the project address.
-  Before the first request of the day to a board's host, Scout reads that host's `robots.txt` and skips a feed the
-  host disallows (`robots_disallowed` in `gigai scout sources status`). Workable is asked at most once a second (its host refuses a
-  faster reader); set `GIGAI_SCOUT_ATS_MIN_INTERVAL_SECONDS` to choose the pace yourself.
+- **Requests say who is asking.** Every request to a job board carries the `User-Agent`
+  `GigAI/<version> (+https://github.com/karthik446/gigai)`: the update, the check that a posting is still open, a
+  description lookup, discovery and the Exa search. Before the first request of the day to a board's host, Scout
+  reads that host's `robots.txt` (wildcards and `$` included) and does not ask for an address the host disallows,
+  a list or a single posting (`robots_disallowed` in `gigai scout sources status`); a host whose `robots.txt`
+  cannot be read is left alone for an hour (`robots_unknown`), and a `Crawl-delay` there is that host's pace, up
+  to 10 seconds. Workable is asked at most once every two seconds (its host refuses a faster reader), whatever
+  `GIGAI_SCOUT_ATS_MIN_INTERVAL_SECONDS` says: that setting can slow Scout down, never speed it past a system's
+  own limit. A system that answers 429 is left alone for as long as its `Retry-After` says (up to 10 minutes), on a
+  manual update too; when that is longer than the update has left, the rest of that system's boards wait for the
+  next update (`rate_limited`).
 
 ### 0.1.11.7
 

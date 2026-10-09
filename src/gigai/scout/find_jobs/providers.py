@@ -64,6 +64,8 @@ class ProviderSpec:
     min_interval_seconds: float | None = None
     #: Catalog spellings of the provider besides its name.
     aliases: tuple[str, ...] = ()
+    #: ``True`` when a board can run past one list page (``page=0`` in ``list_url``; the payload's ``totalItems``).
+    paged: bool = False
 
     @property
     def provider(self) -> ATSProvider:
@@ -151,8 +153,10 @@ def _build() -> dict[str, ProviderSpec]:
             list_has_text=True,
             source_hosts=("workable.com",),
             # apply.workable.com rate-limits a reader: at 0.35 s between requests it answered its own 429 page
-            # after ~900 requests, at 1.0 s it ran clean for ~3,400 (research/expand-reach/discovery/REPORT.md).
-            min_interval_seconds=1.0,
+            # after ~900 requests, at 1.0 s it ran clean for ~3,400 and was then refused for ten minutes, three
+            # times in a row (research/expand-reach/discovery/REPORT.md). 2.0 s is half the rate that was refused:
+            # at most 1,800 requests an hour. No setting asks faster (``market_acquisition.provider_interval``).
+            min_interval_seconds=2.0,
         ),
         ProviderSpec(
             name="rippling",
@@ -169,6 +173,7 @@ def _build() -> dict[str, ProviderSpec]:
             detail_url="https://ats.rippling.com/api/v1/board/{token}/jobs/{id}",
             job_url="https://ats.rippling.com/{token}/jobs/{id}",
             source_hosts=("rippling.com",),
+            paged=True,
         ),
         ProviderSpec(
             name="gem",
@@ -305,11 +310,15 @@ def catalog_aliases() -> dict[str, ATSProvider]:
 
 
 def source_from_host(host: str) -> str | None:
-    """The provider whose ``source_hosts`` substring the host carries, else ``None``."""
+    """The provider whose ``source_hosts`` domain the host is or sits under, else ``None``.
 
-    lowered = host.lower()
+    A suffix match on whole labels: ``jobs.lever.co`` and ``lever.co`` are Lever's; ``clever.com`` is not ``lever.co``
+    and ``jobs.stratagem.com`` is not ``gem.com``.
+    """
+
+    lowered = host.lower().rstrip(".")
     for name, item in registry().items():
-        if any(fragment in lowered for fragment in item.source_hosts):
+        if any(lowered == domain or lowered.endswith("." + domain) for domain in item.source_hosts):
             return name
     return None
 

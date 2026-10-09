@@ -172,7 +172,7 @@ class Flow:
         # Nothing of the caller's environment but PATH: no real home can be a default, no source tree is importable.
         self.env = {
             "PATH": os.environ.get("PATH", ""), "HOME": built.root, "LANG": os.environ.get("LANG", "C.UTF-8"), **operator_home.SEAM_ENV,
-            "GIGAI_SCOUT_ATS_MIN_INTERVAL_SECONDS": "0", "GIGAI_SCOUT_ATS_CONCURRENCY": "8",
+            "GIGAI_SCOUT_ATS_MIN_INTERVAL_SECONDS": "0", "GIGAI_SCOUT_ATS_PROVIDER_FLOORS": "0", "GIGAI_SCOUT_ATS_CONCURRENCY": "8",
         }
         for name in ("TMPDIR", "GIGAI_TEST_LATENCY_SCALE"):
             if os.environ.get(name):

@@ -2170,8 +2170,8 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
         schema_version="scout-sources-update-status:1",
         description=(
             "`update` is the running or last update's snapshot (null when none ever ran): `trigger` is manual or auto (a "
-            "background check), `failures` counts boards that did not answer by code, `backoff` names the providers a background "
-            "check left alone after a 429 (null: none), `stores` counts what the update wrote to the tag store and the text index "
+            "background check), `failures` counts boards that did not answer by code, `backoff` names the providers the update "
+            "left alone after a 429 (null: none; `skipped` and code `rate_limited` there: boards left for the next update), `stores` counts what the update wrote to the tag store and the text index "
             "(`stores.tags.titles_backfilled`: stored titles this update gave their first rules tag, a level, in its one-time "
             "catch-up; it is not the number of titles with a function), `catch_up` is that one-time work, done after boards settle "
             "and never before the first request: `tags` {companies_done, companies_total, pending} and `text_index` and `search_index` (each deferred until "

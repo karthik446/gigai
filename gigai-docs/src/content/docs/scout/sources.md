@@ -198,8 +198,12 @@ Lever, Ashby, Workable, Rippling, Gem, Recruitee, Pinpoint and Breezy. Each
 request names GigAI in its `User-Agent` with the project address, and before
 the first request of the day to a board's host Scout reads that host's
 `robots.txt`; a board whose host disallows the feed is skipped and counted
-as `robots_disallowed` in `gigai scout sources status`. Workable is asked at most once a second (its host
-refuses a faster reader). A Pinpoint board
+as `robots_disallowed` in `gigai scout sources status`. A host whose `robots.txt` cannot be read (it
+answers 429 or a server error, or does not answer) is left alone for an hour and counted as `robots_unknown`;
+a `Crawl-delay` in the file is that host's pace, up to 10 seconds. Workable is asked at most once every two
+seconds (its host refuses a faster reader), whatever pace is set. A system that answers 429 is left alone for
+as long as its `Retry-After` says, up to 10 minutes; when that is longer than the update has left, the rest of
+that system's boards wait for the next update (`rate_limited`). A Pinpoint board
 carries no posting date, so its postings read as undated. A Rippling board
 lists titles and locations only: the date and description of the postings
 whose titles match your profiles are fetched at the update, one small request

@@ -43,10 +43,14 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from datetime import datetime
+import json
 import re
 
+from ...canonical import digest_imported_bytes
 from .ats_board_clients import (
+    ATSBoardClientError,
     BoardFetchStats,
+    _cached_request,
     _company_from_token,
     _normalize_country,
     _published_at_from_iso,
@@ -449,8 +453,150 @@ def breezy_rows(
     return tuple(rows)
 
 
+
+def detail_text(provider: str, detail: Mapping[str, object]) -> str | None:
+    """The posting text a two-phase provider's single detail payload carries (``None`` when it has none)."""
+
+    if provider == "rippling":
+        return _rippling_text(detail)
+    return None
+
+
+def detail_title(provider: str, detail: Mapping[str, object]) -> str | None:
+    """The posting title a two-phase provider's single detail payload carries."""
+
+    return _str(detail.get("name")) if provider == "rippling" else None
+
+
+# ---------------------------------------------------------------------------
+# Paged lists (Rippling: a board over one page of postings)
+# ---------------------------------------------------------------------------
+
+#: 0.1.11.8 S8: a paged list is read for at most this many pages (``page=0`` .. ``page=4``).
+MAX_LIST_PAGES = 5
+
+
+def _page_url(list_url: str, page: int) -> str:
+    return list_url.replace("page=0", f"page={page}", 1)
+
+
+def merge_pages(first: bytes, extra: list[bytes], jobs_key: str) -> bytes:
+    """The first page's body with every later page's jobs appended under ``jobs_key`` (one body, one digest)."""
+
+    payload = json.loads(first)
+    merged = list(payload[jobs_key])
+    for body in extra:
+        more = json.loads(body).get(jobs_key)
+        if type(more) is list:
+            merged.extend(more)
+    payload[jobs_key] = merged
+    return json.dumps(payload, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+
+
+def fetch_paged_list(
+    client, provider: str, board_token: str, list_url: str, jobs_key: str, *, cache, stats: BoardFetchStats
+) -> tuple[bytes, str]:
+    """The list of a provider whose board can run past one page: ``(body, cache_status)`` like ``_cached_request``.
+
+    Page 0 goes through the cache as any list does. When its ``totalItems`` is larger than the items it holds, the next
+    pages are asked (each one request, through the client's pace; at most :data:`MAX_LIST_PAGES` pages in all) and the
+    items are joined into ONE body that is stored under the first page's URL, so the cache, the index and the digest
+    read the whole board. A page that cannot be read fails the board (nothing is stored from a partial read).
+    """
+
+    prior = cache.lookup(provider, list_url) if cache is not None else None
+    body, status = _cached_request(client, list_url, provider, board_token, cache=cache, stats=stats)
+    if status in ("hit", "unchanged"):
+        return body, status
+    try:
+        payload = json.loads(body)
+    except ValueError:
+        return body, status
+    items = payload.get(jobs_key) if type(payload) is dict else None
+    total = payload.get("totalItems") if type(payload) is dict else None
+    if type(items) is not list or type(total) is not int or isinstance(total, bool) or len(items) >= total or not items:
+        return body, status
+    extra: list[bytes] = []
+    held = len(items)
+    for page in range(1, MAX_LIST_PAGES):
+        if held >= total:
+            break
+        try:
+            more, _more_status = _cached_request(client, _page_url(list_url, page), provider, board_token, cache=None, stats=stats)
+        except ATSBoardClientError:
+            if cache is not None:
+                # Page 0 is stored but the board is not whole: drop its validators so the next check asks for everything.
+                cache.store(provider, list_url, body=body, etag=None, last_modified=None, marker=None)
+            raise
+        try:
+            page_items = json.loads(more).get(jobs_key)
+        except (ValueError, AttributeError):
+            break
+        if type(page_items) is not list or not page_items:
+            break
+        extra.append(more)
+        held += len(page_items)
+    if not extra:
+        return body, status
+    merged = merge_pages(body, extra, jobs_key)
+    if cache is not None:
+        entry = cache.lookup(provider, list_url)
+        cache.store(
+            provider,
+            list_url,
+            body=merged,
+            etag=entry.etag if entry is not None else None,
+            last_modified=entry.last_modified if entry is not None else None,
+            marker=None,
+        )
+        status = "revalidated" if prior is not None and prior.sha256 == digest_imported_bytes(merged) else "miss"
+    return merged, status
+
+
+# ---------------------------------------------------------------------------
+# Job-page JSON-LD (Breezy)
+# ---------------------------------------------------------------------------
+
+_LD_JSON = re.compile(r"<script[^>]*type\s*=\s*[\"']application/ld\+json[\"'][^>]*>(.*?)</script>", re.IGNORECASE | re.DOTALL)
+
+
+def _postings_in(node: object):
+    if type(node) is list:
+        for item in node:
+            yield from _postings_in(item)
+    elif type(node) is dict:
+        kind = node.get("@type")
+        kinds = kind if type(kind) is list else [kind]
+        if "JobPosting" in kinds:
+            yield node
+        graph = node.get("@graph")
+        if graph is not None:
+            yield from _postings_in(graph)
+
+
+def jobposting_from_page(html: str) -> tuple[str | None, str] | None:
+    """``(title, description)`` of the first JSON-LD ``JobPosting`` with a description in a job page, else ``None``."""
+
+    for block in _LD_JSON.findall(html):
+        try:
+            data = json.loads(block.strip())
+        except ValueError:
+            continue
+        for posting in _postings_in(data):
+            description = posting.get("description")
+            if type(description) is str and description.strip():
+                return _str(posting.get("title")), description
+    return None
+
+
 __all__ = [
     "DetailLookup",
+    "MAX_LIST_PAGES",
+    "detail_text",
+    "detail_title",
+    "fetch_paged_list",
+    "jobposting_from_page",
+    "merge_pages",
     "breezy_rows",
     "gem_rows",
     "pinpoint_rows",

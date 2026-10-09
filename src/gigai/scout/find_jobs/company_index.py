@@ -655,24 +655,22 @@ def _row(ats: str, slug: str, job: dict[str, object], detail_lookup: DetailLooku
     return None
 
 
-def parse_board_body(
+def _parse_counted(
     ats: str,
     slug: str,
     body: bytes,
-    *,
-    detail_lookup: DetailLookup | None = None,
-) -> dict[str, ObservedPosting]:
-    """Every posting a cached board body lists, keyed by the provider's posting id.
-
-    Raises :class:`CompanyIndexError` (``bad_json``) for a body that is not
-    the provider's list shape. A job without a title or URL is skipped, as
-    the acquire parsers skip it.
-    """
+    detail_lookup: DetailLookup | None,
+) -> tuple[dict[str, ObservedPosting], int, int]:
+    """``(postings, jobs the body lists, jobs skipped for a missing title or URL)``."""
 
     observed: dict[str, ObservedPosting] = {}
+    listed = 0
+    skipped = 0
     for job in _jobs(ats, slug, body):
+        listed += 1
         parsed = _row(ats, slug, job, detail_lookup)
         if parsed is None:
+            skipped += 1
             continue
         posting_id, row, has_text = parsed
         observed[posting_id] = ObservedPosting(
@@ -685,7 +683,32 @@ def parse_board_body(
             published_at=row.published_at,
             countries=row.countries,
         )
+    return observed, listed, skipped
+
+
+def parse_board_body(
+    ats: str,
+    slug: str,
+    body: bytes,
+    *,
+    detail_lookup: DetailLookup | None = None,
+) -> dict[str, ObservedPosting]:
+    """Every posting a cached board body lists, keyed by the provider's posting id.
+
+    Raises :class:`CompanyIndexError` (``bad_json``) for a body that is not
+    the provider's list shape, and for one that lists jobs of which NONE parse
+    (every job lacks a title or URL: the feed renamed a field, 0.1.11.8 S5).
+    Otherwise a job without a title or URL is skipped, as the acquire parsers skip it.
+    """
+
+    observed, listed, _skipped = _parse_counted(ats, slug, body, detail_lookup)
+    if listed and not observed:
+        raise CompanyIndexError("bad_json", f"{ats} company {slug!r} lists jobs but none could be read")
     return observed
+
+
+#: S5: a board that had at least this many postings is not believed when more than 90% of its rows are skipped.
+_SHAPE_DRIFT_MIN_POSTINGS = 20
 
 
 def _has_detail(ats: str) -> bool:
@@ -972,7 +995,12 @@ def refresh_company(
         wants_details = (details and ats == "greenhouse") or (ats != "greenhouse" and _has_detail(ats))
         lookup = cached_detail_lookup(cache, slug, ats=ats) if wants_details and not same_body else None
         try:
-            observed = parse_board_body(ats, slug, entry.body, detail_lookup=lookup)
+            observed, listed, skipped = _parse_counted(ats, slug, entry.body, lookup)
+            if listed and not observed:
+                raise CompanyIndexError("bad_json", f"{ats} company {slug!r} lists jobs but none could be read")
+            known = len(previous.live()) if previous is not None else 0
+            if known >= _SHAPE_DRIFT_MIN_POSTINGS and skipped * 10 > listed * 9:
+                raise CompanyIndexError("bad_json", f"{ats} company {slug!r} lost {skipped} of {listed} rows to unreadable fields")
         except CompanyIndexError as exc:
             return CompanyChange(ats, slug, STATUS_UNREADABLE, code=exc.code)
     updated, change = observe_company(

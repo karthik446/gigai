@@ -28,6 +28,7 @@ from ...canonical import parse_json_bytes
 from ...config import GigAIConfig, load_config
 from ...graph_node_registry import RegisteredNode, lookup, register
 from .ats_board_clients import ATSBoardClients
+from .board_headers import board_headers
 from .exa_client import ExaSearchClient
 from .contracts import (
     ACQUIRE_CAPABILITY,
@@ -42,6 +43,7 @@ from .contracts import (
     PresentInput,
 )
 from .market_acquisition import BOARDS_FROM_INDEX, acquire_node
+from .robots_guard import shared_guard
 from ..projection import present_node
 from ..proposal_execution import assess_node
 from .watchlist import JournalWatchlistClient, list_active
@@ -820,22 +822,6 @@ def _test_model_handler(request: httpx.Request) -> httpx.Response:
     return httpx.Response(404, json={"error": "test fixture route not found"}, request=request)
 
 
-def user_agent() -> str:
-    """0.1.11.8: the one User-Agent every board request carries: who is asking, and where to write.
-
-    Before 0.1.11.8 the client sent httpx's default. A board operator who sees the requests can now name the
-    reader and reach its maintainer; the robots guard (``robots_guard.py``) reads rules for the same token.
-    """
-
-    import importlib.metadata
-
-    try:
-        version = importlib.metadata.version("gigai")
-    except importlib.metadata.PackageNotFoundError:
-        version = "dev"
-    return f"GigAI/{version} (+https://github.com/karthik446/gigai; job-board reader, one polite request per board)"
-
-
 def _http_client() -> httpx.Client:
     transport = httpx.MockTransport(_test_provider_handler) if _test_http_enabled() else None
     return httpx.Client(
@@ -843,7 +829,7 @@ def _http_client() -> httpx.Client:
         transport=transport,
         follow_redirects=False,
         trust_env=False,
-        headers={"User-Agent": user_agent()},
+        headers=board_headers(),
     )
 
 
@@ -1071,7 +1057,8 @@ def _register_nodes(
         acquire_node,
         http_client=http_client,
         exa=ExaSearchClient(),
-        ats=ATSBoardClients(),
+        # 0.1.11.8: the same robots guard as the sources update (``None`` when GIGAI_SCOUT_ROBOTS=0).
+        ats=ATSBoardClients(robots=shared_guard(Path(home) / "cache" / "scout" / "ats-boards")),
         watchlist=watchlist,
         home_root=home,
         target=root,

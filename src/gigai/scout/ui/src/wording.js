@@ -11,7 +11,7 @@ export const PRIVACY_PDF_LINE = "You type them only when you make a PDF, and Gig
 // 0.1.10.8: where to run GigAI, shown once before the very first Update
 // sources (components/NetworkNotice.jsx). The lead is bold.
 export const NETWORK_NOTICE_LEAD = "Run GigAI on your own computer and your own network, not a work laptop or office Wi-Fi.";
-export const NETWORK_NOTICE_BODY = "Scout checks about 16,000 public job boards (Greenhouse, Lever, Ashby and six more hiring systems): thousands of requests, and it keeps checking 8 times a day. An employer can see that traffic.";
+export const NETWORK_NOTICE_BODY = "Scout checks about 16,000 public job boards (Greenhouse, Lever, Ashby and six more hiring systems): about 18,000 requests on the first update, and it keeps checking 8 times a day. An employer can see that traffic.";
 
 // The "?" beside each number and label: one docs page, one anchor each
 // ("What Scout's numbers and labels mean", gigai-docs scout/numbers.md).

@@ -103,6 +103,9 @@ BOARD_SUBDOMAIN_HOSTS: dict[str, str] = {
     "pinpointhq.com": "pinpoint",
     "breezy.hr": "breezy",
 }
+#: B2: a first path segment that is the vendor's own route, never a board (Workable's job page is ``/j/<shortcode>``).
+_NOT_A_BOARD_FIRST_SEGMENT: dict[str, frozenset[str]] = {"apply.workable.com": frozenset({"j", "api"})}
+_LOCALE_SEGMENT = re.compile(r"[a-z]{2}[-_][A-Za-z]{2,4}")
 #: Subdomains of those suffixes that are the vendor's own sites, never a company board.
 _VENDOR_SUBDOMAINS = frozenset({"www", "app", "api", "apply", "docs", "help", "support", "status", "blog", "developer", "developers", "static", "assets", "cdn", "mail", "email", "jobs", "careers", "my", "admin", "login", "auth", "accounts", "account"})
 
@@ -2432,6 +2435,12 @@ def parse_board_url(url: str) -> tuple[str, str] | None:
             return None
         return provider, token
     if not parts:
+        return None
+    if host in _NOT_A_BOARD_FIRST_SEGMENT and parts[0].lower() in _NOT_A_BOARD_FIRST_SEGMENT[host]:
+        return None
+    if host == "ats.rippling.com" and len(parts) > 1 and _LOCALE_SEGMENT.fullmatch(parts[0]):
+        # N4: Rippling's saved feeds never put a locale in a job URL (research samples: /<board>/jobs/<id>), so a
+        # locale-shaped first segment (``/en-GB/acme/jobs``) is not read as a board named ``en-GB``.
         return None
     return provider, parts[0]
 

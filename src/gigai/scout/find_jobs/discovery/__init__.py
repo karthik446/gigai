@@ -30,6 +30,7 @@ from typing import Callable
 
 import httpx
 
+from ..board_headers import board_headers
 from ..watchlist import list_active
 from . import h1b_source, openai_source
 from .merge import add_usable_boards_to_watchlist, merge_and_verify, normalize_company
@@ -209,7 +210,7 @@ def run_discovery(
     # required, skip it entirely: no download, no cache refresh, no board
     # probing (a real I/O cost, not just a formality).
     if prefs.visa_sponsorship_required:
-        with httpx.Client(timeout=60.0) as h1b_client:
+        with httpx.Client(timeout=60.0, headers=board_headers()) as h1b_client:
             h1b_outcome = h1b_source.run(
                 home_root=home_root,
                 client=h1b_client,
@@ -227,7 +228,7 @@ def run_discovery(
     skipped: dict[str, int] = {}
     new_boards: list[dict[str, object]] = []
     if all_candidates:
-        with httpx.Client(timeout=30.0) as merge_client:
+        with httpx.Client(timeout=30.0, headers=board_headers()) as merge_client:
             boards, merge_skipped = merge_and_verify(
                 client=merge_client,
                 all_candidates=all_candidates,

@@ -174,15 +174,31 @@ def enabled(environ: Mapping[str, str] | None = None) -> bool:
     return not _test_http_enabled()
 
 
+def _robots_home(home_root: Path) -> None:
+    """Keep the process's robots guard on disk beside this home's board cache (where the sources update keeps it)."""
+
+    from .robots_guard import shared_guard
+
+    shared_guard(Path(home_root) / "cache" / "scout" / "ats-boards")
+
+
 def liveness_client() -> "httpx.Client":
     """The client of one check: a few seconds, no proxy, and NO redirect is followed (a redirect is ``unknown``).
 
-    No ``User-Agent`` of its own: the board clients send ``httpx``'s, and this one is the same client to a board.
+    It carries the board clients' ``User-Agent`` (``board_headers``: one for every request to a board), and a
+    request to a board's host asks that host's ``robots.txt`` first (``robots_guard.install``, the process's
+    guard): a host that disallows the address is never asked, and the answer is ``unknown``.
     """
 
     import httpx
 
-    return httpx.Client(timeout=httpx.Timeout(TIMEOUT_SECONDS, connect=CONNECT_TIMEOUT_SECONDS), follow_redirects=False, trust_env=False)
+    from .board_headers import board_headers
+    from .robots_guard import install, shared_guard
+
+    client = httpx.Client(
+        timeout=httpx.Timeout(TIMEOUT_SECONDS, connect=CONNECT_TIMEOUT_SECONDS), follow_redirects=False, trust_env=False, headers=board_headers()
+    )
+    return install(client, shared_guard(None))
 
 
 def _stamp(moment: datetime) -> str:
@@ -261,11 +277,11 @@ def _keep(home_root: Path, job: str, state: str, checked_at: str) -> None:
 
 
 def _paced(provider: str) -> None:
-    """Wait until this provider may be asked again (the acquire path's own polite interval)."""
+    """Wait until this provider may be asked again: the acquire path's polite interval, and never under the provider's own floor."""
 
-    from .market_acquisition import AcquireLimits
+    from .market_acquisition import AcquireLimits, provider_interval
 
-    gap = AcquireLimits.from_environment().min_request_interval_seconds
+    gap = provider_interval(provider, AcquireLimits.from_environment().min_request_interval_seconds)
     with _PACE:
         wait = _NEXT_REQUEST.get(provider, 0.0) - time.monotonic()
         if wait > 0:
@@ -423,6 +439,7 @@ def check_posting_live(
     requested = True
     try:
         if own:
+            _robots_home(home_root)
             client = liveness_client()
         if provider == "greenhouse":
             _paced(provider)
@@ -570,6 +587,7 @@ def check_company_page(
     state = UNKNOWN
     try:
         if own:
+            _robots_home(home_root)
             client = liveness_client()
         _paced("page:" + page.host)
         with pinned_stream(client, page) as response:  # type: ignore[arg-type]
@@ -619,6 +637,7 @@ def check_many(home_root: Path, targets: Iterable[LiveTarget], *, now: datetime 
                 found[target.job] = kept or Liveness(UNKNOWN)
                 continue
             if client is None and enabled():
+                _robots_home(home_root)
                 client = liveness_client()
             answer = check_posting_live(
                 home_root, url=target.url, provider=target.provider, token=target.token, posting_id=target.posting_id,

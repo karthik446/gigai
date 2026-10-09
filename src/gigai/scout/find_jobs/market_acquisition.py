@@ -89,6 +89,10 @@ if IMPORT_ROW_CAP > MAX_PUBLIC_IMPORT_ROWS:  # pragma: no cover - a constant mis
 ATS_CONCURRENCY_ENV = "GIGAI_SCOUT_ATS_CONCURRENCY"
 ATS_MIN_INTERVAL_ENV = "GIGAI_SCOUT_ATS_MIN_INTERVAL_SECONDS"
 ACQUIRE_BUDGET_ENV = "GIGAI_SCOUT_ACQUIRE_BUDGET_SECONDS"
+#: Test-only, undocumented: ``0`` drops the providers' own floors (``providers.ProviderSpec.min_interval_seconds``)
+#: so a fake-board run (the core-flow smoke) is not paced like the real host. Nothing a user sets: the pace a user
+#: names (``ATS_MIN_INTERVAL_ENV``) never goes under a provider's floor.
+ATS_PROVIDER_FLOORS_ENV = "GIGAI_SCOUT_ATS_PROVIDER_FLOORS"
 DEFAULT_ATS_CONCURRENCY_PER_PROVIDER = 4
 DEFAULT_ATS_MIN_INTERVAL_SECONDS = 0.125  # 8 requests/s per provider, across all its workers
 DEFAULT_ACQUIRE_BUDGET_SECONDS = 1200.0  # 20 minutes for the whole ATS pass
@@ -97,6 +101,12 @@ BUDGET_EXCEEDED_CODE = "time_budget_exceeded"
 # (a background tick cancelled by a manual Full refresh, or the server
 # stopping). Reported like a budget skip: status ``skipped``, this code.
 CANCELLED_CODE = "cancelled"
+# 0.1.11.8: a board not asked because its provider answered ``429`` and asked for a longer quiet than the pass has
+# left (``Retry-After``, or the doubling pause). Reported like a budget skip: status ``skipped``, this code; the
+# board keeps its old stamp and leads the next pass.
+RATE_LIMITED_CODE = "rate_limited"
+#: The longest a ``Retry-After`` is honoured for; a host asking for more is left alone this long.
+RETRY_AFTER_MAX_SECONDS = 600.0
 # How long a paced wait sleeps before it looks at the stop event again.
 _STOP_POLL_SECONDS = 0.5
 # acquire-rotation: how often the last-fetched index is flushed mid-pass, so
@@ -208,6 +218,51 @@ class _PassCancelled(Exception):
     """The pass's stop event was set while a request waited for its slot."""
 
 
+class _ProviderRateLimited(Exception):
+    """The board's provider asked to be left alone for longer than this pass has left: the board is not asked."""
+
+
+def provider_interval(provider: str, interval: float, environ: Mapping[str, str] | None = None) -> float:
+    """The pace for ``provider``: ``interval``, and never faster than the provider's own floor.
+
+    0.1.11.8: ``max(interval, floor)`` whatever set ``interval`` (the default, a background check's, or the
+    operator's ``ATS_MIN_INTERVAL_ENV``): Workable's host refuses a faster reader, so no setting asks it faster.
+    Only :data:`ATS_PROVIDER_FLOORS_ENV` ``=0`` (tests against fake boards) drops the floor.
+    """
+
+    env = os.environ if environ is None else environ
+    if (env.get(ATS_PROVIDER_FLOORS_ENV) or "").strip().lower() in {"0", "false", "off", "no"}:
+        return interval
+    from .providers import interval_for
+
+    return interval_for(provider, interval)
+
+
+def parse_retry_after(value: object, *, now: datetime | None = None) -> float | None:
+    """A ``Retry-After`` header as seconds from now (a number of seconds, or an HTTP date); ``None`` when it says nothing.
+
+    Never negative and never more than :data:`RETRY_AFTER_MAX_SECONDS`.
+    """
+
+    if type(value) is not str or not value.strip():
+        return None
+    text = value.strip()
+    seconds: float
+    if text.isdigit():
+        seconds = float(text)
+    else:
+        from email.utils import parsedate_to_datetime
+
+        try:
+            when = parsedate_to_datetime(text)
+        except (TypeError, ValueError):
+            return None
+        if when.tzinfo is None:
+            when = when.replace(tzinfo=timezone.utc)
+        seconds = (when - (now or datetime.now(timezone.utc))).total_seconds()
+    return max(0.0, min(seconds, RETRY_AFTER_MAX_SECONDS))
+
+
 class _RateLimiter:
     """Thread-safe pacer: request starts at least ``min_interval`` apart.
 
@@ -278,22 +333,54 @@ class _ThrottledClient:
     answer with a body (0110-025 R5): the board clients redact every
     failure to ``http_error``/``network_error``, and the status is what
     tells a rate limit (``http_429``) from a dead board (``http_404``).
+    A ``429``'s ``Retry-After`` is remembered the same way (0.1.11.8), and after a ``429`` the calling thread
+    sends nothing more until :meth:`begin_board` (the next board): a board's fetch may fall back to a second
+    endpoint or go on to its details, and none of that is asked of a host that has just said "too many".
+
+    ``host_pace`` (0.1.11.8, ``RobotsGuard.pace``): called with the URL after the provider's slot and before the
+    request, it waits out the host's own ``Crawl-delay``; a stop set during that wait cancels the request.
     """
 
-    def __init__(self, client: Any, limiter: _RateLimiter) -> None:
+    #: ``robots_guard.GuardedClient`` reads this: the host's pace is kept here, not a second time there.
+    paces_hosts = True
+
+    def __init__(
+        self, client: Any, limiter: _RateLimiter, *, host_pace: "Callable[[str, threading.Event | None], object] | None" = None
+    ) -> None:
         self._client = client
         self._limiter = limiter
+        self._host_pace = host_pace
         self._seen = threading.local()
 
+    def begin_board(self) -> None:
+        """The calling thread starts another board: a ``429`` to the board before it no longer stops its requests."""
+
+        self._seen.refused = False
+
     def _send(self, method: str, url: str, args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
+        if getattr(self._seen, "refused", False):
+            import httpx
+
+            # Not sent. The failure stays ``http_429`` (and its Retry-After), which is what the board reports.
+            raise httpx.TransportError("the host answered 429 to this board's last request; nothing more is asked")
         self._limiter.wait()
+        if self._host_pace is not None:
+            stop = self._limiter._stop
+            self._host_pace(str(url), stop)
+            if stop is not None and stop.is_set():
+                raise _PassCancelled()
         self._seen.failure = None
+        self._seen.retry_after = None
         try:
             response = getattr(self._client, method)(url, *args, **kwargs)
         except Exception as exc:  # noqa: BLE001 - noted for the board's failure code, then re-raised
             self._seen.failure = _exception_failure_code(exc)
             raise
         self._seen.failure = _response_failure_code(response)
+        if self._seen.failure == "http_429":
+            self._seen.refused = True
+            headers = getattr(response, "headers", None)
+            self._seen.retry_after = parse_retry_after(headers.get("retry-after")) if headers is not None else None
         return response
 
     def get(self, url: str, *args: Any, **kwargs: Any) -> Any:
@@ -306,6 +393,11 @@ class _ThrottledClient:
         """The calling thread's last request failure (``None`` after an answered request)."""
 
         return getattr(self._seen, "failure", None)
+
+    def last_retry_after(self) -> float | None:
+        """Seconds the calling thread's last ``429`` asked for (``Retry-After``); ``None`` when it named none."""
+
+        return getattr(self._seen, "retry_after", None)
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self._client, name)
@@ -483,6 +575,8 @@ def _fetch_one_board(
         return _BoardOutcome(board, "skipped", (), None, 0, BUDGET_EXCEEDED_CODE)
     started = time.monotonic()
     fetch = getattr(ats, "fetch_board", None)
+    if isinstance(client, _ThrottledClient):
+        client.begin_board()
     try:
         if callable(fetch):
             result = fetch(client, board.provider.value, board.board_token, config, cache=cache)
@@ -495,6 +589,9 @@ def _fetch_one_board(
         # Stopped while waiting for its request slot: not asked, so not
         # stamped; it leads the next pass like a budget skip.
         return _BoardOutcome(board, "skipped", (), None, 0, CANCELLED_CODE)
+    except _ProviderRateLimited:
+        # Its provider asked for a longer quiet than the pass has left: not asked, not stamped.
+        return _BoardOutcome(board, "skipped", (), None, 0, RATE_LIMITED_CODE)
     except Exception as exc:  # noqa: BLE001 - one board's failure is one failure row
         elapsed = int((time.monotonic() - started) * 1000)
         return _BoardOutcome(board, "failed", (), None, elapsed, _board_failure_code(exc, client))
@@ -582,15 +679,12 @@ def _fetch_boards(
             provider = board.provider.value
             if provider not in executors:
                 # 0.1.11.8: a provider that asks for a slower pace (``providers.ProviderSpec.min_interval_seconds``,
-                # Workable: its host answers 429 faster) never runs at the default rate, unless the operator or a test
-                # set the pace explicitly (``ATS_MIN_INTERVAL_ENV``): an explicit pace is the pace.
-                interval = limits.interval_for(provider_totals[provider])
-                if not (os.environ.get(ATS_MIN_INTERVAL_ENV) or "").strip():
-                    from .providers import interval_for as provider_interval
-
-                    interval = provider_interval(provider, interval)
+                # Workable: its host answers 429 faster) never runs faster than that, whatever set the interval
+                # (``provider_interval``); a host whose robots.txt names a longer ``Crawl-delay`` is paced by it too.
+                interval = provider_interval(provider, limits.interval_for(provider_totals[provider]))
                 limiters[provider] = _RateLimiter(interval, stop=stop)
-                throttled[provider] = _ThrottledClient(client, limiters[provider]) if client is not None else None
+                host_pace = getattr(getattr(ats, "robots", None), "pace", None)
+                throttled[provider] = _ThrottledClient(client, limiters[provider], host_pace=host_pace) if client is not None else None
                 executors[provider] = ThreadPoolExecutor(max_workers=workers, thread_name_prefix=f"scout-ats-{provider}")
             future = executors[provider].submit(
                 _fetch_one_board,
@@ -642,6 +736,7 @@ def _fetch_boards(
     failures: list[FailureRow] = []
     counts = {"fetched": 0, "cached": 0, "failed": 0, "skipped": 0}
     cancelled = 0
+    rate_limited: dict[str, int] = {}
     requests = 0
     cache_hits = 0
     listed = 0
@@ -663,7 +758,9 @@ def _fetch_boards(
             failures.append(FailureRow(SourceKind.ATS, outcome.board.board_token, None, outcome.code or "error", "ATS board fetch failed"))
         elif outcome.status == "skipped" and outcome.code == CANCELLED_CODE:
             cancelled += 1
-    over_budget = counts["skipped"] - cancelled
+        elif outcome.status == "skipped" and outcome.code == RATE_LIMITED_CODE:
+            rate_limited[outcome.board.provider.value] = rate_limited.get(outcome.board.provider.value, 0) + 1
+    over_budget = counts["skipped"] - cancelled - sum(rate_limited.values())
     if over_budget:
         failures.append(
             FailureRow(
@@ -685,6 +782,17 @@ def _fetch_boards(
                 f"{cancelled} of {len(ordered)} watchlist boards were not fetched: the board pass was stopped",
             )
         )
+    for provider, left in sorted(rate_limited.items()):
+        failures.append(
+            FailureRow(
+                SourceKind.ATS,
+                provider,
+                None,
+                RATE_LIMITED_CODE,
+                f"{left} of {len(ordered)} watchlist boards were not fetched: {provider} answered 429 and asked for "
+                "a longer wait than this pass had left",
+            )
+        )
     summary: dict[str, object] = {
         "total": len(ordered),
         **counts,
@@ -702,6 +810,8 @@ def _fetch_boards(
     }
     if stop is not None:
         summary["cancelled"] = cancelled
+    if rate_limited:
+        summary["rate_limited"] = dict(sorted(rate_limited.items()))
     return rows, failures, summary
 
 
@@ -2274,6 +2384,11 @@ __all__ = [
     "ACQUIRE_BUDGET_ENV",
     "ATS_CONCURRENCY_ENV",
     "ATS_MIN_INTERVAL_ENV",
+    "ATS_PROVIDER_FLOORS_ENV",
+    "RATE_LIMITED_CODE",
+    "RETRY_AFTER_MAX_SECONDS",
+    "parse_retry_after",
+    "provider_interval",
     "BUDGET_EXCEEDED_CODE",
     "IMPORT_ROW_CAP",
     "AcquireLimits",

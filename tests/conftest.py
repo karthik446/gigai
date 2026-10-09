@@ -291,6 +291,13 @@ def _no_snapshot_request(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture(autouse=True)
+def _no_provider_floors(monkeypatch: pytest.MonkeyPatch) -> None:
+    """0.1.11.8: a provider's own floor (Workable: 2 s between requests) is for the real host. No fake board is paced by it; the pacing tests set the switch themselves."""
+
+    monkeypatch.setenv("GIGAI_SCOUT_ATS_PROVIDER_FLOORS", "0")
+
+
+@pytest.fixture(autouse=True)
 def _no_robots_request(monkeypatch: pytest.MonkeyPatch) -> None:
     """0.1.11.8: the sources update asks each board host for its robots.txt once a day: no fake board models that file, so no test counts its request. The guard's own tests build a guard explicitly."""
 

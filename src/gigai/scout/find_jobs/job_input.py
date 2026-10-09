@@ -132,15 +132,20 @@ def job_fetch_client() -> "httpx.Client":
     import httpx
 
     from .bindings import _TIMEOUT, _test_http_enabled, _test_provider_handler
+    from .board_headers import board_headers
+    from .robots_guard import install, shared_guard
 
     transport = httpx.MockTransport(_test_provider_handler) if _test_http_enabled() else None
-    return httpx.Client(
+    client = httpx.Client(
         timeout=_TIMEOUT,
         transport=transport,
         follow_redirects=True,
         max_redirects=_MAX_REDIRECTS,
         trust_env=False,
+        headers=board_headers(),
     )
+    # 0.1.11.8: a request to a board's own host asks that host's robots.txt first (never a company's careers page).
+    return install(client, shared_guard(None))
 
 
 def resolve_job(
@@ -220,14 +225,21 @@ def resolve_job(
 
     if board is not None and (page is None or len(page.text) < MIN_POSTING_TEXT_CHARS):
         provider, token = board
-        try:
-            row = _match_board_row(client, provider, token, job_id=job_id, normalized_url=normalized)
-        except ATSBoardClientError as exc:
-            failures.append(f"{provider} board listing ({exc.code})")
+        if _has_detail_endpoint(provider) and _url_posting_id(url) is not None:
+            # B1: a two-phase provider's pasted posting URL names its id: one detail request, not a loop over the list.
+            try:
+                return _detail_single_job(client, provider, token, _url_posting_id(url) or "", source_url=url, normalized_url=normalized)
+            except _FetchFailure as exc:
+                failures.append(f"{provider} detail ({exc})")
         else:
-            if row is not None:
-                return _from_board_row(row, source_url=url, normalized_url=normalized)
-            failures.append(f"{provider} board {token!r} has no row for this URL")
+            try:
+                row = _match_board_row(client, provider, token, job_id=job_id, normalized_url=normalized)
+            except ATSBoardClientError as exc:
+                failures.append(f"{provider} board listing ({exc.code})")
+            else:
+                if row is not None:
+                    return _from_board_row(row, source_url=url, normalized_url=normalized)
+                failures.append(f"{provider} board {token!r} has no row for this URL")
 
     if page is not None and len(page.text) >= MIN_POSTING_TEXT_CHARS:
         return ResolvedJob(
@@ -603,6 +615,89 @@ def _greenhouse_single_job(
     )
 
 
+def _detail_single_job(
+    client: "httpx.Client", provider: str, token: str, job_id: str, *, source_url: str, normalized_url: str
+) -> ResolvedJob:
+    """ONE GET of a two-phase provider's own detail endpoint for ONE posting (0.1.11.8 B1); never a loop over the board's list."""
+
+    from .providers import spec
+
+    found = spec(provider)
+    if found is None or found.detail_url is None:
+        raise _FetchFailure("bad_board_name", provider, "the provider has no detail endpoint")
+    if not safe_path_segment(token) or not safe_path_segment(job_id):
+        raise _FetchFailure("bad_board_name", provider, "the board token or job id is not a plain name")
+    endpoint = found.detail_url.format(token=token, id=job_id)
+    body, charset = _read_capped(client, endpoint)
+    host = _host_of(endpoint)
+    try:
+        payload = json.loads(_decode(body, charset))
+    except ValueError:
+        raise _FetchFailure("bad_json", host, "response was not JSON") from None
+    if type(payload) is not dict:
+        raise _FetchFailure("bad_json", host, "response was not a job object")
+    from .ats_feeds import detail_text, detail_title
+
+    text = detail_text(provider, payload)
+    if not text:
+        raise _FetchFailure("empty_content", host, "job object carried no posting text")
+    return ResolvedJob(
+        job_identity=normalized_url,
+        source_url=source_url,
+        normalized_url=normalized_url,
+        fetch_kind="ats_board",
+        title=detail_title(provider, payload) or token,
+        company=token,
+        location="",
+        text=text,
+        text_sha256=_text_digest(text),
+    )
+
+
+def _has_detail_endpoint(provider: str) -> bool:
+    from .providers import spec
+
+    found = spec(provider)
+    return found is not None and found.detail_url is not None and provider != "greenhouse"
+
+
+def _breezy_job_page(client: "httpx.Client", url: str, token: str, *, normalized_url: str) -> ResolvedJob:
+    """A Breezy posting's description (0.1.11.8 S4): ONE GET of the stored job page (the stored-URL guard), its JSON-LD ``description``."""
+
+    from .ats_feeds import jobposting_from_page
+
+    body, charset = _read_capped_stored(client, url)
+    found = jobposting_from_page(_decode(body, charset))
+    host = _host_of(url)
+    if found is None:
+        raise _FetchFailure("empty_content", host, "the job page carries no JSON-LD description")
+    title, description = found
+    text = html_to_text(description)
+    if not text.strip():
+        raise _FetchFailure("empty_content", host, "the job page description is empty")
+    return ResolvedJob(
+        job_identity=normalized_url,
+        source_url=url,
+        normalized_url=normalized_url,
+        fetch_kind="ats_board",
+        title=title or token,
+        company=token,
+        location="",
+        text=text,
+        text_sha256=_text_digest(text),
+    )
+
+
+def _url_posting_id(url: str) -> str | None:
+    """The last path segment of a posting URL (a two-phase provider's id), or ``None``."""
+
+    try:
+        parts = [part for part in urlsplit(url).path.split("/") if part]
+    except ValueError:
+        return None
+    return parts[-1] if parts else None
+
+
 def _match_board_row(
     client: "httpx.Client", provider: str, token: str, *, job_id: str | None, normalized_url: str
 ) -> PostingRow | None:
@@ -674,6 +769,11 @@ def fetch_missing_description(
     try:
         if provider == "greenhouse":
             found = _greenhouse_single_job(client, token, posting_id, source_url=url, normalized_url=normalized)
+        elif _has_detail_endpoint(provider):
+            # B1: ONE GET of this posting's own detail, never the board's list plus a detail per posting.
+            found = _detail_single_job(client, provider, token, posting_id, source_url=url, normalized_url=normalized)
+        elif provider == "breezy":
+            found = _breezy_job_page(client, url, token, normalized_url=normalized)
         else:
             row = _match_board_row(client, provider, token, job_id=None, normalized_url=normalized)
             if row is None:

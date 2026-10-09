@@ -284,7 +284,7 @@ def test_a_provider_that_answers_429_is_left_alone_longer_each_time_and_an_answe
     assert held._inner.asked == ["a"]
 
 
-def test_a_background_check_backs_off_on_429_and_a_manual_update_does_not(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_background_check_and_a_manual_update_both_back_off_on_429(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     home, target = _project(tmp_path)
     boards = _Boards()
     with boards.client() as client:
@@ -303,4 +303,6 @@ def test_a_background_check_backs_off_on_429_and_a_manual_update_does_not(tmp_pa
 
     assert check["trigger"] == "auto" and check["failures"]["codes"].get("http_429", 0) >= 1
     assert check["backoff"] is not None and check["backoff"]["greenhouse"]["pauses"] >= 1 and "lever" not in check["backoff"]
-    assert manual["trigger"] == "manual" and manual["failures"]["codes"]["http_429"] == 2 and manual["backoff"] is None
+    # 0.1.11.8 (review B3): a manual update backs off too (it used to keep asking at full pace).
+    assert manual["trigger"] == "manual" and manual["failures"]["codes"]["http_429"] == 2
+    assert manual["backoff"] is not None and manual["backoff"]["greenhouse"]["pauses"] >= 1 and "lever" not in manual["backoff"]

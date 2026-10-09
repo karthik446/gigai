@@ -1104,23 +1104,22 @@ def list_feed_board(client: "httpx.Client", provider: str, board_token: str, con
     found = spec(provider)
     if found is None:
         raise ATSBoardClientError("unsupported_provider", f"unsupported ATS provider {provider!r}")
-    payload = _request(client, found.list_url.format(token=board_token), provider, board_token)
+    if found.paged:
+        from .ats_feeds import fetch_paged_list
+
+        body, _status = fetch_paged_list(
+            client, provider, board_token, found.list_url.format(token=board_token), found.jobs_key or "", cache=None, stats=BoardFetchStats()
+        )
+        payload = _decode_json(body, provider, board_token)
+    else:
+        payload = _request(client, found.list_url.format(token=board_token), provider, board_token)
     jobs = jobs_from_payload(provider, payload)
     if jobs is None:
         _redacted_fail("bad_json", provider, board_token)
         raise AssertionError("unreachable")
-    lookup = None
-    if found.detail_url is not None:
-        detail_url = found.detail_url
-
-        def lookup(job_id: str) -> dict[str, object] | None:
-            try:
-                detail = _request(client, detail_url.format(token=board_token, id=job_id), provider, board_token)
-            except ATSBoardClientError:
-                return None
-            return detail if isinstance(detail, dict) else None
-
-    return found.rows(jobs, board_token, config, None, lookup)
+    # B1: no detail lookup here. A two-phase provider's rows from this path carry no description; a single posting's
+    # text is ONE detail request (``job_input.fetch_missing_description``), never one per posting on the board.
+    return found.rows(jobs, board_token, config, None, None)
 
 
 # ---------------------------------------------------------------------------
@@ -1754,7 +1753,14 @@ def fetch_feed_board(
     if found is None:
         raise ATSBoardClientError("unsupported_provider", f"unsupported ATS provider {provider!r}")
     stats = stats if stats is not None else BoardFetchStats()
-    body, status = _cached_request(client, found.list_url.format(token=board_token), provider, board_token, cache=cache, stats=stats)
+    if found.paged:
+        from .ats_feeds import fetch_paged_list
+
+        body, status = fetch_paged_list(
+            client, provider, board_token, found.list_url.format(token=board_token), found.jobs_key or "", cache=cache, stats=stats
+        )
+    else:
+        body, status = _cached_request(client, found.list_url.format(token=board_token), provider, board_token, cache=cache, stats=stats)
     stats.cache = "hit" if status == "unchanged" else status
     if status == "unchanged":
         return BoardFetchResult((), stats)
@@ -1823,28 +1829,35 @@ def _fetcher_for(provider: str) -> "Callable[..., BoardFetchResult] | None":
 class ATSBoardClients:
     """Concrete ``ATSBoardClient`` implementing every registry provider (``providers.py``).
 
-    ``robots`` (0.1.11.8, the product's update and acquire paths): a ``robots_guard.RobotsGuard`` asked before
-    every board's list request; a host whose rules disallow the feed fails the board with ``robots_disallowed``
-    and no list request is made. ``None`` (tests, the single-posting lookups) asks nothing.
+    ``robots`` (0.1.11.8, the product's update and find-jobs paths): a ``robots_guard.RobotsGuard`` asked before
+    EVERY request a board's fetch makes, the list and each detail (the fetch is handed a
+    ``robots_guard.GuardedClient``). A host whose rules disallow the feed fails the board with
+    ``robots_disallowed`` and no list request is made; one whose robots.txt could not be read fails it with
+    ``robots_unknown``; a disallowed detail is a detail that was not fetched. ``robots_tally`` counts the
+    robots.txt requests this instance caused. ``None`` (tests) asks nothing; the single-posting lookups ask
+    through their own client (``robots_guard.install``).
     """
 
     def __init__(self, robots: object = None) -> None:
         self.robots = robots
+        self.robots_tally: object = None
+        if robots is not None:
+            from .robots_guard import RequestTally
 
-    def _guard(self, client: "httpx.Client", provider: str, board_token: str) -> None:
+            self.robots_tally = RequestTally()
+
+    def _guard(self, client: "httpx.Client", provider: str, board_token: str) -> "httpx.Client":
         if self.robots is None:
-            return
-        from .providers import list_url
+            return client
+        from .robots_guard import GuardedClient
 
-        url = list_url(provider, board_token)
-        if url is not None:
-            self.robots.check(client, url, provider, board_token)  # type: ignore[attr-defined]
+        return GuardedClient(client, self.robots, provider, board_token, counted=self.robots_tally.add)  # type: ignore[arg-type,attr-defined,return-value]
 
     def list_board(self, client: "httpx.Client", provider: str, board_token: str, config: FindJobsConfig) -> tuple[PostingRow, ...]:
         lister = _lister_for(provider)
         if lister is None:
             raise ATSBoardClientError("unsupported_provider", f"unsupported ATS provider {provider!r}")
-        self._guard(client, provider, board_token)
+        client = self._guard(client, provider, board_token)
         return lister(client, board_token, config)
 
     def fetch_board(
@@ -1868,7 +1881,7 @@ class ATSBoardClients:
         fetcher = _fetcher_for(provider)
         if fetcher is None:
             raise ATSBoardClientError("unsupported_provider", f"unsupported ATS provider {provider!r}")
-        self._guard(client, provider, board_token)
+        client = self._guard(client, provider, board_token)
         if descriptions and provider == "greenhouse":
             return fetch_greenhouse_board(client, board_token, config, cache=cache, descriptions=True, title_filter=title_filter)
         if descriptions and provider not in _FETCHERS:

@@ -191,7 +191,7 @@ def test_the_bound_acquire_of_a_run_reads_the_index_and_asks_no_board(
     home, target, workpad = _approved_scout(tmp_path)
     search, boards = _SearchClient(), _RecordingBoards()
     monkeypatch.setattr(bindings, "_http_client", search.client)
-    monkeypatch.setattr(bindings, "ATSBoardClients", lambda: boards)
+    monkeypatch.setattr(bindings, "ATSBoardClients", lambda robots=None: boards)  # 0.1.11.8: the binding passes the robots guard
     JournalWatchlistClient(home, target).add_to_watchlist(_board(ATSProvider.GREENHOUSE, "acme"))
 
     nodes = bindings.register_find_jobs_nodes(home_root=home, target=target)

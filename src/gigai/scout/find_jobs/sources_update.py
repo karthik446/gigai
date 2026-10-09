@@ -95,7 +95,18 @@ from .company_index import (
     refresh_company,
 )
 from .contracts import FindJobsConfig, SourceToggles, WatchlistEntry
-from .market_acquisition import ATS_MIN_INTERVAL_ENV, CANCELLED_CODE, AcquireLimits, _catalog_us_counts, _fetch_boards, _PassCancelled, _seed_watchlist
+from .market_acquisition import (
+    ATS_MIN_INTERVAL_ENV,
+    CANCELLED_CODE,
+    RATE_LIMITED_CODE,
+    RETRY_AFTER_MAX_SECONDS,
+    AcquireLimits,
+    _catalog_us_counts,
+    _fetch_boards,
+    _PassCancelled,
+    _ProviderRateLimited,
+    _seed_watchlist,
+)
 from .refresh_plan import CHECK_QUIET_PERIOD_SECONDS, CHECK_QUIET_SLICES, TICK_INTERVAL_SECONDS, BoardFacts, RefreshPlan, plan_tick
 
 SOURCES_UPDATE_STATUS_SCHEMA = "scout-sources-update-status:1"
@@ -134,8 +145,9 @@ FAILED_BOARDS_LISTED = 50
 #: one. It gives up on what it has not started by the budget.
 CHECK_MIN_INTERVAL_SECONDS = 0.4
 CHECK_BUDGET_SECONDS = 1800.0
-#: A provider that answers ``429`` during a check is left alone this long,
-#: doubling while it keeps refusing, up to the maximum.
+#: A provider that answers ``429`` (a background check or a manual update, 0.1.11.8) is left alone for as long as
+#: its ``Retry-After`` says (at most ``market_acquisition.RETRY_AFTER_MAX_SECONDS``); without that header this
+#: long, doubling while it keeps refusing, up to the maximum.
 CHECK_BACKOFF_SECONDS = 30.0
 CHECK_BACKOFF_MAX_SECONDS = 600.0
 #: Test/operator override of the pace: spread a check's requests evenly over
@@ -747,6 +759,8 @@ class _Listener:
         self.trigger = TRIGGER_MANUAL
         self.tick: dict[str, object] | None = None
         self.backoff: _BackoffClients | None = None
+        #: 0.1.11.8: the robots.txt requests this update's guard made (``robots_guard.RequestTally``); part of ``requests``.
+        self.robots: Any = None
         self.cancelled = False
         self.failure_codes: dict[str, int] = {}
         self.failed_boards: list[dict[str, str]] = []
@@ -838,6 +852,9 @@ class _Listener:
             self._stores.company_written(change)
         return change
 
+    def _robots_requests(self) -> int:
+        return int(getattr(self.robots, "value", 0) or 0)
+
     def snapshot(self) -> dict[str, object]:
         totals = self.totals
         return {
@@ -856,8 +873,8 @@ class _Listener:
             "trigger": self.trigger,
             "tick": self.tick,
             "cancelled": self.cancelled,
-            # 0110-029: the providers a background check left alone after a
-            # ``429`` (``None``: none pushed back, or a manual update).
+            # 0110-029, and a manual update too since 0.1.11.8: the providers left alone after a ``429``
+            # (``None``: none pushed back). ``skipped`` there counts the boards not asked (``rate_limited``).
             "backoff": self.backoff.to_json() if self.backoff is not None else None,
             # Why boards did not answer, by code (`http_429` is a provider
             # pushing back, `http_404` a board that is gone); `boards` names
@@ -877,9 +894,11 @@ class _Listener:
                 "with_changes": totals.companies_with_changes,
             },
             "postings": {"new": totals.new, "changed": totals.changed, "removed": totals.removed, "live": totals.live},
-            "requests": self.requests,
+            # 0.1.11.8: every board's requests plus the robots.txt requests made before them (``robots_requests``).
+            "requests": self.requests + self._robots_requests(),
+            "robots_requests": self._robots_requests(),
             # 0110-8-03: the boards that made more than their one list request (they asked for descriptions), most first, at most
-            # ``FAILED_BOARDS_LISTED``; the sum of every board's requests is ``requests``.
+            # ``FAILED_BOARDS_LISTED``; the sum of every board's requests and ``robots_requests`` is ``requests``.
             "requests_by_board": dict(sorted(self.board_requests.items(), key=lambda item: (-item[1], item[0]))[:FAILED_BOARDS_LISTED]),
             # What this update has not reached: while it runs, every board
             # not asked yet; at the end, the boards the budget left. They
@@ -998,6 +1017,10 @@ class _FillingClients:
         self._inner = inner
         self._title_filter = title_filter
 
+    @property
+    def robots(self) -> Any:
+        return self._inner.robots
+
     def list_board(self, *args: Any, **kwargs: Any) -> Any:
         return self._inner.list_board(*args, **kwargs)
 
@@ -1012,12 +1035,19 @@ def _with_fill(ats: Any, title_filter: Callable[[str], bool] | None = None) -> A
 
 
 class _BackoffClients:
-    """A background check's view of the board clients: a provider that answers ``429`` is left alone for a while (0110-029).
+    """An update's view of the board clients: a provider that answers ``429`` is left alone for a while.
 
-    The pause is per provider and is taken inside that provider's workers,
-    before the next board is asked: :data:`CHECK_BACKOFF_SECONDS`, doubling
-    with each refusal that follows a pause, up to
+    0110-029 for a background check; 0.1.11.8 for a manual update too. The pause is per provider and is taken
+    inside that provider's workers, before the next board is asked. Its length is the ``429``'s ``Retry-After``
+    (seconds or an HTTP date, read by the throttled client; at most ``RETRY_AFTER_MAX_SECONDS``); a ``429``
+    without one pauses :data:`CHECK_BACKOFF_SECONDS`, doubling with each refusal that follows a pause, up to
     :data:`CHECK_BACKOFF_MAX_SECONDS`; an answered request ends the streak.
+
+    ``deadline`` (the pass's budget, on ``clock``): a pause that would end after it is not waited out. The
+    provider is done for this pass: every board of it not asked yet is skipped with ``rate_limited``
+    (``_ProviderRateLimited``), keeps its old stamp and leads the next pass. Nothing more is sent to that
+    provider, bar a request already on the wire.
+
     A stop set during a pause leaves the board unasked (``cancelled``, so it
     leads the next check). ``clock`` and ``wait`` are seams for tests.
     """
@@ -1027,18 +1057,22 @@ class _BackoffClients:
         inner: Any,
         stop: threading.Event | None,
         *,
+        deadline: float | None = None,
         clock: Callable[[], float] = time.monotonic,
         wait: Callable[[float], object] | None = None,
     ) -> None:
         self._inner = inner
         self._stop = stop if stop is not None else threading.Event()
+        self._deadline = deadline
         self._clock = clock
         self._wait = wait if wait is not None else self._stop.wait
         self._lock = threading.Lock()
         self._until: dict[str, float] = {}
         self._streak: dict[str, int] = {}
+        self._given_up: set[str] = set()
         self.pauses: dict[str, int] = {}
         self.paused_seconds: dict[str, float] = {}
+        self.skipped: dict[str, int] = {}
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self._inner, name)
@@ -1048,30 +1082,40 @@ class _BackoffClients:
             if self._stop.is_set():
                 raise _PassCancelled()
             with self._lock:
+                if provider in self._given_up:
+                    self.skipped[provider] = self.skipped.get(provider, 0) + 1
+                    raise _ProviderRateLimited()
                 left = self._until.get(provider, 0.0) - self._clock()
             if left <= 0:
                 return
             self._wait(left)
 
-    def _note(self, provider: str, failure: str | None) -> None:
+    def _note(self, provider: str, failure: str | None, retry_after: float | None = None) -> None:
         with self._lock:
             if failure != "http_429":
                 if failure is None:
                     self._streak[provider] = 0
                 return
             now = self._clock()
-            if now < self._until.get(provider, 0.0):
+            if now < self._until.get(provider, 0.0) or provider in self._given_up:
                 return  # a request already on the wire when the pause began: one refusal, one pause
             streak = self._streak.get(provider, 0) + 1
             self._streak[provider] = streak
-            pause = min(CHECK_BACKOFF_MAX_SECONDS, CHECK_BACKOFF_SECONDS * 2 ** (streak - 1))
-            self._until[provider] = now + pause
+            if retry_after is not None:
+                pause = min(RETRY_AFTER_MAX_SECONDS, max(0.0, retry_after))
+            else:
+                pause = min(CHECK_BACKOFF_MAX_SECONDS, CHECK_BACKOFF_SECONDS * 2 ** (streak - 1))
             self.pauses[provider] = self.pauses.get(provider, 0) + 1
+            if self._deadline is not None and now + pause >= self._deadline:
+                self._given_up.add(provider)  # the wait is longer than the pass: its other boards are not asked
+                return
+            self._until[provider] = now + pause
             self.paused_seconds[provider] = self.paused_seconds.get(provider, 0.0) + pause
 
     def fetch_board(self, client: Any, provider: str, board_token: str, config: FindJobsConfig, **kwargs: Any) -> Any:
         self._hold(provider)
         failure: str | None = "error"
+        retry_after: float | None = None
         try:
             result = self._inner.fetch_board(client, provider, board_token, config, **kwargs)
             failure = None
@@ -1079,17 +1123,29 @@ class _BackoffClients:
         except Exception:  # noqa: BLE001 - nothing is swallowed: the failure code is noted for the back-off, then re-raised
             seen = getattr(client, "last_failure", None)
             failure = seen() if callable(seen) else "error"
+            asked = getattr(client, "last_retry_after", None)
+            retry_after = asked() if callable(asked) else None
             raise
         finally:
-            self._note(provider, failure)
+            self._note(provider, failure, retry_after)
 
     def to_json(self) -> dict[str, object] | None:
-        """``{provider: {"pauses", "paused_seconds"}}`` for the providers that pushed back; ``None`` when none did."""
+        """``{provider: {"pauses", "paused_seconds"}}`` for the providers that pushed back; ``None`` when none did.
+
+        A provider given up on for this pass also carries ``"skipped"`` (its boards not asked) and ``"code"``.
+        """
 
         with self._lock:
             if not self.pauses:
                 return None
-            return {provider: {"pauses": count, "paused_seconds": round(self.paused_seconds.get(provider, 0.0), 1)} for provider, count in sorted(self.pauses.items())}
+            found: dict[str, object] = {}
+            for provider, count in sorted(self.pauses.items()):
+                entry: dict[str, object] = {"pauses": count, "paused_seconds": round(self.paused_seconds.get(provider, 0.0), 1)}
+                if provider in self._given_up:
+                    entry["skipped"] = self.skipped.get(provider, 0)
+                    entry["code"] = RATE_LIMITED_CODE
+                found[provider] = entry
+            return found
 
 
 def _run_update(
@@ -1156,9 +1212,13 @@ def _run_update(
             from .robots_guard import shared_guard
 
             ats = ATSBoardClients(robots=shared_guard(cache.root))
+        listener.robots = getattr(ats, "robots_tally", None)
         clients = _with_fill(ats, _description_gate(config.roles, home_root))
-        if trigger == TRIGGER_AUTO and callable(getattr(clients, "fetch_board", None)):
-            clients = listener.backoff = _BackoffClients(clients, stop)
+        if callable(getattr(clients, "fetch_board", None)):
+            # 0.1.11.8: a manual update backs off like a background check (it used to keep asking at full pace).
+            budget = limits.time_budget_seconds
+            deadline = time.monotonic() + budget if budget is not None and budget > 0 else None
+            clients = listener.backoff = _BackoffClients(clients, stop, deadline=deadline)
         _rows, _failures, summary = _fetch_boards(
             boards,
             ats=clients,
