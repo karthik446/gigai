@@ -194,7 +194,7 @@ def _change(home_root: Path, target: Path, job_url: str, profile_id: str | None,
     """Read the job's record, apply ``change`` and write it, under the record's lock; the suggestions after it."""
 
     job = _job(home_root, target, job_url, profile_id)
-    path = _record_path(home_root, target, job)
+    path = store.suggestions_write_path(Path(home_root), Path(target), job.profile_id, job.job_identity)  # 0.1.11.9: the job's own record
     try:
         with store.record_write_lock(path):
             record = store.read_record(path)
@@ -291,7 +291,7 @@ def after_handback(
     by = _actor(actor)
     when = now or _clock()
     profile_id, identity = response.resume.profile_id, response.job.job_identity  # type: ignore[attr-defined]
-    path = store.suggestions_path(Path(home_root), Path(target), profile_id, identity)
+    path = store.suggestions_write_path(Path(home_root), Path(target), profile_id, identity)
     try:
         with store.record_write_lock(path):
             record = store.read_record(path)

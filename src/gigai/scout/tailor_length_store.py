@@ -21,7 +21,7 @@ from .tailored_resume import (
     list_tailored_resumes,
     render_markdown,
     save_tailor_response,
-    tailored_resume_path,
+    tailored_resume_write_path,
     tailored_resume_write_lock,
 )
 
@@ -71,7 +71,7 @@ def change_stored_length(
             raise TailorError("tailored_resume_not_found", "no stored tailored resume for that job")
         return items[0]
 
-    with tailored_resume_write_lock(tailored_resume_path(home_root, target, newest().resume.profile_id, job_identity)):
+    with tailored_resume_write_lock(tailored_resume_write_path(home_root, target, newest().resume.profile_id, job_identity)):
         stored = newest()  # read again under the lock: a tailoring that landed meanwhile is never written over
         if updated_at is not None and stored.updated_at != updated_at:
             raise TailorError("tailored_resume_changed", "a newer tailoring replaced this resume; reload it")

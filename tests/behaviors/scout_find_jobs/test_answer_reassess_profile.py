@@ -1,23 +1,22 @@
-"""0.1.11.6 AN1: a re-assessment by job identity is made for the profile the caller names, never for one the server picks.
+"""0.1.11.9 PJ2: a job has ONE assessment, and a re-assessment by job identity replaces it, whichever role is named.
 
-THE BUG (released 0.1.11.5): a job held by TWO profiles. `POST /api/answers` with `reassess: {job_identity}` (and
-`gigai scout answer --reassess`) carried no profile; the server took the stored assessment it found first by that
-identity, which is the NEWEST across every profile, and re-assessed the job for that one. An answer given on one
-profile's job page spent a model call on another profile, and the page's own assessment stayed as it was.
+HISTORY. 0.1.11.5 kept one assessment per (role, job); `POST /api/answers` with `reassess: {job_identity}` took the
+NEWEST across the roles, so an answer given on one role's page re-assessed the job for another. 0.1.11.6 (AN1) made the
+caller name the role (`reassess.profile_id`) and refused a job two roles held when none was named
+(`409 reassess_profile_required`). 0.1.11.9 removes the cause: the stores are keyed by job. These are the 0.1.11.6
+tests, changed to the one-assessment behaviour.
 
 Pinned, on a synthetic home (the invented master and posting of `test_pick_header_room.py`, a scripted model, a second
-profile on the same resume), with the OTHER profile's assessment always the newer one:
+role on the same resume), the job assessed under one role and then again under the other:
 
-- `reassess.profile_id` (the job page sends its own): the new assessment is that profile's and is stored under it; the
-  other profile's file is untouched; one model call;
-- a named profile with no assessment of its own is assessed from the address the other holder's names, and that first
-  item is the job page's;
-- without `profile_id`: one holder -> that profile, as before; TWO holders -> `409 reassess_profile_required`, a plain
-  sentence that names the field, and NOTHING is written (no answer, no model call); a deleted profile's old assessment
-  does not make a job ambiguous;
-- an id that is no profile -> `404 profile_not_found`, nothing written; a `reassess` of another shape -> 422;
-- the CLI: `gigai scout answer ... --reassess JOB --profile ID` is the same; without `--profile` on a job two profiles
-  hold it is refused before the answer is saved; `--profile` without `--reassess` is refused.
+- the store holds ONE assessment of the job, in the job's folder, and no role's folder exists;
+- `reassess.profile_id` (the job page sends its own): that ONE assessment is replaced, the named role is recorded on
+  it; one model call;
+- without `profile_id`: the same, with the selected role recorded; no refusal, whoever assessed the job before; a
+  deleted role's name on the stored assessment changes nothing;
+- the stored `origin` stays (the job was assessed before, whichever role is named now);
+- an id that is no role -> `404 profile_not_found`, nothing written; a `reassess` of another shape -> 422;
+- the CLI: `gigai scout answer ... --reassess JOB [--profile ID]` is the same; `--profile` without `--reassess` is refused.
 """
 
 from __future__ import annotations
@@ -29,7 +28,8 @@ import pytest
 
 from gigai.scout import profile_records
 from gigai.scout.find_jobs.assess_contracts import AssessJobInput, AssessRequest, AssessResumeInput
-from gigai.scout.quick_assess import QuickAssessError, list_quick_assessments, run_quick_assessment
+from gigai.scout.job_store_layout import job_digest
+from gigai.scout.quick_assess import QuickAssessError, list_quick_assessments, quick_assess_dir, run_quick_assessment
 from gigai.scout.scout_cli import scout_group
 
 from tests.behaviors.scout_find_jobs.test_pick_header_room import _JOB, _URL, _Server, _answer, _pipeline_off, fx, server  # noqa: F401 - the fixtures
@@ -93,9 +93,9 @@ def assess(fixture, profile_id: str, answer: str):
 
 
 def held_by_two(fixture, *, page_profile: str) -> tuple[str, str, dict[str, str]]:
-    """The job assessed on both profiles, each asking; the OTHER profile's is the newer one.
+    """The job assessed under both roles, each time asking; the OTHER role assessed it last.
 
-    Returns (the page's profile, the other, the requirement ids of the job). The model's NEXT answer is the settled one.
+    Returns (the page's role, the other, the requirement ids of the job). The model's NEXT answer is the settled one.
     """
 
     first, second = fixture.default_profile_id, second_profile(fixture)
@@ -110,9 +110,9 @@ def held_by_two(fixture, *, page_profile: str) -> tuple[str, str, dict[str, str]
 
 
 def matched_on_both(fixture: PostingsFixture, *, page_profile: str) -> tuple[str, str]:
-    """The job assessed Matched on both profiles, each with its picked resume; the OTHER profile's is the newer one.
+    """The job assessed Matched under both roles (its resume picked); the OTHER role assessed it last.
 
-    Returns (the page's profile, the other). The model's next answer is the same Matched one.
+    Returns (the page's role, the other). The model's next answer is the same Matched one. (Used by the browser test.)
     """
 
     first, second = fixture.default_profile_id, second_profile(fixture)
@@ -129,13 +129,28 @@ def matched_on_both(fixture: PostingsFixture, *, page_profile: str) -> tuple[str
 # --- the tests -----------------------------------------------------------------------------------------------------------
 
 
-def _stored(fixture: PostingsFixture) -> dict[str | None, tuple[str, str]]:
-    """profile -> (when its assessment of the job was made, its verdict)."""
+def _stored(fixture: PostingsFixture) -> list[tuple[str | None, str, str]]:
+    """Every stored assessment of the job: (the role recorded on it, when it was made, its verdict)."""
 
-    return {
-        item.resume.profile_id: (item.updated_at, item.result.verdict.value)
+    return [
+        (item.resume.profile_id, item.updated_at, item.result.verdict.value)
         for item in list_quick_assessments(fixture.home_root, fixture.target) if item.job.job_identity == _JOB
-    }
+    ]
+
+
+def _files(fixture: PostingsFixture) -> dict[str, list[str]]:
+    """folder -> the assessment files in it, for every folder of the assessment store."""
+
+    root = quick_assess_dir(fixture.home_root, fixture.target)
+    return {folder.name: sorted(path.name for path in folder.glob("*.json")) for folder in sorted(root.iterdir()) if folder.is_dir()}
+
+
+def _one_assessment(fixture: PostingsFixture) -> tuple[str | None, str, str]:
+    """THE symptom: the job has exactly one stored assessment, in the job's folder, and no role's folder holds one."""
+
+    assert _files(fixture) == {"job": [f"{job_digest(_JOB)}.json"]}
+    (only,) = _stored(fixture)
+    return only
 
 
 def _answers(api: _Server) -> list[str]:
@@ -147,76 +162,78 @@ def _post(api: _Server, reassess: object):
 
 
 @pytest.mark.parametrize("page_profile", ["default", "second"])
-def test_the_named_profile_is_the_one_re_assessed(fx: PostingsFixture, server: _Server, page_profile: str) -> None:  # noqa: F811
+def test_an_answer_re_assesses_the_jobs_one_assessment_whichever_role_is_named(fx: PostingsFixture, server: _Server, page_profile: str) -> None:  # noqa: F811
     mine, other, _ids = held_by_two(fx, page_profile=page_profile)
-    before = _stored(fx)
-    assert before[other][0] > before[mine][0], "the other profile's assessment is the newer one"
+    before = _one_assessment(fx)
+    assert (before[0], before[2]) == (other, PENDING), "the other role assessed the job last"
 
     answered = _post(server, {"job_identity": _JOB, "profile_id": mine})
 
     assert answered.status_code == 201, answered.text
     made = answered.json()["reassessed"]
     assert (made["resume"]["profile_id"], made["result"]["verdict"]) == (mine, MATCHED)
-    after = _stored(fx)
-    assert after[other] == before[other], "the other profile's assessment was made again"
-    assert after[mine][1] == MATCHED and after[mine][0] > before[other][0]
+    after = _one_assessment(fx)
+    assert (after[0], after[2]) == (mine, MATCHED) and after[1] > before[1], "the job's one assessment was not replaced"
     assert len(fx.base.model.assess_prompts) == 1, "one model call"
     assert QUESTION["question_id"] in _answers(server)
 
 
-def test_a_job_two_profiles_hold_is_refused_without_a_profile_and_nothing_is_written(fx: PostingsFixture, server: _Server) -> None:  # noqa: F811
-    mine, other, _ids = held_by_two(fx, page_profile="default")
-    before, answers = _stored(fx), _answers(server)
+def test_a_job_two_roles_assessed_needs_no_role_named(fx: PostingsFixture, server: _Server) -> None:  # noqa: F811
+    """0.1.11.6 refused this (`409 reassess_profile_required`): there were two assessments to choose between."""
 
-    refused = _post(server, {"job_identity": _JOB})
+    _mine, _other, _ids = held_by_two(fx, page_profile="default")
+    before = _one_assessment(fx)
 
-    assert refused.status_code == 409, refused.text
-    error = refused.json()["error"]
-    assert error["code"] == "reassess_profile_required"
-    assert "2 profiles" in error["message"] and "reassess.profile_id" in error["message"] and mine in error["message"] and other in error["message"]
-    assert _stored(fx) == before and _answers(server) == answers, "a refused request wrote something"
-    assert fx.base.model.assess_prompts == [], "a refused request called the model"
+    answered = _post(server, {"job_identity": _JOB})
+
+    assert answered.status_code == 201, answered.text
+    assert answered.json()["reassessed"]["resume"]["profile_id"] == fx.default_profile_id  # the selected role
+    after = _one_assessment(fx)
+    assert (after[0], after[2]) == (fx.default_profile_id, MATCHED) and after[1] > before[1]
+    assert len(fx.base.model.assess_prompts) == 1
 
 
-def test_one_holder_needs_no_profile_as_before(fx: PostingsFixture, server: _Server) -> None:  # noqa: F811
+def test_one_assessor_needs_no_role_as_before(fx: PostingsFixture, server: _Server) -> None:  # noqa: F811
     made = assess(fx, fx.default_profile_id, asking(fx))
     ids = {row.requirement: row.id for row in made.result.matrix}
-    second_profile(fx)  # a second profile that never assessed the job
+    second_profile(fx)  # a second role that never assessed the job
     fx.base.model.assessed = settled(fx, ids)
 
     answered = _post(server, {"job_identity": _JOB})
 
     assert answered.status_code == 201, answered.text
     assert answered.json()["reassessed"]["resume"]["profile_id"] == fx.default_profile_id
-    assert {profile: verdict for profile, (_at, verdict) in _stored(fx).items()} == {fx.default_profile_id: MATCHED}
+    assert (_one_assessment(fx)[0], _one_assessment(fx)[2]) == (fx.default_profile_id, MATCHED)
 
 
-def test_a_deleted_profiles_old_assessment_does_not_make_the_job_ambiguous(fx: PostingsFixture, server: _Server) -> None:  # noqa: F811
+def test_a_deleted_roles_name_on_the_stored_assessment_changes_nothing(fx: PostingsFixture, server: _Server) -> None:  # noqa: F811
     mine, other, _ids = held_by_two(fx, page_profile="default")
+    assert _one_assessment(fx)[0] == other
     profile_records.write_profile(fx.base.gig.resolved, profile_id=other, state="deleted", uuid_factory=uuids(43))
-    before = _stored(fx)
 
     answered = _post(server, {"job_identity": _JOB})
 
     assert answered.status_code == 201, answered.text
     assert answered.json()["reassessed"]["resume"]["profile_id"] == mine
-    assert _stored(fx)[other] == before[other]
+    assert (_one_assessment(fx)[0], _one_assessment(fx)[2]) == (mine, MATCHED)
 
 
-def test_a_named_profile_with_no_assessment_of_its_own_gets_its_first_one(fx: PostingsFixture, server: _Server) -> None:  # noqa: F811
+def test_a_role_that_never_assessed_the_job_replaces_the_same_assessment_and_its_origin_stays(fx: PostingsFixture, server: _Server) -> None:  # noqa: F811
     made = assess(fx, fx.default_profile_id, asking(fx))
     ids = {row.requirement: row.id for row in made.result.matrix}
     second = second_profile(fx)
     fx.base.model.assessed = settled(fx, ids)
-    before = _stored(fx)
+    before = _one_assessment(fx)
 
     answered = _post(server, {"job_identity": _JOB, "profile_id": second})
 
     assert answered.status_code == 201, answered.text
     reply = answered.json()["reassessed"]
-    assert (reply["resume"]["profile_id"], reply["origin"]) == (second, "job_page")
-    after = _stored(fx)
-    assert after[fx.default_profile_id] == before[fx.default_profile_id] and after[second][1] == MATCHED
+    # Until 0.1.11.9 this was the role's FIRST assessment (a second file, `origin: job_page`). The job was assessed
+    # before: its one assessment is replaced, and where it was started from is not changed by an answer.
+    assert (reply["resume"]["profile_id"], reply["origin"], reply["created_at"]) == (second, made.origin, made.created_at)
+    after = _one_assessment(fx)
+    assert (after[0], after[2]) == (second, MATCHED) and after[1] > before[1]
 
 
 @pytest.mark.parametrize(
@@ -238,21 +255,24 @@ def test_a_profile_that_is_none_and_a_wrong_shape_are_refused_before_the_answer_
     assert _stored(fx) == before and _answers(server) == answers and fx.base.model.assess_prompts == []
 
 
-def test_the_lookup_reads_the_store_once(fx: PostingsFixture, monkeypatch: pytest.MonkeyPatch) -> None:  # noqa: F811
+def test_the_lookup_reads_the_jobs_files_and_never_lists_the_store(fx: PostingsFixture, monkeypatch: pytest.MonkeyPatch) -> None:  # noqa: F811
     from gigai.scout import quick_assess
     from gigai.scout.quick_assess import reassess_target
 
-    mine, _other, _ids = held_by_two(fx, page_profile="default")
-    reads: list[object] = []
-    real = quick_assess.list_quick_assessments
-    monkeypatch.setattr(quick_assess, "list_quick_assessments", lambda *args, **kwargs: reads.append(args) or real(*args, **kwargs))
+    mine, other, _ids = held_by_two(fx, page_profile="default")
+
+    def listed(*args: object, **kwargs: object) -> None:
+        raise AssertionError("the whole store was listed for one job")
+
+    monkeypatch.setattr(quick_assess, "list_quick_assessments", listed)
 
     plan = reassess_target(fx.home_root, fx.target, _JOB, profile_id=mine)
-
-    assert (plan.profile_id, plan.own, plan.previous.resume.profile_id) == (mine, True, mine) and len(reads) == 1
+    assert (plan.profile_id, plan.own, plan.previous.resume.profile_id) == (mine, True, other)
+    unnamed = reassess_target(fx.home_root, fx.target, _JOB)  # 0.1.11.6: refused, `reassess_profile_required`
+    assert (unnamed.profile_id, unnamed.own, unnamed.previous.stored_path) == (None, True, plan.previous.stored_path)
     with pytest.raises(QuickAssessError) as refused:
-        reassess_target(fx.home_root, fx.target, _JOB)
-    assert refused.value.code == "reassess_profile_required"
+        reassess_target(fx.home_root, fx.target, _JOB, profile_id="profile_00000000-0000-4000-8000-00000000dead")
+    assert refused.value.code == "profile_not_found"
     nothing = reassess_target(fx.home_root, fx.target, "https://jobs.example.invalid/none")
     assert (nothing.previous, nothing.profile_id, nothing.own) == (None, None, False)
 
@@ -268,21 +288,23 @@ def _last(result) -> dict:
     return json.loads(result.output.strip().splitlines()[-1])
 
 
-def test_the_cli_re_assesses_for_the_profile_it_is_given(fx: PostingsFixture, server: _Server) -> None:  # noqa: F811
-    mine, other, _ids = held_by_two(fx, page_profile="default")
-    before, answers = _stored(fx), _answers(server)
-
-    refused = _cli(fx, "--reassess", _URL)
-    assert refused.exit_code == 1 and _last(refused)["error"]["code"] == "reassess_profile_required", refused.output
-    assert "--profile" in _last(refused)["error"]["message"]
-    assert _stored(fx) == before and _answers(server) == answers and fx.base.model.assess_prompts == []
+def test_the_cli_re_assesses_the_jobs_one_assessment(fx: PostingsFixture, server: _Server) -> None:  # noqa: F811
+    mine, other, ids = held_by_two(fx, page_profile="default")
+    answers = _answers(server)
 
     alone = _cli(fx, "--profile", mine)
     assert alone.exit_code == 1 and "--profile goes with --reassess" in alone.output, alone.output
     assert _answers(server) == answers
 
-    done = _cli(fx, "--reassess", _URL, "--profile", mine)
+    # No role named, on a job two roles assessed: 0.1.11.6 refused it; the job's one assessment is replaced.
+    unnamed = _cli(fx, "--reassess", _URL)
+    assert unnamed.exit_code == 0, unnamed.output
+    assert _last(unnamed)["reassessed"]["resume"]["profile_id"] == fx.default_profile_id
+    assert (_one_assessment(fx)[0], _one_assessment(fx)[2]) == (fx.default_profile_id, MATCHED)
+
+    second = other if other != fx.default_profile_id else mine
+    fx.base.model.assessed = settled(fx, ids)
+    done = _cli(fx, "--reassess", _URL, "--profile", second)
     assert done.exit_code == 0, done.output
-    assert _last(done)["reassessed"]["resume"]["profile_id"] == mine
-    after = _stored(fx)
-    assert after[other] == before[other] and after[mine][1] == MATCHED and len(fx.base.model.assess_prompts) == 1
+    assert _last(done)["reassessed"]["resume"]["profile_id"] == second
+    assert (_one_assessment(fx)[0], _one_assessment(fx)[2]) == (second, MATCHED) and len(fx.base.model.assess_prompts) == 2

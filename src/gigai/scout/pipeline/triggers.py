@@ -467,10 +467,26 @@ def _active_profile_ids(home_root: Path, target: Path) -> frozenset[str]:
     return frozenset(record.profile_id for record in profile_records.list_profiles(resolved) if record.state == STATE_ACTIVE)
 
 
+def _selected_active_profile(home_root: Path, target: Path, active: frozenset[str]) -> str | None:
+    from .. import profile_records
+    from ..quick_assess import _resolve_workpad
+
+    try:
+        selected = profile_records.selected_profile(_resolve_workpad(home_root, target), home_root=home_root, target=target)
+    except Exception:  # noqa: BLE001 - no selected role to stand in: the pair is left out, as it was
+        return None
+    return selected.profile_id if selected is not None and selected.profile_id in active else None
+
+
 def _asking_pairs(home_root: Path, target: Path, answers: Callable[[str, str], bool], first_job: str | None) -> tuple[Pair, ...]:
     """The ``(profile, job)`` pairs of active profiles whose stored assessment left open a question ``answers`` accepts.
 
     The job the answer was given for first, then the newest assessment first.
+
+    0.1.11.9: a job has ONE assessment, and the role on it is the one that asked LAST. When that role is no longer
+    active (archived or deleted since), the job is still the user's and still asks: its pair is the SELECTED role's
+    (left out, as before, when that one is not active either).  Until 0.1.11.9 each active role that had assessed
+    the job had its own pair.
     """
 
     from ..quick_assess import list_quick_assessments
@@ -486,7 +502,17 @@ def _asking_pairs(home_root: Path, target: Path, answers: Callable[[str, str], b
         return ()  # nothing asked: the profiles are not read at all
     active = _active_profile_ids(home_root, target)
     found.sort(key=lambda entry: entry[0])  # stable: the named job first, the rest newest first
-    return tuple(pair for _later, pair in found if pair[0] in active)
+    pairs: list[Pair] = []
+    stand_in: list[str | None] = []  # the selected role, read once and only when a role on an assessment is not active
+    for _later, (profile_id, job) in found:
+        if profile_id not in active:
+            if not stand_in:
+                stand_in.append(_selected_active_profile(home_root, target, active))
+            if stand_in[0] is None:
+                continue
+            profile_id = stand_in[0]
+        pairs.append((profile_id, job))
+    return tuple(pairs)
 
 
 @_reads_journal

@@ -106,7 +106,9 @@ def test_a_stored_assessment_made_under_older_settings_is_stale_and_assess_all_a
         # 2. The same files as a v4-era store wrote them: no recorded basis.
         files = _store_files(home)
         assert len(files) == len(expected)
-        profile_id = files[0].parent.name
+        # 0.1.11.9: the files are in the job's folder; the role that asked is recorded inside.
+        assert files[0].parent.name == "job"
+        profile_id = json.loads(files[0].read_text(encoding="utf-8"))["resume"]["profile_id"]
         for path in files:
             stored = json.loads(path.read_text(encoding="utf-8"))
             assert stored["resume"]["profile_id"] == profile_id

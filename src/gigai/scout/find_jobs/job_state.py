@@ -576,17 +576,40 @@ class JobStateSources:
         return None if root is None else root / resume
 
     def _stored_file(self, kind: str, profile_id: str | None, job_identity: str) -> Path | None:
-        from ..quick_assess import resume_key
+        """The stored file of this job: the JOB's own (0.1.11.9: ``<store>/job/``, whichever role ``profile_id``
+        names), a pasted resume's for ``None``.  On a home whose stores were not migrated, a job nothing has written
+        since is still in a role's folder: the store's own path rule says which one (``job_store_migration``)."""
 
-        directory = self._store(kind, resume_key(profile_id))
+        from ..job_store_layout import JOB_FOLDER, is_profile_folder
+        from ..quick_assess import is_pasted, resume_key
+
+        pasted = is_pasted(profile_id)
+        directory = self._store(kind, resume_key(None) if pasted else JOB_FOLDER)
         if directory is None:
             return None
         if directory not in self._names:
             self._names[directory] = _stored_names(directory)
         digest = _identity_digest(job_identity)
-        if digest not in self._names[directory]:
-            return None
         path = directory / f"{digest}.json"
+        if digest not in self._names[directory]:
+            if pasted:
+                return None
+            # Listed once a request: the names every role's folder holds. A migrated home's are all in ``job/`` too.
+            store = directory.parent
+            if store not in self._names:
+                try:
+                    folders = [item for item in store.iterdir() if is_profile_folder(item.name) and item.is_dir()]
+                except OSError:
+                    folders = []
+                self._names[store] = frozenset().union(*(_stored_names(item) for item in folders))
+            if digest not in self._names[store]:
+                return None
+            from ..job_store_migration import role_record
+
+            held = role_record(store, job_identity, home_root=self._home_root, target=self._target)
+            if held is None:
+                return None
+            path = held
         return None if path.is_symlink() or not path.is_file() else path
 
     def quick_assessment(self, job_identity: str, profile_id: str | None) -> AssessResponse | None:

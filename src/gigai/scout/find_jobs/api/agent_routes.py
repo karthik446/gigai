@@ -40,9 +40,8 @@ from urllib.parse import parse_qs, quote, urlsplit
 from ....canonical import parse_json_bytes
 from ... import story_bank
 from ...question_ids import normalize_question_id
-from ...quick_assess import QuickAssessError, quick_assess_path
+from ...quick_assess import QuickAssessError
 from ...requirement_weights import minor_gap_text, minor_gaps
-from ...tailored_resume import TailorError, read_tailored_resume, tailored_resume_path
 from ..contracts import AcquireOutput, FindJobsContractError
 from ..job_state import JobStateSources, is_text_identity, normalize_job_identity
 from . import openapi
@@ -142,45 +141,27 @@ def _index_join(home_root: Path, target: Path, identity: str, *, profile_id: str
     }
 
 
-def _stored_for_job(by_key: Path, read, identity: str) -> list:
-    """One job's stored item under every resume identity, newest ``updated_at`` first (the listing's own order).
-
-    0.1.10.11 S4 (cause C7): both stores keep ``<resume identity>/<sha256 of the job identity>.json`` (``by_key`` is
-    that path for any one resume identity), so a job's items are one file in each resume identity's folder. The page
-    listed every stored file and kept the ones for its job: 299 assessments and 201 tailored resumes opened for one job
-    on the operator-sized home.
-    """
-
-    try:
-        folders = sorted(folder for folder in by_key.parent.parent.iterdir() if folder.is_dir())
-    except OSError:
-        return []
-    found = [read(folder / by_key.name) for folder in folders]
-    items = [item for item in found if item is not None and item.job.job_identity == identity]
-    items.sort(key=lambda item: (item.updated_at, item.stored_path), reverse=True)
-    return items
-
-
 def job_quick_assessments(home_root: Path, target: Path, identity: str) -> list:
-    """Every resume identity's stored quick assessment of this one job: what ``list_quick_assessments`` holds for it."""
+    """What is stored for this one job, newest first: the JOB's assessment (0.1.11.9: one, whichever role asked) and a
+    pasted resume's.  The store's own two file reads (``quick_assess.job_quick_assessments``); until 0.1.11.9 every
+    folder of the store was one resume identity's and each was looked in."""
 
-    from ...quick_assess import _read_stored
+    from ...quick_assess import job_quick_assessments as stored
 
     try:
-        by_key = quick_assess_path(Path(home_root), Path(target), None, identity)
+        return list(stored(Path(home_root), Path(target), identity))
+    except QuickAssessError:
+        raise
     except Exception as exc:  # noqa: BLE001 - any failure to name the project's folder is "not bound", as the listing says it
         raise QuickAssessError("target_unavailable", "this folder is not bound to a GigAI project") from exc
-    return _stored_for_job(by_key, _read_stored, identity)
 
 
 def job_tailored_resumes(home_root: Path, target: Path, identity: str) -> list:
-    """Every resume identity's stored tailored resume for this one job: ``list_tailored_resumes(job_identity=...)``'s answer."""
+    """The stored tailored resume for this one job (and a pasted resume's): ``list_tailored_resumes(job_identity=...)``'s answer."""
 
-    try:
-        by_key = tailored_resume_path(Path(home_root), Path(target), None, identity)
-    except Exception as exc:  # noqa: BLE001 - any failure to name the project's folder is "not bound", as the listing says it
-        raise TailorError("target_unavailable", "this folder is not bound to a GigAI project") from exc
-    return _stored_for_job(by_key, read_tailored_resume, identity)
+    from ...tailored_resume import list_tailored_resumes
+
+    return list(list_tailored_resumes(Path(home_root), Path(target), job_identity=identity))
 
 
 def _quick_entry(item, basis) -> dict[str, object]:

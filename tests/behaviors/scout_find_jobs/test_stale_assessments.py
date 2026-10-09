@@ -238,7 +238,11 @@ def test_an_assessment_made_with_an_older_prompt_version_is_stale(fx: ProfileFix
     assert _reason(fx, item) == "older_prompt"
 
 
-def test_each_profile_is_judged_by_its_own_settings(fx: ProfileFixtureGig, model: _Binding) -> None:
+def test_every_role_is_judged_by_the_one_set_of_candidate_facts(fx: ProfileFixtureGig, model: _Binding) -> None:
+    """0.1.11.9: a role's own search settings are search filters only. The job's one assessment is made with the
+    shared candidate facts whichever role asked, and it is stale when THOSE change (0110-022 to 0.1.11.8: each role
+    was judged by its own settings)."""
+
     remote = _with_mode(WorkModePreference.REMOTE)
     _write_find_jobs(fx, remote)
     default = selected_profile(fx.resolved, home_root=fx.home_root, target=fx.target)
@@ -250,16 +254,16 @@ def test_each_profile_is_judged_by_its_own_settings(fx: ProfileFixtureGig, model
     )
     mine = _assess(fx, profile_id=default.profile_id)
     theirs = _assess(fx, profile_id=other.profile_id)
-    assert mine.constraints_digest != theirs.constraints_digest
+    assert mine.constraints_digest == theirs.constraints_digest
     assert _reason(fx, mine) is None and _reason(fx, theirs) is None
 
-    # The default profile's settings change: only its own assessment is stale.
+    # The shared settings change: the assessment is stale, whichever role's name is on it.
     _write_find_jobs(fx, replace(remote, countries=("US", "CA")))
 
     assert _reason(fx, mine) == "settings_changed"
-    assert _reason(fx, theirs) is None
+    assert _reason(fx, theirs) == "settings_changed"
     check = BasisCheck(home_root=fx.home_root, target=fx.target, resolved=fx.resolved)
-    assert check.current(default.profile_id).work_mode == "remote" and check.current(other.profile_id).work_mode == "hybrid"
+    assert check.current(default.profile_id).work_mode == check.current(other.profile_id).work_mode == "remote"
     assert check.current("profile_00000000-0000-4000-8000-000000000000") is None, "a profile that is gone has no basis: nothing is called stale"
 
 

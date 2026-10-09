@@ -181,8 +181,12 @@ def test_a_saved_answers_trigger_starts_no_git_process_per_asking_job(fx: Pipeli
     assert fourteen <= ANSWER_TRIGGER_SPAWNS_MAX, (fourteen, spawns)
 
 
-def test_the_trigger_sees_the_journal_write_made_just_before_it(fx: PipelineFixture) -> None:
-    """The save's own write is read by its trigger: the scope keeps a read only while the workpad is unchanged."""
+def test_a_roles_search_settings_write_reopens_nothing_and_the_trigger_after_it_agrees(fx: PipelineFixture) -> None:
+    """0.1.11.9: a role's own search settings are search filters only (one set of candidate facts), so the journal
+    write of `profile update` changes no step's inputs: nothing re-opens, for that role or the other.
+
+    Until 0.1.11.9 this test proved that the save's own write is read by its trigger (that role's re-assessments
+    re-opened). No role setting changes a digest any more, so that is no longer shown HERE."""
 
     default, second = two_profiles(fx.gig)
     jobs = [_job(n) for n in range(3)]
@@ -196,9 +200,7 @@ def test_the_trigger_sees_the_journal_write_made_just_before_it(fx: PipelineFixt
     )
     assert updated.exit_code == 0, updated.output
 
-    # That profile's candidate settings changed in the journal: each of its finished jobs re-opens from its
-    # re-assessment (the command's own trigger read the write). The other profile's are left as they were.
-    reopened = {"tailor": "done", "reassess": "ready", "ats": "done", "label": "blocked"}
+    reopened = _DONE
     assert _states(fx, second) == {job: reopened for job in jobs}
     assert _states(fx, default) == {job: _DONE for job in jobs}
     # ... and the trigger again, with the inputs as they now are, opens nothing more.

@@ -68,7 +68,7 @@ from ...tailored_resume import (
     list_tailored_resumes,
     run_tailored_resume,
     save_tailor_response,
-    tailored_resume_path,
+    tailored_resume_write_path,
     tailored_resume_write_lock,
 )
 from ...resume_display import SPACING_MAX, SPACING_MIN, HeaderFormError, parse_header_form, valid_spacing
@@ -100,7 +100,9 @@ _ERROR_STATUS: dict[str, HTTPStatus] = {
 _EDITED_KEYS = frozenset({"job_url", "markdown", "profile_id", "actor", "source"})
 
 _RESUME_PDF_KEYS = frozenset({"markdown", "spacing_scale", "auto_fit", "profile_id", "header"})
-_TAILORED_PDF_KEYS = frozenset({"profile_id", "job_identity"})
+#: 0.1.11.9: a job has ONE resume, so the job names it. ``profile_id`` is still taken (callers of before send it;
+#: ``"ephemeral"`` names a pasted resume's) and picks nothing else.
+_TAILORED_PDF_KEYS = frozenset({"job_identity"})
 _PROFILE_ID = re.compile(r"\A[A-Za-z0-9_-]+\Z")
 #: ``POST /api/resume/pdf``: a body above this is refused before it is parsed (JSON escaping can
 #: make ``MAX_MARKDOWN_BYTES`` of markdown several times larger on the wire); above the drain
@@ -214,15 +216,15 @@ class TailoredResumesRoutesMixin:
         body = self._read_json_body()
         if body is None:
             return None
-        if type(body) is not dict or not _TAILORED_PDF_KEYS <= set(body) <= _TAILORED_PDF_KEYS | {"header", "spacing_scale"}:
+        if type(body) is not dict or not _TAILORED_PDF_KEYS <= set(body) <= _TAILORED_PDF_KEYS | {"profile_id", "header", "spacing_scale"}:
             self._error(
                 HTTPStatus.UNPROCESSABLE_ENTITY, "invalid_value",
-                "body must be exactly profile_id and job_identity (plus header from the Generate PDF form, and spacing_scale)",
+                "body must be job_identity (plus header from the Generate PDF form, spacing_scale, and profile_id, which is optional)",
             )
             return None
-        profile_id, job_identity = body["profile_id"], body["job_identity"]
-        if not isinstance(profile_id, str) or not profile_id or not isinstance(job_identity, str) or not job_identity:
-            self._error(HTTPStatus.UNPROCESSABLE_ENTITY, "invalid_value", "profile_id and job_identity must be non-empty strings")
+        profile_id, job_identity = body.get("profile_id"), body["job_identity"]
+        if (profile_id is not None and (not isinstance(profile_id, str) or not profile_id)) or not isinstance(job_identity, str) or not job_identity:
+            self._error(HTTPStatus.UNPROCESSABLE_ENTITY, "invalid_value", "job_identity (and profile_id when given) must be non-empty strings")
             return None
         spacing = body.get("spacing_scale")
         if spacing is not None and not valid_spacing(spacing):
@@ -240,7 +242,7 @@ class TailoredResumesRoutesMixin:
             self._error(_status_for(exc.code), exc.code, str(exc))
             return None
         if not items:
-            self._error(HTTPStatus.NOT_FOUND, "tailored_resume_not_found", "no stored tailored resume for that profile and job")
+            self._error(HTTPStatus.NOT_FOUND, "tailored_resume_not_found", "no stored tailored resume for that job")
             return None
         return items[0], form, spacing
 
@@ -288,7 +290,7 @@ class TailoredResumesRoutesMixin:
         stored, form, spacing = request
         home_root, target = self._backend.home_root, self._backend.target
         if spacing is not None and save_job_spacing(home_root, target, stored.resume.profile_id, stored.job.job_identity, spacing) is None:
-            self._error(HTTPStatus.NOT_FOUND, "tailored_resume_not_found", "no stored tailored resume for that profile and job")
+            self._error(HTTPStatus.NOT_FOUND, "tailored_resume_not_found", "no stored tailored resume for that job")
             return
         shown = "form"
         if form is None:
@@ -402,15 +404,16 @@ class TailoredResumesRoutesMixin:
         body = self._read_json_body()
         if body is None:
             return
-        keys = {"profile_id", "job_identity", "updated_at", "line_id", "use"}
+        # 0.1.11.9: a job has ONE resume. ``profile_id`` is still taken (callers of before send it) and picks nothing.
+        keys = {"job_identity", "updated_at", "line_id", "use"}
         custom = type(body) is dict and body.get("use") == "custom"
-        if type(body) is not dict or set(body) != (keys | {"text"} if custom else keys):
+        if type(body) is not dict or set(body) - {"profile_id"} != (keys | {"text"} if custom else keys):
             self._error(
                 HTTPStatus.UNPROCESSABLE_ENTITY, "invalid_value",
-                "body must be exactly profile_id, job_identity, updated_at, line_id and use (plus text when use is custom)",
+                "body must be job_identity, updated_at, line_id and use (plus text when use is custom; profile_id is optional)",
             )
             return
-        if not all(isinstance(body[key], str) and body[key] for key in keys):
+        if not all(isinstance(body[key], str) and body[key] for key in keys | ({"profile_id"} & set(body))):
             self._error(HTTPStatus.UNPROCESSABLE_ENTITY, "invalid_value", "every field must be a non-empty string")
             return
         if body["use"] not in LINE_USES:
@@ -422,7 +425,7 @@ class TailoredResumesRoutesMixin:
         home_root = self._backend.home_root
 
         def stored_items():
-            return list_tailored_resumes(home_root, target, profile_id=body["profile_id"], job_identity=body["job_identity"])
+            return list_tailored_resumes(home_root, target, profile_id=body.get("profile_id"), job_identity=body["job_identity"])
 
         try:
             items = stored_items()
@@ -430,19 +433,19 @@ class TailoredResumesRoutesMixin:
             self._error(_status_for(exc.code), exc.code, str(exc))
             return
         if not items:
-            self._error(HTTPStatus.NOT_FOUND, "tailored_resume_not_found", "no stored tailored resume for that profile and job")
+            self._error(HTTPStatus.NOT_FOUND, "tailored_resume_not_found", "no stored tailored resume for that job")
             return
         # The revision check and the write are one step (0.1.10.7): the resume is read again under the store's write
         # lock, so a tailoring that lands between the two cannot be written over, and this choice cannot be either.
         failure: tuple[HTTPStatus, str, str] | None = None
         updated = None
-        with tailored_resume_write_lock(tailored_resume_path(home_root, target, body["profile_id"], body["job_identity"])):
+        with tailored_resume_write_lock(tailored_resume_write_path(home_root, target, items[0].resume.profile_id, body["job_identity"])):
             try:
                 items = stored_items()
             except QuickAssessError as exc:
                 failure = (_status_for(exc.code), exc.code, str(exc))
             if failure is None and not items:
-                failure = (HTTPStatus.NOT_FOUND, "tailored_resume_not_found", "no stored tailored resume for that profile and job")
+                failure = (HTTPStatus.NOT_FOUND, "tailored_resume_not_found", "no stored tailored resume for that job")
             if failure is None:
                 stored = items[0]
                 if stored.updated_at != body["updated_at"]:
@@ -475,11 +478,11 @@ class TailoredResumesRoutesMixin:
         body = self._read_json_body()
         if body is None:
             return
-        keys = {"profile_id", "job_identity", "updated_at", "use"}
-        if type(body) is not dict or set(body) != keys or not all(isinstance(body[key], str) and body[key] for key in keys):
+        keys = {"job_identity", "updated_at", "use"}  # 0.1.11.9: ``profile_id`` is still taken and picks nothing
+        if type(body) is not dict or set(body) - {"profile_id"} != keys or not all(isinstance(body[key], str) and body[key] for key in body):
             self._error(
                 HTTPStatus.UNPROCESSABLE_ENTITY, "invalid_value",
-                "body must be exactly profile_id, job_identity, updated_at and use, each a non-empty string",
+                "body must be job_identity, updated_at and use, each a non-empty string (profile_id is optional)",
             )
             return
         if body["use"] not in LENGTH_USES:
@@ -490,7 +493,7 @@ class TailoredResumesRoutesMixin:
             return
         try:
             updated = change_stored_length(
-                self._backend.home_root, target, profile_id=body["profile_id"], job_identity=body["job_identity"], use=body["use"],
+                self._backend.home_root, target, profile_id=body.get("profile_id"), job_identity=body["job_identity"], use=body["use"],
                 updated_at=body["updated_at"],
             )
         except QuickAssessError as exc:

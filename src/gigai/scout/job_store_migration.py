@@ -177,17 +177,25 @@ def _scan(project_dir: Path, store: str) -> dict[str, dict[str, _Held]]:
         for path in sorted(folder.glob(f"*{RECORD_SUFFIX}")):
             if path.name.endswith(PROPOSED_RESUME_SUFFIX):
                 continue  # a suggestion record's sidecar: it goes where its record goes
-            item = _read_json(path)
-            job = None if item is None else _job_of(store, item)
-            if item is None or job is None:
-                continue
-            edited = False
-            if store == RESUMES:
-                selection = item.get("selection")
-                selection = selection if isinstance(selection, dict) else {}
-                edited = bool(_holds_user_line(item.get("result")) or selection.get("pins") or selection.get("excludes") or _saved_spacing(path))
-            found.setdefault(job, {})[folder.name] = _Held(folder.name, path, _moment(item.get("updated_at") or item.get("created_at")), edited)
+            read = _held(store, folder.name, path)
+            if read is not None:
+                found.setdefault(read[0], {})[folder.name] = read[1]
     return found
+
+
+def _held(store: str, profile_id: str, path: Path) -> tuple[str, _Held] | None:
+    """``(job identity, record)`` of the record a profile holds at ``path``, or ``None`` (no file, or not a record)."""
+
+    item = _read_json(path)
+    job = None if item is None else _job_of(store, item)
+    if item is None or job is None:
+        return None
+    edited = False
+    if store == RESUMES:
+        selection = item.get("selection")
+        selection = selection if isinstance(selection, dict) else {}
+        edited = bool(_holds_user_line(item.get("result")) or selection.get("pins") or selection.get("excludes") or _saved_spacing(path))
+    return job, _Held(profile_id, path, _moment(item.get("updated_at") or item.get("created_at")), edited)
 
 
 def read_applied(home_root: Path, target: Path) -> dict[str, str]:
@@ -359,10 +367,13 @@ def _copy_bytes(project_dir: Path, plan: _JobPlan, copy: _Copy) -> bytes:
     item = _rewritten(item, project_dir, plan.digest, plan.stems())
     assert isinstance(item, dict)
     # Where the copy IS, whatever it recorded (a home that was copied or moved names another folder there).
-    if "stored_path" in item:
-        item["stored_path"] = os.fspath(copy.dest)
-    if "markdown_path" in item and copy.dest.name == f"{plan.digest}{RECORD_SUFFIX}":
-        item["markdown_path"] = os.fspath(copy.dest.with_suffix(MARKDOWN_SUFFIX))
+    # (Not the sidecar of a suggestion record: it is a resume that WAITS there, and the paths it names are the job's
+    # stored resume's, where ``suggestions.use_proposed`` writes it. The rewrite above has made them the per-job ones.)
+    if copy.dest.name == f"{plan.digest}{RECORD_SUFFIX}":
+        if "stored_path" in item:
+            item["stored_path"] = os.fspath(copy.dest)
+        if "markdown_path" in item:
+            item["markdown_path"] = os.fspath(copy.dest.with_suffix(MARKDOWN_SUFFIX))
     return json.dumps(item, indent=2, sort_keys=True).encode("utf-8")  # the stores' own form
 
 
@@ -511,6 +522,29 @@ class Migration:
         return lines
 
 
+def _index_entry(home_root: Path, project: str, plan: _JobPlan, index: dict) -> tuple[dict[str, str] | None, int]:  # type: ignore[type-arg]
+    """Give ``index`` (the jobs folder's) the job-keyed entry of ``plan``'s kept resume: a copy of the entry its profile's
+    resume has.  ``(the entry as the record names it or None, 1 when it was added)``.  Nothing is written here."""
+
+    if RESUMES not in plan.kept:
+        return None, 0
+    source_key = resumes_folder.job_key(home_root, plan.kept[RESUMES].path)
+    key = resumes_folder.job_store_key(project, plan.job)
+    added = 0
+    if key not in index and source_key in index:
+        added = 1
+        index[key] = {"dir": index[source_key]["dir"], "files": dict(index[source_key]["files"])}
+    return ({"key": key, "from_key": source_key, "dir": str(index[key]["dir"])} if key in index else None), added
+
+
+def _save_folder_index(home_root: Path, root: Path, index: dict) -> None:  # type: ignore[type-arg]
+    if root.is_dir() and not root.is_symlink():
+        with resumes_folder._folder_lock(root):
+            jobs_folder._save_index(home_root, root, index)
+    else:
+        jobs_folder._save_index(home_root, root, index)
+
+
 def _run(home_root: Path, project: str, applied: Mapping[str, str], *, write: bool) -> tuple[Migration, bool]:
     """Plan the copies and, with ``write``, make them.  One code path for both, so a dry run counts what a run does.
 
@@ -546,15 +580,8 @@ def _run(home_root: Path, project: str, applied: Mapping[str, str], *, write: bo
                     _write_copy(project_dir, plan, copy)
                     copied += 1
                     wrote = True
-            folder: dict[str, str] | None = None
-            if RESUMES in plan.kept:
-                source_key = resumes_folder.job_key(home_root, plan.kept[RESUMES].path)
-                key = resumes_folder.job_store_key(project, plan.job)
-                if key not in index and source_key in index:
-                    folders_to_add += 1
-                    index[key] = {"dir": index[source_key]["dir"], "files": dict(index[source_key]["files"])}  # type: ignore[call-overload]
-                if key in index:
-                    folder = {"key": key, "from_key": source_key, "dir": str(index[key]["dir"])}
+            folder, added = _index_entry(home_root, project, plan, index)
+            folders_to_add += added
             if plan.digest not in recorded or wrote:
                 recorded[plan.digest] = _entry(home_root, plan, folder)
     finally:
@@ -562,11 +589,7 @@ def _run(home_root: Path, project: str, applied: Mapping[str, str], *, write: bo
         if write:
             # Also after a failure part way: what was copied is recorded, so the next run copies the rest from the same role.
             if json.dumps(index, sort_keys=True) != index_before:
-                if root.is_dir() and not root.is_symlink():
-                    with resumes_folder._folder_lock(root):
-                        jobs_folder._save_index(home_root, root, index)
-                else:
-                    jobs_folder._save_index(home_root, root, index)
+                _save_folder_index(home_root, root, index)
             if json.dumps(recorded, sort_keys=True) != before:
                 _save_record(home_root, {**record, project: recorded})
 
@@ -638,6 +661,216 @@ def migrate(home_root: Path, target: Path, *, apply: bool = False, applied: Mapp
         raise JobStoreMigrationError("stores_unwritable", "the job stores could not be copied") from exc
 
 
+# --- one job, on a home that was not migrated (0.1.11.9 PJ2) ------------------------------------------------------
+#
+# Every store reads and writes a job's records in its per-job folder.  A home whose stores were never copied there
+# still works: a READ of a job with nothing in the per-job folder answers the record the migration would keep (the
+# same plan, ``_plan_job``), read where it is; the first WRITE of a job copies all of its records first (``adopt_job``:
+# the migration's own copies, for that one job), and then writes in the per-job folder.  A profile's folder is
+# never written, and a later ``migrate`` finds those files "already there".
+
+#: How long the applications read for a fallback READ is reused (seconds).  A write reads them again.
+_APPLIED_TTL = 5.0
+_applied_memo: dict[tuple[str, str], tuple[float, dict[str, str]]] = {}
+
+
+def _role_folders(store_dir: Path) -> list[Path]:
+    try:
+        return sorted(
+            (folder for folder in store_dir.iterdir() if is_profile_folder(folder.name) and not folder.is_symlink() and folder.is_dir()),
+            key=lambda item: item.name,
+        )
+    except OSError:
+        return []
+
+
+def _role_files(project_dir: Path, digest: str) -> dict[str, dict[str, Path]]:
+    """``{store: {profile id: path}}`` of the records the profiles' folders hold under this job's file name.  No file is read."""
+
+    found: dict[str, dict[str, Path]] = {}
+    for store in JOB_STORES:
+        held: dict[str, Path] = {}
+        for folder in _role_folders(project_dir / store):
+            path = folder / f"{digest}{RECORD_SUFFIX}"
+            if path.is_file() and not path.is_symlink():
+                held[folder.name] = path
+        found[store] = held
+    return found
+
+
+def _applied_for(home_root: Path, target: Path, *, fresh: bool) -> Mapping[str, str]:
+    import time
+
+    key = (os.fspath(home_root), os.fspath(target))
+    memo = _applied_memo.get(key)
+    if not fresh and memo is not None and time.monotonic() - memo[0] < _APPLIED_TTL:
+        return memo[1]
+    applied = read_applied(home_root, target)
+    _applied_memo[key] = (time.monotonic(), applied)
+    return applied
+
+
+def _plan_one(home_root: Path, target: Path, project_dir: Path, digest: str, *, write: bool) -> _JobPlan | None:
+    """The migration's plan for the ONE job whose files are named ``digest``; ``None`` when no profile holds it.
+
+    ``write``: the plan is about to be carried out, so the applications are read now and an unreadable read is an
+    error.  A read-only caller takes the applications as they were a moment ago, and none when they cannot be read.
+    """
+
+    files = _role_files(project_dir, digest)
+    held: dict[str, dict[str, _Held]] = {store: {} for store in JOB_STORES}
+    job: str | None = None
+    for store, found in files.items():
+        for profile_id, path in found.items():
+            read = _held(store, profile_id, path)
+            if read is not None and job_digest(read[0]) == digest:
+                job = read[0]
+                held[store][profile_id] = read[1]
+    if job is None:
+        return None
+    holders = {profile_id for found in held.values() for profile_id in found}
+    recorded = None
+    applied_at = None
+    if len(holders) > 1:
+        entry = _load_record(home_root).get(project_dir.name, {}).get(digest)
+        recorded = entry if isinstance(entry, dict) else None
+        if held[RESUMES] and not (recorded is not None and recorded.get("kept_profile_id") in holders):
+            # The one rule that reads anything else: a job with an application and a stored resume.
+            try:
+                applied_at = _applied_for(home_root, target, fresh=write).get(job)
+            except JobStoreMigrationError:
+                if write:
+                    raise
+    return _plan_job(project_dir, job, held, applied_at, recorded)
+
+
+def role_record(store_dir: Path, job_identity: str, *, home_root: Path, target: Path) -> Path | None:
+    """Where a job's record of one store IS when the per-job folder does not hold it: the record the migration would
+    keep for the job, in its profile's folder.  ``None``: no profile holds one.  Reads only; nothing is copied.
+
+    ``store_dir`` is the store (``.../quick_assess``).
+    """
+
+    store_dir = Path(store_dir)
+    digest = job_digest(job_identity)
+    files = _role_files(store_dir.parent, digest)
+    here = files.get(store_dir.name) or {}
+    if not here:
+        return None
+    holders = {profile_id for found in files.values() for profile_id in found}
+    if len(holders) == 1:
+        kept = next(iter(here.values()))  # the one profile that holds the job: no record is opened to say so
+    else:
+        plan = _plan_one(Path(home_root), Path(target), store_dir.parent, digest, write=False)
+        if plan is None or store_dir.name not in plan.kept:
+            return None
+        kept = plan.kept[store_dir.name].path
+    return kept
+
+
+def stored_record(store_dir: Path, job_identity: str, *, home_root: Path, target: Path) -> Path:
+    """Where a job's record of one store IS: the per-job folder's file, or (a home that was not migrated, a job not
+    written since) the record a profile's folder holds for it (``role_record``).  With neither, the per-job path.
+
+    For READS.  A writer calls ``write_record`` and writes there.
+    """
+
+    path = job_store_dir(Path(store_dir)) / f"{job_digest(job_identity)}{RECORD_SUFFIX}"
+    if path.is_symlink() or path.exists():
+        return path
+    held = role_record(store_dir, job_identity, home_root=home_root, target=target)
+    return path if held is None else held
+
+
+def write_record(store_dir: Path, job_identity: str, *, home_root: Path, target: Path) -> Path:
+    """Where a job's record of one store is WRITTEN: always the per-job folder.  What the profiles' folders hold for
+    the job is copied there first (``adopt_job``), so the writer reads the job's record as it was and writes over a copy."""
+
+    adopt_job(home_root, target, job_identity)
+    return job_store_dir(Path(store_dir)) / f"{job_digest(job_identity)}{RECORD_SUFFIX}"
+
+
+def role_records(store_dir: Path, *, home_root: Path, target: Path) -> list[Path]:
+    """Every record of one store that only a profile's folder holds (``role_record`` of each such job): what a LIST of
+    the store adds to the per-job folder's own files on a home that was not migrated.  ``[]`` on a migrated one, for
+    the price of the folders' listings."""
+
+    store_dir = Path(store_dir)
+    try:
+        ours = {path.name for path in job_store_dir(store_dir).glob(f"*{RECORD_SUFFIX}")}
+    except OSError:
+        ours = set()
+    names: set[str] = set()
+    for folder in _role_folders(store_dir):
+        names.update(path.name for path in folder.glob(f"*{RECORD_SUFFIX}") if not path.name.endswith(PROPOSED_RESUME_SUFFIX))
+    found: list[Path] = []
+    for name in sorted(names - ours):
+        digest = name[: -len(RECORD_SUFFIX)]
+        files = _role_files(store_dir.parent, digest)
+        here = files.get(store_dir.name) or {}
+        holders = {profile_id for held in files.values() for profile_id in held}
+        if len(holders) == 1 and here:
+            found.append(next(iter(here.values())))
+            continue
+        plan = _plan_one(Path(home_root), Path(target), store_dir.parent, digest, write=False)
+        if plan is not None and store_dir.name in plan.kept:
+            found.append(plan.kept[store_dir.name].path)
+    return found
+
+
+def adopt_job(home_root: Path, target: Path, job_identity: str) -> bool:
+    """Before a job's first write: copy every record the profiles' folders hold for it into the per-job folders, as
+    ``migrate`` would (the same plan, the same copies, the jobs folder entry, the record's entry).  ``True`` when a
+    file was copied.  A job no profile holds, or one that is all there already, costs the folders' listings only.
+
+    Nothing in a profile's folder is changed and nothing in a per-job folder is replaced.  Raises
+    ``JobStoreMigrationError`` when a job several profiles hold cannot be decided (its applications cannot be read),
+    and ``OSError`` when a copy cannot be written: the caller's write then does not happen either.
+    """
+
+    home_root, target = Path(home_root), Path(target)
+    try:
+        project = project_id(home_root, target)
+    except Exception as exc:  # noqa: BLE001 - any refusal of the binding: there is no Scout project to write in
+        raise JobStoreMigrationError("target_unavailable", "this folder is not bound to a GigAI project") from exc
+    project_dir = home_root / "scout" / project
+    digest = job_digest(job_identity)
+    held = _role_files(project_dir, digest)
+    # Nothing to copy: no profile holds the job, or every store a profile holds it in has the job's own record already
+    # (a migrated home, a job written before). No record is opened and no application is read to find that out.
+    if all(_taken(job_store_dir(project_dir / store) / f"{digest}{RECORD_SUFFIX}") for store, found in held.items() if found):
+        return False
+    plan = _plan_one(home_root, target, project_dir, digest, write=True)
+    if plan is None:
+        return False
+    wrote = False
+    for copy in plan.copies:
+        if not _taken(copy.dest):
+            _write_copy(project_dir, plan, copy)
+            wrote = True
+    if not wrote:
+        return False
+    root = jobs_folder.jobs_folder(home_root).path
+
+    def entry() -> dict[str, str] | None:
+        index = jobs_folder._load_index(home_root, root)
+        folder, added = _index_entry(home_root, project, plan, index)
+        if added:
+            jobs_folder._save_index(home_root, root, index)
+        return folder
+
+    if root.is_dir() and not root.is_symlink():
+        with resumes_folder._folder_lock(root):  # read and written under the folder's own lock: a save beside it is not lost
+            folder = entry()
+    else:
+        folder = entry()
+    record = _load_record(home_root)
+    recorded = dict(record.get(project, {}))
+    recorded[plan.digest] = _entry(home_root, plan, folder)
+    _save_record(home_root, {**record, project: recorded})
+    return True
+
+
 __all__ = [
     "MIGRATE_COMMAND",
     "RECORD_SCHEMA",
@@ -650,8 +883,13 @@ __all__ = [
     "RULE_ORDER",
     "JobStoreMigrationError",
     "Migration",
+    "adopt_job",
     "choose",
     "migrate",
     "read_applied",
     "record_path",
+    "role_record",
+    "role_records",
+    "stored_record",
+    "write_record",
 ]

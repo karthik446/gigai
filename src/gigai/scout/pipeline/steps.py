@@ -382,9 +382,11 @@ class SharedInputs:
             self._base_dirs[profile_id] = path.parent if path.name == f"{_job_key(job)}.json" else None
             return _read_stored(path)
         directory = self._base_dirs[profile_id]
-        if directory is None:
-            return _read_stored(quick_assess_path(self._ctx.home_root, self._ctx.target, profile_id, job))
-        return _read_stored(directory / f"{_job_key(job)}.json")
+        if directory is not None and (directory / f"{_job_key(job)}.json").is_file():
+            return _read_stored(directory / f"{_job_key(job)}.json")
+        # Not in the folder the first job was read from (0.1.11.9: a home that was not migrated keeps a job nothing
+        # has written since in its role's folder), or no folder is kept: the store says where this job's is.
+        return _read_stored(quick_assess_path(self._ctx.home_root, self._ctx.target, profile_id, job))
 
     def job(self, profile_id: str, job: str) -> _Inputs | None:
         """The inputs last read for this job, so its four digests read its assessment once."""
@@ -663,11 +665,11 @@ def _tailor(ctx: StepContext, claim: Claim, found: _Inputs) -> StepResult:
         TailorRequest,
         run_tailored_resume,
         save_tailor_response,
-        tailored_resume_path,
         tailored_resume_write_lock,
+        tailored_resume_write_path,
     )
 
-    path = tailored_resume_path(ctx.home_root, ctx.target, claim.profile_id, found.job.job_identity)  # type: ignore[attr-defined]
+    path = tailored_resume_write_path(ctx.home_root, ctx.target, claim.profile_id, found.job.job_identity)  # type: ignore[attr-defined]
     _refuse_unreadable(path)  # before any model call
     users = _users_resume(ctx, claim, path)
     if users is not None:

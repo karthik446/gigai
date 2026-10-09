@@ -690,39 +690,42 @@ def _read_model_rows(home_root: Path, target: Path, jobs: Sequence[str]) -> dict
 
 
 def _stored_assessments(home_root: Path, target: Path, jobs: Sequence[str]) -> dict[str, dict[str, object]]:
-    """``job -> the newest stored assessment`` of each job no profile's list holds as assessed (assessed by its address).
+    """``job -> the job's stored assessment`` of each job no profile's list holds as assessed (assessed by its address).
 
-    ONE project lookup and ONE listing of the resume folders for all the jobs; then one file per (job, resume folder),
-    read only when it exists. Jobs with no profile assessment are left out. Same order and same pick as a per-job read
-    of every resume identity's item (newest ``updated_at`` first, a pasted resume skipped, an unassessed one skipped).
+    ONE project lookup and ONE listing of the store's folders for all the jobs; then one file per job, read only when
+    it exists. Jobs with no assessment are left out (a pasted resume's is not the job's; an unassessed one is skipped).
     """
 
     if not jobs:
         return {}
     from ...canonical import digest_imported_bytes
+    from ..job_store_layout import JOB_FOLDER, is_profile_folder
     from ..postings import stamp
     from ..quick_assess import _read_stored, quick_assess_path
     from .job_state import derive_job_state, quick_assessment_fact
 
-    by_key = quick_assess_path(home_root, target, None, jobs[0])  # raises when the folder is not bound: labels read nothing
+    store = quick_assess_path(home_root, target, None, jobs[0]).parent.parent  # raises when the folder is not bound: labels read nothing
     try:
-        folders = sorted(folder for folder in by_key.parent.parent.iterdir() if folder.is_dir())
+        # 0.1.11.9: a job's ONE assessment is in the store's per-job folder. A role's folder still holds it only on a
+        # home whose stores were not migrated, for a job nothing has written since.
+        roles = sorted(folder for folder in store.iterdir() if folder.is_dir() and is_profile_folder(folder.name))
     except OSError:
         return {}
     found: dict[str, dict[str, object]] = {}
     for job in jobs:
         name = digest_imported_bytes(job.encode("utf-8")).removeprefix("sha256:") + ".json"
-        items = [item for item in (_read_stored(folder / name) for folder in folders) if item is not None and item.job.job_identity == job]
-        items.sort(key=lambda item: (item.updated_at, item.stored_path), reverse=True)
-        for item in items:
-            profile_id = item.resume.profile_id
-            if not profile_id:
-                continue  # a pasted resume: not a profile's assessment
-            state = derive_job_state(assessments=(quick_assessment_fact(item),)).state
-            if state == _NOT_ASSESSED:
-                continue
-            found[job] = {"state": state, "profile_id": str(profile_id), "assessed_at": stamp(item.updated_at or item.created_at)}
-            break
+        path = store / JOB_FOLDER / name
+        if not path.is_file() and any((folder / name).is_file() for folder in roles):
+            from ..job_store_migration import role_record
+
+            path = role_record(store, job, home_root=home_root, target=target) or path
+        item = _read_stored(path)
+        if item is None or item.job.job_identity != job or not item.resume.profile_id:
+            continue
+        state = derive_job_state(assessments=(quick_assessment_fact(item),)).state
+        if state == _NOT_ASSESSED:
+            continue
+        found[job] = {"state": state, "profile_id": str(item.resume.profile_id), "assessed_at": stamp(item.updated_at or item.created_at)}
     return found
 
 

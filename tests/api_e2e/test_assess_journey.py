@@ -81,7 +81,7 @@ def test_assess_journey(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None
         assert a["result"]["verdict"] == "pending_user_answers"
         assert a["result"]["structured_questions"][0]["question_id"] == "cloud:gcp"
         assert a["resume"]["profile_id"], "the selected profile's resume must be the default"
-        assert a["preferences"]["titles"] == ["software engineer"]
+        assert a["preferences"]["titles"] == []  # 0.1.11.9: no role's titles go into a job's one assessment
         assert a["producer"]["model_target"] == "ollama_local"
         # uat-bug-014: the fetched public posting text is served; no rank score.
         assert a["posting_text"] == "Build reliable Python services."

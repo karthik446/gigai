@@ -137,7 +137,8 @@ def test_tailored_resumes_journey(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
         stored = Path(a["stored_path"])
         markdown = Path(a["markdown_path"])
         assert stored.is_file() and markdown.is_file() and markdown == stored.with_suffix(".md")
-        assert stored.parent.name == a["resume"]["profile_id"] and stored.parent.parent.name == "resumes"
+        # 0.1.11.9: the job's own folder; the role that asked is recorded inside.
+        assert stored.parent.name == "job" and stored.parent.parent.name == "resumes" and a["resume"]["profile_id"]
         assert markdown.read_text(encoding="utf-8") == a["markdown"]
         first_latency.assert_within_budget()
 

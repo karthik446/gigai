@@ -35,14 +35,15 @@ from gigai.scout import job_store_migration as migration
 from gigai.scout import jobs_folder, tailored_resume
 from gigai.scout.find_jobs.discovery.storage import project_id
 from gigai.scout.job_store_layout import JOB_FOLDER, job_digest
-from gigai.scout.quick_assess import _read_stored, job_quick_assess_path, list_quick_assessments, quick_assess_path
+from gigai.scout.quick_assess import _read_stored, job_quick_assess_path, list_quick_assessments
 from gigai.scout.resume_pdf import job_store_layout_path
 from gigai.scout.resumes_folder import job_key, job_store_key
-from gigai.scout.suggestions import job_suggestions_path, proposed_resume_path, suggestions_path
-from gigai.scout.tailored_resume import job_tailored_resume_path, list_tailored_resumes, tailored_resume_path
+from gigai.scout.suggestions import job_suggestions_path, proposed_resume_path
+from gigai.scout.tailored_resume import job_tailored_resume_path, list_tailored_resumes
 from gigai.workpad import committed_read_cache
 
 from tests.support.answers_stories_fixtures import RESUME, assess, install_model, pending, two_profiles
+from tests.support.job_store_fixtures import role_folders, role_path, to_role_folder
 from tests.support.scout_profile_fixtures import ProfileFixtureGig, build_gig_with_resume
 
 _DAY1 = "2026-10-06T10:00:00.000000Z"
@@ -73,14 +74,14 @@ class Home:
         self.folders: dict[str, dict[str, object]] = {}
 
     def assessed(self, profile: str | None, job: str, at: str) -> Path:
-        path = quick_assess_path(self.home, self.target, profile, job)
+        path = role_path(self.home, self.target, "quick_assess", profile, job)
         _write(path, {
             "job": {"job_identity": job, "title": "Staff Engineer"}, "created_at": _DAY1, "updated_at": at, "stored_path": str(path),
             "resume": {"profile_id": profile}, "result": {"verdict": "matched_above_threshold", "matrix": []},
         })
         if profile is not None:
-            record = suggestions_path(self.home, self.target, profile, job)
-            resume = tailored_resume_path(self.home, self.target, profile, job)
+            record = role_path(self.home, self.target, "suggestions", profile, job)
+            resume = role_path(self.home, self.target, "resumes", profile, job)
             _write(record, {
                 "job_identity": job, "profile_id": profile, "created_at": at, "updated_at": at, "stored_path": str(record),
                 "basis": {"assessment": {"stored_path": str(path), "assessed_at": at}},
@@ -89,12 +90,12 @@ class Home:
         return path
 
     def resume(self, profile: str, job: str, at: str, *, user_line: bool = False, spacing: int | None = None) -> Path:
-        path = tailored_resume_path(self.home, self.target, profile, job)
+        path = role_path(self.home, self.target, "resumes", profile, job)
         _write(path, {
             "job": {"job_identity": job, "title": "Staff Engineer"}, "created_at": _DAY1, "updated_at": at,
             "stored_path": str(path), "markdown_path": str(path.with_suffix(".md")),
             "resume": {"profile_id": profile},
-            "sources": {"assessment_stored_path": str(quick_assess_path(self.home, self.target, profile, job))},
+            "sources": {"assessment_stored_path": str(role_path(self.home, self.target, "quick_assess", profile, job))},
             "result": {"sections": [{"lines": [{"text": "Built the platform.", "origin": "user" if user_line else "resume"}]}]},
             "selection": {"pins": [], "excludes": [], "picked_by": "model"},
         })
@@ -139,9 +140,10 @@ def home(tmp_path: Path) -> Home:
     built.save_index()
 
     # only_b's suggestion record has a proposed resume waiting beside it.
-    record = suggestions_path(built.home, built.target, b, JOBS["only_b"])
+    record = role_path(built.home, built.target, "suggestions", b, JOBS["only_b"])
     sidecar = proposed_resume_path(record)
-    _write(sidecar, {"job": {"job_identity": JOBS["only_b"]}, "stored_path": str(sidecar), "markdown_path": str(only_b.with_suffix(".md")), "updated_at": _DAY2})
+    # (As the product writes it: the waiting resume names the STORED resume's paths, where taking it writes it.)
+    _write(sidecar, {"job": {"job_identity": JOBS["only_b"]}, "stored_path": str(only_b), "markdown_path": str(only_b.with_suffix(".md")), "updated_at": _DAY2})
     value = json.loads(record.read_bytes())
     value["proposed"] = {"resume": {"stored_path": str(sidecar), "origin": "pick"}}
     _write(record, value)
@@ -190,7 +192,7 @@ def test_the_path_helpers_name_the_per_job_folder(home: Home) -> None:
     assert job_store_layout_path(home.home, home.target, job) == home.project_dir / "resumes" / "job" / f"{digest}.layout"
     assert job_suggestions_path(home.home, home.target, job) == home.project_dir / "suggestions" / "job" / f"{digest}.json"
     # The file name does not change: only the folder does.
-    assert job_quick_assess_path(home.home, home.target, job).name == quick_assess_path(home.home, home.target, home.a, job).name
+    assert job_quick_assess_path(home.home, home.target, job).name == role_path(home.home, home.target, "quick_assess", home.a, job).name
     assert job_store_key(home.project, job) == job_key(home.home, job_tailored_resume_path(home.home, home.target, job)) == f"{home.project}/resumes/job/{digest}"
 
 
@@ -306,7 +308,11 @@ def test_the_paths_inside_the_copies_resolve(home: Home) -> None:
     # The proposed resume beside only_b's record went with it, and the record names the copy.
     sidecar = proposed_resume_path(home.job_file("suggestions", "only_b"))
     assert json.loads(home.job_file("suggestions", "only_b").read_bytes())["proposed"]["resume"]["stored_path"] == str(sidecar)
-    assert json.loads(sidecar.read_bytes())["stored_path"] == str(sidecar)
+    # The waiting resume names the job's STORED resume (where taking it writes it), not its own file (0.1.11.9 PJ2:
+    # the first copy named the sidecar itself, and ``use_proposed`` would have written the resume there).
+    waiting = json.loads(sidecar.read_bytes())
+    assert waiting["stored_path"] == str(home.job_file("resumes", "only_b"))
+    assert waiting["markdown_path"] == str(home.job_file("resumes", "only_b", ".md"))
     # No copy names a profile's folder any more.
     for path in home.project_dir.rglob(f"{JOB_FOLDER}/*.json"):
         text = path.read_text(encoding="utf-8")
@@ -346,7 +352,7 @@ def test_the_jobs_folder_index_gets_one_entry_per_job_and_keeps_the_others(home:
     assert {key: after[key] for key in before} == before
     added = {key: entry for key, entry in after.items() if key not in before}
     assert sorted(added) == sorted(job_store_key(home.project, JOBS[name]) for name in ("applied", "edited", "one_resume", "spacing", "only_b"))
-    winner = job_key(home.home, tailored_resume_path(home.home, home.target, home.a, JOBS["applied"]))
+    winner = job_key(home.home, role_path(home.home, home.target, "resumes", home.a, JOBS["applied"]))
     assert added[job_store_key(home.project, JOBS["applied"])] == before[winner]
     # The job's entry is found the way a reader of the per-job store will look it up.
     assert jobs_folder._load_index(home.home, jobs_folder.jobs_folder(home.home).path)[job_key(home.home, home.job_file("resumes", "applied"))] == before[winner]
@@ -395,18 +401,23 @@ def test_the_command_refuses_a_folder_that_is_no_scout_project(tmp_path: Path) -
     assert list(empty.iterdir()) == []  # never creates a Scout project
 
 
-def test_an_unfiltered_list_does_not_show_a_migrated_job_twice(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Real stored assessments (a scripted model): the per-job copy parses as one, and every profile's list leaves it out."""
+def test_a_list_shows_a_job_once_before_and_after_the_migration(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Real stored assessments (a scripted model), left as a GigAI before 0.1.11.9 left them: one in each role's folder.
+    A list shows the job ONCE: the record the migration would keep, read in place; after it, the per-job copy."""
 
     fx = build_gig_with_resume(tmp_path, resume_text=RESUME)
     a, b = two_profiles(fx)
     install_model(monkeypatch, [pending("cloud:gcp", "GCP?"), pending("cloud:gcp", "GCP?")])
     text = "Staff Engineer at Acme. 5+ years of Python. You know the platform."
-    first = assess(fx, a, text, title="Staff Engineer")
+    job = assess(fx, a, text, title="Staff Engineer").job.job_identity
+    to_role_folder(fx.home_root, fx.target, a, job)
     assess(fx, b, text, title="Staff Engineer")
-    job = first.job.job_identity
+    (newest,) = [path for path in to_role_folder(fx.home_root, fx.target, b, job) if path.parent.parent.name == "quick_assess"]
+    before = role_folders(fx.home_root, fx.target)
+
     listed = list_quick_assessments(fx.home_root, fx.target)
-    assert len(listed) == 2
+    assert [item.stored_path for item in listed] == [str(newest)]  # two roles hold it, no resume: the newest assessment's
+    assert listed[0].resume.profile_id == b
 
     with committed_read_cache():
         report = migration.migrate(fx.home_root, fx.target, apply=True)
@@ -414,15 +425,16 @@ def test_an_unfiltered_list_does_not_show_a_migrated_job_twice(tmp_path: Path, m
     copy = job_quick_assess_path(fx.home_root, fx.target, job)
     stored = _read_stored(copy)
     assert stored is not None and stored.stored_path == str(copy) and stored.job.job_identity == job
-    assert stored.result == next(item for item in listed if item.resume.profile_id == stored.resume.profile_id).result
+    assert stored.result == listed[0].result
 
     after = list_quick_assessments(fx.home_root, fx.target)
-    assert [item.stored_path for item in after] == [item.stored_path for item in listed]
-    assert len(list_quick_assessments(fx.home_root, fx.target, profile_id=a)) == 1
+    assert [item.stored_path for item in after] == [str(copy)]
+    # A role's id no longer narrows: the job's one assessment, whichever role is named.
+    assert [item.stored_path for item in list_quick_assessments(fx.home_root, fx.target, profile_id=a)] == [str(copy)]
+    assert role_folders(fx.home_root, fx.target) == before
 
 
-def test_an_unfiltered_resume_list_leaves_the_job_folder_out(home: Home, monkeypatch: pytest.MonkeyPatch) -> None:
-    home.apply()
+def test_a_resume_list_reads_the_kept_resume_of_each_job(home: Home, monkeypatch: pytest.MonkeyPatch) -> None:
     seen: list[Path] = []
 
     def read(path: Path) -> object:
@@ -430,6 +442,12 @@ def test_an_unfiltered_resume_list_leaves_the_job_folder_out(home: Home, monkeyp
         return SimpleNamespace(job=SimpleNamespace(job_identity=JOBS["applied"]), updated_at=_DAY1, stored_path=str(path))
 
     monkeypatch.setattr(tailored_resume, "_read_stored", read)
-    items = list_tailored_resumes(home.home, home.target)
-    assert len(items) == 8  # the profiles' eight; the five copies in resumes/job are not listed
-    assert seen and all(path.parent.name in (home.a, home.b) for path in seen)
+    kept = {"applied": home.a, "edited": home.a, "one_resume": home.a, "spacing": home.b, "only_b": home.b}
+    # Not migrated: one resume a job, the one the migration would keep, read where its role's folder holds it.
+    with committed_read_cache():
+        assert len(list_tailored_resumes(home.home, home.target)) == 5
+    assert sorted(seen) == sorted(role_path(home.home, home.target, "resumes", profile, JOBS[name]) for name, profile in kept.items())
+    seen.clear()
+    home.apply()
+    assert len(list_tailored_resumes(home.home, home.target)) == 5
+    assert sorted(seen) == sorted(home.job_file("resumes", name) for name in kept)  # migrated: the per-job folder alone

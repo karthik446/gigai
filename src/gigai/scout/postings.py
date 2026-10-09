@@ -390,6 +390,18 @@ def _scout_root(home_root: Path, target: Path) -> Path:
     return pipeline_path(home_root, target).parent.parent
 
 
+def _job_store_folders(store: Path) -> list[Path]:
+    """The folders of one store that hold a JOB's record: the per-job folder, and every role's (a home whose stores
+    were not migrated keeps a job nothing has written since there).  Never a pasted resume's."""
+
+    from .job_store_layout import EPHEMERAL_FOLDER
+
+    try:
+        return sorted(folder for folder in store.iterdir() if folder.name != EPHEMERAL_FOLDER and folder.is_dir())
+    except OSError:
+        return []
+
+
 def _facts_stamp(home_root: Path, target: Path, view: ProfileView, rank_model: str | None) -> str:
     from .assessment_basis import _watched_files
     from .find_jobs.model_rank import PROMPT_VERSION, cache_dir
@@ -401,6 +413,9 @@ def _facts_stamp(home_root: Path, target: Path, view: ProfileView, rank_model: s
     stores = [
         _stat(root / name / view.profile_id) for name in ("quick_assess", "resumes", "label", "ats", "quick_assess_tailored")
     ]
+    # 0.1.11.9 PJ2: a job's assessment and resume are in the store's per-job folder (and, on a home that was not
+    # migrated, still in ANY role's folder): every folder of those two stores counts.
+    stores += [_stat(folder) for name in ("quick_assess", "resumes") for folder in _job_store_folders(root / name)]
     try:
         watched = [_stat(path) for path in _watched_files(home_root, target)]
     except Exception:  # noqa: BLE001 - an unbound folder has nothing to watch; the stores' own stamps still count
@@ -468,8 +483,10 @@ class _Facts:
         self._run_latest = run_latest or {}
         root = _scout_root(home_root, target)
         self._fit = fit_setting(home_root, target, path=root / SETTINGS_FILENAME)
-        self._assessed = _stored_names(root / "quick_assess" / view.profile_id)
-        self._tailored = _stored_names(root / "resumes" / view.profile_id)
+        # 0.1.11.9 PJ2: the JOB's assessment and resume, whichever role's row this is (path lines only; which
+        # jobs a role's list holds is unchanged).
+        self._assessed = frozenset().union(*(_stored_names(folder) for folder in _job_store_folders(root / "quick_assess")))
+        self._tailored = frozenset().union(*(_stored_names(folder) for folder in _job_store_folders(root / "resumes")))
         self._labelled = _stored_names(root / "label" / view.profile_id)
         # ``events={}``: application events are journal records, read when a response is built, not cached here.
         self._sources = JobStateSources(home_root=home_root, target=target, resolved=resolved, events={})

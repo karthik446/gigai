@@ -171,7 +171,7 @@ def test_post_assess_then_get_assessments(running_server, ollama_config, monkeyp
     assert "text" not in body["job"] and body["job"]["text_sha256"].startswith("sha256:")
     assert body["preferences"] == {
         "visa_sponsorship_required": False,
-        "titles": ["staff ai engineer", "principal machine learning engineer"],
+        "titles": [],  # 0.1.11.9: no role's titles go into a job's one assessment
         "countries": ["US"],
     }
     assert body["producer"]["callable"] == "scout.assess" and body["producer"]["model_target"] == "ollama_local"
@@ -182,8 +182,8 @@ def test_post_assess_then_get_assessments(running_server, ollama_config, monkeyp
     # Never the resume or job text on the wire.
     assert "six years" not in response.text.replace('"six years"', "")  # the model's evidence quote is allowed
     assert _POSTING not in response.text and "Fixture Resume" not in response.text
-    # The MUST: countries (find-jobs.json) and titles (profile) reached the prompt.
-    assert "US" in binding.port.prompts[0] and "principal machine learning engineer" in binding.port.prompts[0]
+    # The MUST: the countries (find-jobs.json) reached the prompt. 0.1.11.9: no role's titles do.
+    assert "US" in binding.port.prompts[0] and "principal machine learning engineer" not in binding.port.prompts[0]
 
     second = client.post(
         "/api/assess",
@@ -206,7 +206,9 @@ def test_post_assess_then_get_assessments(running_server, ollama_config, monkeyp
     assert [item["stored_path"] for item in ephemeral["items"]] == [second.json()["stored_path"]]
     matched = client.get("/api/assessments", params={"verdict": "matched_above_threshold"}).json()
     assert [item["stored_path"] for item in matched["items"]] == [second.json()["stored_path"]]
-    assert client.get("/api/assessments", params={"profile_id": "profile_nobody"}).json()["items"] == []
+    # 0.1.11.9: a role's id leaves the pasted-resume ones out and narrows no further (a job's assessment is not one role's).
+    nobody = client.get("/api/assessments", params={"profile_id": "profile_nobody"}).json()
+    assert [item["stored_path"] for item in nobody["items"]] == [body["stored_path"]]
     _assert_error(client.get("/api/assessments", params={"profile_id": "../../etc"}), status=422, code="invalid_value")
 
 

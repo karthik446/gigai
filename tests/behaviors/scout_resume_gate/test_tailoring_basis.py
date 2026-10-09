@@ -39,7 +39,7 @@ from gigai.scout.find_jobs.api import static as static_module
 from gigai.scout.find_jobs.api.master import selection_response
 from gigai.scout.find_jobs.contracts import PinnedResume
 from gigai.scout.resume_import import import_resume_file
-from gigai.scout.tailored_resume import list_tailored_resumes
+from gigai.scout.tailored_resume import list_tailored_resumes, read_tailored_resume
 from gigai.scout.target_resolution import home_scout_target
 from gigai.workpad import resolve_workpad
 
@@ -187,6 +187,8 @@ def test_the_header_the_line_under_it_and_every_status_name_the_basis_the_tailor
 
     said: dict[str, dict] = {}
     read_by: dict[str, bool] = {}
+    # 0.1.11.9: a job has ONE stored resume, so each case's is read right after its tailoring (the next case replaces it).
+    stored_by: dict[str, object] = {}
     problems: list[str] = []
     for name, expected in CASES:
         profile_id = home.ids.get(name)
@@ -204,6 +206,7 @@ def test_the_header_the_line_under_it_and_every_status_name_the_basis_the_tailor
         assert read_the_master == (expected == MASTER), f"{name}: the tailor call read {reading}"
 
         # --- what the stored resume RECORDS ---
+        stored_by[name] = read_tailored_resume(Path(on_disk["stored_path"]))
         recorded = on_disk["sources"].get("master")
         assert (recorded is not None) == read_the_master, f"{name}: sources.master must say what was read"
         assert ("selection" in on_disk) == read_the_master and bool(_item_ids(on_disk)) == read_the_master
@@ -239,7 +242,8 @@ def test_the_header_the_line_under_it_and_every_status_name_the_basis_the_tailor
 
     for name, expected in CASES:
         profile_id = home.ids.get(name)
-        stored = next(item for item in list_tailored_resumes(home.home, home.scout) if item.resume.profile_id == profile_id)
+        stored = stored_by[name]
+        assert stored is not None and stored.resume.profile_id == profile_id
         assert said[name]["basis"] == tailor_master.recorded_basis(stored) == expected
         if expected == MASTER:
             assert said[name]["header"] == f"from your master resume (revision {master['revision']}), picked for profile {home.labels[profile_id]}"

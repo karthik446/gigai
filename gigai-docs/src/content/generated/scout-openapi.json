@@ -237,7 +237,7 @@
         ]
       },
       "post": {
-        "description": "Save an answer; with reassess the job is assessed again. Answers 201 with the saved `answer`. Storing it is local; the model runs only when `reassess` is given. `reassess.profile_id` (0.1.11.6) names the profile the new assessment is made for and stored under; a job page sends its own. Left out, the one profile that has assessed the job is taken; a job assessed for more than one active profile answers 409 reassess_profile_required, and an unknown id 404 profile_not_found, both before anything is saved. The answer is the user's: every profile's later assessment reuses it, for the same question id and for the same fact worded differently. A new id creates the answer; an existing id replaces its text (send `revision` to be safe against another writer: 409 revision_conflict carries the current `answer`). Text holding an email, phone, link or street address is refused with 422 personal_info_refused. Example, an agent saves a factual reply from a chat and the next posting that asks it is not asked again: POST this route with the request example; then POST /api/assess for another posting that requires GCP: the answer has no question for it and its resume_evidence reads `Story bank cloud:gcp: ...`. 0.1.10.7: the write also queues the background pipeline (tailored resume, assessment against it, Scout ATS score, Scout label) for every job of an active profile whose stored assessment left open a question this answers; at most `pipeline.auto_jobs_per_trigger` (10) jobs run, the rest wait for an approval (GET /api/pipeline/approvals). The pipeline's tailoring replaces only a tailored resume the pipeline itself made: one tailored on demand (POST /api/tailored-resumes) or with a line chosen or edited (PUT /api/tailored-resumes/lines) is kept as it is, its `updated_at` unchanged, and the assessment, the Scout ATS score and the Scout label are made against it. Read what was queued with GET /api/pipeline.",
+        "description": "Save an answer; with reassess the job is assessed again. Answers 201 with the saved `answer`. Storing it is local; the model runs only when `reassess` is given. A job has one assessment (0.1.11.9) and `reassess` replaces it. `reassess.profile_id` is optional and picks no record: it is the role recorded on the new assessment (left out: the selected role); an unknown id answers 404 profile_not_found before anything is saved. The answer is the user's: every later assessment reuses it, for the same question id and for the same fact worded differently. A new id creates the answer; an existing id replaces its text (send `revision` to be safe against another writer: 409 revision_conflict carries the current `answer`). Text holding an email, phone, link or street address is refused with 422 personal_info_refused. Example, an agent saves a factual reply from a chat and the next posting that asks it is not asked again: POST this route with the request example; then POST /api/assess for another posting that requires GCP: the answer has no question for it and its resume_evidence reads `Story bank cloud:gcp: ...`. 0.1.10.7: the write also queues the background pipeline (tailored resume, assessment against it, Scout ATS score, Scout label) for every job of an active profile whose stored assessment left open a question this answers; at most `pipeline.auto_jobs_per_trigger` (10) jobs run, the rest wait for an approval (GET /api/pipeline/approvals). The pipeline's tailoring replaces only a tailored resume the pipeline itself made: one tailored on demand (POST /api/tailored-resumes) or with a line chosen or edited (PUT /api/tailored-resumes/lines) is kept as it is, its `updated_at` unchanged, and the assessment, the Scout ATS score and the Scout label are made against it. Read what was queued with GET /api/pipeline.",
         "operationId": "post_api_answers",
         "parameters": [],
         "requestBody": {
@@ -278,7 +278,7 @@
                     "type": "string"
                   },
                   "reassess": {
-                    "description": "`{\"job_identity\": \"<id>\", \"profile_id\": \"<id>\"}`: a job to assess again with the answer, and the profile to assess it for (optional: left out, the one profile that has assessed the job).",
+                    "description": "`{\"job_identity\": \"<id>\", \"profile_id\": \"<id>\"}`: a job to assess again with the answer (it has one assessment, which this replaces). `profile_id` is optional and picks no record: the role recorded on the new assessment (left out: the selected role).",
                     "type": "object"
                   },
                   "revision": {
@@ -399,7 +399,7 @@
                 }
               }
             },
-            "description": "revision_conflict, reassess_profile_required"
+            "description": "revision_conflict"
           },
           "415": {
             "content": {
@@ -1450,7 +1450,7 @@
         "operationId": "get_api_assessments",
         "parameters": [
           {
-            "description": "Only this resume identity.",
+            "description": "\"ephemeral\": only the pasted-resume assessments. A role id leaves those out and narrows no further (0.1.11.9: a job has one assessment, whichever role asked for it).",
             "in": "query",
             "name": "profile_id",
             "required": false,
@@ -1914,7 +1914,7 @@
                     "type": "string"
                   },
                   "profile_id": {
-                    "description": "The profile. Default: the profile whose assessment of the job is newest.",
+                    "description": "Optional and picks nothing (0.1.11.9: a job has one assessment, one suggestion record and one resume, whichever role asked).",
                     "type": "string"
                   }
                 },
@@ -2363,7 +2363,7 @@
         "operationId": "get_api_jobs_folder",
         "parameters": [
           {
-            "description": "With job_identity: add `job`, that job's own folder and the names of its files.",
+            "description": "Optional (0.1.11.9: the job names its folder); taken with job_identity and picks nothing.",
             "in": "query",
             "name": "profile_id",
             "required": false,
@@ -2372,7 +2372,7 @@
             }
           },
           {
-            "description": "With profile_id: the job.",
+            "description": "The job: adds `job`, that job's own folder and the names of its files.",
             "in": "query",
             "name": "job_identity",
             "required": false,
@@ -2596,11 +2596,11 @@
                 "additionalProperties": false,
                 "properties": {
                   "job_identity": {
-                    "description": "Optional: the job's identity (the page's own).",
+                    "description": "Optional: the job whose folder to open (the page's own identity). Without it, the jobs folder itself is opened.",
                     "type": "string"
                   },
                   "profile_id": {
-                    "description": "Optional: with job_identity, the job whose folder to open. Without both, the jobs folder itself is opened.",
+                    "description": "Optional; taken with job_identity and picks nothing (0.1.11.9: the job names its folder).",
                     "type": "string"
                   }
                 },
@@ -2933,7 +2933,7 @@
             }
           },
           {
-            "description": "The profile. Default: the profile whose assessment of the job is newest.",
+            "description": "Optional and picks nothing (0.1.11.9: a job has one assessment, one suggestion record and one resume, whichever role asked).",
             "in": "query",
             "name": "profile_id",
             "required": false,
@@ -3169,7 +3169,7 @@
                     "type": "string"
                   },
                   "profile_id": {
-                    "description": "The profile. Default: the profile whose assessment of the job is newest.",
+                    "description": "Optional and picks nothing (0.1.11.9: a job has one assessment, one suggestion record and one resume, whichever role asked).",
                     "type": "string"
                   },
                   "ref": {
@@ -11089,7 +11089,7 @@
         "operationId": "get_api_resumes_folder",
         "parameters": [
           {
-            "description": "With job_identity: add `files`, the names of that job's files in the folder.",
+            "description": "Optional (0.1.11.9: the job names its files); taken with job_identity and picks nothing.",
             "in": "query",
             "name": "profile_id",
             "required": false,
@@ -11098,7 +11098,7 @@
             }
           },
           {
-            "description": "With profile_id: the job.",
+            "description": "The job: adds `files`, the names of that job's files in the folder.",
             "in": "query",
             "name": "job_identity",
             "required": false,
@@ -14862,7 +14862,7 @@
         "operationId": "get_api_tailored_resumes",
         "parameters": [
           {
-            "description": "Only this resume identity.",
+            "description": "\"ephemeral\": only the pasted-resume ones. A role id leaves those out and narrows no further (0.1.11.9: a job has one resume).",
             "in": "query",
             "name": "profile_id",
             "required": false,
@@ -15336,7 +15336,7 @@
                     "type": "string"
                   },
                   "profile_id": {
-                    "description": "The resume identity.",
+                    "description": "Optional (0.1.11.9: a job has one resume, and the job names it). Still taken from callers of before; \"ephemeral\" names a pasted resume's.",
                     "type": "string"
                   },
                   "updated_at": {
@@ -15353,7 +15353,6 @@
                   }
                 },
                 "required": [
-                  "profile_id",
                   "job_identity",
                   "updated_at",
                   "use"
@@ -15500,7 +15499,7 @@
                     "type": "string"
                   },
                   "profile_id": {
-                    "description": "The resume identity.",
+                    "description": "Optional (0.1.11.9: a job has one resume, and the job names it). Still taken from callers of before; \"ephemeral\" names a pasted resume's.",
                     "type": "string"
                   },
                   "text": {
@@ -15522,7 +15521,6 @@
                   }
                 },
                 "required": [
-                  "profile_id",
                   "job_identity",
                   "updated_at",
                   "line_id",
@@ -15666,7 +15664,7 @@
                     "type": "string"
                   },
                   "profile_id": {
-                    "description": "The resume identity.",
+                    "description": "Optional (0.1.11.9: a job has one resume, and the job names it). Still taken from callers of before; \"ephemeral\" names a pasted resume's.",
                     "type": "string"
                   },
                   "spacing_scale": {
@@ -15675,7 +15673,6 @@
                   }
                 },
                 "required": [
-                  "profile_id",
                   "job_identity"
                 ],
                 "type": "object"
@@ -15801,7 +15798,7 @@
                     "type": "string"
                   },
                   "profile_id": {
-                    "description": "The resume identity.",
+                    "description": "Optional (0.1.11.9: a job has one resume, and the job names it). Still taken from callers of before; \"ephemeral\" names a pasted resume's.",
                     "type": "string"
                   },
                   "spacing_scale": {
@@ -15810,7 +15807,6 @@
                   }
                 },
                 "required": [
-                  "profile_id",
                   "job_identity"
                 ],
                 "type": "object"
@@ -15965,7 +15961,7 @@
                     "type": "string"
                   },
                   "profile_id": {
-                    "description": "The resume identity.",
+                    "description": "Optional (0.1.11.9: a job has one resume, and the job names it). Still taken from callers of before; \"ephemeral\" names a pasted resume's.",
                     "type": "string"
                   },
                   "updated_at": {
@@ -15982,7 +15978,6 @@
                   }
                 },
                 "required": [
-                  "profile_id",
                   "job_identity",
                   "updated_at",
                   "use",

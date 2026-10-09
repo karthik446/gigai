@@ -224,8 +224,10 @@ def test_brief_out_writes_the_part_to_the_named_file_only(fx: PipelineFixture, t
 def test_brief_needs_a_stored_assessment_and_a_posting_link(fx: PipelineFixture) -> None:
     missing = _refused(fx, "resume", "brief", "--job-url", "https://jobs.example.test/acme/never-assessed")
     assert missing["code"] == "assessment_missing" and "gigai scout jobs assess" in str(missing["message"])
-    other = _refused(fx, "resume", "brief", "--job-url", JOB, "--profile", "profile_00000000-0000-4000-8000-00000000dead")
-    assert other["code"] == "assessment_missing"
+    # 0.1.11.9: a job has ONE assessment, and a role's id picks no record: naming a role that never assessed the job
+    # (0.1.11: `assessment_missing` "for profile ...") reads the job's own brief. (PJ3 decides what `--profile` is for.)
+    named = _ok(fx, "resume", "brief", "--job-url", JOB, "--profile", "profile_00000000-0000-4000-8000-00000000dead")
+    assert named == _ok(fx, "resume", "brief", "--job-url", JOB)
     assert _refused(fx, "resume", "brief", "--job-url", "not a link")["code"] == "invalid_value"
 
 

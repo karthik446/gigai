@@ -181,7 +181,10 @@ def test_a_the_trigger_is_off_with_the_pipeline_and_never_reaches_a_pasted_resum
     monkeypatch.delenv(PIPELINE_ENV)
 
     fired = _save_answer(fx, answer=_ANSWER + " And Terragrunt.")["pipeline"]
-    assert [item["profile_id"] for item in fired["enqueued"]] == [default]  # the archived profile's pair is left out
+    # 0.1.11.9: the job has ONE assessment, and the role on it (the one that asked last) is archived: the job is
+    # queued ONCE, for the selected role, never for the archived one. (0.1.11.8: each role had its own assessment and
+    # the archived role's pair was left out.)
+    assert [item["profile_id"] for item in fired["enqueued"]] == [default]
 
 
 # --- (b) a story about A's open question re-opens A, not B ---------------------------------------------------
@@ -313,10 +316,11 @@ def test_c_denying_an_approval_cancels_its_jobs_with_no_model_call_and_process_n
 
 def test_d_the_41st_model_call_of_the_day_waits_and_two_profiles_share_the_counter(fx: PipelineFixture) -> None:
     default, second = two_profiles(fx.gig)
-    job = _job(1)
-    _ask(fx, job, profile_id=default)
-    _ask(fx, job, profile_id=second)
-    for profile_id in (default, second):
+    # 0.1.11.9: one job each. (Two roles on the SAME job tailor it once now: the job has one resume, and the second
+    # role's tailor step keeps it with no model call, so that home never reached a 41st call.)
+    jobs = {default: _job(1), second: _job(2)}
+    for profile_id, job in jobs.items():
+        _ask(fx, job, profile_id=profile_id)
         assert triggers.process_now(fx.home_root, fx.target, profile_id, job)["result"] == "enqueued"
     today = datetime(2026, 10, 3, 11, 0).astimezone()
     day = today.date().isoformat()
@@ -347,7 +351,7 @@ def test_d_the_41st_model_call_of_the_day_waits_and_two_profiles_share_the_count
     tomorrow = today + timedelta(days=1)
     later = _runner(fx, now=lambda: tomorrow, clock=lambda: tomorrow.timestamp(), workers=1).drain()
     assert later.state == DRAIN_RAN and later.model_calls == 1
-    assert _steps(fx, job, default) == _DONE and _steps(fx, job, second) == _DONE
+    assert _steps(fx, jobs[default], default) == _DONE and _steps(fx, jobs[second], second) == _DONE
 
 
 def test_d_the_rank_counter_is_one_for_the_install_warns_past_60_and_stops_at_100(fx: PipelineFixture) -> None:
@@ -565,7 +569,12 @@ def _entry(fx: PipelineFixture):
 # --- (d of the change) a profile's settings change re-opens only that profile's steps, by digest ------------
 
 
-def test_a_profiles_settings_change_reopens_only_that_profiles_steps_by_digest(fx: PipelineFixture) -> None:
+def test_a_roles_own_search_settings_change_reopens_nothing(fx: PipelineFixture) -> None:
+    """0.1.11.9: ONE set of candidate facts. A role's own location, work mode and countries are search filters only;
+    no assessment reads them, so changing them re-opens no step of either role. (0110-022 to 0.1.11.8: that role's
+    re-assessments re-opened. That a changed CANDIDATE setting re-opens the re-assessment and not the tailoring is
+    the next test's.)"""
+
     default, second = two_profiles(fx.gig)
     job = _job(1)
     for profile_id in (default, second):
@@ -581,21 +590,10 @@ def test_a_profiles_settings_change_reopens_only_that_profiles_steps_by_digest(f
     )
     assert updated.exit_code == 0, updated.output
 
-    # The profile's own candidate settings changed: the re-assessment reads them, so that profile's job re-opens
-    # from there. Not from the tailoring (0.1.10.7 fix1): its digest holds what changes the tailored text, and
-    # the profile record's revision is not part of it.
-    assert _steps(fx, job, second) == {"tailor": "done", "reassess": "ready", "ats": "done", "label": "blocked"}
-    assert _steps(fx, job, default) == _DONE  # the other profile: untouched
-    # The steps that re-opened say why; the tailoring and the ATS score were not touched.
-    assert {step.name: step.trigger for step in _all_steps(fx) if step.profile_id == second} == {
-        "tailor": "process_now", "reassess": "profile_changed", "ats": "process_now", "label": "profile_changed",
-    }
-    assert {step.trigger for step in _all_steps(fx) if step.profile_id == default} == {"process_now"}
-    assert fx.model.calls == calls  # the update itself called no model
-
-    assert _runner(fx).drain().state == DRAIN_RAN
-    assert _steps(fx, job, second) == _DONE and fx.model.calls == calls + 1  # one re-assessment, no second tailoring
-    assert triggers.profile_changed(fx.home_root, fx.target).state == "nothing"  # done with the inputs as they are
+    assert _steps(fx, job, second) == _DONE and _steps(fx, job, default) == _DONE
+    assert {step.trigger for step in _all_steps(fx)} == {"process_now"}  # nothing was re-opened by the update
+    assert triggers.profile_changed(fx.home_root, fx.target).state == "nothing"
+    assert _runner(fx).drain().state == DRAIN_IDLE and fx.model.calls == calls  # nothing to run, no model call
 
 
 def test_a_changed_candidate_setting_reopens_the_reassessment_and_not_the_tailoring(fx: PipelineFixture, monkeypatch: pytest.MonkeyPatch) -> None:

@@ -69,7 +69,7 @@ from .tailored_resume import (
     list_tailored_resumes,
     render_markdown,
     save_tailor_response,
-    tailored_resume_path,
+    tailored_resume_write_path,
     tailored_resume_write_lock,
 )
 
@@ -389,10 +389,12 @@ def change_stored_selection(
     def newest() -> TailorResponse:
         items = list_tailored_resumes(home_root, target, profile_id=profile_id, job_identity=job_identity)
         if not items:
-            raise TailorError("tailored_resume_not_found", "no stored tailored resume for that profile and job")
+            raise TailorError("tailored_resume_not_found", "no stored tailored resume for that job")
         return items[0]
 
-    with tailored_resume_write_lock(tailored_resume_path(home_root, target, profile_id, job_identity)):
+    # 0.1.11.9: the job's own resume, whichever role the caller names, or none (``newest`` says whether it is a pasted
+    # resume's).  Read again under the lock: a tailoring that landed meanwhile is never written over.
+    with tailored_resume_write_lock(tailored_resume_write_path(home_root, target, newest().resume.profile_id, job_identity)):
         stored = newest()
         if updated_at is not None and stored.updated_at != updated_at:
             raise TailorError("tailored_resume_changed", "a newer tailoring replaced this resume; reload it")

@@ -149,7 +149,8 @@ def test_assess_pasted_job_prints_verdict_matrix_questions_and_path(tmp_path: Pa
     stored_line = next(line for line in result.output.splitlines() if line.strip().startswith("Stored at "))
     stored = Path(stored_line.split("Stored at ", 1)[1].strip())
     assert stored.is_file() and stored.parent.parent.name == "quick_assess"
-    assert "staff ai engineer" in binding.port.prompts[0]  # the selected profile's titles reached the prompt
+    # 0.1.11.9: no role's titles reach the prompt (a job has one assessment, whichever role asked).
+    assert "staff ai engineer" not in binding.port.prompts[0] and "target titles the candidate is looking for = unspecified." in binding.port.prompts[0]
     # The resume itself never appears in the output.
     assert "six years." not in result.output.replace("-- six years", "")
 

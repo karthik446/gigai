@@ -1773,10 +1773,10 @@ def answer_command(
     differently. An answer that holds contact details is refused. --as
     records who writes (an agent passes --as agent) and --source, in free
     text, where the answer came from. Pass
-    --reassess JOB_URL_OR_ID to re-run the whole assessment for that job
-    immediately, with this answer applied; --profile PROFILE_ID says for
-    which profile when more than one has assessed the job (refused with
-    reassess_profile_required otherwise, before anything is saved).
+    --reassess JOB_URL_OR_ID to re-run the job's assessment immediately,
+    with this answer applied. A job has one assessment (0.1.11.9);
+    --profile PROFILE_ID is optional and only names the role recorded on
+    the new one (left out: the selected role).
     `gigai scout answers save` is the same write without the re-assessment.
     """
 
@@ -1808,7 +1808,7 @@ def answer_command(
         return
 
     # The job to re-assess is looked up first, so the answer names the posting that asked.
-    # 0.1.11.6: and for WHICH profile (--profile, else the one profile that holds the job; refused when two do).
+    # 0.1.11.9: the job's ONE stored assessment (--profile only names the role recorded on the new one).
     previous = None
     plan = None
     if reassess:

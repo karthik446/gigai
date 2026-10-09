@@ -52,18 +52,17 @@ shape. ``GET /api/answers`` lists every answer in that shape (``q`` and
 ``tag`` narrow it). One answer, the edit, the delete and the near match are
 ``/api/answers/{question_id}`` and ``/api/answers/match`` (``api/story_bank.py``).
 
-0.1.11.6 AN1: WHICH PROFILE the re-assessment is for. ``reassess`` takes an
-optional ``profile_id`` beside ``job_identity`` (the job page sends its own);
-the new assessment is made for and stored under that profile, whoever else
-holds the job (``quick_assess.reassess_target``). An id that is no profile of
-this gig answers ``404 profile_not_found``. Without it the one profile that
-holds the job is taken, as before; a job assessed for more than one active
-profile answers ``409 reassess_profile_required`` (until 0.1.11.6 the profile
-of the NEWEST stored assessment was taken: an answer given on one profile's
-page re-assessed the job for another). Both refusals come BEFORE the answer
-is saved: nothing is written and no model is called. A named profile with no
-stored assessment of its own is assessed from the address another holder's
-(or a run's) names, and that first item is the job page's (``job_page``).
+0.1.11.9: a job has ONE assessment, and the re-assessment replaces it,
+whichever role's page the answer was given on. ``reassess`` still takes an
+optional ``profile_id`` beside ``job_identity`` (0.1.11.6; the job page sends
+its own): it no longer picks a record, it is the role recorded on the new
+assessment (``quick_assess.reassess_target``); without it, the selected role.
+An id that is no role of this gig answers ``404 profile_not_found`` BEFORE the
+answer is saved: nothing is written and no model is called. The ``409
+reassess_profile_required`` of 0.1.11.6 (a job two roles had each assessed, and
+no role named) is gone: there is nothing to choose between. A job with no
+stored assessment is assessed from the address a run names, and that first
+item is the job page's (``job_page``).
 
 Origin (assess-origin-field): a re-assessment keeps the stored item's
 ``origin`` (the request names none, so ``quick_assess._origin_for`` leaves it
@@ -99,7 +98,6 @@ _ANSWER_ERROR_STATUS: dict[str, HTTPStatus] = {
     "invalid_value": HTTPStatus.UNPROCESSABLE_ENTITY,
     "reassess_unavailable": HTTPStatus.UNPROCESSABLE_ENTITY,
     "reassess_not_found": HTTPStatus.NOT_FOUND,
-    "reassess_profile_required": HTTPStatus.CONFLICT,
     "target_unavailable": HTTPStatus.NOT_FOUND,
     "profile_not_found": HTTPStatus.NOT_FOUND,
     **ERROR_STATUS,
@@ -210,7 +208,7 @@ class AnswersRoutesMixin:
             return
         home_root = self._backend.home_root
 
-        # 0.1.11.6: which profile the re-assessment is for, settled before anything is written (one read of the store).
+        # The job's stored assessment (and that a named role exists), settled before anything is written.
         plan: ReassessTarget | None = None
         if job_identity is not None:
             try:
@@ -281,8 +279,8 @@ class AnswersRoutesMixin:
         return {"job_identity": job_identity, "title": "", "company": "", "url": None}
 
     def _reassess(self, target, job_identity: str, plan: ReassessTarget, *, trigger: str) -> dict[str, object]:
-        """Re-run the whole assessment for ``job_identity``, for ``plan``'s
-        profile, and return the new ``AssessResponse`` JSON. Raises ``QuickAssessError``
+        """Re-run the job's one assessment for ``job_identity`` (``plan``'s role is
+        recorded on it), and return the new ``AssessResponse`` JSON. Raises ``QuickAssessError``
         (``reassess_not_found`` if nothing was ever assessed for this
         identity; ``reassess_unavailable`` for a pasted-text job with no
         URL to re-fetch). ``trigger`` (Q4a) is recorded in the stored
@@ -309,7 +307,7 @@ class AnswersRoutesMixin:
             request = AssessRequest(
                 job=AssessJobInput(job_url=previous.job.source_url, title=previous.job.title or None, company=previous.job.company or None),
                 resume=AssessResumeInput(profile_id=plan.profile_id),
-                # A profile with no stored assessment of its own (the address is another holder's): its first is the job page's.
+                # A job with only a pasted resume's assessment (read for the address): the job's first is the job page's.
                 origin=None if plan.own else ORIGIN_JOB_PAGE,
             )
         response = run_quick_assessment(request, home_root=self._backend.home_root, target=target, trigger=trigger)

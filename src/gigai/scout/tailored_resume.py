@@ -132,14 +132,15 @@ from .resume_privacy import ModelResume, is_name_line, model_resume, redact_inli
 from .untrusted_text import fence_untrusted_posting
 from .quick_assess import (
     EPHEMERAL_RESUME_KEY,
+    JOB_RECORD,
     QuickAssessError,
     _apply_job_overrides,
     _default_model_target,
     _resolve_binding,
     _resolve_workpad,
     find_quick_assessment_by_job_identity,
+    is_pasted,
     read_quick_assessment,
-    resume_key,
 )
 
 if TYPE_CHECKING:
@@ -2466,14 +2467,42 @@ def tailored_resume_dir(home_root: Path, target: Path) -> Path:
 
 
 def tailored_resume_path(home_root: Path, target: Path, profile_id: str | None, job_identity: str) -> Path:
-    digest = digest_imported_bytes(job_identity.encode("utf-8")).removeprefix("sha256:")
-    return tailored_resume_dir(home_root, target) / resume_key(profile_id) / f"{digest}.json"
+    """Where the stored resume of ``job_identity`` IS (for a read); its ``.md`` and ``.layout`` are beside it.
+
+    0.1.11.9: a job has ONE resume, whichever role it was picked under: ``resumes/job/<sha256(job identity)>.json``.
+    ``profile_id`` no longer picks a record; it only tells a pasted resume's (``None``: the ``ephemeral`` folder, as
+    before) from the job's.  On a home whose stores were not migrated, a job nothing has written since is read where
+    its role's folder holds it (``job_store_migration.stored_record``).  A WRITER takes :func:`tailored_resume_write_path`.
+    """
+
+    if is_pasted(profile_id):
+        digest = digest_imported_bytes(job_identity.encode("utf-8")).removeprefix("sha256:")
+        return tailored_resume_dir(home_root, target) / EPHEMERAL_RESUME_KEY / f"{digest}.json"
+    from .job_store_migration import stored_record
+
+    return stored_record(tailored_resume_dir(home_root, target), job_identity, home_root=home_root, target=target)
 
 
 def job_tailored_resume_path(home_root: Path, target: Path, job_identity: str) -> Path:
     """0.1.11.9 PJ1: where the JOB's one resume is kept, ``resumes/job/<sha256(job identity)>.json`` (its ``.md`` and ``.layout`` beside it)."""
 
     return job_store_path(tailored_resume_dir(home_root, target), job_identity)
+
+
+def tailored_resume_write_path(home_root: Path, target: Path, profile_id: str | None, job_identity: str) -> Path:
+    """Where the resume of ``job_identity`` is WRITTEN (and its spacing, and the lock a writer holds): the job's own
+    file, never a role's folder.
+
+    What the roles' folders hold for the job (a home that was not migrated) is copied to the job's folders first
+    (``job_store_migration.write_record``): the stored resume a writer then reads and changes is the job's, with
+    its ``.md`` and its spacing beside it.  A pasted resume's (``profile_id`` ``None``) is written where it always was.
+    """
+
+    if is_pasted(profile_id):
+        return tailored_resume_path(home_root, target, None, job_identity)
+    from .job_store_migration import write_record
+
+    return write_record(tailored_resume_dir(home_root, target), job_identity, home_root=home_root, target=target)
 
 
 def _same_file(recorded: str, path: Path) -> bool:
@@ -2507,34 +2536,44 @@ def _read_stored(path: Path) -> TailorResponse | None:
 def list_tailored_resumes(
     home_root: Path, target: Path, *, profile_id: str | None = None, job_identity: str | None = None
 ) -> tuple[TailorResponse, ...]:
-    """Every stored tailored resume for this project, newest ``updated_at`` first.
+    """Every stored tailored resume for this project, newest ``updated_at`` first: ONE per job (0.1.11.9), and the
+    pasted-resume ones.
 
-    ``profile_id`` narrows to one resume identity (``"ephemeral"`` selects
-    the pasted-resume runs); ``job_identity`` narrows to one job.  Files
-    that no longer parse are skipped, never raised.
+    ``profile_id``: ``"ephemeral"`` selects the pasted-resume runs; a role's id leaves those out and no longer
+    narrows further (a job's resume is not one role's).  ``job_identity`` narrows to one job (two small file reads;
+    the store is not listed).  Files that no longer parse are skipped, never raised.  On a home whose stores were
+    not migrated, a job nothing has written since is listed from its role's folder.
     """
 
     if profile_id is not None and not _SAFE_RESUME_KEY.fullmatch(profile_id):
         raise TailorError("invalid_value", "profile_id filter is not a profile id")
+    home_root, target = Path(home_root), Path(target)
     try:
         root = tailored_resume_dir(home_root, target)
     except Exception as exc:
         raise TailorError("target_unavailable", "this folder is not bound to a GigAI project") from exc
     if not root.is_dir():
         return ()
-    # 0.1.11.9 PJ1: the per-job folder holds COPIES of what the profile folders hold; a list of every profile's leaves it out.
-    subdirs = [root / profile_id] if profile_id is not None else sorted(p for p in root.iterdir() if p.is_dir() and p.name != JOB_FOLDER)
+    jobs, pasted = profile_id != EPHEMERAL_RESUME_KEY, profile_id in (None, EPHEMERAL_RESUME_KEY)
+    paths: list[Path] = []
+    if job_identity is not None:
+        paths += [tailored_resume_path(home_root, target, JOB_RECORD, job_identity)] if jobs else []
+        paths += [tailored_resume_path(home_root, target, None, job_identity)] if pasted else []
+    else:
+        if jobs:
+            from .job_store_migration import role_records
+
+            paths += sorted((root / JOB_FOLDER).glob("*.json")) + role_records(root, home_root=home_root, target=target)
+        if pasted:
+            paths += sorted((root / EPHEMERAL_RESUME_KEY).glob("*.json"))
     items: list[TailorResponse] = []
-    for subdir in subdirs:
-        if not subdir.is_dir():
+    for path in paths:
+        stored = _read_stored(path)
+        if stored is None:
             continue
-        for path in sorted(subdir.glob("*.json")):
-            stored = _read_stored(path)
-            if stored is None:
-                continue
-            if job_identity is not None and stored.job.job_identity != job_identity:
-                continue
-            items.append(stored)
+        if job_identity is not None and stored.job.job_identity != job_identity:
+            continue
+        items.append(stored)
     items.sort(key=lambda item: (item.updated_at, item.stored_path), reverse=True)
     return tuple(items)
 
@@ -2546,8 +2585,7 @@ def _stored_matrix(home_root: Path, target: Path, job_identity: str, profile_id:
     """The stored quick assessment's matrix for this job (context only), tolerantly."""
 
     try:
-        # 0.1.11.6 AN1: the profile's OWN assessment first. A job two profiles hold has two, and the newest by identity
-        # alone may be the other profile's: its rows are not this resume's.
+        # 0.1.11.9: the JOB's one assessment (a role's id only says it is not a pasted resume's).
         stored = read_quick_assessment(home_root, target, profile_id, job_identity) if profile_id is not None else None
         if stored is None:
             stored = find_quick_assessment_by_job_identity(home_root, target, job_identity)
@@ -2715,7 +2753,8 @@ def run_tailored_resume(
     # 4. Storage path first (so the response can name it and ``created_at``
     #    survives a re-run), then the stored matrix (context only).
     try:
-        path = tailored_resume_path(home_root, target, resume.profile_id, job.job_identity)
+        # 0.1.11.9: the JOB's own file, whichever role asked (its id is recorded inside, as before).
+        path = tailored_resume_write_path(home_root, target, resume.profile_id, job.job_identity)
     except Exception as exc:
         raise TailorError("target_unavailable", "this folder is not bound to a GigAI project") from exc
     previous = _read_stored(path)
@@ -2811,7 +2850,7 @@ def run_tailored_resume(
 
 @contextmanager
 def tailored_resume_write_lock(path: Path) -> Iterator[None]:
-    """One writer at a time for the stored tailored resumes beside ``path`` (one profile's folder).
+    """One writer at a time for the stored tailored resumes beside ``path`` (the jobs' folder, or the pasted resumes').
 
     Whoever reads a stored resume and then writes it back (a line choice,
     the pipeline's tailoring) does both inside this block, so the revision
@@ -2980,6 +3019,7 @@ __all__ = [
     "job_tailored_resume_path",
     "tailored_resume_path",
     "tailored_resume_write_lock",
+    "tailored_resume_write_path",
     "text_terms",
     "unsupported_numbers",
     "unsupported_posting_terms",

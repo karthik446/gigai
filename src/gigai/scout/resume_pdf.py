@@ -56,6 +56,7 @@ from gigai.scout.tailored_resume import (
     replaced_line,
     shown_text,
     tailored_resume_path,
+    tailored_resume_write_path,
     tailored_resume_write_lock,
 )
 from gigai.scout.find_jobs.discovery.storage import atomic_write
@@ -864,13 +865,13 @@ def save_job_spacing(home_root: Path, target: Path, profile_id: str | None, job_
     Written to ``job_layout_path`` (atomically, under the store's write lock for that folder) and nowhere else:
     the job's stored resume, its markdown, the jobs folder, the master and the saved display layout are not
     opened for writing.  It stays when the job's resume is picked or stored again (the file is the job's, not
-    one pick's), and goes with the profile's folder when the profile is deleted.  ``ValueError`` when the
+    one pick's).  ``profile_id`` only tells a pasted resume's (``None``) from the job's.  ``ValueError`` when the
     spacing is outside the slider's range."""
 
     if not valid_spacing(spacing_scale):
         raise ValueError(f"spacing must be between {SPACING_MIN} and {SPACING_MAX}")
     spacing = round(float(spacing_scale), 2)
-    path = tailored_resume_path(home_root, target, profile_id, job_identity)
+    path = tailored_resume_write_path(home_root, target, profile_id, job_identity)  # 0.1.11.9: the job's own, never a role's folder
     with tailored_resume_write_lock(path):
         if read_tailored_resume(path) is None:
             return None

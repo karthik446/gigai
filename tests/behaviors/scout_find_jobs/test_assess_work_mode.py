@@ -308,8 +308,9 @@ def test_quick_assess_has_no_work_mode_paragraph_when_the_profile_has_none(fx: P
     assert response.result.verdict.value == "pending_user_answers"  # rule 4 as before: asks about the Houston office
 
 
-def test_quick_assess_reads_each_profiles_own_work_mode(fx: ProfileFixtureGig, binding: _Binding) -> None:
-    """Per profile since 0110-022: a second person's assessment uses THEIR work mode and area, not the default's."""
+def test_quick_assess_reads_the_one_work_mode_whichever_role_asks(fx: ProfileFixtureGig, binding: _Binding) -> None:
+    """0.1.11.9: ONE set of candidate facts. A role's own work mode and area are search filters only; the assessment
+    reads the shared ones (0110-022 to 0.1.11.8: a role with its own settings was assessed for THEM)."""
 
     _write_find_jobs(fx, _with_mode(WorkModePreference.REMOTE))
     default = selected_profile(fx.resolved, home_root=fx.home_root, target=fx.target)
@@ -321,8 +322,8 @@ def test_quick_assess_reads_each_profiles_own_work_mode(fx: ProfileFixtureGig, b
     )
 
     theirs = _quick(fx, profile_id=other.profile_id)
-    assert _work_mode(binding.port.prompts[-1]) == {"mode": "hybrid", "area": "Houston, TX"}
-    assert theirs.result.verdict.value == "matched_above_threshold"
+    assert _work_mode(binding.port.prompts[-1]) == {"mode": "remote only", "area": "Austin, TX"}
+    assert theirs.result.verdict.value == "not_a_match"
 
     mine = _quick(fx, profile_id=default.profile_id)
     assert _work_mode(binding.port.prompts[-1]) == {"mode": "remote only", "area": "Austin, TX"}

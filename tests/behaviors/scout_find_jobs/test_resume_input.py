@@ -143,7 +143,9 @@ def test_profile_and_text_together_are_rejected() -> None:
 # --- preferences ---------------------------------------------------------------------
 
 
-def test_preference_defaults_come_from_config_and_profile(tmp_path: Path) -> None:
+def test_preference_defaults_come_from_the_config_and_never_from_a_role(tmp_path: Path) -> None:
+    """0.1.11.9: one set of candidate facts, and no role's titles (a job has one assessment, whichever role asked)."""
+
     fx = build_gig_with_resume(tmp_path)  # fixture config: countries=("US",), visa False
     profile = resolve_profile(AssessResumeInput(), resolved=fx.resolved, home_root=fx.home_root, target=fx.target)
     assert profile is not None and profile.titles
@@ -152,7 +154,14 @@ def test_preference_defaults_come_from_config_and_profile(tmp_path: Path) -> Non
 
     assert prefs.visa_sponsorship_required is False
     assert prefs.countries == ("US",)
-    assert prefs.titles == tuple(profile.titles)
+    assert prefs.titles == ()
+    # A role's own search settings are search filters only: its countries are not the candidate's.
+    from dataclasses import replace
+
+    from gigai.scout.profile_records import ProfileSearchSettings
+
+    own = replace(profile, search_settings=ProfileSearchSettings(location="Houston, TX", work_mode="hybrid", countries=("CA",), max_age_days=None))
+    assert resolve_preferences(None, target=fx.target, profile=own) == prefs
 
 
 def test_preference_overrides_win_field_by_field(tmp_path: Path) -> None:

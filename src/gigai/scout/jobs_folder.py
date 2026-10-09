@@ -53,6 +53,7 @@ from pathlib import Path
 
 from ..canonical import digest_imported_bytes
 from .find_jobs.discovery.storage import atomic_write
+from .job_store_layout import JOB_FOLDER, RESUMES, is_profile_folder
 from .resume_pii import detect_contact_details
 from .resumes_folder import (
     SOURCE_DEFAULT,
@@ -276,7 +277,24 @@ def _usable(directory: Path, key: str, *, recorded: bool = False) -> bool:
     if directory.is_symlink() or not directory.is_dir():
         return False
     owner = _owner(directory)
-    return owner == key or (recorded and owner is None)
+    return _names_job(owner, key) or (recorded and owner is None)
+
+
+def _names_job(owner: str | None, key: str) -> bool:
+    """The folder record's ``owner`` names the job ``key`` names.
+
+    0.1.11.9: a job is named by its own key (``resumes_folder.job_store_key``: ``<project>/resumes/job/<digest>``).
+    A folder made before that is recorded under ONE ROLE's key (``<project>/resumes/<role id>/<same digest>``): it is
+    the same job's folder, and its record is left as it was written (an older GigAI on this home still reads it).
+    """
+
+    if owner is None or owner == key:
+        return owner == key
+    was, now = owner.split("/"), key.split("/")
+    return (
+        len(was) == len(now) == 4 and now[1:3] == [RESUMES, JOB_FOLDER] and was[0] == now[0] and was[1] == RESUMES
+        and was[3] == now[3] and is_profile_folder(was[2])
+    )
 
 
 def _choose_dir(root: Path, job: JobRef, recorded: object, claimed: Mapping[str, str] | None = None) -> str:
@@ -305,7 +323,7 @@ def _choose_dir(root: Path, job: JobRef, recorded: object, claimed: Mapping[str,
 def _write_job_record(directory: Path, job: JobRef, day: date) -> None:
     """``.gigai-job.json``, written once: which job this folder is, and the day it was made."""
 
-    if _owner(directory) == job.key:
+    if _names_job(_owner(directory), job.key):
         return
     payload = {
         "schema_version": JOB_SCHEMA,

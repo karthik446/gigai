@@ -750,17 +750,38 @@ def _job_digest(job_identity: str) -> str:
 
 
 def suggestions_path(home_root: Path, target: Path, profile_id: str | None, job_identity: str) -> Path:
-    """Where one job's record is stored: the path rule of ``quick_assess.quick_assess_path``."""
+    """Where one job's record IS (for a read): the path rule of ``quick_assess.quick_assess_path``.
 
-    from .quick_assess import resume_key
+    0.1.11.9: a job has ONE record, ``suggestions/job/<sha256(job identity)>.json``, whichever role its assessment
+    was made under; ``profile_id`` only tells a pasted resume's (``None``) from the job's.  A WRITER takes
+    :func:`suggestions_write_path`."""
 
-    return suggestions_dir(home_root, target) / resume_key(profile_id) / f"{_job_digest(job_identity)}.json"
+    from .quick_assess import is_pasted, resume_key
+
+    if is_pasted(profile_id):
+        return suggestions_dir(home_root, target) / resume_key(None) / f"{_job_digest(job_identity)}.json"
+    from .job_store_migration import stored_record
+
+    return stored_record(suggestions_dir(home_root, target), job_identity, home_root=Path(home_root), target=Path(target))
 
 
 def job_suggestions_path(home_root: Path, target: Path, job_identity: str) -> Path:
     """0.1.11.9 PJ1: where the JOB's one record is kept, ``suggestions/job/<sha256(job identity)>.json`` (no profile)."""
 
     return job_store_path(suggestions_dir(home_root, target), job_identity)
+
+
+def suggestions_write_path(home_root: Path, target: Path, profile_id: str | None, job_identity: str) -> Path:
+    """Where one job's record is WRITTEN: the job's own file, never a role's folder (``quick_assess.quick_assess_write_path``'s
+    rule: what the roles' folders hold for the job is copied to the job's folders first)."""
+
+    from .quick_assess import is_pasted
+
+    if is_pasted(profile_id):
+        return suggestions_path(home_root, target, None, job_identity)
+    from .job_store_migration import write_record
+
+    return write_record(suggestions_dir(home_root, target), job_identity, home_root=Path(home_root), target=Path(target))
 
 
 def proposed_resume_path(record_path: Path) -> Path:
@@ -805,9 +826,16 @@ def read_record(path: Path) -> SuggestionRecord | None:
     if path.is_symlink() or not path.is_file():
         return None
     try:
-        return without_page_reasons(SuggestionRecord.from_json(parse_json_bytes(path.read_bytes())))
+        record = without_page_reasons(SuggestionRecord.from_json(parse_json_bytes(path.read_bytes())))
     except (OSError, ValueError):
         return None
+    # ``save_record`` writes at the path a record names.  One read from another file than it names (a home that was
+    # copied or moved) is given the path of the file it was read from, as a stored resume is (``tailored_resume._read_stored``).
+    try:
+        same = os.path.samefile(record.stored_path, path)
+    except OSError:
+        same = False
+    return record if same else replace(record, stored_path=os.fspath(path))
 
 
 def read_suggestions(home_root: Path, target: Path, profile_id: str | None, job_identity: str) -> SuggestionRecord | None:
@@ -1039,12 +1067,13 @@ def store_assessed(
     writes only.
     """
 
-    from .tailored_resume import read_tailored_resume, save_tailor_response, tailored_resume_path, tailored_resume_write_lock
+    from .tailored_resume import read_tailored_resume, save_tailor_response, tailored_resume_write_lock, tailored_resume_write_path
 
     profile_id = resume.profile_id  # type: ignore[attr-defined]
     identity = job.job_identity  # type: ignore[attr-defined]
-    record_path = suggestions_path(home_root, target, profile_id, identity)
-    resume_path = tailored_resume_path(Path(home_root), Path(target), profile_id, identity)
+    # 0.1.11.9: the JOB's own record and resume, whichever role the assessment was made under.
+    record_path = suggestions_write_path(home_root, target, profile_id, identity)
+    resume_path = tailored_resume_write_path(Path(home_root), Path(target), profile_id, identity)
     rows = requirement_rows(assessment.result.matrix)  # type: ignore[attr-defined]
     digest = result_digest(assessment)
     revision_id = getattr(master_source, "revision_id", None)
@@ -1101,10 +1130,10 @@ def use_proposed(home_root: Path, target: Path, profile_id: str | None, job_iden
     ``proposal_stale`` when the stored resume is not the one the proposal was made beside (an edit since: nothing is
     replaced), ``stored_resume_unreadable`` when the stored file cannot be read (it is left as it is)."""
 
-    from .tailored_resume import TailorResponse, read_tailored_resume, save_tailor_response, tailored_resume_path, tailored_resume_write_lock
+    from .tailored_resume import TailorResponse, read_tailored_resume, save_tailor_response, tailored_resume_write_lock, tailored_resume_write_path
 
-    record_path = suggestions_path(home_root, target, profile_id, job_identity)
-    resume_path = tailored_resume_path(Path(home_root), Path(target), profile_id, job_identity)
+    record_path = suggestions_write_path(home_root, target, profile_id, job_identity)
+    resume_path = tailored_resume_write_path(Path(home_root), Path(target), profile_id, job_identity)
     sibling = proposed_resume_path(record_path)
     with tailored_resume_write_lock(resume_path), record_write_lock(record_path):
         record = read_record(record_path)
@@ -1115,7 +1144,11 @@ def use_proposed(home_root: Path, target: Path, profile_id: str | None, job_iden
             raise SuggestionError("stored_resume_unreadable", STORED_UNREADABLE)
         if stored is not None and proposal_is_stale(record.proposed, stored):
             raise SuggestionError("proposal_stale", PROPOSAL_STALE)
-        response = replace(TailorResponse.from_json(parse_json_bytes(sibling.read_bytes())), updated_at=now)
+        # It becomes the job's stored resume: written THERE, whatever path it recorded while it waited.
+        response = replace(
+            TailorResponse.from_json(parse_json_bytes(sibling.read_bytes())), updated_at=now,
+            stored_path=os.fspath(resume_path), markdown_path=os.fspath(resume_path.with_suffix(".md")),
+        )
         save_tailor_response(response, home_root=Path(home_root))
         taken = {key: value for key, value in record.proposed.items() if key != "against"}
         taken["resume"] = {"stored_path": os.fspath(resume_path), "markdown_sha256": _markdown_digest(response.markdown), "origin": "pick"}
@@ -1132,7 +1165,7 @@ def use_proposed(home_root: Path, target: Path, profile_id: str | None, job_iden
 def dismiss_proposed(home_root: Path, target: Path, profile_id: str | None, job_identity: str, *, now: str) -> SuggestionRecord | None:
     """Drop the proposed selection and its sibling file; the stored job resume is not touched. ``None``: no record."""
 
-    record_path = suggestions_path(home_root, target, profile_id, job_identity)
+    record_path = suggestions_write_path(home_root, target, profile_id, job_identity)
     with record_write_lock(record_path):
         record = read_record(record_path)
         if record is None:
@@ -1210,6 +1243,7 @@ __all__ = [
     "suggestions_dir",
     "job_suggestions_path",
     "suggestions_path",
+    "suggestions_write_path",
     "use_proposed",
     "with_selection",
 ]

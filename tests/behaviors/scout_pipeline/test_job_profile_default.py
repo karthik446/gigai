@@ -1,8 +1,13 @@
-"""0.1.11 N5b (SPEC 10.2 item 5, N5 NOT PROVEN 9): ONE profile default for brief, pick, suggestions AND resume store.
+"""0.1.11 N5b (SPEC 10.2 item 5, N5 NOT PROVEN 9), changed by 0.1.11.9 PJ2: a job command with no role named.
 
-The default is the profile whose assessment of the job is newest.  When two profiles each have a stored resume for the
-job and none is named, every one of those commands refuses with ``profile_ambiguous`` and names both, so a
-``--resolves`` can never be checked against one profile and applied to another.  Synthetic gig, two profiles, one job.
+0.1.11: the default was the role whose assessment of the job was newest, and when two roles each had a stored resume
+for the job every command refused (``profile_ambiguous``), so a ``--resolves`` could never be checked against one
+role's resume and applied to another's.
+
+0.1.11.9: a job has ONE assessment, ONE resume and ONE suggestion record. Two roles cannot each have a resume for it:
+a resume stored under another role REPLACES the job's. So nothing is ambiguous, nothing is refused, and a named role
+picks no other record. (The role a view names is the one recorded on the job's assessment.)  Synthetic gig, two roles,
+one job.
 """
 
 from __future__ import annotations
@@ -63,28 +68,28 @@ def _store(fx: PipelineFixture, tmp_path: Path, *more: str):
     return _invoke(fx, "resume", "store", "--in", str(path), "--job-url", JOB, "--as", "agent", *more)
 
 
-def test_the_default_is_the_newest_assessments_profile_and_two_resumes_refuse_to_guess(fx: PipelineFixture, tmp_path: Path) -> None:
+def test_one_job_has_one_resume_whichever_role_stores_it_and_nothing_is_ambiguous(fx: PipelineFixture, tmp_path: Path) -> None:
     other = _second_profile(fx)
 
-    # No resume yet: the default is the newest assessment's profile (the second), for pick and for store.
+    # The second role assessed the job last: its id is the one recorded on the job's one assessment.
     assert _last(_invoke(fx, "resume", "pick", "--job-url", JOB))["profile_id"] == other
     assert _store(fx, tmp_path).exit_code == 0
     assert [item.resume.profile_id for item in list_tailored_resumes(fx.home_root, fx.target, job_identity=JOB)] == [other]
     assert _last(_invoke(fx, "resume", "brief", "--job-url", JOB))["profile_id"] == other
 
-    # The first profile gets a resume too: now two profiles have one, and nothing is guessed.
+    # The same file stored under the FIRST role: it is the job's resume already, so nothing changes and the job still
+    # has ONE resume (0.1.11: a second one under that role, and every command below refused).
     assert _store(fx, tmp_path, "--profile", fx.profile_id).exit_code == 0
-    for args in (("resume", "pick"), ("resume", "brief"), ("resume", "brief", "--posting"), ("suggestions", "list")):
+    (held,) = list_tailored_resumes(fx.home_root, fx.target, job_identity=JOB)
+    for args in (("resume", "pick"), ("resume", "brief"), ("resume", "brief", "--posting")):
         result = _invoke(fx, *args, "--job-url", JOB)
-        assert result.exit_code == 1, (args, result.output)
-        error = _last(result)["error"]
-        assert error["code"] == "profile_ambiguous", (args, error)
-        assert fx.profile_id in str(error["message"]) and other in str(error["message"]) and "--profile" in str(error["message"])
-    before = list_tailored_resumes(fx.home_root, fx.target, job_identity=JOB)
-    result = _store(fx, tmp_path, "--resolves", "sg-1")
-    assert result.exit_code == 1 and _last(result)["error"]["code"] == "profile_ambiguous", result.output
-    assert list_tailored_resumes(fx.home_root, fx.target, job_identity=JOB) == before, "a refused store writes nothing"
+        assert result.exit_code == 0, (args, result.output)
+    # (This fixture's assessment wrote no suggestion record: the command says THAT, and no longer `profile_ambiguous`.)
+    listed = _invoke(fx, "suggestions", "list", "--job-url", JOB)
+    assert listed.exit_code == 1 and _last(listed)["error"]["code"] == "suggestions_not_found", listed.output
 
-    # Naming a profile works for each of them.
-    for profile in (fx.profile_id, other):
-        assert _last(_invoke(fx, "resume", "pick", "--job-url", JOB, "--profile", profile))["profile_id"] == profile
+    # Naming either role reads the same job: the same resume, the same record.
+    views = [_last(_invoke(fx, "resume", "pick", "--job-url", JOB, "--profile", profile)) for profile in (fx.profile_id, other)]
+    unnamed = _last(_invoke(fx, "resume", "pick", "--job-url", JOB))
+    assert views[0] == views[1] == unnamed and unnamed["resume"]["markdown"] == held.markdown
+    assert len(list_tailored_resumes(fx.home_root, fx.target, job_identity=JOB)) == 1

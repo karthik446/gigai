@@ -208,7 +208,8 @@ def test_pasted_job_against_selected_profile_returns_verdict_and_stores_json(fx:
 
     stored = Path(response.stored_path)
     assert stored.is_file()
-    assert stored.parent.name == selected.profile_id
+    assert stored.parent.name == "job"  # 0.1.11.9: the job's own folder; the role that asked is recorded inside
+    assert response.resume.profile_id == selected.profile_id
     assert stored.parent.parent.name == "quick_assess"
     assert stored.parents[3] == fx.home_root / "scout"
     payload = json.loads(stored.read_text(encoding="utf-8"))
@@ -250,13 +251,14 @@ def test_list_filters_by_profile_id_and_verdict_newest_first(fx: ProfileFixtureG
     assert {item.stored_path for item in everything} == {a.stored_path, b.stored_path, c.stored_path}
     assert [item.created_at for item in everything] == sorted((item.created_at for item in everything), reverse=True)
 
+    # 0.1.11.9: a role's id leaves the pasted-resume ones out and narrows no further (a job's assessment is not one role's).
     by_profile = list_quick_assessments(fx.home_root, fx.target, profile_id=selected.profile_id)
     assert {item.stored_path for item in by_profile} == {a.stored_path, b.stored_path}
     ephemeral = list_quick_assessments(fx.home_root, fx.target, profile_id=quick_assess.EPHEMERAL_RESUME_KEY)
     assert [item.stored_path for item in ephemeral] == [c.stored_path]
     matched = list_quick_assessments(fx.home_root, fx.target, verdict="matched_above_threshold")
     assert {item.stored_path for item in matched} == {b.stored_path, c.stored_path}
-    assert list_quick_assessments(fx.home_root, fx.target, profile_id="profile_nobody") == ()
+    assert {item.stored_path for item in list_quick_assessments(fx.home_root, fx.target, profile_id="profile_nobody")} == {a.stored_path, b.stored_path}
 
 
 def test_unparsable_stored_file_is_skipped_not_raised(fx: ProfileFixtureGig, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -291,23 +293,20 @@ def test_ephemeral_resume_is_never_imported_and_never_stored(fx: ProfileFixtureG
 # --- the orchestrator's MUST: countries + titles reach the prompt -------------------------------
 
 
-def test_prompt_carries_countries_from_find_jobs_json_and_titles_from_the_profile(fx: ProfileFixtureGig, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_prompt_carries_countries_from_find_jobs_json_and_no_role_titles(fx: ProfileFixtureGig, monkeypatch: pytest.MonkeyPatch) -> None:
     binding, _ = _install(monkeypatch, [_GOOD_MATCH])
 
     response = _run(fx, _pasted())
 
     prompt = binding.port.prompts[0]
     constraints = _constraints(prompt)
-    # find-jobs.json (the fixture's shared config) says countries=("US",);
-    # the migrated default profile's titles are the config's two roles.
+    # find-jobs.json (the fixture's shared config) says countries=("US",).
+    # 0.1.11.9: no role's titles go into a job's one assessment (the default role's are the config's two roles).
     assert re.search(r"\bUS\b", constraints), constraints
-    assert "staff ai engineer, principal machine learning engineer" in constraints
+    assert "target titles the candidate is looking for = unspecified." in constraints
+    assert "staff ai engineer" not in prompt
     assert "visa sponsorship required = no" in constraints
-    assert response.preferences == AssessPreferences(
-        visa_sponsorship_required=False,
-        titles=("staff ai engineer", "principal machine learning engineer"),
-        countries=("US",),
-    )
+    assert response.preferences == AssessPreferences(visa_sponsorship_required=False, titles=(), countries=("US",))
     assert _POSTING in prompt and "six years" in prompt
 
 
@@ -335,11 +334,11 @@ def test_request_preferences_location_overrides_the_config_location(fx: ProfileF
     constraints = _constraints(binding.port.prompts[0])
     assert "applied by rule 4): Toronto, ON, Canada; target titles" in constraints
     assert "): Remote;" not in constraints
-    # The other preferences still resolve from the config/profile; the
+    # The other preferences still resolve from the config; the
     # override is echoed and round-trips through the wire shape.
     assert response.preferences == AssessPreferences(
         visa_sponsorship_required=False,
-        titles=("staff ai engineer", "principal machine learning engineer"),
+        titles=(),
         countries=("US",),
         location="Toronto, ON, Canada",
     )
@@ -362,10 +361,11 @@ def test_request_preferences_override_countries_titles_and_visa(fx: ProfileFixtu
     assert response.preferences == AssessPreferences(visa_sponsorship_required=True, titles=("platform lead",), countries=("CA", "GB"))
 
 
-def test_a_profile_with_its_own_search_settings_is_assessed_for_its_location_and_countries(
+def test_a_role_with_its_own_search_settings_is_assessed_with_the_shared_candidate_facts(
     fx: ProfileFixtureGig, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """0110-022: the shared config says "Remote" / US; this profile says Houston / CA."""
+    """0.1.11.9: ONE set of candidate facts. The shared config says "Remote" / US; this role's own search settings say
+    Houston / hybrid / CA, and they are search filters only (until 0.1.11.9 it was assessed for them, 0110-022)."""
     from gigai.scout.profile_records import ProfileSearchSettings
 
     binding, _ = _install(monkeypatch, [_GOOD_MATCH, _GOOD_MATCH])
@@ -380,18 +380,17 @@ def test_a_profile_with_its_own_search_settings_is_assessed_for_its_location_and
     response = _run(fx, _pasted(resume=AssessResumeInput(profile_id=created.profile_id)))
 
     constraints = _constraints(binding.port.prompts[0])
-    assert "applied by rule 4): Houston, TX; target titles" in constraints
-    assert re.search(r"\bCA\b", constraints) and not re.search(r"\bUS\b", constraints)
-    assert response.preferences.countries == ("CA",) and response.preferences.location is None
+    assert "applied by rule 4): Remote; target titles" in constraints and "Houston" not in binding.port.prompts[0]
+    assert re.search(r"\bUS\b", constraints) and not re.search(r"\bCA\b", constraints)
+    assert response.preferences.countries == ("US",) and response.preferences.location is None
 
-    # the default profile is still assessed for the shared config's
-    _run(fx, _pasted(resume=AssessResumeInput(profile_id=selected.profile_id)))
-    default_constraints = _constraints(binding.port.prompts[1])
-    assert "applied by rule 4): Remote; target titles" in default_constraints
-    assert re.search(r"\bUS\b", default_constraints) and "Houston" not in default_constraints
+    # ... and so the same job assessed under the default role gets the same constraints, and the same basis.
+    again = _run(fx, _pasted(resume=AssessResumeInput(profile_id=selected.profile_id)))
+    assert _constraints(binding.port.prompts[1]) == constraints
+    assert (again.constraints_digest, again.prompt_version) == (response.constraints_digest, response.prompt_version)
 
 
-def test_explicit_profile_supplies_its_own_titles(fx: ProfileFixtureGig, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_an_explicit_role_is_recorded_and_its_titles_are_not_in_the_prompt(fx: ProfileFixtureGig, monkeypatch: pytest.MonkeyPatch) -> None:
     binding, _ = _install(monkeypatch, [_GOOD_MATCH])
     selected = selected_profile(fx.resolved, home_root=fx.home_root, target=fx.target)
     assert selected is not None
@@ -403,8 +402,8 @@ def test_explicit_profile_supplies_its_own_titles(fx: ProfileFixtureGig, monkeyp
     response = _run(fx, _pasted(resume=AssessResumeInput(profile_id=created.profile_id)))
 
     assert response.resume.profile_id == created.profile_id
-    assert "staff backend engineer" in _constraints(binding.port.prompts[0])
-    assert Path(response.stored_path).parent.name == created.profile_id
+    assert "staff backend engineer" not in binding.port.prompts[0]
+    assert Path(response.stored_path).parent.name == "job"
 
 
 # --- job overrides + fetch errors -----------------------------------------------------------

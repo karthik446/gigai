@@ -18,7 +18,7 @@ from http import HTTPStatus
 from urllib.parse import parse_qs, urlsplit
 
 from ... import resumes_folder
-from ...quick_assess import QuickAssessError
+from ...quick_assess import JOB_RECORD, QuickAssessError
 from ...tailored_resume import tailored_resume_path
 from ..contracts import FindJobsContractError
 from ..job_state import normalize_job_identity
@@ -51,11 +51,12 @@ class ResumesFolderRoutesMixin:
         body = resumes_folder.resumes_folder(home_root).to_json()
         if profile_id or job:
             target = getattr(self._backend, "target", None)
-            if not profile_id or not job or target is None:
-                self._error(HTTPStatus.UNPROCESSABLE_ENTITY, "invalid_value", "profile_id and job_identity go together")
+            # 0.1.11.9: the job names its files. ``profile_id`` is still taken and picks nothing.
+            if not job or target is None:
+                self._error(HTTPStatus.UNPROCESSABLE_ENTITY, "invalid_value", "job_identity names the job (profile_id is optional and goes with it)")
                 return
             try:
-                stored = tailored_resume_path(home_root, target, profile_id, normalize_job_identity(job))
+                stored = tailored_resume_path(home_root, target, profile_id or JOB_RECORD, normalize_job_identity(job))
             except (FindJobsContractError, QuickAssessError, ValueError) as exc:
                 self._error(HTTPStatus.UNPROCESSABLE_ENTITY, "invalid_value", str(exc))
                 return

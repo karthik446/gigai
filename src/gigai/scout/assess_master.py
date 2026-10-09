@@ -231,10 +231,17 @@ def assess_input(
 
     ``None``: the switch is on the profile's view, the resume is not a
     profile's (pasted text), no master is stored, or the profile's resume was
-    replaced by hand after its selection.  The profile's prior is the lines
-    its selection shows, else its titles.  ``ids`` (0.1.11 N3; the caller
+    replaced by hand after its selection.  ``ids`` (0.1.11 N3; the caller
     passes ``assessment_core.prompt_reads_ids()``): the view carries master
     line ids and notes, and the input says how many lines a pick should hold.
+
+    0.1.11.9, one assessment per job: what the PROMPT gets (the view, and the
+    number of lines a pick should hold) is made with NO role's prior; the
+    posting's own terms rank the master's lines.  Until 0.1.11.9 the role's
+    shown lines (else its titles) ranked them too, so two roles could show the
+    model different lines of the same master for the same posting.  The
+    input's ``prior`` is still the role's: the PICK that follows an assessment
+    is settled with it (``quick_assess._settle_and_record``), as before.
     """
 
     stored = _evidence_master(home_root, target, profile, resolved)
@@ -248,8 +255,9 @@ def assess_input(
         label=profile.label,  # type: ignore[attr-defined]
     )
     revision = stored.revision  # type: ignore[attr-defined]
-    view = evidence_text(stored.master, prior, title=title, posting_text=posting_text, company=company, location=location, today=today, ids=ids)  # type: ignore[attr-defined]
-    pick_lines = pick_line_count(stored.master, prior, SelectionPosting(title, posting_text, company, location), today=today) if ids else 0  # type: ignore[attr-defined]
+    no_prior = SelectionProfile()
+    view = evidence_text(stored.master, no_prior, title=title, posting_text=posting_text, company=company, location=location, today=today, ids=ids)  # type: ignore[attr-defined]
+    pick_lines = pick_line_count(stored.master, no_prior, SelectionPosting(title, posting_text, company, location), today=today) if ids else 0  # type: ignore[attr-defined]
     return AssessInput(view, ResumeBasis(INPUT_EVIDENCE, revision.revision_id, revision.revision, view.selector_version), pick_lines, stored, prior)
 
 

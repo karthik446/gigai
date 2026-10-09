@@ -10,9 +10,9 @@ serialized by ``ResolvedResume`` (S30 Q2 recommendation (a)).
 Preferences: ``visa_sponsorship_required`` and ``countries`` default from the
 target's ``find-jobs.json`` read tolerantly (missing, unreadable or starter
 file -> ``False`` / ``()``, the same posture as
-``proposal_execution._read_sealed_config``); ``titles`` default from the
-resolved profile (``()`` for an ephemeral resume).  Every field can be
-overridden per call through ``AssessPreferences``.
+``proposal_execution._read_sealed_config``); ``titles`` default to none
+(0.1.11.9: a job has one assessment, and no role's titles go into it).  Every
+field can be overridden per call through ``AssessPreferences``.
 """
 
 from __future__ import annotations
@@ -130,13 +130,15 @@ def read_config_preferences(target: Path) -> tuple[bool, tuple[str, ...]]:
 def resolve_preferences(
     overrides: AssessPreferences | None, *, target: Path, profile: "ProfileRecord | None"
 ) -> AssessPreferences:
-    """Fill every ``None`` in ``overrides`` from the defaults; never returns a ``None`` field."""
+    """Fill every ``None`` in ``overrides`` from the defaults; never returns a ``None`` field.
+
+    0.1.11.9, ONE set of candidate facts: the countries are the shared find-jobs.json's whichever role asked (a
+    role's own ``search_settings`` are search filters only; until 0.1.11.9 they replaced the countries, 0110-022),
+    and no role's titles are a default (assess.md rule 6 made them context only).  ``profile`` is no longer read.
+    """
 
     visa_default, countries_default = read_config_preferences(target)
-    # 0110-022: a profile with its own search settings has its own countries.
-    if profile is not None and profile.search_settings is not None:
-        countries_default = tuple(profile.search_settings.countries)
-    titles_default: tuple[str, ...] = () if profile is None else tuple(profile.titles)
+    titles_default: tuple[str, ...] = ()
     given = overrides if overrides is not None else AssessPreferences()
     return AssessPreferences(
         visa_sponsorship_required=visa_default if given.visa_sponsorship_required is None else given.visa_sponsorship_required,

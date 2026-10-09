@@ -156,15 +156,55 @@ def resume_key(profile_id: str | None) -> str:
     return EPHEMERAL_RESUME_KEY if profile_id is None else profile_id
 
 
+#: What a caller that names NO role passes where a ``profile_id`` is asked (0.1.11.9): the job's own record.
+JOB_RECORD = JOB_FOLDER
+
+
+def is_pasted(profile_id: str | None) -> bool:
+    """``profile_id`` names a pasted resume's records (``None``, or the ``"ephemeral"`` a list filter and a route
+    take), not a job's.  0.1.11.9: this is ALL a ``profile_id`` says about where a record is; which role it names is
+    recorded inside the record and picks nothing."""
+
+    return profile_id is None or profile_id == EPHEMERAL_RESUME_KEY
+
+
 def quick_assess_path(home_root: Path, target: Path, profile_id: str | None, job_identity: str) -> Path:
-    digest = digest_imported_bytes(job_identity.encode("utf-8")).removeprefix("sha256:")
-    return quick_assess_dir(home_root, target) / resume_key(profile_id) / f"{digest}.json"
+    """Where the stored assessment of ``job_identity`` IS (for a read).
+
+    0.1.11.9: a job has ONE assessment, whichever role asked for it: ``quick_assess/job/<sha256(job identity)>.json``.
+    ``profile_id`` no longer picks a record; it only tells a pasted resume's assessment (``None``: the ``ephemeral``
+    folder, as before) from the job's.  On a home whose stores were not migrated, a job nothing has written since is
+    read where its role's folder holds it (``job_store_migration.stored_record``).  A WRITER takes
+    :func:`quick_assess_write_path`.
+    """
+
+    if is_pasted(profile_id):
+        digest = digest_imported_bytes(job_identity.encode("utf-8")).removeprefix("sha256:")
+        return quick_assess_dir(home_root, target) / EPHEMERAL_RESUME_KEY / f"{digest}.json"
+    from .job_store_migration import stored_record
+
+    return stored_record(quick_assess_dir(home_root, target), job_identity, home_root=home_root, target=target)
 
 
 def job_quick_assess_path(home_root: Path, target: Path, job_identity: str) -> Path:
     """0.1.11.9 PJ1: where the JOB's one assessment is kept, ``quick_assess/job/<sha256(job identity)>.json`` (no profile)."""
 
     return job_store_path(quick_assess_dir(home_root, target), job_identity)
+
+
+def quick_assess_write_path(home_root: Path, target: Path, profile_id: str | None, job_identity: str) -> Path:
+    """Where an assessment of ``job_identity`` is WRITTEN: the job's own file, never a role's folder.
+
+    What the roles' folders hold for the job (a home that was not migrated) is copied to the job's folders first
+    (``job_store_migration.write_record``), so the stored assessment the writer then reads is the job's.
+    A pasted resume's (``profile_id`` ``None``) is written where it always was.
+    """
+
+    if is_pasted(profile_id):
+        return quick_assess_path(home_root, target, None, job_identity)
+    from .job_store_migration import write_record
+
+    return write_record(quick_assess_dir(home_root, target), job_identity, home_root=home_root, target=target)
 
 
 #: 0.1.10.7 M2: assessments of a job against the profile's TAILORED resume, beside ``quick_assess/``
@@ -186,7 +226,8 @@ def tailored_variant_path(home_root: Path, target: Path, profile_id: str | None,
 
 
 def read_quick_assessment(home_root: Path, target: Path, profile_id: str | None, job_identity: str) -> AssessResponse | None:
-    """The stored (base) assessment of ``job_identity`` for ``profile_id``, or ``None``."""
+    """The stored (base) assessment of ``job_identity``, or ``None``: the job's one (0.1.11.9), whichever role
+    ``profile_id`` names; a pasted resume's for ``None``."""
 
     return _read_stored(quick_assess_path(Path(home_root), Path(target), profile_id, job_identity))
 
@@ -209,11 +250,13 @@ def _read_stored(path: Path) -> AssessResponse | None:
 def list_quick_assessments(
     home_root: Path, target: Path, *, profile_id: str | None = None, verdict: str | None = None
 ) -> tuple[AssessResponse, ...]:
-    """Every stored quick assessment for this project, newest ``updated_at`` first.
+    """Every stored quick assessment for this project, newest ``updated_at`` first: ONE per job (0.1.11.9), and
+    the pasted-resume ones.
 
-    ``profile_id`` narrows to one resume identity (``"ephemeral"`` selects
-    the pasted-resume assessments); ``verdict`` narrows to one verdict value.
-    Files that no longer parse are skipped, never raised.
+    ``profile_id``: ``"ephemeral"`` selects the pasted-resume assessments; a role's id leaves those out and no
+    longer narrows further (a job's assessment is not one role's).  ``verdict`` narrows to one verdict value.
+    Files that no longer parse are skipped, never raised.  On a home whose stores were not migrated, a job nothing
+    has written since is listed from its role's folder (``job_store_migration.role_records``).
 
     P3 (v0.1.9): ordered by ``updated_at`` (last ASSESSED, which a
     re-assessment after answers bumps) rather than P5's ``created_at`` --
@@ -230,19 +273,32 @@ def list_quick_assessments(
         raise QuickAssessError("target_unavailable", "this folder is not bound to a GigAI project") from exc
     if not root.is_dir():
         return ()
-    # 0.1.11.9 PJ1: the per-job folder holds COPIES of what the profile folders hold; a list of every profile's leaves it out.
-    subdirs = [root / profile_id] if profile_id is not None else sorted(p for p in root.iterdir() if p.is_dir() and p.name != JOB_FOLDER)
+    paths: list[Path] = []
+    if profile_id != EPHEMERAL_RESUME_KEY:
+        from .job_store_migration import role_records
+
+        paths += sorted((root / JOB_FOLDER).glob("*.json")) + role_records(root, home_root=Path(home_root), target=Path(target))
+    if profile_id in (None, EPHEMERAL_RESUME_KEY):
+        paths += sorted((root / EPHEMERAL_RESUME_KEY).glob("*.json"))
     items: list[AssessResponse] = []
-    for subdir in subdirs:
-        if not subdir.is_dir():
+    for path in paths:
+        stored = _read_stored(path)
+        if stored is None:
             continue
-        for path in sorted(subdir.glob("*.json")):
-            stored = _read_stored(path)
-            if stored is None:
-                continue
-            if verdict is not None and (stored.result.verdict is None or stored.result.verdict.value != verdict):
-                continue
-            items.append(stored)
+        if verdict is not None and (stored.result.verdict is None or stored.result.verdict.value != verdict):
+            continue
+        items.append(stored)
+    items.sort(key=lambda item: (item.updated_at, item.stored_path), reverse=True)
+    return tuple(items)
+
+
+def job_quick_assessments(home_root: Path, target: Path, job_identity: str) -> tuple[AssessResponse, ...]:
+    """What is stored for ONE job, newest first: the job's assessment and, when there is one, a pasted resume's.
+    Two small file reads; the store is not listed."""
+
+    home_root, target = Path(home_root), Path(target)
+    found = (_read_stored(quick_assess_path(home_root, target, JOB_RECORD, job_identity)), _read_stored(quick_assess_path(home_root, target, None, job_identity)))
+    items = [item for item in found if item is not None and item.job.job_identity == job_identity]
     items.sort(key=lambda item: (item.updated_at, item.stored_path), reverse=True)
     return tuple(items)
 
@@ -250,14 +306,15 @@ def list_quick_assessments(
 def find_quick_assessment_by_job_identity(
     home_root: Path, target: Path, job_identity: str
 ) -> AssessResponse | None:
-    """The stored quick assessment for ``job_identity``, across every resume
-    identity directory (P3's re-assess: the request names only the job, not
-    which profile/ephemeral resume it was originally assessed against)."""
+    """The stored quick assessment for ``job_identity``: the job's or a pasted resume's, the newest
+    (P3's re-assess: the request names only the job)."""
 
-    for item in list_quick_assessments(home_root, target):
-        if item.job.job_identity == job_identity:
-            return item
-    return None
+    try:
+        return next(iter(job_quick_assessments(home_root, target, job_identity)), None)
+    except QuickAssessError:
+        raise
+    except Exception as exc:  # noqa: BLE001 - the listing's own answer for a folder with no project
+        raise QuickAssessError("target_unavailable", "this folder is not bound to a GigAI project") from exc
 
 
 @dataclass(frozen=True)
@@ -265,8 +322,8 @@ class ReassessTarget:
     """What a re-assessment by ``job_identity`` acts on (:func:`reassess_target`).
 
     ``previous`` is the stored assessment that names the posting (``None``: nothing stored for this job);
-    ``profile_id`` the profile the new assessment is made for; ``own`` says ``previous`` is that profile's own
-    stored assessment (not another holder's, read only for the posting's address).
+    ``profile_id`` the role the caller named for the new assessment (``None``: the selected one); ``own`` says
+    ``previous`` is the JOB's stored assessment (not a pasted resume's, read only for the posting's address).
     """
 
     previous: AssessResponse | None
@@ -275,38 +332,20 @@ class ReassessTarget:
 
 
 def reassess_target(home_root: Path, target: Path, job_identity: str, *, profile_id: str | None = None) -> ReassessTarget:
-    """Which profile a re-assessment of ``job_identity`` is for (0.1.11.6: a job held by two profiles).
+    """What a re-assessment of ``job_identity`` reads and writes: the job's ONE stored assessment (0.1.11.9).
 
-    One read of the store. With ``profile_id`` the answer is that profile, whoever else holds the job; an id that is
-    no profile of this gig (or a deleted one) raises ``profile_not_found``. Its own stored assessment names the
-    posting; when it has none, another holder's does (``own`` is false).
-
-    Without ``profile_id`` (callers older than 0.1.11.6): the one profile that holds the job, as before. A job
-    assessed for MORE than one active profile raises ``reassess_profile_required`` rather than picking one (until
-    0.1.11.6 the newest assessment's profile was taken, which re-assessed a job for a profile the caller was not
-    looking at). Assessments of a pasted resume and of profiles that are no longer active do not make a job ambiguous.
+    ``profile_id`` no longer picks a record.  Given, it is the role recorded on the new assessment (whose resume
+    stands in when no master is stored); an id that is no role of this gig (or a deleted one) raises
+    ``profile_not_found``.  Not given: the selected role, as for any assessment.  Until 0.1.11.9 a job two roles
+    held had two assessments, and a caller that named none was refused (``reassess_profile_required``); there is
+    nothing to choose between now.
     """
 
-    items = [item for item in list_quick_assessments(home_root, target) if item.job.job_identity == job_identity]
-    if profile_id is not None:
-        if profile_id not in _profile_ids(home_root, target, states=("active", "archived")):
-            raise QuickAssessError("profile_not_found", f"profile {profile_id!r} is not committed in this gig")
-        own = next((item for item in items if item.resume.profile_id == profile_id), None)
-        return ReassessTarget(own or (items[0] if items else None), profile_id, own is not None)
-    held = [item for item in items if item.resume.profile_id is not None]
-    if len({item.resume.profile_id for item in held}) > 1:
-        active = _profile_ids(home_root, target, states=("active",))
-        held = [item for item in held if item.resume.profile_id in active] or held
-        holders = sorted({str(item.resume.profile_id) for item in held})
-        if len(holders) > 1:
-            raise QuickAssessError(
-                "reassess_profile_required",
-                f"this job is assessed for {len(holders)} profiles ({', '.join(holders)}); say which one to assess again: "
-                'reassess.profile_id (CLI: --profile)',
-            )
-        return ReassessTarget(held[0], held[0].resume.profile_id, True)
-    previous = held[0] if held else (items[0] if items else None)
-    return ReassessTarget(previous, None if previous is None else previous.resume.profile_id, previous is not None)
+    if profile_id is not None and profile_id not in _profile_ids(home_root, target, states=("active", "archived")):
+        raise QuickAssessError("profile_not_found", f"profile {profile_id!r} is not committed in this gig")
+    items = job_quick_assessments(home_root, target, job_identity)
+    own = next((item for item in items if item.resume.profile_id is not None), None)
+    return ReassessTarget(own or (items[0] if items else None), profile_id, own is not None)
 
 
 def _profile_ids(home_root: Path, target: Path, *, states: tuple[str, ...]) -> frozenset[str]:
@@ -730,23 +769,21 @@ def candidate_location_and_work_mode(preferences, profile, *, home_root: Path, t
     assessment itself and for ``assessment_basis`` (what a stored assessment
     is compared with), so the two cannot drift.
 
+    0.1.11.9, ONE set of candidate facts: they are facts about the person, not
+    about a search, so they are read where the default role's always were (the
+    shared find-jobs.json), whichever role asked.  A role's own
+    ``search_settings`` are search filters only (until 0.1.11.9 a role with its
+    own settings was assessed for ITS location and work mode, 0110-022 and
+    0110-038).  ``profile`` is no longer read.
+
     Location (assess-prompt-v2): the request's ``preferences.location`` when
-    given, else the profile's own (0110-022: a profile with its own search
-    settings is assessed for ITS location), else find-jobs.json's. Work mode
-    (0110-038): the profile's own, else the default's (the shared
-    find-jobs.json, filled from the setup's saved answer like a run's sealed
-    config); "any"/none adds nothing to the prompt.
+    given, else find-jobs.json's. Work mode (0110-038): find-jobs.json's,
+    filled from the setup's saved answer like a run's sealed config;
+    "any"/none adds nothing to the prompt.
     """
 
-    own_settings = None if profile is None else profile.search_settings
-    if preferences.location is not None:
-        location = preferences.location
-    elif own_settings is not None:
-        location = own_settings.location or ""
-    else:
-        location = _config_location(target)
-    work_mode = own_settings.work_mode if own_settings is not None else _config_work_mode(home_root, target)
-    return location, work_mode
+    location = preferences.location if preferences.location is not None else _config_location(target)
+    return location, _config_work_mode(home_root, target)
 
 
 #: A model id as an adapter names it (``claude-opus-5-5``, ``gpt-5.1-codex``, ``llama3.1:8b``): never free text.
@@ -898,8 +935,8 @@ def run_quick_assessment(
     except FindJobsContractError as exc:
         raise QuickAssessError(exc.code, str(exc)) from exc
 
-    # 3. Effective preferences: find-jobs.json (visa, countries) + profile
-    #    titles, with the request's own values overriding both.
+    # 3. Effective preferences: find-jobs.json (visa, countries), with the
+    #    request's own values overriding them. No role's titles (0.1.11.9).
     preferences = resolve_preferences(request.preferences, target=target, profile=profile)
     assert preferences.countries is not None and preferences.titles is not None
     assert preferences.visa_sponsorship_required is not None
@@ -908,9 +945,9 @@ def run_quick_assessment(
     #     ``location``. Kept OUT of the echoed ``preferences`` unless the
     #     request carried it, so a stored/served response's preferences
     #     object is unchanged for every caller that never sends one.
-    # 0110-022: a profile with its own search settings is assessed for ITS
-    #     location, not the default profile's.
-    # 0110-038: and for its own work mode ("any"/none adds nothing to the prompt).
+    # 0.1.11.9: ONE set of candidate facts, whichever role asked (a role's own
+    #     search settings are search filters only).
+    # 0110-038: the work mode too ("any"/none adds nothing to the prompt).
     candidate_location, candidate_work_mode = candidate_location_and_work_mode(
         preferences, profile, home_root=home_root, target=target
     )
@@ -922,7 +959,8 @@ def run_quick_assessment(
             resume = replace(resume, text=variant.resume_text)
             path = tailored_variant_path(home_root, target, resume.profile_id, job.job_identity)
         else:
-            path = quick_assess_path(home_root, target, resume.profile_id, job.job_identity)
+            # 0.1.11.9: the JOB's own file, whichever role asked (its id is recorded inside, as before).
+            path = quick_assess_write_path(home_root, target, resume.profile_id, job.job_identity)
     except Exception as exc:
         raise QuickAssessError("target_unavailable", "this folder is not bound to a GigAI project") from exc
     previous = _read_stored(path)
@@ -1152,6 +1190,7 @@ def run_quick_assessment(
 __all__ = [
     "EPHEMERAL_RESUME_KEY",
     "ERROR_NOT_STORED",
+    "JOB_RECORD",
     "ERROR_POSTING_UNREADABLE",
     "POSTING_UNREADABLE_REASONS",
     "REASON_NO_POSTING_BODY",
@@ -1166,10 +1205,13 @@ __all__ = [
     "ReassessTarget",
     "candidate_location_and_work_mode",
     "find_quick_assessment_by_job_identity",
+    "is_pasted",
     "job_quick_assess_path",
+    "job_quick_assessments",
     "list_quick_assessments",
     "quick_assess_dir",
     "quick_assess_path",
+    "quick_assess_write_path",
     "read_quick_assessment",
     "read_tailored_variant",
     "reassess_target",

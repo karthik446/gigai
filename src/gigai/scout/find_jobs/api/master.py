@@ -566,9 +566,10 @@ class MasterRoutesMixin:
         if paths is None or body is None:
             return
         home_root, target = paths
-        required = ("profile_id", "job_identity", "updated_at", "use", "item_id")
-        if not all(isinstance(body.get(key), str) and body[key] for key in required):
-            self._error(HTTPStatus.UNPROCESSABLE_ENTITY, "invalid_value", "profile_id, job_identity, updated_at, use and item_id are required, each a non-empty string")
+        # 0.1.11.9: a job has ONE resume. ``profile_id`` is still taken (callers of before send it) and picks nothing.
+        required = ("job_identity", "updated_at", "use", "item_id")
+        if not all(isinstance(body.get(key), str) and body[key] for key in required) or not isinstance(body.get("profile_id"), str | None):
+            self._error(HTTPStatus.UNPROCESSABLE_ENTITY, "invalid_value", "job_identity, updated_at, use and item_id are required, each a non-empty string")
             return
         fit = body.get("fit", FIT_ASK)
         if body["use"] not in JOB_USES or fit not in FITS:
@@ -576,7 +577,7 @@ class MasterRoutesMixin:
             return
         try:
             edit = change_stored_selection(
-                home_root, target, profile_id=body["profile_id"], job_identity=body["job_identity"], use=body["use"],  # type: ignore[arg-type]
+                home_root, target, profile_id=body.get("profile_id") or None, job_identity=body["job_identity"], use=body["use"],  # type: ignore[arg-type]
                 item_id=body["item_id"], fit=fit, updated_at=body["updated_at"],  # type: ignore[arg-type]
             )
         except TailorError as exc:

@@ -519,7 +519,8 @@ def test_run_stores_json_and_markdown_cites_answers_uses_the_matrix_and_keeps_cr
     stored = Path(response.stored_path)
     markdown = Path(response.markdown_path)
     assert stored.is_file() and markdown.is_file() and markdown == stored.with_suffix(".md")
-    assert stored.parent.name == selected.profile_id and stored.parent.parent.name == "resumes"
+    # 0.1.11.9: the job's own folder; the role that asked is recorded inside.
+    assert stored.parent.name == "job" and stored.parent.parent.name == "resumes" and response.resume.profile_id == selected.profile_id
     assert stored.parent.parent.parent == fx.home_root / "scout" / stored.parent.parent.parent.name
     on_disk = json.loads(stored.read_text(encoding="utf-8"))
     assert on_disk["sources"]["answers"] == [{"question_id": "cloud:gcp", "revision_id": response.sources.answers["cloud:gcp"]}]

@@ -1115,7 +1115,7 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
     RouteSpec(
         "GET", "/api/assessments", "Stored quick assessments, newest first, each with its job_state.", "read", "none",
         {"schema_version": "scout-assessments-list-response:1", "items": []}, schema_version="scout-assessments-list-response:1",
-        params=(_q("profile_id", "string", "Only this resume identity."), _q("verdict", "string", "Only this verdict.")), errors=((422, "bad_enum"), _NO_TARGET),
+        params=(_q("profile_id", "string", '"ephemeral": only the pasted-resume assessments. A role id leaves those out and narrows no further (0.1.11.9: a job has one assessment, whichever role asked for it).'), _q("verdict", "string", "Only this verdict.")), errors=((422, "bad_enum"), _NO_TARGET),
         description=_BASIS_NOTE + " " + _STALE_NOTE,
     ),
     RouteSpec(
@@ -1124,7 +1124,7 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
         schema_version="scout-answers-response:1",
         params=(
             _b("question_id", "string", "The question's id (`<category>:<value>`).", required=True), _b("answer", "string", "The answer.", required=True),
-            _b("reassess", "object", '`{"job_identity": "<id>", "profile_id": "<id>"}`: a job to assess again with the answer, and the profile to assess it for (optional: left out, the one profile that has assessed the job).'),
+            _b("reassess", "object", '`{"job_identity": "<id>", "profile_id": "<id>"}`: a job to assess again with the answer (it has one assessment, which this replaces). `profile_id` is optional and picks no record: the role recorded on the new assessment (left out: the selected role).'),
             _b("question", "string", "The question's own words, kept with the answer."),
             _b("tag", "string", "Your own tag (lowercase, at most 40 characters); omitted = a tag from the question."),
             _b("from_bank", "string", "When the answer confirms a `bank_suggestions` near match: that suggestion's `bank_question_id`."),
@@ -1135,13 +1135,13 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
             "question_id": "cloud:gcp", "question": "Do you have GCP experience?", "answer": "Yes, 4 years, GKE + BigQuery", "actor": "agent",
             "source": "from the user's repo infra-charts, at the user's request",
         },
-        errors=(_UNKNOWN_KEY, _WRONG_TYPE, _INVALID, (422, "answer_invalid"), (422, "personal_info_refused"), _REVISION_CONFLICT, (422, "reassess_unavailable"), (404, "reassess_not_found"), (404, "profile_not_found"), (409, "reassess_profile_required"), _NOT_FOUND, _NO_TARGET),
+        errors=(_UNKNOWN_KEY, _WRONG_TYPE, _INVALID, (422, "answer_invalid"), (422, "personal_info_refused"), _REVISION_CONFLICT, (422, "reassess_unavailable"), (404, "reassess_not_found"), (404, "profile_not_found"), _NOT_FOUND, _NO_TARGET),
         description=(
-            "Answers 201 with the saved `answer`. Storing it is local; the model runs only when `reassess` is given. `reassess.profile_id` "
-            "(0.1.11.6) names the profile the new assessment is made for and stored under; a job page sends its own. Left out, the one "
-            "profile that has assessed the job is taken; a job assessed for more than one active profile answers 409 "
-            "reassess_profile_required, and an unknown id 404 profile_not_found, both before anything is saved. The answer is the user's: "
-            "every profile's later assessment reuses it, for the same question id and for the same fact worded differently. A new id creates "
+            "Answers 201 with the saved `answer`. Storing it is local; the model runs only when `reassess` is given. A job has one "
+            "assessment (0.1.11.9) and `reassess` replaces it. `reassess.profile_id` is optional and picks no record: it is the role "
+            "recorded on the new assessment (left out: the selected role); an unknown id answers 404 profile_not_found before anything is "
+            "saved. The answer is the user's: "
+            "every later assessment reuses it, for the same question id and for the same fact worded differently. A new id creates "
             "the answer; an existing id replaces its text (send `revision` to be safe against another writer: 409 revision_conflict carries "
             "the current `answer`). Text holding an email, phone, link or street address is refused with 422 personal_info_refused. "
             "Example, an agent saves a factual reply from a chat and the next posting that asks it is not asked again: POST this route with "
@@ -1321,7 +1321,7 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
         schema_version="scout-job-suggestions-response:1",
         params=(
             _q("url", "string", "The posting URL, raw or normalized.", required=True),
-            _q("profile_id", "string", "The profile. Default: the profile whose assessment of the job is newest."),
+            _q("profile_id", "string", "Optional and picks nothing (0.1.11.9: a job has one assessment, one suggestion record and one resume, whichever role asked)."),
             _q("status", "string", "Only the suggestions in this state.", enum=("open", "done", "dismissed")),
         ),
         errors=(_INVALID, _UNKNOWN_KEY, (404, "assessment_missing"), (404, "suggestions_not_found"), _NO_TARGET),
@@ -1355,7 +1355,7 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
         params=(
             _b("job_url", "string", "The posting's link: the ONE job.", required=True),
             _b("action", "string", "What to do.", required=True, enum=("add", "resolve", "dismiss")),
-            _b("profile_id", "string", "The profile. Default: the profile whose assessment of the job is newest."),
+            _b("profile_id", "string", "Optional and picks nothing (0.1.11.9: a job has one assessment, one suggestion record and one resume, whichever role asked)."),
             _ACTOR_PARAM,
             _b("kind", "string", "add: what the suggestion is about.", enum=("reword", "keyword", "order", "gap", "master_line")),
             _b("why", "string", "add: what would help, 1 to 300 characters. No name and no contact detail."),
@@ -1398,7 +1398,7 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
         params=(
             _b("job_url", "string", "The posting's link: the ONE job.", required=True),
             _b("action", "string", "The step.", required=True, enum=("refresh", "draft", "shorten", "use_proposed", "dismiss_proposed")),
-            _b("profile_id", "string", "The profile. Default: the profile whose assessment of the job is newest."),
+            _b("profile_id", "string", "Optional and picks nothing (0.1.11.9: a job has one assessment, one suggestion record and one resume, whichever role asked)."),
         ),
         request_example={"job_url": _JOB_URL, "action": "refresh"},
         errors=(
@@ -1483,7 +1483,7 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
         "GET", "/api/tailored-resumes", "Stored tailored resumes, newest first.", "read", "none",
         {"schema_version": "scout-tailored-resumes-response:1", "items": []},
         schema_version="scout-tailored-resumes-response:1",
-        params=(_q("profile_id", "string", "Only this resume identity."), _q("job_identity", "string", "Only this job.")), errors=(_NO_TARGET,),
+        params=(_q("profile_id", "string", '"ephemeral": only the pasted-resume ones. A role id leaves those out and narrows no further (0.1.11.9: a job has one resume).'), _q("job_identity", "string", "Only this job.")), errors=(_NO_TARGET,),
         description="Carries resume-derived text (the product). For a job's ids and links use GET /api/jobs?url=.",
     ),
     RouteSpec(
@@ -1525,7 +1525,7 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
         "PUT", "/api/tailored-resumes/lines", "Show the original, the rewrite, or your own text on one line of a stored tailored resume.", "write", "none",
         {"schema_version": "scout-tailor-response:1", "job": {"job_identity": _JOB_URL}, "markdown": "# ..."}, schema_version="scout-tailor-response:1",
         params=(
-            _b("profile_id", "string", "The resume identity.", required=True), _b("job_identity", "string", "The job identity.", required=True),
+            _b("profile_id", "string", 'Optional (0.1.11.9: a job has one resume, and the job names it). Still taken from callers of before; "ephemeral" names a pasted resume\'s.'), _b("job_identity", "string", "The job identity.", required=True),
             _b("updated_at", "string", "The updated_at of the tailored resume you read; a newer tailoring answers 409.", required=True),
             _b("line_id", "string", "A line id (`L<n>`) from the tailored resume.", required=True),
             _b("use", "string", "Which version to show; custom shows `text`.", required=True, enum=("original", "rewritten", "custom")),
@@ -1546,7 +1546,7 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
         "PUT", "/api/tailored-resumes/length", "Put back what a tailored resume left out for length, or leave it out again.", "write", "none",
         {"schema_version": "scout-tailor-response:1", "job": {"job_identity": _JOB_URL}, "markdown": "# ..."}, schema_version="scout-tailor-response:1",
         params=(
-            _b("profile_id", "string", "The resume identity.", required=True), _b("job_identity", "string", "The job identity.", required=True),
+            _b("profile_id", "string", 'Optional (0.1.11.9: a job has one resume, and the job names it). Still taken from callers of before; "ephemeral" names a pasted resume\'s.'), _b("job_identity", "string", "The job identity.", required=True),
             _b("updated_at", "string", "The updated_at of the tailored resume you read; a newer tailoring answers 409.", required=True),
             _b("use", "string", "restore puts every cut role and bullet back; cut, after a restore, leaves the same things out again.", required=True, enum=("restore", "cut")),
         ),
@@ -1574,7 +1574,7 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
         },
         schema_version="scout-tailor-response:1",
         params=(
-            _b("profile_id", "string", "The resume identity.", required=True), _b("job_identity", "string", "The job identity.", required=True),
+            _b("profile_id", "string", 'Optional (0.1.11.9: a job has one resume, and the job names it). Still taken from callers of before; "ephemeral" names a pasted resume\'s.'), _b("job_identity", "string", "The job identity.", required=True),
             _b("updated_at", "string", "The updated_at of the tailored resume you read; a newer tailoring answers 409.", required=True),
             _b("use", "string", "add shows a left-out master line; remove takes a picked one off this resume.", required=True, enum=("add", "remove")),
             _b("item_id", "string", "The master line's id (from `selection.picked` / `selection.left_out`, or GET /api/master).", required=True),
@@ -1829,7 +1829,7 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
     RouteSpec(
         "POST", "/api/tailored-resumes/pdf", "Render the stored tailored resume as a PDF (binary).", "read", "none", {"content_type": "application/pdf"},
         params=(
-            _b("profile_id", "string", "The resume identity.", required=True), _b("job_identity", "string", "The job identity.", required=True),
+            _b("profile_id", "string", 'Optional (0.1.11.9: a job has one resume, and the job names it). Still taken from callers of before; "ephemeral" names a pasted resume\'s.'), _b("job_identity", "string", "The job identity.", required=True),
             _HEADER_PARAM,
             _b("spacing_scale", "number", "The spacing for this PDF, 0.7 to 1.4, used as given (nothing tightens it) and not saved. Default: the spacing saved for this job, else the saved layout."),
         ),
@@ -1851,7 +1851,7 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
         "POST", "/api/tailored-resumes/preview", "Show the stored tailored resume as it will print (page pictures), and save this job's spacing.", "write", "none",
         {"pages": 2, "max_pages": 2, "spacing_scale": 0.85, "saved": True, "note": None, "spacing": {"min": 0.7, "max": 1.4, "step": 0.05}, "header_shown": "placeholder", "image_type": "image/png", "images": ["iVBORw0KGgo..."]},
         params=(
-            _b("profile_id", "string", "The resume identity.", required=True), _b("job_identity", "string", "The job identity.", required=True),
+            _b("profile_id", "string", 'Optional (0.1.11.9: a job has one resume, and the job names it). Still taken from callers of before; "ephemeral" names a pasted resume\'s.'), _b("job_identity", "string", "The job identity.", required=True),
             _HEADER_PARAM,
             _b("spacing_scale", "number", "The job page's spacing slider, 0.7 to 1.4: SAVED as this job's spacing, then used for the preview and for the PDF. Leave it out to read the preview and save nothing."),
         ),
@@ -1955,8 +1955,8 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
         {"schema_version": "scout-resumes-folder-response:1", "path": "/home/you/Documents/GigAI/resumes", "shown": "~/Documents/GigAI/resumes", "source": "default", "default": "~/Documents/GigAI/resumes", "exists": True},
         schema_version="scout-resumes-folder-response:1",
         params=(
-            _q("profile_id", "string", "With job_identity: add `files`, the names of that job's files in the folder."),
-            _q("job_identity", "string", "With profile_id: the job."),
+            _q("profile_id", "string", "Optional (0.1.11.9: the job names its files); taken with job_identity and picks nothing."),
+            _q("job_identity", "string", "The job: adds `files`, the names of that job's files in the folder."),
         ),
         errors=(_UNKNOWN_KEY, _INVALID, _NO_TARGET),
         description=(
@@ -1974,8 +1974,8 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
         {"schema_version": "scout-jobs-folder-response:1", "path": "/home/you/Documents/GigAI/jobs", "shown": "~/Documents/GigAI/jobs", "source": "default", "default": "~/Documents/GigAI/jobs", "exists": True},
         schema_version="scout-jobs-folder-response:1",
         params=(
-            _q("profile_id", "string", "With job_identity: add `job`, that job's own folder and the names of its files."),
-            _q("job_identity", "string", "With profile_id: the job."),
+            _q("profile_id", "string", "Optional (0.1.11.9: the job names its folder); taken with job_identity and picks nothing."),
+            _q("job_identity", "string", "The job: adds `job`, that job's own folder and the names of its files."),
         ),
         errors=(_UNKNOWN_KEY, _INVALID, _NO_TARGET),
         description=(
@@ -2006,8 +2006,8 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
         {"schema_version": "scout-jobs-folder-open:1", "opened": True, "shown": "~/Documents/GigAI/jobs/acme/staff-engineer", "message": "Opened ~/Documents/GigAI/jobs/acme/staff-engineer."},
         schema_version="scout-jobs-folder-open:1",
         params=(
-            _b("profile_id", "string", "Optional: with job_identity, the job whose folder to open. Without both, the jobs folder itself is opened."),
-            _b("job_identity", "string", "Optional: the job's identity (the page's own)."),
+            _b("profile_id", "string", "Optional; taken with job_identity and picks nothing (0.1.11.9: the job names its folder)."),
+            _b("job_identity", "string", "Optional: the job whose folder to open (the page's own identity). Without it, the jobs folder itself is opened."),
         ),
         request_example={}, errors=(_UNKNOWN_KEY, _WRONG_TYPE, _INVALID, (403, "forbidden_origin"), (404, "folder_missing"), (422, "outside_jobs_folder"), _NO_TARGET),
         description=(

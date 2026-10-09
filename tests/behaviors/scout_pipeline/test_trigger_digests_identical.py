@@ -179,12 +179,13 @@ def test_every_steps_digest_is_the_same_with_the_triggers_shared_inputs(fx: Pipe
     edited_story = same("a story was added", done=False)
     assert edited_story != edited
 
-    # One profile's candidate settings change.
+    # One role's own search settings change.
     _cli(fx, "profile", "update", second, "--work-mode", "onsite", "--country", "CA")
-    # (The command's own trigger re-opens that profile's re-assessments: steps that are queued are compared too.)
-    settings = same("a profile's candidate settings changed", done=False)
-    # The re-assessment reads the settings; the label reads whether the base assessment is stale, and it now is.
-    assert {key[:1] + key[2:] for key in settings if settings[key] != edited_story[key]} == {(second, "reassess"), (second, "label")}
+    settings = same("a role's search settings changed", done=False)
+    # 0.1.11.9: they are search filters only. The candidate's facts (location, work mode, countries, sponsorship) are
+    # one set, read from the shared config whichever role asked, so no step's digest moves and no assessment goes
+    # stale. (Until 0.1.11.9 that role's re-assessment and label digests changed: it was assessed for ITS settings.)
+    assert {key[:1] + key[2:] for key in settings if settings[key] != edited_story[key]} == set()
     # The answer and the story were saved without their triggers; the look every save makes finds what they changed.
     assert {item["step"] for item in triggers.profile_changed(fx.home_root, fx.target).enqueued} == {"tailor"}
     _drain(fx)

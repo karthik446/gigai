@@ -172,10 +172,14 @@ def test_clip_is_one_line_of_at_most_sixty_characters() -> None:
     assert len(story_prep_job.clip("x" * 500)) == 60 and story_prep_job.clip("short  text") == "short text"
 
 
-def test_a_job_assessed_for_two_profiles_needs_profile(simspace: PostingsFixture) -> None:
+def test_a_second_roles_old_assessment_file_does_not_make_the_job_ambiguous(simspace: PostingsFixture) -> None:
+    """0.1.11.9: a job has ONE assessment (the job's folder). A file a GigAI before 0.1.11.9 left in another role's
+    folder is superseded history: the command needs no `--profile` (0.1.11.7: refused, `profile_ambiguous`)."""
+
     from tests.behaviors.scout_find_jobs.test_assessment_v9_flow import _assessment_path
 
     path = _assessment_path(simspace)
+    assert path.parent.name == "job"
     stored = json.loads(path.read_text(encoding="utf-8"))
     other = "profile_00000000-0000-4000-8000-0000000000bb"
     copy = path.parents[1] / other
@@ -184,10 +188,9 @@ def test_a_job_assessed_for_two_profiles_needs_profile(simspace: PostingsFixture
     assert text != json.dumps(stored)
     (copy / path.name).write_text(text, encoding="utf-8")
 
-    refused = _cli(simspace)
-    assert refused.exit_code != 0 and "--profile" in refused.output and "profile_" in refused.output
-    refused_json = _cli(simspace, "--json")
-    assert refused_json.exit_code != 0 and json.loads(refused_json.stdout)["error"]["code"] == "profile_ambiguous"
+    unnamed = _cli(simspace, "--json")
+    assert unnamed.exit_code == 0, unnamed.output
+    assert "profile_ambiguous" not in unnamed.output
     named = _cli(simspace, "--profile", simspace.default_profile_id, "--json")
     assert named.exit_code == 0, named.output
     assert json.loads(named.stdout)["profile_id"] == simspace.default_profile_id
