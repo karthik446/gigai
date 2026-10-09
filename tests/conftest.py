@@ -136,32 +136,51 @@ def _has_live_marker(tree: ast.AST) -> bool:
     return False
 
 
-@lru_cache(maxsize=256)
-def classify_source(path_string: str, function_name: str) -> str:
-    """Classify a test from isolation requirements, conservatively."""
+@lru_cache(maxsize=None)
+def _file_shape(path_string: str):
+    """Everything classify_source needs that depends only on the file, not the
+    function: parsed once per file no matter how many test functions it holds.
+
+    classify_source used to be the cache boundary (keyed by (path, function_name)),
+    but a 256-entry cache is far smaller than the ~9,000 distinct (path, function)
+    pairs in this suite, so it evicted almost immediately and every test function
+    re-parsed and re-walked its file's AST from scratch at collection time (measured:
+    118s of a 121s collection, nearly all inside ast.walk). Caching per-file instead
+    means a 12-function file pays the parse/walk cost once, not 12 times.
+    """
 
     path = Path(path_string)
     try:
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=path_string)
     except (OSError, UnicodeError, SyntaxError):
-        return "integration"
+        return None
     functions = _function_nodes(tree)
-    root = functions.get(function_name)
-    if root is None:
-        return "integration"
-    if _has_live_marker(tree):
-        return "integration"
+    has_live_marker = _has_live_marker(tree)
     imported = _import_modules(tree)
-    if imported & {"subprocess", "multiprocessing", "sqlite3", "socket", "http", "httpx", "requests", "urllib"}:
-        return "integration"
-    if any(module.startswith(("importlib.resources", "importlib.metadata", "setuptools", "wheel")) for module in imported):
-        return "release"
-
     # tests/ is always repo_root/tests/... (this file's own location).
     repo_root = Path(__file__).resolve().parent.parent
     imported_helpers = _imported_fixture_sources(tree, repo_root)
     local_and_imported = dict(functions)
     local_and_imported.update({name: helper for name, helper in imported_helpers.items() if name not in local_and_imported})
+    return functions, has_live_marker, imported, local_and_imported
+
+
+def classify_source(path_string: str, function_name: str) -> str:
+    """Classify a test from isolation requirements, conservatively."""
+
+    shape = _file_shape(path_string)
+    if shape is None:
+        return "integration"
+    functions, has_live_marker, imported, local_and_imported = shape
+    root = functions.get(function_name)
+    if root is None:
+        return "integration"
+    if has_live_marker:
+        return "integration"
+    if imported & {"subprocess", "multiprocessing", "sqlite3", "socket", "http", "httpx", "requests", "urllib"}:
+        return "integration"
+    if any(module.startswith(("importlib.resources", "importlib.metadata", "setuptools", "wheel")) for module in imported):
+        return "release"
 
     reachable: list[ast.AST] = [root]
     seen: set[str] = {function_name}

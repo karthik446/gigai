@@ -55,7 +55,7 @@ api-e2e:
 # 107 s with UNIT_WORKERS=4 on a laptop. CI (the PR lane and the release pre-check) passes UNIT_WORKERS=4.
 UNIT_WORKERS ?= 0
 unit-tests:
-	$(UV) run --locked --extra test pytest -m fast_unit -q --durations=25 -n $(UNIT_WORKERS) --ignore=tests/api_e2e
+	$(UV) run --locked --extra test pytest -m fast_unit -q --durations=25 -n $(UNIT_WORKERS) --dist $(TEST_XDIST_DIST) --ignore=tests/api_e2e
 
 # 0.1.11.1: the PR lane's second half. The test files that import what changed since BASE (a commit id; the
 # push's previous head in CI), chosen by tools/ci_select_tests.py; nothing when the change cannot be mapped or
