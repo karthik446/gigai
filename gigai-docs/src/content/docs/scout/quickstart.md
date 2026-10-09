@@ -128,13 +128,16 @@ them out too and say how many, and `gigai scout jobs list --state applied` lists
 
 ### Search all jobs
 
-The box **Search all jobs** on the Jobs page searches every posting Scout has stored, not only the ones
-your profiles hold. Type titles (a comma between two roles), and optionally a company or a location.
+The Jobs page has two tabs. **Your jobs** is the list your profiles hold, with its filters. **Search** holds
+the box **Search all jobs**, which searches every posting Scout has stored, not only the ones your profiles
+hold. Type titles (a comma between two roles), and optionally a company or a location.
 Every typed word has to be in the title, seniority included: "senior engineer" lists only Senior or Sr.
 titles. Company and location words are whole words ("ai" finds Example AI, not Maintain). Results are
 newest first and not ranked; they keep the default profile's remote/US/last-30-days filters until you
 choose **Show all** (any place, any date). The page of results comes first and the count after it, and
-**Load more** shows the next page. A search stores nothing and makes no model call.
+**Load more** shows the next page. A search stores nothing and makes no model call. The **?** beside a
+short help line opens the whole rule; a result's job page leads back to the Search tab with the results
+still there (a reload clears them).
 
 - **Save this search as a profile** turns the words into a profile that ranks and assesses.
 - **Assess** on a result assesses it as the default profile: one model call, and Scout asks first.

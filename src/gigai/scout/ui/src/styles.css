@@ -1876,9 +1876,61 @@ table.data-table th {
 .free-search .free-search-title { flex: 2 1 320px; }
 .free-search .free-search-word { flex: 1 1 150px; }
 .free-search .free-search-hint { margin: 0; }
-/* 0.1.11.8: the US-only box and the one help line under the switches (the two rules); the same line under the Jobs filters. */
+/* 0.1.11.8: the US-only box and the short help line under it (the rule is behind its "?"); the same under the Jobs filters. */
 .free-search .free-search-rules,
+.free-search .free-search-copies,
 .jobs-list-rules { margin: 0; }
+
+/* 0.1.11.8 N3: the two tabs at the top of the Jobs page ("Your jobs", "Search": components/JobsTabs.jsx). Links drawn
+   as tabs on one line: each takes half the width up to 200px, so a narrow screen needs no rule of its own. */
+.jobs-tabs { display: flex; gap: 4px; margin-bottom: 16px; border-bottom: 1px solid var(--border); }
+.jobs-tab {
+  flex: 1 1 0;
+  max-width: 200px;
+  padding: 9px 18px;
+  margin-bottom: -1px;
+  border: 1px solid transparent;
+  border-bottom: 2px solid transparent;
+  border-radius: 8px 8px 0 0;
+  color: var(--muted);
+  font-size: 0.95rem;
+  font-weight: 600;
+  text-align: center;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.jobs-tab:hover { color: var(--text); }
+.jobs-tab.active { color: var(--text); background: var(--panel); border-color: var(--border); border-bottom-color: var(--accent); }
+.jobs-tab:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* 0.1.11.8 N3: the "?" beside a short help line (components/HelpTip.jsx) and the box it opens under that line (the
+   line is the box's frame, so it never leaves the panel, whatever the screen's width). */
+.free-search .free-search-hint,
+.free-search .free-search-rules,
+.free-search .free-search-copies,
+.jobs-list-rules { position: relative; }
+.help-tip { display: inline-block; }
+.help-tip-button { padding: 0; background: none; color: inherit; cursor: pointer; font-family: inherit; }
+.help-tip-body {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: min(460px, 100%);
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--text);
+  font-size: 0.82rem;
+  font-weight: 400;
+  line-height: 1.45;
+  text-align: left;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.18);
+}
 .posting-detail .tag { margin-left: 2px; }
 .free-search-results { display: flex; flex-direction: column; gap: 10px; }
 .posting-row.search-row { grid-template-columns: minmax(0, 1fr) 240px minmax(0, 420px); align-items: center; }

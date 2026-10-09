@@ -39,6 +39,7 @@ import {
 } from "../jobModel.js";
 import { assessmentStaleFor, eventActionLabel, fitStateFor, isApplicationState, jobStateFor, staleAssessmentNote, staleReasonWords } from "../jobStateModel.js";
 import { modelTargetLabel } from "../modelTargets.js";
+import { TAB_SEARCH, backToJobs } from "../jobsTabsModel.js";
 import { ASSESSMENTS_HASH, JOBS_HASH } from "../routing.js";
 
 // Q4a: one posting's job page (#/jobs/<normalized_url>), per
@@ -339,13 +340,15 @@ function AssessSends({ jobUrl, profileId, target }) {
 }
 
 function BackToList({ from }) {
+  const back = backToJobs();
   return from === "assessments" ? (
     <a className="back-link" href={ASSESSMENTS_HASH}>
       ← Assessments
     </a>
   ) : (
-    <a className="back-link" href={JOBS_HASH}>
-      ← Jobs
+    // 0.1.11.8 N3: back to the Jobs tab the job was opened from (a search result's page goes back to Search).
+    <a className="back-link" href={back.hash} data-tab={back.tab}>
+      {back.tab === TAB_SEARCH ? "← Search" : "← Jobs"}
     </a>
   );
 }

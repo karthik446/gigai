@@ -293,12 +293,16 @@ def test_the_wiring_and_the_built_bundle() -> None:
     panel = (UI_SRC / "components" / "FreeSearchPanel.jsx").read_text(encoding="utf-8")
     jobs = (UI_SRC / "views" / "JobsView.jsx").read_text(encoding="utf-8")
     model = (UI_SRC / "freeSearchModel.js").read_text(encoding="utf-8")
-    for needle in ('data-testid="free-search-us-only"', "store.setUsOnly(event.target.checked)", 'data-role="free-search-rules"', 'data-role="search-copies"', "{US_ONLY_RULE} {US_ONLY_WITH_SHOW_ALL} {COPIES_RULE} {CANONICAL_RULE} {SEARCH_COPIES_RULE}", "rowLabels(row, names, { usOnly })"):
+    for needle in ('data-testid="free-search-us-only"', "store.setUsOnly(event.target.checked)", 'data-role="free-search-rules"', 'data-role="search-copies"', "help={HELP.searchUsOnly}", "help={HELP.searchCopies}", "rowLabels(row, names, { usOnly })"):
         assert needle in panel, needle
-    for needle in ('data-testid="jobs-us-only"', "usOnly: event.target.checked", 'data-role="jobs-list-rules"', 'data-role="job-copies"', "usOnlyDefault={usOnlyServed ? usOnlyServed.default : undefined}", 'data-testid="unclear-location"', "{COPIES_RULE} {CANONICAL_RULE}"):
+    for needle in ('data-testid="jobs-us-only"', "usOnly: event.target.checked", 'data-role="jobs-list-rules"', 'data-role="job-copies"', "usOnlyDefault={usOnlyServed ? usOnlyServed.default : undefined}", 'data-testid="unclear-location"', "help={HELP.listUsOnly}", "help={HELP.listCopies}"):
         assert needle in jobs, needle
-    # The help line says how the two switches relate, in the server's words.
+    # The help says how the two switches relate, in the server's words. 0.1.11.8 N3: each rule is a short line and
+    # the whole text behind a "?" (jobsTabsModel.HELP: tests/api_e2e/test_ui_jobs_tabs_model.py).
     assert job_copies.US_ONLY_WITH_SHOW_ALL in model
+    tabs = (UI_SRC / "jobsTabsModel.js").read_text(encoding="utf-8")
+    assert "searchUsOnly: { label: \"About US only\", paragraphs: [US_ONLY_RULE, US_ONLY_WITH_SHOW_ALL] }" in tabs
+    assert "paragraphs: [COPIES_RULE, CANONICAL_RULE, SEARCH_COPIES_RULE]" in tabs and "paragraphs: [COPIES_RULE, CANONICAL_RULE] }" in tabs
     # The box is this view's: nothing of it goes to the browser's storage or to a profile.
     for source in (panel, (UI_SRC / "freeSearchStore.js").read_text(encoding="utf-8")):
         assert "localStorage" not in source and "sessionStorage" not in source

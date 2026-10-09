@@ -3,8 +3,6 @@ import { getFreeSearch, postApplication, postAssess } from "../api.js";
 import { reassessErrorText } from "../answersModel.js";
 import {
   NOT_RANKED,
-  SEARCH_COPIES_RULE,
-  US_ONLY_WITH_SHOW_ALL,
   appliedRow,
   applyRequest,
   assessLabel,
@@ -31,18 +29,21 @@ import {
 } from "../freeSearchModel.js";
 import { createFreeSearchStore, keepProfileDraft } from "../freeSearchStore.js";
 import { eventActionLabel } from "../jobStateModel.js";
-import { CANONICAL_RULE, COPIES_RULE, US_ONLY_LABEL, US_ONLY_RULE, copiesTag, postedLine } from "../postingsModel.js";
+import { COPIES_SHORT, HELP, SEARCH_SHORT, US_ONLY_SHORT } from "../jobsTabsModel.js";
+import { US_ONLY_LABEL, copiesTag, postedLine } from "../postingsModel.js";
 import { REQUIREMENTS_UNREADABLE_TEXT, isRequirementsUnreadable } from "../rankModel.js";
 import { SETTINGS_HASH, jobHash, navigate } from "../routing.js";
 import { displayCompanyName } from "../display.js";
+import HelpTip from "./HelpTip.jsx";
 
 // 0.1.11.7 FS2: "Search all jobs" on the Jobs page (freeSearchModel.js has the rules, freeSearchStore.js what was read).
+// 0.1.11.8 N3: it is the page's "Search" tab (#/jobs/search), alone there; the list and its own box are "Your jobs".
 //
 //   the box       a title (a comma separates titles), optional company and location words, and "Show all", which
 //                 drops the default profile's location, work mode, countries and posted window. Its label says what
 //                 those are ("remote, US, last 30 days"), read from the search's own answer
 //   US only       0.1.11.8 N1: a checkbox of its own, by the posting's location; on by default for a US setup. It
-//                 still applies with Show all until it is unticked (the help line under the switches says the rule)
+//                 still applies with Show all until it is unticked (one short line under it; the rule behind its "?")
 //   copies        0.1.11.8 N2: the same company, title and description posted more than once is ONE row: one
 //                 canonical job (its US posting, else the earliest posted), with every location ("Remote: Estonia,
 //                 Lithuania, Latvia +4") and how many postings it stands for; Open, Assess and Mark applied act on
@@ -52,10 +53,12 @@ import { displayCompanyName } from "../display.js";
 //                 total line after it; "Load more" adds the next 50
 //   per row       Open (its job page), "Assess · 1 model call · as <default profile>" (asked once more before the
 //                 call; POST /api/assess with the default profile's id), "Mark applied" (POST /api/applications)
+//   the help      0.1.11.8 N3: three short lines (what is searched, US only, one row per job), each with a "?"
+//                 that opens the whole rule (HelpTip.jsx, jobsTabsModel.HELP)
 //   the footer    "Not ranked. Save as a profile to rank.", "Show all N (any place, any date)" when the default
 //                 filters hid rows, and "Save this search as a profile" (the new-profile form in Settings, filled in)
 //
-// The search takes no profile: the profile chips of the list below and the top bar's selector do not change it.
+// The search takes no profile: the profile chips of "Your jobs" and the top bar's selector do not change it.
 // Nothing is stored by a search; the results live in this tab until it is reloaded.
 const store = createFreeSearchStore({ fetchSearch: getFreeSearch });
 
@@ -253,6 +256,10 @@ export default function FreeSearchPanel({ profiles, onOpenRow, onRowChanged, usO
           </div>
         )}
       </form>
+      <p className="muted small free-search-hint" data-role="free-search-hint">
+        <span data-role="search-short">{SEARCH_SHORT}</span>
+        <HelpTip help={HELP.searchRules} name="search-rules" />
+      </p>
       <label className="filter-toggle free-search-all">
         <input type="checkbox" role="switch" checked={form.showAll} onChange={(event) => store.setShowAll(event.target.checked)} data-testid="free-search-show-all" />
         <span data-role="free-search-show-all-label">{showAllLabel(defaultsText)}</span>
@@ -262,14 +269,9 @@ export default function FreeSearchPanel({ profiles, onOpenRow, onRowChanged, usO
         <span data-role="free-search-us-only-label">{US_ONLY_LABEL}</span>
       </label>
       <p className="muted small free-search-rules" data-role="free-search-rules">
-        {US_ONLY_RULE} {US_ONLY_WITH_SHOW_ALL} {COPIES_RULE} {CANONICAL_RULE} {SEARCH_COPIES_RULE}
+        <span data-role="us-only-short">{US_ONLY_SHORT}</span>
+        <HelpTip help={HELP.searchUsOnly} name="search-us-only" />
       </p>
-      {!results && !loading && !error && (
-        <p className="muted small free-search-hint" data-role="free-search-hint">
-          Searches every stored posting, in a profile's list or in none. A comma separates titles; every word of a typed title must be in the posting's title. The
-          profile chips below do not change it, and a search stores nothing.
-        </p>
-      )}
       {loading && (
         <p className="muted" role="status" data-role="free-search-loading">
           Searching the stored postings…
@@ -307,6 +309,12 @@ export default function FreeSearchPanel({ profiles, onOpenRow, onRowChanged, usO
               {edited && <span data-role="free-search-edited"> The boxes changed since: press Search to search again.</span>}
             </span>
           </div>
+          {results.rows.length > 0 && (
+            <p className="muted small free-search-copies" data-role="free-search-copies-rule">
+              <span data-role="copies-short">{COPIES_SHORT}</span>
+              <HelpTip help={HELP.searchCopies} name="search-copies" />
+            </p>
+          )}
           {hidden && (
             <div className="result-count">
               <button type="button" className="link-button" data-testid="free-search-show-hidden" onClick={() => store.setShowAll(true)}>

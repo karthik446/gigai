@@ -1,5 +1,8 @@
 """0.1.11.8 N1 + N2: the "US only" box and the row of copies, in "Search all jobs" and on the Jobs list.
 
+0.1.11.8 N3: the two are the Jobs page's tabs ("Search" at `#/jobs/search`, "Your jobs" at `#/jobs`), and each rule
+is one short line with the whole text behind a "?" (tests/ui/test_jobs_tabs_ui.py pins the tabs and the "?").
+
 Real Chromium against a REAL server of its own (`GET /api/search`, `GET /api/postings`, the built search index),
 nothing stubbed but `GET /api/setup` (the fixture home was never through the setup interview). The home is synthetic
 (`tests/support/copies_fixtures.py` on `posting_fixtures.py`: made-up Lever boards, a scripted model): no request
@@ -145,9 +148,28 @@ def _refused(ui, path: str) -> dict:
 
 def _open_jobs(ui, route: str = "/#/jobs") -> None:
     ui.goto(route)
-    ui.page.locator(PANEL).wait_for()
     ui.wait_for_jobs_list()
     ui.settle()
+
+
+def _open_search(ui) -> None:
+    """The Search tab, once it knows the setup's US-only default (the page's list read says it)."""
+
+    ui.goto("/#/jobs/search")
+    ui.page.locator(PANEL).wait_for()
+    ui.page.wait_for_function("(box) => document.querySelector(box).checked", arg=SEARCH_BOX)
+    ui.settle()
+
+
+def _help(ui, name: str) -> str:
+    """The whole text behind the "?" named `name`: opened, read, closed again."""
+
+    tip = ui.page.locator(f'[data-testid="help-tip"][data-help="{name}"]')
+    tip.locator('[data-action="help-tip"]').click()
+    said = tip.locator('[data-role="help-tip-body"]').text_content()
+    ui.page.keyboard.press("Escape")
+    tip.locator('[data-role="help-tip-body"]').wait_for(state="detached")
+    return said
 
 
 def _search(ui, title: str) -> None:
@@ -193,20 +215,25 @@ def _list_rows(ui) -> list[dict]:
 def test_us_only_and_the_row_of_copies_in_search_all_jobs(page) -> None:  # noqa: ANN001
     ui, fx = page, page.fx
     fx.base.model.assess_prompts.clear()
-    _open_jobs(ui)
-    # Before anything is typed: the box is ticked (this setup's countries hold the US) and the help line says the rules.
+    _open_search(ui)
+    # Before anything is typed: the box is ticked (this setup's countries hold the US); one short line under it, and
+    # the rule behind its "?".
     box = ui.page.locator(SEARCH_BOX)
     assert box.is_checked()
-    rules = ui.page.locator(f'{PANEL} [data-role="free-search-rules"]').text_content()
+    assert ui.page.locator(f'{PANEL} [data-role="free-search-rules"] [data-role="us-only-short"]').text_content() == "Hides postings clearly outside the US; unclear places stay listed."
+    rules = _help(ui, "search-us-only")
     assert "US only hides a posting only when every place its location names is clearly outside the US." in rules
     assert 'is labelled "unclear location"' in rules and "still applies with Show all until you turn it off" in rules
-    assert "the same description posted more than once (only the location differs) is one row" in rules
-    assert "its US posting when it has one, else the earliest posted" in rules
 
     # Untouched, the box sends nothing: the server applies the default. The jobs not clearly abroad: five rows.
     _search(ui, "staff engineer, staff ai engineer")
     assert all("us_only" not in query for query in ui.searches), ui.searches
     _total(ui, NOT_ABROAD)
+    # One row per job: the short line under the count, the rule behind its "?".
+    assert ui.page.locator(f'{PANEL} [data-role="copies-short"]').text_content() == "One row per job: the same job posted in several places is one row."
+    rules = _help(ui, "search-copies")
+    assert "the same description posted more than once (only the location differs) is one row" in rules
+    assert "its US posting when it has one, else the earliest posted" in rules
     us = _search_rows(ui)
     assert set(us) == {job_url(SLUG, 9), job_url(SLUG, 10), job_url(SLUG, 13), job_url(OTHER, 1), job_url(WATCHED, 3)}
     assert all("Estonia" not in row["location"] for row in us.values())
@@ -284,9 +311,9 @@ def test_us_only_and_the_row_of_copies_on_the_jobs_list(page) -> None:  # noqa: 
         ("Staff AI Engineer", 3), ("Staff Engineer", 1), ("Staff Engineer, Payments", 2), ("Staff Engineer, Platform", 1), ("Staff Engineer, Search", 1),
     ]
     assert not any("Estonia" in row["detail"] for row in rows)
-    rules = ui.page.locator('[data-role="jobs-list-rules"]').text_content()
-    assert "US only hides a posting only when every place its location names is clearly outside the US." in rules
-    assert "the same description posted more than once (only the location differs) is one row" in rules
+    assert ui.page.locator('[data-role="jobs-list-rules"] [data-role="us-only-short"]').text_content() == "Hides postings clearly outside the US; unclear places stay listed."
+    assert "US only hides a posting only when every place its location names is clearly outside the US." in _help(ui, "list-us-only")
+    assert "the same description posted more than once (only the location differs) is one row" in _help(ui, "list-copies")
     assert ui.page.locator('[data-role="us-only-left-out"]').text_content().strip() == "9 outside the US are left out."
     assert ui.page.locator('[data-role="postings-count"]').text_content().startswith("Showing 1-5 of 5 postings"), "the count is rows"
     # The posting that says "Remote" alone is listed, with the label; no other row has it.
@@ -321,7 +348,6 @@ def test_us_only_and_the_row_of_copies_on_the_jobs_list(page) -> None:  # noqa: 
     # A reload keeps the view's switch (it is in the address), and no profile was changed by it.
     ui.lists.clear()
     ui.page.reload()
-    ui.page.locator(PANEL).wait_for()
     ui.wait_for_jobs_list()
     ui.page.wait_for_function("(arg) => document.querySelectorAll(arg.row).length === arg.count", arg={"row": LIST_ROW, "count": JOBS})
     ui.settle()

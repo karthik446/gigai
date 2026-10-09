@@ -10,6 +10,9 @@
 //                        run (0.1.10.7 M4b)
 //   #/jobs?page=3&state=needs_answers   the same list on page 3 with a filter (0110-10-01: page, size, profile, state,
 //                        window, removed and q live in the address; see postingsModel.jobsHash)
+//   #/jobs/search        0.1.11.8 N3: the same page on its "Search" tab (Search all jobs). A job's id is its address
+//                        ("https://…") or "text:<digest>", never the bare word "search", so the two do not collide;
+//                        this entry stands before the job page's so the router reads it first
 //   #/jobs/<encoded id>  one posting's job page, keyed by its normalized_url
 //                        (or a quick assessment's job_identity)
 //   #/assessments        every on-demand assessment, newest first (uat-bug-016)
@@ -45,7 +48,7 @@ import { useEffect, useState } from "react";
 import { postingHome } from "./jobModel.js";
 
 export const ROUTES = [
-  { view: "jobs", path: "#/jobs", label: "Jobs", pattern: /^#\/jobs\/?(?:\?.*)?$/ },
+  { view: "jobs", path: "#/jobs", label: "Jobs", pattern: /^#\/jobs(?:\/(search))?\/?(?:\?.*)?$/, param: "tab" },
   { view: "job", path: "#/jobs/", label: "Job", pattern: /^#\/jobs\/(.+)$/, param: "jobId" },
   { view: "assessments", path: "#/assessments", label: "Assessments", pattern: /^#\/assessments\/?$/ },
   { view: "assessment", path: "#/assessments/", label: "Assessment", pattern: /^#\/assessments\/(.+)$/, param: "jobId" },

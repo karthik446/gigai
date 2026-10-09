@@ -39,6 +39,7 @@ import {
 } from "../assessAllModel.js";
 import { postingByAddressQuery, postingJob } from "../postingsModel.js";
 import { servedPostingRow } from "../freeSearchModel.js";
+import { tabOf } from "../jobsTabsModel.js";
 import { RUNS_HASH, SETTINGS_HASH, assessmentHash, runHash } from "../routing.js";
 import { onDemandItemFor, resolveJobId } from "../jobAddress.js";
 
@@ -823,6 +824,7 @@ export default function FindJobsView({
   if (route.view === "jobs") {
     return (
       <JobsView
+        tab={tabOf(route.params.tab)}
         selectedProfileId={profileId}
         onSelectProfile={onSelectProfile}
         allProfiles={profiles}

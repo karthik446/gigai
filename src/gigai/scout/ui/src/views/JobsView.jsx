@@ -4,6 +4,8 @@ import { assessAllLabel, assessAsLabel, batchEndLine, isBatchStarted } from "../
 import AssessApprovalDialog from "../components/AssessApprovalDialog.jsx";
 import AssessBatchProgress from "../components/AssessBatchProgress.jsx";
 import FreeSearchPanel from "../components/FreeSearchPanel.jsx";
+import HelpTip from "../components/HelpTip.jsx";
+import JobsTabs from "../components/JobsTabs.jsx";
 import { unheldPostingRow } from "../freeSearchModel.js";
 import { useAssessBatch } from "../useAssessBatch.js";
 import RankPanel from "../components/RankPanel.jsx";
@@ -11,17 +13,15 @@ import SponsorshipBadge from "../components/SponsorshipBadge.jsx";
 import SourcesStrip from "../components/SourcesStrip.jsx";
 import { useSourcesStatus } from "../components/SourcesUpdatePanel.jsx";
 import { inProgressCount } from "../jobStateModel.js";
+import { COPIES_SHORT, HELP, JOBS_TABS, SEARCH_TAB_HASH, TAB_SEARCH, TAB_YOURS, US_ONLY_SHORT, rememberTab, tabOfHash } from "../jobsTabsModel.js";
 import { h1bLabel } from "../jobModel.js";
 import {
   EMPTY_FILTER,
   ORDER_CHIP,
   PAGE_SIZES,
-  CANONICAL_RULE,
-  COPIES_RULE,
   PROFILE_FILTER_KEY,
   REMOVED_FILTER,
   US_ONLY_LABEL,
-  US_ONLY_RULE,
   approvalDialog,
   approvalBody,
   assessAllBody,
@@ -101,9 +101,15 @@ import { sourcesStrip } from "../sourcesStripModel.js";
 //                   ..." (no board date), the exact day on hover
 //                   (postingsModel.postedLine)
 //
-// 0.1.11.7 FS2: "Search all jobs" (FreeSearchPanel) is above the filters: a search over EVERY stored posting, which
-// takes no profile. The profile chips and the selected profile do not change it, and opening one of its rows does not
-// switch the selected profile.
+// 0.1.11.7 FS2: "Search all jobs" (FreeSearchPanel): a search over EVERY stored posting, which takes no profile. The
+// profile chips and the selected profile do not change it, and opening one of its rows does not switch the selected
+// profile.
+//
+// 0.1.11.8 N3: the page has TWO TABS (components/JobsTabs.jsx, jobsTabsModel.js), so one search box is shown at a
+// time: "Your jobs" (#/jobs: the summary, the sources, the filters with their box, the list) and "Search"
+// (#/jobs/search: Search all jobs alone). The tab is the address. This view stays mounted on both (the list keeps
+// reading: the top bar's count, the setup's US-only default and a row's refresh need it); on Search it draws the
+// search alone and writes nothing to the address. The long help lines are one short line and a "?" (HelpTip.jsx).
 //
 // Everything a row shows is the posting's own text, a code or a number, and
 // is drawn as text. Old find-jobs runs are history: "Past runs".
@@ -259,10 +265,12 @@ export function expireJobsList() {
 // it, and the list is whatever it says.
 function currentView({ mounting = false } = {}) {
   const parsed = parseJobsHash(window.location.hash);
-  if (parsed.bare) {
+  // 0.1.11.8 N3: the Search tab's address says nothing of the list: the list is as it was left.
+  const onSearch = tabOfHash(window.location.hash) === TAB_SEARCH;
+  if (parsed.bare || onSearch) {
     // A plain #/jobs coming in (the job page's arrow): the page the list was left on, else the remembered profiles.
     // The Jobs tab clicked while the list is shown is a fresh start: page 1.
-    const left = mounting ? postingsStore.lastView() : null;
+    const left = mounting || onSearch ? postingsStore.lastView() : null;
     if (left) {
       return { filter: left.filter, page: left.page, size: left.size };
     }
@@ -319,7 +327,12 @@ function Pager({ page, pages, size, onPage, onSize }) {
   );
 }
 
-export default function JobsView({ selectedProfileId, onSelectProfile, allProfiles, applicationsState, onRows, onCounts }) {
+export default function JobsView({ tab = TAB_YOURS, selectedProfileId, onSelectProfile, allProfiles, applicationsState, onRows, onCounts }) {
+  // 0.1.11.8 N3: which tab the address names. On Search the list below is not drawn and the address is the tab's.
+  const onSearch = tab === TAB_SEARCH;
+  const tabRef = useRef(tab);
+  tabRef.current = tab;
+  useEffect(() => rememberTab(tab), [tab]);
   // The page, its size and the filters, from the address.
   const [place, setPlace] = useState(() => currentView({ mounting: true }));
   const { filter, page, size } = place;
@@ -362,7 +375,9 @@ export default function JobsView({ selectedProfileId, onSelectProfile, allProfil
   const go = useCallback(
     (next, { replace = false } = {}) => {
       const hash = jobsHash(next.filter, next.page, next.size);
-      if (replace || window.location.hash === hash) {
+      if (tabRef.current === TAB_SEARCH) {
+        adopt(next); // the Search tab's address stays; the "Your jobs" link carries the list's
+      } else if (replace || window.location.hash === hash) {
         window.history.replaceState(window.history.state, "", hash);
         adopt(next);
       } else {
@@ -397,18 +412,29 @@ export default function JobsView({ selectedProfileId, onSelectProfile, allProfil
     setSelectedIds([]);
   }, [filter, page, size]);
 
-  // The scroll position of a page is remembered while it is shown.
+  // The scroll position of a page is remembered while it is shown (the Search tab is a page of its own).
   useEffect(() => {
-    const onScroll = () => scrollAt.set(jobsHash(filter, page, size), window.scrollY);
+    const key = onSearch ? SEARCH_TAB_HASH : jobsHash(filter, page, size);
+    const onScroll = () => scrollAt.set(key, window.scrollY);
     window.addEventListener("scroll", onScroll, { passive: true });
     return () => window.removeEventListener("scroll", onScroll);
-  }, [filter, page, size]);
+  }, [filter, page, size, onSearch]);
   useLayoutEffect(() => {
-    if (restore.current !== null && rows.length > 0) {
+    if (!onSearch && restore.current !== null && rows.length > 0) {
       window.scrollTo(0, restore.current);
       restore.current = null;
     }
-  }, [rows]);
+  }, [rows, onSearch]);
+  // The Search tab shown (a tab click, Back from a result's job page): where it was left. Its rows are in memory, so
+  // they are drawn at once; a frame later, after the app's own scroll to the top of a new view.
+  useEffect(() => {
+    if (!onSearch) {
+      return undefined;
+    }
+    const saved = scrollAt.get(SEARCH_TAB_HASH) ?? 0;
+    const frame = window.requestAnimationFrame(() => window.scrollTo(0, saved));
+    return () => window.cancelAnimationFrame(frame);
+  }, [onSearch]);
 
   useEffect(() => {
     postingsStore.peekNew();
@@ -575,8 +601,23 @@ export default function JobsView({ selectedProfileId, onSelectProfile, allProfil
   const waitingAssess = filter.removed ? null : notAssessedLine(counts);
   const ranking = rankingLine(response && response.ranking);
 
+  const [yoursTab, searchTab] = JOBS_TABS;
+
+  if (onSearch) {
+    return (
+      <div>
+        <JobsTabs tab={tab} listHash={jobsHash(filter, page, size)} />
+        <div role="tabpanel" id={searchTab.panelId} aria-labelledby={searchTab.id} data-testid="jobs-panel-search">
+          <FreeSearchPanel profiles={allProfiles} onOpenRow={openSearchRow} onRowChanged={searchRowChanged} usOnlyDefault={usOnlyServed ? usOnlyServed.default : undefined} />
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div>
+      <JobsTabs tab={tab} listHash={jobsHash(filter, page, size)} />
+      <div role="tabpanel" id={yoursTab.panelId} aria-labelledby={yoursTab.id} data-testid="jobs-panel-yours">
       <div className="summary-strip jobs-summary" aria-label="Summary">
         <Tile label="Postings" value={totals ? totals.matched : "…"} />
         <Tile label="New since last check" value={newCount === null ? "–" : newCount} />
@@ -606,8 +647,6 @@ export default function JobsView({ selectedProfileId, onSelectProfile, allProfil
         </div>
         <SourcesStrip strip={strip} read={sources.read} status={sources.status} />
       </section>
-
-      <FreeSearchPanel profiles={allProfiles} onOpenRow={openSearchRow} onRowChanged={searchRowChanged} usOnlyDefault={usOnlyServed ? usOnlyServed.default : undefined} />
 
       <section className="panel" style={{ padding: "12px 16px" }}>
         <div className="filter-bar">
@@ -706,7 +745,7 @@ export default function JobsView({ selectedProfileId, onSelectProfile, allProfil
             </div>
             <div className="filter-group" data-role="place-filter">
               <div className="chip-group-label">Place</div>
-              <label className="filter-toggle jobs-us-only" title={US_ONLY_RULE}>
+              <label className="filter-toggle jobs-us-only">
                 <input
                   type="checkbox"
                   checked={usOnly}
@@ -718,9 +757,12 @@ export default function JobsView({ selectedProfileId, onSelectProfile, allProfil
               </label>
             </div>
           </div>
+          {/* 0.1.11.8 N3: one short line per rule, the whole text behind its "?". */}
           <p className="muted small jobs-list-rules" data-role="jobs-list-rules">
-            {US_ONLY_RULE} {usOnlyLeftOut && <span data-role="us-only-left-out">{usOnlyLeftOut} </span>}
-            {COPIES_RULE} {CANONICAL_RULE}
+            <span data-role="us-only-short">{US_ONLY_SHORT}</span>
+            <HelpTip help={HELP.listUsOnly} name="list-us-only" /> {usOnlyLeftOut && <span data-role="us-only-left-out">{usOnlyLeftOut} </span>}
+            <span data-role="copies-short">{COPIES_SHORT}</span>
+            <HelpTip help={HELP.listCopies} name="list-copies" />
           </p>
           <div className="result-count">
             <span data-role="postings-count" data-refreshing={listed.refreshing ? "true" : undefined}>
@@ -837,6 +879,7 @@ export default function JobsView({ selectedProfileId, onSelectProfile, allProfil
           }}
         />
       )}
+      </div>
     </div>
   );
 }

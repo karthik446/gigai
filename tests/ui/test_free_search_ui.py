@@ -1,5 +1,8 @@
 """0.1.11.7 FS2: "Search all jobs" on the Jobs page, and "Save this search as a profile".
 
+0.1.11.8 N3: Search all jobs is the Jobs page's "Search" tab (`#/jobs/search`); the list and its profile chips are
+the "Your jobs" tab (`#/jobs`). The flows below open the Search tab (tests/ui/test_jobs_tabs_ui.py pins the tabs).
+
 Real Chromium against a REAL server of its own (`GET /api/search`, the built search index), nothing stubbed but
 `GET /api/setup` (the fixture home was never through the setup interview). The home is synthetic
 (`tests/support/posting_fixtures.py`: two active profiles, made-up Lever boards, a scripted model): no request leaves
@@ -153,9 +156,10 @@ def _search(ui, title: str, *, wait: bool = True) -> None:
 
 
 def _open_jobs(ui) -> None:
-    ui.goto("/#/jobs")
+    """The Jobs page on its Search tab."""
+
+    ui.goto("/#/jobs/search")
     ui.page.locator(PANEL).wait_for()
-    ui.wait_for_jobs_list()
     ui.settle()
 
 
@@ -189,9 +193,14 @@ def test_the_page_comes_first_then_the_total_with_labels_show_all_and_load_more(
     ui.server_json("/api/applications", {"job_identity": applied, "event_kind": "applied"})
     assessed = ui.server_json("/api/assess", {"job": {"job_url": job_url(WATCHED, 3)}, "resume": {"profile_id": fx.default_profile_id}, "origin": "job_page"})
     assert assessed["result"]["verdict"]
-    _open_jobs(ui)
-    # A profile chip is on: the search below is not that profile's list.
+    # A profile chip of "Your jobs" is on: the search (the other tab) is not that profile's list.
+    ui.goto("/#/jobs")
+    ui.wait_for_jobs_list()
+    ui.settle()
     ui.page.locator('[data-role="profile-filter-chip"]', has_text=SECOND_LABEL).click()
+    ui.settle()
+    ui.page.locator('[data-testid="jobs-tab-search"]').click()
+    ui.page.locator(PANEL).wait_for()
     ui.settle()
     assert ui.page.locator(f'{PANEL} [data-role="free-search-hint"]').count() == 1 and ui.page.locator(ROW).count() == 0
 
