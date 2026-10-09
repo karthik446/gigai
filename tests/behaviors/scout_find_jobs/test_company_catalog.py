@@ -47,7 +47,10 @@ from tests.scenarios import InstalledGigAI
 # staffing_suspect (confidence 14..69), 1345 with a USCIS h1b object.
 # 0.1.11.8 rev4 (orchestrator research/expand-reach/discovery/REPORT.md): rev3 plus 10616 boards verified live on
 # the six new systems; 191 of them flagged staffing_suspect by the S26 name rule (no confidence), no h1b object.
-_SHIPPED_REVISION = "s26-full-rev4-more-sources-2026-10-09"
+# rev5 (operator decision 2026-10-09): the same 21034 records; a board of the six new systems carries ``hq_country``
+# ``US`` only with two or more US postings on record (4520 of them; the 1433 with exactly one keep their counts and
+# read ``None``). No hand flag was added: the repost check found no reposting agency among the boards it could read.
+_SHIPPED_REVISION = "s26-full-rev5-two-us-postings-2026-10-09"
 _SHIPPED_RECORDS = 21034
 _SHIPPED_BY_PROVIDER = {
     "ashby": 3364, "greenhouse": 4649, "lever": 2405,
@@ -81,7 +84,7 @@ def test_shipped_catalog_loads_with_its_own_revision_and_digest() -> None:
     assert catalog.skipped == 0
     assert catalog.summary()["by_provider"] == _SHIPPED_BY_PROVIDER
     providers = {record.provider for record in catalog.records}
-    assert providers == set(ATSProvider)  # 0.1.11.8: every registry provider has boards in rev4
+    assert providers == set(ATSProvider)  # 0.1.11.8: every registry provider has boards in rev4 and rev5
     keys = [(record.provider, record.board_token.lower()) for record in catalog.records]
     assert len(keys) == len(set(keys)), "case-insensitive duplicate boards in the shipped catalog"
     assert all(record.board_token == record.board_token.strip() and " " not in record.board_token and "&" not in record.board_token for record in catalog.records)
@@ -342,14 +345,24 @@ def test_shipped_catalog_flags_exactly_the_rev3_staffing_suspects() -> None:
 
 def test_shipped_catalog_hq_country_is_us_on_every_record() -> None:
     """S26 rev3 is a US directory by construction (``hq_country`` always ``US``), so seeding's country filter admits
-    every rev3 record for ``countries=["US"]`` (6462 of 10418 have US postings). The 0.1.11.8 rev4 boards carry
-    ``hq_country`` ``US`` only when the feed listed a US posting (5953 of 10616), ``None`` otherwise: a board with no
-    US posting is in the catalog but not admitted for a US setup."""
+    every rev3 record for ``countries=["US"]`` (6462 of 10418 have US postings). The boards of the six new systems
+    (0.1.11.8) carry ``hq_country`` ``US`` only when the feed listed at least TWO US postings (rev5: 4520 of 10616;
+    rev4 asked for one, 5953), ``None`` otherwise: a board below the bar is in the catalog, with its counts, but not
+    admitted for a US setup."""
+
+    from gigai.scout.find_jobs.company_catalog import UNCLASSIFIED_MIN_US_POSTINGS, min_us_postings
 
     catalog = load_company_catalog()
+    classified = {"greenhouse", "lever", "ashby"}
     assert {record.hq_country for record in catalog.records} == {"US", None}
-    assert sum(1 for record in catalog.records if record.hq_country == "US") == 10418 + 5953
+    assert sum(1 for record in catalog.records if record.hq_country == "US") == 10418 + 4520
     assert sum(1 for record in catalog.records if (record.us_posting_count or 0) > 0) == 6462 + 5953
-    assert all(record.hq_country == "US" for record in catalog.records if record.provider.value in {"greenhouse", "lever", "ashby"})
-    assert all((record.us_posting_count or 0) > 0 for record in catalog.records if record.hq_country is None) is False
-    assert all(record.hq_country == "US" for record in catalog.records if (record.us_posting_count or 0) > 0)
+    assert all(record.hq_country == "US" for record in catalog.records if record.provider.value in classified)
+    new = [record for record in catalog.records if record.provider.value not in classified]
+    assert len(new) == 10616 and UNCLASSIFIED_MIN_US_POSTINGS == 2
+    assert {min_us_postings(record.provider) for record in new} == {2}
+    assert {min_us_postings(ATSProvider(name)) for name in classified} == {1}
+    # The mark is the count's, both ways; the count itself is kept on every record (a later seed run re-counts it).
+    assert all((record.hq_country == "US") == ((record.us_posting_count or 0) >= 2) for record in new)
+    below = [record for record in new if record.us_posting_count == 1]
+    assert len(below) == 1433 and all(record.hq_country is None and (record.posting_count or 0) >= 1 and record.last_verified for record in below)

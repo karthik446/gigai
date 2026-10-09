@@ -31,9 +31,10 @@ others.
 - **Nine hiring systems.** Scout reads the public job feeds of Workable, Rippling, Gem, Recruitee, Pinpoint and
   Breezy beside Greenhouse, Lever and Ashby. The catalog ships the 10,616 boards found and verified on them
   (Workable 2,843, Rippling 1,647, Gem 801, Recruitee 2,287, Pinpoint 565, Breezy 2,473; 245,570 postings,
-  115,883 in the US); a US setup adds the 5,851 of them that list a US posting and are not a staffing agency by
-  name, so the watchlist grows from about 10,300 to about 16,200 boards and the first update after the upgrade
-  takes a few passes. **Add company** takes a board or job URL on any of the nine. A Pinpoint posting has no date; a
+  115,883 in the US); a US setup adds the 4,441 of them that list two or more US postings and are not a staffing
+  agency by name, so the watchlist grows from about 10,300 to about 14,800 boards and the first update after the
+  upgrade takes a few passes. A board with a single US posting stays in the catalog and joins once a later catalog
+  counts two; a board you add yourself is always watched. **Add company** takes a board or job URL on any of the nine. A Pinpoint posting has no date; a
   Rippling posting's date and description are fetched at the update for the titles your profiles search, as
   Greenhouse descriptions are; a Breezy posting's description is fetched when it is assessed.
 - **Requests say who is asking.** Every request to a job board carries the `User-Agent`

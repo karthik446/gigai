@@ -313,6 +313,78 @@ def test_seeding_skips_staffing_suspects_and_the_receipt_says_so(tmp_path: Path)
     assert_managed_workpad_clean(resolved.path)
 
 
+# --- rev5 (operator decision 2026-10-09): two US postings for a board outside Greenhouse, Lever and Ashby ---------
+# The count is the seed run's snapshot. A board below the bar stays in the catalog and is not seeded for a US setup;
+# a board the user adds (a pasted URL, ``watch_companies``) is always added.
+
+_ONE_US = _record("Solo Works", ATSProvider.WORKABLE, "solo-works", hq=None, us_postings=1)
+_TWO_US = _record("Duo Works", ATSProvider.BREEZY, "duo-works", hq="US", us_postings=2)
+_ONE_US_MARKED = _record("Marked Works", ATSProvider.GEM, "marked-works", hq="US", us_postings=1)
+_NO_US = _record("Elsewhere Works", ATSProvider.RECRUITEE, "elsewhere-works", hq=None, us_postings=0)
+_NEW_SYSTEM_RECORDS = (_ONE_US, _TWO_US, _ONE_US_MARKED, _NO_US)
+
+
+def test_a_new_system_board_needs_two_us_postings_for_a_us_setup() -> None:
+    records = (*_RECORDS, *_NEW_SYSTEM_RECORDS)
+    kept, by_country, by_company, by_staffing = catalog_records_for_prefs(records, DiscoveryPrefs(countries=("US",)))
+    # Greenhouse "acme" (one US posting) and "nowhere" (no hq, three) are admitted as before; of the new-system
+    # boards only the one with two. A stray ``hq_country`` US on a one-posting board does not admit it.
+    assert [r.board_token for r in kept] == ["acme", "kong", "nowhere", "duo-works"]
+    assert (by_country, by_company, by_staffing) == (5, 0, 0)
+    # Every system outside the three classified ones has the bar.
+    for provider in ATSProvider:
+        one = _record("One", provider, "one", hq=None, us_postings=1)
+        two = _record("Two", provider, "two", hq=None, us_postings=2)
+        admitted = [r.board_token for r in catalog_records_for_prefs((one, two), DiscoveryPrefs(countries=("US",)))[0]]
+        expected = ["one", "two"] if provider in {ATSProvider.GREENHOUSE, ATSProvider.LEVER, ATSProvider.ASHBY} else ["two"]
+        assert admitted == expected, provider
+    # No country preference: no country filter at all, so nothing is held back (unchanged).
+    assert len(catalog_records_for_prefs(records, DiscoveryPrefs())[0]) == len(records)
+    # Another country asks for the hq mark alone; the US bar is not its business.
+    german = _record("Berlin Works", ATSProvider.WORKABLE, "berlin-works", hq="DE", us_postings=0)
+    assert [r.board_token for r in catalog_records_for_prefs((german, _ONE_US), DiscoveryPrefs(countries=("DE",)))[0]] == ["berlin-works"]
+
+
+def test_a_board_below_the_bar_is_added_when_the_user_asks_for_it(tmp_path: Path) -> None:
+    from gigai.scout.find_jobs.watchlist import add_company_from_url
+
+    home, target, gig_id = _fixture(tmp_path)
+    catalog = _catalog(*_RECORDS, *_NEW_SYSTEM_RECORDS)
+    prefs = DiscoveryPrefs(countries=("US",))
+    seeded = seed_watchlist_from_catalog(home, target, gig_id, prefs=prefs, catalog=catalog, now="2026-10-09T00:00:00Z")
+    assert seeded.added == 4 and seeded.excluded_by_country == 5
+    assert "solo-works" not in {entry.board_token for entry in list_active(home, target, gig_id)}
+    # 1. A pasted board URL (``gigai scout watchlist add``, ``POST /api/watchlist``, the UI's Add company): the
+    #    catalog is not asked at all.
+    added = add_company_from_url("https://apply.workable.com/solo-works", home, target, gig_id)
+    assert (added.provider, added.board_token) == (ATSProvider.WORKABLE, "solo-works")
+    assert "solo-works" in {entry.board_token for entry in list_active(home, target, gig_id)}
+    # 2. Named in the setup's "companies to watch": seeded from the catalog whatever its count (and its country).
+    watched = DiscoveryPrefs(countries=("US",), watch_companies=("Marked Works", "Elsewhere Works"))
+    again = seed_watchlist_from_catalog(home, target, gig_id, prefs=watched, catalog=catalog, now="2026-10-09T00:01:00Z")
+    assert sorted(wid.rsplit(":", 1)[1] for wid in again.added_watchlist_ids) == ["elsewhere-works", "marked-works"]
+    # A later plain seeding pass removes nothing: what the user added stays.
+    seed_watchlist_from_catalog(home, target, gig_id, prefs=prefs, catalog=catalog, now="2026-10-09T00:02:00Z")
+    assert {entry.board_token for entry in list_active(home, target, gig_id)} == {
+        "acme", "kong", "nowhere", "duo-works", "solo-works", "marked-works", "elsewhere-works",
+    }
+    resolved = resolve_workpad(home_root=home, requested_target=target, gig_id=gig_id, allow_semantic_state=True)
+    assert_managed_workpad_clean(resolved.path)
+
+
+def test_a_shipped_board_below_the_bar_is_not_seeded_and_can_be_added_by_its_url(tmp_path: Path) -> None:
+    from gigai.scout.find_jobs.watchlist import add_company_from_url
+
+    shipped = load_company_catalog()
+    below = next(r for r in shipped.records if r.provider is ATSProvider.BREEZY and r.us_posting_count == 1 and not r.staffing_suspect)
+    assert below.hq_country is None and below.posting_count and below.last_verified  # the counts a re-count starts from
+    assert below not in catalog_records_for_prefs(shipped.records, DiscoveryPrefs(countries=("US",)))[0]
+    home, target, gig_id = _fixture(tmp_path)
+    added = add_company_from_url(below.board_url, home, target, gig_id)
+    assert added.watchlist_id == below.watchlist_id
+    assert [entry.watchlist_id for entry in list_active(home, target, gig_id)] == [below.watchlist_id]
+
+
 def test_the_shipped_catalog_seeds_none_of_its_staffing_suspects(tmp_path: Path) -> None:
     home, target, gig_id = _fixture(tmp_path)
     shipped = load_company_catalog()
@@ -320,11 +392,12 @@ def test_the_shipped_catalog_seeds_none_of_its_staffing_suspects(tmp_path: Path)
     assert len(suspects) == 239
     result = seed_watchlist_from_catalog(home, target, gig_id, prefs=DiscoveryPrefs(countries=("US",)))
     assert result.excluded_as_staffing_suspect == 239
-    # rev4: rev3's 10,370 admitted boards, plus the 5,953 new-system boards with a US posting (``hq_country`` US),
-    # minus the 102 of those the S26 name rule flagged staffing_suspect; the 4,574 boards with no US posting and no
-    # flag are in the catalog but not admitted for ``countries=["US"]``.
-    assert result.added == result.eligible == 10370 + 5953 - 102 == 16221
+    # rev5: rev3's 10,370 admitted boards, plus the 4,520 new-system boards with two or more US postings
+    # (``hq_country`` US; rev4 asked for one and had 5,953), minus the 79 of those the S26 name rule flagged
+    # staffing_suspect; the boards below the bar (1,433 with one US posting, 4,663 with none) are in the catalog but
+    # not admitted for ``countries=["US"]``.
+    assert result.added == result.eligible == 10370 + 4520 - 79 == 14811
     resolved = resolve_workpad(home_root=home, requested_target=target, gig_id=gig_id, allow_semantic_state=True)
     seeded = _seeded_ids(resolved.path)
-    assert len(seeded) == 16221 and suspects.isdisjoint(seeded)
+    assert len(seeded) == 14811 and suspects.isdisjoint(seeded)
     assert set(result.added_watchlist_ids) == seeded

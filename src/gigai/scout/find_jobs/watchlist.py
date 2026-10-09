@@ -429,9 +429,17 @@ def catalog_records_for_prefs(records: tuple[object, ...], prefs: object) -> tup
       or -- when ``US`` is asked for -- one with US postings on record
       (``us_posting_count > 0``); no ``countries`` pref means no country
       filter at all.
+    * rev5: for ``US``, a board outside Greenhouse, Lever and Ashby needs two
+      US postings on record (``company_catalog.min_us_postings``), whatever
+      its ``hq_country`` says: the six newer systems' records carry only
+      their feed's counts. A board below the bar stays in the catalog and is
+      still added when the user names it (``watch_companies``) or adds its
+      URL (``add_company_from_url``: that path never comes through here).
 
     Returns ``(kept, excluded_by_country, excluded_by_company, excluded_as_staffing_suspect)``.
     """
+
+    from .company_catalog import min_us_postings
 
     excludes = _pref_keys(getattr(prefs, "exclude_companies", ()))
     watches = _pref_keys(getattr(prefs, "watch_companies", ()))
@@ -454,8 +462,10 @@ def catalog_records_for_prefs(records: tuple[object, ...], prefs: object) -> tup
         if countries:
             hq = getattr(record, "hq_country", None)
             us_postings = getattr(record, "us_posting_count", None)
-            in_country = isinstance(hq, str) and hq.upper() in countries
-            us_ok = "US" in countries and isinstance(us_postings, int) and us_postings > 0
+            bar = min_us_postings(getattr(record, "provider", None))
+            us_ok = "US" in countries and isinstance(us_postings, int) and us_postings >= bar
+            # A US mark on a board that has the bar counts only with the postings behind it.
+            in_country = isinstance(hq, str) and hq.upper() in countries and (us_ok or bar <= 1 or hq.upper() != "US")
             if not (in_country or us_ok):
                 by_country += 1
                 continue

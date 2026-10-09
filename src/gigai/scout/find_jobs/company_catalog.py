@@ -58,7 +58,16 @@ Shipped revisions
   the six new systems (workable 2,843 / rippling 1,647 / gem 801 / recruitee 2,287 / pinpoint 565 / breezy 2,473;
   5,953 of them with a US posting; 191 flagged ``staffing_suspect`` by the S26 name rule, no Jev verdict, no
   ``h1b``, ``employer_type`` ``unknown``): 21,034 records, 582,877 B gzip. Built from
-  ``research/expand-reach/discovery/rev4/companies.json`` (``build-rev4.py`` over ``boards-all.json``).
+  ``research/expand-reach/discovery/rev4/companies.json`` (``build-rev4.py`` over ``boards-all.json``). Never released.
+* ``s26-full-rev5-two-us-postings-2026-10-09`` -- rev4's 21,034 records, re-marked (operator decision 2026-10-09): a
+  board of the six new systems carries ``hq_country`` ``US`` only with TWO or more US postings on record (4,520
+  boards; rev4 asked for one, 5,953). The 1,433 boards with exactly one stay in the catalog with their counts
+  (``posting_count``, ``us_posting_count``, ``last_verified``) and ``hq_country`` null, as a board with none does;
+  the count is that seed run's snapshot, and the next seed run re-counts every board from its feed and marks the
+  ones that reached two (:func:`min_us_postings` is the same bar in the seeding filter). Greenhouse, Lever and Ashby
+  records are rev3's, unchanged. A US setup seeds 14,811 boards (rev4: 16,221). 583,359 B gzip. Built from
+  ``research/expand-reach/discovery/rev5/companies.json`` (orchestrator ``workers/0.1.11.8-rev5-derive.py`` over
+  rev4, no network).
 """
 
 from __future__ import annotations
@@ -87,17 +96,30 @@ COMPANY_CATALOG_RESOURCE = "data/companies.json.gz"
 #: re-classification keeps a Jev staffing verdict below confidence 70 as
 #: ``staffing_suspect`` instead of excluding it --
 #: ``research/S26-us-company-directory/full/coverage.md``). Replaced
-#: ``s26-sample-2026-09-24`` (the 285-record sample) on 2026-09-25.
-COMPANY_CATALOG_REVISION = "s26-full-rev4-more-sources-2026-10-09"
+#: ``s26-sample-2026-09-24`` (the 285-record sample) on 2026-09-25. Since 0.1.11.8: rev5 (see "Shipped revisions").
+COMPANY_CATALOG_REVISION = "s26-full-rev5-two-us-postings-2026-10-09"
 
 #: Pinned ``digest_imported_bytes`` of the shipped ``companies.json.gz``. A
 #: mismatch means the resource was swapped without updating this module (or
 #: was corrupted in packaging); :func:`load_company_catalog` fails closed.
-COMPANY_CATALOG_SHA256 = "sha256:14bf15ab7b61a288c17c66ee0c9d822a53a0cca6368013fd67fc0a384053fa3a"
+COMPANY_CATALOG_SHA256 = "sha256:80d5fa694d88cb094d567351f83734f383f7f1652de7c4c8b18717ac999c0c9d"
 
 #: Scope decision (SCOPE-ADD-2, "Catalog delivery for 0.1.9"): the compressed
 #: seed inside the wheel stays at or under 5 MB.
 COMPANY_CATALOG_SIZE_BUDGET_BYTES = 5 * 1024 * 1024
+
+#: rev5 (operator decision 2026-10-09): the US postings a board needs on record before a US setup seeds it. The S26
+#: boards (Greenhouse, Lever, Ashby) were classified one by one, so one US posting is enough; a board of any other
+#: system has only its feed's counts behind it and needs two. The count is the seed run's snapshot: a board below the
+#: bar stays in the catalog with its counts and is admitted by the catalog revision whose seed run counts two.
+_CLASSIFIED_PROVIDERS = frozenset({ATSProvider.GREENHOUSE, ATSProvider.LEVER, ATSProvider.ASHBY})
+UNCLASSIFIED_MIN_US_POSTINGS = 2
+
+
+def min_us_postings(provider: object) -> int:
+    """The ``us_posting_count`` a record of ``provider`` needs to be seeded for ``countries=["US"]``."""
+
+    return 1 if provider in _CLASSIFIED_PROVIDERS else UNCLASSIFIED_MIN_US_POSTINGS
 
 #: 0.1.11.8: every registry provider and its spellings (``providers.catalog_aliases()``); the board page per provider.
 _PROVIDER_ALIASES = catalog_aliases()
@@ -510,10 +532,12 @@ __all__ = [
     "CompanyCatalogError",
     "CompanyH1B",
     "CompanyRecord",
+    "UNCLASSIFIED_MIN_US_POSTINGS",
     "build_catalog_resource",
     "catalog_info",
     "decode_catalog_bytes",
     "load_company_catalog",
+    "min_us_postings",
     "parse_catalog_payload",
     "parse_company_h1b",
     "parse_company_record",
