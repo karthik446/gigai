@@ -1308,6 +1308,10 @@ def _write_temporary(directory: Path, data: bytes, *, prefix: str) -> Path:
     return temporary
 
 
+#: How many paths one ``git add`` names (see ``_commit_handoff``).
+_GIT_ADD_BATCH = 1000
+
+
 def _commit_handoff(
     root: Path,
     path: Path,
@@ -1318,13 +1322,12 @@ def _commit_handoff(
     *,
     artifact_paths: tuple[str, ...] = (),
 ) -> None:
-    _git(
-        root,
-        "add",
-        "--",
-        ".gitignore",
-        *(os.fspath(path.relative_to(root)), *artifact_paths),
-    )
+    # 0.1.11.8: one ``git add`` per 1,000 paths. A commit that seeds the shipped catalog names every watchlist
+    # entry (21,034 records in rev4), and one command line with all of them is longer than the OS allows
+    # (macOS: ``OSError: Argument list too long``). The commit itself stays one.
+    paths = (".gitignore", os.fspath(path.relative_to(root)), *artifact_paths)
+    for start in range(0, len(paths), _GIT_ADD_BATCH):
+        _git(root, "add", "--", *paths[start : start + _GIT_ADD_BATCH])
     message = f"journal: {transition.replace('_', ' ')}\n\n{SEQUENCE_TRAILER}: {sequence:012d}\n{HANDOFF_TRAILER}: {handoff_id}"
     if previous_handoff is not None:
         message += f"\nGigAI-Previous-Handoff: {previous_handoff}"
