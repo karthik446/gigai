@@ -28,7 +28,7 @@ from tests.support.sharding import ShardUsageError, requested_shard, split_items
 
 _INTEGRATION_TOKENS = frozenset(
     {
-        "tmp_path", "tmpdir", "monkeypatch", "capsys", "capfd", "caplog",
+        "tmp_path", "tmp_path_factory", "tmpdir", "monkeypatch", "capsys", "capfd", "caplog",
         "subprocess", "multiprocessing", "sqlite", "sqlite3", "socket",
         "http", "httpx", "requests", "urllib", "CliRunner", "Process",
         "HTTPServer", "SetupHTTPServer",
@@ -98,6 +98,33 @@ def _import_modules(tree: ast.AST) -> set[str]:
     return modules
 
 
+def _imported_fixture_sources(tree: ast.AST, repo_root: Path) -> dict[str, ast.AST]:
+    """Function defs a fixture/helper NAME resolves to when imported from another `tests.*` module.
+
+    classify_source's reachability walk otherwise only sees helpers defined in the
+    same file: a test importing a fixture (``from tests...test_pick_header_room
+    import fx, server``) that itself opens a socket or writes to tmp_path looked
+    fast_unit, because `fx`/`server` had no function body to walk into here.
+    """
+
+    resolved: dict[str, ast.AST] = {}
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.ImportFrom) and node.module and node.module.startswith("tests.")):
+            continue
+        source_path = repo_root / Path(*node.module.split(".")).with_suffix(".py")
+        try:
+            source_tree = ast.parse(source_path.read_text(encoding="utf-8"), filename=str(source_path))
+        except (OSError, UnicodeError, SyntaxError):
+            continue
+        source_functions = _function_nodes(source_tree)
+        for alias in node.names:
+            local_name = alias.asname or alias.name
+            helper = source_functions.get(alias.name)
+            if helper is not None:
+                resolved[local_name] = helper
+    return resolved
+
+
 def _has_live_marker(tree: ast.AST) -> bool:
     """Keep explicitly opt-in provider tests out of the offline unit lane."""
 
@@ -130,11 +157,17 @@ def classify_source(path_string: str, function_name: str) -> str:
     if any(module.startswith(("importlib.resources", "importlib.metadata", "setuptools", "wheel")) for module in imported):
         return "release"
 
+    # tests/ is always repo_root/tests/... (this file's own location).
+    repo_root = Path(__file__).resolve().parent.parent
+    imported_helpers = _imported_fixture_sources(tree, repo_root)
+    local_and_imported = dict(functions)
+    local_and_imported.update({name: helper for name, helper in imported_helpers.items() if name not in local_and_imported})
+
     reachable: list[ast.AST] = [root]
     seen: set[str] = {function_name}
     for current in reachable:
         called = _names(current)
-        for name, helper in functions.items():
+        for name, helper in local_and_imported.items():
             if name in called and name not in seen:
                 seen.add(name)
                 reachable.append(helper)

@@ -113,7 +113,12 @@ jobs:
   throttle-next-publish:
     name: Next docs were published recently enough to skip
     needs: build
-    if: github.event_name == 'push' && github.ref_name != 'main'
+    # vars.DOCS_PUBLISH == 'true': this job checks out gh-pages, which does not exist
+    # until the operator creates it (see the header); without this gate it would fail
+    # red on every version-branch push before that. publish's own if: already carries
+    # the same gate and always() so a *skipped* (not failed) throttle-next-publish does
+    # not skip publish for every other trigger (push to main, release, backfill).
+    if: github.event_name == 'push' && github.ref_name != 'main' && vars.DOCS_PUBLISH == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     outputs:
