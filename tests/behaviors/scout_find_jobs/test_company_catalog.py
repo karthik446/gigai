@@ -45,10 +45,15 @@ from tests.scenarios import InstalledGigAI
 # The S26 full seed, rev3 (research/S26-us-company-directory/full/coverage.md):
 # 10418 included records, every one a usable board (skipped 0), 48 flagged
 # staffing_suspect (confidence 14..69), 1345 with a USCIS h1b object.
-_SHIPPED_REVISION = "s26-full-rev3-2026-09-25"
-_SHIPPED_RECORDS = 10418
-_SHIPPED_BY_PROVIDER = {"ashby": 3364, "greenhouse": 4649, "lever": 2405}
-_SHIPPED_STAFFING_SUSPECTS = 48
+# 0.1.11.8 rev4 (orchestrator research/expand-reach/discovery/REPORT.md): rev3 plus 10616 boards verified live on
+# the six new systems; 191 of them flagged staffing_suspect by the S26 name rule (no confidence), no h1b object.
+_SHIPPED_REVISION = "s26-full-rev4-more-sources-2026-10-09"
+_SHIPPED_RECORDS = 21034
+_SHIPPED_BY_PROVIDER = {
+    "ashby": 3364, "greenhouse": 4649, "lever": 2405,
+    "workable": 2843, "rippling": 1647, "gem": 801, "recruitee": 2287, "pinpoint": 565, "breezy": 2473,
+}
+_SHIPPED_STAFFING_SUSPECTS = 239
 _SHIPPED_H1B_OBJECTS = 1345
 
 
@@ -76,7 +81,7 @@ def test_shipped_catalog_loads_with_its_own_revision_and_digest() -> None:
     assert catalog.skipped == 0
     assert catalog.summary()["by_provider"] == _SHIPPED_BY_PROVIDER
     providers = {record.provider for record in catalog.records}
-    assert providers <= {ATSProvider.GREENHOUSE, ATSProvider.LEVER, ATSProvider.ASHBY}
+    assert providers == set(ATSProvider)  # 0.1.11.8: every registry provider has boards in rev4
     keys = [(record.provider, record.board_token.lower()) for record in catalog.records]
     assert len(keys) == len(set(keys)), "case-insensitive duplicate boards in the shipped catalog"
     assert all(record.board_token == record.board_token.strip() and " " not in record.board_token and "&" not in record.board_token for record in catalog.records)
@@ -323,19 +328,28 @@ def test_shipped_catalog_flags_exactly_the_rev3_staffing_suspects() -> None:
     suspects = catalog.staffing_suspects()
     assert len(suspects) == _SHIPPED_STAFFING_SUSPECTS
     assert all(record.staffing_suspect for record in suspects)
-    # rev3 keeps a Jev staffing verdict only below the exclusion threshold (70).
-    confidences = [record.staffing_confidence for record in suspects]
+    # rev3 keeps a Jev staffing verdict only below the exclusion threshold (70); the rev4 boards of the six new
+    # systems were flagged by the S26 name rule alone, so they carry no confidence.
+    rev3 = [record for record in suspects if record.provider.value in {"greenhouse", "lever", "ashby"}]
+    confidences = [record.staffing_confidence for record in rev3]
+    assert len(rev3) == 48
     assert all(isinstance(value, int) and 0 <= value < 70 for value in confidences)
     assert min(confidences) == 14 and max(confidences) == 69  # type: ignore[type-var]
+    assert all(record.staffing_confidence is None for record in suspects if record not in rev3)
     assert sum(1 for record in catalog.records if record.staffing_suspect) == len(suspects)
     assert all(record.staffing_confidence is None for record in catalog.records if not record.staffing_suspect)
 
 
 def test_shipped_catalog_hq_country_is_us_on_every_record() -> None:
-    """S26 is a US directory by construction (``hq_country`` always ``US``);
-    seeding's country filter therefore admits every record for ``countries=["US"]``
-    and ``us_posting_count`` decides nothing (6462 of 10418 have US postings)."""
+    """S26 rev3 is a US directory by construction (``hq_country`` always ``US``), so seeding's country filter admits
+    every rev3 record for ``countries=["US"]`` (6462 of 10418 have US postings). The 0.1.11.8 rev4 boards carry
+    ``hq_country`` ``US`` only when the feed listed a US posting (5953 of 10616), ``None`` otherwise: a board with no
+    US posting is in the catalog but not admitted for a US setup."""
 
     catalog = load_company_catalog()
-    assert {record.hq_country for record in catalog.records} == {"US"}
-    assert sum(1 for record in catalog.records if (record.us_posting_count or 0) > 0) == 6462
+    assert {record.hq_country for record in catalog.records} == {"US", None}
+    assert sum(1 for record in catalog.records if record.hq_country == "US") == 10418 + 5953
+    assert sum(1 for record in catalog.records if (record.us_posting_count or 0) > 0) == 6462 + 5953
+    assert all(record.hq_country == "US" for record in catalog.records if record.provider.value in {"greenhouse", "lever", "ashby"})
+    assert all((record.us_posting_count or 0) > 0 for record in catalog.records if record.hq_country is None) is False
+    assert all(record.hq_country == "US" for record in catalog.records if (record.us_posting_count or 0) > 0)

@@ -54,6 +54,11 @@ Shipped revisions
   ``h1b`` object), 289,333 B gzip (catalog-repin). Built from
   ``research/S26-us-company-directory/full/companies.json`` (rev3) with
   :func:`build_catalog_resource`; every record parses (``skipped == 0``).
+* ``s26-full-rev4-more-sources-2026-10-09`` -- rev3 plus the 10,616 boards the 0.1.11.8 seed found and verified live on
+  the six new systems (workable 2,843 / rippling 1,647 / gem 801 / recruitee 2,287 / pinpoint 565 / breezy 2,473;
+  5,953 of them with a US posting; 191 flagged ``staffing_suspect`` by the S26 name rule, no Jev verdict, no
+  ``h1b``, ``employer_type`` ``unknown``): 21,034 records, 582,877 B gzip. Built from
+  ``research/expand-reach/discovery/rev4/companies.json`` (``build-rev4.py`` over ``boards-all.json``).
 """
 
 from __future__ import annotations
@@ -83,12 +88,12 @@ COMPANY_CATALOG_RESOURCE = "data/companies.json.gz"
 #: ``staffing_suspect`` instead of excluding it --
 #: ``research/S26-us-company-directory/full/coverage.md``). Replaced
 #: ``s26-sample-2026-09-24`` (the 285-record sample) on 2026-09-25.
-COMPANY_CATALOG_REVISION = "s26-full-rev3-2026-09-25"
+COMPANY_CATALOG_REVISION = "s26-full-rev4-more-sources-2026-10-09"
 
 #: Pinned ``digest_imported_bytes`` of the shipped ``companies.json.gz``. A
 #: mismatch means the resource was swapped without updating this module (or
 #: was corrupted in packaging); :func:`load_company_catalog` fails closed.
-COMPANY_CATALOG_SHA256 = "sha256:9bfdf50e910665e6b46b28094c600b666aa27c0ec77dd9e5167bf681c2304b1c"
+COMPANY_CATALOG_SHA256 = "sha256:14bf15ab7b61a288c17c66ee0c9d822a53a0cca6368013fd67fc0a384053fa3a"
 
 #: Scope decision (SCOPE-ADD-2, "Catalog delivery for 0.1.9"): the compressed
 #: seed inside the wheel stays at or under 5 MB.

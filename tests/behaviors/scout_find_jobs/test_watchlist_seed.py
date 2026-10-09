@@ -317,11 +317,14 @@ def test_the_shipped_catalog_seeds_none_of_its_staffing_suspects(tmp_path: Path)
     home, target, gig_id = _fixture(tmp_path)
     shipped = load_company_catalog()
     suspects = {record.watchlist_id for record in shipped.staffing_suspects()}
-    assert len(suspects) == 48
+    assert len(suspects) == 239
     result = seed_watchlist_from_catalog(home, target, gig_id, prefs=DiscoveryPrefs(countries=("US",)))
-    assert result.excluded_as_staffing_suspect == 48
-    assert result.added == result.eligible == len(shipped.records) - 48 == 10370
+    assert result.excluded_as_staffing_suspect == 239
+    # rev4: rev3's 10,370 admitted boards, plus the 5,953 new-system boards with a US posting (``hq_country`` US),
+    # minus the 102 of those the S26 name rule flagged staffing_suspect; the 4,574 boards with no US posting and no
+    # flag are in the catalog but not admitted for ``countries=["US"]``.
+    assert result.added == result.eligible == 10370 + 5953 - 102 == 16221
     resolved = resolve_workpad(home_root=home, requested_target=target, gig_id=gig_id, allow_semantic_state=True)
     seeded = _seeded_ids(resolved.path)
-    assert len(seeded) == 10370 and suspects.isdisjoint(seeded)
+    assert len(seeded) == 16221 and suspects.isdisjoint(seeded)
     assert set(result.added_watchlist_ids) == seeded

@@ -60,6 +60,7 @@ def test_registry_urls_and_helpers() -> None:
     assert providers.catalog_aliases()["ashbyhq"] is ATSProvider.ASHBY
     assert providers.catalog_aliases()["gem"] is ATSProvider.GEM
     assert providers.interval_for("recruitee", 0.125) == 1.0
+    assert providers.interval_for("workable", 0.125) == 1.0  # apply.workable.com answers 429 at a faster pace
     assert providers.interval_for("lever", 0.125) == 0.125
 
 

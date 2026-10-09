@@ -150,6 +150,9 @@ def _build() -> dict[str, ProviderSpec]:
             updated_field=None,
             list_has_text=True,
             source_hosts=("workable.com",),
+            # apply.workable.com rate-limits a reader: at 0.35 s between requests it answered its own 429 page
+            # after ~900 requests, at 1.0 s it ran clean for ~3,400 (research/expand-reach/discovery/REPORT.md).
+            min_interval_seconds=1.0,
         ),
         ProviderSpec(
             name="rippling",
