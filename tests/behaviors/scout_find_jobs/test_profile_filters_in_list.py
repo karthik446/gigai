@@ -40,7 +40,9 @@ def fx(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> PostingsFixture:
 
 
 def _listed(fx: PostingsFixture, profile_id: str) -> set[tuple[str, str]]:
-    rows = posting_search.search_postings(fx.home_root, fx.target, profile_ids=[profile_id], now=NOW, limit=200)["postings"]["rows"]  # type: ignore[index]
+    # The PROFILE's own countries are what these tests are about: the list's US-only switch (0.1.11.8, on by default in
+    # this US setup) is off, or a profile set to Germany would list nothing here.
+    rows = posting_search.search_postings(fx.home_root, fx.target, profile_ids=[profile_id], now=NOW, limit=200, us_only=False)["postings"]["rows"]  # type: ignore[index]
     return {(row["title"], row["location"]) for row in rows}
 
 

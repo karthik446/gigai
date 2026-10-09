@@ -15,13 +15,18 @@
 // What a row can do: open its job page, "Assess · 1 model call · as <default profile>" (POST /api/assess with the
 // default profile's id: on today's storage every assessment is a profile's), "Mark applied" (the job's own event).
 // Everything a row shows is the posting's own text, a code or a number, drawn as text.
-import { applicationBadge } from "./postingsModel.js";
+import { applicationBadge, rowPlace, unclearLabel, usOnlyChecked } from "./postingsModel.js";
 import { ORIGIN_JOB_PAGE, ORIGIN_QUICK_ASSESS } from "./jobModel.js";
 
 export const SEARCH_PAGE = 50;
-export const EMPTY_FORM = { title: "", company: "", location: "", showAll: false };
+// `usOnly` (0.1.11.8 N1): null until the box is touched (the server applies the setup's default), then true / false.
+export const EMPTY_FORM = { title: "", company: "", location: "", showAll: false, usOnly: null };
 export const NOT_RANKED = "Not ranked. Save as a profile to rank.";
 export const ANY_SCOPE = "any place, any date";
+// 0.1.11.8: how the two switches relate (the box's help line), and what a row of several copies is.
+export const US_ONLY_WITH_SHOW_ALL =
+  "Show all drops the default work mode, countries and posted window; US only is a switch of its own and still applies with Show all until you turn it off. With US only off and Show all off, your default countries apply.";
+export const SEARCH_COPIES_RULE = "The counts are rows.";
 export const PROFILE_RULE_NOTE = "The profile matches by the profile rule, which can list more than this search.";
 export const NO_DEFAULTS_TEXT =
   "There are no default filters to apply: Scout's setup has no readable search settings. Turn on Show all to search every stored posting.";
@@ -42,7 +47,8 @@ export function typedTitles(text) {
 
 export function cleanForm(form) {
   const given = form || EMPTY_FORM;
-  return { title: typedTitles(given.title).join(", "), company: squeeze(given.company), location: squeeze(given.location), showAll: Boolean(given.showAll) };
+  const usOnly = given.usOnly === true || given.usOnly === false ? given.usOnly : null;
+  return { title: typedTitles(given.title).join(", "), company: squeeze(given.company), location: squeeze(given.location), showAll: Boolean(given.showAll), usOnly };
 }
 
 // Something to search for: a title, or a company or location word (the server lists a company on its own).
@@ -53,7 +59,7 @@ export function canSearch(form) {
 
 export function sameSearch(a, b) {
   const [left, right] = [cleanForm(a), cleanForm(b)];
-  return left.title === right.title && left.company === right.company && left.location === right.location && left.showAll === right.showAll;
+  return left.title === right.title && left.company === right.company && left.location === right.location && left.showAll === right.showAll && left.usOnly === right.usOnly;
 }
 
 // The query of one page. It never names a profile: the search is not a profile's list.
@@ -71,6 +77,9 @@ export function searchQuery(form, { offset = 0, limit = SEARCH_PAGE, count = fal
   }
   if (clean.showAll) {
     query.set("all", "1");
+  }
+  if (clean.usOnly !== null) {
+    query.set("us_only", clean.usOnly ? "1" : "0"); // left out: the server applies the setup's default
   }
   query.set("limit", String(limit));
   if (offset > 0) {
@@ -93,7 +102,10 @@ export function countQuery(form) {
 //   read     how many rows the server has given (the next page's offset), whatever was shown of them
 //   filters  the default filters the search applied ({text: "remote, US, last 30 days", ...}); null for Show all
 export function emptyResults(form) {
-  return { form: cleanForm(form), rows: [], read: 0, more: false, total: null, totalAll: null, hidden: null, filters: null, query: null, profiles: [], labelsRead: true, source: null };
+  return {
+    form: cleanForm(form), rows: [], read: 0, more: false, total: null, totalAll: null, hidden: null, filters: null, query: null, profiles: [], labelsRead: true, source: null,
+    usOnly: null, scope: null, allScope: null,
+  };
 }
 
 function whole(value) {
@@ -136,6 +148,10 @@ export function withPage(results, response, { append = false } = {}) {
     profiles: mergeProfiles(append ? results.profiles : [], response && response.profiles),
     labelsRead: response ? response.labels_read !== false : results.labelsRead,
     source: (response && response.source) || results.source,
+    // 0.1.11.8: {on, default, rule} of the US-only switch as the server applied it, and the scope in its words.
+    usOnly: (response && response.us_only) || results.usOnly,
+    scope: (response && response.scope_text) || null,
+    allScope: (response && response.all_scope_text) || null,
   };
 }
 
@@ -172,7 +188,17 @@ export function typedText(results) {
 }
 
 export function scopeText(results) {
-  return results.filters && results.filters.text ? results.filters.text : ANY_SCOPE;
+  return results.scope || (results.filters && results.filters.text ? results.filters.text : ANY_SCOPE);
+}
+
+// Whether the "US only" box is ticked: what was set here, else what the last answer applied, else the known default.
+export function searchUsOnlyChecked(form, results, knownDefault) {
+  return usOnlyChecked(form.usOnly, (results && results.usOnly) || (typeof knownDefault === "boolean" ? { default: knownDefault } : null));
+}
+
+// Where a row is: of several copies, "Remote: Estonia, Lithuania, Latvia +4"; else its own location.
+export function rowLocation(row) {
+  return rowPlace(row);
 }
 
 function what(results) {
@@ -209,7 +235,7 @@ export function hiddenLabel(results) {
   if (!results.filters || !results.hidden || results.totalAll === null) {
     return null;
   }
-  return `Show all ${number(results.totalAll)} (${ANY_SCOPE})`;
+  return `Show all ${number(results.totalAll)} (${results.allScope || ANY_SCOPE})`;
 }
 
 // The switch says what it drops. `defaultsText` is the last answer's `filters.text` (null before the first search).
@@ -248,13 +274,15 @@ export function profileNames(results, profiles) {
 //   assessment   its assessment state, with the profile it was assessed as
 //   application  "Applied · Oct 6" (postingsModel.applicationBadge)
 //   removed      the board no longer lists it (only a search that asked for removed postings has such rows)
-export function rowLabels(row, names) {
-  const labels = (row.profiles || []).map((item) => ({
+//   place        0.1.11.8: "unclear location", first, on a row US only kept without knowing where it is (`usOnly`)
+export function rowLabels(row, names, { usOnly = false } = {}) {
+  const place = unclearLabel(row, usOnly);
+  const labels = (place ? [place] : []).concat((row.profiles || []).map((item) => ({
     kind: "profile",
     label: `in: ${labelOf(item.profile_id, names)}`,
     tone: "plain",
     title: "This profile's list holds this posting",
-  }));
+  })));
   if (row.assessment && row.assessment.state) {
     const as = row.assessment.profile_id ? ` as ${labelOf(row.assessment.profile_id, names)}` : "";
     labels.push({ kind: "assessment", label: `assessed: ${humanCode(row.assessment.state)}`, tone: "ok", title: `Assessed${as}${row.assessment.assessed_at ? ` · ${row.assessment.assessed_at}` : ""}` });

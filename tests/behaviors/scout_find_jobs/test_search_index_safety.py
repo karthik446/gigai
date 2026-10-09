@@ -225,7 +225,7 @@ def _edit(home: Path, *statements: str) -> None:
 
 
 def test_other_schema_version(home: Path) -> None:
-    _edit(home, "UPDATE meta SET value = '2' WHERE key = 'schema_version'")
+    _edit(home, f"UPDATE meta SET value = '{search_index.SCHEMA_VERSION + 1}' WHERE key = 'schema_version'")
     assert not search_index.is_built(home)
     assert search_index.upsert_company(home, "greenhouse:example-ai") is False  # a write never touches another layout
     assert_falls_back_then_rebuilds(home, {search_index.OTHER_SCHEMA})

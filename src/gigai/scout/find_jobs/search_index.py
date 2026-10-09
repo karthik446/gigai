@@ -25,7 +25,11 @@ What is stored, one row per indexed posting (removed ones too, flagged):
   keeps those rows, as ``filters.published_too_old`` does), ``wm`` (the work
   mode read from the location, ``work_mode.derive_work_mode``) and ``ckind``
   (what ``filters.country_match`` would derive before the wanted countries are
-  known), with the country codes in ``pc``.
+  known), with the country codes in ``pc``. 0.1.11.8 (schema 2): ``us_place``
+  (``job_copies.place_of``: ``us``, ``unclear`` or ``other``, what US only
+  reads) and ``content`` (the company index's ``content_sha256``, the digest of
+  the posting's title and description; ``NULL`` when no description is stored:
+  what makes two postings copies of one job).
 * ``ft``: external-content FTS5 (``unicode61 remove_diacritics 2``) over
   ``title_words``, ``company_words``, ``location_words``, kept by two
   triggers. No ``contentless_delete`` (Debian 12 ships SQLite 3.40).
@@ -86,6 +90,7 @@ from urllib.parse import unquote
 from ...canonical import digest_imported_bytes
 from .ats_board_clients import MATCH_ANY_TITLE_ROLE, _needed, _title_segments, _words, matches_roles
 from .company_index import _PROVIDERS, CompanyIndex, CompanyIndexEntry, CompanyIndexError, company_key
+from .job_copies import PLACE_OTHER, place_of
 from .filters import (
     DEFAULT_COUNTRY,
     _fold,
@@ -101,7 +106,7 @@ if TYPE_CHECKING:
     from .contracts import FindJobsConfig
 
 #: Layout of the file itself. A mismatch reads as "unavailable" until a rebuild.
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 _BUSY_TIMEOUT_MS = 5000
 _TOKENIZE = "unicode61 remove_diacritics 2"
@@ -128,7 +133,7 @@ _TABLES_DDL = (
     "CREATE TABLE p (id INTEGER PRIMARY KEY, board TEXT NOT NULL, company TEXT NOT NULL, posting_id TEXT NOT NULL, "
     "title TEXT NOT NULL, title_words TEXT NOT NULL, company_words TEXT NOT NULL, location TEXT NOT NULL, "
     "location_words TEXT NOT NULL, url TEXT NOT NULL, posted TEXT NOT NULL, published_ts TEXT, first_seen TEXT NOT NULL, "
-    "changed_at TEXT, removed INTEGER NOT NULL, wm TEXT NOT NULL, ckind TEXT NOT NULL)",
+    "changed_at TEXT, removed INTEGER NOT NULL, wm TEXT NOT NULL, ckind TEXT NOT NULL, us_place TEXT NOT NULL, content TEXT)",
     "CREATE INDEX p_board ON p (board)",
     "CREATE INDEX p_posted ON p (posted)",
     "CREATE TABLE pc (id INTEGER NOT NULL, country TEXT NOT NULL, PRIMARY KEY (country, id)) WITHOUT ROWID",
@@ -147,11 +152,11 @@ _TRIGGERS_DDL = (
 )
 _INSERT_ROW = (
     "INSERT INTO p (id, board, company, posting_id, title, title_words, company_words, location, location_words, url, "
-    "posted, published_ts, first_seen, changed_at, removed, wm, ckind) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
+    "posted, published_ts, first_seen, changed_at, removed, wm, ckind, us_place, content) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
 )
 _ROW_COLUMNS = (
     "p.board, p.company, p.posting_id, p.title, p.location, p.url, p.posted, p.published_ts, p.first_seen, "
-    "p.changed_at, p.removed"
+    "p.changed_at, p.removed, p.us_place, p.content"
 )
 
 _PLAIN_WORD_RE = re.compile(r"[a-z0-9]+")
@@ -276,6 +281,9 @@ class IndexFilters:
     countries: tuple[str, ...] = ()
     work_mode: str = "any"
     area: str | None = None
+    #: 0.1.11.8 N1: US only decides the country instead of ``countries``: every posting but one whose location is
+    #: clearly outside the US (``job_copies.place_of``, stored as ``us_place``).
+    us_only: bool = False
 
     @classmethod
     def from_config(cls, config: "FindJobsConfig", *, now: datetime | None = None) -> "IndexFilters":
@@ -320,6 +328,14 @@ class IndexRow:
     first_seen: str
     changed_at: str | None
     removed: bool
+    #: 0.1.11.8: ``job_copies.place_of`` of the posting (``us``, ``unclear``, ``other``).
+    place: str = ""
+    #: 0.1.11.8: the digest of the posting's title and description (``None``: no description stored).
+    content: str | None = None
+
+
+def _row(row: Sequence[object]) -> IndexRow:
+    return IndexRow(*row[:10], removed=bool(row[10]), place=row[11], content=row[12])  # type: ignore[arg-type]
 
 
 @dataclass(frozen=True, slots=True)
@@ -327,14 +343,16 @@ class IndexResult:
     """What the index holds for a query, or ``available=False`` with a ``reason``: then the caller scans.
 
     ``rows`` (:func:`candidates`) are newest first; ``counts``
-    (:func:`title_counts`) are ``(title, postings)`` pairs. Both are
-    CANDIDATES: the caller applies the title rule. ``stamp`` names the index
-    state that answered, so two pages can be told to come from the same one.
+    (:func:`title_counts`) are ``(title, postings)`` pairs; ``copies``
+    (:func:`copy_counts`) are ``(title, board, company, removed, content, postings)``.
+    All are CANDIDATES: the caller applies the title rule. ``stamp`` names the
+    index state that answered, so two pages can be told to come from the same one.
     """
 
     available: bool
     rows: tuple[IndexRow, ...] = ()
     counts: tuple[tuple[str, int], ...] = ()
+    copies: tuple[tuple[str, str, str, bool, str | None, int], ...] = ()
     reason: str | None = None
     detail: str | None = None
     stamp: str | None = None
@@ -560,6 +578,7 @@ class _Facts:
         self.words: dict[str, str] = {}
         self.places: dict[str, tuple[str, str]] = {}
         self.countries: dict[tuple[str, tuple[str, ...] | None], tuple[str, frozenset[str]]] = {}
+        self.us_places: dict[tuple[str, tuple[str, ...] | None], str] = {}
 
     def title(self, title: str) -> str:
         found = self.words.get(title)
@@ -571,6 +590,13 @@ class _Facts:
         found = self.places.get(location)
         if found is None:
             found = self.places[location] = (" ".join(plain_words(location)), derive_work_mode(location, None).mode)
+        return found
+
+    def us_place(self, location: str, structured: tuple[str, ...] | None) -> str:
+        key = (location, structured)
+        found = self.us_places.get(key)
+        if found is None:
+            found = self.us_places[key] = place_of(location, structured)
         return found
 
     def country(self, location: str, structured: tuple[str, ...] | None) -> tuple[str, frozenset[str]]:
@@ -605,6 +631,7 @@ def _index_file(conn: sqlite3.Connection, index: CompanyIndex, name: str, next_i
             next_id, entry.key, company, posting_id, posting.title, facts.title(posting.title), company_words,
             posting.location, location_words, posting.url, published or _stamp(posting.first_seen) or "", published,
             posting.first_seen, posting.changed_at, 1 if posting.removed else 0, mode, kind,
+            facts.us_place(posting.location, posting.countries), posting.content_sha256 or None,
         ))
         countries.extend((next_id, code) for code in codes)
         next_id += 1
@@ -994,7 +1021,9 @@ def _sql(query: IndexQuery) -> tuple[str, list[object]] | None:
             clauses.append("(p.published_ts IS NULL OR p.published_ts >= ?)")
             params.append(filters.cutoff)
         wanted = sorted({code.upper() for code in filters.countries})
-        if wanted:
+        if filters.us_only:
+            clauses.append(f"p.us_place != '{PLACE_OTHER}'")  # ONE country rule: US only, instead of the countries
+        elif wanted:
             # filters.country_match is not False: no place / an unknown place stays, "Remote" alone is the default
             # country, a region alone is out, structured or parsed codes decide (structured with none: out).
             clauses.append(
@@ -1015,8 +1044,11 @@ def _unavailable(error: _Unavailable) -> IndexResult:
     return IndexResult(False, reason=error.reason, detail=error.detail)
 
 
-def candidates(home_root: Path, query: IndexQuery, *, limit: int | None = None, offset: int = 0) -> IndexResult:
+def candidates(home_root: Path, query: IndexQuery, *, limit: int | None = None, offset: int = 0, ordered: bool = True) -> IndexResult:
     """The postings the index narrows ``query`` to, newest first (``posted``, then URL), ``limit`` from ``offset``.
+
+    ``ordered=False`` (0.1.11.8, with no ``limit``): every candidate in no particular order, for a caller that
+    orders them itself (the copies of one job as one row): SQLite then sorts nothing.
 
     A superset of the rule's rows for the titles (the caller applies
     ``matches_roles`` or :func:`strict_title_match`), exact for the words and
@@ -1030,12 +1062,35 @@ def candidates(home_root: Path, query: IndexQuery, *, limit: int | None = None, 
             _rows, stamp = _read(home_root, lambda _conn: ())
             return IndexResult(True, stamp=stamp)
         where, params = built
-        sql = f"SELECT {_ROW_COLUMNS} {where} ORDER BY p.posted DESC, p.url DESC, p.id DESC LIMIT ? OFFSET ?"
+        order = "ORDER BY p.posted DESC, p.url DESC, p.id DESC " if ordered or limit is not None or offset else ""
+        sql = f"SELECT {_ROW_COLUMNS} {where} {order}LIMIT ? OFFSET ?"
         page = (-1 if limit is None else max(0, limit), max(0, offset))
         rows, stamp = _read(home_root, lambda conn: conn.execute(sql, (*params, *page)).fetchall())
     except _Unavailable as error:
         return _unavailable(error)
-    return IndexResult(True, rows=tuple(IndexRow(*row[:10], removed=bool(row[10])) for row in rows), stamp=stamp)
+    return IndexResult(True, rows=tuple(_row(row) for row in rows), stamp=stamp)
+
+
+def copy_counts(home_root: Path, query: IndexQuery) -> IndexResult:
+    """The count path when copies are one row (0.1.11.8 N2): ``(title, board, company, removed, content, candidates)``.
+
+    One row per title and description of a board, so the caller runs the
+    title rule once per title and counts each job once (``job_copies.copy_key``;
+    the postings with no stored description, ``content`` null, each count).
+    """
+
+    built = _sql(query)
+    try:
+        if built is None:
+            _rows, stamp = _read(home_root, lambda _conn: ())
+            return IndexResult(True, stamp=stamp)
+        where, params = built
+        sql = f"SELECT p.title, p.board, MIN(p.company), p.removed, p.content, COUNT(*) {where} GROUP BY p.board, p.title, p.removed, p.content"
+        rows, stamp = _read(home_root, lambda conn: conn.execute(sql, params).fetchall())
+    except _Unavailable as error:
+        return _unavailable(error)
+    found = tuple((title, board, company, bool(removed), content, count) for title, board, company, removed, content, count in rows)
+    return IndexResult(True, copies=found, stamp=stamp)
 
 
 def rows_with_url_part(home_root: Path, part: str, *, fold_case: bool = False) -> IndexResult:
@@ -1058,7 +1113,7 @@ def rows_with_url_part(home_root: Path, part: str, *, fold_case: bool = False) -
         rows, stamp = _read(home_root, lambda conn: conn.execute(sql, (part,)).fetchall())
     except _Unavailable as error:
         return _unavailable(error)
-    return IndexResult(True, rows=tuple(IndexRow(*row[:10], removed=bool(row[10])) for row in rows), stamp=stamp)
+    return IndexResult(True, rows=tuple(_row(row) for row in rows), stamp=stamp)
 
 
 def title_counts(home_root: Path, query: IndexQuery) -> IndexResult:
@@ -1096,6 +1151,7 @@ __all__ = [
     "SCHEMA_VERSION",
     "candidates",
     "close",
+    "copy_counts",
     "is_built",
     "plain_words",
     "rebuild_from_index",

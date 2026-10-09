@@ -232,7 +232,55 @@ export function toggleSort(sort) {
   return sort === NEWEST_POSTED ? null : NEWEST_POSTED;
 }
 
-export const EMPTY_FILTER = { profileIds: [], window: null, states: [], removed: false, query: "", sort: null };
+// `usOnly` (0.1.11.8 N1): null is the setup's default (the server decides: on for a US setup), true / false what the
+// checkbox was set to in this view. Like the order it is not a filter of the "Clear filters" kind, and nothing of it
+// is stored in a profile.
+export const EMPTY_FILTER = { profileIds: [], window: null, states: [], removed: false, query: "", sort: null, usOnly: null };
+
+// 0.1.11.8: the two list rules, in the words the server's `us_only.rule` and `job_copies.COPIES_RULE` use.
+export const US_ONLY_LABEL = "US only";
+export const US_ONLY_RULE =
+  'US only hides a posting only when every place its location names is clearly outside the US. A posting in the US or remote in the US stays; "Remote" alone, no location, or a place Scout cannot read also stays and is labelled "unclear location".';
+export const COPIES_RULE =
+  "The same company, the same title and the same description posted more than once (only the location differs) is one row that lists every location, also two cities of one country. A posting with another description, or with none stored, stays a row of its own.";
+export const CANONICAL_RULE = "The row is one job: its US posting when it has one, else the earliest posted.";
+export const UNCLEAR_LABEL = "unclear location";
+
+// The "unclear location" label of a row US only kept without knowing where it is; null for any other row.
+export function unclearLabel(row, usOnly) {
+  if (!usOnly || !row || row.location_unclear !== true) {
+    return null;
+  }
+  return { kind: "place", label: UNCLEAR_LABEL, tone: "plain", title: "Scout cannot tell where this posting is (Remote alone, no location, or a place it does not know). US only keeps it." };
+}
+
+// Whether the "US only" box is ticked: what this view set, else what the last answer applied, else the setup's default.
+export function usOnlyChecked(usOnly, served) {
+  if (usOnly === true || usOnly === false) {
+    return usOnly;
+  }
+  return Boolean(served && (typeof served.on === "boolean" ? served.on : served.default));
+}
+
+// "12 outside the US are left out." Null when US only left nothing out.
+export function usOnlyLeftOutLine(counts) {
+  const left = counts && Number.isInteger(counts.us_only_left_out) ? counts.us_only_left_out : 0;
+  return left > 0 ? `${left} outside the US ${left === 1 ? "is" : "are"} left out.` : null;
+}
+
+// A row of several copies: where they are ("Remote: Estonia, Lithuania, Latvia +4"); else the posting's own location.
+export function rowPlace(row) {
+  return row && row.copies > 1 && row.locations_text ? row.locations_text : (row && row.location) || "";
+}
+
+// {count, label, title} of a row that stands for several postings; null for a row with no other copy.
+export function copiesTag(row) {
+  if (!row || !Number.isInteger(row.copies) || row.copies < 2) {
+    return null;
+  }
+  const places = Array.isArray(row.locations) ? row.locations.filter(Boolean) : [];
+  return { count: row.copies, label: `${row.copies} postings`, title: `The same job posted ${row.copies} times${places.length ? `: ${places.join("; ")}` : ""}` };
+}
 
 export function hasFilter(filter) {
   return Boolean(filter.profileIds.length || filter.window || filter.states.length || filter.removed || filter.query.trim());
@@ -254,6 +302,9 @@ export function postingsQuery(filter, { limit = PAGE_ROWS, offset = 0 } = {}) {
   }
   if (filter.sort === NEWEST_POSTED) {
     query.set("sort", NEWEST_POSTED);
+  }
+  if (filter.usOnly === true || filter.usOnly === false) {
+    query.set("us_only", filter.usOnly ? "1" : "0");
   }
   query.set("limit", String(limit));
   if (offset) {
@@ -508,7 +559,7 @@ const MODE_WORDS = { remote: "Remote", hybrid: "Hybrid", onsite: "On-site", on_s
 
 // "Acme · Denver, CO · Hybrid · $180k-$220k": only what the posting states.
 export function detailLine(row) {
-  return [row.company ? displayCompanyName(row.company) : null, row.location, MODE_WORDS[row.work_mode] || null, row.salary].filter((part) => typeof part === "string" && part.trim()).join(" · ");
+  return [row.company ? displayCompanyName(row.company) : null, rowPlace(row), MODE_WORDS[row.work_mode] || null, row.salary].filter((part) => typeof part === "string" && part.trim()).join(" · ");
 }
 
 // --- the posting's date (0110-10-14) -----------------------------------------------------------
@@ -636,7 +687,15 @@ export function assessAskBody({ selectedIds = [], filter = EMPTY_FILTER, rows = 
   if (filter.window) {
     body.window = filter.window;
   }
+  withUsOnly(body, filter);
   return body;
+}
+
+// 0.1.11.8: a filter ask selects what the list shows, so it says what the "US only" box was set to (left out: the default).
+function withUsOnly(body, filter) {
+  if (filter.usOnly === true || filter.usOnly === false) {
+    body.us_only = filter.usOnly;
+  }
 }
 
 // 0.1.11.2: the ASK of "Assess all" (beside "N not assessed"): every not-assessed posting the filter selects, whatever
@@ -658,6 +717,7 @@ export function assessAllBody({ filter = EMPTY_FILTER, rows = [] } = {}) {
   if (filter.window) {
     body.window = filter.window;
   }
+  withUsOnly(body, filter);
   return body;
 }
 
@@ -936,6 +996,9 @@ export function jobsHash(filter, page = 1, size = PAGE_ROWS) {
   if (filter.sort === NEWEST_POSTED) {
     query.set("sort", NEWEST_POSTED);
   }
+  if (filter.usOnly === true || filter.usOnly === false) {
+    query.set("us", filter.usOnly ? "1" : "0");
+  }
   const text = query.toString();
   return text ? `${JOBS_HASH_BASE}?${text}` : JOBS_HASH_BASE;
 }
@@ -955,6 +1018,7 @@ export function parseJobsHash(hash) {
       removed: query.get("removed") === "1",
       query: query.get("q") || "",
       sort: query.get("sort") === NEWEST_POSTED ? NEWEST_POSTED : null,
+      usOnly: query.get("us") === "1" ? true : query.get("us") === "0" ? false : null,
     },
     page: cleanPage(query.get("page")),
     size: cleanSize(query.get("size")),

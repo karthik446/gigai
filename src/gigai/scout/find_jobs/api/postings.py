@@ -87,7 +87,9 @@ def preparing_body(progress: dict[str, object]) -> dict[str, object]:
 
 
 _FLAGS = {"1": True, "true": True, "0": False, "false": False}
-_QUERY_KEYS = frozenset({"profile_id", "q", "state", "window", "removed", "history", "include_hidden", "limit", "offset", "sort", "job"})
+_QUERY_KEYS = frozenset({
+    "profile_id", "q", "state", "window", "removed", "history", "include_hidden", "limit", "offset", "sort", "job", "us_only", "collapse",
+})
 _RANK_KEYS = frozenset({"mode", "approve"})
 _RANK_ERROR_STATUS = {
     "invalid_value": HTTPStatus.UNPROCESSABLE_ENTITY,
@@ -96,7 +98,7 @@ _RANK_ERROR_STATUS = {
     "target_unavailable": HTTPStatus.NOT_FOUND,
     "config_unavailable": HTTPStatus.CONFLICT,
 }
-_ASSESS_KEYS = frozenset({"jobs", "profile_id", "query", "states", "window", "approve", "again", "actor", "include_low_rank", "background"})
+_ASSESS_KEYS = frozenset({"jobs", "profile_id", "query", "states", "window", "approve", "again", "actor", "include_low_rank", "background", "us_only"})
 
 
 class PostingsRoutesMixin:
@@ -138,6 +140,14 @@ class PostingsRoutesMixin:
                 self._error(HTTPStatus.UNPROCESSABLE_ENTITY, "invalid_value", f"{key} must be 1 or 0")
                 return
             flags[key] = _FLAGS[raw]
+        # 0.1.11.8: `us_only` absent is the setup's default (on for a US setup); `collapse` is on unless 0.
+        switches: dict[str, bool | None] = {}
+        for key in ("us_only", "collapse"):
+            raw = (query.get(key) or [None])[0]
+            if raw is not None and raw not in _FLAGS:
+                self._error(HTTPStatus.UNPROCESSABLE_ENTITY, "invalid_value", f"{key} must be 1 or 0")
+                return
+            switches[key] = None if raw is None else _FLAGS[raw]
         try:
             limit = int((query.get("limit") or [str(DEFAULT_LIMIT)])[0])
             offset = int((query.get("offset") or ["0"])[0])
@@ -149,7 +159,8 @@ class PostingsRoutesMixin:
             lambda: search_postings(
                 home_root, target, profile_ids=query.get("profile_id"), query=(query.get("q") or [None])[0],
                 states=query.get("state"), window=(query.get("window") or [None])[0], limit=limit, offset=offset,
-                model_wait=model_wait_seconds(), sort=(query.get("sort") or [None])[0], jobs=query.get("job"), **flags,
+                model_wait=model_wait_seconds(), sort=(query.get("sort") or [None])[0], jobs=query.get("job"),
+                us_only=switches["us_only"], collapse=switches["collapse"], **flags,
             )
         )
 
@@ -199,6 +210,10 @@ class PostingsRoutesMixin:
         if type(approve) is not bool or type(again) is not bool or type(include_low_rank) is not bool or type(background) is not bool:
             self._error(HTTPStatus.UNPROCESSABLE_ENTITY, "wrong_type", "approve, again, include_low_rank and background must be true or false")
             return
+        us_only = body.get("us_only")
+        if us_only is not None and type(us_only) is not bool:
+            self._error(HTTPStatus.UNPROCESSABLE_ENTITY, "wrong_type", "us_only must be true or false")
+            return
         texts = {key: body.get(key) for key in ("profile_id", "query", "window", "actor")}
         if any(value is not None and type(value) is not str for value in texts.values()):
             self._error(HTTPStatus.UNPROCESSABLE_ENTITY, "wrong_type", "profile_id, query, window and actor must be strings")
@@ -212,7 +227,7 @@ class PostingsRoutesMixin:
             return assess_these(
                 home_root, target, jobs=jobs, profile_id=texts["profile_id"], query=texts["query"], states=states,
                 window=texts["window"], approve=approve, again=again, decided_by=texts["actor"] or "operator",
-                include_low_rank=include_low_rank, model_wait=model_wait, on_live=on_live,
+                include_low_rank=include_low_rank, model_wait=model_wait, on_live=on_live, us_only=us_only,
             )
 
         def build(on_live=None) -> dict[str, object]:

@@ -3,7 +3,9 @@
 ``find_jobs/free_search.py`` is the builder; ``gigai scout jobs search --json``
 prints the same object. Typed titles (comma separated, the strict rule),
 company and location words (WHOLE words), the default profile's filters unless
-``all=1``, newest posted first, a page of 50. It takes NO profile: the search
+``all=1``, newest posted first, a page of 50. 0.1.11.8: ``us_only=1|0`` (absent:
+on for a US setup; it still applies with ``all=1``) and ``collapse=1|0`` (on
+unless 0: the same company and title posted more than once is one row). It takes NO profile: the search
 is not a profile's list. It makes no board request, calls no model, refreshes
 nothing and writes nothing.
 
@@ -25,7 +27,7 @@ from ...data_labels import LabelError
 from ..free_search import DEFAULT_LIMIT, FreeSearchError, SearchRequest, search, to_json
 
 _FLAGS = {"1": True, "true": True, "0": False, "false": False}
-_QUERY_KEYS = frozenset({"title", "company", "location", "all", "removed", "limit", "offset", "count"})
+_QUERY_KEYS = frozenset({"title", "company", "location", "all", "removed", "limit", "offset", "count", "us_only", "collapse"})
 _ERROR_STATUS = {"invalid_value": HTTPStatus.UNPROCESSABLE_ENTITY, "config_unavailable": HTTPStatus.CONFLICT}
 
 
@@ -49,6 +51,13 @@ class SearchRoutesMixin:
                 self._error(HTTPStatus.UNPROCESSABLE_ENTITY, "invalid_value", f"{key} must be 1 or 0")
                 return
             flags[key] = _FLAGS[raw]
+        switches: dict[str, bool | None] = {}
+        for key in ("us_only", "collapse"):
+            raw = (query.get(key) or [None])[0]
+            if raw is not None and raw not in _FLAGS:
+                self._error(HTTPStatus.UNPROCESSABLE_ENTITY, "invalid_value", f"{key} must be 1 or 0")
+                return
+            switches[key] = None if raw is None else _FLAGS[raw]
         try:
             limit = int((query.get("limit") or [str(DEFAULT_LIMIT)])[0])
             offset = int((query.get("offset") or ["0"])[0])
@@ -59,6 +68,7 @@ class SearchRoutesMixin:
             request = SearchRequest.typed(
                 query.get("title"), company=query.get("company"), location=query.get("location"), show_all=flags["all"],
                 include_removed=flags["removed"], limit=limit, offset=offset, count=flags["count"],
+                us_only=switches["us_only"], collapse=switches["collapse"],
             )
             response = to_json(search(self._backend.home_root, request, target=target))
         except FreeSearchError as exc:

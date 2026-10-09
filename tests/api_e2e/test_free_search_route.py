@@ -164,3 +164,51 @@ def test_what_is_refused(served) -> None:
     ):
         status, error = _search(url, **query)
         assert status == 422 and error["error"]["code"] == code, (query, error)
+
+
+def test_the_two_switches_of_0_1_11_8_on_both_routes(served) -> None:
+    """``us_only`` and ``collapse`` on GET /api/search and GET /api/postings: what they take, what they answer, what is refused."""
+
+    from gigai.scout.find_jobs import job_copies
+
+    fx, url = served
+    # The SAME description for every posting of a title: three Staff AI Engineer and two Staff Engineer at acme-health
+    # are two jobs, two Staff AI Engineer at quiet-harbor one. (The fixture's own postings each have their own text.)
+    now = datetime.now(UTC)
+    same = "Own the Python inference services. Requirements: Python in production; Kubernetes."
+    fx.seed(
+        WATCHED, [lever_job(WATCHED, n, title=TITLE_BOTH if n <= 3 else TITLE_SECOND_ONLY, text=same, created=now - timedelta(hours=n)) for n in range(1, 6)],
+        seen_at=now - timedelta(minutes=20),
+    )
+    fx.seed(UNWATCHED, [lever_job(UNWATCHED, n, title=TITLE_BOTH, text=same, created=now - timedelta(hours=10 + n)) for n in (1, 2)],
+            seen_at=now - timedelta(minutes=20), watch=False)
+    assert _get(url + "/api/postings?limit=5")[0] == 200
+
+    # The search: three copies at acme-health and two at quiet-harbor are two rows; collapse=0 lists the five.
+    status, found = _search(url, title="staff ai engineer", count=1)
+    assert status == 200 and found["counts"]["total"] == 2 and found["query"] == {**found["query"], "us_only": True, "collapse": True}
+    assert sorted(row["copies"] for row in found["postings"]["rows"]) == [2, 3]
+    assert {row["job_identity"] for row in found["postings"]["rows"]} == {job_url(WATCHED, 3), job_url(UNWATCHED, 2)}, "each row is its earliest posting"
+    assert found["us_only"] == {"on": True, "default": True, "rule": job_copies.US_ONLY_RULE}
+    assert all(row["location_unclear"] is False for row in found["postings"]["rows"])
+    status, each = _search(url, title="staff ai engineer", count=1, collapse=0)
+    assert status == 200 and each["counts"]["total"] == 5 and each["query"]["collapse"] is False
+    # US only is its own switch: with all=1 it is still on until us_only=0.
+    status, with_all = _search(url, title="staff ai engineer", all=1)
+    assert status == 200 and with_all["query"]["us_only"] is True and with_all["filters"] is None and with_all["scope_text"] == "US only, any date"
+    status, without = _search(url, title="staff ai engineer", all=1, us_only=0)
+    assert status == 200 and without["query"]["us_only"] is False and without["us_only"]["on"] is False and without["scope_text"] == "any place, any date"
+
+    # The profiles' list: the same two switches, the same answer shape.
+    status, listed = _get(url + "/api/postings?limit=50")
+    assert status == 200 and listed["filters"]["us_only"] is True and listed["filters"]["collapse"] is True
+    assert listed["us_only"] == found["us_only"] and listed["counts"]["us_only_left_out"] == 0
+    assert listed["counts"]["matched"] == 2 and listed["counts"]["postings"] == 5, "three Staff AI Engineer and two Staff Engineer: two rows"
+    assert sorted(row["copies"] for row in listed["postings"]["rows"]) == [2, 3]
+    assert {row["job_identity"] for row in listed["postings"]["rows"]} == {job_url(WATCHED, 3), job_url(WATCHED, 5)}
+    status, every = _get(url + "/api/postings?limit=50&collapse=0&us_only=0")
+    assert status == 200 and every["counts"]["matched"] == 5 and every["filters"]["us_only"] is False and every["filters"]["collapse"] is False
+
+    for path in ("/api/search?title=staff&us_only=yes", "/api/search?title=staff&collapse=2", "/api/postings?us_only=maybe", "/api/postings?collapse=x"):
+        status, refused = _get(url + path)
+        assert status == 422 and refused["error"]["code"] == "invalid_value", path

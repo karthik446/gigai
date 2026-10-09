@@ -98,7 +98,7 @@ def test_the_label_changes_no_state_or_fact_of_a_row(fx: PostingsFixture) -> Non
     # 0.1.11.5: the default list is the other four, each as before, in the same order.
     after = _search(fx)
     assert strip(after["postings"]["rows"]) == strip([row for row in before["postings"]["rows"] if row["job_identity"] != job])
-    assert after["counts"] == {**before["counts"], "matched": 4, "shown": 4, "new": 4, "by_state": {"not_assessed": 4}, "applied": 1}
+    assert after["counts"] == {**before["counts"], "matched": 4, "shown": 4, "new": 4, "by_state": {"not_assessed": 4}, "applied": 1, "postings": 4}
 
 
 def test_the_applied_filter_lists_every_job_with_a_status(fx: PostingsFixture) -> None:

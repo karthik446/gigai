@@ -90,6 +90,37 @@ estimate is the batch's, ``question.batch`` / ``more_after`` and
 ``counts.batch`` / ``more_after`` say the same in numbers, and the same call
 again assesses the next 50.
 
+US ONLY (0.1.11.8 N1, ``find_jobs/job_copies.py``). A switch of its own on the
+list, by the POSTING'S LOCATION (never by its board): a posting is left out
+only when every place its location names is clearly outside the US. A US
+place or "Remote" in the US stays; "Remote" alone, no location, or a place
+Scout cannot read ALSO stays and its row says ``location_unclear`` (the
+"unclear location" label). ON by default for a US setup (the shared
+``find-jobs.json`` countries hold the US), OFF otherwise; ``us_only`` says
+either, for this call only (no profile setting is changed).
+``counts.us_only_left_out`` is how many postings it left out.
+
+COPIES (0.1.11.8 N2). The same company, the same title (case, spaces and
+punctuation aside) AND the same description posted more than once, so that
+only the location differs (typically once per country), is ONE row:
+``copies`` (how many), ``locations`` / ``locations_text`` ("Remote: Estonia,
+Lithuania, Latvia +4") and ``members`` (each copy's address). The
+description is compared by the digest the company index keeps
+(``content_sha256``). Conservative: another description (another team under
+the same title) is another row, and a posting with NO stored description is
+never merged; two companies or two titles never merge, nor a removed copy
+with a live one. Two cities of one country merge. Collapsed BEFORE the page
+and the counts: ``matched`` and every other count are rows, a page of 50 is
+50 jobs. The row is ONE canonical job (``canonical_job.pick_canonical``: its
+US posting when it has one, else the earliest posted, then the posting id):
+its state, its rank and its address are the row's, and Assess, Mark applied
+and the job page act on it. Any copy with an application makes the row
+applied. "Assess these" by a filter takes the canonical job only: one model
+call for a job, not one per country. Only the copies the other filters
+select are a row's copies. A search that NAMES its postings (``jobs``) is
+exact: neither US only nor the collapse applies. ``collapse=False`` lists
+every posting.
+
 LABELS (data_labels, P4): like ``scout new``, no response mixes. A response
 holds posting text and what a model derived from it (``public-untrusted``)
 next to ids, counts, codes and the profile tags, and nothing the user wrote.
@@ -98,6 +129,7 @@ next to ids, counts, codes and the profile tags, and nothing the user wrote.
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Mapping, Sequence
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from functools import lru_cache
 from pathlib import Path
@@ -109,7 +141,19 @@ from . import postings, run_history
 from .assess_causes import failure_lines
 from .evaluated_models import notice_lines
 from .assess_preview import model_input_summary, summary_lines
-from .data_labels import ENVELOPE_KEY, UNTRUSTED_TEXT_RULE, labels_envelope
+from .data_labels import ENVELOPE_KEY, PUBLIC_UNTRUSTED, UNTRUSTED_TEXT_RULE, labels_envelope
+from .find_jobs.canonical_job import canonical_order
+from .find_jobs.job_copies import (
+    PLACE_OTHER,
+    PLACE_UNCLEAR,
+    PLACE_US,
+    US_ONLY_RULE,
+    copy_key,
+    distinct_locations,
+    locations_text,
+    place_of,
+    us_only_default,
+)
 from .pipeline.busy import LiveBatch, assess_batch
 from .pipeline.store import (
     EPHEMERAL_PROFILE,
@@ -120,7 +164,7 @@ from .pipeline.store import (
     PostingRecord,
     RunAssessment,
 )
-from .postings import PostingModelError, PostingModelPreparing, ProfileView
+from .postings import PostingModelError, PostingModelPreparing, PostingText, ProfileView
 from .scout_new import (
     APPLIED_COMMAND,
     FIRST_USE_DAYS,
@@ -177,6 +221,13 @@ STATES = frozenset(_ROW_STATES | {STATE_ASSESSED, STATE_RECOMMENDED, STATE_APPLI
 DEFAULT_LIMIT = 50
 MAX_LIMIT = 200
 _NOT_ASSESSED = "not_assessed"
+#: 0.1.11.8 N2: the grid's labels plus the locations of a row's copies (posting text, like ``location``).
+_ROWS_LABELS = {
+    **POSTINGS_LABELS,
+    "/rows/*/locations/*": PUBLIC_UNTRUSTED,
+    "/rows/*/locations_text": PUBLIC_UNTRUSTED,
+    "/rows/*/members/*/location": PUBLIC_UNTRUSTED,
+}
 
 
 class PostingSearchError(ValueError):
@@ -226,6 +277,81 @@ def _index_words(home_root: Path, rows: Iterable[PostingRecord]) -> dict[str, st
             if job in jobs:
                 found[job] = " ".join(str(part or "") for part in (posting.title, entry.company, posting.location)).casefold()
     return found
+
+
+@dataclass(frozen=True, slots=True)
+class _Place:
+    """What the company index says of one posting, for US only and the copies."""
+
+    title: str
+    company: str
+    location: str
+    #: ``job_copies.place_of``: ``us``, ``unclear`` or ``other``.
+    place: str
+    #: The digest of the title and the description (``None``: no description stored, never merged).
+    content: str | None
+    posting_id: str
+
+
+#: ``(home, board) -> (the company file's stamp, {job: its place})``.
+_PLACES: dict[tuple[str, str], tuple[object, dict[str, _Place]]] = {}
+_PLACES_LOCK = threading.Lock()
+_PLACES_BOARDS = 4096
+
+
+def _places(home_root: Path, rows: Iterable[PostingRecord]) -> dict[str, _Place]:
+    """``job -> its place`` (title, company, location, where, description digest) from the company index.
+
+    One company file per board that has a row here, read once and kept while the file's stamp (mtime, size) does not
+    move, so a server reads a board again only after an update wrote it. A board whose file cannot be read gives
+    nothing: its postings are kept by US only and are rows of their own.
+    """
+
+    from .find_jobs.company_index import CompanyIndex
+    from .find_jobs.contracts import FindJobsContractError, normalize_url
+
+    boards = sorted({row.board for row in rows})
+    index = CompanyIndex.for_home(Path(home_root))
+    found: dict[str, _Place] = {}
+    for board in boards:
+        try:
+            ats, slug = postings.split_board(board)
+            stat = postings._stat(index.path(ats, slug))
+        except ValueError:
+            continue  # not a board the index can name: it has no file
+        key = (str(home_root), board)
+        with _PLACES_LOCK:
+            kept = _PLACES.get(key)
+        if kept is None or kept[0] != stat:
+            entry = index.read(ats, slug)
+            facts: dict[str, _Place] = {}
+            if entry is not None:
+                company = entry.company if type(entry.company) is str else ""
+                for posting_id, posting in entry.postings.items():
+                    try:
+                        job = normalize_url(posting.url)
+                    except FindJobsContractError:
+                        continue
+                    facts[job] = _Place(
+                        posting.title, company, posting.location, place_of(posting.location, posting.countries),
+                        posting.content_sha256 or None, posting_id,
+                    )
+            kept = (stat, facts)
+            with _PLACES_LOCK:
+                if len(_PLACES) >= _PLACES_BOARDS and key not in _PLACES:
+                    del _PLACES[next(iter(_PLACES))]
+                _PLACES[key] = kept
+        found.update(kept[1])
+    return found
+
+
+def us_only_setting(home_root: Path, target: Path) -> bool:
+    """0.1.11.8 N1: the list's US-only default: ON when the shared ``find-jobs.json`` countries hold the US. A read."""
+
+    try:
+        return us_only_default(postings._shared_config(Path(home_root), Path(target)).countries)
+    except (PostingModelError, ValueError, OSError):
+        return False  # no readable setup: nothing says this is a US setup
 
 
 def _posted(row: PostingRecord) -> str:
@@ -309,7 +435,7 @@ class _Selection:
     def __init__(
         self, home_root: Path, target: Path, store: PipelineStore, *, profile_ids: Sequence[str], query: str | None,
         states: Sequence[str], window: str | None, removed: bool | None, jobs: Sequence[str] | None, moment: datetime,
-        model_wait: float | None = None, sort: str = SORT_FIT,
+        model_wait: float | None = None, sort: str = SORT_FIT, us_only: bool = False, collapse: bool = False,
     ) -> None:
         refreshed = postings.refresh(home_root, target, store=store, now=moment, wait=model_wait)
         #: Rows read as stored while a build runs (``postings.BUILD_STALE``), for a caller that acts on them.
@@ -338,22 +464,37 @@ class _Selection:
         setting = fit_rules.fit_setting(home_root, target)
         #: Item 12: the application of each job, read once; the "Applied" filter, the rows' badge and (0.1.11.5) what
         #: the list leaves out all use it.
-        self.applications = _applications(refreshed.resolved)
+        self.applications = dict(_applications(refreshed.resolved))
         applications = self.applications
         named = jobs is not None
 
         def low(row: PostingRecord) -> bool:
             return fit_rules.is_ranked_low(row.state, row.rank_score, setting)
 
-        shown = [
-            (group, row) for group, row in shown
-            if (_wanted(row, states, setting, applications) or row.state == weak or row.job in applications)
-            and _in_window(row, window, self.since, moment)
-        ]
+        # The filters that judge ONE posting first: the window, the words, US only. Then copies become one row, and
+        # the state filters judge the row.
+        shown = [(group, row) for group, row in shown if _in_window(row, window, self.since, moment)]
         words = [word for word in (query or "").casefold().split() if word]
         if words:
             text = _index_words(home_root, [row for _group, row in shown])
             shown = [(group, row) for group, row in shown if all(word in text.get(row.job, "") for word in words)]
+        #: 0.1.11.8: ``job -> every copy the row stands for`` (the row's own posting first), and what US only left out.
+        self.copies: dict[str, list[tuple[Sequence[PostingRecord], PostingRecord]]] = {}
+        self.places: dict[str, _Place] = {}
+        self.us_only_left_out = 0
+        if not named and (us_only or collapse) and shown:
+            self.places = places = _places(home_root, [row for _group, row in shown])
+            if us_only:
+                # 0.1.11.8 N1: only a posting clearly outside the US is left out; one Scout cannot place (or with no file) stays.
+                kept = [pair for pair in shown if pair[1].job not in places or places[pair[1].job].place != PLACE_OTHER]
+                self.us_only_left_out = len(shown) - len(kept)
+                shown = kept
+            if collapse:
+                shown = self._collapsed(shown, places, applications)
+        shown = [
+            (group, row) for group, row in shown
+            if _wanted(row, states, setting, applications) or row.state == weak or row.job in applications
+        ]
         # 0110-10-02: the weak fits the OTHER filters select (the chip's number), then only the ones asked for stay.
         # 0.1.11.5: the same for the postings with an application; a weak fit the list leaves out as applied is not
         # in the weak-fit number (its chip would not list it).
@@ -375,6 +516,59 @@ class _Selection:
         if sort == SORT_NEWEST_POSTED:
             shown.sort(key=lambda pair: _posted(pair[1]), reverse=True)  # stable: postings of one instant keep the grid's order
         self.new = sum(1 for _group, row in shown if row.first_seen > self.since and row.removed_at is None)
+
+    def _collapsed(
+        self, shown: Sequence[tuple[Sequence[PostingRecord], PostingRecord]], places: Mapping[str, _Place],
+        applications: dict[str, dict[str, object]],
+    ) -> list[tuple[Sequence[PostingRecord], PostingRecord]]:
+        """0.1.11.8 N2: the copies of one job (``job_copies.copy_key``) as ONE row: its canonical job.
+
+        ``canonical_job.pick_canonical`` names it (the US posting, else the earliest posted, then the posting id).
+        ``self.copies`` keeps the copies, the canonical one first. A copy with an application makes the ROW applied:
+        the canonical job is given that application in this selection's view (``applications``), so the list leaves
+        the row out as applied and "Applied" lists it once.
+        """
+
+        groups: dict[object, list[tuple[Sequence[PostingRecord], PostingRecord]]] = {}
+        for pair in shown:
+            row = pair[1]
+            facts = places.get(row.job)
+            key = None if facts is None else copy_key(row.board, facts.company, facts.title, facts.content, row.removed_at is not None)
+            groups.setdefault(key if key is not None else row.job, []).append(pair)
+        rows: list[tuple[Sequence[PostingRecord], PostingRecord]] = []
+        for members in groups.values():
+            if len(members) > 1:
+                members = canonical_order(
+                    members, us=lambda pair: places[pair[1].job].place == PLACE_US, posted=lambda pair: _posted(pair[1]),
+                    posting_id=lambda pair: places[pair[1].job].posting_id,
+                )
+                canonical = members[0][1].job
+                self.copies[canonical] = members
+                if canonical not in applications:
+                    applied = next((applications[pair[1].job] for pair in members if pair[1].job in applications), None)
+                    if applied is not None:
+                        applications[canonical] = dict(applied)
+            rows.append(members[0])
+        return rows
+
+    def copies_json(self, row: PostingRecord, text: PostingText | None) -> dict[str, object]:
+        """The additive keys of a row: ``location_unclear``, ``copies``, ``locations``, ``locations_text``, ``members``."""
+
+        facts = self.places.get(row.job)
+        unclear = facts is not None and facts.place == PLACE_UNCLEAR
+        members = self.copies.get(row.job)
+        if not members:
+            place = "" if text is None else (text.location or "")
+            return {
+                "location_unclear": unclear, "copies": 1, "locations": distinct_locations([place]), "locations_text": place,
+                "members": [{"job_identity": row.job, "job_url": text.url if text is not None else row.job, "location": place or None}],
+            }
+        where = [(member.job, self.places.get(member.job)) for _group, member in members]
+        found = distinct_locations(place.location for _job, place in where if place is not None)
+        return {
+            "location_unclear": unclear, "copies": len(members), "locations": found, "locations_text": locations_text(found),
+            "members": [{"job_identity": job, "job_url": job, "location": None if place is None else (place.location or None)} for job, place in where],
+        }
 
     def profiles_json(self) -> list[dict[str, object]]:
         counts: dict[str, int] = {}
@@ -410,7 +604,7 @@ def _h1b_index() -> Mapping[tuple[str, str], Mapping[str, object]]:
 def _rows_json(
     home_root: Path, target: Path, store: PipelineStore, shown: Sequence[tuple[Sequence[PostingRecord], PostingRecord]],
     views: Sequence[ProfileView] = (), ranked_low: Callable[[PostingRecord], bool] | None = None,
-    applications: Mapping[str, Mapping[str, object]] | None = None,
+    applications: Mapping[str, Mapping[str, object]] | None = None, selection: "_Selection | None" = None,
 ) -> list[dict[str, object]]:
     """The grid rows: ``scout new``'s own row, plus where a row's assessment came from when it was a run's."""
 
@@ -438,6 +632,8 @@ def _rows_json(
         # 0.1.11.3 (item 12): a LABEL (the job's latest application status and its date; null: none). Never a state.
         applied = None if applications is None else applications.get(row.job)
         entry["application"] = None if applied is None else dict(applied)
+        if selection is not None:
+            entry.update(selection.copies_json(row, text))  # 0.1.11.8 N2 (additive)
         origin: dict[str, object] | None = None
         if item is not None:
             origin = {"origin": "quick_assess"}
@@ -498,8 +694,15 @@ def search_postings(
     model_wait: float | None = None,
     sort: str | None = None,
     jobs: Iterable[str] | None = None,
+    us_only: bool | None = None,
+    collapse: bool | None = None,
 ) -> dict[str, object]:
     """The live search, as the ``scout-postings:1`` response. See the module docstring.
+
+    ``us_only`` (0.1.11.8 N1): ``None`` is the setup's default (ON when the
+    shared config's countries hold the US). ``collapse`` (N2): the copies of
+    one job are one row (``None``: on).
+    Neither applies to a search that names its postings.
 
     ``jobs`` (0.1.11.6): only these postings, by address (raw or normalized),
     each one the store holds whatever hides it from the list: an application,
@@ -540,12 +743,16 @@ def search_postings(
         if not named or len(named) > MAX_LIMIT:
             raise PostingSearchError("invalid_value", f"job must name 1..{MAX_LIMIT} postings")
     moment = (now or datetime.now(UTC)).astimezone(UTC)
+    us_default = us_only_setting(home_root, target)
+    us_on = named is None and (us_default if us_only is None else bool(us_only))
+    collapse = named is None and (True if collapse is None else bool(collapse))
     with committed_read_cache():
         store = postings.open_store(home_root, target)
         try:
             selection = _Selection(
                 home_root, target, store, profile_ids=wanted_profiles, query=query, states=wanted_states, window=window,
                 removed=None if named is not None else removed, jobs=named, moment=moment, model_wait=model_wait, sort=sort,
+                us_only=us_on, collapse=collapse,
             )
             unknown = [item for item in selection.hidden_profiles if item != EPHEMERAL_PROFILE and not history]
             if unknown:
@@ -560,8 +767,11 @@ def search_postings(
                 "filters": {
                     "profile_ids": list(wanted_profiles), "query": query or None, "states": list(wanted_states), "window": window,
                     "removed": bool(removed), "limit": limit, "offset": offset, "sort": sort,
+                    "us_only": us_on, "collapse": collapse,
                     **({} if named is None else {"jobs": named}),
                 },
+                # 0.1.11.8 N1 (additive): the switch as it applied, the setup's default, the rule in a sentence.
+                "us_only": {"on": us_on, "default": us_default, "rule": US_ONLY_RULE},
                 "anchor": {"last_checked_at": selection.anchor, "since": selection.since},
                 "counts": {
                     "matched": len(selection.shown), "shown": len(page), "new": selection.new,
@@ -573,11 +783,17 @@ def search_postings(
                     "applied": selection.applied,
                     # 0.1.11.2: the not-assessed postings ranked below the weak-fit rank. They are in ``matched`` and in the rows.
                     "ranked_low": selection.ranked_low,
+                    # 0.1.11.8: the postings the listed rows stand for (``matched`` when no row has a copy), and the
+                    # postings US only left out.
+                    "postings": sum(len(selection.copies.get(row.job, (None,))) for _group, row in selection.shown),
+                    "us_only_left_out": selection.us_only_left_out,
                 },
                 "postings": {
-                    ENVELOPE_KEY: labels_envelope(POSTINGS_LABELS),
+                    ENVELOPE_KEY: labels_envelope(_ROWS_LABELS),
                     "rule": UNTRUSTED_TEXT_RULE,
-                    "rows": _rows_json(home_root, target, store, page, selection.views, selection.is_ranked_low, selection.applications),
+                    "rows": _rows_json(
+                        home_root, target, store, page, selection.views, selection.is_ranked_low, selection.applications, selection,
+                    ),
                 },
                 "profiles": selection.profiles_json(),
                 "rank": rank_status(home_root, target),
@@ -654,6 +870,7 @@ def assess_these(
     include_low_rank: bool = False,
     model_wait: float | None = None,
     on_live: Callable[[LiveBatch], None] | None = None,
+    us_only: bool | None = None,
 ) -> dict[str, object]:
     """"Assess these": ask first (count and estimate), assess on approval. The ``scout-postings-assess:1`` response.
 
@@ -664,6 +881,11 @@ def assess_these(
     ``cancelled``. ``low_rank.included`` says what ``include_low_rank`` would do to THIS run: the low-ranked ones
     join the pool, and one approval is still the top 50 by rank of the whole pool, so ``changes_batch`` is false
     when none of them would be among the 50.
+
+    0.1.11.8: a FILTER selects what the Jobs list shows: US only as the list
+    applies it (``us_only``; ``None``: the setup's default) and one posting per
+    job (the row of its copies), so a job posted once per country is one model
+    call. Named postings are assessed as named.
 
     ``jobs`` names the postings (job identities); without it the filter
     (``query``, ``states``, ``window``, ``profile_id``) selects them. A
@@ -703,17 +925,19 @@ def assess_these(
         if not named:
             raise PostingSearchError("invalid_value", "jobs must name at least one posting")
     moment = (now or datetime.now(UTC)).astimezone(UTC)
+    us_on = named is None and (us_only_setting(home_root, target) if us_only is None else bool(us_only))
+    collapse = named is None  # a filter selects one posting per job; named postings are assessed as named
     with committed_read_cache():
         store = postings.open_store(home_root, target)
         try:
             selection = _Selection(
                 home_root, target, store, profile_ids=(profile_id,) if profile_id else (), query=query, states=wanted_states,
-                window=window, removed=False, jobs=named, moment=moment, model_wait=model_wait,
+                window=window, removed=False, jobs=named, moment=moment, model_wait=model_wait, us_only=us_on, collapse=collapse,
             )
             if selection.as_stored and _half_applied(selection, store, named, home_root, target):
                 selection = _Selection(
                     home_root, target, store, profile_ids=(profile_id,) if profile_id else (), query=query, states=wanted_states,
-                    window=window, removed=False, jobs=named, moment=moment,
+                    window=window, removed=False, jobs=named, moment=moment, us_only=us_on, collapse=collapse,
                 )
             if selection.hidden_profiles:
                 raise PostingSearchError("profile_not_found", "no active Scout profile has this id")
@@ -756,6 +980,8 @@ def assess_these(
                     body[key] = value
             if again:
                 body["again"] = True
+            if us_only is not None and named is None:
+                body["us_only"] = bool(us_only)  # the yes selects what the question counted
             if include_low_rank:
                 body["include_low_rank"] = True
             low_rank: dict[str, object] | None = None
@@ -860,9 +1086,9 @@ def assess_these(
                 "approval": None if approval_id is None else {"id": approval_id, "decided_by": decided_by, "jobs": len(pairs)},
                 "assessed": assessed,
                 "postings": {
-                    ENVELOPE_KEY: labels_envelope(POSTINGS_LABELS),
+                    ENVELOPE_KEY: labels_envelope(_ROWS_LABELS),
                     "rule": UNTRUSTED_TEXT_RULE,
-                    "rows": _rows_json(home_root, target, store, page, selection.views),
+                    "rows": _rows_json(home_root, target, store, page, selection.views, selection=selection),
                 },
                 "profiles": selection.profiles_json(),
             }
@@ -879,6 +1105,24 @@ def applied_left_out_line(applied: object, filters: object = None) -> str | None
     if type(applied) is not int or applied < 1 or asked:
         return None
     return f"{applied} you already applied to {'are' if applied != 1 else 'is'} left out: {APPLIED_COMMAND}"
+
+
+def us_only_left_out_line(counts: Mapping[str, object]) -> str | None:
+    """0.1.11.8 N1: "12 outside the US are left out (US only): --no-us-only"; ``None`` when US only left nothing out."""
+
+    left = counts.get("us_only_left_out")
+    if type(left) is not int or left < 1:
+        return None
+    return f"{left} outside the US {'are' if left != 1 else 'is'} left out (US only): --no-us-only"
+
+
+def copies_line(counts: Mapping[str, object]) -> str | None:
+    """0.1.11.8 N2: "The 40 rows stand for 61 postings: ..."; ``None`` when no row has a copy."""
+
+    rows, all_ = counts.get("matched"), counts.get("postings")
+    if type(rows) is not int or type(all_) is not int or all_ <= rows:
+        return None
+    return f"The {rows} row{'s' if rows != 1 else ''} stand{'s' if rows == 1 else ''} for {all_} postings: the same job posted more than once is one row (--no-collapse lists each)."
 
 
 def ranking_line(ranking: object) -> str | None:
@@ -941,6 +1185,7 @@ def render(response: Mapping[str, object]) -> str:
         left_out = applied_left_out_line(counts.get("applied"), response.get("filters"))
         if left_out:
             lines.append(left_out)
+        lines.extend(filter(None, [us_only_left_out_line(counts), copies_line(counts)]))
         running = ranking_line(response.get("ranking"))
         if running:
             lines.append(running)
@@ -948,6 +1193,7 @@ def render(response: Mapping[str, object]) -> str:
     assert isinstance(listing, Mapping)
     filters = response.get("filters")
     by_rank = not isinstance(filters, Mapping) or filters.get("sort", SORT_FIT) == SORT_FIT
+    us_only = isinstance(filters, Mapping) and filters.get("us_only") is True
     before: Mapping[str, object] | None = None
     for row in listing["rows"]:  # type: ignore[union-attr]
         divider = divider_text(before, row, counts) if by_rank else None  # 0.1.11.2: "Ranked low (N)", in the rank order only
@@ -956,7 +1202,11 @@ def render(response: Mapping[str, object]) -> str:
         before = row
         tags = ", ".join(str(labels.get(item["profile_id"], item["profile_id"])) for item in row["profiles"])
         gap = f" · {row['minor_gap_text']}" if row.get("minor_gap_text") and not row.get("thin_posting") else ""  # 0110-10-03
-        lines.append(f"{row['company_name'] or row['company'] or '?'}: {row['title'] or row['job_identity']} [{tags}] {row['score_text']}{gap}")
+        copies = row.get("copies")
+        places = f" ({row['locations_text']}; {copies} copies)" if type(copies) is int and copies > 1 else ""
+        if us_only and row.get("location_unclear"):
+            places += " (unclear location)"  # 0.1.11.8 N1: US only kept it without knowing where it is
+        lines.append(f"{row['company_name'] or row['company'] or '?'}: {row['title'] or row['job_identity']}{places} [{tags}] {row['score_text']}{gap}")
         posted = posted_text(row)  # 0110-10-14: "posted 2026-09-24" | "updated ..." | "first seen ..."
         lines.append(f"  {posted + ' · ' if posted else ''}{row['job_identity']}")
     history = response.get("history")
@@ -984,4 +1234,5 @@ __all__ = [
     "assess_these",
     "render",
     "search_postings",
+    "us_only_setting",
 ]

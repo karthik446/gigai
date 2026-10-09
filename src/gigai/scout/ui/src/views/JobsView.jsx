@@ -16,8 +16,12 @@ import {
   EMPTY_FILTER,
   ORDER_CHIP,
   PAGE_SIZES,
+  CANONICAL_RULE,
+  COPIES_RULE,
   PROFILE_FILTER_KEY,
   REMOVED_FILTER,
+  US_ONLY_LABEL,
+  US_ONLY_RULE,
   approvalDialog,
   approvalBody,
   assessAllBody,
@@ -50,6 +54,10 @@ import {
   toggleState,
   toggleSort,
   toggleWindow,
+  copiesTag,
+  unclearLabel,
+  usOnlyChecked,
+  usOnlyLeftOutLine,
 } from "../postingsModel.js";
 import { createPostingsStore, waitingLine } from "../postingsStore.js";
 import { APPLICATIONS_HASH, RUNS_HASH, jobHash } from "../routing.js";
@@ -69,6 +77,12 @@ import { sourcesStrip } from "../sourcesStripModel.js";
 //                   (0110-10-02: off by default, and weak fits are listed only
 //                   while it is on; the chip shows how many there are);
 //                   "Removed" lists what the boards no longer show
+//   US only         0.1.11.8 N1: a checkbox, by the posting's location; on by default for a US setup (the server's
+//                   `us_only.default`). It is this view's switch (in the address, `us=0|1`): no profile setting changes
+//   copies          0.1.11.8 N2: the same company, title and description posted more than once is ONE row (one
+//                   canonical job: its US posting, else the earliest posted), with every location and how many
+//                   postings it stands for; the counts and the pages are rows. A row US only kept without knowing
+//                   where it is says "unclear location"
 //   order chip      0110-10-14: "Newest posted" (off by default: the best
 //                   fit first). On, the server orders by the day the posting
 //                   went up (`sort=newest_posted`); it is not a filter
@@ -128,15 +142,18 @@ function Tile({ label, value, href, testId }) {
   );
 }
 
-function PostingRow({ row, profiles, anchor, selected, onSelect, onOpen, onAssessAs, busy }) {
+function PostingRow({ row, profiles, anchor, usOnly, selected, onSelect, onOpen, onAssessAs, busy }) {
   const tags = profileTags(row, profiles);
   const others = secondProfiles(row, profiles);
   const details = detailLine(row);
   const posted = postedLine(row);
+  const copies = copiesTag(row);
+  const unclear = unclearLabel(row, usOnly);
   return (
     <li
       className={`posting-row${row.removed_at ? " removed" : ""}`}
       data-testid="job-row"
+      data-copies={copies ? copies.count : 1}
       data-state={row.state}
       data-fit={typeof row.fit === "number" ? row.fit : undefined}
       data-rank={typeof row.rank_score === "number" ? row.rank_score : undefined}
@@ -160,7 +177,15 @@ function PostingRow({ row, profiles, anchor, selected, onSelect, onOpen, onAsses
         )}
         {(details || posted) && (
           <div className="posting-detail">
-            {details}
+            <span data-role="job-detail">{details}</span>
+            {copies && (
+              <>
+                {" "}
+                <span className="tag" data-role="job-copies" title={copies.title}>
+                  {copies.label}
+                </span>
+              </>
+            )}
             {details && posted ? " · " : ""}
             {posted && (
               <span data-role="posted" data-kind={posted.kind} data-at={posted.at} title={posted.title}>
@@ -192,6 +217,11 @@ function PostingRow({ row, profiles, anchor, selected, onSelect, onOpen, onAsses
         {stateText(row)}
       </div>
       <div className="posting-chips" data-role="state-chips">
+        {unclear && (
+          <span className={`state-pill tone-${unclear.tone}`} data-testid="unclear-location" data-kind={unclear.kind} title={unclear.title}>
+            {unclear.label}
+          </span>
+        )}
         {(h1bLabel(row.h1b) || (row.sponsorship && row.sponsorship !== "unknown")) && <SponsorshipBadge sponsorship={row.sponsorship} h1b={row.h1b} />}
         {rowChips(row).map((chip) => (
           <span key={`${chip.kind}:${chip.label}`} className={`state-pill tone-${chip.tone}`} data-testid={chip.testId} data-kind={chip.kind} title={chip.title}>
@@ -431,6 +461,10 @@ export default function JobsView({ selectedProfileId, onSelectProfile, allProfil
 
   const profiles = response ? response.profiles : [];
   const counts = response ? response.counts : null;
+  // 0.1.11.8 N1: the box shows what this view set, else what the list applied (the setup's default).
+  const usOnlyServed = response ? response.us_only : null;
+  const usOnly = usOnlyChecked(filter.usOnly, usOnlyServed);
+  const usOnlyLeftOut = usOnly ? usOnlyLeftOutLine(counts) : null;
   const anchor = response ? response.anchor : null;
 
   const setProfiles = (profileId) =>
@@ -573,7 +607,7 @@ export default function JobsView({ selectedProfileId, onSelectProfile, allProfil
         <SourcesStrip strip={strip} read={sources.read} status={sources.status} />
       </section>
 
-      <FreeSearchPanel profiles={allProfiles} onOpenRow={openSearchRow} onRowChanged={searchRowChanged} />
+      <FreeSearchPanel profiles={allProfiles} onOpenRow={openSearchRow} onRowChanged={searchRowChanged} usOnlyDefault={usOnlyServed ? usOnlyServed.default : undefined} />
 
       <section className="panel" style={{ padding: "12px 16px" }}>
         <div className="filter-bar">
@@ -670,7 +704,24 @@ export default function JobsView({ selectedProfileId, onSelectProfile, allProfil
                 </button>
               </div>
             </div>
+            <div className="filter-group" data-role="place-filter">
+              <div className="chip-group-label">Place</div>
+              <label className="filter-toggle jobs-us-only" title={US_ONLY_RULE}>
+                <input
+                  type="checkbox"
+                  checked={usOnly}
+                  disabled={!response}
+                  data-testid="jobs-us-only"
+                  onChange={(event) => setFilter((current) => ({ ...current, usOnly: event.target.checked }))}
+                />
+                <span>{US_ONLY_LABEL}</span>
+              </label>
+            </div>
           </div>
+          <p className="muted small jobs-list-rules" data-role="jobs-list-rules">
+            {US_ONLY_RULE} {usOnlyLeftOut && <span data-role="us-only-left-out">{usOnlyLeftOut} </span>}
+            {COPIES_RULE} {CANONICAL_RULE}
+          </p>
           <div className="result-count">
             <span data-role="postings-count" data-refreshing={listed.refreshing ? "true" : undefined}>
               {/* 0110-9-01: a message with the percent while the server prepares, never an endless spinner; rows that
@@ -686,7 +737,7 @@ export default function JobsView({ selectedProfileId, onSelectProfile, allProfil
                     onClick={() => {
                       rememberProfileFilter([]);
                       setSearch("");
-                      setFilter((current) => ({ ...EMPTY_FILTER, sort: current.sort })); // the order is not a filter
+                      setFilter((current) => ({ ...EMPTY_FILTER, sort: current.sort, usOnly: current.usOnly })); // the order and US only are not filters
                     }}
                   >
                     Clear filters
@@ -742,6 +793,7 @@ export default function JobsView({ selectedProfileId, onSelectProfile, allProfil
               row={item.row}
               profiles={profiles}
               anchor={anchor}
+              usOnly={usOnly}
               selected={selectedIds.includes(item.row.job_identity)}
               onSelect={select}
               onOpen={open}

@@ -28,6 +28,7 @@ from typing import Literal
 from ...wording import ATS_WORDING, LABEL_WORDING
 from ...data_labels import LABELS, NO_LABELS, OPENAPI_KEY, PUBLIC_UNTRUSTED, UNTRUSTED_TEXT_RULE, USER_PRIVATE, labels_header
 from ..contracts import NotAssessedReason
+from ..job_copies import US_ONLY_RULE
 
 OPENAPI_VERSION = "3.1.0"
 SPEC_PATH = "/api/openapi.json"
@@ -402,13 +403,34 @@ _NEW_EXAMPLE: dict[str, object] = {
 }
 _POSTINGS_EXAMPLE: dict[str, object] = {
     "schema_version": "scout-postings:1", "checked_at": "2026-10-03T09:30:00.000000Z",
-    "filters": {"profile_ids": [], "query": None, "states": [], "window": None, "removed": False, "limit": 50, "offset": 0, "sort": "fit"},
+    "filters": {
+        "profile_ids": [], "query": None, "states": [], "window": None, "removed": False, "limit": 50, "offset": 0, "sort": "fit",
+        "us_only": True, "collapse": True,
+    },
+    # 0.1.11.8 N1: the US-only switch as it applied, the setup's default, and the rule in a sentence.
+    "us_only": {"on": True, "default": True, "rule": US_ONLY_RULE},
     "anchor": {"last_checked_at": _NEW_SINCE, "since": _NEW_SINCE},
-    "counts": {"matched": 1, "shown": 1, "new": 1, "by_state": {"not_assessed": 1}, "weak_fit": 0, "applied": 0, "ranked_low": 0},
+    "counts": {
+        "matched": 1, "shown": 1, "new": 1, "by_state": {"not_assessed": 1}, "weak_fit": 0, "applied": 0, "ranked_low": 0,
+        "postings": 2, "us_only_left_out": 3,
+    },
     "postings": {
-        "_labels": _NEW_EXAMPLE["postings"]["_labels"],  # type: ignore[index]
+        "_labels": {
+            **_NEW_EXAMPLE["postings"]["_labels"],  # type: ignore[index,dict-item]
+            "/rows/*/locations/*": "public-untrusted", "/rows/*/locations_text": "public-untrusted", "/rows/*/members/*/location": "public-untrusted",
+        },
         "rule": UNTRUSTED_TEXT_RULE,
-        "rows": [{**_NEW_EXAMPLE["postings"]["rows"][0], "assessment_basis": None, "ranked_low": False, "sponsorship": None, "h1b": {"approvals": 32, "fiscal_years": ["2025", "2026"]}, "application": None}],  # type: ignore[index]
+        "rows": [{
+            **_NEW_EXAMPLE["postings"]["rows"][0],  # type: ignore[index,dict-item]
+            "assessment_basis": None, "ranked_low": False, "sponsorship": None, "h1b": {"approvals": 32, "fiscal_years": ["2025", "2026"]}, "application": None,
+            # 0.1.11.8 N1: Scout can place this posting. N2: the same job posted twice is this ONE row (its canonical job).
+            "location_unclear": False,
+            "copies": 2, "locations": ["Remote - United States", "Austin, TX"], "locations_text": "Remote - United States; Austin, TX",
+            "members": [
+                {"job_identity": _JOB_URL, "job_url": _JOB_URL, "location": "Remote - United States"},
+                {"job_identity": _JOB_URL + "-2", "job_url": _JOB_URL + "-2", "location": "Austin, TX"},
+            ],
+        }],
     },
     "profiles": [{"profile_id": "prof_1", "label": "Staff Engineer", "is_default": True, "matched": 1, "resume": {"record_id": "rec_1", "revision_id": "rev_1"}}],
     "rank": {"enabled": True, "calls_today": {"day": "2026-10-03", "used": 4, "limit": 100, "warn_at": 60, "warning": False, "reached": False}},
@@ -433,12 +455,15 @@ _SEARCH_EXAMPLE: dict[str, object] = {
     "schema_version": "scout-free-search:1", "checked_at": "2026-10-03T09:30:00.000000Z",
     "query": {
         "titles": ["staff ai engineer"], "company": [], "location": [], "all": False, "include_removed": False,
-        "limit": 50, "offset": 0, "count": True,
+        "limit": 50, "offset": 0, "count": True, "us_only": True, "collapse": True,
     },
     "filters": {
         "work_mode": "remote", "area": None, "countries": ["US"], "posted_since": "2026-09-03T09:30:00.000000Z",
         "text": "remote, US, last 30 days", "work_mode_note": "Work mode is read from the posting's location.",
     },
+    "us_only": {"on": True, "default": True, "rule": US_ONLY_RULE},
+    "scope_text": "remote, US, last 30 days",
+    "all_scope_text": "US only, any date",
     "source": "index",
     "index": {"used": True, "reason": None},
     "counts": {"shown": 1, "more": False, "total": 1, "total_all": 4, "hidden": 3},
@@ -447,7 +472,8 @@ _SEARCH_EXAMPLE: dict[str, object] = {
     "postings": {
         "_labels": {
             "/rows/*/company": "public-untrusted", "/rows/*/company_name": "public-untrusted", "/rows/*/company_slug": "public-untrusted",
-            "/rows/*/location": "public-untrusted", "/rows/*/title": "public-untrusted",
+            "/rows/*/location": "public-untrusted", "/rows/*/locations/*": "public-untrusted", "/rows/*/locations_text": "public-untrusted",
+            "/rows/*/members/*/location": "public-untrusted", "/rows/*/title": "public-untrusted",
         },
         "rule": _NEW_EXAMPLE["postings"]["rule"],  # type: ignore[index]
         "rows": [{
@@ -457,11 +483,18 @@ _SEARCH_EXAMPLE: dict[str, object] = {
             "profiles": [{"profile_id": "prof_1", "state": "needs_answers"}],
             "assessment": {"state": "needs_answers", "profile_id": "prof_1", "assessed_at": "2026-10-02T09:00:00.000000Z"},
             "application": None,
+            # 0.1.11.8 N1: Scout can place this posting. N2: the same job posted twice is this ONE row (its canonical job).
+            "location_unclear": False,
+            "copies": 2, "locations": ["Remote - United States", "Austin, TX"], "locations_text": "Remote - United States; Austin, TX",
+            "members": [
+                {"job_identity": _JOB_URL, "job_url": _JOB_URL, "location": "Remote - United States", "posted": "2026-10-01T12:00:00.000000Z"},
+                {"job_identity": _JOB_URL + "-2", "job_url": _JOB_URL + "-2", "location": "Austin, TX", "posted": "2026-09-28T12:00:00.000000Z"},
+            ],
         }],
     },
     "profiles": [{"profile_id": "prof_1", "label": "Staff Engineer", "is_default": True}],
     "labels_read": True,
-    "footer": ["Not ranked. Save as a profile to rank.", "Show all 4 (any place, any date): --all"],
+    "footer": ["Not ranked. Save as a profile to rank.", "Show all 4 (US only, any date): --all"],
 }
 
 _POSTINGS_RANKING_EXAMPLE: dict[str, object] = {
@@ -529,6 +562,8 @@ _POSTINGS_NOTE = (
     "unless `state=weak_fit` asks for it; it asks no question (`open_questions` is empty) and `counts.weak_fit` is how many "
     "the other filters select, listed or not. "
     "THIN POSTING (0.1.11.2): a row says `thin_posting` (true or false). It is true for a match read from fewer than 4 requirement rows (every matrix row, the \"N of M requirements\"): its `score_text` says \"thin posting, not enough requirements to score\" in place of \"Matched\" and \"fit N%\", its `fit` is null and no percentage is shown; with 1 to 3 rows the state, the filters and the counts stay a match's, and the row is LISTED LAST: after every other assessed posting and every posting not assessed yet, ranked or not (a fit read from 2 requirements is never listed above a real match). A match with NO row about the job (an empty matrix, a lone \"No stated requirements\" row, eligibility rows alone) has the state `thin_posting` instead of `matched`: `fit` is null, it is never in `counts.by_state.matched` or `state=matched`, it is listed by `state=thin_posting`, and it comes last of the thin postings. "
+    "US ONLY (0.1.11.8): `us_only=1|0` is a switch of the list, by the posting's location; left out, it is on for a US setup (`us_only` in the answer: `on`, `default`, `rule`), and `counts.us_only_left_out` says how many postings it left out. Only a posting clearly outside the US is left out: one Scout cannot place (`Remote` alone, no location) is listed with `location_unclear: true`. It changes no profile setting. "
+    "COPIES (0.1.11.8): the same company, the same title and the same description posted more than once (only the location differs) is ONE row unless `collapse=0`: `copies`, `locations`, `locations_text` and `members` (`job_identity`, `job_url`, `location`; the canonical job first) on each row. The row is ONE canonical job (its US posting when it has one, else the earliest posted): its state and its address are the row's, and POST /api/postings/assess by a filter takes it alone. A posting with another description, or with none stored, is never merged. `counts.matched` and the page are rows and `counts.postings` is how many postings they stand for. Any copy with an application makes the row applied. "
     "APPLIED LABEL (0.1.11.3): each row of `GET /api/postings` says `application` (`{status, since}`: the job's latest application status, `applied`, `interview_scheduled`, `offer_received`, `rejected` or `withdrawn`, and when it happened; null when none). It is a label read from the application events once per request: it never changes a row's `state`, rank or gate. "
     "ALREADY APPLIED (0.1.11.5): a posting with an application (any of those statuses, a rejected or withdrawn one too) is left out like a weak fit: of the rows, of `counts.matched` and `counts.by_state`, and of the postings a filter selects for POST /api/postings/assess, unless `state=applied` asks for it (then every one of them is listed, a weak fit too) or the posting is named (`jobs`). `counts.applied` is how many the other filters select, listed or not. "
     "ONE POSTING BY ITS ADDRESS (0.1.11.6): `GET /api/postings?job=<address>` is the exact read of a posting: its row comes back whether it has an application, is a weak fit, was removed by its board or sits past the first 200 rows of the list. A job page opened by its address reads this; never search a page of the list for one posting. "
@@ -2479,7 +2514,9 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
             _q("title", "string", "The typed titles, comma separated (or repeat the key); each one is a role and any of them is enough. STRICT: every typed word must be in the title, seniority words included (`senior engineer` lists only Senior or Sr. titles)."),
             _q("company", "string", "Words that must all be WHOLE words of the company name (case and accents aside): `ai` finds Example AI, not Maintain."),
             _q("location", "string", "Words that must all be WHOLE words of the posting's location: `remote`, `denver`."),
-            _q("all", "string", "1: any place, any date. Drops the default profile's countries, posted window and work mode.", enum=("0", "1", "true", "false")),
+            _q("all", "string", "1: any date and any work mode. Drops the default profile's countries, posted window and work mode; US only (`us_only`) still applies until it is turned off.", enum=("0", "1", "true", "false")),
+            _q("us_only", "string", "0.1.11.8: US only, by the posting's LOCATION (never its board). 1: leave out a posting only when every place its location names is clearly outside the US; a posting in the US or remote in the US stays, and one Scout cannot place (`Remote` alone, no location, an unknown place) ALSO stays, with `location_unclear: true` on its row. 0: off. Left out: the setup's default (on when the shared settings' countries hold the US, else off); `us_only.default` says which. It still applies with `all=1`; with it off and without `all=1` the default countries apply.", enum=("0", "1", "true", "false")),
+            _q("collapse", "string", "0.1.11.8: 0 lists every posting. Left out or 1: the same company, the same title and the same description posted more than once (only the location differs) is ONE row (`copies`, `locations`, `locations_text`, `members`), also two cities of one country; a posting with another description, or with none stored, is never merged; the page and the counts are rows. The row is one canonical job: its US posting when it has one, else the earliest posted.", enum=("0", "1", "true", "false")),
             _q("removed", "string", "1: also the postings their board no longer lists (each row says `removed`).", enum=("0", "1", "true", "false")),
             _q("limit", "integer", "Rows a page, 1 to 200 (50)."),
             _q("offset", "integer", "Rows to skip (0)."),
@@ -2502,7 +2539,22 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
             "`job_identity`: `profiles` (the profiles whose list holds the posting, with the state that list shows), "
             "`assessment` (`{state, profile_id, assessed_at}` or null) and `application` (`{status, since}` or null). "
             "`profiles` at the top names them (`label`, `is_default`); `labels_read` false means the stores could not be read "
-            "and the rows carry no label. No rank and no fit number. `footer` is what a page says under the list. Nothing is "
+            "and the rows carry no label. No rank and no fit number. `footer` is what a page says under the list. "
+            "US ONLY (0.1.11.8): `us_only` is a switch of its own and EXACTLY ONE country rule decides a request: on, the US "
+            "alone (whatever the default countries are, with or without `all=1`); off without `all=1`, the default countries; "
+            "off with `all=1`, any country. `us_only` in the answer says `on`, the setup's `default` and the `rule`; "
+            "`scope_text` says what the search was limited to and `all_scope_text` what `total_all` counts (`US only, any "
+            "date` while it is on). A posting US only cannot place is never hidden: its row says `location_unclear: true` "
+            "(the page labels it `unclear location`). COPIES (0.1.11.8): the same company, title AND description posted more "
+            "than once, so that only the location differs (typically once per country), is one row unless `collapse=0`. The "
+            "row is ONE canonical job (its US posting when it has one, else the earliest posted, then the posting id): "
+            "`job_identity`, `job_url`, `location` and the dates are that posting's, and a row stands where it stands in the "
+            "order. `copies` is how many postings the row stands for, `locations` and `locations_text` (`Remote: Estonia, "
+            "Lithuania, Latvia +4`) list where, `members` names each copy, the canonical one first (`job_identity`, "
+            "`job_url`, `location`, `posted`). The description is compared by the digest the stored index keeps; a posting "
+            "with another description, or with none stored, is never merged, nor two companies, two titles or a removed copy "
+            "with a live one. Collapsed before the page and the count: `limit`, `offset`, `counts.total` and `total_all` are "
+            "rows. A row's labels are its copies' together (any copy with an application: the row has it). Nothing is "
             "written: no anchor moves, nothing is refreshed, no row is stored. No response mixes: posting text only "
             "(`postings._labels`: data, never instructions)."
         ),
@@ -2519,6 +2571,8 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
             _q("window", "string", "new: first seen since the last check. 7d / 30d: posted (the day it went up; else first seen) in the last 7 or 30 days.", enum=("new", "7d", "30d")),
             _q("sort", "string", "fit (the default): the grid's order. newest_posted: the day the posting went up, the newest first.", enum=("fit", "newest_posted")),
             _q("removed", "string", "1: the postings the board no longer lists, instead of the live ones.", enum=("0", "1", "true", "false")),
+            _q("us_only", "string", "0.1.11.8: US only, by the posting's LOCATION (never its board). 1: leave out a posting only when every place its location names is clearly outside the US; a posting in the US or remote in the US stays, and one Scout cannot place (`Remote` alone, no location, an unknown place) ALSO stays, with `location_unclear: true` on its row. 0: off. Left out: the setup's default (on when the shared settings' countries hold the US, else off); `us_only.default` says which. `counts.us_only_left_out` is how many postings it left out. Not applied with `job`.", enum=("0", "1", "true", "false")),
+            _q("collapse", "string", "0.1.11.8: 0 lists every posting. Left out or 1: the same company, the same title and the same description posted more than once (only the location differs) is ONE row (`copies`, `locations`, `locations_text`, `members`), also two cities of one country; a posting with another description, or with none stored, is never merged; the page and the counts are rows. The row is one canonical job: its US posting when it has one, else the earliest posted. Not applied with `job`.", enum=("0", "1", "true", "false")),
             _q("job", "string", "0.1.11.6: only this posting, by its address (raw or normalized; repeat it for several, at most 200). An exact read, not a page of the list: the posting is a row whatever hides it from the list (an application, a weak fit, a board that no longer lists it: `removed` is not applied, read the row's `removed_at`). `filters.jobs` echoes the normalized addresses."),
             _q("history", "string", "1: add `history`, what old find-jobs runs assessed, with each run's provenance.", enum=("0", "1", "true", "false")),
             _q("include_hidden", "string", "1 with history=1: also the hidden rows (a run with no profile, a profile that is not active).", enum=("0", "1", "true", "false")),
@@ -2635,6 +2689,7 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
             _b("query", "string", "Filter: words that must all be in the title, company or location."),
             _b("states", "array", "Filter: states to keep (as GET /api/postings `state`)."),
             _b("window", "string", "Filter: new, 7d or 30d (as GET /api/postings).", enum=("new", "7d", "30d")),
+            _b("us_only", "boolean", "Filter (0.1.11.8): US only, as GET /api/postings `us_only`. Left out: the setup's default. A filter selects what the list shows: no posting located outside the US while it is on, and ONE posting per job (the row of its copies), so a job posted once per country is one model call. Not applied to `jobs`."),
             _b("approve", "boolean", "true: assess (one model call per posting). Left out or false: only ask."),
             _b("again", "boolean", "true: also the postings whose assessment is current."),
             _b("include_low_rank", "boolean", "true: also the postings whose rank score is below `fit.assess_min_rank` (50). Left out: they are skipped and counted (`low_rank`)."),

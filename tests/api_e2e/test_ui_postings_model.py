@@ -298,6 +298,7 @@ def test_the_row_chips_say_the_state_the_scout_label_stale_and_removed(out: dict
     assert round_trip["page"] == 5 and round_trip["size"] == 100 and round_trip["filter"] == {
         "profileIds": ["p1", "p2"], "window": "30d", "states": ["recommended"], "removed": True, "query": "a&b=c",
         "sort": None,  # 0110-10-14: the order rides with the filters; off (the server's own order) unless the address says so
+        "usOnly": None,  # 0.1.11.8: the US-only box rides there too (`us=0|1`); absent, the server applies the setup's default
     }
     assert out["needsAnswers"] == [0, 4]
 

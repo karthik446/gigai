@@ -12,7 +12,9 @@
 // Plain JavaScript with its fetcher passed in, so the model test runs it under node.
 import { EMPTY_FORM, canSearch, cleanForm, countQuery, emptyResults, needsCount, nextPageQuery, replaceRow, searchQuery, withCount, withPage } from "./freeSearchModel.js";
 
-const START = { form: EMPTY_FORM, results: null, loading: false, loadingMore: false, counting: false, error: null, moreError: null, defaultsText: null };
+// `usOnlyDefault` (0.1.11.8): the setup's US-only default once an answer said it (null before): what the box shows
+// until it is touched.
+const START = { form: EMPTY_FORM, results: null, loading: false, loadingMore: false, counting: false, error: null, moreError: null, defaultsText: null, usOnlyDefault: null };
 
 export function createFreeSearchStore({ fetchSearch }) {
   let state = START;
@@ -55,7 +57,8 @@ export function createFreeSearchStore({ fetchSearch }) {
             return undefined;
           }
           const results = withPage(emptyResults(form), response);
-          set({ results, loading: false, defaultsText: results.filters && results.filters.text ? results.filters.text : state.defaultsText });
+          const usOnlyDefault = results.usOnly && typeof results.usOnly.default === "boolean" ? results.usOnly.default : state.usOnlyDefault;
+          set({ results, loading: false, usOnlyDefault, defaultsText: results.filters && results.filters.text ? results.filters.text : state.defaultsText });
           return needsCount(results) ? count(mine, form) : undefined;
         })
         .catch((error) => mine === run && set({ loading: false, error }));
@@ -64,6 +67,17 @@ export function createFreeSearchStore({ fetchSearch }) {
     setShowAll(showAll) {
       set({ form: { ...state.form, showAll: Boolean(showAll) } });
       return state.results || state.error ? this.search() : Promise.resolve();
+    },
+    // "US only" is part of the search too (its own switch: Show all does not change it).
+    setUsOnly(usOnly) {
+      set({ form: { ...state.form, usOnly: Boolean(usOnly) } });
+      return state.results || state.error ? this.search() : Promise.resolve();
+    },
+    // The setup's default, learned from elsewhere on the page (the Jobs list's answer) before any search.
+    knowUsOnlyDefault(value) {
+      if (typeof value === "boolean" && state.usOnlyDefault !== value) {
+        set({ usOnlyDefault: value });
+      }
     },
     loadMore() {
       const before = state.results;
@@ -85,7 +99,7 @@ export function createFreeSearchStore({ fetchSearch }) {
     // Back to the empty box: nothing of the search is kept.
     clear() {
       run += 1;
-      set({ ...START, defaultsText: state.defaultsText });
+      set({ ...START, defaultsText: state.defaultsText, usOnlyDefault: state.usOnlyDefault, form: { ...EMPTY_FORM, usOnly: state.form.usOnly } });
     },
   };
 }

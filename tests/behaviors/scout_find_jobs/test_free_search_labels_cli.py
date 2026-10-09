@@ -264,3 +264,67 @@ def test_a_request_for_nothing_is_refused(fx: PostingsFixture) -> None:
     as_json = CliRunner().invoke(cli, ["scout", "jobs", "search", "of the", "--json", *home])
     assert as_json.exit_code == 1 and json.loads(as_json.output)["error"]["code"] == "invalid_value"
     assert "WHOLE word" in CliRunner().invoke(cli, ["scout", "jobs", "search", "--help"]).output
+
+
+# ---------------------------------------------------------------------------
+# 0.1.11.8 N1 + N2: the copies of one job are one row with their labels together; the command's two switches
+# ---------------------------------------------------------------------------
+
+
+SAME_TEXT = "Own the Python inference services. Requirements: 5+ years of Python in production; Kubernetes."
+
+
+def test_a_row_of_copies_has_its_copies_labels_together_and_the_command_has_both_switches(fx: PostingsFixture) -> None:
+    # The SAME description three times at acme-health and twice at quiet-harbor: two jobs. (The fixture's own
+    # postings each have a description of their own, so nothing of it ever merged.)
+    fx.seed(
+        WATCHED,
+        [lever_job(WATCHED, n, title=TITLE_BOTH if n <= 3 else TITLE_SECOND_ONLY, text=SAME_TEXT if n <= 3 else None, created=MOMENT - timedelta(hours=n)) for n in range(1, 6)],
+        seen_at=MOMENT - timedelta(minutes=20),
+    )
+    fx.seed(
+        UNWATCHED, [lever_job(UNWATCHED, n, title=TITLE_BOTH, text=SAME_TEXT, created=MOMENT - timedelta(hours=10 + n)) for n in (1, 2)],
+        seen_at=MOMENT - timedelta(minutes=20), watch=False,
+    )
+    posting_search.search_postings(fx.home_root, fx.target, now=MOMENT)
+    _record(fx, 2, "applied", "2026-10-06T10:00:00Z")  # applied through the SECOND copy
+    assessed = posting_search.assess_these(fx.home_root, fx.target, jobs=[job_url(WATCHED, 1)], approve=True, now=MOMENT)
+    assert assessed["assessed"]["assessed"] == 1  # type: ignore[index]  # assessed through the FIRST copy
+
+    each = _by_job(_search(fx, "staff ai engineer", collapse=False))
+    assert len(each) == 5 and each[job_url(WATCHED, 3)]["application"] is None and each[job_url(WATCHED, 3)]["assessment"] is None
+    assert each[job_url(WATCHED, 2)]["application"]["status"] == "applied" and each[job_url(WATCHED, 1)]["assessment"] is not None
+
+    found = _search(fx, "staff ai engineer")
+    rows = _by_job(found)
+    assert found["counts"]["total"] == len(rows) == 2 and found["query"]["collapse"] is True
+    # All three are in the US: the EARLIEST posted is the row's job, the others follow it.
+    row = rows[job_url(WATCHED, 3)]
+    assert row["copies"] == 3 and [member["job_identity"] for member in row["members"]] == [job_url(WATCHED, n) for n in (3, 2, 1)]
+    # Any copy applied: the row is applied. Any copy assessed: the row says so. Every profile that holds a copy is named.
+    assert row["application"] == each[job_url(WATCHED, 2)]["application"]
+    assert row["assessment"] == each[job_url(WATCHED, 1)]["assessment"]
+    assert {item["profile_id"] for item in row["profiles"]} == {fx.default_profile_id, fx.second_profile_id}
+    assert rows[job_url(UNWATCHED, 2)]["copies"] == 2 and rows[job_url(UNWATCHED, 2)]["profiles"] == []
+    # One location, however many copies: it is said once; and a US place is not "unclear".
+    assert row["locations"] == ["Remote - United States"] and row["locations_text"] == "Remote - United States" and row["location_unclear"] is False
+
+    home = ["--home", str(fx.home_root), "--target", str(fx.target)]
+
+    def run(*args: str) -> str:
+        result = CliRunner().invoke(cli, ["scout", "jobs", "search", "Staff AI Engineer", *args, *home])
+        assert result.exit_code == 0, result.output
+        return result.output
+
+    text = run()
+    assert "Showing 1-2, newest first" in text and "2 postings match." in text
+    assert any("[applied]" in line and "[3 copies]" in line and "assessed: " in line for line in text.splitlines()), text
+    assert "Showing 1-5" in run("--no-collapse") and "5 postings match." in run("--no-collapse")
+    # The switches, and what the answer says of them: this setup's default is on; --all keeps it until --no-us-only.
+    default = json.loads(run("--json"))
+    assert default["query"]["us_only"] is True and default["us_only"]["default"] is True and default["query"]["collapse"] is True
+    with_all = json.loads(run("--all", "--json"))
+    assert with_all["query"]["us_only"] is True and with_all["filters"] is None and with_all["scope_text"] == "US only, any date"
+    without = json.loads(run("--all", "--no-us-only", "--no-collapse", "--json"))
+    assert without["query"]["us_only"] is False and without["query"]["collapse"] is False and without["scope_text"] == "any place, any date"
+    assert '(US only, any date)' in run("--all") and "(any place, any date)" in run("--all", "--no-us-only")

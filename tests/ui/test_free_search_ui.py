@@ -17,7 +17,8 @@ Pinned:
 - the page comes first and the total after it (the count request is held: the rows are there, "Counting…" is said, no
   total; released, the total line appears), newest first, with the labels (profiles, assessment, application);
 - the search names no profile, whichever profile chip is on;
-- "Show all N (any place, any date)" changes the count and the switch; "Load more" asks for the next 50 and adds them;
+- "Show all N (US only, any date)" changes the count and the switch (0.1.11.8: the fixture is a US setup, so US only
+  is on and Show all keeps it); "Load more" asks for the next 50 and adds them;
 - "Assess · 1 model call · as <default profile>" asks first, then posts the DEFAULT profile's id (another profile is
   the selected one), one model call; "Mark applied" posts the job alone;
 - "Save this search as a profile" opens the new-profile form with the typed titles filled in and creates nothing;
@@ -240,14 +241,14 @@ def test_the_page_comes_first_then_the_total_with_labels_show_all_and_load_more(
 
     # What the default filters hid, and Show all.
     hidden = ui.page.locator(f'{PANEL} [data-testid="free-search-show-hidden"]')
-    assert hidden.text_content() == f"Show all {total + OLD} (any place, any date)"
+    assert hidden.text_content() == f"Show all {total + OLD} (US only, any date)"
     ui.searches.clear()
     hidden.click()
     ui.page.locator(f'{TOTAL}[data-total="{total + OLD}"]').wait_for()
     ui.settle()
     assert ui.page.locator(f'{PANEL} [data-testid="free-search-show-all"]').is_checked()
     assert ui.searches[0] == {"title": [TYPED], "all": ["1"], "limit": ["50"]}
-    assert ui.page.locator(TOTAL).text_content() == f'{total + OLD} postings match "{TYPED}" (any place, any date).'
+    assert ui.page.locator(TOTAL).text_content() == f'{total + OLD} postings match "{TYPED}" (US only, any date).'
     assert ui.page.locator(f'{PANEL} [data-testid="free-search-show-hidden"]').count() == 0
 
     # Load more: the next 50, under the ones shown.

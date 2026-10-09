@@ -1,8 +1,10 @@
-import { useState, useSyncExternalStore } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { getFreeSearch, postApplication, postAssess } from "../api.js";
 import { reassessErrorText } from "../answersModel.js";
 import {
   NOT_RANKED,
+  SEARCH_COPIES_RULE,
+  US_ONLY_WITH_SHOW_ALL,
   appliedRow,
   applyRequest,
   assessLabel,
@@ -20,14 +22,16 @@ import {
   profileNames,
   rowJobId,
   rowLabels,
+  rowLocation,
   sameSearch,
+  searchUsOnlyChecked,
   showAllLabel,
   shownLine,
   totalLine,
 } from "../freeSearchModel.js";
 import { createFreeSearchStore, keepProfileDraft } from "../freeSearchStore.js";
 import { eventActionLabel } from "../jobStateModel.js";
-import { postedLine } from "../postingsModel.js";
+import { CANONICAL_RULE, COPIES_RULE, US_ONLY_LABEL, US_ONLY_RULE, copiesTag, postedLine } from "../postingsModel.js";
 import { REQUIREMENTS_UNREADABLE_TEXT, isRequirementsUnreadable } from "../rankModel.js";
 import { SETTINGS_HASH, jobHash, navigate } from "../routing.js";
 import { displayCompanyName } from "../display.js";
@@ -37,6 +41,12 @@ import { displayCompanyName } from "../display.js";
 //   the box       a title (a comma separates titles), optional company and location words, and "Show all", which
 //                 drops the default profile's location, work mode, countries and posted window. Its label says what
 //                 those are ("remote, US, last 30 days"), read from the search's own answer
+//   US only       0.1.11.8 N1: a checkbox of its own, by the posting's location; on by default for a US setup. It
+//                 still applies with Show all until it is unticked (the help line under the switches says the rule)
+//   copies        0.1.11.8 N2: the same company, title and description posted more than once is ONE row: one
+//                 canonical job (its US posting, else the earliest posted), with every location ("Remote: Estonia,
+//                 Lithuania, Latvia +4") and how many postings it stands for; Open, Assess and Mark applied act on
+//                 that job. A row US only kept without knowing where it is says "unclear location"
 //   the rows      newest posted first, never ranked: company, title, location, the posting's date and its labels (the
 //                 profiles whose list holds it, its assessment state, its application). The page comes first and the
 //                 total line after it; "Load more" adds the next 50
@@ -49,16 +59,18 @@ import { displayCompanyName } from "../display.js";
 // Nothing is stored by a search; the results live in this tab until it is reloaded.
 const store = createFreeSearchStore({ fetchSearch: getFreeSearch });
 
-function SearchRow({ row, names, defaultProfile, onOpen, onChanged }) {
+function SearchRow({ row, names, defaultProfile, usOnly, onOpen, onChanged }) {
   const [asking, setAsking] = useState(false); // the question before the model call
   const [busy, setBusy] = useState(null); // "assess" | "apply"
   const [error, setError] = useState(null);
   const [note, setNote] = useState(null);
   const id = rowJobId(row);
   const posted = postedLine(row);
-  const labels = rowLabels(row, names);
+  const labels = rowLabels(row, names, { usOnly });
   const company = row.company ? displayCompanyName(row.company) : "";
-  const details = [company, row.location].filter((part) => typeof part === "string" && part.trim()).join(" · ");
+  const place = rowLocation(row);
+  const copies = copiesTag(row);
+  const details = [company, place].filter((part) => typeof part === "string" && part.trim()).join(" · ");
 
   const assess = () => {
     setAsking(false);
@@ -84,7 +96,7 @@ function SearchRow({ row, names, defaultProfile, onOpen, onChanged }) {
   };
 
   return (
-    <li className={`posting-row search-row${row.removed ? " removed" : ""}`} data-testid="search-row" data-job={id || undefined}>
+    <li className={`posting-row search-row${row.removed ? " removed" : ""}`} data-testid="search-row" data-job={id || undefined} data-copies={copies ? copies.count : 1}>
       <div className="posting-main">
         {id ? (
           <a className="posting-title" href={jobHash(id)} onClick={() => onOpen(row)} data-action="open-search-job">
@@ -96,8 +108,16 @@ function SearchRow({ row, names, defaultProfile, onOpen, onChanged }) {
         {(details || posted) && (
           <div className="posting-detail">
             <span data-role="search-company">{company}</span>
-            {company && row.location ? " · " : ""}
-            <span data-role="search-location">{row.location}</span>
+            {company && place ? " · " : ""}
+            <span data-role="search-location">{place}</span>
+            {copies && (
+              <>
+                {" "}
+                <span className="tag" data-role="search-copies" title={copies.title}>
+                  {copies.label}
+                </span>
+              </>
+            )}
             {details && posted ? " · " : ""}
             {posted && (
               <span data-role="posted" data-kind={posted.kind} data-at={posted.at} title={posted.title}>
@@ -161,8 +181,11 @@ function SearchRow({ row, names, defaultProfile, onOpen, onChanged }) {
   );
 }
 
-export default function FreeSearchPanel({ profiles, onOpenRow, onRowChanged }) {
-  const { form, results, loading, loadingMore, counting, error, moreError, defaultsText } = useSyncExternalStore(store.subscribe, store.getState);
+export default function FreeSearchPanel({ profiles, onOpenRow, onRowChanged, usOnlyDefault }) {
+  const { form, results, loading, loadingMore, counting, error, moreError, defaultsText, usOnlyDefault: knownDefault } = useSyncExternalStore(store.subscribe, store.getState);
+  // The setup's US-only default, as the Jobs list below read it: the box shows it before the first search.
+  useEffect(() => store.knowUsOnlyDefault(usOnlyDefault), [usOnlyDefault]);
+  const usOnly = searchUsOnlyChecked(form, results, knownDefault);
   const defaultProfile = defaultProfileOf(profiles);
   const names = profileNames(results, profiles);
   const shown = results ? shownLine(results) : null;
@@ -234,6 +257,13 @@ export default function FreeSearchPanel({ profiles, onOpenRow, onRowChanged }) {
         <input type="checkbox" role="switch" checked={form.showAll} onChange={(event) => store.setShowAll(event.target.checked)} data-testid="free-search-show-all" />
         <span data-role="free-search-show-all-label">{showAllLabel(defaultsText)}</span>
       </label>
+      <label className="filter-toggle free-search-us-only">
+        <input type="checkbox" checked={usOnly} onChange={(event) => store.setUsOnly(event.target.checked)} data-testid="free-search-us-only" />
+        <span data-role="free-search-us-only-label">{US_ONLY_LABEL}</span>
+      </label>
+      <p className="muted small free-search-rules" data-role="free-search-rules">
+        {US_ONLY_RULE} {US_ONLY_WITH_SHOW_ALL} {COPIES_RULE} {CANONICAL_RULE} {SEARCH_COPIES_RULE}
+      </p>
       {!results && !loading && !error && (
         <p className="muted small free-search-hint" data-role="free-search-hint">
           Searches every stored posting, in a profile's list or in none. A comma separates titles; every word of a typed title must be in the posting's title. The
@@ -298,7 +328,7 @@ export default function FreeSearchPanel({ profiles, onOpenRow, onRowChanged }) {
           {results.rows.length > 0 && (
             <ul className="posting-list" data-testid="free-search-list">
               {results.rows.map((row) => (
-                <SearchRow key={`${row.company_key}|${row.job_url}`} row={row} names={names} defaultProfile={defaultProfile} onOpen={onOpenRow} onChanged={changed} />
+                <SearchRow key={`${row.company_key}|${row.job_url}`} row={row} names={names} defaultProfile={defaultProfile} usOnly={Boolean(results.usOnly && results.usOnly.on)} onOpen={onOpenRow} onChanged={changed} />
               ))}
             </ul>
           )}

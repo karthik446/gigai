@@ -48,6 +48,16 @@ others.
   own limit. A system that answers 429 is left alone for as long as its `Retry-After` says (up to 10 minutes), on a
   manual update too; when that is longer than the update has left, the rest of that system's boards wait for the
   next update (`rate_limited`).
+- **US only, and one row per job.** Search all jobs and the Jobs list have a **US only** switch (`--us-only/--no-us-only`,
+  `us_only=1|0`), on by default for a US setup. It hides only postings clearly outside the US; a posting whose
+  place it cannot read ("Remote" alone, no location) stays listed and says "unclear location". The same job posted
+  once per country with the same description is one row listing its locations ("Remote: Estonia, Lithuania,
+  Latvia +4"); **Assess** and **Mark applied** act on one posting of it, a US one if there is one (`--no-collapse`,
+  `collapse=0` list every posting). The search index is rebuilt by the next `gigai scout sources update`; until
+  then a search reads every company file and is slower.
+- **The first `scout new` after the upgrade is long.** Every matching posting on the new boards is new to you once,
+  so it lists that backlog, and a Pinpoint posting (no date) reads as posted on the day it was first seen, so it
+  stays inside "last 30 days" for 30 days.
 
 ### 0.1.11.7
 

@@ -1876,6 +1876,10 @@ table.data-table th {
 .free-search .free-search-title { flex: 2 1 320px; }
 .free-search .free-search-word { flex: 1 1 150px; }
 .free-search .free-search-hint { margin: 0; }
+/* 0.1.11.8: the US-only box and the one help line under the switches (the two rules); the same line under the Jobs filters. */
+.free-search .free-search-rules,
+.jobs-list-rules { margin: 0; }
+.posting-detail .tag { margin-left: 2px; }
 .free-search-results { display: flex; flex-direction: column; gap: 10px; }
 .posting-row.search-row { grid-template-columns: minmax(0, 1fr) 240px minmax(0, 420px); align-items: center; }
 .search-row .posting-actions { flex-direction: row; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 6px 14px; }

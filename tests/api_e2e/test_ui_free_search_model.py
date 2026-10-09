@@ -259,7 +259,7 @@ def out(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict:
 def test_the_requests_the_boxes_build(out: dict) -> None:
     queries = out["queries"]
     assert queries["titles"] == ["Staff AI Engineer", "Staff Engineer"], "a comma separates titles; spaces are squeezed"
-    assert queries["clean"] == {"title": "Staff AI Engineer, Staff Engineer", "company": "quiet", "location": "", "showAll": False}
+    assert queries["clean"] == {"title": "Staff AI Engineer, Staff Engineer", "company": "quiet", "location": "", "showAll": False, "usOnly": None}
     assert queries["can"] == [False, False, True, True], "a company word alone can be searched; commas alone cannot"
     assert queries["same"] == [True, False]
     assert queries["page"] == "title=staff+ai+engineer&limit=50"
@@ -287,7 +287,8 @@ def test_the_page_comes_first_and_the_count_after(out: dict) -> None:
         "shown": f'Showing 1-50, newest first: "staff ai engineer" ({scope}).',
         "total": f'{total} postings match "staff ai engineer" ({scope}).',
         "empty": None,
-        "hidden": f"Show all {total + OLD} (any place, any date)",
+        # 0.1.11.8: this fixture is a US setup, so US only is on (nobody touched its box) and Show all keeps it.
+        "hidden": f"Show all {total + OLD} (US only, any date)",
         "read": 50, "more": True, "rows": 50, "scope": scope,
     }
     assert out["order"] == sorted(out["order"], reverse=True), "newest posted first, as the server gave them"
@@ -298,8 +299,8 @@ def test_show_all_load_more_a_failed_count_and_the_newest_search_wins(out: dict)
     queries = out["queries"]
     total = 3 + RECENT + OLD
     assert out["allSent"] == [queries["all"], queries["allCount"]]
-    assert out["all"]["total"] == f'{total} postings match "staff ai engineer" (any place, any date).'
-    assert out["all"]["hidden"] is None and out["all"]["scope"] == "any place, any date" and out["all"]["rows"] == 50
+    assert out["all"]["total"] == f'{total} postings match "staff ai engineer" (US only, any date).'
+    assert out["all"]["hidden"] is None and out["all"]["scope"] == "US only, any date" and out["all"]["rows"] == 50
     assert out["allDefaultsText"] == out["defaultsText"], "the switch still says what it drops"
     assert out["moreSent"] == [queries["allNext"]], "the next 50, from the rows read so far; no second count"
     assert out["more"]["rows"] == total and out["more"]["read"] == total and out["more"]["more"] is False and out["unique"]
@@ -357,7 +358,7 @@ def test_the_profile_draft_and_the_errors(out: dict) -> None:
     assert out["canSave"] == [True, False, False], "a search with no title has nothing to save as a profile"
     assert out["kept"] == [True, None], "the draft is handed over once"
     assert "Show all" in out["errors"][0] and out["errors"][1] == "limit must be 1..200" and out["errors"][2] == "boom"
-    assert out["cleared"]["results"] is None and out["cleared"]["form"] == {"title": "", "company": "", "location": "", "showAll": False}
+    assert out["cleared"]["results"] is None and out["cleared"]["form"] == {"title": "", "company": "", "location": "", "showAll": False, "usOnly": None}
     assert out["cleared"]["defaultsText"] == scope
 
 

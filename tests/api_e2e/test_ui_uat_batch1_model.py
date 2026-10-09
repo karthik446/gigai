@@ -442,7 +442,7 @@ def test_the_rotation_line_never_says_unknown(out: dict) -> None:
 
 
 def test_the_run_dialog_names_its_sources_in_words(out: dict) -> None:
-    assert out["sources"] == ["Exa web search", "Company job boards (Greenhouse, Lever, Ashby)", "hiring.cafe", "something_else"]
+    assert out["sources"] == ["Exa web search", "Company job boards (Greenhouse, Lever, Ashby, Workable, Rippling, Gem, Recruitee, Pinpoint, Breezy)", "hiring.cafe", "something_else"]
 
 
 # --- uat-bug-012 -------------------------------------------------------------------

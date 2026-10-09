@@ -17,6 +17,31 @@ ever stored, not only the watchlist) and answers one page:
   the default profile never has search settings of its own). The work mode is
   read from the posting's location (the index holds no board field).
   ``show_all`` drops all three.
+* US ONLY (0.1.11.8 N1, ``job_copies.place_of``): a switch of its own, by the
+  posting's location. It hides a posting only when every place its location
+  names is clearly outside the US; "Remote" alone, no location or a place
+  Scout cannot read STAYS and its row says ``location_unclear``. ON by default
+  for a US setup (the shared config's countries hold the US), OFF otherwise;
+  ``us_only`` says either. EXACTLY ONE country rule decides a request: US
+  only ON = that rule (whatever the config lists, with or without
+  ``show_all``); OFF without ``show_all`` = the config's countries; OFF with
+  ``show_all`` = any country. So ``show_all`` drops the window and the work
+  mode, and the countries only when US only is off. "Show all N"
+  (``total_all``) counts under the same US rule.
+* COPIES (0.1.11.8 N2, ``job_copies.copy_key``): the same company, title AND
+  description posted more than once (only the location differs: once per
+  country) is ONE row. The row is ONE canonical job
+  (``canonical_job.pick_canonical``: its US posting when it has one, else the
+  earliest posted) and lists every location (``locations``, ``copies``,
+  ``members``). A posting with another description, or with none stored, is
+  never merged. Collapsed BEFORE the page and the count: 50 rows are 50
+  jobs, ``total`` counts jobs, ``offset`` counts jobs; a row stands where its
+  canonical job stands in the order. A row's labels are its copies' labels
+  together (any copy applied: the row is applied). Only the copies the
+  request selects are a row's copies. To collapse, every candidate of the
+  search is read (one read; the description digest is in the index), so a
+  collapsed page costs what its count costs. ``collapse=False`` lists every
+  posting, as before.
 * ORDER: newest posted first (published, else first seen), then the URL.
   PAGE: 50 rows, 200 at most, from ``offset``. Removed postings are left out
   unless ``include_removed``.
@@ -54,6 +79,7 @@ from __future__ import annotations
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from functools import lru_cache
 from pathlib import Path
 import sqlite3
 import threading
@@ -62,6 +88,20 @@ from typing import TYPE_CHECKING
 
 from . import search_index
 from .ats_board_clients import _words
+from .filters import DEFAULT_COUNTRY
+from .canonical_job import canonical_order
+from .job_copies import (
+    PLACE_OTHER,
+    PLACE_UNCLEAR,
+    PLACE_US,
+    UNCLEAR_LABEL,
+    US_ONLY_RULE,
+    copy_key,
+    distinct_locations,
+    locations_text,
+    place_of,
+    us_only_default,
+)
 from .search_index import IndexFilters, IndexQuery, IndexRow, _stamp, strict_title_match, words_match
 
 if TYPE_CHECKING:
@@ -76,6 +116,8 @@ SOURCE_INDEX = "index"
 SOURCE_SCAN = "scan"
 
 NOT_RANKED_TEXT = "Not ranked. Save as a profile to rank."
+ANY_SCOPE_TEXT = "any place, any date"
+US_ONLY_SCOPE_TEXT = "US only, any date"
 WORK_MODE_NOTE = "Work mode is read from the posting's location."
 
 #: The first read of candidates is this many times the rows the page needs: the rule drops some.
@@ -122,6 +164,10 @@ class SearchRequest:
     offset: int = 0
     #: Also count (``total``, ``total_all``): a second read on the index path.
     count: bool = False
+    #: 0.1.11.8 N1: ``None`` is the setup's default (ON when the shared config's countries hold the US).
+    us_only: bool | None = None
+    #: 0.1.11.8 N2: the same company and title posted more than once is one row.
+    collapse: bool = True
 
     @classmethod
     def typed(
@@ -135,12 +181,18 @@ class SearchRequest:
         limit: int = DEFAULT_LIMIT,
         offset: int = 0,
         count: bool = False,
+        us_only: bool | None = None,
+        collapse: bool | None = None,
     ) -> "SearchRequest":
-        """``title``: comma separated titles; ``company`` / ``location``: words. Raises :class:`FreeSearchError`."""
+        """``title``: comma separated titles; ``company`` / ``location``: words. Raises :class:`FreeSearchError`.
+
+        ``collapse=None`` is the default: on.
+        """
 
         request = cls(
             titles=_split(title, ","), company_words=_split(company, None), location_words=_split(location, None),
             show_all=bool(show_all), include_removed=bool(include_removed), limit=limit, offset=offset, count=bool(count),
+            us_only=None if us_only is None else bool(us_only), collapse=True if collapse is None else bool(collapse),
         )
         request.check()
         return request
@@ -180,8 +232,12 @@ class RowLabels:
 
 @dataclass(frozen=True, slots=True)
 class SearchRow:
+    #: The row's posting: of several copies, the canonical job (``canonical_job.pick_canonical``).
     posting: IndexRow
+    #: The labels of the row: of several copies, theirs together.
     labels: RowLabels = field(default_factory=RowLabels)
+    #: 0.1.11.8 N2: every copy the row stands for, the canonical job first (``posting``), each with its job identity.
+    copies: tuple[tuple[IndexRow, str | None], ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -204,6 +260,23 @@ class SearchPage:
     #: Whether the label stores were read (``False``: no gig here, or a store could not be read).
     labelled: bool = False
     checked_at: str | None = None
+    #: 0.1.11.8 N1: whether US only applied, and what the setup's default is.
+    us_only: bool = False
+    us_only_default: bool = False
+
+    @property
+    def scope_text(self) -> str:
+        """What the search was limited to, in words: the default filters, or what Show all leaves."""
+
+        if self.filters is not None:
+            return str(self.filters["text"])
+        return US_ONLY_SCOPE_TEXT if self.us_only else ANY_SCOPE_TEXT
+
+    @property
+    def all_scope_text(self) -> str:
+        """What "Show all N" would search: any date and work mode, and the US alone while US only is on."""
+
+        return US_ONLY_SCOPE_TEXT if self.us_only else ANY_SCOPE_TEXT
 
     @property
     def hidden(self) -> int | None:
@@ -257,9 +330,51 @@ def _filters_json(config: "FindJobsConfig", filters: IndexFilters) -> dict[str, 
     }
 
 
+@dataclass(frozen=True, slots=True)
+class _Plan:
+    """What one request applies, decided once: the window and work mode, and the ONE country rule."""
+
+    moment: datetime
+    #: The default config whose posted window and work mode apply; ``None`` for ``show_all``.
+    config: "FindJobsConfig | None"
+    #: The countries that decide when US only is off (``()``: any country).
+    countries: tuple[str, ...]
+    #: The same, as the index applies it (``None``: no filter at all).
+    filters: IndexFilters | None
+    #: The filters of "Show all N": nothing, or the US alone while US only is on.
+    all_filters: IndexFilters | None
+    us_only: bool
+    us_only_default: bool
+
+
+def _fits(plan: _Plan, row: object, *, defaults: bool) -> bool:
+    """The scan's test of one posting. ``defaults``: the request's country rule, window and work mode; without it,
+    what "Show all N" keeps (the US rule while US only is on, else everything)."""
+
+    from .filters import country_match, published_too_old
+    from .work_mode import work_mode_fit
+
+    if plan.us_only:
+        if place_of(row.location, row.countries) == PLACE_OTHER:  # type: ignore[attr-defined]
+            return False
+    elif defaults and plan.countries and country_match(row.location, plan.countries, structured_countries=row.countries) is False:  # type: ignore[attr-defined]
+        return False
+    if not defaults or plan.config is None:
+        return True
+    return not published_too_old(row, plan.config, now=plan.moment) and work_mode_fit(row, plan.config).passes  # type: ignore[arg-type]
+
+
 # ---------------------------------------------------------------------------
 # The two paths
 # ---------------------------------------------------------------------------
+
+
+@lru_cache(maxsize=262144)
+def _strict(title: str, typed: str) -> bool:
+    """``strict_title_match``, remembered by this process: a pure rule, and the page, its count and the next page of
+    one search ask it of the same titles (0.1.11.8: a page of jobs reads every candidate of the search)."""
+
+    return strict_title_match(title, typed)
 
 
 def _rule(titles: Sequence[str]) -> Callable[[str], bool]:
@@ -272,7 +387,7 @@ def _rule(titles: Sequence[str]) -> Callable[[str], bool]:
     def accepts(title: str) -> bool:
         found = decided.get(title)
         if found is None:
-            found = decided[title] = any(strict_title_match(title, typed) for typed in titles)
+            found = decided[title] = any(_strict(title, typed) for typed in titles)
         return found
 
     return accepts
@@ -285,9 +400,52 @@ def _query(request: SearchRequest, filters: IndexFilters | None) -> IndexQuery:
     )
 
 
-def _index_rows(home_root: Path, query: IndexQuery, accepts: Callable[[str], bool], need: int) -> tuple[list[IndexRow] | None, str | None]:
-    """The first ``need`` rows the rule accepts, from the index; ``(None, reason)`` when it cannot answer."""
+Group = tuple[IndexRow, ...]
 
+
+def _key(row: IndexRow) -> tuple[str, str, str, str, bool] | None:
+    return copy_key(row.board, row.company, row.title, row.content, row.removed)
+
+
+def _order(row: IndexRow) -> tuple[str, str, str, str]:
+    """The order's key (newest first when reversed): posted, then the URL; then the board and the id, so it is total."""
+
+    return (row.posted, row.url, row.board, row.posting_id)
+
+
+def _collapsed(rows: Iterable[IndexRow]) -> list[Group]:
+    """``rows`` as rows of copies: each group with its canonical job first, the groups in the order of their canonical jobs.
+
+    A posting with no stored description is a group of its own (``copy_key`` is ``None``).
+    """
+
+    groups: dict[object, list[IndexRow]] = {}
+    for row in rows:
+        key = _key(row)
+        groups.setdefault(key if key is not None else (row.board, row.posting_id), []).append(row)
+    found = [
+        tuple(canonical_order(group, us=lambda row: row.place == PLACE_US, posted=lambda row: row.posted, posting_id=lambda row: row.posting_id))
+        if len(group) > 1 else (group[0],)
+        for group in groups.values()
+    ]
+    found.sort(key=lambda group: _order(group[0]), reverse=True)
+    return found
+
+
+def _index_rows(
+    home_root: Path, request: SearchRequest, query: IndexQuery, accepts: Callable[[str], bool], need: int,
+) -> tuple[list[Group] | None, str | None]:
+    """The first ``need`` rows the rule accepts, from the index; ``(None, reason)`` when it cannot answer.
+
+    With ``request.collapse`` a row is a job, and a job stands where its canonical posting stands, which is known
+    only when every copy was seen: EVERY candidate is read, in one read (one index state, no restart).
+    """
+
+    if request.collapse:
+        found = search_index.candidates(home_root, query, ordered=False)  # the rows are ordered by their canonical jobs, below
+        if not found.available:
+            return None, found.reason or search_index.DAMAGED
+        return _collapsed(row for row in found.rows if accepts(row.title))[:need], None
     for _attempt in range(_RESTARTS):
         rows: list[IndexRow] = []
         stamp: str | None = None
@@ -302,33 +460,47 @@ def _index_rows(home_root: Path, query: IndexQuery, accepts: Callable[[str], boo
                 break  # the index was written between two reads: the offsets no longer name the same rows; read again
             rows.extend(row for row in found.rows if accepts(row.title))
             if len(rows) >= need or len(found.rows) < chunk:
-                return rows[:need], None
+                return [(row,) for row in rows[:need]], None
             start += chunk
             chunk *= 2
     return None, search_index.STALE
 
 
-def _index_count(home_root: Path, query: IndexQuery, accepts: Callable[[str], bool]) -> int | None:
-    found = search_index.title_counts(home_root, query)
+def _index_count(home_root: Path, request: SearchRequest, query: IndexQuery, accepts: Callable[[str], bool]) -> int | None:
+    if not request.collapse:
+        found = search_index.title_counts(home_root, query)
+        if not found.available:
+            return None
+        return sum(count for title, count in found.counts if accepts(title))
+    found = search_index.copy_counts(home_root, query)
     if not found.available:
         return None
-    return sum(count for title, count in found.counts if accepts(title))
+    jobs: set[object] = set()
+    alone = 0
+    for title, board, company, removed, content, count in found.copies:
+        if not accepts(title):
+            continue
+        key = copy_key(board, company, title, content, removed)
+        if key is None:
+            alone += count  # no stored description: each posting is its own row
+        else:
+            jobs.add(key)
+    return len(jobs) + alone
 
 
 def _scan(
-    home_root: Path, request: SearchRequest, config: "FindJobsConfig | None", accepts: Callable[[str], bool], now: datetime,
-) -> tuple[list[IndexRow], int]:
+    home_root: Path, request: SearchRequest, plan: _Plan, accepts: Callable[[str], bool],
+) -> tuple[list[Group], int]:
     """Every company file through the same predicates: ``(the rows in order, how many match without the default filters)``."""
 
     from .company_index import CompanyIndex
-    from .filters import country_match, published_too_old
-    from .work_mode import work_mode_fit
 
     index = CompanyIndex.for_home(home_root)
     places: dict[str, bool] = {}
-    fits: dict[tuple[object, ...], bool] = {}
+    fits: dict[tuple[object, ...], tuple[bool, bool, str]] = {}
     rows: list[IndexRow] = []
     unfiltered = 0
+    unfiltered_jobs: set[object] = set()
     for ats, slug in index.keys():
         entry = index.read(ats, slug)
         if entry is None:
@@ -347,31 +519,35 @@ def _scan(
                     here = places[posting.location] = words_match(posting.location, request.location_words)
                 if not here:
                     continue
+            key = (posting.location, posting.countries, posting.published_at)
+            fit = fits.get(key)
+            if fit is None:
+                # The fields the three rules read, as ``index_search._indexed_row`` gives them (no board work mode).
+                row = SimpleNamespace(
+                    location=posting.location, countries=posting.countries, published_at=posting.published_at, work_mode=None,
+                )
+                fit = fits[key] = (_fits(plan, row, defaults=False), _fits(plan, row, defaults=True), place_of(posting.location, posting.countries))
+            if not fit[0]:
+                continue  # outside the country rule that also "Show all N" keeps (US only)
             unfiltered += 1
-            if config is not None:
-                key = (posting.location, posting.countries, posting.published_at)
-                fit = fits.get(key)
-                if fit is None:
-                    # The fields the three rules read, as ``index_search._indexed_row`` gives them (no board work mode).
-                    row = SimpleNamespace(
-                        location=posting.location, countries=posting.countries, published_at=posting.published_at, work_mode=None,
-                    )
-                    fit = fits[key] = not (
-                        published_too_old(row, config, now=now)  # type: ignore[arg-type]
-                        or (bool(config.countries) and country_match(row.location, config.countries, structured_countries=row.countries) is False)
-                        or not work_mode_fit(row, config).passes  # type: ignore[arg-type]
-                    )
-                if not fit:
-                    continue
+            content = posting.content_sha256 or None
+            if request.collapse:
+                job = copy_key(entry.key, company, posting.title, content, bool(posting.removed))
+                unfiltered_jobs.add(job if job is not None else (entry.key, posting_id))
+            if not fit[1]:
+                continue
             published = _stamp(posting.published_at)
             rows.append(IndexRow(
                 board=entry.key, company=company, posting_id=posting_id, title=posting.title, location=posting.location,
                 url=posting.url, posted=published or _stamp(posting.first_seen) or "", published_at=published,
                 first_seen=posting.first_seen, changed_at=posting.changed_at, removed=bool(posting.removed),
+                place=fit[2], content=content,
             ))
+    if request.collapse:
+        return _collapsed(rows), len(unfiltered_jobs)
     # The index's order: posted, then the URL, newest first. (Two postings with one instant AND one URL: by board and id here.)
-    rows.sort(key=lambda row: (row.posted, row.url, row.board, row.posting_id), reverse=True)
-    return rows, unfiltered
+    rows.sort(key=_order, reverse=True)
+    return [(row,) for row in rows], unfiltered
 
 
 # ---------------------------------------------------------------------------
@@ -596,36 +772,77 @@ def _labels(home_root: Path, target: Path | None, rows: Sequence[IndexRow]) -> t
     return labelled, profiles, True
 
 
+def _together(labels: Sequence[RowLabels]) -> RowLabels:
+    """The labels of a row of copies: every profile whose list holds a copy, the first copy's assessment and application."""
+
+    if len(labels) == 1:
+        return labels[0]
+    profiles: dict[str, ProfileLabel] = {}
+    for item in labels:
+        for profile in item.profiles:
+            profiles.setdefault(profile.profile_id, profile)
+    return RowLabels(
+        job_identity=labels[0].job_identity,
+        profiles=tuple(profiles.values()),
+        assessment=next((item.assessment for item in labels if item.assessment is not None), None),
+        application=next((item.application for item in labels if item.application is not None), None),
+    )
+
+
 # ---------------------------------------------------------------------------
 # The search
 # ---------------------------------------------------------------------------
 
 
-def _prepare(
-    home_root: Path, request: SearchRequest, target: Path | None, now: datetime | None,
-) -> tuple[datetime, "FindJobsConfig | None", IndexFilters | None]:
+def _prepare(home_root: Path, request: SearchRequest, target: Path | None, now: datetime | None) -> _Plan:
+    from dataclasses import replace
+
     from .contracts import FindJobsContractError
 
     request.check()
     moment = (now or datetime.now(UTC)).astimezone(UTC)
-    if request.show_all:
-        return moment, None, None
-    if target is None:
-        raise FreeSearchError("config_unavailable", "the default filters need the Scout folder; search every posting with --all (the API: all=1)")
-    config = default_config(home_root, target)
+    config: "FindJobsConfig | None" = None
+    default = False
+    if not request.show_all:
+        if target is None:
+            raise FreeSearchError("config_unavailable", "the default filters need the Scout folder; search every posting with --all (the API: all=1)")
+        config = default_config(home_root, target)
+        default = us_only_default(config.countries)
+    elif target is not None:
+        default = _us_default_or_off(home_root, target)
+    us_only = default if request.us_only is None else request.us_only
+    us = IndexFilters(countries=(DEFAULT_COUNTRY,), us_only=True)
+    if config is None:
+        filters = us if us_only else None
+    else:
+        try:
+            filters = IndexFilters.from_config(config, now=moment)
+        except FindJobsContractError as exc:
+            raise FreeSearchError("config_unavailable", str(exc)) from exc
+        if us_only:
+            filters = replace(filters, countries=(DEFAULT_COUNTRY,), us_only=True)
+    return _Plan(
+        moment=moment, config=config, countries=() if filters is None else filters.countries, filters=filters,
+        all_filters=us if us_only else None, us_only=us_only, us_only_default=default,
+    )
+
+
+def _us_default_or_off(home_root: Path, target: Path) -> bool:
+    """The setup's US-only default for a ``show_all`` search, which needs no config: no readable setup is "off"."""
+
     try:
-        return moment, config, IndexFilters.from_config(config, now=moment)
-    except FindJobsContractError as exc:
-        raise FreeSearchError("config_unavailable", str(exc)) from exc
+        return us_only_default(default_config(home_root, target).countries)
+    except (FreeSearchError, ValueError, OSError):
+        return False
 
 
-def _index_totals(home_root: Path, request: SearchRequest, filters: IndexFilters | None, accepts: Callable[[str], bool]) -> tuple[int, int] | None:
+def _index_totals(home_root: Path, request: SearchRequest, plan: _Plan, accepts: Callable[[str], bool]) -> tuple[int, int] | None:
     """``(total, total_all)`` from the index's count path; ``None`` when it cannot answer."""
 
-    total = _index_count(home_root, _query(request, filters), accepts)
+    total = _index_count(home_root, request, _query(request, plan.filters), accepts)
     if total is None:
         return None
-    total_all = total if filters is None else _index_count(home_root, _query(request, None), accepts)
+    total_all = total if plan.filters == plan.all_filters else _index_count(home_root, request, _query(request, plan.all_filters), accepts)
     return None if total_all is None else (total, total_all)
 
 
@@ -633,23 +850,21 @@ def count(home_root: Path, request: SearchRequest, *, target: Path | None = None
     """``(total, total_all)`` of ``request``, with no page: what a caller asks AFTER it showed the page.
 
     ``total_all`` is the same search without the default filters (equal to
-    ``total`` for a ``show_all`` search). From the index's count path, else
-    from the scan. Pass the page's ``now`` so both judge one posted window.
-    Writes nothing. Raises what :func:`search` raises.
+    ``total`` for a ``show_all`` search); the US rule stays in it while US
+    only is on. With ``collapse`` both count jobs, not copies. From the
+    index's count path, else from the scan. Pass the page's ``now`` so both
+    judge one posted window. Writes nothing. Raises what :func:`search` raises.
     """
 
     home_root = Path(home_root)
-    moment, config, filters = _prepare(home_root, request, None if target is None else Path(target), now)
-    return _count_prepared(home_root, request, moment, config, filters)
+    return _count_prepared(home_root, request, _prepare(home_root, request, None if target is None else Path(target), now))
 
 
-def _count_prepared(
-    home_root: Path, request: SearchRequest, moment: datetime, config: "FindJobsConfig | None", filters: IndexFilters | None,
-) -> tuple[int, int]:
+def _count_prepared(home_root: Path, request: SearchRequest, plan: _Plan) -> tuple[int, int]:
     accepts = _rule(request.titles)
-    totals = _index_totals(home_root, request, filters, accepts)
+    totals = _index_totals(home_root, request, plan, accepts)
     if totals is None:
-        every, unfiltered = _scan(home_root, request, config, accepts, moment)
+        every, unfiltered = _scan(home_root, request, plan, accepts)
         totals = (len(every), unfiltered)
     return totals
 
@@ -660,9 +875,7 @@ def search(home_root: Path, request: SearchRequest, *, target: Path | None = Non
     return _search(home_root, request, target, now)[0]
 
 
-def _search(
-    home_root: Path, request: SearchRequest, target: Path | None, now: datetime | None,
-) -> tuple[SearchPage, tuple[datetime, "FindJobsConfig | None", IndexFilters | None]]:
+def _search(home_root: Path, request: SearchRequest, target: Path | None, now: datetime | None) -> tuple[SearchPage, _Plan]:
     """One page of the free search. See the module docstring. Writes nothing.
 
     ``target`` is the Scout folder: the default filters are read from its
@@ -676,39 +889,48 @@ def _search(
 
     home_root = Path(home_root)
     target = None if target is None else Path(target)
-    moment, config, filters = _prepare(home_root, request, target, now)
+    plan = _prepare(home_root, request, target, now)
     accepts = _rule(request.titles)
     need = request.offset + request.limit + 1
 
     totals: tuple[int, int] | None = None
-    found, reason = _index_rows(home_root, _query(request, filters), accepts, need)
+    found, reason = _index_rows(home_root, request, _query(request, plan.filters), accepts, need)
     if found is not None and request.count:
-        totals = _index_totals(home_root, request, filters, accepts)
+        totals = _index_totals(home_root, request, plan, accepts)
         if totals is None:
             found, reason = None, search_index.STALE  # the index went away between the page and the count: one answer, from the scan
     if found is None:
         source = SOURCE_SCAN
-        every, unfiltered = _scan(home_root, request, config, accepts, moment)
+        every, unfiltered = _scan(home_root, request, plan, accepts)
         found, totals = every[:need], (len(every), unfiltered)
     else:
         source = SOURCE_INDEX
     page = found[request.offset:request.offset + request.limit]
-    labels, profiles, labelled = _labels(home_root, target, page)
+    # Every copy of the page's rows is labelled in one read; a row's labels are its copies' together.
+    labels, profiles, labelled = _labels(home_root, target, [row for group in page for row in group])
+    rows: list[SearchRow] = []
+    at = 0
+    for group in page:
+        mine = labels[at:at + len(group)]
+        at += len(group)
+        rows.append(SearchRow(group[0], _together(mine), tuple((row, label.job_identity) for row, label in zip(group, mine, strict=True))))
 
     result = SearchPage(
         request=request,
-        rows=tuple(SearchRow(row, label) for row, label in zip(page, labels, strict=True)),
+        rows=tuple(rows),
         more=len(found) > request.offset + request.limit,
         source=source,
         index_reason=reason,
         total=None if totals is None else totals[0],
         total_all=None if totals is None else totals[1],
-        filters=None if config is None or filters is None else _filters_json(config, filters),
+        filters=None if plan.config is None or plan.filters is None else _filters_json(plan.config, plan.filters),
         profiles=profiles,
         labelled=labelled,
-        checked_at=stamp(moment),
+        checked_at=stamp(plan.moment),
+        us_only=plan.us_only,
+        us_only_default=plan.us_only_default,
     )
-    return result, (moment, config, filters)
+    return result, plan
 
 
 # ---------------------------------------------------------------------------
@@ -731,7 +953,7 @@ def footer_lines(page: SearchPage) -> list[str]:
     lines = [NOT_RANKED_TEXT]
     hidden = page.hidden
     if page.filters is not None and hidden:
-        lines.append(f"Show all {page.total_all:,} (any place, any date): --all")
+        lines.append(f"Show all {page.total_all:,} ({page.all_scope_text}): --all")
     return lines
 
 
@@ -745,6 +967,8 @@ def to_json(page: SearchPage) -> dict[str, object]:
     rows = []
     for row in page.rows:
         posting, labels = row.posting, row.labels
+        copies = row.copies or ((posting, labels.job_identity),)
+        places = distinct_locations(copy.location for copy, _identity in copies)
         slug = posting.board.partition(":")[2]
         name = slug_display_name(posting.company or slug)
         rows.append({
@@ -764,6 +988,17 @@ def to_json(page: SearchPage) -> dict[str, object]:
             "profiles": [{"profile_id": item.profile_id, "state": item.state} for item in labels.profiles],
             "assessment": None if labels.assessment is None else dict(labels.assessment),
             "application": None if labels.application is None else dict(labels.application),
+            # 0.1.11.8 N1 (additive): Scout cannot tell where the posting is ("Remote" alone, no location, an unknown place).
+            "location_unclear": posting.place == PLACE_UNCLEAR,
+            # 0.1.11.8 N2 (additive): the copies this row stands for (1: no other copy), their locations, and each one.
+            # The row itself (job_identity, job_url, location, the dates) is the canonical job, the first member.
+            "copies": len(copies),
+            "locations": places,
+            "locations_text": locations_text(places),
+            "members": [
+                {"job_identity": identity, "job_url": copy.url, "location": copy.location, "posted": copy.posted or None}
+                for copy, identity in copies
+            ],
         })
     return {
         "schema_version": SCHEMA_VERSION,
@@ -771,9 +1006,13 @@ def to_json(page: SearchPage) -> dict[str, object]:
         "query": {
             "titles": list(request.titles), "company": list(request.company_words), "location": list(request.location_words),
             "all": request.show_all, "include_removed": request.include_removed, "limit": request.limit, "offset": request.offset,
-            "count": request.count,
+            "count": request.count, "us_only": page.us_only, "collapse": request.collapse,
         },
         "filters": None if page.filters is None else dict(page.filters),
+        # 0.1.11.8 N1 (additive): the switch as it applied, the setup's default, the rule in a sentence, the scope in words.
+        "us_only": {"on": page.us_only, "default": page.us_only_default, "rule": US_ONLY_RULE},
+        "scope_text": page.scope_text,
+        "all_scope_text": page.all_scope_text,
         "source": page.source,
         "index": {"used": page.source == SOURCE_INDEX, "reason": page.index_reason},
         "counts": {"shown": len(page.rows), "more": page.more, "total": page.total, "total_all": page.total_all, "hidden": page.hidden},
@@ -783,6 +1022,8 @@ def to_json(page: SearchPage) -> dict[str, object]:
             ENVELOPE_KEY: labels_envelope({
                 "/rows/*/title": PUBLIC_UNTRUSTED, "/rows/*/company": PUBLIC_UNTRUSTED, "/rows/*/company_slug": PUBLIC_UNTRUSTED,
                 "/rows/*/company_name": PUBLIC_UNTRUSTED, "/rows/*/location": PUBLIC_UNTRUSTED,
+                "/rows/*/locations/*": PUBLIC_UNTRUSTED, "/rows/*/locations_text": PUBLIC_UNTRUSTED,
+                "/rows/*/members/*/location": PUBLIC_UNTRUSTED,
             }),
             "rule": UNTRUSTED_TEXT_RULE,
             "rows": rows,
@@ -796,7 +1037,7 @@ def to_json(page: SearchPage) -> dict[str, object]:
     }
 
 
-def _row_tags(row: Mapping[str, object], names: Mapping[str, str]) -> str:
+def _row_tags(row: Mapping[str, object], names: Mapping[str, str], us_only: bool = False) -> str:
     tags: list[str] = []
     held = [str(names.get(item["profile_id"], item["profile_id"])) for item in row["profiles"]]  # type: ignore[index,union-attr]
     if held:
@@ -809,6 +1050,11 @@ def _row_tags(row: Mapping[str, object], names: Mapping[str, str]) -> str:
         tags.append(str(application["status"]).replace("_", " "))
     if row.get("removed"):
         tags.append("removed")
+    copies = row.get("copies")
+    if type(copies) is int and copies > 1:
+        tags.append(f"{copies} copies")
+    if row.get("location_unclear") and us_only:
+        tags.append(UNCLEAR_LABEL)
     return "".join(f" [{tag}]" for tag in tags)
 
 
@@ -820,7 +1066,7 @@ def render_page(response: Mapping[str, object]) -> str:
     request = SearchRequest(
         titles=tuple(query["titles"]), company_words=tuple(query["company"]), location_words=tuple(query["location"]),  # type: ignore[arg-type]
     )
-    scope = str(filters["text"]) if isinstance(filters, Mapping) else "any place, any date"
+    scope = str(response.get("scope_text") or (filters["text"] if isinstance(filters, Mapping) else ANY_SCOPE_TEXT))
     what = f"{_typed_text(request)} ({scope})"
     lines: list[str] = []
     if response["source"] == SOURCE_SCAN:
@@ -841,11 +1087,14 @@ def render_page(response: Mapping[str, object]) -> str:
     first = int(query["offset"]) + 1  # type: ignore[call-overload]
     lines.append(f"Showing {first}-{first + len(rows) - 1}, newest first: {what}.")
     names = {str(item["profile_id"]): str(item["label"]) for item in response["profiles"]}  # type: ignore[union-attr]
+    switch = response.get("us_only")
+    us_only = isinstance(switch, Mapping) and switch.get("on") is True  # the label is said where US only kept the row
     width = min(28, max(len(str(row["company"])) for row in rows))
     for row in rows:
         day = str(row["posted"] or "")[:10] or "no date   "
-        place = f"  ({row['location']})" if row["location"] else ""
-        lines.append(f"  {day}  {str(row['company']):<{width}}  {row['title']}{place}{_row_tags(row, names)}")
+        where = row.get("locations_text") or row["location"]
+        place = f"  ({where})" if where else ""
+        lines.append(f"  {day}  {str(row['company']):<{width}}  {row['title']}{place}{_row_tags(row, names, us_only)}")
         lines.append(f"      {row['job_url']}")
     return "\n".join(lines)
 
@@ -885,14 +1134,14 @@ def answer_lines(
     from dataclasses import replace
 
     moment = now or datetime.now(UTC)
-    page, (_moment, config, filters) = _search(home_root, request, None if target is None else Path(target), moment)
+    page, plan = _search(home_root, request, None if target is None else Path(target), moment)
     response = redact(to_json(page))
     if as_json:
         yield json.dumps(response, sort_keys=True, separators=(",", ":"))
         return
     yield render_page(response)
     if page.total is None:
-        total, total_all = _count_prepared(Path(home_root), request, _moment, config, filters)
+        total, total_all = _count_prepared(Path(home_root), request, plan)
         response = redact(to_json(replace(page, total=total, total_all=total_all)))
     yield render_total(response)
 

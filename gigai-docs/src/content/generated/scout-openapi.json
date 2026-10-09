@@ -8090,7 +8090,7 @@
     },
     "/api/postings": {
       "get": {
-        "description": "The live search: the stored postings every active profile matches. No run, no board request, no model call. What \"Run find jobs\" searched, without a run: read from the stored index through the per-(posting, profile) read model, across every active profile (a deleted or archived profile is never listed). A changed setting (titles, countries, work mode) is seen by the next call. Each posting is listed once, for its best profile (`profile_id`), with every active profile it matches in `profiles`, best first; with one `profile_id` the row is that profile's own. Ordered like GET /api/new: a current assessment, then a stale one, then not assessed; inside a group the verdict, then `fit` (the row's one fit number: the share of requirements met with the must-haves counted twice, 0 to 100, null when not assessed), then the rank score, then the newest. A posting whose state is `weak_fit` (it waits on answers, its `fit` is below `fit.weak_fit_below_percent`, 40, AND its rank score is below `fit.weak_fit_below_rank`, 50) is left out unless `state=weak_fit` asks for it; it asks no question (`open_questions` is empty) and `counts.weak_fit` is how many the other filters select, listed or not. THIN POSTING (0.1.11.2): a row says `thin_posting` (true or false). It is true for a match read from fewer than 4 requirement rows (every matrix row, the \"N of M requirements\"): its `score_text` says \"thin posting, not enough requirements to score\" in place of \"Matched\" and \"fit N%\", its `fit` is null and no percentage is shown; with 1 to 3 rows the state, the filters and the counts stay a match's, and the row is LISTED LAST: after every other assessed posting and every posting not assessed yet, ranked or not (a fit read from 2 requirements is never listed above a real match). A match with NO row about the job (an empty matrix, a lone \"No stated requirements\" row, eligibility rows alone) has the state `thin_posting` instead of `matched`: `fit` is null, it is never in `counts.by_state.matched` or `state=matched`, it is listed by `state=thin_posting`, and it comes last of the thin postings. APPLIED LABEL (0.1.11.3): each row of `GET /api/postings` says `application` (`{status, since}`: the job's latest application status, `applied`, `interview_scheduled`, `offer_received`, `rejected` or `withdrawn`, and when it happened; null when none). It is a label read from the application events once per request: it never changes a row's `state`, rank or gate. ALREADY APPLIED (0.1.11.5): a posting with an application (any of those statuses, a rejected or withdrawn one too) is left out like a weak fit: of the rows, of `counts.matched` and `counts.by_state`, and of the postings a filter selects for POST /api/postings/assess, unless `state=applied` asks for it (then every one of them is listed, a weak fit too) or the posting is named (`jobs`). `counts.applied` is how many the other filters select, listed or not. ONE POSTING BY ITS ADDRESS (0.1.11.6): `GET /api/postings?job=<address>` is the exact read of a posting: its row comes back whether it has an application, is a weak fit, was removed by its board or sits past the first 200 rows of the list. A job page opened by its address reads this; never search a page of the list for one posting. SPONSORSHIP AND H-1B (0.1.11.3): each row of `GET /api/postings` says `sponsorship` (`offered`, `not_offered` or `unknown`: what the assessment read from the posting; null when the posting is not assessed) and `h1b` (`{approvals, fiscal_years}`: the COMPANY's H-1B approvals from the bundled company catalog, no network; null when the catalog holds no figure). The page shows them as a label (\"Sponsorship not stated \u00b7 32 H-1B approvals\"); they never filter, sort, hold or rank a posting. RANKED LOW (0.1.11.2): a posting nothing assessed yet whose KNOWN rank score is below `fit.weak_fit_below_rank` (50) is ranked low. It is ORDERED lower, never hidden or collapsed: it is in the rows and in `counts.matched` like any other posting, in rank order, so it comes after the other ranked postings not assessed yet and before the ones not ranked yet. Each row says `ranked_low` (true only for such a posting), `counts.ranked_low` is how many the list holds (a page draws a plain \"Ranked low (N)\" divider above them), and `state=ranked_low` is an optional filter that lists only them. A posting not ranked yet is never ranked low: it is listed after them (`score_text` \"not ranked yet \u00b7 not assessed\"); an assessed posting keeps the rules above whatever its rank. `ranking` is how far the background rank is (`{enabled, in_progress, window_days, stale_resume, by_profile: [{profile_id, ranked, total, stale_resume}]}`; `total` is the ranked postings plus the unranked ones that went up in the last `window_days` days, the only ones the rank lane ranks): while `in_progress` the order is of what is ranked so far. `ranking.stale_resume` is true when a profile's resume (its master) changed after its postings were ranked: a rank score is stored per resume, so those postings read \"not ranked yet\" until they are ranked again (the Jobs page then offers \"Re-rank\": POST /api/postings/rank, `mode: latest`). It is a read: no model is called for it. `counts.matched` is every posting the filters keep, `counts.new` those first seen since the last check (`anchor.since`; the last 7 days before the first check). This call never moves that anchor. `sort=newest_posted` orders the rows by the day the posting went up instead, the newest first (a posting the board gives no date for: by when Scout first saw it); `sort=fit`, the default, is the order above. A row's dates: `published_at` is the day the posting WENT UP (Greenhouse's `first_published`, Lever's `createdAt`, Ashby's `publishedAt`), the one `window=7d|30d`, the profile's \"posted within\" and `sort=newest_posted` judge (null when the board gives none), `published_kind` what the date is (`posted`; `updated`, a last change, only for a board kind that gives nothing else: none today), `updated_at` the board's LAST CHANGE to the posting (null when it gives none; a posting up for two months and edited three days ago is two months old) and `first_seen_at` when Scout first stored the posting, the date `window=new` judges. `assessment_basis` says where a row's assessment came from: `{origin: \"quick_assess\"}`, or for an old run's `{origin: \"run:<run_id>\", run_id, prompt_version, constraints_digest, story_bank_digest, profile_ref, resume, posting_sha256, model_target, model}` (ids and digests). `rank` is the background rank lane: whether it is on (its own switch, `rank.enabled`, not the pipeline's) and today's calls against `rank.max_calls_per_day` (100) and the warning level `rank.warn_calls_per_day` (60), counted once for all profiles. With history=1, `history.rows` lists what old runs assessed (`{job_identity, profile_id, state, thin_posting, met, requirements, open_questions, assessed_at, hidden, basis}`); rows of a run with no profile (`ephemeral`) or of a profile that is not active are hidden: listed only with include_hidden=1 or when `profile_id` names them, and counted in `history.hidden` otherwise. No response mixes: posting text and what a model derived from it only (`postings._labels`: public-untrusted), nothing the user wrote. In every response `company` is the company's NAME (the company index's, e.g. \"Osprey Lane\"); `company_slug` is the board token (\"ospreylabs\": an id, never a name; null for a posting read from a page or pasted text) and `company_name` repeats the name. A row's `minor_gaps` / `minor_gap_text` name the bonus and one-of-a-list requirements its assessment did not meet (they never block a match: \"Matched\" with \"1 minor gap: Helm\", and the question about it stays in `open_questions`); `rows_not_shown` counts requirement rows past the 40 an assessment keeps. While the stored postings are prepared for the first time (once after an upgrade or a new install) this answers 202 with the GET /api/postings/status object and `status` preparing, never a long wait: ask again when GET /api/postings/status says ready.",
+        "description": "The live search: the stored postings every active profile matches. No run, no board request, no model call. What \"Run find jobs\" searched, without a run: read from the stored index through the per-(posting, profile) read model, across every active profile (a deleted or archived profile is never listed). A changed setting (titles, countries, work mode) is seen by the next call. Each posting is listed once, for its best profile (`profile_id`), with every active profile it matches in `profiles`, best first; with one `profile_id` the row is that profile's own. Ordered like GET /api/new: a current assessment, then a stale one, then not assessed; inside a group the verdict, then `fit` (the row's one fit number: the share of requirements met with the must-haves counted twice, 0 to 100, null when not assessed), then the rank score, then the newest. A posting whose state is `weak_fit` (it waits on answers, its `fit` is below `fit.weak_fit_below_percent`, 40, AND its rank score is below `fit.weak_fit_below_rank`, 50) is left out unless `state=weak_fit` asks for it; it asks no question (`open_questions` is empty) and `counts.weak_fit` is how many the other filters select, listed or not. THIN POSTING (0.1.11.2): a row says `thin_posting` (true or false). It is true for a match read from fewer than 4 requirement rows (every matrix row, the \"N of M requirements\"): its `score_text` says \"thin posting, not enough requirements to score\" in place of \"Matched\" and \"fit N%\", its `fit` is null and no percentage is shown; with 1 to 3 rows the state, the filters and the counts stay a match's, and the row is LISTED LAST: after every other assessed posting and every posting not assessed yet, ranked or not (a fit read from 2 requirements is never listed above a real match). A match with NO row about the job (an empty matrix, a lone \"No stated requirements\" row, eligibility rows alone) has the state `thin_posting` instead of `matched`: `fit` is null, it is never in `counts.by_state.matched` or `state=matched`, it is listed by `state=thin_posting`, and it comes last of the thin postings. US ONLY (0.1.11.8): `us_only=1|0` is a switch of the list, by the posting's location; left out, it is on for a US setup (`us_only` in the answer: `on`, `default`, `rule`), and `counts.us_only_left_out` says how many postings it left out. Only a posting clearly outside the US is left out: one Scout cannot place (`Remote` alone, no location) is listed with `location_unclear: true`. It changes no profile setting. COPIES (0.1.11.8): the same company, the same title and the same description posted more than once (only the location differs) is ONE row unless `collapse=0`: `copies`, `locations`, `locations_text` and `members` (`job_identity`, `job_url`, `location`; the canonical job first) on each row. The row is ONE canonical job (its US posting when it has one, else the earliest posted): its state and its address are the row's, and POST /api/postings/assess by a filter takes it alone. A posting with another description, or with none stored, is never merged. `counts.matched` and the page are rows and `counts.postings` is how many postings they stand for. Any copy with an application makes the row applied. APPLIED LABEL (0.1.11.3): each row of `GET /api/postings` says `application` (`{status, since}`: the job's latest application status, `applied`, `interview_scheduled`, `offer_received`, `rejected` or `withdrawn`, and when it happened; null when none). It is a label read from the application events once per request: it never changes a row's `state`, rank or gate. ALREADY APPLIED (0.1.11.5): a posting with an application (any of those statuses, a rejected or withdrawn one too) is left out like a weak fit: of the rows, of `counts.matched` and `counts.by_state`, and of the postings a filter selects for POST /api/postings/assess, unless `state=applied` asks for it (then every one of them is listed, a weak fit too) or the posting is named (`jobs`). `counts.applied` is how many the other filters select, listed or not. ONE POSTING BY ITS ADDRESS (0.1.11.6): `GET /api/postings?job=<address>` is the exact read of a posting: its row comes back whether it has an application, is a weak fit, was removed by its board or sits past the first 200 rows of the list. A job page opened by its address reads this; never search a page of the list for one posting. SPONSORSHIP AND H-1B (0.1.11.3): each row of `GET /api/postings` says `sponsorship` (`offered`, `not_offered` or `unknown`: what the assessment read from the posting; null when the posting is not assessed) and `h1b` (`{approvals, fiscal_years}`: the COMPANY's H-1B approvals from the bundled company catalog, no network; null when the catalog holds no figure). The page shows them as a label (\"Sponsorship not stated \u00b7 32 H-1B approvals\"); they never filter, sort, hold or rank a posting. RANKED LOW (0.1.11.2): a posting nothing assessed yet whose KNOWN rank score is below `fit.weak_fit_below_rank` (50) is ranked low. It is ORDERED lower, never hidden or collapsed: it is in the rows and in `counts.matched` like any other posting, in rank order, so it comes after the other ranked postings not assessed yet and before the ones not ranked yet. Each row says `ranked_low` (true only for such a posting), `counts.ranked_low` is how many the list holds (a page draws a plain \"Ranked low (N)\" divider above them), and `state=ranked_low` is an optional filter that lists only them. A posting not ranked yet is never ranked low: it is listed after them (`score_text` \"not ranked yet \u00b7 not assessed\"); an assessed posting keeps the rules above whatever its rank. `ranking` is how far the background rank is (`{enabled, in_progress, window_days, stale_resume, by_profile: [{profile_id, ranked, total, stale_resume}]}`; `total` is the ranked postings plus the unranked ones that went up in the last `window_days` days, the only ones the rank lane ranks): while `in_progress` the order is of what is ranked so far. `ranking.stale_resume` is true when a profile's resume (its master) changed after its postings were ranked: a rank score is stored per resume, so those postings read \"not ranked yet\" until they are ranked again (the Jobs page then offers \"Re-rank\": POST /api/postings/rank, `mode: latest`). It is a read: no model is called for it. `counts.matched` is every posting the filters keep, `counts.new` those first seen since the last check (`anchor.since`; the last 7 days before the first check). This call never moves that anchor. `sort=newest_posted` orders the rows by the day the posting went up instead, the newest first (a posting the board gives no date for: by when Scout first saw it); `sort=fit`, the default, is the order above. A row's dates: `published_at` is the day the posting WENT UP (Greenhouse's `first_published`, Lever's `createdAt`, Ashby's `publishedAt`), the one `window=7d|30d`, the profile's \"posted within\" and `sort=newest_posted` judge (null when the board gives none), `published_kind` what the date is (`posted`; `updated`, a last change, only for a board kind that gives nothing else: none today), `updated_at` the board's LAST CHANGE to the posting (null when it gives none; a posting up for two months and edited three days ago is two months old) and `first_seen_at` when Scout first stored the posting, the date `window=new` judges. `assessment_basis` says where a row's assessment came from: `{origin: \"quick_assess\"}`, or for an old run's `{origin: \"run:<run_id>\", run_id, prompt_version, constraints_digest, story_bank_digest, profile_ref, resume, posting_sha256, model_target, model}` (ids and digests). `rank` is the background rank lane: whether it is on (its own switch, `rank.enabled`, not the pipeline's) and today's calls against `rank.max_calls_per_day` (100) and the warning level `rank.warn_calls_per_day` (60), counted once for all profiles. With history=1, `history.rows` lists what old runs assessed (`{job_identity, profile_id, state, thin_posting, met, requirements, open_questions, assessed_at, hidden, basis}`); rows of a run with no profile (`ephemeral`) or of a profile that is not active are hidden: listed only with include_hidden=1 or when `profile_id` names them, and counted in `history.hidden` otherwise. No response mixes: posting text and what a model derived from it only (`postings._labels`: public-untrusted), nothing the user wrote. In every response `company` is the company's NAME (the company index's, e.g. \"Osprey Lane\"); `company_slug` is the board token (\"ospreylabs\": an id, never a name; null for a posting read from a page or pasted text) and `company_name` repeats the name. A row's `minor_gaps` / `minor_gap_text` name the bonus and one-of-a-list requirements its assessment did not meet (they never block a match: \"Matched\" with \"1 minor gap: Helm\", and the question about it stays in `open_questions`); `rows_not_shown` counts requirement rows past the 40 an assessment keeps. While the stored postings are prepared for the first time (once after an upgrade or a new install) this answers 202 with the GET /api/postings/status object and `status` preparing, never a long wait: ask again when GET /api/postings/status says ready.",
         "operationId": "get_api_postings",
         "parameters": [
           {
@@ -8151,6 +8151,36 @@
             "description": "1: the postings the board no longer lists, instead of the live ones.",
             "in": "query",
             "name": "removed",
+            "required": false,
+            "schema": {
+              "enum": [
+                "0",
+                "1",
+                "true",
+                "false"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "0.1.11.8: US only, by the posting's LOCATION (never its board). 1: leave out a posting only when every place its location names is clearly outside the US; a posting in the US or remote in the US stays, and one Scout cannot place (`Remote` alone, no location, an unknown place) ALSO stays, with `location_unclear: true` on its row. 0: off. Left out: the setup's default (on when the shared settings' countries hold the US, else off); `us_only.default` says which. `counts.us_only_left_out` is how many postings it left out. Not applied with `job`.",
+            "in": "query",
+            "name": "us_only",
+            "required": false,
+            "schema": {
+              "enum": [
+                "0",
+                "1",
+                "true",
+                "false"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "0.1.11.8: 0 lists every posting. Left out or 1: the same company, the same title and the same description posted more than once (only the location differs) is ONE row (`copies`, `locations`, `locations_text`, `members`), also two cities of one country; a posting with another description, or with none stored, is never merged; the page and the counts are rows. The row is one canonical job: its US posting when it has one, else the earliest posted. Not applied with `job`.",
+            "in": "query",
+            "name": "collapse",
             "required": false,
             "schema": {
               "enum": [
@@ -8237,11 +8267,14 @@
                     },
                     "matched": 1,
                     "new": 1,
+                    "postings": 2,
                     "ranked_low": 0,
                     "shown": 1,
+                    "us_only_left_out": 3,
                     "weak_fit": 0
                   },
                   "filters": {
+                    "collapse": true,
                     "limit": 50,
                     "offset": 0,
                     "profile_ids": [],
@@ -8249,6 +8282,7 @@
                     "removed": false,
                     "sort": "fit",
                     "states": [],
+                    "us_only": true,
                     "window": null
                   },
                   "history": null,
@@ -8259,6 +8293,9 @@
                       "/rows/*/company_slug": "public-untrusted",
                       "/rows/*/description": "public-untrusted",
                       "/rows/*/location": "public-untrusted",
+                      "/rows/*/locations/*": "public-untrusted",
+                      "/rows/*/locations_text": "public-untrusted",
+                      "/rows/*/members/*/location": "public-untrusted",
                       "/rows/*/minor_gap_text": "public-untrusted",
                       "/rows/*/minor_gaps/*": "public-untrusted",
                       "/rows/*/open_questions/*/question": "public-untrusted",
@@ -8276,6 +8313,7 @@
                         "company": "Acme",
                         "company_name": "Acme",
                         "company_slug": "acme",
+                        "copies": 2,
                         "description": "Acme is hiring a Staff Engineer to own its Python services\u2026",
                         "first_seen": "2026-10-02T08:00:00.000000Z",
                         "first_seen_at": "2026-10-02T08:00:00.000000Z",
@@ -8291,6 +8329,24 @@
                         "job_url": "https://boards.greenhouse.io/acme/jobs/101",
                         "label": null,
                         "location": "Remote - US",
+                        "location_unclear": false,
+                        "locations": [
+                          "Remote - United States",
+                          "Austin, TX"
+                        ],
+                        "locations_text": "Remote - United States; Austin, TX",
+                        "members": [
+                          {
+                            "job_identity": "https://boards.greenhouse.io/acme/jobs/101",
+                            "job_url": "https://boards.greenhouse.io/acme/jobs/101",
+                            "location": "Remote - United States"
+                          },
+                          {
+                            "job_identity": "https://boards.greenhouse.io/acme/jobs/101-2",
+                            "job_url": "https://boards.greenhouse.io/acme/jobs/101-2",
+                            "location": "Austin, TX"
+                          }
+                        ],
                         "minor_gap_text": null,
                         "minor_gaps": [],
                         "needs_tailoring": null,
@@ -8368,7 +8424,12 @@
                     "stale_resume": false,
                     "window_days": 7
                   },
-                  "schema_version": "scout-postings:1"
+                  "schema_version": "scout-postings:1",
+                  "us_only": {
+                    "default": true,
+                    "on": true,
+                    "rule": "US only hides a posting only when every place its location names is clearly outside the US. A posting in the US or remote in the US stays; \"Remote\" alone, no location, or a place Scout cannot read also stays and is labelled \"unclear location\"."
+                  }
                 },
                 "schema": {
                   "additionalProperties": true,
@@ -8514,6 +8575,10 @@
                     "description": "Filter: states to keep (as GET /api/postings `state`).",
                     "type": "array"
                   },
+                  "us_only": {
+                    "description": "Filter (0.1.11.8): US only, as GET /api/postings `us_only`. Left out: the setup's default. A filter selects what the list shows: no posting located outside the US while it is on, and ONE posting per job (the row of its copies), so a job posted once per country is one model call. Not applied to `jobs`.",
+                    "type": "boolean"
+                  },
                   "window": {
                     "description": "Filter: new, 7d or 30d (as GET /api/postings).",
                     "enum": [
@@ -8593,6 +8658,9 @@
                       "/rows/*/company_slug": "public-untrusted",
                       "/rows/*/description": "public-untrusted",
                       "/rows/*/location": "public-untrusted",
+                      "/rows/*/locations/*": "public-untrusted",
+                      "/rows/*/locations_text": "public-untrusted",
+                      "/rows/*/members/*/location": "public-untrusted",
                       "/rows/*/minor_gap_text": "public-untrusted",
                       "/rows/*/minor_gaps/*": "public-untrusted",
                       "/rows/*/open_questions/*/question": "public-untrusted",
@@ -8610,6 +8678,7 @@
                         "company": "Acme",
                         "company_name": "Acme",
                         "company_slug": "acme",
+                        "copies": 2,
                         "description": "Acme is hiring a Staff Engineer to own its Python services\u2026",
                         "first_seen": "2026-10-02T08:00:00.000000Z",
                         "first_seen_at": "2026-10-02T08:00:00.000000Z",
@@ -8625,6 +8694,24 @@
                         "job_url": "https://boards.greenhouse.io/acme/jobs/101",
                         "label": null,
                         "location": "Remote - US",
+                        "location_unclear": false,
+                        "locations": [
+                          "Remote - United States",
+                          "Austin, TX"
+                        ],
+                        "locations_text": "Remote - United States; Austin, TX",
+                        "members": [
+                          {
+                            "job_identity": "https://boards.greenhouse.io/acme/jobs/101",
+                            "job_url": "https://boards.greenhouse.io/acme/jobs/101",
+                            "location": "Remote - United States"
+                          },
+                          {
+                            "job_identity": "https://boards.greenhouse.io/acme/jobs/101-2",
+                            "job_url": "https://boards.greenhouse.io/acme/jobs/101-2",
+                            "location": "Austin, TX"
+                          }
+                        ],
                         "minor_gap_text": null,
                         "minor_gaps": [],
                         "needs_tailoring": null,
@@ -12430,7 +12517,7 @@
     },
     "/api/search": {
       "get": {
-        "description": "The free search: every stored posting by typed title, newest first. No profile, no rank, no model call, no write. 0.1.11.7: a search over EVERY stored posting (every company `gigai scout sources update` stored, not only the profiles' lists). It takes NO profile and is not ranked: rows are newest posted first (the day the posting went up, else the day Scout first stored it; then the address). At least one of `title`, `company`, `location` is needed (422 `invalid_value`). The default profile's countries, posted window and work mode apply unless `all=1`; `filters` says what was applied (null with `all=1`), and the work mode is read from the posting's location. Without readable default settings and without `all=1` the answer is 409 `config_unavailable`. PAGE FIRST, COUNT AFTER: without `count=1` the page is answered as soon as it is read and `counts.total`, `total_all` and `hidden` are null (they are given anyway when `source` is scan, which knows them); `counts.more` always says whether a row follows the page. `source` is `index` (the local search index answered) or `scan` (`index.reason` says why it did not: missing, not_built, stale, damaged, other_schema, busy or no_fts5; every company file was read instead: the same rows, slower). A search never builds the index: Update sources does. Each row: `company` (the name; `company_slug` is the board token), `title`, `location`, `posted`, `job_url`, and LABELS read from the stores as they are, by `job_identity`: `profiles` (the profiles whose list holds the posting, with the state that list shows), `assessment` (`{state, profile_id, assessed_at}` or null) and `application` (`{status, since}` or null). `profiles` at the top names them (`label`, `is_default`); `labels_read` false means the stores could not be read and the rows carry no label. No rank and no fit number. `footer` is what a page says under the list. Nothing is written: no anchor moves, nothing is refreshed, no row is stored. No response mixes: posting text only (`postings._labels`: data, never instructions).",
+        "description": "The free search: every stored posting by typed title, newest first. No profile, no rank, no model call, no write. 0.1.11.7: a search over EVERY stored posting (every company `gigai scout sources update` stored, not only the profiles' lists). It takes NO profile and is not ranked: rows are newest posted first (the day the posting went up, else the day Scout first stored it; then the address). At least one of `title`, `company`, `location` is needed (422 `invalid_value`). The default profile's countries, posted window and work mode apply unless `all=1`; `filters` says what was applied (null with `all=1`), and the work mode is read from the posting's location. Without readable default settings and without `all=1` the answer is 409 `config_unavailable`. PAGE FIRST, COUNT AFTER: without `count=1` the page is answered as soon as it is read and `counts.total`, `total_all` and `hidden` are null (they are given anyway when `source` is scan, which knows them); `counts.more` always says whether a row follows the page. `source` is `index` (the local search index answered) or `scan` (`index.reason` says why it did not: missing, not_built, stale, damaged, other_schema, busy or no_fts5; every company file was read instead: the same rows, slower). A search never builds the index: Update sources does. Each row: `company` (the name; `company_slug` is the board token), `title`, `location`, `posted`, `job_url`, and LABELS read from the stores as they are, by `job_identity`: `profiles` (the profiles whose list holds the posting, with the state that list shows), `assessment` (`{state, profile_id, assessed_at}` or null) and `application` (`{status, since}` or null). `profiles` at the top names them (`label`, `is_default`); `labels_read` false means the stores could not be read and the rows carry no label. No rank and no fit number. `footer` is what a page says under the list. US ONLY (0.1.11.8): `us_only` is a switch of its own and EXACTLY ONE country rule decides a request: on, the US alone (whatever the default countries are, with or without `all=1`); off without `all=1`, the default countries; off with `all=1`, any country. `us_only` in the answer says `on`, the setup's `default` and the `rule`; `scope_text` says what the search was limited to and `all_scope_text` what `total_all` counts (`US only, any date` while it is on). A posting US only cannot place is never hidden: its row says `location_unclear: true` (the page labels it `unclear location`). COPIES (0.1.11.8): the same company, title AND description posted more than once, so that only the location differs (typically once per country), is one row unless `collapse=0`. The row is ONE canonical job (its US posting when it has one, else the earliest posted, then the posting id): `job_identity`, `job_url`, `location` and the dates are that posting's, and a row stands where it stands in the order. `copies` is how many postings the row stands for, `locations` and `locations_text` (`Remote: Estonia, Lithuania, Latvia +4`) list where, `members` names each copy, the canonical one first (`job_identity`, `job_url`, `location`, `posted`). The description is compared by the digest the stored index keeps; a posting with another description, or with none stored, is never merged, nor two companies, two titles or a removed copy with a live one. Collapsed before the page and the count: `limit`, `offset`, `counts.total` and `total_all` are rows. A row's labels are its copies' together (any copy with an application: the row has it). Nothing is written: no anchor moves, nothing is refreshed, no row is stored. No response mixes: posting text only (`postings._labels`: data, never instructions).",
         "operationId": "get_api_search",
         "parameters": [
           {
@@ -12461,9 +12548,39 @@
             }
           },
           {
-            "description": "1: any place, any date. Drops the default profile's countries, posted window and work mode.",
+            "description": "1: any date and any work mode. Drops the default profile's countries, posted window and work mode; US only (`us_only`) still applies until it is turned off.",
             "in": "query",
             "name": "all",
+            "required": false,
+            "schema": {
+              "enum": [
+                "0",
+                "1",
+                "true",
+                "false"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "0.1.11.8: US only, by the posting's LOCATION (never its board). 1: leave out a posting only when every place its location names is clearly outside the US; a posting in the US or remote in the US stays, and one Scout cannot place (`Remote` alone, no location, an unknown place) ALSO stays, with `location_unclear: true` on its row. 0: off. Left out: the setup's default (on when the shared settings' countries hold the US, else off); `us_only.default` says which. It still applies with `all=1`; with it off and without `all=1` the default countries apply.",
+            "in": "query",
+            "name": "us_only",
+            "required": false,
+            "schema": {
+              "enum": [
+                "0",
+                "1",
+                "true",
+                "false"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "0.1.11.8: 0 lists every posting. Left out or 1: the same company, the same title and the same description posted more than once (only the location differs) is ONE row (`copies`, `locations`, `locations_text`, `members`), also two cities of one country; a posting with another description, or with none stored, is never merged; the page and the counts are rows. The row is one canonical job: its US posting when it has one, else the earliest posted.",
+            "in": "query",
+            "name": "collapse",
             "required": false,
             "schema": {
               "enum": [
@@ -12529,6 +12646,7 @@
             "content": {
               "application/json": {
                 "example": {
+                  "all_scope_text": "US only, any date",
                   "checked_at": "2026-10-03T09:30:00.000000Z",
                   "counts": {
                     "hidden": 3,
@@ -12549,7 +12667,7 @@
                   },
                   "footer": [
                     "Not ranked. Save as a profile to rank.",
-                    "Show all 4 (any place, any date): --all"
+                    "Show all 4 (US only, any date): --all"
                   ],
                   "index": {
                     "reason": null,
@@ -12563,6 +12681,9 @@
                       "/rows/*/company_name": "public-untrusted",
                       "/rows/*/company_slug": "public-untrusted",
                       "/rows/*/location": "public-untrusted",
+                      "/rows/*/locations/*": "public-untrusted",
+                      "/rows/*/locations_text": "public-untrusted",
+                      "/rows/*/members/*/location": "public-untrusted",
                       "/rows/*/title": "public-untrusted"
                     },
                     "rows": [
@@ -12577,10 +12698,31 @@
                         "company_key": "lever:example-co",
                         "company_name": "Example Co",
                         "company_slug": "example-co",
+                        "copies": 2,
                         "first_seen": "2026-10-02T08:00:00.000000Z",
                         "job_identity": "https://boards.greenhouse.io/acme/jobs/101",
                         "job_url": "https://boards.greenhouse.io/acme/jobs/101",
                         "location": "Remote - United States",
+                        "location_unclear": false,
+                        "locations": [
+                          "Remote - United States",
+                          "Austin, TX"
+                        ],
+                        "locations_text": "Remote - United States; Austin, TX",
+                        "members": [
+                          {
+                            "job_identity": "https://boards.greenhouse.io/acme/jobs/101",
+                            "job_url": "https://boards.greenhouse.io/acme/jobs/101",
+                            "location": "Remote - United States",
+                            "posted": "2026-10-01T12:00:00.000000Z"
+                          },
+                          {
+                            "job_identity": "https://boards.greenhouse.io/acme/jobs/101-2",
+                            "job_url": "https://boards.greenhouse.io/acme/jobs/101-2",
+                            "location": "Austin, TX",
+                            "posted": "2026-09-28T12:00:00.000000Z"
+                          }
+                        ],
                         "posted": "2026-10-01T12:00:00.000000Z",
                         "profiles": [
                           {
@@ -12604,6 +12746,7 @@
                   ],
                   "query": {
                     "all": false,
+                    "collapse": true,
                     "company": [],
                     "count": true,
                     "include_removed": false,
@@ -12612,11 +12755,18 @@
                     "offset": 0,
                     "titles": [
                       "staff ai engineer"
-                    ]
+                    ],
+                    "us_only": true
                   },
                   "ranked": false,
                   "schema_version": "scout-free-search:1",
-                  "source": "index"
+                  "scope_text": "remote, US, last 30 days",
+                  "source": "index",
+                  "us_only": {
+                    "default": true,
+                    "on": true,
+                    "rule": "US only hides a posting only when every place its location names is clearly outside the US. A posting in the US or remote in the US stays; \"Remote\" alone, no location, or a place Scout cannot read also stays and is labelled \"unclear location\"."
+                  }
                 },
                 "schema": {
                   "additionalProperties": true,

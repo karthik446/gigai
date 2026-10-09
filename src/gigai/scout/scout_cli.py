@@ -3063,6 +3063,10 @@ def new_command(
 # --- 0.1.10.7 M4a: `gigai scout jobs list|assess|import-runs` ----------------
 
 
+_US_ONLY_HELP = "US only: leave out a posting only when every place its location names is clearly outside the US. 'Remote' alone, no location or a place Scout cannot read is NOT left out: it is listed with an 'unclear location' label. Default: on when the countries of your setup include the US, off otherwise."
+_COLLAPSE_HELP = "The same company, title and description posted more than once (only the location differs: one per country) is ONE row that lists its locations; the page and the totals count rows. A posting with another description, or with none stored, stays its own row. --no-collapse lists every posting. Default: on."
+
+
 @scout_group.group("jobs")
 def jobs_group() -> None:
     """The stored postings your profiles match: search them, assess the ones you pick. No find-jobs run."""
@@ -3084,6 +3088,8 @@ def _jobs_errors() -> tuple[type[BaseException], ...]:
 @click.option("--removed", "removed", is_flag=True, help="The postings the board no longer lists, instead of the live ones.")
 @click.option("--history", "history", is_flag=True, help="Also what old find-jobs runs assessed, with each run's provenance.")
 @click.option("--include-hidden", "include_hidden", is_flag=True, help="With --history: also the hidden rows (a run with no profile, a profile that is not active).")
+@click.option("--us-only/--no-us-only", "us_only", default=None, help=_US_ONLY_HELP)
+@click.option("--collapse/--no-collapse", "collapse", default=None, help=_COLLAPSE_HELP)
 @click.option("--limit", "limit", type=click.IntRange(min=1, max=200), default=50, show_default=True)
 @click.option("--offset", "offset", type=click.IntRange(min=0), default=0)
 @click.option("--home", "home_value", type=click.Path(path_type=Path, file_okay=False))
@@ -3091,7 +3097,8 @@ def _jobs_errors() -> tuple[type[BaseException], ...]:
 @click.option("--json", "as_json", is_flag=True)
 def jobs_list_command(
     profile_ids: tuple[str, ...], query: str | None, states: tuple[str, ...], window: str | None, removed: bool, history: bool,
-    include_hidden: bool, limit: int, offset: int, home_value: Path | None, target_value: Path | None, as_json: bool,
+    include_hidden: bool, us_only: bool | None, collapse: bool | None, limit: int, offset: int, home_value: Path | None,
+    target_value: Path | None, as_json: bool,
 ) -> None:
     """Search the stored postings across your active profiles. No board is asked, no run is made, no model is called.
 
@@ -3099,6 +3106,12 @@ def jobs_list_command(
     profile it matches. The "new since" anchor of `gigai scout new` does not
     move. A posting you already applied to is left out (a line says how
     many; with --json, counts.applied): --state applied lists them.
+
+    The same company, title and description posted more than once (one per
+    country) is one row that lists its locations: one job, its US posting
+    when it has one, else the earliest posted. --no-collapse lists each.
+    With US only on, a posting clearly located outside the US is left out
+    (a line says how many); one Scout cannot place is listed and labelled.
     """
 
     from .outbound_check import redact_payload
@@ -3109,7 +3122,7 @@ def jobs_list_command(
         target = _pipeline_target(target_value, home_root, as_json=as_json)
         response = search_postings(
             home_root, target, profile_ids=profile_ids or None, query=query, states=states or None, window=window, removed=removed,
-            history=history, include_hidden=include_hidden, limit=limit, offset=offset,
+            history=history, include_hidden=include_hidden, limit=limit, offset=offset, us_only=us_only, collapse=collapse,
         )
     except _jobs_errors() as exc:
         _fail(exc, as_json=as_json, fallback="scout_jobs_failed")
@@ -3122,15 +3135,17 @@ def jobs_list_command(
 @click.argument("titles", required=False)
 @click.option("--company", "company", multiple=True, help="A WHOLE word of the company name (repeatable; case and accents aside): `ai` finds Example AI, not Maintain.")
 @click.option("--location", "location", multiple=True, help="A WHOLE word of the posting's location (repeatable): `remote`, `denver`.")
-@click.option("--all", "show_all", is_flag=True, help="Any place, any date: drop the default profile's countries, posted window and work mode.")
+@click.option("--all", "show_all", is_flag=True, help="Any date and work mode: drop the default profile's countries, posted window and work mode. US only still applies until --no-us-only.")
+@click.option("--us-only/--no-us-only", "us_only", default=None, help=_US_ONLY_HELP + " It still applies with --all; with it off and no --all, your default countries apply.")
+@click.option("--collapse/--no-collapse", "collapse", default=None, help=_COLLAPSE_HELP)
 @click.option("--limit", "limit", type=click.IntRange(min=1, max=200), default=50, show_default=True)
 @click.option("--offset", "offset", type=click.IntRange(min=0), default=0)
 @click.option("--home", "home_value", type=click.Path(path_type=Path, file_okay=False))
 @click.option("--target", "target_value", type=click.Path(path_type=Path, file_okay=False))
 @click.option("--json", "as_json", is_flag=True)
 def jobs_search_command(
-    titles: str | None, company: tuple[str, ...], location: tuple[str, ...], show_all: bool, limit: int, offset: int,
-    home_value: Path | None, target_value: Path | None, as_json: bool,
+    titles: str | None, company: tuple[str, ...], location: tuple[str, ...], show_all: bool, us_only: bool | None, collapse: bool | None,
+    limit: int, offset: int, home_value: Path | None, target_value: Path | None, as_json: bool,
 ) -> None:
     """Search EVERY stored posting by title, newest first. No profile, no rank, no model call; writes nothing.
 
@@ -3140,7 +3155,14 @@ def jobs_search_command(
     location words match WHOLE words, not parts of a word.
 
     The default profile's countries, posted window and work mode apply;
-    --all drops them. The page is printed first, the total after it. Read
+    --all drops them. US only is a switch of its own: one country rule
+    decides a search (US only on: the US alone, also with --all; off: your
+    default countries, or any country with --all). A posting Scout cannot
+    place ("Remote" alone, no location) is never hidden by it: it is listed
+    and labelled. The same company, title and description posted more than
+    once is one row with its locations (one job: its US posting, else the
+    earliest posted), and the total counts rows. The page is printed
+    first, the total after it. Read
     from the local search index `gigai scout sources update` keeps; without
     one, every company file is read (slower, same rows).
     """
@@ -3153,6 +3175,7 @@ def jobs_search_command(
         target = _pipeline_target(target_value, home_root, as_json=as_json)
         request = free_search.SearchRequest.typed(
             titles, company=company, location=location, show_all=show_all, limit=limit, offset=offset, count=as_json,
+            us_only=us_only, collapse=collapse,
         )
         for line in free_search.answer_lines(home_root, request, target=target, as_json=as_json, redact=redact_payload):
             click.echo(line)
@@ -3166,6 +3189,7 @@ def jobs_search_command(
 @click.option("--query", "query", help="Without JOBS: words that must all be in the title, company or location.")
 @click.option("--state", "states", multiple=True, help="Without JOBS: keep this state (repeatable), as `gigai scout jobs list`.")
 @click.option("--window", "window", type=click.Choice(["new", "7d", "30d"]), help="Without JOBS: new, 7d or 30d, as `gigai scout jobs list`.")
+@click.option("--us-only/--no-us-only", "us_only", default=None, help="Without JOBS: as `gigai scout jobs list` (default: on for a US setup).")
 @click.option("--yes", "yes", is_flag=True, help="Approve: assess without asking (one model call per posting).")
 @click.option("--again", "again", is_flag=True, help="Also the postings whose assessment is current.")
 @click.option("--include-low-rank", "include_low_rank", is_flag=True, help="Also the low-ranked postings (rank below fit.assess_min_rank, 50), which are left out by default.")
@@ -3175,14 +3199,18 @@ def jobs_search_command(
 @click.option("--target", "target_value", type=click.Path(path_type=Path, file_okay=False))
 @click.option("--json", "as_json", is_flag=True)
 def jobs_assess_command(
-    jobs: tuple[str, ...], profile_id: str | None, query: str | None, states: tuple[str, ...], window: str | None, yes: bool,
-    again: bool, include_low_rank: bool, actor: str, cancel: bool, home_value: Path | None, target_value: Path | None, as_json: bool,
+    jobs: tuple[str, ...], profile_id: str | None, query: str | None, states: tuple[str, ...], window: str | None,
+    us_only: bool | None, yes: bool, again: bool, include_low_rank: bool, actor: str, cancel: bool, home_value: Path | None, target_value: Path | None, as_json: bool,
 ) -> None:
     """Assess these postings: the ones named (posting URLs), or the ones the filter selects.
 
     Nothing is assessed without approval: without --yes the command says how
     many would be assessed and what it will cost, and asks (in a terminal) or
-    stops there (--json, or no terminal). Each posting is assessed for the
+    stops there (--json, or no terminal). A filter selects what `gigai scout
+    jobs list` shows: one posting per job (a job posted once per country is
+    one model call, for its canonical posting) and, with US only on, no
+    posting clearly located outside the US.
+    Each posting is assessed for the
     profile it fits best, from the posting text already stored (a posting with
     none has its description fetched first, one request for it alone). One
     approval assesses the top 50 by rank and never more.
@@ -3207,7 +3235,7 @@ def jobs_assess_command(
         # 0.1.11.5 (ASSESS-01): the batch is asked through its marker, whichever process runs it.
         from .pipeline import busy
 
-        if jobs or yes or again or include_low_rank or profile_id or query or states or window:
+        if jobs or yes or again or include_low_rank or profile_id or query or states or window or us_only is not None:
             _fail(click.UsageError("--cancel takes no posting, filter or approval option"), as_json=as_json, fallback="invalid_value")
             return
         try:
@@ -3231,7 +3259,7 @@ def jobs_assess_command(
     def call(approve: bool, low_rank: bool = include_low_rank) -> dict[str, object]:
         return assess_these(
             home_root, target, jobs=list(jobs) or None, profile_id=profile_id, query=query, states=states or None, window=window,
-            approve=approve, again=again, decided_by=actor, include_low_rank=low_rank,
+            approve=approve, again=again, decided_by=actor, include_low_rank=low_rank, us_only=us_only,
         )
 
     try:
