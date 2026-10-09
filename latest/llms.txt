@@ -8,7 +8,7 @@
 
 **Anything GigAI gives your agent is sent to that agent's model provider. Agents get no contact data from GigAI, but an agent with shell access can read local files.**
 
-**Run GigAI on your own computer and your own network, not a work laptop or office Wi-Fi.** Scout checks about 10,000 public job boards (Greenhouse, Lever, Ashby): thousands of requests, and it keeps checking 8 times a day. An employer can see that traffic.
+**Run GigAI on your own computer and your own network, not a work laptop or office Wi-Fi.** Scout checks about 15,000 public job boards (Greenhouse, Lever, Ashby and six more hiring systems): about 16,000 requests on the first update, and it keeps checking 8 times a day. An employer can see that traffic.
 
 If a user pastes a resume with contact details straight into the chat, the agent's model provider has them. That is outside GigAI's control.
 
@@ -29,15 +29,15 @@ The setup, in order (the full version of each step is on the Start here page bel
 
 ## Setup
 
-- [Start here](https://karthik446.github.io/gigai/0.1.11.7/scout/agents/start/): the full setup steps for an agent, with every command
-- [Your first 10 minutes](https://karthik446.github.io/gigai/0.1.11.7/scout/first-10-minutes/): the same path for a person
-- [For agents](https://karthik446.github.io/gigai/0.1.11.7/scout/agents/): the daily loop, per-agent setup (Claude Code, Codex, others), the security model
-- [Privacy and security](https://karthik446.github.io/gigai/0.1.11.7/scout/privacy/): what is stored, what is sent, and to whom
-- [Token usage](https://karthik446.github.io/gigai/0.1.11.7/scout/tokens/): measured tokens and time per step
+- [Start here](https://karthik446.github.io/gigai/0.1.11.8/scout/agents/start/): the full setup steps for an agent, with every command
+- [Your first 10 minutes](https://karthik446.github.io/gigai/0.1.11.8/scout/first-10-minutes/): the same path for a person
+- [For agents](https://karthik446.github.io/gigai/0.1.11.8/scout/agents/): the daily loop, per-agent setup (Claude Code, Codex, others), the security model
+- [Privacy and security](https://karthik446.github.io/gigai/0.1.11.8/scout/privacy/): what is stored, what is sent, and to whom
+- [Token usage](https://karthik446.github.io/gigai/0.1.11.8/scout/tokens/): measured tokens and time per step
 
 ## Optional
 
-- [Scout CLI reference](https://karthik446.github.io/gigai/0.1.11.7/scout/reference/cli/): every Scout command, with its options
-- [API reference](https://karthik446.github.io/gigai/0.1.11.7/scout/reference/api/): the local API, also served by a running Scout at `/api/openapi.json`
-- [What Scout's numbers and labels mean](https://karthik446.github.io/gigai/0.1.11.7/scout/numbers/): rank, verdict, Scout label, Scout ATS score
-- [Changelog](https://karthik446.github.io/gigai/0.1.11.7/changelog/): read "After you upgrade" before upgrading
+- [Scout CLI reference](https://karthik446.github.io/gigai/0.1.11.8/scout/reference/cli/): every Scout command, with its options
+- [API reference](https://karthik446.github.io/gigai/0.1.11.8/scout/reference/api/): the local API, also served by a running Scout at `/api/openapi.json`
+- [What Scout's numbers and labels mean](https://karthik446.github.io/gigai/0.1.11.8/scout/numbers/): rank, verdict, Scout label, Scout ATS score
+- [Changelog](https://karthik446.github.io/gigai/0.1.11.8/changelog/): read "After you upgrade" before upgrading
