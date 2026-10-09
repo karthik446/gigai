@@ -98,8 +98,8 @@ Rippling posting’s date and description are fetched at the update for the titl
 Greenhouse descriptions are; a Breezy posting’s description is fetched when it is assessed.</li>
 <li><strong>Requests say who is asking.</strong> Every board request carries a <code dir="auto">User-Agent</code> naming GigAI and the project address.
 Before the first request of the day to a board’s host, Scout reads that host’s <code dir="auto">robots.txt</code> and skips a feed the
-host disallows (<code dir="auto">robots_disallowed</code> in <code dir="auto">gigai scout sources status</code>). A company’s own host (Recruitee, Pinpoint,
-Breezy) and Workable are asked at most once a second.</li>
+host disallows (<code dir="auto">robots_disallowed</code> in <code dir="auto">gigai scout sources status</code>). Workable is asked at most once a second (its host refuses a
+faster reader); set <code dir="auto">GIGAI_SCOUT_ATS_MIN_INTERVAL_SECONDS</code> to choose the pace yourself.</li>
 </ul>
 <div class="sl-heading-wrapper level-h3"><h3 id="01117">0.1.11.7</h3><a class="sl-anchor-link" href="#01117"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “0.1.11.7”</span></a></div>
 <p>Search every stored posting, not only the ones your profiles hold. <strong>After you upgrade</strong> (<code dir="auto">uv tool upgrade gigai</code>),
