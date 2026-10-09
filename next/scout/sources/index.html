@@ -229,8 +229,23 @@ starter snapshot”), or run <code dir="auto">gigai scout snapshot status</code>
 use.</li>
 </ul>
 <div class="sl-heading-wrapper level-h2"><h2 id="where-the-data-comes-from">Where the data comes from</h2><a class="sl-anchor-link" href="#where-the-data-comes-from"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “Where the data comes from”</span></a></div>
-<p>Company and title data comes from the public job boards of each company
-(Greenhouse, Lever, Ashby), read with plain public requests. The starter
+<p>Company and title data comes from the public job boards of each company,
+read with plain public requests. Nine hiring systems are read: Greenhouse,
+Lever, Ashby, Workable, Rippling, Gem, Recruitee, Pinpoint and Breezy. Each
+request names GigAI in its <code dir="auto">User-Agent</code> with the project address, and before
+the first request of the day to a board’s host Scout reads that host’s
+<code dir="auto">robots.txt</code>; a board whose host disallows the feed is skipped and counted
+as <code dir="auto">robots_disallowed</code> in <code dir="auto">gigai scout sources status</code>. A host whose <code dir="auto">robots.txt</code> cannot be read (it
+answers 429 or a server error, or does not answer) is left alone for an hour and counted as <code dir="auto">robots_unknown</code>;
+a <code dir="auto">Crawl-delay</code> in the file is that host’s pace, up to 10 seconds. Workable is asked at most once every two
+seconds (its host refuses a faster reader), whatever pace is set. A system that answers 429 is left alone for
+as long as its <code dir="auto">Retry-After</code> says, up to 10 minutes; when that is longer than the update has left, the rest of
+that system’s boards wait for the next update (<code dir="auto">rate_limited</code>). A Pinpoint board
+carries no posting date, so its postings read as undated. A Rippling board
+lists titles and locations only: the date and description of the postings
+whose titles match your profiles are fetched at the update, one small request
+each, like Greenhouse descriptions. A Breezy board lists titles, locations
+and dates; a posting’s description is fetched when it is assessed. The starter
 snapshot redistributes only the metadata listed above, never an employer’s
 description text. A company that wants its board left out of the snapshot can
 ask by opening an issue on the
