@@ -51,6 +51,7 @@ from gigai.scout.tailored_resume import (
     heading_only,
     heading_only_line,
     is_earlier_heading,
+    job_tailored_resume_path,
     read_tailored_resume,
     replaced_line,
     shown_text,
@@ -811,6 +812,12 @@ def job_layout_path(stored_path: Path | str) -> Path:
     return Path(stored_path).with_suffix(JOB_LAYOUT_SUFFIX)
 
 
+def job_store_layout_path(home_root: Path, target: Path, job_identity: str) -> Path:
+    """0.1.11.9 PJ1: where the JOB's own spacing is kept, ``resumes/job/<sha256(job identity)>.layout`` (no profile)."""
+
+    return job_layout_path(job_tailored_resume_path(home_root, target, job_identity))
+
+
 def stored_job_path(stored: object, home_root: Path, target: Path | None) -> Path | None:
     """Where THIS home's store keeps ``stored``'s resume: the file its spacing sits beside.
 
@@ -935,6 +942,7 @@ __all__ = [
     "save_job_spacing",
     "job_spacing",
     "job_layout_path",
+    "job_store_layout_path",
     "stored_job_path",
     "JOB_LAYOUT_SUFFIX",
     "stored_resume_pdf",

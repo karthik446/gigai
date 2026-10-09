@@ -97,6 +97,7 @@ from .find_jobs.contracts import (
     Verdict,
 )
 from .find_jobs.discovery.storage import atomic_write, project_id
+from .job_store_layout import JOB_FOLDER, job_store_path
 from .find_jobs.job_input import job_fetch_client, resolve_job
 from .find_jobs.job_source import ATS_FETCH_KINDS
 from .find_jobs.job_source import resolve_job_for_assessment
@@ -158,6 +159,12 @@ def resume_key(profile_id: str | None) -> str:
 def quick_assess_path(home_root: Path, target: Path, profile_id: str | None, job_identity: str) -> Path:
     digest = digest_imported_bytes(job_identity.encode("utf-8")).removeprefix("sha256:")
     return quick_assess_dir(home_root, target) / resume_key(profile_id) / f"{digest}.json"
+
+
+def job_quick_assess_path(home_root: Path, target: Path, job_identity: str) -> Path:
+    """0.1.11.9 PJ1: where the JOB's one assessment is kept, ``quick_assess/job/<sha256(job identity)>.json`` (no profile)."""
+
+    return job_store_path(quick_assess_dir(home_root, target), job_identity)
 
 
 #: 0.1.10.7 M2: assessments of a job against the profile's TAILORED resume, beside ``quick_assess/``
@@ -223,7 +230,8 @@ def list_quick_assessments(
         raise QuickAssessError("target_unavailable", "this folder is not bound to a GigAI project") from exc
     if not root.is_dir():
         return ()
-    subdirs = [root / profile_id] if profile_id is not None else sorted(p for p in root.iterdir() if p.is_dir())
+    # 0.1.11.9 PJ1: the per-job folder holds COPIES of what the profile folders hold; a list of every profile's leaves it out.
+    subdirs = [root / profile_id] if profile_id is not None else sorted(p for p in root.iterdir() if p.is_dir() and p.name != JOB_FOLDER)
     items: list[AssessResponse] = []
     for subdir in subdirs:
         if not subdir.is_dir():
@@ -1158,6 +1166,7 @@ __all__ = [
     "ReassessTarget",
     "candidate_location_and_work_mode",
     "find_quick_assessment_by_job_identity",
+    "job_quick_assess_path",
     "list_quick_assessments",
     "quick_assess_dir",
     "quick_assess_path",

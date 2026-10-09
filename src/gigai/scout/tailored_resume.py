@@ -123,6 +123,7 @@ from .find_jobs.contracts import (
 )
 from .find_jobs.discovery.storage import atomic_write, project_id
 from .find_jobs.job_input import job_fetch_client, resolve_job
+from .job_store_layout import JOB_FOLDER, job_store_path
 from .find_jobs.job_source import resolve_job_for_assessment
 from .find_jobs.resume_input import resolve_profile, resolve_resume, resume_for_profile
 from .question_ids import normalize_question_id
@@ -2469,6 +2470,12 @@ def tailored_resume_path(home_root: Path, target: Path, profile_id: str | None, 
     return tailored_resume_dir(home_root, target) / resume_key(profile_id) / f"{digest}.json"
 
 
+def job_tailored_resume_path(home_root: Path, target: Path, job_identity: str) -> Path:
+    """0.1.11.9 PJ1: where the JOB's one resume is kept, ``resumes/job/<sha256(job identity)>.json`` (its ``.md`` and ``.layout`` beside it)."""
+
+    return job_store_path(tailored_resume_dir(home_root, target), job_identity)
+
+
 def _same_file(recorded: str, path: Path) -> bool:
     try:
         return os.path.samefile(recorded, path)
@@ -2515,7 +2522,8 @@ def list_tailored_resumes(
         raise TailorError("target_unavailable", "this folder is not bound to a GigAI project") from exc
     if not root.is_dir():
         return ()
-    subdirs = [root / profile_id] if profile_id is not None else sorted(p for p in root.iterdir() if p.is_dir())
+    # 0.1.11.9 PJ1: the per-job folder holds COPIES of what the profile folders hold; a list of every profile's leaves it out.
+    subdirs = [root / profile_id] if profile_id is not None else sorted(p for p in root.iterdir() if p.is_dir() and p.name != JOB_FOLDER)
     items: list[TailorResponse] = []
     for subdir in subdirs:
         if not subdir.is_dir():
@@ -2969,6 +2977,7 @@ __all__ = [
     "tailor_once",
     "tailor_sources",
     "tailored_resume_dir",
+    "job_tailored_resume_path",
     "tailored_resume_path",
     "tailored_resume_write_lock",
     "text_terms",

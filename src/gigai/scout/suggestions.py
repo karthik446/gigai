@@ -83,6 +83,7 @@ from .find_jobs.assess_contracts import (
 )
 from .find_jobs.contracts import is_row_id
 from .find_jobs.discovery.storage import atomic_write, project_id
+from .job_store_layout import job_store_path
 
 _logger = logging.getLogger("gigai.scout.server")
 
@@ -756,6 +757,12 @@ def suggestions_path(home_root: Path, target: Path, profile_id: str | None, job_
     return suggestions_dir(home_root, target) / resume_key(profile_id) / f"{_job_digest(job_identity)}.json"
 
 
+def job_suggestions_path(home_root: Path, target: Path, job_identity: str) -> Path:
+    """0.1.11.9 PJ1: where the JOB's one record is kept, ``suggestions/job/<sha256(job identity)>.json`` (no profile)."""
+
+    return job_store_path(suggestions_dir(home_root, target), job_identity)
+
+
 def proposed_resume_path(record_path: Path) -> Path:
     """The sibling file that holds a ``proposed`` selection's resume (a ``TailorResponse``), beside the record."""
 
@@ -1201,6 +1208,7 @@ __all__ = [
     "store_assessed",
     "stored_unreadable",
     "suggestions_dir",
+    "job_suggestions_path",
     "suggestions_path",
     "use_proposed",
     "with_selection",

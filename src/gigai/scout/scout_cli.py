@@ -1077,6 +1077,44 @@ def jobs_folder_command(action: str | None, set_value: str | None, reset: bool, 
     _emit(payload, as_json, "\n".join(lines + ([offer] if offer else [])))
 
 
+@scout_group.command("migrate-job-stores")
+@click.option("--apply", "apply", is_flag=True, help="Make the copies. Without it this is a dry run: it prints the counts and writes nothing.")
+@click.option("--target", "target_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--home", "home_value", type=click.Path(path_type=Path, file_okay=False))
+@click.option("--json", "as_json", is_flag=True)
+@_reads_committed
+def migrate_job_stores_command(apply: bool, target_value: Path | None, home_value: Path | None, as_json: bool) -> None:
+    """Give every job ONE assessment, ONE resume and ONE suggestion record (0.1.11.9). A dry run unless --apply.
+
+    Before 0.1.11.9 GigAI kept these once per role, so a job two roles found
+    had two of each. This copies one of them into the job's own place: the
+    role with the application, else the one whose resume you edited (a line
+    of yours, a pin, an exclude or a saved spacing), else the only one with
+    a stored resume, else the newest assessment. It copies and never moves:
+    each role's own folder is left byte for byte as it was, nothing is
+    deleted, and what was not chosen stays readable there.
+
+    Without --apply it prints the counts and writes nothing at all. An
+    applied job with a stored resume under two roles is listed: the
+    application does not say which resume was sent, so both are kept. A
+    second --apply changes nothing. Applications, answers and rank scores
+    are not touched.
+    """
+
+    from . import job_store_migration
+    from .target_resolution import home_scout_target
+
+    home_root = home_value or default_home_root()
+    # Never creates a Scout project: a home without one has nothing to migrate.
+    target = target_value or home_scout_target(home_root)
+    try:
+        report = job_store_migration.migrate(home_root, target, apply=apply)
+    except job_store_migration.JobStoreMigrationError as exc:
+        _fail(exc, as_json=as_json, fallback="invalid_value")
+        return
+    _emit({"ok": True, **report.to_json()}, as_json, "\n".join(report.lines()))
+
+
 def _other_server_label(other: OtherScoutServer) -> str:
     """The folder another project's Scout server serves, the way the operator types it."""
 

@@ -56,6 +56,7 @@ import unicodedata
 
 from ..canonical import digest_imported_bytes
 from .find_jobs.discovery.storage import atomic_write
+from .job_store_layout import JOB_FOLDER, RESUMES, job_digest
 from .resume_pii import detect_contact_details
 from .target_resolution import _display_path
 
@@ -282,6 +283,13 @@ def job_key(home_root: Path, stored_path: str | os.PathLike[str]) -> str:
         return stored.relative_to(Path(home_root) / "scout").as_posix()
     except ValueError:
         return digest_imported_bytes(os.fspath(stored).encode("utf-8"))
+
+
+def job_store_key(project_id: str, job_identity: str) -> str:
+    """0.1.11.9 PJ1: what names a JOB in the index, ``<project>/resumes/job/<sha256(job identity)>``:
+    ``job_key`` of the job's resume in the per-job store (``tailored_resume.job_tailored_resume_path``), no profile in it."""
+
+    return f"{project_id}/{RESUMES}/{JOB_FOLDER}/{job_digest(job_identity)}"
 
 
 def readable_markdown(markdown: str) -> str:
@@ -644,6 +652,7 @@ __all__ = [
     "index_path",
     "job_files",
     "job_key",
+    "job_store_key",
     "master_file",
     "readable_markdown",
     "resumes_folder",
