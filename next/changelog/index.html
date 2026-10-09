@@ -120,6 +120,11 @@ then a search reads every company file and is slower.</li>
 <li><strong>The first <code dir="auto">scout new</code> after the upgrade can list a backlog of the new boards.</strong> Every matching posting on the
 new boards is new to you once, and a Pinpoint posting (no date) reads as posted on the day it was first seen, so it
 stays inside “last 30 days” for 30 days.</li>
+<li><strong>Assess any job Search lists, by its link.</strong> <code dir="auto">gigai scout jobs assess &lt;job URL&gt;</code> now assesses a posting that is
+in no profile’s list (a job <code dir="auto">gigai scout jobs search</code> finds whose title none of your profiles search): it is
+assessed as your default profile, or <code dir="auto">--profile</code>, and the question says so before any model call. The link can be
+the job page’s own address on any of the nine systems. The command exits with code 1 when every link you named
+was not found or could not be assessed.</li>
 </ul>
 <div class="sl-heading-wrapper level-h3"><h3 id="01117">0.1.11.7</h3><a class="sl-anchor-link" href="#01117"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “0.1.11.7”</span></a></div>
 <p>Search every stored posting, not only the ones your profiles hold. <strong>After you upgrade</strong> (<code dir="auto">uv tool upgrade gigai</code>),
