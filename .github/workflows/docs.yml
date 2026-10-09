@@ -46,6 +46,11 @@ env:
 jobs:
   build:
     name: Build docs
+    # ci-spike item 7: a push to a karthik446/gigai-v* branch with an open PR fires both
+    # this workflow's `pull_request` and `push` triggers for the same commit; the `push`
+    # build (which also publishes `next`) runs the same checks, so skip the redundant
+    # pull_request build for that head. A PR from any other branch still gets it.
+    if: "!(github.event_name == 'pull_request' && startsWith(github.head_ref, 'karthik446/gigai-v'))"
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     outputs:
@@ -100,11 +105,44 @@ jobs:
           path: gigai-docs/dist
           retention-days: 7
 
+  # ci-spike item 8: "next" (a version branch push) used to publish on every push, each
+  # one also starting a GitHub Pages deployment run (scheduled workflows only run on the
+  # default branch, so a cron here cannot build a version branch's content; this debounces
+  # the push trigger itself instead). dev (push to main) and a release/backfill publish
+  # are unthrottled: they are already low-volume and a release must never be delayed.
+  throttle-next-publish:
+    name: Next docs were published recently enough to skip
+    needs: build
+    if: github.event_name == 'push' && github.ref_name != 'main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      skip: ${{ steps.check.outputs.skip }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: gh-pages
+      - id: check
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          file="${VERSION}/last-publish.txt"
+          if [ -f "${file}" ] && [ "$(( $(date -u +%s) - $(cat "${file}") ))" -lt 43200 ]; then
+            echo "skip=true" >> "${GITHUB_OUTPUT}"
+          else
+            echo "skip=false" >> "${GITHUB_OUTPUT}"
+          fi
+
   publish:
     name: Publish ${{ needs.build.outputs.version }} to gh-pages
-    needs: build
+    needs: [build, throttle-next-publish]
     # Off until the operator creates gh-pages and sets DOCS_PUBLISH=true (see the header).
-    if: github.event_name != 'pull_request' && vars.DOCS_PUBLISH == 'true'
+    # ci-spike item 8: a version-branch push republishes "next" only after 12 hours since
+    # the last publish of that version. throttle-next-publish is itself skipped (not
+    # failed) for every other trigger (push to main, release, backfill), so this needs
+    # always() plus an explicit build-succeeded check instead of the default needs-all-
+    # green behaviour, or this job would be skipped for every one of those triggers too.
+    if: always() && needs.build.result == 'success' && github.event_name != 'pull_request' && vars.DOCS_PUBLISH == 'true' && needs.throttle-next-publish.outputs.skip != 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
@@ -139,6 +177,11 @@ jobs:
           if [ -n "${ALIAS}" ]; then args+=(--alias "${ALIAS}"); fi
           node src/gigai-docs/scripts/publish-version.mjs "${args[@]}"
           node src/gigai-docs/scripts/check-links.mjs site --base "${PAGES_PATH}/"
+      - name: "Record this publish's time (ci-spike item 8, read by throttle-next-publish)"
+        if: github.event_name == 'push' && github.ref_name != 'main'
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+        run: date -u +%s > "site/${VERSION}/last-publish.txt"
       - name: Push gh-pages
         working-directory: site
         env:

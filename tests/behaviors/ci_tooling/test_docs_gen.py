@@ -121,7 +121,7 @@ def test_docs_workflow_deploys_nothing_until_the_operator_enables_it() -> None:
     text = _need(".github/workflows/docs.yml").read_text()
     publish = text[text.index("\n  publish:") :]
     # the only job that can push is gated on the repo variable and never runs for a PR
-    assert "if: github.event_name != 'pull_request' && vars.DOCS_PUBLISH == 'true'" in publish
+    assert "github.event_name != 'pull_request' && vars.DOCS_PUBLISH == 'true'" in publish
     assert text.count("contents: write") == 1 and text.index("contents: write") > text.index("\n  publish:")
     assert "permissions:\n  contents: read" in text.split("\njobs:")[0]
     assert "secrets." not in text

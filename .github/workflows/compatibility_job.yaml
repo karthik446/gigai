@@ -12,7 +12,41 @@ permissions:
   contents: read
 
 jobs:
+  # ci-spike item 1: the cron fires daily regardless of activity, but a release already
+  # starts a sweep on its tag (release.yml, post-release-compatibility), and main only
+  # moves at a release. 22 of 25 nightlies in a 30-day sample re-swept a commit an
+  # earlier sweep had already covered. Skip the cron (not workflow_dispatch) when HEAD
+  # of main is the same commit the last successful sweep covered.
+  check-main-moved:
+    if: github.event_name == 'schedule'
+    name: Check main moved since the last successful sweep
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      moved: ${{ steps.check.outputs.moved }}
+    steps:
+      - id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          HEAD_SHA: ${{ github.sha }}
+        run: |
+          last_sha="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/compatibility_job.yaml/runs?status=success&branch=main&per_page=1" \
+            --jq '.workflow_runs[0].head_sha // ""')"
+          if [ "${last_sha}" = "${HEAD_SHA}" ]; then
+            echo "main is still ${HEAD_SHA}, already swept by a previous run; skipping"
+            echo "moved=false" >> "${GITHUB_OUTPUT}"
+          else
+            echo "main moved (${last_sha:-none} -> ${HEAD_SHA})"
+            echo "moved=true" >> "${GITHUB_OUTPUT}"
+          fi
+
   compatibility:
+    needs: [check-main-moved]
+    if: always() && needs.check-main-moved.result != 'failure' && (github.event_name != 'schedule' || needs.check-main-moved.outputs.moved == 'true')
     name: Full compatibility matrix
     permissions:
       contents: read

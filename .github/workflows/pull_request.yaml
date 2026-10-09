@@ -52,7 +52,11 @@ env:
 
 concurrency:
   group: gigai-pr-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  # ci-spike item 4: a re-dispatched release pre-check (profile `release`) on the same
+  # branch cancels the stale one instead of queuing beside it. `full` sweeps are never
+  # cancelled this way: a release tag and its branch are different refs, so they are
+  # already different concurrency groups.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && inputs.profile == 'release') }}
 
 jobs:
   changes:
@@ -115,6 +119,10 @@ jobs:
       - id: matrix
         env:
           PROFILE: ${{ inputs.profile || 'pr' }}
+          # ci-spike item 2: macOS source shards run at release (the sweep's trigger ref
+          # is the release tag) or on the weekly day; the macOS smoke job (not this
+          # matrix) still runs every sweep regardless.
+          REF: ${{ github.ref }}
           # ci-shard-suite: every OS x Python entry below runs as this many
           # source-tests jobs. The only place the number is written: each
           # job's name and GIGAI_TEST_SHARDS read it back from the matrix.
@@ -126,11 +134,14 @@ jobs:
               # here because the PR no longer runs the shards. (The cases pr and release do not
               # exist: the job above does not run for them.)
               # ci-spike: the post-release sweep. ubuntu/3.11 is not repeated
-              # (the gate ran it). macOS runs one Python (3.13, the newest; the
-              # gate's smoke uses 3.12): GitHub allows 5 concurrent macOS jobs,
-              # so 4 shards fit in one wave. Add {"os":"macos-latest","python":"3.11"}
-              # here for an on-demand floor check (a second wave, ~+20 min).
-              entries='[{"os":"ubuntu-24.04","python":"3.11"},{"os":"ubuntu-24.04","python":"3.12"},{"os":"ubuntu-24.04","python":"3.13"},{"os":"macos-latest","python":"3.13"}]'
+              # (the gate ran it). GitHub allows 5 concurrent macOS jobs, so 4 shards of
+              # one Python (3.13, the newest; the gate's smoke uses 3.12) fit in one wave.
+              entries='[{"os":"ubuntu-24.04","python":"3.11"},{"os":"ubuntu-24.04","python":"3.12"},{"os":"ubuntu-24.04","python":"3.13"}]'
+              # ci-spike item 2: weekly day is Sunday (UTC); a release sweep runs on the
+              # tag ref and always gets the macOS shards too.
+              if [ "$(date -u +%u)" = 7 ] || [[ "${REF}" == refs/tags/* ]]; then
+                entries="$(python3 -c 'import json,sys; e=json.loads(sys.argv[1]); e.append({"os":"macos-latest","python":"3.13"}); print(json.dumps(e))' "${entries}")"
+              fi
               ;;
             *)
               echo "unknown profile: ${PROFILE}" >&2
@@ -199,6 +210,9 @@ jobs:
       GIGAI_TEST_LATENCY_SCALE: ${{ contains(matrix.os, 'macos') && '7' || '3' }}
     strategy:
       fail-fast: false
+      # ci-spike item 4: caps the sweep's slot usage so a release or PR run started
+      # during it always finds a free slot (Free plan: 20 concurrent, 5 macOS).
+      max-parallel: 8
       matrix:
         include: ${{ fromJSON(needs.source-matrix.outputs.include) }}
     steps:
@@ -465,7 +479,9 @@ jobs:
 
   debian-offline:
     needs: changes
-    if: needs.changes.outputs.code_changed == 'true' && (inputs.profile || 'pr') == 'full'
+    # ci-spike item 5: the offline container only at release (the sweep's trigger ref is
+    # the release tag, refs/tags/v*); the nightly cron sweep runs on main and skips it.
+    if: needs.changes.outputs.code_changed == 'true' && (inputs.profile || 'pr') == 'full' && startsWith(github.ref, 'refs/tags/')
     name: Debian 12 offline container (shard ${{ matrix.shard }}/4)
     runs-on: ubuntu-24.04
     # measured 2026-09-29 (run 36614963298): the whole suite in one container
@@ -474,6 +490,8 @@ jobs:
     continue-on-error: true
     strategy:
       fail-fast: false
+      # ci-spike item 4: see source-tests above; debian-offline shares the same 20-slot cap.
+      max-parallel: 2
       matrix:
         shard: [1, 2, 3, 4]
     steps:
@@ -487,8 +505,12 @@ jobs:
           file: containers/debian-offline/Dockerfile
           tags: gigai-debian-offline:${{ github.sha }}
           load: true
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          # ci-spike item 9: mode=max cached every intermediate layer per ref, which filled
+          # the account's 10 GB cache cap (8.64 GB of it, 618 entries) and evicted uv and
+          # Playwright cache entries. mode=min caches only the final layers; scope keys it
+          # so this job's cache never collides with another workflow's gha cache entries.
+          cache-from: type=gha,scope=debian-offline
+          cache-to: type=gha,mode=min,scope=debian-offline
       - run: >-
           docker run --rm
           --network none
