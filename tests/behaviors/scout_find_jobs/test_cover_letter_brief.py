@@ -19,6 +19,7 @@ The END outcome is the one reply an agent gets, through the real CLI, on the syn
 
 from __future__ import annotations
 
+import gc
 import hashlib
 import json
 import os
@@ -29,7 +30,9 @@ from click.testing import CliRunner
 
 from gigai.scout import cover_letter, cover_letter_brief, job_brief, jobs_folder, pdf_header_file
 from gigai.scout.data_labels import PUBLIC_UNTRUSTED, USER_PRIVATE, mixes_private_with_untrusted
+from gigai.scout.find_jobs import job_source
 from gigai.scout.master_resume import parse_master
+from gigai.scout.pipeline.store import pipeline_path
 from gigai.scout.scout_cli import scout_group
 from gigai.scout.untrusted_text import FENCE_CLOSE, FENCE_OPEN, MARKER_REMOVED
 
@@ -67,32 +70,12 @@ def _snapshot(fx: PostingsFixture) -> dict[str, str]:
     return found
 
 
-def _settle_pipeline_wal(fx: PostingsFixture) -> None:
-    """Fold the model-call metrics' pending WAL into ``pipeline.sqlite`` (``call_metrics.record_call``, run by
-    ``_assess`` above) before a test takes its first byte-exact snapshot: SQLite's own deferred checkpoint, not a
-    write the brief makes, otherwise lands at a moment the byte-exact snapshot cannot predict (flaky under xdist)."""
-
-    import sqlite3
-
-    from gigai.scout.pipeline.store import pipeline_path
-
-    path = pipeline_path(fx.home_root, fx.target)
-    if not path.is_file():
-        return
-    connection = sqlite3.connect(os.fspath(path), timeout=30.0, isolation_level=None)
-    try:
-        connection.execute("PRAGMA wal_checkpoint(TRUNCATE)")
-    finally:
-        connection.close()
-
-
 @pytest.fixture
 def assessed(fx: PostingsFixture, monkeypatch: pytest.MonkeyPatch) -> PostingsFixture:
     """The job assessed with a prompt that shows the master's ids, so each met row names the master lines it relied on."""
 
     _patch_v9_template(monkeypatch)
     _assess(fx, _v9_answer(fx))
-    _settle_pipeline_wal(fx)
     return fx
 
 
@@ -180,6 +163,28 @@ def test_it_calls_no_model_writes_nothing_and_leaves_the_master_as_it_is(assesse
     assert _snapshot(assessed) == before, "the brief wrote something"
     assert len(assessed.base.model.assess_prompts) == calls and not assessed.base.model.tailor_prompts, "the brief called a model"
     assert _master(assessed).revision.revision == revision
+
+
+def test_reading_the_job_for_an_assessment_leaves_no_database_connection_open(fx: PostingsFixture) -> None:
+    """0.1.11.9 FX2: ``job_source.index_posting`` (the first read of an assess by URL) closes the store it opens.
+
+    An open connection shows as ``pipeline.sqlite-wal`` and ``-shm`` beside the file, and the last close removes them.
+    A connection nobody closes is in a cycle with its own statement cache, so it stays open until the garbage collector
+    finds it: in a long process that is late, and the snapshot of the test above moved with it. The collector is off
+    here, so only a close can remove the two files.
+    """
+
+    sidecars = [pipeline_path(fx.home_root, fx.target).with_name("pipeline.sqlite" + suffix) for suffix in ("-wal", "-shm")]
+    assert not any(path.exists() for path in sidecars), "the fixture left a connection open"
+    gc.collect()
+    gc.disable()
+    try:
+        found = job_source.index_posting(fx.home_root, fx.target, _JOB)
+        left = [path.name for path in sidecars if path.exists()]
+    finally:
+        gc.enable()
+    assert found is not None and found.fetch_kind == "ats_board" and _POSTING in found.text
+    assert left == [], "index_posting left its pipeline.sqlite connection open"
 
 
 def test_the_brief_holds_no_value_of_the_header_file_and_never_opens_it(assessed: PostingsFixture, monkeypatch: pytest.MonkeyPatch) -> None:

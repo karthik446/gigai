@@ -232,8 +232,9 @@ def test_the_us_only_box_of_the_jobs_list(out: dict) -> None:
     assert label["label"] == "unclear location" == out["constants"]["unclear"] == job_copies.UNCLEAR_LABEL and label["kind"] == "place"
     assert off is None and placed is None and none is None
     # A filter's "Assess these" selects what the list shows: it carries the box when it was touched.
+    # 0.1.11.9: ticked rows are named by their address alone (the ask names JOBS, never a (job, role) pair).
     assert out["ask"] == [
-        {"profile_id": anywhere}, {"profile_id": anywhere, "us_only": False}, {"jobs": [job_url(SLUG, 7)], "profile_id": anywhere},
+        {"profile_id": anywhere}, {"profile_id": anywhere, "us_only": False}, {"jobs": [job_url(SLUG, 7)]},
         {"states": ["not_assessed"], "profile_id": anywhere, "us_only": False}, {"states": ["not_assessed"], "profile_id": anywhere},
     ]
 

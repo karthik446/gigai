@@ -167,7 +167,11 @@ def index_posting(
     try:
         if not pipeline_path(home_root, target).is_file():
             return None  # no posting store yet: nothing is created for a read
-        rows = postings.open_store(home_root, target).postings(jobs={job_identity}, live=False)
+        store = postings.open_store(home_root, target)
+        try:
+            rows = store.postings(jobs={job_identity}, live=False)
+        finally:
+            store.close()  # not left to the garbage collector: an open connection keeps the -wal and -shm files
         text = postings.posting_texts(home_root, rows[:1]).get(job_identity) if rows else None
     except (PipelineStoreError, FindJobsContractError, WorkpadError, sqlite3.Error, OSError, ValueError):
         return None

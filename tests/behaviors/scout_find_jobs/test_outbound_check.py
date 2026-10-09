@@ -358,9 +358,14 @@ def test_the_timing_check_would_catch_a_quadratic_pattern() -> None:
     naive = re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+")
 
     def seconds(text: str) -> float:
-        started = time.perf_counter()
-        naive.search(text)
-        return time.perf_counter() - started
+        # The best of five, in this process's own CPU time: one wall-clock reading of 14 ms is mostly the other
+        # workers of a full run (0.1.11.9 FX2: 26 ms and 72 ms were read there, 2.7x, for a pattern that is 4x).
+        best = float("inf")
+        for _ in range(5):
+            started = time.process_time()
+            naive.search(text)
+            best = min(best, time.process_time() - started)
+        return best
 
     t_short, t_long = seconds("a" * 3_000), seconds("a" * 6_000)
     assert t_long > 3.0 * t_short + 0.0, (t_short, t_long)
