@@ -198,8 +198,9 @@ Lever, Ashby, Workable, Rippling, Gem, Recruitee, Pinpoint and Breezy. Each
 request names GigAI in its `User-Agent` with the project address, and before
 the first request of the day to a board's host Scout reads that host's
 `robots.txt`; a board whose host disallows the feed is skipped and counted
-as `robots_disallowed` in `gigai scout sources status`. A host whose `robots.txt` cannot be read (it
-answers 429 or a server error, or does not answer) is left alone for an hour and counted as `robots_unknown`;
+as `robots_disallowed` (`gigai scout sources status` prints one line per system with boards left, and `--json` the counts). A host whose `robots.txt` cannot be read (it
+answers 429 or a server error, or does not answer) is left alone for an hour and counted as `robots_unknown`; when
+that host is a system's only one (Workable), the rest of its boards wait for the next update at once;
 a `Crawl-delay` in the file is that host's pace, up to 10 seconds. Workable is asked at most once every two
 seconds (its host refuses a faster reader), whatever pace is set. A system that answers 429 is left alone for
 as long as its `Retry-After` says, up to 10 minutes; when that is longer than the update has left, the rest of

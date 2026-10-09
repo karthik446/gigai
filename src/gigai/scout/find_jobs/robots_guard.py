@@ -21,7 +21,10 @@ What a host's answer means:
   site; one that leaves the site, or a longer chain, is a host with no rules;
 * ``404`` / ``410`` / ``401`` / ``403`` and any other ``4xx``: no rules, everything is allowed;
 * ``429``, ``5xx``, a timeout or no answer: NOT KNOWN. Nothing on that host is asked for
-  :data:`UNKNOWN_TTL_SECONDS`, then the file is asked for again (``robots_unknown``).
+  :data:`UNKNOWN_TTL_SECONDS`, then the file is asked for again (``robots_unknown``); a ``429`` that names a
+  ``Retry-After`` is asked again when that has passed (at least :data:`MIN_RETRY_AFTER_SECONDS`, at most the hour).
+  The refusal carries ``host`` and ``retry_in`` (seconds until the file is asked again, only when the host named
+  one), which the sources update reads to wait it out or to leave the host's boards for the next update.
 
 A host answers once per :data:`TTL_SECONDS` per process (one lock per host, so four
 workers make one request), and the answer is kept on disk under the board cache
@@ -61,6 +64,8 @@ if TYPE_CHECKING:  # pragma: no cover - imported only by static type checkers
 TTL_SECONDS = 24 * 3600
 #: How long a host whose robots.txt could not be read (429, 5xx, a timeout) is left alone before it is asked again.
 UNKNOWN_TTL_SECONDS = 3600
+#: A ``429`` on robots.txt with a shorter ``Retry-After`` than this is asked again after this (never a request per board).
+MIN_RETRY_AFTER_SECONDS = 5.0
 #: The agent token the rules are read for; a file without a group for it is read for ``*``.
 AGENT_TOKEN = PRODUCT_TOKEN
 #: At most this much of a robots body is read; the rest is ignored (RFC 9309 asks for at least 500 KiB).
@@ -158,6 +163,8 @@ class HostRules:
     body: str | None
     #: ``rules`` (a body), ``none`` (the host has no robots.txt: everything is allowed) or ``unknown`` (it could not be read: nothing is).
     state: str = STATE_RULES
+    #: ``unknown`` only: the ``Retry-After`` (seconds) of the ``429`` that left the file unread; ``None`` when none was named.
+    retry_after: float | None = None
 
     @cached_property
     def group(self) -> _Group | None:
@@ -259,7 +266,10 @@ class RobotsGuard:
         if counted is not None and requests:
             counted(requests)
         if state == STATE_UNKNOWN:
-            raise ATSBoardClientError(ROBOTS_UNKNOWN, f"{provider} board {board_token!r}: the host's robots.txt could not be read; it is asked again within the hour")
+            error = ATSBoardClientError(ROBOTS_UNKNOWN, f"{provider} board {board_token!r}: the host's robots.txt could not be read; it is asked again within the hour")
+            error.host = _host_of(url)  # type: ignore[attr-defined]
+            error.retry_in = self.retry_in(url)  # type: ignore[attr-defined]
+            raise error
         if state == ROBOTS_DISALLOWED:
             raise ATSBoardClientError(ROBOTS_DISALLOWED, f"{provider} board {board_token!r}: the host's robots.txt disallows the request")
 
@@ -310,6 +320,15 @@ class RobotsGuard:
                 return
             self._sleep(min(left, _PACE_POLL_SECONDS))
 
+    def retry_in(self, url: str) -> float | None:
+        """Seconds until ``url``'s host is asked for its robots.txt again, when its ``429`` named a ``Retry-After``; else ``None``."""
+
+        with self._lock:
+            rules = self._rules.get(_host_of(url))
+        if rules is None or rules.state != STATE_UNKNOWN or rules.retry_after is None:
+            return None
+        return max(0.0, self._ttl(rules) - (time.time() - rules.fetched_at))
+
     def crawl_delay(self, url: str) -> float | None:
         """The ``Crawl-delay`` held for ``url``'s host, or ``None`` (no request is made to find out)."""
 
@@ -327,7 +346,11 @@ class RobotsGuard:
             return lock
 
     def _ttl(self, rules: HostRules) -> float:
-        return self.unknown_ttl_seconds if rules.state == STATE_UNKNOWN else self.ttl_seconds
+        if rules.state != STATE_UNKNOWN:
+            return self.ttl_seconds
+        if rules.retry_after is not None:
+            return min(self.unknown_ttl_seconds, max(rules.retry_after, MIN_RETRY_AFTER_SECONDS))
+        return self.unknown_ttl_seconds
 
     def _fresh(self, host: str) -> HostRules | None:
         now = time.time()
@@ -369,7 +392,12 @@ class RobotsGuard:
                     body = bytes(response.content)[:MAX_BODY_BYTES].decode("utf-8-sig", errors="replace")
                     return HostRules(host, now, body, STATE_RULES), requests
                 if status == 429 or status >= 500:
-                    return HostRules(host, now, None, STATE_UNKNOWN), requests
+                    asked = None
+                    if status == 429:
+                        from .market_acquisition import parse_retry_after
+
+                        asked = parse_retry_after(response.headers.get("retry-after"))
+                    return HostRules(host, now, None, STATE_UNKNOWN, asked), requests
                 return HostRules(host, now, None, STATE_NONE), requests
             return HostRules(host, now, None, STATE_NONE), requests  # a longer chain than we follow: no rules
         finally:
@@ -403,7 +431,10 @@ class RobotsGuard:
         state = payload.get("state", STATE_RULES if body is not None else STATE_NONE)
         if state not in _STATES or (state == STATE_RULES) != (body is not None):
             return None
-        return HostRules(host, float(fetched_at), body, state)
+        asked = payload.get("retry_after")
+        if state != STATE_UNKNOWN or not isinstance(asked, (int, float)) or isinstance(asked, bool):
+            asked = None
+        return HostRules(host, float(fetched_at), body, state, float(asked) if asked is not None else None)
 
     def _store(self, rules: HostRules) -> None:
         path = self._path(rules.host)
@@ -412,7 +443,7 @@ class RobotsGuard:
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
             temp = path.with_suffix(f".json.tmp{threading.get_ident()}")
-            temp.write_text(json.dumps({"host": rules.host, "fetched_at": rules.fetched_at, "body": rules.body, "state": rules.state}), "utf-8")
+            temp.write_text(json.dumps({"host": rules.host, "fetched_at": rules.fetched_at, "body": rules.body, "state": rules.state, "retry_after": rules.retry_after}), "utf-8")
             os.replace(temp, path)
         except OSError:
             return
@@ -528,6 +559,7 @@ __all__ = [
     "MAX_BODY_BYTES",
     "MAX_CRAWL_DELAY_SECONDS",
     "MAX_REDIRECTS",
+    "MIN_RETRY_AFTER_SECONDS",
     "ROBOTS_DISALLOWED",
     "ROBOTS_ENV",
     "ROBOTS_UNKNOWN",

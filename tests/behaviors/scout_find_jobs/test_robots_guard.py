@@ -279,7 +279,11 @@ def test_an_unreadable_robots_file_fails_the_board_with_its_own_code_in_the_upda
         boards, cache=board_cache_for_home(tmp_path), index=CompanyIndex.for_home(tmp_path), client=client,
         limits=_limits(concurrency=1), ats=ATSBoardClients(robots=RobotsGuard()),
     ).snapshot
-    assert result["failures"]["codes"] == {robots_guard.ROBOTS_UNKNOWN: 2}
+    # Lever's boards share one host: the first board meets the unreadable file, the second is left at once for the next
+    # update (``robots_unknown``, skipped, not failed). Recruitee's tenants have their own host and fail one by one.
+    assert result["failures"]["codes"] == {robots_guard.ROBOTS_UNKNOWN: 1}
+    assert result["boards"]["skipped"] == 1
+    assert result["backoff"] == {"lever": {"pauses": 0, "paused_seconds": 0.0, "skipped": 1, "code": "robots_unknown"}}
     assert [url for url in calls if "api.lever.co" in url] == ["https://api.lever.co/robots.txt"]  # no Lever list was asked
     assert "https://initech.recruitee.com/api/offers/" in calls
 

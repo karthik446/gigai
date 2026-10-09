@@ -105,6 +105,11 @@ CANCELLED_CODE = "cancelled"
 # left (``Retry-After``, or the doubling pause). Reported like a budget skip: status ``skipped``, this code; the
 # board keeps its old stamp and leads the next pass.
 RATE_LIMITED_CODE = "rate_limited"
+# 0.1.11.8: the same skip, for a provider whose shared host's robots.txt cannot be read (``robots_guard``): waiting
+# five minutes does not fix that, so its boards are left at once for the next update.
+ROBOTS_UNKNOWN_SKIP_CODE = "robots_unknown"
+#: The codes of a board left unasked because its provider is held (reported per provider).
+HELD_CODES = (RATE_LIMITED_CODE, ROBOTS_UNKNOWN_SKIP_CODE)
 #: The longest a ``Retry-After`` is honoured for; a host asking for more is left alone this long.
 RETRY_AFTER_MAX_SECONDS = 600.0
 # How long a paced wait sleeps before it looks at the stop event again.
@@ -219,7 +224,14 @@ class _PassCancelled(Exception):
 
 
 class _ProviderRateLimited(Exception):
-    """The board's provider asked to be left alone for longer than this pass has left: the board is not asked."""
+    """The board's provider (or its host) is known to refuse for longer than this pass has left: the board is not asked.
+
+    ``code`` is why: ``rate_limited`` (a ``429`` and its pause), or ``robots_unknown`` (the host's robots.txt cannot be read).
+    """
+
+    def __init__(self, code: str = "rate_limited") -> None:
+        super().__init__(code)
+        self.code = code
 
 
 def provider_interval(provider: str, interval: float, environ: Mapping[str, str] | None = None) -> float:
@@ -589,9 +601,9 @@ def _fetch_one_board(
         # Stopped while waiting for its request slot: not asked, so not
         # stamped; it leads the next pass like a budget skip.
         return _BoardOutcome(board, "skipped", (), None, 0, CANCELLED_CODE)
-    except _ProviderRateLimited:
-        # Its provider asked for a longer quiet than the pass has left: not asked, not stamped.
-        return _BoardOutcome(board, "skipped", (), None, 0, RATE_LIMITED_CODE)
+    except _ProviderRateLimited as held:
+        # Its provider asked for a longer quiet than the pass has left (or its host's robots.txt is unreadable): not asked, not stamped.
+        return _BoardOutcome(board, "skipped", (), None, 0, held.code)
     except Exception as exc:  # noqa: BLE001 - one board's failure is one failure row
         elapsed = int((time.monotonic() - started) * 1000)
         return _BoardOutcome(board, "failed", (), None, elapsed, _board_failure_code(exc, client))
@@ -736,7 +748,7 @@ def _fetch_boards(
     failures: list[FailureRow] = []
     counts = {"fetched": 0, "cached": 0, "failed": 0, "skipped": 0}
     cancelled = 0
-    rate_limited: dict[str, int] = {}
+    held_by_code: dict[str, dict[str, int]] = {code: {} for code in HELD_CODES}
     requests = 0
     cache_hits = 0
     listed = 0
@@ -758,9 +770,12 @@ def _fetch_boards(
             failures.append(FailureRow(SourceKind.ATS, outcome.board.board_token, None, outcome.code or "error", "ATS board fetch failed"))
         elif outcome.status == "skipped" and outcome.code == CANCELLED_CODE:
             cancelled += 1
-        elif outcome.status == "skipped" and outcome.code == RATE_LIMITED_CODE:
-            rate_limited[outcome.board.provider.value] = rate_limited.get(outcome.board.provider.value, 0) + 1
-    over_budget = counts["skipped"] - cancelled - sum(rate_limited.values())
+        elif outcome.status == "skipped" and outcome.code in held_by_code:
+            held = held_by_code[outcome.code]
+            held[outcome.board.provider.value] = held.get(outcome.board.provider.value, 0) + 1
+    rate_limited = held_by_code[RATE_LIMITED_CODE]
+    robots_unknown = held_by_code[ROBOTS_UNKNOWN_SKIP_CODE]
+    over_budget = counts["skipped"] - cancelled - sum(rate_limited.values()) - sum(robots_unknown.values())
     if over_budget:
         failures.append(
             FailureRow(
@@ -793,6 +808,17 @@ def _fetch_boards(
                 "a longer wait than this pass had left",
             )
         )
+    for provider, left in sorted(robots_unknown.items()):
+        failures.append(
+            FailureRow(
+                SourceKind.ATS,
+                provider,
+                None,
+                ROBOTS_UNKNOWN_SKIP_CODE,
+                f"{left} of {len(ordered)} watchlist boards were not fetched: {provider}'s robots.txt could not be read; "
+                "they are asked again at the next update",
+            )
+        )
     summary: dict[str, object] = {
         "total": len(ordered),
         **counts,
@@ -812,6 +838,8 @@ def _fetch_boards(
         summary["cancelled"] = cancelled
     if rate_limited:
         summary["rate_limited"] = dict(sorted(rate_limited.items()))
+    if robots_unknown:
+        summary["robots_unknown"] = dict(sorted(robots_unknown.items()))
     return rows, failures, summary
 
 
@@ -2386,6 +2414,7 @@ __all__ = [
     "ATS_MIN_INTERVAL_ENV",
     "ATS_PROVIDER_FLOORS_ENV",
     "RATE_LIMITED_CODE",
+    "ROBOTS_UNKNOWN_SKIP_CODE",
     "RETRY_AFTER_MAX_SECONDS",
     "parse_retry_after",
     "provider_interval",

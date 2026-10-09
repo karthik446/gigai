@@ -2823,6 +2823,48 @@ def sources_update_command(
         raise click.exceptions.Exit(1)
 
 
+def _sources_waiting_lines(update: dict[str, object]) -> list[str]:
+    """One line per system whose boards the last update did not check for a reason a later update may fix (0.1.11.8).
+
+    ``Workable: 1,258 boards waiting (rate_limited; asks again at the next update)``: read from the snapshot's
+    ``backoff`` (a system left for this pass: ``rate_limited``, or ``robots_unknown`` for a host whose robots.txt could
+    not be read) and ``failures.by_provider`` (boards whose own host's robots.txt could not be read or does not allow
+    the request). A snapshot from before those keys has no lines.
+    """
+
+    def boards(count: int) -> str:
+        return f"{count:,} board{'' if count == 1 else 's'}"
+
+    backoff = update.get("backoff")
+    failures = update.get("failures")
+    by_provider = failures.get("by_provider") if isinstance(failures, dict) else None
+    held: dict[str, tuple[int, str]] = {}
+    if isinstance(backoff, dict):
+        for provider, entry in backoff.items():
+            skipped = entry.get("skipped") if isinstance(entry, dict) else None
+            code = entry.get("code") if isinstance(entry, dict) else None
+            if isinstance(skipped, int) and skipped > 0 and isinstance(code, str):
+                held[str(provider)] = (skipped, code)
+    codes_by_provider = by_provider if isinstance(by_provider, dict) else {}
+    lines: list[str] = []
+    for provider in sorted({*held, *codes_by_provider}):
+        parts: list[str] = []
+        waiting = held.get(provider)
+        if waiting is not None:
+            parts.append(f"{boards(waiting[0])} waiting ({waiting[1]}; asks again at the next update)")
+        codes = codes_by_provider.get(provider)
+        codes = codes if isinstance(codes, dict) else {}
+        unreadable = codes.get("robots_unknown")
+        if isinstance(unreadable, int) and unreadable > 0 and (waiting is None or waiting[1] != "robots_unknown"):
+            parts.append(f"{boards(unreadable)} not asked (robots_unknown: robots.txt could not be read; asked again within the hour)")
+        disallowed = codes.get("robots_disallowed")
+        if isinstance(disallowed, int) and disallowed > 0:
+            parts.append(f"{boards(disallowed)} not asked (robots_disallowed: the host's robots.txt does not allow it)")
+        if parts:
+            lines.append(f"{provider.capitalize()}: " + "; ".join(parts))
+    return lines
+
+
 @sources_group.command("status")
 @click.option("--home", "home_value", type=click.Path(path_type=Path, file_okay=False))
 @click.option("--json", "as_json", is_flag=True)
@@ -2842,6 +2884,8 @@ def sources_status_command(home_value: Path | None, as_json: bool) -> None:
         click.echo(f"Last update {update['status']} ({update.get('finished_at') or update.get('updated_at')}): {update['summary']}")
         if update["status"] == "running":
             click.echo(_sources_progress_line(update))
+        for line in _sources_waiting_lines(update):
+            click.echo(line)
     else:
         click.echo("No sources update has run yet.")
     click.echo(f"Stored companies: {index['companies_indexed']} ({index['status']}).")

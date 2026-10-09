@@ -100,6 +100,7 @@ from .market_acquisition import (
     CANCELLED_CODE,
     RATE_LIMITED_CODE,
     RETRY_AFTER_MAX_SECONDS,
+    ROBOTS_UNKNOWN_SKIP_CODE,
     AcquireLimits,
     _catalog_us_counts,
     _fetch_boards,
@@ -764,6 +765,8 @@ class _Listener:
         self.cancelled = False
         self.failure_codes: dict[str, int] = {}
         self.failed_boards: list[dict[str, str]] = []
+        #: 0.1.11.8: ``{provider: {code: boards}}`` for the failures above (``failures.by_provider``).
+        self.failure_by_provider: dict[str, dict[str, int]] = {}
         self.rotation: dict[str, object] | None = None
         self.watchlist_seed: dict[str, object] | None = None
         self.state: dict[str, object] = {
@@ -810,6 +813,8 @@ class _Listener:
             if status == "failed":
                 failure = code or "error"
                 self.failure_codes[failure] = self.failure_codes.get(failure, 0) + 1
+                per_provider = self.failure_by_provider.setdefault(provider, {})
+                per_provider[failure] = per_provider.get(failure, 0) + 1
                 if len(self.failed_boards) < FAILED_BOARDS_LISTED:
                     self.failed_boards.append({"board": f"{provider}:{board_token}", "code": failure})
             elif status == "skipped" and code == CANCELLED_CODE:
@@ -883,6 +888,13 @@ class _Listener:
                 "total": sum(self.failure_codes.values()),
                 "codes": dict(sorted(self.failure_codes.items())),
                 "boards": list(self.failed_boards),
+                # 0.1.11.8: the same counts split by system, present once a board has failed (``gigai scout sources
+                # status`` names who is waiting and why).
+                **(
+                    {"by_provider": {provider: dict(sorted(codes.items())) for provider, codes in sorted(self.failure_by_provider.items())}}
+                    if self.failure_by_provider
+                    else {}
+                ),
             },
             "companies": {
                 "checked": totals.companies,
@@ -1048,6 +1060,14 @@ class _BackoffClients:
     (``_ProviderRateLimited``), keeps its old stamp and leads the next pass. Nothing more is sent to that
     provider, bar a request already on the wire.
 
+    A provider whose ONE shared host's robots.txt cannot be read (Workable: ``apply.workable.com``; a board
+    fails ``robots_unknown`` and the host is not asked again for an hour) is handled the same way, without the
+    wait: when the refusal names a ``Retry-After`` (a ``429`` on robots.txt) that ends inside the budget, the provider
+    pauses for it and the guard asks again; otherwise (no ``Retry-After``, a 5xx, a timeout, or a wait past the
+    budget) its other boards are skipped at once, ``robots_unknown`` (no ``Retry-After``) or ``rate_limited``
+    (one that is too long). A provider whose boards each have their own host (``<token>.recruitee.com``) keeps
+    failing board by board: one tenant's robots.txt says nothing about the next.
+
     A stop set during a pause leaves the board unasked (``cancelled``, so it
     leads the next check). ``clock`` and ``wait`` are seams for tests.
     """
@@ -1069,7 +1089,7 @@ class _BackoffClients:
         self._lock = threading.Lock()
         self._until: dict[str, float] = {}
         self._streak: dict[str, int] = {}
-        self._given_up: set[str] = set()
+        self._given_up: dict[str, str] = {}
         self.pauses: dict[str, int] = {}
         self.paused_seconds: dict[str, float] = {}
         self.skipped: dict[str, int] = {}
@@ -1084,7 +1104,7 @@ class _BackoffClients:
             with self._lock:
                 if provider in self._given_up:
                     self.skipped[provider] = self.skipped.get(provider, 0) + 1
-                    raise _ProviderRateLimited()
+                    raise _ProviderRateLimited(self._given_up[provider])
                 left = self._until.get(provider, 0.0) - self._clock()
             if left <= 0:
                 return
@@ -1107,10 +1127,36 @@ class _BackoffClients:
                 pause = min(CHECK_BACKOFF_MAX_SECONDS, CHECK_BACKOFF_SECONDS * 2 ** (streak - 1))
             self.pauses[provider] = self.pauses.get(provider, 0) + 1
             if self._deadline is not None and now + pause >= self._deadline:
-                self._given_up.add(provider)  # the wait is longer than the pass: its other boards are not asked
+                self._given_up[provider] = RATE_LIMITED_CODE  # the wait is longer than the pass: its other boards are not asked
                 return
             self._until[provider] = now + pause
             self.paused_seconds[provider] = self.paused_seconds.get(provider, 0.0) + pause
+
+    def _robots_unknown(self, provider: str, board_token: str, error: BaseException) -> bool:
+        """A board failed ``robots_unknown``: hold its provider when the unreadable robots.txt is its one shared host's.
+
+        ``True`` when the failure was taken here (the provider is paused or given up on).
+        """
+
+        host = str(getattr(error, "host", "") or "")
+        if not host or board_token.lower() in host:
+            return False  # the board's own host: it says nothing about the provider's other boards
+        retry_in = getattr(error, "retry_in", None)
+        with self._lock:
+            if provider in self._given_up:
+                return True
+            now = self._clock()
+            if retry_in is None:
+                self._given_up[provider] = ROBOTS_UNKNOWN_SKIP_CODE  # waiting out the hour is not this pass's job
+                return True
+            if self._deadline is not None and now + retry_in >= self._deadline:
+                self._given_up[provider] = RATE_LIMITED_CODE
+                return True
+            if now >= self._until.get(provider, 0.0):  # one refusal, one pause
+                self._until[provider] = now + retry_in
+                self.pauses[provider] = self.pauses.get(provider, 0) + 1
+                self.paused_seconds[provider] = self.paused_seconds.get(provider, 0.0) + retry_in
+            return True
 
     def fetch_board(self, client: Any, provider: str, board_token: str, config: FindJobsConfig, **kwargs: Any) -> Any:
         self._hold(provider)
@@ -1120,11 +1166,14 @@ class _BackoffClients:
             result = self._inner.fetch_board(client, provider, board_token, config, **kwargs)
             failure = None
             return result
-        except Exception:  # noqa: BLE001 - nothing is swallowed: the failure code is noted for the back-off, then re-raised
-            seen = getattr(client, "last_failure", None)
-            failure = seen() if callable(seen) else "error"
-            asked = getattr(client, "last_retry_after", None)
-            retry_after = asked() if callable(asked) else None
+        except Exception as exc:  # noqa: BLE001 - nothing is swallowed: the failure code is noted for the back-off, then re-raised
+            if getattr(exc, "code", None) == ROBOTS_UNKNOWN_SKIP_CODE and self._robots_unknown(provider, board_token, exc):
+                failure = ROBOTS_UNKNOWN_SKIP_CODE  # taken above: not read again as the 429 that left robots.txt unread
+            else:
+                seen = getattr(client, "last_failure", None)
+                failure = seen() if callable(seen) else "error"
+                asked = getattr(client, "last_retry_after", None)
+                retry_after = asked() if callable(asked) else None
             raise
         finally:
             self._note(provider, failure, retry_after)
@@ -1132,18 +1181,22 @@ class _BackoffClients:
     def to_json(self) -> dict[str, object] | None:
         """``{provider: {"pauses", "paused_seconds"}}`` for the providers that pushed back; ``None`` when none did.
 
-        A provider given up on for this pass also carries ``"skipped"`` (its boards not asked) and ``"code"``.
+        A provider given up on for this pass also carries ``"skipped"`` (its boards not asked) and ``"code"``
+        (``rate_limited``, or ``robots_unknown`` for a shared host whose robots.txt could not be read).
         """
 
         with self._lock:
-            if not self.pauses:
+            if not self.pauses and not self._given_up:
                 return None
             found: dict[str, object] = {}
-            for provider, count in sorted(self.pauses.items()):
-                entry: dict[str, object] = {"pauses": count, "paused_seconds": round(self.paused_seconds.get(provider, 0.0), 1)}
+            for provider in sorted({*self.pauses, *self._given_up}):
+                entry: dict[str, object] = {
+                    "pauses": self.pauses.get(provider, 0),
+                    "paused_seconds": round(self.paused_seconds.get(provider, 0.0), 1),
+                }
                 if provider in self._given_up:
                     entry["skipped"] = self.skipped.get(provider, 0)
-                    entry["code"] = RATE_LIMITED_CODE
+                    entry["code"] = self._given_up[provider]
                 found[provider] = entry
             return found
 

@@ -41,7 +41,7 @@ others.
   (Workable 2,843, Rippling 1,647, Gem 801, Recruitee 2,287, Pinpoint 565, Breezy 2,473; 245,570 postings,
   115,883 in the US); a US setup adds the 4,441 of them that list two or more US postings and are not a staffing
   agency by name, so the watchlist grows from about 10,300 to about 14,800 boards and the first update after the
-  upgrade takes a few passes. A board with a single US posting stays in the catalog and joins once a later catalog
+  upgrade can take more than one pass. A board with a single US posting stays in the catalog and joins once a later catalog
   counts two; a board you add yourself is always watched. **Add company** takes a board or job URL on any of the nine. A Pinpoint posting has no date; a
   Rippling posting's date and description are fetched at the update for the titles your profiles search, as
   Greenhouse descriptions are; a Breezy posting's description is fetched when it is assessed.
@@ -49,13 +49,15 @@ others.
   `GigAI/<version> (+https://github.com/karthik446/gigai)`: the update, the check that a posting is still open, a
   description lookup, discovery and the Exa search. Before the first request of the day to a board's host, Scout
   reads that host's `robots.txt` (wildcards and `$` included) and does not ask for an address the host disallows,
-  a list or a single posting (`robots_disallowed` in `gigai scout sources status`); a host whose `robots.txt`
-  cannot be read is left alone for an hour (`robots_unknown`), and a `Crawl-delay` there is that host's pace, up
-  to 10 seconds. Workable is asked at most once every two seconds (its host refuses a faster reader), whatever
+  a list or a single posting; a host whose `robots.txt` cannot be read is left alone for an hour (`robots_unknown`),
+  and a `Crawl-delay` there is that host's pace, up to 10 seconds. `gigai scout sources status` prints one line per
+  system that still has boards waiting or skipped from the last update (`robots_disallowed`, `robots_unknown`,
+  `rate_limited`), and the same counts are in `--json`. Workable is asked at most once every two seconds (its host refuses a faster reader), whatever
   `GIGAI_SCOUT_ATS_MIN_INTERVAL_SECONDS` says: that setting can slow Scout down, never speed it past a system's
   own limit. A system that answers 429 is left alone for as long as its `Retry-After` says (up to 10 minutes), on a
-  manual update too; when that is longer than the update has left, the rest of that system's boards wait for the
-  next update (`rate_limited`).
+  manual update too; when that is longer than the update has left, or when a system's one shared host cannot be
+  read (`robots_unknown`), the rest of that system's boards wait for the next update at once instead of the
+  update sitting idle (`rate_limited`, `robots_unknown`).
 - **US only, and one row per job.** Search all jobs and the Jobs list have a **US only** switch (`--us-only/--no-us-only`,
   `us_only=1|0`), on by default for a US setup. It hides only postings clearly outside the US; a posting whose
   place it cannot read ("Remote" alone, no location) stays listed and says "unclear location". The same job posted
@@ -63,8 +65,8 @@ others.
   Latvia +4"); **Assess** and **Mark applied** act on one posting of it, a US one if there is one (`--no-collapse`,
   `collapse=0` list every posting). The search index is rebuilt by the next `gigai scout sources update`; until
   then a search reads every company file and is slower.
-- **The first `scout new` after the upgrade is long.** Every matching posting on the new boards is new to you once,
-  so it lists that backlog, and a Pinpoint posting (no date) reads as posted on the day it was first seen, so it
+- **The first `scout new` after the upgrade can list a backlog of the new boards.** Every matching posting on the
+  new boards is new to you once, and a Pinpoint posting (no date) reads as posted on the day it was first seen, so it
   stays inside "last 30 days" for 30 days.
 
 ### 0.1.11.7
