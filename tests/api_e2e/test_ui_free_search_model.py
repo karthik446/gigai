@@ -191,7 +191,7 @@ def _node(script: str) -> dict:
     node = shutil.which("node")
     if node is None:
         pytest.skip("LOUD: node is not on PATH; the free search model was NOT run")
-    completed = subprocess.run([node, "--input-type=module", "-e", script], capture_output=True, text=True, timeout=60, check=False)
+    completed = subprocess.run([node, "--input-type=module", "-"], input=script, capture_output=True, text=True, timeout=60, check=False)  # the script goes by stdin: Linux caps one argument at 128 KiB
     assert completed.returncode == 0, f"node failed (rc {completed.returncode}):\n{completed.stderr}"
     return json.loads(completed.stdout)
 

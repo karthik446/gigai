@@ -79,7 +79,7 @@ def out(tmp_path_factory: pytest.TempPathFactory) -> dict:
     routing.write_text(source, encoding="utf-8")
     script = SCRIPT.replace("TABS_URL", json.dumps((UI_SRC / "jobsTabsModel.js").resolve().as_uri()))
     script = script.replace("ROUTING_URL", json.dumps(routing.as_uri())).replace("JOB;", json.dumps(JOB) + ";")
-    completed = subprocess.run([node, "--input-type=module", "-e", script], capture_output=True, text=True, timeout=60, check=False)
+    completed = subprocess.run([node, "--input-type=module", "-"], input=script, capture_output=True, text=True, timeout=60, check=False)  # the script goes by stdin: Linux caps one argument at 128 KiB
     assert completed.returncode == 0, f"node failed (rc {completed.returncode}):\n{completed.stderr}"
     return json.loads(completed.stdout)
 
