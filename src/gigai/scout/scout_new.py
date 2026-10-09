@@ -1286,13 +1286,18 @@ def _kept_by_us_only(home_root: Path, rows: Sequence[PostingRecord]) -> list[Pos
     return [row for row in rows if row.job not in places or places[row.job].place != PLACE_OTHER]
 
 
-def _applications(home_root: Path, applied: Iterable[str]) -> dict[str, dict[str, object]]:
+def _applications(home_root: Path, applied: Iterable[str], store: PipelineStore) -> dict[str, dict[str, object]]:
     """Each applied job AND its copies (``job_key.copies_of``: only the boards of the jobs applied to are read)."""
 
-    from .find_jobs.job_key import copies_of
+    from .find_jobs.job_key import copies_of, find_boards
 
     found: dict[str, dict[str, object]] = {}
-    for job in sorted(applied):
+    applied = sorted(applied)
+    if applied:
+        # 0.1.11.9 PERF1: the board of an applied job is its row's (a job some role lists); the search index is read
+        # once for all the others, not once each.
+        find_boards(home_root, applied, known={row.job: row.board for row in store.postings(jobs=applied, live=False)})
+    for job in applied:
         for copy in copies_of(home_root, job):
             found.setdefault(copy, {})
     return found
@@ -1482,7 +1487,7 @@ def _scout_new(
         # 0.1.11.5: a posting with an application is left out of what is new, of its counts and of every batch
         # (``gigai scout jobs list --state applied`` lists them). The events are read once per request.
         # 0.1.11.9 NEW1: an application on ANY copy of a job is the job's.
-        applied = _applications(home_root, _applied(refreshed.resolved))
+        applied = _applications(home_root, _applied(refreshed.resolved), store)
         applied_new = 0
         # 0.1.11.9 NEW1: the Jobs list's US only, by its default; and one row a job (:class:`_JobRows`).
         us_default = us_only_setting(home_root, target)
@@ -1659,9 +1664,12 @@ def _scout_new(
         texts = postings.posting_texts(home_root, [row for _group, row in shown])
         rows_json: list[dict[str, object]] = []
         evidence: list[dict[str, object]] = []
+        from .find_jobs.job_key import find_boards
         from .quick_assess import read_quick_assessment
 
         pending = postings.TagPending(home_root, views)
+        # 0.1.11.9 PERF1: a stored record is read under the job's key, found from the posting's board: the row's own.
+        find_boards(home_root, known={row.job: row.board for _group, row in shown if row.state != _NOT_ASSESSED})
         for group, row in shown:
             item = None if row.state == _NOT_ASSESSED else read_quick_assessment(home_root, target, row.profile_id, row.job)
             text = texts.get(row.job)

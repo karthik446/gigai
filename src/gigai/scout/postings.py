@@ -559,7 +559,7 @@ class _Facts:
     def of(self, row: PostingRecord) -> PostingRecord:
         """``row`` with its facts as the stores hold them now."""
 
-        from .find_jobs.job_key import job_key
+        from .find_jobs.job_key import find_boards, job_key
         from .find_jobs.job_state import NOT_ASSESSED, _identity_digest, derive_job_state, quick_assessment_fact
         from .fit import fit_percent, plain_percent, shown_state, thin_state
         from .pipeline.steps import read_label
@@ -569,6 +569,10 @@ class _Facts:
         # kept under one identity for all its copies (``job_key``; the row's own for a posting with no copy).
         kept = job_key(self.home_root, self.target, row.job, board=row.board)
         key = _identity_digest(kept)
+        if key in self._assessed or key in self._tailored:
+            # 0.1.11.9 PERF1: the stores resolve the key again from ``kept`` alone; its board is this row's (a copy is
+            # a posting of the same board), so the search index is not scanned for a URL that names no board.
+            find_boards(self.home_root, known={kept: row.board})
         item = self._sources.quick_assessment(kept, profile_id) if key in self._assessed else None
         tailored = key in self._tailored and self._sources.tailored_at(kept, profile_id)[0]
         state, stale, assessed_at, met, requirements, questions = NOT_ASSESSED, None, None, None, None, 0

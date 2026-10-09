@@ -22,7 +22,7 @@ the names of the stores' files. Nothing is written, no model, no request.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 import os
 from pathlib import Path
@@ -53,7 +53,7 @@ _BOARDS: dict[tuple[str, str], tuple[object, dict[str, tuple[str, ...]], dict[st
 #: ``(home, identity) -> its board``, for a URL that does not name its board (the search index said so once).
 _BOARD_OF: dict[tuple[str, str], str] = {}
 #: ``(home, identity) -> when the search index held no posting with this address``: it is not asked again for a
-#: minute (the lookup is one scan of the index's URLs).
+#: minute (the lookup is one scan of the index's URLs, for every address asked about at once).
 _NOT_FOUND: dict[tuple[str, str], float] = {}
 _NOT_FOUND_SECONDS = 60.0
 _LOCK = threading.Lock()
@@ -156,60 +156,123 @@ def board_postings(home_root: Path, board: str) -> Mapping[str, BoardPosting]:
     return _board(home_root, board)[1]
 
 
-def _board_of(home_root: Path, job_identity: str) -> str | None:
-    """The board whose company file holds ``job_identity``, or ``None``. The URL itself names it for most systems
-    (no read); for the others the search index is asked once per identity. An index that cannot answer names none:
+def _boards_of(home_root: Path, identities: Iterable[str]) -> dict[str, str]:
+    """``{identity: the board whose company file holds it}`` for the ``identities`` a board holds. The URL itself
+    names it for most systems (no read); the search index is asked about ALL the others at once (one scan of its
+    URLs, narrowed by each address's host and path), once per identity. An index that cannot answer names none:
     the company files are never scanned for this."""
 
     import sqlite3
+    from urllib.parse import urlsplit
 
     from . import search_index
     from .company_index import CompanyIndex
     from .contracts import FindJobsContractError, normalize_url, parse_board_url
 
-    key = (os.fspath(home_root), job_identity)
-    with _LOCK:
-        kept = _BOARD_OF.get(key)
-        missed = _NOT_FOUND.get(key)
-    if kept is not None:
-        return kept
-    if missed is not None and time.monotonic() - missed < _NOT_FOUND_SECONDS:
-        return None
-    where = parse_board_url(job_identity)
-    if where is not None:
-        index = CompanyIndex.for_home(Path(home_root))
-        for token in dict.fromkeys((where[1], where[1].lower())):
-            try:
-                if _stat(index.path(where[0], token)) is not None:
-                    return _key(where[0], token)
-            except ValueError:
-                continue
-    from urllib.parse import urlsplit
-
-    parts = urlsplit(job_identity)
-    bare = parts.path in ("", "/")
-    try:
-        found = search_index.rows_with_url_part(Path(home_root), (parts.hostname or "") if bare else parts.path, fold_case=bare)
-    except (sqlite3.Error, OSError, ValueError):
-        return None
-    if not found.available:
-        return None
-    for row in found.rows:
-        try:
-            if normalize_url(row.url) != job_identity:
-                continue
-        except FindJobsContractError:
+    home = os.fspath(home_root)
+    found: dict[str, str] = {}
+    asked: dict[str, tuple[str, str]] = {}
+    index = None
+    for job_identity in dict.fromkeys(identities):
+        if type(job_identity) is not str or not job_identity or job_identity.startswith("text:"):
             continue
         with _LOCK:
+            kept = _BOARD_OF.get((home, job_identity))
+            missed = _NOT_FOUND.get((home, job_identity))
+        if kept is not None:
+            found[job_identity] = kept
+            continue
+        if missed is not None and time.monotonic() - missed < _NOT_FOUND_SECONDS:
+            continue
+        where = parse_board_url(job_identity)
+        if where is not None:
+            index = index or CompanyIndex.for_home(Path(home_root))
+            for token in dict.fromkeys((where[1], where[1].lower())):
+                try:
+                    if _stat(index.path(where[0], token)) is not None:
+                        found[job_identity] = _key(where[0], token)
+                        break
+                except ValueError:
+                    continue
+            if job_identity in found:
+                continue
+        try:
+            parts = urlsplit(job_identity)
+            host = parts.hostname or ""
+        except ValueError:
+            continue
+        bare = parts.path in ("", "/")
+        # The stored URL holds the address's path as written and its host in some case (``normalize_url`` folds no
+        # more than that). SQLite folds ASCII only: another host is found by its path alone.
+        asked[job_identity] = (host if bare or host.isascii() else "", "" if bare else parts.path)
+    if not asked:
+        return found
+    try:
+        held = search_index.boards_with_url_parts(Path(home_root), asked.values())
+    except (sqlite3.Error, OSError, ValueError):
+        return found
+    if not held.available:
+        return found
+    answered: dict[str, str] = {}
+    for url, board in held.boards:
+        try:
+            identity = normalize_url(url)
+        except FindJobsContractError:
+            continue
+        if identity in asked:
+            answered.setdefault(identity, board)  # the first one: a live posting before a removed one, then the newest
+    now = time.monotonic()
+    with _LOCK:
+        for job_identity in asked:
+            board = answered.get(job_identity)
+            if board is None:
+                if len(_NOT_FOUND) >= _KEPT_IDENTITIES:
+                    _NOT_FOUND.clear()
+                _NOT_FOUND[(home, job_identity)] = now
+                continue
             if len(_BOARD_OF) >= _KEPT_IDENTITIES:
                 del _BOARD_OF[next(iter(_BOARD_OF))]
-            _BOARD_OF[key] = row.board
-        return row.board
-    with _LOCK:
-        if len(_NOT_FOUND) >= _KEPT_IDENTITIES:
-            _NOT_FOUND.clear()
-        _NOT_FOUND[key] = time.monotonic()
-    return None
+            _BOARD_OF[(home, job_identity)] = board
+            found[job_identity] = board
+    return found
+
+
+def _board_of(home_root: Path, job_identity: str) -> str | None:
+    """The board whose company file holds ``job_identity``, or ``None`` (:func:`_boards_of` of one address)."""
+
+    return _boards_of(home_root, (job_identity,)).get(job_identity)
+
+
+def find_boards(home_root: Path, identities: Iterable[str] = (), *, known: Mapping[str, str] | None = None) -> None:
+    """Names the boards of many jobs ahead of their :func:`copies_of` / :func:`job_key`, for a caller that has many.
+
+    0.1.11.9 PERF1. A URL that does not name its board costs one scan of the search index's URLs, and a list has
+    several such jobs (an employer's own careers address), each looked up again by every read of a stored record.
+    ``known`` is what the caller's own rows say (``{identity: its row's board}``): kept when the URL names no board
+    and that board's company file does hold the posting, so nothing is scanned for it. The search index is asked
+    about all the others at once. It changes no answer and never raises.
+    """
+
+    from .contracts import parse_board_url
+
+    try:
+        home = os.fspath(home_root)
+        asked = list(identities)
+        for job_identity, board in (known or {}).items():
+            with _LOCK:
+                kept = (home, job_identity) in _BOARD_OF
+            if kept:
+                continue
+            if type(board) is str and board and parse_board_url(job_identity) is None and job_identity in board_postings(Path(home_root), board):
+                with _LOCK:
+                    if len(_BOARD_OF) >= _KEPT_IDENTITIES:
+                        del _BOARD_OF[next(iter(_BOARD_OF))]
+                    _BOARD_OF[(home, job_identity)] = board
+            else:
+                asked.append(job_identity)
+        _boards_of(Path(home_root), asked)
+    except Exception:  # noqa: BLE001 - as ``copies_of``: an index that cannot be read says nothing
+        return
 
 
 def _key(ats: str, slug: str) -> str:
@@ -285,4 +348,4 @@ def job_key(home_root: Path, target: Path, job_identity: str, *, board: str | No
     return kept_copy(project_dir, copies)
 
 
-__all__ = ["BoardPosting", "board_copies", "board_postings", "canonical_identity", "copies_of", "job_key", "kept_copy"]
+__all__ = ["BoardPosting", "board_copies", "board_postings", "canonical_identity", "copies_of", "find_boards", "job_key", "kept_copy"]

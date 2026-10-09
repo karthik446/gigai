@@ -147,7 +147,7 @@ from .evaluated_models import notice_lines
 from .assess_preview import model_input_summary, summary_lines
 from .data_labels import ENVELOPE_KEY, PUBLIC_UNTRUSTED, UNTRUSTED_TEXT_RULE, labels_envelope
 from .find_jobs.canonical_job import canonical_order
-from .find_jobs.job_key import BoardPosting, board_postings, copies_of, job_key
+from .find_jobs.job_key import BoardPosting, board_postings, copies_of, find_boards, job_key
 from .find_jobs.job_copies import (
     PLACE_OTHER,
     PLACE_UNCLEAR,
@@ -412,6 +412,7 @@ class _Selection:
         rows = store.postings(jobs=jobs, live=False) if jobs is not None else store.postings(live=False)
         # 0.1.11.6: ``removed`` None (a read of named postings) takes a posting whether its board still lists it or not.
         groups = _grouped(row for row in rows if removed is None or (row.removed_at is not None) == removed)
+        listed = groups  # every job read, before a role filter
         named = jobs is not None
         wanted_roles = set(self.profile_ids)
         #: 0.1.11.9 RB2: the copies of one job are ONE row tagged with the roles that found ANY copy, so a role filter
@@ -436,6 +437,9 @@ class _Selection:
             # 0.1.11.9 RB2: an application on ANY copy of a job posted once per country is the job's: every copy's
             # row says so, also when the copy applied to is one these filters do not select (the company index names
             # the copies; only the boards of the jobs applied to are read for it).
+            # 0.1.11.9 PERF1: the board of an applied job is its row's; the search index is read once for all the
+            # others (a job no role lists), not once each.
+            find_boards(home_root, applications, known={job: listed[job][0].board for job in applications if job in listed})
             for job, applied in list(applications.items()):
                 for copy in copies_of(home_root, job):
                     applications.setdefault(copy, dict(applied))
@@ -629,6 +633,8 @@ def _rows_json(
     pending = postings.TagPending(home_root, views)
     labels = {view.profile_id: view.label for view in views}
     h1b = _h1b_index() if shown else {}  # once per request: a row looks its board up, never reads the catalog
+    # 0.1.11.9 PERF1: a stored record is read under the job's key, which is found from the posting's board: the row's own.
+    find_boards(home_root, known={row.job: row.board for _group, row in shown if row.state != _NOT_ASSESSED})
     for group, row in shown:
         item = None if row.state == _NOT_ASSESSED else read_quick_assessment(home_root, target, row.profile_id, row.job)
         text = texts.get(row.job)

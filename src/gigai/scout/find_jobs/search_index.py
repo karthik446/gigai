@@ -353,6 +353,8 @@ class IndexResult:
     rows: tuple[IndexRow, ...] = ()
     counts: tuple[tuple[str, int], ...] = ()
     copies: tuple[tuple[str, str, str, bool, str | None, int], ...] = ()
+    #: :func:`boards_with_url_parts`: ``(the stored URL, its board)`` pairs.
+    boards: tuple[tuple[str, str], ...] = ()
     reason: str | None = None
     detail: str | None = None
     stamp: str | None = None
@@ -1116,6 +1118,49 @@ def rows_with_url_part(home_root: Path, part: str, *, fold_case: bool = False) -
     return IndexResult(True, rows=tuple(_row(row) for row in rows), stamp=stamp)
 
 
+#: Addresses one statement of :func:`boards_with_url_parts` asks for (SQLite bounds an expression's depth).
+_ADDRESSES_A_SCAN = 200
+
+
+def boards_with_url_parts(home_root: Path, addresses: Iterable[tuple[str, str]]) -> IndexResult:
+    """``(stored URL, board)`` of every posting whose URL holds BOTH parts of one of ``addresses``, live ones first, then newest.
+
+    0.1.11.9 PERF1: which board holds each of several addresses, in ONE scan of ``p.url`` for all of them (one per
+    :data:`_ADDRESSES_A_SCAN`). An address is ``(host, path)``: the host whatever its case (``""``: any), the path
+    as written (``""``: any). A path alone does not identify a posting: ``/jobs`` is in most of the stored URLs, and
+    :func:`rows_with_url_part` then builds a row for each. Here the host narrows it to one company's postings, and
+    only two columns are read. The caller applies the exact test, as with :func:`rows_with_url_part`.
+    """
+
+    wanted = list(dict.fromkeys((host.lower(), path) for host, path in addresses if host or path))
+    if not wanted:
+        return IndexResult(True)
+    statements: list[tuple[str, list[str]]] = []
+    for start in range(0, len(wanted), _ADDRESSES_A_SCAN):
+        tests, params = [], []
+        for host, path in wanted[start : start + _ADDRESSES_A_SCAN]:
+            # The path first: the plain test is the faster one, and the URL is folded only for a row that passes it.
+            both = [("instr(p.url, ?) > 0", path), ("instr(lower(p.url), ?) > 0", host)]
+            tests.append("(" + " AND ".join(test for test, part in both if part) + ")")
+            params += [part for _test, part in both if part]
+        statements.append((f"SELECT p.url, p.board, p.removed, p.posted, p.id FROM p AS p WHERE {' OR '.join(tests)}", params))
+
+    def run(conn: sqlite3.Connection) -> list[tuple[object, ...]]:
+        found: dict[object, tuple[object, ...]] = {}
+        for sql, params in statements:
+            for row in conn.execute(sql, params):
+                found[row[4]] = row
+        # ``ORDER BY p.removed, p.posted DESC, p.id DESC``, over the rows of every statement.
+        newest = sorted(found.values(), key=lambda row: (row[3], row[4]), reverse=True)
+        return sorted(newest, key=lambda row: row[2])  # type: ignore[arg-type, return-value]
+
+    try:
+        rows, stamp = _read(home_root, run)
+    except _Unavailable as error:
+        return _unavailable(error)
+    return IndexResult(True, boards=tuple((str(row[0]), str(row[1])) for row in rows), stamp=stamp)
+
+
 def title_counts(home_root: Path, query: IndexQuery) -> IndexResult:
     """The count path: ``(title, candidates with that title)`` for ``query``, so the rule runs once per title."""
 
@@ -1149,6 +1194,7 @@ __all__ = [
     "IndexRow",
     "IndexStatus",
     "SCHEMA_VERSION",
+    "boards_with_url_parts",
     "candidates",
     "close",
     "copy_counts",
