@@ -426,8 +426,8 @@ def test_the_report_selects_each_posting_with_the_rows_its_assessment_cites(buil
     from gigai.scout.target_resolution import home_scout_target
 
     home = built / "home"
-    path = sorted(home.glob("scout/*/quick_assess/profile_*/*.json"))[0]
-    profile_id = path.parent.name
+    path = sorted(home.glob("scout/*/quick_assess/job/*.json"))[0]
+    profile_id = next(p.name for p in (home / "scout").glob("*/quick_assess_tailored/profile_*") if p.is_dir())
     original, stat = path.read_bytes(), path.stat()
     stored = tm.stored_master(home, home_scout_target(home))
     assert stored is not None

@@ -178,5 +178,5 @@ def test_agent_permissions_takes_the_port_scout_runs_on(tmp_path: Path, monkeypa
     assert CliRunner().invoke(cli, ["agent-permissions", "--port", "0"]).exit_code == 2
 
 
-GOLDEN_SKILL = "ef190aad3e718ae9971c7a85da2436847027d32e3f21edaca15af9c670b330b3"
-GOLDEN_AGENTS = "e71eb15f146231f0de76c8d8ed7e1bc5e4e521343230ddf69e804f8e80a28d5b"
+GOLDEN_SKILL = "1b4d169f80c8cadc19acb6967b07877dc6f92342478ade5a798e7dff3a76583e"
+GOLDEN_AGENTS = "daeb91f73c62e3ca23902aab09274301480a4491424a265242fa4a009ba8b9e0"

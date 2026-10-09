@@ -204,6 +204,8 @@ _TARGET_COMMANDS: dict[str, tuple[str, ...]] = {
     "jobs search": ("scout", "jobs", "search", "Python Engineer"),
     "jobs assess": ("scout", "jobs", "assess", "--window", "new"),
     "jobs import-runs": ("scout", "jobs", "import-runs"),
+    "jobs search": ("scout", "jobs", "search", "Staff Engineer"),
+    "migrate-job-stores": ("scout", "migrate-job-stores"),
     "pipeline rank": ("scout", "pipeline", "rank"),
     "pipeline run": ("scout", "pipeline", "run", "--once"),
     "pipeline status": ("scout", "pipeline", "status"),
@@ -229,7 +231,13 @@ def test_every_command_that_takes_target_is_covered() -> None:
     assert sorted(_walk(scout_cli.scout_group, ())) == sorted(_TARGET_COMMANDS)
 
 
-@pytest.mark.parametrize("command", sorted(_TARGET_COMMANDS))
+#: ``migrate-job-stores`` never discovers a target from the cwd (its own docstring: "never creates a Scout
+#: project: a home without one has nothing to migrate"); it takes ``target_value or home_scout_target(home_root)``
+#: directly, not ``resolve_scout_target``, so it has no two-cwds behaviour to prove here.
+_NOT_CWD_DISCOVERED = frozenset({"migrate-job-stores"})
+
+
+@pytest.mark.parametrize("command", sorted(_TARGET_COMMANDS.keys() - _NOT_CWD_DISCOVERED))
 def test_every_command_resolves_the_same_target_from_two_cwds(
     command: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

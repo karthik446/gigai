@@ -67,12 +67,32 @@ def _snapshot(fx: PostingsFixture) -> dict[str, str]:
     return found
 
 
+def _settle_pipeline_wal(fx: PostingsFixture) -> None:
+    """Fold the model-call metrics' pending WAL into ``pipeline.sqlite`` (``call_metrics.record_call``, run by
+    ``_assess`` above) before a test takes its first byte-exact snapshot: SQLite's own deferred checkpoint, not a
+    write the brief makes, otherwise lands at a moment the byte-exact snapshot cannot predict (flaky under xdist)."""
+
+    import sqlite3
+
+    from gigai.scout.pipeline.store import pipeline_path
+
+    path = pipeline_path(fx.home_root, fx.target)
+    if not path.is_file():
+        return
+    connection = sqlite3.connect(os.fspath(path), timeout=30.0, isolation_level=None)
+    try:
+        connection.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+    finally:
+        connection.close()
+
+
 @pytest.fixture
 def assessed(fx: PostingsFixture, monkeypatch: pytest.MonkeyPatch) -> PostingsFixture:
     """The job assessed with a prompt that shows the master's ids, so each met row names the master lines it relied on."""
 
     _patch_v9_template(monkeypatch)
     _assess(fx, _v9_answer(fx))
+    _settle_pipeline_wal(fx)
     return fx
 
 
