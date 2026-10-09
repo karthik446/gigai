@@ -125,6 +125,16 @@ class Boards:
             return httpx.Response(200, content=self.lever(path.rsplit("/", 1)[1]), headers={"content-type": "application/json"}, request=request)
         if request.method == "GET" and host in ("boards-api.greenhouse.io", "api.ashbyhq.com"):
             return httpx.Response(200, json={"jobs": []}, request=request)
+        if request.method == "GET" and path != "/robots.txt":
+            # 0.1.11.8: a catalog board on one of the six new systems: an empty board in that feed's own shape
+            # (a robots.txt request falls through to the 404 below: no rules).
+            from gigai.scout.find_jobs.providers import registry
+
+            for name, spec in registry().items():
+                list_host = spec.list_url.split("/", 3)[2]
+                if list_host == host or (list_host.startswith("{token}.") and host.endswith(list_host[len("{token}"):])):
+                    empty = [] if spec.jobs_key is None else {spec.jobs_key: []}
+                    return httpx.Response(200, json=empty, request=request)
         return httpx.Response(404, json={"error": "core-flow fixture: no such board"}, request=request)
 
 

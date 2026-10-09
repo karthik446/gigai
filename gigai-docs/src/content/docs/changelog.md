@@ -38,8 +38,8 @@ others.
   Greenhouse descriptions are; a Breezy posting's description is fetched when it is assessed.
 - **Requests say who is asking.** Every board request carries a `User-Agent` naming GigAI and the project address.
   Before the first request of the day to a board's host, Scout reads that host's `robots.txt` and skips a feed the
-  host disallows (`robots_disallowed` in `gigai scout sources status`). A company's own host (Recruitee, Pinpoint,
-  Breezy) and Workable are asked at most once a second.
+  host disallows (`robots_disallowed` in `gigai scout sources status`). Workable is asked at most once a second (its host refuses a
+  faster reader); set `GIGAI_SCOUT_ATS_MIN_INTERVAL_SECONDS` to choose the pace yourself.
 
 ### 0.1.11.7
 

@@ -198,7 +198,6 @@ def _build() -> dict[str, ProviderSpec]:
             updated_field="updated_at",
             list_has_text=True,
             source_hosts=("recruitee.com",),
-            min_interval_seconds=1.0,
         ),
         ProviderSpec(
             name="pinpoint",
@@ -213,7 +212,6 @@ def _build() -> dict[str, ProviderSpec]:
             updated_field=None,
             list_has_text=True,
             source_hosts=("pinpointhq.com",),
-            min_interval_seconds=1.0,
         ),
         ProviderSpec(
             name="breezy",
@@ -228,7 +226,6 @@ def _build() -> dict[str, ProviderSpec]:
             updated_field=None,
             list_has_text=False,
             source_hosts=("breezy.hr",),
-            min_interval_seconds=1.0,
         ),
     )
     table = {spec.name: spec for spec in specs}

@@ -93,6 +93,8 @@ import threading
 import time
 import uuid
 
+from ..find_jobs.contracts import ATSProvider
+
 #: ``PRAGMA user_version`` of a file this module writes.
 SCHEMA_VERSION = 5
 
@@ -325,8 +327,9 @@ _SHAPES: Mapping[str, re.Pattern[str]] = {
     "owner": re.compile(r"[0-9a-f]{32}:[A-Za-z0-9_-]{1,32}"),
     "timestamp": re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?Z"),
     "day": re.compile(r"\d{4}-\d{2}-\d{2}"),
-    # ``<ats>:<percent-encoded slug>``: the company index file's own key (no whitespace, no "@").
-    "board": re.compile(r"(?:greenhouse|lever|ashby):[A-Za-z0-9][A-Za-z0-9_.%~-]{0,119}"),
+    # ``<ats>:<percent-encoded slug>``: the company index file's own key (no whitespace, no "@"); the ats is any
+    # provider of the registry (0.1.11.8: nine; ``find_jobs.contracts.ATSProvider`` is the one list).
+    "board": re.compile(r"(?:" + "|".join(re.escape(member.value) for member in ATSProvider) + r"):[A-Za-z0-9][A-Za-z0-9_.%~-]{0,119}"),
 }
 _WORKER = re.compile(r"[A-Za-z0-9_-]{1,32}")
 

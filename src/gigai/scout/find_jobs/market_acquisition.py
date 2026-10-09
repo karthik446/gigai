@@ -581,11 +581,15 @@ def _fetch_boards(
         for index, board in enumerate(ordered):
             provider = board.provider.value
             if provider not in executors:
-                # 0.1.11.8: a provider that asks for a slower pace (``providers.ProviderSpec.min_interval_seconds``:
-                # one request a second to a company's own host) never runs at the default rate.
-                from .providers import interval_for as provider_interval
+                # 0.1.11.8: a provider that asks for a slower pace (``providers.ProviderSpec.min_interval_seconds``,
+                # Workable: its host answers 429 faster) never runs at the default rate, unless the operator or a test
+                # set the pace explicitly (``ATS_MIN_INTERVAL_ENV``): an explicit pace is the pace.
+                interval = limits.interval_for(provider_totals[provider])
+                if not (os.environ.get(ATS_MIN_INTERVAL_ENV) or "").strip():
+                    from .providers import interval_for as provider_interval
 
-                limiters[provider] = _RateLimiter(provider_interval(provider, limits.interval_for(provider_totals[provider])), stop=stop)
+                    interval = provider_interval(provider, interval)
+                limiters[provider] = _RateLimiter(interval, stop=stop)
                 throttled[provider] = _ThrottledClient(client, limiters[provider]) if client is not None else None
                 executors[provider] = ThreadPoolExecutor(max_workers=workers, thread_name_prefix=f"scout-ats-{provider}")
             future = executors[provider].submit(

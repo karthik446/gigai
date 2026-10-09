@@ -198,7 +198,8 @@ Lever, Ashby, Workable, Rippling, Gem, Recruitee, Pinpoint and Breezy. Each
 request names GigAI in its `User-Agent` with the project address, and before
 the first request of the day to a board's host Scout reads that host's
 `robots.txt`; a board whose host disallows the feed is skipped and counted
-as `robots_disallowed` in `gigai scout sources status`. A Pinpoint board
+as `robots_disallowed` in `gigai scout sources status`. Workable is asked at most once a second (its host
+refuses a faster reader). A Pinpoint board
 carries no posting date, so its postings read as undated. A Rippling board
 lists titles and locations only: the date and description of the postings
 whose titles match your profiles are fetched at the update, one small request
