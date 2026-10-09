@@ -22,6 +22,25 @@ operator-visible capability and must link to the relevant release or evidence.
 
 ## Released versions
 
+### 0.1.11.8
+
+Six more hiring systems, and the boards Scout could find on them. **After you upgrade** (`uv tool upgrade gigai`),
+run `gigai scout sources update`: the new boards join your watchlist on the first update and are checked like the
+others.
+
+- **Nine hiring systems.** Scout reads the public job feeds of Workable, Rippling, Gem, Recruitee, Pinpoint and
+  Breezy beside Greenhouse, Lever and Ashby. The catalog ships the 10,616 boards found and verified on them
+  (Workable 2,843, Rippling 1,647, Gem 801, Recruitee 2,287, Pinpoint 565, Breezy 2,473; 245,570 postings,
+  115,883 in the US); a US setup adds the 5,851 of them that list a US posting and are not a staffing agency by
+  name, so the watchlist grows from about 10,300 to about 16,200 boards and the first update after the upgrade
+  takes a few passes. **Add company** takes a board or job URL on any of the nine. A Pinpoint posting has no date; a
+  Rippling posting's date and description are fetched at the update for the titles your profiles search, as
+  Greenhouse descriptions are; a Breezy posting's description is fetched when it is assessed.
+- **Requests say who is asking.** Every board request carries a `User-Agent` naming GigAI and the project address.
+  Before the first request of the day to a board's host, Scout reads that host's `robots.txt` and skips a feed the
+  host disallows (`robots_disallowed` in `gigai scout sources status`). A company's own host (Recruitee, Pinpoint,
+  Breezy) and Workable are asked at most once a second.
+
 ### 0.1.11.7
 
 Search every stored posting, not only the ones your profiles hold. **After you upgrade** (`uv tool upgrade gigai`),

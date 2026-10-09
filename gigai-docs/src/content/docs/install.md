@@ -27,7 +27,7 @@ gigai --version
 Or pin a release tag:
 
 ```bash
-uv tool install "git+https://github.com/karthik446/gigai@v0.1.11.7"
+uv tool install "git+https://github.com/karthik446/gigai@v0.1.11.8"
 ```
 
 ## Check the install
