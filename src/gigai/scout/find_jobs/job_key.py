@@ -243,6 +243,18 @@ def _board_of(home_root: Path, job_identity: str) -> str | None:
     return _boards_of(home_root, (job_identity,)).get(job_identity)
 
 
+def board_of(home_root: Path, job_identity: str) -> str | None:
+    """The board (``<ats>:<slug>``) whose company file holds ``job_identity``, or ``None``: no board, a pasted
+    posting, an index that cannot be read. As :func:`copies_of` finds it; it never raises."""
+
+    if type(job_identity) is not str or not job_identity or job_identity.startswith("text:"):
+        return None
+    try:
+        return _board_of(Path(home_root), job_identity)
+    except Exception:  # noqa: BLE001 - as ``copies_of``: an index that cannot be read names no board
+        return None
+
+
 def find_boards(home_root: Path, identities: Iterable[str] = (), *, known: Mapping[str, str] | None = None) -> None:
     """Names the boards of many jobs ahead of their :func:`copies_of` / :func:`job_key`, for a caller that has many.
 
@@ -348,4 +360,4 @@ def job_key(home_root: Path, target: Path, job_identity: str, *, board: str | No
     return kept_copy(project_dir, copies)
 
 
-__all__ = ["BoardPosting", "board_copies", "board_postings", "canonical_identity", "copies_of", "find_boards", "job_key", "kept_copy"]
+__all__ = ["BoardPosting", "board_copies", "board_of", "board_postings", "canonical_identity", "copies_of", "find_boards", "job_key", "kept_copy"]

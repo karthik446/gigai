@@ -3203,6 +3203,11 @@ def jobs_list_command(
     when it has one, else the earliest posted. --no-collapse lists each.
     With US only on, a posting clearly located outside the US is left out
     (a line says how many); one Scout cannot place is listed and labelled.
+
+    A job you assessed that no role found (from Search, or by its address
+    with `gigai scout jobs assess <URL>`) is listed too, with its state and
+    "in no role: assessed from search" where its roles would be. A --profile
+    filter lists none of them.
     """
 
     from .outbound_check import redact_payload

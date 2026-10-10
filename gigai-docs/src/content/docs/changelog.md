@@ -36,6 +36,12 @@ holds until the job is next written. To copy everything over at once, run `gigai
   on a command or a request (`--profile`, `profile_id`) is recorded as the role that asked and selects nothing.
   An assessment reads your location and work mode from the setup settings, the same for every role; a role's own
   location, countries and work mode still filter its search.
+- **A job you assessed that no role found stays in your list.** A posting you assess from the Search tab or by
+  its address (`gigai scout jobs assess <URL>`) used to be findable again only by searching for the same title.
+  It is now a row of the Jobs list and of `gigai scout jobs list`, with its state (needs your answers, matched,
+  ...), once per job, counted like any row. It has no role tag: the row says "assessed from search" (the
+  command: `[in no role: assessed from search]`). A role filter lists none of them. A posting no role found
+  that you did not assess is not listed.
 - **A role is a tag.** The Jobs list, `gigai scout jobs list`, `gigai scout new` and their API responses list a
   job once, with `tags`: each role that found it, with that role's own rank score, best first. `--profile` on
   `jobs list` and `jobs assess` keeps the jobs that role found; it no longer changes which assessment or state a

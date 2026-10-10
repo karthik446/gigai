@@ -10,6 +10,9 @@ tagged with every active role that found it (``tags``, best first: role id,
 name, its own rank score). 0.1.11.9: a role is a TAG, a filter and never a
 selector: the job has one assessment and one resume, its row shows them
 whichever role a call names, and its weak-fit state is the best tag's rank's.
+0.1.11.9 IDX1: a job the user ASSESSED that no role found (by its address or from
+Search) is a row too, with ``tags: []``, derived per read from the job's stored
+assessment (:func:`_assessed_in_no_role`), never stored; a role filter lists none.
 Filters: roles (the jobs a named role found),
 words in the title, company or location, states, a time window ("new since
 the last check", the last 7 or 30 days), postings the board no longer lists.
@@ -147,7 +150,7 @@ from .evaluated_models import notice_lines
 from .assess_preview import model_input_summary, summary_lines
 from .data_labels import ENVELOPE_KEY, PUBLIC_UNTRUSTED, UNTRUSTED_TEXT_RULE, labels_envelope
 from .find_jobs.canonical_job import canonical_order
-from .find_jobs.job_key import BoardPosting, board_postings, copies_of, find_boards, job_key
+from .find_jobs.job_key import BoardPosting, board_of, board_postings, copies_of, find_boards, job_key
 from .find_jobs.job_copies import (
     PLACE_OTHER,
     PLACE_UNCLEAR,
@@ -226,6 +229,9 @@ STATES = frozenset(_ROW_STATES | {STATE_ASSESSED, STATE_RECOMMENDED, STATE_APPLI
 DEFAULT_LIMIT = 50
 MAX_LIMIT = 200
 _NOT_ASSESSED = "not_assessed"
+#: 0.1.11.9 IDX1: what a row says where its role tags go when no role found the job (``tags: []``): the user assessed
+#: it by its address or from Search.
+NO_ROLE_TEXT = "in no role: assessed from search"
 #: 0.1.11.8 N2: the grid's labels plus the locations of a row's copies (posting text, like ``location``).
 _ROWS_LABELS = {
     **POSTINGS_LABELS,
@@ -388,6 +394,115 @@ def _hidden(row: PostingRecord, states: Sequence[str], named: bool, applications
     return row.state == fit_rules.WEAK_FIT and fit_rules.WEAK_FIT not in states
 
 
+#: ``record path -> (the file's stamp, the job it names, the role that asked)``: a stored assessment no role's list
+#: holds is opened once, then only its stamp is looked at.
+_ASSESSED_NAMES: dict[str, tuple[tuple[int, int], str | None, str | None]] = {}
+_ASSESSED_NAMES_LOCK = threading.Lock()
+_KEPT_ASSESSED_NAMES = 4096
+
+
+def _assessed_name(path: Path) -> tuple[str | None, str | None]:
+    """``(the job identity, the id of the role that asked)`` of the stored assessment at ``path``; ``(None, None)``
+    for a file that cannot be read."""
+
+    from .quick_assess import _read_stored
+
+    try:
+        found = path.stat()
+    except OSError:
+        return None, None
+    stat = (found.st_mtime_ns, found.st_size)
+    key = str(path)
+    with _ASSESSED_NAMES_LOCK:
+        kept = _ASSESSED_NAMES.get(key)
+    if kept is None or kept[0] != stat:
+        stored = _read_stored(path)
+        asked = None if stored is None or stored.profile_ref is None else stored.profile_ref.profile_id
+        kept = (stat, None if stored is None else stored.job.job_identity, asked)
+        with _ASSESSED_NAMES_LOCK:
+            if len(_ASSESSED_NAMES) >= _KEPT_ASSESSED_NAMES and key not in _ASSESSED_NAMES:
+                del _ASSESSED_NAMES[next(iter(_ASSESSED_NAMES))]
+            _ASSESSED_NAMES[key] = kept
+    return kept[1], kept[2]
+
+
+def _assessed_in_no_role(
+    home_root: Path, target: Path, tagged: set[str], resolved: object, views: Sequence[ProfileView], moment: datetime,
+) -> list[PostingRecord]:
+    """0.1.11.9 IDX1: rows for the jobs the user ASSESSED that no role's list holds. Derived per read, never stored.
+
+    `gigai scout jobs assess <URL>` and the Search tab assess a posting the company index holds and no role found.
+    Its assessment is kept as any job's (``quick_assess/job/``), so the list shows it too, or the user could find it
+    again only by searching for the same title: one row a job, with its state, no role tag (``tags: []``).
+
+    The job store's file NAMES are compared with the jobs the roles' lists hold (``tagged``: every row of the read
+    model); only a record of another job is opened, once (:data:`_ASSESSED_NAMES`). A job is left out when any of
+    its copies is in a role's list (that row shows the assessment), when no board holds it (a pasted posting, a URL
+    Scout does not store: the Assessments page lists those) and when its board's file no longer has the posting.
+    Every copy the board holds is a row, so the list's own rules (US only, one row a job) apply as to any job. The
+    row is the asking role's when that role is active, else the default role's: it names no tag. One company file a
+    job; the search index only for a URL that does not name its board (``job_key.find_boards``, all at once).
+    """
+
+    from .find_jobs.company_index import CompanyIndex
+    from .find_jobs.contracts import FindJobsContractError, normalize_url
+    from .job_store_layout import JOB_FOLDER, job_digest
+    from .quick_assess import quick_assess_dir
+
+    if not views:
+        return []
+    try:
+        paths = sorted((quick_assess_dir(home_root, target) / JOB_FOLDER).glob("*.json"))
+    except (OSError, ValueError):
+        return []
+    if not paths:
+        return []
+    held = {job_digest(job) for job in tagged}
+    asked: dict[str, str | None] = {}
+    for path in paths:
+        if path.stem in held:
+            continue
+        job, role = _assessed_name(path)
+        if job and not job.startswith("text:") and job not in tagged:
+            asked.setdefault(job, role)
+    if not asked:
+        return []
+    find_boards(home_root, asked)
+    index = CompanyIndex.for_home(home_root)
+    default = next((view for view in views if view.is_default), views[0])
+    owners = {view.profile_id: view for view in views}
+    found: dict[str, list[tuple[str, object, object]]] = {}
+    seen: set[str] = set()
+    for job, role in asked.items():
+        board = board_of(home_root, job)
+        if board is None or job in seen:
+            continue
+        copies = copies_of(home_root, job, board=board)
+        if any(copy in tagged for copy in copies):
+            continue  # a role's list holds the job by another copy: that row shows the assessment
+        try:
+            entry = index.read(*postings.split_board(board))
+        except (OSError, ValueError):
+            continue
+        if entry is None:
+            continue
+        by_url: dict[str, object] = {}
+        for posting in entry.postings.values():
+            try:
+                by_url.setdefault(normalize_url(posting.url), posting)
+            except FindJobsContractError:
+                continue
+        owner = owners.get(role or "", default)
+        for copy in copies:
+            if copy in by_url and copy not in seen:
+                seen.add(copy)
+                found.setdefault(owner.profile_id, []).append((copy, entry, by_url[copy]))
+    rows: list[PostingRecord] = []
+    for profile_id, items in found.items():
+        rows.extend(postings.unlisted_records(home_root, target, resolved, owners[profile_id], items, now=moment))
+    return rows
+
+
 class _Selection:
     """One refreshed read of the read model with the call's filters applied: every matching posting, in order."""
 
@@ -395,6 +510,7 @@ class _Selection:
         self, home_root: Path, target: Path, store: PipelineStore, *, profile_ids: Sequence[str], query: str | None,
         states: Sequence[str], window: str | None, removed: bool | None, jobs: Sequence[str] | None, moment: datetime,
         model_wait: float | None = None, sort: str = SORT_FIT, us_only: bool = False, collapse: bool = False,
+        assessed_in_no_role: bool = False,
     ) -> None:
         refreshed = postings.refresh(home_root, target, store=store, now=moment, wait=model_wait)
         #: Rows read as stored while a build runs (``postings.BUILD_STALE``), for a caller that acts on them.
@@ -425,6 +541,11 @@ class _Selection:
         # 0.1.11.9: a role is a TAG. ``profile_ids`` filters the jobs (above: the ones a named role found); it never
         # picks whose row a job is shown by. That is the best tag's, so the state is the job's own.
         shown = [(group, _shown(group)) for group in groups.values()]
+        if assessed_in_no_role and not named and not wanted_roles and not self.hidden_profiles:
+            # 0.1.11.9 IDX1: the jobs the user assessed that no role found are listed too, with no tag (a role filter
+            # is a filter on the tags, so it lists none of them). Every filter below judges them as any row.
+            extra = _assessed_in_no_role(home_root, target, {row.job for row in rows}, refreshed.resolved, self.views, moment)
+            shown += [((), row) for row in extra if (row.removed_at is not None) == removed]
         #: The ONE role a call filters by, if it names one: a tag's own flag (``tag_pending``) is then that role's.
         self.only = self.profile_ids[0] if len(self.profile_ids) == 1 else None
         weak = fit_rules.WEAK_FIT
@@ -769,7 +890,7 @@ def search_postings(
             selection = _Selection(
                 home_root, target, store, profile_ids=wanted_profiles, query=query, states=wanted_states, window=window,
                 removed=None if named is not None else removed, jobs=named, moment=moment, model_wait=model_wait, sort=sort,
-                us_only=us_on, collapse=collapse,
+                us_only=us_on, collapse=collapse, assessed_in_no_role=True,
             )
             unknown = [item for item in selection.hidden_profiles if item != EPHEMERAL_PROFILE and not history]
             if unknown:
@@ -1334,7 +1455,9 @@ def render(response: Mapping[str, object]) -> str:
         if divider:
             lines.append(divider)
         before = row
-        tags = ", ".join(str(labels.get(item["profile_id"], item["profile_id"])) for item in row["profiles"])
+        # No tag: no role found the job. In the list it is there because it was assessed (IDX1); "Assess these" names it.
+        no_role = "in no role" if response["schema_version"] == ASSESS_SCHEMA_VERSION else NO_ROLE_TEXT
+        tags = ", ".join(str(labels.get(item["profile_id"], item["profile_id"])) for item in row["profiles"]) or no_role
         gap = f" · {row['minor_gap_text']}" if row.get("minor_gap_text") and not row.get("thin_posting") else ""  # 0110-10-03
         copies = row.get("copies")
         places = f" ({row['locations_text']}; {copies} copies)" if type(copies) is int and copies > 1 else ""

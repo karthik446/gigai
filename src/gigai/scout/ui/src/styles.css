@@ -1713,6 +1713,8 @@ table.data-table th {
   color: var(--muted);
   background: var(--panel);
 }
+/* 0.1.11.9 IDX1: "assessed from search", where the role tags of a job no role found would be */
+.profile-tag.no-role { border-style: dashed; font-style: italic; }
 .profile-tag.shown { background: var(--quick-bg); color: var(--quick); border-color: transparent; }
 .posting-score { font-size: 0.86rem; color: var(--text); }
 /* 0.1.11.5 (UI-01): the fit and rank chips under the title, beside the profile tags */

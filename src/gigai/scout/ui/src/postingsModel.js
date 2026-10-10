@@ -347,6 +347,15 @@ export function profileTags(row, profiles) {
     }));
 }
 
+// 0.1.11.9 IDX1: a row NO role tags is in the list because you assessed it (by its address or from Search). It has
+// no role chip; this marker stands where they would be. null for a row a role found.
+export const NO_ROLE_LABEL = "assessed from search";
+export const NO_ROLE_TITLE = "No role found this job. You assessed it from Search or by its address, so it is listed here with its state.";
+export function noRoleMarker(row) {
+  const tags = (row && (row.tags || row.profiles)) || [];
+  return tags.length === 0 ? { label: NO_ROLE_LABEL, title: NO_ROLE_TITLE } : null;
+}
+
 // The tooltip of a role tag on a row: which saved search found the job, and that role's own rank score.
 export function roleTagTitle(tag) {
   const rank = tag && tag.rankScore !== null && tag.rankScore !== undefined ? ` Its rank for this role: ${tag.rankScore}.` : "";

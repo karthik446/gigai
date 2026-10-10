@@ -42,6 +42,7 @@ import {
   parseJobsHash,
   postedLine,
   profileChips,
+  noRoleMarker,
   profileTags,
   roleTagTitle,
   rankingLine,
@@ -151,6 +152,7 @@ function Tile({ label, value, href, testId }) {
 
 function PostingRow({ row, profiles, anchor, usOnly, selected, onSelect }) {
   const tags = profileTags(row, profiles);
+  const noRole = noRoleMarker(row);
   const details = detailLine(row);
   const posted = postedLine(row);
   const copies = copiesTag(row);
@@ -213,6 +215,11 @@ function PostingRow({ row, profiles, anchor, usOnly, selected, onSelect }) {
               {tag.label}
             </span>
           ))}
+          {noRole && (
+            <span className="profile-tag no-role" data-testid="no-role-marker" title={noRole.title}>
+              {noRole.label}
+            </span>
+          )}
           {scoreChips(row).map((chip) => (
             <span key={chip.kind} className={`score-chip ${chip.kind} tone-${chip.tone}`} data-testid={chip.testId} data-tone={chip.tone} title={chip.title}>
               {chip.label}
