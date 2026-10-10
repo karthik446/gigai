@@ -57,7 +57,8 @@ holds until the job is next written. To copy everything over at once, run `gigai
   and `GET /api/jobs?url=` answer from the job; the commands they print name no role.
 - **The same job posted once per country is one job.** 0.1.11.8 listed it as one row; now it also has one
   assessment and one resume. Assess, the resume commands and the job page work from any copy's URL and reach the
-  same record, which is kept under one posting of the job: its US posting when it has one, else the earliest
+  same record for a job a role found; for a job no role found, use the URL Search shows (the posting that stands
+  for the job). The record is kept under one posting of the job: its US posting when it has one, else the earliest
   posted (a job that already has a record under another of its postings keeps it there). An application
   recorded on any copy shows on the job's row, and the row's tags are the roles that found any copy; a role
   filter keeps the row for a role that found only another copy. Two copies named to `gigai scout jobs assess` are
