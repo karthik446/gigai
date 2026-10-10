@@ -394,6 +394,55 @@ def test_headings_with_an_id_are_kept_and_invisible_unicode_is_stripped() -> Non
     assert set(found.to_json()) == {"url", "title", "headings", "body_chars", "page_level_citable", "truncated"}
 
 
+def test_a_heading_with_no_id_of_its_own_uses_its_nearest_enclosing_sections_id() -> None:
+    html = '<section id="intro"><h2>Intro</h2><p>text</p></section>'
+    found = lf.parse_page("https://docs.example.com/a/b", f"<html><head><title>T</title></head><body>{html}</body></html>")
+    assert [dict(heading) for heading in found.headings] == [{"tag": "h2", "id": "intro", "text": "Intro"}]
+
+
+def test_a_heading_with_no_id_of_its_own_uses_the_nearest_enclosing_div_class_section_id() -> None:
+    html = '<div class="section" id="intro"><h2>Intro</h2></div>'
+    found = lf.parse_page("https://docs.example.com/a/b", f"<html><head><title>T</title></head><body>{html}</body></html>")
+    assert [dict(heading) for heading in found.headings] == [{"tag": "h2", "id": "intro", "text": "Intro"}]
+
+
+def test_a_plain_div_between_a_section_and_its_heading_does_not_hide_the_sections_id() -> None:
+    html = '<section id="outer"><div class="note"><p>a hint</p></div><h2>Heading</h2></section>'
+    found = lf.parse_page("https://docs.example.com/a/b", f"<html><head><title>T</title></head><body>{html}</body></html>")
+    assert [dict(heading) for heading in found.headings] == [{"tag": "h2", "id": "outer", "text": "Heading"}]
+
+
+def test_a_headerlink_permalink_inside_the_heading_gives_it_its_id() -> None:
+    html = '<h2>Intro<a class="headerlink" href="#intro" title="Link to this heading">#</a></h2>'
+    found = lf.parse_page("https://docs.example.com/a/b", f"<html><head><title>T</title></head><body>{html}</body></html>")
+    assert found.headings[0]["id"] == "intro"
+
+
+def test_an_anchor_or_span_placed_immediately_before_a_heading_gives_it_its_id() -> None:
+    for wrapper in ('<a id="intro"></a>', '<span id="intro"></span>'):
+        html = f"{wrapper}<h2>Intro</h2>"
+        found = lf.parse_page("https://docs.example.com/a/b", f"<html><head><title>T</title></head><body>{html}</body></html>")
+        assert [dict(heading) for heading in found.headings] == [{"tag": "h2", "id": "intro", "text": "Intro"}]
+
+
+def test_an_anchor_not_immediately_before_a_heading_is_not_used() -> None:
+    html = '<a id="intro"></a><p>some other content</p><h2>Intro</h2>'
+    found = lf.parse_page("https://docs.example.com/a/b", f"<html><head><title>T</title></head><body>{html}</body></html>")
+    assert found.headings == ()  # no usable anchor nearby: the heading has none, so it is dropped like any id-less heading
+
+
+def test_a_headings_own_id_is_never_overridden_by_an_enclosing_section_or_a_preceding_anchor() -> None:
+    html = '<a id="before"></a><section id="outer"><h2 id="own">Intro</h2></section>'
+    found = lf.parse_page("https://docs.example.com/a/b", f"<html><head><title>T</title></head><body>{html}</body></html>")
+    assert [dict(heading) for heading in found.headings] == [{"tag": "h2", "id": "own", "text": "Intro"}]
+
+
+def test_a_heading_with_no_id_anywhere_near_it_stays_without_one() -> None:
+    html = "<div><p>intro text</p><h2>Intro</h2></div>"
+    found = lf.parse_page("https://docs.example.com/a/b", f"<html><head><title>T</title></head><body>{html}</body></html>")
+    assert found.headings == ()  # no section, no headerlink, no preceding anchor: same as before the fix
+
+
 def test_only_the_documents_own_title_is_its_title() -> None:
     html = "<html><head><title>Real title</title></head><body><svg><title>Icon</title></svg><p>text</p></body></html>"
     assert lf.parse_page("https://docs.example.com/a/b", html).title == "Real title"
@@ -543,8 +592,25 @@ def test_the_arc_checklist_names_the_stages_the_fetched_pages_cover() -> None:
     assert lf.compute_arc_checklist([]) == {}
 
 
+def test_a_tracking_server_page_does_not_count_for_the_serving_stage() -> None:
+    pages = [
+        {"url": "https://mlflow.org/docs/latest/tracking-server.html", "title": "MLflow Tracking Server", "headings": [], "depth": 1},
+    ]
+    checklist = lf.compute_arc_checklist(pages)
+    assert "serve_deploy_locally" not in checklist
+    assert [hit["page_index"] for hit in checklist["production_like"]] == [0]  # a tracking/backend-store mention counts there instead
+
+
+def test_a_local_inference_server_page_counts_for_the_serving_stage() -> None:
+    pages = [
+        {"url": "https://mlflow.org/docs/latest/deployment/deploy-model-locally.html", "title": "Deploy MLflow Model as a Local Inference Server", "headings": [], "depth": 1},
+    ]
+    checklist = lf.compute_arc_checklist(pages)
+    assert [hit["page_index"] for hit in checklist["serve_deploy_locally"]] == [0]
+
+
 def test_a_crawls_json_carries_its_arc_checklist() -> None:
-    web = FakeWeb({"https://docs.example.com/docs/quickstart/": page("Quickstart", '<h1 id="serve">Serve the model</h1>')})
+    web = FakeWeb({"https://docs.example.com/docs/quickstart/": page("Quickstart", '<h1 id="serve">Serve a model</h1>')})
     stored = lf.crawl_lesson(fetcher(web), ["https://docs.example.com/docs/quickstart/"]).to_json()
     assert set(stored["arc_checklist"]) == {"first_run", "serve_deploy_locally"}  # type: ignore[call-overload]
 

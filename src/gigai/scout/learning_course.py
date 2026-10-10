@@ -478,6 +478,25 @@ _COMMON_PRODUCT_WORDS = frozenset({
 _SHARED_HOSTS = frozenset({"github.com", "gitlab.com", "bitbucket.org", "arxiv.org", "medium.com"})
 #: Hosting suffixes: the labels in front of them name the project ("argo-cd.readthedocs.io"), the suffix never does.
 _HOSTING_SUFFIXES = (".github.io", ".gitlab.io", ".readthedocs.io", ".readthedocs.org", ".gitbook.io", ".netlify.app", ".pages.dev")
+#: A vendor word's OWN root domain, where (unlike "apache.org", a foundation hosting many unrelated third-party
+#: projects under their own subdomains) the vendor publishes many of ITS OWN products together: a tool whose
+#: name names the vendor ("NVIDIA GPUs", "AWS Bedrock") is documented somewhere under this domain, not identified
+#: by a further sub-label of it. A vendor with no entry here (``apache``, ``hashicorp``) stays as before: its
+#: word alone never makes a host the tool's.
+_VENDOR_OWN_DOMAINS: Mapping[str, str] = {
+    "nvidia": "nvidia.com", "aws": "amazon.com", "amazon": "amazon.com", "google": "google.com",
+    "microsoft": "microsoft.com", "azure": "microsoft.com",
+}
+
+
+def _vendor_own_host(host: str, name: str) -> bool:
+    """Whether ``host`` is a vendor's own multi-product domain AND ``name`` names that same vendor."""
+
+    words = set(_NAME_WORDS.findall(name.lower()))
+    for vendor, domain in _VENDOR_OWN_DOMAINS.items():
+        if vendor in words and (host == domain or host.endswith("." + domain)):
+            return True
+    return False
 
 
 def tool_aliases(name: str) -> list[str]:
@@ -544,6 +563,8 @@ def source_strength(source: Mapping[str, Any], name: str, link: str = "") -> int
         return 0
     if link and _url_host(link) == host:
         return 2
+    if _vendor_own_host(host, name):
+        return 2
     own = next((host[: -len(suffix)] for suffix in _HOSTING_SUFFIXES if host.endswith(suffix)), None)
     labels = [] if host in _SHARED_HOSTS else [label for label in (own.split(".") if own is not None else host.split(".")[:-1]) if label]
     flat_labels = [re.sub(r"[^a-z0-9]", "", label) for label in labels]
@@ -604,8 +625,9 @@ def choose_main_tool(title: str, candidates: Sequence[ToolCandidate], sources: S
     In this order:
 
     1. a tool the lesson TITLE names (whole words, case ignored). When the title names several ("Airflow,
-       Prefect and Temporal") the one with most verified pages of its own, then most postings, then the first
-       named.
+       Prefect and Temporal") the one with most verified pages of its own, then the LONGER name (the more
+       specific one: "AWS Bedrock" over the "AWS" it contains, even when AWS has more postings), then most
+       postings, then the first named.
     2. the tool whose documentation holds the MAJORITY (more than half) of the lesson's verified sources.
     3. of the lesson's own counted tools, the one most postings name: first among those with a verified page of
        their own, then (none has one) among all of them. Between the two, a tool the lesson names that the
@@ -620,7 +642,13 @@ def choose_main_tool(title: str, candidates: Sequence[ToolCandidate], sources: S
     titled = [(index, named_at(title, candidates[index].name)) for index in order if candidates[index].titled]
     in_title = [(index, at) for index, at in titled if at is not None]
     if in_title:
-        index, _at = min(in_title, key=lambda found: (-pages[found[0]], tuple(-number for number in candidates[found[0]].count), found[1]))
+        index, _at = min(
+            in_title,
+            key=lambda found: (
+                -pages[found[0]], -len(candidates[found[0]].name),
+                tuple(-number for number in candidates[found[0]].count), found[1],
+            ),
+        )
         return candidates[index], TOOL_BY_TITLE
     majority = [index for index in order if pages[index] * 2 > len(sources)]
     if majority:

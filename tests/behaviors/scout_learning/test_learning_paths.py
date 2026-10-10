@@ -921,6 +921,20 @@ def test_a_title_that_names_several_tools_takes_the_one_with_verified_pages_then
     assert lp.pick_tool(first_lesson(data), data, []).name == "Trackwell"  # no page at all: 12 postings against 3 and 6
 
 
+def test_a_title_naming_a_vendor_and_its_product_takes_the_more_specific_name_even_with_fewer_postings() -> None:
+    # "AWS Bedrock" and "AWS" are both named in the title and both verify on the same AWS pages (a vendor's own
+    # domain counts for any tool naming that vendor): the more specific name wins, even though AWS alone has
+    # more postings.
+    data = course({**TRACKING, "title": "Managed foundation models on AWS Bedrock", "technologies": ["AWS", "AWS Bedrock"]})
+    data["technologies"] = {"Managed AI": [  # type: ignore[index]
+        {"id": "aws", "display": "AWS", "percent": 40.0, "in_90d": 100, "any_date": 120},
+        {"id": "aws-bedrock", "display": "AWS Bedrock", "percent": 8.0, "in_90d": 20, "any_date": 25},
+    ]}
+    pages = [source("https://docs.aws.amazon.com/bedrock/latest/userguide/a"), source("https://docs.aws.amazon.com/bedrock/latest/userguide/b")]
+    picked = lp.pick_tool(first_lesson(data), data, pages)
+    assert (picked.name, picked.how) == ("AWS Bedrock", "title")
+
+
 def test_without_a_tool_in_the_title_the_tool_whose_documentation_holds_most_of_the_sources_is_the_main_tool() -> None:
     data = course({**TRACKING, "technologies": ["Trackwell", "Servewell"]})
     sources = [source("https://servewell.example.org/docs/start"), source("https://servewell.example.org/docs/deploy"), source("https://trackwell.example.org/docs/start")]
@@ -968,9 +982,25 @@ def test_without_a_title_tool_or_a_majority_the_lessons_counted_technology_most_
     ("https://github.com/vectorwell/vectorwell", "Repository", "Vectorwell", 1),
     ("https://go.dev/doc/tutorial/getting-started", "Tutorial", "Go", 2),
     ("https://docs.gopher.example.com/start/intro", "Where to go next", "Go", 0),
+    ("https://docs.nvidia.com/cuda/profiler-users-guide/", "Profiler User's Guide", "NVIDIA GPUs", 2),  # the vendor's OWN domain, for its own product
+    ("https://docs.nvidia.com/deploy/mps/index.html", "Multi-Process Service", "NVIDIA Triton Inference Server", 2),
+    ("https://docs.aws.amazon.com/bedrock/latest/userguide/what-is-bedrock.html", "What is Amazon Bedrock?", "AWS Bedrock", 2),
+    ("https://docs.aws.amazon.com/bedrock/latest/userguide/what-is-bedrock.html", "What is Amazon Bedrock?", "AWS", 2),
+    ("https://sparkle.apache.org/docs/latest/tuning", "Tuning", "Apache GPUs", 0),  # "apache" has no entry: unchanged, vendor word alone is never enough
 ])
 def test_a_page_is_a_tools_by_its_host_or_by_its_address_or_title(url: str, title: str, tool: str, strength: int) -> None:
     assert lc.source_strength(source(url, title), tool) == strength
+
+
+def test_a_vendors_own_domain_counts_for_the_vendor_but_not_for_an_unrelated_product_hosted_under_it() -> None:
+    # "apache.org" hosts many unrelated third-party projects under their own sub-labels: the vendor word alone
+    # never makes "sparkle.apache.org" a page of "Apache Airwell" (the pinned case above). "docs.nvidia.com" is
+    # NVIDIA's own multi-product documentation, so it counts for any tool that names NVIDIA.
+    assert lc.source_strength(source("https://sparkle.apache.org/docs/latest/tuning"), "Apache Airwell") == 0
+    assert lc.source_strength(source("https://docs.nvidia.com/cuda/gpu-compute/"), "NVIDIA GPUs") == 2
+    assert lc.source_strength(source("https://docs.microsoft.com/azure/aks/intro"), "Azure Kubernetes Service") == 2
+    # a host that merely contains the vendor's word as a label, but is not the vendor's real root domain, does not count
+    assert lc.source_strength(source("https://docs.nvidia.example.com/guide"), "NVIDIA GPUs") == 0
 
 
 def test_a_tools_names_and_where_a_title_names_it() -> None:

@@ -206,6 +206,12 @@ class FetchBudget:
 
 HEADING_TAGS = frozenset({"h1", "h2", "h3", "h4"})
 _BODY_SKIP_TAGS = frozenset({"script", "style"})
+#: A ``div``'s class names that mark it as a Sphinx/docutils section wrapper (others are not treated as one).
+_SECTION_DIV_CLASSES = frozenset({"section", "doc-section"})
+#: Elements that may hold a bare anchor placed immediately before a heading (``<a id=...></a>``, ``<span id=...></span>``).
+_ANCHOR_TAGS = frozenset({"a", "span"})
+#: A void element: no end tag follows, so it never changes "immediately before the heading".
+_VOID_TAGS = frozenset({"br", "hr", "img", "input", "meta", "link", "wbr"})
 #: Path ends that are index or redirect stubs on documentation hosts (0 headings, a list of links or a script).
 STUB_PATH_HINTS = re.compile(r"/(documentation|documentation\.html|books-and-papers|videos|podcasts)/?$", re.I)
 #: A page that titles itself a redirect is a stub however long its navigation text is.
@@ -214,7 +220,19 @@ REDIRECT_TITLE_RE = re.compile(r"redirect", re.I)
 PREFER_RE = re.compile(r"(docs?|tutorial|quickstart|guide|concepts?|streams?|registry|deploy|serving|tracking|api)", re.I)
 
 
+def _class_names(attrs: Mapping[str, str | None]) -> frozenset[str]:
+    return frozenset((attrs.get("class") or "").split())
+
+
 class _PageParser(HTMLParser):
+    """Besides the document's title, its headings and links: each heading's anchor may not sit on the heading itself.
+
+    Sphinx/docutils, Docusaurus and ReadTheDocs commonly put the ``id`` on the enclosing ``<section>`` or
+    ``<div class="section">``, on an ``<a>``/``<span>`` placed immediately before the heading, or only reachable
+    through a ``headerlink`` permalink inside the heading (``<a class="headerlink" href="#id">``). A heading
+    that carries its own ``id`` is never overridden by one of these.
+    """
+
     def __init__(self) -> None:
         super().__init__(convert_charrefs=True)
         self.title = ""
@@ -225,25 +243,61 @@ class _PageParser(HTMLParser):
         self.links: list[str] = []
         self.body_chars = 0
         self._skip_depth = 0
+        #: One entry per still-open ``section``/``article``/``div``: its id if it is a section wrapper, else ``None``.
+        self._section_ids: list[str | None] = []
+        #: Stack of ids of the still-open ``a``/``span`` elements seen outside a heading (``""`` when one has none).
+        self._open_anchor_ids: list[str] = []
+        #: The id of the last ``a``/``span`` closed since, cleared as soon as anything else opens or closes.
+        self._pending_anchor_id = ""
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         found = dict(attrs)
         if tag == "title" and not self._title_done:  # the document's title, not an inline SVG's
             self._in_title = True
         if tag in HEADING_TAGS:
-            self._heading = {"tag": tag, "id": found.get("id") or "", "text": ""}
+            enclosing = next((found_id for found_id in reversed(self._section_ids) if found_id), "")
+            fallback = self._pending_anchor_id or enclosing
+            self._heading = {"tag": tag, "id": found.get("id") or "", "text": "", "headerlink_id": "", "fallback_id": fallback}
+            self._pending_anchor_id = ""
+        elif self._heading is not None:
+            if tag == "a" and not self._heading["headerlink_id"] and "headerlink" in _class_names(found):
+                anchor = (found.get("href") or "").removeprefix("#")
+                if anchor:
+                    self._heading["headerlink_id"] = anchor
         if tag == "a" and found.get("href"):
             self.links.append(str(found["href"]))
         if tag in _BODY_SKIP_TAGS:
             self._skip_depth += 1
+        if self._heading is None:
+            if tag in ("section", "article", "div"):
+                is_section = tag != "div" or bool(_class_names(found) & _SECTION_DIV_CLASSES)
+                self._section_ids.append((found.get("id") or "") if is_section else None)
+                self._pending_anchor_id = ""
+            elif tag in _ANCHOR_TAGS:
+                self._open_anchor_ids.append(found.get("id") or "")
+            elif tag not in _VOID_TAGS:
+                self._pending_anchor_id = ""  # anything else opening breaks "immediately before the heading"
 
     def handle_endtag(self, tag: str) -> None:
         if tag == "title" and self._in_title:
             self._in_title = False
             self._title_done = True
         if tag in HEADING_TAGS and self._heading is not None:
-            self.headings.append(self._heading)
+            heading = self._heading
+            if not heading["id"]:
+                heading["id"] = heading["headerlink_id"] or heading["fallback_id"]
+            del heading["headerlink_id"]
+            del heading["fallback_id"]
+            self.headings.append(heading)
             self._heading = None
+            self._pending_anchor_id = ""
+        if self._heading is None:
+            if tag in ("section", "article", "div") and self._section_ids:
+                self._section_ids.pop()
+            elif tag in _ANCHOR_TAGS and self._open_anchor_ids:
+                self._pending_anchor_id = self._open_anchor_ids.pop()
+            elif tag not in _VOID_TAGS and tag not in HEADING_TAGS:
+                self._pending_anchor_id = ""
         if tag in _BODY_SKIP_TAGS and self._skip_depth > 0:
             self._skip_depth -= 1
 
@@ -653,9 +707,21 @@ ARC_STAGE_KEYWORDS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("core_object_model", ("concepts", "architecture", "design", "core concepts", "intro", "introduction")),
     ("persist_compare", ("compare", "search", "query", "persist", "point-in-time", "offline", "online")),
     ("package_register_promote", ("registry", "model-registry", "register", "alias", "package", "project")),
-    ("serve_deploy_locally", ("deploy", "deployment", "serve", "serving", "server")),
+    (
+        "serve_deploy_locally",
+        (
+            "serving", "serve a model", "models serve", "inference server", "scoring endpoint",
+            "deploy a model", "deploy-model", "model deployment", "rest api for a model",
+        ),
+    ),
     ("reproduce_automate", ("reproduce", "ci", "docker", "compose", "pin", "environment", "automate")),
-    ("production_like", ("production", "cluster", "multi-container", "backend", "postgres", "minio", "scale")),
+    (
+        "production_like",
+        (
+            "production", "cluster", "multi-container", "backend", "postgres", "minio", "scale",
+            "tracking server", "backend store",
+        ),
+    ),
     ("windowing", ("window", "windowing", "tumbling", "hopping", "aggregate", "aggregation")),
     ("retention", ("retention", "topic-configs", "topic configs", "log.retention")),
     ("compaction", ("compaction", "compact")),
