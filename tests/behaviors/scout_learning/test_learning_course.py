@@ -1041,24 +1041,28 @@ def test_the_metered_model_records_a_lesson_call_with_its_lesson_count() -> None
 
 
 # ---------------------------------------------------------------------------
-# 7. G7e: behaviours are not lessons; the main tool's own pages
+# 7. G7h: methods are lessons, traits and seniority talk are not; the main tool's own pages
 # ---------------------------------------------------------------------------
 
 
-def test_the_curriculum_template_says_a_behaviour_is_never_a_lesson() -> None:
+def test_the_curriculum_template_states_the_method_versus_trait_rule() -> None:
     template = lc._template(lc._CURRICULUM_RESOURCE)
-    rule = next(paragraph for paragraph in template.split("\n\n") if "LESSONS ARE TECHNICAL" in paragraph)
-    assert rule.startswith("{{plan}}LESSONS ARE TECHNICAL. Every lesson teaches a technical subject")
-    assert "A BEHAVIOUR is NEVER a lesson and never a module" in rule
-    for behaviour in ("code review", "design reviews", "documentation", "stakeholder management", "mentoring", "leadership", "ownership", "cross-functional"):
-        assert behaviour in rule
+    rule = next(paragraph for paragraph in template.split("\n\n") if "METHODS VERSUS TRAITS" in paragraph)
+    assert rule.startswith("{{plan}}METHODS VERSUS TRAITS. A lesson teaches a METHOD")
+    assert "something a learner can PRACTICE with a hands-on exercise from public documentation or tutorials" in rule
+    for method in ("prioritization framework", "discovery-interview technique", "roadmap format", "experimentation or A/B-testing method"):
+        assert method in rule
+    assert "A TRAIT is NEVER a lesson and never a module" in rule
+    for trait in ("mentoring and coaching", "operating at staff level", "communication skills and soft skills", "leadership as a trait"):
+        assert trait in rule
+    assert "This split is role-independent" in rule and "product management" in rule
     assert 'A concept whose category ends with "(behaviour, not a lesson)" goes under EXPECTATIONS only' in rule
-    assert "- every lesson is technical: no lesson and no module about a behaviour" in template
-    assert '"teaches only behaviours" names a lesson about behaviours' in template  # the retry is told what the refusal means
+    assert "- every lesson teaches a method, not a trait: no lesson and no module is a trait or seniority lesson" in template
+    assert '"reads as a trait or seniority lesson" names a lesson about a trait or a level, not a method' in template  # the retry is told what the refusal means
     # the rule is in the planning prompt and not in the source follow-up
     prompt = lc.curriculum_prompt(ROLE, CONCEPTS)
-    assert "LESSONS ARE TECHNICAL" in prompt and "{{" not in prompt
-    assert "LESSONS ARE TECHNICAL" not in lc.sources_retry_prompt(ROLE, [{"id": "lesson-1-1", "title": "Lesson 1.1"}], {})
+    assert "METHODS VERSUS TRAITS" in prompt and "{{" not in prompt
+    assert "METHODS VERSUS TRAITS" not in lc.sources_retry_prompt(ROLE, [{"id": "lesson-1-1", "title": "Lesson 1.1"}], {})
 
 
 def test_a_concept_that_is_not_technical_is_marked_a_behaviour_in_the_prompt() -> None:
@@ -1069,28 +1073,143 @@ def test_a_concept_that_is_not_technical_is_marked_a_behaviour_in_the_prompt() -
     assert prompt.count("(behaviour, not a lesson) |") == 2  # mentoring and technical-direction, nothing else
 
 
-def test_a_lesson_whose_concepts_are_all_behaviours_is_refused_and_one_with_a_technical_concept_is_kept() -> None:
+#: The MLOps curriculum's 35 lesson titles (g7f, post-fix head b75826d0): 0 trait lessons.
+MLOPS_LESSON_TITLES = (
+    "The ML lifecycle and what an ML platform provides",
+    "Python for production ML services: packaging, typing and async",
+    "Distributed systems and API design for platform services",
+    "Kubernetes for ML workloads: jobs, GPU scheduling and autoscaling",
+    "AWS for ML platforms: EKS, IAM, networking and storage",
+    "Infrastructure as code with Terraform",
+    "GPU compute: NVIDIA GPUs, drivers, device plugins and memory",
+    "Batch scheduling and capacity with Slurm and Kubernetes queues",
+    "Distributed data processing with Spark and PySpark",
+    "SQL, data modeling, warehouses and the lakehouse",
+    "Workflow orchestration with Airflow: DAGs, scheduling and backfills",
+    "Feature pipelines, feature stores and training-serving skew",
+    "Dataset curation, versioning, lineage and metadata",
+    "ML pipeline frameworks: Kubeflow, Flyte, Metaflow and Prefect",
+    "Experiment tracking and the model registry with MLflow",
+    "Distributed training across GPU nodes",
+    "Fault-tolerant training: checkpointing, preemption and resumable jobs",
+    "Model serving architecture: online, batch and streaming inference",
+    "Serving open-weight LLMs with vLLM and comparable runtimes",
+    "Inference performance: batching, KV caching, quantization and tail latency",
+    "Edge and on-device deployment for robotics and autonomy",
+    "CI/CD for models and services with GitHub Actions",
+    "GitOps with Argo CD",
+    "Staged model rollouts: shadow, canary and automated rollback",
+    "Model evaluation pipelines, regression suites and simulation",
+    "Logs, metrics and traces with OpenTelemetry and Prometheus",
+    "SLOs, alerting and on-call for ML services",
+    "Model monitoring: drift, data quality and prediction logging",
+    "Cost visibility and efficiency for GPU and warehouse spend",
+    "Identity and access: OAuth 2.0, OIDC, SAML and RBAC",
+    "Securing the ML supply chain: images, secrets and model artifacts",
+    "Governance, audit trails and regulated deployments",
+    "Managed foundation models with AWS Bedrock",
+    "Retrieval infrastructure: vector search and RAG",
+    "Agent runtimes, tool protocols and the Model Context Protocol",
+)
+
+#: The PRODUCT MANAGER curriculum's method lessons (pre-rule evidence, read-only; 25 titles that must pass).
+PM_METHOD_LESSON_TITLES = (
+    "What a product manager owns: judgment, outcomes and the product lifecycle",
+    "Product vision, strategy and tying product decisions to business outcomes",
+    "Technical fluency: how software is built and how to reason about it with engineers",
+    "Customer discovery, user interviews and market validation",
+    "Design thinking, journey mapping and workflow design",
+    "Prototyping to learn: hands-on testing of ideas before building",
+    "Zero-to-one: building new products in ambiguity as an early or founding PM",
+    "Prioritization frameworks and making tradeoffs explicit",
+    "Building and communicating a product roadmap",
+    "Requirements, user stories, acceptance criteria and writing specs",
+    "Agile delivery, backlog ownership and partnering with engineering to execute",
+    "Platform products, developer experience and internal tools",
+    "APIs, webhooks, integrations and partner ecosystems",
+    "Identity, authentication, permissions and access models",
+    "Real-time and sync patterns, data products and data quality",
+    "Infrastructure, cloud compute, networking and hardware constraints",
+    "Machine learning and LLM fundamentals for product decisions",
+    "Designing AI agents and agentic product experiences",
+    "Evaluating AI product quality: evals, failure modes and risk",
+    "Using AI tools and coding agents in your own product work",
+    "Defining success metrics and using product analytics",
+    "Experimentation and A/B testing",
+    "Growth funnels, onboarding, adoption and product-led growth",
+    "Pricing, packaging, subscriptions, usage metering and billing",
+    "Product launch, rollout strategy and go-to-market collaboration",
+    "Documentation, changelogs and enabling support and customer success",
+    "Enterprise and B2B SaaS: buyers, admins, procurement and public sector",
+    "Security, privacy, compliance and governance in regulated products",
+    "Fintech: payments, banking, insurance, trading, fraud and identity verification",
+    "Ecommerce, marketplaces, mobile, media and advertising products",
+    "Physical and high-consequence domains: manufacturing, automotive, healthcare, life sciences",
+)
+
+#: The PRODUCT MANAGER curriculum's 4 trait lessons (pre-rule evidence): levels, staff/principal scope,
+#: coaching/mentoring/leading, and cross-functional collaboration with stakeholder management (no method word).
+PM_TRAIT_LESSON_TITLES = (
+    "PM levels from associate to senior: track record and what postings ask for",
+    "Staff and principal scope: independent ownership as a senior individual contributor",
+    "Coaching, mentoring and leading product managers",
+    "Cross-functional collaboration, stakeholder management and executive communication",
+)
+
+
+#: Every real lesson has at least one technical concept mapped to it (postings name something technical for
+#: it); the per-lesson gate below mirrors that: a title passes the trait check once it has a technical concept,
+#: unless the title alone is enough to refuse it (G7h: title match AND no technical concept).
+_KNOWN = {str(item["id"]): item for item in CONCEPTS}
+
+
+@pytest.mark.parametrize("title", MLOPS_LESSON_TITLES)
+def test_every_mlops_lesson_title_passes_the_trait_check(title: str) -> None:
+    assert not lc._is_trait_lesson(title, ["kubernetes"], _KNOWN)
+
+
+@pytest.mark.parametrize("title", PM_METHOD_LESSON_TITLES)
+def test_every_pm_method_lesson_title_passes_the_trait_check(title: str) -> None:
+    assert not lc._is_trait_lesson(title, ["kubernetes"], _KNOWN)
+
+
+@pytest.mark.parametrize("title", PM_TRAIT_LESSON_TITLES)
+def test_every_pm_trait_lesson_title_is_refused_by_the_trait_check(title: str) -> None:
+    # refused even with a technical concept mapped: the title alone names a trait or level, so G7h still refuses it
+    assert lc._is_trait_title(title)
+    assert lc._is_trait_lesson(title, ["mentoring"], _KNOWN)  # no technical concept: refused
+
+
+def test_design_docs_as_a_method_passes_but_design_docs_and_standards_is_refused() -> None:
+    assert lc._is_trait_title("Design docs and engineering standards")
+    assert not lc._is_trait_title("Design docs as a method: writing and reviewing")
+
+
+def test_a_trait_titled_lesson_is_refused_only_when_it_has_no_technical_concept() -> None:
     answer = curriculum_answer()
-    lesson_of(answer).update(title="Mentoring and technical direction at staff level", concepts=["mentoring", "technical-direction"])
+    lesson_of(answer).update(title="Coaching, mentoring and leading engineers at staff level", concepts=["mentoring", "technical-direction"])
     with pytest.raises(LearningCourseError) as refused:
         lc.parse_curriculum(json.dumps(answer), ROLE, CONCEPTS)
     assert refused.value.code == "curriculum_invalid"
-    assert "lesson lesson-1-1 teaches only behaviours (mentoring, technical-direction): a lesson must teach a technical concept" in str(refused.value)
-    # a behaviour beside a technical concept does not refuse the lesson
+    assert "lesson lesson-1-1 ('Coaching, mentoring and leading engineers at staff level') reads as a trait or seniority lesson" in str(refused.value)
+    # the same title beside a technical concept is a method lesson that happens to mention mentoring: kept
     lesson_of(answer).update(concepts=["mentoring", "model-serving"])
     assert parsed(answer)["modules"][0]["lessons"][0]["concepts"] == ["mentoring", "model-serving"]
+    # a non-trait title with only behaviour concepts is NOT refused (G7h replaces the per-concept check with the title check)
+    lesson_of(answer).update(title="Lesson 1.1", concepts=["mentoring"])
+    assert parsed(answer)["modules"][0]["lessons"][0]["concepts"] == ["mentoring"]
     # a concept without G1's flag counts as technical (a stored count from before the flag)
     unflagged = [{key: value for key, value in item.items() if key != "technical"} for item in CONCEPTS]
-    lesson_of(answer).update(concepts=["mentoring"])
+    lesson_of(answer).update(title="Operating at staff level", concepts=["mentoring"])
     assert lc.parse_curriculum(json.dumps(answer), ROLE, unflagged)["planned_lessons"] == 28
 
 
-def test_a_curriculum_with_a_behaviour_lesson_is_asked_for_once_more_with_what_was_wrong() -> None:
+def test_a_curriculum_with_a_trait_lesson_is_asked_for_once_more_with_what_was_wrong() -> None:
     bad = curriculum_answer()
-    lesson_of(bad, 6, 0).update(concepts=["mentoring"])
+    lesson_of(bad, 6, 0).update(title="Operating at staff level", concepts=["mentoring"])
     model = ScriptedModel(bad, curriculum_answer())
     assert lc.plan_curriculum(model, ROLE, CONCEPTS)["planned_lessons"] == 28 and model.calls == 2 and model.invalid == 1
-    assert "rejected by the validator: lesson lesson-7-1 teaches only behaviours (mentoring)" in model.prompts[1]
+    assert "rejected by the validator: lesson lesson-7-1 ('Operating at staff level') reads as a trait or seniority lesson" in model.prompts[1]
 
 
 MLFLOW = "https://mlflow.example.org"

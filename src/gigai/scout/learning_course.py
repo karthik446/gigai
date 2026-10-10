@@ -268,6 +268,40 @@ def _concept_line(concept: Mapping[str, object]) -> str:
     return f"{concept['id']} | {clean_text(str(concept.get('display', '')))} | {category} | {counts} | {example}"
 
 
+#: G7h: words that name a TRAIT or a seniority/level claim rather than a teachable METHOD. A title matching one
+#: of these is refused as a lesson ONLY when the lesson also has no technical concept (:func:`_is_trait_lesson`):
+#: a method lesson may still use one of these words in passing ("Agile delivery, backlog ownership and
+#: partnering with engineering"; "What a product manager owns") without being refused, because its concepts are
+#: not all behaviours. Role-independent: the same words apply to an engineering course and to "Product manager".
+_TRAIT_WORDS = (
+    r"mentor\w*", r"coach\w*", r"\bownership\b", r"communication skills", r"\bleading\b", r"\bleadership\b",
+    r"\blevels\b", r"senior and staff", r"associate to senior", r"staff and principal", r"operat\w* at", r"soft skills",
+)
+#: A trait phrase that is still a trait UNLESS the title also names one of ``_METHOD_WORDS`` ("design docs and
+#: engineering standards" is standards talk; "design docs as a method: writing and reviewing" names "review").
+_TRAIT_UNLESS_METHOD_WORDS = (r"cross-functional collaboration", r"stakeholder management", r"engineering standards")
+_METHOD_WORDS = (r"roadmap", r"prioriti[sz]ation", r"interview", r"review", r"framework", r"template", r"metric", r"process")
+_TRAIT_PATTERN = re.compile("|".join(_TRAIT_WORDS), re.IGNORECASE)
+_TRAIT_UNLESS_METHOD_PATTERN = re.compile("|".join(_TRAIT_UNLESS_METHOD_WORDS), re.IGNORECASE)
+_METHOD_PATTERN = re.compile("|".join(_METHOD_WORDS), re.IGNORECASE)
+
+
+def _is_trait_title(title: str) -> bool:
+    """Whether a lesson title names a trait or seniority/level claim rather than a teachable method (G7h)."""
+
+    if _TRAIT_PATTERN.search(title):
+        return True
+    return bool(_TRAIT_UNLESS_METHOD_PATTERN.search(title)) and not _METHOD_PATTERN.search(title)
+
+
+def _is_trait_lesson(title: str, concepts: Sequence[str], known: Mapping[str, Mapping[str, object]]) -> bool:
+    """Whether a lesson is refused as a trait lesson: its title names a trait AND it has no technical concept."""
+
+    if not _is_trait_title(title):
+        return False
+    return not any(_is_technical(known[concept_id]) for concept_id in concepts)
+
+
 def curriculum_prompt(role_text: str, counted_concepts: Sequence[Mapping[str, object]], validation_error: BaseException | str | None = None) -> str:
     """The curriculum prompt. It is built from the role and the counted concepts only: no resume line is an input."""
 
@@ -324,10 +358,11 @@ def parse_curriculum(raw: str, role_text: str, counted_concepts: Sequence[Mappin
     Refused: no JSON object; fewer than 6 or more than 9 modules; a module without 3 to 5 lessons; fewer than 25
     or more than 35 lessons; a module or lesson id that is not kebab-case or is used twice; a title that is
     empty, too long or holds contact data; a concept id that was not counted; a lesson with no concept that is
-    not marked ``curriculum``; a lesson whose concepts are ALL behaviours (G1's ``technical`` flag is false for
-    each: mentoring, ownership, design reviews, documentation): a behaviour is shown under the front page's
-    expectations and is never a lesson; a lesson with fewer than 2 usable source URLs; an expectations or
-    technologies id that was not counted; a counted ``tool`` concept in no technology group.
+    not marked ``curriculum``; a lesson that reads as a TRAIT or seniority lesson (G7h, :func:`_is_trait_lesson`):
+    its title names a trait or level ("mentoring", "operating at staff level", "cross-functional collaboration"
+    with no method word) AND it has no technical concept; a trait or level is shown under the front page's
+    expectations and is never a lesson, whatever the role; a lesson with fewer than 2 usable source URLs; an
+    expectations or technologies id that was not counted; a counted ``tool`` concept in no technology group.
     """
 
     decoded = _clean_tree(_json_object(raw, "curriculum_invalid"))
@@ -383,10 +418,10 @@ def parse_curriculum(raw: str, role_text: str, counted_concepts: Sequence[Mappin
             concepts = ids_of(raw_lesson.get("concepts", []), f"concepts of lesson {lesson_id}")
             if not concepts and raw_lesson.get("curriculum") is not True:
                 raise bad(f"lesson {lesson_id} must name a concept or be marked curriculum")
-            if concepts and not any(_is_technical(known[concept_id]) for concept_id in concepts):
+            if _is_trait_lesson(title, concepts, known):
                 raise bad(
-                    f"lesson {lesson_id} teaches only behaviours ({', '.join(concepts[:5])}): a lesson must teach a technical concept; "
-                    "behaviours belong under expectations only"
+                    f"lesson {lesson_id} ({title!r}) reads as a trait or seniority lesson, not a method: a lesson must teach something "
+                    "a learner can practice; traits and seniority talk belong under expectations only"
                 )
             candidates = _candidates(raw_lesson.get("sources"), CANDIDATES_MAX)
             if len(candidates) < CANDIDATES_MIN:
