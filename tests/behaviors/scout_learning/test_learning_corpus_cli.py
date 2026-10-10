@@ -69,7 +69,7 @@ class SeamModel:
             normalized_usage=NormalizedUsage(1000, 200, 1200), cost_status="unavailable",
         )
 
-    def request(self, *, role: str, prompt: str, required_capabilities: object = frozenset({"text"})) -> SimpleNamespace:
+    def request(self, *, role: str, prompt: str, required_capabilities: object = frozenset({"text"}), timeout_seconds: float | None = None) -> SimpleNamespace:
         return SimpleNamespace(prompt=prompt, role=role)
 
     def close(self) -> None:
