@@ -295,7 +295,7 @@ def _claim(home_root: Path, target: Path, pathway_id: str | None) -> _Run:
             _write_json(learning / _LIVE_FILENAME, _claim_body(current, process_token()))
             if pathway_id is not None:
                 _own(home_root, target, current, pathway_id)
-        except BaseException:
+        except BaseException:  # noqa: BLE001 - cleans up (releases the run) and re-raises: nothing is swallowed
             _RUNS.pop(current.run, None)
             raise
     return current
@@ -981,7 +981,7 @@ class LearningJob:
         self._check_claim()
         try:
             result = learning_store.import_course(self.home_root, self.target, site, self._role_text, self._cost(), replace_id=self.pathway_id, finish=finish)
-        except BaseException:
+        except BaseException:  # noqa: BLE001 - cleans up (marks the step running again) and re-raises: nothing is swallowed
             self._mark(STEP_IMPORT, "running")  # it did not end: the failure below says why
             raise
         return result.pathway, False
@@ -1198,7 +1198,7 @@ def _new(home_root: Path, target: Path, role_text: str) -> tuple[Pathway, _Run]:
         pathway = learning_store.create_request(home_root, target, role_text)
         with learning_store.write_lock(home_root, target):
             _own(home_root, target, current, pathway.id)
-    except BaseException:
+    except BaseException:  # noqa: BLE001 - cleans up (releases the claimed slot) and re-raises: nothing is swallowed
         _release(home_root, target, current)
         raise
     return pathway, current
@@ -1240,7 +1240,7 @@ def resume(home_root: Path, target: Path, pathway_id: str, *, job_factory: JobFa
                 home_root, target,
                 replace(stored, status="running", error=None, error_code=None, updated_at=learning_store.now_text(), revision=stored.revision + 1),
             )
-    except BaseException:
+    except BaseException:  # noqa: BLE001 - cleans up (releases the claimed slot) and re-raises: nothing is swallowed
         _release(home_root, target, current)
         raise
     _thread((job_factory or LearningJob)(home_root, target, pathway_id), current)

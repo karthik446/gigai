@@ -48,13 +48,13 @@ from __future__ import annotations
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 import datetime
-import hashlib
 import json
 from pathlib import Path
 import re
 from typing import Any, Protocol
 from urllib.parse import urlsplit
 
+from ..canonical import digest_imported_bytes
 from .learning_corpus import LearningCorpusError, _error_text, _json_object, _render, _template
 from .learning_course import (
     JSON_OPENER,
@@ -839,7 +839,8 @@ def _key(lesson: Mapping[str, Any], seeds: Sequence[str], tool: Tool) -> str:
     """What a lesson's path was built from: when it changes, a stored outcome is not this lesson's any more."""
 
     inputs = [str(lesson.get("title", "")), str(lesson.get("summary", "")), _subtopic_titles(lesson), _names(lesson), list(seeds), tool.name]
-    return hashlib.sha256(json.dumps(inputs, ensure_ascii=False).encode("utf-8")).hexdigest()[:24]
+    digest = json.dumps(inputs, ensure_ascii=False).encode("utf-8")
+    return digest_imported_bytes(digest).removeprefix("sha256:")[:24]
 
 
 def run_paths_step(

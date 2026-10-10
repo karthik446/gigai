@@ -44,7 +44,6 @@ from collections import Counter
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
-import hashlib
 import html
 from importlib import resources
 import json
@@ -52,6 +51,8 @@ from pathlib import Path
 import re
 from types import SimpleNamespace
 from typing import Protocol
+
+from ..canonical import digest_imported_bytes
 
 from .learning_store import LearningError, clean_role_text
 from .untrusted_text import fence_untrusted_posting
@@ -483,10 +484,9 @@ class Corpus:
     def fingerprint(self, titles: Titles) -> str:
         """A digest of the title phrases and the texts read: a stored vocabulary fits only the corpus it was named from."""
 
-        digest = hashlib.sha256(json.dumps(titles.to_json(), sort_keys=True).encode("utf-8"))
-        for posting in self.read:
-            digest.update(b"\x00" + (posting.text or "").encode("utf-8"))
-        return digest.hexdigest()
+        parts = [json.dumps(titles.to_json(), sort_keys=True).encode("utf-8")]
+        parts.extend(b"\x00" + (posting.text or "").encode("utf-8") for posting in self.read)
+        return digest_imported_bytes(b"".join(parts)).removeprefix("sha256:")
 
 
 def _postings(count: int) -> str:
