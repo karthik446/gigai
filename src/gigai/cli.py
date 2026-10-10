@@ -52,6 +52,7 @@ from .scout.documents_cli import document_group
 from .scout.answer_cli import answer_group
 from .scout.acquisition_cli import acquisition_group
 from .scout.interview_cli import interview_group
+from .scout.learning_cli import learning_group
 from .scout.scout_cli import scout_group
 from .private_transfer_cli import transfer_group
 from .secrets_cli import secrets_group
@@ -4333,6 +4334,7 @@ cli.add_command(interview_group)
 # gig's Click group) is the accepted pattern for now, matching every other
 # scout_*_cli group above; a real gig-plugin registration mechanism is
 # 0.2.0 roadmap Workstream 3 scope, not built here.
+scout_group.add_command(learning_group)  # 0.1.11.10: `gigai scout learning list | show | open | import`
 cli.add_command(scout_group)
 cli.add_command(transfer_group)
 cli.add_command(secrets_group)

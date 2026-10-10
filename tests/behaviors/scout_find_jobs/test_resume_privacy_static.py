@@ -87,6 +87,12 @@ _BUILDERS: dict[tuple[str, str], frozenset[str]] = {
     ("gigai.scout.find_jobs.api.extract", "render_prompt"): frozenset({"model_resume"}),
     ("gigai.scout.interview_prep.categories", "_prompt"): frozenset({"model_resume"}),
     ("gigai.scout.find_jobs.rank_digest", "resume_digest"): frozenset({"split_resume_header", "guard_private", "guard_name"}),
+    # 0.1.11.10 Part B G2: the lesson-writing prompt of a learning pathway, the ONE prompt of a course that carries the
+    # master resume (the reference for known/some/new). The master holds no contact line by construction (master_store
+    # strips at import, and learning_course.read_master_lines reads it through master_store.load_master, a reviewed
+    # reader above); every line is still put through guard_private here, as an "id | text" line. The curriculum and
+    # source prompts of the same module take no resume argument (test_learning_course.py proves both).
+    ("gigai.scout.learning_course", "lessons_prompt"): frozenset({"guard_private"}),
 }
 
 #: Who may import the local display settings and the renderer (module -> allowed importers).

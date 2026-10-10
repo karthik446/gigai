@@ -43,8 +43,13 @@ class ModelAdapterBinding:
         role: str,
         prompt: str,
         required_capabilities: frozenset[str] = frozenset({"text"}),
+        timeout_seconds: float | None = None,
     ) -> InvocationRequest:
-        """Build a fully resolved request using this target's declared policy."""
+        """Build a fully resolved request using this target's declared policy.
+
+        ``timeout_seconds`` overrides a CLI adapter's own default for this one call only (0.1.11.10 G7c: the
+        course job's longer calls); every other caller omits it and keeps the adapter's default.
+        """
 
         return InvocationRequest(
             target_name=self.current.target.name,
@@ -56,6 +61,7 @@ class ModelAdapterBinding:
             required_capabilities=required_capabilities,
             max_output_tokens=self.current.target.max_output_tokens,
             reasoning_effort=self.current.target.reasoning_effort,
+            timeout_seconds=timeout_seconds,
         )
 
 

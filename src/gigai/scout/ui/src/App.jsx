@@ -13,6 +13,7 @@ import SettingsView from "./views/SettingsView.jsx";
 import PdfView from "./views/PdfView.jsx";
 import AnswersStoriesView from "./views/AnswersStoriesView.jsx";
 import MasterView from "./views/MasterView.jsx";
+import LearningView from "./views/LearningView.jsx";
 import { JOBS_HASH, SETTINGS_HASH, navViewFor, navigate, postingHash, routeFor, useHashRoute } from "./routing.js";
 
 function useConfig() {
@@ -343,6 +344,8 @@ export default function App() {
         {route.view === "answers" && <AnswersStoriesView />}
 
         {route.view === "master" && <MasterView reloadProfiles={profilesState.reload} />}
+
+        {route.view === "learning" && <LearningView />}
 
         {route.view === "assess" && (
           <AssessView

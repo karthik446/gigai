@@ -91,6 +91,8 @@ _PARAMETRIC_MATCHERS = {
     "_match_story_id": "/api/stories/{story_id}",
     # 0.1.10.7 PL5: ``api/pipeline._match_approval_id``.
     "_match_approval_id": "/api/pipeline/approvals/{approval_id}",
+    # 0.1.11.10: ``api/learning._match_pathway_id``.
+    "_match_pathway_id": "/api/learning/pathways/{pathway_id}",
 }
 
 

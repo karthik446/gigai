@@ -50,6 +50,9 @@ const CODES_WITH_OWN_MESSAGE = new Set([
   "discovery_unavailable",
   "discovery_running",
   "posting_requirements_unreadable",
+  // 0.1.11.10 Part B (G6): POST /api/learning/pathways' own refusals, shown plainly on the form/dialog.
+  "learning_running",
+  "personal_info_refused",
 ]);
 
 class ApiError extends Error {
@@ -950,6 +953,29 @@ export function postPipelineApproval(approvalId, body) {
 
 export function postPipelineProcess(body) {
   return request("POST", "/api/pipeline/process", body);
+}
+
+// 0.1.11.10 Part A slice 1: the learning-pathway routes (find_jobs/api/learning.py).
+export function getLearningPathways() {
+  return request("GET", "/api/learning/pathways");
+}
+
+export function getLearningPathway(pathwayId) {
+  return request("GET", `/api/learning/pathways/${encodeURIComponent(pathwayId)}`);
+}
+
+// 0.1.11.10 Part B (G5/G6): without `approve` this is the estimate only, nothing started (learning_job.ask_response);
+// with `{role_text, approve: true}` it stores the request and starts the job (202).
+export function postLearningPathways(body) {
+  return request("POST", "/api/learning/pathways", body);
+}
+
+export function postLearningPathwayCancel(pathwayId) {
+  return request("POST", `/api/learning/pathways/${encodeURIComponent(pathwayId)}/cancel`, {});
+}
+
+export function postLearningPathwayResume(pathwayId) {
+  return request("POST", `/api/learning/pathways/${encodeURIComponent(pathwayId)}/resume`, {});
 }
 
 export { ApiError };

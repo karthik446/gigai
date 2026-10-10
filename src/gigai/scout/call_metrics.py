@@ -62,7 +62,9 @@ KIND_TAG = "tag"
 KIND_TAILOR = "tailor"
 KIND_EXTRACT = "extract"
 KIND_INTERVIEW = "interview"
-KINDS: tuple[str, ...] = (KIND_ASSESS, KIND_RANK, KIND_TAG, KIND_TAILOR, KIND_EXTRACT, KIND_INTERVIEW)
+#: 0.1.11.10: the calls that make a learning pathway (the role's title phrases and vocabulary; later the course text).
+KIND_LEARNING = "learning"
+KINDS: tuple[str, ...] = (KIND_ASSESS, KIND_RANK, KIND_TAG, KIND_TAILOR, KIND_EXTRACT, KIND_INTERVIEW, KIND_LEARNING)
 
 #: ``error_code`` of a call that raised with no code of its own, timed out, or answered something unusable.
 ERROR_FAILED = "model_call_failed"
@@ -566,6 +568,7 @@ __all__ = [
     "KIND_ASSESS",
     "KIND_EXTRACT",
     "KIND_INTERVIEW",
+    "KIND_LEARNING",
     "KIND_RANK",
     "KIND_TAG",
     "KIND_TAILOR",

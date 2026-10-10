@@ -43,6 +43,8 @@ class InvocationRequest:
     required_capabilities: frozenset[str] = frozenset({"text"})
     max_output_tokens: int = 64
     reasoning_effort: str | None = None
+    #: Overrides a CLI adapter's own default (``process.py``'s ``timeout_seconds``) for this one call; ``None`` keeps it.
+    timeout_seconds: float | None = None
 
     @property
     def role_reference(self) -> RoleReference | None:
@@ -66,6 +68,8 @@ class InvocationRequest:
             )
         if self.max_output_tokens <= 0:
             raise ValueError("invocation max_output_tokens must be positive")
+        if self.timeout_seconds is not None and self.timeout_seconds <= 0:
+            raise ValueError("invocation timeout_seconds must be positive")
         if self.reasoning_effort is not None and self.reasoning_effort not in {
             "none",
             "low",

@@ -68,6 +68,8 @@ EXPECTED_ROUTES = {
     "answers": "#/answers",
     # 0.1.10.9 master P5: the Master resume page.
     "master": "#/master",
+    # 0.1.11.10 Part A slice 1: the Learning pathways tab, read-only.
+    "learning": "#/learning",
 }
 
 
@@ -124,7 +126,7 @@ def test_nav_views_are_routes() -> None:
     nav = _NAV_VIEWS.search(source)
     assert nav is not None, "routing.js must export NAV_VIEWS (the top bar's link order)"
     nav_views = re.findall(r'"([a-z]+)"', nav.group("body"))
-    assert nav_views == ["jobs", "assessments", "applications", "runs"]
+    assert nav_views == ["jobs", "assessments", "applications", "runs", "learning"]
     assert all(view in routes for view in nav_views)
 
 

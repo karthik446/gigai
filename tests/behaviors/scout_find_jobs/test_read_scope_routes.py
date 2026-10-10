@@ -83,6 +83,8 @@ GET_REQUESTS: dict[str, str] = {
     "/api/stories": "/api/stories",
     "/api/stories/prep": "/api/stories/prep",
     "/api/stories/{story_id}": "/api/stories/story_00000000-0000-4000-8000-000000000001",
+    "/api/learning/pathways": "/api/learning/pathways",
+    "/api/learning/pathways/{pathway_id}": "/api/learning/pathways/lp-00000000",
     "/api/applications": "/api/applications",
     "/api/tailored-resumes": "/api/tailored-resumes",
     "/api/master": "/api/master",

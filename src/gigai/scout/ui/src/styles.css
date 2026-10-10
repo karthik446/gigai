@@ -1940,3 +1940,13 @@ table.data-table th {
 .search-row .search-ask { margin: 8px 0 0; }
 .free-search-more { display: flex; align-items: center; gap: 8px; }
 .free-search-footer { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; font-size: 0.86rem; color: var(--muted); }
+
+/* 0.1.11.10 Part A slice 1: the Learning pathways tab's list (views/LearningView.jsx). Same shape as .story-list. */
+.learning-list { list-style: none; padding: 0; margin: 0; }
+.learning-entry { border: 1px solid var(--border); border-radius: 6px; padding: 10px 12px; margin-bottom: 8px; }
+.learning-entry-head { display: flex; gap: 8px; align-items: baseline; justify-content: space-between; }
+.learning-entry p { margin: 4px 0; }
+.learning-entry .button { margin-top: 6px; margin-right: 6px; }
+
+/* 0.1.11.10 Part B (G6): the "Role" input and "Generate course" button. */
+[data-role="learning-request-form"] .text-input { width: 100%; max-width: 420px; margin-bottom: 8px; }

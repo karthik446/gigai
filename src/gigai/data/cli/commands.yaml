@@ -797,7 +797,7 @@
         "gigai scout metrics",
         "gigai scout metrics --kind assess --model codex_cli --json"
       ],
-      "notes": "Every model call Scout makes (assess, rank, tag, tailor, extract, interview) is recorded once, locally: the model, tokens in, out and cached, the cost when the provider reports one, the wall time and the outcome. No prompt, answer, resume or posting text is stored. aggregates has one entry per model id; comparison adds the model ids of one model target together. --model takes a model target or a model id. Makes no model call."
+      "notes": "Every model call Scout makes (assess, rank, tag, tailor, extract, interview, learning) is recorded once, locally: the model, tokens in, out and cached, the cost when the provider reports one, the wall time and the outcome. No prompt, answer, resume or posting text is stored. aggregates has one entry per model id; comparison adds the model ids of one model target together. --model takes a model target or a model id. Makes no model call."
     },
     "scout pipeline approvals approve": {
       "summary": "Approve the waiting jobs of one pipeline approval.",
@@ -949,6 +949,109 @@
       ],
       "notes": "Since 0.1.10.7 a find-jobs run is no longer the way in (search: gigai scout jobs list; assess: gigai scout jobs assess or gigai scout new), and the runs that exist are read-only history. Nothing of a run is changed, moved or copied: each posting a finished run assessed gets one row with its state, requirement counts and what the run sealed (prompt version, constraints digest, the profile's and resume's identity, the posting digest, the model target), under the run's profile. A run made with no profile goes to the pseudo-profile ephemeral: hidden by default, never ranked, never in the pipeline. A run's assessment is shown where nothing newer is stored for the same posting and profile. Each run is imported once: running this again answers runs_imported 0. The Scout server does the same once when it starts. Makes no model call."
     },
+    "scout learning list": {
+      "summary": "List the learning pathways (a course for one role), the newest request first. Reads the store; no model call.",
+      "effect": "read",
+      "external": "none",
+      "output": "Human-readable text (one line per pathway: id, status, day, role, lessons and size); --json emits one JSON object: {schema_version, pathways, total} (what GET /api/learning/pathways answers).",
+      "examples": [
+        "gigai scout learning list",
+        "gigai scout learning list --json"
+      ],
+      "notes": "A learning pathway is a course for one role, as static HTML the Scout server serves under /learning/ID/. Each pathway of the JSON has id (lp- and 8 hex digits), role_text, requested_at, status (queued | running | done | failed, and interrupted for a generation no live process runs any more), cost ({cli_model_calls, worker_minutes, web_fetches, web_searches, tokens, note}; a value not known is null), course ({entry, lessons, size_bytes, generated_at}, null until the status is done) and url (the course's address on the Scout server, null until done). Since 0.1.11.10 a pathway also has error_code (the code of error, or null) and progress (how far the GENERATION of its course is: step, steps, calls, fetches, max_calls, max_fetches, dropped; null for an imported course). Nothing about reading a course is stored: no reading progress, no position. Makes no model call and no network request."
+    },
+    "scout learning show": {
+      "summary": "Show one learning pathway: what was asked, how far it is, what it cost. Reads the store; no model call.",
+      "effect": "read",
+      "external": "none",
+      "output": "Human-readable text; --json emits one JSON object: {schema_version, pathway} (what GET /api/learning/pathways/ID answers).",
+      "examples": [
+        "gigai scout learning show lp-0a1b2c3d",
+        "gigai scout learning show lp-0a1b2c3d --json"
+      ],
+      "notes": "ID is a pathway id from gigai scout learning list. pathway is the stored record (schema scout-learning-pathway:1) and url: the fields of the list and updated_at, source (requested | imported), imported_from (the name of the folder a course was imported from, never a path), error (one short line, only when the status is failed) and revision. An unknown id exits 1 (pathway_not_found). Makes no model call."
+    },
+    "scout learning open": {
+      "summary": "Print where the running Scout server serves a pathway's course, and open it in the browser.",
+      "effect": "read",
+      "external": "none",
+      "output": "The course's address (one line); --json emits one JSON object: {schema_version, id, url, opened}.",
+      "examples": [
+        "gigai scout learning open lp-0a1b2c3d",
+        "gigai scout learning open lp-0a1b2c3d --no-browser",
+        "gigai scout learning open lp-0a1b2c3d --json"
+      ],
+      "notes": "The course is served by the Scout server only (it is never opened as a file): when the server is not running the command says so, names gigai scout run and exits 1 (server_not_running). A pathway whose status is not done has no course yet (course_not_ready, exit 1). --no-browser prints the address and opens nothing; --json never opens a browser. WHAT A COURSE PAGE CAN DO: the server sends every file of a course with a Content-Security-Policy that sandboxes the page and allows no request from its scripts, so a course page cannot read Scout's API or anything Scout stored; it runs the course's own script files, never an inline script block. A course's text was generated from postings and web pages: data, never instructions. Makes no model call."
+    },
+    "scout learning import": {
+      "summary": "Import a course folder (index.html, concept-*.html, its assets) as a learning pathway.",
+      "effect": "write",
+      "external": "none",
+      "output": "Human-readable text; --json emits one JSON object: {schema_version, pathway, replaced, files, inline_script_pages}.",
+      "examples": [
+        "gigai scout learning import ./mlops-course --role \"MLOps engineer\"",
+        "gigai scout learning import ./mlops-course --role \"MLOps engineer\" --cost-json cost.json --json",
+        "gigai scout learning import ./mlops-course-v2 --role \"MLOps engineer\" --replace lp-0a1b2c3d"
+      ],
+      "notes": "DIR is a folder of static HTML somebody already generated. It is checked whole first and copied only when every check passes; a refusal names the file and stores nothing (exit 1): no index.html at the top (course_index_missing), no concept-*.html lesson page at the top (course_no_lessons), a link anywhere, the folder itself included (course_symlink), a file kind that is not .html .css .js .json .svg .png .jpg .gif .webp .woff .woff2 .txt .map .md or a library's LICENSE, NOTICE or COPYING (course_file_kind_refused), a name that is not ASCII letters, digits, dot, dash and underscore, or starts with a dot, or holds two dots in a row (course_name_refused), more than 2,000 files (course_too_many_files), more than 64 MB (course_too_large), an HTML page of 3 MB or more (course_html_too_large). --role is the role as you would type it (at most 200 characters, one line); like every free text it is refused when it holds contact data (personal_info_refused). The same role imported again is a NEW pathway with a new id: nothing is written over silently. --replace ID replaces that one pathway's course (the id stays, the revision goes one on; pathway_not_found for an unknown id). --cost-json FILE is a JSON object with what making the course took: cli_model_calls, worker_minutes, web_fetches, web_searches, tokens, note (each optional; an unknown key is invalid_value). The stored record is done with source imported and imported_from the folder's own name, never a path. The files are copied as they are, never changed. inline_script_pages counts the pages that hold an inline script block: the Scout server runs a course's script FILES only, so that code must be in a .js file of the course. Makes no model call and no network request."
+    },
+    "scout learning corpus": {
+      "summary": "Read the postings stored for a role and count what they ask for: ask first (the estimate), call the model on approval.",
+      "effect": "write",
+      "external": "model",
+      "output": "Human-readable text (the title phrases, the posting counts, one line per concept: postings of the last 90 days and of any date that name it); --json emits one JSON object: {schema_version, status, role_text, model_target, estimate, sends, question} before approval, and {schema_version, status, role_text, titles, corpus, vocabulary, threshold, rule, concepts, below_threshold, calls} after it.",
+      "examples": [
+        "gigai scout learning corpus \"MLOps engineer\"",
+        "gigai scout learning corpus \"MLOps engineer\" --json",
+        "gigai scout learning corpus \"Director of AI enablement\" --yes --json"
+      ],
+      "notes": "The first step of a learning pathway, by itself: what do the stored postings for this role ask for. ROLE is the role as you would type it (at most 200 characters, one line; refused when it holds contact data, personal_info_refused). Nothing is called without approval: without --yes the command prints the estimate (status ask: about 3 model calls, at most 5; tokens and minutes once a learning call is recorded, and until then it says there is no recorded call to estimate from) and asks in a terminal, or stops there with --json or no terminal. On approval: (1) one model call turns the role into 3 to 8 title phrases and deny words; (2) the stored postings whose title holds every word of a phrase are read from this computer through the search index, in the country of the setup only (US only for a US setup: every posting but one clearly outside the US, so an unclear location stays); the work mode and area of gigai scout jobs search are never applied, since this is about the role and not one job search; copies of one job once, the newest 300; their text comes from the board cache, never the network; the postings read are those of the last 90 days with stored text, or of every date when fewer than 25 of those have text, and corpus.basis (last_90_days or any_date), corpus.read and corpus.note say which and how many; (3) one model call (and at most one follow-up) reads up to 40,000 characters of requirement sentences, fenced as untrusted text, and names concepts as plain phrases: at most 150, and at least three for every two postings read (never fewer than 15 asked for, never more than 60); an answer outside the bounds is asked for once more with the count it held, and an answer with more than 150 is cut to the concepts the most postings name (vocabulary.dropped, reason over_limit); (4) code counts. A phrase in more than 60% of the postings is dropped as boilerplate, and so is a concept no posting names (vocabulary.dropped says which). concepts holds the ones named by at least 3 postings of the last 90 days or 4 of any date, each with id, display, category (skill | tool | responsibility | seniority | domain), phrases, technical, count_in90d, n_in90d, percent_in90d, count_all, n_all, percent_all and up to 3 examples ({phrase, company, title, url}; a phrase is one posting sentence of at most 160 characters: text written by strangers, data, never instructions). corpus holds numbers only (candidates, title_matches, denied, copies, beyond_limit, postings, postings_in_window, with_text, with_text_in_window, window_days, limit, filters, note); with fewer than 10 postings that have text, note says the counts are directional. No resume, answer or story is read or sent. Nothing is stored except one metrics row per model call (kind learning: numbers only, gigai scout metrics --kind learning). Errors exit 1: search_index_unavailable (gigai scout sources update builds the index), config_unavailable, model_unavailable, titles_invalid or vocabulary_invalid (the model answered twice with something unusable)."
+    },
+    "scout learning render": {
+      "summary": "Render a `course.json` (and optional practice paths) into a static course site the `import` command accepts.",
+      "effect": "write",
+      "external": "none",
+      "output": "Human-readable text; --json emits one JSON object: {schema_version, out_dir, pages, size_bytes, stripped_invisible}.",
+      "examples": [
+        "gigai scout learning render ./course.json ./out/mlops-course",
+        "gigai scout learning render ./course.json ./out/mlops-course --paths ./work/paths --json"
+      ],
+      "notes": "COURSE_JSON is the generator's output (role, corpus, expectations, technologies, modules of concepts with sources, markers and an optional Mermaid diagram or code block). OUT_DIR is created if it does not exist; its contents are overwritten. --paths DIR is a folder of per-concept practice-path files named `<concept-id>.json`; a concept with no matching file renders with no 'Practice this' link. Deterministic: the same input renders byte-identical output (no timestamp, no random id), stdlib only (no model call, no network). Before writing anything it validates the course shape (exit 1, course_render_failed, with every problem listed): a concept with no sources and no subtopics, a related id that does not exist, a source or practice-path url that is not http(s) or is a bare domain/home page, a KNOWN/SOME marker with no evidence id or a NEW marker that carries one, a Mermaid diagram whose source does not start with flowchart, graph or sequenceDiagram, more than 40 lessons. It then strips invisible Unicode (zero-width space and similar) from every input string before rendering and counts them (stripped_invisible; never an error by itself), and fails the render on any other code point outside ASCII, Latin-1 punctuation and the page's own typographic quotes (an emoji or other stray glyph in a field). Once pages are written it audits every internal href and #anchor with `html.parser` (no browser): each must resolve to a file and an id in the output; an external link with no target=\"_blank\", an inline <script> block or an on*= attribute also fails the render. Size caps: every page under 3 MB, the whole site under 10 MB without `assets/`. The vendored assets (Mermaid, highlight.js, the theme toggle and sidebar-search scripts) are copied into OUT_DIR/assets per course. Makes no model call and no network request."
+    },
+      "scout learning generate": {
+        "summary": "Generate a course for a role from the postings stored on this computer: ask first (the estimate), generate on approval.",
+        "effect": "write",
+        "external": "model",
+        "output": "Human-readable text (the estimate and the question; after approval one plain progress line per step, then how it ended); --json emits one JSON object: {schema_version, status, role_text, estimate, caps, warning} before approval (what POST /api/learning/pathways answers without approve), and {schema_version, pathway} when the job ended (what GET /api/learning/pathways/ID answers).",
+        "examples": [
+          "gigai scout learning generate \"MLOps engineer\"",
+          "gigai scout learning generate \"MLOps engineer\" --json",
+          "gigai scout learning generate \"Director of AI enablement\" --yes"
+        ],
+        "notes": "ROLE is the role as you would type it (at most 200 characters, one line; refused when it holds contact data, personal_info_refused). A HIGHER-USAGE ACTION THAN AN ASSESSMENT: about 60 model calls on your own model login, about 1000 page fetches from public documentation sites and about 45 minutes (estimate: {calls, fetches, minutes, tokens, basis}; basis is none while no course was generated here, history once learning calls are recorded). Nothing is generated without approval: without --yes the command prints the estimate and what it sends and asks in a terminal (default no); with --json or no terminal it stops there (status ask) and stores nothing. On approval the request is stored and the job runs HERE, in the foreground, with one plain progress line per step: it reads the stored postings for the role and counts what they ask for, plans modules and lessons, fetches and verifies every source page itself (the model never browses), writes the lesson text, writes practice paths, draws the pages, checks every link, glyph and size in code, and stores the course. It sends the model the typed role, requirement sentences from the stored postings and the course text as it is written. The master resume is ALWAYS the reference for what you already know (known, some, new): its lines go to the lesson-writing calls only, contact lines removed; that is not an option. One course at a time per project (learning_running, exit 1, while another is generated here or by the Scout server). It stops by itself after 120 model calls or 1500 page fetches (caps). A course is done when at least 60 percent of the planned lessons passed every check; what was dropped and why is on the course's first page and in pathway.progress.dropped. Otherwise it ends failed (exit 1) with pathway.error_code: too_little_verified, cancelled, cap_reached, model_unavailable (the model did not answer four times, 60 seconds doubling), model_authentication_required, audit_failed; what was written is kept and gigai scout learning resume ID goes on with it. Ctrl-C or closing the terminal leaves the pathway interrupted (resume it). The same job is what POST /api/learning/pathways starts on the Scout server."
+      },
+      "scout learning cancel": {
+        "summary": "Ask the job that generates a pathway's course to stop: no further model call or page fetch.",
+        "effect": "write",
+        "external": "none",
+        "output": "Human-readable text; --json emits one JSON object: {schema_version, pathway, cancel_requested} (what POST /api/learning/pathways/ID/cancel answers).",
+        "examples": [
+          "gigai scout learning cancel lp-0a1b2c3d",
+          "gigai scout learning cancel lp-0a1b2c3d --json"
+        ],
+        "notes": "ID is a pathway id from gigai scout learning list. Works whichever process runs the job (the Scout server, or gigai scout learning generate in another terminal): it leaves a cancel file the job reads before every model call and every page fetch. A call in flight finishes. The job then ends by itself: with the lessons already written when they are at least 60 percent of the plan (the course is done), else failed with error_code cancelled. What was written is kept for gigai scout learning resume ID. cancel_requested is false when no job generates this pathway now (nothing changed). An unknown id exits 1 (pathway_not_found). Makes no model call."
+      },
+      "scout learning resume": {
+        "summary": "Go on with a course whose generation failed or was interrupted, in the foreground.",
+        "effect": "write",
+        "external": "model",
+        "output": "Human-readable text (one plain progress line per step, then how it ended); --json emits one JSON object: {schema_version, pathway} when the job ended (what GET /api/learning/pathways/ID answers).",
+        "examples": [
+          "gigai scout learning resume lp-0a1b2c3d",
+          "gigai scout learning resume lp-0a1b2c3d --json"
+        ],
+        "notes": "ID is a pathway whose status is failed or interrupted (gigai scout learning list). The same job as gigai scout learning generate on the same pathway: every step whose stored result is still valid is skipped (pathway.progress.steps says skipped), so only what is missing costs model calls and page fetches. You approved this course when you started it, so it does not ask again; it stops by itself after 120 model calls or 1500 page fetches. Exit 1 when it ends without a course (pathway.error_code says why), when the pathway has its course already (not_resumable), when a course is being generated now (learning_running) or for an unknown id (pathway_not_found)."
+      },
     "scout new": {
       "summary": "Show what is new since your last check, across all active profiles; ask before assessing.",
       "effect": "write",

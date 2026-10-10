@@ -100,7 +100,7 @@ class ClaudeCLIAdapter:
                     self.argv(request),
                     prompt=request.prompt,
                     cwd=Path(directory),
-                    timeout_seconds=self._timeout_seconds,
+                    timeout_seconds=request.timeout_seconds if request.timeout_seconds is not None else self._timeout_seconds,
                     extra_environment_names=(
                         # Claude's macOS login lookup requires USER even with HOME
                         # preserved. Keep this adapter-specific, not full inheritance.
