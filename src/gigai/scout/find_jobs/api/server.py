@@ -72,6 +72,7 @@ from .common import (
 )
 from .openapi import response_labels_header, with_allowed_keys
 from .profiles import _match_profile_id
+from .learning import COURSE_PREFIX, _match_pathway_id
 from .story_bank import _match_answer_id, _match_story_id
 
 # _TEST_HTTP_ENV/_TEST_MODEL_ENV live in present_api.py now -- they're only
@@ -1612,6 +1613,7 @@ def _make_handler(
     from .resumes import ResumesRoutesMixin
     from .search import SearchRoutesMixin
     from .jobs_folder import JobsFolderRoutesMixin
+    from .learning import LearningRoutesMixin
     from .resumes_folder import ResumesFolderRoutesMixin
     from .runs import RunRoutesMixin
     from .runs_list import RunsListRoutesMixin
@@ -1657,6 +1659,7 @@ def _make_handler(
         TailoredResumesRoutesMixin,
         WatchlistRoutesMixin,
         SourcesRoutesMixin,
+        LearningRoutesMixin,
         StaticRoutesMixin,
         BaseHTTPRequestHandler,
     ):
@@ -1962,6 +1965,14 @@ def _make_handler(
                     if story_id is not None:
                         self._handle_get_story(story_id)
                         return
+                    # 0.1.11.10: the learning pathways (api/learning.py): files of the store only.
+                    if path == "/api/learning/pathways":
+                        self._handle_get_learning_pathways()
+                        return
+                    pathway_id = _match_pathway_id(path, suffix="")
+                    if pathway_id is not None:
+                        self._handle_get_learning_pathway(pathway_id)
+                        return
                     if path == "/api/runs":
                         self._handle_get_runs_list()
                         return
@@ -2040,11 +2051,36 @@ def _make_handler(
                         return
                     self._error(HTTPStatus.NOT_FOUND, "not_found", "no such route")
                     return
+                # 0.1.11.10: a file of a learning pathway's course, from the store and never from ui/dist.
+                if path.startswith(COURSE_PREFIX):
+                    self._handle_get_learning_file(path)
+                    return
                 self._handle_get_static(path)
             except CLIENT_GONE:
                 self._client_closed()
             except Exception as exc:  # noqa: BLE001 - last-resort boundary so the connection never just drops
                 self._unhandled("GET", path, exc)
+
+        def do_HEAD(self) -> None:  # noqa: N802
+            """0.1.11.10: ``HEAD`` answers for a course file only (``/learning/...``); any other path is 405, no body."""
+
+            if not self._check_loopback():
+                return
+            if not self._check_host():
+                return
+            path = urlsplit(self.path).path
+            try:
+                if path.startswith(COURSE_PREFIX):
+                    self._handle_head_learning_file(path)
+                    return
+                self.send_response(HTTPStatus.METHOD_NOT_ALLOWED)
+                self.send_header("Allow", "GET")
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+            except CLIENT_GONE:
+                self._client_closed()
+            except Exception as exc:  # noqa: BLE001 - last-resort boundary so the connection never just drops
+                self._unhandled("HEAD", path, exc)
 
         @_in_read_scope("POST")  # 0.1.10.11 S4: the four POST routes that write no journal (``READ_SCOPE_POST_ROUTES``)
         def do_POST(self) -> None:  # noqa: N802
@@ -2081,6 +2117,18 @@ def _make_handler(
                 approval_id = _match_approval_id(path, suffix="")
                 if approval_id is not None:
                     self._handle_post_pipeline_approval(approval_id)
+                    return
+                # 0.1.11.10 G5: generate a course (estimate first; approve starts the job), stop it, resume it (api/learning.py).
+                if path == "/api/learning/pathways":
+                    self._handle_post_learning_pathways()
+                    return
+                pathway_id = _match_pathway_id(path, suffix="/cancel")
+                if pathway_id is not None:
+                    self._handle_post_learning_pathway_action(pathway_id, "cancel")
+                    return
+                pathway_id = _match_pathway_id(path, suffix="/resume")
+                if pathway_id is not None:
+                    self._handle_post_learning_pathway_action(pathway_id, "resume")
                     return
                 if path == "/api/postings/assess":
                     self._handle_post_postings_assess()

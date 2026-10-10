@@ -1,6 +1,6 @@
 """0.1.10.7 E: ``GET /api/metrics`` -- what the model calls of this project cost, as averages.
 
-Every Scout model call (assess, rank, tag, tailor, extract, interview) is
+Every Scout model call (assess, rank, tag, tailor, extract, interview, learning) is
 recorded once, locally, by ``scout/call_metrics.py``: the model, tokens in /
 out / cached, the cost when the provider reports one, the wall time and the
 outcome. No prompt, answer, resume or posting text is ever stored, so none is

@@ -2941,7 +2941,7 @@ def _metrics_tokens(value: object) -> str:
 
 
 @scout_group.command("metrics")
-@click.option("--kind", "kind", help="Only this kind of call: assess, rank, tag, tailor, extract or interview.")
+@click.option("--kind", "kind", help="Only this kind of call: assess, rank, tag, tailor, extract, interview or learning.")
 @click.option("--model", "model", help="Only this model target (codex_cli, claude_cli, ...) or model id.")
 @click.option("--home", "home_value", type=click.Path(path_type=Path, file_okay=False))
 @click.option("--target", "target_value", type=click.Path(path_type=Path, file_okay=False))

@@ -30,6 +30,8 @@
 //   #/master             0.1.10.9 master P5: the master resume, by role (add, edit,
 //                        retire, history), the migration and each profile's
 //                        selection; reached from Settings
+//   #/learning           0.1.11.10 Part A slice 1: the Learning pathways tab, read-only
+//                        (a course per role, built outside the UI)
 //   #/pdf                0110-046: Generate PDF, where an agent's or the
 //   #/pdf/<profile>/<job>  CLI's headerless PDF is finished (the link they
 //                        print); markdown picked here, or the stored
@@ -60,11 +62,12 @@ export const ROUTES = [
   { view: "pdf", path: "#/pdf", label: "Generate PDF", pattern: /^#\/pdf(?:\/(.*))?$/, param: "pdfTarget" },
   { view: "answers", path: "#/answers", label: "Answers and stories", pattern: /^#\/answers\/?$/ },
   { view: "master", path: "#/master", label: "Master resume", pattern: /^#\/master\/?$/ },
+  { view: "learning", path: "#/learning", label: "Learning pathways", pattern: /^#\/learning\/?$/ },
 ];
 
 // The top bar's primary links, in order (the profile switcher and the
 // Settings gear are laid out separately by TopBar.jsx).
-export const NAV_VIEWS = ["jobs", "assessments", "applications", "runs"];
+export const NAV_VIEWS = ["jobs", "assessments", "applications", "runs", "learning"];
 
 export const JOBS_HASH = "#/jobs";
 export const ASSESSMENTS_HASH = "#/assessments";
@@ -74,6 +77,7 @@ export const SETTINGS_HASH = "#/settings";
 export const ASSESS_HASH = "#/assess";
 export const ANSWERS_HASH = "#/answers";
 export const MASTER_HASH = "#/master";
+export const LEARNING_HASH = "#/learning";
 // Kept for the phase-1 callers (JobPage/JobCard): the grid's hash.
 export const GRID_HASH = JOBS_HASH;
 

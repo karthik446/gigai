@@ -100,6 +100,13 @@ JOURNEYS: dict[Route, str] = {
     Route("POST", "/api/master/selection"): "test_master_api_journey.py",
     Route("PUT", "/api/tailored-resumes/lines"): "test_tailored_resume_line_choice_journey.py",
     Route("PUT", "/api/tailored-resumes"): "test_edited_tailored_resume_journey.py",
+    # 0.1.11.10: the learning pathways (the course files under /learning/ are journeyed in the same file).
+    Route("GET", "/api/learning/pathways"): "test_learning_journey.py",
+    Route("GET", "/api/learning/pathways/{pathway_id}"): "test_learning_journey.py",
+    # 0.1.11.10 G5: generating a course (estimate first, approve, cancel, resume).
+    Route("POST", "/api/learning/pathways"): "test_learning_generate_journey.py",
+    Route("POST", "/api/learning/pathways/{pathway_id}/cancel"): "test_learning_generate_journey.py",
+    Route("POST", "/api/learning/pathways/{pathway_id}/resume"): "test_learning_generate_journey.py",
     # 0.1.11 N5: the job routes of the chat step.
     Route("GET", "/api/jobs/suggestions"): "test_job_suggestions_journey.py",
     Route("POST", "/api/jobs/suggestions"): "test_job_suggestions_journey.py",
