@@ -175,7 +175,8 @@ short help line opens the whole rule; a result’s job page leads back to the Se
 still there (a reload clears them).</p>
 <ul>
 <li><strong>Save this search as a profile</strong> turns the words into a profile that ranks and assesses.</li>
-<li><strong>Assess</strong> on a result assesses it as the default profile: one model call, and Scout asks first.</li>
+<li><strong>Assess</strong> on a result assesses that job: one model call, and Scout asks first. The assessment is the
+job’s own, whichever of your roles lists it, or none.</li>
 <li><strong>Mark applied</strong> works on a result too. Its job page opens even when no profile holds the posting; the
 description is not stored for such a posting, so Assess fetches the page.</li>
 </ul>
@@ -190,7 +191,7 @@ for the filter.</p>
 <p>Either button asks first. No model is called until you approve. The dialog says:</p>
 <ul>
 <li>the title, for example “Assess the top 50 by rank of 177 postings?”;</li>
-<li>how many per profile, and “50 at a time”: how many are left after these 50;</li>
+<li>“50 at a time”: how many are left after these 50;</li>
 <li><strong>Estimate</strong>: “~50 model calls, ~950k tokens, ~29 min”, from your own earlier calls (with
 none recorded yet it says so);</li>
 <li><strong>Model</strong>: the model the calls go to;</li>
@@ -217,8 +218,8 @@ running batch (12 of 50 assessed).” or “An assess batch is running (12 of 50
 This posting is not waiting in it.” A job that waits in the batch has no Assess button of
 its own until its result is in.</li>
 </ul>
-<p>A row that also matches another of your profiles has a link for that one: <strong>Or assess as
-Platform track</strong> (the profile’s name). It asks the same way.</p>
+<p>A job two of your roles found is one row, tagged with both. It has one assessment and one
+resume, whichever role you open it from; the role chips above the list only filter it.</p>
 <div class="sl-heading-wrapper level-h3"><h3 id="closed-postings">Closed postings</h3><a class="sl-anchor-link" href="#closed-postings"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “Closed postings”</span></a></div>
 <p>When you open a job, assess it, make its PDF or mark it applied, Scout checks that the
 posting is still on its board. A posting the board no longer lists is marked <strong>Closed</strong>, is
