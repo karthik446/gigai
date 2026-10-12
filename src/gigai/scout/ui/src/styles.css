@@ -386,6 +386,13 @@ select,
   color: var(--danger);
 }
 
+/* 0.1.11.10: no new sponsorship, H-1B transfers taken. Not a flat no:
+   the caution tone, not the danger one. */
+.status-badge.sponsorship-transfer_only {
+  background: var(--warn-bg);
+  color: var(--warn);
+}
+
 .status-badge.sponsorship-unknown {
   background: var(--chip-bg);
   color: var(--muted);

@@ -13,7 +13,7 @@ import pytest
 
 from gigai.scout import assess_master
 from gigai.scout import master_selection as ms
-from gigai.scout.master_selection import EVIDENCE_CAP
+from gigai.scout.assess_master import ASSESS_EVIDENCE_CAP
 from tests.evals import run_master_assess_eval as runner
 
 
@@ -48,7 +48,7 @@ def test_the_view_is_the_profiles_selection_and_the_evidence_view_is_what_the_pr
                 master, assess_master.profile_prior(titles=tuple(profile["titles"]), item_ids=tuple(view.item_ids()), profile_id=profile["profile_id"], label=profile["label"]),
                 title=posting["title"], posting_text=posting["text"], company=posting["company"], location=posting["location"], today=runner.TODAY,
             )
-            assert text == built.markdown and len(text) <= EVIDENCE_CAP and holds["within_cap"]
+            assert text == built.markdown and len(text) <= ASSESS_EVIDENCE_CAP and holds["within_cap"]
             assert holds["bullets"] > 3 * view.markdown.count("\n- ") // 2
 
 

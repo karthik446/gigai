@@ -19,6 +19,7 @@ const SPONSORSHIP_FILTERS = [
   { value: "offered", label: "Offered" },
   { value: "unknown", label: "Unknown" },
   { value: "not_offered", label: "Not offered" },
+  { value: "transfer_only", label: "H-1B transfer only" },
 ];
 
 const ASSESSED_FILTERS = [

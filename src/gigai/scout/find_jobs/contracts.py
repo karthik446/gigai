@@ -216,10 +216,17 @@ class SponsorshipStatus(StrEnum):
     time; ``AssessmentResult.sponsorship`` is the model's read at assess
     time.  Both are optional and default to ``None`` (unknown / not derived)
     so old serialized rows without this field keep parsing.
+
+    ``transfer_only`` (0.1.11.10): the posting says it gives no NEW
+    sponsorship and takes H-1B transfers ("cannot provide new visa
+    sponsorship ... open to facilitating H-1B visa transfers").  It is not a
+    flat no, and it is a label like the other three: nothing gates on it.
+    Stored values written before it stay as they are.
     """
 
     OFFERED = "offered"
     NOT_OFFERED = "not_offered"
+    TRANSFER_ONLY = "transfer_only"
     UNKNOWN = "unknown"
 
 

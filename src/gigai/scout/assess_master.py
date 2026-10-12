@@ -10,12 +10,30 @@ RESUME is for a profile:
   before.  ``assess_input`` answers ``None`` here too.
 - ``evidence``: the EVIDENCE VIEW (``master_selection.evidence_view``): the
   lines of the WHOLE master most relevant to this posting, picked by code, up
-  to the assess prompt's own resume cap (``EVIDENCE_CAP``, 12,000 characters).
+  to the assess prompt's own resume cap (``ASSESS_EVIDENCE_CAP``, 24,000
+  characters: since 0.1.11.10 a master of ordinary size is shown WHOLE, see
+  below).
   The same prompt, the same one call: only the RESUME block differs.  A
   verdict then says what the user can truthfully claim, not what one profile's
   2 pages happen to show.  The stored assessment says so
   (``AssessResponse.resume_basis``: the master revision and the selector
   version; ``resume`` still names the profile's pinned resume).
+
+0.1.11.10, THE WHOLE MASTER WHEN IT FITS.  The view's lines are ranked by the
+words they share with the posting, and under the old cap (12,000 characters)
+a master of 48 bullets showed 32: a requirement whose only evidence was one of
+the other 16 was answered "no resume line states ..." and the pick could not
+take the line, however often the user re-assessed.  Word matching cannot
+repair that (an adjacent line shares no word with the requirement it is
+adjacent to), so the ASSESS view's cap (``ASSESS_EVIDENCE_CAP``) is now large
+enough for a master of ordinary size to be shown whole (about 75 bullets); the
+ranking decides only what a larger master leaves out.  Only the assess prompt
+reads the larger view: ``master_selection.EVIDENCE_CAP`` (the selector's own
+default, which the tailoring's candidate set and ``selection show --evidence``
+read) is unchanged, and a pick is validated against the master, so it may name
+any line this view shows.  ``assess.md`` rule 1 says the rest: every line of the block
+is read before a row is called silent, and a row with adjacent evidence quotes
+the line.
 
 The quick assessment, "Assess all new" and the pipeline's base assessment all
 go through ``run_quick_assessment`` and so read the same input.  Three things
@@ -96,7 +114,13 @@ import threading
 
 from .find_jobs.assess_contracts import MAX_PICK_LINES, RESUME_INPUT_EVIDENCE, ResumeBasis
 from .master_resume import KIND_SKILLS, Master, skill_names
-from .master_selection import EVIDENCE_CAP, CitedRequirement, EvidenceView, SelectionPosting, SelectionProfile, evidence_view, select
+from .master_selection import CitedRequirement, EvidenceView, SelectionPosting, SelectionProfile, evidence_view, select
+
+#: 0.1.11.10: how much of the master one assessment's prompt may hold, in characters of the rendered view (ids and
+#: notes included). Twice the selector's own default (``master_selection.EVIDENCE_CAP``): a requirement can rest on a
+#: line that shares no word with it, so a master of ordinary size is shown whole, never cut by word ranking.
+#: ``assessment_core._MAX_PROMPT_RESUME_TEXT`` is the same number, so the prompt cuts nothing off the view.
+ASSESS_EVIDENCE_CAP = 24_000
 
 INPUT_VIEW = "view"
 INPUT_EVIDENCE = RESUME_INPUT_EVIDENCE
@@ -140,12 +164,12 @@ def evidence_text(
 ) -> EvidenceView:
     """The evidence view one assessment of this posting reads: its ``markdown`` is the prompt's RESUME. Pure.
 
-    Never longer than the assess prompt's resume cap, so the prompt cuts
-    nothing off it. ``ids`` (0.1.11 N3): with each line's and each entry's
+    Never longer than the assess prompt's resume cap (``ASSESS_EVIDENCE_CAP``),
+    so the prompt cuts nothing off it. ``ids`` (0.1.11 N3): with each line's and each entry's
     master id, and its note (``master_selection.evidence_view``).
     """
 
-    return evidence_view(master, prior, SelectionPosting(title, posting_text, company, location), today=today, cap=EVIDENCE_CAP, ids=ids)
+    return evidence_view(master, prior, SelectionPosting(title, posting_text, company, location), today=today, cap=ASSESS_EVIDENCE_CAP, ids=ids)
 
 
 #: The pick asked of a model holds a quarter more lines than the code selector shows under its cap, so the cap has something to leave out.
@@ -724,6 +748,7 @@ class ResumeCheck:
 
 
 __all__ = [
+    "ASSESS_EVIDENCE_CAP",
     "ASSESS_INPUT",
     "ASSESS_INPUTS",
     "CHANGE_LINE",

@@ -1,9 +1,11 @@
 import { sponsorshipChip } from "../jobModel.js";
 
 // `sponsorship` is a SponsorshipStatus value ("offered" | "not_offered" |
-// "unknown") or null/undefined when not derived; all three render, since an
-// operator filtering on sponsorship needs to see a silent posting as its
-// own state rather than a blank cell.
+// "transfer_only" | "unknown") or null/undefined when not derived; all of
+// them render, since an operator filtering on sponsorship needs to see a
+// silent posting as its own state rather than a blank cell. 0.1.11.10:
+// "transfer_only" reads "H-1B transfer only" (no NEW sponsorship, transfers
+// taken: not a flat no), in the caution tone.
 //
 // Q4b: `h1b` (rows[].h1b {approvals, fiscal_years}, the company catalog's
 // H-1B join added by Q4b-data) is appended ONLY when the posting itself is

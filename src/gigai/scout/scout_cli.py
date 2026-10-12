@@ -1010,13 +1010,14 @@ def resume_folder_command(set_value: str | None, reset: bool, home_value: Path |
 
 
 @scout_group.command("jobs-folder")
-@click.argument("action", required=False, type=click.Choice(["migrate"]))
+@click.argument("action", required=False, type=click.Choice(["migrate", "repair"]))
 @click.option("--set", "set_value", help="Use this folder from now on (an absolute path, or one that starts with ~); it is created when missing.")
 @click.option("--reset", "reset", is_flag=True, help="Go back to the default folder.")
 @click.option("--dry-run", "dry_run", is_flag=True, help="With migrate: list every planned copy and write nothing.")
+@click.option("--apply", "apply", is_flag=True, help="With repair: move the folders it lists (without it repair only lists them).")
 @click.option("--home", "home_value", type=click.Path(path_type=Path, file_okay=False))
 @click.option("--json", "as_json", is_flag=True)
-def jobs_folder_command(action: str | None, set_value: str | None, reset: bool, dry_run: bool, home_value: Path | None, as_json: bool) -> None:
+def jobs_folder_command(action: str | None, set_value: str | None, reset: bool, dry_run: bool, apply: bool, home_value: Path | None, as_json: bool) -> None:
     """Show or change your jobs folder: one folder per application, where GigAI puts a job's files.
 
     Default ~/Documents/GigAI/jobs. Each job has its own folder,
@@ -1038,16 +1039,36 @@ def jobs_folder_command(action: str | None, set_value: str | None, reset: bool, 
     and role come from the stored job, never from the file's name. The old
     folder is left as it is; master.md and PDFs are not copied. Run it with
     --dry-run first: that lists every copy and writes nothing.
+
+    repair (0.1.11.10) finds the job folders filed directly under company/
+    because the company was lost when the job was stored, and says where each
+    belongs. It lists them and moves nothing unless you add --apply; a folder
+    whose target exists is reported and left alone (nothing is overwritten or
+    merged), and a job whose company is still unknown stays where it is.
     """
 
-    from . import jobs_folder, jobs_folder_migrate
+    from . import jobs_folder, jobs_folder_migrate, jobs_folder_repair
 
     home_root = home_value or default_home_root()
     if set_value is not None and reset:
         _fail(ValueError("pass --set PATH or --reset, not both"), as_json=as_json, fallback="invalid_value")
         return
-    if action is None and dry_run:
+    if action != "migrate" and dry_run:
         _fail(ValueError("--dry-run goes with migrate: gigai scout jobs-folder migrate --dry-run"), as_json=as_json, fallback="invalid_value")
+        return
+    if action != "repair" and apply:
+        _fail(ValueError("--apply goes with repair: gigai scout jobs-folder repair --apply"), as_json=as_json, fallback="invalid_value")
+        return
+    if action == "repair":
+        if set_value is not None or reset:
+            _fail(ValueError("repair takes no --set or --reset: change the folder first, then repair"), as_json=as_json, fallback="invalid_value")
+            return
+        try:
+            repaired = jobs_folder_repair.repair(home_root, apply=apply)
+        except jobs_folder.JobsFolderError as exc:
+            _fail(exc, as_json=as_json, fallback="invalid_value")
+            return
+        _emit({"ok": True, **repaired.to_json()}, as_json, "\n".join(repaired.lines()))
         return
     if action == "migrate":
         if set_value is not None or reset:

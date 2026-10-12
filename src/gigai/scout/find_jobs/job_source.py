@@ -57,13 +57,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 from pathlib import Path
+import re
 import sqlite3
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Callable
 
 from ...canonical import digest_imported_bytes
 from .assess_contracts import AssessJobInput, ResolvedJob
-from .contracts import FindJobsContractError, normalize_url
+from .contracts import BOARD_PATH_HOSTS, BOARD_SUBDOMAIN_HOSTS, FindJobsContractError, normalize_url
 
 if TYPE_CHECKING:  # pragma: no cover - imported only by static type checkers
     import httpx
@@ -97,6 +98,10 @@ def resolve_job_for_assessment(
     indexed = index_posting(home_root, target, normalized, open_client=open_client)
     if indexed is not None:
         return indexed
+    # 0.1.11.10 fix C: a posting only the COMPANY index holds (a board nobody's role follows) is that board's text, with its company.
+    company_held = company_index_posting(home_root, target, normalized)
+    if company_held is not None:
+        return company_held
     # S3: the one branch here that requests a URL the posting store holds (``index_posting``'s own request goes to the
     # board's API host). Decided before a client is opened.
     stored = index_holds(home_root, target, normalized)
@@ -104,7 +109,7 @@ def resolve_job_for_assessment(
         fetched = resolve(job, client, trust=TRUST_STORED) if stored else resolve(job, client)
     if fetched.fetch_kind != "generic":
         return fetched
-    return stored_ats_posting(home_root, target, normalized) or fetched
+    return stored_ats_posting(home_root, target, normalized) or with_indexed_company(home_root, fetched)
 
 
 def index_holds(home_root: Path, target: Path, job_identity: str) -> bool:
@@ -197,6 +202,110 @@ def index_posting(
     return replace(found, job_identity=job_identity, normalized_url=job_identity)
 
 
+def company_index_posting(home_root: Path, target: Path, job_identity: str) -> ResolvedJob | None:
+    """0.1.11.10 fix C: the company index's posting for ``job_identity`` with its board text (``ats_board``), or ``None``.
+
+    ``index_posting`` reads the posting store, which holds only the postings a role follows. A job pasted by its board
+    address that no role follows (``ats.rippling.com/<board>/jobs/<id>``) is still in the company index, with its company,
+    title and the board's cached text: read from there, no request, never a scrape of the page (whose resolution had no company).
+    ``None`` when the company index does not hold it or its board gave no text.
+    """
+
+    from .. import postings
+    from . import free_search
+
+    try:
+        if job_identity.startswith("text:"):
+            return None
+        found = free_search.find_posting(Path(home_root), job_identity)
+        if found is None:
+            return None
+        entry, _posting = found
+        text = postings.posting_texts(Path(home_root), [SimpleNamespace(board=entry.key, job=job_identity)]).get(job_identity)  # type: ignore[list-item]
+    except (FindJobsContractError, sqlite3.Error, OSError, ValueError, LookupError):
+        return None
+    body = (text.text if text is not None else None) or ""
+    if text is None or not body.strip():
+        return None
+    return ResolvedJob(
+        job_identity=job_identity, source_url=text.url, normalized_url=job_identity, fetch_kind="ats_board", title=text.title,
+        company=text.company, location=text.location, text=body, text_sha256=digest_imported_bytes(body.encode("utf-8")),
+    )
+
+
+def with_indexed_company(home_root: Path, job: ResolvedJob) -> ResolvedJob:
+    """0.1.11.10 fix C: ``job`` with the company the company index holds for its address, when ``job`` names none.
+
+    A job resolved by a page scrape (``generic``) or stored by one has no company, and the jobs folder files it under
+    ``company/``. The company index knows the posting by its address (company, and the title when ``job`` has none).
+    Text, kind and digest are untouched. ``job`` unchanged when it names a company or the index does not hold the address.
+    """
+
+    from . import free_search
+
+    if (job.company or "").strip() or job.job_identity.startswith("text:"):
+        return job
+    try:
+        found = free_search.find_posting(Path(home_root), job.job_identity)
+    except (FindJobsContractError, sqlite3.Error, OSError, ValueError, LookupError):
+        found = None
+    if found is not None and (found[0].company or "").strip():
+        entry, posting = found
+        return replace(job, company=entry.company, title=job.title or posting.title, location=job.location or posting.location)
+    named = careers_host_company(home_root, job.source_url) or careers_host_company(home_root, job.job_identity)
+    return replace(job, company=named) if named else job
+
+
+#: Second-level public suffixes whose registrable domain has one more label (``example.co.uk``): the common ones.
+_TWO_LABEL_SUFFIXES = frozenset({
+    "co.uk", "org.uk", "ac.uk", "gov.uk", "com.au", "net.au", "org.au", "co.nz", "co.jp", "co.in", "co.za", "co.kr", "co.il",
+    "com.br", "com.mx", "com.sg", "com.hk", "com.tr", "com.ar", "com.cn", "com.tw",
+})
+#: A first-party careers host's first label: ``jobs.<name>.<tld>`` or ``careers.<name>.<tld>``.
+_CAREERS_LABELS = frozenset({"jobs", "careers"})
+#: The registrable names of applicant-tracking systems and job boards: their host never names the company that posted.
+_NOT_A_COMPANY_HOST_NAMES = frozenset({
+    "greenhouse", "lever", "ashbyhq", "workable", "workdayjobs", "myworkdayjobs", "smartrecruiters", "icims", "jobvite", "rippling",
+    "bamboohr", "recruitee", "teamtailor", "linkedin", "indeed", "glassdoor", "ziprecruiter", "wellfound", "dice", "monster",
+    "simplyhired", "gem", "pinpointhq", "breezy", "workday", "taleo", "oraclecloud", "successfactors", "paylocity", "paycomonline",
+    "ultipro", "adp", "jazzhr", "applytojob", "careerbuilder", "angel", "hired", "builtin", "lensa", "talent", "jooble",
+})
+_HOST_LABEL = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")
+
+
+def careers_host_company(home_root: Path | str | None, url: str | None) -> str | None:
+    """0.1.11.10 fix C2: the company a first-party careers host names, shown as the layout shows a company; else ``None``.
+
+    ``https://jobs.twilio.com/...`` and ``https://careers.example.co.uk/...`` give ``Twilio`` and ``Example``. Only the form
+    ``jobs.<name>.<tld>`` / ``careers.<name>.<tld>`` (``www.`` allowed in front), and never an ATS or job board (the board URL
+    parser's hosts and ``_NOT_A_COMPANY_HOST_NAMES``).
+    """
+
+    from urllib.parse import urlsplit
+
+    from .company_names import company_display_name
+
+    try:
+        host = (urlsplit((url or "").strip()).hostname or "").lower().rstrip(".")
+    except ValueError:
+        return None
+    labels = host.split(".")
+    if labels and labels[0] == "www":
+        labels = labels[1:]
+    if len(labels) < 3:
+        return None
+    suffix = 2 if ".".join(labels[-2:]) in _TWO_LABEL_SUFFIXES else 1
+    if len(labels) != suffix + 2 or labels[0] not in _CAREERS_LABELS:
+        return None
+    name = labels[-(suffix + 1)]
+    joined = ".".join(labels)
+    if not _HOST_LABEL.fullmatch(name) or name in _NOT_A_COMPANY_HOST_NAMES or joined in BOARD_PATH_HOSTS:
+        return None
+    if any(joined.endswith("." + board) or joined == board for board in BOARD_SUBDOMAIN_HOSTS):
+        return None
+    return company_display_name(home_root, name)
+
+
 @dataclass(frozen=True)
 class IndexJob:
     """One job as the index and the posting read model hold it (no request, nothing written).
@@ -283,4 +392,4 @@ def company_index_job(home_root: Path, job_identity: str) -> dict[str, object] |
     }
 
 
-__all__ = ["ATS_FETCH_KINDS", "IndexJob", "index_holds", "company_index_job", "index_job", "index_posting", "resolve_job_for_assessment", "stored_ats_posting"]
+__all__ = ["ATS_FETCH_KINDS", "IndexJob", "careers_host_company", "company_index_posting", "with_indexed_company", "index_holds", "company_index_job", "index_job", "index_posting", "resolve_job_for_assessment", "stored_ats_posting"]

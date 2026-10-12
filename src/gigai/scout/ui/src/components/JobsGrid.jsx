@@ -56,6 +56,7 @@ const SPONSORSHIP_OPTIONS = [
   ["all", "All"],
   ["offered", "Sponsors visas"],
   ["not_offered", "No sponsorship"],
+  ["transfer_only", "H-1B transfer only"],
   ["unknown", "Not stated"],
 ];
 

@@ -189,6 +189,13 @@ def _job_folder(home_root: Path, response: object) -> str | None:
     return None if folder is None else folder.shown
 
 
+#: 0.1.11.10 fix C: said when the stored job names no company (the jobs folder's layout files it under ``company/``, never silently).
+NO_COMPANY_LINE = (
+    "  The posting names no company, so its folder is filed under company/ in your jobs folder (the layout's folder for an unknown company); "
+    "`gigai scout jobs-folder repair` lists what can be moved once a company is known."
+)
+
+
 def store_resume(
     in_file: str, job_url: str, profile_id: str | None, actor: str, source: str | None, out_file: Path | None, home_root: Path, target: Path, as_json: bool,
     *, resolves: str | None = None, fit: bool = False, renamed_from: str | None = None, force: bool = False,
@@ -253,7 +260,8 @@ def store_resume(
     if as_json:
         payload: dict[str, object] = {
             "ok": True, **response.to_json(), "changed": attached.changed, "out_path": None if out_path is None else str(out_path),
-            "folder_path": folder_file, "job_folder": _job_folder(home_root, response), "recheck": recheck, "drain": drain, "status": status, "recheck_failed": recheck_failed,
+            "folder_path": folder_file, "job_folder": _job_folder(home_root, response),
+            "folder_company_unknown": not (response.job.company or "").strip(), "recheck": recheck, "drain": drain, "status": status, "recheck_failed": recheck_failed,
             "suggestions": record, "suggestions_error": record_error,
         }
         if renamed_from is not None:
@@ -280,6 +288,8 @@ def store_resume(
     click.echo(f"  Markdown: {response.markdown_path}")
     if folder_file is not None:
         click.echo(f"  In your jobs folder: {folder_file}")
+        if not (job.company or "").strip():
+            click.echo(NO_COMPANY_LINE)
     if out_path is not None:
         click.echo(f"  Copied to {out_path}")
     if record is not None:

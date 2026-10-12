@@ -175,10 +175,13 @@ export function unchangedSinceLabel(fromRunDate) {
 // stated by the posting -> "Sponsors visas" / "No sponsorship"; silent ->
 // "Sponsorship not stated" (uat-batch1 N9: "Unknown · 32 H-1B approvals"
 // read as a contradiction; SponsorshipBadge appends the catalog's H-1B
-// count there when the posting carries one).
+// count there when the posting carries one). 0.1.11.10: "H-1B transfer
+// only" for a posting that gives no NEW sponsorship and takes transfers
+// (transfer_only): not a flat no.
 const SPONSORSHIP_LABELS = {
   offered: "Sponsors visas",
   not_offered: "No sponsorship",
+  transfer_only: "H-1B transfer only",
   unknown: "Sponsorship not stated",
 };
 

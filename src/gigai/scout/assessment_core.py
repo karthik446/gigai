@@ -62,8 +62,10 @@ from .find_jobs.contracts import (
     MAX_SOURCE_CHARS,
     FindJobsContractError,
     NotAssessedReason,
+    SponsorshipStatus,
     is_row_id,
 )
+from .find_jobs.filters import sponsorship_from_text
 from .find_jobs.work_mode import in_person_modes
 from .question_ids import normalize_question_id
 from .requirement_weights import bound_rows, cap_list_item_questions, cap_mandatory_questions, settled_verdict
@@ -88,7 +90,9 @@ _INSTRUCTIONS_RESOURCE = "scout/data/instructions/assess.md"
 _ROLE = "reviewer"
 
 _MAX_PROMPT_POSTING_TEXT = 12_000
-_MAX_PROMPT_RESUME_TEXT = 12_000
+# 0.1.11.10: as large as the assess view of the master may be (``assess_master.ASSESS_EVIDENCE_CAP``), so the prompt
+# cuts nothing off a view the selector fitted. A profile's own 2-page resume is far below either number.
+_MAX_PROMPT_RESUME_TEXT = 24_000
 _MAX_PROMPT_VALIDATION_ERROR = 300
 
 _PLACEHOLDER = re.compile(r"\{\{([a-z_]+)\}\}")
@@ -815,6 +819,15 @@ _SPONSORSHIP_SYNONYMS = {
     "not offered": "not_offered",
     "no": "not_offered",
     "unavailable": "not_offered",
+    # 0.1.11.10: no NEW sponsorship, H-1B transfers taken. Not a flat no.
+    "transfer_only": "transfer_only",
+    "transfer only": "transfer_only",
+    "transfers only": "transfer_only",
+    "transfers_only": "transfer_only",
+    "h-1b transfer only": "transfer_only",
+    "h1b transfer only": "transfer_only",
+    "h-1b transfers only": "transfer_only",
+    "h1b transfers only": "transfer_only",
     "unknown": "unknown",
     "unclear": "unknown",
     "n/a": "unknown",
@@ -914,7 +927,7 @@ def _normalize_assessment_payload(decoded: Mapping[str, object]) -> dict[str, ob
       between verdict and the matrix/questions is enforced downstream, in ``parse``
       (``proposals.parse_assessment_proposal``), not here.
     - unknown top-level keys are dropped so the frozen contract's closed-object check still applies cleanly
-    - ``sponsorship`` synonyms map to offered/not_offered/unknown; absent stays absent
+    - ``sponsorship`` synonyms map to offered/not_offered/transfer_only/unknown; absent stays absent
     - 0110-10-03 (``requirement_weights``): the matrix is put must-haves first and
       bounded (``bound_rows``): rows past the bound are counted in
       ``rows_not_shown``, never an error and never dropped in silence; and a
@@ -1381,7 +1394,8 @@ def _without_authorization(decoded: Mapping[str, object]) -> Mapping[str, object
     which the job list already shows), not a requirement: no hold, no question, no not_a_match, no row in the score.
     Whatever the model returns about them is removed here, so a prompt-only rule cannot leak; a ``not_a_match`` that
     rested on such a row alone is read from the remaining rows (matched, or pending when a must-have question is
-    open). The label becomes ``not_offered`` when a removed row says the employer does not sponsor. An answer in
+    open). The label becomes ``not_offered`` when a removed row says the employer does not sponsor, and
+    ``transfer_only`` (0.1.11.10) when it says so AND takes H-1B transfers, which is not a flat no. An answer in
     the v8 shape is returned untouched. Pure.
     """
 
@@ -1397,8 +1411,12 @@ def _without_authorization(decoded: Mapping[str, object]) -> Mapping[str, object
     questions = decoded.get("questions")
     if isinstance(questions, list):
         out["questions"] = [item for item in questions if not (isinstance(item, Mapping) and is_authorization_question(item))]
-    if "sponsorship" not in out and says_no_sponsorship(dropped):
-        out["sponsorship"] = "not_offered"
+    if "sponsorship" not in out:
+        said = " ".join(f"{row.get('requirement') or ''} {row.get('class_basis') or ''}" for row in dropped)
+        if sponsorship_from_text(said) == SponsorshipStatus.TRANSFER_ONLY:
+            out["sponsorship"] = SponsorshipStatus.TRANSFER_ONLY.value
+        elif says_no_sponsorship(dropped):
+            out["sponsorship"] = SponsorshipStatus.NOT_OFFERED.value
     said = _normalize_verdict(decoded.get("verdict"))
     if said in ("matched_above_threshold", "pending_user_answers") or (
         said == "not_a_match" and not any(row.get("status") == "unmet" and row.get("class") in (None, "hard") for row in kept)
@@ -1409,6 +1427,21 @@ def _without_authorization(decoded: Mapping[str, object]) -> Mapping[str, object
         if said == "not_a_match":
             out["not_a_match_reason"] = None
     return out
+
+
+def _transfer_label(decoded: Mapping[str, object], boundary: Boundary) -> Mapping[str, object]:
+    """``decoded`` with a flat ``not_offered`` read as ``transfer_only`` when the posting's own text takes H-1B transfers (0.1.11.10).
+
+    The label only: no row, no question and no verdict is touched (rule 5). A model that answers the flat no for
+    "cannot provide new visa sponsorship ... open to facilitating H-1B visa transfers" is corrected by the same
+    rule the acquire-time label uses (``filters.sponsorship_from_text``); every other answer is left as it came. Pure.
+    """
+
+    if not boundary.posting_text or _normalize_sponsorship(decoded.get("sponsorship")) != SponsorshipStatus.NOT_OFFERED.value:
+        return decoded
+    if sponsorship_from_text(boundary.posting_text) != SponsorshipStatus.TRANSFER_ONLY:
+        return decoded
+    return {**decoded, "sponsorship": SponsorshipStatus.TRANSFER_ONLY.value}
 
 
 def _normalize_and_strip(decoded: Mapping[str, object], *, boundary: Boundary | None = None) -> tuple[dict[str, object], tuple[str, ...], int]:
@@ -1461,6 +1494,7 @@ def _normalize_and_strip(decoded: Mapping[str, object], *, boundary: Boundary | 
     """
     boundary = boundary if boundary is not None else Boundary()
     decoded = _without_authorization(decoded)
+    decoded = _transfer_label(decoded, boundary)
     decoded = _location_unclear(decoded, boundary)
     unknown_sources: list[tuple[str, str]] = []
     matrix = decoded.get("matrix")

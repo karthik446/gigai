@@ -260,8 +260,8 @@ export function h1bLabel(h1b) {
 }
 
 // The sponsorship chip's words (SponsorshipBadge renders them): the
-// posting's own statement ("Sponsors visas" / "No sponsorship" / "Sponsorship
-// not stated") plus the company's H-1B approvals whenever the catalog holds a
+// posting's own statement ("Sponsors visas" / "No sponsorship" / "H-1B
+// transfer only" / "Sponsorship not stated") plus the company's H-1B approvals whenever the catalog holds a
 // figure (0.1.11.3: stated or silent, "Sponsors visas · 32 H-1B approvals").
 // A LABEL only. `positive` (the chip's green tone) is true only for a silent
 // posting whose company has approvals.

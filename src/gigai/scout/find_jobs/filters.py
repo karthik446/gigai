@@ -382,6 +382,34 @@ _NOT_OFFERED_PHRASES: tuple[str, ...] = (
     "no sponsorship",
 )
 
+# 0.1.11.10: "no NEW sponsorship, transfers OK" is its own label (``transfer_only``), not a flat no.
+# ``_NO_NEW_SPONSORSHIP``: the posting rules out a new petition in words the phrase list above does not hold
+# ("cannot provide new visa sponsorship"). ``_TRANSFER``: an H-1B or visa transfer is named; it counts as taken
+# only when its own clause (back to the sentence start or a "but"/"however") does not negate it
+# ("we do not sponsor visas or support H-1B transfers" is a flat no).
+_NO_NEW_SPONSORSHIP = re.compile(
+    r"(?:cannot|can\s?not|can't|unable\s+to|not\s+able\s+to|do(?:es)?\s+not|don't|doesn't|will\s+not|won't|are\s+not|is\s+not|aren't|isn't)\s+"
+    r"(?:currently\s+|presently\s+)?(?:provid\w+|offer\w*|sponsor\w*|support\w*|fil\w+|initiat\w+)\s+(?:any\s+)?new\s+"
+    r"(?:(?:visa|h-?1b|work|employment|immigration)\s+)*(?:sponsorships?|visas?|petitions?|applications?)"
+    r"|\bno\s+new\s+(?:(?:visa|h-?1b|work|employment|immigration)\s+)*sponsorships?"
+)
+_TRANSFER = re.compile(r"(?:h-?1b|visa)(?:\s+visa)?\s+transfers?|transfers?\s+of\s+(?:an?\s+|your\s+)?(?:existing\s+|current\s+)?(?:h-?1b|visa)")
+_TRANSFERS_ONLY = re.compile(r"(?:h-?1b|visa)(?:\s+visa)?\s+transfers?\s+only|\bonly\s+(?:\w+\s+){0,3}?(?:h-?1b|visa)(?:\s+visa)?\s+transfers?")
+_CLAUSE_START = re.compile(r"[.!?;\n]|\bbut\b|\bhowever\b|\balthough\b|\bthough\b")
+_NEGATION = re.compile(r"\b(?:not|no|nor|neither|never|cannot|unable|without)\b|n't")
+
+
+def _takes_transfers(lowered: str) -> bool:
+    """Whether ``lowered`` names an H-1B or visa transfer in a clause that does not negate it. Pure."""
+
+    for found in _TRANSFER.finditer(lowered):
+        before = lowered[: found.start()]
+        starts = [match.end() for match in _CLAUSE_START.finditer(before)]
+        if not _NEGATION.search(before[starts[-1] if starts else 0 :]):
+            return True
+    return False
+
+
 _OFFERED_PHRASES: tuple[str, ...] = (
     "visa sponsorship available",
     "visa sponsorship is available",
@@ -715,12 +743,21 @@ def sponsorship_from_text(text: str | None) -> SponsorshipStatus:
     "offered" phrase when both somehow appear (fail toward the stricter,
     safer read for a candidate who needs sponsorship); otherwise whichever
     phrase set matches; otherwise ``unknown``.
+
+    0.1.11.10: a posting that rules out sponsorship AND takes H-1B or visa
+    transfers ("cannot provide new visa sponsorship ... open to facilitating
+    H-1B visa transfers"), or that says "H-1B transfers only", is
+    ``transfer_only``: no new sponsorship, which is not a flat no. A transfer
+    the posting also refuses stays ``not_offered``.
     """
 
     if not text:
         return SponsorshipStatus.UNKNOWN
     lowered = text.lower()
-    if any(phrase in lowered for phrase in _NOT_OFFERED_PHRASES):
+    refused = any(phrase in lowered for phrase in _NOT_OFFERED_PHRASES) or bool(_NO_NEW_SPONSORSHIP.search(lowered))
+    if _TRANSFERS_ONLY.search(lowered) or (refused and _takes_transfers(lowered)):
+        return SponsorshipStatus.TRANSFER_ONLY
+    if refused:
         return SponsorshipStatus.NOT_OFFERED
     if any(phrase in lowered for phrase in _OFFERED_PHRASES):
         return SponsorshipStatus.OFFERED

@@ -7,6 +7,7 @@ tests/behaviors/scout_find_jobs.
 
 - item 6: a stated "no sponsorship" with no H-1B figure shows red "No sponsorship" on the card; "Sponsors visas" with a
   figure shows "Sponsors visas · 32 H-1B approvals"; an unknown posting with no figure shows no sponsorship chip at all;
+  0.1.11.10: "no new sponsorship, transfers taken" (`transfer_only`) shows "H-1B transfer only" in its own tone, not the flat no's;
 - item 11: the job page's stored-resume preview shows an `## Other` section the stored markdown holds (the preview is one view since 0.1.11.5).
 """
 
@@ -34,9 +35,9 @@ def test_the_card_says_the_stated_sponsorship_with_or_without_a_figure(ui) -> No
             route.continue_()
             return
         body = route.fetch().json()
-        for place, row in enumerate(body.get("postings", {}).get("rows", [])[:3]):
+        for place, row in enumerate(body.get("postings", {}).get("rows", [])[:4]):
             row["sponsorship"], row["h1b"] = [
-                ("not_offered", None), ("offered", {"approvals": 32, "fiscal_years": ["2025", "2026"]}), ("unknown", None),
+                ("not_offered", None), ("offered", {"approvals": 32, "fiscal_years": ["2025", "2026"]}), ("unknown", None), ("transfer_only", None),
             ][place]
             labelled[row["job_identity"]] = row["sponsorship"]
         route.fulfill(status=200, content_type="application/json", body=json.dumps(body))
@@ -45,7 +46,7 @@ def test_the_card_says_the_stated_sponsorship_with_or_without_a_figure(ui) -> No
     ui.goto("/#/jobs")
     ui.wait_for_jobs_list()
     ui.settle()
-    assert len(labelled) == 3
+    assert len(labelled) == 4
     chips = {}
     for identity, sponsorship in labelled.items():
         card = ui.page.locator(f"{ROW}:has(a[href='#/jobs/{quote(identity, safe='')}'])")
@@ -53,9 +54,12 @@ def test_the_card_says_the_stated_sponsorship_with_or_without_a_figure(ui) -> No
         chips[sponsorship] = [" ".join(text.split()) for text in badge.all_inner_texts()]
         if sponsorship == "not_offered":
             assert badge.first.get_attribute("class").count("sponsorship-not_offered") == 1
+        if sponsorship == "transfer_only":
+            assert "sponsorship-transfer_only" in badge.first.get_attribute("class") and "sponsorship-not_offered" not in badge.first.get_attribute("class")
     assert chips["not_offered"] == ["No sponsorship"], chips
     assert chips["offered"] == ["Sponsors visas · 32 H-1B approvals"], chips
     assert chips["unknown"] == [], chips
+    assert chips["transfer_only"] == ["H-1B transfer only"], chips
     shot(ui, "card-sponsorship-label")
     ui.page.unroute_all()
     ui.assert_clean()

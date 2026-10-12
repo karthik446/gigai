@@ -2651,7 +2651,10 @@ def resolve_tailor_job(
     except FindJobsContractError as exc:
         raise TailorError(exc.code, str(exc)) from exc
     from .find_jobs.assess_contracts import AssessRequest
+    from .find_jobs.job_source import with_indexed_company
 
+    # 0.1.11.10 fix C: a stored or scraped job with no company gets the one the company index holds for its address (no lost company folder).
+    job = with_indexed_company(home_root, job)
     return _apply_job_overrides(job, AssessRequest(job=request.job, resume=request.resume))
 
 

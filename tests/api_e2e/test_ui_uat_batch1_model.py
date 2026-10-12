@@ -205,6 +205,8 @@ def _payload() -> dict:
             [None, {"approvals": 1, "fiscal_years": [2025, 2026]}],
             ["offered", {"approvals": 32, "fiscal_years": [2026]}],
             ["not_offered", {"approvals": 32, "fiscal_years": [2026]}],
+            ["transfer_only", {"approvals": 32, "fiscal_years": [2026]}],
+            ["transfer_only", None],
         ],
         "rotations": [
             # a first run ever, the pass running: nothing measured yet
@@ -407,7 +409,7 @@ def test_the_status_rendering_is_option_a_only() -> None:
 
 
 def test_the_sponsorship_chip(out: dict) -> None:
-    with_record, with_denials, no_record, zero, null_status, offered, not_offered = out["chips"]
+    with_record, with_denials, no_record, zero, null_status, offered, not_offered, transfer_only, transfer_plain = out["chips"]
     assert with_record["label"] == "Sponsorship not stated · 32 H-1B approvals (FY2026)"
     assert with_record["positive"] is True and with_record["status"] == "unknown"
     assert "2 denials" in with_denials["title"] and "denial" not in with_denials["label"]
@@ -417,6 +419,14 @@ def test_the_sponsorship_chip(out: dict) -> None:
     # 0.1.11.3: a posting that states its position shows it plus the company's figure (a label, never a contradiction).
     assert offered["label"] == "Sponsors visas · 32 H-1B approvals (FY2026)" and offered["positive"] is False
     assert not_offered["label"] == "No sponsorship · 32 H-1B approvals (FY2026)" and not_offered["positive"] is False
+    # 0.1.11.10: no NEW sponsorship, H-1B transfers taken. Its own label and its own chip class, not the flat no's.
+    assert transfer_only["label"] == "H-1B transfer only · 32 H-1B approvals (FY2026)" and transfer_only["positive"] is False
+    assert (transfer_plain["label"], transfer_plain["status"], transfer_plain["title"]) == ("H-1B transfer only", "transfer_only", "Stated in the posting")
+    assert not_offered["status"] == "not_offered"
+    grid = (UI_SRC / "components" / "JobsGrid.jsx").read_text(encoding="utf-8")
+    # The filter keeps "No sponsorship" and has the new option right after it.
+    assert '["not_offered", "No sponsorship"],\n  ["transfer_only", "H-1B transfer only"],' in grid
+    assert ".status-badge.sponsorship-transfer_only" in (UI_SRC / "styles.css").read_text(encoding="utf-8")
     for chip in out["chips"]:
         assert "Unknown" not in chip["label"]
 

@@ -156,7 +156,8 @@ posting. The list is matched again right after you change either setting.
 
 Whether a posting sponsors visas is never a filter. A posting that says it
 does not sponsor stays in the list with a "No sponsorship" label, also when
-your settings say you need a visa.
+your settings say you need a visa. One that says it offers no new sponsorship
+but takes H-1B transfers is labelled "H-1B transfer only".
 
 ## Keywords
 

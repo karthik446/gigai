@@ -52,7 +52,8 @@ country outside your list ("Europe", "Remote (Germany)", "London / Remote") is
 not listed; one that says only "Remote" or "Anywhere" is read as the US.
 `visa_sponsorship_required` says you need a visa. It is a label and
 never a filter: a posting that says it does not sponsor is kept and marked
-"No sponsorship", in a run, in the Jobs list, in ranking and in an assessment.
+"No sponsorship" (or "H-1B transfer only" when it takes transfers), in a run, in the Jobs list,
+in ranking and in an assessment.
 Acquire also caps results to at
 most 2 postings per company for diversity, and results appear as cards on
 the UI as the run progresses.

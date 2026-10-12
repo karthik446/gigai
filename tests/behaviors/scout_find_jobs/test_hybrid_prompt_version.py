@@ -60,12 +60,13 @@ PROMPT_SHA256_V8 = {
     "onsite": "1435bc410449b861fdbc9062767f92a7f841fcc1ebd25e33f98b688ecd5ffc4d",
     "hybrid": "91e8cd53e8d76726094bfb77876b6123fc4345bf00b27271fd31a4de651e96ed",
 }
-#: sha256 of the prompt each work mode renders for ``_JOB`` / ``_ctx`` now (assess-prompt-v9, 9.4 wording).
+#: sha256 of the prompt each work mode renders for ``_JOB`` / ``_ctx`` now (assess-prompt-v9; 0.1.11.10 wording: rule 1 reads
+#: every line of the RESUME block before a row is silent, rule 5 names ``transfer_only``; re-captured from the renderer).
 PROMPT_SHA256 = {
-    "": "7292e9aa64d43bb12277a517e6ca50e961ceed457fda82122dde945e8cd10ed0",
-    "remote": "53d03d6a5c8a9051165b50fff952f4d5bae63976084351720264dff70194345d",
-    "onsite": "a44cb994fcd27f126c2b9b848dcbae48cd4ef8bb2140498c95431a875d959d2e",
-    "hybrid": "abc44aa289387fec433fdcf66184d8c3ccfe498531c1daf4bb05e6156f5bb70a",
+    "": "9b7f375e44b030e5b5fe5cf1ec9b6a5ac8d58228f95eec53a71b15a396ead48c",
+    "remote": "a7a4cb51e0b7eb13d736c78c65363d629f6935a972dd7ec4d7e7efa489de4702",
+    "onsite": "9917b8bc3d84adaf9ffc0b8007970073292a2525888b2f4a68d9cfdccdbbd318",
+    "hybrid": "3d4e4eda57eb8ba7cec223a2c8348d4d6a7530cf9c0659d399551c10672817bd",
 }
 #: The same under assess-prompt-v7: the fenced prompt, before the requirement weights (0110-10-03).
 PROMPT_SHA256_V7 = {
