@@ -73,6 +73,7 @@ def learning_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[S
 
     monkeypatch.setenv("GIGAI_SCOUT_AUTO_REFRESH", "0")
     monkeypatch.setenv("GIGAI_SCOUT_MODEL_TAGS", "0")
+    monkeypatch.setattr("gigai.scout.learning_shipped_store.package_shipped_dir", lambda: tmp_path / "no-shipped-courses")  # the real package courses are not these tests' subject
     gig = build_gig_with_resume(tmp_path)
     server = serve(backend=ScoutFindJobsBackend(home_root=gig.home_root, target=gig.target), bind=("127.0.0.1", 0))
     thread = threading.Thread(target=server.serve_forever, daemon=True)

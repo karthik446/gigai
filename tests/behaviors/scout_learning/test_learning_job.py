@@ -355,7 +355,8 @@ def running_record(env: SimpleNamespace, *, pid: int, age_seconds: float = 0.0) 
         return learning_store.write_pathway(env.home, env.target, dataclasses.replace(pathway, status="running", revision=2))
 
 
-def test_a_running_record_whose_owner_is_gone_reads_as_interrupted_and_can_be_resumed(env: SimpleNamespace) -> None:
+def test_a_running_record_whose_owner_is_gone_reads_as_interrupted_and_can_be_resumed(env: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("gigai.scout.learning_shipped_store.package_shipped_dir", lambda: env.home / "no-shipped-courses")  # the real package courses are not these tests' subject
     record = running_record(env, pid=dead_pid())
     assert learning_job.live_status(env.home, env.target, record) == "interrupted"
     assert learning_job.running_id(env.home, env.target) is None

@@ -98,7 +98,8 @@ def test_a_refused_import_exits_1_with_the_named_error_and_stores_nothing(home_t
     assert learning_store.list_pathways(home, target) == []
 
 
-def test_list_and_show_read_the_store(home_target: tuple[Path, Path], tmp_path: Path) -> None:  # noqa: F811
+def test_list_and_show_read_the_store(home_target: tuple[Path, Path], tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:  # noqa: F811
+    monkeypatch.setattr("gigai.scout.learning_shipped_store.package_shipped_dir", lambda: tmp_path / "no-shipped-courses")  # the real package courses are not these tests' subject
     home, target = home_target
     empty = _run(home, target, "list")
     assert empty.exit_code == 0 and "No learning pathways yet" in empty.output and "gigai scout learning import" in empty.output

@@ -97,6 +97,8 @@ def _poll(client: httpx.Client, pathway_id: str, until: tuple[str, ...]) -> list
 
 
 def test_a_course_is_generated_only_on_approval_shows_its_progress_and_is_served_locked_down(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    (tmp_path / "no-shipped-courses").mkdir()
+    monkeypatch.setenv("GIGAI_SCOUT_LEARNING_SHIPPED_DIR", str(tmp_path / "no-shipped-courses"))  # the real package courses are not this test's subject
     home, target = setup_and_init(tmp_path)
     seed_boards(home)
     search_index.close(home)
