@@ -129,7 +129,8 @@ def test_a_met_row_without_a_usable_source_cites_a_line_as_written_or_nothing() 
     # 0.1.11.3 Q3 (was: the model's words were kept): words no line says are not a citation; a piece of one line is that line.
     answer = _answer([_row("Go services", "met", [], ["Built Go services."], "hard"), _row("Billing APIs", "met", [], ["Wrote the REST API layer"])])
     matrix = _assess(answer).parsed.matrix
-    assert list(matrix[0].resume_evidence) == [] and matrix[0].status.value == "met"
+    # 0.1.11.10 B2: a short form of a line (its words, in its order, >= 3 shared) is traced to that line by the word rule.
+    assert list(matrix[0].resume_evidence) == [check.parse_master_lines(MASTER)["b-000002"].text] and matrix[0].status.value == "met"
     assert list(matrix[1].resume_evidence) == [check.parse_master_lines(MASTER)["b-000004"].text]
     # A prompt that showed no ids has no lines: the answer is read as before.
     plain = build_assess_context(resume_text="- Built Go services")

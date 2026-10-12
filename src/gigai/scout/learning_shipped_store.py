@@ -24,7 +24,6 @@ No model call, no network, no journal read. Nothing here reads a resume or a pos
 
 from __future__ import annotations
 
-import hashlib
 import json
 import logging
 import os
@@ -36,6 +35,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from .. import canonical
 from . import learning_store
 from .learning_shipped import (
     CATALOG_FILENAME,
@@ -266,14 +266,14 @@ def _digest(course: ShippedCourse) -> str:
         known = _DIGESTS.get(key)
     if known is not None and known[0] == signature:
         return known[1]
-    digest = hashlib.sha256(ASSET_BASE.encode("utf-8"))
+    digest = bytearray(ASSET_BASE.encode("utf-8"))
     for path in (*inputs, renderer):
-        digest.update(b"\0" + path.name.encode("utf-8") + b"\0")
+        digest += b"\0" + path.name.encode("utf-8") + b"\0"
         try:
-            digest.update(path.read_bytes())
+            digest += path.read_bytes()
         except OSError:
-            digest.update(b"<unreadable>")
-    value = digest.hexdigest()
+            digest += b"<unreadable>"
+    value = canonical.digest_imported_bytes(bytes(digest)).partition(":")[2]
     with _MEMO_LOCK:
         _DIGESTS[key] = (signature, value)
     return value

@@ -39,11 +39,11 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
-import hashlib
 import json
 from pathlib import Path
 from typing import Any
 
+from .. import canonical as canonical_module
 from . import learning_corpus, learning_shipped_store, learning_store
 from .find_jobs.discovery.storage import atomic_write
 from .learning_course import MARKER_KNOWN, MARKER_NEW, MARKER_SOME, _clean_tree, _front_item, _lesson_counts, _scope
@@ -101,7 +101,7 @@ def catalog_digest(catalog: Mapping[str, Any]) -> str:
     """A digest of the shipped catalog as data (sorted keys): the same catalog gives the same digest however it was written."""
 
     canonical = json.dumps(catalog, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
-    return "sha256:" + hashlib.sha256(canonical).hexdigest()
+    return canonical_module.digest_imported_bytes(canonical)
 
 
 def _mapping(value: object) -> Mapping[str, Any]:
