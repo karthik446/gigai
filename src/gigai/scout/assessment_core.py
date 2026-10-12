@@ -1025,7 +1025,7 @@ class AssessExtras:
     #: (``stated_check``), and the id of every question dropped with them.
     met_by_master: tuple[tuple[str, str], ...] = ()
     stated_questions: tuple[str, ...] = ()
-    #: 0.1.11.3 Q3: what the citation check did to each evidence item that was not one verbatim line (``suggestion_check.clean_citations``): ``trimmed_to_line`` | ``split_join`` | ``no_line``.
+    #: 0.1.11.3 Q3: what the citation check did to each evidence item that was not one verbatim line (``suggestion_check.clean_citations``): ``trimmed_to_line`` | ``traced_to_line`` (0.1.11.10 B2: a shortened or reworded quote, by the shared-word rule) | ``split_join`` | ``no_line``.
     checked_citations: tuple[str, ...] = ()
     #: 0.1.11.4 Q4: how many questions were dropped for naming a city no text the prompt showed names (``suggestion_check.names_unknown_place``).
     unplaced_questions: int = 0

@@ -41,8 +41,13 @@ source, a row that is not ``met``) is the model's own quote. Each item is made O
   put in front of it): it becomes that whole line (``trimmed_to_line``);
 * the item joins pieces of several lines with ``;`` or ``...``: each line is cited on its own, in the order joined
   (``split_join``);
-* no line holds any piece of it (a paraphrase, a sentence about the resume): the item is removed, and the row cites
-  nothing rather than a text no line says (``no_line``).
+* 0.1.11.10 B2: a piece that no line holds as it is written (the model shortened or reworded the line) is traced by
+  the shared-word rule an assessment's quotes are traced to the master by (``assess_master.paraphrased_line``): when
+  it is the paraphrase of ONE master line, or of one line more than of any other, it becomes that whole line
+  (``traced_to_line``). The piece that says what the line does NOT state ("firmware work not stated") is never
+  traced, and neither is a Skills line; two lines that share as many words with the piece leave it with no line;
+* no line holds any piece of it and none is its paraphrase by that rule (a sentence about the resume, a made-up
+  quote): the item is removed, and the row cites nothing rather than a text no line says (``no_line``).
 
 Code only removes text or replaces it by the candidate's own line: a row's status, class and sources are never touched.
 """
@@ -665,6 +670,14 @@ _LABEL = re.compile(r"\A[^:]{1,80}:\s+(?=\S)")
 _MAX_SPLIT = 3
 #: The shortest piece that can stand for a line: a single word of three letters ("SQL") names its one line.
 _MIN_PIECE = 3
+#: A piece that says what the lines do NOT state (the tail assess.md asks for on an unclear row): never traced to a line.
+_NOT_STATED = re.compile(
+    r"\b(?:not|never|no(?=\s+(?:mention|evidence|line)))\s+(?:(?:yet|explicitly|clearly)\s+)?(?:stated|established|shown|mentioned|named|specified|listed|evidenced|demonstrated|mention|evidence|line)\b"
+    r"|\b(?:unspecified|unstated)\b",
+    re.IGNORECASE,
+)
+#: The id prefix of a Skills line (``master_resume``): a list of names, never the line a reworded sentence is traced to.
+_SKILLS_ID = "s-"
 
 
 def _flat(text: str) -> str:
@@ -678,6 +691,8 @@ class _Citable:
 
     def __init__(self, lines: Mapping[str, MasterLine], answers: Mapping[str, str], stories: Mapping[str, str]) -> None:
         shown = [line.text[:_MAX_EVIDENCE] for line in lines.values()]
+        self.master = [(line.id, line.text) for line in lines.values() if not line.id.startswith(_SKILLS_ID)]
+        self.by_id = {line.id: line.text[:_MAX_EVIDENCE] for line in lines.values()}
         shown += [f"Story bank {key}: {text}"[:_MAX_EVIDENCE] for key, text in stories.items()]
         shown += [f"Your answer: {text}"[:_MAX_EVIDENCE] for key, text in answers.items() if key not in stories]
         self.flat: dict[str, str] = {}
@@ -706,20 +721,34 @@ class _Citable:
             found = self.one(piece) if piece else None
         return found
 
+    def traced(self, piece: str) -> str | None:
+        """The ONE master line ``piece`` is a shortened or reworded quote of, by the shared-word rule; ``None`` when none or no clear one is."""
+
+        if _NOT_STATED.search(piece):
+            return None
+        from .assess_master import paraphrased_line  # imported here: assess_master imports the selector, which this module must not need
+
+        found = paraphrased_line(piece, self.master)
+        return self.by_id[found] if found is not None else None
+
 
 def single_line_cites(item: str, citable: _Citable) -> tuple[list[str], str]:
-    """``(the citations, what was done)`` for one evidence item: ``verbatim`` | ``trimmed_to_line`` | ``split_join`` | ``no_line``."""
+    """``(the citations, what was done)`` for one evidence item: ``verbatim`` | ``trimmed_to_line`` | ``traced_to_line`` | ``split_join`` | ``no_line``."""
 
     if item in citable.shown:
         return [item], "verbatim"
     whole = citable.of(item)
     if whole is not None:
         return [whole], "trimmed_to_line"
-    found = [citable.of(piece) for piece in _JOIN.split(item)]
+    held = [citable.of(piece) for piece in _JOIN.split(item)]
+    # 0.1.11.10 B2: a piece no line holds as written may be one line shortened or reworded (the module text).
+    found = [text if text is not None else citable.traced(piece) for piece, text in zip(_JOIN.split(item), held)]
     cites = list(dict.fromkeys(text for text in found if text is not None))[:_MAX_SPLIT]
     if not cites:
         return [], "no_line"
-    return cites, "split_join" if len(cites) > 1 else "trimmed_to_line"
+    if len(cites) > 1:
+        return cites, "split_join"
+    return cites, "trimmed_to_line" if cites[0] in held else "traced_to_line"
 
 
 def clean_citations(

@@ -425,6 +425,36 @@ def master_lines(master: Master) -> ResumeLines:
 # --- which master lines an assessment cites -----------------------------------------------------------
 
 
+def _paraphrased(words: frozenset[str], line_words: frozenset[str]) -> int:
+    """How many words an evidence quote (``words``) shares with a line when it is that line's paraphrase, else 0.
+
+    The shared-word rule: at least ``_SHARED_WORDS`` shared words that are ``_SHARED_SHARE`` of the quote's own.
+    """
+
+    shared = len(words & line_words)
+    return shared if words and shared >= _SHARED_WORDS and shared / len(words) >= _SHARED_SHARE else 0
+
+
+def paraphrased_line(quote: str, lines: Iterable[tuple[str, str]]) -> str | None:
+    """The id of the ONE line of ``lines`` (``(id, text)``) that evidence ``quote`` paraphrases, or ``None``. Pure.
+
+    The paraphrase half of the rule ``MasterCitations.quote`` traces a quote by (a Skills line is left out by the
+    caller, as there). When several lines pass the rule, the one that shares the most words with the quote is
+    the line; two lines that share as many leave the quote with no line (``None``): code does not choose.
+    """
+
+    words = _words(quote)
+    best: str | None = None
+    most = second = 0
+    for item_id, text in lines:
+        shared = _paraphrased(words, _words(text))
+        if shared > most:
+            best, most, second = item_id, shared, most
+        elif shared > second:
+            second = shared
+    return best if most > second else None
+
+
 class MasterCitations:
     """The lines of one master, kept flat, so the evidence quotes of many assessment rows are traced to them.
 
@@ -445,10 +475,7 @@ class MasterCitations:
         found = {item_id for item_id, flat, _line_words in self._lines if any(piece in flat for piece in pieces)}
         words = _words(quote)
         if not found and words:
-            for item_id, _flat_line, line_words in self._lines:
-                shared = words & line_words
-                if len(shared) >= _SHARED_WORDS and len(shared) / len(words) >= _SHARED_SHARE:
-                    found.add(item_id)
+            found = {item_id for item_id, _flat_line, line_words in self._lines if _paraphrased(words, line_words)}
         if found:
             return frozenset(found), frozenset()
         flat_quote = _flat(quote)
@@ -768,6 +795,7 @@ __all__ = [
     "evidence_text",
     "has_sources",
     "master_lines",
+    "paraphrased_line",
     "pick_line_count",
     "profile_prior",
     "reads_evidence",
