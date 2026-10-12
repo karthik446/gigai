@@ -53,13 +53,24 @@ shipped string (every JSON string value and every key) is a hit when it holds:
 - ``master_name``: an employer, school or project name of the master (:func:`master_names`);
 - ``posting_shingle``: any :data:`SHINGLE_WORDS` consecutive words of a stored posting sentence (a sentence of
   :data:`SHORT_SENTENCE_MIN_WORDS` words up to that size is compared whole);
-- ``posting_company``: the company of a stored posting sentence;
-- ``posting_count``: a count of postings in words (:data:`POSTING_COUNT`).
+- ``posting_company``: the company of a stored posting sentence, in prose (see the two rules below);
+- ``posting_count``: a count of postings in words (:data:`POSTING_COUNT`): a number or a number word within a few
+  words of "postings", "job ads" or "listings", or one of the generator's own count sentences.
 
 Texts are compared as words: NFKC, case folded, split on anything that is not a letter or a digit. A name that
 stands, as whole words, in a vocabulary display or phrase or in a technology name of the course is a term the
 course teaches ("AWS", "Snowflake") and is not a name hit; each one is counted in ``Forbidden.counts`` under
 ``names_that_are_course_terms`` and listed in ``Forbidden.exempt`` by its source, so the exemption is visible.
+
+Two more rules hold for a posting's COMPANY only, never for a line, a shingle, an id or anything of the master:
+
+- it is not searched in a URL field (:func:`is_url_field`: the string under a ``url`` or ``href`` key, or a value
+  of ``tool_links`` / ``technology_links``, when the whole string is one http(s) address). Those are public
+  documentation addresses the generator verified, and a company named like an ordinary word ("tabs") stands in
+  their paths;
+- a REVIEWED allow list (``allow_names``, the developer tool's ``--allow-name``): a company whose whole name is, as
+  words and whatever the case, an allowed name is not a hit. Each allowed name and every prose place it stands in
+  is reported (:class:`Allowed`), so a reader can review what the course says there.
 
 A hit names the file, the field and the SOURCE of what was found (``master line 12``, ``counts.json
 concepts[3].examples[1].phrase words 4-11``), never the text.
@@ -105,8 +116,28 @@ MASTER_NAME_SEPARATORS = re.compile(r"\s+[|·–—-]\s+|[|·(]")
 MASTER_NAME_SUFFIXES = frozenset({"inc", "incorporated", "llc", "l l c", "ltd", "limited", "corp", "corporation", "co", "company", "gmbh", "plc", "pvt", "pte", "ag", "sa", "bv"})
 #: A master item or entry id: ``b-1a2b3c``, ``sum-1a2b3c``, ``r-1a2b3c``.
 ID_SHAPE = re.compile(r"(?<![a-z0-9-])(?:sum|[a-z]{1,2})-[0-9a-f]{6}(?![a-z0-9])")
-#: Words that state a count of postings, as the generator's own sentences do.
-POSTING_COUNT = re.compile(r"(?i)\b\d+\s+of\s+\d+\s+(?:stored\s+)?postings\b|\b\d+\s+(?:stored\s+)?postings\b|\bnamed in your\b|\byour stored postings\b")
+_NUMBER = (
+    r"(?:\d+(?:[.,]\d+)*%?|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen"
+    r"|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundreds?|thousands?|dozens?|half|thirds?|quarters?|fifths?|tenths?)"
+)
+#: How many words may stand between the number and the postings: "12 of 171 postings", "a third of the postings".
+POSTING_COUNT_GAP_WORDS = 3
+_GAP = rf"(?:[\w'%-]+,?\s+){{0,{POSTING_COUNT_GAP_WORDS}}}?"
+#: A count of POSTINGS in words: a number or a number word before "posting(s)", "job ad(s)" or "listing(s)" with at
+#: most :data:`POSTING_COUNT_GAP_WORDS` words between and no sentence end; the same after "postings", "job
+#: posting(s)", "job ad(s)" or "job listing(s)" ("postings in the last 90 days"); and the generator's own count
+#: sentences ("Named in your postings ...", "... your stored postings"). A number that counts something else is
+#: not one, nor is "named in your interview notes".
+POSTING_COUNT = re.compile(
+    rf"(?i)(?<![\w.,]){_NUMBER}(?![\w])\s+{_GAP}(?:(?:job\s+)?postings?|job\s+ads?|(?:job\s+)?listings?)\b"
+    rf"|\b(?:(?:job\s+)?postings|job\s+posting|job\s+ads?|job\s+listings?)\b[\s:(,-]+{_GAP}{_NUMBER}(?![\w])"
+    rf"|\bnamed\s+in\s+your\s+{_GAP}postings\b|\byour\s+stored\s+postings\b"
+)
+#: The keys whose string is an address, and the objects whose values are (name -> address).
+URL_KEYS = frozenset({"url", "href"})
+URL_MAPS = frozenset({"tool_links", "technology_links"})
+#: A string that is one http(s) address and nothing else.
+URL = re.compile(r"https?://\S+")
 #: The work-folder files whose posting sentences and companies the scan compares against.
 POSTING_FILES = ("corpus.json", "counts.json", "course.json")
 ROLE_KEY = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")
@@ -155,11 +186,26 @@ class Hit:
         return f"{self.kind}: {self.file} {self.field} holds {self.source}"
 
 
+@dataclass(frozen=True)
+class Allowed:
+    """What the reviewed allow list let through, for a reader to review.
+
+    ``names`` are ``(name, source)``: an allowed name that is the company of a stored posting, and where that
+    company is stored. ``places`` are ``(name, file, field)``: every prose string of the shipped folder the name
+    stands in. A name of the list that is no stored company (or is a course term or a name of the master, which
+    the list never touches) is in neither.
+    """
+
+    names: tuple[tuple[str, str], ...] = ()
+    places: tuple[tuple[str, str, str], ...] = ()
+
+
 class ShippedScanError(LearningError):
     """The scan found something that may not ship; ``hits`` says where and from which source."""
 
-    def __init__(self, hits: Sequence[Hit]) -> None:
+    def __init__(self, hits: Sequence[Hit], allowed: Allowed | None = None) -> None:
         self.hits = tuple(hits)
+        self.allowed = allowed or Allowed()
         shown = "; ".join(hit.line() for hit in self.hits[:HITS_SHOWN])
         more = f"; and {len(self.hits) - HITS_SHOWN} more" if len(self.hits) > HITS_SHOWN else ""
         super().__init__("shipped_scan_failed", f"the shipped course was refused, {len(self.hits)} hit(s): {shown}{more}")
@@ -281,6 +327,8 @@ class Forbidden:
     counts: Mapping[str, int] = field(default_factory=dict)
     #: The sources of the names left out because the course teaches them as a term.
     exempt: tuple[str, ...] = ()
+    #: words -> (name as allowed, source): the posting companies the reviewed allow list lets through.
+    allowed: Mapping[tuple[str, ...], tuple[str, str]] = field(default_factory=dict)
 
 
 def course_terms(vocabulary: Iterable[Mapping[str, Any]] = (), technologies: Iterable[str] = ()) -> set[tuple[str, ...]]:
@@ -305,16 +353,23 @@ def forbidden(
     posting_sentences: Sequence[tuple[str, str]] = (),
     posting_companies: Sequence[tuple[str, str]] = (),
     terms: set[tuple[str, ...]] | frozenset[tuple[str, ...]] = frozenset(),
+    allow_names: Iterable[str] = (),
 ) -> Forbidden:
     """The forbidden set of a master (or none) and stored posting sentences and companies, each ``(source, text)``.
 
     ``terms`` (:func:`course_terms`) are the terms the course teaches: a master NAME or a posting COMPANY that
-    is one of them is not searched, and is listed in ``exempt``. Lines, shingles and ids know no exemption.
+    is one of them is not searched, and is listed in ``exempt``. ``allow_names`` is the reviewed allow list: a
+    posting COMPANY whose whole name is one of them (as words, whatever the case) is not searched, and is listed
+    in ``allowed`` and counted under ``names_allowed``. Lines, shingles, ids and the master's names know no
+    exemption: a name of the master, a master line or a posting sentence with the very words of an allowed name
+    is searched all the same.
     """
 
     phrases: dict[int, dict[tuple[str, ...], tuple[str, str]]] = {}
     counts: dict[str, int] = {}
     exempt: list[str] = []
+    allow = {words(name): str(name) for name in allow_names if words(name)}
+    allowed: dict[tuple[str, ...], tuple[str, str]] = {}
 
     def add(kind: str, found: tuple[str, ...], source: str) -> None:
         if not found:
@@ -324,6 +379,11 @@ def forbidden(
                 exempt.append(source)
                 counts["names_that_are_course_terms"] = counts.get("names_that_are_course_terms", 0) + 1
                 phrases.setdefault(len(found), {})[found] = ("", source)
+            return
+        if kind == KIND_POSTING_COMPANY and found in allow and found not in phrases.get(len(found), {}):
+            if found not in allowed:
+                allowed[found] = (allow[found], source)
+                counts["names_allowed"] = counts.get("names_allowed", 0) + 1
             return
         if found not in phrases.setdefault(len(found), {}):
             phrases[len(found)][found] = (kind, source)
@@ -360,15 +420,21 @@ def forbidden(
         for start, shingle in shingles(sentence):
             add(KIND_POSTING_SHINGLE, shingle, f"{source} words {start}-{start + SHINGLE_WORDS - 1}")
     counts.update({what: len(group) for what, group in short.items() if group})
+    # A master line or a posting sentence with the very words of an allowed name is searched: nothing was allowed.
+    allowed = {found: value for found, value in allowed.items() if found not in phrases.get(len(found), {})}
+    counts.pop("names_allowed", None)
+    if allowed:
+        counts["names_allowed"] = len(allowed)
     # An exempt name stays out of the search.
     kept = {size: {found: value for found, value in group.items() if value[0]} for size, group in phrases.items()}
-    return Forbidden(phrases={size: group for size, group in kept.items() if group}, ids=ids, counts=dict(sorted(counts.items())), exempt=tuple(exempt))
+    return Forbidden(phrases={size: group for size, group in kept.items() if group}, ids=ids, counts=dict(sorted(counts.items())), exempt=tuple(exempt), allowed=allowed)
 
 
-def build_forbidden(work: Path, master: MasterParts | None = None) -> Forbidden:
+def build_forbidden(work: Path, master: MasterParts | None = None, *, allow_names: Iterable[str] = ()) -> Forbidden:
     """The forbidden set of a work folder (its stored posting sentences and companies) and of a master, if any.
 
-    The course terms that exempt a name are the work folder's own vocabulary and the technology names of its lessons.
+    The course terms that exempt a name are the work folder's own vocabulary and the technology names of its
+    lessons; ``allow_names`` is the reviewed allow list of :func:`forbidden`.
     """
 
     work = Path(work)
@@ -379,7 +445,7 @@ def build_forbidden(work: Path, master: MasterParts | None = None) -> Forbidden:
         for _at, found in _walk(_read(work / COURSE_FILENAME).get("modules", [])):
             if isinstance(found, Mapping) and isinstance(found.get("technologies"), list):
                 technologies.extend(str(name) for name in found["technologies"])
-    return forbidden(master=master, posting_sentences=sentences, posting_companies=companies, terms=course_terms(vocabulary, technologies))
+    return forbidden(master=master, posting_sentences=sentences, posting_companies=companies, terms=course_terms(vocabulary, technologies), allow_names=allow_names)
 
 
 # ---------------------------------------------------------------------------
@@ -387,29 +453,43 @@ def build_forbidden(work: Path, master: MasterParts | None = None) -> Forbidden:
 # ---------------------------------------------------------------------------
 
 
-def _strings(value: object, at: str = "") -> Iterator[tuple[str, str]]:
-    """Every string of a JSON tree, keys included, with its place."""
+def is_url_field(key: str, parent: str, text: str) -> bool:
+    """Whether the string ``text`` under ``key`` (of an object that itself stands under ``parent``) is a URL field.
+
+    It is when the key is one of :data:`URL_KEYS` or the object is one of :data:`URL_MAPS`, AND the whole string
+    is one http(s) address: prose under such a key is prose.
+    """
+
+    return (key in URL_KEYS or parent in URL_MAPS) and URL.fullmatch(text) is not None
+
+
+def _strings(value: object, at: str = "", key: str = "", parent: str = "") -> Iterator[tuple[str, str, bool]]:
+    """Every string of a JSON tree, keys included, with its place and whether it is a URL field."""
 
     if isinstance(value, str):
-        yield at, value
+        yield at, value, is_url_field(key, parent, value)
     elif isinstance(value, Mapping):
-        for key, inner in value.items():
-            yield f"{at}{{key}}", str(key)
-            yield from _strings(inner, f"{at}.{key}" if at else str(key))
+        for inner_key, inner in value.items():
+            yield f"{at}{{key}}", str(inner_key), False
+            yield from _strings(inner, f"{at}.{inner_key}" if at else str(inner_key), str(inner_key), key)
     elif isinstance(value, list):
         for index, inner in enumerate(value):
             yield from _strings(inner, f"{at}[{index}]")
 
 
-def scan_text(text: str, banned: Forbidden) -> list[tuple[str, str]]:
-    """``(kind, source)`` of everything forbidden one string holds, each once."""
+def scan_text(text: str, banned: Forbidden, *, url: bool = False) -> list[tuple[str, str]]:
+    """``(kind, source)`` of everything forbidden one string holds, each once.
+
+    ``url`` says the string is a URL field (:func:`is_url_field`): a posting's company is not searched in it.
+    Everything else is.
+    """
 
     found: dict[tuple[str, str], None] = {}
     tokens = words(text)
     for size, group in banned.phrases.items():
         for start in range(len(tokens) - size + 1):
             match = group.get(tokens[start:start + size])
-            if match is not None:
+            if match is not None and not (url and match[0] == KIND_POSTING_COMPANY):
                 found[match] = None
     low = unicodedata.normalize("NFKC", text).casefold()
     for found_id, source in banned.ids.items():
@@ -422,37 +502,57 @@ def scan_text(text: str, banned: Forbidden) -> list[tuple[str, str]]:
     return list(found)
 
 
+def allowed_in(text: str, banned: Forbidden) -> list[str]:
+    """The allowed names (``Forbidden.allowed``) one string holds as whole words, each once."""
+
+    found: dict[str, None] = {}
+    tokens = words(text)
+    for size in {len(name) for name in banned.allowed}:
+        for start in range(len(tokens) - size + 1):
+            match = banned.allowed.get(tokens[start:start + size])
+            if match is not None:
+                found[match[0]] = None
+    return list(found)
+
+
 @dataclass(frozen=True)
 class ScanReport:
-    """What a clean scan read."""
+    """What a clean scan read, and what the reviewed allow list let through."""
 
     files: int
     strings: int
     words: int
+    allowed: Allowed = field(default_factory=Allowed)
 
 
 def scan_shipped(folder: Path, banned: Forbidden) -> ScanReport:
     """Scan every string of every file of a shipped ``folder``; raise :class:`ShippedScanError` on ANY hit.
 
+    A posting's company is not searched in a URL field, and one on the reviewed allow list (``banned.allowed``) is
+    not a hit: the report, and the refusal too, name every prose place such a name stands in (:class:`Allowed`).
     Every file must be JSON: another kind of file is refused (``ShippedExportError`` ``unexpected_file``), since
     nothing else belongs in a shipped course and it could not be read string by string.
     """
 
     folder = Path(folder)
     hits: list[Hit] = []
+    places: list[tuple[str, str, str]] = []
     files = strings = total = 0
     for path in sorted(item for item in folder.rglob("*") if item.is_file()):
         name = path.relative_to(folder).as_posix()
         if path.suffix != ".json":
             raise ShippedExportError("unexpected_file", f"{name} is not a JSON file: a shipped course holds JSON only")
         files += 1
-        for at, text in _strings(_read(path)):
+        for at, text, url in _strings(_read(path)):
             strings += 1
             total += len(words(text))
-            hits.extend(Hit(kind, name, at, source) for kind, source in scan_text(text, banned))
+            hits.extend(Hit(kind, name, at, source) for kind, source in scan_text(text, banned, url=url))
+            if banned.allowed and not url:
+                places.extend((allowed_name, name, at) for allowed_name in allowed_in(text, banned))
+    allowed = Allowed(names=tuple(banned.allowed.values()), places=tuple(places))
     if hits:
-        raise ShippedScanError(hits)
-    return ScanReport(files, strings, total)
+        raise ShippedScanError(hits, allowed)
+    return ScanReport(files, strings, total, allowed)
 
 
 # ---------------------------------------------------------------------------
@@ -712,10 +812,12 @@ class ExportReport:
         return sum(packed for _name, _raw, packed in self.files)
 
 
-def export_shipped(work: Path, out: Path, *, role_key: str, master: MasterParts | None) -> ExportReport:
+def export_shipped(work: Path, out: Path, *, role_key: str, master: MasterParts | None, allow_names: Iterable[str] = ()) -> ExportReport:
     """Write the shipped folder ``out`` of the finished course in ``work``; refuse it when the scan finds anything.
 
-    ``master`` is what of a master the scan searches for (:func:`master_parts`), or ``None`` for no master. The
+    ``master`` is what of a master the scan searches for (:func:`master_parts`), or ``None`` for no master.
+    ``allow_names`` is the reviewed allow list of posting companies (:func:`forbidden`); what it let through is in
+    the report's ``scan.allowed``, or in the refusal's ``allowed``. The
     postings' side of the scan always comes from ``work`` itself. The folder is written beside ``out`` under a
     temporary name, scanned there (:func:`scan_shipped`) and moved into place only when clean, so a refused
     export leaves ``out`` as it was. The same inputs give the same bytes. An existing ``out`` is replaced only
@@ -725,7 +827,7 @@ def export_shipped(work: Path, out: Path, *, role_key: str, master: MasterParts 
     work, out = Path(work), Path(out)
     inputs = load_work(work)
     shipped = shipped_course(inputs["course"], inputs["paths"], inputs["curriculum"], inputs["vocabulary"], inputs["titles"], role_key=role_key)
-    banned = build_forbidden(work, master)
+    banned = build_forbidden(work, master, allow_names=allow_names)
     if out.exists():
         previous = out / COURSE_FILENAME
         if not out.is_dir() or (any(out.iterdir()) and not (previous.is_file() and _read(previous).get("schema_version") == SCHEMA_VERSION)):
@@ -752,6 +854,7 @@ def export_shipped(work: Path, out: Path, *, role_key: str, master: MasterParts 
 
 
 __all__ = [
+    "Allowed",
     "CATALOG_SCHEMA_VERSION",
     "ExportReport",
     "FORBIDDEN_KEYS",
@@ -764,6 +867,7 @@ __all__ = [
     "MASTER_NAME_SUFFIXES",
     "MasterParts",
     "POSTING_COUNT",
+    "POSTING_COUNT_GAP_WORDS",
     "POSTING_FILES",
     "SCHEMA_VERSION",
     "SHINGLE_WORDS",
@@ -772,6 +876,10 @@ __all__ = [
     "Shipped",
     "ShippedExportError",
     "ShippedScanError",
+    "URL",
+    "URL_KEYS",
+    "URL_MAPS",
+    "allowed_in",
     "build_forbidden",
     "check_role_key",
     "check_shipped",
@@ -779,6 +887,7 @@ __all__ = [
     "deflated",
     "export_shipped",
     "forbidden",
+    "is_url_field",
     "load_work",
     "master_names",
     "master_parts",
