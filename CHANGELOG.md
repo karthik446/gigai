@@ -30,6 +30,41 @@ mechanics here. Those belong in the internal changelog.
 
 ## Released versions
 
+### 0.1.11.10
+
+Learning pathways. A new **Learning pathways** tab in Scout (and `gigai scout learning`) gives you a course for a
+role: lessons grouped in modules, each with short subtopics, verified documentation links, diagrams and a
+hands-on practice page. It is built from public documentation and from what your own stored postings ask for, and
+it is plain files served by your own Scout under a locked-down page policy (nothing in a course can reach Scout's
+API). **After you upgrade** (`uv tool upgrade gigai`) the tab shows the two courses that come with GigAI; nothing
+else has to be done.
+
+- **Two courses come with GigAI:** MLOps / ML platform engineer and AI forward deployed engineer. They hold no
+  postings and nothing about you. Press **Build my pathway** (or run `gigai scout learning pathway ROLE_KEY`) and
+  GigAI builds one page for you on your own computer: it reads your resume (contact lines removed) with one model
+  call, asks first and tells you the estimate (about 1 call, about 30k tokens), marks each lesson as known, partly
+  known or new with the resume line that shows it, and counts what your own stored postings ask for. When your
+  resume changes the tab says so and you can build it again.
+- **A course for any role you type.** Type any role (Product manager, Director of AI enablement, ...) in the tab,
+  or run `gigai scout learning generate "ROLE"`. GigAI shows a cost warning with an estimate (a course takes about
+  50 model calls, about 1 million tokens and 2 to 3 hours of background work), asks first, and runs in the
+  background with plain progress; you can stop it and resume it. A finished course appears in the tab.
+  Lessons are teachable methods and tools, not traits.
+- **Import a course you have** with `gigai scout learning import FOLDER --role "ROLE"`; it is checked whole first.
+- **"H-1B transfer only" label.** A posting that cannot sponsor new visas but takes H-1B transfers is labelled
+  "H-1B transfer only" instead of "No sponsorship". It is only a label: it never holds, asks or rejects. Ranking no
+  longer reads such a posting as no sponsorship; scores that carried the old flag are ranked once again after the
+  upgrade.
+- **The assessment sees your whole master resume.** It used to see only the lines picked by words shared with the
+  posting, so a line that proved a requirement could be cut. It now reads every line, must not say "no resume
+  line states X" when one does, and the resume pick can take the line it quotes. A quote the assessment
+  shortens or rewords is traced back to the one master line it comes from.
+- **The resume store keeps the company.** Storing an edited resume for a job a company's board lists no longer
+  files it under `company/`; a posting at a company's own careers address (jobs.<company>.com) is filed under that
+  company. Already misfiled folders: `gigai scout jobs-folder repair` shows what it would move (nothing moves);
+  `gigai scout jobs-folder repair --apply` moves them, never merging or overwriting.
+- **For maintainers:** `make learning-link-check` re-verifies the links of the shipped courses before a release.
+
 ### 0.1.11.9
 
 One job, one assessment. Until now Scout kept an assessment, a tailored resume and its suggestions once per
