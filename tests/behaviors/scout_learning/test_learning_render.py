@@ -368,6 +368,7 @@ def test_the_vendored_assets_exist_via_importlib_resources() -> None:
     assets = learning_render.package_assets_dir()
 
     assert (assets / "course.js").is_file()
+    assert (assets / "course.css").is_file()
     assert (assets / "theme-init.js").is_file()
     assert (assets / "mermaid" / "mermaid.min.js").is_file()
     assert (assets / "mermaid" / "LICENSE").is_file()

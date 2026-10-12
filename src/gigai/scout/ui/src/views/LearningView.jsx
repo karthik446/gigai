@@ -1,9 +1,17 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { getConfig, getLearningPathways, postLearningPathwayCancel, postLearningPathwayResume, postLearningPathways } from "../api.js";
+import {
+  getConfig,
+  getLearningPathways,
+  postLearningPathwayCancel,
+  postLearningPathwayResume,
+  postLearningPathways,
+  postLearningShippedPathway,
+} from "../api.js";
 import {
   EMPTY_NOTE,
   IMPORT_COMMAND,
   LEARNING_POLL_MS,
+  OPEN_PAGE_LABEL,
   ROLE_PLACEHOLDER,
   WHAT_IS_A_COURSE,
   anyLive,
@@ -11,14 +19,22 @@ import {
   cleanedRole,
   displayRows,
   generateDialog,
+  pathwayBuildDialog,
 } from "../learningModel.js";
 import { modelTargetLabel } from "../modelTargets.js";
+import LearningPathwayDialog from "../components/LearningPathwayDialog.jsx";
 import LearningRequestDialog from "../components/LearningRequestDialog.jsx";
 
 // 0.1.11.10 Part A slice 1 (read) plus Part B G6 (request): the Learning pathways tab (#/learning). A pathway is one
 // role a course was built for, imported or requested from this tab; this page lists them, newest first, lets the
 // operator type a role and request a new course (an estimate dialog first; nothing is generated before "Generate"),
 // shows a running course's plain progress with Stop, and Resume for a failed/interrupted one.
+// 0.1.11.10 shipped lessons (slice 3): the courses that ship inside GigAI are the first rows, each with its
+// "Shipped with GigAI" line, the state of the user's own pathway page as plain text, and "Open course".
+// Slices 4b/5b: a shipped row has one button that builds (or rebuilds) that page. The build always compares the
+// course with the resume (about one model call), so the button opens a consent dialog with the estimate first;
+// "Build" starts the build, the row shows its plain progress while the list is polled, and "Open your pathway page"
+// once built.
 export default function LearningView() {
   const [pathways, setPathways] = useState(null);
   const [error, setError] = useState(null);
@@ -30,6 +46,11 @@ export default function LearningView() {
   const [submitting, setSubmitting] = useState(false);
   const [dialogError, setDialogError] = useState(null);
   const [stoppingIds, setStoppingIds] = useState(() => new Set());
+  const [askingIds, setAskingIds] = useState(() => new Set());
+  const [buildErrors, setBuildErrors] = useState({});
+  const [pageDialog, setPageDialog] = useState(null);
+  const [pageSubmitting, setPageSubmitting] = useState(false);
+  const [pageDialogError, setPageDialogError] = useState(null);
   const pollRef = useRef(null);
 
   const load = useCallback(() => {
@@ -144,8 +165,56 @@ export default function LearningView() {
     [load],
   );
 
+  // "Build my pathway": ask what the build takes and sends (nothing is sent), and show it in the consent dialog.
+  const askToBuildPage = useCallback(
+    (roleKey) => {
+      setAskingIds((current) => new Set(current).add(roleKey));
+      setBuildErrors((current) => ({ ...current, [roleKey]: null }));
+      postLearningShippedPathway(roleKey, {})
+        .then((response) => {
+          setPageDialog(pathwayBuildDialog(response, modelLabel));
+          setPageDialogError(null);
+        })
+        .catch((err) => setBuildErrors((current) => ({ ...current, [roleKey]: err.message || String(err) })))
+        .finally(() => {
+          setAskingIds((current) => {
+            const next = new Set(current);
+            next.delete(roleKey);
+            return next;
+          });
+        });
+    },
+    [modelLabel],
+  );
+
+  const closePageDialog = useCallback(() => {
+    setPageDialog(null);
+    setPageDialogError(null);
+  }, []);
+
+  // "Build" in the dialog: the build starts (202) and the answer is the course's row, which says it is running;
+  // the poll above then follows it to its end.
+  const approvePageBuild = useCallback(() => {
+    if (!pageDialog) {
+      return;
+    }
+    const roleKey = pageDialog.roleKey;
+    setPageSubmitting(true);
+    postLearningShippedPathway(roleKey, pageDialog.approveBody)
+      .then((response) => {
+        const row = response && response.pathway;
+        if (row) {
+          setPathways((current) => (current || []).map((pathway) => (pathway.id === roleKey ? row : pathway)));
+        }
+        setPageDialog(null);
+        setPageDialogError(null);
+      })
+      .catch((err) => setPageDialogError(err.message || String(err)))
+      .finally(() => setPageSubmitting(false));
+  }, [pageDialog]);
+
   const loaded = pathways !== null;
-  const rows = loaded ? displayRows({ pathways }, { stoppingIds }) : [];
+  const rows = loaded ? displayRows({ pathways }, { stoppingIds, askingIds, buildErrors }) : [];
 
   return (
     <div data-role="learning">
@@ -188,6 +257,10 @@ export default function LearningView() {
         <LearningRequestDialog dialog={dialog} submitting={submitting} error={dialogError} onApprove={approve} onCancel={closeDialog} />
       )}
 
+      {pageDialog && (
+        <LearningPathwayDialog dialog={pageDialog} submitting={pageSubmitting} error={pageDialogError} onApprove={approvePageBuild} onCancel={closePageDialog} />
+      )}
+
       {loaded && rows.length === 0 && (
         <section className="panel" data-role="learning-empty">
           <p className="muted">{EMPTY_NOTE}</p>
@@ -200,10 +273,10 @@ export default function LearningView() {
       {loaded && rows.length > 0 && (
         <ul className="learning-list" data-role="learning-list">
           {rows.map((row) => (
-            <li key={row.id} className="learning-entry" data-testid="learning-row" data-pathway-id={row.id}>
+            <li key={row.id} className="learning-entry" data-testid="learning-row" data-pathway-id={row.id} data-shipped={row.shipped ? "true" : undefined}>
               <div className="learning-entry-head">
                 <strong>{row.roleText}</strong>
-                <span className="muted small">{row.requestedAtLabel}</span>
+                {row.requestedAtLabel && <span className="muted small">{row.requestedAtLabel}</span>}
               </div>
               <p className="muted small" data-role="learning-status">
                 {row.statusText}
@@ -218,9 +291,11 @@ export default function LearningView() {
                   {row.progressCounters}
                 </p>
               )}
-              <p className="muted small" data-role="learning-cost">
-                {row.costText}
-              </p>
+              {row.costText && (
+                <p className="muted small" data-role="learning-cost">
+                  {row.costText}
+                </p>
+              )}
               {row.lessons !== null && (
                 <p className="muted small" data-role="learning-lessons">
                   {row.lessons} lesson{row.lessons === 1 ? "" : "s"}
@@ -230,6 +305,26 @@ export default function LearningView() {
               {row.sourceText && (
                 <p className="muted small" data-role="learning-source">
                   {row.sourceText}
+                </p>
+              )}
+              {row.localPageText && (
+                <p className="muted small" data-role="learning-local-page">
+                  {row.localPageText}
+                </p>
+              )}
+              {row.stalePageText && (
+                <p className="muted small" data-role="learning-local-page-stale">
+                  {row.stalePageText}
+                </p>
+              )}
+              {row.buildingText && (
+                <p className="muted small" data-role="learning-building">
+                  {row.buildingText}
+                </p>
+              )}
+              {row.buildErrorText && (
+                <p className="muted small" data-role="learning-build-error">
+                  {row.buildErrorText}
                 </p>
               )}
               {row.errorText && (
@@ -255,6 +350,22 @@ export default function LearningView() {
               {row.canOpen && (
                 <a className="button small secondary" data-action="open-course" href={row.url} target="_blank" rel="noopener">
                   Open course
+                </a>
+              )}
+              {row.buildLabel && (
+                <button
+                  type="button"
+                  className="button small secondary"
+                  onClick={() => askToBuildPage(row.id)}
+                  disabled={row.buildDisabled}
+                  data-action="learning-build-page"
+                >
+                  {row.buildLabel}
+                </button>
+              )}
+              {row.localPageUrl && (
+                <a className="button small secondary" data-action="open-pathway-page" href={row.localPageUrl} target="_blank" rel="noopener">
+                  {OPEN_PAGE_LABEL}
                 </a>
               )}
             </li>

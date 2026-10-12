@@ -93,6 +93,8 @@ _PARAMETRIC_MATCHERS = {
     "_match_approval_id": "/api/pipeline/approvals/{approval_id}",
     # 0.1.11.10: ``api/learning._match_pathway_id``.
     "_match_pathway_id": "/api/learning/pathways/{pathway_id}",
+    # 0.1.11.10 shipped lessons: ``api/learning._match_shipped_role_key``.
+    "_match_shipped_role_key": "/api/learning/shipped/{role_key}",
 }
 
 

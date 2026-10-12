@@ -36,20 +36,53 @@ The file itself passes ``learning_store.resolve_course_file``: only a ``done`` p
 allowed kind inside the course's own folder, never through a link, never a dotfile, never ``..``. Anything else is
 404, the same answer as an unknown pathway. The request passes the server's own guards first (a loopback peer, and
 a ``Host`` that is this server: ``do_GET`` / ``do_HEAD``).
+
+0.1.11.10 SHIPPED LESSONS (slice 3), the courses that ship inside GigAI (``scout/learning_shipped_store.py``):
+
+* ``GET /api/learning/pathways`` lists them FIRST, one row each with ``source: "shipped"`` (:func:`shipped_summary`);
+  ``GET /api/learning/pathways/{role key}`` answers that row. A shipped course is not generated here: the cancel and
+  resume routes answer 404 for a role key, as for an unknown pathway.
+* ``GET`` / ``HEAD /learning/shipped/{role key}/{page}``: a page of the course, rendered from the package's data on
+  first use into a cache folder of the home. ``pathway.html`` is the one page that is the user's own: the locally
+  built file when there is one, else a plain page saying it is not built yet.
+* ``GET`` / ``HEAD /learning/_assets/{file}``: the shared assets of the package, by an exact whitelist (the listing
+  of the package's assets folder).
+
+Every one of these files is sent with the SAME ``COURSE_HEADERS`` as a generated course's. A role key is never a
+pathway id and ``_assets`` and ``shipped`` are not ids, so no address means two things.
+
+0.1.11.10 SHIPPED LESSONS (slices 4b and 5b), the one page of a shipped course that is the user's own
+(``scout/learning_pathway_build.py``):
+
+* ``POST /api/learning/shipped/{role_key}/pathway`` ``{}``: what building that page would take and send (the
+  estimate of the one model call that compares the course with the master resume) and NOTHING is sent or started.
+  With ``"approve": true`` the build starts on a thread of the server and the answer is ``202`` with the course's
+  row; ``409 learning_running`` while a course is generated or a page is built for this project.
+* THE RESUME IS ALWAYS THE REFERENCE: there is no build without the comparison and no key that turns it off.
+  ``approve`` is the usual consent to a model call. With no master resume line there is nothing to send, and the
+  build makes no call.
+* The row's ``local_page`` (:func:`local_page`) says ``not_built`` / ``built`` / ``stale`` with ``reasons``, and
+  ``build``: a build that runs now, or the plain line of the last one that did not finish. This file reads no
+  resume text: the state comes from small files and the master's revision id.
 """
 
 from __future__ import annotations
 
 from http import HTTPStatus
 from pathlib import Path
+from typing import Any
 from urllib.parse import parse_qs, unquote, urlsplit
 
-from ... import learning_store
+from ... import learning_shipped_store, learning_store
+from ...learning_shipped_store import ShippedCourse
 from ...learning_store import LearningError, Pathway
 
 LIST_SCHEMA = "scout-learning-pathways-response:1"
 ONE_SCHEMA = "scout-learning-pathway-response:1"
 COURSE_PREFIX = "/learning/"
+#: The pages of a shipped course and the assets every shipped course shares (neither name is a pathway id).
+SHIPPED_PREFIX = "/learning/shipped/"
+ASSETS_PREFIX = "/learning/_assets/"
 COURSE_CSP = (
     "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; "
     "connect-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'self'; "
@@ -124,13 +157,96 @@ def _live_status(home_root: Path, target: Path, pathway: Pathway) -> str:
     return learning_job.live_status(home_root, target, pathway)
 
 
-def pathways_response(home_root: Path, target: Path) -> dict[str, object]:
-    """The ``GET /api/learning/pathways`` body (also what ``gigai scout learning list --json`` prints)."""
+def local_page(home_root: Path, target: Path, role_key: str, *, learning: Path | None = None) -> dict[str, object]:
+    """``{"state", "built_at", "reasons", "build", "url"}`` of a shipped course's locally built pathway page.
 
-    rows = [
+    ``state`` / ``reasons`` follow ``learning_pathway_local.state``'s rule. Asked from a list it is cheap: the
+    record of the build (one small file) says the GigAI version, the catalog digest and the master revision the
+    page was built from. ``stale`` is said for another version or another catalog, and with the reason ``master``
+    when the master resume is at another revision than the one the page was compared with, or when a page built
+    with no resume now has one to be compared with. Of the master only its revision chain is read (ids, no resume
+    text; an answer of this process up to ``learning_pathway_build.MASTER_REF_SECONDS`` old is reused). The
+    postings are NOT counted here (that is the build itself, seconds): a page is not said to be stale for new
+    postings by this read.
+
+    ``build``: ``learning_pathway_build.build_state``: null, or ``{"status": "running", "started_at",
+    "detail"}`` while a build of this page runs, or ``{"status": "failed", "error_code", "error",
+    "finished_at"}`` after one that did not finish (the page that was there stays).
+    """
+
+    from ... import learning_pathway_build, learning_pathway_local
+
+    master: Any = learning_pathway_local.NOT_GIVEN
+    record = None
+    try:
+        folder: Path | None = Path(learning) if learning is not None else learning_store.learning_dir(home_root, target)
+    except LearningError:
+        folder = None
+    if folder is not None:
+        record = learning_pathway_local.read_local_record(folder, role_key)
+        if record is not None:
+            master = learning_pathway_build.current_master_ref(home_root, target, max_age=learning_pathway_build.MASTER_REF_SECONDS)
+    found = learning_pathway_local.state(home_root, target, role_key, master=master, learning=folder)
+    state, reasons = found["state"], list(found["reasons"])  # type: ignore[call-overload]
+    if state != learning_shipped_store.PAGE_NOT_BUILT and record is not None and record.get("master") is None and isinstance(master, dict):
+        # Built when there was no resume to compare with; there is one now.
+        state, reasons = learning_shipped_store.PAGE_STALE, [*reasons, learning_pathway_local.STALE_MASTER]
+    return {
+        "state": state, "built_at": found["built_at"], "reasons": reasons,
+        "build": learning_pathway_build.build_state(folder, role_key) if folder is not None else None,
+        "url": learning_shipped_store.course_url(role_key, learning_shipped_store.PATHWAY_PAGE),
+    }
+
+
+def shipped_summary(home_root: Path, target: Path, course: ShippedCourse, *, learning: Path | None = None) -> dict[str, object]:
+    """The row of a course that ships inside GigAI: the keys of :func:`pathway_summary` plus ``label`` and ``local_page``.
+
+    ``id`` is the role key. It is always ``done`` (its pages are rendered when first opened), nobody asked for it
+    (``requested_at`` null) and making it cost this user nothing (``cost`` null). ``local_page`` is the state of
+    the locally built pathway page (:func:`local_page`): ``not_built``, ``built`` or ``stale`` with ``built_at``
+    and the ``reasons`` it is stale for, the ``build`` that runs or failed, and ``url``, where it is served.
+    ``learning``: the project's learning folder when the caller already named it (one ``git`` process per naming).
+    """
+
+    key = course.role_key
+    return {
+        "id": key,
+        "role_text": course.role,
+        "requested_at": None,
+        "status": "done",
+        "cost": None,
+        "course": {"entry": learning_store.COURSE_ENTRY, "lessons": course.lessons, "size_bytes": None, "generated_at": None},
+        "url": learning_shipped_store.course_url(key),
+        "source": learning_shipped_store.SOURCE_SHIPPED,
+        "imported_from": None,
+        "error": None,
+        "error_code": None,
+        "progress": None,
+        "label": learning_shipped_store.SHIPPED_LABEL,
+        "local_page": local_page(home_root, target, key, learning=learning),
+    }
+
+
+def shipped_response(home_root: Path, target: Path, course: ShippedCourse) -> dict[str, object]:
+    """The ``GET /api/learning/pathways/{role key}`` body: the list's row (a shipped course has no stored record)."""
+
+    return {"schema_version": ONE_SCHEMA, "pathway": shipped_summary(home_root, target, course)}
+
+
+def pathways_response(home_root: Path, target: Path) -> dict[str, object]:
+    """The ``GET /api/learning/pathways`` body (also what ``gigai scout learning list --json`` prints).
+
+    The courses shipped with GigAI first (by role), then the user's own, the newest request first.
+    """
+
+    own = [
         pathway_summary(pathway, status=_live_status(home_root, target, pathway))
         for pathway in learning_store.list_pathways(home_root, target)
     ]
+    shipped = learning_shipped_store.list_courses()
+    # The project is named ONCE for every shipped row (and not at all when nothing ships).
+    learning = learning_store.learning_dir(home_root, target) if shipped else None
+    rows = [shipped_summary(home_root, target, course, learning=learning) for course in shipped] + own
     return {"schema_version": LIST_SCHEMA, "pathways": rows, "total": len(rows)}
 
 
@@ -160,6 +276,19 @@ _JOB_ERROR_STATUS = {
     "pathway_not_found": HTTPStatus.NOT_FOUND,
     "target_unavailable": HTTPStatus.NOT_FOUND,
 }
+SHIPPED_API_PREFIX = "/api/learning/shipped/"
+_BUILD_KEYS = frozenset({"approve"})
+
+
+def _match_shipped_role_key(path: str, *, suffix: str) -> str | None:
+    """Extract ``{role_key}`` from ``/api/learning/shipped/{role_key}<suffix>`` (the shape of ``_match_pathway_id``)."""
+
+    if not path.startswith(SHIPPED_API_PREFIX) or not suffix or not path.endswith(suffix):
+        return None
+    remainder = path[len(SHIPPED_API_PREFIX): len(path) - len(suffix)]
+    if not remainder or "/" in remainder:
+        return None
+    return unquote(remainder)
 
 
 def _match_pathway_id(path: str, *, suffix: str) -> str | None:
@@ -194,6 +323,52 @@ def split_course_path(path: str) -> tuple[str, str] | None:
         return pathway_id, unquote(rest, errors="strict")
     except UnicodeDecodeError:
         return None
+
+
+def split_shipped_path(path: str) -> tuple[str, str] | None:
+    """``(role key, page)`` of a ``/learning/shipped/...`` request path, percent-decoded ONCE; else ``None``.
+
+    The page is ``""`` for ``/learning/shipped/<role key>/`` (the entry page). What it names is judged by
+    ``learning_shipped_store.resolve_page``: one plain ``.html`` name, so a ``/``, a ``..`` or a ``%`` left after
+    the one decoding is refused there.
+    """
+
+    if not path.startswith(SHIPPED_PREFIX):
+        return None
+    role_key, slash, rest = path[len(SHIPPED_PREFIX):].partition("/")
+    if not slash or not learning_shipped_store.is_role_key(role_key):
+        return None
+    try:
+        return role_key, unquote(rest, errors="strict")
+    except UnicodeDecodeError:
+        return None
+
+
+def pathway_not_built_page(course: ShippedCourse) -> bytes:
+    """The page served as a shipped course's ``pathway.html`` while the local page is not built.
+
+    Plain: the course's own stylesheet and theme script (so it reads like the pages around it), nothing else.
+    """
+
+    from html import escape
+
+    role = escape(course.role)
+    return (
+        '<!doctype html>\n<html lang="en">\n<head>\n<meta charset="utf-8">\n'
+        '<meta name="viewport" content="width=device-width, initial-scale=1">\n'
+        f"<title>Your pathway - {role}</title>\n"
+        f'<script src="{learning_shipped_store.ASSET_BASE}/theme-init.js"></script>\n'
+        f'<link rel="stylesheet" href="{learning_shipped_store.ASSET_BASE}/course.css">\n'
+        '</head>\n<body>\n<main class="content" data-role="pathway-not-built">\n'
+        "<h1>Your pathway page is not built yet</h1>\n"
+        f"<p>This page is yours alone: for the course {role}, it shows what your resume already covers and what is new "
+        "to you. It is built on this computer from your own resume and stored postings, and it has not been built yet.</p>\n"
+        "<p>To build it: in Scout, open Learning pathways and press Build your pathway page on this course, or run "
+        f"<code>gigai scout learning pathway {escape(course.role_key)}</code>. Building it calls no model.</p>\n"
+        "<p>The lessons and practice pages of this course are the same for everyone and are ready to read.</p>\n"
+        f'<p><a href="{learning_store.COURSE_ENTRY}">Back to the course</a></p>\n'
+        "</main>\n</body>\n</html>\n"
+    ).encode("utf-8")
 
 
 class LearningRoutesMixin:
@@ -235,6 +410,10 @@ class LearningRoutesMixin:
             self._error(HTTPStatus.NOT_FOUND, exc.code, str(exc))
             return
         if pathway is None:
+            shipped = learning_shipped_store.get_course(pathway_id)
+            if shipped is not None:
+                self._write_json(HTTPStatus.OK, shipped_response(*paths, shipped))
+                return
             self._error(HTTPStatus.NOT_FOUND, "not_found", "there is no such learning pathway")
             return
         self._write_json(HTTPStatus.OK, live_pathway_response(*paths, pathway))
@@ -310,6 +489,42 @@ class LearningRoutesMixin:
             return
         self._write_json(HTTPStatus.OK, {**response, "cancel_requested": asked})
 
+    def _handle_post_learning_shipped_pathway(self, role_key: str) -> None:
+        """Without ``approve``: what the build takes and sends, nothing sent. With it: the build starts (202, the course's row)."""
+
+        from ... import learning_pathway_build
+
+        body = self._read_json_body()
+        if body is None:
+            return
+        if not isinstance(body, dict):
+            self._error(HTTPStatus.UNPROCESSABLE_ENTITY, "wrong_type", "the body must be a JSON object")
+            return
+        unknown = sorted(set(body) - _BUILD_KEYS)
+        if unknown:
+            self._error(HTTPStatus.UNPROCESSABLE_ENTITY, "unknown_key", f"unknown key: {unknown[0]}; allowed: approve")
+            return
+        approve = body.get("approve", False)
+        if type(approve) is not bool:
+            self._error(HTTPStatus.UNPROCESSABLE_ENTITY, "wrong_type", "approve must be true or false")
+            return
+        paths = self._learning_paths()
+        if paths is None:
+            return
+        course = learning_shipped_store.get_course(role_key)
+        if course is None:
+            self._error(HTTPStatus.NOT_FOUND, "not_found", "there is no such course shipped with GigAI")
+            return
+        try:
+            if not approve:
+                self._write_json(HTTPStatus.OK, learning_pathway_build.ask_response(*paths, course))
+                return
+            learning_pathway_build.start(*paths, course)
+        except LearningError as exc:
+            self._error(_JOB_ERROR_STATUS.get(exc.code, HTTPStatus.CONFLICT), exc.code, str(exc))
+            return
+        self._write_json(HTTPStatus.ACCEPTED, shipped_response(*paths, course))
+
     def _learning_course_file(self, path: str) -> Path | None:
         """The stored file a ``/learning/...`` request names, or ``None`` (whatever the reason: the answer is one 404)."""
 
@@ -323,40 +538,81 @@ class LearningRoutesMixin:
         except LearningError:
             return None
 
-    def _handle_get_learning_file(self, path: str) -> None:
+    def _learning_served(self, path: str) -> tuple[str, Path | bytes] | None:
+        """What a ``/learning/...`` request is answered with: ``(the name its kind is read from, a file or the bytes)``.
+
+        ``None`` is the one 404. A shared asset, a page of a shipped course (its ``pathway.html`` is the user's own
+        file, or the not-built page), else a file of a generated course.
+        """
+
+        if path.startswith(ASSETS_PREFIX):
+            try:
+                asset = learning_shipped_store.asset_file(unquote(path[len(ASSETS_PREFIX):], errors="strict"))
+            except UnicodeDecodeError:
+                return None
+            return None if asset is None else (asset.name, asset)
+        if path.startswith(SHIPPED_PREFIX):
+            home_root = getattr(self._backend, "home_root", None)
+            target = getattr(self._backend, "target", None)
+            named = split_shipped_path(path)
+            if home_root is None or named is None:
+                return None
+            role_key, page = named
+            if page != learning_shipped_store.PATHWAY_PAGE:
+                rendered = learning_shipped_store.resolve_page(Path(home_root), role_key, page)
+                return None if rendered is None else (rendered.name, rendered)
+            course = learning_shipped_store.get_course(role_key)
+            if course is None:
+                return None
+            built = None if target is None else learning_shipped_store.pathway_page(Path(home_root), Path(target), role_key)
+            return (page, built if built is not None else pathway_not_built_page(course))
         resource = self._learning_course_file(path)
-        if resource is None:
+        return None if resource is None else (resource.name, resource)
+
+    def _handle_get_learning_file(self, path: str) -> None:
+        served = self._learning_served(path)
+        if served is None:
             self._error(HTTPStatus.NOT_FOUND, "not_found", "no such route")
             return
-        self._write_bytes(HTTPStatus.OK, course_content_type(resource.name), resource.read_bytes(), COURSE_HEADERS)
+        name, resource = served
+        body = resource if isinstance(resource, bytes) else resource.read_bytes()
+        self._write_bytes(HTTPStatus.OK, course_content_type(name), body, COURSE_HEADERS)
 
     def _handle_head_learning_file(self, path: str) -> None:
         """``HEAD``: the headers ``GET`` would send (the file's size included) and no body; 404 has no body either."""
 
-        resource = self._learning_course_file(path)
-        if resource is None:
+        served = self._learning_served(path)
+        if served is None:
             self.send_response(HTTPStatus.NOT_FOUND)
             self.send_header("Content-Length", "0")
             self.end_headers()
             return
+        name, resource = served
         self.send_response(HTTPStatus.OK)
-        self.send_header("Content-Type", course_content_type(resource.name))
-        self.send_header("Content-Length", str(resource.stat().st_size))
+        self.send_header("Content-Type", course_content_type(name))
+        self.send_header("Content-Length", str(len(resource) if isinstance(resource, bytes) else resource.stat().st_size))
         for name, value in COURSE_HEADERS.items():
             self.send_header(name, value)
         self.end_headers()
 
 
 __all__ = [
+    "ASSETS_PREFIX",
     "COURSE_CSP",
     "COURSE_HEADERS",
     "COURSE_PREFIX",
     "LearningRoutesMixin",
     "course_content_type",
     "course_url",
+    "local_page",
     "live_pathway_response",
     "pathway_response",
     "pathway_summary",
+    "pathway_not_built_page",
     "pathways_response",
+    "shipped_response",
+    "shipped_summary",
+    "SHIPPED_PREFIX",
     "split_course_path",
+    "split_shipped_path",
 ]

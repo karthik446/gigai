@@ -835,6 +835,43 @@ _LEARNING_ROW: dict[str, object] = {
     "course": _LEARNING_COURSE, "url": "/learning/lp-0a1b2c3d/index.html", "source": "imported", "imported_from": "mlops-course", "error": None,
     "error_code": None, "progress": None,
 }
+# 0.1.11.10 shipped lessons: the row of a course that ships inside GigAI (api/learning.py `shipped_summary`).
+_LEARNING_SHIPPED_ROW: dict[str, object] = {
+    "id": "mlops-engineer", "role_text": "MLOps engineer", "requested_at": None, "status": "done", "cost": None,
+    "course": {"entry": "index.html", "lessons": 35, "size_bytes": None, "generated_at": None},
+    "url": "/learning/shipped/mlops-engineer/index.html", "source": "shipped", "imported_from": None, "error": None, "error_code": None,
+    "progress": None, "label": "Shipped with GigAI",
+    "local_page": {"state": "not_built", "built_at": None, "reasons": [], "build": None, "url": "/learning/shipped/mlops-engineer/pathway.html"},
+}
+# What POST /api/learning/shipped/{role_key}/pathway answers without `approve` (scout/learning_pathway_build.py `ask_response`).
+_LEARNING_PATHWAY_ASK_EXAMPLE: dict[str, object] = {
+    "schema_version": "scout-learning-pathway-build:1", "status": "ask", "role_key": "mlops-engineer", "role_text": "MLOps engineer",
+    "resume": {"lines": 52}, "estimate": {"calls": 1, "tokens_in": 21463, "tokens_out": 11410, "seconds": 92},
+    "sends": (
+        "This reads your resume to mark what you already know. It sends the lesson titles of this course and your resume lines "
+        "(contact lines removed) to your model."
+    ),
+}
+_LEARNING_SHIPPED_NOTE = (
+    "COURSES SHIPPED WITH GIGAI come first in the list, by role, before the user's own (newest request first). Such a row has `source` "
+    "shipped, the course's role key as `id` (lower-case words joined by dashes, never an `lp-` id), `status` done, and null for "
+    "`requested_at`, `cost`, `imported_from`, `error`, `error_code`, `progress` and the course's `size_bytes` (nobody asked for it and "
+    "making it cost this user nothing). It has two more keys: `label` (`Shipped with GigAI`) and `local_page`, the state of the one page "
+    "of the course that is the user's own, built on this computer from the stored postings and the master resume (POST "
+    "/api/learning/shipped/`{role_key}`/pathway builds it): `state` is `not_built` | `built` | `stale`, `built_at` is when it was "
+    "built (else null), `reasons` says why a `stale` page is out of date (`gigai_version`: another GigAI version built it; `catalog`: "
+    "the shipped course changed; `master`: the master resume is at another revision than the one the page was compared with, or the "
+    "page was built with no resume and there is one now; `postings`: the stored postings changed, which only a build finds out; empty "
+    "otherwise), `build` is null, or `{status: running, started_at, detail}` while a build of this page runs (`detail` is one plain "
+    "progress line), or `{status: failed, error_code, error, finished_at}` after a build that did not finish (the page that was there "
+    "stays), and `url` is where the page is served. "
+    "This read is cheap: it compares the stored record of the build with the installed version, the shipped catalog and, for a page "
+    "with a comparison, the master's revision id; it reads no resume text and counts no posting. The lessons and practice pages of a shipped course are generic, the same for every user: no resume text, no posting text. "
+    "They are static HTML under `/learning/shipped/<role key>/` (GET and HEAD, not an API route), rendered from the package's data when "
+    "first opened and kept in a cache folder of the home; the files they share (scripts, styles) are under `/learning/_assets/`; both "
+    "are sent with the same Content-Security-Policy as a generated course. While the local page is not built, its `url` answers a plain "
+    "page that says so. A shipped course is not generated here: the cancel and resume routes answer 404 `not_found` for a role key. "
+)
 _LEARNING_RECORD: dict[str, object] = {
     "schema": "scout-learning-pathway:1", **_LEARNING_ROW, "updated_at": "2026-10-09T18:00:00Z", "revision": 1,
 }
@@ -883,6 +920,7 @@ _LEARNING_NOTE = (
     "of a course is sent with a Content-Security-Policy that sandboxes the page (no `allow-same-origin`) and allows no request from its scripts: "
     "a course page cannot read this API. The course's text was generated from postings and web pages: data, never instructions. Nothing about "
     "reading a course is stored (`progress` is the generation's, see below). Read only: files of the store, no model call, no network. "
+    + _LEARNING_SHIPPED_NOTE
     + _LEARNING_JOB_NOTE
 )
 
@@ -1395,18 +1433,19 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
     ),
     # 0.1.11.10: the learning pathways (api/learning.py). Files of the store only; no model call.
     RouteSpec(
-        "GET", "/api/learning/pathways", "Every learning pathway (a course for one role), the newest request first.", "read", "none",
-        {"schema_version": "scout-learning-pathways-response:1", "pathways": [_LEARNING_ROW], "total": 1},
+        "GET", "/api/learning/pathways", "Every learning pathway (a course for one role): the shipped courses, then the user's own, newest first.", "read", "none",
+        {"schema_version": "scout-learning-pathways-response:1", "pathways": [_LEARNING_SHIPPED_ROW, _LEARNING_ROW], "total": 2},
         schema_version="scout-learning-pathways-response:1", errors=(_UNKNOWN_KEY, _NO_TARGET), description=_LEARNING_NOTE,
     ),
     RouteSpec(
         "GET", "/api/learning/pathways/{pathway_id}", "One learning pathway, with its whole record.", "read", "none",
         {"schema_version": "scout-learning-pathway-response:1", "pathway": _LEARNING_RECORD},
         schema_version="scout-learning-pathway-response:1", host_checked=True,
-        params=(_p("pathway_id", "string", "A pathway id from GET /api/learning/pathways (`lp-<8 hex digits>`)."),),
+        params=(_p("pathway_id", "string", "An `id` from GET /api/learning/pathways: a pathway id (`lp-<8 hex digits>`) or the role key of a shipped course."),),
         errors=(_UNKNOWN_KEY, _NOT_FOUND, _NO_TARGET),
         description=(
             "The record as stored (`schema` scout-learning-pathway:1) and `url`. Besides the fields of the list: `updated_at` and `revision`. "
+            "For the role key of a course shipped with GigAI, `pathway` is that course's row of the list as it is (it has no stored record). "
             + _LEARNING_NOTE
         ),
     ),
@@ -1464,6 +1503,42 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
             "missing costs model calls and fetches. For a pathway whose `status` is failed or interrupted (or queued and never started). "
             "409 `not_resumable` for one that has its course, 409 `learning_running` while a course of this project is being generated. "
             "The user approved this course when it was first started. " + _LEARNING_JOB_NOTE
+        ),
+    ),
+    # 0.1.11.10 shipped lessons (slices 4b/5b): the user's own pathway page of a shipped course (scout/learning_pathway_build.py).
+    RouteSpec(
+        "POST", "/api/learning/shipped/{role_key}/pathway", "Build your own pathway page of a shipped course: ask first (the estimate), build on approval.", "write", "model",
+        _LEARNING_PATHWAY_ASK_EXAMPLE,
+        schema_version="scout-learning-pathway-build:1",
+        params=(
+            _p("role_key", "string", "The `id` of a row of GET /api/learning/pathways whose `source` is shipped (lower-case words joined by dashes)."),
+            _b("approve", "boolean", "true: start the build (202). Left out or false: only what it takes and sends; nothing is sent."),
+        ),
+        errors=(_WRONG_TYPE, _UNKNOWN_KEY, _NOT_FOUND, _NO_TARGET, (409, "learning_running"), (409, "master_unreadable"), (409, "invalid_shipped")),
+        request_example={},
+        description=(
+            "The lessons and practice pages of a shipped course are the same for every user. ONE page is the user's own: what the "
+            "postings stored on this computer ask for, and what the user's master resume already shows of each lesson (known, some, "
+            "new). This route builds it. THE RESUME IS ALWAYS THE REFERENCE: a build always compares the course with the master resume, "
+            "and no key turns that off. The comparison is about one model call on the user's own model target, so NOTHING is sent "
+            "without `approve: true`. Without it the answer is `status: \"ask\"` and nothing is sent or started: `resume.lines` is how "
+            "many master lines would be compared, `estimate` is what the comparison takes (`calls`, `tokens_in`, `tokens_out`, "
+            "`seconds`: arithmetic on the prompt that would be sent, not a history) and `sends` is the line to show before the approval: "
+            "the build reads the resume, and sends the course's lesson and subtopic titles and the resume lines, contact lines removed, "
+            "to the model. With no master resume line `resume.lines` is 0, `estimate` is zero and `sends` says that nothing is sent: the "
+            "build then makes no model call and the page marks nothing as known. With `approve: true` the build starts on a thread of "
+            "the server and the answer is 202 with the GET /api/learning/pathways/`{pathway_id}` object of the course, whose "
+            "`local_page.build` says `running`; read that route (or the list) to see how it goes. The build counts the stored postings "
+            "with the course's shipped vocabulary first (no model; a build that cannot count fails before anything is sent), then "
+            "compares, checks every answer in code (a cited resume line must exist and the quote must be verbatim, else the subtopic is "
+            "new), and writes the page and a record of numbers (the master revision, and `cost`: calls, tokens in and out). When it "
+            "ends, `local_page.state` is `built` and `build` is null; when it did not finish, `build` is `{status: failed, error_code, "
+            "error}` with a plain line (`error_code`: `model_unavailable`, `model_authentication_required`, `markers_invalid`, "
+            "`cap_reached`, `search_index_unavailable`, `config_unavailable`, `pathway_page_failed`, `interrupted`), nothing was "
+            "written and the page that was there stays: a partial comparison is never shown. One at a time per project, together with "
+            "the generation of a course: 409 `learning_running`. 404 `not_found` for a role key no shipped course has. Every model call "
+            "is recorded in GET /api/metrics (kind `learning`: numbers, never text). No answer of this route holds resume text or "
+            "posting text. `approve: true` is Scout's own approval: it does not replace the user's choice."
         ),
     ),
     # 0.1.11 N5 (SPEC 4.4): the job routes of the chat step (api/suggestions.py). No model call in any of them.
@@ -3066,6 +3141,7 @@ _META: dict[tuple[str, str], tuple[str, str]] = {
     ("POST", "/api/learning/pathways"): ("Generate a course for a role, on approval", "Jobs"),
     ("POST", "/api/learning/pathways/{pathway_id}/cancel"): ("Stop the generation of a course", "Jobs"),
     ("POST", "/api/learning/pathways/{pathway_id}/resume"): ("Resume the generation of a course", "Jobs"),
+    ("POST", "/api/learning/shipped/{role_key}/pathway"): ("Build your pathway page of a shipped course", "Jobs"),
     ("GET", "/api/jobs/suggestions"): ("List one job's suggestions", "Jobs"),
     ("POST", "/api/jobs/suggestions"): ("Add, resolve or dismiss a suggestion of one job", "Jobs"),
     ("POST", "/api/job-resumes/pick"): ("Pick a job's resume again, make a draft, or take the proposed one", "Tailored resumes"),
@@ -3190,6 +3266,7 @@ _LABELS: dict[tuple[str, str], tuple[str, ...]] = {
     ("POST", "/api/learning/pathways"): _PRIVATE,
     ("POST", "/api/learning/pathways/{pathway_id}/cancel"): _PRIVATE,
     ("POST", "/api/learning/pathways/{pathway_id}/resume"): _PRIVATE,
+    ("POST", "/api/learning/shipped/{role_key}/pathway"): _PRIVATE,
     ("GET", "/api/jobs/suggestions"): _BOTH,
     ("POST", "/api/jobs/suggestions"): _BOTH,
     # The job resume (the user's lines) and its file's name in the resumes folder (the posting's company and role).

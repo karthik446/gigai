@@ -107,6 +107,8 @@ JOURNEYS: dict[Route, str] = {
     Route("POST", "/api/learning/pathways"): "test_learning_generate_journey.py",
     Route("POST", "/api/learning/pathways/{pathway_id}/cancel"): "test_learning_generate_journey.py",
     Route("POST", "/api/learning/pathways/{pathway_id}/resume"): "test_learning_generate_journey.py",
+    # 0.1.11.10 shipped lessons (slice 4b): the user's own pathway page of a shipped course, built with no model call.
+    Route("POST", "/api/learning/shipped/{role_key}/pathway"): "test_learning_shipped_journey.py",
     # 0.1.11 N5: the job routes of the chat step.
     Route("GET", "/api/jobs/suggestions"): "test_job_suggestions_journey.py",
     Route("POST", "/api/jobs/suggestions"): "test_job_suggestions_journey.py",

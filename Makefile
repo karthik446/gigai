@@ -6,7 +6,7 @@ TEST_XDIST_WORKERS ?= auto
 TEST_XDIST_MAX_WORKERS ?= 14
 TEST_XDIST_DIST ?= worksteal
 
-.PHONY: test test-macos-smoke test-operator-home test-operator-writes test-core-flow test-source test-behavior test-wheel test-installed test-live test-debian-offline unit-tests test-changed api-e2e eval-live lint
+.PHONY: test test-macos-smoke test-operator-home test-operator-writes test-core-flow test-source test-behavior test-wheel test-installed test-live test-debian-offline unit-tests test-changed api-e2e eval-live learning-link-check lint
 
 # 0110-10-08: names the package uses and never defines. 0.1.10.9 shipped `time.monotonic()` in a module with no
 # `import time`, on a line only a large store reaches: no test ran it, and nothing read the code for it. Every PR
@@ -175,6 +175,20 @@ eval-live:
 		exit 2; \
 	fi
 	$(UV) run --locked --extra test python tests/evals/run_assess_eval.py $(EVAL_ARGS)
+
+# 0.1.11.10 shipped lessons, slice 6: re-verify every external link of the shipped learning courses before a
+# release (tools/learning_link_check.py: one GET per page under the generator's own outbound policy, the anchor
+# and section of every practice-path item, no model call, a report under build/ and nothing written into the
+# package). It talks to other people's documentation hosts for minutes, so it is never part of a default lane:
+# without GIGAI_LINK_CHECK=1 it prints what it would fetch and the time estimate, and stops.
+#   GIGAI_LINK_CHECK=1 make learning-link-check LINK_CHECK_COURSES=<shipped course folder, or the folder of several>
+LINK_CHECK_COURSES ?= src/gigai/scout/data/learning/shipped
+LINK_CHECK_OUT ?= build/learning-link-check
+learning-link-check:
+	@if [ "$${GIGAI_LINK_CHECK:-}" != "1" ]; then \
+		echo "learning link check: GIGAI_LINK_CHECK is not 1, so this only prints what it would fetch" >&2; \
+	fi
+	$(UV) run --locked python tools/learning_link_check.py $(LINK_CHECK_COURSES) --out $(LINK_CHECK_OUT)
 
 # Debian's direct-mount/read-only container contract is a platform-specific
 # CI gate.  It remains explicit because it cannot be truthfully run on every

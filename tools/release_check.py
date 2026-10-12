@@ -1,4 +1,10 @@
-"""Fail-closed checks for a versioned GigAI release."""
+"""Fail-closed checks for a versioned GigAI release.
+
+Not one of these checks, and never blocking: before a release that ships learning courses, run
+``GIGAI_LINK_CHECK=1 make learning-link-check`` by hand and read ``build/learning-link-check/report.txt``
+(``tools/learning_link_check.py``: it fetches every external page the shipped courses link to, so no CI lane and
+no command here runs it).
+"""
 
 from __future__ import annotations
 

@@ -13,6 +13,15 @@ the same job the Scout server runs, here in the foreground with plain progress l
 one-course-at-a-time claim). It asks first with the estimate (default no; ``--yes`` approves). ``cancel ID`` asks a
 running job to stop, whichever process runs it; ``resume ID`` goes on with one that failed or was interrupted.
 
+0.1.11.10 shipped lessons (slice 3): ``list`` also shows the courses that ship inside GigAI (marked ``shipped``,
+first), and ``show`` and ``open`` take a shipped course's ROLE_KEY where they take a pathway ID (``learning_shipped_store``).
+A shipped course is not generated here, so ``cancel`` and ``resume`` refuse a role key.
+
+0.1.11.10 shipped lessons (slices 4b and 5b): ``pathway ROLE_KEY`` builds, or builds again, the one page of a
+shipped course that is yours (``learning_pathway_build``): what your own stored postings ask for, and what your
+resume already shows of each lesson. The resume is always the reference, so the build always compares it (about
+one model call): the command says what that takes and sends and asks first (default no; ``--yes`` approves).
+
 ``--json`` prints one JSON object (what the API route answers, through the same outbound check) and an error is
 ``{"status": "error", "error": {"code", "message"}}`` with exit code 1, like the other ``gigai scout`` commands.
 """
@@ -25,7 +34,8 @@ from pathlib import Path
 import click
 
 from ..setup import default_home_root
-from . import learning_store
+from . import learning_shipped_store, learning_store
+from .learning_shipped_store import ShippedCourse
 from .learning_store import LearningError, Pathway
 
 _START_HINT = "Start it with `gigai scout run`, then run this command again."
@@ -102,6 +112,53 @@ def _progress_words(pathway: Pathway) -> str | None:
     return words
 
 
+_LOCAL_PAGE_WORDS = {
+    learning_shipped_store.PAGE_NOT_BUILT: "your pathway page is not built yet",
+    learning_shipped_store.PAGE_BUILT: "your pathway page was built on {day}",
+    learning_shipped_store.PAGE_STALE: "your pathway page was built on {day} and is out of date",
+}
+#: Why a built page is out of date, by ``local_page.reasons`` (``learning_pathway_local.state``).
+_STALE_WORDS = {
+    "gigai_version": "GigAI was updated since",
+    "catalog": "the course changed since",
+    "master": "your resume changed since",
+    "postings": "your stored postings changed since",
+}
+
+
+def _local_page_words(local_page: object) -> str:
+    """The state of a shipped course's locally built pathway page, in words; a stale page says why."""
+
+    state = local_page.get("state") if isinstance(local_page, dict) else None
+    built_at = local_page.get("built_at") if isinstance(local_page, dict) else None
+    words = _LOCAL_PAGE_WORDS.get(str(state), _LOCAL_PAGE_WORDS[learning_shipped_store.PAGE_NOT_BUILT]).format(day=str(built_at or "")[:10])
+    reasons = local_page.get("reasons") if isinstance(local_page, dict) else None
+    why = [_STALE_WORDS[reason] for reason in (reasons if isinstance(reasons, list) else []) if reason in _STALE_WORDS]
+    if state == learning_shipped_store.PAGE_STALE and why:
+        words += ": " + ", ".join(why)
+    build = local_page.get("build") if isinstance(local_page, dict) else None
+    if isinstance(build, dict) and build.get("status") == "running":
+        words += "; it is being built now"
+    elif isinstance(build, dict) and build.get("status") == "failed":
+        words += f"; the last build did not finish ({build.get('error_code')})"
+    return words
+
+
+def _lessons_words(lessons: int) -> str:
+    return f"{lessons} lesson{'' if lessons == 1 else 's'}"
+
+
+def _shipped(pathway_id: str) -> ShippedCourse | None:
+    """The course shipped with GigAI that ``pathway_id`` names as a role key, or ``None``."""
+
+    return learning_shipped_store.get_course(pathway_id)
+
+
+def _refuse_shipped(pathway_id: str, doing: str) -> None:
+    if _shipped(pathway_id) is not None:
+        raise LearningError("pathway_not_found", f"{pathway_id} is a course shipped with GigAI: it is not generated here, so there is nothing to {doing}")
+
+
 def _pathway(home_root: Path, target: Path, pathway_id: str) -> Pathway:
     pathway = learning_store.get_pathway(home_root, target, pathway_id)
     if pathway is None:
@@ -126,7 +183,7 @@ def learning_group() -> None:
 def learning_list_command(home_value: Path | None, target_value: Path | None, as_json: bool) -> None:
     """List the learning pathways, the newest request first. Reads the store; no model call."""
 
-    from .find_jobs.api.learning import pathways_response
+    from .find_jobs.api.learning import pathways_response, shipped_summary
 
     home_root = home_value or default_home_root()
     try:
@@ -135,19 +192,25 @@ def learning_list_command(home_value: Path | None, target_value: Path | None, as
             _emit(pathways_response(home_root, target))
             return
         pathways = learning_store.list_pathways(home_root, target)
+        courses = learning_shipped_store.list_courses()
+        learning = learning_store.learning_dir(home_root, target) if courses else None
+        shipped = [shipped_summary(home_root, target, course, learning=learning) for course in courses]
     except _errors() as exc:
         _fail(getattr(exc, "code", "scout_learning_failed"), str(exc), as_json=as_json)
         return
-    if not pathways:
+    if not pathways and not shipped:
         click.echo("No learning pathways yet. Import a course folder: gigai scout learning import DIR --role \"ROLE\"")
         return
+    for row in shipped:
+        lessons = _lessons_words(int(row["course"]["lessons"]))  # type: ignore[index]
+        click.echo(f"{row['id']}  shipped  {row['role_text']}  ({lessons})  [shipped with GigAI]  {_local_page_words(row['local_page'])}")
     for pathway in pathways:
         line = f"{_live(home_root, target, pathway)}"
         line = f"{pathway.id}  {line:<7}  {pathway.requested_at[:10]}  {pathway.role_text}  ({_course_words(pathway)})  [{pathway.source}]"
         if pathway.error:
             line += f"  error: {pathway.error}"
         click.echo(line)
-    click.echo("Open one: gigai scout learning open ID")
+    click.echo("Open one: gigai scout learning open ID" + (" (a shipped course: its ROLE_KEY, the first word of its line)" if shipped else ""))
 
 
 @learning_group.command("show")
@@ -156,13 +219,34 @@ def learning_list_command(home_value: Path | None, target_value: Path | None, as
 @_target_option
 @_json_option
 def learning_show_command(pathway_id: str, home_value: Path | None, target_value: Path | None, as_json: bool) -> None:
-    """Show one learning pathway: what was asked, how far it is, what it cost. Reads the store; no model call."""
+    """Show one learning pathway: what was asked, how far it is, what it cost. Reads the store; no model call.
 
-    from .find_jobs.api.learning import pathway_response
+    PATHWAY_ID is a pathway id, or the ROLE_KEY of a course shipped with GigAI.
+    """
+
+    from .find_jobs.api.learning import pathway_response, shipped_response
 
     home_root = home_value or default_home_root()
     try:
         target = _target(target_value, home_root, as_json=as_json)
+        course = _shipped(pathway_id)
+        if course is not None:
+            shown = shipped_response(home_root, target, course)
+            if as_json:
+                _emit(shown)
+                return
+            row = shown["pathway"]
+            assert isinstance(row, dict)
+            click.echo("\n".join([
+                f"{course.role_key}  {course.role}",
+                "Status: done",
+                f"Course: {_lessons_words(course.lessons)}",
+                "Source: shipped with GigAI (the lessons and practice pages are the same for everyone)",
+                f"Your pathway page: {_local_page_words(row['local_page'])}",
+                f"Build it or build it again: gigai scout learning pathway {course.role_key}",
+                f"Open it: gigai scout learning open {course.role_key}",
+            ]))
+            return
         pathway = _pathway(home_root, target, pathway_id)
         status = _live(home_root, target, pathway)
     except _errors() as exc:
@@ -203,8 +287,10 @@ def learning_show_command(pathway_id: str, home_value: Path | None, target_value
 def learning_open_command(pathway_id: str, no_browser: bool, home_value: Path | None, target_value: Path | None, as_json: bool) -> None:
     """Print where the running Scout server serves a pathway's course, and open it in the browser.
 
-    The course is served by the Scout server only: when it is not running, the
-    command says how to start it and exits 1. --json never opens a browser.
+    PATHWAY_ID is a pathway id, or the ROLE_KEY of a course shipped with
+    GigAI. The course is served by the Scout server only: when it is not
+    running, the command says how to start it and exits 1. --json never
+    opens a browser.
     """
 
     from . import run_supervisor
@@ -213,10 +299,14 @@ def learning_open_command(pathway_id: str, no_browser: bool, home_value: Path | 
     home_root = home_value or default_home_root()
     try:
         target = _target(target_value, home_root, as_json=as_json)
-        pathway = _pathway(home_root, target, pathway_id)
-        path = course_url(pathway)
-        if path is None:
-            raise LearningError("course_not_ready", f"learning pathway {pathway.id} has no course yet (status: {pathway.status})")
+        course = _shipped(pathway_id)
+        if course is not None:
+            shown_id, path = course.role_key, learning_shipped_store.course_url(course.role_key)
+        else:
+            pathway = _pathway(home_root, target, pathway_id)
+            shown_id, path = pathway.id, course_url(pathway)
+            if path is None:
+                raise LearningError("course_not_ready", f"learning pathway {pathway.id} has no course yet (status: {pathway.status})")
         current = run_supervisor.status(home_root=home_root, requested_target=target)
     except _errors() as exc:
         _fail(getattr(exc, "code", "scout_learning_failed"), str(exc), as_json=as_json)
@@ -235,9 +325,114 @@ def learning_open_command(pathway_id: str, no_browser: bool, home_value: Path | 
 
         opened = bool(webbrowser.open(url))
     if as_json:
-        _emit({"schema_version": "scout-learning-open:1", "id": pathway.id, "url": url, "opened": opened})
+        _emit({"schema_version": "scout-learning-open:1", "id": shown_id, "url": url, "opened": opened})
         return
     click.echo(url)
+
+
+def _count_words(count: int, one: str, many: str | None = None) -> str:
+    return f"{count} {one if count == 1 else (many or one + 's')}"
+
+
+def _pathway_counts_line(counts: dict[str, object]) -> str:
+    """The numbers a local pathway page was built from, in one line (numbers only: no posting text)."""
+
+    corpus = counts.get("corpus") if isinstance(counts.get("corpus"), dict) else {}
+    lessons = counts.get("lessons") if isinstance(counts.get("lessons"), dict) else {}
+    assert isinstance(corpus, dict) and isinstance(lessons, dict)
+    named = sum(1 for found in lessons.values() if isinstance(found, dict) and (found.get("postings_in_90d") or found.get("postings_any_date")))
+    window = int(corpus.get("window_days", 90) or 90)
+    return (
+        f"Counted: {int(corpus.get('with_text_in_window', 0) or 0)} of your stored postings of the last {window} days "
+        f"({int(corpus.get('with_text', 0) or 0)} of any date); a posting names {int(counts.get('concepts_named', 0) or 0)} of the "  # type: ignore[call-overload]
+        f"{_count_words(int(counts.get('concepts', 0) or 0), 'thing')} the course lists and {named} of its {_count_words(len(lessons), 'lesson')}."  # type: ignore[call-overload]
+    )
+
+
+@learning_group.command("pathway")
+@click.argument("role_key", metavar="ROLE_KEY")
+@click.option("--yes", "yes", is_flag=True, help="Approve: compare your resume with the course (about 1 model call) without asking.")
+@_home_option
+@_target_option
+@_json_option
+def learning_pathway_command(role_key: str, yes: bool, home_value: Path | None, target_value: Path | None, as_json: bool) -> None:
+    """Build, or build again, your own pathway page of a course shipped with GigAI.
+
+    ROLE_KEY is the first word of the course's line in `gigai scout learning
+    list`. The lessons of a shipped course are the same for everyone; this
+    one page is yours: what the postings stored on this computer ask for,
+    and what your resume already shows of each lesson (known, in part, new).
+
+    Your master resume is always the reference, so the build compares it
+    with the course: the lesson titles and your resume lines (contact lines
+    removed) go to your own model, in about one model call. Nothing is sent
+    without approval: without --yes the command says what it takes and asks
+    (in a terminal; default no) or stops there (--json, or no terminal).
+    With no master resume there is nothing to send, and the page is built
+    with nothing marked as known.
+    """
+
+    import sys
+
+    from . import learning_pathway_build, run_supervisor
+    from .find_jobs.api.learning import shipped_response
+
+    home_root = home_value or default_home_root()
+    try:
+        target = _target(target_value, home_root, as_json=as_json)
+        course = _shipped(role_key)
+        if course is None:
+            raise LearningError("pathway_not_found", f"there is no course {role_key!r} shipped with GigAI; `gigai scout learning list` lists them")
+        asked_for = learning_pathway_build.ask_response(home_root, target, course)
+        sends = bool(asked_for["resume"]["lines"])  # type: ignore[index]
+        question = f"Build your pathway page of '{course.role}'?"
+        facts = [f"Estimate: {learning_pathway_build.estimate_words(asked_for['estimate'])}.", str(asked_for["sends"])]  # type: ignore[arg-type]
+        approved = yes or not sends  # with no resume line nothing is sent: there is nothing to approve
+        asked = not approved and not as_json and sys.stdin.isatty()
+        if asked:
+            # What it takes and what it sends, before the y/n (default no).
+            click.echo("\n".join(facts))
+            approved = click.confirm(question.rstrip("?"), default=False)
+        if not approved:
+            if as_json:
+                _emit(asked_for)
+                return
+            if not asked:
+                click.echo(question)
+                click.echo("\n".join(facts))
+            click.echo("Nothing was sent. Approve with --yes.")
+            return
+        built = learning_pathway_build.run(home_root, target, course, on_progress=None if as_json else click.echo)
+        response = shipped_response(home_root, target, course)
+        current = run_supervisor.status(home_root=home_root, requested_target=target)
+    except _errors() as exc:
+        _fail(getattr(exc, "code", "scout_learning_failed"), str(exc), as_json=as_json)
+        return
+    if as_json:
+        _emit(response)
+        return
+    address = learning_shipped_store.course_url(course.role_key, learning_shipped_store.PATHWAY_PAGE)
+    lines = [f"Built your pathway page of {course.role} ({course.role_key}).", _pathway_counts_line(dict(built.counts))]
+    note = built.counts.get("corpus", {}).get("note") if isinstance(built.counts.get("corpus"), dict) else None
+    if note:
+        lines.append(str(note))
+    if built.page.compared:
+        tally = built.page.tally
+        lines.append(f"Your resume: {tally.get('KNOWN', 0)} known, {tally.get('SOME', 0)} in part, {tally.get('NEW', 0)} new (subtopics of the course).")
+    else:
+        lines.append(learning_pathway_build.NO_RESUME)
+    calls = int(built.usage.get("calls") or 0)
+    if calls:
+        tokens_in, tokens_out = built.usage.get("tokens_in"), built.usage.get("tokens_out")
+        tokens = f": {tokens_in:,} tokens in, {tokens_out:,} out" if isinstance(tokens_in, int) and isinstance(tokens_out, int) else ""
+        lines.append(f"Sent to your model: {_count_words(calls, 'call')}{tokens}.")
+    else:
+        lines.append("Nothing was sent to a model.")
+    if current.state == run_supervisor.STATE_RUNNING and current.url:
+        lines.append(f"Open it: {current.url.rstrip('/')}{address}")
+    else:
+        lines.append(f"Open it: the Scout server serves it at {address} (start the server with `gigai scout run`).")
+    click.echo("\n".join(lines))
 
 
 @learning_group.command("import")
@@ -455,6 +650,7 @@ def learning_cancel_command(pathway_id: str, home_value: Path | None, target_val
     home_root = home_value or default_home_root()
     try:
         target = _target(target_value, home_root, as_json=as_json)
+        _refuse_shipped(pathway_id, "cancel")
         _pathway(home_root, target, pathway_id)
         asked = learning_job.cancel(home_root, target, pathway_id)
         pathway = _pathway(home_root, target, pathway_id)
@@ -490,6 +686,7 @@ def learning_resume_command(pathway_id: str, home_value: Path | None, target_val
     home_root = home_value or default_home_root()
     try:
         target = _target(target_value, home_root, as_json=as_json)
+        _refuse_shipped(pathway_id, "resume")
         pathway = learning_job.run_foreground(home_root, target, pathway_id=pathway_id, on_progress=None if as_json else click.echo)
     except _errors() as exc:
         _fail(getattr(exc, "code", "scout_learning_failed"), str(exc), as_json=as_json)

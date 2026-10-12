@@ -93,6 +93,10 @@ _BUILDERS: dict[tuple[str, str], frozenset[str]] = {
     # reader above); every line is still put through guard_private here, as an "id | text" line. The curriculum and
     # source prompts of the same module take no resume argument (test_learning_course.py proves both).
     ("gigai.scout.learning_course", "lessons_prompt"): frozenset({"guard_private"}),
+    # 0.1.11.10 shipped lessons, slice 5: the marker prompt of a SHIPPED course, the one prompt of it that carries the
+    # master (catalog titles + "id | text" lines, each through guard_private; no lesson body, no posting text). The
+    # module calls no reader: its caller hands the lines in from learning_course.read_master_lines.
+    ("gigai.scout.learning_markers", "markers_prompt"): frozenset({"guard_private"}),
 }
 
 #: Who may import the local display settings and the renderer (module -> allowed importers).

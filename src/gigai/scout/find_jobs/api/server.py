@@ -72,7 +72,7 @@ from .common import (
 )
 from .openapi import response_labels_header, with_allowed_keys
 from .profiles import _match_profile_id
-from .learning import COURSE_PREFIX, _match_pathway_id
+from .learning import COURSE_PREFIX, _match_pathway_id, _match_shipped_role_key
 from .story_bank import _match_answer_id, _match_story_id
 
 # _TEST_HTTP_ENV/_TEST_MODEL_ENV live in present_api.py now -- they're only
@@ -2129,6 +2129,11 @@ def _make_handler(
                 pathway_id = _match_pathway_id(path, suffix="/resume")
                 if pathway_id is not None:
                     self._handle_post_learning_pathway_action(pathway_id, "resume")
+                    return
+                # 0.1.11.10 shipped lessons: build the user's own pathway page of a shipped course (api/learning.py).
+                role_key = _match_shipped_role_key(path, suffix="/pathway")
+                if role_key is not None:
+                    self._handle_post_learning_shipped_pathway(role_key)
                     return
                 if path == "/api/postings/assess":
                     self._handle_post_postings_assess()

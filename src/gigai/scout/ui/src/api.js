@@ -53,6 +53,10 @@ const CODES_WITH_OWN_MESSAGE = new Set([
   // 0.1.11.10 Part B (G6): POST /api/learning/pathways' own refusals, shown plainly on the form/dialog.
   "learning_running",
   "personal_info_refused",
+  // 0.1.11.10 shipped lessons (slices 4b/5b): POST /api/learning/shipped/<role key>/pathway's own refusals, shown on
+  // the row or in the dialog (learning_running is above).
+  "master_unreadable",
+  "invalid_shipped",
 ]);
 
 class ApiError extends Error {
@@ -976,6 +980,13 @@ export function postLearningPathwayCancel(pathwayId) {
 
 export function postLearningPathwayResume(pathwayId) {
   return request("POST", `/api/learning/pathways/${encodeURIComponent(pathwayId)}/resume`, {});
+}
+
+// 0.1.11.10 shipped lessons (slices 4b/5b): the user's own pathway page of a shipped course. Without `approve` this
+// is what building it takes and sends, nothing sent (learning_pathway_build.ask_response); with `{approve: true}`
+// the build starts (202) and the answer is the course's row ({schema_version, pathway}).
+export function postLearningShippedPathway(roleKey, body) {
+  return request("POST", `/api/learning/shipped/${encodeURIComponent(roleKey)}/pathway`, body || {});
 }
 
 export { ApiError };

@@ -17,6 +17,16 @@ Pinned:
   tab loads the real course page (200, its title);
 - an empty home (no pathways at all) shows "No courses yet" and the CLI import line, no rows;
 - `ui.assert_clean()`: no console error, no HTTP >= 400.
+
+0.1.11.10 shipped lessons (slice 3): a course that ships inside GigAI (SYNTHETIC here: ``make_shipped`` in
+``tmp_path``, standing for the package's shipped folder) is the FIRST row, with its "Shipped with GigAI" line, its
+lessons, the state of the user's own pathway page as plain text ("Your pathway page is not built yet"; "... was
+built on <day>" once the file is there), no date and no cost line. Its controls are "Open course" and the one button
+that builds the user's own pathway page (slice 4b: tests/ui/test_learning_pathway_build.py presses it), plus the
+link to that page once it is there. "Open course" opens the real page in a new tab: rendered on first use, with the shared assets under
+``/learning/_assets/`` loaded and run under the course's Content-Security-Policy (no console error, no failed
+request, the Mermaid diagram of a lesson drawn), and "Your pathway" there opens the not-built page. The user's own
+rows below it are as they were.
 """
 
 from __future__ import annotations
@@ -30,8 +40,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from gigai.scout import learning_store
+from gigai.scout import learning_shipped_store, learning_store
 
+from tests.behaviors.scout_learning.test_learning_shipped_store import KEY, ROLE, make_shipped
 from tests.behaviors.scout_learning.test_learning_store import make_course
 from tests.support.scout_profile_fixtures import build_gig_with_resume
 from tests.ui.conftest import _ui_session
@@ -45,6 +56,7 @@ ROW = '[data-testid="learning-row"]'
 OPEN = '[data-action="open-course"]'
 SOURCE = '[data-role="learning-source"]'
 ERROR = '[data-role="learning-error"]'
+LOCAL_PAGE = '[data-role="learning-local-page"]'
 ROLE_INPUT = "#learning-role"
 GENERATE = '[data-action="learning-generate"]'
 SHOT_DIR = Path("/Users/kar/orca/workspaces/gigai/orchestrator/research/role-packet/out/ui-shots")
@@ -188,4 +200,90 @@ def test_rows_show_role_date_status_cost_lessons_size_and_source_and_open_course
 
     SHOT_DIR.mkdir(parents=True, exist_ok=True)
     ui.page.screenshot(path=str(SHOT_DIR / "learning-tab.png"))
+    ui.assert_clean()
+
+
+def test_a_shipped_course_is_the_first_row_and_open_course_opens_its_real_pages(learning_ui, learning_home: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> None:
+    import os
+    import re
+
+    ui = learning_ui
+    package = learning_home.tmp / "shipped-package"
+    make_shipped(package)
+    monkeypatch.setattr(learning_shipped_store, "package_shipped_dir", lambda: package)
+    ids = _seed_pathways(learning_home)
+    ui.goto("/#/learning")
+    ui.page.locator(ROW).first.wait_for()
+    assert ui.page.locator(ROW).count() == 4
+    assert [row.get_attribute("data-pathway-id") for row in ui.page.locator(ROW).all()][0] == KEY, "the shipped course is listed first"
+
+    row = f'{ROW}[data-pathway-id="{KEY}"]'
+    shipped = ui.page.locator(row)
+    assert shipped.get_attribute("data-shipped") == "true"
+    assert (shipped.locator("strong").first.text_content() or "").strip() == ROLE
+    assert _text(ui, f'{row} [data-role="learning-status"]') == "Ready"
+    assert _text(ui, f"{row} {SOURCE}") == "Shipped with GigAI"
+    assert _text(ui, f'{row} [data-role="learning-lessons"]') == "4 lessons"
+    assert _text(ui, f"{row} {LOCAL_PAGE}") == "Your pathway page is not built yet"
+    assert shipped.locator('[data-role="learning-cost"]').count() == 0 and shipped.locator(".learning-entry-head span").count() == 0
+    assert shipped.locator(ERROR).count() == 0
+    # "Open course" and the one button that builds the user's own page (slice 4b); no link to a page that is not there.
+    assert [(button.text_content() or "").strip() for button in shipped.locator("button").all()] == ["Build my pathway"]
+    assert shipped.locator("a").count() == 1 and shipped.locator('[data-action="open-pathway-page"]').count() == 0
+    open_link = shipped.locator(OPEN)
+    assert open_link.get_attribute("href") == f"/learning/shipped/{KEY}/index.html"
+    assert open_link.get_attribute("target") == "_blank" and open_link.get_attribute("rel") == "noopener"
+
+    # The user's own rows are as they were, and only a shipped row has the pathway-page line.
+    done = f'{ROW}[data-pathway-id="{ids["done"]}"]'
+    assert _text(ui, f'{done} [data-role="learning-cost"]') == "43 model calls, 430 page fetches, 12 web searches, about 45 minutes"
+    assert _text(ui, f"{done} {SOURCE}") == "Imported from mlops-course" and ui.page.locator(f"{done} .learning-entry-head span").count() == 1
+    assert ui.page.locator(f"{ROW}:not([data-shipped]) {LOCAL_PAGE}").count() == 0 and ui.page.locator(f"{ROW}[data-shipped]").count() == 1
+
+    assert not learning_shipped_store.cache_root(learning_home.home).exists(), "the tab renders nothing"
+    with ui.page.context.expect_page() as new_page_info:
+        open_link.click()
+    course = new_page_info.value
+    course.wait_for_load_state("load")
+    assert course.url.endswith(f"/learning/shipped/{KEY}/index.html") and course.title() == ROLE
+    assert (learning_shipped_store.cache_dir(learning_home.home, KEY) / "index.html").is_file(), "rendered when first opened"
+
+    # The shared assets load and run under the course's policy: watched from before a fresh load of each page.
+    console: list[str] = []
+    failed: list[str] = []
+    asked: list[str] = []
+    course.on("console", lambda message: console.append(f"{message.type}: {message.text}") if message.type == "error" else None)
+    course.on("response", lambda response: failed.append(f"{response.status} {response.url}") if response.status >= 400 else None)
+    course.on("request", lambda request: asked.append(request.url))
+    course.reload()
+    course.wait_for_load_state("load")
+    assert course.locator("html").get_attribute("data-theme") == "light", "theme-init.js ran from /learning/_assets/"
+    course.goto(f"{learning_home.url}/learning/shipped/{KEY}/concept-lesson-alpha.html")
+    course.locator(".mermaid svg").wait_for(timeout=30000)
+    assert course.locator("pre code .hljs-string, pre code .hljs-keyword, pre code .hljs-built_in").count() > 0, "the code is highlighted"
+    assert any("/learning/_assets/mermaid/mermaid.min.js" in url for url in asked) and any("/learning/_assets/course.css" in url for url in asked)
+    assert all(url.startswith(learning_home.url) for url in asked), "no request leaves this server"
+
+    course.locator('a[href="pathway.html"]').first.click()
+    course.wait_for_url(f"**/learning/shipped/{KEY}/pathway.html")
+    assert (course.locator("h1").text_content() or "").strip() == "Your pathway page is not built yet"
+    assert ROLE in (course.locator("main").text_content() or "")
+    course.locator('a[href="index.html"]').click()
+    course.wait_for_url(f"**/learning/shipped/{KEY}/index.html")
+    assert console == [] and failed == [], (console, failed)
+    course.close()
+
+    # Once the user's own page is there, the row says when it was built (noon UTC: the same day in every time zone).
+    mine = learning_shipped_store.pathway_page_path(learning_home.home, learning_home.target, KEY)
+    mine.parent.mkdir(parents=True)
+    mine.write_text("<!doctype html><title>mine</title><p>synthetic local page</p>", encoding="utf-8")
+    os.utime(mine, (1_800_014_400, 1_800_014_400))
+    ui.reload()
+    ui.page.locator(row).wait_for()
+    assert re.fullmatch(r"Your pathway page was built on .*15.*2027.*", _text(ui, f"{row} {LOCAL_PAGE}")), _text(ui, f"{row} {LOCAL_PAGE}")
+    assert [(button.text_content() or "").strip() for button in ui.page.locator(f"{row} button").all()] == ["Rebuild my pathway"]
+    assert ui.page.locator(f'{row} [data-action="open-pathway-page"]').get_attribute("href") == f"/learning/shipped/{KEY}/pathway.html"
+
+    SHOT_DIR.mkdir(parents=True, exist_ok=True)
+    ui.page.screenshot(path=str(SHOT_DIR / "learning-tab-shipped.png"))
     ui.assert_clean()

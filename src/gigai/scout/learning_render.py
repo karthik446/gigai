@@ -17,6 +17,12 @@ ids (the UI and the acceptance browser test depend on those). What changed for t
   under 3 MB) and an inline-script / ``on*=`` attribute assertion, so a page that would violate the slice-1 CSP is
   caught here, before import, not by the importer's own scan.
 
+0.1.11.10 shipped lessons, slice 2: the same renderer draws a SHIPPED (generic) course from package data
+(``render_shipped``). ``RenderOptions`` carries what differs: where the assets are (a shared base instead of a copy
+per course), the stylesheet as one ``course.css`` file instead of inline, and the shipped page bodies (nothing of
+a resume, nothing counted from stored postings, one link to the locally built ``pathway.html``). The defaults are
+a personal course, byte for byte what it was.
+
 No model call, no network, stdlib only.
 """
 
@@ -32,6 +38,12 @@ import unicodedata
 from pathlib import Path
 
 ASSET_REL = "assets"
+COURSE_CSS_NAME = "course.css"
+#: The one page of a shipped course that is built locally, from the user's own master and stored postings. It is not
+#: part of the rendered site and may not exist yet: a link to it is allowed by the link audit without a check.
+PATHWAY_PAGE = "pathway.html"
+FOOTER_PERSONAL = "generated offline"
+FOOTER_SHIPPED = "shipped with GigAI"
 MAX_LESSONS = 40
 MAX_SITE_BYTES_NO_ASSETS = 10 * 1024 * 1024
 MAX_HTML_BYTES = 3 * 1024 * 1024
@@ -291,9 +303,7 @@ PAGE_HEAD = """<!doctype html>
 """ + THEME_INIT_SCRIPT + """
 <link rel="stylesheet" href="{asset_rel}/hljs/styles/github.min.css" data-hljs-theme="light">
 <link rel="stylesheet" href="{asset_rel}/hljs/styles/github-dark.min.css" data-hljs-theme="dark" disabled>
-<style>
-{css}
-</style>
+{style}
 </head>
 <body>
 <div class="shell">
@@ -312,7 +322,7 @@ PAGE_HEAD = """<!doctype html>
 PAGE_TAIL = """
 </main>
 <footer>
-<p class="muted">Course &middot; generated offline &middot; no tracking</p>
+<p class="muted">Course &middot; {footer} &middot; no tracking</p>
 </footer>
 </div>
 </div>
@@ -326,342 +336,60 @@ PAGE_TAIL = """
 </html>
 """
 
-CSS = """
-:root, :root[data-theme="light"] {
-  --fg: #1a1a1a;
-  --bg: #ffffff;
-  --muted: #4d4d4d;
-  --border: #ddd;
-  --accent: #0b5fff;
-  --code-bg: #f6f8fa;
-  --chip-bg: #eef2ff;
-  --sidebar-bg: #fafbfc;
-}
-:root[data-theme="dark"] {
-  --fg: #e6e6e6;
-  --bg: #15171a;
-  --muted: #b3b3b3;
-  --border: #3a3d42;
-  --accent: #7fb0ff;
-  --code-bg: #1d2024;
-  --chip-bg: #22273a;
-  --sidebar-bg: #191b1e;
-}
-* { box-sizing: border-box; }
-html, body { margin: 0; padding: 0; }
-body {
-  background: var(--bg);
-  color: var(--fg);
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-  line-height: 1.55;
-}
-.shell { display: flex; align-items: flex-start; }
-nav.sidebar {
-  position: sticky;
-  top: 0;
-  height: 100vh;
-  overflow-y: auto;
-  width: 280px;
-  flex-shrink: 0;
-  background: var(--sidebar-bg);
-  border-right: 1px solid var(--border);
-  padding: 1.2rem 1rem 2rem;
-  font-size: 0.88rem;
-}
-nav.sidebar .sidebar-title { font-weight: 600; margin-bottom: 0.8rem; }
-nav.sidebar .sidebar-title a { color: var(--fg); }
-nav.sidebar .sidebar-search { margin-bottom: 1rem; }
-nav.sidebar .sidebar-search input {
-  width: 100%;
-  padding: 0.4rem 0.6rem;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--bg);
-  color: var(--fg);
-  font-size: 0.85rem;
-}
-nav.sidebar .sidebar-overview { list-style: none; margin: 0 0 1rem; padding: 0; }
-nav.sidebar .sidebar-overview li { margin: 0.15rem 0; }
-nav.sidebar .sidebar-overview a { color: var(--muted); display: block; padding: 0.1rem 0.3rem; border-radius: 4px; }
-nav.sidebar .sidebar-overview a:hover { color: var(--accent); }
-nav.sidebar details.toc-module { margin-bottom: 0.2rem; }
-nav.sidebar details.toc-module > summary {
-  cursor: pointer;
-  font-weight: 600;
-  padding: 0.3rem 0.2rem;
-  list-style: none;
-  display: flex;
-  align-items: baseline;
-  gap: 0.4rem;
-}
-nav.sidebar details.toc-module > summary::-webkit-details-marker { display: none; }
-nav.sidebar details.toc-module > summary::before {
-  content: "";
-  display: inline-block;
-  width: 0;
-  height: 0;
-  margin-top: 0.4em;
-  border-top: 4px solid transparent;
-  border-bottom: 4px solid transparent;
-  border-left: 5px solid var(--muted);
-  transition: transform 0.15s ease;
-  flex-shrink: 0;
-}
-nav.sidebar details.toc-module[open] > summary::before { transform: rotate(90deg); }
-nav.sidebar ul.module-lessons { list-style: none; margin: 0.2rem 0 0.4rem; padding-left: 0.9rem; }
-nav.sidebar ul.module-lessons li { margin: 0.1rem 0; }
-nav.sidebar ul.module-lessons a {
-  color: var(--muted);
-  display: flex;
-  align-items: baseline;
-  gap: 0.45rem;
-  padding: 0.12rem 0.3rem;
-  border-radius: 4px;
-}
-nav.sidebar ul.module-lessons a:hover { color: var(--accent); text-decoration: none; }
-nav.sidebar ul.module-lessons a.current { color: var(--accent); background: var(--chip-bg); font-weight: 600; }
-nav.sidebar ul.module-lessons .lesson-dot {
-  display: inline-block;
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  background: var(--muted);
-  flex-shrink: 0;
-  margin-top: 0.5em;
-}
-nav.sidebar li.lesson-hidden, nav.sidebar details.module-hidden { display: none; }
-.page { max-width: 70ch; margin: 0 auto; padding: 1.5rem 1.5rem 4rem; flex: 1; }
-.page-top { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-bottom: 1.5rem; }
-nav.breadcrumb { font-size: 0.9rem; color: var(--muted); margin-bottom: 0; }
-nav.breadcrumb a { color: var(--accent); }
-.theme-toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4rem;
-  font-size: 0.82rem;
-  color: var(--fg);
-  background: var(--chip-bg);
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  padding: 0.3rem 0.7rem;
-  cursor: pointer;
-  flex-shrink: 0;
-}
-.theme-toggle:hover { border-color: var(--accent); }
-.theme-toggle-glyph { font-size: 0.95rem; line-height: 1; }
-h1, h2, h3 { line-height: 1.25; }
-h1 { font-size: 1.8rem; margin-top: 0; }
-h2 { font-size: 1.3rem; margin-top: 2.2rem; border-bottom: 1px solid var(--border); padding-bottom: .3rem; }
-h3 { font-size: 1.05rem; margin-top: 1.6rem; }
-p, li { max-width: 70ch; }
-.muted { color: var(--muted); font-size: 0.9rem; }
-a { color: var(--accent); text-decoration: none; }
-a:hover { text-decoration: underline; }
-table { border-collapse: collapse; width: 100%; margin: 1rem 0; }
-th, td { text-align: left; padding: 0.5rem 0.6rem; border-bottom: 1px solid var(--border); vertical-align: top; }
-th { color: var(--muted); font-weight: 600; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.02em; }
-.examples-list { list-style: none; padding: 0; margin: 0.4rem 0 0; }
-.examples-list li { padding: 0.35rem 0; border-bottom: 1px dashed var(--border); font-size: 0.92rem; }
-.count-chip {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 0.78rem;
-  color: var(--muted);
-}
-.tech-group { margin: 1rem 0 1.6rem; }
-.tech-group h3 { margin-top: 0.6rem; }
-.tech-bar-row { display: flex; align-items: center; gap: 0.6rem; margin: 0.3rem 0; }
-.tech-bar-label { width: 11rem; flex-shrink: 0; font-size: 0.92rem; }
-.tech-bar-label a { color: var(--fg); scroll-margin-top: 1rem; }
-.tech-bar-track { flex: 1; background: var(--chip-bg); border-radius: 4px; height: 0.8rem; overflow: hidden; min-width: 3rem; }
-.tech-bar-fill { background: var(--accent); height: 100%; border-radius: 4px; display: block; }
-.tech-bar-pct { font-size: 0.82rem; color: var(--muted); white-space: nowrap; width: 3rem; text-align: right; }
-.toc-modules { list-style: none; padding: 0; }
-.toc-modules > li { margin-bottom: 1.2rem; }
-.toc-modules h3 { margin: 0 0 0.3rem; }
-.toc-modules .intro { color: var(--muted); font-size: 0.9rem; margin: 0 0 0.5rem; }
-.toc-modules ul.concepts { list-style: none; padding-left: 1rem; }
-.toc-modules ul.concepts li { margin: 0.25rem 0; }
-pre {
-  background: var(--code-bg);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 0.8rem 1rem;
-  overflow-x: auto;
-}
-code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.88rem; }
-.code-lang {
-  display: block;
-  font-size: 0.72rem;
-  color: var(--muted);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  margin-bottom: -0.4rem;
-}
-.mermaid-wrap { margin: 1.2rem 0; }
-.mermaid { display: none; }
-html.js .mermaid { display: block; }
-.mermaid-fallback {
-  display: block;
-  background: var(--code-bg);
-  border: 1px dashed var(--border);
-  border-radius: 6px;
-  padding: 0.8rem 1rem;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 0.82rem;
-  white-space: pre-wrap;
-}
-html.js .mermaid-fallback { display: none; }
-.sources-list { list-style: none; padding: 0; }
-.sources-list li { padding: 0.4rem 0; border-bottom: 1px solid var(--border); font-size: 0.9rem; }
-.sources-list .domain { color: var(--muted); font-size: 0.8rem; }
-.sources-preview {
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 0.6rem 1rem;
-  margin: 0.8rem 0 1.2rem;
-  background: var(--sidebar-bg);
-}
-.sources-preview-title { margin: 0 0 0.3rem; font-size: 0.8rem; text-transform: uppercase; color: var(--muted); letter-spacing: 0.03em; }
-.sources-preview .sources-list li:last-child { border-bottom: none; }
-.ext-marker { font-size: 0.75em; margin-left: 0.15em; opacity: 0.7; }
-a.autolink { text-decoration: underline; text-decoration-style: dotted; text-decoration-thickness: 1px; }
-.kind-badge {
-  display: inline-block;
-  font-size: 0.72rem;
-  text-transform: uppercase;
-  background: var(--chip-bg);
-  color: var(--muted);
-  padding: 0.05rem 0.4rem;
-  border-radius: 999px;
-  margin-right: 0.4rem;
-}
-.related-list { list-style: none; padding: 0; }
-.related-list li { display: inline-block; margin: 0.2rem 0.4rem 0.2rem 0; }
-.related-list a {
-  display: inline-block;
-  padding: 0.2rem 0.6rem;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  font-size: 0.85rem;
-}
-.prevnext { display: flex; justify-content: space-between; margin-top: 2rem; border-top: 1px solid var(--border); padding-top: 1rem; }
-.prevnext a { font-size: 0.92rem; }
-.tech-tags { margin: 0.6rem 0; }
-.tech-tags a, .tech-tags span {
-  display: inline-block;
-  font-size: 0.8rem;
-  padding: 0.1rem 0.5rem;
-  margin: 0.1rem 0.3rem 0.1rem 0;
-  background: var(--chip-bg);
-  border-radius: 999px;
-  color: var(--fg);
-}
-footer { margin-top: 3rem; border-top: 1px solid var(--border); padding-top: 1rem; }
-@media print {
-  nav.sidebar, nav.breadcrumb, footer, .theme-toggle { display: none; }
-  a { color: inherit; text-decoration: underline; }
-  .page { max-width: none; }
-}
-@media (max-width: 820px) {
-  .shell { flex-direction: column; }
-  nav.sidebar {
-    position: static;
-    height: auto;
-    width: 100%;
-    max-height: 40vh;
-    border-right: none;
-    border-bottom: 1px solid var(--border);
-  }
-  .page { padding: 1rem 0.9rem 3rem; max-width: none; }
-}
-@media (max-width: 480px) {
-  h1 { font-size: 1.5rem; }
-  .tech-bar-label { width: 8rem; }
-}
-.curriculum-badge {
-  display: inline-block;
-  font-size: 0.72rem;
-  color: var(--muted);
-  background: var(--chip-bg);
-  padding: 0.05rem 0.4rem;
-  border-radius: 999px;
-}
-.on-this-page {
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 0.8rem 1rem;
-  margin: 1rem 0 1.6rem;
-  font-size: 0.9rem;
-}
-.on-this-page .otp-title { font-weight: 600; margin: 0 0 0.3rem; }
-.on-this-page ul { list-style: none; padding-left: 0.2rem; margin: 0; }
-.on-this-page li { margin: 0.2rem 0; }
-.concept-marker-line { color: var(--muted); font-size: 0.88rem; margin: 0.2rem 0 1rem; }
-.source-id {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 0.78rem;
-  color: var(--muted);
-  background: var(--chip-bg);
-  border-radius: 3px;
-  padding: 0.05rem 0.35rem;
-}
-.evidence-line { color: var(--muted); font-size: 0.88rem; margin: 0.3rem 0; }
-.missing-line { color: var(--muted); font-size: 0.88rem; margin: 0.3rem 0; font-style: italic; }
-.your-path { border: 1px solid var(--border); border-radius: 8px; padding: 1rem 1.2rem; margin: 1rem 0 2rem; }
-.your-path ul { list-style: none; padding-left: 0; margin: 0.4rem 0; }
-.your-path li { padding: 0.25rem 0; }
-.your-path details { margin-top: 0.8rem; }
-.your-path summary { cursor: pointer; color: var(--muted); font-size: 0.9rem; }
-.your-path-module { margin: 1rem 0; }
-.your-path-module h3 { margin: 0 0 0.3rem; font-size: 1rem; }
-.your-path-module:first-of-type { margin-top: 0.4rem; }
-.path-number { color: var(--muted); font-size: 0.85rem; margin-right: 0.5rem; font-variant-numeric: tabular-nums; }
-.path-wrench { font-size: 0.85rem; opacity: 0.8; margin-left: 0.3rem; }
-.practice-path-lead { color: var(--muted); font-size: 0.92rem; margin: 0.2rem 0 1rem; }
-.practice-steps { list-style: none; padding: 0; margin: 0.6rem 0 1.2rem; }
-.practice-steps li {
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 0.8rem 1rem;
-  margin: 0 0 0.8rem;
-}
-.practice-steps li:last-child { margin-bottom: 0; }
-.practice-step-title { margin: 0 0 0.4rem; font-weight: 600; }
-.practice-step-title .path-number { font-weight: 400; }
-.practice-step-why { margin: 0 0 0.5rem; }
-.practice-step-source { font-size: 0.85rem; color: var(--muted); margin: 0.3rem 0; }
-.practice-step-done { color: var(--muted); font-size: 0.85rem; font-style: italic; margin: 0.3rem 0 0; }
-.practice-link-button {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4rem;
-  font-size: 0.92rem;
-  font-weight: 600;
-  color: var(--accent);
-  background: var(--chip-bg);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 0.55rem 1rem;
-  margin: 0 0 1.4rem;
-  text-decoration: none;
-}
-.practice-link-button:hover { border-color: var(--accent); text-decoration: none; }
-.practice-link-button-end { margin: 2rem 0 0; }
-nav.sidebar ul.module-lessons .lesson-practice-link {
-  display: flex;
-  align-items: baseline;
-  gap: 0.4rem;
-  color: var(--muted);
-  font-size: 0.82rem;
-  padding: 0.05rem 0.3rem 0.1rem 1.1rem;
-  text-decoration: none;
-}
-nav.sidebar ul.module-lessons .lesson-practice-link:hover { color: var(--accent); text-decoration: none; }
-nav.sidebar ul.module-lessons .lesson-practice-link.current { color: var(--accent); font-weight: 600; }
-.practice-lead { color: var(--muted); font-size: 0.92rem; margin: 0.2rem 0 1.4rem; }
-.practice-section-title { margin-top: 2.2rem; }
-.practice-back-link { margin-top: 2rem; }
-"""
+STYLE_INLINE = """<style>
+{css}
+</style>"""
+
+STYLE_LINK = """<link rel="stylesheet" href="{asset_rel}/course.css">"""
+
+_COURSE_CSS: str | None = None
+
+
+def course_css() -> str:
+    """The course stylesheet: the text of ``course.css`` among the package's assets (read once per process)."""
+
+    global _COURSE_CSS
+    if _COURSE_CSS is None:
+        _COURSE_CSS = (package_assets_dir() / COURSE_CSS_NAME).read_text(encoding="utf-8")
+    return _COURSE_CSS
+
+
+@dataclass(frozen=True)
+class RenderOptions:
+    """How a course is drawn. The defaults are a PERSONAL course, byte for byte what it was before the options existed.
+
+    ``asset_rel``: where a page finds the assets, written into every ``src``/``href`` (``assets`` beside the pages,
+    or a shared base such as ``../../_assets`` or ``/learning/_assets``).
+    ``inline_css``: the stylesheet inside every page (``True``) or one ``<asset_rel>/course.css`` link (``False``).
+    ``copy_assets``: copy the vendored assets into ``<out_dir>/assets`` (``False`` when they are served from a
+    shared place).
+    ``shipped``: the GENERIC course that ships inside GigAI: nothing of a resume and nothing counted from stored
+    postings is drawn (no 'Your path' block, no marker, evidence or missing line, no postings chip, no percentage,
+    no posting sentence); the index and the sidebar link to ``pathway.html`` instead, the one page built locally.
+    """
+
+    asset_rel: str = ASSET_REL
+    inline_css: bool = True
+    copy_assets: bool = True
+    shipped: bool = False
+
+
+PERSONAL = RenderOptions()
+
+
+def shipped_options(asset_base: str) -> RenderOptions:
+    """The options of a shipped course whose assets are served once at ``asset_base``."""
+
+    return RenderOptions(asset_rel=clean_asset_base(asset_base), inline_css=False, copy_assets=False, shipped=True)
+
+
+def clean_asset_base(asset_base: str) -> str:
+    """``asset_base`` without a trailing slash; refused unless it is a plain path (the course CSP loads from 'self' only)."""
+
+    base = str(asset_base).rstrip("/")
+    if not base or not re.fullmatch(r"[A-Za-z0-9._/-]+", base) or base.startswith("//"):
+        raise CourseError([f"asset base '{asset_base}' is not a plain path on this server (letters, digits, . _ - /)"])
+    return base
 
 
 # ---------------------------------------------------------------------------
@@ -681,7 +409,9 @@ def subtopic_anchor(sub_id: str) -> str:
     return f"subtopic-{slugify(sub_id)}"
 
 
-def render_sidebar(course: dict, modules: list[dict], current_page: str, paths: dict[str, dict] | None = None) -> str:
+def render_sidebar(
+    course: dict, modules: list[dict], current_page: str, paths: dict[str, dict] | None = None, *, shipped: bool = False
+) -> str:
     paths = paths or {}
     role = course.get("role", "Course")
     parts = ['<nav class="sidebar">']
@@ -696,7 +426,10 @@ def render_sidebar(course: dict, modules: list[dict], current_page: str, paths: 
     parts.append("</div>")
 
     parts.append('<ul class="sidebar-overview">')
-    parts.append('<li><a href="index.html#your-path">Your path</a></li>')
+    if shipped:
+        parts.append(f'<li><a href="{PATHWAY_PAGE}">Your pathway</a></li>')
+    else:
+        parts.append('<li><a href="index.html#your-path">Your path</a></li>')
     parts.append('<li><a href="index.html#expectations">Expectations</a></li>')
     parts.append('<li><a href="index.html#technologies">Technologies</a></li>')
     parts.append("</ul>")
@@ -810,7 +543,7 @@ def render_technologies(technologies: dict[str, list[dict]]) -> str:
     return "\n".join(out)
 
 
-def render_toc(modules: list[dict]) -> str:
+def render_toc(modules: list[dict], *, shipped: bool = False) -> str:
     out = ['<ul class="toc-modules">']
     for mi, module in enumerate(modules, start=1):
         out.append("<li>")
@@ -822,6 +555,9 @@ def render_toc(modules: list[dict]) -> str:
         for concept in module.get("concepts", []):
             cid = concept.get("id", "")
             href = concept_page_filename(cid)
+            if shipped:
+                out.append(f'<li><a href="{esc(href)}">{esc(concept.get("title", cid))}</a></li>')
+                continue
             label = postings_label(concept)
             out.append(
                 f'<li><a href="{esc(href)}">{esc(concept.get("title", cid))}</a> {label}</li>'
@@ -961,6 +697,50 @@ def render_index(course: dict, modules: list[dict]) -> str:
     return "\n".join(body)
 
 
+def render_shipped_index(course: dict, modules: list[dict]) -> str:
+    """The index of a SHIPPED course: the role, one link to the locally built pathway page, plain lists, the lessons.
+
+    Nothing here comes from a resume or from stored postings: no 'Your path' block, no count, no percentage, no
+    posting sentence. Expectations and technologies are listed in the order the course data gives them; a
+    technology keeps its ``tech-`` anchor, which the lesson pages link to.
+    """
+
+    body = [f"<h1>{esc(course.get('role', 'Role'))}</h1>"]
+    body.append('<p class="muted">Shipped with GigAI. The lessons and practice pages are the same for everyone.</p>')
+    body.append(
+        f'<p><a href="{PATHWAY_PAGE}">Your pathway</a>: what your resume already shows, what is new to you, '
+        "and how often your own stored postings ask for each item. That page is built on this machine.</p>"
+    )
+
+    expectations = course.get("expectations", {})
+    body.append('<h2 id="expectations">Expectations</h2>')
+    for section_title, key in (("Responsibilities", "responsibilities"), ("Scope at staff level", "scope_at_staff")):
+        items = expectations.get(key, [])
+        if not items:
+            continue
+        body.append(f"<h3>{esc(section_title)}</h3>")
+        body.append("<ul>" + "".join(f"<li>{esc(item.get('display', ''))}</li>" for item in items) + "</ul>")
+
+    body.append('<h2 id="technologies">Technologies</h2>')
+    for category, items in course.get("technologies", {}).items():
+        body.append('<div class="tech-group">')
+        body.append(f"<h3>{esc(category)}</h3>")
+        tags = "".join(
+            f'<span id="{esc(tech_anchor(item.get("display", "")))}">{esc(item.get("display", ""))}</span>' for item in items
+        )
+        body.append(f'<div class="tech-tags">{tags}</div>')
+        body.append("</div>")
+
+    body.append("<h2>Concepts</h2>")
+    body.append(render_toc(modules, shipped=True))
+
+    not_included = render_not_included(course.get("dropped", []))
+    if not_included:
+        body.append(not_included)
+
+    return "\n".join(body)
+
+
 def render_detail_sections(detail: list[dict], tool_links: dict[str, str], used: set[str]) -> str:
     out = []
     for section in detail:
@@ -1063,10 +843,10 @@ def render_tech_tags(tech_names: list[str], technology_links: dict[str, str], in
     return f'<div class="tech-tags">{"".join(links)}</div>'
 
 
-def render_subtopic(sub: dict, tool_links: dict[str, str], used: set[str]) -> str:
+def render_subtopic(sub: dict, tool_links: dict[str, str], used: set[str], *, shipped: bool = False) -> str:
     sid = sub.get("id", "")
     title = sub.get("title", sid)
-    label = sub.get("marker")
+    label = None if shipped else sub.get("marker")
     parts = [f'<h3 id="{esc(subtopic_anchor(sid))}">{esc(title)}</h3>']
 
     body_sections = render_detail_sections(sub.get("body", []), tool_links, used)
@@ -1228,14 +1008,16 @@ def render_concept_page(
     tool_links: dict[str, str],
     path: dict | None = None,
     index_anchors: set[str] | None = None,
+    *,
+    shipped: bool = False,
 ) -> str:
     used_tools: set[str] = set()
     title = concept.get("title", concept.get("id", ""))
-    label = postings_label(concept)
+    label = "" if shipped else postings_label(concept)
     body = [f"<h1>{esc(title)}</h1>"]
     if label:
         body.append(f'<p class="muted">{label}</p>')
-    marker_line = concept_marker_line(concept)
+    marker_line = "" if shipped else concept_marker_line(concept)
     if marker_line:
         body.append(marker_line)
 
@@ -1279,7 +1061,7 @@ def render_concept_page(
     if subtopics:
         body.append("<h2>Subtopics</h2>")
         for sub in subtopics:
-            body.append(render_subtopic(sub, tool_links, used_tools))
+            body.append(render_subtopic(sub, tool_links, used_tools, shipped=shipped))
 
     body.append("<h2>Sources</h2>")
     body.append(render_sources(sources))
@@ -1409,7 +1191,7 @@ class _LinkCollector(HTMLParser):
                 self.inline_scripts += 1
 
 
-def audit_links(out_dir: Path) -> list[str]:
+def audit_links(out_dir: Path, *, local_pages: frozenset[str] = frozenset()) -> list[str]:
     """Internal link audit (design section 5): every ``href``/``#anchor`` resolves to a file and an id.
 
     A pure function over the finished output folder, parsed with
@@ -1417,10 +1199,22 @@ def audit_links(out_dir: Path) -> list[str]:
     on a clean site. Also flags an external link with no ``target="_blank"``,
     an inline ``<script>`` block and any ``on*=`` attribute (the slice-1 CSP
     runs neither).
+
+    ``local_pages`` names pages that are NOT part of this site and are built by someone else, later, into the same
+    URL folder (a shipped course's ``pathway.html``). A link to one is ALLOWED WITHOUT A CHECK: neither the file
+    nor its anchor is verified here, and a file of that name already in the folder is not read. Whoever builds
+    that page audits it. ``build_course`` reports how many such links it let through (``RenderResult.unchecked_links``).
     """
 
+    return _audit_site(out_dir, local_pages)[0]
+
+
+def _audit_site(out_dir: Path, local_pages: frozenset[str]) -> tuple[list[str], dict[str, int]]:
+    """``audit_links`` plus, per local page, the number of links to it that were allowed without a check."""
+
     problems: list[str] = []
-    pages = sorted(p.relative_to(out_dir).as_posix() for p in out_dir.glob("*.html"))
+    unchecked = {name: 0 for name in sorted(local_pages)}
+    pages = sorted(p.relative_to(out_dir).as_posix() for p in out_dir.glob("*.html") if p.name not in local_pages)
     ids_by_page: dict[str, set[str]] = {}
     collected: dict[str, _LinkCollector] = {}
     for page in pages:
@@ -1440,12 +1234,15 @@ def audit_links(out_dir: Path) -> list[str]:
                 problems.append(f"{page}: external link '{url}' has no target=\"_blank\"")
         for path, frag in collector.links:
             target_page = path or page
+            if target_page in local_pages:
+                unchecked[target_page] += 1
+                continue
             if target_page not in ids_by_page:
                 problems.append(f"{page}: href target '{path or '#' + (frag or '')}' does not resolve to a file in the site")
                 continue
             if frag and frag not in ids_by_page[target_page]:
                 problems.append(f"{page}: anchor '#{frag}' does not resolve to an id in '{target_page}'")
-    return sorted(problems)
+    return sorted(problems), unchecked
 
 
 # ---------------------------------------------------------------------------
@@ -1458,14 +1255,29 @@ class RenderResult:
     pages: int
     size_bytes: int
     stripped_invisible: int
+    #: Links the audit ALLOWED WITHOUT A CHECK, as ``(page name, number of links to it)``: a shipped course's links
+    #: to ``pathway.html``, which is built locally and may not exist yet. Empty for a personal course.
+    unchecked_links: tuple[tuple[str, int], ...] = ()
 
 
-def build_course(course: dict, out_dir: Path, paths: dict[str, dict] | None = None, *, assets_src: Path | None = None) -> RenderResult:
+def build_course(
+    course: dict,
+    out_dir: Path,
+    paths: dict[str, dict] | None = None,
+    *,
+    assets_src: Path | None = None,
+    options: RenderOptions = PERSONAL,
+) -> RenderResult:
     """Render ``course`` (already validated) into ``out_dir``; deterministic byte for byte on the same input.
 
     ``assets_src`` is the folder of vendored assets (mermaid, hljs, course.js,
     theme-init.js) to copy per course; defaults to the package's own
     ``data/learning/assets`` (``package_assets_dir``).
+
+    ``options`` (``RenderOptions``) says where the pages find the assets, whether the stylesheet is inline or
+    one shared file, and whether this is a shipped (generic) course. The default is a personal course, unchanged.
+    A failed PERSONAL render removes ``out_dir``; a failed SHIPPED render removes only the pages it wrote, as that
+    folder may be a cache someone else also writes to.
     """
 
     course, stripped = sanitize_course(course)
@@ -1475,6 +1287,10 @@ def build_course(course: dict, out_dir: Path, paths: dict[str, dict] | None = No
 
     role = course.get("role", "Role")
     modules = course.get("modules", [])
+    shipped = options.shipped
+    local_pages = frozenset({PATHWAY_PAGE}) if shipped else frozenset()
+    style = STYLE_INLINE.format(css="\n" + course_css()) if options.inline_css else STYLE_LINK.format(asset_rel=options.asset_rel)
+    footer = FOOTER_SHIPPED if shipped else FOOTER_PERSONAL
 
     flat_concepts: list[dict] = []
     for module in modules:
@@ -1487,14 +1303,21 @@ def build_course(course: dict, out_dir: Path, paths: dict[str, dict] | None = No
     glyph_errors: list[str] = []
     written_pages: list[str] = []
 
+    def discard() -> None:
+        if not shipped:
+            shutil.rmtree(out_dir, ignore_errors=True)
+            return
+        for name in written_pages:
+            (out_dir / name).unlink(missing_ok=True)
+
     def write_page(filename: str, body: str, title: str, current: str, breadcrumb: str | None = None) -> None:
-        sidebar = render_sidebar(course, modules, filename, paths)
+        sidebar = render_sidebar(course, modules, filename, paths, shipped=shipped)
         if breadcrumb is None:
             breadcrumb = render_breadcrumb(current, role)
         html_out = (
-            PAGE_HEAD.format(title=esc(title), asset_rel=ASSET_REL, css=CSS, sidebar=sidebar, breadcrumb=breadcrumb)
+            PAGE_HEAD.format(title=esc(title), asset_rel=options.asset_rel, style=style, sidebar=sidebar, breadcrumb=breadcrumb)
             + body
-            + PAGE_TAIL.format(asset_rel=ASSET_REL)
+            + PAGE_TAIL.format(asset_rel=options.asset_rel, footer=footer)
         )
         glyph_errors.extend(check_glyphs(html_out, filename))
         encoded = html_out.encode("utf-8")
@@ -1505,13 +1328,16 @@ def build_course(course: dict, out_dir: Path, paths: dict[str, dict] | None = No
 
     tool_links = course.get("tool_links", {})
 
-    write_page("index.html", render_index(course, modules), role, "index")
+    index_body = render_shipped_index(course, modules) if shipped else render_index(course, modules)
+    write_page("index.html", index_body, role, "index")
 
     for i, concept in enumerate(flat_concepts):
         prev_c = flat_concepts[i - 1] if i > 0 else None
         next_c = flat_concepts[i + 1] if i < len(flat_concepts) - 1 else None
         path = paths.get(concept.get("id", ""))
-        page_body = render_concept_page(concept, concepts_by_id, prev_c, next_c, tool_links, path, index_tech_anchors(course))
+        page_body = render_concept_page(
+            concept, concepts_by_id, prev_c, next_c, tool_links, path, index_tech_anchors(course), shipped=shipped
+        )
         write_page(
             concept_page_filename(concept["id"]),
             page_body,
@@ -1529,28 +1355,41 @@ def build_course(course: dict, out_dir: Path, paths: dict[str, dict] | None = No
             )
 
     if glyph_errors:
-        shutil.rmtree(out_dir, ignore_errors=True)
+        discard()
         raise CourseError(sorted(glyph_errors))
 
-    link_problems = audit_links(out_dir)
+    link_problems, unchecked = _audit_site(out_dir, local_pages)
     if link_problems:
-        shutil.rmtree(out_dir, ignore_errors=True)
+        discard()
         raise CourseError(link_problems)
 
-    site_bytes = sum(f.stat().st_size for f in out_dir.rglob("*") if f.is_file())
+    def site_size() -> int:
+        if shipped:
+            return sum((out_dir / name).stat().st_size for name in written_pages)
+        return sum(f.stat().st_size for f in out_dir.rglob("*") if f.is_file())
+
+    site_bytes = site_size()
     if site_bytes >= MAX_SITE_BYTES_NO_ASSETS:
-        shutil.rmtree(out_dir, ignore_errors=True)
+        discard()
         raise CourseError([f"course: {site_bytes} bytes without assets, at or over the {MAX_SITE_BYTES_NO_ASSETS}-byte cap"])
 
-    assets_src = assets_src if assets_src is not None else package_assets_dir()
-    assets_dst = out_dir / "assets"
-    if assets_src.exists():
-        if assets_dst.exists():
-            shutil.rmtree(assets_dst)
-        shutil.copytree(assets_src, assets_dst)
+    if options.copy_assets:
+        assets_src = assets_src if assets_src is not None else package_assets_dir()
+        assets_dst = out_dir / "assets"
+        if assets_src.exists():
+            if assets_dst.exists():
+                shutil.rmtree(assets_dst)
+            # a page with its stylesheet inline has no use for the shared file: the copy stays what it was
+            skip = shutil.ignore_patterns(COURSE_CSS_NAME) if options.inline_css else None
+            shutil.copytree(assets_src, assets_dst, ignore=skip)
 
-    total_bytes = sum(f.stat().st_size for f in out_dir.rglob("*") if f.is_file())
-    return RenderResult(out_dir=out_dir, pages=len(written_pages), size_bytes=total_bytes, stripped_invisible=stripped)
+    return RenderResult(
+        out_dir=out_dir,
+        pages=len(written_pages),
+        size_bytes=site_size(),
+        stripped_invisible=stripped,
+        unchecked_links=tuple((name, count) for name, count in sorted(unchecked.items()) if count),
+    )
 
 
 def package_assets_dir() -> Path:
@@ -1597,8 +1436,97 @@ def render_to_folder(course_path: Path, out_dir: Path, paths_dir: Path | None = 
     return build_course(course, Path(out_dir), paths)
 
 
+# ---------------------------------------------------------------------------
+# Shipped (generic) courses
+# ---------------------------------------------------------------------------
+
+#: Fields a shipped course must not carry: they come from a resume (marker, evidence, missing) or are counted
+#: from one machine's stored postings (the rest). Named per place they would sit in ``course.json``.
+_PERSONAL_LESSON_KEYS = ("marker", "evidence", "missing", "postings_in_90d", "postings_any_date")
+_PERSONAL_SUBTOPIC_KEYS = ("marker", "evidence", "missing")
+_PERSONAL_ITEM_KEYS = ("percent", "in_90d", "any_date", "examples")
+#: A practice path's lead sentences, as a personal course writes them: 'N of M postings name it', 'Named in your
+#: postings in the last 90 days: X 9 of 171', 'not among the tools counted in your stored postings'.
+_PATH_LEAD_KEYS = ("tool", "why_this_tool", "alternatives")
+_POSTING_COUNT_TEXT = re.compile(
+    r"\b\d+\s+of\s+\d+\s+(?:stored\s+)?postings\b|\bnamed in your\b|\byour (?:own |stored |own stored )?postings\b", re.IGNORECASE
+)
+
+
+def _carried(entry: dict, keys: tuple[str, ...]) -> list[str]:
+    return [key for key in keys if entry.get(key) not in (None, "", [], {})]
+
+
+def validate_shipped_course(course: dict, paths: dict[str, dict] | None = None) -> list[str]:
+    """What makes ``course`` unfit to render as a SHIPPED course: any resume field or posting count still in it.
+
+    The renderer's shipped mode draws none of these anyway; this is the second lock, so a personal course handed
+    to ``render_shipped`` by mistake is refused with the field named instead of rendered with the field hidden.
+    """
+
+    errors: list[str] = []
+    if _carried(course, ("corpus",)):
+        errors.append("course: a shipped course carries no 'corpus' counts")
+    for group_name in ("expectations", "technologies"):
+        for key, items in sorted((course.get(group_name) or {}).items()):
+            for ii, item in enumerate(items or []):
+                for field in _carried(item, _PERSONAL_ITEM_KEYS):
+                    errors.append(f"{group_name}.{key}[{ii}]: a shipped course carries no '{field}'")
+    for mi, module in enumerate(course.get("modules", [])):
+        for ci, concept in enumerate(module.get("concepts", [])):
+            ctx = f"modules[{mi}].concepts[{ci}] ({concept.get('id', '?')})"
+            for field in _carried(concept, _PERSONAL_LESSON_KEYS):
+                errors.append(f"{ctx}: a shipped course carries no '{field}'")
+            for si, sub in enumerate(concept.get("subtopics", [])):
+                for field in _carried(sub, _PERSONAL_SUBTOPIC_KEYS):
+                    errors.append(f"{ctx}.subtopics[{si}]: a shipped course carries no '{field}'")
+    for cid, path in sorted((paths or {}).items()):
+        for field in _PATH_LEAD_KEYS:
+            found = _POSTING_COUNT_TEXT.search(str(path.get(field) or ""))
+            if found:
+                errors.append(f"paths/{cid}.json: {field} speaks of one machine's postings ('{found.group(0)}'); a shipped path does not")
+    return errors
+
+
+def render_shipped(course_data_dir: Path, out_dir: Path, asset_base: str) -> RenderResult:
+    """Render a SHIPPED course's pages from its data folder (``course.json`` and ``paths/<lesson>.json``).
+
+    ``asset_base`` is where the pages find the shared assets and ``course.css`` (``../../_assets``,
+    ``/learning/_assets``); nothing is copied. The same validators, glyph gate, link audit and caps as a personal
+    course apply, with one exception that ``RenderResult.unchecked_links`` reports: links to ``pathway.html`` (the
+    locally built page, which may not exist yet) are allowed without a check. Deterministic: the same data and
+    ``asset_base`` give the same bytes. Render into an empty folder; pages of an older render are not removed.
+    Raises ``CourseError`` with every problem found.
+    """
+
+    options = shipped_options(asset_base)
+    data_dir = Path(course_data_dir)
+    try:
+        course = json.loads((data_dir / "course.json").read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise CourseError([f"cannot read course JSON: {exc}"]) from exc
+    if not isinstance(course, dict):
+        raise CourseError(["cannot read course JSON: not an object"])
+
+    concept_ids = {c["id"] for m in course.get("modules", []) for c in m.get("concepts", []) if c.get("id")}
+    try:
+        paths = load_paths(data_dir / "paths", concept_ids)
+    except (OSError, json.JSONDecodeError) as exc:
+        raise CourseError([f"cannot read a practice path: {exc}"]) from exc
+
+    errors = validate_shipped_course(course, paths) + validate_course(course, paths)
+    if errors:
+        raise CourseError(sorted(errors))
+
+    return build_course(course, Path(out_dir), paths, options=options)
+
+
 __all__ = [
     "ASSET_REL",
+    "COURSE_CSS_NAME",
+    "PATHWAY_PAGE",
+    "PERSONAL",
+    "RenderOptions",
     "MAX_HTML_BYTES",
     "MAX_LESSONS",
     "MAX_SITE_BYTES_NO_ASSETS",
@@ -1607,15 +1535,19 @@ __all__ = [
     "audit_links",
     "build_course",
     "check_glyphs",
+    "course_css",
     "human_size",
     "load_paths",
     "package_assets_dir",
+    "render_shipped",
     "render_to_folder",
     "sanitize_course",
     "sanitize_paths",
+    "shipped_options",
     "strip_invisible",
     "total_size",
     "validate_course",
     "validate_marker",
     "validate_path",
+    "validate_shipped_course",
 ]
