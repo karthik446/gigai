@@ -9,6 +9,9 @@
    employer, school or project name, 8 consecutive words of a stored posting sentence, a posting's company or a
    count of postings anywhere in the shipped text refuses the export: it raises, nothing final is written, a
    folder exported before stays as it was. A hit says the file, the field and the source, never the text.
+   (S1b) A posting's company is searched in prose only, never in a URL field; a reviewed allow list lets a company
+   name through and reports every prose place it stands in, and never exempts a line, a shingle, an id or a name
+   of the master; a count is a hit only when it counts POSTINGS.
 3. The shingle size and the master-name extraction are constants with their own tests.
 4. A field the schema does not know is refused, never passed through.
 5. The developer tool prints the counts, the sizes (raw and deflated) and the hits.
@@ -380,6 +383,9 @@ SCAN_CASES = [
     ("posting_company", "Vexmoor is one example.", ".company"),
     ("posting_count", "Kilns matter: 4 of 9 postings name them.", "a count of postings in words"),
     ("posting_count", "This is not among the tools counted in your stored postings.", "a count of postings in words"),
+    ("posting_count", "Named in 12 of 171 postings.", "a count of postings in words"),
+    ("posting_count", "Roughly twelve postings ask for a pyrometer.", "a count of postings in words"),
+    ("posting_count", "It shows up in about a third of the postings.", "a count of postings in words"),
 ]
 
 
@@ -477,6 +483,216 @@ def test_a_name_the_course_teaches_as_a_term_is_not_a_name_hit_and_is_reported(t
     with pytest.raises(ShippedScanError) as refused:
         export(work, out)
     assert {hit.kind for hit in refused.value.hits} == {"posting_shingle"}
+
+
+# --- S1b: a count is a hit only when it counts postings
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Named in 12 of 171 postings",
+        "twelve postings",
+        "about a third of the postings",
+        "Half of all job ads ask for it.",
+        "It is in 40% of the listings.",
+        "One in three job postings names a pyrometer.",
+        "Seen in 1,204 stored postings.",
+        "Job postings: 12 of 171 name it.",
+        "Counted over the postings in the last 90 days.",
+        "Named in your postings in the last ninety days: Kiln Controller.",
+        "It is not among the tools counted in your stored postings.",
+        "Dozens of job listings repeat this.",
+    ],
+)
+def test_a_count_of_postings_in_words_is_a_hit(text: str) -> None:
+    assert shipped.scan_text(text, shipped.Forbidden()) == [("posting_count", "a count of postings in words")]
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        # the wording style of a real practice step: people, lanes, shelves and steps are counted, never postings
+        "Every person or kiln named in your firing notes has exactly one lane and no lane is empty of a named owner.",
+        "The log shows three linked loads and you can fire only the last one without rerunning the first two.",
+        "When a second or third studio needs the same ramp, the pattern is real.",
+        "Run all 12 steps of the checklist, then hold for 90 minutes at cone 6.",
+        "The tools named in your notes cover half of the shelf plan.",
+        "Read the job posting again before the interview and list what it asks for.",
+        "Postings differ by studio. 3 checks follow.",
+        "The API accepts a POST of one event; posting the same event twice changes nothing.",
+        "Release v1.2 postings to the queue are idempotent.",
+    ],
+)
+def test_a_number_that_counts_something_else_is_not_a_hit(text: str) -> None:
+    assert shipped.scan_text(text, shipped.Forbidden()) == []
+
+
+def test_the_real_wording_style_of_a_step_passes_the_export(tmp_path: Path) -> None:
+    work, out = make_work(tmp_path), tmp_path / ROLE_KEY
+    edit(work, "paths/firing-ramps.json", lambda path: path["steps"][0].update(done_when="Every person or kiln named in your firing notes has exactly one lane and no lane is empty of a named owner."))
+    export(work, out)
+    assert "named in your firing notes" in (out / "paths" / "firing-ramps.json").read_text(encoding="utf-8")
+
+
+# --- S1b: a company is searched in prose, not in a URL field
+
+
+def _company_in_urls(work: Path) -> None:
+    """Put the stored company "Vexmoor" into every kind of URL field of the synthetic course."""
+
+    def course_urls(course: dict[str, Any]) -> None:
+        course["tool_links"] = {"Emberline": "https://vexmoor.example.test/docs"}
+        first = course["modules"][0]["concepts"][0]
+        first["sources"][0]["url"] = "https://docs.example.test/kiln/vexmoor/handbook#vexmoor-panel"
+        first["technology_links"] = {"Kiln Controller": "https://docs.example.test/controllers/Vexmoor"}
+
+    def path_urls(path: dict[str, Any]) -> None:
+        path["steps"][0]["source"]["url"] = "https://docs.example.test/controller/vexmoor#headless-vexmoor-panel"
+        path["setup"][0]["source"]["url"] = "https://docs.example.test/vexmoor"
+        path["sources"][0]["url"] = "https://docs.example.test/controller/guide?tab=vexmoor"
+
+    edit(work, "course.json", course_urls)
+    edit(work, "paths/firing-ramps.json", path_urls)
+
+
+def test_a_company_name_in_a_url_field_is_not_a_hit(tmp_path: Path) -> None:
+    work, out = make_work(tmp_path), tmp_path / ROLE_KEY
+    _company_in_urls(work)
+    report = export(work, out)
+    assert report.forbidden["posting_company"] == 2  # still searched for, in prose
+    shipped_text = "".join(data.decode("utf-8") for data in folder_bytes(out).values())
+    assert shipped_text.casefold().count("vexmoor") == 8
+
+
+def test_a_company_name_in_prose_is_a_hit_beside_the_same_name_in_a_url(tmp_path: Path) -> None:
+    work, out = make_work(tmp_path), tmp_path / ROLE_KEY
+    _company_in_urls(work)
+    edit(work, "paths/firing-ramps.json", lambda path: path["steps"][0].update(why="The Vexmoor studio fires this way."))
+    # a link text, a link name and an address written into a sentence are prose
+    edit(work, "paths/firing-ramps.json", lambda path: path["steps"][1]["source"].update(title="Vexmoor guide"))
+    edit(work, "course.json", lambda course: course["tool_links"].update({"Vexmoor": "https://docs.example.test/tool"}))
+    edit(work, "course.json", set_body("See https://docs.example.test/vexmoor for the ramp."))
+    with pytest.raises(ShippedScanError) as refused:
+        export(work, out)
+    assert {(hit.kind, hit.file, hit.field) for hit in refused.value.hits} == {
+        ("posting_company", "paths/firing-ramps.json", "steps[0].why"),
+        ("posting_company", "paths/firing-ramps.json", "steps[1].source.title"),
+        ("posting_company", "course.json", "tool_links{key}"),
+        ("posting_company", "course.json", BODY_FIELD),
+    }
+
+
+def test_a_url_field_is_one_address_under_a_url_key_or_in_a_links_object() -> None:
+    address = "https://docs.example.test/vexmoor#tabs"
+    assert shipped.URL_KEYS == {"url", "href"} and shipped.URL_MAPS == {"tool_links", "technology_links"}
+    assert shipped.is_url_field("url", "source", address) and shipped.is_url_field("href", "", address)
+    assert shipped.is_url_field("Emberline", "tool_links", address) and shipped.is_url_field("Emberline", "technology_links", address)
+    assert not shipped.is_url_field("body", "", address) and not shipped.is_url_field("title", "source", address)
+    # prose under a url key is prose, and so is anything that is not one http(s) address
+    for prose in ("Vexmoor says so", f"{address} and Vexmoor", f"see {address}", "ftp://vexmoor.example.test/x", "vexmoor.example.test"):
+        assert not shipped.is_url_field("url", "source", prose), prose
+    tree = {"steps": [{"do": "Vexmoor", "source": {"url": address, "title": "Vexmoor"}}], "tool_links": {"Vexmoor": address}, "url": "Vexmoor says so"}
+    assert [(at, url) for at, _text, url in shipped._strings(tree) if "{key}" not in at] == [
+        ("steps[0].do", False), ("steps[0].source.url", True), ("steps[0].source.title", False), ("tool_links.Vexmoor", True), ("url", False),
+    ]
+
+
+def test_only_the_company_is_left_out_of_a_url_field_everything_else_is_searched(tmp_path: Path) -> None:
+    banned = shipped.forbidden(
+        master=master(), posting_sentences=[("posting 0", POSTING_LONG)], posting_companies=[("company 0", "Vexmoor")],
+    )
+    assert shipped.scan_text("https://docs.example.test/vexmoor", banned, url=True) == []
+    assert shipped.scan_text("https://docs.example.test/vexmoor", banned) == [("posting_company", "company 0")]
+    in_url = {
+        "master_name": "https://glazewright.example.test/log",
+        "master_id": "https://docs.example.test/items/b-7a8b9c",
+        "master_shingle": "https://docs.example.test/" + MASTER_EIGHT.replace(" ", "-"),
+        "posting_shingle": "https://docs.example.test/" + POSTING_EIGHT.replace(" ", "-"),
+        "posting_count": "https://docs.example.test/12-of-171 postings",
+    }
+    for kind, text in in_url.items():
+        assert kind in {found for found, _source in shipped.scan_text(text, banned, url=True)}, kind
+
+    # through the export: a name of the master in a step's address refuses it
+    work, out = make_work(tmp_path), tmp_path / ROLE_KEY
+    edit(work, "paths/firing-ramps.json", lambda path: path["steps"][0]["source"].update(url="https://glazewright.example.test/log"))
+    with pytest.raises(ShippedScanError) as refused:
+        export(work, out)
+    assert [(hit.kind, hit.field) for hit in refused.value.hits] == [("master_name", "steps[0].source.url")]
+
+
+# --- S1b: the reviewed allow list
+
+
+def test_an_allowed_name_passes_and_every_prose_place_is_reported(tmp_path: Path) -> None:
+    work, out = make_work(tmp_path), tmp_path / ROLE_KEY
+    _company_in_urls(work)
+    edit(work, "course.json", set_body("The role was made known by VEXMOOR, where potters sat with customers."))
+    edit(work, "paths/firing-ramps.json", lambda path: path["steps"][0].update(do="Fire a tile the way Vexmoor does."))
+    with pytest.raises(ShippedScanError) as refused:
+        export(work, out)
+    assert {hit.kind for hit in refused.value.hits} == {"posting_company"} and len(refused.value.hits) == 2
+    assert refused.value.allowed == shipped.Allowed()
+
+    report = export(work, out, allow_names=["vexmoor"])
+    assert report.forbidden["names_allowed"] == 1 and report.forbidden["posting_company"] == 1  # Brindlecote Pottery stays searched
+    assert report.scan.allowed.names == (("vexmoor", "corpus.json concepts[0].examples[1].company"),)
+    # the prose places only: the six addresses that hold the name are not listed
+    assert report.scan.allowed.places == (("vexmoor", "course.json", BODY_FIELD), ("vexmoor", "paths/firing-ramps.json", "steps[0].do"))
+    assert "VEXMOOR" in (out / "course.json").read_text(encoding="utf-8")
+
+
+def test_an_allowed_name_is_a_whole_name_and_allows_nothing_else(tmp_path: Path) -> None:
+    work, out = make_work(tmp_path), tmp_path / "shipped" / ROLE_KEY
+    edit(work, "course.json", set_body("A studio such as Brindlecote Pottery fires twice a week."))
+    for names in (["Brindlecote"], ["Pottery"], ["Vexmoor"], ["Brindlecote Pottery Works"], [""], []):
+        with pytest.raises(ShippedScanError) as refused:
+            export(work, out, allow_names=names)
+        assert [hit.kind for hit in refused.value.hits] == ["posting_company"], names
+    report = export(work, out, allow_names=["  brindlecote   POTTERY "])
+    assert report.scan.allowed.places == (("  brindlecote   POTTERY ", "course.json", BODY_FIELD),)
+
+
+ALLOW_EVERYTHING = ["Vexmoor", "Brindlecote Pottery", "Glazewright", "Quokkaflux Ceramics", "Snowmelt Robotics", "b-7a8b9c", MASTER_LINE, MASTER_EIGHT, POSTING_EIGHT, POSTING_SHORT]
+
+
+@pytest.mark.parametrize(("kind", "text", "source"), [case for case in SCAN_CASES if case[0] != "posting_company"], ids=[f"{case[0]}-{index}" for index, case in enumerate(SCAN_CASES) if case[0] != "posting_company"])
+def test_an_allowed_name_never_exempts_a_line_a_shingle_an_id_a_master_name_or_a_count(tmp_path: Path, kind: str, text: str, source: str) -> None:
+    work, out = make_work(tmp_path), tmp_path / "shipped" / ROLE_KEY
+    edit(work, "course.json", set_body(text))
+    with pytest.raises(ShippedScanError) as refused:
+        export(work, out, allow_names=ALLOW_EVERYTHING)
+    hits = [hit for hit in refused.value.hits if hit.kind == kind]
+    assert hits and source in hits[0].source and not out.exists()
+    # only the two stored companies were allowed: no name of the master, no id, no line, no sentence
+    assert sorted(name for name, _source in refused.value.allowed.names) == ["Brindlecote Pottery", "Vexmoor"]
+
+
+def test_forbidden_is_pure_and_an_allowed_name_with_the_words_of_a_master_line_stays_forbidden() -> None:
+    parts = shipped.MasterParts(lines=("Vexmoor kiln works",), ids=("b-7a8b9c",), names=("brindlecote pottery",))
+    companies = [("company 0", "Vexmoor Kiln Works"), ("company 1", "Brindlecote Pottery"), ("company 2", "Harrowgate"), ("company 3", "HARROWGATE"), ("company 4", "Emberline")]
+    sentences = [("posting 0", "Harrowgate fires five kilns weekly now")]
+    arguments = dict(master=parts, posting_sentences=sentences, posting_companies=companies, terms=shipped.course_terms(VOCABULARY))
+    allow = ["harrowgate", "vexmoor kiln works", "Brindlecote Pottery", "Emberline", "b-7a8b9c", "Harrowgate fires five kilns weekly now", "nobody"]
+
+    plain, allowed = shipped.forbidden(**arguments), shipped.forbidden(**arguments, allow_names=allow)
+    assert plain.allowed == {} and "names_allowed" not in plain.counts and plain == shipped.forbidden(**arguments)  # the same inputs, the same set
+    assert allowed == shipped.forbidden(**arguments, allow_names=tuple(allow))
+    # only the company that is nothing else is allowed, once, by its first source
+    assert allowed.allowed == {("harrowgate",): ("harrowgate", "company 2")} and allowed.counts["names_allowed"] == 1
+    assert allowed.exempt == ("company 4",) == plain.exempt
+    assert shipped.scan_text("Harrowgate is one example.", plain) == [("posting_company", "company 2")]
+    assert shipped.scan_text("Harrowgate is one example.", allowed) == []
+    assert shipped.allowed_in("Ask HARROWGATE, then Harrowgate again; not Harrowgates.", allowed) == ["harrowgate"]
+    assert shipped.allowed_in("Ask Harrowgate.", plain) == []
+    for text, found in (
+        ("Vexmoor Kiln Works opened.", ("master_line", "master line 0")),
+        ("Brindlecote Pottery opened.", ("master_name", "master name 0")),
+        ("See b-7a8b9c.", ("master_id", "master id 0")),
+        ("They say Harrowgate fires five kilns weekly now.", ("posting_shingle", "posting 0 (whole)")),
+    ):
+        assert found in shipped.scan_text(text, allowed), text
 
 
 def test_scan_shipped_reads_every_file_and_refuses_one_that_is_not_json(tmp_path: Path) -> None:
@@ -705,9 +921,44 @@ def test_the_tool_asks_for_the_master_choice_and_refuses_a_home_without_a_master
     assert code == 2 and "REFUSED (course_not_done)" in capsys.readouterr().out
 
 
+def test_the_tool_prints_each_allowed_name_and_each_prose_place(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    work, out = make_work(tmp_path), tmp_path / "shipped" / ROLE_KEY
+    _company_in_urls(work)
+    edit(work, "course.json", set_body("The role was made known by Vexmoor, where potters sat with customers."))
+    edit(work, "paths/firing-ramps.json", lambda path: path["steps"][0].update(do="Fire a tile the way Vexmoor does."))
+    arguments = ["--work", str(work), "--out", str(out), "--role-key", ROLE_KEY, "--no-master"]
+    tool = _tool()
+
+    assert tool.main(arguments) == 1 and not out.exists()
+    printed = capsys.readouterr().out
+    assert "REFUSED by the scan: 2 hit(s)" in printed and "allowed name" not in printed and "Vexmoor" not in printed
+
+    assert tool.main([*arguments, "--allow-name", "Vexmoor", "--allow-name", "Glazewright", "--allow-name", "Emberline"]) == 0
+    printed = capsys.readouterr().out
+    for line in (
+        "        1  names_allowed",
+        "  allowed name (reviewed, not a hit): Vexmoor, the company of corpus.json concepts[0].examples[1].company; in 2 prose place(s)",
+        f"    Vexmoor: course.json {BODY_FIELD}",
+        "    Vexmoor: paths/firing-ramps.json steps[0].do",
+        "  allowed name NOT USED: Glazewright is no stored posting's company",
+        "  allowed name NOT USED: Emberline is no stored posting's company",  # a course term: exempt by that rule, not by the list
+        "scan: 0 hits in 4 files",
+    ):
+        assert line in printed, line
+    assert printed.count("    Vexmoor: ") == 2 and "source.url" not in printed and "tool_links" not in printed
+
+    # a refusal prints the hits AND what was allowed, so the reader still sees every allowed place
+    edit(work, "course.json", lambda course: course["modules"][0].update(intro="A studio such as Brindlecote Pottery fires weekly."))
+    assert tool.main([*arguments, "--allow-name", "Vexmoor"]) == 1
+    printed = capsys.readouterr().out
+    assert "REFUSED by the scan: 1 hit(s)" in printed and "  posting_company: course.json modules[0].intro holds" in printed
+    assert f"    Vexmoor: course.json {BODY_FIELD}" in printed and "Brindlecote" not in printed
+
+
 def test_the_tool_is_not_a_user_command() -> None:
     commands = (REPO / "src" / "gigai" / "data" / "cli" / "commands.yaml").read_text(encoding="utf-8")
     assert "export_shipped" not in commands and "export-shipped" not in commands and "learning_shipped" not in commands
+    assert "allow-name" not in commands and "allow_name" not in commands  # the allow list is on the developer tool only
 
 
 # ---------------------------------------------------------------------------
