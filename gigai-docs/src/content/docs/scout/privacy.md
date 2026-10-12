@@ -125,6 +125,14 @@ model calls by itself, only for jobs you engaged with, and at most 40 a day; ran
 limits are in Settings > Background pipeline. Each of those calls sends what
 the table above lists for its step.
 
+## Learning pathways
+
+- **Generate a course:** the role you typed, sentences from your stored postings, the course text as it is written,
+  and your resume lines with contact lines removed go to the lesson-writing calls.
+- **Build my pathway:** the course's lesson titles and your resume lines, contact lines removed, go to your model in
+  one call. The pathway page is your own file on this computer.
+- **The shipped courses** hold no postings and nothing personal. Importing a folder sends nothing.
+
 ## Network traffic besides your model
 
 Scout makes these other requests:

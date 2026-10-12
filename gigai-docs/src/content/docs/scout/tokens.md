@@ -99,6 +99,20 @@ Scout now turns every Codex tool off, so Codex no longer sends its tool definiti
 call. On a made-up prompt during development (2026-10-03) the input of one Codex call fell from
 about 33,800 tokens to about 7,000. How much a real assessment falls has not been measured yet.
 
+### Learning pathways
+
+Measured on the 0.1.11.10 head, from the cost record of each run:
+
+| What | Calls | Tokens | Time |
+| --- | --- | --- | --- |
+| A course for a role (real: MLOps 48 calls, AI forward deployed engineer 43 calls) | about 43 to 48 | about 0.86 to 1.0 million (MLOps about 1.02M, AI forward deployed engineer about 0.86M) | about 2 to 2.5 hours of background work (130 to 140 minutes) |
+| The pathway page of a shipped course | about 1 | about 32k | about 90 seconds |
+
+> A course uses about 1 million tokens. On an entry-level plan, such as Claude Pro or ChatGPT Plus, that can use up most or all of your weekly limit; use a higher plan, or one of the courses that come with GigAI. See [Learning pathways](../learning/).
+
+A course also makes about 1,300 page fetches to public documentation sites. Scout asks first and stops a course by
+itself after 120 calls or 1,500 fetches. See [Learning pathways](../learning/).
+
 ## Codex or Claude Code
 
 From the six-call sample above, for the same input:

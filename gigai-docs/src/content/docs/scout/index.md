@@ -81,6 +81,7 @@ flowchart TB
 - [Privacy and security](privacy/): read this before you add a resume.
 - [Resume and PDF](resume/): preparing a resume, the picked resume, the PDF.
 - [What Scout's numbers and labels mean](numbers/): rank, verdict, Scout label, Scout ATS score.
+- [Learning pathways](learning/): the two courses that ship with GigAI, the pathway page built from your resume, a course for any role.
 - [Update sources](sources/) and [Configuration](configuration/): the company store, `find-jobs.json`, Exa.
 - [For agents](agents/): the daily workflow from your own AI agent, setup, the security model.
 - [Start here](agents/start/): the page you give your agent so it sets GigAI up for you.

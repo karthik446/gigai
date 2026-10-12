@@ -42,14 +42,17 @@ else has to be done.
 - **Two courses come with GigAI:** MLOps / ML platform engineer and AI forward deployed engineer. They hold no
   postings and nothing about you. Press **Build my pathway** (or run `gigai scout learning pathway ROLE_KEY`) and
   GigAI builds one page for you on your own computer: it reads your resume (contact lines removed) with one model
-  call, asks first and tells you the estimate (about 1 call, about 30k tokens), marks each lesson as known, partly
+  call, asks first and tells you the estimate (about 1 call, about 32k tokens, about 90 seconds), marks each lesson as known, partly
   known or new with the resume line that shows it, and counts what your own stored postings ask for. When your
   resume changes the tab says so and you can build it again.
 - **A course for any role you type.** Type any role (Product manager, Director of AI enablement, ...) in the tab,
   or run `gigai scout learning generate "ROLE"`. GigAI shows a cost warning with an estimate (a course takes about
-  50 model calls, about 1 million tokens and 2 to 3 hours of background work), asks first, and runs in the
+  43 to 48 model calls, about 1 million tokens and about 2 to 2.5 hours of background work), asks first, and runs in the
   background with plain progress; you can stop it and resume it. A finished course appears in the tab.
   Lessons are teachable methods and tools, not traits.
+  A course uses about 1 million tokens. On an entry-level plan (about $20 a month, such as Claude Pro or ChatGPT
+  Plus) that can use up most or all of your weekly limit; use a higher plan, or one of the courses that come with
+  GigAI.
 - **Import a course you have** with `gigai scout learning import FOLDER --role "ROLE"`; it is checked whole first.
 - **"H-1B transfer only" label.** A posting that cannot sponsor new visas but takes H-1B transfers is labelled
   "H-1B transfer only" instead of "No sponsorship". It is only a label: it never holds, asks or rejects. Ranking no
