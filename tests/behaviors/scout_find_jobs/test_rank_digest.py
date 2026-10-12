@@ -85,6 +85,40 @@ def test_sponsorship_negation_must_be_within_the_window() -> None:
     assert constraint_flags("We are unable to sponsor visas.") == ["no_sponsor"]
 
 
+POSITRON_STYLE = (
+    "We cannot provide new visa sponsorship for this role but are open to facilitating H-1B visa transfers."
+)
+
+
+def test_a_transfer_sentence_is_transfer_only_not_no_sponsor() -> None:
+    assert constraint_flags(POSITRON_STYLE) == ["transfer_only"]
+    assert "no_sponsor" not in constraint_flags("Build things. " + POSITRON_STYLE)
+
+
+@pytest.mark.parametrize("flat", [
+    "We do not sponsor work visas.",
+    "We are unable to sponsor visas and do not support H-1B transfers.",
+    "This position does not provide visa sponsorship.",
+])
+def test_a_flat_no_stays_no_sponsor(flat: str) -> None:
+    assert constraint_flags(flat) == ["no_sponsor"]
+
+
+def test_a_transfer_sentence_keeps_an_unrelated_citizenship_flag() -> None:
+    assert constraint_flags(POSITRON_STYLE + " Candidates must be U.S. citizens for this program.") == ["transfer_only", "citizen_or_gc"]
+
+
+def test_will_sponsor_is_unchanged() -> None:
+    assert constraint_flags("We will sponsor visas for the right person.") == []
+
+
+def test_the_rank_prompt_does_not_call_transfer_only_a_blocker() -> None:
+    from gigai.scout.find_jobs.model_rank import PROMPT
+
+    blockers = PROMPT.split("Blockers are ONLY", 1)[1].split("\n", 1)[0]
+    assert "no_sponsor" in blockers and "transfer_only" not in blockers
+
+
 def test_onsite_flag() -> None:
     assert constraint_flags("This is a hybrid role, three days in-office.") == ["onsite"]
     assert constraint_flags("Fully remote.") == []

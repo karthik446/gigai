@@ -16,7 +16,8 @@ text::
 - ``flags=`` are hard-constraint hints read from the WHOLE text, because they
   are exactly what the ranker must see as blockers: ``no_sponsor`` (a
   sponsorship/visa mention with a negation within 160 characters and no
-  positive "we sponsor"), ``citizen_or_gc``, ``clearance`` and ``onsite``.
+  positive "we sponsor"; ``transfer_only`` instead when the posting takes
+  H-1B transfers, which is not a blocker), ``citizen_or_gc``, ``clearance`` and ``onsite``.
   v1's single tight regex caught 3 of the spike's 9 sponsorship/citizenship/
   clearance not-a-matches; this window-based v2 catches all 9. It also flags
   postings the full assessment only ASKS about (a "U.S. citizen or permanent
@@ -37,6 +38,8 @@ from dataclasses import dataclass
 import re
 from typing import Protocol, Sequence
 
+from .contracts import SponsorshipStatus
+from .filters import sponsorship_from_text
 from ..resume_privacy import (  # noqa: F401  (re-exported)
     _is_clean,
     _is_contact_line,
@@ -154,14 +157,21 @@ class CandidatePrefs:
 
 
 def constraint_flags(text: str) -> list[str]:
-    """``no_sponsor`` / ``citizen_or_gc`` / ``clearance`` / ``onsite``, in that order."""
+    """``no_sponsor`` (or ``transfer_only``) / ``citizen_or_gc`` / ``clearance`` / ``onsite``, in that order.
+
+    0.1.11.10: text that rules out NEW sponsorship but takes H-1B or visa transfers is ``transfer_only``
+    (the rule layer's own read, ``filters.sponsorship_from_text``), never ``no_sponsor``: it is not a blocker.
+    """
 
     out: list[str] = []
-    for match in _SPONSOR.finditer(text):
-        window = text[max(0, match.start() - _SPONSOR_WINDOW): match.end() + _SPONSOR_WINDOW]
-        if _NEG.search(window) and not _POS.search(window):
-            out.append("no_sponsor")
-            break
+    if sponsorship_from_text(text) is SponsorshipStatus.TRANSFER_ONLY:
+        out.append("transfer_only")
+    else:
+        for match in _SPONSOR.finditer(text):
+            window = text[max(0, match.start() - _SPONSOR_WINDOW): match.end() + _SPONSOR_WINDOW]
+            if _NEG.search(window) and not _POS.search(window):
+                out.append("no_sponsor")
+                break
     if _CITIZEN.search(text):
         out.append("citizen_or_gc")
     if _CLEARANCE.search(text):
