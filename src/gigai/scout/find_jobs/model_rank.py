@@ -520,6 +520,11 @@ def cache_key(*, content_sha256: str, resume_digest_sha256: str, prefs_sha256: s
     })
 
 
+# Written on every entry from now on. An older entry that holds a no_sponsor blocker predates the
+# transfer-only rule (digest-v5 stays, so a bump would re-rank everything): it is re-ranked once.
+FLAG_RULES = 2
+
+
 def _read_cached(path: Path) -> dict[str, object] | None:
     if path.is_symlink() or not path.is_file():
         return None
@@ -534,6 +539,8 @@ def _read_cached(path: Path) -> dict[str, object] | None:
         return None
     if not isinstance(reasons, list) or not isinstance(blockers, list):
         return None
+    if "flag_rules" not in value and "no_sponsor" in " ".join(str(item) for item in (*reasons, *blockers)):
+        return None
     return value
 
 
@@ -544,6 +551,7 @@ def _write_cached(path: Path, item: Mapping[str, object], *, resolved_model: str
         "blockers": list(item["blockers"]),  # type: ignore[arg-type]
         "prompt_version": PROMPT_VERSION,
         "digest_version": DIGEST_VERSION,
+        "flag_rules": FLAG_RULES,
         "resolved_model": resolved_model,
     }
     try:

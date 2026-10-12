@@ -7,6 +7,7 @@ attribute) is patched with a scripted fake transport. The resume is synthetic.
 
 from __future__ import annotations
 
+from dataclasses import replace
 import json
 from pathlib import Path
 import re
@@ -525,3 +526,98 @@ def test_pass_result_seals_to_rank_json(tmp_path: Path, monkeypatch: pytest.Monk
     assert sealed["postings"][0]["demoted"] is True
     assert sealed["batches"][0]["attempts"] == 1 and sealed["batches"][0]["valid"] is True
     assert RankResult.from_json(sealed).to_json() == sealed
+
+
+# --- flag-rules marker: old no_sponsor entries are re-ranked once ----------------------------
+
+_TRANSFER = "We cannot provide new visa sponsorship for this role but are open to facilitating H-1B visa transfers."
+
+
+def _age_entries(home: Path, *, blockers: list[str] | None = None) -> None:
+    """Make every cached entry look like one written before the marker existed."""
+
+    for path in cache_dir(home).glob("*.json"):
+        value = json.loads(path.read_text())
+        value.pop("flag_rules", None)
+        if blockers is not None:
+            value["blockers"], value["score"] = blockers, 15 if blockers else 80
+        path.write_text(json.dumps(value))
+
+
+def test_new_entries_carry_the_flag_rules_marker(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _install(monkeypatch, _Binding(_Port(lambda prompt, _n: _good_answer(prompt))))
+    _rank(tmp_path, _rows(6))
+    entries = [json.loads(path.read_text()) for path in cache_dir(tmp_path / "home").glob("*.json")]
+    assert len(entries) == 6 and {item["flag_rules"] for item in entries} == {model_rank.FLAG_RULES}
+
+
+def test_an_old_no_sponsor_entry_is_reranked_once_then_hits(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    port = _Port(lambda prompt, _n: _good_answer(prompt))
+    _install(monkeypatch, _Binding(port))
+    _rank(tmp_path, _rows(5))
+    assert len(port.prompts) == 1
+    _age_entries(tmp_path / "home")
+
+    second = _rank(tmp_path, _rows(5))
+    assert len(port.prompts) == 2 and second.totals()["cached"] == 4  # only p0 carried no_sponsor
+    assert [item.cached for item in second.postings] == [False, True, True, True, True]
+
+    third = _rank(tmp_path, _rows(5))
+    assert len(port.prompts) == 2 and third.totals()["cached"] == 5
+
+
+def test_an_old_entry_without_a_blocker_still_hits(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    port = _Port(lambda prompt, _n: _good_answer(prompt))
+    _install(monkeypatch, _Binding(port))
+    _rank(tmp_path, _rows(4)[1:])
+    _age_entries(tmp_path / "home")
+
+    result = _rank(tmp_path, _rows(4)[1:])
+
+    assert len(port.prompts) == 1 and all(item.cached for item in result.postings)
+
+
+def test_a_no_sponsor_mention_in_a_reason_or_a_longer_blocker_string_counts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    port = _Port(lambda prompt, _n: _good_answer(prompt))
+    _install(monkeypatch, _Binding(port))
+    _rank(tmp_path, _rows(2)[1:])
+    (path,) = cache_dir(tmp_path / "home").glob("*.json")
+    for blockers, reasons in ((["no_sponsor: candidate needs sponsorship"], ["fits"]), ([], ["flags=no_sponsor"])):
+        value = json.loads(path.read_text())
+        value.pop("flag_rules", None)
+        value["blockers"], value["reasons"] = blockers, reasons
+        path.write_text(json.dumps(value))
+        assert model_rank._read_cached(path) is None
+    value = json.loads(path.read_text())
+    value.update(flag_rules=model_rank.FLAG_RULES, extra="shape")
+    path.write_text(json.dumps(value))
+    assert model_rank._read_cached(path) is not None, "the marker (or any extra field) still validates"
+
+
+def test_a_transfer_only_posting_leaves_the_demotion_after_the_rerank(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def respond(prompt: str, _n: int) -> str:
+        items = []
+        for pid, rest in _batch_lines(prompt):
+            blocked = "flags=no_sponsor" in rest
+            items.append({"posting_id": pid, "score": 15 if blocked else 80, "reasons": ["fits"],
+                          "blockers": ["no_sponsor"] if blocked else []})
+        return json.dumps(items)
+
+    port = _Port(respond)
+    _install(monkeypatch, _Binding(port))
+    base = _rows(2)[1]
+    row = replace(base, text=base.text + _TRANSFER + "\n")
+    _rank(tmp_path, [row])
+    # the entry the old rules cached: the transfer text flagged no_sponsor, demoted, no marker
+    _age_entries(tmp_path / "home", blockers=["no_sponsor"])
+    stale = model_rank._read_cached(next(cache_dir(tmp_path / "home").glob("*.json")))
+    assert stale is None and len(port.prompts) == 1
+
+    again = _rank(tmp_path, [row])
+    assert len(port.prompts) == 2 and again.postings[0].cached is False
+    result = _rank(tmp_path, [row])
+    assert len(port.prompts) == 2
+
+    (item,) = result.postings
+    assert item.cached and item.blockers == () and item.score == 80 and not item.demoted
+    assert "flags=transfer_only" in port.prompts[-1]
