@@ -71,11 +71,17 @@ from . import learning_store
 from .learning_store import LearningError, Pathway
 
 SCHEMA_ESTIMATE = "scout-learning-generate:1"
-#: The estimate while no ``learning`` call is recorded: about 60 calls, 1000 fetches, 45 minutes (G4 measured up to 24
-#: crawl fetches and 8 to 15 re-fetches per lesson; about 150 more for the sources; the audit fetches nothing).
-DEFAULT_CALLS, DEFAULT_FETCHES, DEFAULT_MINUTES = 60, 1000, 45
+#: The estimate while no ``learning`` call is recorded: about 60 calls, 1300 fetches, 140 minutes, from the two real
+#: runs (MLOps 140.1 min, 1332 fetches, 48 calls; forward deployed engineer 129.5 min, 1298 fetches, 43 calls).
+DEFAULT_CALLS, DEFAULT_FETCHES, DEFAULT_MINUTES = 60, 1300, 140
 #: What one run of the job may spend at most.
 MAX_CALLS, MAX_FETCHES = 120, 1500
+#: The plan warning under the estimate (the UI dialog says the same, text only).
+PLAN_WARNING = (
+    "A course uses about 1 million tokens. On an entry-level plan (about $20 a month, such as Claude Pro or ChatGPT Plus) that can use up most or all of your weekly limit; use a higher plan, or one of the courses that come with GigAI; more are coming."
+)
+#: The line under the courses that come with GigAI (``learning list`` and the Learning tab).
+MORE_COURSES_NOTE = "More courses are coming in future GigAI releases."
 #: The key of the warning the dialog shows (the wording is the UI's).
 WARNING_KEY = "learning_higher_usage"
 #: A progress file not touched for this long is not a live job (``pipeline.busy.BATCH_QUIET_SECONDS``).

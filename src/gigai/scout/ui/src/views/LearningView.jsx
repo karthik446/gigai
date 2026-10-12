@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import {
   getConfig,
   getLearningPathways,
@@ -11,6 +11,7 @@ import {
   EMPTY_NOTE,
   IMPORT_COMMAND,
   LEARNING_POLL_MS,
+  MORE_COURSES_NOTE,
   OPEN_PAGE_LABEL,
   ROLE_PLACEHOLDER,
   WHAT_IS_A_COURSE,
@@ -272,7 +273,8 @@ export default function LearningView() {
 
       {loaded && rows.length > 0 && (
         <ul className="learning-list" data-role="learning-list">
-          {rows.map((row) => (
+          {rows.map((row, index) => (
+            <Fragment key={row.id}>
             <li key={row.id} className="learning-entry" data-testid="learning-row" data-pathway-id={row.id} data-shipped={row.shipped ? "true" : undefined}>
               <div className="learning-entry-head">
                 <strong>{row.roleText}</strong>
@@ -369,6 +371,12 @@ export default function LearningView() {
                 </a>
               )}
             </li>
+            {row.shipped && !(rows[index + 1] && rows[index + 1].shipped) && (
+              <li className="muted small" data-role="learning-more-courses">
+                {MORE_COURSES_NOTE}
+              </li>
+            )}
+            </Fragment>
           ))}
         </ul>
       )}

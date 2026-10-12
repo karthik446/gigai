@@ -111,7 +111,7 @@ def test_a_course_is_generated_only_on_approval_shows_its_progress_and_is_served
         assert asked.status_code == 200 and asked.headers["x-gigai-labels"] == "user-private", asked.text
         assert asked.json() == {
             "schema_version": "scout-learning-generate:1", "status": "ask", "role_text": ROLE,
-            "estimate": {"calls": 60, "fetches": 1000, "minutes": 45, "tokens": None, "basis": "none"},
+            "estimate": {"calls": 60, "fetches": 1300, "minutes": 140, "tokens": None, "basis": "none"},
             "caps": {"calls": 120, "fetches": 1500}, "warning": "learning_higher_usage",
         }
         assert client.post(PATHWAYS, json={"role_text": ROLE, "approve": False}).json()["status"] == "ask"

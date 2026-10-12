@@ -699,12 +699,12 @@ def test_the_estimate_is_the_constants_until_a_done_course_has_a_cost_record(env
     asked = learning_job.ask_response(env.home, env.target, f" {ROLE} ")
     assert asked == {
         "schema_version": "scout-learning-generate:1", "status": "ask", "role_text": ROLE,
-        "estimate": {"calls": 60, "fetches": 1000, "minutes": 45, "tokens": None, "basis": "none"},
+        "estimate": {"calls": 60, "fetches": 1300, "minutes": 140, "tokens": None, "basis": "none"},
         "caps": {"calls": 120, "fetches": 1500}, "warning": "learning_higher_usage",
     }
     assert learning_store.list_pathways(env.home, env.target) == [], "asking stores nothing"
     assert learning_job.estimate_words(asked["estimate"]) == (  # type: ignore[arg-type]
-        "about 60 model calls, about 1000 page fetches from public documentation sites, about 45 minutes (no recorded course yet to estimate tokens or time from)"
+        "about 60 model calls, about 1300 page fetches from public documentation sites, about 140 minutes (no recorded course yet to estimate tokens or time from)"
     )
     with pytest.raises(learning_store.LearningError) as refused:
         learning_job.ask_response(env.home, env.target, "call 415 555 0100 about the role")

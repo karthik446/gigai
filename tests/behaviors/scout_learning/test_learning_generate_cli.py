@@ -159,7 +159,7 @@ def test_the_estimate_comes_first_and_nothing_is_generated_without_approval(fx: 
     assert asked.exit_code == 0, asked.output
     assert _json(asked) == {
         "schema_version": "scout-learning-generate:1", "status": "ask", "role_text": ROLE,
-        "estimate": {"calls": 60, "fetches": 1000, "minutes": 45, "tokens": None, "basis": "none"},
+        "estimate": {"calls": 60, "fetches": 1300, "minutes": 140, "tokens": None, "basis": "none"},
         "caps": {"calls": 120, "fetches": 1500}, "warning": "learning_higher_usage",
     }
 
@@ -167,11 +167,13 @@ def test_the_estimate_comes_first_and_nothing_is_generated_without_approval(fx: 
     assert plain.exit_code == 0, plain.output
     for part in (
         "Generate a course for 'MLOps engineer'? This is a higher-usage action than an assessment.",
-        "Estimate: about 60 model calls, about 1000 page fetches from public documentation sites, about 45 minutes (no recorded course yet to estimate tokens or time from).",
+        "Estimate: about 60 model calls, about 1300 page fetches from public documentation sites, about 140 minutes (no recorded course yet to estimate tokens or time from).",
+        learning_job.PLAN_WARNING,
         "The course uses your resume to mark what you already know (contact lines removed; sent to the lesson-writing calls only).",
         "Stops by itself after 120 model calls or 1500 page fetches.",
     ):
         assert part in plain.output, (part, plain.output)
+    assert "about 1 million tokens" in plain.output and "$20 a month" in plain.output and "%" not in learning_job.PLAN_WARNING
     assert plain.output.rstrip().endswith("Nothing was generated. Approve with --yes.")
 
     # a terminal is asked, default no

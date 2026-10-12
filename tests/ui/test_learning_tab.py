@@ -227,6 +227,9 @@ def test_a_shipped_course_is_the_first_row_and_open_course_opens_its_real_pages(
     assert _text(ui, f"{row} {LOCAL_PAGE}") == "Your pathway page is not built yet"
     assert shipped.locator('[data-role="learning-cost"]').count() == 0 and shipped.locator(".learning-entry-head span").count() == 0
     assert shipped.locator(ERROR).count() == 0
+    more = ui.page.locator('[data-role="learning-more-courses"]')
+    assert more.count() == 1 and (more.text_content() or "").strip() == "More courses are coming in future GigAI releases."
+    assert more.evaluate("el => el.previousElementSibling.getAttribute('data-pathway-id')") == KEY, "the line sits under the shipped group"
     # "Open course" and the one button that builds the user's own page (slice 4b); no link to a page that is not there.
     assert [(button.text_content() or "").strip() for button in shipped.locator("button").all()] == ["Build my pathway"]
     assert shipped.locator("a").count() == 1 and shipped.locator('[data-action="open-pathway-page"]').count() == 0

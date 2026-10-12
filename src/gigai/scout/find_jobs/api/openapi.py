@@ -897,7 +897,7 @@ _LEARNING_RUNNING_RECORD: dict[str, object] = {
 }
 _LEARNING_ESTIMATE_EXAMPLE: dict[str, object] = {
     "schema_version": "scout-learning-generate:1", "status": "ask", "role_text": "Director of AI enablement",
-    "estimate": {"calls": 60, "fetches": 1000, "minutes": 45, "tokens": None, "basis": "none"},
+    "estimate": {"calls": 60, "fetches": 1300, "minutes": 140, "tokens": None, "basis": "none"},
     "caps": {"calls": 120, "fetches": 1500}, "warning": "learning_higher_usage",
 }
 _LEARNING_JOB_NOTE = (
@@ -1464,7 +1464,7 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
             "Without `approve: true` the answer is `status: \"ask\"` and NOTHING is stored or started: `estimate` says what one course takes "
             "(`calls`: model calls on the user's own model target, `fetches`: pages GigAI fetches from public documentation sites, `minutes`, "
             "`tokens` or null) and `basis` says where the numbers come from: `none` (no course generated here yet has a cost record: about 60 "
-            "calls, 1000 fetches, 45 minutes) or `history` (sized from your last course(s): the average of the last up to 3 done courses "
+            "calls, 1300 fetches, 140 minutes) or `history` (sized from your last course(s): the average of the last up to 3 done courses "
             "generated here of their own recorded calls, fetches, minutes and tokens). `caps` is where one run of the job stops by itself "
             "(120 model calls, 1500 page fetches) and `warning` is the key of the warning to show before the approval (`learning_higher_usage`: "
             "this takes more of the user's model usage than an assessment). With `approve: true` the request is stored (`status` queued), the "

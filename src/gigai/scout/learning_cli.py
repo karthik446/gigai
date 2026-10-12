@@ -183,6 +183,7 @@ def learning_group() -> None:
 def learning_list_command(home_value: Path | None, target_value: Path | None, as_json: bool) -> None:
     """List the learning pathways, the newest request first. Reads the store; no model call."""
 
+    from . import learning_job
     from .find_jobs.api.learning import pathways_response, shipped_summary
 
     home_root = home_value or default_home_root()
@@ -204,6 +205,8 @@ def learning_list_command(home_value: Path | None, target_value: Path | None, as
     for row in shipped:
         lessons = _lessons_words(int(row["course"]["lessons"]))  # type: ignore[index]
         click.echo(f"{row['id']}  shipped  {row['role_text']}  ({lessons})  [shipped with GigAI]  {_local_page_words(row['local_page'])}")
+    if shipped:
+        click.echo(learning_job.MORE_COURSES_NOTE)
     for pathway in pathways:
         line = f"{_live(home_root, target, pathway)}"
         line = f"{pathway.id}  {line:<7}  {pathway.requested_at[:10]}  {pathway.role_text}  ({_course_words(pathway)})  [{pathway.source}]"
@@ -581,8 +584,8 @@ def learning_generate_command(role_text: str, yes: bool, home_value: Path | None
     """Generate a course for ROLE from the postings stored on this computer.
 
     A higher-usage action than an assessment: about 60 model calls on your
-    own model login, about 1000 page fetches from public documentation sites
-    and about 45 minutes. Nothing is generated without approval: without
+    own model login, about 1300 page fetches from public documentation sites
+    and about 140 minutes. Nothing is generated without approval: without
     --yes the command says what it will take and asks (in a terminal;
     default no) or stops there (--json, or no terminal).
 
@@ -604,6 +607,7 @@ def learning_generate_command(role_text: str, yes: bool, home_value: Path | None
         caps = response["caps"]
         facts = [
             f"Estimate: {learning_job.estimate_words(response['estimate'])}.",  # type: ignore[arg-type]
+            learning_job.PLAN_WARNING,
             _GENERATE_SENDS,
             f"Stops by itself after {caps['calls']} model calls or {caps['fetches']} page fetches. Stop it any time from another terminal: gigai scout learning cancel ID.",  # type: ignore[index]
         ]

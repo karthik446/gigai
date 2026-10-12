@@ -472,6 +472,7 @@ def test_the_command_asks_first_and_builds_only_with_yes(local_home: tuple[Path,
     assert len(port.prompts) == 1 and store.pathway_page(home, target, KEY) is not None
     day = str(_row(home, target)["built_at"])[:10]
     assert f"your pathway page was built on {day}" in _cli(home, target, "list").output.splitlines()[0]
+    assert _cli(home, target, "list").output.splitlines()[1] == "More courses are coming in future GigAI releases."
     shown = _cli(home, target, "show", KEY).output
     assert f"Your pathway page: your pathway page was built on {day}" in shown and f"gigai scout learning pathway {KEY}" in shown
 

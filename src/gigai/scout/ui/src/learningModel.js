@@ -349,6 +349,13 @@ export function estimateSentence(estimate, modelLabel) {
   return sentence;
 }
 
+// The plan warning of the estimate (text only; the CLI's learning_job.PLAN_WARNING says the same).
+export const PLAN_WARNING =
+  "A course uses about 1 million tokens. On an entry-level plan (about $20 a month, such as Claude Pro or ChatGPT Plus) that can use up most or all of your weekly limit; use a higher plan, or one of the courses that come with GigAI; more are coming.";
+
+// One plain line under the courses that come with GigAI (the CLI's learning_job.MORE_COURSES_NOTE).
+export const MORE_COURSES_NOTE = "More courses are coming in future GigAI releases.";
+
 export const SENDS_SENTENCE =
   "It sends: the typed role, sentences from job postings stored on your machine, and the course text as it is written. " +
   "The course uses your resume to mark what you already know (contact lines are removed first).";
@@ -386,6 +393,7 @@ export function generateDialog(response, modelLabel) {
     role,
     title: generateDialogTitle(role),
     estimateText: estimateSentence(response.estimate, modelLabel),
+    warningText: PLAN_WARNING,
     sendsText: SENDS_SENTENCE,
     stopsText: stopsSentence(response.caps),
     approveLabel: generateButtonLabel(response.estimate),

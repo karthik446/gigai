@@ -8,6 +8,7 @@ export default function LearningRequestDialog({ dialog, submitting, error, onApp
         <h2 id="learning-request-title">{dialog.title}</h2>
         <p>This is a higher-usage action than an assessment.</p>
         <p data-role="learning-request-estimate">{dialog.estimateText}</p>
+        <p data-role="learning-request-plan-warning">{dialog.warningText}</p>
         <p data-role="learning-request-sends">{dialog.sendsText}</p>
         <p data-role="learning-request-stops">{dialog.stopsText}</p>
         {error && <div className="callout danger">{error}</div>}
