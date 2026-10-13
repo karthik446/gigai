@@ -307,3 +307,33 @@ def test_cancel_stops_a_running_job_from_another_command_and_one_course_runs_at_
     assert _json(_run(fx, "cancel", record.id, "--json"))["cancel_requested"] is False
     unknown = _run(fx, "cancel", "lp-00000000", "--json")
     assert unknown.exit_code == 1 and _json(unknown)["error"]["code"] == "pathway_not_found"  # type: ignore[index]
+
+
+def test_generate_with_keys_and_a_curriculum_file_makes_no_curriculum_call_and_keeps_both_inputs_for_resume(fx: SimpleNamespace, tmp_path: Path) -> None:
+    """``--keys`` reaches the vocabulary prompt, ``--curriculum`` replaces the curriculum call, ``resume`` needs neither again."""
+
+    keys = tmp_path / "keys.json"
+    keys.write_text(json.dumps({
+        "schema_version": "learning-center-concept-keys:1", "version": 1, "areas": {"infra": "Cloud"},
+        "keys": [
+            {"key": "terraform", "display": "Terraform", "area": "infra", "category": "tool", "technical": True, "aliases": ["terraform", "infrastructure as code"], "parent": None, "former_ids": {}},
+            {"key": "kubernetes", "display": "Kubernetes", "area": "infra", "category": "tool", "technical": True, "aliases": ["kubernetes", "k8s"], "parent": None, "former_ids": {"old": ["kube"]}},
+        ],
+    }), encoding="utf-8")
+    given = tmp_path / "curriculum.json"
+    given.write_text(json.dumps({"modules": [course_answer()["modules"][0]]}), encoding="utf-8")  # one module of four lessons, on pages the fake web answers
+
+    fx.model.answers = [*corpus_answers(), lessons_answer()]  # no curriculum answer: step 6 makes no call
+    done = _run(fx, "generate", ROLE, "--yes", "--keys", str(keys), "--curriculum", str(given))
+    assert done.exit_code == 0, done.output
+    (record,) = learning_store.list_pathways(fx.home, fx.target)
+    assert record.status == "done" and record.course is not None and record.course.lessons == 4
+    assert "Checking the given modules and lessons..." in done.output and "Planning the modules and lessons..." not in done.output
+    assert not any("You are planning a COURSE" in prompt for prompt in fx.model.prompts) and len(fx.model.prompts) == 4  # titles, vocabulary, its follow-up, the one module's lesson text
+    vocabulary_prompt = fx.model.prompts[1]
+    start = vocabulary_prompt.index("EXISTING KEYS")
+    assert "terraform | Terraform | terraform; infrastructure as code" in vocabulary_prompt[start:] and "kubernetes | Kubernetes | kubernetes; k8s" in vocabulary_prompt[start:]
+    work = learning_job.work_dir(fx.home, fx.target, record.id)
+    assert json.loads((work / "curriculum-input.json").read_text(encoding="utf-8")) == json.loads(given.read_text(encoding="utf-8"))
+    assert (work / "keys-input.json").is_file() and json.loads((work / "curriculum.json").read_text(encoding="utf-8"))["origin"] == "given"
+    assert record.cost["cli_model_calls"] == 4  # type: ignore[index]

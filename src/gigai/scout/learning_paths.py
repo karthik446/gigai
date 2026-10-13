@@ -34,6 +34,14 @@ Per lesson (the method the research spike ``spike9c`` proved on three lessons):
    tool's hosts, else the lesson has no practice page (``path_unverified``); two unusable answers are
    ``path_model_failed``.
 
+A CASE EXERCISE INSTEAD (0.1.11.11, ``learning_case``). A lesson whose main tool has no verified documentation page of
+its own (``path_unverified``: nothing to cite), or that the curriculum marks ``practice: "case"``, gets ONE call for a
+written practice page, a case exercise or an artifact template (``<work>/paths/<lesson id>.json`` with ``kind``
+``case`` or ``artifact``; no citation, no fetch). ``practice: "none"`` has no practice page. Two unusable answers are
+``case_model_failed``. A tool path file carries ``kind: "tool"``; one written before ``kind`` existed reads as ``tool``.
+An article or a book page (``learning_course.doc_sources``) is no page of any tool: it neither picks the main tool
+nor makes a start page nor sets the hosts a path may cite.
+
 THE RESUME IS NOT AN INPUT. :func:`paths_prompt` is built from a lesson's ``title``, ``summary``,
 ``subtopics[].title`` and ``technologies`` only (design section 6): no marker, no evidence quote and no resume
 line can reach it, and this module reads no resume.
@@ -55,6 +63,7 @@ from typing import Any, Protocol
 from urllib.parse import urlsplit
 
 from ..canonical import digest_imported_bytes
+from . import learning_case
 from .learning_corpus import LearningCorpusError, _error_text, _json_object, _render, _template
 from .learning_course import (
     JSON_OPENER,
@@ -66,6 +75,7 @@ from .learning_course import (
     _one_line,
     choose_main_tool,
     contact_findings,
+    doc_sources,
     source_strength,
     tool_aliases,
     tool_pages,
@@ -81,6 +91,7 @@ from .learning_fetch import (
     is_deep_path,
     lesson_words,
 )
+from .learning_render import KIND_TOOL, path_kind
 from .untrusted_text import fence_untrusted_posting, neutralise_fence_markers
 
 SCHEMA_PATH_WORK = "scout-learning-path-work:1"
@@ -302,6 +313,7 @@ def pick_tool(lesson: Mapping[str, Any], course: Mapping[str, Any], lesson_sourc
             taken.add(shown.casefold())
             candidates.append(ToolCandidate(shown, counted=False, link=url))
 
+    lesson_sources = doc_sources(lesson_sources)  # an article or a book page is no page of a tool
     chosen = choose_main_tool(clean_text(str(lesson.get("title", ""))), candidates, lesson_sources)
     if chosen is None:
         return Tool(names[0] if names else (_one_line(lesson.get("title"), TITLE_CHARS_MAX) or str(lesson["id"])))
@@ -374,7 +386,7 @@ def start_pages(lesson_sources: Sequence[Mapping[str, Any]], tool_name: str, lin
     """
 
     scored: list[tuple[int, int, str]] = []
-    for index, source in enumerate(lesson_sources):
+    for index, source in enumerate(doc_sources(lesson_sources)):
         url = usable_url(source.get("url")) if isinstance(source, Mapping) else None
         strength = source_strength(source, tool_name, link) if url is not None else 0
         if url is None or not strength:
@@ -778,7 +790,7 @@ def build_path(lesson_id: str, tool: Tool, course: Mapping[str, Any], attempt: A
     why = " ".join(part for part in (count_sentence(tool, course), attempt.why) if part)
     alternatives = " ".join(part for part in (attempt.alternatives, others_sentence(tool, course)) if part)
     return {
-        "concept": lesson_id, "tool": tool.name, "alternatives": alternatives, "why_this_tool": why,
+        "concept": lesson_id, "kind": KIND_TOOL, "tool": tool.name, "alternatives": alternatives, "why_this_tool": why,
         "setup": attempt.setup, "steps": attempt.steps,
         "sources": [
             {
@@ -791,11 +803,16 @@ def build_path(lesson_id: str, tool: Tool, course: Mapping[str, Any], attempt: A
 
 
 def check_path(data: object, lesson_id: str) -> bool:
-    """Whether a stored path is one this step wrote for ``lesson_id`` and the renderer still accepts (skip-if-valid)."""
+    """Whether a stored TOOL path is one this step wrote for ``lesson_id`` and the renderer still accepts (skip-if-valid).
+
+    A path with no ``kind`` is a tool path; a case or artifact page is not one (:func:`learning_case.check_case_path`).
+    """
 
     from .learning_render import validate_path
 
-    if not isinstance(data, Mapping) or data.get("concept") != lesson_id or not isinstance(data.get("tool"), str) or not data["tool"]:
+    if not isinstance(data, Mapping) or path_kind(dict(data)) != KIND_TOOL:
+        return False
+    if data.get("concept") != lesson_id or not isinstance(data.get("tool"), str) or not data["tool"]:
         return False
     setup, steps, sources = data.get("setup"), data.get("steps"), data.get("sources")
     if not isinstance(setup, list) or not isinstance(steps, list) or not isinstance(sources, list) or len(steps) < STEPS_MIN or len(setup) < SETUP_MIN:
@@ -835,37 +852,58 @@ def _write_json(path: Path, data: object) -> None:
     atomic_write(path, (json.dumps(data, indent=1, ensure_ascii=False) + "\n").encode("utf-8"))
 
 
-def _key(lesson: Mapping[str, Any], seeds: Sequence[str], tool: Tool) -> str:
+def _key(lesson: Mapping[str, Any], seeds: Sequence[str], tool: Tool, mark: str | None = None) -> str:
     """What a lesson's path was built from: when it changes, a stored outcome is not this lesson's any more."""
 
     inputs = [str(lesson.get("title", "")), str(lesson.get("summary", "")), _subtopic_titles(lesson), _names(lesson), list(seeds), tool.name]
+    if mark:
+        inputs.append(mark)  # only a lesson with a mark: the key of one without is what it always was
     digest = json.dumps(inputs, ensure_ascii=False).encode("utf-8")
     return digest_imported_bytes(digest).removeprefix("sha256:")[:24]
 
 
+def practice_marks(work_dir: Path) -> dict[str, str]:
+    """``{lesson id: practice}`` of the curriculum stored in a work folder: the lessons it marks ``case`` or ``none`` (``tool``, or no mark, is left out)."""
+
+    stored = _read_json(Path(work_dir) / "curriculum.json")
+    marks: dict[str, str] = {}
+    for module in stored.get("modules", []) if isinstance(stored, Mapping) else []:
+        for lesson in module.get("lessons", []) if isinstance(module, Mapping) else []:
+            if isinstance(lesson, Mapping) and lesson.get("practice") in ("case", "none") and isinstance(lesson.get("id"), str):
+                marks[lesson["id"]] = lesson["practice"]
+    return marks
+
+
 def run_paths_step(
     work_dir: Path, *, model: CourseModel, fetcher: _PageFetcher, course: Mapping[str, object], sources: Mapping[str, object],
-    cancel: Callable[[], bool] | None = None, progress: Callable[[str], None] | None = None,
+    cancel: Callable[[], bool] | None = None, progress: Callable[[str], None] | None = None, practice: Mapping[str, str] | None = None,
 ) -> dict[str, object]:
-    """Step 9 over a work folder: the practice path of every lesson of ``course``, or why it has none.
+    """Step 9 over a work folder: the practice page of every lesson of ``course``, or why it has none.
 
     ``course`` is G2's ``course.json`` and ``sources`` its step 7 answer (``{"lessons": {lesson id: [source]}}``);
     ``fetcher`` is the course's ``learning_fetch.PageFetcher`` (the crawl and every re-fetch go through it) and
-    ``model`` its metered model (kind ``learning``, one call per attempt, ``items`` 1: one lesson).
+    ``model`` its metered model (kind ``learning``, one call per attempt, ``items`` 1: one lesson). ``practice`` is
+    ``{lesson id: "case" | "none"}`` (default: what the work folder's curriculum marks, :func:`practice_marks`).
+
+    A lesson marked ``case`` gets a case exercise or an artifact template (:mod:`learning_case`) without trying a
+    tool path; one marked ``none`` has no practice page and is not listed as dropped. Any other lesson gets a tool
+    path, and when its main tool has no verified page of its own to cite (``path_unverified``) a case exercise in
+    its place. A tool path whose model answers were unusable twice is still ``path_model_failed`` (no fallback).
 
     Returns ``{"paths": {lesson id: path}, "dropped": [{"what": lesson id, "title", "reason"}], "stopped", "log"}``.
-    ``reason`` is ``path_unverified`` (fewer than 8 steps or 2 setup items survived the checks, or nothing could
-    be fetched to cite) or ``path_model_failed`` (two answers, neither usable). Each kept path is written to
-    ``<work_dir>/paths/<lesson id>.json``. ``stopped`` is ``budget_exhausted`` when the course's fetch budget
-    ended the step early (the lessons not reached are neither kept nor dropped, and a resume takes them up), else
-    ``None``. A cancel, from ``cancel`` or from the fetcher, raises ``LearningCourseStopped``. A model that
-    cannot be reached raises what ``model.ask`` raises (``model_unavailable``): that is not a verdict on a lesson.
+    ``reason`` is ``path_model_failed`` (two answers, neither usable) or ``case_model_failed`` (the same for a case
+    exercise). Each kept path is written to ``<work_dir>/paths/<lesson id>.json`` (``kind`` ``tool``, ``case`` or
+    ``artifact``). ``stopped`` is ``budget_exhausted`` when the course's fetch budget ended the step early (the
+    lessons not reached are neither kept nor dropped, and a resume takes them up), else ``None``. A cancel, from
+    ``cancel`` or from the fetcher, raises ``LearningCourseStopped``. A model that cannot be reached raises what
+    ``model.ask`` raises (``model_unavailable``): that is not a verdict on a lesson.
     """
 
     work = Path(work_dir)
     say = progress or (lambda _text: None)
     lessons = _course_lessons(course)
     by_lesson = _source_lists(sources)
+    marks = dict(practice) if practice is not None else practice_marks(work)
     companies = sorted({company for found in _example_companies(course).values() for company in found})
     role_text = str(course.get("role", ""))
     paths: dict[str, dict[str, Any]] = {}
@@ -889,11 +927,14 @@ def run_paths_step(
             log.append(f"{lesson_id}: not a lesson id a path file can be named by")
             drop(PATH_UNVERIFIED)
             continue
+        mark = marks.get(lesson_id)
+        if mark == "none":
+            continue  # the curriculum says this lesson has no practice page
         found = by_lesson.get(lesson_id)
         lesson_sources = [source for source in found if isinstance(source, Mapping)] if isinstance(found, list) else []
         tool = pick_tool(lesson, course, lesson_sources)
         seeds = start_pages(lesson_sources, tool.name, tool.link)
-        key = _key(lesson, seeds, tool)
+        key = _key(lesson, seeds, tool, mark)
         path_file = work / "paths" / f"{lesson_id}.json"
         state_file = work / "paths-work" / f"{lesson_id}.json"
         state = _read_json(state_file)
@@ -902,10 +943,13 @@ def run_paths_step(
         current = state is not None and state.get("key") == key
 
         stored = _read_json(path_file)
-        if (state is None or current) and isinstance(stored, dict) and check_path(stored, lesson_id):
+        stored_kind = path_kind(stored) if isinstance(stored, dict) else None
+        if (state is None or current) and isinstance(stored, dict) and (
+            learning_case.check_case_path(stored, lesson_id) if stored_kind != KIND_TOOL else (mark != "case" and check_path(stored, lesson_id))
+        ):
             paths[lesson_id] = stored
             continue
-        if current and state is not None and state.get("outcome") in (PATH_UNVERIFIED, PATH_MODEL_FAILED):
+        if current and state is not None and state.get("outcome") in (PATH_MODEL_FAILED, learning_case.CASE_MODEL_FAILED):
             drop(str(state["outcome"]))
             continue
 
@@ -916,6 +960,35 @@ def run_paths_step(
                 "tool": tool.name, "tool_chosen_by": tool.how, "tool_hosts": list(tool.hosts), "off_tool": attempt.off_tool if attempt else 0,
             })
 
+        def written(crawl_pages: Sequence[Mapping[str, Any]], host: str, attempt: Attempt | None = None, calls: int = 0) -> None:
+            """A case exercise or an artifact template in place of a tool path: one call, the checks, the file; or ``case_model_failed``.
+
+            ``attempt`` and ``calls`` are what the tool path spent before it gave up: the state keeps them beside the outcome.
+            """
+
+            say(f"Writing the case exercise for lesson {number} of {len(lessons)}")
+            page = learning_case.write_case(
+                model, role_text=role_text, lesson=lesson, source_titles=[str(source.get("title", "")) for source in lesson_sources],
+                companies=companies, cancel=cancel, log=log,
+            )
+            if page is None:
+                finish(learning_case.CASE_MODEL_FAILED, crawl_pages, host, attempt, calls + 2)
+                drop(learning_case.CASE_MODEL_FAILED)
+                return
+            page = _clean_tree(page)
+            if not learning_case.check_case_path(page, lesson_id):
+                log.append(f"{lesson_id}: the case page did not pass the renderer's checks after cleaning")
+                finish(learning_case.CASE_MODEL_FAILED, crawl_pages, host, attempt, calls + 1)
+                drop(learning_case.CASE_MODEL_FAILED)
+                return
+            _write_json(path_file, page)
+            finish(learning_case.OUTCOME_CASE, crawl_pages, host, attempt, calls + 1)
+            paths[lesson_id] = page
+
+        if mark == "case":
+            written([], "")
+            continue
+
         try:
             # -- the pages: a crawl that finished is not fetched again -------------------------------------
             crawl_pages = state.get("pages") if current and state is not None and isinstance(state.get("pages"), list) else None
@@ -924,7 +997,7 @@ def run_paths_step(
                 if not seeds:
                     log.append(f"{lesson_id}: no verified source page of the main tool {tool.name} to start from")
                     finish(PATH_UNVERIFIED, [], host)
-                    drop(PATH_UNVERIFIED)
+                    written([], host)
                     continue
                 say(f"Reading the documentation for lesson {number} of {len(lessons)}")
                 crawl = crawl_lesson(fetcher, seeds, lesson_words([*_subtopic_titles(lesson), *_names(lesson)]), max_pages=MAX_PAGES_PER_LESSON)  # type: ignore[arg-type]
@@ -932,11 +1005,14 @@ def run_paths_step(
                     raise FetchStopped(crawl.stopped)
                 crawl_pages, host = [dict(page) for page in crawl.pages], crawl.host
                 _write_json(state_file, {"schema_version": SCHEMA_PATH_WORK, "key": key, "host": host, "pages": crawl_pages, "outcome": None})
+            if current and state is not None and state.get("outcome") == PATH_UNVERIFIED:
+                written(crawl_pages, host)  # an earlier run found nothing to cite and was stopped before the exercise was written
+                continue
             pages = listed_pages(crawl_pages)
             if not any(page["citable"] for page in pages):
                 log.append(f"{lesson_id}: no fetched page has a section to cite")
                 finish(PATH_UNVERIFIED, crawl_pages, host)
-                drop(PATH_UNVERIFIED)
+                written(crawl_pages, host)
                 continue
             checklist = arc_checklist(crawl_pages)
 
@@ -989,7 +1065,7 @@ def run_paths_step(
                 + ("" if best.on_tool else f", {best.off_tool} of them off the hosts of the main tool {tool.name}")
             )
             finish(PATH_UNVERIFIED, crawl_pages, host, best, calls)
-            drop(PATH_UNVERIFIED)
+            written(crawl_pages, host, best, calls)
             continue
         if best.missing_stages:
             log.append(f"{lesson_id}: kept without an item for " + ", ".join(best.missing_stages))
@@ -1024,6 +1100,7 @@ __all__ = [
     "parse_path_answer",
     "paths_prompt",
     "pick_tool",
+    "practice_marks",
     "resolve_citation",
     "retry_notice",
     "run_paths_step",

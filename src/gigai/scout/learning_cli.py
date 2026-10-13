@@ -588,13 +588,48 @@ def _ended(home_root: Path, target: Path, pathway: Pathway, *, as_json: bool) ->
         raise click.exceptions.Exit(1)
 
 
+CURRICULUM_FILE_BYTES_MAX = 2 * 1024 * 1024
+
+
+def _load_curriculum(path: Path) -> dict[str, object]:
+    """The JSON object of a ``--curriculum`` file (``curriculum_invalid``: not one regular local UTF-8 JSON object file)."""
+
+    from .learning_course import LearningCourseError
+
+    if path.is_symlink() or not path.is_file():
+        raise LearningCourseError("curriculum_invalid", "--curriculum must be one regular local file")
+    try:
+        size = path.stat().st_size
+    except OSError as exc:
+        raise LearningCourseError("curriculum_invalid", "--curriculum must be a UTF-8 JSON file") from exc
+    if size > CURRICULUM_FILE_BYTES_MAX:
+        raise LearningCourseError("curriculum_invalid", "the curriculum file is larger than 2 MB")
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, ValueError) as exc:
+        raise LearningCourseError("curriculum_invalid", "--curriculum must be a UTF-8 JSON file") from exc
+    if not isinstance(data, dict):
+        raise LearningCourseError("curriculum_invalid", "the curriculum file holds no JSON object")
+    return data
+
+
 @learning_group.command("generate")
 @click.argument("role_text", metavar="ROLE")
 @click.option("--yes", "yes", is_flag=True, help="Approve: generate without asking (about 60 model calls, at most 120).")
+@click.option(
+    "--keys", "keys_file", metavar="FILE", type=click.Path(path_type=Path, dir_okay=False),
+    help="For the operator and for the learning center's own generation, not a setting: the shared concept key list (concept-keys.json), given to the vocabulary and curriculum calls as ids to reuse where a concept is the same.",
+)
+@click.option(
+    "--curriculum", "curriculum_file", metavar="FILE", type=click.Path(path_type=Path, dir_okay=False),
+    help="For the operator and for the learning center's own generation, not a setting: a given list of modules and lessons (JSON) that REPLACES the model's curriculum call, so a curated module is written lesson by lesson.",
+)
 @_home_option
 @_target_option
 @_json_option
-def learning_generate_command(role_text: str, yes: bool, home_value: Path | None, target_value: Path | None, as_json: bool) -> None:
+def learning_generate_command(
+    role_text: str, yes: bool, keys_file: Path | None, curriculum_file: Path | None, home_value: Path | None, target_value: Path | None, as_json: bool,
+) -> None:
     """Generate a course for ROLE from the postings stored on this computer.
 
     A higher-usage action than an assessment: about 60 model calls on your
@@ -608,19 +643,35 @@ def learning_generate_command(role_text: str, yes: bool, home_value: Path | None
     the foreground, with one plain progress line per step; one course at a
     time per project. It stops by itself after 120 model calls or 1500 page
     fetches; `gigai scout learning cancel ID` stops it from another terminal.
+
+    --keys and --curriculum are for the operator and for the learning
+    center's own generation (the Scout UI has no such choice). --keys FILE is
+    the shared concept key list: the vocabulary and curriculum calls are given
+    it as ids to reuse. --curriculum FILE is a list of modules and lessons
+    that replaces the model's curriculum call (every lesson may say
+    "practice": "tool", "case" or "none", and give its own sources); both
+    files are checked before anything is asked or sent, and kept with the
+    course, so `resume` goes on with the same ones.
     """
 
     import sys
 
-    from . import learning_job
+    from . import learning_corpus, learning_course, learning_job
 
     home_root = home_value or default_home_root()
     try:
         target = _target(target_value, home_root, as_json=as_json)
-        response = learning_job.ask_response(home_root, target, role_text)
+        keys = learning_corpus.load_keys(keys_file) if keys_file is not None else ()
+        curriculum = _load_curriculum(curriculum_file) if curriculum_file is not None else None
+        if curriculum is not None:
+            learning_course.check_given_shape(curriculum, role_text, keys)
+        response = learning_job.ask_response(home_root, target, role_text, curriculum=curriculum)
         caps = response["caps"]
+        shape = learning_job.curriculum_shape(curriculum)
         facts = [
             f"Estimate: {learning_job.estimate_words(response['estimate'])}.",  # type: ignore[arg-type]
+            *([f"The curriculum file holds {_lessons_words(shape['lessons'])}: {shape['case_lessons']} with a written exercise (1 model call and no page fetch each), "
+               f"{shape['none_lessons']} with no practice page."] if shape["lessons"] else []),
             learning_job.PLAN_WARNING,
             _GENERATE_SENDS,
             f"Stops by itself after {caps['calls']} model calls or {caps['fetches']} page fetches. Stop it any time from another terminal: gigai scout learning cancel ID.",  # type: ignore[index]
@@ -641,7 +692,9 @@ def learning_generate_command(role_text: str, yes: bool, home_value: Path | None
                 click.echo("\n".join(facts))
             click.echo("Nothing was generated. Approve with --yes.")
             return
-        pathway = learning_job.run_foreground(home_root, target, role_text=role_text, on_progress=None if as_json else click.echo)
+        pathway = learning_job.run_foreground(
+            home_root, target, role_text=role_text, on_progress=None if as_json else click.echo, keys=keys, curriculum=curriculum,
+        )
     except _errors() as exc:
         _fail(getattr(exc, "code", "scout_learning_failed"), str(exc), as_json=as_json)
         return

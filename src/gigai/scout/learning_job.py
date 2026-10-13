@@ -21,12 +21,22 @@ THE STEPS (:data:`STEPS`), in order, each with a result under ``<learning>/work/
    ``learning_course.read_master_lines`` and handed to that one call (``master_lines=``), which gives them to the
    lesson-writing prompt only. They go nowhere else from here: not to G1, not to the paths step, not to the record,
    not to a progress line. An empty master makes every lesson NEW and is not an error.
-3. ``paths``: G4's ``run_paths_step`` (``paths/<lesson>.json``), reached through :func:`paths_step` by name.
+3. ``paths``: G4's ``run_paths_step`` (``paths/<lesson>.json``), reached through :func:`paths_step` by name: a tool
+   practice path, or a case exercise / artifact template (``learning_case``) for a lesson whose tool has no page to
+   cite or that the curriculum marks ``practice: "case"``.
 4. ``render``: G3's ``build_course`` into ``site/``.
 5. ``audit``: the gates of design section 5 that code can check on the finished folder (:func:`audit_site`):
    internal links and anchors, every external link is one this job verified (NO new fetch), no stray glyph, no
    inline script, the size caps, the contact check. The first failure fails the course.
 6. ``import``: ``learning_store.import_course`` into the store, with ``cost`` filled from the job's own counters.
+
+TWO INPUTS FOR GENERATION BY US (0.1.11.11, ``gigai scout learning generate --keys FILE --curriculum FILE``; the operator's
+and ours, never the UI's). ``keys``: the shared concept key list, given to the vocabulary and curriculum calls as ids to
+reuse where a concept is the same (``learning_corpus.keys_block``). ``curriculum``: a given lesson list that REPLACES step
+6's model call (``learning_course.parse_given_curriculum``), so a curated module is written lesson by lesson. Both are
+copied into the work folder (:data:`_KEYS_FILENAME`, :data:`_CURRICULUM_INPUT`), so a resume needs neither again; a key
+the curriculum teaches that no posting counted is added to the work folder's ``vocabulary.json`` (the export needs every
+lesson key in the vocabulary). The estimate counts a lesson with a case exercise as 1 call and 0 fetches.
 
 A step whose stored result still validates is not run again (``skipped``), so a job that stopped RESUMES where it
 stopped (:func:`resume`: the same id, only the steps with no result cost anything).
@@ -53,7 +63,7 @@ check before it is stored (:func:`_plain`). No posting text and no resume text i
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from html.parser import HTMLParser
 import json
@@ -61,6 +71,7 @@ import logging
 import math
 import os
 from pathlib import Path
+import re
 import shutil
 import threading
 import time
@@ -118,6 +129,9 @@ _OWNER_FILENAME = "owner.json"
 _CANCEL_FILENAME = "cancel"
 _LINES_FILENAME = "progress.jsonl"
 _STATE_FILENAME = "job.json"
+#: The two inputs of a course made by us, as the job copied them into its work folder (a resume reads them from there).
+_KEYS_FILENAME = "keys-input.json"
+_CURRICULUM_INPUT = "curriculum-input.json"
 _CORPUS_FILENAME = "corpus.json"
 _AUDIT_FILENAME = "audit.json"
 _SITE_DIR = "site"
@@ -125,6 +139,7 @@ _PATHS_DIR = "paths"
 _PATHS_MODULE = "gigai.scout.learning_paths"
 #: Test-only: a JSON file of scripted model answers and pages (see :func:`_test_parts`).
 _TEST_SCRIPT_ENV = "GIGAI_SCOUT_LEARNING_TEST_SCRIPT"
+_PHRASE_FALLBACK = re.compile(r"[a-z0-9]+")
 
 _logger = logging.getLogger("gigai.scout.server")
 
@@ -378,8 +393,23 @@ def _history_courses(home_root: Path, target: Path) -> list[Mapping[str, object]
     return found
 
 
-def estimate(home_root: Path, target: Path) -> dict[str, object]:
+#: A course the defaults and the history are about: the two real runs wrote 35 and 34 lessons; the design says 25 to 35.
+DEFAULT_LESSONS = 30
+#: What a tool practice path costs and a written exercise does not (the crawl of up to 24 pages and the re-fetch of
+#: every cited one, from the two real runs: about 38 fetches a lesson in all, about 5 of them for the sources; about 2.5
+#: of the 3.7 minutes a lesson). A lesson's practice step is ONE model call either way; a case exercise or an artifact
+#: template (:mod:`learning_case`) fetches nothing, and a lesson marked ``practice: "none"`` makes no call at all.
+PATH_FETCHES_PER_LESSON, PATH_MINUTES_PER_LESSON, SOURCE_FETCHES_PER_LESSON = 33, 2.5, 5
+
+
+def estimate(home_root: Path, target: Path, *, lessons: int | None = None, case_lessons: int = 0, none_lessons: int = 0) -> dict[str, object]:
     """``{calls, fetches, minutes, tokens, basis}`` of one course. Makes no call and starts nothing.
+
+    ``lessons`` (a given curriculum: ``--curriculum``) sizes the course to that many lessons instead of
+    :data:`DEFAULT_LESSONS`, ``case_lessons`` of them with a case exercise or artifact template (1 call and 0 fetches
+    each) and ``none_lessons`` with no practice page (0 calls, 0 fetches); the answer then also says ``lessons``,
+    ``case_lessons`` and ``none_lessons``. Every other lesson is a tool path (1 call and about
+    :data:`PATH_FETCHES_PER_LESSON` fetches).
 
     ``basis: "none"`` (the constants of :data:`DEFAULT_CALLS` / :data:`DEFAULT_FETCHES` / :data:`DEFAULT_MINUTES`;
     ``tokens`` is ``None``) while no DONE, requested course with a cost record is stored here, else ``"history"``:
@@ -391,8 +421,32 @@ def estimate(home_root: Path, target: Path) -> dict[str, object]:
 
     answer: dict[str, object] = {"calls": DEFAULT_CALLS, "fetches": DEFAULT_FETCHES, "minutes": DEFAULT_MINUTES, "tokens": None, "basis": "none"}
     courses = _history_courses(home_root, target)
-    if not courses:
+    if courses:
+        answer = _historic_estimate(courses, answer)
+    if lessons is None:
         return answer
+    return _sized(answer, lessons, case_lessons, none_lessons)
+
+
+def _sized(base: dict[str, object], lessons: int, case_lessons: int, none_lessons: int) -> dict[str, object]:
+    """``base`` (a course of :data:`DEFAULT_LESSONS` tool lessons) for ``lessons`` lessons of which some have no tool path."""
+
+    scale = lessons / DEFAULT_LESSONS
+    spared = max(0, case_lessons) + max(0, none_lessons)
+    calls = max(1, round(int(base["calls"]) * scale) - max(0, none_lessons))  # type: ignore[call-overload]
+    fetches = max(lessons * SOURCE_FETCHES_PER_LESSON, round(int(base["fetches"]) * scale) - spared * PATH_FETCHES_PER_LESSON)  # type: ignore[call-overload]
+    minutes = max(1, math.ceil(float(base["minutes"]) * scale - spared * PATH_MINUTES_PER_LESSON))  # type: ignore[arg-type]
+    tokens = base.get("tokens")
+    return {
+        **base, "calls": min(MAX_CALLS, calls), "fetches": min(MAX_FETCHES, fetches), "minutes": minutes,
+        "tokens": round(int(tokens) * scale) if isinstance(tokens, int) else None,  # type: ignore[call-overload]
+        "lessons": lessons, "case_lessons": max(0, case_lessons), "none_lessons": max(0, none_lessons),
+    }
+
+
+def _historic_estimate(courses: list[Mapping[str, object]], answer: dict[str, object]) -> dict[str, object]:
+    """``answer`` with the averages of ``courses`` (:func:`estimate`'s ``basis: "history"``)."""
+
     calls = [int(cost["cli_model_calls"]) for cost in courses]  # type: ignore[arg-type]
     fetches = [int(cost["web_fetches"]) for cost in courses if isinstance(cost.get("web_fetches"), int)]  # type: ignore[arg-type]
     minutes = [float(cost["worker_minutes"]) for cost in courses if isinstance(cost.get("worker_minutes"), (int, float))]  # type: ignore[arg-type]
@@ -408,15 +462,32 @@ def estimate(home_root: Path, target: Path) -> dict[str, object]:
     return answer
 
 
-def ask_response(home_root: Path, target: Path, role_text: str) -> dict[str, object]:
-    """What ``POST /api/learning/pathways`` answers without ``approve`` (also the CLI's question): the facts, nothing started."""
+def curriculum_shape(given: Mapping[str, Any] | None) -> dict[str, int]:
+    """``{lessons, case_lessons, none_lessons}`` of a curriculum file (``--curriculum``): what :func:`estimate` is sized by. Zero lessons when it holds none."""
+
+    lessons = [
+        lesson for module in (given or {}).get("modules", []) if isinstance(module, Mapping)
+        for lesson in module.get("lessons", []) if isinstance(lesson, Mapping)
+    ]
+    return {
+        "lessons": len(lessons), "case_lessons": sum(1 for lesson in lessons if lesson.get("practice") == "case"),
+        "none_lessons": sum(1 for lesson in lessons if lesson.get("practice") == "none"),
+    }
+
+
+def ask_response(home_root: Path, target: Path, role_text: str, *, curriculum: Mapping[str, Any] | None = None) -> dict[str, object]:
+    """What ``POST /api/learning/pathways`` answers without ``approve`` (also the CLI's question): the facts, nothing started.
+
+    ``curriculum`` (the CLI's ``--curriculum`` file) sizes the estimate to its lessons, a case lesson as 1 call and 0 fetches.
+    """
 
     role = learning_store.clean_role_text(role_text)
+    shape = curriculum_shape(curriculum)
     return {
         "schema_version": SCHEMA_ESTIMATE,
         "status": "ask",
         "role_text": role,
-        "estimate": estimate(home_root, target),
+        "estimate": estimate(home_root, target, **shape) if shape["lessons"] else estimate(home_root, target),
         "caps": {"calls": MAX_CALLS, "fetches": MAX_FETCHES},
         "warning": WARNING_KEY,
     }
@@ -656,7 +727,9 @@ class LearningJob:
 
     ``model`` (a ``learning_course.CourseModel``), ``fetcher_factory`` (``(budget, cancel) -> PageFetcher``) and
     ``paths_step`` (G4's function) default to the real ones; a test passes fakes. ``sleep`` waits between retries,
-    ``on_progress`` is told every plain progress line (the CLI prints them).
+    ``on_progress`` is told every plain progress line (the CLI prints them). ``keys`` (``learning_corpus.ConceptKey``) and
+    ``curriculum`` (the content of a ``--curriculum`` file) are the two inputs of a course made by us; with neither, the
+    job reads the copies an earlier run of this pathway left in its work folder.
     """
 
     def __init__(
@@ -664,8 +737,11 @@ class LearningJob:
         fetcher_factory: Callable[[Any, Callable[[], bool]], Any] | None = None,
         paths_step: Callable[..., Mapping[str, Any]] | None = None, sleep: Callable[[float], object] = time.sleep,
         on_progress: Callable[[str], object] | None = None, max_calls: int = MAX_CALLS, max_fetches: int = MAX_FETCHES,
+        keys: Sequence[Any] = (), curriculum: Mapping[str, Any] | None = None,
     ) -> None:
         self.home_root, self.target, self.pathway_id = Path(home_root), Path(target), pathway_id
+        self._keys: tuple[Any, ...] = tuple(keys)
+        self._given: Mapping[str, Any] | None = curriculum
         self.work = work_dir(self.home_root, self.target, pathway_id)
         self._model, self._fetcher_factory, self._paths_step = model, fetcher_factory, paths_step
         self._sleep, self._on_progress = sleep, on_progress
@@ -800,15 +876,46 @@ class LearningJob:
         self._update()
         return value
 
+    def _take_inputs(self) -> None:
+        """Copy the two inputs of a course made by us into the work folder; with none given, read what an earlier run left there."""
+
+        from . import learning_corpus
+
+        if self._keys:
+            _write_json(self.work / _KEYS_FILENAME, {
+                "schema_version": learning_corpus.KEYS_SCHEMA,
+                "keys": [
+                    {
+                        "key": key.key, "display": key.display, "area": key.area, "category": key.category, "technical": key.technical,
+                        "aliases": list(key.aliases), "former_ids": {"stored": list(key.former_ids)},
+                    }
+                    for key in self._keys
+                ],
+            })
+        else:
+            kept = _read_json(self.work / _KEYS_FILENAME)
+            if kept is not None:
+                try:
+                    self._keys = learning_corpus.parse_keys(kept)
+                except LearningError:
+                    self._keys = ()
+        if self._given is not None:
+            _write_json(self.work / _CURRICULUM_INPUT, self._given)
+        else:
+            kept = _read_json(self.work / _CURRICULUM_INPUT)
+            self._given = kept if isinstance(kept, Mapping) else None
+
     # -- the steps ---------------------------------------------------------------------------------------
 
     def _corpus(self, model: _JobModel, role_text: str) -> tuple[dict[str, Any], bool]:
         from . import learning_corpus
 
         stored = _read_json(self.work / _CORPUS_FILENAME)
+        digest = learning_corpus.keys_digest(self._keys) if self._keys else None
         if (
             isinstance(stored, dict) and stored.get("schema_version") == learning_corpus.SCHEMA_VERSION and stored.get("status") == "done"
             and stored.get("role_text") == role_text and isinstance(stored.get("concepts"), list) and isinstance(stored.get("corpus"), dict)
+            and stored.get("keys") == digest
         ):
             return stored, True
         filters = learning_corpus.corpus_filters(self.home_root, self.target)
@@ -816,7 +923,10 @@ class LearningJob:
         # failed run can be read, and a resume asks again only for what has no stored answer.
         found = learning_corpus.run_corpus(
             self.home_root, role_text, model=model, filters=filters, progress=self.say, store=_CorpusWork(self.work),  # type: ignore[arg-type]
+            **({"keys": self._keys} if self._keys else {}),
         )
+        if digest is not None:
+            found["keys"] = digest
         _write_json(self.work / _CORPUS_FILENAME, found)
         self.say(f"Reading {found['corpus'].get('with_text', 0)} postings")  # type: ignore[union-attr]
         return found, False
@@ -832,8 +942,35 @@ class LearningJob:
             # and the one call they are handed to (step 8, the lesson text).
             master_lines=learning_course.read_master_lines(self.home_root, self.target),
             cancel=self.cancelled, progress=self.say,
+            **({"keys": self._keys} if self._keys else {}), **({"given": self._given} if self._given is not None else {}),
         )
+        self._add_key_concepts(corpus["concepts"])
         return course, had and spent == (self.calls, self.fetches)
+
+    def _add_key_concepts(self, counted: Sequence[Mapping[str, Any]]) -> None:
+        """A key of the shared list that the curriculum teaches and no posting counted joins the work folder's ``vocabulary.json``.
+
+        The export refuses a lesson whose concept key is not in the vocabulary; a module made from a given curriculum
+        teaches keys the postings of its role may never name. The concept is the key as the list says it (its aliases as
+        phrases), counted by no posting.
+        """
+
+        from . import learning_course as lc
+
+        if not self._keys:
+            return
+        curriculum = lc.CourseWork(self.work).read(lc.STEP_CURRICULUM, lc.check_curriculum)
+        stored = _read_json(self.work / "vocabulary.json")
+        if curriculum is None or not isinstance(stored, dict) or not isinstance(stored.get("concepts"), list):
+            return
+        present = {item.get("id") for item in stored["concepts"] if isinstance(item, Mapping)}
+        extra = [key for key in lc.key_concepts(curriculum, counted, self._keys) if key.key not in present]
+        if not extra:
+            return
+        for key in extra:
+            phrases = [phrase for phrase in key.aliases if 1 <= len(phrase.split()) <= 4][:8] or [" ".join(_PHRASE_FALLBACK.findall(key.display.lower()))[:60] or key.key.replace("-", " ")]
+            stored["concepts"].append({"id": key.key, "display": key.display, "category": key.category, "phrases": phrases, "technical": key.technical})
+        _write_json(self.work / "vocabulary.json", stored)
 
     def _partial_course(self, role_text: str, corpus: Mapping[str, Any], code: str) -> dict[str, Any]:
         """The course of what is stored when the job may ask nothing more; ``_Failed(code)`` when that is too little.
@@ -1089,6 +1226,7 @@ class LearningJob:
             self._tokens_before = int(state.get("tokens") or 0) if isinstance(state, dict) else 0
             self._steps = [{"id": step, "status": "pending", "started_at": None, "finished_at": None, "detail": None} for step in STEPS]
             self._update(status="running", error=None, error_code=None)
+            self._take_inputs()
             try:
                 with capture_calls() as captured:
                     self._captured = captured
@@ -1256,8 +1394,13 @@ def resume(home_root: Path, target: Path, pathway_id: str, *, job_factory: JobFa
 def run_foreground(
     home_root: Path, target: Path, *, role_text: str | None = None, pathway_id: str | None = None,
     on_progress: Callable[[str], object] | None = None, job_factory: Callable[..., LearningJob] | None = None,
+    keys: Sequence[Any] = (), curriculum: Mapping[str, Any] | None = None,
 ) -> Pathway:
-    """The CLI's run: the same job, the same one-at-a-time claim, in the calling thread. A new request or a resume."""
+    """The CLI's run: the same job, the same one-at-a-time claim, in the calling thread. A new request or a resume.
+
+    ``keys`` and ``curriculum`` are the two inputs of a course made by us (``generate --keys --curriculum``): the job
+    keeps a copy in its work folder, so ``resume`` (which takes neither) goes on with the same ones.
+    """
 
     home_root, target = Path(home_root), Path(target)
     if pathway_id is None:
@@ -1265,7 +1408,8 @@ def run_foreground(
     else:
         pathway = _resumable(home_root, target, pathway_id)
         current = _claim(home_root, target, pathway_id)
-    return (job_factory or LearningJob)(home_root, target, pathway.id, on_progress=on_progress).run(current)
+    inputs: dict[str, Any] = {**({"keys": tuple(keys)} if keys else {}), **({"curriculum": curriculum} if curriculum is not None else {})}
+    return (job_factory or LearningJob)(home_root, target, pathway.id, on_progress=on_progress, **inputs).run(current)
 
 
 def cancel(home_root: Path, target: Path, pathway_id: str) -> bool:
@@ -1304,6 +1448,7 @@ __all__ = [
     "ask_response",
     "audit_site",
     "cancel",
+    "curriculum_shape",
     "estimate",
     "estimate_words",
     "live_status",

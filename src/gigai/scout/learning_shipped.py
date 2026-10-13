@@ -47,7 +47,12 @@ CATALOG IS WHAT GIGAI SHIPS: the lessons live on the public learning center (``s
   ``course.json`` and ``paths/`` are written by the export for the SITE (``--catalog-only`` writes the catalog
   alone, the only file in the wheel) and are never read by GigAI.
 
-``paths/<lesson id>.json``: the practice path as generated, minus the sentences code wrote from the counts: the
+``paths/<lesson id>.json``: the practice page as generated. It has a ``kind``: ``tool`` (a path through one tool's
+documentation, the default: one written before ``kind`` existed is exported with ``kind: "tool"``), ``case`` (scenario,
+constraints, deliverable, reference answer, rubric, common mistakes) or ``artifact`` (artifact name, template, a
+model-written reference example, review checklist). A case or artifact page cites nothing and carries no sentence
+written from the counts: it is exported unchanged (its keys checked like any other), the catalog's ``has_practice``
+is true for it, and the scan reads every string of it. A tool path is exported minus the sentences code wrote from the counts: the
 opening of ``why_this_tool`` ("N of M postings ... name <tool>." or "<tool> is named in this lesson; it is not
 among the tools counted in your stored postings.") and the "Named in your postings ...: ..." tail of
 ``alternatives``.
@@ -174,7 +179,11 @@ _LESSON_KEPT = ("id", "title", "summary", "detail", "in_practice", "technologies
 _LESSON_REMOVED = ("marker", "postings_in_90d", "postings_any_date", "source")
 _SUBTOPIC_KEPT = ("id", "title", "body")
 _SUBTOPIC_REMOVED = ("marker", "evidence", "missing")
-_PATH_KEYS = ("concept", "tool", "alternatives", "why_this_tool", "setup", "steps", "sources")
+_PATH_KEYS = ("concept", "kind", "tool", "alternatives", "why_this_tool", "setup", "steps", "sources")
+#: A case exercise and an artifact template (``learning_case``): written practice, no tool and no citation, and no
+#: sentence code wrote from the posting counts, so the export carries them as they are.
+_CASE_PATH_KEYS = ("concept", "kind", "scenario", "constraints", "deliverable", "reference_answer", "rubric", "common_mistakes")
+_ARTIFACT_PATH_KEYS = ("concept", "kind", "artifact_name", "template", "reference_example", "review_checklist")
 _CONCEPT_KEYS = ("id", "display", "category", "phrases", "technical")
 #: Keys that may stand nowhere in a shipped folder, at any depth.
 FORBIDDEN_KEYS = frozenset({
@@ -686,9 +695,17 @@ def _only(found: Mapping[str, Any], kept: Sequence[str], removed: Sequence[str],
 
 
 def strip_path(path: Mapping[str, Any]) -> tuple[dict[str, Any], int]:
-    """A practice path without the sentences code wrote from the posting counts, and how many were taken out."""
+    """A practice path without the sentences code wrote from the posting counts, and how many were taken out.
 
+    A case or artifact page (``kind``) has none to take out and is kept whole, its keys checked like a tool path's;
+    a tool path with no ``kind`` is written with ``kind: "tool"``.
+    """
+
+    kind = path.get("kind")
+    if kind in ("case", "artifact"):
+        return _only(path, _CASE_PATH_KEYS if kind == "case" else _ARTIFACT_PATH_KEYS, (), f"the {kind} page of {path.get('concept', '?')}"), 0
     kept = _only(path, _PATH_KEYS, (), f"the path of {path.get('concept', '?')}")
+    kept["kind"] = "tool"
     tool = re.escape(str(kept.get("tool", "")))
     why, counted = re.subn(rf"^\d+ of \d+ {_WINDOWS} name {tool}(?: \([^)]*\))?\.\s*", "", str(kept.get("why_this_tool", "")))
     why, uncounted = re.subn(rf"^{tool} is named in this lesson; it is not among the tools counted in your stored postings\.\s*", "", why)

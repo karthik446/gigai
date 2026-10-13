@@ -271,7 +271,94 @@ def validate_path_items(items: list[dict], ctx: str) -> list[str]:
     return errors
 
 
+#: What a practice page is: a tool practice path (steps cited into one tool's documentation: the default, and what a
+#: stored path with no ``kind`` is), a case exercise, or an artifact template (0.1.11.11, ``learning_case``).
+KIND_TOOL, KIND_CASE, KIND_ARTIFACT = "tool", "case", "artifact"
+PATH_KINDS = (KIND_TOOL, KIND_CASE, KIND_ARTIFACT)
+#: The kind of a source page as the page says it: a documentation page (the default), an article or a book chapter.
+#: An article or book page is cited at page level only (``learning_course.verified_kind``).
+SOURCE_KIND_LABELS = {"article": "article", "book": "book chapter"}
+_URL_IN_TEXT = re.compile(r"(?i)\bhttps?://|\bwww\.")
+
+
+def path_kind(path: dict) -> str:
+    """The kind of a practice path file: its ``kind``, ``tool`` when it has none (every path written before ``kind`` existed)."""
+
+    kind = path.get("kind") if isinstance(path, dict) else None
+    return kind if isinstance(kind, str) else KIND_TOOL
+
+
+def _text_errors(value: object, ctx: str) -> list[str]:
+    """Why a case page's text may not stand anywhere in it: a link, as text, in any string of ``value``."""
+
+    errors: list[str] = []
+    if isinstance(value, str):
+        if _URL_IN_TEXT.search(value):
+            errors.append(f"{ctx}: a link in the text of a case page (it cites no page)")
+    elif isinstance(value, dict):
+        for key, item in value.items():
+            errors.extend(_text_errors(item, f"{ctx}.{key}"))
+    elif isinstance(value, list):
+        for index, item in enumerate(value):
+            errors.extend(_text_errors(item, f"{ctx}[{index}]"))
+    return errors
+
+
+def _lines(path: dict, key: str, ctx: str, errors: list[str]) -> None:
+    items = path.get(key)
+    if not isinstance(items, list) or not items or not all(isinstance(item, str) and item.strip() for item in items):
+        errors.append(f"{ctx}: {key} must be a list of non-empty lines")
+
+
+def _sections(value: object, key: str, ctx: str, errors: list[str], text_key: str = "body") -> None:
+    if not isinstance(value, list) or not value:
+        errors.append(f"{ctx}: {key} must be a list of sections")
+        return
+    for index, item in enumerate(value):
+        if not isinstance(item, dict) or not all(isinstance(item.get(name), str) and item[name].strip() for name in ("title", text_key)):
+            errors.append(f"{ctx}.{key}[{index}]: a section has a title and {text_key}")
+
+
+def validate_case_path(path: dict, ctx: str) -> list[str]:
+    """The second lock on a case or artifact page: the shape the renderer draws, and no link in its text.
+
+    The model-facing checks (lengths, verbs, companies) are ``learning_case``'s; this only refuses a page the
+    renderer cannot draw. A case page cites no page, so it holds no ``source``, ``url`` or ``sources`` key.
+    """
+
+    errors: list[str] = []
+    kind = path_kind(path)
+    for forbidden in ("steps", "setup", "sources"):
+        if path.get(forbidden):
+            errors.append(f"{ctx}: a {kind} page holds no {forbidden}")
+    if kind == KIND_CASE:
+        for key in ("scenario", "deliverable"):
+            if not isinstance(path.get(key), str) or not path[key].strip():
+                errors.append(f"{ctx}: {key} is empty")
+        _lines(path, "constraints", ctx, errors)
+        _lines(path, "rubric", ctx, errors)
+        _lines(path, "common_mistakes", ctx, errors)
+        _sections(path.get("reference_answer"), "reference_answer", ctx, errors)
+    else:
+        if not isinstance(path.get("artifact_name"), str) or not path["artifact_name"].strip():
+            errors.append(f"{ctx}: artifact_name is empty")
+        _sections(path.get("template"), "template", ctx, errors, "prompt")
+        example = path.get("reference_example")
+        if not isinstance(example, dict) or not isinstance(example.get("situation"), str) or not example["situation"].strip():
+            errors.append(f"{ctx}: reference_example holds no situation")
+        else:
+            _sections(example.get("sections"), "reference_example.sections", ctx, errors)
+        _lines(path, "review_checklist", ctx, errors)
+    errors.extend(_text_errors(path, ctx))
+    return errors
+
+
 def validate_path(path: dict, ctx: str) -> list[str]:
+    kind = path_kind(path)
+    if kind not in PATH_KINDS:
+        return [f"{ctx}: kind '{kind}' is not one of {', '.join(PATH_KINDS)}"]
+    if kind != KIND_TOOL:
+        return validate_case_path(path, ctx)
     errors: list[str] = []
     setup = path.get("setup", [])
     steps = path.get("steps", [])
@@ -624,6 +711,7 @@ DROPPED_REASONS = {
     "no_verified_source": "no source page for it could be verified",
     "module_text_failed": "its text did not pass the checks, twice",
     "path_unverified": "too few of its practice steps could be verified",
+    "case_model_failed": "its case exercise did not pass the checks, twice",
     "path_invalid": "its practice path did not pass the checks",
     "cancelled": "the course was stopped before it was written",
     "cap_reached": "the course reached its cap of model calls or page fetches before it was written",
@@ -776,7 +864,7 @@ def render_sources(sources: list[dict]) -> str:
     for src in sources:
         title = src.get("title", src.get("url", ""))
         url = src.get("url", "")
-        kind = src.get("kind", "")
+        kind = SOURCE_KIND_LABELS.get(src.get("kind", ""), src.get("kind", ""))
         domain = domain_of(url)
         items.append(
             "<li>"
@@ -964,7 +1052,88 @@ def render_practice_steps(steps: list[dict]) -> str:
     return f'<ul class="practice-steps">{"".join(items)}</ul>'
 
 
+#: What a case or artifact page says about its reference text, and where a reader finds that it is not a person's.
+MODEL_WRITTEN_NOTE = "Written by a model for this lesson, not by a person: read it as one way to do it, not the only one."
+
+
+def _list_items(lines: list[str]) -> str:
+    return "<ul>" + "".join(f"<li>{esc(line)}</li>" for line in lines) + "</ul>"
+
+
+def _checklist(lines: list[str]) -> str:
+    """A list the reader ticks mentally: a plain ``[ ]`` in front of every line (no script, no form control)."""
+
+    return '<ul class="practice-steps">' + "".join(
+        f'<li><p class="practice-step-title"><span class="path-number">[&nbsp;]</span> {esc(line)}</p></li>' for line in lines
+    ) + "</ul>"
+
+
+def _sections_block(sections: list[dict], text_key: str) -> str:
+    return "".join(f"<h3>{esc(section['title'])}</h3><p>{esc(section[text_key])}</p>" for section in sections)
+
+
+def _case_back_link(concept: dict) -> str:
+    title = concept.get("title", concept.get("id", ""))
+    return f'<p class="practice-back-link"><a href="{esc(concept_page_filename(concept["id"]))}">Back to {esc(title)}</a></p>'
+
+
+def render_case_page(concept: dict, path: dict) -> str:
+    """A case exercise: the scenario, its constraints and the deliverable first, then (folded away, so the reader tries first) the reference answer, the rubric and the usual mistakes."""
+
+    title = concept.get("title", concept.get("id", ""))
+    body = [
+        f"<h1>Case exercise: {esc(title)}</h1>",
+        '<p class="practice-lead">A case, not a tool: attempt it on paper before you open the reference answer.</p>',
+        '<h2 class="practice-section-title">Scenario</h2>',
+        f"<p>{esc(path['scenario'])}</p>",
+        '<h2 class="practice-section-title">Constraints and numbers</h2>',
+        _list_items(path["constraints"]),
+        '<h2 class="practice-section-title">Deliverable</h2>',
+        f"<p>{esc(path['deliverable'])}</p>",
+        '<h2 class="practice-section-title">Reference answer</h2>',
+        f'<p class="muted">{esc(MODEL_WRITTEN_NOTE)}</p>',
+        "<details><summary>Show the reference answer</summary>",
+        _sections_block(path["reference_answer"], "body"),
+        "</details>",
+        '<h2 class="practice-section-title">Check your answer</h2>',
+        '<p class="muted">Read each line and tick it in your head: your answer either does it or it does not.</p>',
+        _checklist(path["rubric"]),
+        '<h2 class="practice-section-title">Common mistakes</h2>',
+        _list_items(path["common_mistakes"]),
+        _case_back_link(concept),
+    ]
+    return "\n".join(body)
+
+
+def render_artifact_page(concept: dict, path: dict) -> str:
+    """An artifact exercise: the template to fill (a section and what to write in it), a filled example, and a review checklist."""
+
+    title = concept.get("title", concept.get("id", ""))
+    example = path["reference_example"]
+    body = [
+        f"<h1>Write a {esc(path['artifact_name'])}: {esc(title)}</h1>",
+        '<p class="practice-lead">An artifact, not a tool: fill the template for a case of your own, then review it against the checklist.</p>',
+        '<h2 class="practice-section-title">Template</h2>',
+        _sections_block(path["template"], "prompt"),
+        '<h2 class="practice-section-title">Example, filled in</h2>',
+        f'<p class="muted">{esc(MODEL_WRITTEN_NOTE)}</p>',
+        f"<p><strong>Situation (made up):</strong> {esc(example['situation'])}</p>",
+        "<details><summary>Show the filled example</summary>",
+        _sections_block(example["sections"], "body"),
+        "</details>",
+        '<h2 class="practice-section-title">Review checklist</h2>',
+        _checklist(path["review_checklist"]),
+        _case_back_link(concept),
+    ]
+    return "\n".join(body)
+
+
 def render_practice_page(concept: dict, path: dict) -> str:
+    kind = path_kind(path)
+    if kind == KIND_CASE:
+        return render_case_page(concept, path)
+    if kind == KIND_ARTIFACT:
+        return render_artifact_page(concept, path)
     title = concept.get("title", concept.get("id", ""))
     tool = path.get("tool", "")
     why_tool = path.get("why_this_tool", "")
@@ -1524,6 +1693,10 @@ def render_shipped(course_data_dir: Path, out_dir: Path, asset_base: str) -> Ren
 __all__ = [
     "ASSET_REL",
     "COURSE_CSS_NAME",
+    "KIND_ARTIFACT",
+    "KIND_CASE",
+    "KIND_TOOL",
+    "PATH_KINDS",
     "PATHWAY_PAGE",
     "PERSONAL",
     "RenderOptions",
@@ -1538,6 +1711,7 @@ __all__ = [
     "course_css",
     "human_size",
     "load_paths",
+    "path_kind",
     "package_assets_dir",
     "render_shipped",
     "render_to_folder",
@@ -1548,6 +1722,7 @@ __all__ = [
     "total_size",
     "validate_course",
     "validate_marker",
+    "validate_case_path",
     "validate_path",
     "validate_shipped_course",
 ]

@@ -7,9 +7,19 @@ course the renderer (G3, ``learning_render``) draws. Four steps, each a function
    35 lessons), each lesson mapped to concept ids or marked ``curriculum`` (field-standard, no posting names
    it), the expectations and technology groups of the front page, and 2 to 5 candidate source URLs per lesson
    (``data/instructions/learning_curriculum.md``; :func:`parse_curriculum` validates the answer).
+   A curriculum can also be GIVEN (``--curriculum FILE``, :func:`parse_given_curriculum`): then step 6 makes no model
+   call, the file is validated with the same rules (every concept id is one the postings counted or one of the shared
+   key list; a trait lesson is refused; 1 to 60 lessons) and stored as the curriculum. A lesson may carry
+   ``practice`` (``tool``, ``case`` or ``none``; absent: ``tool``, falling back to a case exercise when no page of
+   its tool verifies): ``case`` goes straight to ``learning_case``, ``none`` has no practice page.
 7. SOURCES (no model unless a lesson is left short): every candidate URL is fetched under the outbound
    policy of ``learning_fetch`` and kept only when it answered 200 with a title and is not a site's home page.
-   The page's anchorable headings are kept with it. Lessons left with no source, and lessons whose MAIN TOOL
+   A source has a KIND: ``doc`` (the default: documentation, a guide, a tutorial, a paper's page, a repository, a
+   spec), ``article`` or ``book``. A documentation page keeps its anchorable headings, which a tool practice path
+   cites. An ARTICLE or BOOK page has none to anchor on: it is verified by its title, a deep path and the length of
+   its text (``learning_fetch.article_problem``) and is cited as a whole page, never at a heading; it never
+   decides the main tool of a lesson or the hosts its practice path may cite (:func:`doc_sources`), and the
+   renderer labels it. Lessons left with no source, and lessons whose MAIN TOOL
    (:func:`choose_main_tool`) has fewer than two verified pages of its own, get ONE more model call asking for
    three new URLs each (it names the tool and the URLs that did not answer); a lesson still without any source
    is dropped (``no_verified_source``).
@@ -51,8 +61,11 @@ import re
 from typing import Any, Protocol
 from urllib.parse import urlsplit
 
-from .learning_corpus import LearningCorpusError, MeteredRoleModel, _error_text, _json_object, _render, _template
-from .learning_fetch import STOP_BUDGET, FetchStopped, clean_text
+from .learning_corpus import (
+    KEYS_BLOCK_CHARS, ConceptKey, LearningCorpusError, MeteredRoleModel, _error_text, _json_object, _render, _template, canonical_key_ids,
+    keys_digest,
+)
+from .learning_fetch import STOP_BUDGET, FetchStopped, article_problem, clean_text
 from .learning_store import LearningError
 from .resume_privacy import guard_private, redact_inline
 from .untrusted_text import fence_untrusted_posting
@@ -80,6 +93,13 @@ SOURCE_TITLE_CHARS_MAX = 160
 URL_CHARS_MAX = 500
 ID_CHARS_MAX = 48
 SOURCE_KINDS = ("doc", "guide", "tutorial", "paper", "book", "article", "course", "repo", "spec")
+#: The kinds of a source that is cited as a whole page (an article, a book chapter); every other kind is documentation.
+PAGE_LEVEL_KINDS = ("article", "book")
+#: What a lesson's ``practice`` may say: a tool path, a case or artifact page, or no practice page.
+PRACTICE_KINDS = ("tool", "case", "none")
+#: A given curriculum (``--curriculum``): at most this many lessons; and the renderer's own cap holds on top of it.
+GIVEN_LESSONS_MAX = 60
+GIVEN_MODULES_MAX = 60
 
 #: Step 8 bounds.
 SUBTOPICS_MAX = 6
@@ -244,6 +264,18 @@ def _prose(value: object) -> str:
 # ---------------------------------------------------------------------------
 
 
+def is_page_level_source(source: object) -> bool:
+    """Whether a source (or candidate) is an article or a book page: cited as a whole page, not at a heading."""
+
+    return isinstance(source, Mapping) and source.get("kind") in PAGE_LEVEL_KINDS
+
+
+def doc_sources(sources: Iterable[Mapping[str, Any]]) -> list[Mapping[str, Any]]:
+    """The sources that are documentation (every kind but ``article`` and ``book``): what a main tool and its hosts are chosen from."""
+
+    return [source for source in sources if not is_page_level_source(source)]
+
+
 def _kept(counted_concepts: Iterable[Mapping[str, object]]) -> list[Mapping[str, object]]:
     return [concept for concept in counted_concepts if concept.get("kept", True) and isinstance(concept.get("id"), str)]
 
@@ -302,15 +334,42 @@ def _is_trait_lesson(title: str, concepts: Sequence[str], known: Mapping[str, Ma
     return not any(_is_technical(known[concept_id]) for concept_id in concepts)
 
 
-def curriculum_prompt(role_text: str, counted_concepts: Sequence[Mapping[str, object]], validation_error: BaseException | str | None = None) -> str:
-    """The curriculum prompt. It is built from the role and the counted concepts only: no resume line is an input."""
+def _key_lines(keys: Sequence[ConceptKey], counted_ids: Iterable[str]) -> str:
+    """``id | display`` of the shared keys no posting counted (a counted one is in the concept block already), at most 40k characters."""
 
-    lines = "\n".join(_concept_line(concept) for concept in _kept(counted_concepts)) or "(no concept was counted)"
+    counted = set(counted_ids)
+    lines: list[str] = []
+    used = 0
+    for key in keys:
+        if key.key in counted:
+            continue
+        line = f"{key.key} | {clean_text(key.display)}"
+        if used + len(line) + 1 > KEYS_BLOCK_CHARS:
+            break
+        lines.append(line)
+        used += len(line) + 1
+    return "\n".join(lines)
+
+
+def curriculum_prompt(
+    role_text: str, counted_concepts: Sequence[Mapping[str, object]], validation_error: BaseException | str | None = None,
+    keys: Sequence[ConceptKey] = (),
+) -> str:
+    """The curriculum prompt. It is built from the role and the counted concepts only: no resume line is an input.
+
+    ``keys`` is the shared key list (``--keys``): the ids of it that no posting counted are listed too, as ids a lesson
+    may name in ``concepts`` when it teaches that key.
+    """
+
+    kept = _kept(counted_concepts)
+    lines = "\n".join(_concept_line(concept) for concept in kept) or "(no concept was counted)"
+    listed = _key_lines(keys, (str(concept["id"]) for concept in kept)) if keys else ""
     return _render(
         _template(_CURRICULUM_RESOURCE),
         {
             "plan": "", "retry": None, "role": role_text, "concepts": fence_untrusted_posting(lines), "lessons": None,
             "validation_error": _error_text(validation_error),
+            "keys": fence_untrusted_posting(listed) if listed else None,
         },
     )
 
@@ -352,7 +411,9 @@ def _candidates(value: object, limit: int, tried: Iterable[str] = ()) -> list[di
     return found
 
 
-def parse_curriculum(raw: str, role_text: str, counted_concepts: Sequence[Mapping[str, object]]) -> dict[str, object]:
+def parse_curriculum(
+    raw: str, role_text: str, counted_concepts: Sequence[Mapping[str, object]], keys: Sequence[ConceptKey] = (),
+) -> dict[str, object]:
     """The curriculum of a model answer, or ``curriculum_invalid`` naming the first thing wrong.
 
     Refused: no JSON object; fewer than 6 or more than 9 modules; a module without 3 to 5 lessons; fewer than 25
@@ -362,29 +423,94 @@ def parse_curriculum(raw: str, role_text: str, counted_concepts: Sequence[Mappin
     its title names a trait or level ("mentoring", "operating at staff level", "cross-functional collaboration"
     with no method word) AND it has no technical concept; a trait or level is shown under the front page's
     expectations and is never a lesson, whatever the role; a lesson with fewer than 2 usable source URLs; an
-    expectations or technologies id that was not counted; a counted ``tool`` concept in no technology group.
+    expectations or technologies id that was not counted; a counted ``tool`` concept in no technology group; a
+    ``practice`` that is not ``tool``, ``case`` or ``none``.
+
+    ``keys`` (the shared key list, ``--keys``): an id of the list that no posting counted may be named by a lesson,
+    an expectation or a technology group as well.
     """
 
-    decoded = _clean_tree(_json_object(raw, "curriculum_invalid"))
+    return _curriculum(_clean_tree(_json_object(raw, "curriculum_invalid")), role_text, counted_concepts, keys, given=False)
 
+
+def parse_given_curriculum(
+    data: object, role_text: str, counted_concepts: Sequence[Mapping[str, object]], keys: Sequence[ConceptKey] = (),
+) -> dict[str, object]:
+    """A curriculum somebody wrote (``--curriculum FILE``: ``{modules: [{id, title, lessons: [...]}], expectations?, technologies?}``),
+    validated by the rules of :func:`parse_curriculum`, or ``curriculum_invalid`` naming the first thing wrong.
+
+    Different from a model's answer, and only in what a person who curated a module is allowed to leave out or
+    to ask for: 1 to :data:`GIVEN_LESSONS_MAX` lessons in all (and no more than the renderer's cap of a course) in
+    any number of modules of any size; a lesson with no ``sources`` (step 7 asks the model for some, as it does
+    for any lesson left with none); no ``expectations`` and no ``technologies`` (the groups are left empty, and
+    the rule that every counted tool is in a group applies only when ``technologies`` is given). Everything else
+    is the same: ids, titles with no link or contact detail, every concept id one the postings counted or one of
+    ``keys``, a lesson that names a concept or is marked ``curriculum``, and no trait lesson.
+    """
+
+    if not isinstance(data, Mapping):
+        raise LearningCourseError("curriculum_invalid", "the curriculum file holds no JSON object")
+    return _curriculum(_clean_tree(dict(data)), role_text, counted_concepts, keys, given=True)
+
+
+def check_given_shape(data: object, role_text: str, keys: Sequence[ConceptKey] = ()) -> dict[str, object]:
+    """:func:`parse_given_curriculum` before anything is counted: what can be known from the file and the key list alone.
+
+    A concept id that is not a key of the list may be one the postings will count, so it is read as a plain technical
+    concept here (the trait check then sees one more technical id than the final check will); the final check, at step
+    6, is the one with the counted vocabulary. ``curriculum_invalid`` names the first thing wrong.
+    """
+
+    ids: set[str] = set()
+    if isinstance(data, Mapping):
+        for module in data.get("modules", []) if isinstance(data.get("modules"), list) else []:
+            for lesson in module.get("lessons", []) if isinstance(module, Mapping) and isinstance(module.get("lessons"), list) else []:
+                if isinstance(lesson, Mapping) and isinstance(lesson.get("concepts"), list):
+                    ids.update(item for item in lesson["concepts"] if isinstance(item, str))
+        for part in ("expectations", "technologies"):
+            group = data.get(part)
+            for items in group.values() if isinstance(group, Mapping) else []:
+                if isinstance(items, list):
+                    ids.update(item for item in items if isinstance(item, str))
+    assumed = [
+        {"id": name, "display": name, "category": "skill", "technical": True}
+        for name in sorted(ids) if _ID.fullmatch(name) and name not in canonical_key_ids(keys)
+    ]
+    return parse_given_curriculum(data, role_text, assumed, keys)
+
+
+def _curriculum(
+    decoded: Mapping[str, Any], role_text: str, counted_concepts: Sequence[Mapping[str, object]], keys: Sequence[ConceptKey], *, given: bool,
+) -> dict[str, object]:
     def bad(message: str) -> LearningCourseError:
         return LearningCourseError("curriculum_invalid", message)
 
-    known = {str(concept["id"]): concept for concept in _kept(counted_concepts)}
+    counted = {str(concept["id"]): concept for concept in _kept(counted_concepts)}
+    # An id of the shared list is a concept a lesson may teach although no posting counted it: its category and
+    # ``technical`` flag are the list's. A counted concept keeps its own.
+    known: dict[str, Mapping[str, object]] = {
+        key.key: {"id": key.key, "display": key.display, "category": key.category, "technical": key.technical} for key in keys
+    }
+    known.update(counted)
+    alias_of = canonical_key_ids(keys)
 
     def ids_of(value: object, what: str) -> list[str]:
         if not isinstance(value, list):
             raise bad(f"{what} must be a list of concept ids")
         found: list[str] = []
         for item in value:
-            if not isinstance(item, str) or item not in known:
+            name = item if isinstance(item, str) and item in known else alias_of.get(item) if isinstance(item, str) else None
+            if name is None or name not in known:
                 raise bad(f"{what}: unknown concept id {str(item)[:ID_CHARS_MAX]!r}")
-            if item not in found:
-                found.append(item)
+            if name not in found:
+                found.append(name)
         return found
 
     raw_modules = decoded.get("modules")
-    if not isinstance(raw_modules, list) or not MODULES_MIN <= len(raw_modules) <= MODULES_MAX:
+    if given:
+        if not isinstance(raw_modules, list) or not 1 <= len(raw_modules) <= GIVEN_MODULES_MAX:
+            raise bad(f"modules must hold 1 to {GIVEN_MODULES_MAX} modules")
+    elif not isinstance(raw_modules, list) or not MODULES_MIN <= len(raw_modules) <= MODULES_MAX:
         raise bad(f"modules must hold {MODULES_MIN} to {MODULES_MAX} modules")
     modules: list[dict[str, object]] = []
     module_ids: set[str] = set()
@@ -400,7 +526,10 @@ def parse_curriculum(raw: str, role_text: str, counted_concepts: Sequence[Mappin
         if not module_title:
             raise bad(f"the title of module {module_id} must be one line of 1 to {TITLE_CHARS_MAX} characters with no link or contact detail")
         raw_lessons = raw_module.get("lessons")
-        if not isinstance(raw_lessons, list) or not MODULE_LESSONS_MIN <= len(raw_lessons) <= MODULE_LESSONS_MAX:
+        if given:
+            if not isinstance(raw_lessons, list) or not 1 <= len(raw_lessons) <= GIVEN_LESSONS_MAX:
+                raise bad(f"module {module_id} must hold 1 to {GIVEN_LESSONS_MAX} lessons")
+        elif not isinstance(raw_lessons, list) or not MODULE_LESSONS_MIN <= len(raw_lessons) <= MODULE_LESSONS_MAX:
             raise bad(f"module {module_id} must hold {MODULE_LESSONS_MIN} to {MODULE_LESSONS_MAX} lessons")
         lessons: list[dict[str, object]] = []
         for raw_lesson in raw_lessons:
@@ -424,17 +553,29 @@ def parse_curriculum(raw: str, role_text: str, counted_concepts: Sequence[Mappin
                     "a learner can practice; traits and seniority talk belong under expectations only"
                 )
             candidates = _candidates(raw_lesson.get("sources"), CANDIDATES_MAX)
-            if len(candidates) < CANDIDATES_MIN:
+            if len(candidates) < CANDIDATES_MIN and not given:
                 raise bad(f"lesson {lesson_id} needs at least {CANDIDATES_MIN} usable source URLs (https, a page under a site, not its home page)")
+            practice = raw_lesson.get("practice")
+            if practice is not None and practice not in PRACTICE_KINDS:
+                raise bad(f"practice of lesson {lesson_id} must be one of: {', '.join(PRACTICE_KINDS)}")
             lessons.append({
                 "id": lesson_id, "title": title, "concepts": concepts, "source": "postings" if concepts else "curriculum",
-                "candidates": candidates,
+                "candidates": candidates, **({"practice": practice} if practice is not None else {}),
             })
         modules.append({"id": module_id, "title": module_title, "lessons": lessons})
-    if not LESSONS_MIN <= len(lesson_ids) <= LESSONS_MAX:
+    if given:
+        from .learning_render import MAX_LESSONS
+
+        if not 1 <= len(lesson_ids) <= GIVEN_LESSONS_MAX:
+            raise bad(f"the module must hold 1 to {GIVEN_LESSONS_MAX} lessons in all; this one holds {len(lesson_ids)}")
+        if len(lesson_ids) > MAX_LESSONS:
+            raise bad(f"a course page set holds at most {MAX_LESSONS} lessons (this one holds {len(lesson_ids)}): split the module into two files")
+    elif not LESSONS_MIN <= len(lesson_ids) <= LESSONS_MAX:
         raise bad(f"the course must hold {LESSONS_MIN} to {LESSONS_MAX} lessons in all; this one holds {len(lesson_ids)}")
 
     raw_expectations = decoded.get("expectations")
+    if raw_expectations is None and given:
+        raw_expectations = {}
     if not isinstance(raw_expectations, Mapping):
         raise bad("expectations must be an object with responsibilities and scope")
     expectations = {
@@ -442,6 +583,9 @@ def parse_curriculum(raw: str, role_text: str, counted_concepts: Sequence[Mappin
         "scope_at_level": ids_of(raw_expectations.get("scope", []), "expectations.scope"),
     }
     raw_technologies = decoded.get("technologies")
+    stated_technologies = raw_technologies is not None or not given
+    if raw_technologies is None and given:
+        raw_technologies = {}
     if not isinstance(raw_technologies, Mapping) or len(raw_technologies) > TECH_GROUPS_MAX:
         raise bad(f"technologies must be an object of at most {TECH_GROUPS_MAX} groups")
     technologies: dict[str, list[str]] = {}
@@ -451,27 +595,53 @@ def parse_curriculum(raw: str, role_text: str, counted_concepts: Sequence[Mappin
             raise bad("a technologies group title is one line, used once, with no link or contact detail")
         technologies[name] = ids_of(raw_ids, f"technologies group {name!r}")
     grouped = {concept_id for ids in technologies.values() for concept_id in ids}
-    uncovered = sorted(concept_id for concept_id, concept in known.items() if concept.get("category") == "tool" and concept_id not in grouped)
-    if uncovered:
+    uncovered = sorted(concept_id for concept_id, concept in counted.items() if concept.get("category") == "tool" and concept_id not in grouped)
+    if uncovered and stated_technologies:
         raise bad("technologies must cover every tool concept; missing: " + ", ".join(uncovered[:20]))
     return {
         "schema_version": SCHEMA_CURRICULUM, "role": role_text, "modules": modules, "expectations": expectations,
-        "technologies": technologies, "planned_lessons": len(lesson_ids),
+        "technologies": technologies, "planned_lessons": len(lesson_ids), **({"origin": "given"} if given else {}),
     }
 
 
-def plan_curriculum(model: CourseModel, role_text: str, counted_concepts: Sequence[Mapping[str, object]]) -> dict[str, object]:
+def plan_curriculum(
+    model: CourseModel, role_text: str, counted_concepts: Sequence[Mapping[str, object]], keys: Sequence[ConceptKey] = (),
+) -> dict[str, object]:
     """Step 6: one call, and one more with the validator's message when the first answer does not validate."""
 
     error: LearningError | None = None
     for _attempt in range(2):
-        raw = model.ask(curriculum_prompt(role_text, counted_concepts, error), items=1, timeout_seconds=LONG_CALL_TIMEOUT_SECONDS)
+        raw = model.ask(curriculum_prompt(role_text, counted_concepts, error, keys), items=1, timeout_seconds=LONG_CALL_TIMEOUT_SECONDS)
         try:
-            return parse_curriculum(raw, role_text, counted_concepts)
+            return parse_curriculum(raw, role_text, counted_concepts, keys)
         except (LearningCorpusError, LearningCourseError) as exc:
             model.invalid_output()
             error = exc
     raise LearningCourseError("curriculum_invalid", f"the model's curriculum for this role was not usable, twice ({error})")
+
+
+def given_digest(given: Mapping[str, Any], keys: Sequence[ConceptKey] = ()) -> str:
+    """A short fingerprint of a given curriculum and the key list it was checked against (a stored curriculum made from them carries it)."""
+
+    from ..canonical import digest_imported_bytes
+
+    body = json.dumps([dict(given), keys_digest(keys)], sort_keys=True, ensure_ascii=False).encode("utf-8")
+    return digest_imported_bytes(body).removeprefix("sha256:")[:16]
+
+
+def key_concepts(curriculum: Mapping[str, Any], counted_concepts: Sequence[Mapping[str, object]], keys: Sequence[ConceptKey]) -> list[ConceptKey]:
+    """The keys of the shared list that a curriculum uses (a lesson, an expectation or a technology group) and no posting counted."""
+
+    counted = {str(concept["id"]) for concept in _kept(counted_concepts)}
+    by_id = {key.key: key for key in keys}
+    used: list[str] = []
+    for lesson in _lessons(curriculum):
+        used.extend(lesson.get("concepts", []))
+    for ids in (curriculum.get("expectations") or {}).values():
+        used.extend(ids)
+    for ids in (curriculum.get("technologies") or {}).values():
+        used.extend(ids)
+    return [by_id[name] for name in dict.fromkeys(used) if name in by_id and name not in counted]
 
 
 def _lessons(curriculum: Mapping[str, Any]) -> list[Mapping[str, Any]]:
@@ -628,7 +798,7 @@ def source_strength(source: Mapping[str, Any], name: str, link: str = "") -> int
 def tool_pages(sources: Iterable[Mapping[str, Any]], name: str, link: str = "") -> list[Mapping[str, Any]]:
     """The verified sources that are pages of the tool ``name`` (:func:`source_strength` above 0), in the order given."""
 
-    return [source for source in sources if isinstance(source, Mapping) and source_strength(source, name, link)]
+    return [source for source in doc_sources(sources) if isinstance(source, Mapping) and source_strength(source, name, link)]
 
 
 @dataclass(frozen=True)
@@ -669,9 +839,11 @@ def choose_main_tool(title: str, candidates: Sequence[ToolCandidate], sources: S
        postings do not count but that has verified pages (most pages wins) is taken before a counted tool
        with none: a path is only ever built from pages of the tool its header names.
 
-    Ties keep the order of ``candidates``.
+    Ties keep the order of ``candidates``. An article or a book page is not a page of any tool: ``sources`` are
+    read as their documentation sources only (:func:`doc_sources`), for the pages and for the majority.
     """
 
+    sources = doc_sources(sources)
     pages = [len(tool_pages(sources, item.name, item.link)) for item in candidates]
     order = range(len(candidates))
     titled = [(index, named_at(title, candidates[index].name)) for index in order if candidates[index].titled]
@@ -778,7 +950,10 @@ def gather_sources(
     """Step 7: the candidate pages that answered, per lesson, with their headings; and the lessons left with none.
 
     A source is ``{title, url, kind, page_title, requested_url, headings, page_level_citable}``: ``url`` is the
-    address that answered 200 (after at most three vetted redirects), never the text a model wrote. A page is
+    address that answered 200 (after at most three vetted redirects), never the text a model wrote. ``kind`` is
+    ``doc`` (the default; also guide, tutorial, paper, repo, spec, course), ``article`` or ``book``: the last two are
+    verified by title, a deep path and the length of the text (``learning_fetch.article_problem``) and are cited
+    as a whole page (``page_level_citable`` true), so they hold the headings they have and never use them. A page is
     fetched once however many lessons name it. A lesson with no source gets one model call for three new URLs
     (``model`` ``None``: no call); still none, and it is in ``dropped`` with ``no_verified_source``. A spent
     fetch budget ends the fetching (``stopped``) and no follow-up call is made; a cancel raises ``FetchStopped``.
@@ -824,6 +999,10 @@ def gather_sources(
             reason = "no_title"
         if reason is None and (usable_url(fetched.url) is None or is_bare_domain_url(fetched.url)):
             reason = "home_page"
+        kind = candidate.get("kind", "doc")
+        if reason is None and kind in PAGE_LEVEL_KINDS:
+            # An article or a book page has no anchors: title + deep path + text length (``learning_fetch.article_problem``).
+            reason = article_problem(fetched.page)
         if reason is not None:
             rejected.append({"lesson": lesson_id, "url": url, "reason": str(reason)})
             return
@@ -832,8 +1011,10 @@ def gather_sources(
         page = fetched.page
         verified[lesson_id].append({
             "title": candidate.get("title") or _one_line(page.title, SOURCE_TITLE_CHARS_MAX) or "Source page",
-            "url": fetched.url, "kind": candidate.get("kind", "doc"), "page_title": page.title, "requested_url": url,
-            "headings": [dict(heading) for heading in page.headings], "page_level_citable": page.page_level_citable,
+            "url": fetched.url, "kind": kind, "page_title": page.title, "requested_url": url,
+            "headings": [dict(heading) for heading in page.headings],
+            # An article or book page is cited as the whole page it is, whatever headings it has.
+            "page_level_citable": True if kind in PAGE_LEVEL_KINDS else page.page_level_citable,
         })
 
     for number, lesson in enumerate(lessons, 1):
@@ -848,6 +1029,8 @@ def gather_sources(
             return {}
         found: dict[str, str] = {}
         for lesson in lessons:
+            if lesson.get("practice") in ("case", "none"):
+                continue  # a written exercise or none: there is no tool whose documentation must be found
             tool = curriculum_tool(lesson, counted_concepts, verified[str(lesson["id"])])
             if tool is not None and len(tool_pages(verified[str(lesson["id"])], tool)) < MAIN_TOOL_PAGES_MIN:
                 found[str(lesson["id"])] = tool
@@ -1468,22 +1651,33 @@ class CourseWork:
 def run_course_steps(
     work_dir: Path, *, model: CourseModel, fetcher: _PageFetcher, role_text: str, corpus: Mapping[str, object],
     counted_concepts: Sequence[Mapping[str, object]], master_lines: object, cancel: Callable[[], bool] | None = None,
-    progress: Callable[[str], None] | None = None,
+    progress: Callable[[str], None] | None = None, keys: Sequence[ConceptKey] = (), given: Mapping[str, Any] | None = None,
 ) -> dict[str, object]:
     """Steps 6, 7, 8 and 10 over a work folder: a step whose stored result still validates is not run again.
 
     Returns the course (also written as ``course.json``). ``corpus`` and ``counted_concepts`` are G1's
     (``run_corpus()["corpus"]`` and ``["concepts"]``); ``master_lines`` goes to step 8 and nowhere else.
+
+    ``keys`` is the shared key list (``--keys``) and ``given`` a curriculum somebody wrote (``--curriculum``): with
+    ``given`` step 6 makes NO model call (:func:`parse_given_curriculum`), and a stored curriculum made from another
+    file (or by the model) is made again.
     """
 
     work = CourseWork(work_dir)
     say = progress or (lambda _text: None)
     curriculum = work.read(STEP_CURRICULUM, check_curriculum)
+    digest = given_digest(given, keys) if given is not None else None
+    if curriculum is not None and curriculum.get("input") != digest:
+        curriculum = None  # made from another file, or by the model: this run's curriculum is not it
     if curriculum is None:
         if cancel is not None and cancel():
             raise LearningCourseStopped()
-        say("Planning the modules and lessons...")
-        curriculum = plan_curriculum(model, role_text, counted_concepts)
+        if given is not None:
+            say("Checking the given modules and lessons...")
+            curriculum = {**parse_given_curriculum(given, role_text, counted_concepts, keys), "input": digest}
+        else:
+            say("Planning the modules and lessons...")
+            curriculum = plan_curriculum(model, role_text, counted_concepts, keys)
         work.write(STEP_CURRICULUM, curriculum)
     sources = work.read(STEP_SOURCES, lambda data: check_sources(data, curriculum))
     if sources is None:
@@ -1531,6 +1725,12 @@ __all__ = [
     "ToolCandidate",
     "assemble_course",
     "check_curriculum",
+    "check_given_shape",
+    "doc_sources",
+    "given_digest",
+    "is_page_level_source",
+    "key_concepts",
+    "parse_given_curriculum",
     "check_module",
     "check_sources",
     "choose_main_tool",
