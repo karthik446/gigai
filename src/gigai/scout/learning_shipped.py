@@ -637,6 +637,9 @@ def scan_shipped(folder: Path, banned: Forbidden) -> ScanReport:
 
     A posting's company is not searched in a URL field, and one on the reviewed allow list (``banned.allowed``) is
     not a hit: the report, and the refusal too, name every prose place such a name stands in (:class:`Allowed`).
+    The catalog's ``site.base_url`` is not scanned when it is the product's own :data:`SITE_BASE_URL`: it is the
+    product's configuration, not course text, and a name the master shares with the site's domain would otherwise
+    refuse every export (any other value of that field is scanned like every string).
     Every file must be JSON: another kind of file is refused (``ShippedExportError`` ``unexpected_file``), since
     nothing else belongs in a shipped course and it could not be read string by string.
     """
@@ -651,6 +654,8 @@ def scan_shipped(folder: Path, banned: Forbidden) -> ScanReport:
             raise ShippedExportError("unexpected_file", f"{name} is not a JSON file: a shipped course holds JSON only")
         files += 1
         for at, text, url in _strings(_read(path)):
+            if name == "catalog.json" and at == "site.base_url" and text == SITE_BASE_URL:
+                continue
             strings += 1
             total += len(words(text))
             hits.extend(Hit(kind, name, at, source) for kind, source in scan_text(text, banned, url=url))

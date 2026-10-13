@@ -1014,3 +1014,23 @@ def test_the_wheel_configuration_lists_only_the_shipped_catalogs() -> None:
     assert any(fnmatchcase(f"data/learning/shipped/{ROLE_KEY}/catalog.json", pattern) for pattern in patterns)
     for name in ("course.json", "paths/firing-ramps.json", "notes.txt"):
         assert not any(fnmatchcase(f"data/learning/shipped/{ROLE_KEY}/{name}", pattern) for pattern in patterns), f"{name} would ship"
+
+
+def test_the_products_own_site_url_is_not_a_master_name_hit_but_the_same_word_elsewhere_is(tmp_path: Path) -> None:
+    """A master name that is also a word of the site's own domain must not refuse every export (the catalog's
+    ``site.base_url`` is product configuration); the same name in prose, or in a base_url that is not the product's, is still a hit."""
+
+    work = make_work(tmp_path)
+    parts = shipped.MasterParts(lines=("Vexmoor kiln works",), ids=("b-7a8b9c",), names=("edgelab",))
+    report = export(work, tmp_path / "ok", master=parts)
+    assert report.lessons >= 1 and len(report.files) >= 1
+
+    edit(work, "course.json", set_body("The edgelab team fires on Fridays."))
+    with pytest.raises(ShippedScanError) as refused:
+        export(work, tmp_path / "prose", master=parts)
+    assert ("master_name", "course.json") in {(hit.kind, hit.file) for hit in refused.value.hits}
+
+    work = make_work(tmp_path / "again")
+    with pytest.raises(ShippedScanError) as refused:
+        export(work, tmp_path / "other-site", master=parts, base_url="https://edgelab.example.test/learn")
+    assert ("master_name", "catalog.json", "site.base_url") in {(hit.kind, hit.file, hit.field) for hit in refused.value.hits}
