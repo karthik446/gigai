@@ -4,7 +4,7 @@ A developer tool, not a user command: it is run at release time on the machine t
 
     python tools/learning_export_shipped.py --work <home>/scout/<project>/learning/work/<id> \
         --out src/gigai/scout/data/learning/shipped/<role-key> --role-key <role-key> \
-        (--master-home <home> [--master-target <target>] | --no-master) [--allow-name <name> ...]
+        (--master-home <home> [--master-target <target>] | --no-master) [--allow-name <name> ...] [--catalog-only]
 
 ``--master-home`` names a GigAI home whose stored master (``master_store.load_master``) and story ids the scan
 searches the shipped text for; ``--no-master`` scans for the postings' side only (and for anything shaped like a
@@ -16,6 +16,12 @@ is that name (as words, whatever the case) is not a hit. It is for a company nam
 product the course legitimately names, after a person has read each sentence: every allowed name and every prose
 place it stands in is printed, written or refused. It never lets through a posting sentence, a master line, an id
 or a name of the master, and it exists on this tool only.
+
+Two uses. WITHOUT ``--catalog-only`` the full folder (``course.json``, ``catalog.json``, ``paths/``) is written: that
+is what the public learning center imports (step 2 of publishing). WITH ``--catalog-only`` the scan still reads the
+full folder, and only ``catalog.json`` is written: that is the one file of a course that goes into GigAI's package
+data (``--out src/gigai/scout/data/learning/shipped/<role-key>``). ``--site-version`` says which site version the
+catalog's ``site`` block names (default: ``learning_shipped.SITE_VERSION``).
 
 It prints what the strip removed, what the scan searched for, the files with their raw and deflated sizes, and,
 when the scan refuses the export, every hit as kind, file, field and source (never the text). Nothing final is
@@ -82,6 +88,8 @@ def main(argv: list[str] | None = None) -> int:
     source.add_argument("--no-master", action="store_true", help="scan for the postings' side only")
     parser.add_argument("--master-target", type=Path, help="the target of --master-home (default: <home>/scout)")
     parser.add_argument("--allow-name", action="append", default=[], metavar="NAME", help="a reviewed posting company name the scan lets through in prose; repeatable, every place is printed")
+    parser.add_argument("--catalog-only", action="store_true", help="write only catalog.json (GigAI's package data); the scan still reads the full folder")
+    parser.add_argument("--site-version", default=learning_shipped.SITE_VERSION, help="the learning center version the catalog's site block names")
     args = parser.parse_args(argv)
 
     try:
@@ -90,7 +98,10 @@ def main(argv: list[str] | None = None) -> int:
             print(f"master: {len(master.lines)} lines, {len(master.ids)} ids, {len(master.names)} names")
         else:
             print("master: none")
-        report = learning_shipped.export_shipped(args.work, args.out, role_key=args.role_key, master=master, allow_names=args.allow_name)
+        report = learning_shipped.export_shipped(
+            args.work, args.out, role_key=args.role_key, master=master, allow_names=args.allow_name,
+            catalog_only=args.catalog_only, site_version=args.site_version,
+        )
     except learning_shipped.ShippedScanError as refused:
         print(f"REFUSED by the scan: {len(refused.hits)} hit(s); nothing was written to {args.out}")
         by_kind: dict[str, int] = {}
@@ -115,6 +126,8 @@ def main(argv: list[str] | None = None) -> int:
     print("\n".join(_allowed(report.scan.allowed, args.allow_name)), end="\n" if args.allow_name else "")
     print(f"scan: 0 hits in {report.scan.files} files, {report.scan.strings} strings, {report.scan.words} words")
     kinds = {"course.json": [0, 0, 0], "catalog.json": [0, 0, 0], "paths/*.json": [0, 0, 0]}
+    if args.catalog_only:
+        print("catalog only: course.json and paths/ were scanned and not written")
     for name, raw, packed in report.files:
         row = kinds["paths/*.json" if name.startswith("paths/") else name]
         row[0], row[1], row[2] = row[0] + 1, row[1] + raw, row[2] + packed

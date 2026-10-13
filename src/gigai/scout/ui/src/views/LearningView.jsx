@@ -12,6 +12,8 @@ import {
   IMPORT_COMMAND,
   LEARNING_POLL_MS,
   MORE_COURSES_NOTE,
+  MORE_COURSES_URL,
+  OPEN_PUBLIC_LABEL,
   OPEN_PAGE_LABEL,
   ROLE_PLACEHOLDER,
   WHAT_IS_A_COURSE,
@@ -31,7 +33,7 @@ import LearningRequestDialog from "../components/LearningRequestDialog.jsx";
 // operator type a role and request a new course (an estimate dialog first; nothing is generated before "Generate"),
 // shows a running course's plain progress with Stop, and Resume for a failed/interrupted one.
 // 0.1.11.10 shipped lessons (slice 3): the courses that ship inside GigAI are the first rows, each with its
-// "Shipped with GigAI" line, the state of the user's own pathway page as plain text, and "Open course".
+// "From the GigAI learning center" line, the state of the user's own pathway page as plain text, and "Open on scout.edgelab.one".
 // Slices 4b/5b: a shipped row has one button that builds (or rebuilds) that page. The build always compares the
 // course with the resume (about one model call), so the button opens a consent dialog with the estimate first;
 // "Build" starts the build, the row shows its plain progress while the list is polled, and "Open your pathway page"
@@ -351,7 +353,7 @@ export default function LearningView() {
               )}
               {row.canOpen && (
                 <a className="button small secondary" data-action="open-course" href={row.url} target="_blank" rel="noopener">
-                  Open course
+                  {row.shipped ? OPEN_PUBLIC_LABEL : "Open course"}
                 </a>
               )}
               {row.buildLabel && (
@@ -373,7 +375,9 @@ export default function LearningView() {
             </li>
             {row.shipped && !(rows[index + 1] && rows[index + 1].shipped) && (
               <li className="muted small" data-role="learning-more-courses">
-                {MORE_COURSES_NOTE}
+                <a href={MORE_COURSES_URL} target="_blank" rel="noopener">
+                  {MORE_COURSES_NOTE}
+                </a>
               </li>
             )}
             </Fragment>

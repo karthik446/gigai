@@ -1,8 +1,9 @@
 """0.1.11.10 shipped lessons, slice 1: the SHIPPED form of a course, its export and the scan that guards it.
 
-A shipped course is GENERIC course data that travels inside GigAI as package data
-(``gigai/scout/data/learning/shipped/<role-key>/``). It holds the concept vocabulary and the model-written lesson
-and practice text, and nothing else: nothing of a resume, no posting sentence, no company, no count. Everything
+A shipped course is GENERIC course data. The full folder (``course.json``, ``catalog.json``, ``paths/``) is what the
+export writes for the public learning center; only ``catalog.json`` travels inside GigAI as package data
+(``gigai/scout/data/learning/shipped/<role-key>/``). The folder holds the concept vocabulary and the model-written
+lesson and practice text, and nothing else: nothing of a resume, no posting sentence, no company, no count. Everything
 about one user (known/some/new, percentages) is built locally from that user's own master and stored postings.
 
 THE FOLDER, schema ``scout-learning-shipped-course:1`` (every file is minified JSON with sorted keys, UTF-8):
@@ -27,7 +28,8 @@ THE FOLDER, schema ``scout-learning-shipped-course:1`` (every file is minified J
   ids of the lesson). A key this module does not know is REFUSED, never passed through: a new field has to be
   judged before it ships.
 
-``catalog.json`` (schema ``scout-learning-shipped-catalog:1``), all the local pathway page needs of the course::
+``catalog.json`` (schema ``scout-learning-shipped-catalog:2``), all the local pathway page needs of the course. THE
+CATALOG IS WHAT GIGAI SHIPS: the lessons live on the public learning center (``site``) and the page links to them::
 
     {"schema_version", "role_key", "role", "titles": {"phrases": [...], "deny": [...]},
      "vocabulary": [{"id", "display", "category", "phrases", "technical"}],
@@ -35,7 +37,15 @@ THE FOLDER, schema ``scout-learning-shipped-course:1`` (every file is minified J
      "technologies": {"<group name>": ["<id>"]},
      "modules": [{"id", "title"}],
      "lessons": [{"id", "title", "module", "concept_keys", "technologies", "has_practice",
-                  "subtopics": [{"id", "title"}]}]}
+                  "prerequisites": [], "depth": null, "library_id"?,
+                  "subtopics": [{"id", "title"}]}],
+     "site": {"base_url", "site_version", "lessons_path", "practice_path", "pathways_path"},
+     "pathway_version", "concept_keys_version"}
+
+  ``library_id`` (optional, default the lesson's ``id``) is the lesson's id on the site. A reader accepts
+  ``scout-learning-shipped-catalog:1`` too (no ``site`` block: nothing is linked and the page says so).
+  ``course.json`` and ``paths/`` are written by the export for the SITE (``--catalog-only`` writes the catalog
+  alone, the only file in the wheel) and are never read by GigAI.
 
 ``paths/<lesson id>.json``: the practice path as generated, minus the sentences code wrote from the counts: the
 opening of ``why_this_tool`` ("N of M postings ... name <tool>." or "<tool> is named in this lesson; it is not
@@ -95,7 +105,16 @@ from typing import Any
 from .learning_store import LearningError
 
 SCHEMA_VERSION = "scout-learning-shipped-course:1"
-CATALOG_SCHEMA_VERSION = "scout-learning-shipped-catalog:1"
+CATALOG_SCHEMA_VERSION = "scout-learning-shipped-catalog:2"
+#: The catalog a reader still accepts: no ``site`` block, so nothing is linked.
+CATALOG_SCHEMA_V1 = "scout-learning-shipped-catalog:1"
+CATALOG_SCHEMAS = (CATALOG_SCHEMA_V1, CATALOG_SCHEMA_VERSION)
+#: What an export of the shipped catalog says about the public learning center (the site repo's ``content/site.json``).
+SITE_BASE_URL = "https://scout.edgelab.one/learn"
+SITE_VERSION = "2026.10.1"
+SITE_LESSONS_PATH, SITE_PRACTICE_PATH, SITE_PATHWAYS_PATH = "lessons", "practice", "pathways"
+PATHWAY_VERSION = 1
+CONCEPT_KEYS_VERSION = 1
 SOURCE_SCHEMA_VERSION = "scout-learning-course:1"
 
 COURSE_FILENAME = "course.json"
@@ -167,6 +186,85 @@ KIND_MASTER_LINE, KIND_MASTER_SHINGLE, KIND_MASTER_ID, KIND_MASTER_NAME = "maste
 KIND_ID_SHAPE, KIND_POSTING_SHINGLE, KIND_POSTING_COMPANY, KIND_POSTING_COUNT = "id_shape", "posting_shingle", "posting_company", "posting_count"
 _NAME_KINDS = frozenset({KIND_MASTER_NAME, KIND_POSTING_COMPANY})
 HITS_SHOWN = 20
+
+
+_SITE_SEGMENT = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")
+_SITE_URL = re.compile(r"https://[a-z0-9.-]+(?::[0-9]+)?(?:/[A-Za-z0-9._~-]+)*")
+_SITE_VERSION_CHARS_MAX = 40
+
+
+@dataclass(frozen=True)
+class Site:
+    """Where the public learning center is, as a catalog says (``catalog["site"]``): the one place a link may point to.
+
+    Every link is built here: the stable, unversioned URLs ``<base>/lessons/<lesson>/#<subtopic>``,
+    ``<base>/practice/<lesson>/`` and ``<base>/pathways/<role-key>/``. No query string, nothing of the user.
+    """
+
+    base_url: str
+    site_version: str
+    lessons_path: str = SITE_LESSONS_PATH
+    practice_path: str = SITE_PRACTICE_PATH
+    pathways_path: str = SITE_PATHWAYS_PATH
+
+    @property
+    def host(self) -> str:
+        return self.base_url.split("/", 3)[2]
+
+    def home_url(self) -> str:
+        return f"{self.base_url}/"
+
+    def lesson_url(self, library_id: str, anchor: str | None = None) -> str:
+        found = f"{self.base_url}/{self.lessons_path}/{_quote(library_id)}/"
+        return f"{found}#{_quote(anchor)}" if anchor else found
+
+    def practice_url(self, library_id: str) -> str:
+        return f"{self.base_url}/{self.practice_path}/{_quote(library_id)}/"
+
+    def pathway_url(self, role_key: str) -> str:
+        return f"{self.base_url}/{self.pathways_path}/{_quote(role_key)}/"
+
+    def owns(self, url: str) -> bool:
+        """Whether ``url`` is an address on the site's base (the only external link a local page may hold)."""
+
+        return url == self.base_url or url.startswith(self.base_url + "/")
+
+
+def _quote(text: str) -> str:
+    from urllib.parse import quote
+
+    return quote(str(text), safe="-_.~")
+
+
+def catalog_site(catalog: object) -> Site | None:
+    """The :class:`Site` of a catalog, or ``None`` for a ``:1`` catalog or a ``site`` block that is not valid.
+
+    A valid block has an ``https`` ``base_url`` of plain path segments (no query, no fragment, no credentials, no
+    trailing slash needed) and a ``site_version`` text; the three paths are plain words. With none, nothing links.
+    """
+
+    if not isinstance(catalog, Mapping) or catalog.get("schema_version") != CATALOG_SCHEMA_VERSION:
+        return None
+    found = catalog.get("site")
+    if not isinstance(found, Mapping):
+        return None
+    base, version = found.get("base_url"), found.get("site_version")
+    if not isinstance(base, str) or not isinstance(version, str) or not version.strip() or len(version) > _SITE_VERSION_CHARS_MAX:
+        return None
+    base = base.rstrip("/")
+    if not _SITE_URL.fullmatch(base):
+        return None
+    paths = [found.get(name, default) for name, default in (("lessons_path", SITE_LESSONS_PATH), ("practice_path", SITE_PRACTICE_PATH), ("pathways_path", SITE_PATHWAYS_PATH))]
+    if not all(isinstance(path, str) and _SITE_SEGMENT.fullmatch(path) for path in paths):
+        return None
+    return Site(base, version.strip(), *paths)
+
+
+def library_id(lesson: Mapping[str, Any]) -> str:
+    """The id a lesson has on the site: its ``library_id`` when it has one, else its own ``id``."""
+
+    found = lesson.get("library_id")
+    return found if isinstance(found, str) and found else str(lesson.get("id", ""))
 
 
 class ShippedExportError(LearningError):
@@ -608,10 +706,12 @@ class Shipped:
     paths: dict[str, dict[str, Any]]
     removed: dict[str, int]
 
-    def files(self) -> dict[str, bytes]:
-        """The folder's files by relative name, as written: minified, keys sorted."""
+    def files(self, *, catalog_only: bool = False) -> dict[str, bytes]:
+        """The folder's files by relative name, as written: minified, keys sorted. ``catalog_only``: just ``catalog.json``."""
 
         found = {COURSE_FILENAME: _dump(self.course), CATALOG_FILENAME: _dump(self.catalog)}
+        if catalog_only:
+            return {CATALOG_FILENAME: found[CATALOG_FILENAME]}
         for lesson_id in sorted(self.paths):
             found[f"{PATHS_DIRNAME}/{lesson_id}.json"] = _dump(self.paths[lesson_id])
         return found
@@ -625,11 +725,13 @@ def check_role_key(role_key: str) -> str:
 
 def shipped_course(
     course: Mapping[str, Any], paths: Mapping[str, Mapping[str, Any]], curriculum: Mapping[str, Any], vocabulary: Mapping[str, Any],
-    titles: Mapping[str, Any], *, role_key: str,
+    titles: Mapping[str, Any], *, role_key: str, site_version: str = SITE_VERSION, base_url: str = SITE_BASE_URL,
+    pathway_version: int = PATHWAY_VERSION, concept_keys_version: int = CONCEPT_KEYS_VERSION,
 ) -> Shipped:
     """The shipped form of a finished ``course`` and its ``paths`` (see the module's description of the schema).
 
-    ``curriculum`` gives each lesson's concept keys, ``vocabulary`` and ``titles`` the catalog's counting inputs.
+    ``curriculum`` gives each lesson's concept keys, ``vocabulary`` and ``titles`` the catalog's counting inputs;
+    ``base_url`` and ``site_version`` say where the public lessons are and which site version the catalog was made for.
     Refused (:class:`ShippedExportError`): a course that is not ``done``, a key the schema does not know, a
     concept key or front id the vocabulary does not hold, a path of a lesson the course does not hold.
     """
@@ -702,7 +804,7 @@ def shipped_course(
             lesson_ids.add(lesson_id)
             lessons.append({
                 "id": lesson_id, "title": kept.get("title", ""), "module": shown_module.get("id"), "concept_keys": list(keys[lesson_id]),
-                "technologies": list(kept.get("technologies", [])), "has_practice": lesson_id in paths,
+                "technologies": list(kept.get("technologies", [])), "has_practice": lesson_id in paths, "prerequisites": [], "depth": None,
                 "subtopics": [{"id": sub.get("id"), "title": sub.get("title")} for sub in subtopics],
             })
         shown_module["concepts"] = shown_lessons
@@ -731,6 +833,11 @@ def shipped_course(
         "expectations": expectation_ids, "technologies": technology_ids,
         "modules": [{"id": module.get("id"), "title": module.get("title")} for module in modules],
         "lessons": lessons,
+        "site": {
+            "base_url": base_url, "site_version": site_version, "lessons_path": SITE_LESSONS_PATH, "practice_path": SITE_PRACTICE_PATH,
+            "pathways_path": SITE_PATHWAYS_PATH,
+        },
+        "pathway_version": pathway_version, "concept_keys_version": concept_keys_version,
     }
     result = Shipped(shipped, catalog, shown_paths, dict(sorted(removed.items())))
     problems = check_shipped(result)
@@ -747,6 +854,8 @@ def check_shipped(shipped: Shipped) -> list[str]:
         problems.append(f"course.json is not a {SCHEMA_VERSION}")
     if shipped.catalog.get("schema_version") != CATALOG_SCHEMA_VERSION:
         problems.append(f"catalog.json is not a {CATALOG_SCHEMA_VERSION}")
+    elif catalog_site(shipped.catalog) is None:
+        problems.append("catalog.json holds no valid site block")
     trees = {COURSE_FILENAME: shipped.course, CATALOG_FILENAME: shipped.catalog, **{f"{PATHS_DIRNAME}/{name}.json": path for name, path in shipped.paths.items()}}
     for name, tree in trees.items():
         for at, found in _walk(tree):
@@ -812,7 +921,10 @@ class ExportReport:
         return sum(packed for _name, _raw, packed in self.files)
 
 
-def export_shipped(work: Path, out: Path, *, role_key: str, master: MasterParts | None, allow_names: Iterable[str] = ()) -> ExportReport:
+def export_shipped(
+    work: Path, out: Path, *, role_key: str, master: MasterParts | None, allow_names: Iterable[str] = (), catalog_only: bool = False,
+    site_version: str = SITE_VERSION, base_url: str = SITE_BASE_URL,
+) -> ExportReport:
     """Write the shipped folder ``out`` of the finished course in ``work``; refuse it when the scan finds anything.
 
     ``master`` is what of a master the scan searches for (:func:`master_parts`), or ``None`` for no master.
@@ -822,17 +934,24 @@ def export_shipped(work: Path, out: Path, *, role_key: str, master: MasterParts 
     temporary name, scanned there (:func:`scan_shipped`) and moved into place only when clean, so a refused
     export leaves ``out`` as it was. The same inputs give the same bytes. An existing ``out`` is replaced only
     when it is a shipped course folder (``out_not_shipped`` otherwise).
+
+    The scan always reads the FULL folder (course, catalog and paths). ``catalog_only`` then moves into place only
+    ``catalog.json``: the form that goes into GigAI's package data (the site gets the full folder).
     """
 
     work, out = Path(work), Path(out)
     inputs = load_work(work)
-    shipped = shipped_course(inputs["course"], inputs["paths"], inputs["curriculum"], inputs["vocabulary"], inputs["titles"], role_key=role_key)
+    shipped = shipped_course(inputs["course"], inputs["paths"], inputs["curriculum"], inputs["vocabulary"], inputs["titles"], role_key=role_key, site_version=site_version, base_url=base_url)
     banned = build_forbidden(work, master, allow_names=allow_names)
     if out.exists():
-        previous = out / COURSE_FILENAME
-        if not out.is_dir() or (any(out.iterdir()) and not (previous.is_file() and _read(previous).get("schema_version") == SCHEMA_VERSION)):
+        previous, previous_catalog = out / COURSE_FILENAME, out / CATALOG_FILENAME
+        was_shipped = (previous.is_file() and _read(previous).get("schema_version") == SCHEMA_VERSION) or (
+            previous_catalog.is_file() and _read(previous_catalog).get("schema_version") in CATALOG_SCHEMAS
+        )
+        if not out.is_dir() or (any(out.iterdir()) and not was_shipped):
             raise ShippedExportError("out_not_shipped", f"{out} exists and is not a shipped course folder")
     files = shipped.files()
+    written = shipped.files(catalog_only=catalog_only)
     temporary = out.with_name(f".{out.name}.tmp-{os.getpid()}")
     shutil.rmtree(temporary, ignore_errors=True)
     try:
@@ -841,21 +960,29 @@ def export_shipped(work: Path, out: Path, *, role_key: str, master: MasterParts 
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_bytes(data)
         scan = scan_shipped(temporary, banned)
+        if catalog_only:
+            for name in files:
+                if name != CATALOG_FILENAME:
+                    (temporary / name).unlink()
+            shutil.rmtree(temporary / PATHS_DIRNAME, ignore_errors=True)
         if out.exists():
             shutil.rmtree(out)
         os.replace(temporary, out)
     finally:
         shutil.rmtree(temporary, ignore_errors=True)
     return ExportReport(
-        out=out, role_key=role_key, lessons=len(shipped.catalog["lessons"]), paths=len(shipped.paths),
-        files=tuple((name, len(data), deflated(data)) for name, data in files.items()),
+        out=out, role_key=role_key, lessons=len(shipped.catalog["lessons"]), paths=0 if catalog_only else len(shipped.paths),
+        files=tuple((name, len(data), deflated(data)) for name, data in written.items()),
         removed=shipped.removed, forbidden=banned.counts, exempt=banned.exempt, scan=scan,
     )
 
 
 __all__ = [
     "Allowed",
+    "CATALOG_SCHEMAS",
+    "CATALOG_SCHEMA_V1",
     "CATALOG_SCHEMA_VERSION",
+    "CONCEPT_KEYS_VERSION",
     "ExportReport",
     "FORBIDDEN_KEYS",
     "Forbidden",
@@ -866,21 +993,26 @@ __all__ = [
     "MASTER_NAME_SEPARATORS",
     "MASTER_NAME_SUFFIXES",
     "MasterParts",
+    "PATHWAY_VERSION",
     "POSTING_COUNT",
     "POSTING_COUNT_GAP_WORDS",
     "POSTING_FILES",
     "SCHEMA_VERSION",
+    "SITE_BASE_URL",
+    "SITE_VERSION",
     "SHINGLE_WORDS",
     "SHORT_SENTENCE_MIN_WORDS",
     "ScanReport",
     "Shipped",
     "ShippedExportError",
     "ShippedScanError",
+    "Site",
     "URL",
     "URL_KEYS",
     "URL_MAPS",
     "allowed_in",
     "build_forbidden",
+    "catalog_site",
     "check_role_key",
     "check_shipped",
     "course_terms",
@@ -888,6 +1020,7 @@ __all__ = [
     "export_shipped",
     "forbidden",
     "is_url_field",
+    "library_id",
     "load_work",
     "master_names",
     "master_parts",

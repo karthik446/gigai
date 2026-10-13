@@ -81,7 +81,7 @@ PLAN_WARNING = (
     "A course uses about 1 million tokens. On an entry-level plan (about $20 a month, such as Claude Pro or ChatGPT Plus) that can use up most or all of your weekly limit; use a higher plan, or one of the courses that come with GigAI; more are coming."
 )
 #: The line under the courses that come with GigAI (``learning list`` and the Learning tab).
-MORE_COURSES_NOTE = "More courses are coming in future GigAI releases."
+MORE_COURSES_NOTE = "More pathways on scout.edgelab.one"
 #: The key of the warning the dialog shows (the wording is the UI's).
 WARNING_KEY = "learning_higher_usage"
 #: A progress file not touched for this long is not a live job (``pipeline.busy.BATCH_QUIET_SECONDS``).

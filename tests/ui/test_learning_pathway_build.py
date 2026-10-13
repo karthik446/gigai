@@ -59,7 +59,7 @@ DIALOG = '[data-testid="learning-pathway-dialog"]'
 APPROVE = '[data-action="learning-pathway-approve"]'
 NOT_NOW = '[data-action="learning-pathway-cancel"]'
 BUILD_PATH = f"/api/learning/shipped/{KEY}/pathway"
-SHOT_DIR = Path("/Users/kar/orca/workspaces/gigai/orchestrator/research/role-packet/out/ui-shots")
+SHOT_DIR = Path("build/ui-artifacts/ui-shots")  # inside the repo's build folder, never in another project's
 
 #: A made-up master: one experience line, a skills list.
 MASTER = (("e-0a1b2c", "Ran the Widgetflow line for three widget plants"), ("s-112233", "Gearbox, Widgetflow, Sprocket"))
@@ -216,7 +216,8 @@ def test_the_button_asks_first_and_build_compares_the_resume_and_the_row_follows
     assert _text(ui, OPEN_PAGE) == "Open your pathway page"
     assert link.get_attribute("href") == f"/learning/shipped/{KEY}/pathway.html"
     assert link.get_attribute("target") == "_blank" and link.get_attribute("rel") == "noopener"
-    assert ui.page.locator(f"{SHIPPED} {OPEN}").get_attribute("href") == f"/learning/shipped/{KEY}/index.html", "Open course is as it was"
+    open_site = ui.page.locator(f"{SHIPPED} {OPEN}")
+    assert open_site.get_attribute("href") == f"https://scout.edgelab.one/learn/pathways/{KEY}/" and _text(ui, f"{SHIPPED} {OPEN}") == "Open on scout.edgelab.one"
 
     # The link opens the real page, under the course's policy, with what the resume shows.
     with ui.page.context.expect_page() as opened:
@@ -235,8 +236,10 @@ def test_the_button_asks_first_and_build_compares_the_resume_and_the_row_follows
     assert "What your resume shows" in shown and "Ran the Widgetflow line" in shown and "Production evidence" in shown
     assert page.locator("html").get_attribute("data-theme") == "light", "the course's theme script ran"
     page.screenshot(path=str(SHOT_DIR / "learning-pathway-page.png"), full_page=True)
-    page.locator('a[href="concept-lesson-alpha.html"]').first.click()
-    page.wait_for_url(f"**/learning/shipped/{KEY}/concept-lesson-alpha.html")
+    # The lessons are on the learning center: a link goes there in a new tab (not followed here), and no lesson page is local.
+    lesson_link = page.locator(f'main a[href="https://scout.edgelab.one/learn/lessons/lesson-alpha/"]').first
+    assert lesson_link.get_attribute("target") == "_blank" and lesson_link.get_attribute("rel") == "noopener"
+    assert page.locator('a[href$=".html"]:not([href="pathway.html"])').count() == 0 and "site version 2026.10.1" in (page.locator("footer").text_content() or "")
     assert console == [] and failed == [], (console, failed)
     page.close()
     ui.page.screenshot(path=str(SHOT_DIR / "learning-tab-pathway-built.png"))

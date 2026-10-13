@@ -46,7 +46,7 @@ from typing import Any
 
 from . import learning_pathway_local, learning_shipped_store, learning_store
 from .find_jobs.discovery.storage import atomic_write
-from .learning_shipped import CATALOG_FILENAME, COURSE_FILENAME
+from .learning_shipped import CATALOG_FILENAME
 from .learning_shipped_store import ShippedCourse
 from .learning_store import LearningError
 
@@ -310,14 +310,9 @@ def _build(
 
     role_key = course.role_key
     catalog = _catalog(course)
-    try:
-        shipped = json.loads((course.data_dir / COURSE_FILENAME).read_text(encoding="utf-8"))
-    except (OSError, ValueError) as exc:
-        raise LearningError("invalid_shipped", f"the shipped course {role_key} cannot be read") from exc
 
     say(COUNTING)
     counts = learning_pathway_local.count_postings(home_root, target, catalog)
-    site = learning_shipped_store.ensure_rendered(Path(home_root), course)
 
     lines = _master_lines(home_root, target)
     master = current_master_ref(home_root, target)
@@ -334,7 +329,7 @@ def _build(
 
     say(WRITING)
     out_path = learning_shipped_store.pathway_page_path(Path(home_root), Path(target), role_key)
-    page = learning_pathway_local.build_pathway_page(catalog, shipped, counts, markers, out_path, learning_shipped_store.ASSET_BASE, site_dir=site)
+    page = learning_pathway_local.build_pathway_page(catalog, counts, markers, out_path, learning_shipped_store.ASSET_BASE)
     learning_pathway_local.write_local_record(
         home_root, target, role_key, catalog=catalog, counts=counts, master=master if markers is not None else None, learning=learning,
     )

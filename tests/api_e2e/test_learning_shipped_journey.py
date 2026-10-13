@@ -1,25 +1,26 @@
-"""0.1.11.10 shipped lessons, slice 3: the courses that ship inside GigAI, over HTTP against the real supervised server.
+"""0.1.11.10 shipped lessons, slice 3 (learning center M2): the course catalogs that ship inside GigAI, over HTTP against the real supervised server.
 
 ``GET /api/learning/pathways`` (the shipped rows), ``GET /api/learning/pathways/{pathway_id}`` for a role key, the
-pages under ``/learning/shipped/{role key}/`` and the shared assets under ``/learning/_assets/``.
+ONE page under ``/learning/shipped/{role key}/`` (``pathway.html``) and the shared assets under ``/learning/_assets/``.
+The lessons are on the public learning center: every other page of a shipped course is a 404 here.
 
-The shipped course is SYNTHETIC (``make_shipped``, written into ``tmp_path``). The server is a child process, so it
+The shipped course is SYNTHETIC (``make_shipped``, a catalog written into ``tmp_path``). The server is a child process, so it
 is pointed at that folder through ``GIGAI_SCOUT_LEARNING_SHIPPED_DIR``, which ``learning_shipped_store`` reads only
 while both test seams are on (the harness starts the server with ``--allow-test-seams``).
 
 1. The list answers the shipped course FIRST, with ``source: "shipped"``, and the user's own course after it as
    before; the single read answers the shipped row for its role key; cancel and resume of a role key are 404.
-   Listing renders nothing.
-2. A page is rendered on first use into the home's cache and served with the EXACT Content-Security-Policy and the
-   three other headers of a generated course; ``/learning/shipped/<role key>/`` is the entry page; ``HEAD`` answers
-   the same headers and no body.
-3. A shared asset is served by its exact name with the same headers and the package file's bytes; the rendered
-   pages name only assets that are served.
+   The row's ``url`` is the course's pathway on the learning center (an address for the browser: the server never
+   fetches it). Listing renders nothing.
+2. No lesson, practice or entry page of a shipped course is served, nothing is rendered or cached, and
+   ``/learning/shipped/<role key>/`` is a 404; ``HEAD`` answers 404 with no body.
+3. A shared asset is served by its exact name with the EXACT Content-Security-Policy and the three other headers of
+   a generated course and the package file's bytes; the pathway page names only assets that are served.
 4. ``pathway.html`` is the one page from the user's home: a plain page saying it is not built yet while there is
-   none, the user's own file once it is there (and the list then says ``built``).
+   none (with a link to the course on the learning center), the user's own file once it is there (and the list then
+   says ``built``).
 5. 404, with no byte of anything else: an unknown role, a pathway id, every way out of the two folders (``../``,
-   ``%2e%2e``, ``%2f``, a doubly encoded dot, a backslash, an absolute path, a link), a folder, the cache's own
-   stamp file. No answer is a 5xx.
+   ``%2e%2e``, ``%2f``, a doubly encoded dot, a backslash, an absolute path), a folder, a lesson page. No answer is a 5xx.
 6. A request whose ``Host`` is not this server is refused (403), for ``GET`` and ``HEAD``.
 
 Slices 4b and 5b, the second journey: ``POST /api/learning/shipped/{role_key}/pathway`` builds the user's own
@@ -58,12 +59,12 @@ from gigai.scout.find_jobs import search_index
 from tests.api_e2e.harness import setup_and_init, start_server, stop_server
 from tests.api_e2e.test_learning_journey import CSP, SECRET, _course_headers, _error, _raw
 from tests.behaviors.scout_learning.test_learning_corpus import lever_job, seed_board
-from tests.behaviors.scout_learning.test_learning_shipped_store import KEY, PAGES, ROLE, make_shipped
+from tests.behaviors.scout_learning.test_learning_shipped_store import BASE, KEY, ROLE, make_shipped
 from tests.behaviors.scout_learning.test_learning_store import make_course
 from tests.support.latency import latency_bound
 
 
-def test_a_shipped_course_is_listed_first_and_served_from_the_cache_locked_down(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_shipped_course_is_listed_first_links_out_and_serves_only_its_own_page_locked_down(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     home, target = setup_and_init(tmp_path)
     shipped_root = tmp_path / "shipped-package"
     make_shipped(shipped_root)
@@ -72,12 +73,12 @@ def test_a_shipped_course_is_listed_first_and_served_from_the_cache_locked_down(
     try:
         client, port = server.client, server.port
         base = f"/learning/shipped/{KEY}"
-        cache = learning_shipped_store.cache_dir(home, KEY)
+        public = f"{BASE}/pathways/{KEY}/"
         shipped_row = {
             "id": KEY, "role_text": ROLE, "requested_at": None, "status": "done", "cost": None,
-            "course": {"entry": "index.html", "lessons": 4, "size_bytes": None, "generated_at": None},
-            "url": f"{base}/index.html", "source": "shipped", "imported_from": None, "error": None, "error_code": None, "progress": None,
-            "label": "Shipped with GigAI",
+            "course": {"entry": None, "lessons": 4, "size_bytes": None, "generated_at": None},
+            "url": public, "source": "shipped", "imported_from": None, "error": None, "error_code": None, "progress": None,
+            "label": "From the GigAI learning center",
             "local_page": {"state": "not_built", "built_at": None, "reasons": [], "build": None, "url": f"{base}/pathway.html"},
         }
 
@@ -96,28 +97,15 @@ def test_a_shipped_course_is_listed_first_and_served_from_the_cache_locked_down(
         _error(client.get(f"/api/learning/pathways/{KEY}", params={"x": "1"}), 422, "unknown_key")
         for action in ("cancel", "resume"):
             _error(client.post(f"/api/learning/pathways/{KEY}/{action}", json={}), 404, "not_found")
-        assert not learning_shipped_store.cache_root(home).exists(), "listing and reading a row render nothing"
+        cache = home / "cache" / "scout" / "learning-shipped"
+        assert not cache.exists(), "listing and reading a row render nothing"
 
-        # ---- 2. a page: rendered on first use, the exact policy -------------------------------------------------
-        index = client.get(f"{base}/index.html")
-        assert index.status_code == 200 and index.headers["content-type"] == "text/html; charset=utf-8"
-        assert index.headers["content-security-policy"] == CSP, "the policy is this string, character for character"
-        _course_headers(dict(index.headers))
-        assert {entry.name for entry in cache.iterdir()} == PAGES | {learning_shipped_store.STAMP_FILENAME}
-        assert cache == home / "cache" / "scout" / "learning-shipped" / learning_shipped_store.gigai_version() / KEY
-        assert index.content == (cache / "index.html").read_bytes() and ROLE in index.text and 'href="pathway.html"' in index.text
-        assert client.get(f"{base}/").content == index.content, "the course's own address is its entry page"
-        stamp = (cache / learning_shipped_store.STAMP_FILENAME).stat().st_mtime_ns
-        for name in sorted(PAGES):
-            page = client.get(f"{base}/{name}")
-            assert page.status_code == 200 and page.content == (cache / name).read_bytes(), name
-            _course_headers(dict(page.headers))
-        assert client.get(f"{base}/%69ndex.html").content == index.content, "an encoded letter is the same page"
-        assert (cache / learning_shipped_store.STAMP_FILENAME).stat().st_mtime_ns == stamp, "rendered once"
-        status, headers, payload = _raw(port, "HEAD", f"{base}/index.html")
-        assert status == 200 and payload == b"" and headers["content-length"] == str(len(index.content))
-        assert headers["content-type"] == "text/html; charset=utf-8"
-        _course_headers(headers)
+        # ---- 2. no lesson page is served: the lessons are on the learning center ---------------------------------
+        for name in ("index.html", "concept-lesson-alpha.html", "concept-lesson-beta.html", "practice-lesson-alpha.html", "practice-lesson-gamma.html", "course.json", "catalog.json", ""):
+            for method in ("GET", "HEAD"):
+                status, _headers, payload = _raw(port, method, f"{base}/{name}")
+                assert status == 404 and ROLE.encode() not in payload and (method == "GET" or payload == b""), (method, name, status)
+        assert not cache.exists(), "nothing is rendered or cached by asking for a page"
 
         # ---- 3. the shared assets ------------------------------------------------------------------------------
         package_assets = learning_render.package_assets_dir()
@@ -137,9 +125,7 @@ def test_a_shipped_course_is_listed_first_and_served_from_the_cache_locked_down(
         status, headers, payload = _raw(port, "HEAD", "/learning/_assets/course.css")
         assert status == 200 and payload == b"" and headers["content-length"] == str((package_assets / "course.css").stat().st_size)
         _course_headers(headers)
-        named = set()
-        for name in PAGES:
-            named |= set(re.findall(r'(?:href|src)="(/learning/_assets/[^"]+)"', (cache / name).read_text(encoding="utf-8")))
+        named = set(re.findall(r'(?:href|src)="(/learning/_assets/[^"]+)"', client.get(f"{base}/pathway.html").text))
         assert {"/learning/_assets/course.css", "/learning/_assets/theme-init.js"} <= named
         for address in sorted(named):
             assert client.get(address).status_code == 200, f"a page names an asset that is not served: {address}"
@@ -148,11 +134,12 @@ def test_a_shipped_course_is_listed_first_and_served_from_the_cache_locked_down(
         absent = client.get(f"{base}/pathway.html")
         assert absent.status_code == 200 and absent.headers["content-type"] == "text/html; charset=utf-8"
         _course_headers(dict(absent.headers))
-        assert "Your pathway page is not built yet" in absent.text and ROLE in absent.text and 'href="index.html"' in absent.text
+        assert "Your pathway page is not built yet" in absent.text and ROLE in absent.text
+        assert f'<a href="{public}" target="_blank" rel="noopener">' in absent.text and 'href="index.html"' not in absent.text
         assert "<script>" not in absent.text and "style=" not in absent.text
         status, headers, payload = _raw(port, "HEAD", f"{base}/pathway.html")
         assert status == 200 and payload == b"" and headers["content-length"] == str(len(absent.content))
-        assert not (cache / "pathway.html").exists()
+        assert not cache.exists()
 
         mine = learning_shipped_store.pathway_page_path(home, target, KEY)
         mine.parent.mkdir(parents=True)
@@ -164,15 +151,11 @@ def test_a_shipped_course_is_listed_first_and_served_from_the_cache_locked_down(
         assert client.get("/api/learning/pathways").json()["pathways"][0]["local_page"] == {
             "state": "built", "built_at": "2027-01-15T08:00:00Z", "reasons": [], "build": None, "url": f"{base}/pathway.html",
         }
-        assert client.get(f"{base}/index.html").content == index.content, "the generic pages do not change with it"
+        assert client.get(f"{base}/index.html").status_code == 404, "the page of the user's own does not bring the lessons back"
 
         # ---- 5. everything else is 404 --------------------------------------------------------------------------
         (home / "secret.txt").write_text(SECRET, encoding="utf-8")
-        (cache.parent / "secret.html").write_text(SECRET, encoding="utf-8")
-        (cache / "link.html").symlink_to(home / "secret.txt")
-        (cache / "notes.txt").write_text(SECRET, encoding="utf-8")
-        (cache / "sub").mkdir()
-        (cache / "sub" / "page.html").write_text(SECRET, encoding="utf-8")
+        (home / "secret.html").write_text(SECRET, encoding="utf-8")
         not_served = [
             "/learning/shipped/no-such-role/index.html",
             "/learning/shipped/no-such-role/pathway.html",
@@ -184,11 +167,11 @@ def test_a_shipped_course_is_listed_first_and_served_from_the_cache_locked_down(
             "/learning/shipped",
             f"/learning/{KEY}/index.html",
             f"{base}/missing.html",
-            f"{base}/link.html",
-            f"{base}/notes.txt",
+            f"{base}/index.html",
+            f"{base}/concept-lesson-alpha.html",
+            f"{base}/practice-lesson-alpha.html",
             f"{base}/sub",
-            f"{base}/sub/page.html",
-            f"{base}/{learning_shipped_store.STAMP_FILENAME}",
+            f"{base}/.render.json",
             f"{base}/../secret.html",
             f"{base}/../../../../../secret.txt",
             f"{base}/%2e%2e/secret.html",
@@ -234,17 +217,17 @@ def test_a_shipped_course_is_listed_first_and_served_from_the_cache_locked_down(
 
         # ---- 6. the server's own guards ------------------------------------------------------------------------
         for method in ("GET", "HEAD"):
-            for path in (f"{base}/index.html", f"{base}/pathway.html", "/learning/_assets/course.css"):
+            for path in (f"{base}/pathway.html", "/learning/_assets/course.css"):
                 for host in ("evil.example.invalid", f"evil.example.invalid:{port}", f"192.168.1.10:{port}"):
                     status, _headers, payload = _raw(port, method, path, host=host)
                     assert status == 403 and ROLE.encode() not in payload, (method, path, host, status)
         for method in ("POST", "PUT", "DELETE"):
-            for path in (f"{base}/index.html", "/learning/_assets/course.css"):
+            for path in (f"{base}/pathway.html", "/learning/_assets/course.css"):
                 refused = client.request(method, path, json={})
                 assert refused.status_code in (403, 404, 405) and ROLE not in refused.text, (method, path, refused.status_code)
 
-        # Serving wrote nothing but the cache: the package folder and the user's page are as they were.
-        assert {entry.name for entry in (shipped_root / KEY).iterdir()} == {"course.json", "catalog.json", "paths"}
+        # Serving wrote nothing: the package folder (the catalog alone) and the user's page are as they were.
+        assert {entry.name for entry in (shipped_root / KEY).iterdir()} == {"catalog.json"} and not cache.exists()
         assert mine.read_text(encoding="utf-8").endswith("MY LOCAL PATHWAY</p>")
     finally:
         stop_server(server)
@@ -357,7 +340,7 @@ def test_the_users_own_pathway_page_is_built_on_approval_with_the_resume_compare
         body = started.json()
         assert set(body) == {"schema_version", "pathway"} and body["schema_version"] == "scout-learning-pathway-response:1"
         row = body["pathway"]
-        assert row["id"] == KEY and row["source"] == "shipped" and row["url"] == f"{base}/index.html"
+        assert row["id"] == KEY and row["source"] == "shipped" and row["url"] == f"{BASE}/pathways/{KEY}/"
         running = row["local_page"]
         assert running["state"] == "not_built" and running["build"]["status"] == "running" and re.fullmatch(STAMP, running["build"]["started_at"])
         _error(client.post(build, json={"approve": True}), 409, "learning_running")
@@ -376,8 +359,13 @@ def test_the_users_own_pathway_page_is_built_on_approval_with_the_resume_compare
         assert "What your resume shows" in page.text and "Production evidence" in page.text and QUOTE in page.text and "b-widgetflow" in page.text
         assert "Ran gamma widgets at scale" not in page.text, "a quote that is not in the resume line never reaches the page"
         assert learning_pathway_local.NOT_COMPARED not in page.text and "<script>" not in page.text
-        for name in sorted(set(re.findall(r'href="([a-z0-9-]+\.html)', page.text))):
-            assert client.get(f"{base}/{name}").status_code == 200, f"the page links to a page that is not served: {name}"
+        # Every link that leaves the page is an address on the learning center, in a new tab; the one local link is the page itself.
+        hrefs = re.findall(r'<a [^>]*href="([^"#][^"]*)"', page.text)
+        assert any(href.startswith(f"{BASE}/lessons/lesson-alpha/") for href in hrefs) and f"{BASE}/lessons/lesson-alpha/#lesson-alpha-first" in hrefs
+        assert all(href.startswith(f"{BASE}/") or href == "pathway.html" for href in hrefs), sorted(set(hrefs))
+        assert all('target="_blank" rel="noopener"' in tag for tag in re.findall(rf'<a [^>]*href="{re.escape(BASE)}[^>]*>', page.text))
+        assert "site version 2026.10.1" in page.text and "From the GigAI learning center" in page.text
+        assert client.get(f"{base}/concept-lesson-alpha.html").status_code == 404, "the lesson page is not served here"
 
         record = learning_pathway_local.read_local_record(learning, KEY)
         assert record is not None and record["resume_compared"] is True and record["corpus"]["with_text"] == 2

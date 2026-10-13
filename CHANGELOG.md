@@ -28,6 +28,18 @@ Do not include commit IDs, schema field names, test counts, or implementation
 mechanics here. Those belong in the internal changelog.
 -->
 
+#### Learning center — the courses link to the public lessons
+
+- The two courses that come with GigAI now link to the public GigAI learning center, scout.edgelab.one, instead of
+  carrying their lessons: GigAI ships only each course's catalog. In the Learning pathways tab the label reads
+  **From the GigAI learning center**, **Open course** becomes **Open on scout.edgelab.one** (an ordinary link your
+  browser follows: GigAI makes no request and nothing of yours is in the address), and the line under the courses reads
+  **More pathways on scout.edgelab.one**. `gigai scout learning open ROLE_KEY` prints the public address.
+- **Build my pathway** is unchanged and still works offline: the counts, the one resume comparison and the page are
+  built on your computer. Every lesson, subtopic and practice link on the page now goes to the learning center in a
+  new tab, and the page footer says which learning center version it was made for. Reading a lesson needs the network.
+- The package is smaller because it no longer holds the lesson text.
+
 ## Released versions
 
 ### 0.1.11.10
