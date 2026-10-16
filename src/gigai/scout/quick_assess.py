@@ -62,6 +62,7 @@ from pathlib import Path
 import re
 import subprocess
 import threading
+import time
 
 import httpx
 
@@ -431,6 +432,38 @@ def _is_timeout(exc: BaseException) -> bool:
 
 
 @dataclass
+class _StageTiming:
+    call: float = 0.0
+    parse: float = 0.0
+    attempts: int = 0
+    answer_chars: int = 0
+    model: str = "unknown"
+
+
+@dataclass
+class _TimedPort:
+    """Observe each transport invocation, underneath the model fallback policy."""
+
+    inner: object
+    timing: _StageTiming
+
+    def invoke(self, request):
+        started = time.monotonic()
+        self.timing.attempts += 1
+        self.timing.model = getattr(request, "model", "unknown")
+        try:
+            result = self.inner.invoke(request)
+            self.timing.answer_chars += len(result.output_text)
+            self.timing.model = result.resolved_model
+            return result
+        finally:
+            self.timing.call += time.monotonic() - started
+
+    def __getattr__(self, name):
+        return getattr(self.inner, name)
+
+
+@dataclass
 class _ObservedPort:
     """Wraps a resolved adapter port to (a) notice a timeout in whatever it
     raises and (b) optionally enforce a deadline of its own (test seam only)."""
@@ -481,7 +514,7 @@ class _ObservedPort:
 @dataclass(frozen=True)
 class _ObservedBinding:
     inner: object
-    port: _ObservedPort = field(repr=False)
+    port: _ObservedPort | _TimedPort = field(repr=False)
 
     def request(self, **kwargs):
         return self.inner.request(**kwargs)
@@ -958,6 +991,8 @@ def run_quick_assessment(
     the caller gets the same code: a success never leaves nothing behind.
     """
 
+    started = time.monotonic()
+    timing = _StageTiming()
     home_root = Path(home_root)
     target = Path(target)
     if variant is None:
@@ -1094,7 +1129,8 @@ def run_quick_assessment(
     # refused evaluated model is asked (and refused) once, the default model answers the rest (outside the meter: all counted).
     policy = assess_model.PolicyState()
     while True:
-        binding = meter.bind(_resolve_binding(active, model_target, home_root=home_root))
+        observed = _resolve_binding(active, model_target, home_root=home_root)
+        binding = meter.bind(replace(observed, port=_TimedPort(observed.port, timing)))
         assess_model.apply(binding, model_target.value, policy)
         try:
             attempt = assess_once(
@@ -1106,6 +1142,7 @@ def run_quick_assessment(
             )
         finally:
             binding.close()
+        timing.parse += attempt.parse_seconds
         # GUARDFIX: a thin answer (1-2 requirement rows on a long posting) is retried once like a refused one, but is
         # stored with a note when the retry is thin too (below); only an answer with no usable row is refused.
         refused = (
@@ -1119,6 +1156,7 @@ def run_quick_assessment(
             GUARD_RETRIES.append(job.job_identity)
             continue
         break
+    before = max(0.0, time.monotonic() - started - timing.call - timing.parse)
 
     if not attempt.ok:
         if attempt.incomplete_posting:
@@ -1223,6 +1261,7 @@ def run_quick_assessment(
         model_fallback=policy.fallback,
     )
     # 1. Store the assessment (0110-8-09: a call is ok only when its answer was stored).
+    store_started = time.monotonic()
     try:
         atomic_write(path, json.dumps(response.to_json(), indent=2, sort_keys=True).encode("utf-8"))
     except OSError as exc:
@@ -1242,7 +1281,10 @@ def run_quick_assessment(
             except OSError:
                 _logger.warning("the requirement list of a posting could not be stored", exc_info=True)
         # 3. The gate is stored with the assessment above. 4. The selection and the suggestion record (no model call).
+        store_finished = time.monotonic()
         _settle_and_record(response, job=job, master_input=master_input, profile=profile, home_root=home_root, target=target, now=assessed_at)
+    else:
+        store_finished = time.monotonic()
     if (bank.entries or bank.stories) and variant is None:
         # Which answers and stories this assessment cited ("Story bank <id>: ...").
         story_bank.record_reuse(
@@ -1250,6 +1292,14 @@ def run_quick_assessment(
             evidence=[evidence for row in body.matrix for evidence in row.resume_evidence],
             posting={"job_identity": job.job_identity, "title": job.title, "company": job.company, "url": job.source_url},
         )
+    finished = time.monotonic()
+    _logger.info(
+        "assess stages before=%.6fs call=%.6fs parse=%.6fs store=%.6fs settle=%.6fs total=%.6fs "
+        "answer_chars=%d attempts=%d guard_retries=%d model=%s",
+        before, timing.call, timing.parse, store_finished - store_started, finished - store_finished,
+        finished - started, timing.answer_chars, timing.attempts, guard_retries,
+        re.sub(r"[^A-Za-z0-9_.:/-]", "_", timing.model),
+    )
     return response
 
 

@@ -37,6 +37,7 @@ from dataclasses import dataclass, field, replace
 from importlib import resources
 import json
 import re
+import time
 
 from ..adapters.port import ModelInvocationError, NormalizedUsage
 from ..canonical import digest_imported_bytes
@@ -430,6 +431,8 @@ class AssessAttempt:
     # answer the incomplete-posting guard would have withheld: the number of requirement rows it holds (1 or 2). The
     # caller may retry it once and, if it stays thin, stores it with a note instead of refusing it.
     thin_requirements: int | None = None
+    # Log-only timing, never part of a stored assessment.
+    parse_seconds: float = 0.0
 
     def __post_init__(self) -> None:
         if self.ok and (self.parsed is None or self.not_assessed_reason is not None):
@@ -546,6 +549,19 @@ def invoke_json_once(
 
     validation_error: str | None = None
     attempts = 0
+    parse_seconds = 0.0
+
+    def outcome(*args) -> AssessAttempt:
+        return AssessAttempt(*args, parse_seconds=parse_seconds)
+
+    def parse_timed(text: str) -> object:
+        nonlocal parse_seconds
+        started = time.monotonic()
+        try:
+            return parse(_extract_json_object(text))
+        finally:
+            parse_seconds += time.monotonic() - started
+
     for attempt in range(2):
         prompt = render(validation_error)
         try:
@@ -558,7 +574,7 @@ def invoke_json_once(
                 if getattr(exc, "code", "") in _DENIED_INVOCATION_CODES
                 else NotAssessedReason.MODEL_UNAVAILABLE
             )
-            return AssessAttempt(False, None, reason, None, attempts, validation_error)
+            return outcome(False, None, reason, None, attempts, validation_error)
         except Exception as exc:
             code = getattr(exc, "code", "")
             if code in _MAPPED_FOREIGN_CODES:
@@ -567,11 +583,10 @@ def invoke_json_once(
                     if code == "model_denied"
                     else NotAssessedReason.MODEL_UNAVAILABLE
                 )
-                return AssessAttempt(False, None, reason, None, attempts, validation_error)
+                return outcome(False, None, reason, None, attempts, validation_error)
             raise
         try:
-            decoded = _extract_json_object(result.output_text)
-            parsed = parse(decoded)
+            parsed = parse_timed(result.output_text)
         except (FindJobsContractError, ValueError, TypeError) as exc:
             validation_error = str(exc)
             note_invalid_output(binding.port)  # 0.1.10.7 E: metrics only
@@ -580,10 +595,10 @@ def invoke_json_once(
                 # model can correct its own shape, before giving up on this
                 # single posting.
                 continue
-            return AssessAttempt(
+            return outcome(
                 False, None, NotAssessedReason.MODEL_OUTPUT_INVALID, None, attempts, validation_error
             )
-        return AssessAttempt(True, parsed, None, result.normalized_usage, attempts, validation_error)
+        return outcome(True, parsed, None, result.normalized_usage, attempts, validation_error)
     raise AssertionError("invoke_json_once: the retry loop always returns")  # pragma: no cover
 
 
@@ -678,6 +693,7 @@ def assess_once(
             attempt.attempts,
             POSTING_INCOMPLETE_MESSAGE,
             incomplete_posting=True,
+            parse_seconds=attempt.parse_seconds,
         )
     return attempt
 
