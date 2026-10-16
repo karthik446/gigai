@@ -440,6 +440,17 @@ class _StageTiming:
     model: str = "unknown"
 
 
+class _TimedBinding:
+    """``inner`` with a timed ``port``; everything else is the wrapped binding's (works for any binding, test doubles too)."""
+
+    def __init__(self, inner: object, timing: "_StageTiming") -> None:
+        self._inner = inner
+        self.port = _TimedPort(inner.port, timing)  # type: ignore[attr-defined]
+
+    def __getattr__(self, name: str) -> object:
+        return getattr(self._inner, name)
+
+
 @dataclass
 class _TimedPort:
     """Observe each transport invocation, underneath the model fallback policy."""
@@ -514,7 +525,7 @@ class _ObservedPort:
 @dataclass(frozen=True)
 class _ObservedBinding:
     inner: object
-    port: _ObservedPort | _TimedPort = field(repr=False)
+    port: _ObservedPort = field(repr=False)
 
     def request(self, **kwargs):
         return self.inner.request(**kwargs)
@@ -1130,7 +1141,7 @@ def run_quick_assessment(
     policy = assess_model.PolicyState()
     while True:
         observed = _resolve_binding(active, model_target, home_root=home_root)
-        binding = meter.bind(replace(observed, port=_TimedPort(observed.port, timing)))
+        binding = meter.bind(_TimedBinding(observed, timing))
         assess_model.apply(binding, model_target.value, policy)
         try:
             attempt = assess_once(
