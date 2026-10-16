@@ -123,6 +123,7 @@ def user_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     (home / ".claude" / "settings.json").write_text(json.dumps(CLAUDE_USER_SETTINGS), encoding="utf-8")
     (home / ".claude.json").write_text(json.dumps(CLAUDE_USER_STATE), encoding="utf-8")
     monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("GIGAI_HOME", str(home / ".gigai"))
     monkeypatch.delenv("CODEX_HOME", raising=False)
     monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN", raising=False)
     return home
@@ -289,14 +290,14 @@ def test_every_codex_call_path_offers_the_model_no_tool_whatever_the_user_config
         assert {"mcp_servers.fetcher.enabled=false", "mcp_servers.remote-docs.enabled=false"} <= set(configs)
         # the default model is a "code mode only" model with sub-agents: its catalog entry is replaced for this call
         assert surface["model"] == "fake-code-model"
-        assert not Path(surface["model_catalog_json"]).exists()  # removed with the call's directory
+        assert Path(surface["model_catalog_json"]).is_file()
         assert Path(surface["model_catalog_json"]).name == MODEL_CATALOG_FILE
-        assert Path(surface["model_catalog_json"]).parent.name == Path(call["cwd"]).name
+        assert Path(surface["model_catalog_json"]).parent == Path(call["cwd"])
         assert f"model_catalog_json={json.dumps(surface['model_catalog_json'])}" in configs
         disabled = [argv[i + 1] for i, value in enumerate(argv) if value == "--disable"]
         assert disabled == [name for name in CODEX_TOOL_FEATURES if name in disabled] and len(disabled) > 30
         assert not {"--enable", "--search", "--dangerously-bypass-approvals-and-sandbox", "--add-dir", "--profile", "-p"} & set(argv)
-        assert Path(call["cwd"]).name.startswith("gigai-codex-")
+        assert Path(call["cwd"]) == user_home.resolve() / ".gigai" / "run" / "cli-codex"
 
 
 @pytest.mark.parametrize("path", PATHS)
@@ -319,7 +320,8 @@ def test_every_claude_call_path_offers_the_model_no_tool_whatever_the_user_confi
             "--add-dir", "--chrome", "--agents", "--dangerously-skip-permissions",
         } & set(argv)
         assert "bypassPermissions" not in argv
-        assert Path(call["cwd"]).name.startswith("gigai-claude-")
+        assert Path(call["cwd"]) == user_home.resolve() / ".gigai" / "run" / "cli-claude"
+        assert list(Path(call["cwd"]).iterdir()) == []
 
 
 def test_the_old_codex_argv_left_web_search_and_the_mcp_servers_on(record: Path, user_home: Path) -> None:

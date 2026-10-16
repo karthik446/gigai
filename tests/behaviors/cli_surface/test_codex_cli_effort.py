@@ -70,7 +70,8 @@ def test_effort_copy_passes_the_requested_effort_as_a_config_override() -> None:
     assert ranker.argv(_request(effort="max"), _DIR, _LOCKDOWN) == _ASSESS_ARGV
 
 
-def test_invoke_runs_exactly_the_argv(tmp_path: Path) -> None:
+def test_invoke_runs_exactly_the_argv(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("GIGAI_HOME", str(tmp_path / "home"))
     record = tmp_path / "argv.json"
     executable = tmp_path / "codex"
     executable.write_text(
@@ -92,11 +93,7 @@ def test_invoke_runs_exactly_the_argv(tmp_path: Path) -> None:
     effort_at = rank.index("model_reasoning_effort=low")
     without_effort = [*rank[: effort_at - 1], *rank[effort_at + 1 :]]
 
-    def stable(argv: list[str]) -> list[str]:
-        # each call has its own directory (--cd and the model catalog in it)
-        return [item for item in argv[:-2] if "gigai-codex-" not in item]
-
-    assert stable(without_effort) == stable(assess)  # the effort override is the only difference
+    assert without_effort == assess  # stable cwd; the effort override is the only difference
 
 
 def test_the_ranker_uses_its_own_effort_copy_and_leaves_the_assess_port_alone(monkeypatch) -> None:
