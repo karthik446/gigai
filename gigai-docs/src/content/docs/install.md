@@ -27,7 +27,24 @@ gigai --version
 Or pin a release tag:
 
 ```bash
-uv tool install "git+https://github.com/karthik446/gigai@v0.1.11.10"
+uv tool install "git+https://github.com/karthik446/gigai@v0.1.11.11"
+```
+
+## Upgrade
+
+For an unpinned install, upgrade to the latest published version:
+
+```bash
+uv tool upgrade gigai
+```
+
+`uv tool upgrade gigai` keeps an existing `==` version pin or Git `@tag` pin;
+it does not move that install to a newer release. To drop either pin and install
+the latest published version from PyPI, use:
+
+```bash
+uv tool install gigai --force
+gigai --version
 ```
 
 ## Check the install

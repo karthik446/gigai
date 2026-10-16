@@ -30,6 +30,25 @@ mechanics here. Those belong in the internal changelog.
 
 ## Released versions
 
+### 0.1.11.11
+
+- **Repeated assessments can reuse Claude's prompt cache.** CLI helpers now run in a fixed, isolated
+  working folder for each GigAI home instead of a fresh temporary folder for every call. This lets repeated
+  assessments reuse Claude's cached prompt for cheaper calls, without changing the assessment instructions
+  or answer format. Codex uses the same per-home isolation with safe concurrent catalog handling.
+- **Assessment stage timings in the log.** Each assessment writes one log line with its stage timings,
+  making it easier to see where time went. This is log-only; saved answers do not change.
+- **Sponsorship stays a label, not a ranking penalty.** Ranking no longer lowers a job's score for
+  sponsorship, transfer-only or work-authorization flags. The rank prompt is now `rank-v3`.
+  **Scores saved by earlier versions are dropped from the current ranking, not automatically recomputed
+  as a whole-store backfill.** When enabled, the background rank lane ranks recent unranked jobs for active
+  roles (posted in the last seven days, or first seen then if no posting date is available). **Rank now**
+  uses that same recent-unranked window, not just the visible page. **Re-rank latest 100** instead re-ranks
+  the newest jobs in that window, up to two calls of 50 across roles. These actions respect the ranking
+  switch, daily allowance and other running work; older jobs can remain unranked.
+- **Upgrading a pinned install is documented.** `uv tool upgrade gigai` keeps a `==` version or `@tag`
+  pin. To drop the pin and install the latest published version, use `uv tool install gigai --force`.
+
 ### 0.1.11.10
 
 Learning pathways. A new **Learning pathways** tab in Scout (and `gigai scout learning`) gives you a course for a
