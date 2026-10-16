@@ -18,6 +18,12 @@ from gigai.model_targets import ModelTargetResolutionError, resolve_model_target
 from gigai.setup import build_config
 
 
+@pytest.fixture(autouse=True)
+def _isolated_cli_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Fake CLI calls must not create workspaces in the operator's home."""
+    monkeypatch.setenv("GIGAI_HOME", str(tmp_path / "home"))
+
+
 def _request(target: str = "cli-default") -> InvocationRequest:
     return InvocationRequest(
         target_name=target,

@@ -126,6 +126,7 @@ _USAGE = {"type": "turn.completed", "usage": {"input_tokens": 3, "output_tokens"
 
 
 def _codex_model(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, events: list[dict]) -> str:
+    monkeypatch.setenv("GIGAI_HOME", str(tmp_path / "cli-home"))
     executable = _fake_codex(tmp_path / "bin", events)
     monkeypatch.setattr("gigai.adapters.codex_cli.codex_lockdown", lambda _exe: _no_lockdown())
     adapter = CodexCLIAdapter(executable=str(executable))

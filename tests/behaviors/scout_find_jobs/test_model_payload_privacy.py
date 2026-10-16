@@ -656,7 +656,8 @@ def _dumping_cli(tmp_path: Path, name: str, probe_args: str, probe_out: str, rep
 
 
 @pytest.mark.parametrize("kind", ["codex_cli", "claude_cli"])
-def test_a_cli_adapter_sends_the_request_prompt_on_stdin_and_nothing_else(tmp_path: Path, kind: str) -> None:
+def test_a_cli_adapter_sends_the_request_prompt_on_stdin_and_nothing_else(tmp_path: Path, kind: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("GIGAI_HOME", str(tmp_path / "cli-home"))
     from gigai.scout.assessment_core import AssessContext, AssessJob, render_assess_prompt
 
     prompt = render_assess_prompt(

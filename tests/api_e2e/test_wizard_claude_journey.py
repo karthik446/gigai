@@ -143,6 +143,7 @@ def test_the_wizard_chooses_claude_extracts_through_it_and_finishes(tmp_path: Pa
     record = write_fake_claude(tmp_path / "fake-bin")
     _put_on_path(monkeypatch, tmp_path / "fake-bin")
     home, target = setup_and_init(tmp_path)
+    monkeypatch.setenv("GIGAI_HOME", str(home))
     server = start_server(home, target, monkeypatch=monkeypatch)
     try:
         client = server.client
@@ -222,6 +223,7 @@ def test_without_claude_on_path_the_wizard_says_so(tmp_path: Path, monkeypatch: 
     write_fake_claude(tmp_path / "fake-bin")
     _put_on_path(monkeypatch, tmp_path / "fake-bin")
     home, target = setup_and_init(tmp_path)
+    monkeypatch.setenv("GIGAI_HOME", str(home))
     # ... then claude is gone: the system dirs plus node's and git's, no claude.
     git = shutil.which("git")
     assert git is not None

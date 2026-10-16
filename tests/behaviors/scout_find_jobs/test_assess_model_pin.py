@@ -63,6 +63,7 @@ def _config(home: Path, model: str = "default"):
 
 
 def _fake(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, refuse: tuple[str, ...] = ()) -> Path:
+    monkeypatch.setenv("GIGAI_HOME", str(tmp_path / "cli-home"))
     bin_dir = tmp_path / "fake-bin"
     record = write_fake_claude(bin_dir, refuse=refuse, answer_text=_v8_answer(), echo_model=True)
     monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}")

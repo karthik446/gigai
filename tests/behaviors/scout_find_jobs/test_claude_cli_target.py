@@ -72,6 +72,7 @@ def fake_claude(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """A fake ``claude`` first on PATH; returns its call record."""
 
     bin_dir = tmp_path / "fake-bin"
+    monkeypatch.setenv("GIGAI_HOME", str(tmp_path / "cli-home"))
     record = write_fake_claude(bin_dir)
     monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}")
     return record

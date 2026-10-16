@@ -63,7 +63,8 @@ def test_claude_argv_loads_no_settings_no_mcp_and_no_tools_in_every_mode(lean: b
 
 
 @pytest.fixture(autouse=True)
-def _canned_cli_probe() -> None:
+def _canned_cli_probe(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("GIGAI_HOME", str(tmp_path / "home"))
     reset_probe_cache()
 
 
