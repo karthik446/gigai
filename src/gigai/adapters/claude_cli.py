@@ -6,11 +6,11 @@ import json
 import os
 from pathlib import Path
 import shutil
-from tempfile import TemporaryDirectory
 from typing import Any, Mapping
 
 from .capabilities import require_capabilities
 from .cli_probe import require_claude_capabilities
+from .cli_workspace import cli_workspace
 from .port import InvocationRequest, InvocationResult, ModelInvocationError, NormalizedUsage
 from .process import run_json_process
 
@@ -94,7 +94,7 @@ class ClaudeCLIAdapter:
         require_capabilities(("text",), request.required_capabilities, target_name=request.target_name)
         assert self._executable is not None
         require_claude_capabilities(self._executable)
-        with TemporaryDirectory(prefix="gigai-claude-") as directory:
+        with cli_workspace("claude") as directory:
             try:
                 output = run_json_process(
                     self.argv(request),

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 import shutil
 import tempfile
@@ -10,6 +11,7 @@ from typing import Mapping
 
 from .capabilities import require_capabilities
 from .cli_probe import CodexLockdown, codex_feature_flags, codex_lockdown, codex_mcp_flags
+from .cli_workspace import cli_workspace
 from .port import InvocationRequest, InvocationResult, ModelInvocationError, NormalizedUsage
 from .process import run_json_process
 
@@ -112,9 +114,17 @@ class CodexCLIAdapter:
         require_capabilities(("text",), request.required_capabilities, target_name=request.target_name)
         assert self._executable is not None
         lockdown = codex_lockdown(self._executable)
-        with tempfile.TemporaryDirectory(prefix="gigai-codex-") as directory:
+        with cli_workspace("codex") as directory:
             if lockdown.model_catalog is not None:
-                (Path(directory) / MODEL_CATALOG_FILE).write_text(lockdown.model_catalog, encoding="utf-8")
+                # Same-directory replacement: concurrent readers always see a complete catalog.
+                with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=directory, delete=False) as catalog:
+                    temporary = Path(catalog.name)
+                    try:
+                        catalog.write(lockdown.model_catalog)
+                        catalog.close()
+                        os.replace(temporary, Path(directory) / MODEL_CATALOG_FILE)
+                    finally:
+                        temporary.unlink(missing_ok=True)
             try:
                 output = run_json_process(
                     self.argv(request, directory, lockdown),
