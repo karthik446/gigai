@@ -13,15 +13,13 @@ text::
   only (found by heading; when no section is found the whole text is used
   and the field says ``(req=full)``), so a company blurb or a benefits list
   does not pad the skills.
-- ``flags=`` are hard-constraint hints read from the WHOLE text, because they
-  are exactly what the ranker must see as blockers: ``no_sponsor`` (a
-  sponsorship/visa mention with a negation within 160 characters and no
-  positive "we sponsor"; ``transfer_only`` instead when the posting takes
-  H-1B transfers, which is not a blocker), ``citizen_or_gc``, ``clearance`` and ``onsite``.
-  v1's single tight regex caught 3 of the spike's 9 sponsorship/citizenship/
-  clearance not-a-matches; this window-based v2 catches all 9. It also flags
-  postings the full assessment only ASKS about (a "U.S. citizen or permanent
-  resident" line), which is why a blocker demotes and never hides.
+- ``flags=`` are labels and constraint hints read from the WHOLE text:
+  ``no_sponsor`` (a sponsorship/visa mention with a negation within 160
+  characters and no positive "we sponsor"; ``transfer_only`` instead when
+  the posting takes H-1B transfers), ``citizen_or_gc``, ``clearance`` and ``onsite``.
+  Sponsorship, transfer and work-authorization flags are labels only, never
+  score penalties or blockers. Other flags need the candidate context to
+  establish a genuine blocker; blockers demote and never hide.
 
 The resume digest is a few lines: years, the job titles found in the resume,
 its domain, the skills in the same vocabulary as ``req=``, and the candidate's
@@ -160,7 +158,7 @@ def constraint_flags(text: str) -> list[str]:
     """``no_sponsor`` (or ``transfer_only``) / ``citizen_or_gc`` / ``clearance`` / ``onsite``, in that order.
 
     0.1.11.10: text that rules out NEW sponsorship but takes H-1B or visa transfers is ``transfer_only``
-    (the rule layer's own read, ``filters.sponsorship_from_text``), never ``no_sponsor``: it is not a blocker.
+    (the rule layer's own read, ``filters.sponsorship_from_text``), never ``no_sponsor``; both are labels only.
     """
 
     out: list[str] = []

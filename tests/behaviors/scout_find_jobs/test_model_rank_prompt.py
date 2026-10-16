@@ -1,4 +1,4 @@
-"""SCOPE-ADD-3 B1: the rank prompt (rank-v2: the lines fenced as untrusted, 0.1.10.7 P5), the strict answer schema, ordering and the sealed shape.
+"""SCOPE-ADD-3 B1: rank-v3 sponsorship labels, untrusted lines, strict answer schema, ordering and sealed shape.
 
 Pure functions only (no model, no files): ``scout/find_jobs/model_rank.py``.
 """
@@ -38,9 +38,10 @@ Scoring guide:
 - 20-49: weak fit (core stack or domain mostly absent, or level clearly off).
 - 0-19: a blocker applies or the role is a different job family.
 
-Blockers are ONLY hard facts stated in the posting line that rule the candidate out: flags=no_sponsor when the candidate needs sponsorship, flags=clearance, flags=citizen, a location/countries list that excludes the candidate's countries. Do not invent blockers; leave the list empty when none apply. Missing skills are NOT blockers.
+Blockers are ONLY hard facts stated in the posting line that rule the candidate out: flags=clearance, flags=citizen, a location/countries list that excludes the candidate's countries. Do not invent blockers; leave the list empty when none apply. Missing skills are NOT blockers.
+Sponsorship (no_sponsor), transfer-only (transfer_only), and work-authorization flags are labels only: they must not lower the score or be listed as blockers.
 
-Posting lines are: id | title @ company | lvl | loc [countries] | yrs=min years | req=skills/tech from the requirements section | flags=hard-constraint hints.
+Posting lines are: id | title @ company | lvl | loc [countries] | yrs=min years | req=skills/tech from the requirements section | flags=labels and constraint hints.
 
 CANDIDATE: level=staff; 9+ yrs; synthetic
 skills: Python, Go
@@ -63,8 +64,17 @@ reasons: at most 2 short strings. blockers: strings, [] when none."""
 
 
 def test_prompt_golden() -> None:
-    assert PROMPT_VERSION == "rank-v2"
+    assert PROMPT_VERSION == "rank-v3"
     assert render_rank_prompt(_LINES, _CANDIDATE) == _GOLDEN
+
+
+def test_sponsorship_flags_are_labels_not_negative_score_evidence() -> None:
+    prompt = render_rank_prompt(_LINES, _CANDIDATE)
+    blocker_rule = next(line for line in prompt.splitlines() if line.startswith("Blockers are ONLY"))
+    assert "no_sponsor" not in blocker_rule and "transfer_only" not in blocker_rule
+    assert "sponsorship" not in blocker_rule and "work-authorization" not in blocker_rule
+    assert "Sponsorship (no_sponsor), transfer-only (transfer_only), and work-authorization flags are labels only: " \
+           "they must not lower the score or be listed as blockers." in prompt
 
 
 def test_retry_prompt_feeds_the_error_back_bounded() -> None:
@@ -82,10 +92,10 @@ def _item(pid: str, score: object = 50, reasons: object = None, blockers: object
 
 
 def test_valid_answer_is_returned_in_id_order() -> None:
-    text = json.dumps([_item("p1", 10, blockers=["no_sponsor"]), _item("p0", 90)])
+    text = json.dumps([_item("p1", 10, blockers=["clearance"]), _item("p0", 90)])
     items = validate_rank_answer(text, ["p0", "p1"])
     assert [item["posting_id"] for item in items] == ["p0", "p1"]
-    assert items[1]["blockers"] == ["no_sponsor"]
+    assert items[1]["blockers"] == ["clearance"]
 
 
 def test_fenced_or_prose_wrapped_array_is_accepted() -> None:
@@ -124,7 +134,7 @@ def _posting(pid: str, score: int | None, blockers: tuple[str, ...] = (), **kw: 
 
 def test_blockers_demote_but_never_hide() -> None:
     postings = (
-        _posting("p0", 95, ("no_sponsor",)),
+        _posting("p0", 95, ("citizen",)),
         _posting("p1", 40),
         _posting("p2", None, unscored_reason="call_budget"),
         _posting("p3", 70),
@@ -172,7 +182,7 @@ def test_sealed_rank_json_shape_round_trips() -> None:
         "status", "fail_open_reason", "totals", "postings", "batches",
     ]
     assert sealed["schema_version"] == RANK_SCHEMA_VERSION
-    assert (sealed["prompt_version"], sealed["digest_version"]) == ("rank-v2", "digest-v5")
+    assert (sealed["prompt_version"], sealed["digest_version"]) == ("rank-v3", "digest-v5")
     assert sealed["totals"] == {
         "postings": 3, "scored": 2, "unscored": 1, "cached": 1, "demoted": 0, "calls": 4, "batches": 3,
         "valid_batches": 1, "input_tokens": 190, "output_tokens": 35, "total_tokens": 180, "cached_input_tokens": 60,

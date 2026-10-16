@@ -79,10 +79,9 @@ if TYPE_CHECKING:  # pragma: no cover - imported only by static type checkers
     from ...config import GigAIConfig
     from .contracts import ModelTarget, PostingRow
 
-#: rank-v2 (0.1.10.7 P5): the posting lines are fenced as untrusted and the prompt states the
-#: rule (``untrusted_text``). The version is part of the score cache key (``cache_key``), so a
-#: score made with rank-v1 is never served as if the fenced prompt had made it.
-PROMPT_VERSION = "rank-v2"
+#: rank-v3: sponsorship and work authorization are labels, never score penalties.
+#: The version is part of the score cache key, so earlier scores are not reused.
+PROMPT_VERSION = "rank-v3"
 RANK_SCHEMA_VERSION = "scout-rank:1"
 DEFAULT_BATCH_SIZE = 50
 DEFAULT_CONCURRENCY = 8
@@ -108,9 +107,10 @@ Scoring guide:
 - 20-49: weak fit (core stack or domain mostly absent, or level clearly off).
 - 0-19: a blocker applies or the role is a different job family.
 
-Blockers are ONLY hard facts stated in the posting line that rule the candidate out: flags=no_sponsor when the candidate needs sponsorship, flags=clearance, flags=citizen, a location/countries list that excludes the candidate's countries. Do not invent blockers; leave the list empty when none apply. Missing skills are NOT blockers.
+Blockers are ONLY hard facts stated in the posting line that rule the candidate out: flags=clearance, flags=citizen, a location/countries list that excludes the candidate's countries. Do not invent blockers; leave the list empty when none apply. Missing skills are NOT blockers.
+Sponsorship (no_sponsor), transfer-only (transfer_only), and work-authorization flags are labels only: they must not lower the score or be listed as blockers.
 
-Posting lines are: id | title @ company | lvl | loc [countries] | yrs=min years | req=skills/tech from the requirements section | flags=hard-constraint hints.
+Posting lines are: id | title @ company | lvl | loc [countries] | yrs=min years | req=skills/tech from the requirements section | flags=labels and constraint hints.
 
 {candidate}
 
@@ -133,7 +133,7 @@ You cannot see that answer. Produce a fresh, complete answer following the forma
 
 
 def render_rank_prompt(lines: Sequence[str], candidate: str, error: str | None = None) -> str:
-    """The rank-v2 prompt for one batch of digest lines: the spike's text, with the lines fenced as untrusted (P5)."""
+    """The rank-v3 prompt: sponsorship labels are neutral and posting lines are untrusted."""
 
     text = PROMPT.format(
         candidate=candidate, n=len(lines), lines=fence_untrusted_posting("\n".join(lines)), untrusted_rule=UNTRUSTED_POSTING_RULE
@@ -520,11 +520,6 @@ def cache_key(*, content_sha256: str, resume_digest_sha256: str, prefs_sha256: s
     })
 
 
-# Written on every entry from now on. An older entry that holds a no_sponsor blocker predates the
-# transfer-only rule (digest-v5 stays, so a bump would re-rank everything): it is re-ranked once.
-FLAG_RULES = 2
-
-
 def _read_cached(path: Path) -> dict[str, object] | None:
     if path.is_symlink() or not path.is_file():
         return None
@@ -539,8 +534,6 @@ def _read_cached(path: Path) -> dict[str, object] | None:
         return None
     if not isinstance(reasons, list) or not isinstance(blockers, list):
         return None
-    if "flag_rules" not in value and "no_sponsor" in " ".join(str(item) for item in (*reasons, *blockers)):
-        return None
     return value
 
 
@@ -551,7 +544,6 @@ def _write_cached(path: Path, item: Mapping[str, object], *, resolved_model: str
         "blockers": list(item["blockers"]),  # type: ignore[arg-type]
         "prompt_version": PROMPT_VERSION,
         "digest_version": DIGEST_VERSION,
-        "flag_rules": FLAG_RULES,
         "resolved_model": resolved_model,
     }
     try:

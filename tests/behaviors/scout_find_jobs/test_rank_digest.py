@@ -62,9 +62,9 @@ def test_v2_flags_catch_every_spike_sponsorship_citizenship_clearance_case(spike
     assert flag in constraint_flags(text), spike_id
 
 
-def test_all_nine_spike_cases_are_flagged_as_hard_constraints() -> None:
-    hard = {"no_sponsor", "citizen_or_gc", "clearance"}
-    caught = [case[0] for case in SPIKE_BLOCKER_CASES if hard & set(constraint_flags(case[2]))]
+def test_all_nine_spike_cases_keep_their_labels_and_constraint_hints() -> None:
+    flags = {"no_sponsor", "citizen_or_gc", "clearance"}
+    caught = [case[0] for case in SPIKE_BLOCKER_CASES if flags & set(constraint_flags(case[2]))]
     assert len(caught) == 9
 
 
@@ -116,7 +116,7 @@ def test_the_rank_prompt_does_not_call_transfer_only_a_blocker() -> None:
     from gigai.scout.find_jobs.model_rank import PROMPT
 
     blockers = PROMPT.split("Blockers are ONLY", 1)[1].split("\n", 1)[0]
-    assert "no_sponsor" in blockers and "transfer_only" not in blockers
+    assert "no_sponsor" not in blockers and "transfer_only" not in blockers
 
 
 def test_onsite_flag() -> None:

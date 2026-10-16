@@ -71,11 +71,9 @@ def _batch_lines(prompt: str) -> list[tuple[str, str]]:
 
 def _good_answer(prompt: str) -> str:
     items = []
-    for pid, rest in _batch_lines(prompt):
+    for pid, _rest in _batch_lines(prompt):
         number = int(pid[1:])
-        blocked = "flags=no_sponsor" in rest
-        items.append({"posting_id": pid, "score": 15 if blocked else 90 - number % 50, "reasons": ["fits"],
-                      "blockers": ["no_sponsor"] if blocked else []})
+        items.append({"posting_id": pid, "score": 90 - number % 50, "reasons": ["fits"], "blockers": []})
     return json.dumps(items)
 
 
@@ -185,13 +183,20 @@ def test_every_row_scored_through_the_assess_adapter_seam_at_low_effort(tmp_path
 
 
 def test_blocked_postings_are_demoted_not_dropped(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    _install(monkeypatch, _Binding(_Port(lambda prompt, _n: _good_answer(prompt))))
+    def answer(prompt: str, _n: int) -> str:
+        items = json.loads(_good_answer(prompt))
+        for item in items:
+            if item["posting_id"] in {"p0", "p5"}:
+                item.update(score=15, blockers=["clearance"])
+        return json.dumps(items)
+
+    _install(monkeypatch, _Binding(_Port(answer)))
 
     result = _rank(tmp_path, _rows(10))
 
     blocked = [item for item in result.postings if item.demoted]
     assert [item.posting_id for item in blocked] == ["p0", "p5"]
-    assert all(item.score == 15 and item.blockers == ("no_sponsor",) for item in blocked)
+    assert all(item.score == 15 and item.blockers == ("clearance",) for item in blocked)
     order = [item.posting_id for item in ranked_order(result)]
     assert len(order) == 10 and order[-2:] == ["p0", "p5"]
 
@@ -433,10 +438,10 @@ def test_cache_key_covers_resume_prefs_model_and_versions(tmp_path: Path, monkey
     for field, value in (("content_sha256", "sha256:2"), ("resume_digest_sha256", "r2"), ("prefs_sha256", "p2"),
                          ("model", "claude_cli:sonnet")):
         assert model_rank.cache_key(**{**base, field: value}) != key
-    assert model_rank.PROMPT_VERSION == "rank-v2"
-    monkeypatch.setattr(model_rank, "PROMPT_VERSION", "rank-v1")
-    assert model_rank.cache_key(**base) != key
+    assert model_rank.PROMPT_VERSION == "rank-v3"
     monkeypatch.setattr(model_rank, "PROMPT_VERSION", "rank-v2")
+    assert model_rank.cache_key(**base) != key
+    monkeypatch.setattr(model_rank, "PROMPT_VERSION", "rank-v3")
     monkeypatch.setattr(model_rank, "DIGEST_VERSION", "digest-v9")
     assert model_rank.cache_key(**base) != key
     assert model_rank.prefs_digest(_PREFS) != model_rank.prefs_digest(CandidatePrefs(titles=("Staff Software Engineer",)))
@@ -444,27 +449,27 @@ def test_cache_key_covers_resume_prefs_model_and_versions(tmp_path: Path, monkey
 
 
 def test_a_score_cached_under_the_earlier_prompt_is_not_reused(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """0.1.10.7 P5: rank-v2 fences the posting lines; a rank-v1 score is never served as if rank-v2 had made it."""
+    """rank-v3 never reuses scores from the sponsorship-demoting rank-v2 prompt."""
 
     port = _Port(lambda prompt, _n: _good_answer(prompt))
     _install(monkeypatch, _Binding(port))
-    monkeypatch.setattr(model_rank, "PROMPT_VERSION", "rank-v1")
+    monkeypatch.setattr(model_rank, "PROMPT_VERSION", "rank-v2")
     earlier = _rank(tmp_path, _rows(5))
-    cached_v1 = sorted(cache_dir(tmp_path / "home").glob("*.json"))
-    assert len(port.prompts) == 1 and len(cached_v1) == 5 and earlier.totals()["cached"] == 0
+    cached_v2 = sorted(cache_dir(tmp_path / "home").glob("*.json"))
+    assert len(port.prompts) == 1 and len(cached_v2) == 5 and earlier.totals()["cached"] == 0
     assert _rank(tmp_path, _rows(5)).totals()["cached"] == 5 and len(port.prompts) == 1, "the same prompt version reuses them"
     monkeypatch.undo()
     _install(monkeypatch, _Binding(port))
-    assert model_rank.PROMPT_VERSION == "rank-v2"
+    assert model_rank.PROMPT_VERSION == "rank-v3"
 
     now = _rank(tmp_path, _rows(5))
 
     assert len(port.prompts) == 2, "every posting is ranked again with the shipped prompt"
     assert now.totals()["cached"] == 0 and [item.cached for item in now.postings] == [False] * 5
-    assert now.prompt_version == "rank-v2"
+    assert now.prompt_version == "rank-v3"
     written = sorted(cache_dir(tmp_path / "home").glob("*.json"))
-    assert len(written) == 10 and set(cached_v1) < set(written), "the old files stay; the new scores have new keys"
-    assert {json.loads(path.read_text())["prompt_version"] for path in set(written) - set(cached_v1)} == {"rank-v2"}
+    assert len(written) == 10 and set(cached_v2) < set(written), "the old files stay; the new scores have new keys"
+    assert {json.loads(path.read_text())["prompt_version"] for path in set(written) - set(cached_v2)} == {"rank-v3"}
     assert _rank(tmp_path, _rows(5)).totals()["cached"] == 5 and len(port.prompts) == 2
 
 
@@ -523,101 +528,48 @@ def test_pass_result_seals_to_rank_json(tmp_path: Path, monkeypatch: pytest.Monk
     assert sealed["schema_version"] == "scout-rank:1"
     assert sealed["status"] == "complete" and sealed["fail_open_reason"] is None
     assert sealed["postings"][0]["normalized_url"] == "https://boards.example/0"
-    assert sealed["postings"][0]["demoted"] is True
+    assert sealed["postings"][0]["demoted"] is False
     assert sealed["batches"][0]["attempts"] == 1 and sealed["batches"][0]["valid"] is True
     assert RankResult.from_json(sealed).to_json() == sealed
 
 
-# --- flag-rules marker: old no_sponsor entries are re-ranked once ----------------------------
+# --- sponsorship labels and legacy cache shape ----------------------------------------------
 
-_TRANSFER = "We cannot provide new visa sponsorship for this role but are open to facilitating H-1B visa transfers."
-
-
-def _age_entries(home: Path, *, blockers: list[str] | None = None) -> None:
-    """Make every cached entry look like one written before the marker existed."""
-
-    for path in cache_dir(home).glob("*.json"):
-        value = json.loads(path.read_text())
-        value.pop("flag_rules", None)
-        if blockers is not None:
-            value["blockers"], value["score"] = blockers, 15 if blockers else 80
-        path.write_text(json.dumps(value))
-
-
-def test_new_entries_carry_the_flag_rules_marker(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    _install(monkeypatch, _Binding(_Port(lambda prompt, _n: _good_answer(prompt))))
-    _rank(tmp_path, _rows(6))
-    entries = [json.loads(path.read_text()) for path in cache_dir(tmp_path / "home").glob("*.json")]
-    assert len(entries) == 6 and {item["flag_rules"] for item in entries} == {model_rank.FLAG_RULES}
-
-
-def test_an_old_no_sponsor_entry_is_reranked_once_then_hits(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize(
+    ("text", "flag"),
+    [
+        ("We are unable to sponsor visas for this role.", "no_sponsor"),
+        ("We cannot provide new visa sponsorship but are open to facilitating H-1B visa transfers.", "transfer_only"),
+    ],
+)
+def test_sponsorship_labels_keep_high_scores(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, text: str, flag: str,
+) -> None:
     port = _Port(lambda prompt, _n: _good_answer(prompt))
-    _install(monkeypatch, _Binding(port))
-    _rank(tmp_path, _rows(5))
-    assert len(port.prompts) == 1
-    _age_entries(tmp_path / "home")
-
-    second = _rank(tmp_path, _rows(5))
-    assert len(port.prompts) == 2 and second.totals()["cached"] == 4  # only p0 carried no_sponsor
-    assert [item.cached for item in second.postings] == [False, True, True, True, True]
-
-    third = _rank(tmp_path, _rows(5))
-    assert len(port.prompts) == 2 and third.totals()["cached"] == 5
-
-
-def test_an_old_entry_without_a_blocker_still_hits(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    port = _Port(lambda prompt, _n: _good_answer(prompt))
-    _install(monkeypatch, _Binding(port))
-    _rank(tmp_path, _rows(4)[1:])
-    _age_entries(tmp_path / "home")
-
-    result = _rank(tmp_path, _rows(4)[1:])
-
-    assert len(port.prompts) == 1 and all(item.cached for item in result.postings)
-
-
-def test_a_no_sponsor_mention_in_a_reason_or_a_longer_blocker_string_counts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    port = _Port(lambda prompt, _n: _good_answer(prompt))
-    _install(monkeypatch, _Binding(port))
-    _rank(tmp_path, _rows(2)[1:])
-    (path,) = cache_dir(tmp_path / "home").glob("*.json")
-    for blockers, reasons in ((["no_sponsor: candidate needs sponsorship"], ["fits"]), ([], ["flags=no_sponsor"])):
-        value = json.loads(path.read_text())
-        value.pop("flag_rules", None)
-        value["blockers"], value["reasons"] = blockers, reasons
-        path.write_text(json.dumps(value))
-        assert model_rank._read_cached(path) is None
-    value = json.loads(path.read_text())
-    value.update(flag_rules=model_rank.FLAG_RULES, extra="shape")
-    path.write_text(json.dumps(value))
-    assert model_rank._read_cached(path) is not None, "the marker (or any extra field) still validates"
-
-
-def test_a_transfer_only_posting_leaves_the_demotion_after_the_rerank(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    def respond(prompt: str, _n: int) -> str:
-        items = []
-        for pid, rest in _batch_lines(prompt):
-            blocked = "flags=no_sponsor" in rest
-            items.append({"posting_id": pid, "score": 15 if blocked else 80, "reasons": ["fits"],
-                          "blockers": ["no_sponsor"] if blocked else []})
-        return json.dumps(items)
-
-    port = _Port(respond)
     _install(monkeypatch, _Binding(port))
     base = _rows(2)[1]
-    row = replace(base, text=base.text + _TRANSFER + "\n")
-    _rank(tmp_path, [row])
-    # the entry the old rules cached: the transfer text flagged no_sponsor, demoted, no marker
-    _age_entries(tmp_path / "home", blockers=["no_sponsor"])
-    stale = model_rank._read_cached(next(cache_dir(tmp_path / "home").glob("*.json")))
-    assert stale is None and len(port.prompts) == 1
+    row = replace(base, text=base.text + text)
 
-    again = _rank(tmp_path, [row])
-    assert len(port.prompts) == 2 and again.postings[0].cached is False
-    result = _rank(tmp_path, [row])
-    assert len(port.prompts) == 2
+    first = _rank(tmp_path, [row])
+    assert f"flags={flag}" in port.prompts[0]
+    assert first.postings[0].score == 90
+    assert first.postings[0].blockers == () and not first.postings[0].demoted
+    (path,) = cache_dir(tmp_path / "home").glob("*.json")
+    stored = json.loads(path.read_text())
+    assert stored["score"] == 90 and stored["blockers"] == []
+    assert "flag_rules" not in stored
 
-    (item,) = result.postings
-    assert item.cached and item.blockers == () and item.score == 80 and not item.demoted
-    assert "flags=transfer_only" in port.prompts[-1]
+    second = _rank(tmp_path, [row])
+    assert len(port.prompts) == 1
+    assert second.postings[0].cached and second.postings[0].score == 90
+
+
+@pytest.mark.parametrize("marker", [None, 2])
+def test_old_format_cache_reader_tolerates_optional_marker(tmp_path: Path, marker: int | None) -> None:
+    value = {"score": 15, "reasons": ["flags=no_sponsor"], "blockers": ["no_sponsor"],
+             "prompt_version": "rank-v2", "digest_version": "digest-v5"}
+    if marker is not None:
+        value["flag_rules"] = marker
+    path = tmp_path / "legacy.json"
+    path.write_text(json.dumps(value))
+    assert model_rank._read_cached(path) == value

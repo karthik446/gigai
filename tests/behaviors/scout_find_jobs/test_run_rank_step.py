@@ -169,7 +169,7 @@ def test_a_blocked_posting_is_demoted_below_unscored_ones_never_dropped(substrat
     # Company 0 scores highest but names a blocker; companies 1..3 do not.
     def score_for(line: str) -> tuple[int, list[str]]:
         number = _company_number(line)
-        return (99, ["no_sponsor"]) if number == 0 else (40 + number, [])
+        return (99, ["clearance"]) if number == 0 else (40 + number, [])
 
     install_rank_port(monkeypatch, RankPort(score_for))
     rows = [_posting(n) for n in range(4)]
@@ -181,7 +181,7 @@ def test_a_blocked_posting_is_demoted_below_unscored_ones_never_dropped(substrat
     assert blocked not in _urls(capped)  # demoted below every unblocked row ...
     assert blocked in _urls(everything)  # ... never dropped
     [sealed] = [item for item in capped.rank_scores if item.normalized_url == blocked]
-    assert sealed.score == 99 and sealed.mismatch_flags == ("no_sponsor",) and sealed.hidden_by_default is False
+    assert sealed.score == 99 and sealed.mismatch_flags == ("clearance",) and sealed.hidden_by_default is False
 
 
 def test_the_import_cap_takes_the_best_ranked_rows_not_the_newest(substrate: dict, monkeypatch) -> None:
@@ -264,7 +264,7 @@ def test_rank_json_is_committed_in_the_rank_result_shape(substrate: dict, monkey
     )
     sealed = json.loads(raw)
     assert sealed["schema_version"] == "scout-rank:1" and sealed["run_id"] == RUN_ID and sealed["kind"] == "run"
-    assert (sealed["prompt_version"], sealed["digest_version"]) == ("rank-v2", "digest-v5")
+    assert (sealed["prompt_version"], sealed["digest_version"]) == ("rank-v3", "digest-v5")
     assert (sealed["model_target"], sealed["configured_target"], sealed["resolved_model"]) == (
         "ollama_local", "ollama-default", "fake-rank-model")
     assert {"effort", "effort_applied", "batch_size", "concurrency", "max_calls", "status", "fail_open_reason"} <= set(sealed)
