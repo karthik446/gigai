@@ -131,7 +131,10 @@ the table above lists for its step.
   and your resume lines with contact lines removed go to the lesson-writing calls.
 - **Build my pathway:** the course's lesson titles and your resume lines, contact lines removed, go to your model in
   one call. The pathway page is your own file on this computer.
-- **The shipped courses** hold no postings and nothing personal. Importing a folder sends nothing.
+- **The courses from the GigAI learning center** hold no postings and nothing personal, and only their catalogs ship
+  with GigAI. **Open on scout.edgelab.one** is a link your browser follows (scout.edgelab.one then sees that request,
+  as any website does): GigAI sends nothing and the address holds nothing of yours. The lesson links on your pathway
+  page work the same way. Importing a folder sends nothing.
 
 ## Network traffic besides your model
 

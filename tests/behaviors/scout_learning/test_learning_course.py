@@ -1325,3 +1325,299 @@ def test_the_course_steps_hand_the_counted_concepts_to_the_source_step(tmp_path:
     assert model.calls == 9 and course["status"] == "done" and "main tool: Mlflow" in model.prompts[1]
     stored = json.loads((tmp_path / "work" / "sources.json").read_text(encoding="utf-8"))
     assert len(stored["lessons"]["lesson-1-1"]) == 3 and stored["thin_tools"] == []
+
+
+# ---------------------------------------------------------------------------
+# 8. ARTICLE and BOOK sources (0.1.11.11): verified by title + deep path + text length, cited as a whole page
+# ---------------------------------------------------------------------------
+
+LONG_PAGE_TEXT = "A method written down in plain words, with the reasons for each step and one worked example. " * 6
+ARTICLES = "https://articles.example.org"
+
+
+def article_candidates() -> list[dict[str, str]]:
+    return [
+        {"title": "Prioritising by cost of delay", "url": f"{ARTICLES}/pm/cost-of-delay", "kind": "article"},
+        {"title": "A chapter on roadmaps", "url": "https://books.example.org/inspired/chapter-3", "kind": "book"},
+        {"title": "Too short", "url": f"{ARTICLES}/pm/stub-post", "kind": "article"},
+        {"title": "No deep path", "url": f"{ARTICLES}/post", "kind": "article"},
+        {"title": "A guide", "url": f"{HOST}/guides/pm", "kind": "guide"},
+    ]
+
+
+def article_web() -> FakeWeb:
+    return FakeWeb({
+        f"{ARTICLES}/pm/cost-of-delay": page("Cost of delay", f'<h1 id="intro">Intro</h1><h2 id="formula">Formula</h2><p>{LONG_PAGE_TEXT}</p>'),
+        "https://books.example.org/inspired/chapter-3": page("Chapter 3: Roadmaps", f"<p>{LONG_PAGE_TEXT}</p>"),
+        f"{ARTICLES}/pm/stub-post": page("A stub", "<p>Too little text to call it an article.</p>"),
+        f"{ARTICLES}/post": page("A post on a shallow path", f"<p>{LONG_PAGE_TEXT}</p>"),
+        f"{HOST}/guides/pm": page("Guide to PM", "<p>Short but a guide.</p>"),
+    })
+
+
+def article_curriculum() -> dict[str, object]:
+    answer = curriculum_answer()
+    lesson_of(answer).update(title="Prioritisation methods", concepts=["model-serving"], sources=article_candidates())
+    return answer
+
+
+def test_an_article_or_book_page_is_verified_by_title_deep_path_and_text_length_and_cited_as_a_page() -> None:
+    curriculum = parsed(article_curriculum())
+    sources = lc.gather_sources(fetcher(article_web()), curriculum)
+    kept = {item["url"]: item for item in sources["lessons"]["lesson-1-1"]}
+    assert set(kept) == {f"{ARTICLES}/pm/cost-of-delay", "https://books.example.org/inspired/chapter-3", f"{HOST}/guides/pm"}
+    article = kept[f"{ARTICLES}/pm/cost-of-delay"]
+    assert (article["kind"], article["page_level_citable"]) == ("article", True)
+    assert [heading["id"] for heading in article["headings"]] == ["intro", "formula"]  # the page has headings: it is still cited as a page
+    assert (kept["https://books.example.org/inspired/chapter-3"]["kind"], kept["https://books.example.org/inspired/chapter-3"]["page_level_citable"]) == ("book", True)
+    rejected = {(item["url"].rsplit("/", 1)[1], item["reason"]) for item in sources["rejected"] if item["lesson"] == "lesson-1-1"}
+    assert rejected == {("stub-post", "too_little_text"), ("post", "not_a_deep_path")}
+    assert lc.check_sources(sources, curriculum)
+
+
+def test_a_documentation_page_keeps_the_rule_it_always_had_a_short_page_with_a_title_still_answers() -> None:
+    answer = article_curriculum()
+    lesson_of(answer)["sources"] = [
+        {"title": "A guide", "url": f"{HOST}/guides/pm", "kind": "guide"}, {"title": "A shallow post as a doc", "url": f"{ARTICLES}/post", "kind": "doc"},
+    ]
+    sources = lc.gather_sources(fetcher(article_web()), parsed(answer))
+    assert [item["url"] for item in sources["lessons"]["lesson-1-1"]] == [f"{HOST}/guides/pm", f"{ARTICLES}/post"]
+    assert not any(item["page_level_citable"] for item in sources["lessons"]["lesson-1-1"])  # not an article: no claim of a page-level citation
+
+
+def test_the_lesson_page_labels_an_article_and_a_book_source(tmp_path: Path) -> None:
+    sources = [
+        {"title": "Cost of delay", "url": f"{ARTICLES}/pm/cost-of-delay", "kind": "article"},
+        {"title": "Roadmaps", "url": "https://books.example.org/inspired/chapter-3", "kind": "book"},
+        {"title": "Guide", "url": f"{HOST}/guides/pm", "kind": "doc"},
+    ]
+    html = learning_render.render_sources(sources)
+    assert '<span class="kind-badge">article</span>' in html and '<span class="kind-badge">book chapter</span>' in html and '<span class="kind-badge">doc</span>' in html
+
+
+def test_an_article_or_a_book_page_is_no_page_of_a_tool() -> None:
+    sources = [
+        {"title": "Kubernetes tips", "url": "https://kubernetes.blog.example.net/posts/tips", "kind": "article"},
+        {"title": "Kubernetes in a book", "url": "https://kubernetes.books.example.org/ch/3", "kind": "book"},
+    ]
+    assert lc.tool_pages(sources, "Kubernetes") == []
+    assert lc.tool_pages([{**item, "kind": "doc"} for item in sources], "Kubernetes") != []
+    assert lc.doc_sources(sources) == [] and lc.is_page_level_source(sources[0]) and not lc.is_page_level_source({"kind": "paper"})
+    candidates = [lc.ToolCandidate("Kubernetes", (21, 23), of_lesson=True), lc.ToolCandidate("Airflow", (9, 11), of_lesson=True)]
+    mixed = [*sources, {"title": "Airflow docs", "url": "https://airflow.example.org/docs/a", "kind": "doc"}]
+    # the majority rule counts documentation only: one Airflow page of one documentation source
+    assert lc.choose_main_tool("Orchestration", candidates, mixed) == (candidates[1], lc.TOOL_BY_HOSTS)
+    assert lc.choose_main_tool("Orchestration", candidates, sources) == (candidates[0], lc.TOOL_BY_COUNT)  # no page of either: the counts decide
+
+
+def test_a_lesson_marked_case_is_not_asked_for_tool_pages() -> None:
+    answer = tool_lesson_answer()
+    lesson_of(answer)["practice"] = "case"
+    curriculum = parsed(answer)
+    assert curriculum["modules"][0]["lessons"][0]["practice"] == "case"
+    sources = lc.gather_sources(fetcher(moved_docs_web(answer)), curriculum, ScriptedModel(), counted_concepts=CONCEPTS)  # no answer scripted: a call fails
+    assert sources["retry_call"] == "not_needed" and sources["thin_tools"] == [] and sources["dropped"] == []
+
+
+@pytest.mark.parametrize("practice, accepted", [("tool", True), ("case", True), ("none", True), ("article", False), ("", False), (3, False)])
+def test_a_lessons_practice_is_tool_case_or_none(practice: object, accepted: bool) -> None:
+    answer = curriculum_answer()
+    lesson_of(answer)["practice"] = practice
+    if accepted:
+        assert parsed(answer)["modules"][0]["lessons"][0]["practice"] == practice
+    else:
+        with pytest.raises(LearningCourseError, match="practice of lesson lesson-1-1 must be one of: tool, case, none"):
+            parsed(answer)
+    assert "practice" not in parsed()["modules"][0]["lessons"][0]  # no mark: the key is absent, as the curriculums stored before it
+
+
+def test_the_curriculum_template_describes_the_practice_mark_and_article_and_book_sources() -> None:
+    template = lc._template(lc._CURRICULUM_RESOURCE)
+    assert '"practice": "tool"' in template and 'Mark a lesson "case"' in template and 'kind "article" or "book"' in template
+    assert "LIBRARY KEYS" in template and "{{keys}}" in template
+
+
+# ---------------------------------------------------------------------------
+# 9. A GIVEN curriculum (--curriculum) replaces step 6's model call; the shared keys (--keys)
+# ---------------------------------------------------------------------------
+
+from gigai.scout.learning_corpus import ConceptKey  # noqa: E402
+
+KEYS = (
+    ConceptKey("sd-caching", "Caching", "software", "skill", True, ("cache", "caching"), ("old-caching",)),
+    ConceptKey("risk-based-testing", "Risk based testing", "quality", "skill", True, ("risk based testing",)),
+    ConceptKey("coaching-people", "Coaching people", "career", "seniority", False, ("coaching",)),
+    ConceptKey("mlflow", "MLflow", "ai-ml", "tool", True, ("mlflow",)),
+)
+
+
+def given_curriculum(**change: object) -> dict[str, object]:
+    """A curriculum somebody wrote: one module of three lessons, one with sources, one marked case, one with none."""
+
+    out: dict[str, object] = {"modules": [{"id": "part-a", "title": "Part A", "lessons": [
+        {"id": "caching", "title": "Caching", "concepts": ["sd-caching"], "practice": "tool", "sources": [
+            {"title": "Cache docs", "url": f"{HOST}/caching/guide-1", "kind": "doc"}, {"title": "Cache docs 2", "url": f"{HOST}/caching/guide-2", "kind": "doc"},
+        ]},
+        {"id": "risk-testing", "title": "Risk based testing", "concepts": ["risk-based-testing", "model-serving"], "practice": "case", "sources": [
+            {"title": "An article", "url": f"{ARTICLES}/qa/risk-based-testing", "kind": "article"},
+        ]},
+        {"id": "no-sources", "title": "A lesson with no sources of its own", "concepts": ["on-call"]},
+    ]}]}
+    out.update(change)
+    return out
+
+
+def given(raw: Mapping[str, object] | None = None, keys: object = KEYS) -> dict:
+    return lc.parse_given_curriculum(raw if raw is not None else given_curriculum(), ROLE, CONCEPTS, keys)  # type: ignore[arg-type]
+
+
+def test_a_given_curriculum_is_stored_as_the_curriculum_with_no_expectations_or_technologies_needed() -> None:
+    curriculum = given()
+    assert (curriculum["schema_version"], curriculum["origin"], curriculum["planned_lessons"], curriculum["role"]) == (lc.SCHEMA_CURRICULUM, "given", 3, ROLE)
+    assert curriculum["expectations"] == {"responsibilities": [], "scope_at_level": []} and curriculum["technologies"] == {}  # counted tools need no group here
+    first, second, third = curriculum["modules"][0]["lessons"]
+    assert first["practice"] == "tool" and second["practice"] == "case" and "practice" not in third
+    assert second["candidates"] == [{"title": "An article", "url": f"{ARTICLES}/qa/risk-based-testing", "kind": "article"}]
+    assert third["candidates"] == [] and third["concepts"] == ["on-call"] and first["concepts"] == ["sd-caching"]
+    assert lc.check_curriculum(curriculum) and lc.check_curriculum(json.loads(json.dumps(curriculum)))
+
+
+def test_a_given_curriculum_may_name_a_counted_concept_or_a_key_of_the_shared_list_and_nothing_else() -> None:
+    raw = given_curriculum()
+    raw["modules"][0]["lessons"][0]["concepts"] = ["old-caching"]  # an id the key replaced reads as the key
+    assert given(raw)["modules"][0]["lessons"][0]["concepts"] == ["sd-caching"]
+    raw["modules"][0]["lessons"][0]["concepts"] = ["quantum-annealing"]
+    with pytest.raises(LearningCourseError, match="unknown concept id 'quantum-annealing'"):
+        given(raw)
+    with pytest.raises(LearningCourseError, match="unknown concept id 'sd-caching'"):
+        given(given_curriculum(), keys=())  # without the key list the same id is unknown
+    raw = given_curriculum(expectations={"responsibilities": ["on-call", "sd-caching"], "scope": []}, technologies={"Caches": ["sd-caching", "mlflow", "kubernetes", "airflow", "terraform"]})
+    stated = given(raw)
+    assert stated["expectations"]["responsibilities"] == ["on-call", "sd-caching"] and stated["technologies"] == {"Caches": ["sd-caching", "mlflow", "kubernetes", "airflow", "terraform"]}
+    with pytest.raises(LearningCourseError, match="technologies must cover every tool concept; missing: airflow, kubernetes, terraform"):
+        given(given_curriculum(technologies={"Caches": ["sd-caching", "mlflow"]}))  # stated groups keep the coverage rule
+
+
+def test_a_given_trait_lesson_is_refused_like_a_models_and_a_method_lesson_with_a_trait_word_is_not() -> None:
+    raw = given_curriculum()
+    raw["modules"][0]["lessons"][2].update(title="Mentoring and coaching engineers", concepts=["mentoring"])
+    with pytest.raises(LearningCourseError, match=r"lesson no-sources \('Mentoring and coaching engineers'\) reads as a trait or seniority lesson"):
+        given(raw)
+    raw["modules"][0]["lessons"][2].update(title="Coaching people", concepts=["coaching-people"])  # a key whose own flag says it is no skill
+    with pytest.raises(LearningCourseError, match="reads as a trait or seniority lesson"):
+        given(raw)
+    raw["modules"][0]["lessons"][2].update(title="Leadership of an incident review process", concepts=["on-call"])
+    assert given(raw)["planned_lessons"] == 3
+
+
+@pytest.mark.parametrize("change, message", [
+    (lambda raw: raw.update(modules=[]), "modules must hold 1 to 60 modules"),
+    (lambda raw: raw.update(modules="none"), "modules must hold 1 to 60 modules"),
+    (lambda raw: raw["modules"][0].update(lessons=[]), "module part-a must hold 1 to 60 lessons"),
+    (lambda raw: raw["modules"][0]["lessons"][1].update(id="caching"), "lesson id caching is used twice"),
+    (lambda raw: raw["modules"][0]["lessons"][1].update(id="No Kebab"), "lowercase kebab-case"),
+    (lambda raw: raw["modules"][0].update(id="Part A"), "module id is lowercase kebab-case and used once"),
+    (lambda raw: raw["modules"][0]["lessons"][1].update(title=""), "title of lesson risk-testing"),
+    (lambda raw: raw["modules"][0]["lessons"][1].update(concepts=[]), "must name a concept or be marked curriculum"),
+    (lambda raw: raw["modules"][0]["lessons"][1].update(practice="lab"), "practice of lesson risk-testing must be one of: tool, case, none"),
+    (lambda raw: raw["modules"][0]["lessons"].extend({"id": f"extra-{n}", "title": f"Extra {n}", "concepts": ["on-call"]} for n in range(38)), "a course page set holds at most 40 lessons (this one holds 41)"),
+])
+def test_a_given_curriculum_outside_the_bounds_is_refused_with_the_reason(change: Callable[[dict], None], message: str) -> None:
+    raw = given_curriculum()
+    change(raw)
+    with pytest.raises(LearningCourseError) as refused:
+        given(raw)
+    assert refused.value.code == "curriculum_invalid" and message in str(refused.value)
+    with pytest.raises(LearningCourseError, match="no JSON object"):
+        lc.parse_given_curriculum("a list", ROLE, CONCEPTS, KEYS)
+
+
+def test_a_given_module_may_hold_up_to_sixty_lessons_by_the_files_rule_and_forty_by_the_renderers() -> None:
+    many = given_curriculum()
+    many["modules"][0]["lessons"] = [{"id": f"l-{n}", "title": f"Lesson {n}", "concepts": ["on-call"]} for n in range(40)]
+    assert given(many)["planned_lessons"] == 40
+    many["modules"][0]["lessons"] = [{"id": f"l-{n}", "title": f"Lesson {n}", "concepts": ["on-call"]} for n in range(61)]
+    with pytest.raises(LearningCourseError, match="module part-a must hold 1 to 60 lessons"):
+        given(many)
+
+
+def test_the_shape_check_before_anything_is_counted_reads_an_unknown_id_as_one_the_postings_will_count() -> None:
+    raw = given_curriculum()
+    raw["modules"][0]["lessons"][0]["concepts"] = ["a-concept-the-postings-may-count"]
+    assert lc.check_given_shape(raw, ROLE, KEYS)["planned_lessons"] == 3
+    raw["modules"][0]["lessons"][0]["practice"] = "lab"
+    with pytest.raises(LearningCourseError, match="practice of lesson caching"):
+        lc.check_given_shape(raw, ROLE, KEYS)
+
+
+def test_a_given_curriculum_makes_step_6_without_a_model_call_and_a_lesson_with_no_sources_gets_the_follow_up(tmp_path: Path) -> None:
+    raw = given_curriculum()
+    web = FakeWeb({
+        f"{HOST}/caching/guide-1": page("Cache docs", '<h2 id="ttl">TTL</h2>'), f"{HOST}/caching/guide-2": page("Cache docs 2", '<h2 id="evict">Eviction</h2>'),
+        f"{ARTICLES}/qa/risk-based-testing": page("Risk based testing", f"<p>{LONG_PAGE_TEXT}</p>"),
+        f"{HOST}/on-call/guide": page("On call guide", '<h2 id="rota">Rota</h2>'),
+    })
+    follow_up = {"lessons": [{"id": "no-sources", "sources": [{"title": "On call guide", "url": f"{HOST}/on-call/guide", "kind": "doc"}]}]}
+    model = ScriptedModel(follow_up, module_answer())
+    course = lc.run_course_steps(
+        tmp_path / "work", model=model, fetcher=fetcher(web), role_text=ROLE, corpus=CORPUS, counted_concepts=CONCEPTS, master_lines=MASTER,
+        keys=KEYS, given=raw,
+    )
+    assert model.calls == 2 and course["status"] == "done" and course["kept_lessons"] == 3 and course["dropped"] == []
+    assert "LESSONS THAT NEED SOURCES" in model.prompts[0] and lessons_in(model.prompts[0]) == ["no-sources"]  # the design doc's retry, nothing else
+    assert lessons_in(model.prompts[1]) == ["caching", "risk-testing", "no-sources"]
+    stored = json.loads((tmp_path / "work" / "curriculum.json").read_text(encoding="utf-8"))
+    assert stored["origin"] == "given" and stored["input"] == lc.given_digest(raw, KEYS)
+    risk = next(item for item in course["modules"][0]["concepts"] if item["id"] == "risk-testing")
+    assert risk["sources"] == [{"title": "An article", "url": f"{ARTICLES}/qa/risk-based-testing", "kind": "article"}]
+
+    # the same file again: nothing is asked and nothing is fetched
+    again = lc.run_course_steps(
+        tmp_path / "work", model=ScriptedModel(), fetcher=fetcher(FakeWeb()), role_text=ROLE, corpus=CORPUS, counted_concepts=CONCEPTS,
+        master_lines=MASTER, keys=KEYS, given=raw,
+    )
+    assert again["kept_lessons"] == 3
+
+
+def test_another_given_file_or_none_makes_the_stored_curriculum_again(tmp_path: Path) -> None:
+    raw = given_curriculum()
+    web = FakeWeb({f"{HOST}/caching/guide-1": page("Cache docs"), f"{HOST}/caching/guide-2": page("Cache docs 2"), f"{ARTICLES}/qa/risk-based-testing": page("Risk", f"<p>{LONG_PAGE_TEXT}</p>")})
+    raw["modules"][0]["lessons"].pop()
+    lc.run_course_steps(
+        tmp_path / "work", model=ScriptedModel(module_answer()), fetcher=fetcher(web), role_text=ROLE, corpus=CORPUS, counted_concepts=CONCEPTS,
+        master_lines=MASTER, keys=KEYS, given=raw,
+    )
+    other = given_curriculum()
+    other["modules"][0]["lessons"].pop()
+    other["modules"][0]["title"] = "Part A, renamed"
+    work = lc.CourseWork(tmp_path / "work")
+    assert work.read(lc.STEP_CURRICULUM)["input"] == lc.given_digest(raw, KEYS) != lc.given_digest(other, KEYS)
+    model = ScriptedModel(module_answer())
+    lc.run_course_steps(
+        tmp_path / "work", model=model, fetcher=fetcher(web), role_text=ROLE, corpus=CORPUS, counted_concepts=CONCEPTS, master_lines=MASTER, keys=KEYS, given=other,
+    )
+    assert work.read(lc.STEP_CURRICULUM)["modules"][0]["title"] == "Part A, renamed"  # the curriculum was made again, from the new file
+    assert model.calls == 0  # the text of lessons whose ids did not change is kept: only what has no stored result is asked for
+
+
+def test_the_curriculum_prompt_lists_the_keys_no_posting_counted_and_a_lesson_may_name_one() -> None:
+    prompt = lc.curriculum_prompt(ROLE, CONCEPTS, keys=KEYS)
+    assert "LIBRARY KEYS" in prompt
+    start = prompt.index("LIBRARY KEYS")
+    block = prompt[prompt.index(FENCE_OPEN, start) : prompt.index(FENCE_CLOSE, start)]
+    assert "sd-caching | Caching" in block and "risk-based-testing | Risk based testing" in block and "coaching-people | Coaching people" in block
+    assert "mlflow | MLflow" not in block  # a key a posting counted is in the concept block, not listed twice
+    assert "LIBRARY KEYS" not in lc.curriculum_prompt(ROLE, CONCEPTS) and "LIBRARY KEYS" not in lc.sources_retry_prompt(ROLE, [{"id": "x", "title": "T"}], {})
+    answer = curriculum_answer()
+    lesson_of(answer).update(concepts=["sd-caching"])
+    assert lc.parse_curriculum(json.dumps(answer), ROLE, CONCEPTS, KEYS)["modules"][0]["lessons"][0]["concepts"] == ["sd-caching"]
+    with pytest.raises(LearningCourseError, match="unknown concept id 'sd-caching'"):
+        lc.parse_curriculum(json.dumps(answer), ROLE, CONCEPTS)  # no list given: the id is unknown, as before
+    model = ScriptedModel(answer)
+    assert lc.plan_curriculum(model, ROLE, CONCEPTS, KEYS)["planned_lessons"] == 28 and "sd-caching | Caching" in model.prompts[0]
+
+
+def test_the_keys_a_curriculum_teaches_that_no_posting_counted_are_found() -> None:
+    curriculum = given(given_curriculum(expectations={"responsibilities": ["coaching-people"], "scope": []}))
+    assert [key.key for key in lc.key_concepts(curriculum, CONCEPTS, KEYS)] == ["sd-caching", "risk-based-testing", "coaching-people"]
+    assert lc.key_concepts(curriculum, CONCEPTS, ()) == []

@@ -20,6 +20,37 @@ operator-visible capability and must link to the relevant release or evidence.
 
 ### Added
 
+#### Learning center — a written practice page for lessons with no tool to practise
+
+- A lesson that has no tool with public documentation to work through (product management, engineering
+  management, test design, SAP functional consulting, Salesforce administration, the design exercises of the system
+  design module) now gets a written practice page instead of none: a **case exercise** (a made-up scenario, its
+  constraints and numbers, the deliverable, a reference answer to open after you tried, a rubric to tick and the usual
+  mistakes) or an **artifact template** (the sections of a PRD, a test plan, an ADR, a runbook, a cutover plan and so on,
+  an example filled in for a made-up situation, and a review checklist). It is one model call and no page fetch, and it is
+  marked as written by a model. A lesson whose tool's documentation cannot be cited falls back to one instead of being
+  listed as not included.
+- Sources can be **articles** and **book chapters**, not only documentation: such a page is checked for a title, a real
+  page address and real text, is cited as a whole page, and is labelled **article** or **book chapter** on the lesson.
+  It never decides which tool a lesson practises.
+- For the operator and for the learning center's own generation, not a setting (the Scout UI has no such choice):
+  `gigai scout learning generate ROLE --keys FILE` gives the vocabulary and curriculum calls the shared concept key list
+  as ids to reuse, and `--curriculum FILE` replaces the model's curriculum call with a list of modules and lessons you
+  wrote (each lesson may say `practice` tool, case or none, and give its own sources), so a curated module is written
+  lesson by lesson. Both files are checked before anything is asked, and `resume` goes on with the same ones.
+
+#### Learning center — the courses link to the public lessons
+
+- The two courses that come with GigAI now link to the public GigAI learning center, scout.edgelab.one, instead of
+  carrying their lessons: GigAI ships only each course's catalog. In the Learning pathways tab the label reads
+  **From the GigAI learning center**, **Open course** becomes **Open on scout.edgelab.one** (an ordinary link your
+  browser follows: GigAI makes no request and nothing of yours is in the address), and the line under the courses reads
+  **More pathways on scout.edgelab.one**. `gigai scout learning open ROLE_KEY` prints the public address.
+- **Build my pathway** is unchanged and still works offline: the counts, the one resume comparison and the page are
+  built on your computer. Every lesson, subtopic and practice link on the page now goes to the learning center in a
+  new tab, and the page footer says which learning center version it was made for. Reading a lesson needs the network.
+- The package is smaller because it no longer holds the lesson text.
+
 ## Released versions
 
 ### 0.1.11.11

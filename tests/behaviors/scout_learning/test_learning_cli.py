@@ -173,3 +173,94 @@ def test_open_prints_the_running_servers_address_and_says_how_to_start_one(
     monkeypatch.setattr(run_supervisor, "status", lambda **_kwargs: _status(run_supervisor.STATE_UNREACHABLE, "http://127.0.0.1:8765"))
     unreachable = _run(home, target, "open", done.id, "--no-browser")
     assert unreachable.exit_code == 1 and "did not answer" in unreachable.output and opened == [address]
+
+
+# ---------------------------------------------------------------------------
+# generate --keys FILE and --curriculum FILE (0.1.11.11): for the operator and for generation by us
+# ---------------------------------------------------------------------------
+
+
+def _keys_file(path: Path) -> Path:
+    path.write_text(json.dumps({
+        "schema_version": "learning-center-concept-keys:1", "version": 1, "areas": {"infra": "Cloud"},
+        "keys": [{"key": "kubernetes", "display": "Kubernetes", "area": "infra", "category": "tool", "technical": True, "aliases": ["kubernetes", "k8s"], "parent": None, "former_ids": {}}],
+    }), encoding="utf-8")
+    return path
+
+
+def _curriculum_file(path: Path, **change: object) -> Path:
+    body: dict[str, object] = {"modules": [{"id": "m1", "title": "Methods", "lessons": [
+        {"id": "caching", "title": "Caching", "concepts": ["kubernetes"], "practice": "tool"},
+        {"id": "risk-based-testing", "title": "Risk based testing", "concepts": ["kubernetes"], "practice": "case"},
+        {"id": "reading", "title": "Reading list", "concepts": ["kubernetes"], "practice": "none"},
+    ]}]}
+    body.update(change)
+    path.write_text(json.dumps(body), encoding="utf-8")
+    return path
+
+
+def test_the_generate_help_names_both_inputs_and_says_they_are_for_the_operator_and_us() -> None:
+    help_text = CliRunner().invoke(cli, ["scout", "learning", "generate", "--help"], catch_exceptions=False).output
+    assert "--keys FILE" in help_text and "--curriculum FILE" in help_text
+    flat = " ".join(help_text.split())
+    assert "For the operator and for the learning center's own generation, not a setting" in flat
+    assert "the shared concept key list (concept-keys.json), given to the vocabulary and curriculum calls as ids to reuse" in flat
+    assert "REPLACES the model's curriculum call" in flat and "`resume` goes on with the same ones" in flat
+    assert "the Scout UI has no such choice" in flat
+    for command in ("resume", "cancel", "list", "show"):
+        resumed = CliRunner().invoke(cli, ["scout", "learning", command, "--help"], catch_exceptions=False).output
+        assert "--keys" not in resumed and "--curriculum" not in resumed  # no other command takes them
+
+
+def test_both_options_are_read_before_anything_is_asked_and_the_estimate_is_sized_to_the_curriculum(home_target: tuple[Path, Path], tmp_path: Path) -> None:  # noqa: F811
+    home, target = home_target
+    keys, curriculum = _keys_file(tmp_path / "keys.json"), _curriculum_file(tmp_path / "curriculum.json")
+    asked = _run(home, target, "generate", "Test lead", "--keys", str(keys), "--curriculum", str(curriculum), "--json")
+    assert asked.exit_code == 0, asked.output
+    body = _json(asked)
+    assert body["status"] == "ask" and body["estimate"]["lessons"] == 3 and body["estimate"]["case_lessons"] == 1 and body["estimate"]["none_lessons"] == 1  # type: ignore[index]
+    assert body["estimate"]["calls"] == 5  # type: ignore[index]  # 60 calls for 30 lessons: 6 for these three, one of them with no practice call
+    assert learning_store.list_pathways(home, target) == []  # asking stores nothing
+
+    plain = _run(home, target, "generate", "Test lead", "--curriculum", str(curriculum))
+    assert plain.exit_code == 0 and "The curriculum file holds 3 lessons: 1 with a written exercise (1 model call and no page fetch each), 1 with no practice page." in plain.output
+    assert plain.output.rstrip().endswith("Nothing was generated. Approve with --yes.")
+    without = _run(home, target, "generate", "Test lead")
+    assert "The curriculum file holds" not in without.output
+    assert _json(_run(home, target, "generate", "Test lead", "--json"))["estimate"] == {"calls": 60, "fetches": 1300, "minutes": 140, "tokens": None, "basis": "none"}
+
+
+@pytest.mark.parametrize("args, code, message", [
+    (["--keys", "missing.json"], "keys_invalid", "one regular local file"),
+    (["--curriculum", "missing.json"], "curriculum_invalid", "one regular local file"),
+    (["--keys", "curriculum.json"], "keys_invalid", "is not a learning-center-concept-keys:1"),
+    (["--curriculum", "keys.json"], "curriculum_invalid", "modules must hold 1 to 60 modules"),
+    (["--curriculum", "broken.json"], "curriculum_invalid", "must be a UTF-8 JSON file"),
+    (["--curriculum", "list.json"], "curriculum_invalid", "holds no JSON object"),
+    (["--curriculum", "trait.json"], "curriculum_invalid", "reads as a trait or seniority lesson"),
+    (["--curriculum", "toomany.json"], "curriculum_invalid", "at most 40 lessons"),
+])
+def test_a_key_file_or_curriculum_file_that_is_refused_stops_the_command_with_the_reason_and_stores_nothing(
+    home_target: tuple[Path, Path], tmp_path: Path, args: list[str], code: str, message: str,  # noqa: F811
+) -> None:
+    home, target = home_target
+    _keys_file(tmp_path / "keys.json")
+    _curriculum_file(tmp_path / "curriculum.json")
+    (tmp_path / "broken.json").write_text("{ nope", encoding="utf-8")
+    (tmp_path / "list.json").write_text("[1]", encoding="utf-8")
+    _curriculum_file(tmp_path / "trait.json", modules=[{"id": "m1", "title": "Traits", "lessons": [{"id": "mentoring", "title": "Mentoring and coaching engineers", "concepts": ["kubernetes"]}]}])
+    # a concept id that is no key is read as one the postings will count: only a trait word with no technical concept is refused here
+    trait = json.loads((tmp_path / "trait.json").read_text(encoding="utf-8"))
+    trait["modules"][0]["lessons"][0]["concepts"] = []
+    trait["modules"][0]["lessons"][0]["curriculum"] = True
+    (tmp_path / "trait.json").write_text(json.dumps(trait), encoding="utf-8")
+    _curriculum_file(tmp_path / "toomany.json", modules=[{"id": "m1", "title": "Big", "lessons": [{"id": f"l-{n}", "title": f"Lesson {n}", "concepts": ["kubernetes"]} for n in range(41)]}])
+    args = [str(tmp_path / item) if item.endswith(".json") else item for item in args]
+
+    refused = _run(home, target, "generate", "Test lead", "--yes", *args, "--json")
+    assert refused.exit_code == 1, refused.output
+    error = _json(refused)["error"]
+    assert error["code"] == code and message in error["message"]  # type: ignore[index]
+    plain = _run(home, target, "generate", "Test lead", "--yes", *args)
+    assert plain.exit_code == 1 and message in plain.output
+    assert learning_store.list_pathways(home, target) == [] and not (learning_store.learning_dir(home, target) / "work").exists()

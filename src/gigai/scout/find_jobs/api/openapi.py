@@ -838,9 +838,9 @@ _LEARNING_ROW: dict[str, object] = {
 # 0.1.11.10 shipped lessons: the row of a course that ships inside GigAI (api/learning.py `shipped_summary`).
 _LEARNING_SHIPPED_ROW: dict[str, object] = {
     "id": "mlops-engineer", "role_text": "MLOps engineer", "requested_at": None, "status": "done", "cost": None,
-    "course": {"entry": "index.html", "lessons": 35, "size_bytes": None, "generated_at": None},
-    "url": "/learning/shipped/mlops-engineer/index.html", "source": "shipped", "imported_from": None, "error": None, "error_code": None,
-    "progress": None, "label": "Shipped with GigAI",
+    "course": {"entry": None, "lessons": 35, "size_bytes": None, "generated_at": None},
+    "url": "https://scout.edgelab.one/learn/pathways/mlops-engineer/", "source": "shipped", "imported_from": None, "error": None, "error_code": None,
+    "progress": None, "label": "From the GigAI learning center",
     "local_page": {"state": "not_built", "built_at": None, "reasons": [], "build": None, "url": "/learning/shipped/mlops-engineer/pathway.html"},
 }
 # What POST /api/learning/shipped/{role_key}/pathway answers without `approve` (scout/learning_pathway_build.py `ask_response`).
@@ -855,8 +855,10 @@ _LEARNING_PATHWAY_ASK_EXAMPLE: dict[str, object] = {
 _LEARNING_SHIPPED_NOTE = (
     "COURSES SHIPPED WITH GIGAI come first in the list, by role, before the user's own (newest request first). Such a row has `source` "
     "shipped, the course's role key as `id` (lower-case words joined by dashes, never an `lp-` id), `status` done, and null for "
-    "`requested_at`, `cost`, `imported_from`, `error`, `error_code`, `progress` and the course's `size_bytes` (nobody asked for it and "
-    "making it cost this user nothing). It has two more keys: `label` (`Shipped with GigAI`) and `local_page`, the state of the one page "
+    "`requested_at`, `cost`, `imported_from`, `error`, `error_code`, `progress` and the course's `entry` and `size_bytes` (nobody asked for "
+    "it and making it cost this user nothing; GigAI holds no pages of it). Its `url` is the course's pathway on the public learning "
+    "center (`https://scout.edgelab.one/learn/pathways/<role key>/`, an address for the user's browser to open: this server never "
+    "fetches it), or null for a catalog that names no learning center. It has two more keys: `label` (`From the GigAI learning center`) and `local_page`, the state of the one page "
     "of the course that is the user's own, built on this computer from the stored postings and the master resume (POST "
     "/api/learning/shipped/`{role_key}`/pathway builds it): `state` is `not_built` | `built` | `stale`, `built_at` is when it was "
     "built (else null), `reasons` says why a `stale` page is out of date (`gigai_version`: another GigAI version built it; `catalog`: "
@@ -866,10 +868,11 @@ _LEARNING_SHIPPED_NOTE = (
     "progress line), or `{status: failed, error_code, error, finished_at}` after a build that did not finish (the page that was there "
     "stays), and `url` is where the page is served. "
     "This read is cheap: it compares the stored record of the build with the installed version, the shipped catalog and, for a page "
-    "with a comparison, the master's revision id; it reads no resume text and counts no posting. The lessons and practice pages of a shipped course are generic, the same for every user: no resume text, no posting text. "
-    "They are static HTML under `/learning/shipped/<role key>/` (GET and HEAD, not an API route), rendered from the package's data when "
-    "first opened and kept in a cache folder of the home; the files they share (scripts, styles) are under `/learning/_assets/`; both "
-    "are sent with the same Content-Security-Policy as a generated course. While the local page is not built, its `url` answers a plain "
+    "with a comparison, the master's revision id; it reads no resume text and counts no posting. The lessons and practice pages of a shipped course are on the learning center, the same for every user; GigAI ships only "
+    "the course's catalog and serves no lesson page. The one page of it this server serves is the local page, at "
+    "`/learning/shipped/<role key>/pathway.html` (GET and HEAD, not an API route; every other path under `/learning/shipped/<role key>/` "
+    "is a 404); the files it shares with the other courses (scripts, styles) are under `/learning/_assets/`; both are sent with the "
+    "same Content-Security-Policy as a generated course. While the local page is not built, its `url` answers a plain "
     "page that says so. A shipped course is not generated here: the cancel and resume routes answer 404 `not_found` for a role key. "
 )
 _LEARNING_RECORD: dict[str, object] = {

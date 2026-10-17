@@ -14,7 +14,8 @@ one-course-at-a-time claim). It asks first with the estimate (default no; ``--ye
 running job to stop, whichever process runs it; ``resume ID`` goes on with one that failed or was interrupted.
 
 0.1.11.10 shipped lessons (slice 3): ``list`` also shows the courses that ship inside GigAI (marked ``shipped``,
-first), and ``show`` and ``open`` take a shipped course's ROLE_KEY where they take a pathway ID (``learning_shipped_store``).
+first), and ``show`` and ``open`` take a shipped course's ROLE_KEY where they take a pathway ID (``learning_shipped_store``);
+``open`` of one prints its public address on the learning center (the lessons are not served here).
 A shipped course is not generated here, so ``cancel`` and ``resume`` refuse a role key.
 
 0.1.11.10 shipped lessons (slices 4b and 5b): ``pathway ROLE_KEY`` builds, or builds again, the one page of a
@@ -34,7 +35,7 @@ from pathlib import Path
 import click
 
 from ..setup import default_home_root
-from . import learning_shipped_store, learning_store
+from . import learning_shipped, learning_shipped_store, learning_store
 from .learning_shipped_store import ShippedCourse
 from .learning_store import LearningError, Pathway
 
@@ -204,9 +205,9 @@ def learning_list_command(home_value: Path | None, target_value: Path | None, as
         return
     for row in shipped:
         lessons = _lessons_words(int(row["course"]["lessons"]))  # type: ignore[index]
-        click.echo(f"{row['id']}  shipped  {row['role_text']}  ({lessons})  [shipped with GigAI]  {_local_page_words(row['local_page'])}")
+        click.echo(f"{row['id']}  shipped  {row['role_text']}  ({lessons})  [from the GigAI learning center]  {_local_page_words(row['local_page'])}")
     if shipped:
-        click.echo(learning_job.MORE_COURSES_NOTE)
+        click.echo(f"{learning_job.MORE_COURSES_NOTE}: {learning_shipped.SITE_BASE_URL}/")
     for pathway in pathways:
         line = f"{_live(home_root, target, pathway)}"
         line = f"{pathway.id}  {line:<7}  {pathway.requested_at[:10]}  {pathway.role_text}  ({_course_words(pathway)})  [{pathway.source}]"
@@ -244,10 +245,10 @@ def learning_show_command(pathway_id: str, home_value: Path | None, target_value
                 f"{course.role_key}  {course.role}",
                 "Status: done",
                 f"Course: {_lessons_words(course.lessons)}",
-                "Source: shipped with GigAI (the lessons and practice pages are the same for everyone)",
+                f"Source: {learning_shipped_store.SHIPPED_LABEL} (the lessons and practice pages are on scout.edgelab.one, the same for everyone)",
                 f"Your pathway page: {_local_page_words(row['local_page'])}",
                 f"Build it or build it again: gigai scout learning pathway {course.role_key}",
-                f"Open it: gigai scout learning open {course.role_key}",
+                f"Open it on the learning center: gigai scout learning open {course.role_key}",
             ]))
             return
         pathway = _pathway(home_root, target, pathway_id)
@@ -288,12 +289,14 @@ def learning_show_command(pathway_id: str, home_value: Path | None, target_value
 @_target_option
 @_json_option
 def learning_open_command(pathway_id: str, no_browser: bool, home_value: Path | None, target_value: Path | None, as_json: bool) -> None:
-    """Print where the running Scout server serves a pathway's course, and open it in the browser.
+    """Print where a pathway's course is, and open it in the browser.
 
-    PATHWAY_ID is a pathway id, or the ROLE_KEY of a course shipped with
-    GigAI. The course is served by the Scout server only: when it is not
-    running, the command says how to start it and exits 1. --json never
-    opens a browser.
+    PATHWAY_ID is a pathway id, or the ROLE_KEY of a course from the GigAI
+    learning center. A course of your own is served by the Scout server only:
+    when it is not running, the command says how to start it and exits 1. A
+    course from the learning center is on scout.edgelab.one: the command prints
+    that address (and opens it in your browser; nothing of yours is sent) and
+    needs no server. --json never opens a browser.
     """
 
     from . import run_supervisor
@@ -304,12 +307,23 @@ def learning_open_command(pathway_id: str, no_browser: bool, home_value: Path | 
         target = _target(target_value, home_root, as_json=as_json)
         course = _shipped(pathway_id)
         if course is not None:
-            shown_id, path = course.role_key, learning_shipped_store.course_url(course.role_key)
-        else:
-            pathway = _pathway(home_root, target, pathway_id)
-            shown_id, path = pathway.id, course_url(pathway)
-            if path is None:
-                raise LearningError("course_not_ready", f"learning pathway {pathway.id} has no course yet (status: {pathway.status})")
+            public = learning_shipped_store.public_url(course)
+            if public is None:
+                raise LearningError("course_not_linked", f"the catalog of {course.role_key} names no learning center: update GigAI to open it")
+            opened = False
+            if not no_browser and not as_json:
+                import webbrowser
+
+                opened = bool(webbrowser.open(public))
+            if as_json:
+                _emit({"schema_version": "scout-learning-open:1", "id": course.role_key, "url": public, "opened": opened})
+                return
+            click.echo(public)
+            return
+        pathway = _pathway(home_root, target, pathway_id)
+        shown_id, path = pathway.id, course_url(pathway)
+        if path is None:
+            raise LearningError("course_not_ready", f"learning pathway {pathway.id} has no course yet (status: {pathway.status})")
         current = run_supervisor.status(home_root=home_root, requested_target=target)
     except _errors() as exc:
         _fail(getattr(exc, "code", "scout_learning_failed"), str(exc), as_json=as_json)
@@ -414,7 +428,7 @@ def learning_pathway_command(role_key: str, yes: bool, home_value: Path | None, 
     if as_json:
         _emit(response)
         return
-    address = learning_shipped_store.course_url(course.role_key, learning_shipped_store.PATHWAY_PAGE)
+    address = learning_shipped_store.local_page_url(course.role_key)
     lines = [f"Built your pathway page of {course.role} ({course.role_key}).", _pathway_counts_line(dict(built.counts))]
     note = built.counts.get("corpus", {}).get("note") if isinstance(built.counts.get("corpus"), dict) else None
     if note:
@@ -574,13 +588,48 @@ def _ended(home_root: Path, target: Path, pathway: Pathway, *, as_json: bool) ->
         raise click.exceptions.Exit(1)
 
 
+CURRICULUM_FILE_BYTES_MAX = 2 * 1024 * 1024
+
+
+def _load_curriculum(path: Path) -> dict[str, object]:
+    """The JSON object of a ``--curriculum`` file (``curriculum_invalid``: not one regular local UTF-8 JSON object file)."""
+
+    from .learning_course import LearningCourseError
+
+    if path.is_symlink() or not path.is_file():
+        raise LearningCourseError("curriculum_invalid", "--curriculum must be one regular local file")
+    try:
+        size = path.stat().st_size
+    except OSError as exc:
+        raise LearningCourseError("curriculum_invalid", "--curriculum must be a UTF-8 JSON file") from exc
+    if size > CURRICULUM_FILE_BYTES_MAX:
+        raise LearningCourseError("curriculum_invalid", "the curriculum file is larger than 2 MB")
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, ValueError) as exc:
+        raise LearningCourseError("curriculum_invalid", "--curriculum must be a UTF-8 JSON file") from exc
+    if not isinstance(data, dict):
+        raise LearningCourseError("curriculum_invalid", "the curriculum file holds no JSON object")
+    return data
+
+
 @learning_group.command("generate")
 @click.argument("role_text", metavar="ROLE")
 @click.option("--yes", "yes", is_flag=True, help="Approve: generate without asking (about 60 model calls, at most 120).")
+@click.option(
+    "--keys", "keys_file", metavar="FILE", type=click.Path(path_type=Path, dir_okay=False),
+    help="For the operator and for the learning center's own generation, not a setting: the shared concept key list (concept-keys.json), given to the vocabulary and curriculum calls as ids to reuse where a concept is the same.",
+)
+@click.option(
+    "--curriculum", "curriculum_file", metavar="FILE", type=click.Path(path_type=Path, dir_okay=False),
+    help="For the operator and for the learning center's own generation, not a setting: a given list of modules and lessons (JSON) that REPLACES the model's curriculum call, so a curated module is written lesson by lesson.",
+)
 @_home_option
 @_target_option
 @_json_option
-def learning_generate_command(role_text: str, yes: bool, home_value: Path | None, target_value: Path | None, as_json: bool) -> None:
+def learning_generate_command(
+    role_text: str, yes: bool, keys_file: Path | None, curriculum_file: Path | None, home_value: Path | None, target_value: Path | None, as_json: bool,
+) -> None:
     """Generate a course for ROLE from the postings stored on this computer.
 
     A higher-usage action than an assessment: about 60 model calls on your
@@ -594,19 +643,35 @@ def learning_generate_command(role_text: str, yes: bool, home_value: Path | None
     the foreground, with one plain progress line per step; one course at a
     time per project. It stops by itself after 120 model calls or 1500 page
     fetches; `gigai scout learning cancel ID` stops it from another terminal.
+
+    --keys and --curriculum are for the operator and for the learning
+    center's own generation (the Scout UI has no such choice). --keys FILE is
+    the shared concept key list: the vocabulary and curriculum calls are given
+    it as ids to reuse. --curriculum FILE is a list of modules and lessons
+    that replaces the model's curriculum call (every lesson may say
+    "practice": "tool", "case" or "none", and give its own sources); both
+    files are checked before anything is asked or sent, and kept with the
+    course, so `resume` goes on with the same ones.
     """
 
     import sys
 
-    from . import learning_job
+    from . import learning_corpus, learning_course, learning_job
 
     home_root = home_value or default_home_root()
     try:
         target = _target(target_value, home_root, as_json=as_json)
-        response = learning_job.ask_response(home_root, target, role_text)
+        keys = learning_corpus.load_keys(keys_file) if keys_file is not None else ()
+        curriculum = _load_curriculum(curriculum_file) if curriculum_file is not None else None
+        if curriculum is not None:
+            learning_course.check_given_shape(curriculum, role_text, keys)
+        response = learning_job.ask_response(home_root, target, role_text, curriculum=curriculum)
         caps = response["caps"]
+        shape = learning_job.curriculum_shape(curriculum)
         facts = [
             f"Estimate: {learning_job.estimate_words(response['estimate'])}.",  # type: ignore[arg-type]
+            *([f"The curriculum file holds {_lessons_words(shape['lessons'])}: {shape['case_lessons']} with a written exercise (1 model call and no page fetch each), "
+               f"{shape['none_lessons']} with no practice page."] if shape["lessons"] else []),
             learning_job.PLAN_WARNING,
             _GENERATE_SENDS,
             f"Stops by itself after {caps['calls']} model calls or {caps['fetches']} page fetches. Stop it any time from another terminal: gigai scout learning cancel ID.",  # type: ignore[index]
@@ -627,7 +692,9 @@ def learning_generate_command(role_text: str, yes: bool, home_value: Path | None
                 click.echo("\n".join(facts))
             click.echo("Nothing was generated. Approve with --yes.")
             return
-        pathway = learning_job.run_foreground(home_root, target, role_text=role_text, on_progress=None if as_json else click.echo)
+        pathway = learning_job.run_foreground(
+            home_root, target, role_text=role_text, on_progress=None if as_json else click.echo, keys=keys, curriculum=curriculum,
+        )
     except _errors() as exc:
         _fail(getattr(exc, "code", "scout_learning_failed"), str(exc), as_json=as_json)
         return

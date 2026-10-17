@@ -12,9 +12,12 @@ about one user lives on one page that is built on that user's machine and never 
    course's, not this machine's).
 2. :func:`build_pathway_page`: the page, in the look of the course (the personal course's templates, imported
    from ``learning_render``; ``course.css`` and the scripts at the shared asset base; no new style). It holds the
-   role, the corpus line, 'Your path', Expectations and Technologies with percentages and bars, and the lessons
-   with their 'N postings' chips. Every link to a shipped page and anchor is checked against the rendered course
-   (:func:`audit_page`) before the file is written. The same inputs give the same bytes: no date is on the page.
+   role, the corpus line, 'Your path', Expectations and Technologies with percentages and bars, and the lessons.
+   It is built from the CATALOG alone: every lesson, subtopic and practice link goes to the public learning center
+   (``learning_shipped.Site``, ``target="_blank" rel="noopener"``), the one link that leaves the page; a ``:1``
+   catalog has no site, so nothing is linked and the page says so. The audit (:func:`audit_page`) allows exactly
+   those addresses and the page's own anchors, and runs before the file is written. The footer prints the
+   catalog's site version. The same inputs give the same bytes: no date is on the page.
 3. THE RESUME is the reference for known/some/new, always; it is compared by one model call that a later slice
    makes. ``markers`` is that call's checked answer, or ``None`` before it has run: the page then says 'Your
    resume is not compared yet' and shows nothing derived from a resume (no label, no line, no guess by a code
@@ -28,7 +31,8 @@ about one user lives on one page that is built on that user's machine and never 
 5. :func:`state`: ``not_built``, ``built`` or ``stale`` (the rule is in its text).
 
 The page itself is the user's own file at ``learning_shipped_store.pathway_page_path`` (the project's learning
-folder, not the page cache), served in the same URL folder as the shipped pages, so its links are plain file names.
+folder), served by the Scout server at ``/learning/shipped/<role key>/pathway.html``; the only page of a shipped
+course the server serves.
 
 No model call, no network. Examples of posting sentences with their company are on the page (it is local and
 private) and nowhere else.
@@ -58,20 +62,14 @@ from .learning_render import (
     check_glyphs,
     clean_asset_base,
     concept_marker_line,
-    concept_page_filename,
     esc,
-    render_breadcrumb,
+    postings_label,
     render_expectations_table,
-    render_sidebar,
     render_subtopic,
     render_technologies,
-    render_toc,
-    render_your_path,
-    sanitize_course,
-    subtopic_anchor,
     validate_marker,
 )
-from .learning_shipped import CATALOG_FILENAME, CATALOG_SCHEMA_VERSION, COURSE_FILENAME
+from .learning_shipped import CATALOG_FILENAME, CATALOG_SCHEMAS, Site, catalog_site, library_id
 from .learning_shipped_store import PAGE_BUILT, PAGE_NOT_BUILT, PAGE_STALE
 from .learning_store import LearningError
 
@@ -79,6 +77,9 @@ COUNTS_SCHEMA = "scout-learning-local-counts:1"
 RECORD_SCHEMA = "scout-learning-local-page:1"
 LOCAL_DIRNAME = "local"
 FOOTER_LOCAL = "built on this computer"
+#: What the footer and the page header call the lessons' home.
+CENTER_NAME = "From the GigAI learning center"
+NOT_LINKED = "The lessons of this course are not linked: this catalog names no learning center. Update GigAI to link them."
 #: The page's expectation groups: (the key in the catalog and in the counts, the heading the course prints).
 EXPECTATION_GROUPS = (("responsibilities", "Responsibilities"), ("scope_at_staff", "Scope at staff level"))
 #: A page is stale once the postings read differ from the recorded count by MORE than this share of it.
@@ -109,8 +110,8 @@ def _mapping(value: object) -> Mapping[str, Any]:
 
 
 def _role_key(catalog: Mapping[str, Any]) -> str:
-    if not isinstance(catalog, Mapping) or catalog.get("schema_version") != CATALOG_SCHEMA_VERSION:
-        raise LearningError("invalid_value", f"the catalog is not a {CATALOG_SCHEMA_VERSION}")
+    if not isinstance(catalog, Mapping) or catalog.get("schema_version") not in CATALOG_SCHEMAS:
+        raise LearningError("invalid_value", f"the catalog is not a {' or '.join(CATALOG_SCHEMAS)}")
     role_key = catalog.get("role_key")
     if not learning_shipped_store.is_role_key(role_key):
         raise LearningError("invalid_value", "the catalog names no role key")
@@ -197,7 +198,7 @@ class PathwayPage:
 
     path: Path
     size_bytes: int
-    #: Links to shipped pages and to anchors that were checked against the rendered course, all found.
+    #: Links (to the page's own anchors and to the learning center) that the audit checked, all allowed.
     links_checked: int
     #: Whether the page holds the resume's known/some/new (``markers`` was given).
     compared: bool
@@ -229,20 +230,27 @@ def _marker_entry(markers: Mapping[str, Any], key: str) -> dict[str, Any] | None
     return entry
 
 
-def _marked_modules(course: Mapping[str, Any], counts: Mapping[str, Any], markers: Mapping[str, Any] | None) -> list[dict[str, Any]]:
-    """The course's modules as the personal templates read them: each lesson with its count and, when compared, its markers."""
+def _marked_modules(catalog: Mapping[str, Any], counts: Mapping[str, Any], markers: Mapping[str, Any] | None) -> list[dict[str, Any]]:
+    """The catalog's modules as the page reads them: each lesson with its count and, when compared, its markers."""
 
     lesson_counts = _mapping(counts.get("lessons"))
     known_keys: set[str] = set()
+    by_module: dict[str, list[Mapping[str, Any]]] = {}
+    for lesson in _lessons(catalog):
+        by_module.setdefault(str(lesson.get("module")), []).append(lesson)
     modules: list[dict[str, Any]] = []
-    for module in course.get("modules") or []:
+    for module in catalog.get("modules") or []:
+        if not isinstance(module, Mapping):
+            continue
         lessons = []
-        for lesson in module.get("concepts") or []:
+        for lesson in by_module.get(str(module.get("id")), []):
             lesson_id = lesson["id"]
             found = lesson_counts.get(lesson_id) or {}
+            subtopics = [sub for sub in lesson.get("subtopics") or [] if isinstance(sub, Mapping) and isinstance(sub.get("id"), str)]
             shown: dict[str, Any] = {
-                "id": lesson_id, "title": lesson.get("title", lesson_id), "postings_in_90d": int(found.get("postings_in_90d", 0) or 0),
-                "subtopics": [{"id": sub["id"], "title": sub.get("title", sub["id"])} for sub in lesson.get("subtopics") or []],
+                "id": lesson_id, "library_id": library_id(lesson), "title": lesson.get("title", lesson_id), "has_practice": bool(lesson.get("has_practice")),
+                "postings_in_90d": int(found.get("postings_in_90d", 0) or 0),
+                "subtopics": [{"id": sub["id"], "title": sub.get("title", sub["id"])} for sub in subtopics],
             }
             known_keys.add(lesson_id)
             known_keys.update(f"{lesson_id}/{sub['id']}" for sub in shown["subtopics"])
@@ -251,11 +259,11 @@ def _marked_modules(course: Mapping[str, Any], counts: Mapping[str, Any], marker
                     sub.update(_marker_entry(markers, f"{lesson_id}/{sub['id']}") or {"marker": MARKER_NEW, "evidence": None, "missing": None})
                 shown["marker"] = _marker_entry(markers, lesson_id) or _lesson_marker(shown["subtopics"])
             lessons.append(shown)
-        modules.append({"id": module.get("id", ""), "title": module.get("title", module.get("id", "")), "intro": module.get("intro", ""), "concepts": lessons})
+        modules.append({"id": module.get("id", ""), "title": module.get("title", module.get("id", "")), "concepts": lessons})
     if markers is not None:
         stray = sorted(str(key) for key in markers if key not in known_keys)
         if stray:
-            raise CourseError([f"markers[{key}]: the course holds no such lesson or subtopic" for key in stray[:10]])
+            raise CourseError([f"markers[{key}]: the catalog holds no such lesson or subtopic" for key in stray[:10]])
     return modules
 
 
@@ -281,7 +289,116 @@ def _subtopic_marker_lines(sub: Mapping[str, Any]) -> list[str]:
     return [line for line in drawn[1:] if line.startswith('<p class="')]
 
 
-def _resume_evidence(modules: Sequence[Mapping[str, Any]]) -> str:
+class _Links:
+    """Where a lesson, a subtopic and a practice path are: the public learning center, or nowhere (a ``:1`` catalog)."""
+
+    def __init__(self, site: Site | None) -> None:
+        self.site = site
+
+    def anchor(self, url: str | None, text: str, css: str = "", *, inner: str | None = None) -> str:
+        """``text`` (or the escaped ``inner`` html) as a link to ``url`` that opens in a new tab; plain text when there is no site."""
+
+        shown = esc(text) if inner is None else inner
+        if url is None:
+            return shown if not css else f'<span class="{css}">{shown}</span>'
+        cls = f' class="{css}"' if css else ""
+        return f'<a href="{esc(url)}"{cls} target="_blank" rel="noopener">{shown}</a>'
+
+
+
+    def lesson(self, lesson: Mapping[str, Any], text: str, css: str = "", *, inner: str | None = None) -> str:
+        return self.anchor(None if self.site is None else self.site.lesson_url(lesson["library_id"]), text, css, inner=inner)
+
+    def subtopic(self, lesson: Mapping[str, Any], sub: Mapping[str, Any]) -> str:
+        return self.anchor(None if self.site is None else self.site.lesson_url(lesson["library_id"], sub["id"]), str(sub["title"]))
+
+    def practice(self, lesson: Mapping[str, Any], css: str = "") -> str:
+        if self.site is None or not lesson.get("has_practice"):
+            return ""
+        return self.anchor(self.site.practice_url(lesson["library_id"]), "Practice", css)
+
+
+def _render_sidebar(catalog: Mapping[str, Any], modules: Sequence[Mapping[str, Any]], links: _Links) -> str:
+    """The course's sidebar from the catalog: this page's own anchors, then every lesson and its practice path on the site."""
+
+    parts = ['<nav class="sidebar">']
+    parts.append(f'<div class="sidebar-title"><a href="{PATHWAY_PAGE}" class="current">{esc(catalog.get("role", "Role"))}</a></div>')
+    parts.append('<div class="sidebar-search">')
+    parts.append('<input type="search" id="sidebar-search-input" placeholder="Search content" autocomplete="off" aria-label="Search content">')
+    parts.append("</div>")
+    parts.append('<ul class="sidebar-overview">')
+    parts.append('<li><a href="#your-path">Your path</a></li>')
+    parts.append('<li><a href="#expectations">Expectations</a></li>')
+    parts.append('<li><a href="#technologies">Technologies</a></li>')
+    parts.append("</ul>")
+    for mi, module in enumerate(modules, start=1):
+        module_title = str(module.get("title", module.get("id", "")))
+        parts.append('<details class="toc-module" open>')
+        parts.append(f'<summary data-module-title="{esc(module_title.lower())}">{mi}. {esc(module_title)}</summary>')
+        parts.append('<ul class="module-lessons">')
+        for ci, lesson in enumerate(module["concepts"], start=1):
+            numbered = f"{mi}.{ci} {lesson['title']}"
+            practice = links.practice(lesson, "lesson-practice-link")
+            parts.append(
+                f'<li data-lesson-title="{esc(numbered.lower())}">'
+                + links.lesson(lesson, numbered, "lesson-link", inner=f'<span class="lesson-dot"></span><span>{esc(numbered)}</span>')
+                + practice + "</li>"
+            )
+        parts.append("</ul>")
+        parts.append("</details>")
+    parts.append("</nav>")
+    return "\n".join(parts)
+
+
+def _render_toc(modules: Sequence[Mapping[str, Any]], links: _Links) -> str:
+    out = ['<ul class="toc-modules">']
+    for mi, module in enumerate(modules, start=1):
+        out.append("<li>")
+        out.append(f"<h3>{mi}. {esc(module.get('title', module.get('id', '')))}</h3>")
+        out.append('<ul class="concepts">')
+        for lesson in module["concepts"]:
+            out.append(f"<li>{links.lesson(lesson, str(lesson['title']))} {postings_label(lesson)}</li>")
+        out.append("</ul>")
+        out.append("</li>")
+    out.append("</ul>")
+    return "\n".join(out)
+
+
+def _render_your_path(modules: Sequence[Mapping[str, Any]], links: _Links) -> str:
+    """The personal course's 'Your path' (``learning_render.render_your_path``) with the lessons linked to the site."""
+
+    out = ['<div class="your-path" id="your-path">', "<h2>Your path</h2>"]
+    any_active = False
+    for mi, module in enumerate(modules, start=1):
+        active_items: list[str] = []
+        known_items: list[str] = []
+        for ci, lesson in enumerate(module["concepts"], start=1):
+            label = (lesson.get("marker") or {}).get("marker")
+            line = f'<li><span class="path-number">{mi}.{ci}</span>{links.lesson(lesson, str(lesson["title"]))}</li>'
+            if label == MARKER_KNOWN:
+                known_items.append(line)
+            elif label in (MARKER_SOME, MARKER_NEW):
+                active_items.append(line)
+        if not active_items and not known_items:
+            continue
+        out.append('<div class="your-path-module">')
+        out.append(f"<h3>{mi}. {esc(module.get('title', module.get('id', '')))}</h3>")
+        if active_items:
+            any_active = True
+            out.append(f'<ul class="path-list">{"".join(active_items)}</ul>')
+        if known_items:
+            out.append("<details>")
+            out.append("<summary>Skim (you have production evidence)</summary>")
+            out.append(f'<ul class="path-list">{"".join(known_items)}</ul>')
+            out.append("</details>")
+        out.append("</div>")
+    if not any_active:
+        out.insert(2, '<p class="muted">Nothing new or partial &mdash; see the skim lists below.</p>')
+    out.append("</div>")
+    return "\n".join(out)
+
+
+def _resume_evidence(modules: Sequence[Mapping[str, Any]], links: _Links) -> str:
     """Per lesson the resume shows in part or whole: 'You have / Missing', then each subtopic with its line and its link."""
 
     out = ['<h2 id="resume-evidence">What your resume shows</h2>']
@@ -291,14 +408,13 @@ def _resume_evidence(modules: Sequence[Mapping[str, Any]]) -> str:
         for ci, lesson in enumerate(module["concepts"], start=1):
             if lesson["marker"]["marker"] == MARKER_NEW:
                 continue
-            href = concept_page_filename(lesson["id"])
-            block = [f'<p><span class="path-number">{mi}.{ci}</span><a href="{esc(href)}">{esc(lesson["title"])}</a></p>']
+            block = [f'<p><span class="path-number">{mi}.{ci}</span>{links.lesson(lesson, str(lesson["title"]))}</p>']
             line = concept_marker_line(lesson)
             if line:
                 block.append(line)
             block.append("<ul>")
             for sub in lesson["subtopics"]:
-                block.append(f'<li><a href="{esc(href)}#{esc(subtopic_anchor(sub["id"]))}">{esc(sub["title"])}</a>')
+                block.append(f"<li>{links.subtopic(lesson, sub)}")
                 block.extend(_subtopic_marker_lines(sub))
                 block.append("</li>")
             block.append("</ul>")
@@ -323,16 +439,19 @@ def _corpus_line(corpus: Mapping[str, Any]) -> str:
     return f'<p class="muted">{line}{" &middot; " + esc(scope) if scope else ""}</p>'
 
 
-def render_pathway_body(catalog: Mapping[str, Any], course: Mapping[str, Any], counts: Mapping[str, Any], markers: Mapping[str, Any] | None) -> tuple[str, dict[str, int]]:
+def render_pathway_body(catalog: Mapping[str, Any], counts: Mapping[str, Any], markers: Mapping[str, Any] | None) -> tuple[str, dict[str, int]]:
     """The page's body and, when compared, the subtopics per label."""
 
-    modules = _marked_modules(course, counts, markers)
+    modules = _marked_modules(catalog, counts, markers)
+    links = _Links(catalog_site(catalog))
     corpus = _mapping(counts.get("corpus"))
     body = [f"<h1>Your pathway: {esc(catalog.get('role', 'Role'))}</h1>"]
     body.append(
         '<p class="muted">Built on this computer and kept here: nothing on this page is shipped or sent. '
-        "The lessons it links to are the same for everyone.</p>"
+        "The lessons it links to are on the GigAI learning center and are the same for everyone.</p>"
     )
+    if links.site is None:
+        body.append(f'<p class="muted">{esc(NOT_LINKED)}</p>')
     body.append(_corpus_line(corpus))
 
     tally: dict[str, int] = {}
@@ -341,8 +460,8 @@ def render_pathway_body(catalog: Mapping[str, Any], course: Mapping[str, Any], c
     else:
         labels = [sub["marker"] for module in modules for lesson in module["concepts"] for sub in lesson["subtopics"]]
         tally = {label: labels.count(label) for label in (MARKER_NEW, MARKER_SOME, MARKER_KNOWN)}
-        body.append(render_your_path(modules))
-        body.append(_resume_evidence(modules))
+        body.append(_render_your_path(modules, links))
+        body.append(_resume_evidence(modules, links))
 
     expectations = _mapping(counts.get("expectations"))
     body.append('<h2 id="expectations">Expectations</h2>')
@@ -351,20 +470,36 @@ def render_pathway_body(catalog: Mapping[str, Any], course: Mapping[str, Any], c
     body.append('<h2 id="technologies">Technologies</h2>')
     body.append(render_technologies({str(name): list(items or []) for name, items in technologies.items() if items}))
     body.append('<h2 id="lessons">Lessons</h2>')
-    body.append(render_toc(modules))
+    body.append(_render_toc(modules, links))
     return "\n".join(body), tally
 
 
-def audit_page(page_html: str, site_dir: Path, *, page_name: str = PATHWAY_PAGE) -> tuple[list[str], int]:
-    """The link and anchor audit of the pathway page against the rendered shipped course in ``site_dir``.
+class _Audit(_LinkCollector):
+    """``_LinkCollector`` that also keeps the ``rel`` of every external link."""
 
-    Every link to a page must name a plain ``.html`` file of that folder; every ``#anchor`` an id of the page it
-    points at (this page's own for a bare ``#anchor`` or a link to itself). An inline script, an ``on*=``
-    attribute and an external link with no ``target="_blank"`` are problems too, as in the course's own audit.
-    Returns the sorted problems and how many links were checked.
+    def __init__(self) -> None:
+        super().__init__()
+        self.external_rel: dict[str, list[str]] = {}
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        super().handle_starttag(tag, attrs)
+        found = dict(attrs)
+        href = found.get("href")
+        if tag == "a" and href and href.startswith(("http://", "https://")):
+            self.external_rel.setdefault(href, []).append(found.get("rel") or "")
+
+
+def audit_page(page_html: str, site: Site | None, *, page_name: str = PATHWAY_PAGE) -> tuple[list[str], int]:
+    """The link and anchor audit of the pathway page.
+
+    The page may hold exactly these links: an ``#anchor`` that is an id of the page, a link to the page itself, and
+    an address on the catalog's learning center (``site.base_url``), each of those with ``target="_blank"`` and
+    ``rel="noopener"``. Any other address, a page of any other name, an inline script and an ``on*=`` attribute are
+    problems; so is any external link at all when the catalog names no site. Returns the sorted problems and how
+    many links were checked.
     """
 
-    own = _LinkCollector()
+    own = _Audit()
     own.feed(page_html)
     problems: list[str] = []
     if own.inline_scripts:
@@ -372,68 +507,66 @@ def audit_page(page_html: str, site_dir: Path, *, page_name: str = PATHWAY_PAGE)
     for attr in sorted(set(own.on_attrs)):
         problems.append(f"{page_name}: an {attr}= attribute is not allowed")
     for url, is_blank in own.external:
+        if site is None or not site.owns(url):
+            problems.append(f"{page_name}: external link '{url}' is not an address of the learning center")
+            continue
         if not is_blank:
             problems.append(f"{page_name}: external link '{url}' has no target=\"_blank\"")
-    ids_by_page: dict[str, set[str] | None] = {"": own.ids, page_name: own.ids}
+        if any("noopener" not in rel.split() for rel in own.external_rel.get(url, [])):
+            problems.append(f"{page_name}: external link '{url}' has no rel=\"noopener\"")
     for path, frag in own.links:
-        if path not in ids_by_page:
-            target = Path(site_dir) / path
-            plain = "/" not in path and "\\" not in path and path.endswith(".html") and not path.startswith(".")
-            if plain and not target.is_symlink() and target.is_file():
-                collector = _LinkCollector()
-                collector.feed(target.read_text(encoding="utf-8"))
-                ids_by_page[path] = collector.ids
-            else:
-                ids_by_page[path] = None
-        ids = ids_by_page[path]
-        if ids is None:
-            problems.append(f"{page_name}: href target '{path}' does not resolve to a page of the shipped course")
-        elif frag and frag not in ids:
-            problems.append(f"{page_name}: anchor '#{frag}' does not resolve to an id in '{path or page_name}'")
-    return sorted(set(problems)), len(own.links)
+        if path not in ("", page_name):
+            problems.append(f"{page_name}: href target '{path}' is not a page this page may link to")
+        elif frag and frag not in own.ids:
+            problems.append(f"{page_name}: anchor '#{frag}' does not resolve to an id in '{page_name}'")
+    return sorted(set(problems)), len(own.links) + len(own.external)
+
+
+def _footer(site: Site | None) -> str:
+    """The footer line: the learning center and the site version the catalog was made for, then 'built on this computer'."""
+
+    named = CENTER_NAME if site is None else f"{CENTER_NAME} &middot; site version {esc(site.site_version)}"
+    return f"{named} &middot; {FOOTER_LOCAL}"
 
 
 def build_pathway_page(
-    catalog: Mapping[str, Any], course: Mapping[str, Any], counts: Mapping[str, Any], markers: Mapping[str, Any] | None,
-    out_path: Path, asset_base: str, *, site_dir: Path | None = None,
+    catalog: Mapping[str, Any], counts: Mapping[str, Any], markers: Mapping[str, Any] | None, out_path: Path, asset_base: str,
 ) -> PathwayPage:
     """Write the one local page of a shipped course to ``out_path``; the same inputs give the same bytes.
 
-    ``catalog`` and ``course`` are the shipped ``catalog.json`` and ``course.json``; ``counts`` is
-    :func:`count_postings`'s answer; ``markers`` is ``None`` until the resume was compared (see the module text).
-    ``asset_base`` is where the page finds ``course.css`` and the scripts (``/learning/_assets``). ``site_dir`` is
-    the folder of the RENDERED shipped course the links are checked against (default: ``out_path``'s folder); the
-    page is served in the same URL folder as those pages, so every link is a plain file name.
+    ``catalog`` is the shipped ``catalog.json``; ``counts`` is :func:`count_postings`'s answer; ``markers`` is
+    ``None`` until the resume was compared (see the module text). ``asset_base`` is where the page finds
+    ``course.css`` and the scripts (``/learning/_assets``). Nothing but the catalog is read: the lessons are on the
+    learning center and every link to them is an address there (:func:`audit_page`).
 
-    Raises ``CourseError`` with every problem found (a marker that is not one, a link or an anchor the course does
-    not have, a glyph the course refuses, a page over the size cap); nothing is written then, and a page already
-    at ``out_path`` stays as it was.
+    Raises ``CourseError`` with every problem found (a marker that is not one, a link the audit does not allow, a
+    glyph the course refuses, a page over the size cap); nothing is written then, and a page already at
+    ``out_path`` stays as it was.
     """
 
     role_key = _role_key(catalog)
-    if course.get("role_key") != role_key or counts.get("role_key") != role_key:
-        raise CourseError([f"the catalog is of {role_key}; the course and the counts must be of the same course"])
+    if counts.get("role_key") != role_key:
+        raise CourseError([f"the catalog is of {role_key}; the counts must be of the same course"])
     base = clean_asset_base(asset_base)
-    clean_course, _removed = sanitize_course({"role": catalog.get("role", "Role"), "modules": list(course.get("modules") or [])})
     clean_markers = _clean_tree(dict(markers)) if markers is not None else None
-    body, tally = render_pathway_body(catalog, clean_course, counts, clean_markers)
+    body, tally = render_pathway_body(catalog, counts, clean_markers)
+    site = catalog_site(catalog)
+    modules = _marked_modules(catalog, counts, clean_markers)
 
-    has_practice = {lesson["id"]: {} for lesson in _lessons(catalog) if lesson.get("has_practice")}
-    sidebar = render_sidebar(clean_course, clean_course["modules"], PATHWAY_PAGE, has_practice, shipped=True)
-    role = str(clean_course["role"])
+    role = str(catalog.get("role", "Role"))
     page = (
         PAGE_HEAD.format(
-            title=esc(f"Your pathway: {role}"), asset_rel=base, style=STYLE_LINK.format(asset_rel=base), sidebar=sidebar,
-            breadcrumb=render_breadcrumb(PATHWAY_PAGE, role),
+            title=esc(f"Your pathway: {role}"), asset_rel=base, style=STYLE_LINK.format(asset_rel=base), sidebar=_render_sidebar(catalog, modules, _Links(site)),
+            breadcrumb=f'<nav class="breadcrumb">{esc(role)}</nav>',
         )
         + body
-        + PAGE_TAIL.format(asset_rel=base, footer=FOOTER_LOCAL)
+        + PAGE_TAIL.format(asset_rel=base, footer=_footer(site))
     )
     problems = check_glyphs(page, PATHWAY_PAGE)
     encoded = page.encode("utf-8")
     if len(encoded) >= MAX_HTML_BYTES:
         problems.append(f"{PATHWAY_PAGE}: page is {len(encoded)} bytes, at or over the {MAX_HTML_BYTES}-byte cap")
-    link_problems, checked = audit_page(page, Path(site_dir) if site_dir is not None else Path(out_path).parent)
+    link_problems, checked = audit_page(page, site)
     problems.extend(link_problems)
     if problems:
         raise CourseError(sorted(problems))
@@ -605,22 +738,16 @@ def build_local_page(
 ) -> tuple[PathwayPage, dict[str, Any]]:
     """Count, build and record the local page of one shipped course; returns the page and the counts.
 
-    The shipped pages are rendered first when they are not (``ensure_rendered``), since the page's links are
-    checked against them. ``markers`` and ``master`` go together: the checked answer of the resume comparison and
-    the master revision it was made from, or neither. The record is written last, after the page.
+    Only the catalog is read. ``markers`` and ``master`` go together: the checked answer of the resume comparison
+    and the master revision it was made from, or neither. The record is written last, after the page.
     """
 
     if (markers is None) != (master is None):
         raise LearningError("invalid_value", "the markers and the master revision they came from are given together")
-    try:
-        catalog = json.loads((shipped.data_dir / CATALOG_FILENAME).read_text(encoding="utf-8"))
-        course = json.loads((shipped.data_dir / COURSE_FILENAME).read_text(encoding="utf-8"))
-    except (OSError, ValueError) as exc:
-        raise LearningError("invalid_value", f"the shipped course {shipped.role_key} cannot be read: {exc}") from exc
+    catalog = learning_shipped_store.read_catalog(shipped)
     counts = count_postings(home_root, target, catalog, now=now)
-    site = learning_shipped_store.ensure_rendered(Path(home_root), shipped)
     out_path = learning_shipped_store.pathway_page_path(Path(home_root), Path(target), shipped.role_key)
-    page = build_pathway_page(catalog, course, counts, markers, out_path, learning_shipped_store.ASSET_BASE, site_dir=site)
+    page = build_pathway_page(catalog, counts, markers, out_path, learning_shipped_store.ASSET_BASE)
     write_local_record(home_root, target, shipped.role_key, catalog=catalog, counts=counts, master=master, now=now)
     return page, counts
 

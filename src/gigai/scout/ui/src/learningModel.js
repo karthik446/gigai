@@ -11,8 +11,8 @@
 //
 // 0.1.11.10 shipped lessons (slice 3): the courses that ship inside GigAI come first in the same list, each a row
 // with source "shipped" (`shipped_summary`): id is the role key, requested_at and cost are null, `label` reads
-// "Shipped with GigAI" and `local_page` is the state of the one page that is the user's own ({state: not_built |
-// built | stale, built_at, reasons, url}). Such a row shows its label and that state as text, and "Open course"; it is
+// "From the GigAI learning center" and `local_page` is the state of the one page that is the user's own ({state: not_built |
+// built | stale, built_at, reasons, url}). Such a row shows its label and that state as text, and "Open on scout.edgelab.one" (`url` is the course on the learning center); it is
 // never polled, stopped or resumed (those rules ask for source "requested").
 //
 // Slices 4b/5b: a shipped row has ONE button, "Build my pathway" ("Rebuild my pathway" once there is a page). The
@@ -152,7 +152,10 @@ export function requestedAtLabel(isoDate) {
   return parsed.toLocaleString(undefined, { month: "short", day: "numeric", year: "numeric" });
 }
 
-export const SHIPPED_LABEL = "Shipped with GigAI";
+export const SHIPPED_LABEL = "From the GigAI learning center";
+
+// What "Open course" is called on a course from the learning center: the link goes to scout.edgelab.one, in a new tab.
+export const OPEN_PUBLIC_LABEL = "Open on scout.edgelab.one";
 
 // Whether the row is a course that ships inside GigAI (not one this user asked for or imported).
 export function isShipped(pathway) {
@@ -353,8 +356,9 @@ export function estimateSentence(estimate, modelLabel) {
 export const PLAN_WARNING =
   "A course uses about 1 million tokens. On an entry-level plan (about $20 a month, such as Claude Pro or ChatGPT Plus) that can use up most or all of your weekly limit; use a higher plan, or one of the courses that come with GigAI; more are coming.";
 
-// One plain line under the courses that come with GigAI (the CLI's learning_job.MORE_COURSES_NOTE).
-export const MORE_COURSES_NOTE = "More courses are coming in future GigAI releases.";
+// One line under the courses from the learning center, a link to the site (the CLI's learning_job.MORE_COURSES_NOTE).
+export const MORE_COURSES_NOTE = "More pathways on scout.edgelab.one";
+export const MORE_COURSES_URL = "https://scout.edgelab.one/learn/";
 
 export const SENDS_SENTENCE =
   "It sends: the typed role, sentences from job postings stored on your machine, and the course text as it is written. " +

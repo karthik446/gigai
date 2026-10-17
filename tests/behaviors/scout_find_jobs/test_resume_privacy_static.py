@@ -97,6 +97,11 @@ _BUILDERS: dict[tuple[str, str], frozenset[str]] = {
     # master (catalog titles + "id | text" lines, each through guard_private; no lesson body, no posting text). The
     # module calls no reader: its caller hands the lines in from learning_course.read_master_lines.
     ("gigai.scout.learning_markers", "markers_prompt"): frozenset({"guard_private"}),
+    # 0.1.11.11 (learning center M3): the case-exercise prompt of a lesson with no tool to practise. It carries NO resume
+    # line: it is built from the lesson's title, summary, subtopic titles and technologies, the role, and the lesson's
+    # verified source titles by index, all fenced as untrusted (test_learning_case.py proves it holds no marker, evidence
+    # quote or subtopic body, and takes no resume or master argument). The row pins that the builder exists and fences.
+    ("gigai.scout.learning_case", "case_prompt"): frozenset({"fence_untrusted_posting"}),
 }
 
 #: Who may import the local display settings and the renderer (module -> allowed importers).

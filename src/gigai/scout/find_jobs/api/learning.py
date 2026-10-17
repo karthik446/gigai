@@ -42,9 +42,11 @@ a ``Host`` that is this server: ``do_GET`` / ``do_HEAD``).
 * ``GET /api/learning/pathways`` lists them FIRST, one row each with ``source: "shipped"`` (:func:`shipped_summary`);
   ``GET /api/learning/pathways/{role key}`` answers that row. A shipped course is not generated here: the cancel and
   resume routes answer 404 for a role key, as for an unknown pathway.
-* ``GET`` / ``HEAD /learning/shipped/{role key}/{page}``: a page of the course, rendered from the package's data on
-  first use into a cache folder of the home. ``pathway.html`` is the one page that is the user's own: the locally
-  built file when there is one, else a plain page saying it is not built yet.
+* ``GET`` / ``HEAD /learning/shipped/{role key}/pathway.html``: the ONE page of a shipped course this server serves,
+  the user's own: the locally built file when there is one, else a plain page saying it is not built yet. The
+  lessons and practice pages are on the public learning center (the catalog's ``site``): the row's ``url`` is the
+  address of the course's pathway there, for the user's browser to open (this server never fetches it), and every
+  other ``/learning/shipped/...`` path answers 404.
 * ``GET`` / ``HEAD /learning/_assets/{file}``: the shared assets of the package, by an exact whitelist (the listing
   of the package's assets folder).
 
@@ -194,17 +196,19 @@ def local_page(home_root: Path, target: Path, role_key: str, *, learning: Path |
     return {
         "state": state, "built_at": found["built_at"], "reasons": reasons,
         "build": learning_pathway_build.build_state(folder, role_key) if folder is not None else None,
-        "url": learning_shipped_store.course_url(role_key, learning_shipped_store.PATHWAY_PAGE),
+        "url": learning_shipped_store.local_page_url(role_key),
     }
 
 
 def shipped_summary(home_root: Path, target: Path, course: ShippedCourse, *, learning: Path | None = None) -> dict[str, object]:
     """The row of a course that ships inside GigAI: the keys of :func:`pathway_summary` plus ``label`` and ``local_page``.
 
-    ``id`` is the role key. It is always ``done`` (its pages are rendered when first opened), nobody asked for it
+    ``id`` is the role key. It is always ``done`` (its lessons are on the learning center), nobody asked for it
     (``requested_at`` null) and making it cost this user nothing (``cost`` null). ``local_page`` is the state of
     the locally built pathway page (:func:`local_page`): ``not_built``, ``built`` or ``stale`` with ``built_at``
     and the ``reasons`` it is stale for, the ``build`` that runs or failed, and ``url``, where it is served.
+    The row's own ``url`` is the course's pathway on the learning center (``learning_shipped_store.public_url``),
+    or ``None`` for a catalog that names no site; ``course.entry`` is ``None``: GigAI holds no pages of it.
     ``learning``: the project's learning folder when the caller already named it (one ``git`` process per naming).
     """
 
@@ -215,8 +219,8 @@ def shipped_summary(home_root: Path, target: Path, course: ShippedCourse, *, lea
         "requested_at": None,
         "status": "done",
         "cost": None,
-        "course": {"entry": learning_store.COURSE_ENTRY, "lessons": course.lessons, "size_bytes": None, "generated_at": None},
-        "url": learning_shipped_store.course_url(key),
+        "course": {"entry": None, "lessons": course.lessons, "size_bytes": None, "generated_at": None},
+        "url": learning_shipped_store.public_url(course),
         "source": learning_shipped_store.SOURCE_SHIPPED,
         "imported_from": None,
         "error": None,
@@ -329,8 +333,8 @@ def split_shipped_path(path: str) -> tuple[str, str] | None:
     """``(role key, page)`` of a ``/learning/shipped/...`` request path, percent-decoded ONCE; else ``None``.
 
     The page is ``""`` for ``/learning/shipped/<role key>/`` (the entry page). What it names is judged by
-    ``learning_shipped_store.resolve_page``: one plain ``.html`` name, so a ``/``, a ``..`` or a ``%`` left after
-    the one decoding is refused there.
+    the served page: only ``pathway.html`` is one, so any other name (a ``/``, a ``..`` or a ``%`` left after the
+    one decoding included) is refused.
     """
 
     if not path.startswith(SHIPPED_PREFIX):
@@ -353,6 +357,8 @@ def pathway_not_built_page(course: ShippedCourse) -> bytes:
     from html import escape
 
     role = escape(course.role)
+    public = learning_shipped_store.public_url(course)
+    opening = "" if public is None else f'<p><a href="{escape(public)}" target="_blank" rel="noopener">Open this course on the GigAI learning center</a></p>\n'
     return (
         '<!doctype html>\n<html lang="en">\n<head>\n<meta charset="utf-8">\n'
         '<meta name="viewport" content="width=device-width, initial-scale=1">\n'
@@ -365,8 +371,8 @@ def pathway_not_built_page(course: ShippedCourse) -> bytes:
         "to you. It is built on this computer from your own resume and stored postings, and it has not been built yet.</p>\n"
         "<p>To build it: in Scout, open Learning pathways and press Build your pathway page on this course, or run "
         f"<code>gigai scout learning pathway {escape(course.role_key)}</code>. Building it calls no model.</p>\n"
-        "<p>The lessons and practice pages of this course are the same for everyone and are ready to read.</p>\n"
-        f'<p><a href="{learning_store.COURSE_ENTRY}">Back to the course</a></p>\n'
+        "<p>The lessons and practice pages of this course are the same for everyone and are on the GigAI learning center.</p>\n"
+        f"{opening}"
         "</main>\n</body>\n</html>\n"
     ).encode("utf-8")
 
@@ -541,7 +547,7 @@ class LearningRoutesMixin:
     def _learning_served(self, path: str) -> tuple[str, Path | bytes] | None:
         """What a ``/learning/...`` request is answered with: ``(the name its kind is read from, a file or the bytes)``.
 
-        ``None`` is the one 404. A shared asset, a page of a shipped course (its ``pathway.html`` is the user's own
+        ``None`` is the one 404. A shared asset, the ONE page of a shipped course (its ``pathway.html``: the user's own
         file, or the not-built page), else a file of a generated course.
         """
 
@@ -559,8 +565,7 @@ class LearningRoutesMixin:
                 return None
             role_key, page = named
             if page != learning_shipped_store.PATHWAY_PAGE:
-                rendered = learning_shipped_store.resolve_page(Path(home_root), role_key, page)
-                return None if rendered is None else (rendered.name, rendered)
+                return None  # the lessons are on the learning center: this server serves no other page of a shipped course
             course = learning_shipped_store.get_course(role_key)
             if course is None:
                 return None

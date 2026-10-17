@@ -1,21 +1,31 @@
 ---
 title: Learning pathways
-description: The Learning pathways tab in Scout, the two courses that ship with GigAI, the pathway page built from your resume and stored postings, a course for any role you type, and what is sent where.
+description: The Learning pathways tab in Scout, the two courses from the GigAI learning center, the pathway page built from your resume and stored postings, a course for any role you type, and what is sent where.
 ---
 
 The **Learning pathways** tab (and `gigai scout learning`) gives you a course for a role: lessons grouped in
-modules, each with short subtopics, verified documentation links, diagrams and a hands-on practice page. A course is
-plain files served by your own Scout; nothing in a course can reach Scout's API.
+modules, each with short subtopics, verified documentation links, diagrams and a hands-on practice page. The lessons
+of the courses that come with GigAI are on the public GigAI learning center,
+[scout.edgelab.one](https://scout.edgelab.one/learn/); a course you generate or import is plain files served by your
+own Scout, and nothing in a course can reach Scout's API.
 
-## The two courses that ship with GigAI
+## The two courses from the GigAI learning center
 
-After you upgrade, the tab shows two courses:
+After you upgrade, the tab shows two courses, labelled **From the GigAI learning center**:
 
 - **MLOps / ML platform engineer**
 - **AI forward deployed engineer**
 
-They are generic lessons. They hold no postings and nothing about you: every install gets the same files. Open one
-from the tab, or list them with `gigai scout learning list`. More courses that ship with GigAI are coming.
+They are generic lessons. They hold no postings and nothing about you: every reader sees the same pages. The lessons
+and practice pages live on the learning center; GigAI ships only each course's catalog (its lesson titles and the words
+it counts in your postings) and no lesson text.
+
+- **Open on scout.edgelab.one** in the tab (or `gigai scout learning open ROLE_KEY`, which prints the address) opens the
+  course's pathway on the learning center in a new browser tab. Your browser makes that request: GigAI makes none and
+  nothing of yours is in the address.
+- List the courses with `gigai scout learning list`. The line under them, **More pathways on scout.edgelab.one**, links
+  to the learning center.
+- Reading a lesson needs the network. Your own pathway page, below, is built and read on your computer.
 
 ## Build my pathway
 
@@ -32,6 +42,9 @@ writes one extra page on your own computer:
   often they ask for each thing the course names.
 - **The page is your own file.** It lives in your project's learning folder and is never shipped or uploaded.
   A build that fails writes nothing; the page that was there stays as it was.
+- **Every lesson, subtopic and practice link goes to the learning center**, in a new tab. The page's footer says which
+  learning center version its catalog was made for; the learning center's own pages say theirs, so if the two differ,
+  your catalog is older (`uv tool upgrade gigai`).
 
 When your resume changes, the tab says **your resume changed since** you built the page, and the button reads
 **Rebuild my pathway**. The same goes for a GigAI update that changed the course or for changed stored postings.
@@ -64,9 +77,9 @@ whole first (links, anchors, size caps) and makes no model call and no network r
 
 | Action | Sent to your model |
 | --- | --- |
-| Open a shipped course, import a folder | Nothing. |
+| Open on scout.edgelab.one, import a folder | Nothing. Opening a course on the learning center is your browser's request. |
 | Build my pathway | The lesson titles and your resume lines, contact lines removed. One call. |
 | Generate a course | The role you typed, sentences from stored postings, the course text as it is written, and your resume lines (contact lines removed) in the lesson-writing calls. |
 
-Page fetches go to public documentation sites. The shipped courses and your pathway page are served by your own
-Scout on your computer. See [Privacy and security](../privacy/#learning-pathways).
+Page fetches go to public documentation sites. Your pathway page is served by your own Scout on your computer; the
+lessons of the courses from the learning center are served by scout.edgelab.one when you open them. See [Privacy and security](../privacy/#learning-pathways).

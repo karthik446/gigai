@@ -342,6 +342,29 @@ def is_stub_path(url: str) -> bool:
     return bool(STUB_PATH_HINTS.search(urlsplit(url).path))
 
 
+def article_problem(page: Page) -> str | None:
+    """Why a fetched page may not stand as an ARTICLE or BOOK source of a lesson; ``None`` when it may.
+
+    An article or a book chapter has no documentation anchors to deep-link, and it is cited as the page it is. It is
+    verified by what GigAI can see of it: it answered 200 (the fetch's own check), it has a title that is not a
+    redirect's, its address is a deep path (a page under a section, not a home page, not a section's stub), and it
+    holds at least :data:`MIN_BODY_CHARS_FOR_PAGE_LEVEL` characters of visible text. Headings are not needed: a page
+    that has some is still cited as a whole page, never at one of them.
+    """
+
+    if not page.title:
+        return "no_title"
+    if not is_deep_path(page.url):
+        return "not_a_deep_path"
+    if REDIRECT_TITLE_RE.search(page.title):
+        return "redirect_title"
+    if is_stub_path(page.url):
+        return "stub_page"
+    if page.body_chars < MIN_BODY_CHARS_FOR_PAGE_LEVEL:
+        return "too_little_text"
+    return None
+
+
 def parse_page(url: str, body: str, *, truncated: bool = False) -> Page:
     """The title, the anchorable headings and the links of one HTML body. Never raises on bad markup."""
 
@@ -759,6 +782,7 @@ def compute_arc_checklist(pages: Iterable[Mapping[str, Any]]) -> dict[str, list[
 
 __all__ = [
     "ARC_STAGE_KEYWORDS",
+    "article_problem",
     "BAD_REDIRECT",
     "FETCH_BUDGET",
     "INVISIBLE_RE",

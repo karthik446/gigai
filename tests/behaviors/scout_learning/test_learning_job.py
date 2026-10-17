@@ -789,3 +789,181 @@ def test_a_record_written_before_progress_still_reads_and_a_read_takes_no_lock(e
     assert rows[old.id]["status"] == "queued" and rows[running.id]["status"] == "interrupted"
     assert set(rows[old.id]) == {"id", "role_text", "requested_at", "status", "cost", "course", "url", "source", "imported_from", "error", "error_code", "progress"}
     assert {item: item.read_bytes() for item in learning_store.learning_dir(env.home, env.target).rglob("*") if item.is_file()} == before, "a read writes nothing"
+
+
+# ---------------------------------------------------------------------------
+# 10. The two inputs of a course made by us (--keys, --curriculum), the case lessons, the estimate (0.1.11.11)
+# ---------------------------------------------------------------------------
+
+from gigai.scout.learning_corpus import ConceptKey  # noqa: E402
+from tests.behaviors.scout_learning.test_learning_case import artifact_answer, case_answer  # noqa: E402
+from tests.behaviors.scout_learning.test_learning_course import ARTICLES, LONG_PAGE_TEXT, MASTER as _MASTER  # noqa: E402,F401
+from tests.behaviors.scout_learning.test_learning_fetch import page  # noqa: E402
+from tests.behaviors.scout_learning.test_learning_paths import answering, docs  # noqa: E402
+
+JOB_KEYS = (
+    ConceptKey("risk-based-testing", "Risk based testing", "quality", "skill", True, ("risk based testing", "risk based"), ()),
+    ConceptKey("mlflow", "MLflow", "ai-ml", "tool", True, ("mlflow",), ()),
+)
+
+
+def given_two_lessons() -> dict[str, object]:
+    """A curriculum somebody wrote: a tool lesson with its documentation and a case lesson with two articles."""
+
+    return {"modules": [{"id": "m1", "title": "Methods and tools", "lessons": [
+        {"id": "experiment-tracking", "title": "Experiment tracking", "concepts": ["model-serving"], "practice": "tool", "sources": [
+            {"title": "Quickstart", "url": f"{HOST}/trackwell/quickstart", "kind": "doc"}, {"title": "Concepts", "url": f"{HOST}/trackwell/concepts", "kind": "doc"},
+        ]},
+        {"id": "risk-based-testing", "title": "Risk based testing", "concepts": ["risk-based-testing"], "practice": "case", "sources": [
+            {"title": "Choosing what to test first", "url": f"{ARTICLES}/qa/risk-based-testing", "kind": "article"},
+            {"title": "A chapter on test design", "url": "https://books.example.org/testing/chapter-4", "kind": "book"},
+        ]},
+    ]}]}
+
+
+def two_lesson_web() -> FakeWeb:
+    return FakeWeb({
+        **docs("trackwell", "Trackwell"),
+        f"{ARTICLES}/qa/risk-based-testing": page("Choosing what to test first", f"<p>{LONG_PAGE_TEXT}</p>"),
+        "https://books.example.org/testing/chapter-4": page("Chapter 4: test design", f"<p>{LONG_PAGE_TEXT}</p>"),
+    })
+
+
+def two_lesson_env(env: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
+    """The env's corpus step, now one that takes ``keys`` and keeps a ``vocabulary.json`` as the real one does."""
+
+    seen: dict[str, object] = {"keys": None}
+    canned = learning_corpus.run_corpus
+
+    def run_corpus(home: Path, role_text: str, *, keys: tuple[ConceptKey, ...] = (), store: object = None, **options: object) -> dict[str, object]:
+        seen["keys"] = keys
+        found = canned(home, role_text, store=store, **options)  # type: ignore[arg-type]
+        store.write("vocabulary", {"role_text": role_text, "concepts": [  # type: ignore[attr-defined]
+            {"id": str(item["id"]), "display": str(item["display"]), "category": str(item["category"]), "phrases": item["phrases"], "technical": item["technical"]}
+            for item in CONCEPTS
+        ]})
+        return found
+
+    monkeypatch.setattr(learning_corpus, "run_corpus", run_corpus)
+    env.seen = seen
+    return env
+
+
+def tool_and_case_script() -> list[object]:
+    """The whole job: the corpus call, ONE call for both lessons' text (no curriculum call), the tool path, the case page."""
+
+    return [
+        "titles", module_answer(lambda lid: {"technologies": ["Trackwell"], "sources": [0, 1] if lid == "risk-based-testing" else [0]}),
+        answering(), case_answer(),
+    ]
+
+
+def test_a_given_curriculum_and_keys_make_a_course_with_a_tool_path_and_a_case_page(env: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> None:
+    two_lesson_env(env, monkeypatch)
+    pathway_id = request(env)
+    model, web = ScriptedModel(*tool_and_case_script()), two_lesson_web()
+    done = job(env, pathway_id, model, web, REAL_PATHS, keys=JOB_KEYS, curriculum=given_two_lessons()).run()
+    assert (done.status, done.error_code) == ("done", None) and done.course is not None and done.course.lessons == 2
+    assert env.seen["keys"] == JOB_KEYS  # the corpus step was given the list
+    # 1 corpus call + 1 module call + 1 tool path + 1 case page: step 6 made NO call
+    assert model.calls == 4 and done.cost["cli_model_calls"] == 4 and not any("You are planning a COURSE" in prompt for prompt in model.prompts)  # type: ignore[index]
+    assert done.progress["dropped"] == [] and set(steps(done).values()) == {"done"}  # type: ignore[index]
+
+    work = learning_job.work_dir(env.home, env.target, pathway_id)
+    tool = json.loads((work / "paths" / "experiment-tracking.json").read_text(encoding="utf-8"))
+    written = json.loads((work / "paths" / "risk-based-testing.json").read_text(encoding="utf-8"))
+    assert (tool["kind"], tool["tool"]) == ("tool", "Trackwell") and written["kind"] == "case" and "steps" not in written
+    for name in ("experiment-tracking", "risk-based-testing"):
+        assert learning_store.resolve_course_file(env.home, env.target, pathway_id, f"practice-{name}.html") is not None
+    practice = learning_store.resolve_course_file(env.home, env.target, pathway_id, "practice-risk-based-testing.html").read_text(encoding="utf-8")  # type: ignore[union-attr]
+    assert "Case exercise: Risk based testing" in practice and "[&nbsp;]" in practice and "Done when" not in practice
+    lesson = learning_store.resolve_course_file(env.home, env.target, pathway_id, "concept-risk-based-testing.html").read_text(encoding="utf-8")  # type: ignore[union-attr]
+    assert '<span class="kind-badge">article</span>' in lesson and '<span class="kind-badge">book chapter</span>' in lesson and "Practice this" in lesson
+    tool_practice = learning_store.resolve_course_file(env.home, env.target, pathway_id, "practice-experiment-tracking.html").read_text(encoding="utf-8")  # type: ignore[union-attr]
+    assert "Main tool: Trackwell" in tool_practice and "Done when" in tool_practice
+
+    # the inputs are kept with the course, and a key no posting counted joins the vocabulary the export needs
+    assert json.loads((work / "curriculum-input.json").read_text(encoding="utf-8")) == given_two_lessons()
+    kept = learning_corpus.parse_keys(json.loads((work / "keys-input.json").read_text(encoding="utf-8")))
+    assert kept == JOB_KEYS
+    vocabulary = json.loads((work / "vocabulary.json").read_text(encoding="utf-8"))["concepts"]
+    added = [item for item in vocabulary if item["id"] == "risk-based-testing"]
+    assert added == [{"id": "risk-based-testing", "display": "Risk based testing", "category": "skill", "phrases": ["risk based testing", "risk based"], "technical": True}]
+    assert [item["id"] for item in vocabulary].count("mlflow") == 1  # a key a posting counted is not added twice
+    assert json.loads((work / "curriculum.json").read_text(encoding="utf-8"))["origin"] == "given"
+
+
+def test_a_resume_goes_on_with_the_inputs_the_first_run_kept_and_a_given_curriculum_makes_no_call(env: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> None:
+    two_lesson_env(env, monkeypatch)
+    pathway_id = request(env)
+    first = job(env, pathway_id, ScriptedModel("titles", "unusable", "unusable"), two_lesson_web(), REAL_PATHS, keys=JOB_KEYS, curriculum=given_two_lessons()).run()
+    assert first.status == "failed" and first.error_code == "too_little_verified"  # the lesson text failed twice: nothing was kept
+    work = learning_job.work_dir(env.home, env.target, pathway_id)
+    assert (work / "curriculum-input.json").is_file() and (work / "keys-input.json").is_file() and (work / "curriculum.json").is_file()
+
+    # no keys, no curriculum given: the copies in the work folder are used; step 6 asks nothing and no source is fetched again
+    second, web = ScriptedModel(*tool_and_case_script()[1:]), two_lesson_web()
+    done = job(env, pathway_id, second, web, REAL_PATHS).run()
+    assert done.status == "done" and second.calls == 3 and steps(done)["corpus"] == "skipped"
+    assert not any("You are planning a COURSE" in prompt for prompt in second.prompts)
+    assert json.loads((work / "paths" / "risk-based-testing.json").read_text(encoding="utf-8"))["kind"] == "case"
+
+
+def test_a_given_artifact_and_a_failed_case_are_told_apart(env: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> None:
+    two_lesson_env(env, monkeypatch)
+    pathway_id = request(env)
+    answers = tool_and_case_script()
+    answers[3] = artifact_answer()
+    done = job(env, pathway_id, ScriptedModel(*answers), two_lesson_web(), REAL_PATHS, keys=JOB_KEYS, curriculum=given_two_lessons()).run()
+    work = learning_job.work_dir(env.home, env.target, pathway_id)
+    assert done.status == "done" and json.loads((work / "paths" / "risk-based-testing.json").read_text(encoding="utf-8"))["kind"] == "artifact"
+
+    other = request(env, "Test lead")
+    answers = tool_and_case_script()
+    answers[3:] = ["no json", {"kind": "case"}]
+    failed = job(env, other, ScriptedModel(*answers), two_lesson_web(), REAL_PATHS, keys=JOB_KEYS, curriculum=given_two_lessons()).run()
+    assert failed.status == "done" and failed.progress["dropped"] == [{"what": "path:risk-based-testing", "reason": "case_model_failed"}]  # type: ignore[index]
+    assert not (learning_job.work_dir(env.home, env.target, other) / "paths" / "risk-based-testing.json").exists()
+    index = learning_store.resolve_course_file(env.home, env.target, other, "").read_text(encoding="utf-8")  # type: ignore[union-attr]
+    assert "Not included" in index and "its case exercise did not pass the checks, twice" in index
+
+
+def test_a_given_curriculum_the_rules_refuse_fails_the_course_at_step_6_with_the_reason_and_no_call_for_it(env: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> None:
+    two_lesson_env(env, monkeypatch)
+    pathway_id = request(env)
+    bad = given_two_lessons()
+    bad["modules"][0]["lessons"][1].update(title="Mentoring and coaching engineers", concepts=["mentoring"])  # type: ignore[index]
+    model = ScriptedModel("titles")
+    failed = job(env, pathway_id, model, two_lesson_web(), REAL_PATHS, keys=JOB_KEYS, curriculum=bad).run()
+    assert (failed.status, failed.error_code) == ("failed", "curriculum_invalid") and model.calls == 1  # the corpus call; no curriculum call
+    assert "reads as a trait or seniority lesson" in str(failed.error) and steps(failed)["course"] == "failed"
+
+
+def test_the_estimate_counts_a_case_lesson_as_one_call_and_no_fetch_and_a_none_lesson_as_nothing(env: SimpleNamespace) -> None:
+    base = learning_job.estimate(env.home, env.target)
+    assert base == {"calls": 60, "fetches": 1300, "minutes": 140, "tokens": None, "basis": "none"}
+    tools_only = learning_job.estimate(env.home, env.target, lessons=30)
+    assert {key: tools_only[key] for key in base} == base and tools_only["lessons"] == 30 and tools_only["case_lessons"] == 0
+    some = learning_job.estimate(env.home, env.target, lessons=30, case_lessons=10)
+    assert (some["calls"], some["fetches"], some["minutes"]) == (60, 1300 - 10 * learning_job.PATH_FETCHES_PER_LESSON, 140 - 25)  # the same calls, 330 fetches less
+    assert some["case_lessons"] == 10 and some["none_lessons"] == 0
+    all_case = learning_job.estimate(env.home, env.target, lessons=30, case_lessons=30)
+    assert all_case["calls"] == 60 and all_case["fetches"] == 1300 - 30 * learning_job.PATH_FETCHES_PER_LESSON == 310  # only what the sources take is left
+    none = learning_job.estimate(env.home, env.target, lessons=30, case_lessons=0, none_lessons=4)
+    assert none["calls"] == 56 and none["fetches"] == 1300 - 4 * learning_job.PATH_FETCHES_PER_LESSON
+    small = learning_job.estimate(env.home, env.target, lessons=15, case_lessons=5)
+    assert (small["calls"], small["fetches"], small["minutes"]) == (30, 650 - 165, 58)  # 70 minutes less 5 x 2.5, rounded up
+    big = learning_job.estimate(env.home, env.target, lessons=60)
+    assert big["calls"] == 120 and big["fetches"] == 1500  # the caps hold
+
+
+def test_the_estimate_is_sized_from_history_too_and_the_question_says_how_many_lessons(env: SimpleNamespace) -> None:
+    _done_course(env, {"cli_model_calls": 40, "worker_minutes": 90.0, "web_fetches": 1000, "tokens": 800_000}, at=datetime(2026, 10, 2, tzinfo=UTC))
+    sized = learning_job.estimate(env.home, env.target, lessons=15, case_lessons=15)
+    assert sized["basis"] == "history" and (sized["calls"], sized["fetches"], sized["tokens"]) == (20, max(75, 500 - 15 * 33), 400_000)
+    shape = learning_job.curriculum_shape(given_two_lessons())
+    assert shape == {"lessons": 2, "case_lessons": 1, "none_lessons": 0}
+    assert learning_job.curriculum_shape(None) == {"lessons": 0, "case_lessons": 0, "none_lessons": 0} and learning_job.curriculum_shape({"modules": "x"})["lessons"] == 0
+    asked = learning_job.ask_response(env.home, env.target, ROLE, curriculum=given_two_lessons())
+    assert asked["estimate"]["lessons"] == 2 and asked["estimate"]["case_lessons"] == 1  # type: ignore[index]
+    assert "lessons" not in learning_job.ask_response(env.home, env.target, ROLE)["estimate"]  # type: ignore[operator]

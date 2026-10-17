@@ -295,7 +295,7 @@ def test_catalog_holds_what_the_local_page_needs(tmp_path: Path) -> None:
     export(work, out)
     catalog = json.loads((out / "catalog.json").read_text(encoding="utf-8"))
 
-    assert catalog["schema_version"] == "scout-learning-shipped-catalog:1"
+    assert catalog["schema_version"] == "scout-learning-shipped-catalog:2"
     assert (catalog["role_key"], catalog["role"]) == (ROLE_KEY, "Kiln operator")
     assert catalog["titles"] == {"phrases": ["kiln operator", "kiln technician"], "deny": ["intern"]}
     assert catalog["vocabulary"] == VOCABULARY
@@ -304,9 +304,49 @@ def test_catalog_holds_what_the_local_page_needs(tmp_path: Path) -> None:
     assert catalog["modules"] == [{"id": "m1", "title": "Firing"}]
     assert catalog["lessons"][0] == {
         "id": "firing-ramps", "title": "Firing ramps", "module": "m1", "concept_keys": ["kiln-controller", "firing-schedules"],
-        "technologies": ["Kiln Controller", "Node.js 2.0"], "has_practice": True,
+        "technologies": ["Kiln Controller", "Node.js 2.0"], "has_practice": True, "prerequisites": [], "depth": None,
         "subtopics": [{"id": "firing-ramps-basics", "title": "Firing ramps: the basics"}, {"id": "firing-ramps-checks", "title": "Firing ramps: the checks"}],
     }
+    # The learning center M2 fields: where the lessons are, and which versions the catalog was made for.
+    assert catalog["site"] == {
+        "base_url": "https://scout.edgelab.one/learn", "site_version": shipped.SITE_VERSION, "lessons_path": "lessons", "practice_path": "practice", "pathways_path": "pathways",
+    }
+    assert (catalog["pathway_version"], catalog["concept_keys_version"]) == (1, 1) and "library_id" not in catalog["lessons"][0], "library_id defaults to the id"
+    assert shipped.catalog_site(catalog).lesson_url("firing-ramps", "firing-ramps-basics") == "https://scout.edgelab.one/learn/lessons/firing-ramps/#firing-ramps-basics"
+
+
+def test_a_catalog_only_export_writes_only_the_catalog_and_still_scans_everything(tmp_path: Path) -> None:
+    work, full, only = make_work(tmp_path), tmp_path / "full", tmp_path / "only"
+    export(work, full)
+    report = export(work, only, catalog_only=True, site_version="2026.11.0")
+    assert sorted(path.relative_to(only).as_posix() for path in only.rglob("*") if path.is_file()) == ["catalog.json"], "no course.json and no paths/"
+    assert [name for name, _raw, _packed in report.files] == ["catalog.json"] and report.paths == 0 and report.lessons == 2
+    assert report.scan.files == 4, "the scan read the full folder: course, catalog and two paths"
+    expected = json.loads((full / "catalog.json").read_text(encoding="utf-8"))
+    expected["site"]["site_version"] = "2026.11.0"
+    assert json.loads((only / "catalog.json").read_text(encoding="utf-8")) == expected
+    # The scan is still the gate: a hit in a file that is NOT written refuses the export and writes nothing.
+    edit(work, "course.json", lambda course: course["modules"][0].update(intro="A studio such as Brindlecote Pottery fires weekly."))
+    refused = tmp_path / "refused"
+    with pytest.raises(ShippedScanError):
+        export(work, refused, catalog_only=True)
+    assert not refused.exists()
+    # A catalog-only folder is a shipped folder: it is replaced, and a folder of something else is not.
+    edit(work, "course.json", lambda course: course["modules"][0].update(intro="Firing."))
+    export(work, only, catalog_only=True)
+    (tmp_path / "other").mkdir()
+    (tmp_path / "other" / "notes.txt").write_text("mine", encoding="utf-8")
+    with pytest.raises(ShippedExportError) as refused_out:
+        export(work, tmp_path / "other", catalog_only=True)
+    assert refused_out.value.code == "out_not_shipped"
+
+
+def test_the_tool_writes_the_catalog_only_with_the_flag(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    work, out = make_work(tmp_path), tmp_path / ROLE_KEY
+    assert _tool().main(["--work", str(work), "--out", str(out), "--role-key", ROLE_KEY, "--no-master", "--catalog-only", "--site-version", "2026.12.1"]) == 0
+    printed = capsys.readouterr().out
+    assert "catalog only: course.json and paths/ were scanned and not written" in printed
+    assert sorted(path.name for path in out.iterdir()) == ["catalog.json"] and json.loads((out / "catalog.json").read_text(encoding="utf-8"))["site"]["site_version"] == "2026.12.1"
 
 
 def test_paths_lose_the_count_sentences_and_keep_the_models_words(tmp_path: Path) -> None:
@@ -966,9 +1006,31 @@ def test_the_tool_is_not_a_user_command() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_the_wheel_configuration_lists_the_shipped_course_folders() -> None:
+def test_the_wheel_configuration_lists_only_the_shipped_catalogs() -> None:
     configuration = tomllib.loads((REPO / "pyproject.toml").read_text(encoding="utf-8"))
     patterns = configuration["tool"]["setuptools"]["package-data"]["gigai.scout"]
-    assert "data/learning/shipped/*/*" in patterns and "data/learning/shipped/*/*/*" in patterns
-    for name in ("course.json", "catalog.json", "paths/firing-ramps.json"):
-        assert any(fnmatchcase(f"data/learning/shipped/{ROLE_KEY}/{name}", pattern) for pattern in patterns), name
+    assert "data/learning/shipped/*/catalog.json" in patterns
+    assert not [pattern for pattern in patterns if pattern.startswith("data/learning/shipped/") and pattern != "data/learning/shipped/*/catalog.json"]
+    assert any(fnmatchcase(f"data/learning/shipped/{ROLE_KEY}/catalog.json", pattern) for pattern in patterns)
+    for name in ("course.json", "paths/firing-ramps.json", "notes.txt"):
+        assert not any(fnmatchcase(f"data/learning/shipped/{ROLE_KEY}/{name}", pattern) for pattern in patterns), f"{name} would ship"
+
+
+def test_the_products_own_site_url_is_not_a_master_name_hit_but_the_same_word_elsewhere_is(tmp_path: Path) -> None:
+    """A master name that is also a word of the site's own domain must not refuse every export (the catalog's
+    ``site.base_url`` is product configuration); the same name in prose, or in a base_url that is not the product's, is still a hit."""
+
+    work = make_work(tmp_path)
+    parts = shipped.MasterParts(lines=("Vexmoor kiln works",), ids=("b-7a8b9c",), names=("edgelab",))
+    report = export(work, tmp_path / "ok", master=parts)
+    assert report.lessons >= 1 and len(report.files) >= 1
+
+    edit(work, "course.json", set_body("The edgelab team fires on Fridays."))
+    with pytest.raises(ShippedScanError) as refused:
+        export(work, tmp_path / "prose", master=parts)
+    assert ("master_name", "course.json") in {(hit.kind, hit.file) for hit in refused.value.hits}
+
+    work = make_work(tmp_path / "again")
+    with pytest.raises(ShippedScanError) as refused:
+        export(work, tmp_path / "other-site", master=parts, base_url="https://edgelab.example.test/learn")
+    assert ("master_name", "catalog.json", "site.base_url") in {(hit.kind, hit.file, hit.field) for hit in refused.value.hits}

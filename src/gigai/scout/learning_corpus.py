@@ -648,6 +648,131 @@ class Concept:
         return {"id": self.id, "display": self.display, "category": self.category, "phrases": list(self.phrases), "technical": self.technical}
 
 
+# ---------------------------------------------------------------------------
+# The shared key list (``--keys``): ids a vocabulary and a curriculum reuse
+# ---------------------------------------------------------------------------
+
+#: The schema of the learning center's ``content/keys/concept-keys.json``.
+KEYS_SCHEMA = "learning-center-concept-keys:1"
+#: The block of existing keys a prompt carries is cut at this many characters (keys whose aliases occur in the corpus first).
+KEYS_BLOCK_CHARS = 40_000
+KEY_ALIASES_SHOWN = 6
+KEYS_MAX = 2000
+KEYS_FILE_BYTES_MAX = 4 * 1024 * 1024
+
+
+@dataclass(frozen=True)
+class ConceptKey:
+    """One key of the shared list: a stable id, how it reads, and the phrasings and older ids that mean the same concept."""
+
+    key: str
+    display: str
+    area: str = ""
+    category: str = "skill"
+    technical: bool = True
+    aliases: tuple[str, ...] = ()
+    #: Every id this key replaced, in any course (``former_ids`` is ``{course: [id, ...]}`` in the file).
+    former_ids: tuple[str, ...] = ()
+
+
+def parse_keys(data: object) -> tuple[ConceptKey, ...]:
+    """The keys of a decoded ``concept-keys.json``, or ``keys_invalid`` naming the first thing wrong."""
+
+    def bad(message: str) -> LearningCorpusError:
+        return LearningCorpusError("keys_invalid", message)
+
+    if not isinstance(data, Mapping) or data.get("schema_version") != KEYS_SCHEMA:
+        raise bad(f"the key list is not a {KEYS_SCHEMA}")
+    items = data.get("keys")
+    if not isinstance(items, list) or not 1 <= len(items) <= KEYS_MAX:
+        raise bad(f"keys must be a list of 1 to {KEYS_MAX} keys")
+    found: list[ConceptKey] = []
+    seen: set[str] = set()
+    for item in items:
+        key = item.get("key") if isinstance(item, Mapping) else None
+        if not isinstance(key, str) or len(key) > ID_CHARS_MAX or not _ID.fullmatch(key) or key in seen:
+            raise bad("every key has a lowercase kebab-case id, used once")
+        seen.add(key)
+        display = item.get("display")
+        if not isinstance(display, str) or not display.strip() or "\n" in display:
+            raise bad(f"the display of key {key} must be one line")
+        aliases = item.get("aliases", [])
+        if not isinstance(aliases, list) or not all(isinstance(alias, str) and alias.strip() and "\n" not in alias for alias in aliases):
+            raise bad(f"the aliases of key {key} must be a list of one-line phrasings")
+        former = item.get("former_ids") or {}
+        if not isinstance(former, Mapping) or not all(isinstance(old, list) and all(isinstance(name, str) for name in old) for old in former.values()):
+            raise bad(f"former_ids of key {key} must map a course to a list of ids")
+        category = item.get("category")
+        found.append(ConceptKey(
+            key, " ".join(display.split()), str(item.get("area") or ""), category if category in CATEGORIES else "skill",
+            item.get("technical") is not False, tuple(" ".join(alias.split()) for alias in aliases),
+            tuple(dict.fromkeys(name for old in former.values() for name in old)),
+        ))
+    return tuple(found)
+
+
+def load_keys(path: Path) -> tuple[ConceptKey, ...]:
+    """The keys of the file at ``path`` (``keys_invalid``: not one regular JSON file of the schema)."""
+
+    path = Path(path)
+    if path.is_symlink() or not path.is_file():
+        raise LearningCorpusError("keys_invalid", "--keys must be one regular local file")
+    try:
+        size = path.stat().st_size
+    except OSError as exc:
+        raise LearningCorpusError("keys_invalid", "--keys must be a UTF-8 JSON file") from exc
+    if size > KEYS_FILE_BYTES_MAX:
+        raise LearningCorpusError("keys_invalid", "the key list is larger than 4 MB")
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, ValueError) as exc:
+        raise LearningCorpusError("keys_invalid", "--keys must be a UTF-8 JSON file") from exc
+    return parse_keys(data)
+
+
+def keys_digest(keys: Sequence[ConceptKey]) -> str:
+    """A short fingerprint of a key list: what a stored vocabulary or curriculum was made with."""
+
+    body = json.dumps([[key.key, key.display, list(key.aliases), list(key.former_ids)] for key in keys], ensure_ascii=False).encode("utf-8")
+    return digest_imported_bytes(body).removeprefix("sha256:")[:16]
+
+
+def canonical_key_ids(keys: Sequence[ConceptKey]) -> dict[str, str]:
+    """``{id: key}``: a key's own id and every id it replaced both read as the key."""
+
+    found: dict[str, str] = {}
+    for key in keys:
+        for name in key.former_ids:
+            found.setdefault(name, key.key)
+    for key in keys:
+        found[key.key] = key.key
+    return found
+
+
+def keys_block(keys: Sequence[ConceptKey], lines: Sequence[str], *, limit: int = KEYS_BLOCK_CHARS) -> str:
+    """The existing keys as a prompt lists them: ``id | display | up to 6 aliases``, at most ``limit`` characters.
+
+    Over the limit, the keys with the most aliases that occur in ``lines`` (the corpus sentences) come first and the
+    rest are left out; ties keep the file's order, so the same corpus gives the same block.
+    """
+
+    text = "\n".join(lines)
+    ranked = []
+    for number, key in enumerate(keys):
+        hits = sum(1 for alias in key.aliases if phrase_pattern(alias).search(text)) if text and key.aliases else 0
+        ranked.append((-hits, number, key))
+    ranked.sort(key=lambda item: item[:2])
+    out: list[str] = []
+    used = 0
+    for _hits, _number, key in ranked:
+        line = f"{key.key} | {' '.join(key.display.split())} | {'; '.join(key.aliases[:KEY_ALIASES_SHOWN])}".rstrip(" |")
+        if used + len(line) + 1 > limit:
+            break
+        out.append(line)
+        used += len(line) + 1
+    return "\n".join(out)
+
+
 _ID = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")
 _PHRASE_WORD = re.compile(r"[A-Za-z0-9+#./&-]+")
 _CONCEPT_KEYS = frozenset({"id", "display", "category", "phrases", "technical"})
@@ -711,9 +836,12 @@ def sample_sentences(texts: Sequence[str], budget: int = SENTENCE_BUDGET) -> lis
 
 def vocabulary_prompt(
     role_text: str, lines: Sequence[str], *, minimum: int = CONCEPTS_MIN, maximum: int = CONCEPTS_MAX,
-    known_ids: Sequence[str] | None = None, validation_error: BaseException | str | None = None,
+    known_ids: Sequence[str] | None = None, validation_error: BaseException | str | None = None, existing_keys: str | None = None,
 ) -> str:
-    """The vocabulary prompt: ``lines`` are requirement sentences, or (``known_ids`` given: the follow-up) uncovered word groups."""
+    """The vocabulary prompt: ``lines`` are requirement sentences, or (``known_ids`` given: the follow-up) uncovered word groups.
+
+    ``existing_keys`` (:func:`keys_block`) is the shared key list, fenced: ids to reuse where the concept is the same.
+    """
 
     follow_up = known_ids is not None
     return _render(
@@ -726,11 +854,14 @@ def vocabulary_prompt(
             "block_title": "UNCOVERED WORD GROUPS" if follow_up else "REQUIREMENT SENTENCES",
             "sentences": fence_untrusted_posting("\n".join(f"- {line}" for line in lines)),
             "validation_error": _error_text(validation_error),
+            "existing_keys": fence_untrusted_posting(existing_keys) if existing_keys else None,
         },
     )
 
 
-def parse_vocabulary(raw: str, *, minimum: int = CONCEPTS_MIN, maximum: int = CONCEPTS_MAX, accepted: int | None = None) -> tuple[Concept, ...]:
+def parse_vocabulary(
+    raw: str, *, minimum: int = CONCEPTS_MIN, maximum: int = CONCEPTS_MAX, accepted: int | None = None, keys: Sequence[ConceptKey] = (),
+) -> tuple[Concept, ...]:
     """The concepts of a model answer, or ``vocabulary_invalid`` naming the first thing wrong.
 
     Refused: no JSON object, fewer than ``minimum`` or more than ``maximum`` concepts (the message says how many
@@ -738,6 +869,10 @@ def parse_vocabulary(raw: str, *, minimum: int = CONCEPTS_MIN, maximum: int = CO
     through for the caller to cut), a concept with other keys than the five, an id that is not lowercase kebab-case or is used twice, a category that is not one of the
     five, no phrase or more than eight, a phrase that is not 1 to 4 plain words, a ``technical`` that is not a
     boolean.
+
+    With ``keys`` (the shared key list) the id of an existing key is accepted as it is, with the phrases the
+    answer gives; an id a key REPLACED (its ``former_ids``) is read as the key, and two concepts that read as one
+    key are one concept (their phrases joined, at most eight).
     """
 
     decoded = _json_object(raw, "vocabulary_invalid")
@@ -752,6 +887,7 @@ def parse_vocabulary(raw: str, *, minimum: int = CONCEPTS_MIN, maximum: int = CO
         raise bad(_held("concepts", "object", len(items), minimum, maximum))
     concepts: list[Concept] = []
     ids: set[str] = set()
+    alias_of = canonical_key_ids(keys)
     for item in items:
         if not isinstance(item, Mapping) or set(item) != _CONCEPT_KEYS:
             raise bad("every concept has exactly the keys id, display, category, phrases, technical")
@@ -780,7 +916,13 @@ def parse_vocabulary(raw: str, *, minimum: int = CONCEPTS_MIN, maximum: int = CO
         if not isinstance(technical, bool):
             raise bad(f"technical of {concept_id} must be true or false")
         ids.add(concept_id)
-        concepts.append(Concept(concept_id, display.strip(), str(category), tuple(plain), technical))
+        canon = alias_of.get(concept_id, concept_id)
+        earlier = next((number for number, held in enumerate(concepts) if held.id == canon), None)
+        if earlier is not None:
+            held = concepts[earlier]
+            concepts[earlier] = replace(held, phrases=tuple(dict.fromkeys([*held.phrases, *plain]))[:PHRASES_MAX])
+            continue
+        concepts.append(Concept(canon, display.strip(), str(category), tuple(plain), technical))
     return tuple(concepts)
 
 
@@ -898,6 +1040,7 @@ class Vocabulary:
 
 def propose_vocabulary(
     model: RoleModel, role_text: str, texts: Sequence[str], *, on_answer: Callable[[str, str, str | None], object] | None = None,
+    keys: Sequence[ConceptKey] = (),
 ) -> Vocabulary:
     """Step 4: one call (one more when the answer does not validate), the screen, and at most one follow-up call.
 
@@ -908,6 +1051,10 @@ def propose_vocabulary(
     follow-up answer that does not validate is ignored (it is never asked for again); a follow-up id the
     vocabulary already has is left out. ``on_answer(call, raw answer, what was wrong or None)`` is told every
     answer as it arrives (``call`` is ``first``, ``retry`` or ``follow_up``), so a caller can keep it.
+
+    ``keys`` is the shared key list (``--keys``): every vocabulary prompt of the step carries it as a fenced block of
+    ids to reuse where the concept is the same (:func:`keys_block`: the keys whose aliases occur in the sentences
+    first, at most 40k characters), and an answer's ids are read through it (:func:`parse_vocabulary`).
     """
 
     if not texts:
@@ -916,16 +1063,17 @@ def propose_vocabulary(
     if not lines:
         return Vocabulary(())
     heard = on_answer or (lambda _call, _raw, _error: None)
+    existing = keys_block(keys, lines) if keys else None
     minimum = concepts_minimum(len(texts))
     error: LearningCorpusError | None = None
     proposed: tuple[Concept, ...] | None = None
     for call in ("first", "retry"):
         raw = model.ask(
-            vocabulary_prompt(role_text, lines, minimum=minimum, validation_error=error),
+            vocabulary_prompt(role_text, lines, minimum=minimum, validation_error=error, existing_keys=existing),
             timeout_seconds=VOCABULARY_TIMEOUT_SECONDS,
         )
         try:
-            proposed = parse_vocabulary(raw, minimum=minimum, accepted=CONCEPTS_ACCEPTED)
+            proposed = parse_vocabulary(raw, minimum=minimum, accepted=CONCEPTS_ACCEPTED, keys=keys)
         except LearningCorpusError as exc:
             model.invalid_output()
             error = exc
@@ -947,11 +1095,11 @@ def propose_vocabulary(
     if groups:
         prompt = vocabulary_prompt(
             role_text, [f"{group} ({count} sentences)" for group, count in groups], minimum=0, maximum=min(FOLLOW_UP_MAX, room),
-            known_ids=[concept.id for concept in concepts],
+            known_ids=[concept.id for concept in concepts], existing_keys=existing,
         )
         raw = model.ask(prompt, timeout_seconds=VOCABULARY_TIMEOUT_SECONDS)
         try:
-            extra = parse_vocabulary(raw, minimum=0, maximum=min(FOLLOW_UP_MAX, room))
+            extra = parse_vocabulary(raw, minimum=0, maximum=min(FOLLOW_UP_MAX, room), keys=keys)
         except LearningCorpusError as exc:
             model.invalid_output()
             follow_up = "invalid"
@@ -1151,8 +1299,12 @@ def _stored_vocabulary(store: CorpusStore | None, role: str, fingerprint: str) -
 def run_corpus(
     home_root: Path, role_text: str, *, model: RoleModel, filters: object | None = None,
     now: datetime | None = None, progress: Callable[[str], None] | None = None, store: CorpusStore | None = None,
+    keys: Sequence[ConceptKey] = (),
 ) -> dict[str, object]:
     """Steps 2 to 5 for one role, as plain data. The only model calls are ``model``'s.
+
+    ``keys`` is the shared key list (``gigai scout learning generate --keys``): the vocabulary call is given it as ids to
+    reuse where a concept is the same, and a stored vocabulary made with another list is asked for again.
 
     ``filters`` is :func:`corpus_filters`'s answer (``None``: every stored posting). The result holds counts and,
     per concept, at most three example sentences of at most 160 characters: never a posting's text.
@@ -1180,7 +1332,8 @@ def run_corpus(
     fingerprint = corpus.fingerprint(titles)
     if store is not None:
         store.write(STEP_SUMMARY, {"role_text": role, "fingerprint": fingerprint, **corpus.to_json()})
-    vocabulary = _stored_vocabulary(store, role, fingerprint)
+    vocabulary_fingerprint = f"{fingerprint}+keys:{keys_digest(keys)}" if keys else fingerprint
+    vocabulary = _stored_vocabulary(store, role, vocabulary_fingerprint)
     if vocabulary is None:
         if texts:
             say(f"Asking what {_postings(len(texts))} ask for...")
@@ -1189,13 +1342,13 @@ def run_corpus(
         def keep(call: str, raw: str, error: str | None) -> None:
             answers.append({"call": call, "usable": error is None, "error": error, "answer": raw})
             if store is not None:
-                store.write(STEP_RAW, {"role_text": role, "fingerprint": fingerprint, "answers": answers})
+                store.write(STEP_RAW, {"role_text": role, "fingerprint": vocabulary_fingerprint, "answers": answers})
 
-        vocabulary = propose_vocabulary(model, role, texts, on_answer=keep)
+        vocabulary = propose_vocabulary(model, role, texts, on_answer=keep, keys=keys)
         if store is not None:
             store.write(
                 STEP_VOCABULARY,
-                {"role_text": role, "fingerprint": fingerprint, "concepts": [concept.to_json() for concept in vocabulary.concepts], **vocabulary.to_json()},
+                {"role_text": role, "fingerprint": vocabulary_fingerprint, "concepts": [concept.to_json() for concept in vocabulary.concepts], **vocabulary.to_json()},
             )
     counted = count_concepts(corpus.postings, vocabulary.concepts)
     if store is not None:
@@ -1277,6 +1430,14 @@ def render(response: Mapping[str, object]) -> str:
 __all__ = [
     "BOILERPLATE_SHARE",
     "CATEGORIES",
+    "KEYS_BLOCK_CHARS",
+    "KEYS_SCHEMA",
+    "ConceptKey",
+    "canonical_key_ids",
+    "keys_block",
+    "keys_digest",
+    "load_keys",
+    "parse_keys",
     "CONCEPTS_MAX",
     "CONCEPTS_ACCEPTED",
     "CONCEPTS_MIN",

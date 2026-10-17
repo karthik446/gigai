@@ -38,6 +38,7 @@ from gigai.scout.learning_corpus import LearningCorpusError
 from gigai.scout.learning_fetch import FetchBudget, PageFetcher, RawResponse, crawl_lesson
 from gigai.scout.untrusted_text import FENCE_CLOSE, FENCE_OPEN
 
+from tests.behaviors.scout_learning.test_learning_case import artifact_answer, case_answer
 from tests.behaviors.scout_learning.test_learning_fetch import Clock, FakeWeb, page
 
 ROLE = "MLOps engineer"
@@ -242,7 +243,7 @@ def test_one_crawl_and_one_call_make_a_path_in_the_renderers_schema(tmp_path: Pa
     assert model.calls == 1 and model.items == [1] and model.invalid == 0
     assert result["dropped"] == [] and result["stopped"] is None and list(result["paths"]) == ["experiment-tracking"]
     path = result["paths"]["experiment-tracking"]
-    assert list(path) == ["concept", "tool", "alternatives", "why_this_tool", "setup", "steps", "sources"]
+    assert list(path) == ["concept", "kind", "tool", "alternatives", "why_this_tool", "setup", "steps", "sources"] and path["kind"] == "tool"
     assert path["concept"] == "experiment-tracking" and len(path["setup"]) == 2 and len(path["steps"]) == 11
     assert [item["n"] for item in path["steps"]] == list(range(1, 12))
     assert path["setup"][0] == {
@@ -651,31 +652,46 @@ def test_two_unusable_answers_are_path_model_failed_and_there_is_no_third_call(t
     assert not (tmp_path / "work" / "paths").exists()
 
 
-def test_fewer_than_eight_steps_left_after_the_checks_is_path_unverified(tmp_path: Path) -> None:
+def test_fewer_than_eight_steps_left_after_the_checks_is_path_unverified_and_the_lesson_gets_a_case_exercise(tmp_path: Path) -> None:
     bad = STEPS[:7] + (("quickstart", "no-such-id"), (99, "x"))
-    result, model, _web = one(tmp_path, answering(steps=bad), answering(steps=bad))
-    assert model.calls == 2 and model.invalid == 0
-    assert result["paths"] == {} and reasons(result) == [("experiment-tracking", "path_unverified")]
+    result, model, _web = one(tmp_path, answering(steps=bad), answering(steps=bad), case_answer())
+    assert model.calls == 3 and model.invalid == 0  # two tool attempts, then the one call of the case exercise
+    assert result["dropped"] == [] and list(result["paths"]) == ["experiment-tracking"]
+    assert result["paths"]["experiment-tracking"]["kind"] == "case" and "tool" not in result["paths"]["experiment-tracking"]
     assert "experiment-tracking: 7 steps and 2 setup items were left after the checks" in result["log"]
-    assert not (tmp_path / "work" / "paths" / "experiment-tracking.json").exists()
+    stored = json.loads((tmp_path / "work" / "paths" / "experiment-tracking.json").read_text(encoding="utf-8"))
+    assert stored == result["paths"]["experiment-tracking"] and stored["concept"] == "experiment-tracking"
+    state = json.loads((tmp_path / "work" / "paths-work" / "experiment-tracking.json").read_text(encoding="utf-8"))
+    assert (state["outcome"], state["calls"], state["tool"]) == ("case_kept", 3, "Trackwell")
 
 
-def test_fewer_than_two_setup_items_left_is_path_unverified(tmp_path: Path) -> None:
+def test_fewer_than_two_setup_items_left_is_path_unverified_and_the_lesson_gets_a_case_exercise(tmp_path: Path) -> None:
     setup = (("quickstart", "install"), ("quickstart", "nope"))
-    result, _model, _web = one(tmp_path, answering(setup=setup), answering(setup=setup))
-    assert reasons(result) == [("experiment-tracking", "path_unverified")]
+    result, _model, _web = one(tmp_path, answering(setup=setup), answering(setup=setup), artifact_answer())
+    assert result["dropped"] == [] and result["paths"]["experiment-tracking"]["kind"] == "artifact"
 
 
-def test_a_lesson_with_nothing_to_cite_is_path_unverified_without_a_call(tmp_path: Path) -> None:
-    result, model, web = one(tmp_path, web=FakeWeb({}))  # nothing answers
-    assert model.calls == 0 and reasons(result) == [("experiment-tracking", "path_unverified")]
+def test_a_lesson_with_nothing_to_cite_is_path_unverified_and_gets_a_case_exercise_in_one_call(tmp_path: Path) -> None:
+    result, model, web = one(tmp_path, case_answer(), web=FakeWeb({}))  # nothing answers
+    assert model.calls == 1 and result["dropped"] == [] and result["paths"]["experiment-tracking"]["kind"] == "case"
     assert "experiment-tracking: no fetched page has a section to cite" in result["log"]
     assert len(web.pages_asked()) == 2
 
-    model = ScriptedModel()
+    model = ScriptedModel(case_answer())
     result = lp.run_paths_step(tmp_path / "other", model=model, fetcher=fetcher(web), course=course(), sources={"lessons": {}})
-    assert model.calls == 0 and reasons(result) == [("experiment-tracking", "path_unverified")]
+    assert model.calls == 1 and result["dropped"] == [] and result["paths"]["experiment-tracking"]["kind"] == "case"
     assert "experiment-tracking: no verified source page of the main tool Trackwell to start from" in result["log"]
+    assert "the lesson has no tool" not in model.prompts[0] and "LESSON: Experiment tracking" in model.prompts[0]
+
+
+def test_a_lesson_with_nothing_to_cite_and_two_unusable_case_answers_is_case_model_failed(tmp_path: Path) -> None:
+    result, model, _web = one(tmp_path, "no json at all", {"kind": "case"}, web=FakeWeb({}))
+    assert model.calls == 2 and model.invalid == 2 and result["paths"] == {}
+    assert reasons(result) == [("experiment-tracking", "case_model_failed")]
+    assert not (tmp_path / "work" / "paths" / "experiment-tracking.json").exists()
+    # a rerun keeps what was decided: no call, no fetch
+    again = run(tmp_path, ScriptedModel(), FakeWeb({}))
+    assert reasons(again) == [("experiment-tracking", "case_model_failed")]
 
 
 # ---------------------------------------------------------------------------
@@ -1018,12 +1034,12 @@ def test_the_crawl_starts_only_from_pages_of_the_main_tool_and_a_tool_with_none_
     # the title names Logbook; every verified source is Trackwell documentation (the MLflow lesson of the first real course)
     titled = {**TRACKING, "title": "Experiment tracking with Logbook"}
     web = FakeWeb(docs("trackwell", "Trackwell"))
-    model = ScriptedModel()
+    model = ScriptedModel(case_answer())
     result = run(tmp_path, model, web, titled)
-    assert model.calls == 0 and web.asked == [] and reasons(result) == [("experiment-tracking", "path_unverified")]
+    assert model.calls == 1 and web.asked == [] and result["dropped"] == [] and result["paths"]["experiment-tracking"]["kind"] == "case"
     assert result["log"] == ["experiment-tracking: no verified source page of the main tool Logbook to start from"]
     state = json.loads((tmp_path / "work" / "paths-work" / "experiment-tracking.json").read_text(encoding="utf-8"))
-    assert (state["tool"], state["tool_chosen_by"], state["tool_hosts"], state["outcome"]) == ("Logbook", "title", [], "path_unverified")
+    assert (state["tool"], state["tool_chosen_by"], state["tool_hosts"], state["outcome"]) == ("Logbook", "title", [], "case_kept")
 
 
 def test_a_path_names_the_titles_tool_and_cites_only_its_documentation(tmp_path: Path) -> None:
@@ -1080,15 +1096,120 @@ def test_items_off_the_main_tools_hosts_get_one_retry_that_names_the_tool_and_it
         "host": "elsewhere.example.net", "pages": [dict(item) for item in crawl.pages], "outcome": None,
     }), encoding="utf-8")
 
-    model = ScriptedModel(answering(), answering())
+    model = ScriptedModel(answering(), answering(), case_answer())
     result = lp.run_paths_step(tmp_path / "work", model=model, fetcher=fetcher(web), course=data, sources=sources)
-    assert model.calls == 2 and model.invalid == 0  # the one retry, never a third call
+    assert model.calls == 3 and model.invalid == 0  # the one retry, never a third tool call; then the case exercise
     retry = model.prompts[1]
     assert "RETRY NOTICE" in retry and "- the MAIN TOOL of this path is Trackwell, and 13 of the 13 kept items cited a page that is not Trackwell documentation" in retry
     assert "(Trackwell documentation is at: docs.example.com)" in retry and "never another tool's" in retry
-    assert reasons(result) == [("experiment-tracking", "path_unverified")] and result["paths"] == {}
-    assert not (tmp_path / "work" / "paths" / "experiment-tracking.json").exists()
+    assert result["dropped"] == [] and result["paths"]["experiment-tracking"]["kind"] == "case"  # no practice path built on another tool's pages
+    assert json.loads((tmp_path / "work" / "paths" / "experiment-tracking.json").read_text(encoding="utf-8"))["kind"] == "case"
     assert "experiment-tracking attempt 1: 13 kept items cite a page off the hosts of the main tool Trackwell" in result["log"]
     assert "experiment-tracking: 11 steps and 2 setup items were left after the checks, 13 of them off the hosts of the main tool Trackwell" in result["log"]
     stored = json.loads(state.read_text(encoding="utf-8"))
-    assert (stored["outcome"], stored["off_tool"], stored["tool_hosts"]) == ("path_unverified", 13, ["docs.example.com"])
+    assert (stored["outcome"], stored["off_tool"], stored["tool_hosts"], stored["calls"]) == ("case_kept", 13, ["docs.example.com"], 3)
+
+
+# ---------------------------------------------------------------------------
+# 8. A written practice page (0.1.11.11): kind, the case fallback, practice marks, article and book sources
+# ---------------------------------------------------------------------------
+
+
+def test_a_path_written_before_kind_existed_reads_as_a_tool_path_and_a_new_one_says_so(tmp_path: Path) -> None:
+    result, _model, _web = one(tmp_path, answering())
+    path = result["paths"]["experiment-tracking"]
+    assert path["kind"] == "tool" and learning_render.path_kind(path) == "tool"
+    legacy = {key: value for key, value in path.items() if key != "kind"}
+    assert lp.check_path(legacy, "experiment-tracking") and learning_render.path_kind(legacy) == "tool"
+    assert learning_render.validate_path(legacy, "p") == [] and not lp.check_path({**path, "kind": "case"}, "experiment-tracking")
+
+
+def test_a_stored_legacy_path_without_kind_is_kept_on_a_rerun_without_a_call(tmp_path: Path) -> None:
+    result, _model, web = one(tmp_path, answering())
+    stored = tmp_path / "work" / "paths" / "experiment-tracking.json"
+    legacy = {key: value for key, value in json.loads(stored.read_text(encoding="utf-8")).items() if key != "kind"}
+    stored.write_text(json.dumps(legacy), encoding="utf-8")
+    again = run(tmp_path, ScriptedModel(), web)
+    assert again["paths"]["experiment-tracking"] == legacy and again["dropped"] == [] and "kind" not in again["paths"]["experiment-tracking"]
+
+
+def test_a_lesson_marked_case_goes_straight_to_the_exercise_without_a_fetch_or_a_tool_path(tmp_path: Path) -> None:
+    web = FakeWeb(docs("trackwell", "Trackwell"))
+    model = ScriptedModel(case_answer())
+    result = run(tmp_path, model, web, practice={"experiment-tracking": "case"})
+    assert model.calls == 1 and web.asked == [] and result["dropped"] == [] and result["paths"]["experiment-tracking"]["kind"] == "case"
+    state = json.loads((tmp_path / "work" / "paths-work" / "experiment-tracking.json").read_text(encoding="utf-8"))
+    assert state["outcome"] == "case_kept"
+    # the same marks, stored: kept on a rerun with no call and no fetch
+    again = run(tmp_path, ScriptedModel(), web, practice={"experiment-tracking": "case"})
+    assert again["paths"] == result["paths"] and web.asked == []
+
+
+def test_a_case_lesson_lists_its_source_titles_by_index_and_never_an_address(tmp_path: Path) -> None:
+    model = ScriptedModel(artifact_answer())
+    result = run(tmp_path, model, None, practice={"experiment-tracking": "case"})
+    assert result["paths"]["experiment-tracking"]["kind"] == "artifact"
+    prompt = model.prompts[0]
+    assert "  [0] A paper" in prompt and "  [1] Quickstart" in prompt and "  [2] Concepts" in prompt
+    assert "docs.example.com" not in prompt and "papers.example.org" not in prompt and "https://" not in prompt
+    for canary in (CANARY, BODY_CANARY):
+        assert canary not in prompt
+
+
+def test_a_lesson_marked_none_has_no_practice_page_and_is_not_dropped(tmp_path: Path) -> None:
+    web = FakeWeb(docs("trackwell", "Trackwell"))
+    model = ScriptedModel()
+    result = run(tmp_path, model, web, practice={"experiment-tracking": "none"})
+    assert model.calls == 0 and web.asked == [] and result == {"paths": {}, "dropped": [], "stopped": None, "log": []}
+
+
+def test_the_marks_are_read_from_the_curriculum_of_the_work_folder(tmp_path: Path) -> None:
+    work = tmp_path / "work"
+    work.mkdir()
+    (work / "curriculum.json").write_text(json.dumps({"modules": [{"id": "m1", "lessons": [
+        {"id": "experiment-tracking", "practice": "case"}, {"id": "model-serving", "practice": "none"}, {"id": "third", "practice": "tool"}, {"id": "fourth"},
+    ]}]}), encoding="utf-8")
+    assert lp.practice_marks(work) == {"experiment-tracking": "case", "model-serving": "none"}
+    assert lp.practice_marks(tmp_path / "nowhere") == {}
+    model = ScriptedModel(case_answer())
+    result = lp.run_paths_step(work, model=model, fetcher=fetcher(FakeWeb({})), course=course(TRACKING, SERVING), sources=sources_for(TRACKING, SERVING))
+    assert model.calls == 1 and list(result["paths"]) == ["experiment-tracking"] and result["dropped"] == []
+
+
+def test_a_mark_that_arrives_later_makes_the_stored_tool_path_stale(tmp_path: Path) -> None:
+    result, _model, web = one(tmp_path, answering())
+    assert result["paths"]["experiment-tracking"]["kind"] == "tool"
+    model = ScriptedModel(case_answer())
+    again = run(tmp_path, model, web, practice={"experiment-tracking": "case"})
+    assert model.calls == 1 and again["paths"]["experiment-tracking"]["kind"] == "case"
+
+
+def article_sources(lesson_id: str = "experiment-tracking") -> dict[str, object]:
+    """A lesson whose every verified source is an article or a book chapter, one on a host that names the tool."""
+
+    return {"schema_version": lc.SCHEMA_SOURCES, "stopped": None, "dropped": [], "lessons": {lesson_id: [
+        {"title": "Tracking tips", "url": "https://trackwell.blog.example.net/posts/tracking-tips", "kind": "article", "page_title": "Tracking tips"},
+        {"title": "A chapter on trackwell", "url": "https://books.example.org/trackwell/chapter-3", "kind": "book", "page_title": "Chapter 3"},
+    ]}}
+
+
+def test_an_article_or_a_book_source_picks_no_tool_makes_no_start_page_and_has_no_hosts() -> None:
+    lesson_sources = article_sources()["lessons"]["experiment-tracking"]  # type: ignore[index]
+    assert lc.tool_pages(lesson_sources, "Trackwell") == [] and lp.start_pages(lesson_sources, "Trackwell") == []
+    tool = lp.pick_tool(TRACKING, course(), lesson_sources)
+    assert tool.hosts == () and tool.how in ("count", "")
+    # as the same sources of any other kind would: the tool's host is found (the kind is the only difference)
+    as_docs = [{**item, "kind": "doc"} for item in lesson_sources]
+    assert lc.tool_pages(as_docs, "Trackwell") != [] and lp.start_pages(as_docs, "Trackwell") != []
+    assert [item["url"] for item in lc.doc_sources([*lesson_sources, *as_docs])] == [item["url"] for item in as_docs]
+
+
+def test_a_framework_lesson_with_only_articles_goes_to_the_case_exercise_not_to_a_tool_path_on_a_blog_host(tmp_path: Path) -> None:
+    web = FakeWeb({**docs("trackwell", "Trackwell"), "https://trackwell.blog.example.net/posts/tracking-tips": page("Tracking tips", f"<p>{LONG_TEXT}</p>")})
+    model = ScriptedModel(case_answer())
+    result = lp.run_paths_step(
+        tmp_path / "work", model=model, fetcher=fetcher(web), course=course(TRACKING), sources=article_sources(),
+    )
+    assert web.asked == [] and model.calls == 1  # nothing crawled, one call, the exercise
+    assert result["dropped"] == [] and result["paths"]["experiment-tracking"]["kind"] == "case"
+    assert "  [0] Tracking tips" in model.prompts[0] and "  [1] A chapter on trackwell" in model.prompts[0]
