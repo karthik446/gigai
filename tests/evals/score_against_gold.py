@@ -79,6 +79,30 @@ lines, rows on no line, lines covered); the status of each must-have row; and
 ``fully_correct`` (all of: verdict, gate, location, no over-ask, no under-ask,
 the must-have rows and their statuses).  No judgement beyond the key: a result
 agrees with it or it does not.
+
+STRICT KEY (F6a, 0.1.11.12): a must row may carry ``evidence_tier`` (``clear`` /
+``buried`` / ``missing``), ``evidence_ids`` (the master line ids the tier rests on)
+and ``in_submitted``; a posting may carry ``outcome`` (``rejected`` / ``open`` /
+``interview``).  Such a row is ``met`` only when its tier is clear.  On a hard or
+askable row with a tier (not line 0, not open either way, not a soft ask), three
+more things are scored, all absent (empty, None) for a key without tiers:
+- ``row_agreement``: the result row is ``met`` and the key says met, or it is
+  anything else and the key says not met; a key row the result has no row for is
+  ``absent`` and disagrees.  ``lenient_met`` lists the met result rows on a
+  buried or missing key row.
+- a wrong citation on such a row (``scored: true``) fails ``fully_correct``; the
+  key lines are ``settled_by`` and ``evidence_ids`` together.
+- ``fit``: the product's own number for the stored matrix
+  (``gigai.scout.fit.fit_percent``, what the Jobs page shows; computed, never
+  stored); ``fit_violation`` when the key holds a buried or missing hard/askable
+  row (``key_below_met_rows``) and the fit is at least :data:`FIT_CAP`.  A row
+  the key leaves open either way or reads as a soft ask is a close call, not a
+  hold: it never caps the fit (the same rows row agreement leaves out).
+  ``outcome`` (``rejected`` / ``open`` / ``interview`` / ``unknown`` for a
+  holdout posting) is reported next to it and never scores a row.
+The ``bar`` block (per cli: ``all`` and each outcome group present) evaluates the
+release bar: ``row_agreement >= 0.90``, ``fit_violations == 0`` and
+``max_over_asks_per_job <= 2``, each with its value and pass.
 """
 
 from __future__ import annotations
@@ -92,6 +116,9 @@ import re
 import sys
 from typing import Any
 
+from gigai.scout.find_jobs.contracts import MatrixStatus, RequirementClass, RequirementMatrixRow
+from gigai.scout.fit import fit_percent
+
 KEY_SCHEMA = "gigai-gold-key:1"
 SCORE_SCHEMA = "gigai-gold-score:1"
 MANDATORY = ("hard", "askable")
@@ -101,7 +128,15 @@ ELIG_IDS = ("elig-location", "elig-region", "elig-work-mode")
 SPONSORSHIP_WORDS = ("sponsor", "authorization", "authorisation", "eligib", "work_permit", "visa")
 MATCH_FLOOR = 0.6
 TOTALS = ("results", "unread", "fully_correct", "verdict_right", "gate_right", "location_right", "over_asks", "soft_asks", "under_asks", "musts_right", "list_exact",
-          "rows_missing", "rows_extra", "rows_unmapped", "class_wrong", "status_wrong", "required_lines", "lines_covered", "resume_checked", "resume_covers", "resume_verbatim", "resume_pages_skills", "resume_c1", "resume_bar", "wrong_citation_must", "wrong_citation_nice", "nice_no_key_lines")
+          "rows_missing", "rows_extra", "rows_unmapped", "class_wrong", "status_wrong", "required_lines", "lines_covered", "resume_checked", "resume_covers", "resume_verbatim", "resume_pages_skills", "resume_c1", "resume_bar", "wrong_citation_must", "wrong_citation_nice", "nice_no_key_lines",
+          "strict_rows", "rows_agree", "lenient_met", "fit_violations")
+STRICT_TIERS = ("clear", "buried", "missing")
+BELOW_MET = ("buried", "missing")
+OUTCOMES = ("rejected", "open", "interview", "unknown")
+FIT_CAP = 70
+DISAGREEMENTS_SHOWN = 30
+ROW_AGREEMENT_BAR = 0.90
+OVER_ASKS_BAR = 2
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -177,6 +212,34 @@ def result_gate(answer: Mapping[str, Any], whole: object) -> str | None:
 def row_class(row: Mapping[str, Any]) -> str | None:
     value = row.get("class", row.get("requirement_class"))
     return str(value) if value is not None else None
+
+
+def strict_row(key_row: Mapping[str, Any]) -> bool:
+    """A key row the strict columns score: a hard/askable must row with an evidence tier, not line 0, not open either way, not a soft ask. Pure."""
+
+    return (key_row.get("kind") == "must" and key_row["class"] in MANDATORY and key_row["line"] != 0
+            and not key_row.get("status_either") and not key_row.get("soft_ask") and key_row.get("evidence_tier") is not None)
+
+
+def fit_of(rows: Sequence[Mapping[str, Any]]) -> int | None:
+    """The fit number of a result's matrix by the product's own rule (``fit_percent``, what the Jobs page shows), on rows typed as the product types them.
+
+    A status or class outside the product's vocabulary is what ``fit_percent`` makes of it: not met, a must-have's weight.
+    """
+
+    typed = []
+    for row in rows:
+        kind = row_class(row)
+        try:
+            status = MatrixStatus(str(row.get("status")))
+        except ValueError:
+            status = MatrixStatus.UNCLEAR
+        try:
+            klass = None if kind is None else RequirementClass(kind)
+        except ValueError:
+            klass = None
+        typed.append(RequirementMatrixRow(str(row.get("requirement") or ""), tuple(str(item) for item in row.get("resume_evidence") or ()), status, klass))
+    return fit_percent(typed)
 
 
 def map_row(row: Mapping[str, Any], lines: Sequence[Mapping[str, Any]], required: frozenset[int]) -> int | None:
@@ -317,24 +380,40 @@ def score_result(key: Mapping[str, Any], whole: object, lines: Sequence[Mapping[
         if got != key_row["status"] and got not in (key_row.get("status_either") or ()) and not (key_row.get("soft_ask") and got == "unclear"):
             status_wrong.append({"line": key_row["line"], "item": key_row.get("item"), "key": key_row["status"], "got": got})
 
-    # advisory: a row marked met whose cited lines share none with the key's lines for it (the user sees irrelevant lines as the proof)
+    # strict key: agreement with the evidence tier on hard/askable rows, lenient met rows, the rows below met that cap the fit
+    agreement, lenient_met, below_met = [], [], []
+    for index, key_row in enumerate(key_rows):
+        if not strict_row(key_row):
+            continue
+        row = matched.get(index)
+        got = "absent" if row is None else str(row.get("status"))
+        name = {"line": key_row["line"], "item": key_row.get("item"), "tier": key_row["evidence_tier"]}
+        agreement.append({**name, "key": key_row["status"], "got": got, "agree": row is not None and (got == "met") == (key_row["status"] == "met")})
+        if key_row["evidence_tier"] in BELOW_MET:
+            below_met.append(name)
+            if got == "met":
+                lenient_met.append(name)
+    fit = fit_of(rows)
+
+    # a row marked met whose cited lines share none with the key's lines for it (the user sees irrelevant lines as the proof):
+    # scored on a strict row (fails ``fully_correct``), advisory elsewhere
     wrong_citation, no_key_lines = [], []
     for index, key_row in enumerate(key_rows):
         row = matched.get(index)
         if row is None or str(row.get("status")) != "met" or key_row.get("status_either"):
             continue
         cited = {str(item) for item in row.get("sources") or ()}
-        group = "must" if key_row["kind"] == "must" else "nice"
-        if group == "must" and key_row["status"] != "met":
+        group, scored = "must" if key_row["kind"] == "must" else "nice", strict_row(key_row)
+        if group == "must" and key_row["status"] != "met" and not scored:
             continue
-        key_lines = {str(item) for item in key_row.get("settled_by") or key_row.get("supporting") or key_row.get("evidence") or ()}
+        key_lines = {str(item) for item in key_row.get("settled_by") or key_row.get("supporting") or key_row.get("evidence") or ()} | {str(item) for item in key_row.get("evidence_ids") or ()}
         if not cited:
             continue
         if not key_lines:
             if group == "nice":
                 no_key_lines.append({"line": key_row["line"], "item": key_row.get("item"), "cited": sorted(cited)})
         elif not cited & key_lines:
-            wrong_citation.append({"group": group, "line": key_row["line"], "item": key_row.get("item"), "cited": sorted(cited)})
+            wrong_citation.append({"group": group, "line": key_row["line"], "item": key_row.get("item"), "cited": sorted(cited), "scored": scored})
 
     # the questions
     by_requirement = {fold(row.get("requirement")): row for row in rows}
@@ -409,9 +488,12 @@ def score_result(key: Mapping[str, Any], whole: object, lines: Sequence[Mapping[
         "wrong_citation": wrong_citation,
         "no_key_lines": no_key_lines,
         "status": {"must_rows_found": sum(1 for index, row in enumerate(key_rows) if row["kind"] == "must" and index in matched), "wrong": status_wrong},
+        "row_agreement": {"key_rows": len(agreement), "agree": sum(entry["agree"] for entry in agreement), "value": round(sum(entry["agree"] for entry in agreement) / len(agreement), 4) if agreement else None, "each": agreement},
+        "lenient_met": lenient_met,
+        "fit": fit, "key_below_met_rows": below_met, "fit_violation": bool(below_met and fit is not None and fit >= FIT_CAP), "outcome": key.get("outcome"),
     }
     score["fully_correct"] = bool(score["verdict"]["right"] and score["gate"]["right"] and score["location"]["right"] and not score["questions"]["over_asks"] and not under
-                                  and score["list"]["musts_right"] and not status_wrong)
+                                  and score["list"]["musts_right"] and not status_wrong and not any(item["scored"] for item in wrong_citation))
     return score
 
 
@@ -556,6 +638,12 @@ def load_key(path: Path) -> dict[str, Any]:
     key = json.loads(path.read_text(encoding="utf-8"))
     if key.get("schema") != KEY_SCHEMA:
         raise ValueError(f"{path} is not a {KEY_SCHEMA} key")
+    for posting_id, posting in key["postings"].items():  # a misspelt tier would silently drop a row from the release bar
+        if posting.get("outcome") is not None and posting["outcome"] not in OUTCOMES:
+            raise ValueError(f"{path}: posting {posting_id} has outcome {posting['outcome']!r}, not one of {'/'.join(OUTCOMES)}")
+        for row in posting["musts"]:
+            if row.get("evidence_tier") is not None and row["evidence_tier"] not in STRICT_TIERS:
+                raise ValueError(f"{path}: posting {posting_id} line {row['line']} has evidence_tier {row['evidence_tier']!r}, not one of {'/'.join(STRICT_TIERS)}")
     return key
 
 
@@ -629,6 +717,10 @@ def score_folder(key: Mapping[str, Any], results: Path, postings: Path, master: 
         total["wrong_citation_must"] += sum(item["group"] == "must" for item in row["wrong_citation"])
         total["wrong_citation_nice"] += sum(item["group"] == "nice" for item in row["wrong_citation"])
         total["nice_no_key_lines"] += len(row["no_key_lines"])
+        total["strict_rows"] += row["row_agreement"]["key_rows"]
+        total["rows_agree"] += row["row_agreement"]["agree"]
+        total["lenient_met"] += len(row["lenient_met"])
+        total["fit_violations"] += int(row["fit_violation"])
         if "resume" in row:
             resume = row["resume"]
             total["resume_checked"] += 1
@@ -637,7 +729,40 @@ def score_folder(key: Mapping[str, Any], results: Path, postings: Path, master: 
             total["resume_pages_skills"] += int(resume["pages_ok"] and resume["skills_kept"])
             total["resume_c1"] += int(resume["c1"] is True)
             total["resume_bar"] += int(resume["bar"])
-    return {"schema_version": SCORE_SCHEMA, "key_set": key.get("set"), "results_label": results.name, "by_cli": by_cli, "results": out}
+    bar = {cli: bar_block([row for row in out if row["cli"] == cli]) for cli in by_cli}
+    return {"schema_version": SCORE_SCHEMA, "key_set": key.get("set"), "results_label": results.name, "by_cli": by_cli, "bar": bar, "results": out}
+
+
+def bar_of(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    """The release bar over some results: row agreement, fit violations and the most over-asks of one job, each with its value and pass. Pure.
+
+    Unread results are counted and reported but hold no rows; a group with no strict rows has no agreement (None: fail).
+    """
+
+    scored = [row for row in rows if row["ok"]]
+    key_rows = sum(row["row_agreement"]["key_rows"] for row in scored)
+    agree = sum(row["row_agreement"]["agree"] for row in scored)
+    agreement = round(agree / key_rows, 4) if key_rows else None
+    violations = sum(int(row["fit_violation"]) for row in scored)
+    most_over = max((row["questions"]["over_asks"] for row in scored), default=None)
+    checks = {
+        "row_agreement": {"value": agreement, "pass": agreement is not None and agreement >= ROW_AGREEMENT_BAR},
+        "fit_violations": {"value": violations, "pass": violations == 0},
+        "max_over_asks_per_job": {"value": most_over, "pass": most_over is not None and most_over <= OVER_ASKS_BAR},
+    }
+    return {"results": len(rows), "unread": len(rows) - len(scored), "key_rows": key_rows, "agree": agree, "lenient_met": sum(len(row["lenient_met"]) for row in scored),
+            **checks, "pass": all(check["pass"] for check in checks.values())}
+
+
+def bar_block(rows: Sequence[Mapping[str, Any]]) -> dict[str, dict[str, Any]]:
+    """The bar for one cli's results: ``all``, then each outcome group the key names for at least one of them. Pure."""
+
+    groups = {"all": list(rows)}
+    for outcome in OUTCOMES:
+        members = [row for row in rows if row.get("outcome") == outcome]
+        if members:
+            groups[outcome] = members
+    return {name: bar_of(members) for name, members in groups.items()}
 
 
 def render(report: Mapping[str, Any]) -> str:
@@ -656,11 +781,31 @@ def render(report: Mapping[str, Any]) -> str:
         questions, listing, cover = row["questions"], row["list"], row["list"]["line_coverage"]
         lines.append(f"| {row['posting']} | {row['cli']} | {'yes' if row['fully_correct'] else 'no'} | {mark(row['verdict'])}: {row['verdict']['got']} ({' or '.join(row['verdict']['key'])}) | {mark(row['gate'])} | {mark(row['location'])} | "
                      f"{questions['asked']} | {questions['right']} | {questions['over_asks']} | {questions['under_asks']} | {len(listing['missing'])} | {len(listing['extra'])} | {len(listing['class_wrong'])} | {len(row['status']['wrong'])} | {cover['covered']}/{cover['required_lines']} |")
-    lines += ["", "Wrong-citation rows (advisory, not in fully correct): a met row whose cited lines share none with the key's lines for it. Row = posting line; nice rows the key has no lines for are counted apart.", "",
+    lines += ["", "Wrong-citation rows: a met row whose cited lines share none with the key's lines for it (scored on a strict hard/askable row, advisory elsewhere). Row = posting line, `*` = scored; nice rows the key has no lines for are counted apart.", "",
               "| cli | must | nice | nice, no key lines | posting: lines |", "|---|---|---|---|---|"]
     for cli, total in sorted(report["by_cli"].items()):
-        where = "; ".join(f"{row['posting']}: {', '.join(item['group'][0] + str(item['line']) for item in row['wrong_citation'])}" for row in report["results"] if row["cli"] == cli and row["ok"] and row["wrong_citation"])
+        where = "; ".join(f"{row['posting']}: {', '.join(item['group'][0] + str(item['line']) + ('*' if item['scored'] else '') for item in row['wrong_citation'])}" for row in report["results"] if row["cli"] == cli and row["ok"] and row["wrong_citation"])
         lines.append(f"| {cli} | {total['wrong_citation_must']} | {total['wrong_citation_nice']} | {total['nice_no_key_lines']} | {where or '-'} |")
+    lines += ["", f"Strict key: key rows = hard/askable rows with an evidence tier; agree = result met exactly when the tier is clear; lenient met = met on a buried or missing row; fit = the product's number for the stored matrix, a violation with a buried or missing hard/askable row and fit >= {FIT_CAP}. Outcome is the key's record, never scored.", "",
+              "| posting | cli | fit | outcome | key rows | agree | lenient met | fit violation | wrong citation scored |", "|---|---|---|---|---|---|---|---|---|"]
+    for row in report["results"]:
+        if row["ok"]:
+            agreement = row["row_agreement"]
+            lines.append(f"| {row['posting']} | {row['cli']} | {'-' if row['fit'] is None else row['fit']} | {row['outcome'] or '-'} | {agreement['key_rows']} | {agreement['agree']} | {len(row['lenient_met'])} | {'yes' if row['fit_violation'] else 'no'} | {sum(item['scored'] for item in row['wrong_citation'])} |")
+    lenient = [f"{row['posting']} {row['cli']}: " + ", ".join(f"L{item['line']}{' ' + item['item'] if item['item'] else ''} ({item['tier']})" for item in row["lenient_met"]) for row in report["results"] if row["ok"] and row["lenient_met"]]
+    lines += ["", "Lenient met rows: " + ("; ".join(lenient) if lenient else "none") + "."]
+    disagreements = [f"- {row['posting']} {row['cli']}: L{entry['line']}{' ' + entry['item'] if entry['item'] else ''} ({entry['tier']}) key {entry['key']}, got {entry['got']}"
+                     for row in report["results"] if row["ok"] for entry in row["row_agreement"]["each"] if not entry["agree"] and entry["got"] != "met"]
+    lines += ["", f"Other disagreements (the result not met on a clear row, or no row at all){f', the first {DISAGREEMENTS_SHOWN} of {len(disagreements)}' if len(disagreements) > DISAGREEMENTS_SHOWN else ''}:"]
+    lines += disagreements[:DISAGREEMENTS_SHOWN] or ["- none"]
+    lines += ["", f"Release bar: row agreement >= {ROW_AGREEMENT_BAR:.2f}, fit violations == 0, most over-asks of one job <= {OVER_ASKS_BAR}; per cli over all results and per outcome group the key names. Unread results count in results only.", "",
+              "| cli | group | results | unread | row agreement | fit violations | max over-asks per job | bar |", "|---|---|---|---|---|---|---|---|"]
+    verdict = lambda check: "ok" if check["pass"] else "FAIL"  # noqa: E731
+    for cli, groups in sorted(report["bar"].items()):
+        for group, bar in groups.items():
+            agreement = "- (no strict rows)" if bar["row_agreement"]["value"] is None else f"{bar['row_agreement']['value']:.3f} ({bar['agree']}/{bar['key_rows']})"
+            over = "- (no result read)" if bar["max_over_asks_per_job"]["value"] is None else bar["max_over_asks_per_job"]["value"]
+            lines.append(f"| {cli} | {group} | {bar['results']} | {bar['unread']} | {agreement} {verdict(bar['row_agreement'])} | {bar['fit_violations']['value']} {verdict(bar['fit_violations'])} | {over} {verdict(bar['max_over_asks_per_job'])} | {verdict(bar)} |")
     return "\n".join(lines) + "\n"
 
 
@@ -693,6 +838,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     (out / "score.md").write_text(render(report), encoding="utf-8")
     for cli, total in sorted(report["by_cli"].items()):
         print(f"{cli}: {total['results']} results, fully correct {total['fully_correct']}, verdict right {total['verdict_right']}, over-asks {total['over_asks']}, under-asks {total['under_asks']}, wrong-citation must {total['wrong_citation_must']} / nice {total['wrong_citation_nice']} (nice rows with no key lines: {total['nice_no_key_lines']})")
+        bar = report["bar"][cli]["all"]
+        print(f"{cli}: bar {'PASS' if bar['pass'] else 'FAIL'}: row agreement {bar['row_agreement']['value']} ({bar['agree']}/{bar['key_rows']}, lenient met {bar['lenient_met']}), fit violations {bar['fit_violations']['value']}, max over-asks per job {bar['max_over_asks_per_job']['value']}")
     print(f"written under {out}")
     return 0
 

@@ -352,3 +352,145 @@ def test_a_met_nice_to_have_row_is_a_wrong_citation_only_against_key_lines_and_c
     assert [(item["group"], item["item"], item["cited"]) for item in wrong["wrong_citation"]] == [("nice", None, ["b-zzz"])] and wrong["no_key_lines"] == []
     right = gold.score_result(key, rust(["b-aaa", "b-zzz"]), lines)
     assert right["wrong_citation"] == [] and right["fully_correct"] == wrong["fully_correct"]  # advisory only
+
+
+# --- strict keys (F6a, 0.1.11.12): evidence tiers, scored citations, the fit cap and the release bar ---------
+
+
+NAMES = {(4, None): "years", (5, "Go"): "go", (5, "Kubernetes"): "k8s", (5, "Terraform"): "tf", (6, None): "cloud"}
+#: Two nice-to-have rows on no posting line: they widen the fit's denominator (weight 1 each) and nothing else.
+EXTRA_NICE = tuple({"id": f"req-x{i}", "requirement": f"Extra nicety {i}", "class": "nice_to_have", "status": "unclear"} for i in (1, 2))
+
+
+def strict_key(lines: list[dict[str, Any]], outcome: str = "rejected", **tiers: str) -> dict[str, Any]:
+    """The synthetic key as a strict key: every must row carries a tier (``clear`` unless named), met only when clear."""
+
+    key = build_key(lines, cloud="met")["postings"]["01"]
+    for row in key["musts"]:
+        name = NAMES[(row["line"], row["item"])]
+        tier = tiers.get(name, "clear")
+        ids = [] if tier == "missing" else [f"b-{name}"]
+        row.update(evidence_tier=tier, evidence_ids=ids, in_submitted=tier == "clear", status="met" if tier == "clear" else "unclear", settled_by=ids if tier == "clear" else [])
+    key["outcome"] = outcome
+    return key
+
+
+def met_result(*, add: tuple[dict[str, Any], ...] = (), unclear: tuple[str, ...] = (), **sources: list[str]) -> dict[str, Any]:
+    """A matched result with every row met (``unclear`` names the rows left open), each must row citing its own master line unless ``sources`` says otherwise."""
+
+    status = {row: "unclear" if row in unclear else "met" for row in ("req-years", "req-go", "req-k8s", "req-tf", "req-cloud", "req-rust")}
+    result = answer(verdict="matched_above_threshold", status=status, add=add, ask=())
+    for row in result["result"]["matrix"]:
+        name = str(row["id"]).removeprefix("req-")
+        row["sources"] = sources.get(name, [f"b-{name}"])
+    return result
+
+
+def test_a_met_result_on_a_buried_row_is_a_lenient_met_and_a_row_disagreement(lines: list[dict[str, Any]]) -> None:
+    key = strict_key(lines, k8s="buried")
+    out = gold.score_result(key, met_result(), lines)
+    assert out["lenient_met"] == [{"line": 5, "item": "Kubernetes", "tier": "buried"}]
+    assert (out["row_agreement"]["key_rows"], out["row_agreement"]["agree"], out["row_agreement"]["value"]) == (5, 4, 0.8)
+    assert [(row["item"], row["agree"]) for row in out["row_agreement"]["each"] if not row["agree"]] == [("Kubernetes", False)]
+    honest = gold.score_result(key, met_result(unclear=("req-k8s",)), lines)  # the result leaves the buried row open: agreement, no lenient met
+    assert honest["lenient_met"] == [] and honest["row_agreement"]["value"] == 1.0
+    missing = gold.score_result(key, answer(verdict="matched_above_threshold", drop=("req-k8s",), status={"req-cloud": "met"}, ask=()), lines)  # no row at all is not "not met"
+    assert missing["row_agreement"]["agree"] == 4 and [row["got"] for row in missing["row_agreement"]["each"] if not row["agree"]] == ["absent"]
+
+
+def test_a_wrong_citation_on_a_strict_must_row_fails_fully_correct(lines: list[dict[str, Any]]) -> None:
+    out = gold.score_result(strict_key(lines), met_result(go=["b-zzz"]), lines)
+    assert out["wrong_citation"] == [{"group": "must", "line": 5, "item": "Go", "cited": ["b-zzz"], "scored": True}] and not out["fully_correct"]
+    assert gold.score_result(strict_key(lines), met_result(), lines)["fully_correct"]
+    key = build_key(lines, cloud="met")["postings"]["01"]  # a v2 key (no tier fields): the same wrong citation stays advisory
+    for must in key["musts"]:
+        must.update(status="met", settled_by=[f"b-{NAMES[(must['line'], must['item'])]}"])
+    before = gold.score_result(key, met_result(go=["b-zzz"]), lines)
+    assert [item["scored"] for item in before["wrong_citation"]] == [False] and before["fully_correct"]
+
+
+def test_fit_100_with_a_buried_hard_row_is_a_fit_violation_and_fit_69_is_not(lines: list[dict[str, Any]]) -> None:
+    key = strict_key(lines, years="buried")
+    out = gold.score_result(key, met_result(), lines)  # 5 must rows x2 + 1 nice, all met
+    assert (out["fit"], out["fit_violation"], out["outcome"]) == (100, True, "rejected")
+    assert out["key_below_met_rows"] == [{"line": 4, "item": None, "tier": "buried"}]
+    low = gold.score_result(key, met_result(add=EXTRA_NICE, unclear=("req-cloud",)), lines)  # 9 of 13: fit 69
+    assert (low["fit"], low["fit_violation"], low["key_below_met_rows"]) == (69, False, out["key_below_met_rows"])
+    assert gold.score_result(strict_key(lines), met_result(), lines)["fit_violation"] is False  # every key row clear: nothing to cap
+
+
+def test_an_elig_row_without_a_tier_is_not_counted_and_a_v2_key_has_no_agreement(lines: list[dict[str, Any]]) -> None:
+    key = strict_key(lines)
+    key["musts"].append({"line": 0, "item": None, "class": "hard", "status": "met", "settled_by": []})
+    place = {"id": "elig-location", "requirement": "Remote", "class": "hard", "status": "met"}
+    out = gold.score_result(key, met_result(add=(place,)), lines)
+    assert out["row_agreement"]["key_rows"] == 5 and all(row["line"] != 0 for row in out["row_agreement"]["each"])
+    v2 = score(lines, answer())
+    assert v2["row_agreement"] == {"key_rows": 0, "agree": 0, "value": None, "each": []} and v2["lenient_met"] == []
+    assert (v2["fit"], v2["fit_violation"], v2["key_below_met_rows"], v2["outcome"]) == (55, False, [], None)  # 6 of 11
+
+
+def test_the_bar_block_scores_agreement_fit_violations_and_over_asks_for_the_set_and_per_outcome(tmp_path: Path, lines: list[dict[str, Any]]) -> None:
+    data = tmp_path / "set"
+    (data / "postings").mkdir(parents=True)
+    (data / "gold").mkdir()
+    (data / "postings" / "01-example-works-staff-engineer.md").write_text(POSTING, encoding="utf-8")
+    (data / "gold" / "key.json").write_text(json.dumps({"schema": gold.KEY_SCHEMA, "set": "synthetic", "postings": {"01": strict_key(lines, k8s="buried")}}), encoding="utf-8")
+    for cli, result in (("claude_cli", met_result()), ("codex_cli", met_result(add=EXTRA_NICE, unclear=("req-k8s", "req-rust")))):  # the honest result: 8 of 13, fit 62
+        folder = data / "results" / "arm" / "01-example-works-staff-engineer" / cli
+        folder.mkdir(parents=True)
+        (folder / "assessment.json").write_text(json.dumps(result), encoding="utf-8")
+    assert gold.main(["--key", str(data / "gold" / "key.json"), "--results", str(data / "results" / "arm")]) == 0
+    report = json.loads((data / "gold" / "scores" / "arm" / "score.json").read_text(encoding="utf-8"))
+    lenient, honest = report["bar"]["claude_cli"], report["bar"]["codex_cli"]
+    assert sorted(lenient) == ["all", "rejected"] and lenient["all"] == lenient["rejected"]
+    assert lenient["all"]["row_agreement"] == {"value": 0.8, "pass": False} and lenient["all"]["fit_violations"] == {"value": 1, "pass": False} and lenient["all"]["pass"] is False
+    assert honest["all"]["row_agreement"] == {"value": 1.0, "pass": True} and honest["all"]["fit_violations"] == {"value": 0, "pass": True}
+    assert honest["all"]["max_over_asks_per_job"] == {"value": 0, "pass": True} and honest["all"]["pass"] is True
+    assert (lenient["all"]["results"], lenient["all"]["key_rows"], lenient["all"]["agree"], lenient["all"]["lenient_met"]) == (1, 5, 4, 1)
+    totals = report["by_cli"]["claude_cli"]
+    assert (totals["strict_rows"], totals["rows_agree"], totals["lenient_met"], totals["fit_violations"]) == (5, 4, 1, 1)
+    rendered = (data / "gold" / "scores" / "arm" / "score.md").read_text(encoding="utf-8")
+    assert "| claude_cli | all | 1 | 0 | 0.800 (4/5) FAIL | 1 FAIL | 0 ok | FAIL |" in rendered and "| codex_cli | all | 1 | 0 | 1.000 (5/5) ok | 0 ok | 0 ok | ok |" in rendered
+    assert "| 01 | claude_cli | 100 | rejected | 5 | 4 | 1 | yes | 0 |" in rendered and "Other disagreements (the result not met on a clear row, or no row at all):\n- none" in rendered
+
+
+def test_a_holdout_key_with_outcome_unknown_loads_and_groups_and_a_misspelt_tier_or_outcome_is_refused(tmp_path: Path, lines: list[dict[str, Any]]) -> None:
+    data = tmp_path / "set"
+    (data / "postings").mkdir(parents=True)
+    (data / "gold").mkdir()
+    (data / "postings" / "01-example-works-staff-engineer.md").write_text(POSTING, encoding="utf-8")
+    key_path = data / "gold" / "key.json"
+    key_path.write_text(json.dumps({"schema": gold.KEY_SCHEMA, "set": "synthetic", "postings": {"01": strict_key(lines, outcome="unknown")}}), encoding="utf-8")
+    folder = data / "results" / "arm" / "01-example-works-staff-engineer" / "claude_cli"
+    folder.mkdir(parents=True)
+    result = met_result()
+    result["result"]["matrix"] = [row for row in result["result"]["matrix"] if row["id"] != "req-cloud"]  # the clear cloud row is dropped: a disagreement that is not lenient
+    (folder / "assessment.json").write_text(json.dumps(result), encoding="utf-8")
+    assert gold.load_key(key_path)["postings"]["01"]["outcome"] == "unknown"
+    assert gold.main(["--key", str(key_path), "--results", str(data / "results" / "arm")]) == 0
+    report = json.loads((data / "gold" / "scores" / "arm" / "score.json").read_text(encoding="utf-8"))
+    assert sorted(report["bar"]["claude_cli"]) == ["all", "unknown"] and report["results"][0]["outcome"] == "unknown"
+    rendered = (data / "gold" / "scores" / "arm" / "score.md").read_text(encoding="utf-8")
+    assert "| claude_cli | unknown | 1 | 0 | 0.800 (4/5) FAIL |" in rendered and "\n- 01 claude_cli: L6 (clear) key met, got absent\n" in rendered
+    for field, value in (("outcome", "ghosted"), ("evidence_tier", "burried")):
+        key = {"schema": gold.KEY_SCHEMA, "set": "synthetic", "postings": {"01": strict_key(lines)}}
+        (key["postings"]["01"] if field == "outcome" else key["postings"]["01"]["musts"][0])[field] = value
+        key_path.write_text(json.dumps(key), encoding="utf-8")
+        with pytest.raises(ValueError, match=value):
+            gold.load_key(key_path)
+
+
+def test_the_fit_is_the_products_own_number_so_a_changed_fit_rule_changes_the_violation(lines: list[dict[str, Any]], monkeypatch: pytest.MonkeyPatch) -> None:
+    key = strict_key(lines, years="buried")
+    seen: list[list[str]] = []
+
+    def capped(matrix: Any) -> int:
+        rows = list(matrix)
+        seen.append([f"{row.requirement_class.value}:{row.status.value}" for row in rows])
+        return 49
+
+    monkeypatch.setattr(gold, "fit_percent", capped)
+    out = gold.score_result(key, met_result(), lines)
+    assert (out["fit"], out["fit_violation"]) == (49, False) and out["key_below_met_rows"] == [{"line": 4, "item": None, "tier": "buried"}]
+    assert seen == [["hard:met", "askable:met", "askable:met", "askable:met", "askable:met", "nice_to_have:met"]]  # the product's typed rows, from the stored matrix
