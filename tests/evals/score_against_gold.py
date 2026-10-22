@@ -103,8 +103,10 @@ more things are scored, all absent (empty, None) for a key without tiers:
   ``outcome`` (``rejected`` / ``open`` / ``interview`` / ``unknown`` for a
   holdout posting) is reported next to it and never scores a row.
 The ``bar`` block (per cli: ``all`` and each outcome group present) evaluates the
-release bar: ``row_agreement >= 0.90``, ``fit_violations == 0`` and
-``max_over_asks_per_job <= 2``, each with its value and pass.
+release bar, each item with its value and pass: the primary criteria
+``fit_violations == 0`` and ``lenient_met == 0`` (summed over the group's
+results), and the floors ``row_agreement >= 0.90`` and
+``max_over_asks_per_job <= 2``.
 """
 
 from __future__ import annotations
@@ -740,8 +742,9 @@ def score_folder(key: Mapping[str, Any], results: Path, postings: Path, master: 
 
 
 def bar_of(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
-    """The release bar over some results: row agreement, fit violations and the most over-asks of one job, each with its value and pass. Pure.
+    """The release bar over some results, each item with its value and pass. Pure.
 
+    Primary: no fit violation and no lenient met row in the group.  Floors: row agreement and the most over-asks of one job.
     Unread results are counted and reported but hold no rows; a group with no strict rows has no agreement (None: fail).
     """
 
@@ -750,13 +753,15 @@ def bar_of(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     agree = sum(row["row_agreement"]["agree"] for row in scored)
     agreement = round(agree / key_rows, 4) if key_rows else None
     violations = sum(int(row["fit_violation"]) for row in scored)
+    lenient = sum(len(row["lenient_met"]) for row in scored)
     most_over = max((row["questions"]["over_asks"] for row in scored), default=None)
     checks = {
-        "row_agreement": {"value": agreement, "pass": agreement is not None and agreement >= ROW_AGREEMENT_BAR},
         "fit_violations": {"value": violations, "pass": violations == 0},
+        "lenient_met": {"value": lenient, "pass": lenient == 0},
+        "row_agreement": {"value": agreement, "pass": agreement is not None and agreement >= ROW_AGREEMENT_BAR},
         "max_over_asks_per_job": {"value": most_over, "pass": most_over is not None and most_over <= OVER_ASKS_BAR},
     }
-    return {"results": len(rows), "unread": len(rows) - len(scored), "key_rows": key_rows, "agree": agree, "absent_clear": sum(row["row_agreement"]["absent_clear"] for row in scored), "lenient_met": sum(len(row["lenient_met"]) for row in scored),
+    return {"results": len(rows), "unread": len(rows) - len(scored), "key_rows": key_rows, "agree": agree, "absent_clear": sum(row["row_agreement"]["absent_clear"] for row in scored),
             **checks, "pass": all(check["pass"] for check in checks.values())}
 
 
@@ -804,14 +809,14 @@ def render(report: Mapping[str, Any]) -> str:
                      for row in report["results"] if row["ok"] for entry in row["row_agreement"]["each"] if not entry["agree"] and entry["got"] != "met"]
     lines += ["", f"Other disagreements (the result not met on a clear row, or no row for a buried or missing one){f', the first {DISAGREEMENTS_SHOWN} of {len(disagreements)}' if len(disagreements) > DISAGREEMENTS_SHOWN else ''}:"]
     lines += disagreements[:DISAGREEMENTS_SHOWN] or ["- none"]
-    lines += ["", f"Release bar: row agreement >= {ROW_AGREEMENT_BAR:.2f}, fit violations == 0, most over-asks of one job <= {OVER_ASKS_BAR}; per cli over all results and per outcome group the key names. Unread results count in results only.", "",
-              "| cli | group | results | unread | row agreement | fit violations | max over-asks per job | bar |", "|---|---|---|---|---|---|---|---|"]
+    lines += ["", f"Release bar, per cli over all results and per outcome group the key names. Primary: fit violations == 0 and lenient met == 0 (summed over the group). Floors: row agreement >= {ROW_AGREEMENT_BAR:.2f}, most over-asks of one job <= {OVER_ASKS_BAR}. Unread results count in results only.", "",
+              "| cli | group | results | unread | fit violations | lenient met | row agreement | max over-asks per job | bar |", "|---|---|---|---|---|---|---|---|---|"]
     verdict = lambda check: "ok" if check["pass"] else "FAIL"  # noqa: E731
     for cli, groups in sorted(report["bar"].items()):
         for group, bar in groups.items():
             agreement = "- (no strict rows)" if bar["row_agreement"]["value"] is None else f"{bar['row_agreement']['value']:.3f} ({bar['agree']}/{bar['key_rows']})"
             over = "- (no result read)" if bar["max_over_asks_per_job"]["value"] is None else bar["max_over_asks_per_job"]["value"]
-            lines.append(f"| {cli} | {group} | {bar['results']} | {bar['unread']} | {agreement} {verdict(bar['row_agreement'])} | {bar['fit_violations']['value']} {verdict(bar['fit_violations'])} | {over} {verdict(bar['max_over_asks_per_job'])} | {verdict(bar)} |")
+            lines.append(f"| {cli} | {group} | {bar['results']} | {bar['unread']} | {bar['fit_violations']['value']} {verdict(bar['fit_violations'])} | {bar['lenient_met']['value']} {verdict(bar['lenient_met'])} | {agreement} {verdict(bar['row_agreement'])} | {over} {verdict(bar['max_over_asks_per_job'])} | {verdict(bar)} |")
     return "\n".join(lines) + "\n"
 
 
@@ -845,7 +850,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     for cli, total in sorted(report["by_cli"].items()):
         print(f"{cli}: {total['results']} results, fully correct {total['fully_correct']}, verdict right {total['verdict_right']}, over-asks {total['over_asks']}, under-asks {total['under_asks']}, wrong-citation must {total['wrong_citation_must']} / nice {total['wrong_citation_nice']} (nice rows with no key lines: {total['nice_no_key_lines']})")
         bar = report["bar"][cli]["all"]
-        print(f"{cli}: bar {'PASS' if bar['pass'] else 'FAIL'}: row agreement {bar['row_agreement']['value']} ({bar['agree']}/{bar['key_rows']}, lenient met {bar['lenient_met']}), fit violations {bar['fit_violations']['value']}, max over-asks per job {bar['max_over_asks_per_job']['value']}")
+        print(f"{cli}: bar {'PASS' if bar['pass'] else 'FAIL'}: fit violations {bar['fit_violations']['value']}, lenient met {bar['lenient_met']['value']}, row agreement {bar['row_agreement']['value']} ({bar['agree']}/{bar['key_rows']}, absent clear {bar['absent_clear']}), max over-asks per job {bar['max_over_asks_per_job']['value']}")
     print(f"written under {out}")
     return 0
 

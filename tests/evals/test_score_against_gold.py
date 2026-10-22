@@ -434,29 +434,35 @@ def test_an_elig_row_without_a_tier_is_not_counted_and_a_v2_key_has_no_agreement
     assert (v2["fit"], v2["fit_violation"], v2["key_below_met_rows"], v2["outcome"]) == (55, False, [], None)  # 6 of 11
 
 
-def test_the_bar_block_scores_agreement_fit_violations_and_over_asks_for_the_set_and_per_outcome(tmp_path: Path, lines: list[dict[str, Any]]) -> None:
+def test_the_bar_block_scores_fit_violations_lenient_met_agreement_and_over_asks_for_the_set_and_per_outcome(tmp_path: Path, lines: list[dict[str, Any]], capsys: pytest.CaptureFixture[str]) -> None:
     data = tmp_path / "set"
     (data / "postings").mkdir(parents=True)
     (data / "gold").mkdir()
     (data / "postings" / "01-example-works-staff-engineer.md").write_text(POSTING, encoding="utf-8")
     (data / "gold" / "key.json").write_text(json.dumps({"schema": gold.KEY_SCHEMA, "set": "synthetic", "postings": {"01": strict_key(lines, k8s="buried")}}), encoding="utf-8")
-    for cli, result in (("claude_cli", met_result()), ("codex_cli", met_result(add=EXTRA_NICE, unclear=("req-k8s", "req-rust")))):  # the honest result: 8 of 13, fit 62
+    results = (("claude_cli", met_result()), ("codex_cli", met_result(add=EXTRA_NICE, unclear=("req-k8s", "req-rust"))),  # the honest result: 8 of 13, fit 62
+               ("gemini_cli", met_result(add=EXTRA_NICE, unclear=("req-tf", "req-rust"))))  # lenient on Kubernetes (and Terraform left open) but fit 62: no violation, the lenient-met item fails it
+    for cli, result in results:
         folder = data / "results" / "arm" / "01-example-works-staff-engineer" / cli
         folder.mkdir(parents=True)
         (folder / "assessment.json").write_text(json.dumps(result), encoding="utf-8")
     assert gold.main(["--key", str(data / "gold" / "key.json"), "--results", str(data / "results" / "arm")]) == 0
     report = json.loads((data / "gold" / "scores" / "arm" / "score.json").read_text(encoding="utf-8"))
-    lenient, honest = report["bar"]["claude_cli"], report["bar"]["codex_cli"]
+    lenient, honest, capped = report["bar"]["claude_cli"], report["bar"]["codex_cli"], report["bar"]["gemini_cli"]
     assert sorted(lenient) == ["all", "rejected"] and lenient["all"] == lenient["rejected"]
     assert lenient["all"]["row_agreement"] == {"value": 0.8, "pass": False} and lenient["all"]["fit_violations"] == {"value": 1, "pass": False} and lenient["all"]["pass"] is False
-    assert honest["all"]["row_agreement"] == {"value": 1.0, "pass": True} and honest["all"]["fit_violations"] == {"value": 0, "pass": True}
+    assert lenient["all"]["lenient_met"] == {"value": 1, "pass": False} and list(lenient["all"])[5:] == ["fit_violations", "lenient_met", "row_agreement", "max_over_asks_per_job", "pass"]
+    assert honest["all"]["row_agreement"] == {"value": 1.0, "pass": True} and honest["all"]["fit_violations"] == {"value": 0, "pass": True} and honest["all"]["lenient_met"] == {"value": 0, "pass": True}
     assert honest["all"]["max_over_asks_per_job"] == {"value": 0, "pass": True} and honest["all"]["pass"] is True
-    assert (lenient["all"]["results"], lenient["all"]["key_rows"], lenient["all"]["agree"], lenient["all"]["lenient_met"]) == (1, 5, 4, 1)
+    assert capped["all"]["fit_violations"] == {"value": 0, "pass": True} and capped["all"]["lenient_met"] == {"value": 1, "pass": False} and capped["all"]["pass"] is False
+    assert (lenient["all"]["results"], lenient["all"]["key_rows"], lenient["all"]["agree"], lenient["all"]["absent_clear"]) == (1, 5, 4, 0)
     totals = report["by_cli"]["claude_cli"]
     assert (totals["strict_rows"], totals["rows_agree"], totals["lenient_met"], totals["fit_violations"]) == (5, 4, 1, 1)
     rendered = (data / "gold" / "scores" / "arm" / "score.md").read_text(encoding="utf-8")
-    assert "| claude_cli | all | 1 | 0 | 0.800 (4/5) FAIL | 1 FAIL | 0 ok | FAIL |" in rendered and "| codex_cli | all | 1 | 0 | 1.000 (5/5) ok | 0 ok | 0 ok | ok |" in rendered
-    assert "| 01 | claude_cli | 100 | rejected | 5 | 4 | 0 | 1 | yes | 0 |" in rendered and "Other disagreements (the result not met on a clear row, or no row for a buried or missing one):\n- none" in rendered
+    assert "| claude_cli | all | 1 | 0 | 1 FAIL | 1 FAIL | 0.800 (4/5) FAIL | 0 ok | FAIL |" in rendered and "| codex_cli | all | 1 | 0 | 0 ok | 0 ok | 1.000 (5/5) ok | 0 ok | ok |" in rendered
+    assert "| gemini_cli | all | 1 | 0 | 0 ok | 1 FAIL | 0.600 (3/5) FAIL | 0 ok | FAIL |" in rendered
+    assert "gemini_cli: bar FAIL: fit violations 0, lenient met 1, row agreement 0.6 (3/5, absent clear 0), max over-asks per job 0\n" in capsys.readouterr().out
+    assert "| 01 | claude_cli | 100 | rejected | 5 | 4 | 0 | 1 | yes | 0 |" in rendered and "Other disagreements (the result not met on a clear row, or no row for a buried or missing one):\n- 01 gemini_cli: L5 Terraform (clear) key met, got unclear\n" in rendered
 
 
 def test_a_holdout_key_with_outcome_unknown_loads_and_groups_and_a_misspelt_tier_or_outcome_is_refused(tmp_path: Path, lines: list[dict[str, Any]]) -> None:
@@ -477,7 +483,7 @@ def test_a_holdout_key_with_outcome_unknown_loads_and_groups_and_a_misspelt_tier
     assert sorted(report["bar"]["claude_cli"]) == ["all", "unknown"] and report["results"][0]["outcome"] == "unknown"
     assert report["results"][0]["row_agreement"]["absent_clear"] == 1 and report["bar"]["claude_cli"]["unknown"]["absent_clear"] == 1 and report["by_cli"]["claude_cli"]["absent_clear"] == 1
     rendered = (data / "gold" / "scores" / "arm" / "score.md").read_text(encoding="utf-8")
-    assert "| claude_cli | unknown | 1 | 0 | 0.750 (3/4) FAIL |" in rendered and "| 01 | claude_cli | 100 | unknown | 4 | 3 | 1 | 0 | yes | 0 |" in rendered
+    assert "| claude_cli | unknown | 1 | 0 | 1 FAIL | 0 ok | 0.750 (3/4) FAIL |" in rendered and "| 01 | claude_cli | 100 | unknown | 4 | 3 | 1 | 0 | yes | 0 |" in rendered
     assert "\n- 01 claude_cli: L5 Kubernetes (buried) key unclear, got absent\n" in rendered and "L6 (clear)" not in rendered
     for field, value in (("outcome", "ghosted"), ("evidence_tier", "burried")):
         key = {"schema": gold.KEY_SCHEMA, "set": "synthetic", "postings": {"01": strict_key(lines)}}
