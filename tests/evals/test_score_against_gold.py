@@ -402,6 +402,26 @@ def test_a_met_result_on_a_buried_row_is_a_lenient_met_and_a_row_disagreement(li
     assert [row["item"] for row in short["row_agreement"]["each"]] == [None, "Go", "Kubernetes", "Terraform"] and len(short["list"]["missing"]) == 1
 
 
+def test_an_answered_result_row_agrees_with_an_unclear_key_row_disagrees_with_a_met_one_and_is_never_lenient_or_an_over_ask(lines: list[dict[str, Any]]) -> None:
+    result = met_result(unclear=("req-k8s",))
+    for row in result["result"]["matrix"]:
+        if row["id"] in ("req-k8s", "req-go"):  # the buried row (key unclear) and a clear row (key met), both answer-only
+            row["status"] = "answered"
+    out = gold.score_result(strict_key(lines, k8s="buried"), result, lines)
+    assert [(row["item"], row["got"], row["agree"]) for row in out["row_agreement"]["each"] if row["item"] in ("Go", "Kubernetes")] == [("Go", "answered", False), ("Kubernetes", "answered", True)]
+    assert (out["row_agreement"]["key_rows"], out["row_agreement"]["agree"], out["lenient_met"]) == (5, 4, [])
+    assert out["questions"]["over_asks"] == 0 and out["questions"]["each"] == []
+    assert out["fit"] < gold.FIT_CAP and not out["fit_violation"]  # answered is held like unclear by the product's fit too
+    assert out["status"]["wrong"] == [{"line": 5, "item": "Go", "key": "met", "got": "answered"}]  # read as unclear: wrong against met, right against unclear
+
+
+def test_an_unclear_must_have_the_result_holds_as_answered_is_not_owed_a_question(lines: list[dict[str, Any]]) -> None:
+    out = score(lines, answer(status={"req-k8s": "answered", "req-cloud": "answered"}, ask=()))  # both answers on file, nothing asked
+    assert (out["questions"]["under_asks"], out["questions"]["key_unclear_not_asked"], out["status"]["wrong"]) == (0, [], [])
+    one = score(lines, answer(status={"req-k8s": "answered"}, ask=(("cloud:aws", "req-cloud"),)))  # one on file, the other asked
+    assert (one["questions"]["right"], one["questions"]["under_asks"], one["questions"]["over_asks"]) == (1, 0, 0)
+
+
 def test_a_wrong_citation_on_a_strict_must_row_fails_fully_correct(lines: list[dict[str, Any]]) -> None:
     out = gold.score_result(strict_key(lines), met_result(go=["b-zzz"]), lines)
     assert out["wrong_citation"] == [{"group": "must", "line": 5, "item": "Go", "cited": ["b-zzz"], "scored": True}] and not out["fully_correct"]

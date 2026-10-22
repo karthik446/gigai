@@ -74,8 +74,11 @@ answer; every question as ``right`` (on a row the key leaves unclear),
 ``over`` (on a row the key settles, on a soft line, on a nice-to-have, about
 sponsorship, or past the cap), ``either`` or ``optional``; ``under_asks``
 (unclear must-have rows the result owed a question and did not ask, the cap
-respected); the requirement list (key rows missing, class wrong, rows on soft
-lines, rows on no line, lines covered); the status of each must-have row; and
+respected; a row the result holds as ``answered``, the product's answer-only
+status (0.1.11.12 F1), has its answer on file and is not owed); the
+requirement list (key rows missing, class wrong, rows on soft lines, rows on no
+line, lines covered); the status of each must-have row (``answered`` reads as
+``unclear`` against the key); and
 ``fully_correct`` (all of: verdict, gate, location, no over-ask, no under-ask,
 the must-have rows and their statuses).  No judgement beyond the key: a result
 agrees with it or it does not.
@@ -138,6 +141,7 @@ STRICT_TIERS = ("clear", "buried", "missing")
 BELOW_MET = ("buried", "missing")
 OUTCOMES = ("rejected", "open", "interview", "unknown")
 FIT_CAP = 70
+ANSWERED = str(MatrixStatus.ANSWERED)  # an answer-only row: held like unclear by the product and read as unclear against the key
 DISAGREEMENTS_SHOWN = 30
 ROW_AGREEMENT_BAR = 0.90
 OVER_ASKS_BAR = 2
@@ -381,7 +385,8 @@ def score_result(key: Mapping[str, Any], whole: object, lines: Sequence[Mapping[
         if key_row["kind"] != "must" or row is None:
             continue
         got = str(row.get("status"))
-        if got != key_row["status"] and got not in (key_row.get("status_either") or ()) and not (key_row.get("soft_ask") and got == "unclear"):
+        held = "unclear" if got == ANSWERED else got
+        if held != key_row["status"] and held not in (key_row.get("status_either") or ()) and not (key_row.get("soft_ask") and held == "unclear"):
             status_wrong.append({"line": key_row["line"], "item": key_row.get("item"), "key": key_row["status"], "got": got})
 
     # strict key: agreement with the evidence tier on hard/askable rows, lenient met rows, the rows below met that cap the fit
@@ -463,7 +468,8 @@ def score_result(key: Mapping[str, Any], whole: object, lines: Sequence[Mapping[
         questions.append(entry)
     over_cap = max(0, on_must - max_must)
     optional_over_cap = max(0, sum(entry["call"] == "optional" for entry in questions) - max_optional)
-    firm_open = [row for row in view["musts"] if row["status"] == "unclear" and not row.get("status_either")]
+    firm_open = [row for index, row in enumerate(view["musts"])  # key_rows begins with view["musts"] in order, so matched shares the index
+                 if row["status"] == "unclear" and not row.get("status_either") and str((matched.get(index) or {}).get("status")) != ANSWERED]
     owed = max(0, min(len(firm_open), max_must - len(asked_loose)))
     under = max(0, owed - len(asked_firm))
     over = [entry for entry in questions if entry["call"] == "over"]
