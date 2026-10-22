@@ -70,9 +70,12 @@ lines, would be compared).  Per result ``wrong_citation`` [{group, line, item, c
 ``no_key_lines`` [{line, item, cited}].
 
 WHAT IS REPORTED, per result: verdict and gate right or wrong; the location
-answer; every question as ``right`` (on a row the key leaves unclear),
-``over`` (on a row the key settles, on a soft line, on a nice-to-have, about
-sponsorship, or past the cap), ``either`` or ``optional``; ``under_asks``
+answer; every question as ``right`` (on a row the key leaves unclear, or on a
+row the result split off a line the key leaves unclear: the question is owed
+once per open key row of the line, and a second ask on the same one is not an
+over-ask), ``over`` (on a row the key settles, on a line whose rows the key all
+settles, on a soft line, on a nice-to-have, about sponsorship, or past the
+cap), ``either`` or ``optional``; ``under_asks``
 (unclear must-have rows the result owed a question and did not ask, the cap
 respected; a row the result holds as ``answered``, the product's answer-only
 status (0.1.11.12 F1), has its answer on file and is not owed); the
@@ -279,7 +282,9 @@ def match_rows(mapped: Sequence[tuple[int | None, Mapping[str, Any]]], key_rows:
     """``{index of a key row: the result row that is it}``. Pure.
 
     On a line the key splits per tool, a result row is the tool whose name its
-    requirement holds; the whole-line row takes a result row no tool claimed.
+    requirement holds, or the row whose requirement sits whole inside the key
+    item (the key says "Strong knowledge of Postgres", the row says "Postgres");
+    the whole-line row takes a result row no tool claimed.
     """
 
     out: dict[int, Mapping[str, Any]] = {}
@@ -292,9 +297,9 @@ def match_rows(mapped: Sequence[tuple[int | None, Mapping[str, Any]]], key_rows:
                 if position in used or line != key_row["line"]:
                     continue
                 if with_item and key_row["line"] != 0:  # line 0 is the one row about the candidate's place, whatever its elig- id
-                    name = fold(key_row["item"])
-                    text = fold(row.get("requirement")) + " " + fold(row.get("id"))
-                    if not (name and (name in text or contained(str(key_row["item"]), str(row.get("requirement") or "")) == 1.0)):
+                    name, requirement = fold(key_row["item"]), str(row.get("requirement") or "")
+                    text = fold(requirement) + " " + fold(row.get("id"))
+                    if not (name and (name in text or contained(str(key_row["item"]), requirement) == 1.0 or contained(requirement, str(key_row["item"])) == 1.0)):
                         continue
                 out[index] = row
                 used.add(position)
@@ -373,7 +378,7 @@ def score_result(key: Mapping[str, Any], whole: object, lines: Sequence[Mapping[
             if row_class(row) not in either[line]["classes"]:
                 class_wrong.append({"line": line, "item": None, "class": "/".join(either[line]["classes"]), "got": row_class(row)})
         else:
-            extra.append({"line": line, "class": row_class(row), "on": "a location row the key does not have" if line == 0 else soft.get(line, "a second row of a one-row line")})
+            extra.append({"line": line, "class": row_class(row), "on": "a location row the key does not have" if line == 0 else soft.get(line, "a row past the key's rows on the line")})
     covered = {line for line, _ in mapped if line in required}
     must_lines = {row["line"] for row in key["musts"] if row["line"] != 0}
     must = lambda items: [item for item in items if item["class"] in MANDATORY or item.get("got") in MANDATORY]  # noqa: E731
@@ -434,6 +439,10 @@ def score_result(key: Mapping[str, Any], whole: object, lines: Sequence[Mapping[
     if not isinstance(raw_questions, list):
         raw_questions = [item for item in answer.get("questions") or () if isinstance(item, Mapping)]
     questions, asked_firm, asked_loose, on_must = [], set(), set(), 0
+    open_spots: dict[int, list[tuple[int, str]]] = {}  # line -> the key's firm-open must rows there: a split result row no key row took asks on the line's behalf
+    for key_row in view["musts"]:
+        if key_row["line"] != 0 and key_row["status"] == "unclear" and not key_row.get("status_either"):
+            open_spots.setdefault(key_row["line"], []).append((key_row["line"], fold(key_row.get("item"))))
     for item in raw_questions:
         if not isinstance(item, Mapping):
             continue
@@ -449,8 +458,12 @@ def score_result(key: Mapping[str, Any], whole: object, lines: Sequence[Mapping[
         elif key_row is None and line in either:
             holds = row is not None and row_class(row) in MANDATORY
             entry.update({"call": "over" if holds else "optional", "why": "a line the key leaves open, asked as a must-have" if holds else "a line the key leaves open"})
+        elif key_row is None and line in open_spots and line not in soft:
+            spot = next((candidate for candidate in open_spots[line] if candidate not in asked_firm), open_spots[line][0])  # owed once per open key row; a second ask on the same one is not an over-ask
+            entry.update({"call": "right", "why": "a row the result split off a line the key leaves unclear: the question is owed on the line"})
+            asked_firm.add(spot)
         elif key_row is None:
-            entry.update({"call": "over", "why": "no row of the key" if line is None else "the key has the location met" if line == 0 else f"the line is {soft.get(line, 'one row')} in the key"})
+            entry.update({"call": "over", "why": "no row of the key" if line is None else "the key has the location met" if line == 0 else f"the line is {soft[line]} in the key" if line in soft else "the key settles every row of this line"})
         elif key_row["kind"] == "nice":
             entry.update({"call": "over", "why": "nice_to_have rows are never asked"})
         elif key_row.get("status_either"):

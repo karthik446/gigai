@@ -120,6 +120,25 @@ def test_an_unclear_must_have_the_result_settles_and_does_not_ask_is_an_under_as
     assert out["questions"]["key_unclear_not_asked"] == [{"line": 5, "item": "Kubernetes"}, {"line": 6, "item": None}]
 
 
+def test_rows_split_off_one_unclear_key_line_and_each_asked_are_owed_not_over_asks(lines: list[dict[str, Any]]) -> None:
+    aws = {"id": "req-aws", "requirement": "AWS", "class": "askable", "status": "unclear", "class_basis": "Experience with AWS, GCP, or similar cloud platforms"}
+    gcp = {"id": "req-gcp", "requirement": "GCP", "class": "askable", "status": "unclear", "class_basis": "Experience with AWS, GCP, or similar cloud platforms"}
+    out = score(lines, answer(drop=("req-cloud",), add=(aws, gcp), ask=(("tool:kubernetes", "req-k8s"), ("cloud:aws", "req-aws"), ("cloud:gcp", "req-gcp"))))
+    assert [entry["call"] for entry in out["questions"]["each"]] == ["right", "right", "right"]  # the key's one cloud row takes AWS; GCP's question still asks on the line's behalf
+    assert (out["questions"]["over_asks"], out["questions"]["under_asks"], out["questions"]["key_unclear_not_asked"]) == (0, 0, [])
+    assert out["list"]["extra"] == [{"line": 6, "class": "askable", "on": "a row past the key's rows on the line"}]
+    settled = {"id": "req-backend", "requirement": "backend systems", "class": "hard", "status": "unclear"}  # split off the years line, which the key has met
+    out = score(lines, answer(add=(settled,), ask=(("tool:kubernetes", "req-k8s"), ("cloud:aws", "req-cloud"), ("years:backend", "req-backend"))))
+    assert [(entry["call"], entry["why"]) for entry in out["questions"]["each"]][2] == ("over", "the key settles every row of this line") and out["questions"]["over_asks"] == 1
+
+
+def test_a_result_row_whose_words_sit_inside_the_key_item_is_that_row(lines: list[dict[str, Any]]) -> None:
+    key_rows = [{"line": 5, "item": "Strong experience with Kubernetes"}, {"line": 5, "item": "Strong experience with Terraform"}]
+    terraform, kubernetes = {"id": "req-a", "requirement": "Terraform"}, {"id": "req-b", "requirement": "Kubernetes"}
+    assert gold.match_rows([(5, terraform), (5, kubernetes)], key_rows) == {0: kubernetes, 1: terraform}
+    assert gold.match_rows([(5, {"id": "req-c", "requirement": "Strong experience with Go"})], key_rows) == {}
+
+
 def test_a_required_list_left_as_one_row_misses_its_per_tool_rows(lines: list[dict[str, Any]]) -> None:
     one = {"id": "req-stack", "requirement": "Strong experience with Go, Kubernetes and Terraform", "class": "askable", "status": "unclear"}
     out = score(lines, answer(drop=("req-go", "req-k8s", "req-tf"), add=(one,), ask=(("cloud:aws", "req-cloud"),)))
