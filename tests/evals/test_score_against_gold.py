@@ -394,8 +394,12 @@ def test_a_met_result_on_a_buried_row_is_a_lenient_met_and_a_row_disagreement(li
     assert [(row["item"], row["agree"]) for row in out["row_agreement"]["each"] if not row["agree"]] == [("Kubernetes", False)]
     honest = gold.score_result(key, met_result(unclear=("req-k8s",)), lines)  # the result leaves the buried row open: agreement, no lenient met
     assert honest["lenient_met"] == [] and honest["row_agreement"]["value"] == 1.0
-    missing = gold.score_result(key, answer(verdict="matched_above_threshold", drop=("req-k8s",), status={"req-cloud": "met"}, ask=()), lines)  # no row at all is not "not met"
-    assert missing["row_agreement"]["agree"] == 4 and [row["got"] for row in missing["row_agreement"]["each"] if not row["agree"]] == ["absent"]
+    missing = gold.score_result(key, answer(verdict="matched_above_threshold", drop=("req-k8s",), status={"req-cloud": "met"}, ask=()), lines)  # no row for the buried row: a hidden gap, a disagreement
+    assert (missing["row_agreement"]["key_rows"], missing["row_agreement"]["agree"], missing["row_agreement"]["absent_clear"]) == (5, 4, 0)
+    assert [row["got"] for row in missing["row_agreement"]["each"] if not row["agree"]] == ["absent"]
+    short = gold.score_result(key, answer(verdict="matched_above_threshold", drop=("req-cloud",), status={"req-k8s": "unclear"}, ask=()), lines)  # no row for a clear row: list completeness, out of the agreement
+    assert (short["row_agreement"]["key_rows"], short["row_agreement"]["agree"], short["row_agreement"]["value"], short["row_agreement"]["absent_clear"]) == (4, 4, 1.0, 1)
+    assert [row["item"] for row in short["row_agreement"]["each"]] == [None, "Go", "Kubernetes", "Terraform"] and len(short["list"]["missing"]) == 1
 
 
 def test_a_wrong_citation_on_a_strict_must_row_fails_fully_correct(lines: list[dict[str, Any]]) -> None:
@@ -426,7 +430,7 @@ def test_an_elig_row_without_a_tier_is_not_counted_and_a_v2_key_has_no_agreement
     out = gold.score_result(key, met_result(add=(place,)), lines)
     assert out["row_agreement"]["key_rows"] == 5 and all(row["line"] != 0 for row in out["row_agreement"]["each"])
     v2 = score(lines, answer())
-    assert v2["row_agreement"] == {"key_rows": 0, "agree": 0, "value": None, "each": []} and v2["lenient_met"] == []
+    assert v2["row_agreement"] == {"key_rows": 0, "agree": 0, "value": None, "absent_clear": 0, "each": []} and v2["lenient_met"] == []
     assert (v2["fit"], v2["fit_violation"], v2["key_below_met_rows"], v2["outcome"]) == (55, False, [], None)  # 6 of 11
 
 
@@ -452,7 +456,7 @@ def test_the_bar_block_scores_agreement_fit_violations_and_over_asks_for_the_set
     assert (totals["strict_rows"], totals["rows_agree"], totals["lenient_met"], totals["fit_violations"]) == (5, 4, 1, 1)
     rendered = (data / "gold" / "scores" / "arm" / "score.md").read_text(encoding="utf-8")
     assert "| claude_cli | all | 1 | 0 | 0.800 (4/5) FAIL | 1 FAIL | 0 ok | FAIL |" in rendered and "| codex_cli | all | 1 | 0 | 1.000 (5/5) ok | 0 ok | 0 ok | ok |" in rendered
-    assert "| 01 | claude_cli | 100 | rejected | 5 | 4 | 1 | yes | 0 |" in rendered and "Other disagreements (the result not met on a clear row, or no row at all):\n- none" in rendered
+    assert "| 01 | claude_cli | 100 | rejected | 5 | 4 | 0 | 1 | yes | 0 |" in rendered and "Other disagreements (the result not met on a clear row, or no row for a buried or missing one):\n- none" in rendered
 
 
 def test_a_holdout_key_with_outcome_unknown_loads_and_groups_and_a_misspelt_tier_or_outcome_is_refused(tmp_path: Path, lines: list[dict[str, Any]]) -> None:
@@ -461,18 +465,20 @@ def test_a_holdout_key_with_outcome_unknown_loads_and_groups_and_a_misspelt_tier
     (data / "gold").mkdir()
     (data / "postings" / "01-example-works-staff-engineer.md").write_text(POSTING, encoding="utf-8")
     key_path = data / "gold" / "key.json"
-    key_path.write_text(json.dumps({"schema": gold.KEY_SCHEMA, "set": "synthetic", "postings": {"01": strict_key(lines, outcome="unknown")}}), encoding="utf-8")
+    key_path.write_text(json.dumps({"schema": gold.KEY_SCHEMA, "set": "synthetic", "postings": {"01": strict_key(lines, outcome="unknown", k8s="buried")}}), encoding="utf-8")
     folder = data / "results" / "arm" / "01-example-works-staff-engineer" / "claude_cli"
     folder.mkdir(parents=True)
-    result = met_result()
-    result["result"]["matrix"] = [row for row in result["result"]["matrix"] if row["id"] != "req-cloud"]  # the clear cloud row is dropped: a disagreement that is not lenient
+    result = met_result()  # the clear cloud row is dropped (absent clear, out of the agreement) and so is the buried Kubernetes row (a hidden gap: a disagreement that is not lenient)
+    result["result"]["matrix"] = [row for row in result["result"]["matrix"] if row["id"] not in ("req-cloud", "req-k8s")]
     (folder / "assessment.json").write_text(json.dumps(result), encoding="utf-8")
     assert gold.load_key(key_path)["postings"]["01"]["outcome"] == "unknown"
     assert gold.main(["--key", str(key_path), "--results", str(data / "results" / "arm")]) == 0
     report = json.loads((data / "gold" / "scores" / "arm" / "score.json").read_text(encoding="utf-8"))
     assert sorted(report["bar"]["claude_cli"]) == ["all", "unknown"] and report["results"][0]["outcome"] == "unknown"
+    assert report["results"][0]["row_agreement"]["absent_clear"] == 1 and report["bar"]["claude_cli"]["unknown"]["absent_clear"] == 1 and report["by_cli"]["claude_cli"]["absent_clear"] == 1
     rendered = (data / "gold" / "scores" / "arm" / "score.md").read_text(encoding="utf-8")
-    assert "| claude_cli | unknown | 1 | 0 | 0.800 (4/5) FAIL |" in rendered and "\n- 01 claude_cli: L6 (clear) key met, got absent\n" in rendered
+    assert "| claude_cli | unknown | 1 | 0 | 0.750 (3/4) FAIL |" in rendered and "| 01 | claude_cli | 100 | unknown | 4 | 3 | 1 | 0 | yes | 0 |" in rendered
+    assert "\n- 01 claude_cli: L5 Kubernetes (buried) key unclear, got absent\n" in rendered and "L6 (clear)" not in rendered
     for field, value in (("outcome", "ghosted"), ("evidence_tier", "burried")):
         key = {"schema": gold.KEY_SCHEMA, "set": "synthetic", "postings": {"01": strict_key(lines)}}
         (key["postings"]["01"] if field == "outcome" else key["postings"]["01"]["musts"][0])[field] = value
