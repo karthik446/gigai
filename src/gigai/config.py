@@ -676,6 +676,8 @@ def _endpoint(value: object, index: int, where: str) -> Endpoint:
         "codex_cli",
         "claude_cli",
         "ollama_local",
+        "anthropic_local",
+        "openai_local",
     }:
         raise MalformedConfigurationError(
             f"endpoints[{index}].adapter{where} is not a supported G11 adapter"
@@ -696,6 +698,16 @@ def _endpoint(value: object, index: int, where: str) -> Endpoint:
         if credential is not None or base_url is None:
             raise MalformedConfigurationError(
                 f"local Ollama endpoint {name!r}{where} requires base_url and cannot declare credentials"
+            )
+        base_url = _validate_local_endpoint(base_url, f"endpoints[{index}].base_url", where)
+    elif adapter in {"openai_local", "anthropic_local"}:
+        # Loopback-only by the same rule as Ollama: a local provider's URL
+        # must name this machine explicitly.  Unlike Ollama, these servers
+        # may demand a key (llama.cpp --api-key, vLLM), so an endpoint MAY
+        # carry a credential reference; it resolves only at send time.
+        if base_url is None:
+            raise MalformedConfigurationError(
+                f"local {adapter} endpoint {name!r}{where} requires base_url"
             )
         base_url = _validate_local_endpoint(base_url, f"endpoints[{index}].base_url", where)
     elif base_url is not None and not base_url.startswith("https://"):
@@ -854,8 +866,13 @@ def _validate_config_relationships(
             target.context_tokens,
             target.max_response_bytes,
         )
-        if endpoint.adapter == "ollama_local":
-            if target.model_digest is None or not digest_pattern.fullmatch(target.model_digest):
+        if endpoint.adapter in {"ollama_local", "openai_local", "anthropic_local"}:
+            # Only Ollama can report a canonical model digest; the
+            # OpenAI-/Anthropic-compatible local protocols expose no digest
+            # endpoint, so their targets carry the model name alone.
+            if endpoint.adapter == "ollama_local" and (
+                target.model_digest is None or not digest_pattern.fullmatch(target.model_digest)
+            ):
                 raise MalformedConfigurationError(
                     f"local model target {target.name!r}{where} requires a canonical lowercase model_digest"
                 )

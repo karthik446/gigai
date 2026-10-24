@@ -11,7 +11,11 @@ use yet -- the one ``gigai scout resume add`` or ``POST /api/resumes``
 stored; its text is read here, from this gig's own records, the way ``POST
 /api/profiles`` reads the same ids). Optional ``model_target`` (the sealed
 ``ModelTarget`` enum) overrides ``find-jobs.json``'s
-``default_model_target``.
+``default_model_target``.  Optional ``local_llm_url`` / ``local_llm_protocol``
+/ ``local_llm_model`` / ``local_llm_key_required`` / ``local_llm_api_key``
+carry the wizard's in-form local server settings (same rules as ``PUT
+/api/setup``): they are persisted best-effort before the target resolves, so
+"Analyze resume" works against the URL in the form before Finish saves it.
 
 Privacy is the same for all three: the resume's text goes to the model
 target of this call and nowhere else, and is never logged or returned.
@@ -60,7 +64,7 @@ from ...resume_pii import detect_contact_details
 from ...resume_privacy import model_resume
 from ...quick_assess import _default_model_target, _ObservedBinding, _ObservedPort, _seam_deadline_seconds
 from ..assess_contracts import AssessResumeInput, ResolvedResume
-from ..contracts import FindJobsContractError, ModelTarget
+from ..contracts import FindJobsContractError, LocalLLMProtocol, ModelTarget
 from ..resume_input import resolve_resume
 
 #: The first line of every extraction prompt.  ``bindings._test_model_handler``
@@ -122,6 +126,31 @@ class StoredResumeRef:
     content_sha256: str | None = None
 
 
+@dataclass(frozen=True)
+class LocalLLMOverride:
+    """The wizard's in-form local LLM provider fields on an extract call.
+
+    ``POST /api/setup`` persists the same values on Finish; the wizard also
+    sends them here so extraction can reach the server the form is holding
+    before Finish ran. The route persists them best-effort (``ensure_local_llm_target``)
+    before resolving the target; the key value, if any, goes to the secrets
+    file, never to find-jobs.json or the log.
+    """
+
+    url: str
+    protocol: str
+    model: str | None
+    key_required: bool
+    api_key: str | None
+
+
+#: The local LLM keys the wizard may send alongside ``model_target``; the
+#: body validator and the OpenAPI params for this route must agree on it.
+_LOCAL_LLM_KEYS = frozenset(
+    {"local_llm_url", "local_llm_protocol", "local_llm_model", "local_llm_key_required", "local_llm_api_key"}
+)
+
+
 # --- request parsing ---------------------------------------------------------------
 
 
@@ -143,18 +172,25 @@ def _parse_resume_ref(value: object) -> StoredResumeRef:
     return StoredResumeRef(record_id=ids[0], revision_id=ids[1], content_sha256=digest)
 
 
-def parse_request(body: object) -> tuple[AssessResumeInput | StoredResumeRef, ModelTarget | None]:
-    """``(resume input, model target override)`` from a JSON body.
+def parse_request(
+    body: object,
+) -> tuple[AssessResumeInput | StoredResumeRef, ModelTarget | None, LocalLLMOverride | None]:
+    """``(resume input, model target override, local LLM override)`` from a JSON body.
 
     Exactly one of ``resume_text`` / ``profile_id`` / ``resume_ref`` is
     required (none is a 422 here, unlike ``/api/assess`` where "neither"
     means the selected profile: the wizard always knows which resume it is
-    holding). A ``resume_ref`` comes back as a ``StoredResumeRef``.
+    holding). A ``resume_ref`` comes back as a ``StoredResumeRef``. The
+    ``local_llm_*`` keys the wizard sends with ``model_target: local_llm``
+    are validated by the same ``_setup_local_llm`` ``PUT /api/setup`` uses
+    (loopback URL, protocol enum, short model id, optional key) and come
+    back as a ``LocalLLMOverride`` only when a URL is present; validation
+    failure is ``invalid_value``.
     """
 
     if not isinstance(body, Mapping):
         raise ResumeExtractError("wrong_type", "request body must be a JSON object")
-    unknown = set(body) - {"resume_text", "profile_id", "resume_ref", "model_target"}
+    unknown = set(body) - {"resume_text", "profile_id", "resume_ref", "model_target"} - _LOCAL_LLM_KEYS
     if unknown:
         raise ResumeExtractError("unknown_key", f"unknown field(s): {sorted(unknown)}")
     try:
@@ -175,7 +211,27 @@ def parse_request(body: object) -> tuple[AssessResumeInput | StoredResumeRef, Mo
         if not isinstance(raw, str) or raw not in {item.value for item in ModelTarget}:
             raise ResumeExtractError("bad_enum", "model_target is not a known model target")
         model_target = ModelTarget(raw)
-    return (stored if stored is not None else resume), model_target
+    local: LocalLLMOverride | None = None
+    if _LOCAL_LLM_KEYS & set(body):
+        # Lazy import: setup imports .server, which composes this module's
+        # mixin, so a module-level import would be a cycle.
+        from .setup import _setup_local_llm
+
+        errors: dict[str, str] = {}
+        url, protocol, model, key_required, api_key = _setup_local_llm(dict(body), errors)
+        if errors:
+            raise ResumeExtractError(
+                "invalid_value", "; ".join(f"{field}: {message}" for field, message in sorted(errors.items()))
+            )
+        if url is not None:
+            local = LocalLLMOverride(
+                url=url,
+                protocol=protocol or LocalLLMProtocol.OPENAI.value,
+                model=model,
+                key_required=key_required,
+                api_key=api_key,
+            )
+    return (stored if stored is not None else resume), model_target, local
 
 
 # --- a stored resume -------------------------------------------------------------------
@@ -380,7 +436,7 @@ class ResumeExtractRoutesMixin:
         if body is None:
             return
         try:
-            resume_input, override = parse_request(body)
+            resume_input, override, local = parse_request(body)
         except ResumeExtractError as exc:
             self._error(_status_for(exc.code), exc.code, str(exc))
             return
@@ -416,6 +472,29 @@ class ResumeExtractRoutesMixin:
             self._error(_status_for(exc.code), exc.code, str(exc))
             return
         source = "stored" if stored_ref is not None else ("profile" if resume.profile_id else "pasted")
+
+        # The wizard's in-form local server settings: persist them (same
+        # helper PUT /api/setup uses) so the target below resolves against
+        # the URL in the form, not just against an earlier save. A missing
+        # key the user must supply is their error (422); any other config
+        # write failure surfaces below as model_target_unavailable.
+        if local is not None:
+            from ...local_provider import ensure_local_llm_target
+
+            try:
+                ensure_local_llm_target(
+                    home_root,
+                    local.url,
+                    local.protocol,
+                    local.model,
+                    api_key_required=local.key_required,
+                    api_key=local.api_key,
+                )
+            except ValueError as exc:
+                self._error(HTTPStatus.UNPROCESSABLE_ENTITY, "invalid_value", str(exc))
+                return
+            except Exception:  # noqa: BLE001 - unwritable config answers as target-unavailable
+                pass
 
         model_target = override or _default_model_target(target)
         try:
@@ -508,6 +587,7 @@ class ResumeExtractRoutesMixin:
 __all__ = [
     "EXTRACTOR_MODEL",
     "EXTRACT_PROMPT_HEADER",
+    "LocalLLMOverride",
     "ResumeExtractError",
     "ResumeExtractRoutesMixin",
     "SCHEMA_VERSION",

@@ -57,10 +57,22 @@ class FindJobsContractError(ValueError):
 
 class ModelTarget(StrEnum):
     OLLAMA_LOCAL = "ollama_local"
+    # Local LLM provider: an operator-configured loopback server speaking the
+    # OpenAI or Anthropic HTTP API; its url/protocol/model live on
+    # FindJobsConfig (``local_llm_url`` / ``local_llm_protocol`` /
+    # ``local_llm_model``). Like ollama_local it is local, private and free.
+    LOCAL_LLM = "local_llm"
     CODEX_CLI = "codex_cli"
     OPENROUTER_API = "openrouter_api"
     # uat-bug-035 (operator decision): the Claude Code CLI, like codex_cli.
     CLAUDE_CLI = "claude_cli"
+
+
+class LocalLLMProtocol(StrEnum):
+    """The HTTP dialect a ``local_llm`` target speaks (the wizard's API type)."""
+
+    OPENAI = "openai"
+    ANTHROPIC = "anthropic"
 
 
 class SourceKind(StrEnum):
@@ -613,6 +625,40 @@ DEFAULT_MAX_AGE_DAYS = 60
 MAX_AGE_DAYS_MAXIMUM = 365
 
 
+def _local_llm_url(value: object, name: str) -> str:
+    """A configured local provider endpoint: explicit numeric loopback.
+
+    The same rule ``config._validate_local_endpoint`` and
+    ``adapters.http.checked_loopback_endpoint`` apply, phrased in this
+    module's contract error style: ``http://127.0.0.1:<port>`` with an
+    explicit port 1..65535 and no credentials, path, query or fragment. A
+    local target can never point at a remote host.
+    """
+
+    from urllib.parse import urlsplit
+
+    if not isinstance(value, str) or not value:
+        _fail("bad_format", f"{name} must be a non-empty string")
+    try:
+        parsed = urlsplit(value)
+        port = parsed.port
+    except ValueError as exc:
+        _fail("bad_format", f"{name} must contain a valid explicit port: {exc}")
+    if (
+        parsed.scheme != "http"
+        or parsed.hostname != "127.0.0.1"
+        or port is None
+        or not 1 <= port <= 65_535
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.query
+        or parsed.fragment
+        or parsed.path not in {"", "/"}
+    ):
+        _fail("bad_format", f"{name} must be http://127.0.0.1:<port> without credentials, path, query, or fragment")
+    return f"http://127.0.0.1:{port}"
+
+
 @dataclass(frozen=True)
 class FindJobsConfig(_Contract):
     """Operator-authored ``<target_root>/find-jobs.json`` snapshot.
@@ -664,6 +710,18 @@ class FindJobsConfig(_Contract):
     max_age_days: int | None = None
     work_mode: WorkModePreference | None = None
     keywords: tuple[str, ...] = ()
+    # Local LLM provider: the loopback URL (``http://127.0.0.1:<port>``), its
+    # API dialect and the model id to send. Meaningful only when
+    # ``default_model_target`` is ``local_llm``. Additive optional keys,
+    # omitted from ``to_json`` until a URL is set, so a config that never
+    # configured a local server digests exactly as before.
+    local_llm_url: str | None = None
+    local_llm_protocol: LocalLLMProtocol = LocalLLMProtocol.OPENAI
+    local_llm_model: str | None = None
+    # Whether the server expects an API key. The key VALUE is never stored
+    # here -- it lives in the 0600 secrets file (LOCAL_LLM_API_KEY); this
+    # flag only tells the endpoint to attach it.
+    local_llm_key_required: bool = False
 
     @property
     def effective_work_mode(self) -> WorkModePreference:
@@ -715,6 +773,15 @@ class FindJobsConfig(_Contract):
         # 0110-026 (F2): same additive rule -- only a search that typed keywords carries them.
         if self.keywords:
             value["keywords"] = _json_strings(self.keywords)
+        # Local LLM provider: same additive rule -- the keys appear together
+        # only once a loopback URL is configured, so every config without one
+        # digests exactly as before.
+        if self.local_llm_url is not None:
+            value["local_llm_url"] = self.local_llm_url
+            value["local_llm_protocol"] = _json_enum(self.local_llm_protocol)
+            value["local_llm_model"] = self.local_llm_model
+            if self.local_llm_key_required:
+                value["local_llm_key_required"] = True
         return value
 
     @classmethod
@@ -722,7 +789,17 @@ class FindJobsConfig(_Contract):
         value = _object_with_optional(
             obj,
             ("schema_version", "roles", "merged_queries", "location", "remote", "published_after", "sources", "default_assess_cap", "default_model_target"),
-            ("countries", "visa_sponsorship_required", "max_age_days", "work_mode", "keywords"),
+            (
+                "countries",
+                "visa_sponsorship_required",
+                "max_age_days",
+                "work_mode",
+                "keywords",
+                "local_llm_url",
+                "local_llm_protocol",
+                "local_llm_model",
+                "local_llm_key_required",
+            ),
             "find_jobs_config",
         )
         if value["schema_version"] != cls.schema_version:
@@ -742,6 +819,24 @@ class FindJobsConfig(_Contract):
         location = _optional_string(value["location"], "location")
         if is_location_placeholder(location):
             location = None
+        local_llm_url = (
+            None
+            if value.get("local_llm_url") is None
+            else _local_llm_url(value["local_llm_url"], "local_llm_url")
+        )
+        local_llm_protocol = (
+            LocalLLMProtocol.OPENAI
+            if value.get("local_llm_protocol") is None
+            else _enum(value["local_llm_protocol"], LocalLLMProtocol, "find_jobs_config.local_llm_protocol")
+        )
+        local_llm_model = (
+            None if "local_llm_model" not in value else _optional_string(value["local_llm_model"], "local_llm_model")
+        )
+        local_llm_key_required = (
+            False
+            if "local_llm_key_required" not in value
+            else _bool(value["local_llm_key_required"], "local_llm_key_required")
+        )
         return cls(
             _strings(value["roles"], "roles"),
             _strings(value["merged_queries"], "merged_queries"),
@@ -756,6 +851,10 @@ class FindJobsConfig(_Contract):
             max_age_days,
             work_mode,  # type: ignore[arg-type]
             () if "keywords" not in value else search_keywords(value["keywords"], "keywords"),
+            local_llm_url,
+            local_llm_protocol,  # type: ignore[arg-type]
+            local_llm_model,
+            local_llm_key_required,
         )
 
 

@@ -50,17 +50,28 @@ function useConfig() {
 // run, show the interview before anything else" from "prefs saved,
 // interview only reachable via Settings".
 function useSetup() {
-  const [state, setState] = useState({ loading: true, prefs: null, prefill: null, prefsMissing: false, error: null });
+  const [state, setState] = useState({ loading: true, prefs: null, prefill: null, prefsMissing: false, model: null, error: null });
+
+  // uat-bug-038 round-trip: the additive model keys GET /api/setup carries
+  // beside prefs (the saved target and its local-LLM keys) -- the Settings
+  // page and the wizard can show the last-saved model from the setup state.
+  const modelKeys = (response) => ({
+    model_target: response.model_target,
+    local_llm_url: response.local_llm_url,
+    local_llm_protocol: response.local_llm_protocol,
+    local_llm_model: response.local_llm_model,
+    local_llm_key_required: response.local_llm_key_required,
+  });
 
   const reload = useCallback(() => {
-    setState({ loading: true, prefs: null, prefill: null, prefsMissing: false, error: null });
+    setState({ loading: true, prefs: null, prefill: null, prefsMissing: false, model: null, error: null });
     getSetup()
-      .then((response) => setState({ loading: false, prefs: response.prefs, prefill: null, prefsMissing: false, error: null }))
+      .then((response) => setState({ loading: false, prefs: response.prefs, prefill: null, prefsMissing: false, model: modelKeys(response), error: null }))
       .catch((error) => {
         if (error instanceof ApiError && error.status === 404 && error.code === "prefs_missing") {
-          setState({ loading: false, prefs: null, prefill: error.prefill || {}, prefsMissing: true, error: null });
+          setState({ loading: false, prefs: null, prefill: error.prefill || {}, prefsMissing: true, model: error.prefill || {}, error: null });
         } else {
-          setState({ loading: false, prefs: null, prefill: null, prefsMissing: false, error: error.message || String(error) });
+          setState({ loading: false, prefs: null, prefill: null, prefsMissing: false, model: null, error: error.message || String(error) });
         }
       });
   }, []);
@@ -68,7 +79,7 @@ function useSetup() {
   // 0.1.11.2: re-read the saved prefs without the loading state (a loading state unmounts the page that saved them).
   const refresh = useCallback(() => {
     getSetup()
-      .then((response) => setState({ loading: false, prefs: response.prefs, prefill: null, prefsMissing: false, error: null }))
+      .then((response) => setState({ loading: false, prefs: response.prefs, prefill: null, prefsMissing: false, model: modelKeys(response), error: null }))
       .catch(() => {});
   }, []);
 
@@ -327,6 +338,7 @@ export default function App() {
             configError={configError}
             reloadConfig={reloadConfig}
             prefs={setupState.prefs}
+            model={setupState.model}
             onEditPreferences={() => setEditingSetup(true)}
             onPrefsSaved={() => {
               setupState.refresh();

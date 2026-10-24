@@ -4198,7 +4198,8 @@ def _parse_endpoint_spec(value: str) -> Endpoint:
     except ValueError as exc:
         raise click.BadParameter(
             "endpoints use NAME=openai_api:CREDENTIAL or "
-            "NAME=openrouter_api:CREDENTIAL[:HTTPS_BASE_URL]"
+            "NAME=openrouter_api:CREDENTIAL[:HTTPS_BASE_URL] or "
+            "NAME=anthropic_local:BASE_URL"
         ) from exc
     if not name or not remainder:
         raise click.BadParameter("endpoint components must not be empty")
@@ -4209,13 +4210,21 @@ def _parse_endpoint_spec(value: str) -> Endpoint:
                 "ollama_local endpoints require an explicit http://127.0.0.1:PORT URL"
             )
         return Endpoint(name=name, adapter="ollama_local", base_url=base_url)
+    if remainder.startswith("anthropic_local:"):
+        base_url = remainder[len("anthropic_local:") :]
+        if not base_url.startswith("http://127.0.0.1:") or not base_url.rsplit(":", 1)[-1].isdigit():
+            raise click.BadParameter(
+                "anthropic_local endpoints require an explicit http://127.0.0.1:PORT URL"
+            )
+        return Endpoint(name=name, adapter="anthropic_local", base_url=base_url)
     try:
         adapter, credential, *base_url = remainder.split(":", 2)
     except ValueError as exc:
         raise click.BadParameter(
             "endpoints use NAME=openai_api:CREDENTIAL, "
-            "NAME=openrouter_api:CREDENTIAL[:HTTPS_BASE_URL], or "
-            "NAME=ollama_local:http://127.0.0.1:PORT"
+            "NAME=openrouter_api:CREDENTIAL[:HTTPS_BASE_URL], "
+            "NAME=ollama_local:http://127.0.0.1:PORT, or "
+            "NAME=anthropic_local:http://127.0.0.1:PORT"
         ) from exc
     if not name or not adapter or not credential or len(base_url) > 1:
         raise click.BadParameter("endpoint components must not be empty")
