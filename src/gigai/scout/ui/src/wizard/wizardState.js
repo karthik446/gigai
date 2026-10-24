@@ -7,8 +7,71 @@
 // uat-bug-035: the targets, their labels and hints live in ../modelTargets.js
 // (the run dialog offers the same list); re-exported for the wizard.
 export { MODEL_TARGETS, MODEL_TARGET_HINTS, MODEL_TARGET_LABELS, modelTargetLabel } from "../modelTargets.js";
-import { MODEL_TARGETS } from "../modelTargets.js";
+import { MODEL_TARGETS, modelTargetLabel } from "../modelTargets.js";
 import { buildPutBody, layoutLine } from "../resumeDisplayModel.js";
+
+// The local LLM provider: an explicit loopback URL, one of the two wire
+// protocols, and the model id the server serves. The server re-validates all
+// three (find_jobs/api/setup.py); these helpers only keep the form honest.
+export const LOCAL_URL_PATTERN = /^http:\/\/127\.0\.0\.1:(\d{1,5})$/;
+export const LOCAL_PROTOCOLS = ["openai", "anthropic"];
+
+function localConfigValue(config, key) {
+  const stored = config && config.config;
+  const value = stored ? stored[key] : null;
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+// The stored boolean form of a local-provider key (the "API key required"
+// checkbox prefill). The key VALUE is never sent to the browser.
+function localConfigBool(config, key) {
+  const stored = config && config.config;
+  return Boolean(stored && stored[key] === true);
+}
+
+// What is still wrong with the local-provider fields, or null. The port bound
+// mirrors config._validate_local_endpoint.
+export function localConfigProblem(fields) {
+  if (fields.modelTarget !== "local_llm") {
+    return null;
+  }
+  const match = LOCAL_URL_PATTERN.exec((fields.localUrl || "").trim());
+  if (!match) {
+    return "Enter the local server URL as http://127.0.0.1:<port>";
+  }
+  const port = Number(match[1]);
+  if (port < 1 || port > 65535) {
+    return "The port must be between 1 and 65535";
+  }
+  if (!(fields.localModel || "").trim()) {
+    return "Enter the model id your server serves, or use Load models";
+  }
+  return null;
+}
+
+// POST /api/setup/local-models for the current URL + protocol (see
+// gigai.adapters.http.list_local_models); the optional server key travels in
+// the body, never in the URL. Throws with a readable message.
+export async function fetchLocalModels(fields) {
+  if (!LOCAL_URL_PATTERN.test((fields.localUrl || "").trim())) {
+    throw new Error("Enter the local server URL as http://127.0.0.1:<port>");
+  }
+  const payload = { url: fields.localUrl.trim(), protocol: fields.localProtocol };
+  if (fields.localKeyRequired && (fields.localApiKey || "").trim()) {
+    payload.api_key = fields.localApiKey.trim();
+  }
+  const response = await fetch("/api/setup/local-models", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  const body = await response.json().catch(() => null);
+  if (!response.ok || !body || !Array.isArray(body.models)) {
+    const message = body && body.error && body.error.message;
+    throw new Error(message || "The local server did not return a model list.");
+  }
+  return body.models;
+}
 
 // uat-bug-028: each mode is a filter (find-jobs.json `work_mode`, applied
 // by the index search before ranking); `hint` says what it keeps.
@@ -83,12 +146,30 @@ export function clampMaxAgeDays(value) {
 // starts with ("Choose existing", the first of the list chosen), so a
 // resume added with `gigai scout resume add` is used without pasting it
 // again. With none stored the wizard starts on "Paste text".
-export function initialFields({ prefs, config, selectedProfile, resumes }) {
+export function initialFields({ prefs, config, model, selectedProfile, resumes }) {
   const p = prefs || {};
   const stored = Array.isArray(resumes) && resumes.length > 0 ? resumes[0] : null;
   const countries = Array.isArray(p.countries) && p.countries.length > 0 ? p.countries : ["US"];
-  const configuredTarget = config && config.config && config.config.default_model_target;
+  // uat-bug-038 round-trip: GET /api/setup's additive model keys (`model`)
+  // carry the last-saved choice, so the wizard prefers them and only falls
+  // back to /api/config's find-jobs values (the same store, after a save).
+  const configuredTarget = model && model.model_target && MODEL_TARGETS.includes(model.model_target)
+    ? model.model_target
+    : (config && config.config && config.config.default_model_target);
   const configuredWindow = config && config.config ? config.config.max_age_days : null;
+  const localUrl = model && typeof model.local_llm_url === "string" && model.local_llm_url.trim()
+    ? model.local_llm_url.trim()
+    : (localConfigValue(config, "local_llm_url") || "http://127.0.0.1:8000");
+  const localProtocol =
+    model && ["openai", "anthropic"].includes(model.local_llm_protocol)
+      ? model.local_llm_protocol
+      : (localConfigValue(config, "local_llm_protocol") || "openai");
+  const localModel =
+    model && typeof model.local_llm_model === "string" && model.local_llm_model.trim()
+      ? model.local_llm_model.trim()
+      : (localConfigValue(config, "local_llm_model") || "");
+  const localKeyRequired =
+    model && model.local_llm_key_required === true ? true : localConfigBool(config, "local_llm_key_required");
   return {
     // screen 1
     profileMode: selectedProfile ? "update" : "new",
@@ -103,6 +184,15 @@ export function initialFields({ prefs, config, selectedProfile, resumes }) {
     // (no availability check is reported to the wizard; a missing CLI shows as
     // the extraction's own "not available on PATH" message).
     modelTarget: MODEL_TARGETS.includes(configuredTarget) ? configuredTarget : "codex_cli",
+    // local LLM provider: the loopback URL, API type and model id used when
+    // the target is "local_llm"; the stored find-jobs values prefill them.
+    localUrl: localUrl,
+    localProtocol: localProtocol,
+    localModel: localModel,
+    // Key never prefills; the checkbox state does. Blank input + checked
+    // means "keep the stored key" server-side.
+    localKeyRequired: localKeyRequired,
+    localApiKey: "",
     extraction: null,
     stack: [],
     seniority: [],
@@ -247,6 +337,15 @@ export function screenIsComplete(step, fields) {
 // The text goes only to the chosen model (`model_target`) in all three.
 export function extractBody(fields, profiles) {
   const body = { model_target: fields.modelTarget };
+  if (fields.modelTarget === "local_llm") {
+    body.local_llm_url = (fields.localUrl || "").trim();
+    body.local_llm_protocol = fields.localProtocol;
+    body.local_llm_model = (fields.localModel || "").trim();
+    body.local_llm_key_required = Boolean(fields.localKeyRequired);
+    if ((fields.localApiKey || "").trim()) {
+      body.local_llm_api_key = fields.localApiKey.trim();
+    }
+  }
   if (fields.resumeMode !== "existing") {
     body.resume_text = fields.resumeText;
     return body;
@@ -349,7 +448,7 @@ export function profileToUpdate({ fields, selectedAtLoad, profiles, selectedProf
 
 export function setupBody(fields, existingPrefs) {
   const prev = existingPrefs || {};
-  return {
+  const body = {
     roles: fields.titles,
     titles_to_avoid: fields.titlesToAvoid,
     countries: fields.countries,
@@ -369,6 +468,16 @@ export function setupBody(fields, existingPrefs) {
     // uat-bug-038: the one model choice is also the run's default target.
     model_target: fields.modelTarget,
   };
+  if (fields.modelTarget === "local_llm") {
+    body.local_llm_url = (fields.localUrl || "").trim();
+    body.local_llm_protocol = fields.localProtocol;
+    body.local_llm_model = (fields.localModel || "").trim();
+    body.local_llm_key_required = Boolean(fields.localKeyRequired);
+    if ((fields.localApiKey || "").trim()) {
+      body.local_llm_api_key = fields.localApiKey.trim();
+    }
+  }
+  return body;
 }
 
 // 0110-013: whether Finish saves the Resume display step: it was opened
@@ -413,6 +522,14 @@ export function reviewRows(fields, resumes) {
     ["Work mode", workModeText],
     ["Visa sponsorship required", fields.visaSponsorshipRequired ? "Yes (postings are labelled, never filtered)" : "No"],
     ["Posting age", `last ${clampMaxAgeDays(fields.maxAgeDays)} days`],
+    [
+      "Model for Scout",
+      fields.modelTarget === "local_llm"
+        ? `${modelTargetLabel(fields.modelTarget)} · ${fields.localProtocol} · ${(fields.localUrl || "").trim()}${
+            (fields.localModel || "").trim() ? ` · ${fields.localModel.trim()}` : ""
+          }`
+        : modelTargetLabel(fields.modelTarget),
+    ],
   ];
 }
 

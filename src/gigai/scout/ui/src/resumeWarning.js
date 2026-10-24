@@ -24,6 +24,8 @@ export function resumeWarningText(modelTarget) {
   let sentTo;
   if (modelTarget === "ollama_local") {
     sentTo = "your Ollama model (it stays on this machine)";
+  } else if (modelTarget === "local_llm") {
+    sentTo = "your local model (it stays on this machine)";
   } else if (PROVIDERS[modelTarget]) {
     sentTo = PROVIDERS[modelTarget];
   } else {

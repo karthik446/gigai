@@ -3,7 +3,7 @@ import ResumeWarning from "../components/ResumeWarning.jsx";
 import TagListInput from "../components/TagListInput.jsx";
 import useResumeCheck from "../components/useResumeCheck.js";
 import { contactHeadsUp } from "../resumeWarning.js";
-import { MODEL_TARGETS, MODEL_TARGET_HINTS, RESUME_FILE_PATTERN, RESUME_MAX_BYTES, bytesToBase64, modelTargetLabel } from "./wizardState.js";
+import { MODEL_TARGETS, MODEL_TARGET_HINTS, RESUME_FILE_PATTERN, RESUME_MAX_BYTES, bytesToBase64, fetchLocalModels, localConfigProblem, modelTargetLabel } from "./wizardState.js";
 
 // Screen 1 -- name the profile, supply a resume (paste / upload / choose an
 // existing one), pick the model that reads it, run the extraction, edit the
@@ -24,6 +24,11 @@ export default function ResumeScreen({
 }) {
   const [uploadError, setUploadError] = useState(null);
   const fileInput = useRef(null);
+  // Local LLM provider: the model ids the configured server served when
+  // last asked (GET /api/setup/local-models), plus the button's own state.
+  const [localModels, setLocalModels] = useState([]);
+  const [localBusy, setLocalBusy] = useState(false);
+  const [localError, setLocalError] = useState(null);
   // 0.1.10-001: the local heads-up; "Continue anyway" applies to this text only.
   const [continuedText, setContinuedText] = useState(null);
   const stored = fields.resumeMode === "existing";
@@ -84,7 +89,21 @@ export default function ResumeScreen({
   const canExtract =
     !extracting &&
     !needsContinue &&
+    !localConfigProblem(fields) &&
     (fields.resumeMode === "existing" ? Boolean(fields.existingRef) : fields.resumeText.trim().length > 0);
+
+  async function loadLocalModels() {
+    setLocalBusy(true);
+    setLocalError(null);
+    try {
+      setLocalModels(await fetchLocalModels(fields));
+    } catch (exc) {
+      setLocalModels([]);
+      setLocalError(exc.message || "The local server did not return a model list.");
+    } finally {
+      setLocalBusy(false);
+    }
+  }
   const extraction = fields.extraction;
 
   return (
@@ -270,6 +289,101 @@ export default function ResumeScreen({
           ))}
         </select>
         <small className="wz-hint">{MODEL_TARGET_HINTS[fields.modelTarget]}</small>
+        {fields.modelTarget === "local_llm" && (
+          <div className="wz-local-llm" data-role="local-llm-config">
+            <label className="form-label" htmlFor="wz-local-url">
+              Local server URL
+            </label>
+            <input
+              id="wz-local-url"
+              type="text"
+              className="text-input"
+              value={fields.localUrl}
+              placeholder="http://127.0.0.1:8000"
+              onChange={(event) => {
+                setField("localUrl", event.target.value);
+                setField("extraction", null);
+              }}
+            />
+            <label className="form-label" htmlFor="wz-local-protocol">
+              API type
+            </label>
+            <select
+              id="wz-local-protocol"
+              className="text-input"
+              value={fields.localProtocol}
+              onChange={(event) => setField("localProtocol", event.target.value)}
+            >
+              <option value="openai">OpenAI-compatible (/v1/chat/completions)</option>
+              <option value="anthropic">Anthropic-compatible (/v1/messages)</option>
+            </select>
+            <label className="form-label wz-checkbox" htmlFor="wz-local-key-required" style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <input
+                id="wz-local-key-required"
+                type="checkbox"
+                checked={Boolean(fields.localKeyRequired)}
+                onChange={(event) => {
+                  setField("localKeyRequired", event.target.checked);
+                  setField("extraction", null);
+                }}
+              />
+              API key required
+            </label>
+            {fields.localKeyRequired && (
+              <>
+                <label className="form-label" htmlFor="wz-local-api-key">
+                  API key
+                </label>
+                <input
+                  id="wz-local-api-key"
+                  type="password"
+                  className="text-input"
+                  autoComplete="off"
+                  value={fields.localApiKey || ""}
+                  placeholder="only if your server requires one — leave blank to keep the stored key"
+                  onChange={(event) => {
+                    setField("localApiKey", event.target.value);
+                    setField("extraction", null);
+                  }}
+                />
+              </>
+            )}
+            <label className="form-label" htmlFor="wz-local-model">
+              Model
+            </label>
+            <input
+              id="wz-local-model"
+              type="text"
+              className="text-input"
+              list="wz-local-models"
+              value={fields.localModel}
+              placeholder="model id your server serves"
+              onChange={(event) => {
+                setField("localModel", event.target.value);
+                setField("extraction", null);
+              }}
+            />
+            <datalist id="wz-local-models">
+              {localModels.map((id) => (
+                <option key={id} value={id} />
+              ))}
+            </datalist>
+            <div style={{ marginTop: 6 }}>
+              <button
+                type="button"
+                className="button secondary small"
+                onClick={loadLocalModels}
+                disabled={localBusy || localConfigProblem({ ...fields, localModel: "x" }) !== null}
+              >
+                {localBusy ? "Loading…" : "Load models"}
+              </button>
+            </div>
+            {localError && <div className="field-error">{localError}</div>}
+            <small className="wz-hint">
+              Loopback only: http://127.0.0.1:&lt;port&gt;. Requests go to your machine, nowhere else.
+            </small>
+          </div>
+        )}
       </div>
       <div className="callout info">
         Your resume is used only for this extraction and for assessing postings. It never goes to web search.

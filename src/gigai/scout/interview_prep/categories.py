@@ -133,7 +133,7 @@ def predict_categories(
     keeps today's default resolver (env, then the default home).
     """
 
-    if model_target not in {"ollama_local", "codex_cli", "openrouter_api", "claude_cli"}:
+    if model_target not in {"ollama_local", "local_llm", "codex_cli", "openrouter_api", "claude_cli"}:
         raise CategoryPredictionError("category_model_target_invalid", f"unsupported model target {model_target!r}")
     try:
         adapter_target = _resolve_configured_target_name_for_adapter(config, model_target)

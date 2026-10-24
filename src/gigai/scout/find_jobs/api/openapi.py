@@ -1052,9 +1052,25 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
             _b("cadence_days", "integer", "Days between discovery runs."), _b("budget_usd_per_session", "number", "Spend cap per session."),
             _b("max_age_days", "integer", "Ignore postings older than this."), _b("profile_id", "string", "Save into this profile."),
             _b("model_target", "string", "Model target."),
+            _b("local_llm_url", "string", "Local LLM provider URL (loopback http://127.0.0.1:<port>)."),
+            _b("local_llm_protocol", "string", "openai | anthropic -- the wire dialect of the local server."),
+            _b("local_llm_model", "string", "Model id the local server serves."),
+            _b("local_llm_key_required", "boolean", "Whether the local server expects an API key. Default false."),
+            _b("local_llm_api_key", "string", "The key value; stored in the secrets file only, never in find-jobs.json. Blank keeps the stored key."),
         ),
         request_example={"roles": ["Software Engineer"], "countries": ["US"]},
         errors=((400, "invalid_value"), _NOT_FOUND),
+    ),
+    RouteSpec(
+        "POST", "/api/setup/local-models", "Model ids a loopback local LLM server serves (GET <url>/v1/models on the operator's machine).",
+        "write", "none", {"schema_version": "scout-find-jobs-local-models-response:1", "models": ["qwen3-32b"]},
+        params=(
+            _b("url", "string", "Loopback http://127.0.0.1:<port>.", required=True),
+            _b("protocol", "string", "openai | anthropic. Default openai."),
+            _b("api_key", "string", "Optional server key; travels in the body, never echoed."),
+        ),
+        request_example={"url": "http://127.0.0.1:8000", "protocol": "openai"},
+        errors=((422, "invalid_loopback_url"), (502, "local_models_unavailable")),
     ),
     RouteSpec(
         "PUT", "/api/config/sources", "Turn the Exa source on or off.", "write", "none", {"sources": {"exa": True}},
@@ -2317,6 +2333,11 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
         params=(
             _b("resume_text", "string", "Pasted resume text."), _b("profile_id", "string", "Use this profile's stored resume."),
             _b("resume_ref", "object", "A stored resume {record_id, revision_id, content_sha256}."), _b("model_target", "string", "Model target."),
+            _b("local_llm_url", "string", "Local LLM provider URL (loopback http://127.0.0.1:<port>)."),
+            _b("local_llm_protocol", "string", "openai | anthropic -- the wire dialect of the local server."),
+            _b("local_llm_model", "string", "Model id the local server serves."),
+            _b("local_llm_key_required", "boolean", "Whether the local server expects an API key. Default false."),
+            _b("local_llm_api_key", "string", "The key value; stored in the secrets file only, never in find-jobs.json. Blank keeps the stored key."),
         ),
         request_example={"resume_text": "..."}, errors=(_UNKNOWN_KEY, _INVALID, *_MODEL_ERRORS),
     ),
@@ -3028,7 +3049,7 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
         schema_version="scout-metrics:1",
         params=(
             _q("kind", "string", "Only this kind of call.", enum=("assess", "rank", "tag", "tailor", "extract", "interview", "learning")),
-            _q("model", "string", "Only this model target (codex_cli, claude_cli, ollama_local, openrouter_api) or model id."),
+            _q("model", "string", "Only this model target (codex_cli, claude_cli, ollama_local, local_llm, openrouter_api) or model id."),
         ),
         errors=(_INVALID, _UNKNOWN_KEY, _NO_TARGET),
         description=(
@@ -3065,7 +3086,7 @@ _ROUTE_ENTRIES: tuple[RouteSpec, ...] = (
             _b(
                 "pipeline", "object",
                 "{enabled: boolean, auto_jobs_per_trigger: 0 to 1000, max_model_calls_per_day: 0 to 1000, label_min_ats: 0 to "
-                "100, models: {tailor, reassess: codex_cli|claude_cli|ollama_local|openrouter_api}}. null for a number puts "
+                "100, models: {tailor, reassess: codex_cli|claude_cli|ollama_local|local_llm|openrouter_api}}. null for a number puts "
                 "its default back; null for a step, or for models, puts the project's model target back.",
             ),
             _b(
@@ -3101,6 +3122,7 @@ _META: dict[tuple[str, str], tuple[str, str]] = {
     ("GET", "/api/config"): ("Get the find-jobs config", "Settings"),
     ("GET", "/api/setup"): ("Get the saved preferences", "Settings"),
     ("PUT", "/api/setup"): ("Save preferences and derive the config", "Settings"),
+    ("POST", "/api/setup/local-models"): ("List models from the local LLM server", "Settings"),
     ("PUT", "/api/config/sources"): ("Turn the Exa source on or off", "Sources"),
     ("GET", "/api/secrets/status"): ("Show which provider keys are set", "Settings"),
     ("POST", "/api/run"): ("Start a find-jobs run (deprecated)", "Runs"),
@@ -3224,6 +3246,7 @@ _LABELS: dict[tuple[str, str], tuple[str, ...]] = {
     ("GET", "/api/config"): _PRIVATE,
     ("GET", "/api/setup"): _PRIVATE,
     ("PUT", "/api/setup"): _PRIVATE,
+    ("POST", "/api/setup/local-models"): _PRIVATE,
     ("PUT", "/api/config/sources"): _NONE,
     ("GET", "/api/secrets/status"): _NONE,
     ("POST", "/api/run"): _NONE,

@@ -20,6 +20,7 @@ export const PER_TOKEN_TARGETS = ["openrouter_api"];
 
 const SHORT_LABELS = {
   ollama_local: "Ollama",
+  local_llm: "Local LLM",
   codex_cli: "Codex",
   claude_cli: "Claude",
   openrouter_api: "OpenRouter",

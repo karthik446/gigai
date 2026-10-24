@@ -9,6 +9,7 @@
 // The short name a sentence uses for a model target.
 const TARGET_NAMES = {
   ollama_local: "ollama",
+  local_llm: "local",
   codex_cli: "codex",
   claude_cli: "claude",
   openrouter_api: "openrouter",

@@ -1,4 +1,5 @@
 import ConfigPanel from "../components/ConfigPanel.jsx";
+import { modelTargetLabel } from "../modelTargets.js";
 import CompanyListsPanel from "../components/CompanyListsPanel.jsx";
 import AddCompanyForm from "../components/AddCompanyForm.jsx";
 import SourcesUpdatePanel from "../components/SourcesUpdatePanel.jsx";
@@ -18,6 +19,7 @@ export default function SettingsView({
   configError,
   reloadConfig,
   prefs,
+  model,
   onEditPreferences,
   onPrefsSaved,
   profiles,
@@ -26,6 +28,11 @@ export default function SettingsView({
   reloadProfiles,
   defaultSearchSettings,
 }) {
+  // uat-bug-038 round-trip: when /api/config is missing or failed, the last
+  // saved model (GET /api/setup's additive keys) still shows on this page.
+  const modelTarget = model && model.model_target;
+  const isLocalLlm = modelTarget === "local_llm";
+  const showModelFallback = !config && modelTarget;
   return (
     <div>
       {/* uat-batch2 (N11-C): "Update sources" is the one action on this page
@@ -67,6 +74,20 @@ export default function SettingsView({
             resumeCreatedAt={config.resume_created_at}
             resumeMissingHint={config.resume_missing_hint}
           />
+        )}
+        {showModelFallback && (
+          <div className="field-row" style={{ marginTop: 8 }}>
+            <div className="field">
+              <div className="label">Default model target</div>
+              <div className="value">{modelTargetLabel(modelTarget)}</div>
+              {isLocalLlm && (
+                <div className="value muted" style={{ marginTop: 4 }}>
+                  {model.local_llm_url || "no URL"} · {model.local_llm_protocol || "openai"} · {model.local_llm_model || "no model"}
+                  {model.local_llm_key_required ? " · API key required" : ""}
+                </div>
+              )}
+            </div>
+          </div>
         )}
         <div className="actions" style={{ justifyContent: "flex-start", marginTop: 12 }}>
           <button className="button secondary" onClick={onEditPreferences} disabled={!prefs}>

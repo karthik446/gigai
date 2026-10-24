@@ -87,7 +87,7 @@ def _imports(fx: ProfileFixtureGig) -> list[dict[str, object]]:
 def test_a_resume_ref_is_one_of_the_three_inputs() -> None:
     ref = {"record_id": "record_x", "revision_id": "revision_x"}
 
-    assert parse_request({"resume_ref": ref}) == (StoredResumeRef("record_x", "revision_x"), None)
+    assert parse_request({"resume_ref": ref}) == (StoredResumeRef("record_x", "revision_x"), None, None)
     assert parse_request({"resume_ref": {**ref, "content_sha256": "sha256:abc"}})[0] == StoredResumeRef(
         "record_x", "revision_x", "sha256:abc"
     )

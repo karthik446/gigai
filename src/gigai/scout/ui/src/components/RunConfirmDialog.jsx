@@ -83,7 +83,9 @@ export default function RunConfirmDialog({ config, onConfirm, onCancel, submitti
 
   const capInvalid = !capValid(selectionCap);
   const assessAll = isAssessAll(selectionCap);
-  const isHosted = modelTarget !== "ollama_local";
+  // local_llm is loopback-only, like ollama_local: hosted-cost wording is
+  // wrong for it.
+  const isHosted = modelTarget !== "ollama_local" && modelTarget !== "local_llm";
 
   return (
     <div className="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="run-confirm-title">

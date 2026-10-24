@@ -86,13 +86,24 @@ export default function SetupWizard({ onDone, onCancel }) {
       // stop the wizard from opening.
       let prefs = null;
       let savedPrefs = null;
+      let model = null;
       try {
         const response = await getSetup();
         prefs = response.prefs;
         savedPrefs = response.prefs;
+        // uat-bug-038 round-trip: the additive model keys GET /api/setup
+        // carries beside prefs -- the saved target and its local-LLM keys.
+        model = {
+          model_target: response.model_target,
+          local_llm_url: response.local_llm_url,
+          local_llm_protocol: response.local_llm_protocol,
+          local_llm_model: response.local_llm_model,
+          local_llm_key_required: response.local_llm_key_required,
+        };
       } catch (error) {
         if (error instanceof ApiError && error.status === 404 && error.code === "prefs_missing") {
           prefs = error.prefill || {};
+          model = error.prefill || {};
         } else {
           if (!cancelled) {
             setLoadError(error.message || String(error));
@@ -136,6 +147,7 @@ export default function SetupWizard({ onDone, onCancel }) {
         initialFields({
           prefs,
           config: configResponse,
+          model,
           selectedProfile: selected,
           resumes: existingResumes({ profiles: profileList, config: configResponse }),
         }),

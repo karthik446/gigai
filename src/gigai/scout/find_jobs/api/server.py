@@ -53,6 +53,7 @@ from ..contracts import (
     AggregateStatus,
     FindJobsConfig,
     FindJobsContractError,
+    LocalLLMProtocol,
     ModelTarget,
     PinnedResume,
     RunRequest,
@@ -1103,7 +1104,23 @@ class ScoutFindJobsBackend:
         # sends on this same PUT; it is NEVER a DiscoveryPrefs field, so it
         # is left out of the prefs dataclass here and consumed only by
         # `_update_find_jobs_config` below.
-        prefs = discovery.DiscoveryPrefs(**{key: value for key, value in prefs_fields.items() if key not in ("max_age_days", "model_target")})
+        # Local LLM provider keys are find-jobs.json/config.toml fields,
+        # never DiscoveryPrefs fields -- consumed by _update_find_jobs_config.
+        prefs = discovery.DiscoveryPrefs(
+            **{
+                key: value
+                for key, value in prefs_fields.items()
+                if key not in (
+                    "max_age_days",
+                    "model_target",
+                    "local_llm_url",
+                    "local_llm_protocol",
+                    "local_llm_model",
+                    "local_llm_key_required",
+                    "local_llm_api_key",
+                )
+            }
+        )
         # 0110-022: a save for a profile that is not the default one puts its
         # countries / work mode / city on THAT profile (below); the shared
         # prefs keep the default profile's, so the default's never change.
@@ -1277,6 +1294,37 @@ class ScoutFindJobsBackend:
         countries: tuple[str, ...] = tuple(prefs_fields["countries"])  # type: ignore[arg-type]
         visa_sponsorship_required = bool(prefs_fields["visa_sponsorship_required"])
         model_target_sent = ModelTarget(str(prefs_fields["model_target"])) if prefs_fields.get("model_target") else None
+        # Local LLM provider (already validated by _validate_setup_body):
+        # sent values replace the stored ones; absent keys keep them.
+        local_llm_url_sent = prefs_fields.get("local_llm_url") if isinstance(prefs_fields.get("local_llm_url"), str) else None
+        # uat-bug-038 / local-llm coupling: the wizard's one model choice is
+        # the default target. A local LLM URL sent WITHOUT a model_target
+        # choice is itself a choice: a local URL implies the local_llm target
+        # (the URL/protocol/model are only meaningful under it), so the saved
+        # default becomes local_llm rather than the stale prior target (e.g.
+        # claude_cli) -- an assess never dispatches to the old provider after
+        # a local URL is saved. An explicit model_target still wins.
+        model_target_resolved = model_target_sent or (
+            ModelTarget.LOCAL_LLM if local_llm_url_sent is not None else None
+        )
+        local_llm_protocol_sent = (
+            LocalLLMProtocol(str(prefs_fields["local_llm_protocol"]))
+            if prefs_fields.get("local_llm_protocol")
+            else None
+        )
+        local_llm_model_sent = (
+            prefs_fields.get("local_llm_model") if isinstance(prefs_fields.get("local_llm_model"), str) else None
+        )
+        local_llm_key_required_sent = (
+            prefs_fields["local_llm_key_required"]
+            if isinstance(prefs_fields.get("local_llm_key_required"), bool)
+            else None
+        )
+        # The key value never reaches find-jobs.json -- it goes to the
+        # secrets file inside ensure_local_llm_target below.
+        local_llm_api_key_sent = (
+            prefs_fields.get("local_llm_api_key") if isinstance(prefs_fields.get("local_llm_api_key"), str) else None
+        )
         window_sent = prefs_fields.get("max_age_days") is not None
         max_age_days_sent: int | None = prefs_fields.get("max_age_days") if window_sent else None  # type: ignore[assignment]
 
@@ -1333,7 +1381,7 @@ class ScoutFindJobsBackend:
             # all new postings, openrouter_api (per-call cost) keeps 10. With
             # no model_target sent the target is the new config's default
             # (ollama_local), so the same rule applies to it.
-            new_target = model_target_sent or ModelTarget.OLLAMA_LOCAL
+            new_target = model_target_resolved or ModelTarget.OLLAMA_LOCAL
             config = FindJobsConfig(
                 roles=() if profile is not None else roles,
                 merged_queries=() if profile is not None else roles,
@@ -1349,6 +1397,10 @@ class ScoutFindJobsBackend:
                 visa_sponsorship_required=visa_sponsorship_required,
                 max_age_days=max_age_days_sent,
                 work_mode=work_mode,
+                local_llm_url=local_llm_url_sent,
+                local_llm_protocol=local_llm_protocol_sent or LocalLLMProtocol.OPENAI,
+                local_llm_model=local_llm_model_sent,
+                local_llm_key_required=bool(local_llm_key_required_sent),
             )
         else:
             existing = FindJobsConfig.from_json(parse_json_bytes(path.read_bytes()))
@@ -1363,13 +1415,41 @@ class ScoutFindJobsBackend:
                 published_after=(None if window_sent else existing.published_after) if shared else existing.published_after,
                 sources=existing.sources,
                 default_assess_cap=existing.default_assess_cap,
-                default_model_target=model_target_sent or existing.default_model_target,
+                default_model_target=model_target_resolved or existing.default_model_target,
                 countries=countries if shared else existing.countries,
                 visa_sponsorship_required=visa_sponsorship_required,
                 max_age_days=(max_age_days_sent if window_sent else existing.max_age_days) if shared else existing.max_age_days,
                 work_mode=work_mode if shared else existing.work_mode,
+                local_llm_url=local_llm_url_sent if local_llm_url_sent is not None else existing.local_llm_url,
+                local_llm_protocol=local_llm_protocol_sent or existing.local_llm_protocol,
+                local_llm_model=local_llm_model_sent if local_llm_model_sent is not None else existing.local_llm_model,
+                local_llm_key_required=(
+                    local_llm_key_required_sent
+                    if local_llm_key_required_sent is not None
+                    else existing.local_llm_key_required
+                ),
             )
         _atomic_write_json(path, config.to_json())
+        # Local LLM provider: mirror the URL/protocol/model onto
+        # config.toml (endpoint `local-llm` + target `local-llm-default`)
+        # so a `local_llm` target dispatches. Best-effort: a config.toml
+        # that cannot be written (no `gigai setup` yet, read-only) leaves
+        # this save standing -- a run then reports the unresolvable target
+        # itself, and re-saving after setup fixes the endpoint.
+        if local_llm_url_sent is not None:
+            try:
+                from ...local_provider import ensure_local_llm_target
+
+                ensure_local_llm_target(
+                    self.home_root,
+                    local_llm_url_sent,
+                    (local_llm_protocol_sent or LocalLLMProtocol.OPENAI).value,
+                    local_llm_model_sent,
+                    api_key_required=bool(local_llm_key_required_sent),
+                    api_key=local_llm_api_key_sent,
+                )
+            except Exception as exc:  # noqa: BLE001 - the prefs/find-jobs save stands regardless
+                _logger.warning("local LLM endpoint not written to config.toml: %s", type(exc).__name__)
 
     def start_discovery(self, on_progress: Callable[[dict[str, object]], None]) -> str:
         """Start ``run_discovery`` on a background thread; return a request id.
@@ -2092,6 +2172,11 @@ def _make_handler(
             try:
                 if path == "/api/run":
                     self._handle_post_run()
+                    return
+                # POST (not GET) so an optional local-server API key travels
+                # in the body, never in a URL that logs and history keep.
+                if path == "/api/setup/local-models":
+                    self._handle_post_setup_local_models()
                     return
                 if path == "/api/discover":
                     self._handle_post_discover()

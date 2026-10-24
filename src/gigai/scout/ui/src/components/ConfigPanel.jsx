@@ -85,6 +85,13 @@ export default function ConfigPanel({ config, resumePreview, resumeLabel, resume
         <div className="field">
           <div className="label">Default model target</div>
           <div className="value" title={config.default_model_target}>{modelTargetLabel(config.default_model_target)}</div>
+          {config.default_model_target === "local_llm" && (
+            <div className="value muted" style={{ marginTop: 4 }}>
+              {config.local_llm_url || "no URL"} · {config.local_llm_protocol || "openai"} ·{" "}
+              {config.local_llm_model || "no model"}
+              {config.local_llm_key_required ? " · API key required" : ""}
+            </div>
+          )}
         </div>
       </div>
       <div className="field-row">

@@ -20,6 +20,7 @@ agent.
 
 1. **Requirements.** macOS or Linux with Python 3.11+, [`uv`](https://docs.astral.sh/uv/getting-started/installation/),
    and one model CLI installed and logged in: Codex (`codex login`) or Claude Code (`claude`, then `/login`).
+   Or, for local anthropic-compatible endpoints, an Ollama installation with Claude models.
 2. **Install.**
 
    ```bash

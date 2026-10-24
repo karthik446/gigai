@@ -17,10 +17,12 @@ from __future__ import annotations
 import re
 from http import HTTPStatus
 
+from ....adapters.http import checked_loopback_endpoint, list_local_models
 from ..contracts import (
     MAX_AGE_DAYS_MAXIMUM,
     FindJobsConfig,
     FindJobsContractError,
+    LocalLLMProtocol,
     ModelTarget,
     SourceToggles,
     is_location_placeholder,
@@ -36,6 +38,58 @@ from .server import (
 
 _WORK_MODES = ("remote", "hybrid", "onsite", "any")
 _COUNTRY_CODE = re.compile(r"\A[A-Z]{2}\Z")
+_LOCAL_LLM_PROTOCOLS = tuple(item.value for item in LocalLLMProtocol)
+
+
+def _setup_local_llm(
+    body: dict[str, object], errors: dict[str, str]
+) -> tuple[str | None, str | None, str | None, bool, str | None]:
+    """The optional local LLM provider keys of a wizard Finish.
+
+    Returns ``(url, protocol, model, key_required, api_key)``, the strings
+    ``None`` when the body did not carry them (the save then leaves
+    find-jobs.json's stored value as it is).  The URL must be an explicit
+    loopback ``http://127.0.0.1:<port>`` -- the same rule the adapters
+    apply, so a "local" provider can never point at a remote host --
+    protocol is ``openai`` or ``anthropic`` (openai when a URL arrives
+    without one), model is a short id string, key_required is the wizard's
+    "API key required" checkbox, and api_key is a short secret string (a
+    blank value means "keep the stored key"; the value itself never lands in
+    find-jobs.json -- it goes to the secrets file).
+    """
+
+    url: str | None = None
+    raw_url = body.get("local_llm_url")
+    if raw_url is not None:
+        try:
+            url = checked_loopback_endpoint(raw_url if isinstance(raw_url, str) else "", "local_llm_url")
+        except ValueError as exc:
+            errors["local_llm_url"] = str(exc)
+    protocol: str | None = None
+    raw_protocol = body.get("local_llm_protocol")
+    if raw_protocol is not None:
+        if not isinstance(raw_protocol, str) or raw_protocol not in _LOCAL_LLM_PROTOCOLS:
+            errors["local_llm_protocol"] = f"local_llm_protocol must be one of {', '.join(_LOCAL_LLM_PROTOCOLS)}"
+        else:
+            protocol = raw_protocol
+    model: str | None = None
+    raw_model = body.get("local_llm_model")
+    if raw_model is not None:
+        if not isinstance(raw_model, str) or not raw_model.strip() or len(raw_model) > 256:
+            errors["local_llm_model"] = "local_llm_model must be a non-empty string (256 characters at most) or null"
+        else:
+            model = raw_model.strip()
+    key_required = _setup_field_bool(body, "local_llm_key_required", errors, default=False)
+    api_key: str | None = None
+    raw_key = body.get("local_llm_api_key")
+    if raw_key is not None:
+        if not isinstance(raw_key, str) or len(raw_key) > 512:
+            errors["local_llm_api_key"] = "local_llm_api_key must be a string (512 characters at most) or null"
+        else:
+            api_key = raw_key.strip() or None
+    if url is not None and protocol is None and "local_llm_protocol" not in errors:
+        protocol = LocalLLMProtocol.OPENAI.value
+    return url, protocol, model, key_required, api_key
 
 
 def _setup_field_string_list(body: dict[str, object], field: str, errors: dict[str, str]) -> tuple[str, ...]:
@@ -160,6 +214,27 @@ def _setup_model_target(body: dict[str, object], errors: dict[str, str]) -> str 
     return value
 
 
+def _model_keys_from_config(config: FindJobsConfig) -> dict[str, object]:
+    """The NON-prefs model keys the wizard's one model choice saved in
+    find-jobs.json, in the same additive shape ``PUT /api/setup`` accepts.
+
+    ``GET /api/setup`` carries these beside ``prefs`` (like ``max_age_days``,
+    a non-prefs key that is never a ``DiscoveryPrefs`` field), so the Settings
+    UI can show the last-saved model target and its local-LLM keys and
+    round-trip them on the next save -- the model choice is one key that must
+    not be lost when a Finish lands without it.
+    """
+
+    keys: dict[str, object] = {"model_target": config.default_model_target.value}
+    if config.local_llm_url is not None:
+        keys["local_llm_url"] = config.local_llm_url
+        keys["local_llm_protocol"] = config.local_llm_protocol.value
+        keys["local_llm_model"] = config.local_llm_model
+        if config.local_llm_key_required:
+            keys["local_llm_key_required"] = True
+    return keys
+
+
 def _validate_setup_body(body: object) -> dict[str, object]:
     """Validate a ``PUT /api/setup`` body against the 11 S23 interview fields.
 
@@ -205,6 +280,11 @@ def _validate_setup_body(body: object) -> dict[str, object]:
         "max_age_days",
         "profile_id",
         "model_target",
+        "local_llm_url",
+        "local_llm_protocol",
+        "local_llm_model",
+        "local_llm_key_required",
+        "local_llm_api_key",
     }
     errors: dict[str, str] = {}
     unknown = set(body) - known_keys
@@ -231,6 +311,9 @@ def _validate_setup_body(body: object) -> dict[str, object]:
     max_age_days = _setup_max_age_days(body, errors)
     profile_id = _setup_profile_id(body, errors)
     model_target = _setup_model_target(body, errors)
+    local_llm_url, local_llm_protocol, local_llm_model, local_llm_key_required, local_llm_api_key = _setup_local_llm(
+        body, errors
+    )
 
     if errors:
         raise SetupValidationError(errors)
@@ -258,6 +341,16 @@ def _validate_setup_body(body: object) -> dict[str, object]:
         fields["profile_id"] = profile_id
     if model_target is not None:
         fields["model_target"] = model_target
+    if local_llm_url is not None:
+        fields["local_llm_url"] = local_llm_url
+    if local_llm_protocol is not None:
+        fields["local_llm_protocol"] = local_llm_protocol
+    if local_llm_model is not None:
+        fields["local_llm_model"] = local_llm_model
+    if local_llm_url is not None:
+        fields["local_llm_key_required"] = local_llm_key_required
+    if local_llm_api_key is not None:
+        fields["local_llm_api_key"] = local_llm_api_key
     return fields
 
 
@@ -320,7 +413,67 @@ def _with_selected_profile_settings(backend: object, prefs_json: object) -> obje
 
 
 class SetupRoutesMixin:
-    """``Handler`` mixin: ``GET``/``PUT /api/setup``."""
+    """``Handler`` mixin: ``GET``/``PUT /api/setup`` and ``POST /api/setup/local-models``."""
+
+    def _handle_post_setup_local_models(self) -> None:
+        """``POST /api/setup/local-models`` -- ids the local server serves.
+
+        Body ``{"url": ..., "protocol": ..., "api_key": ...}`` (protocol and
+        api_key optional). Asks the operator's own loopback server (validated
+        here before any request leaves) for ``GET <url>/v1/models``; both the
+        OpenAI and the Anthropic dialect answer that path with
+        ``{"data": [{"id": ...}]}``. POST so an optional server key travels in
+        the body rather than a URL. The reply carries the model ids alone --
+        never a provider response body, never a credential -- so the wizard's
+        model dropdown can be populated without the browser touching the
+        local server directly.
+        """
+
+        raw = self._read_json_body()
+        if raw is None:
+            return
+        if not isinstance(raw, dict):
+            self._error(HTTPStatus.UNPROCESSABLE_ENTITY, "invalid_value", "body must be a JSON object")
+            return
+        url = raw.get("url")
+        protocol = raw.get("protocol") or LocalLLMProtocol.OPENAI.value
+        api_key = raw.get("api_key")
+        if not isinstance(url, str):
+            self._error(HTTPStatus.UNPROCESSABLE_ENTITY, "invalid_value", "url must be a string")
+            return
+        if not isinstance(protocol, str):
+            self._error(HTTPStatus.UNPROCESSABLE_ENTITY, "invalid_value", "protocol must be a string")
+            return
+        if api_key is not None and not isinstance(api_key, str):
+            self._error(HTTPStatus.UNPROCESSABLE_ENTITY, "invalid_value", "api_key must be a string or null")
+            return
+        try:
+            base_url = checked_loopback_endpoint(url, "url")
+        except ValueError as exc:
+            self._error(HTTPStatus.UNPROCESSABLE_ENTITY, "invalid_loopback_url", str(exc))
+            return
+        if protocol not in _LOCAL_LLM_PROTOCOLS:
+            self._error(
+                HTTPStatus.UNPROCESSABLE_ENTITY,
+                "invalid_value",
+                f"protocol must be one of {', '.join(_LOCAL_LLM_PROTOCOLS)}",
+            )
+            return
+        try:
+            models = list_local_models(base_url, api_key=api_key, protocol=protocol)
+        except Exception as exc:  # noqa: BLE001 - the local server may be down mid-wizard
+            # Type name only: the adapter's error text is already operator-
+            # safe, but nothing from the provider crosses here either.
+            self._error(
+                HTTPStatus.BAD_GATEWAY,
+                "local_models_unavailable",
+                f"could not read models from {base_url} ({type(exc).__name__}). Is the server running at that URL?",
+            )
+            return
+        self._write_json(
+            HTTPStatus.OK,
+            {"schema_version": "scout-find-jobs-local-models-response:1", "models": list(models)},
+        )
 
     @reads_committed
     def _handle_get_setup(self) -> None:
@@ -336,9 +489,18 @@ class SetupRoutesMixin:
             if isinstance(prefs_json, dict) and is_location_placeholder(prefs_json.get("city")):
                 prefs_json = {**prefs_json, "city": None}
             prefs_json = _with_selected_profile_settings(self._backend, prefs_json)
+            # uat-bug-038 round-trip: the saved model choice (and its local-LLM
+            # keys) rides beside prefs, so the Settings UI shows the last-saved
+            # model target and the local-LLM block; a Finish that sends no
+            # model_target therefore keeps what the page displayed.
+            try:
+                config, _config_bytes = self._backend.read_config()
+                model_keys = _model_keys_from_config(config)
+            except (ConfigMissingError, FindJobsContractError, LookupError):
+                model_keys = {}
             self._write_json(
                 HTTPStatus.OK,
-                {"schema_version": "scout-find-jobs-setup-response:1", "prefs": prefs_json},
+                {"schema_version": "scout-find-jobs-setup-response:1", "prefs": prefs_json, **model_keys},
             )
             return
         # CHANGE #1: 404 prefs_missing carries a pre-fill derived from the
@@ -348,22 +510,23 @@ class SetupRoutesMixin:
         try:
             config, _config_bytes = self._backend.read_config()
             prefill = _prefs_prefill_from_config(config)
+            model_keys = _model_keys_from_config(config)
         except (ConfigMissingError, FindJobsContractError, LookupError):
-            prefill = _prefs_prefill_from_config(
-                FindJobsConfig(
-                    roles=(),
-                    merged_queries=(),
-                    location=None,
-                    remote=True,
-                    published_after=None,
-                    sources=SourceToggles(exa=False, ats=True, hiringcafe=False),
-                )
+            config = FindJobsConfig(
+                roles=(),
+                merged_queries=(),
+                location=None,
+                remote=True,
+                published_after=None,
+                sources=SourceToggles(exa=False, ats=True, hiringcafe=False),
             )
+            prefill = _prefs_prefill_from_config(config)
+            model_keys = _model_keys_from_config(config)
         self._error_with_extra(
             HTTPStatus.NOT_FOUND,
             "prefs_missing",
             "no discovery preferences saved yet; complete the setup interview",
-            {"prefill": prefill},
+            {"prefill": {**prefill, **model_keys}},
         )
 
     def _handle_put_setup(self) -> None:

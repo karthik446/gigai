@@ -14,6 +14,8 @@ from .codex_cli import CodexCLIAdapter
 from .openai_api import OpenAIAPIAdapter
 from .openrouter_api import OpenRouterAPIAdapter
 from .ollama_local import OllamaLocalAdapter
+from .anthropic_local import AnthropicLocalAdapter
+from .openai_local import OpenAILocalAdapter
 from .port import InvocationRequest, ModelInvocationPort
 
 
@@ -118,6 +120,36 @@ def resolve_model_adapter(
                 ),
             ),
         )
+    if endpoint.adapter in {"anthropic_local", "openai_local"}:
+        # Loopback-only by config validation; the model name (not a digest)
+        # identifies the model on these protocols.  A key-requiring local
+        # server is supported: the endpoint MAY carry a credential
+        # reference, resolved by the adapter at send time.
+        if endpoint.base_url is None:
+            raise AdapterFactoryError(
+                f"{endpoint.adapter} endpoint {endpoint.name!r} has no base_url"
+            )
+        adapter_class = (
+            AnthropicLocalAdapter if endpoint.adapter == "anthropic_local" else OpenAILocalAdapter
+        )
+        try:
+            port = adapter_class(
+                base_url=endpoint.base_url,
+                credential=(
+                    _credential(config, endpoint.credential, endpoint.name)
+                    if endpoint.credential is not None
+                    else None
+                ),
+                home_root=home_root,
+                client=(
+                    transport_overrides.get(endpoint.name)
+                    if transport_overrides is not None
+                    else None
+                ),
+            )
+        except ValueError as exc:
+            raise AdapterFactoryError(str(exc)) from exc
+        return ModelAdapterBinding(current=target, port=port)
     credential = _credential(config, endpoint.credential, endpoint.name)
     if endpoint.adapter == "openai_api":
         return ModelAdapterBinding(

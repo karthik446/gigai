@@ -206,7 +206,7 @@ def _assess_node_body(
     if context.model_target != input.model_target:
         raise ScoutProposalExecutionError("model_target_mismatch", "sealed model target differs from node context")
     model_target = input.model_target.value
-    if model_target not in {"ollama_local", "codex_cli", "openrouter_api", "claude_cli"}:
+    if model_target not in {"ollama_local", "local_llm", "codex_cli", "openrouter_api", "claude_cli"}:
         raise ScoutProposalExecutionError("model_target_invalid", "unsupported model target")
     # U2 (0.1.8.1 UAT): the sealed enum value (ollama_local/codex_cli/
     # openrouter_api/claude_cli) is an *adapter kind*, never a configured target's own
@@ -763,8 +763,13 @@ def _resolve_configured_target_name_for_adapter(config: GigAIConfig, adapter_kin
     if len(exact_name_matches) == 1:
         return exact_name_matches[0]
 
+    # `local_llm` is one sealed target over two adapter kinds: the wizard
+    # configures whichever dialect the operator's server speaks.
+    dialect_kinds = {"openai_local", "anthropic_local"} if adapter_kind == "local_llm" else set()
     endpoint_names = {
-        endpoint.name for endpoint in config.endpoints if endpoint.adapter == adapter_kind
+        endpoint.name
+        for endpoint in config.endpoints
+        if endpoint.adapter == adapter_kind or endpoint.adapter in dialect_kinds
     }
     matches = [
         target.name
@@ -827,18 +832,22 @@ def _assess_prompt(
 
 def assess_invocation_policy(model_target: str, input: object) -> InvocationPolicy:
     """Build the explicit local/hosted policy for one assess input."""
-    if model_target not in {"ollama_local", "codex_cli", "openrouter_api", "claude_cli"}:
+    if model_target not in {"ollama_local", "local_llm", "codex_cli", "openrouter_api", "claude_cli"}:
         raise ScoutProposalExecutionError("model_target_invalid", "unsupported model target")
     selected = getattr(input, "selected_postings", ())
     pinned = getattr(input, "pinned_resume", None)
     ids = {item.normalized_url for item in selected}
     if pinned is not None:
         ids.add(pinned.record_id)
+    # local_llm is loopback-only, exactly like ollama_local: the model call
+    # stays on this machine (offline), and only the network targets may
+    # reach out.
+    is_local = model_target in {"ollama_local", "local_llm"}
     return InvocationPolicy(
         allowed_reference_ids=frozenset(ids),
-        local_allowed=model_target == "ollama_local",
-        network_allowed=model_target != "ollama_local",
-        offline=model_target == "ollama_local",
+        local_allowed=is_local,
+        network_allowed=not is_local,
+        offline=is_local,
     )
 
 
@@ -1009,12 +1018,15 @@ def execute_local_proposal(
         raise ScoutProposalExecutionError(
             "local_target_invalid", "configured model target is unavailable"
         ) from exc
-    if target.endpoint.adapter != "ollama_local":
+    if target.endpoint.adapter not in {"ollama_local", "openai_local", "anthropic_local"}:
         raise ScoutProposalExecutionError(
             "local_target_required",
-            "proposal execution requires the configured local Ollama target",
+            "proposal execution requires a configured local model target "
+            "(Ollama or a loopback OpenAI-/Anthropic-compatible server)",
         )
-    if not target.target.model_digest:
+    # A digest is the Ollama model's identity; an OpenAI-/Anthropic-
+    # compatible server exposes none, its validated loopback URL is the bound.
+    if target.endpoint.adapter == "ollama_local" and not target.target.model_digest:
         raise ScoutProposalExecutionError(
             "local_target_invalid", "configured local model identity is incomplete"
         )
