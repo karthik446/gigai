@@ -761,6 +761,20 @@ def _resolve_configured_target_name_for_adapter(config: GigAIConfig, adapter_kin
         if target.enabled and target.name == adapter_kind
     ]
     if len(exact_name_matches) == 1:
+        if adapter_kind == "local_llm":
+            target = next(
+                item for item in config.model_targets if item.name == exact_name_matches[0]
+            )
+            endpoint = next(
+                (item for item in config.endpoints if item.name == target.endpoint),
+                None,
+            )
+            if endpoint is None or endpoint.adapter not in {"openai_local", "anthropic_local"}:
+                raise ScoutProposalExecutionError(
+                    "model_target_unavailable",
+                    "the exact `local_llm` model target must use an "
+                    "`openai_local` or `anthropic_local` endpoint",
+                )
         return exact_name_matches[0]
 
     # `local_llm` is one sealed target over two adapter kinds: the wizard

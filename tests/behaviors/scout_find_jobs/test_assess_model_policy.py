@@ -923,6 +923,7 @@ def test_resolve_configured_target_name_for_adapter_exact_name_wins_over_ambiguo
     [
         ("codex_cli", "codex", "codex_cli", None, None),
         ("ollama_local", "ollama", "ollama_local", None, "http://127.0.0.1:11434"),
+        ("local_llm", "local", "openai_local", None, "http://127.0.0.1:8000"),
         ("openrouter_api", "openrouter", "openrouter_api", "openrouter-api", None),
     ],
 )
@@ -978,6 +979,47 @@ def test_resolve_configured_target_name_for_adapter_exact_name_wins_for_every_se
         ),
     )
     assert _resolve_configured_target_name_for_adapter(config, sealed_value) == sealed_value
+
+
+@pytest.mark.parametrize("adapter", ["openai_api", "openrouter_api", "codex_cli"])
+def test_local_llm_exact_name_rejects_non_local_endpoint(
+    tmp_path: Path, adapter: str
+) -> None:
+    from gigai.scout.proposal_execution import (
+        ScoutProposalExecutionError,
+        _resolve_configured_target_name_for_adapter,
+    )
+
+    credential = "hosted-api" if adapter in {"openai_api", "openrouter_api"} else None
+    config = build_config(
+        home_root=tmp_path / "home",
+        workpad_root=tmp_path / "workpads",
+        editor_argv=("/usr/bin/true",),
+        open_with_target=False,
+        credentials=(
+            (CredentialReference(credential, "environment", "HOSTED_API_KEY"),)
+            if credential
+            else ()
+        ),
+        endpoints=(
+            Endpoint(name="offline", adapter="deterministic"),
+            Endpoint(
+                name="hosted",
+                adapter=adapter,
+                credential=credential,
+                base_url="https://api.example.test" if adapter in {"openai_api", "openrouter_api"} else None,
+            ),
+            Endpoint(name="local", adapter="openai_local", base_url="http://127.0.0.1:8000"),
+        ),
+        model_targets=(
+            ConfigModelTarget("offline-default", "offline", "fixture-v1", ("text",), 64),
+            ConfigModelTarget("local_llm", "hosted", "hosted-model", ("text",), 512),
+            ConfigModelTarget("local-default", "local", "local-model", ("text",), 512),
+        ),
+    )
+
+    with pytest.raises(ScoutProposalExecutionError, match="must use an `openai_local`"):
+        _resolve_configured_target_name_for_adapter(config, "local_llm")
 
 
 def test_resolve_configured_target_name_for_adapter_ambiguous_error_names_targets_and_fix(
