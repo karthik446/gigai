@@ -69,7 +69,7 @@ def test_registry_urls_and_helpers() -> None:
     assert providers.catalog_aliases()["myworkdayjobs"] is ATSProvider.WORKDAY
     assert providers.source_from_host("nvidia.wd5.myworkdayjobs.com") == "workday"
     assert "myworkdayjobs.com" in providers.board_hosts()
-    assert providers.spec("workday").concurrency == 1 and providers.spec("workday").public_paths is None
+    assert providers.spec("workday").concurrency == 1 and providers.spec("workday").public_paths == ("/{site}/", "/{site}/job/")
     assert all(item.url_rules is None and item.concurrency is None and item.public_paths is None for item in providers.registry().values() if item.name != "workday")
     assert providers.token_from_list_url("workable", "https://apply.workable.com/api/v1/widget/accounts/acme?details=true") == "acme"
     assert providers.token_from_list_url("workable", "https://apply.workable.com/api/v1/widget/accounts/a/b?details=true") is None
@@ -592,13 +592,14 @@ def test_unknown_provider_still_fails_closed() -> None:
 
 
 def _robots_client(rules: dict[str, httpx.Response]) -> tuple[httpx.Client, list[str]]:
+    """Hosts whose ``robots.txt`` is ``rules[host]`` (404 elsewhere); a feed answers ``[]``, a Workday ``POST`` list an empty page."""
     calls: list[str] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
         calls.append(str(request.url))
         if request.url.path == "/robots.txt":
             return rules.get(request.url.host, httpx.Response(404))
-        return httpx.Response(200, json=[])
+        return httpx.Response(200, json={"total": 0, "jobPostings": []} if request.method == "POST" else [])
 
     return httpx.Client(transport=httpx.MockTransport(handler)), calls
 
@@ -618,11 +619,22 @@ def test_robots_guard_blocks_a_disallowed_feed_and_remembers_the_host(tmp_path) 
 
 
 def test_robots_guard_treats_missing_rules_as_allowed() -> None:
-    client, calls = _robots_client({"api.ashbyhq.com": httpx.Response(401, text="Unauthorized"), "x.breezy.hr": httpx.Response(200, text="<html>page</html>", headers={"content-type": "text/html"})})
+    client, calls = _robots_client(
+        {
+            "api.ashbyhq.com": httpx.Response(401, text="Unauthorized"),
+            "x.breezy.hr": httpx.Response(200, text="<html>page</html>", headers={"content-type": "text/html"}),
+            "apple.wd1.myworkdayjobs.com": httpx.Response(401, text="Unauthorized"),
+        }
+    )
     guard = RobotsGuard()
     assert guard.allows(client, "https://api.ashbyhq.com/posting-api/job-board/acme") is True
     assert guard.allows(client, "https://x.breezy.hr/json") is True
     assert guard.allows(client, "https://nothing.pinpointhq.com/postings.json") is True
+    # A Workday tenant answering 401 (29 POC combos) has no rules under RFC 9309: the site gate allows it too (plan 8.9).
+    guard.check_paths(client, "https://apple.wd1.myworkdayjobs.com", ("/Apple/", "/Apple/job/", "/wday/cxs/apple/Apple/jobs"), "workday", "apple.wd1.Apple")
+    assert ATSBoardClients(robots=guard).fetch_board(client, "workday", "apple.wd1.Apple", _config()).rows == ()
+    assert calls.count("https://apple.wd1.myworkdayjobs.com/robots.txt") == 1
+    assert calls[-1] == "https://apple.wd1.myworkdayjobs.com/wday/cxs/apple/Apple/jobs"
 
 
 def test_board_clients_ask_the_guard_before_the_list() -> None:
@@ -633,6 +645,42 @@ def test_board_clients_ask_the_guard_before_the_list() -> None:
     assert excinfo.value.code == ROBOTS_DISALLOWED
     assert calls == ["https://apply.workable.com/robots.txt"]  # the feed itself was never asked
     assert ATSBoardClients().robots is None
+
+
+WORKDAY_ZOOM_ROBOTS = "User-agent: *\nDisallow: /Zoom/\nDisallow: /refreshFacet/\n"
+WORKDAY_NVIDIA_ROBOTS = "User-agent: *\nDisallow: /NVIDIAExternalCareerSiteResearch/\nDisallow: /Private/\nDisallow: /refreshFacet/\n"
+
+
+def test_workday_site_disallow_blocks_the_tenant_api() -> None:
+    """Zoom: ``Disallow: /Zoom/`` says the site's public pages are off limits; the per-URL check alone would allow
+    ``/wday/cxs/zoom/Zoom/jobs``, the site gate does not, and no cxs request is made (list or fetch)."""
+    client, calls = _robots_client({"zoom.wd5.myworkdayjobs.com": httpx.Response(200, text=WORKDAY_ZOOM_ROBOTS)})
+    clients = ATSBoardClients(robots=RobotsGuard())
+    with pytest.raises(ATSBoardClientError) as excinfo:
+        clients.fetch_board(client, "workday", "zoom.wd5.Zoom", _config(), descriptions=True)
+    assert excinfo.value.code == ROBOTS_DISALLOWED and "'/Zoom/'" in str(excinfo.value)
+    with pytest.raises(ATSBoardClientError) as again:
+        clients.list_board(client, "workday", "zoom.wd5.Zoom", _config())
+    assert again.value.code == ROBOTS_DISALLOWED
+    assert calls == ["https://zoom.wd5.myworkdayjobs.com/robots.txt"]  # one robots request per host, then memory; zero cxs requests
+    assert clients.robots_tally.value == 1
+
+
+def test_workday_private_site_disallow_does_not_block() -> None:
+    """Site, not tenant: a Disallow on the tenant's other (private, invite-only) sites, or on ``/refreshFacet/``, is not
+    a block for the shipped site; its list is asked once the gate and the per-URL check both allow it."""
+    client, calls = _robots_client({"nvidia.wd5.myworkdayjobs.com": httpx.Response(200, text=WORKDAY_NVIDIA_ROBOTS)})
+    clients = ATSBoardClients(robots=RobotsGuard())
+    token = "nvidia.wd5.NVIDIAExternalCareerSite"
+    list_url = "https://nvidia.wd5.myworkdayjobs.com/wday/cxs/nvidia/NVIDIAExternalCareerSite/jobs"
+    assert clients.fetch_board(client, "workday", token, _config(), descriptions=True).rows == ()
+    assert clients.list_board(client, "workday", token, _config()) == ()
+    assert calls == ["https://nvidia.wd5.myworkdayjobs.com/robots.txt", list_url, list_url]
+    assert clients.robots_tally.value == 1  # ``check_paths`` and the per-URL check share the one robots read
+    # The gate reads the board's own site: the research site is refused on the same host, with no second robots read.
+    with pytest.raises(ATSBoardClientError) as excinfo:
+        clients.fetch_board(client, "workday", "nvidia.wd5.NVIDIAExternalCareerSiteResearch", _config())
+    assert excinfo.value.code == ROBOTS_DISALLOWED and clients.robots_tally.value == 1
 
 
 def test_shared_guard_honours_the_environment_switch(tmp_path, monkeypatch) -> None:

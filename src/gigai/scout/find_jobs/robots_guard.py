@@ -266,12 +266,46 @@ class RobotsGuard:
         if counted is not None and requests:
             counted(requests)
         if state == STATE_UNKNOWN:
-            error = ATSBoardClientError(ROBOTS_UNKNOWN, f"{provider} board {board_token!r}: the host's robots.txt could not be read; it is asked again within the hour")
-            error.host = _host_of(url)  # type: ignore[attr-defined]
-            error.retry_in = self.retry_in(url)  # type: ignore[attr-defined]
-            raise error
+            raise self._unknown(url, provider, board_token)
         if state == ROBOTS_DISALLOWED:
             raise ATSBoardClientError(ROBOTS_DISALLOWED, f"{provider} board {board_token!r}: the host's robots.txt disallows the request")
+
+    def check_paths(
+        self,
+        client: Any,
+        origin: str,
+        paths: tuple[str, ...],
+        provider: str,
+        board_token: str,
+        *,
+        counted: Callable[[int], object] | None = None,
+    ) -> None:
+        """The stricter scope (0.1.11.12, Workday): raise as :meth:`check` does unless ``origin``'s rules allow EVERY ``path``.
+
+        Why: Zoom's robots.txt says ``Disallow: /Zoom/`` and the API path is ``/wday/cxs/zoom/Zoom/jobs``, which the
+        per-URL check allows; a board whose public job pages (``ProviderSpec.public_paths``) are disallowed is not
+        fetched through its API either. ``origin`` is the board's ``scheme://host``; the host's rules are looked up
+        once (the same cached file as :meth:`check`, so a board costs at most one robots request), each path is
+        matched by the same RFC 9309 rules, and the first disallowed one fails the board naming that path.
+        """
+
+        host = _host_of(origin)
+        if not host or getattr(self._reading, "active", False):
+            return
+        rules, requests = self._rules_for(client, host)
+        if counted is not None and requests:
+            counted(requests)
+        if rules.state == STATE_UNKNOWN:
+            raise self._unknown(origin, provider, board_token)
+        for path in paths:
+            if not rules.allows(origin + path):
+                raise ATSBoardClientError(ROBOTS_DISALLOWED, f"{provider} board {board_token!r}: the host's robots.txt disallows {path!r}")
+
+    def _unknown(self, url: str, provider: str, board_token: str) -> ATSBoardClientError:
+        error = ATSBoardClientError(ROBOTS_UNKNOWN, f"{provider} board {board_token!r}: the host's robots.txt could not be read; it is asked again within the hour")
+        error.host = _host_of(url)  # type: ignore[attr-defined]
+        error.retry_in = self.retry_in(url)  # type: ignore[attr-defined]
+        return error
 
     def allows(self, client: Any, url: str) -> bool:
         return self.verdict(client, url)[0] == "allowed"
@@ -282,6 +316,14 @@ class RobotsGuard:
         host = _host_of(url)
         if not host or getattr(self._reading, "active", False):
             return "allowed", 0  # a request made while reading a robots file (a redirect hop) is that read
+        rules, requests = self._rules_for(client, host)
+        if rules.state == STATE_UNKNOWN:
+            return STATE_UNKNOWN, requests
+        return ("allowed" if rules.allows(url) else ROBOTS_DISALLOWED), requests
+
+    def _rules_for(self, client: Any, host: str) -> tuple[HostRules, int]:
+        """``host``'s rules, read (and stored) when not held fresh: ``(rules, robots requests made)``."""
+
         requests = 0
         rules = self._fresh(host)
         if rules is None:
@@ -293,9 +335,7 @@ class RobotsGuard:
                         self._rules[host] = rules
                         self.requests += requests
                     self._store(rules)
-        if rules.state == STATE_UNKNOWN:
-            return STATE_UNKNOWN, requests
-        return ("allowed" if rules.allows(url) else ROBOTS_DISALLOWED), requests
+        return rules, requests
 
     def pace(self, url: str, stop: threading.Event | None = None) -> None:
         """Wait until ``url``'s host may be asked again: its ``Crawl-delay`` after the last request to it.

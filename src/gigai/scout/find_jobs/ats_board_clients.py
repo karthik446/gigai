@@ -70,6 +70,7 @@ from .contracts import (
     content_hash,
     normalize_url,
     parse_board_url,
+    split_workday_token,
 )
 from .filters import sponsorship_from_text
 
@@ -2055,10 +2056,31 @@ class ATSBoardClients:
             self.robots_tally = RequestTally()
 
     def _guard(self, client: "httpx.Client", provider: str, board_token: str) -> "httpx.Client":
+        """The client a board's list or fetch is handed: ``client`` itself without a guard, else the guarded one.
+
+        0.1.11.12: a provider with ``public_paths`` (Workday) is first asked about the board's own public pages and
+        its list path, as one question (``RobotsGuard.check_paths``, the same cached robots file): a tenant whose
+        site is disallowed fails with ``robots_disallowed`` before any request. Both ``list_board`` and
+        ``fetch_board`` pass here, and the details still go through the per-URL check of the guarded client.
+        """
+
         if self.robots is None:
             return client
+        from .providers import spec
         from .robots_guard import GuardedClient
 
+        found = spec(provider)
+        if found is not None and found.public_paths is not None:
+            from urllib.parse import urlsplit
+
+            # The ``{site}`` of the three-part token (the shape the spec's templates use) plus the list path itself.
+            parts = split_workday_token(board_token)
+            list_url = found.url_rules.list_url(board_token) if found.url_rules is not None else None
+            if parts is None or list_url is None:
+                raise ATSBoardClientError("bad_board_token", f"not a {provider} board token: {board_token!r}")
+            split = urlsplit(list_url)
+            paths = tuple(path.format(site=parts[2]) for path in found.public_paths) + (split.path,)
+            self.robots.check_paths(client, f"{split.scheme}://{split.netloc}", paths, provider, board_token, counted=self.robots_tally.add)  # type: ignore[attr-defined]
         return GuardedClient(client, self.robots, provider, board_token, counted=self.robots_tally.add)  # type: ignore[arg-type,attr-defined,return-value]
 
     def list_board(self, client: "httpx.Client", provider: str, board_token: str, config: FindJobsConfig) -> tuple[PostingRow, ...]:

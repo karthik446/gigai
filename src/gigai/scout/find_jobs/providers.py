@@ -329,6 +329,10 @@ def _build() -> dict[str, ProviderSpec]:
             min_interval_seconds=1.0,
             aliases=("myworkdayjobs",),
             url_rules=_WORKDAY_URL_RULES,
+            # The board's public pages (the shape, as above): a tenant that disallows its site (Zoom, ``Disallow: /Zoom/``)
+            # is not asked through ``/wday/cxs/`` either (``robots_guard.RobotsGuard.check_paths``). The site's own
+            # paths only: a Disallow on another site of the tenant (its private or invite-only ones) is not a block.
+            public_paths=("/{site}/", "/{site}/job/"),
             concurrency=1,
         ),
     )
