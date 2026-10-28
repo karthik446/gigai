@@ -821,7 +821,7 @@ def test_fetch_workday_board_pages_and_details(tmp_path) -> None:
 
 
 def test_fetch_workday_board_page_cap_marks_partial(tmp_path, monkeypatch) -> None:
-    from gigai.scout.find_jobs.ats_board_clients import fetch_workday_board
+    from gigai.scout.find_jobs.ats_board_clients import fetch_workday_board, list_workday_board_with_partial
     from gigai.scout.find_jobs.sources_update import listing_config
 
     monkeypatch.setattr(ats_feeds, "WORKDAY_MAX_LIST_PAGES", 2)
@@ -833,6 +833,7 @@ def test_fetch_workday_board_page_cap_marks_partial(tmp_path, monkeypatch) -> No
     merged = json.loads(cache.lookup("workday", WORKDAY_LIST_URL).body)
     assert merged["total"] == 60 and len(merged["jobPostings"]) == 5  # stored as far as it was read
     assert result.stats.to_json()["partial"] is True
+    assert list_workday_board_with_partial(_workday_client(_three_pages(), []), WORKDAY_TOKEN, listing_config())[1] is True  # P6: the lister says so too
 
     # A board whose ``total`` the pages cover stops without asking for an empty page, and is whole.
     calls.clear()

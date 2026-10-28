@@ -16,6 +16,13 @@ The answer is ``open``, ``closed`` or ``unknown``:
   request per BOARD, conditional, through ``ats_board_clients``' own cached
   request). ``closed`` only when a ``200`` (or a ``304`` of a kept body) list
   holds neither the posting's URL nor its id.
+* Workday (0.1.11.12): the board's list through its own lister (the POST page
+  loop, every page a provider interval apart, one list read per board per
+  hour), behind the site-level robots gate; ``closed`` only when a COMPLETE
+  list holds neither the stored URL nor its last path segment. A list the
+  page cap cut short (``partial``) is held for the hour like a whole one: a
+  posting on it is ``open``, one missing from it ``unknown``. ``job_url`` is
+  ``None``: a Workday address is never rebuilt from an id.
 * Anything else is ``unknown`` and NEVER ``closed``: a ``5xx``, a ``429``, a
   redirect (the client does not follow one), a timeout, a network error, a
   body that is not the expected JSON, a URL on no known board.
@@ -144,6 +151,7 @@ class Liveness:
 class _Board:
     urls: frozenset[str]
     ids: frozenset[str]
+    partial: bool = False  # the page cap cut the list short: a posting missing from it is not known gone
 
 
 _LOCK = threading.Lock()  # the caches below
@@ -290,6 +298,23 @@ def _paced(provider: str) -> None:
         _NEXT_REQUEST[provider] = time.monotonic() + gap
 
 
+class _PacedPosts:
+    """``client`` with every ``post`` a provider interval apart (:func:`_paced`): the Workday lister's page loop is one
+    POST per page, and the floor is per request, not per board. Everything else is the wrapped client's.
+    """
+
+    def __init__(self, client: "httpx.Client", provider: str) -> None:
+        self._client = client
+        self._provider = provider
+
+    def post(self, url: object, *args: object, **kwargs: object) -> object:
+        _paced(self._provider)
+        return self._client.post(url, *args, **kwargs)  # type: ignore[arg-type]
+
+    def __getattr__(self, name: str) -> object:
+        return getattr(self._client, name)
+
+
 def _greenhouse_job_id(url: str) -> str | None:
     from .job_input import _gh_jid, _greenhouse_path_job_id
 
@@ -348,10 +373,13 @@ def _read_board(client: "httpx.Client", home_root: Path, provider: str, token: s
     found = provider_spec(provider)
     if found is None:
         return None
+    if found.url_rules is not None:
+        return _read_listed_board(client, provider, token)
     endpoint = provider_list_url(provider, token)
     if endpoint is None:
         return None
     cache = BoardCache(_cache_root(home_root) / "boards", validator_source=lambda _provider, _url: None)
+    _paced(provider)
     try:
         body, _status = _cached_request(client, endpoint, provider, token, cache=cache, stats=BoardFetchStats())
         payload = _decode_json(body, provider, token)
@@ -377,15 +405,33 @@ def _read_board(client: "httpx.Client", home_root: Path, provider: str, token: s
     return _Board(frozenset(urls), frozenset(ids))
 
 
+def _read_listed_board(client: "httpx.Client", provider: str, token: str) -> _Board | None:
+    """Workday (0.1.11.12 P6): the board's list through its own lister (``list_workday_board_with_partial``, the POST
+    page loop, every page paced), behind the site-level robots gate (``job_input._board_clients``). The rows' URLs, and
+    each URL's last path segment as the id (a stored URL with a locale segment, ``/en-US/<site>/job/...``, still
+    matches); ``partial`` when the page cap cut the list short. ``None`` when no list answered.
+    """
+
+    from .ats_board_clients import ATSBoardClientError, list_workday_board_with_partial
+    from .job_input import _PERMISSIVE_CONFIG, _board_clients
+
+    try:
+        guarded = _board_clients(provider)._guard(_PacedPosts(client, provider), provider, token)  # type: ignore[arg-type]
+        rows, partial = list_workday_board_with_partial(guarded, token, _PERMISSIVE_CONFIG)
+    except (ATSBoardClientError, OSError):
+        return None
+    ids = {segments[-1].lower() for row in rows if (segments := [part for part in urlsplit(row.url).path.split("/") if part])}
+    return _Board(frozenset(row.normalized_url for row in rows), frozenset(ids), partial)
+
+
 def _board(client: "httpx.Client", home_root: Path, provider: str, token: str) -> tuple[_Board | None, bool]:
-    """``(list, requested)``: the process's list of this board while it is fresh, else one request for it."""
+    """``(list, requested)``: the process's list of this board while it is fresh, else one (paced) read of it."""
 
     key = (str(home_root), provider, token)
     with _LOCK:
         held = _BOARDS.get(key)
     if held is not None and time.monotonic() - held[1] < CACHE_SECONDS:
         return held[0], False
-    _paced(provider)
     found = _read_board(client, home_root, provider, token)
     if found is not None:
         with _LOCK:
@@ -449,7 +495,7 @@ def check_posting_live(
             state = _ask_greenhouse(client, token, posting_id or "", url)  # type: ignore[arg-type]
         else:
             board, requested = _board(client, home_root, provider, token)  # type: ignore[arg-type]
-            state = UNKNOWN if board is None else (OPEN if _listed(board, job, url, posting_id) else CLOSED)
+            state = UNKNOWN if board is None else (OPEN if _listed(board, job, url, posting_id) else (UNKNOWN if board.partial else CLOSED))
     except Exception:  # noqa: BLE001 - the check never fails the action it precedes; what went wrong is ``unknown``
         state = UNKNOWN
     finally:

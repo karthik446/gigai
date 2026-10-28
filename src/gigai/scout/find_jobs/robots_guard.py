@@ -560,6 +560,7 @@ def install(client: "httpx.Client", guard: RobotsGuard | None, *, counted: Calla
         guard.pace(url)
 
     client.event_hooks["request"] = [*client.event_hooks.get("request", []), ask]
+    client.paces_hosts = True  # type: ignore[attr-defined]  # the hook paces: a ``GuardedClient`` over this client (Workday's site gate) does not pace again
     return client
 
 

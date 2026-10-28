@@ -1,5 +1,8 @@
 """0.1.11.8 review fixes, lane A (providers / URLs / feed parsing): B1, B2, S4, S5, S8, N3, N4.
 
+0.1.11.12 (Workday P6): a pasted Workday job URL, or a stored one with no description, is ONE cxs detail GET addressed
+by the URL's own path (never the list's POST loop), behind the sources update's site-level robots gate.
+
 Synthetic fixtures only; every request goes to an ``httpx.MockTransport``.
 """
 
@@ -10,7 +13,8 @@ import json
 import httpx
 import pytest
 
-from gigai.scout.find_jobs import ats_feeds, providers
+from gigai.scout.find_jobs import ats_feeds, providers, robots_guard
+from gigai.scout.find_jobs.assess_contracts import AssessJobInput
 from gigai.scout.find_jobs.ats_board_clients import ATSBoardClients, BoardCache, fetch_feed_board
 from gigai.scout.find_jobs.company_index import (
     STATUS_INDEXED,
@@ -21,8 +25,8 @@ from gigai.scout.find_jobs.company_index import (
     parse_board_body,
     refresh_company,
 )
-from gigai.scout.find_jobs.contracts import FindJobsConfig, SourceToggles, parse_board_url
-from gigai.scout.find_jobs.job_input import PostingTextUnavailable, fetch_missing_description
+from gigai.scout.find_jobs.contracts import FindJobsConfig, FindJobsContractError, SourceToggles, parse_board_url
+from gigai.scout.find_jobs.job_input import PostingTextUnavailable, fetch_missing_description, resolve_job
 
 
 def _config() -> FindJobsConfig:
@@ -295,3 +299,94 @@ def test_a_failed_later_page_fails_the_board_and_drops_validators(tmp_path) -> N
         fetch_feed_board(client, "rippling", "acme-jobs", _config(), cache=cache)
     entry = cache.lookup("rippling", providers.list_url("rippling", "acme-jobs"))
     assert entry is not None and entry.etag is None
+
+
+# --- Workday (0.1.11.12 P6): one posting, one cxs detail GET, behind the site gate ---------------------------------
+
+WD_TOKEN = "nvidia.wd5.NVIDIAExternalCareerSite"
+WD_PATH = "/job/Santa-Clara/Staff-Engineer_JR1990000"
+WD_URL = f"https://nvidia.wd5.myworkdayjobs.com/NVIDIAExternalCareerSite{WD_PATH}"
+WD_DETAIL_PATH = f"/wday/cxs/nvidia/NVIDIAExternalCareerSite{WD_PATH}"
+WD_LIST_PATH = "/wday/cxs/nvidia/NVIDIAExternalCareerSite/jobs"
+
+
+def _workday_handler(calls: list[str], *, robots: str | None = None):
+    """The tenant: its robots file (when given), the cxs detail of ``WD_PATH``, a list that must never be asked, a page shell."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(f"{request.method} {request.url.path}")
+        if request.url.path == "/robots.txt":
+            return httpx.Response(200, text=robots) if robots is not None else httpx.Response(404)
+        if request.url.path == WD_DETAIL_PATH:
+            return httpx.Response(200, json={"jobPostingInfo": {"title": "Staff Engineer", "jobDescription": "<p>Build GPUs.</p><p>Ship CUDA.</p>", "jobReqId": "JR1990000"}})
+        if request.url.path == WD_LIST_PATH:
+            raise AssertionError("the board's list was asked for one posting")
+        return httpx.Response(200, text="<html><body><div id='app'></div></body></html>")  # the public page: a script shell
+
+    return handler
+
+
+def test_a_workday_posting_with_no_description_is_one_cxs_detail_get_by_its_stored_url() -> None:
+    calls: list[str] = []
+    client = httpx.Client(transport=httpx.MockTransport(_workday_handler(calls)))
+    found = fetch_missing_description(client, provider="workday", token=WD_TOKEN, posting_id="JR1990000", url=WD_URL)
+    assert found.text == "Build GPUs.\nShip CUDA." and found.title == "Staff Engineer" and found.fetch_kind == "ats_board"
+    assert calls == [f"GET {WD_DETAIL_PATH}"], "more than the one detail request, or the list"
+
+    # A locale segment before the site names the same posting; a URL of another board (or no posting) asks nothing.
+    calls.clear()
+    assert fetch_missing_description(client, provider="workday", token=WD_TOKEN, posting_id="JR1990000", url=WD_URL.replace("/NVIDIAExternalCareerSite/", "/en-US/NVIDIAExternalCareerSite/")).text == "Build GPUs.\nShip CUDA."
+    assert calls == [f"GET {WD_DETAIL_PATH}"]
+    calls.clear()
+    for other in ("https://nvidia.wd5.myworkdayjobs.com/OtherSite" + WD_PATH, "https://nvidia.wd5.myworkdayjobs.com/NVIDIAExternalCareerSite"):
+        with pytest.raises(PostingTextUnavailable) as caught:
+            fetch_missing_description(client, provider="workday", token=WD_TOKEN, posting_id="JR1990000", url=other)
+        assert caught.value.reason == "board_refused", other
+    assert calls == []
+
+
+def test_a_workday_detail_that_is_gone_reads_as_removed() -> None:
+    client = httpx.Client(transport=httpx.MockTransport(lambda request: httpx.Response(404)))
+    with pytest.raises(PostingTextUnavailable) as caught:
+        fetch_missing_description(client, provider="workday", token=WD_TOKEN, posting_id="JR1990000", url=WD_URL)
+    assert caught.value.reason == "posting_removed"
+
+
+def test_a_pasted_workday_job_url_resolves_by_one_cxs_detail_get_not_the_list() -> None:
+    calls: list[str] = []
+    client = httpx.Client(transport=httpx.MockTransport(_workday_handler(calls)))
+    resolved = resolve_job(AssessJobInput(job_url=WD_URL), client=client)
+    assert resolved.fetch_kind == "ats_board" and resolved.text == "Build GPUs.\nShip CUDA." and resolved.title == "Staff Engineer"
+    # The public page (a script shell, as for every board) and then ONE detail GET; the list's POST loop never runs.
+    assert calls == [f"GET /NVIDIAExternalCareerSite{WD_PATH}", f"GET {WD_DETAIL_PATH}"]
+
+
+def test_a_tenant_whose_robots_disallow_its_site_fails_a_pasted_workday_url_with_no_cxs_request(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Zoom's shape: ``Disallow: /Zoom/`` on the site's own pages; the sources update's site-level gate applies here too.
+    # The client is the single-posting paths' own (``job_fetch_client``): the per-URL hook installed, the shared guard on.
+    monkeypatch.setenv(robots_guard.ROBOTS_ENV, "1")
+    guard = robots_guard.RobotsGuard()
+    monkeypatch.setattr(robots_guard, "_SHARED", guard)
+    calls: list[str] = []
+    client = robots_guard.install(httpx.Client(transport=httpx.MockTransport(_workday_handler(calls, robots="User-agent: *\nDisallow: /NVIDIAExternalCareerSite/\n"))), guard)
+
+    with pytest.raises(PostingTextUnavailable) as caught:
+        fetch_missing_description(client, provider="workday", token=WD_TOKEN, posting_id="JR1990000", url=WD_URL)
+    assert caught.value.reason == "board_refused" and robots_guard.ROBOTS_DISALLOWED in str(caught.value)
+    assert calls == ["GET /robots.txt"], "a cxs request was made for a disallowed site"
+
+    calls.clear()
+    with pytest.raises(FindJobsContractError) as refused:
+        resolve_job(AssessJobInput(job_url=WD_URL), client=client)
+    assert refused.value.code == "job_fetch_failed" and f"workday board ({robots_guard.ROBOTS_DISALLOWED})" in str(refused.value)
+    assert calls == [], "the page or a cxs path was asked for a disallowed site (the file is held for the hour)"
+
+    # The hook on the client does not count twice: the site gate's client paces, the hook already did.
+    assert getattr(client, "paces_hosts", False) is True
+
+    # The tenant's other sites are not the block: a Disallow elsewhere leaves this board's detail readable.
+    calls.clear()
+    monkeypatch.setattr(robots_guard, "_SHARED", robots_guard.RobotsGuard())
+    client = httpx.Client(transport=httpx.MockTransport(_workday_handler(calls, robots="User-agent: *\nDisallow: /InternalSite/\n")))
+    assert fetch_missing_description(client, provider="workday", token=WD_TOKEN, posting_id="JR1990000", url=WD_URL).text == "Build GPUs.\nShip CUDA."
+    assert calls == ["GET /robots.txt", f"GET {WD_DETAIL_PATH}"]

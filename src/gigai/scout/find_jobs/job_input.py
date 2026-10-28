@@ -56,6 +56,7 @@ from .contracts import (
     SourceToggles,
     normalize_url,
     parse_board_url,
+    split_workday_token,
 )
 from .company_index import CompanyIndex
 from .market_acquisition import job_id_from_url
@@ -225,7 +226,15 @@ def resolve_job(
 
     if board is not None and (page is None or len(page.text) < MIN_POSTING_TEXT_CHARS):
         provider, token = board
-        if _has_detail_endpoint(provider) and _url_posting_id(url) is not None:
+        if provider == "workday":
+            # 0.1.11.12 (P6): the pasted URL's own path names the posting: ONE cxs detail GET, never the list's POST loop.
+            try:
+                return _workday_single_job(client, token, url, source_url=url, normalized_url=normalized)
+            except _FetchFailure as exc:
+                failures.append(f"{provider} detail ({exc})")
+            except ATSBoardClientError as exc:
+                failures.append(f"{provider} board ({exc.code})")
+        elif _has_detail_endpoint(provider) and _url_posting_id(url) is not None:
             # B1: a two-phase provider's pasted posting URL names its id: one detail request, not a loop over the list.
             try:
                 return _detail_single_job(client, provider, token, _url_posting_id(url) or "", source_url=url, normalized_url=normalized)
@@ -628,6 +637,14 @@ def _detail_single_job(
     if not safe_path_segment(token) or not safe_path_segment(job_id):
         raise _FetchFailure("bad_board_name", provider, "the board token or job id is not a plain name")
     endpoint = found.detail_url.format(token=token, id=job_id)
+    return _detail_payload(client, provider, token, endpoint, source_url=source_url, normalized_url=normalized_url)
+
+
+def _detail_payload(
+    client: "httpx.Client", provider: str, token: str, endpoint: str, *, source_url: str, normalized_url: str
+) -> ResolvedJob:
+    """ONE GET of ``endpoint``, a two-phase provider's single detail payload, read as that provider's text and title."""
+
     body, charset = _read_capped(client, endpoint)
     host = _host_of(endpoint)
     try:
@@ -652,6 +669,39 @@ def _detail_single_job(
         text=text,
         text_sha256=_text_digest(text),
     )
+
+
+def _workday_external_path(token: str, url: str) -> str | None:
+    """A Workday posting URL's ``externalPath`` (``/job/<location>/<title>_<reqid>``: its path after the board's
+    ``/<site>``, a locale segment before the site skipped), or ``None`` when ``url`` is not a posting of board ``token``.
+    """
+
+    parts = split_workday_token(token)
+    if parts is None or parse_board_url(url) != ("workday", token):
+        return None
+    segments = tuple(part for part in urlsplit(url).path.split("/") if part)
+    for at in (0, 1):
+        if len(segments) > at + 1 and segments[at] == parts[2]:
+            return "/" + "/".join(segments[at + 1 :])
+    return None
+
+
+def _workday_single_job(client: "httpx.Client", token: str, url: str, *, source_url: str, normalized_url: str) -> ResolvedJob:
+    """ONE GET of a Workday posting's cxs detail (0.1.11.12 P6), addressed by the stored URL's own ``externalPath``
+    (``url_rules.detail_url``); never the board's list. The site-level robots gate (``_board_clients``) is asked first:
+    a tenant whose robots.txt disallows the board's pages raises ``ATSBoardClientError`` (``robots_disallowed``) and no
+    cxs request is made.
+    """
+
+    from .providers import spec
+
+    found = spec("workday")
+    path = _workday_external_path(token, url)
+    endpoint = found.url_rules.detail_url(token, {"externalPath": path}) if found is not None and found.url_rules is not None and path else None
+    if endpoint is None:
+        raise _FetchFailure("bad_board_name", "workday", "the URL is not a posting of this board")
+    guarded = _board_clients("workday")._guard(client, "workday", token)
+    return _detail_payload(guarded, "workday", token, endpoint, source_url=source_url, normalized_url=normalized_url)
 
 
 def _has_detail_endpoint(provider: str) -> bool:
@@ -698,10 +748,25 @@ def _url_posting_id(url: str) -> str | None:
     return parts[-1] if parts else None
 
 
+def _board_clients(provider: str) -> ATSBoardClients:
+    """The board clients a single posting's request goes through (0.1.11.12 P6).
+
+    Workday (``public_paths``): the sources update's site-level robots gate (``ATSBoardClients._guard``, the process's
+    shared guard): a tenant whose robots.txt disallows the board's own pages is not asked through ``/wday/cxs/`` either.
+    Every other provider keeps the per-URL check of the client's own hook (``robots_guard.install``) alone.
+    """
+
+    from .providers import spec
+    from .robots_guard import shared_guard
+
+    found = spec(provider)
+    return ATSBoardClients(shared_guard(None) if found is not None and found.public_paths is not None else None)
+
+
 def _match_board_row(
     client: "httpx.Client", provider: str, token: str, *, job_id: str | None, normalized_url: str
 ) -> PostingRow | None:
-    rows = ATSBoardClients().list_board(client, provider, token, _PERMISSIVE_CONFIG)
+    rows = _board_clients(provider).list_board(client, provider, token, _PERMISSIVE_CONFIG)
     for row in rows:
         if row.normalized_url == normalized_url:
             return row
@@ -761,14 +826,17 @@ def fetch_missing_description(
     """A posting the index holds NO description for: ONE request for that posting's own detail, through GigAI's public board client.
 
     Greenhouse: the single-job endpoint (``?content=true``), by the provider's id (so an embedded board's ``gh_jid`` posting works too).
-    Lever and Ashby: the board's list (their one public endpoint), the row matched by URL. No page is scraped, nothing else is asked, the
-    body cap is ``MAX_BODY_BYTES``. Raises :class:`PostingTextUnavailable` with a named reason; never retries.
+    Workday: ONE GET of the posting's cxs detail, addressed by the stored URL's own path (never the list), behind the site-level
+    robots gate. Lever and Ashby: the board's list (their one public endpoint), the row matched by URL. No page is scraped, nothing
+    else is asked, the body cap is ``MAX_BODY_BYTES``. Raises :class:`PostingTextUnavailable` with a named reason; never retries.
     """
 
     normalized = normalize_url(url)
     try:
         if provider == "greenhouse":
             found = _greenhouse_single_job(client, token, posting_id, source_url=url, normalized_url=normalized)
+        elif provider == "workday":
+            found = _workday_single_job(client, token, url, source_url=url, normalized_url=normalized)
         elif _has_detail_endpoint(provider):
             # B1: ONE GET of this posting's own detail, never the board's list plus a detail per posting.
             found = _detail_single_job(client, provider, token, posting_id, source_url=url, normalized_url=normalized)

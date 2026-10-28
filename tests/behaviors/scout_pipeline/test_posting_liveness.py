@@ -8,15 +8,20 @@ public board APIs and counts every request; no request leaves the process. The E
   shows it, "assess these" skips it (no model call) and says so;
 - 200: ``open``; 500 / 429 / a redirect / a timeout / a body that is no job: ``unknown``, nothing written;
 - Lever and Ashby: ``closed`` only on a miss in a list that answered 200;
-- one request per posting (and one per Lever/Ashby board), none within the hour, none for a row already removed;
+- Workday (0.1.11.12 P6): ``closed`` only on a miss in the board's COMPLETE list, read by the tenant's cxs list POSTs
+  (its own lister, every page a provider interval apart, one list read per board per hour), never a GET; a list the
+  page cap cut short is held for the hour too and closes nothing; a Workday address is never rebuilt from an id;
+- one request per posting (and one per Lever/Ashby/Workday board), none within the hour, none for a row already removed;
 - a posting the board lists again is live again after the next index refresh.
 """
 
 from __future__ import annotations
 
 from datetime import timedelta
+import json
 from pathlib import Path
 import threading
+import time
 
 import httpx
 import pytest
@@ -29,7 +34,7 @@ from tests.support.greenhouse_fixtures import gh_detail, gh_job, gh_url, posting
 from tests.support.posting_fixtures import NOW, TITLE_BOTH, PostingsFixture, build_postings_fixture, days_ago, job_url, lever_job
 
 try:  # the red run (HEAD has no check): the end-outcome tests then run with no fake board and fail on what Scout did
-    from gigai.scout.find_jobs import posting_live
+    from gigai.scout.find_jobs import ats_feeds, posting_live
 except ImportError:  # pragma: no cover - only at a commit before the fix
     posting_live = None  # type: ignore[assignment]
 
@@ -47,6 +52,7 @@ class _Boards:
 
     def __init__(self) -> None:
         self.requests: list[str] = []
+        self.posts: list[str] = []  # the Workday cxs list, POSTed
         self.greenhouse: dict[int, object] = {}
         self.lists: dict[str, tuple[int, object]] = {}  # "<host>/<token>" -> (status, body)
 
@@ -55,6 +61,16 @@ class _Boards:
         host, parts = request.url.host, request.url.path.strip("/").split("/")
         if host in ("api.lever.co", "api.ashbyhq.com"):
             status, body = self.lists.get(f"{host}/{parts[-1]}", (200, [] if host == "api.lever.co" else {"jobs": []}))
+            return httpx.Response(status, json=body)
+        if host.endswith(".myworkdayjobs.com"):  # /wday/cxs/<tenant>/<site>/jobs, a POST with {"limit", "offset", ...}
+            if request.method != "POST" or parts[:2] != ["wday", "cxs"] or parts[-1] != "jobs":
+                return httpx.Response(405, json={"error": "not the list"})
+            self.posts.append(f"{host}{request.url.path}")
+            status, body = self.lists.get(f"{host}/{parts[3]}", (200, {"total": 0, "jobPostings": []}))
+            listed = body.get("jobPostings") if type(body) is dict else None
+            if type(listed) is list:  # the page the POST asks for (the lister's loop: offset 0, 20, 40, ...)
+                offset = json.loads(request.content).get("offset", 0)
+                body = {"total": body.get("total", len(listed)), "jobPostings": listed[offset : offset + 20]}
             return httpx.Response(status, json=body)
         job_id = int(parts[-1])  # /v1/boards/<token>/jobs/<id>
         answer = self.greenhouse.get(job_id, 200)
@@ -276,6 +292,110 @@ def test_an_ashby_posting_by_its_link_is_reported_closed_on_a_list_miss_and_noth
     assert posting_live.job_liveness(fx.home_root, fx.target, "https://careers.example.test/jobs/9", now=NOW).state == "unknown"
     assert posting_live.job_liveness(fx.home_root, fx.target, "text:sha256:" + "a" * 64, now=NOW).state == "unknown"
     assert boards.requests == []
+
+
+# --- Workday: the board list through its own lister (0.1.11.12 P6) -------------------------------------------
+
+WD_HOST = "nvidia.wd5.myworkdayjobs.com"
+WD_SITE = "NVIDIAExternalCareerSite"
+WD_LIST_PATH = f"{WD_HOST}/wday/cxs/nvidia/{WD_SITE}/jobs"
+
+
+def _wd_row(n: int) -> dict[str, object]:
+    return {"title": TITLE_BOTH, "externalPath": f"/job/Santa-Clara/Staff-Engineer_JR{n}", "locationsText": "Santa Clara", "postedOn": "Posted Today", "bulletFields": [f"JR{n}"]}
+
+
+def _wd_url(n: int, locale: str = "") -> str:
+    return f"https://{WD_HOST}/{locale}{WD_SITE}/job/Santa-Clara/Staff-Engineer_JR{n}"
+
+
+def test_a_workday_posting_is_closed_only_when_the_boards_list_misses_it_one_post_a_board_an_hour(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    fx = build_postings_fixture(tmp_path, monkeypatch, deleted=False)  # the jobs are no rows of the read model: asked by their link
+    boards = _Boards().install(monkeypatch)
+
+    # The list fails (a 500, then a body that is no list): nothing is concluded.
+    for answer in [(500, {"error": "unavailable"}), (200, {"total": 1, "jobPostings": "none"})]:
+        posting_live.reset_memory()
+        boards.lists[f"{WD_HOST}/{WD_SITE}"] = answer
+        assert posting_live.job_liveness(fx.home_root, fx.target, _wd_url(2), now=NOW).state == "unknown", answer
+
+    # The list answers 200 without posting 2: closed. Postings 1 and 3 are open from the SAME list, as is posting 1
+    # by its locale address (a stored URL is matched by its last path segment too), and nothing was asked by GET.
+    posting_live.reset_memory()
+    boards.requests.clear()
+    boards.posts.clear()
+    boards.lists[f"{WD_HOST}/{WD_SITE}"] = (200, {"total": 2, "jobPostings": [_wd_row(1), _wd_row(3)]})
+    found = posting_live.jobs_liveness(fx.home_root, fx.target, [_wd_url(1), _wd_url(2), _wd_url(3), _wd_url(1, "en-US/")], now=NOW)
+    assert [found[job].state for job in (_wd_url(1), _wd_url(2), _wd_url(3), _wd_url(1, "en-US/"))] == ["open", "closed", "open", "open"]
+    assert boards.requests == [WD_LIST_PATH] == boards.posts, "more than one request for one board, or a GET of the list"
+
+    # Within the hour the held list answers a posting not asked before: no request.
+    boards.requests.clear()
+    assert posting_live.job_liveness(fx.home_root, fx.target, _wd_url(4), now=NOW).state == "closed"
+    assert boards.requests == []
+
+
+def test_a_workday_address_is_never_rebuilt_from_the_index_id() -> None:
+    # ``job_url`` is unset for Workday (the public address needs the list row's path, not the requisition id).
+    assert posting_live.board_job_url("workday", "nvidia.wd5.NVIDIAExternalCareerSite", "JR1990000") is None
+    assert posting_live.board_job_url("lever", "acme", "acme-00001") == "https://jobs.lever.co/acme/acme-00001"
+    assert not posting_live.is_company_site(_wd_url(1)), "a Workday tenant's host is the board's own, not a company site"
+
+
+class _Clock:
+    """``posting_live.time`` that never waits: ``sleep`` is recorded and advances the clock."""
+
+    def __init__(self) -> None:
+        self.now = time.monotonic()
+        self.slept: list[float] = []
+
+    def monotonic(self) -> float:
+        return self.now
+
+    def sleep(self, seconds: float) -> None:
+        self.slept.append(seconds)
+        self.now += seconds
+
+
+def test_every_workday_list_page_is_a_provider_interval_apart(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    fx = build_postings_fixture(tmp_path, monkeypatch, deleted=False)
+    boards = _Boards().install(monkeypatch)
+    clock = _Clock()
+    monkeypatch.setattr(posting_live, "time", clock)
+    monkeypatch.setenv("GIGAI_SCOUT_ATS_PROVIDER_FLOORS", "1")  # the conftest drops the floors; Workday's (1.0 s) is the point here
+    paced: list[str] = []
+    pace = posting_live._paced
+    monkeypatch.setattr(posting_live, "_paced", lambda provider: (paced.append(provider), pace(provider)))
+    boards.lists[f"{WD_HOST}/{WD_SITE}"] = (200, {"total": 50, "jobPostings": [_wd_row(n) for n in range(50)]})
+
+    assert posting_live.job_liveness(fx.home_root, fx.target, _wd_url(7), now=NOW).state == "open"
+
+    assert len(boards.posts) == 3 and paced == ["workday"] * 3, "three pages: three POSTs, each paced"
+    assert clock.slept == [pytest.approx(1.0), pytest.approx(1.0)], "Workday's floor (1.0 s) between pages, the first at once"
+
+
+def test_a_workday_list_the_page_cap_cut_short_closes_nothing_and_is_read_once_an_hour(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    fx = build_postings_fixture(tmp_path, monkeypatch, deleted=False)
+    boards = _Boards().install(monkeypatch)
+    monkeypatch.setattr(posting_live, "time", _Clock())
+    monkeypatch.setattr(ats_feeds, "WORKDAY_MAX_LIST_PAGES", 3)  # the lister's cap, read at call time: 60 rows here
+    boards.lists[f"{WD_HOST}/{WD_SITE}"] = (200, {"total": 70, "jobPostings": [_wd_row(n) for n in range(70)]})
+
+    # The cap cut the list short: a posting on it is open, one missing from it is NOT known gone.
+    assert posting_live.job_liveness(fx.home_root, fx.target, _wd_url(5), now=NOW).state == "open"
+    assert posting_live.job_liveness(fx.home_root, fx.target, _wd_url(999), now=NOW).state == "unknown"
+    assert len(boards.posts) == 3, "the pages up to the cap, read once"
+    # The partial list is held for the hour like a whole one: the board's next postings make no request.
+    assert posting_live.job_liveness(fx.home_root, fx.target, _wd_url(998), now=NOW).state == "unknown"
+    assert posting_live.job_liveness(fx.home_root, fx.target, _wd_url(50), now=NOW).state == "open"
+    assert len(boards.posts) == 3
+
+    # A board of exactly the cap's rows (``total`` reached on the last page) is complete: a miss is closed.
+    posting_live.reset_memory()
+    boards.posts.clear()
+    boards.lists[f"{WD_HOST}/{WD_SITE}"] = (200, {"total": 60, "jobPostings": [_wd_row(n) for n in range(60)]})
+    assert posting_live.job_liveness(fx.home_root, fx.target, _wd_url(999), now=NOW).state == "closed"
+    assert len(boards.posts) == 3
 
 
 # --- the next sources update --------------------------------------------------------------------------------

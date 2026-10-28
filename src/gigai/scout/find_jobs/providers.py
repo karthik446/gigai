@@ -93,8 +93,8 @@ class ProviderSpec:
     paged: bool = False
     #: 0.1.11.12: how the URLs are built when the token is more than one part; ``None`` = the ``{token}`` templates.
     url_rules: BoardUrlRules | None = None
-    #: 0.1.11.12: the path prefixes of the board's public pages a robots.txt must allow before its API is asked
-    #: (``robots_guard``, the stricter scope); ``None`` = the per-URL check only.
+    #: 0.1.11.12: the board's public page paths, as ``{site}`` templates of the three-part token (``"/{site}/"``), a
+    #: robots.txt must allow before its API is asked (``robots_guard``, the stricter scope); ``None`` = the per-URL check only.
     public_paths: tuple[str, ...] | None = None
     #: 0.1.11.12: at most this many requests in flight per provider (``market_acquisition._fetch_boards``); ``None`` = the limit's.
     concurrency: int | None = None

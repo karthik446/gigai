@@ -1128,23 +1128,32 @@ def _workday_list_pages(client: "httpx.Client", list_url: str, board_token: str,
     return pages
 
 
-def list_workday_board(client: "httpx.Client", board_token: str, config: FindJobsConfig) -> tuple[PostingRow, ...]:
-    """The uncached ``list_board`` path of a Workday board: its list pages (same cap) -> rows, NO detail request.
+def list_workday_board_with_partial(client: "httpx.Client", board_token: str, config: FindJobsConfig) -> tuple[tuple[PostingRow, ...], bool]:
+    """The uncached ``list_board`` path of a Workday board: its list pages (same cap) -> rows, NO detail request; and
+    whether the page cap cut the list short (``stats.partial``: a posting not among the rows may still be listed).
 
     B1 as for every registry provider: a row from here carries no description and the relative ``postedOn`` date; a
     single posting's text is ONE detail request (``job_input.fetch_missing_description``), never one per posting.
+    0.1.11.12 P6: ``posting_live`` reads the flag (a posting missing from a partial list is not known gone).
     """
 
     from .ats_feeds import workday_pages
     from .providers import jobs_from_payload
 
     found, _rules, list_url = _workday_board(board_token)
-    merged = workday_pages(_workday_list_pages(client, list_url, board_token, BoardFetchStats()))
+    stats = BoardFetchStats()
+    merged = workday_pages(_workday_list_pages(client, list_url, board_token, stats))
     jobs = jobs_from_payload("workday", _decode_json(merged, "workday", board_token))
     if jobs is None:
         _redacted_fail("bad_json", "workday", board_token)
         raise AssertionError("unreachable")
-    return found.rows(jobs, board_token, config, None, None)
+    return found.rows(jobs, board_token, config, None, None), stats.partial
+
+
+def list_workday_board(client: "httpx.Client", board_token: str, config: FindJobsConfig) -> tuple[PostingRow, ...]:
+    """The ``_LISTERS`` entry: the rows of :func:`list_workday_board_with_partial`, the flag dropped."""
+
+    return list_workday_board_with_partial(client, board_token, config)[0]
 
 
 _LISTERS = {
