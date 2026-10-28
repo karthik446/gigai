@@ -156,12 +156,6 @@ _WORKDAY_URL_RULES = BoardUrlRules(
 )
 
 
-def _workday_rows_pending(*_args: object, **_kwargs: object) -> tuple[PostingRow, ...]:
-    """Packet 1 stand-in for ``ats_feeds.workday_rows`` (packet 2): never answers rows, so no Workday body is read as empty."""
-
-    raise NotImplementedError("workday rows are not read yet (ats_feeds.workday_rows is packet 2)")
-
-
 def _build() -> dict[str, ProviderSpec]:
     from . import ats_feeds
     from .ats_board_clients import (
@@ -327,7 +321,7 @@ def _build() -> dict[str, ProviderSpec]:
             id_key="externalPath",
             title_key="title",
             url_key="externalPath",
-            rows=_workday_rows_pending,
+            rows=ats_feeds.workday_rows,
             published_field="postedOn",
             updated_field=None,
             list_has_text=False,

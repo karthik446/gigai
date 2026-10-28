@@ -721,6 +721,37 @@ def test_cached_posting_rows_are_the_acquire_rows_read_from_the_cache(tmp_path: 
     assert dict(nothing.rows) == {} and nothing.missing == ("ash-1",)
 
 
+def test_cached_posting_rows_read_a_workday_board_back_by_the_stored_id(tmp_path: Path) -> None:
+    """A Workday posting is indexed by its requisition id (else ``url:<public URL>``); the read-back matches the same id."""
+    from gigai.scout.find_jobs.providers import spec
+
+    token = "acme.wd5.AcmeCareers"
+    listed = {
+        "total": 3,
+        "jobPostings": [
+            {"title": "Senior Software Engineer", "externalPath": "/job/US-CA-Santa-Clara/Senior-Software-Engineer_R-290013", "locationsText": "Santa Clara, CA", "postedOn": "Posted 4 Days Ago", "bulletFields": ["R-290013"]},
+            {"title": "Software Engineer, Tools", "externalPath": "/job/US-WA-Seattle/Software-Engineer-Tools", "locationsText": "Seattle, WA", "postedOn": "Posted 30+ Days Ago", "bulletFields": ["Full time"]},
+            {"title": "Staff Accountant", "externalPath": "/job/US-CO-Denver/Staff-Accountant_R-1", "locationsText": "Denver, CO"},
+        ],
+    }
+    detail = {"jobPostingInfo": {"title": "Senior Software Engineer", "jobDescription": "<p>Build the platform.</p>", "startDate": "2026-10-20", "location": "Santa Clara, CA", "country": {"descriptor": "United States of America"}}}
+    _index, cache = _stores(tmp_path)
+    _cache_board(cache, "workday", token, listed)
+    detail_url = spec("workday").url_rules.detail_url(token, {"externalPath": listed["jobPostings"][0]["externalPath"]})
+    cache.store("workday", detail_url, body=_body(detail), etag=None, last_modified=None, marker=None)
+
+    indexed = parse_board_body("workday", token, _body(listed))
+    tools_id = "url:https://acme.wd5.myworkdayjobs.com/AcmeCareers/job/US-WA-Seattle/Software-Engineer-Tools"
+    assert list(indexed) == ["R-290013", tools_id, "R-1"]
+    read = cached_posting_rows(cache, "workday", token, list(indexed) + ["R-gone"])
+    assert list(read.rows) == ["R-290013", tools_id, "R-1"] and read.missing == ("R-gone",)
+    assert read.without_text == (tools_id, "R-1")  # only R-290013 has a cached detail
+    row = read.rows["R-290013"]
+    assert row.text == "Build the platform." and row.published_at == "2026-10-20T00:00:00Z" and row.countries == ("US",)
+    assert row.url == "https://acme.wd5.myworkdayjobs.com/AcmeCareers/job/US-CA-Santa-Clara/Senior-Software-Engineer_R-290013"
+    assert read.rows[tools_id].published_at is None and read.rows[tools_id].countries is None
+
+
 def test_the_last_update_summary_round_trips_beside_the_company_files(tmp_path: Path) -> None:
     index, _cache = _stores(tmp_path)
     assert index.read_update_summary() is None

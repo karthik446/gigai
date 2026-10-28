@@ -6,6 +6,7 @@ invented companies and postings.
 
 from __future__ import annotations
 
+from datetime import date
 import json
 
 import httpx
@@ -144,8 +145,7 @@ def test_workday_token_splits_and_urls() -> None:
     assert detail == "https://nvidia.wd5.myworkdayjobs.com/wday/cxs/nvidia/NVIDIAExternalCareerSite/job/US-CA-Santa-Clara/Senior-Software-Engineer_JR1990000"
     assert rules.detail_url(token, {"externalPath": "job/x"}) is None and rules.detail_url(token, {"externalPath": "/job/../x"}) is None
     assert rules.detail_url(token, {}) is None
-    with pytest.raises(NotImplementedError):  # packet 2 replaces the stand-in with ats_feeds.workday_rows
-        providers.spec("workday").rows([], token, _config())
+    assert providers.spec("workday").rows is ats_feeds.workday_rows  # packet 2: the real parser, no stand-in
     # The other sites go through the same rules: liveness has no job URL from an id, the catalog builds the board page.
     assert board_job_url("workday", token, "JR1990000") is None
     record = parse_company_record({"name": "NVIDIA", "ats": "workday", "board_slug": token})
@@ -166,6 +166,21 @@ def test_published_at_from_text_accepts_each_spelling() -> None:
     assert ats_feeds.published_at_from_text("2026-10-08T10:00:00") is None  # naive: not a date
     assert ats_feeds.published_at_from_text("2026-13-40") is None
     assert ats_feeds.published_at_from_text(None) is None
+
+
+def test_published_at_from_posted_on() -> None:
+    today = date(2026, 10, 28)
+    assert ats_feeds.published_at_from_posted_on("Posted Today", today) == "2026-10-28T00:00:00Z"
+    assert ats_feeds.published_at_from_posted_on("Posted Yesterday", today) == "2026-10-27T00:00:00Z"
+    assert ats_feeds.published_at_from_posted_on("Posted 4 Days Ago", today) == "2026-10-24T00:00:00Z"
+    assert ats_feeds.published_at_from_posted_on("Posted 1 Day Ago", today) == "2026-10-27T00:00:00Z"
+    assert ats_feeds.published_at_from_posted_on("posted 30 days ago", today) == "2026-09-28T00:00:00Z"
+    assert ats_feeds.published_at_from_posted_on("Today", today) == "2026-10-28T00:00:00Z"  # the leading word is optional
+    assert ats_feeds.published_at_from_posted_on("Posted 30+ Days Ago", today) is None  # Workday's cap: undated until the detail
+    assert ats_feeds.published_at_from_posted_on("", today) is None
+    assert ats_feeds.published_at_from_posted_on(None, today) is None  # missing on every row of some tenants
+    assert ats_feeds.published_at_from_posted_on("2026-10-20", today) is None  # not the relative spelling
+    assert ats_feeds.published_at_from_posted_on("Posted Soon", today) is None
 
 
 # --- the six parsers ------------------------------------------------------------------------------------------
@@ -253,6 +268,122 @@ def test_rippling_rows_read_date_and_text_from_the_detail() -> None:
     assert second.work_mode is None  # two locations with different modes: not stated
     assert second.countries == ("GB", "US")
     assert second.location == "New York; London"
+
+
+WORKDAY_TOKEN = "acme.wd5.AcmeCareers"
+WORKDAY_LIST = {
+    "total": 5,
+    "jobPostings": [
+        {
+            "title": "Senior Software Engineer, Platform",
+            "externalPath": "/job/US-CA-Santa-Clara/Senior-Software-Engineer--Platform_R-290013",
+            "locationsText": "Santa Clara, CA",
+            "postedOn": "Posted 4 Days Ago",
+            "bulletFields": ["R-290013"],
+            "timeType": "Full time",
+            "remoteType": "Hybrid",
+        },
+        {
+            "title": "Software Engineer, Backend",
+            "externalPath": "/job/US-TX-Austin/Software-Engineer--Backend_JR1990000",
+            "locationsText": "3 Locations",
+            "postedOn": "Posted 30+ Days Ago",
+            "bulletFields": ["JR1990000"],
+        },
+        {
+            # No ``_<reqid>`` suffix and no ``postedOn`` (the spike saw a tenant with none): the id comes from ``bulletFields``.
+            "title": "Software Engineer II",
+            "externalPath": "/job/Remote/Software-Engineer-II",
+            "locationsText": "Remote",
+            "bulletFields": ["R-55", "Full time"],
+            "remoteType": "Remote",
+        },
+        {
+            # Neither a suffix nor a plain first bullet: the index keys it by URL.
+            "title": "Software Engineer, Tools",
+            "externalPath": "/job/US-WA-Seattle/Software-Engineer-Tools",
+            "locationsText": "Seattle, WA",
+            "postedOn": "Posted Yesterday",
+            "bulletFields": ["Full time"],
+        },
+        {"title": "Staff Accountant", "externalPath": "/job/US-CO-Denver/Staff-Accountant_R-1", "locationsText": "Denver, CO", "postedOn": "Posted Today"},
+    ],
+    "facets": [],
+    "userAuthenticated": False,
+}
+WORKDAY_DETAIL = {
+    "jobPostingInfo": {
+        "title": "Senior Software Engineer, Platform",
+        "jobDescription": "<p>Build the platform.</p><ul><li>Own the services.</li></ul>",
+        "jobReqId": "R-290013",
+        "jobPostingId": "Senior-Software-Engineer--Platform_R-290013",
+        "location": "Santa Clara, CA",
+        "postedOn": "Posted 4 Days Ago",
+        "startDate": "2026-10-20",
+        "timeType": "Full time",
+        "remoteType": "Hybrid",
+        "country": {"descriptor": "United States of America", "id": "bc33aa3152ec42d4995f4791a106ed09"},
+    },
+    "hiringOrganization": {"name": "Acme"},
+    "similarJobs": [],
+}
+WORKDAY_DETAIL_BACKEND = {
+    "jobPostingInfo": {
+        "title": "Software Engineer, Backend",
+        "jobDescription": "<p>Run the backend.</p>",
+        "jobReqId": "JR1990000",
+        "location": "Austin, TX",
+        "additionalLocations": ["Denver, CO", "Remote - US"],
+        "startDate": "2026-09-01",
+        "country": {"descriptor": "United States of America"},
+    }
+}
+WORKDAY_DETAILS = {
+    WORKDAY_LIST["jobPostings"][0]["externalPath"]: WORKDAY_DETAIL,
+    WORKDAY_LIST["jobPostings"][1]["externalPath"]: WORKDAY_DETAIL_BACKEND,
+}
+
+
+def test_workday_rows_from_list_and_detail() -> None:
+    asked: list[str] = []
+
+    def lookup(path: str):
+        asked.append(path)
+        return WORKDAY_DETAILS.get(path)
+
+    jobs = WORKDAY_LIST["jobPostings"]
+    today = date(2026, 10, 28)
+    stats = BoardFetchStats()
+    rows = ats_feeds.workday_rows(jobs, WORKDAY_TOKEN, _config(), stats, lookup, today=today)
+    assert [row.title for row in rows] == ["Senior Software Engineer, Platform", "Software Engineer, Backend", "Software Engineer II", "Software Engineer, Tools"]
+    assert stats.listed == 5 and stats.prefiltered_out == 1
+    assert asked == [job["externalPath"] for job in jobs[:4]]  # the lookup is keyed by externalPath, the detail's address
+    platform, backend, remote, tools = rows
+    assert platform.url == "https://acme.wd5.myworkdayjobs.com/AcmeCareers/job/US-CA-Santa-Clara/Senior-Software-Engineer--Platform_R-290013"
+    assert platform.provider is ATSProvider.WORKDAY and platform.board_token == WORKDAY_TOKEN and platform.query_key == f"ats:workday:{WORKDAY_TOKEN}"
+    assert platform.published_at == "2026-10-20T00:00:00Z"  # the detail's startDate wins over "Posted 4 Days Ago" (2026-10-24)
+    assert platform.text is not None and "Build the platform." in platform.text and "Own the services." in platform.text and "<p>" not in platform.text
+    assert platform.content_sha256 is not None
+    assert platform.countries == ("US",) and platform.work_mode is WorkMode.HYBRID and platform.location == "Santa Clara, CA"
+    assert backend.published_at == "2026-09-01T00:00:00Z"  # "30+" alone is undated; the detail dates it
+    assert backend.location == "Austin, TX; Denver, CO; Remote - US"  # "3 Locations" spelled out from the detail
+    assert backend.work_mode is None and backend.countries == ("US",)
+    assert remote.published_at is None and remote.text is None and remote.countries is None  # no postedOn, no detail
+    assert remote.work_mode is WorkMode.REMOTE and remote.location == "Remote"
+    assert tools.published_at == "2026-10-27T00:00:00Z" and tools.url.endswith("/AcmeCareers/job/US-WA-Seattle/Software-Engineer-Tools")
+    assert [ats_feeds.workday_posting_id(job) for job in jobs] == ["R-290013", "JR1990000", "R-55", None, "R-1"]
+    # Without details: the relative date at day precision, "30+" undated, no countries, "N Locations" kept as listed.
+    platform_only, backend_only, _remote, _tools = ats_feeds.workday_rows(jobs, WORKDAY_TOKEN, _config(), None, None, today=today)
+    assert platform_only.published_at == "2026-10-24T00:00:00Z" and platform_only.countries is None and platform_only.text is None
+    assert backend_only.published_at is None and backend_only.location == "3 Locations"
+    assert ats_feeds.workday_rows(jobs, "acme", _config()) == ()  # not a Workday token: no public URL can be built
+    # The detail readers are the same table the pasted-URL path uses; the Rippling answers are unchanged.
+    assert ats_feeds.detail_text("workday", WORKDAY_DETAIL) == platform.text
+    assert ats_feeds.detail_title("workday", WORKDAY_DETAIL) == "Senior Software Engineer, Platform"
+    assert ats_feeds.detail_text("workday", {"jobPostingInfo": {}}) is None and ats_feeds.detail_title("workday", {}) is None
+    assert ats_feeds.detail_text("rippling", RIPPLING_DETAIL) == "About Acme.\nOwn the platform."
+    assert ats_feeds.detail_title("rippling", RIPPLING_DETAIL) == "Staff Software Engineer"
+    assert ats_feeds.detail_text("breezy", {"description": "x"}) is None and ats_feeds.detail_title("breezy", {"name": "x"}) is None
 
 
 GEM = [
@@ -423,6 +554,31 @@ def test_parse_board_body_for_each_new_provider() -> None:
     assert breezy["a8871d47cd6201"].content_sha256 is None  # no description in the list
     gem = parse_board_body("gem", "acme", json.dumps(GEM).encode("utf-8"))
     assert gem["4003629005"].updated_at == "2026-10-02T18:04:11Z"
+    # Workday (0.1.11.12): the fetcher's merged list body ({"total","jobPostings"}) under the three-part token; the posting
+    # id is the requisition id, the URL-keyed fallback only when a row has none; details come through the lookup.
+    body = json.dumps(WORKDAY_LIST).encode("utf-8")
+    workday = parse_board_body("workday", WORKDAY_TOKEN, body)
+    assert set(workday) == {"R-290013", "JR1990000", "R-55", "R-1", "url:https://acme.wd5.myworkdayjobs.com/AcmeCareers/job/US-WA-Seattle/Software-Engineer-Tools"}
+    assert workday["JR1990000"].published_at is None and workday["JR1990000"].content_sha256 is None and workday["JR1990000"].countries is None
+    assert workday["R-290013"].published_at is not None and workday["R-290013"].updated_at is None  # relative date, no change marker
+    detailed = parse_board_body("workday", WORKDAY_TOKEN, body, detail_lookup=lambda path, _marker: WORKDAY_DETAILS.get(path))
+    assert detailed["JR1990000"].published_at == "2026-09-01T00:00:00Z" and detailed["JR1990000"].countries == ("US",)
+    assert detailed["JR1990000"].content_sha256 is not None and detailed["JR1990000"].location == "Austin, TX; Denver, CO; Remote - US"
+    assert detailed["R-55"].content_sha256 is None
+
+
+def test_workday_details_are_read_from_the_board_cache(tmp_path) -> None:
+    """``has_detail`` and ``cached_detail_lookup`` find a Workday detail at ``url_rules.detail_url`` (what packet 3 stores)."""
+    from gigai.scout.find_jobs.company_index import cached_detail_lookup, has_detail
+
+    assert has_detail("workday") and has_detail("rippling") and has_detail("greenhouse") and not has_detail("breezy")
+    cache = BoardCache(tmp_path / "ats-boards")
+    path = WORKDAY_LIST["jobPostings"][0]["externalPath"]
+    detail_url = providers.spec("workday").url_rules.detail_url(WORKDAY_TOKEN, {"externalPath": path})
+    cache.store("workday", detail_url, body=json.dumps(WORKDAY_DETAIL).encode("utf-8"), etag=None, last_modified=None, marker="Posted 4 Days Ago")
+    lookup = cached_detail_lookup(cache, WORKDAY_TOKEN, ats="workday")
+    assert lookup(path, None) == WORKDAY_DETAIL
+    assert lookup("/job/US/Other_R-2", None) is None
 
 
 def test_unknown_provider_still_fails_closed() -> None:

@@ -74,7 +74,8 @@ from .ats_board_clients import (
     _published_at_from_epoch_ms,
 )
 from .contracts import PostingRow
-from .providers import jobs_from_payload, provider_names, token_from_list_url
+from .providers import ProviderSpec, jobs_from_payload, provider_names, token_from_list_url
+from .providers import board_url as provider_board_url
 from .providers import list_url as provider_list_url
 from .providers import spec as provider_spec
 
@@ -577,6 +578,24 @@ def _job_id(job: Mapping[str, object], url: str, id_key: str = "id") -> str:
     return f"url:{url}"
 
 
+def _listed_id(ats: str, slug: str, job: Mapping[str, object], url: str, id_key: str) -> str:
+    """The id the index stores for a listed job (``_row`` and the read-back in ``cached_posting_rows`` must agree).
+
+    Workday: the requisition id (``R-290013``, plan 8.7), else ``url:<public URL>`` — the list row's only scalar key is
+    ``externalPath``, a relative path that changes with the title slug. Every other provider: ``id_key``, else ``url:<url>``.
+    """
+
+    if ats == "workday":
+        from .ats_feeds import workday_posting_id
+
+        reqid = workday_posting_id(job)
+        if reqid is not None:
+            return reqid
+        board = provider_board_url("workday", slug)
+        return f"url:{board}{url}" if board is not None else f"url:{url}"
+    return _job_id(job, url, id_key)
+
+
 def _id_key(ats: str) -> str:
     found = provider_spec(ats)
     return "id" if found is None else found.id_key
@@ -623,9 +642,9 @@ def _row(ats: str, slug: str, job: dict[str, object], detail_lookup: DetailLooku
         if type(title) is not str or not title.strip():
             return None
         url = job.get(found.url_key)
-        posting_id = _job_id(job, url if type(url) is str else "", found.id_key)
+        posting_id = _listed_id(ats, slug, job, url if type(url) is str else "", found.id_key)
         feed_lookup = None
-        if detail_lookup is not None and found.detail_url is not None:
+        if detail_lookup is not None and has_detail(ats):
             def feed_lookup(job_id: str, _marker: object = None) -> Mapping[str, object] | None:
                 return detail_lookup(job_id, None)
         rows = found.rows([job], slug, _EveryTitle(title), None, feed_lookup)
@@ -707,11 +726,22 @@ def parse_board_body(
 _SHAPE_DRIFT_MIN_POSTINGS = 20
 
 
-def _has_detail(ats: str) -> bool:
-    """Whether ``ats`` fetches a per-job detail (Greenhouse, and a registry provider with ``detail_url``)."""
+def has_detail(ats: str) -> bool:
+    """Whether ``ats`` fetches a per-job detail (Greenhouse, and a registry provider with ``detail_url`` or ``url_rules``)."""
 
     found = provider_spec(ats)
-    return found is not None and found.detail_url is not None
+    return found is not None and (found.detail_url is not None or found.url_rules is not None)
+
+
+def _detail_url(found: ProviderSpec, slug: str, job_id: str) -> str | None:
+    """Where ``job_id``'s detail is cached: the ``{token}``/``{id}`` template, or the rules' answer for a posting whose
+    ``id_key`` is ``job_id`` (Workday: the lookup key is the row's ``externalPath``)."""
+
+    if found.detail_url is not None:
+        return found.detail_url.format(token=slug, id=job_id)
+    if found.url_rules is not None:
+        return found.url_rules.detail_url(slug, {found.id_key: job_id})
+    return None
 
 
 def cached_detail_lookup(cache: BoardCache, slug: str, *, allow_stale: bool = False, ats: str = "greenhouse") -> DetailLookup:
@@ -729,12 +759,12 @@ def cached_detail_lookup(cache: BoardCache, slug: str, *, allow_stale: bool = Fa
 
     if ats != "greenhouse":
         found = provider_spec(ats)
-        detail_url = found.detail_url if found is not None else None
 
         def feed_lookup(job_id: str, marker: str | None) -> dict[str, object] | None:
-            if detail_url is None:
+            url = _detail_url(found, slug, job_id) if found is not None else None
+            if url is None:
                 return None
-            entry = cache.lookup(ats, detail_url.format(token=slug, id=job_id))
+            entry = cache.lookup(ats, url)
             if entry is None:
                 return None
             try:
@@ -790,7 +820,7 @@ def cached_posting_rows(cache: BoardCache, ats: str, slug: str, posting_ids: Ite
         jobs = _jobs(ats, slug, entry.body)
     except CompanyIndexError:
         return CachedRows({}, missing=wanted)
-    lookup = cached_detail_lookup(cache, slug, allow_stale=allow_stale, ats=ats) if _has_detail(ats) else None
+    lookup = cached_detail_lookup(cache, slug, allow_stale=allow_stale, ats=ats) if has_detail(ats) else None
     remaining = set(wanted)
     found: dict[str, PostingRow] = {}
     without_text: list[str] = []
@@ -799,7 +829,7 @@ def cached_posting_rows(cache: BoardCache, ats: str, slug: str, posting_ids: Ite
         if not remaining:
             break
         url = job.get(url_key)
-        if type(url) is not str or not url or _job_id(job, url, id_key) not in remaining:
+        if type(url) is not str or not url or _listed_id(ats, slug, job, url, id_key) not in remaining:
             continue
         parsed = _row(ats, slug, job, lookup)
         if parsed is None:
@@ -988,7 +1018,7 @@ def refresh_company(
         # The same body again, for its dates only: the stored digests stand, so no description is looked up.
         # Greenhouse details are looked up only on a description fill (``details``); a registry provider with a
         # detail endpoint (Rippling) caches its details during the fetch itself, so they are read whenever cached.
-        wants_details = (details and ats == "greenhouse") or (ats != "greenhouse" and _has_detail(ats))
+        wants_details = (details and ats == "greenhouse") or (ats != "greenhouse" and has_detail(ats))
         lookup = cached_detail_lookup(cache, slug, ats=ats) if wants_details and not same_body else None
         try:
             observed, listed, skipped = _parse_counted(ats, slug, entry.body, lookup)

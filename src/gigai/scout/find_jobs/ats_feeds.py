@@ -1,4 +1,4 @@
-"""Row parsers for the 0.1.11.8 feeds: Workable, Rippling, Gem, Recruitee, Pinpoint, Breezy.
+"""Row parsers for the 0.1.11.8 feeds (Workable, Rippling, Gem, Recruitee, Pinpoint, Breezy) and Workday (0.1.11.12).
 
 Each provider's public, unauthenticated per-company feed was probed on 2026-10-08
 (docs/followups/SPIKE-expand-reach.md section 3; the response shapes are in
@@ -11,7 +11,8 @@ signature as ``ats_board_clients._lever_rows``::
 takes it out of the envelope), the title prefilter is ``matches_roles``, and a
 job without a title or a URL is skipped, as the three older parsers do.
 ``detail_lookup(job_id) -> payload | None`` is only read by a two-phase provider
-(Rippling: the list has no date and no description; the per-job detail has both).
+(Rippling: the list has no date and no description; the per-job detail has both;
+Workday: the lookup is keyed by the list row's ``externalPath``, the spec's ``id_key``).
 
 Assumed shapes (read as of 2026-10-08; a provider may change them, so a failure is
 ``bad_json`` / a skipped row, never an assertion):
@@ -37,12 +38,19 @@ Assumed shapes (read as of 2026-10-08; a provider may change them, so a failure 
 * Breezy ``GET https://{token}.breezy.hr/json`` -> ``[{"id", "name", "url", "published_date",
   "location": {"name", "country": {"name", "id"}, "city", "is_remote"}, "department"}]``
   (no description in the list; the job page carries it).
+* Workday ``POST https://<tenant>.<pod>.myworkdayjobs.com/wday/cxs/<tenant>/<site>/jobs`` (probed 2026-10) ->
+  ``{"total", "jobPostings": [{"title", "externalPath"
+  ("/job/<location>/<title-slug>_<reqid>"), "locationsText", "postedOn" (relative: "Posted 4 Days Ago"),
+  "bulletFields": [reqid, ...], "timeType", "remoteType"?}]}`` (pages merged by the fetcher into one body);
+  detail ``GET .../wday/cxs/<tenant>/<site><externalPath>`` -> ``{"jobPostingInfo": {"title", "jobDescription"
+  (HTML), "jobReqId", "location", "additionalLocations"?, "startDate" (ISO date), "remoteType"?,
+  "country": {"descriptor"}}}``.
 """
 
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
-from datetime import datetime
+from datetime import date, datetime, timedelta, timezone
 import json
 import re
 
@@ -61,6 +69,7 @@ from .ats_board_clients import (
 )
 from .contracts import ATSProvider, FindJobsConfig, PostingRow, SourceKind, WorkMode, normalize_url
 from .filters import sponsorship_from_text
+from .providers import board_url
 
 DetailLookup = Callable[[str], Mapping[str, object] | None]
 
@@ -89,6 +98,29 @@ def published_at_from_text(value: object) -> str | None:
     if matched:
         return f"{matched.group(1)}T{matched.group(2)}Z"
     return _published_at_from_iso(text)
+
+
+_POSTED_ON = re.compile(r"^\s*(?:posted\s+)?(?:(today)|(yesterday)|(\d+)(\+?)\s+days?\s+ago)\s*$", re.IGNORECASE)
+
+
+def published_at_from_posted_on(value: object, today: date) -> str | None:
+    """Workday's relative ``postedOn`` -> a day-precision ISO datetime (``YYYY-MM-DDT00:00:00Z``), or ``None``.
+
+    ``Posted Today`` -> ``today``, ``Posted Yesterday`` -> ``today - 1``, ``Posted N Days Ago`` -> ``today - N``
+    (the leading ``Posted`` is optional). ``Posted 30+ Days Ago`` is Workday's cap, not a date, so it and a missing
+    or unparsable value answer ``None``: the posting stays undated until its detail's ``startDate`` is read.
+    """
+
+    found = _POSTED_ON.match(value) if type(value) is str else None
+    if found is None or found.group(4):
+        return None
+    if found.group(1):
+        days = 0
+    elif found.group(2):
+        days = 1
+    else:
+        days = int(found.group(3))
+    return f"{(today - timedelta(days=days)).isoformat()}T00:00:00Z"
 
 
 def _str(value: object) -> str | None:
@@ -281,6 +313,111 @@ def rippling_rows(
 
 
 # ---------------------------------------------------------------------------
+# Workday (0.1.11.12): a POST list merged over pages, a detail per matching title
+# ---------------------------------------------------------------------------
+
+_WORKDAY_REQ_ID = re.compile(r"_([A-Za-z0-9-]+)$")
+_WORKDAY_SAFE_ID = re.compile(r"^[A-Za-z0-9-]+$")
+_WORKDAY_N_LOCATIONS = re.compile(r"^\d+ Locations$")
+
+
+def workday_posting_id(job: Mapping[str, object]) -> str | None:
+    """The requisition id a Workday list row names (``R-290013``), or ``None`` when the row carries none.
+
+    The ``_<reqid>`` suffix of ``externalPath`` (``/job/<location>/<title-slug>_<reqid>``); when the path has no
+    suffix, ``bulletFields[0]`` if it is a plain id. ``None`` means the caller falls back to ``url:<url>``
+    (``company_index._row``), so a posting without an id is still indexed, just not stable across a renamed path.
+    """
+
+    path = _str(job.get("externalPath"))
+    found = _WORKDAY_REQ_ID.search(path.rsplit("/", 1)[-1]) if path else None
+    if found is not None:
+        return found.group(1)
+    bullets = job.get("bulletFields")
+    first = bullets[0] if type(bullets) is list and bullets else None
+    return first if type(first) is str and _WORKDAY_SAFE_ID.fullmatch(first) else None
+
+
+def _workday_info(detail: Mapping[str, object] | None) -> Mapping[str, object] | None:
+    info = detail.get("jobPostingInfo") if detail is not None else None
+    return info if type(info) is dict else None
+
+
+def _workday_text(detail: Mapping[str, object] | None) -> str | None:
+    info = _workday_info(detail)
+    description = info.get("jobDescription") if info is not None else None
+    return (html_to_text(description) or None) if type(description) is str else None
+
+
+def _workday_title(detail: Mapping[str, object] | None) -> str | None:
+    info = _workday_info(detail)
+    return _str(info.get("title")) if info is not None else None
+
+
+def _workday_location(listed: str, info: Mapping[str, object] | None) -> str:
+    """The list's ``locationsText``, except the literal ``N Locations`` is spelled out from a fetched detail."""
+
+    if info is None or not _WORKDAY_N_LOCATIONS.fullmatch(listed):
+        return listed
+    names = [_str(info.get("location"))]
+    more = info.get("additionalLocations")
+    if type(more) is list:
+        names.extend(_str(item) if type(item) is str else _str(item.get("descriptor")) if type(item) is dict else None for item in more)
+    joined = "; ".join(dict.fromkeys(name for name in names if name))
+    return joined or listed
+
+
+def workday_rows(
+    jobs: list,
+    board_token: str,
+    config: FindJobsConfig,
+    stats: BoardFetchStats | None = None,
+    detail_lookup: DetailLookup | None = None,
+    *,
+    today: date | None = None,
+) -> tuple[PostingRow, ...]:
+    """Rows from a Workday list (``jobPostings``), each merged with its detail when ``detail_lookup`` has one.
+
+    ``detail_lookup`` is keyed by the row's ``externalPath`` (the only thing the detail URL is built from). The
+    public URL is ``<board page><externalPath>``; ``countries`` and ``text`` come from the detail only; the detail's
+    ``startDate`` dates the posting, else the list's relative ``postedOn`` against ``today`` (UTC, day precision).
+    """
+
+    board = board_url("workday", board_token)
+    if board is None:
+        return ()
+    day = today if today is not None else datetime.now(timezone.utc).date()
+    rows: list[PostingRow] = []
+    for job, title in _each(jobs, config, stats, "title"):
+        path = _str(job.get("externalPath"))
+        if path is None or not path.startswith("/"):
+            continue
+        detail = detail_lookup(path) if detail_lookup is not None else None
+        info = _workday_info(detail)
+        country = info.get("country") if info is not None else None
+        mode = work_mode_from_label(job.get("remoteType"))
+        if mode is None and info is not None:
+            mode = work_mode_from_label(info.get("remoteType"))
+        published_at = published_at_from_text(info.get("startDate")) if info is not None else None
+        if published_at is None:
+            published_at = published_at_from_posted_on(job.get("postedOn"), day)
+        rows.append(
+            _row(
+                provider=ATSProvider.WORKDAY,
+                board_token=board_token,
+                url=board + path,
+                title=title,
+                location=_workday_location(_str(job.get("locationsText")) or "", info),
+                published_at=published_at,
+                text=_workday_text(detail),
+                countries=_countries(country.get("descriptor")) if type(country) is dict else None,
+                work_mode=mode,
+            )
+        )
+    return tuple(rows)
+
+
+# ---------------------------------------------------------------------------
 # Gem
 # ---------------------------------------------------------------------------
 
@@ -453,19 +590,27 @@ def breezy_rows(
     return tuple(rows)
 
 
+#: What a two-phase provider's single detail payload carries: ``(text reader, title reader)`` by provider name.
+#: Each reader answers ``None`` when the payload has no such field. (A table, not ``ProviderSpec`` fields: the spec
+#: module imports this one lazily, so the detail shapes live beside the parsers that read them.)
+_DETAIL_SHAPES: dict[str, tuple[Callable[[Mapping[str, object]], str | None], Callable[[Mapping[str, object]], str | None]]] = {
+    "rippling": (_rippling_text, lambda detail: _str(detail.get("name"))),
+    "workday": (_workday_text, _workday_title),
+}
+
 
 def detail_text(provider: str, detail: Mapping[str, object]) -> str | None:
     """The posting text a two-phase provider's single detail payload carries (``None`` when it has none)."""
 
-    if provider == "rippling":
-        return _rippling_text(detail)
-    return None
+    shape = _DETAIL_SHAPES.get(provider)
+    return shape[0](detail) if shape is not None else None
 
 
 def detail_title(provider: str, detail: Mapping[str, object]) -> str | None:
     """The posting title a two-phase provider's single detail payload carries."""
 
-    return _str(detail.get("name")) if provider == "rippling" else None
+    shape = _DETAIL_SHAPES.get(provider)
+    return shape[1](detail) if shape is not None else None
 
 
 # ---------------------------------------------------------------------------
