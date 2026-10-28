@@ -699,6 +699,38 @@ def fetch_paged_list(
 
 
 # ---------------------------------------------------------------------------
+# Workday pages (a POST list, 20 postings a page; the fetcher is ``ats_board_clients.fetch_workday_board``)
+# ---------------------------------------------------------------------------
+
+#: 0.1.11.12 (D2): a Workday board is read for at most this many list pages per update (2,000 postings at
+#: :data:`WORKDAY_PAGE_SIZE`); a board with more is stored as far as it was read and counted ``partial``.
+WORKDAY_MAX_LIST_PAGES = 100
+#: Postings asked per list page (``limit``; the spike read 20 a page, larger values were not probed).
+WORKDAY_PAGE_SIZE = 20
+#: At most this many detail GETs per board per update, whatever the prefilter names; the rest wait for a later update.
+WORKDAY_MAX_DETAILS_PER_UPDATE = 200
+
+
+def workday_pages(pages: list[Mapping[str, object]]) -> bytes:
+    """The decoded list pages joined into ONE ``{"total", "jobPostings"}`` body: what the cache holds under the list URL.
+
+    ``total`` is page 1's (later pages report ``0``); when page 1 carries no count the joined postings are counted. Only
+    dict postings are kept (what ``providers.jobs_from_payload`` reads back). The body is compact JSON, so an unchanged
+    board digests the same on the next update (``revalidated``).
+    """
+
+    jobs: list[object] = []
+    for page in pages:
+        listed = page.get("jobPostings")
+        if type(listed) is list:
+            jobs.extend(job for job in listed if type(job) is dict)
+    total = pages[0].get("total") if pages else None
+    if type(total) is not int or isinstance(total, bool) or total < len(jobs):
+        total = len(jobs)
+    return json.dumps({"total": total, "jobPostings": jobs}, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+
+
+# ---------------------------------------------------------------------------
 # Job-page JSON-LD (Breezy)
 # ---------------------------------------------------------------------------
 
@@ -737,6 +769,9 @@ def jobposting_from_page(html: str) -> tuple[str | None, str] | None:
 __all__ = [
     "DetailLookup",
     "MAX_LIST_PAGES",
+    "WORKDAY_MAX_DETAILS_PER_UPDATE",
+    "WORKDAY_MAX_LIST_PAGES",
+    "WORKDAY_PAGE_SIZE",
     "detail_text",
     "detail_title",
     "fetch_paged_list",
@@ -749,4 +784,5 @@ __all__ = [
     "recruitee_rows",
     "rippling_rows",
     "workable_rows",
+    "workday_pages",
 ]

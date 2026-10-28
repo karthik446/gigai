@@ -390,6 +390,41 @@ def test_a_budget_stop_is_partial_and_the_next_update_continues_where_it_stopped
     assert second.to_json()["postings"]["new"] == 2
 
 
+class _WorkerATS:
+    """Records the pool thread that ran each board: the Lever boards wait until four run at once, the Workday boards wait for them."""
+
+    def __init__(self) -> None:
+        self.lock = threading.Lock()
+        self.threads: dict[str, set[str]] = {}
+        self.four_lever = threading.Barrier(4)
+        self.lever_done = threading.Event()
+
+    def fetch_board(self, client, provider, board_token, config, *, cache=None):
+        with self.lock:
+            self.threads.setdefault(provider, set()).add(threading.current_thread().name)
+        if provider == "lever":
+            self.four_lever.wait(timeout=10)  # only passes when four Lever boards are in flight together
+            self.lever_done.set()
+            body = json.dumps([{"id": f"{board_token}-1", "text": "Software Engineer", "hostedUrl": f"https://jobs.lever.co/{board_token}/1", "descriptionPlain": "Build."}]).encode()
+        else:
+            # Held while the Lever boards run: a second Workday worker, if there were one, would start the other board meanwhile.
+            assert self.lever_done.wait(timeout=10)
+            body = json.dumps({"total": 1, "jobPostings": [{"title": "Software Engineer", "externalPath": f"/job/Remote/Software-Engineer_R-{board_token.count('.')}"}]}).encode()
+        cache.store(provider, board_list_url(provider, board_token), body=body, etag=None, last_modified=None, marker=None)
+        return BoardFetchResult((), BoardFetchStats(requests=1, cache="miss", listed=1))
+
+
+def test_workday_provider_runs_one_worker(tmp_path: Path) -> None:
+    """0.1.11.12: one Workday tenant answers every board, so its pool has ONE worker whatever the limit; others keep the limit's."""
+    watchlist = [_board(ATSProvider.WORKDAY, "acme.wd5.AcmeCareers"), _board(ATSProvider.WORKDAY, "globex.wd1.Jobs")]
+    watchlist += [_board(ATSProvider.LEVER, f"b{n}") for n in range(4)]
+    ats = _WorkerATS()
+    result = update_sources(watchlist, cache=board_cache_for_home(tmp_path), index=CompanyIndex.for_home(tmp_path), client=None, ats=ats, config=_config(), limits=_limits(concurrency=4))
+    assert result.status == STATUS_SUCCEEDED and result.to_json()["boards"]["checked"] == 6
+    assert ats.threads["workday"] == {"scout-ats-workday_0"}  # both boards, one after the other, on the single worker
+    assert len(ats.threads["lever"]) == 4
+
+
 # --- one update at a time, and what a reader sees ---------------------------------
 
 

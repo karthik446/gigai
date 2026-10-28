@@ -664,6 +664,7 @@ def _fetch_boards(
             rotation=plan.rotation_json(page_sizes=fetch_index.page_sizes, newly_covered=None),
         )
     workers = max(1, int(limits.concurrency_per_provider))
+    from .providers import spec as provider_spec
     stamped: dict[str, str] = {}
     last_flush = time.monotonic()
 
@@ -697,7 +698,11 @@ def _fetch_boards(
                 limiters[provider] = _RateLimiter(interval, stop=stop)
                 host_pace = getattr(getattr(ats, "robots", None), "pace", None)
                 throttled[provider] = _ThrottledClient(client, limiters[provider], host_pace=host_pace) if client is not None else None
-                executors[provider] = ThreadPoolExecutor(max_workers=workers, thread_name_prefix=f"scout-ats-{provider}")
+                # 0.1.11.12: a provider with its own ceiling (Workday: 1, one tenant answers every board) never runs
+                # more boards at once than that, whatever the limit says.
+                found = provider_spec(provider)
+                cap = found.concurrency if found is not None and found.concurrency is not None else workers
+                executors[provider] = ThreadPoolExecutor(max_workers=max(1, min(workers, cap)), thread_name_prefix=f"scout-ats-{provider}")
             future = executors[provider].submit(
                 _fetch_one_board,
                 board,
@@ -991,7 +996,7 @@ def _fetch_exa_new_boards(
 
 
 class _CountingClient:
-    """Pass-through client that counts the requests it is asked to make."""
+    """Pass-through client that counts the requests it is asked to make (``get`` and, 0.1.11.12, Workday's list ``post``)."""
 
     def __init__(self, client: Any) -> None:
         self._client = client
@@ -1002,6 +1007,11 @@ class _CountingClient:
         with self._lock:
             self.requests += 1
         return self._client.get(url, *args, **kwargs)
+
+    def post(self, url: str, *args: Any, **kwargs: Any) -> Any:
+        with self._lock:
+            self.requests += 1
+        return self._client.post(url, *args, **kwargs)
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self._client, name)

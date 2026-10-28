@@ -74,7 +74,11 @@ from .contracts import (
 from .filters import sponsorship_from_text
 
 if TYPE_CHECKING:  # pragma: no cover - imported only by static type checkers
+    from collections.abc import Mapping
+
     import httpx
+
+    from .providers import BoardUrlRules, ProviderSpec
 
 
 # Block-level tags that should force a line break in the extracted text so
@@ -1072,10 +1076,81 @@ def _greenhouse_rows(
     return tuple(rows)
 
 
+def _workday_board(board_token: str) -> "tuple[ProviderSpec, BoardUrlRules, str]":
+    """The Workday spec, its URL rules and the list URL of ``board_token``; a token that is not three-part fails."""
+
+    from .providers import spec
+
+    found = spec("workday")
+    rules = found.url_rules if found is not None else None
+    list_url = rules.list_url(board_token) if rules is not None else None
+    if found is None or rules is None or list_url is None:
+        raise ATSBoardClientError("bad_board_token", f"not a Workday board token: {board_token!r}")
+    return found, rules, list_url
+
+
+def _workday_list_pages(client: "httpx.Client", list_url: str, board_token: str, stats: BoardFetchStats) -> list[dict[str, object]]:
+    """The decoded list pages of a Workday board, in order: ``POST`` ``{"limit": 20, "offset": 0, 20, 40, ...}``.
+
+    Read while a page lists postings and the next offset is under page 1's ``total`` (later pages report ``0``), for
+    at most ``ats_feeds.WORKDAY_MAX_LIST_PAGES`` pages: at the cap ``stats.partial`` is set and the pages read so far
+    are answered. Every page is one request (uncached: the caller stores what it makes of them). A page that is not
+    ``{"jobPostings": [...]}`` fails the board (``bad_json``).
+    """
+
+    from .ats_feeds import WORKDAY_MAX_LIST_PAGES, WORKDAY_PAGE_SIZE
+
+    provider = "workday"
+    pages: list[dict[str, object]] = []
+    total: int | None = None
+    offset = 0
+    while True:
+        payload = {"limit": WORKDAY_PAGE_SIZE, "offset": offset, "searchText": "", "appliedFacets": {}}
+        body, _page_status = _cached_post(client, list_url, provider, board_token, payload=payload, cache=None, stats=stats)
+        page = _decode_json(body, provider, board_token)
+        listed = page.get("jobPostings") if type(page) is dict else None
+        if type(listed) is not list:
+            _redacted_fail("bad_json", provider, board_token)
+            raise AssertionError("unreachable")
+        if not listed:
+            break
+        pages.append(page)  # type: ignore[arg-type]
+        if len(pages) == 1:
+            count = page.get("total")  # type: ignore[union-attr]
+            total = count if type(count) is int and not isinstance(count, bool) and count > 0 else None
+        offset += WORKDAY_PAGE_SIZE
+        if total is not None and offset >= total:
+            break
+        if len(pages) >= WORKDAY_MAX_LIST_PAGES:
+            stats.partial = True
+            break
+    return pages
+
+
+def list_workday_board(client: "httpx.Client", board_token: str, config: FindJobsConfig) -> tuple[PostingRow, ...]:
+    """The uncached ``list_board`` path of a Workday board: its list pages (same cap) -> rows, NO detail request.
+
+    B1 as for every registry provider: a row from here carries no description and the relative ``postedOn`` date; a
+    single posting's text is ONE detail request (``job_input.fetch_missing_description``), never one per posting.
+    """
+
+    from .ats_feeds import workday_pages
+    from .providers import jobs_from_payload
+
+    found, _rules, list_url = _workday_board(board_token)
+    merged = workday_pages(_workday_list_pages(client, list_url, board_token, BoardFetchStats()))
+    jobs = jobs_from_payload("workday", _decode_json(merged, "workday", board_token))
+    if jobs is None:
+        _redacted_fail("bad_json", "workday", board_token)
+        raise AssertionError("unreachable")
+    return found.rows(jobs, board_token, config, None, None)
+
+
 _LISTERS = {
     "greenhouse": list_greenhouse_board,
     "lever": list_lever_board,
     "ashby": list_ashby_board,
+    "workday": list_workday_board,
 }
 
 
@@ -1145,6 +1220,9 @@ class BoardFetchStats:
     detail_failed: int = 0
     #: 1 when this call ran the board's one-time ``?content=true`` fill pass.
     content_filled: int = 0
+    #: 0.1.11.12: ``True`` when the list was cut at its page cap (Workday: ``ats_feeds.WORKDAY_MAX_LIST_PAGES``), so
+    #: the stored body and ``listed`` cover only the pages read; every other field keeps its meaning.
+    partial: bool = False
 
     def to_json(self) -> dict[str, object]:
         return {
@@ -1156,6 +1234,7 @@ class BoardFetchStats:
             "detail_cached": self.detail_cached,
             "detail_failed": self.detail_failed,
             "content_filled": self.content_filled,
+            "partial": self.partial,
         }
 
 
@@ -1524,6 +1603,44 @@ def _cached_request(
     return body, status
 
 
+def _cached_post(
+    client: "httpx.Client",
+    url: str,
+    provider: str,
+    board_token: str,
+    *,
+    payload: "Mapping[str, object]",
+    cache: BoardCache | None,
+    stats: BoardFetchStats,
+) -> tuple[bytes, str]:
+    """POST ``payload`` (JSON) to ``url`` through the cache; returns ``(body, cache_status)`` like ``_cached_request``.
+
+    A POST carries no validators and never answers ``304``, so the request is always made and the body always
+    transferred: the cache's part is the digest. The entry is keyed by the URL AND the body (``<url>#post=<canonical
+    JSON>``), so two pages of one list are two entries. ``200`` with the stored digest -> ``revalidated``; a new
+    body -> ``miss`` and the entry is rewritten; no cache -> ``bypass``. Failure codes are ``_request``'s.
+    """
+
+    import httpx
+
+    key = f"{url}#post={json.dumps(payload, separators=(',', ':'), sort_keys=True)}"
+    entry = cache.lookup(provider, key) if cache is not None else None
+    try:
+        response = client.post(url, json=payload, headers={"Accept": "application/json"})
+    except httpx.HTTPError:
+        _redacted_fail("network_error", provider, board_token)
+        raise AssertionError("unreachable")
+    stats.requests += 1
+    if response.status_code != 200:
+        _redacted_fail("http_error", provider, board_token)
+    body = bytes(response.content)
+    if cache is None:
+        return body, "bypass"
+    status = "revalidated" if entry is not None and entry.sha256 == digest_imported_bytes(body) else "miss"
+    cache.store(provider, key, body=body, etag=None, last_modified=None, marker=None)
+    return body, status
+
+
 def _decode_json(body: bytes, provider: str, board_token: str) -> object:
     try:
         return json.loads(body.decode("utf-8"))
@@ -1803,10 +1920,100 @@ def fetch_feed_board(
     return BoardFetchResult(found.rows(jobs, board_token, config, stats, lookup), stats)
 
 
+def fetch_workday_board(
+    client: "httpx.Client",
+    board_token: str,
+    config: FindJobsConfig,
+    *,
+    cache: BoardCache | None = None,
+    stats: BoardFetchStats | None = None,
+    title_filter: "Callable[[str], bool] | None" = None,
+) -> BoardFetchResult:
+    """The cached, prefiltered fetch of a Workday board (0.1.11.12): a POST list over pages, then one detail GET per title.
+
+    The list is ``POST <list URL>`` with ``{"limit": 20, "offset": 0, 20, 40, ...}`` (``ats_feeds.WORKDAY_PAGE_SIZE``),
+    asked while a page lists postings and the next offset is under page 1's ``total`` (later pages report ``0``), for
+    at most ``ats_feeds.WORKDAY_MAX_LIST_PAGES`` pages: at the cap the board is stored as far as it was read and
+    ``stats.partial`` is set. A POST never answers ``304``, so every page is one request (``_cached_post``); the pages
+    are joined into ONE ``{"total", "jobPostings"}`` body (``ats_feeds.workday_pages``) stored under the list URL with
+    no validators, and the digest alone decides ``revalidated`` (unchanged board) or ``miss``. A page that cannot be
+    read fails the board.
+
+    Details: one GET of ``url_rules.detail_url(token, posting)`` per listed title the prefilter passes (or
+    ``title_filter``, the update's gate, exactly as ``fetch_feed_board``), through ``_cached_request`` with the row's
+    ``postedOn`` as the marker: a cached detail with the same marker is read without a request; a young posting's
+    marker changes daily until "30+ Days Ago", so its detail is re-asked (conditionally) while it is young. At most
+    ``ats_feeds.WORKDAY_MAX_DETAILS_PER_UPDATE`` detail requests per call; past that a cached detail is still read and
+    an uncached one waits for a later update. Each detail is its own cache entry at the detail URL, keyed by the
+    row's ``externalPath``: what ``company_index.cached_detail_lookup`` reads back. ``stats.requests`` = pages + details.
+    """
+
+    from .ats_feeds import WORKDAY_MAX_DETAILS_PER_UPDATE, workday_pages
+    from .providers import jobs_from_payload
+
+    provider = "workday"
+    found, rules, list_url = _workday_board(board_token)
+    stats = stats if stats is not None else BoardFetchStats()
+    prior = cache.lookup(provider, list_url) if cache is not None else None
+    merged = workday_pages(_workday_list_pages(client, list_url, board_token, stats))
+    if cache is not None:
+        cache.store(provider, list_url, body=merged, etag=None, last_modified=None, marker=None)
+        stats.cache = "revalidated" if prior is not None and prior.sha256 == digest_imported_bytes(merged) else "miss"
+    else:
+        stats.cache = "bypass"
+    jobs = jobs_from_payload(provider, _decode_json(merged, provider, board_token))
+    if jobs is None:
+        _redacted_fail("bad_json", provider, board_token)
+        raise AssertionError("unreachable")
+    by_path = {path: job for job in jobs if type(path := job.get(found.id_key)) is str}
+    asked = 0
+
+    def lookup(path: str) -> dict[str, object] | None:
+        nonlocal asked
+        job = by_path.get(path)
+        url = rules.detail_url(board_token, job) if job is not None else None
+        if url is None:
+            return None
+        posted_on = job.get("postedOn")
+        marker = posted_on if type(posted_on) is str and posted_on else None
+        entry = cache.lookup(provider, url) if cache is not None else None
+        if asked >= WORKDAY_MAX_DETAILS_PER_UPDATE:
+            if entry is None:
+                return None
+            detail_body = entry.body
+        else:
+            before = stats.requests
+            try:
+                detail_body, _detail_status = _cached_request(client, url, provider, board_token, cache=cache, stats=stats, marker=marker)
+            except ATSBoardClientError:
+                asked += 1
+                stats.detail_failed += 1
+                return None
+            if stats.requests == before:
+                stats.detail_cached += 1
+            else:
+                asked += 1
+                stats.detail_fetched += 1
+        try:
+            detail = _decode_json(detail_body, provider, board_token)
+        except ATSBoardClientError:
+            return None
+        return detail if isinstance(detail, dict) else None
+
+    if title_filter is not None:
+        # The update's gate: warm the detail cache for the titles it names; the index reads them back.
+        for path, job in by_path.items():
+            title = job.get(found.title_key)
+            if type(title) is str and title_filter(title):
+                lookup(path)
+    return BoardFetchResult(found.rows(jobs, board_token, config, stats, lookup), stats)
+
+
 _FETCHERS = {
     "greenhouse": fetch_greenhouse_board,
     "lever": fetch_lever_board,
     "ashby": fetch_ashby_board,
+    "workday": fetch_workday_board,
 }
 
 
@@ -1885,6 +2092,9 @@ class ATSBoardClients:
         client = self._guard(client, provider, board_token)
         if descriptions and provider == "greenhouse":
             return fetch_greenhouse_board(client, board_token, config, cache=cache, descriptions=True, title_filter=title_filter)
+        if descriptions and provider == "workday":
+            # 0.1.11.12: the POST list, then the details the gate names (one GET each; the index reads them back).
+            return fetch_workday_board(client, board_token, config, cache=cache, title_filter=title_filter)
         if descriptions and provider not in _FETCHERS:
             # 0.1.11.8: a registry provider with a detail endpoint (Rippling) fetches the details the gate names.
             return fetch_feed_board(client, provider, board_token, config, cache=cache, title_filter=title_filter)
@@ -1906,6 +2116,7 @@ __all__ = [
     "fetch_ashby_board",
     "fetch_greenhouse_board",
     "fetch_lever_board",
+    "fetch_workday_board",
     "greenhouse_pay",
     "html_to_text",
     "lever_pay",

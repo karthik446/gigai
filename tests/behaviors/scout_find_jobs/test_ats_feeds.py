@@ -676,3 +676,191 @@ def test_update_gate_warms_rippling_details_for_the_titles_it_names(tmp_path) ->
     assert staff.published_at == "2026-10-01T12:00:00-07:00" and staff.content_sha256 is not None
     other = observed["f62af676-fa3f-4f75-915e-b104ff5c845c"]
     assert other.published_at is None and other.content_sha256 is None
+
+
+# --- the Workday fetcher (0.1.11.12 packet 3) --------------------------------------------------------------------
+
+WORKDAY_LIST_PATH = "/wday/cxs/acme/AcmeCareers/jobs"
+WORKDAY_LIST_URL = f"https://acme.wd5.myworkdayjobs.com{WORKDAY_LIST_PATH}"
+WORKDAY_JOBS = WORKDAY_LIST["jobPostings"]
+#: Two of the five titles: "Senior Software Engineer, Platform" and "Software Engineer, Backend" (the ones with details).
+WORKDAY_ROLES = ("platform engineer", "backend engineer")
+
+
+def _workday_client(pages: dict[int, dict], calls: list[str]) -> httpx.Client:
+    """A Workday tenant: ``POST .../jobs`` answers ``pages[offset]`` (404 past them); ``GET`` a detail path answers ``WORKDAY_DETAILS``."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "POST":
+            assert request.url.path == WORKDAY_LIST_PATH and request.headers["content-type"] == "application/json"
+            body = json.loads(request.content)
+            assert body == {"limit": 20, "offset": body["offset"], "searchText": "", "appliedFacets": {}}
+            calls.append(f"POST {body['offset']}")
+            page = pages.get(body["offset"])
+            return httpx.Response(200, json=page) if page is not None else httpx.Response(404)
+        calls.append(f"GET {request.url.path}")
+        detail = WORKDAY_DETAILS.get(request.url.path.removeprefix("/wday/cxs/acme/AcmeCareers"))
+        return httpx.Response(200, json=detail) if detail is not None else httpx.Response(404)
+
+    return httpx.Client(transport=httpx.MockTransport(handler))
+
+
+def _three_pages() -> dict[int, dict]:
+    """Page 1 says ``total`` 60 (more than listed), page 2 reports ``0`` (as tenants do), page 3 is empty: 5 postings."""
+
+    return {
+        0: {"total": 60, "jobPostings": [dict(job) for job in WORKDAY_JOBS[:3]], "facets": [], "userAuthenticated": False},
+        20: {"total": 0, "jobPostings": [dict(job) for job in WORKDAY_JOBS[3:]]},
+        40: {"total": 0, "jobPostings": []},
+    }
+
+
+def test_fetch_workday_board_pages_and_details(tmp_path) -> None:
+    from gigai.scout.find_jobs.ats_board_clients import _cached_post, fetch_workday_board
+
+    calls: list[str] = []
+    pages = _three_pages()
+    client = _workday_client(pages, calls)
+    cache = BoardCache(tmp_path / "ats-boards")
+    platform, backend = WORKDAY_JOBS[0]["externalPath"], WORKDAY_JOBS[1]["externalPath"]
+    details = [f"GET /wday/cxs/acme/AcmeCareers{platform}", f"GET /wday/cxs/acme/AcmeCareers{backend}"]
+
+    result = fetch_workday_board(client, WORKDAY_TOKEN, _config(WORKDAY_ROLES), cache=cache)
+    # The pages in order, stopped by the empty one, then one detail per title the prefilter passed.
+    assert calls == ["POST 0", "POST 20", "POST 40", *details]
+    stats = result.stats
+    assert stats.requests == 5 and stats.cache == "miss" and stats.partial is False
+    assert stats.listed == 5 and stats.prefiltered_out == 3
+    assert (stats.detail_fetched, stats.detail_cached, stats.detail_failed) == (2, 0, 0)
+    assert [row.title for row in result.rows] == ["Senior Software Engineer, Platform", "Software Engineer, Backend"]
+    assert result.rows[0].published_at == "2026-10-20T00:00:00Z" and "Build the platform." in (result.rows[0].text or "")
+    # The cache holds ONE body under the list URL: the pages joined, page 1's total.
+    stored = cache.lookup("workday", WORKDAY_LIST_URL)
+    assert stored is not None and stored.etag is None and stored.marker is None
+    merged = json.loads(stored.body)
+    assert merged["total"] == 60 and [job["externalPath"] for job in merged["jobPostings"]] == [job["externalPath"] for job in WORKDAY_JOBS]
+    assert stored.body == ats_feeds.workday_pages([pages[0], pages[20]])
+
+    # Unchanged board: the pages are asked again (a POST has no validators), the body digests the same -> revalidated;
+    # the details carry their ``postedOn`` marker, so neither is asked again.
+    calls.clear()
+    again = fetch_workday_board(client, WORKDAY_TOKEN, _config(WORKDAY_ROLES), cache=cache)
+    assert calls == ["POST 0", "POST 20", "POST 40"]
+    assert again.stats.requests == 3 and again.stats.cache == "revalidated"
+    assert (again.stats.detail_fetched, again.stats.detail_cached) == (0, 2)
+    assert [row.text for row in again.rows] == [row.text for row in result.rows]
+
+    # A posting whose relative date moved on is asked again (conditionally); the list body changed -> miss.
+    pages[0]["jobPostings"][0]["postedOn"] = "Posted 5 Days Ago"
+    calls.clear()
+    moved = fetch_workday_board(client, WORKDAY_TOKEN, _config(WORKDAY_ROLES), cache=cache)
+    assert calls == ["POST 0", "POST 20", "POST 40", details[0]]
+    assert moved.stats.cache == "miss" and (moved.stats.detail_fetched, moved.stats.detail_cached) == (1, 1)
+    assert cache.lookup("workday", providers.spec("workday").url_rules.detail_url(WORKDAY_TOKEN, WORKDAY_JOBS[0])).marker == "Posted 5 Days Ago"
+
+    # ``_cached_post`` itself: keyed by URL and body, so a page entry never shadows the merged list body.
+    page_stats = BoardFetchStats()
+    payload = {"limit": 20, "offset": 0, "searchText": "", "appliedFacets": {}}
+    _body, first = _cached_post(client, WORKDAY_LIST_URL, "workday", WORKDAY_TOKEN, payload=payload, cache=cache, stats=page_stats)
+    _body, second = _cached_post(client, WORKDAY_LIST_URL, "workday", WORKDAY_TOKEN, payload=payload, cache=cache, stats=page_stats)
+    assert (first, second, page_stats.requests) == ("miss", "revalidated", 2)
+    assert json.loads(cache.lookup("workday", WORKDAY_LIST_URL).body)["total"] == 60  # the merged body, untouched
+    _body, bypassed = _cached_post(client, WORKDAY_LIST_URL, "workday", WORKDAY_TOKEN, payload=payload, cache=None, stats=page_stats)
+    assert bypassed == "bypass"
+    with pytest.raises(ATSBoardClientError) as excinfo:
+        _cached_post(client, WORKDAY_LIST_URL, "workday", WORKDAY_TOKEN, payload={**payload, "offset": 999}, cache=cache, stats=page_stats)
+    assert excinfo.value.code == "http_error"
+
+
+def test_fetch_workday_board_page_cap_marks_partial(tmp_path, monkeypatch) -> None:
+    from gigai.scout.find_jobs.ats_board_clients import fetch_workday_board
+    from gigai.scout.find_jobs.sources_update import listing_config
+
+    monkeypatch.setattr(ats_feeds, "WORKDAY_MAX_LIST_PAGES", 2)
+    calls: list[str] = []
+    cache = BoardCache(tmp_path / "ats-boards")
+    result = fetch_workday_board(_workday_client(_three_pages(), calls), WORKDAY_TOKEN, listing_config(), cache=cache)
+    assert [call for call in calls if call.startswith("POST")] == ["POST 0", "POST 20"]  # page 3 was never asked
+    assert result.stats.partial is True and result.stats.listed == 5 and result.stats.cache == "miss"
+    merged = json.loads(cache.lookup("workday", WORKDAY_LIST_URL).body)
+    assert merged["total"] == 60 and len(merged["jobPostings"]) == 5  # stored as far as it was read
+    assert result.stats.to_json()["partial"] is True
+
+    # A board whose ``total`` the pages cover stops without asking for an empty page, and is whole.
+    calls.clear()
+    whole = {0: {"total": 5, "jobPostings": list(WORKDAY_JOBS)}}
+    done = fetch_workday_board(_workday_client(whole, calls), WORKDAY_TOKEN, listing_config(), cache=cache)
+    assert calls == ["POST 0"] and done.stats.partial is False and done.stats.listed == 5
+    assert done.stats.cache == "miss"  # the same postings, but page 1 now says 5: another body
+
+
+def test_update_gate_warms_workday_details_for_the_titles_it_names(tmp_path) -> None:
+    """The sources update lists with a config that matches no title; the gate names which details to fetch."""
+    from gigai.scout.find_jobs.company_index import cached_detail_lookup
+    from gigai.scout.find_jobs.sources_update import listing_config
+
+    calls: list[str] = []
+    client = _workday_client(_three_pages(), calls)
+    cache = BoardCache(tmp_path / "ats-boards")
+    result = ATSBoardClients().fetch_board(
+        client, "workday", WORKDAY_TOKEN, listing_config(), cache=cache, descriptions=True, title_filter=lambda title: title.startswith("Senior")
+    )
+    assert result.rows == ()  # the listing config matches no title
+    assert calls == ["POST 0", "POST 20", "POST 40", f"GET /wday/cxs/acme/AcmeCareers{WORKDAY_JOBS[0]['externalPath']}"]
+    # The company index reads the warmed detail back from the cache: date and text for that posting only.
+    body = cache.lookup("workday", WORKDAY_LIST_URL).body
+    observed = parse_board_body("workday", WORKDAY_TOKEN, body, detail_lookup=cached_detail_lookup(cache, WORKDAY_TOKEN, ats="workday"))
+    senior = observed["R-290013"]
+    assert senior.published_at == "2026-10-20T00:00:00Z" and senior.content_sha256 is not None
+    other = observed["JR1990000"]
+    assert other.content_sha256 is None
+
+
+def test_workday_fetch_is_what_the_company_index_reads_back(tmp_path) -> None:
+    """AMENDMENT: fetched through ``fetch_workday_board`` into a ``BoardCache``, the index reads the same postings back."""
+    from gigai.scout.find_jobs.ats_board_clients import fetch_workday_board
+    from gigai.scout.find_jobs.company_index import cached_posting_rows
+
+    cache = BoardCache(tmp_path / "ats-boards")
+    result = fetch_workday_board(_workday_client(_three_pages(), []), WORKDAY_TOKEN, _config(WORKDAY_ROLES), cache=cache)
+    observed = parse_board_body("workday", WORKDAY_TOKEN, cache.lookup("workday", WORKDAY_LIST_URL).body)
+    assert len(observed) == 5 and list(observed)[:3] == ["R-290013", "JR1990000", "R-55"] and list(observed)[-1] == "R-1"
+    read_back = cached_posting_rows(cache, "workday", WORKDAY_TOKEN, ["R-290013", "JR1990000", "R-55"])
+    assert read_back.missing == () and list(read_back.rows) == ["R-290013", "JR1990000", "R-55"]
+    assert read_back.rows["R-290013"].url == result.rows[0].url and read_back.rows["R-290013"].text == result.rows[0].text
+    assert read_back.rows["JR1990000"].text == result.rows[1].text
+    assert read_back.without_text == ("R-55",)  # listed, prefiltered out: no detail was asked, so no text yet
+
+
+def test_list_board_reads_a_workday_board_without_details() -> None:
+    """``list_board("workday", ...)`` (pasted URL, discovery merge) pages the list and asks NO detail: B1 rows."""
+
+    calls: list[str] = []
+    client = _workday_client(_three_pages(), calls)
+
+    rows = ATSBoardClients().list_board(client, "workday", WORKDAY_TOKEN, _config(WORKDAY_ROLES))
+
+    assert calls == ["POST 0", "POST 20", "POST 40"]
+    assert [row.title for row in rows] == ["Senior Software Engineer, Platform", "Software Engineer, Backend"]
+    assert rows[0].url == "https://acme.wd5.myworkdayjobs.com/AcmeCareers/job/US-CA-Santa-Clara/Senior-Software-Engineer--Platform_R-290013"
+    # No detail: no text; the list's relative ``postedOn`` dates the row ("Posted 4 Days Ago"), Workday's "30+" cap does not.
+    assert all(row.text is None for row in rows)
+    assert rows[0].published_at is not None and rows[1].published_at is None
+    with pytest.raises(ATSBoardClientError) as excinfo:
+        ATSBoardClients().list_board(client, "workday", "acme", _config(WORKDAY_ROLES))
+    assert excinfo.value.code == "bad_board_token"
+
+
+def test_counting_client_tallies_workday_posts_like_gets(tmp_path) -> None:
+    """The Exa new-boards pass counts a Workday board's list POSTs with its detail GETs (``exa_new.requests``)."""
+
+    from gigai.scout.find_jobs.ats_board_clients import fetch_workday_board
+    from gigai.scout.find_jobs.market_acquisition import _CountingClient
+
+    calls: list[str] = []
+    counting = _CountingClient(_workday_client(_three_pages(), calls))
+
+    result = fetch_workday_board(counting, WORKDAY_TOKEN, _config(WORKDAY_ROLES), cache=BoardCache(tmp_path / "ats-boards"))
+
+    assert len(calls) == 5 and result.stats.requests == 5
+    assert counting.requests == 5  # 3 list POSTs + 2 detail GETs, not the GETs alone
